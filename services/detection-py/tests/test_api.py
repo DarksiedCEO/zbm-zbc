@@ -6,8 +6,9 @@ actual request/response serialization through pydantic, not a mock).
 from fastapi.testclient import TestClient
 
 from api import app
+from conftest import TEST_SERVICE_TOKEN
 
-client = TestClient(app)
+client = TestClient(app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"})
 
 
 def test_health():

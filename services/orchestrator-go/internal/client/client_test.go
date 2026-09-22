@@ -43,7 +43,7 @@ func TestDetectAffiliateCouponExtension_ParsesRealContractShape(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewDetectionClient(srv.URL)
+	c := NewDetectionClient(srv.URL, "test-token")
 	findings, err := c.DetectAffiliateCouponExtension(context.Background(), []Order{{"order_id": "ord_1002"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -70,7 +70,7 @@ func TestDetectionClient_NonOKStatusReturnsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewDetectionClient(srv.URL)
+	c := NewDetectionClient(srv.URL, "test-token")
 	_, err := c.DetectDiscountMisuse(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error on 500 response, got nil")
@@ -93,7 +93,7 @@ func TestCorrelationOverlaps_ParsesMapOfFindings(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewDetectionClient(srv.URL)
+	c := NewDetectionClient(srv.URL, "test-token")
 	overlaps, err := c.CorrelationOverlaps(context.Background(), []Finding{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -121,12 +121,114 @@ func TestFixtureOrders_DecodesGenericOrderShape(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewDetectionClient(srv.URL)
+	c := NewDetectionClient(srv.URL, "test-token")
 	orders, err := c.FixtureOrders(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(orders) != 1 || orders[0]["order_id"] != "ord_1001" {
 		t.Fatalf("unexpected orders: %+v", orders)
+	}
+}
+
+// Proves the client actually sends the configured token — not just that
+// call sites compile with a token argument. Without this, a future edit
+// that silently drops the Authorization header would go undetected: every
+// other test's fake server ignores the header entirely.
+func TestDetectionClient_SendsBearerTokenOnEveryRequest(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer srv.Close()
+
+	c := NewDetectionClient(srv.URL, "my-real-secret")
+	if err := c.Health(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotAuth != "Bearer my-real-secret" {
+		t.Fatalf("expected Authorization header 'Bearer my-real-secret', got %q", gotAuth)
+	}
+}
+
+// A client constructed with an empty token must NOT send an Authorization
+// header at all — sending "Bearer " with an empty value would be a
+// malformed header, not "no auth". (Historical note: this used to be how
+// NewLedgerClient was constructed, back when ledger-rust did not enforce
+// auth. ledger-rust now requires a token — see
+// TestLedgerClient_SendsBearerTokenOnAppend below — but this generic
+// empty-token behavior on the shared doJSON plumbing is still worth
+// covering on its own.)
+func TestDetectionClient_EmptyTokenSendsNoAuthorizationHeader(t *testing.T) {
+	var authHeaderPresent bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, authHeaderPresent = r.Header["Authorization"]
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer srv.Close()
+
+	c := NewDetectionClient(srv.URL, "")
+	if err := c.Health(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if authHeaderPresent {
+		t.Fatal("expected no Authorization header when token is empty, but one was sent")
+	}
+}
+
+// Regression test for the Sep 22 2026 independent review fix: ledger-rust
+// now requires a bearer token on every route except /health (it had none
+// before). NewLedgerClient's signature changed to take one — this proves
+// AppendFinding actually sends it, not just that the constructor compiles
+// with a token argument. Without this, a future edit reverting
+// NewLedgerClient to send no header would go undetected until the first
+// real scan failed every ledger write with 401 in production.
+func TestLedgerClient_SendsBearerTokenOnAppend(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"seq":1,"hash":"h","prev_hash":"p"}`))
+	}))
+	defer srv.Close()
+
+	l := NewLedgerClient(srv.URL, "ledger-real-secret")
+	_, err := l.AppendFinding(context.Background(), Finding{FindingID: "f-1", AgentID: "a-1", EntityID: "e-1", LeakCategory: "test"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotAuth != "Bearer ledger-real-secret" {
+		t.Fatalf("expected Authorization header 'Bearer ledger-real-secret', got %q", gotAuth)
+	}
+}
+
+// Regression test for a bug caught live (Sep 22 2026) by an actual 3-process
+// end-to-end run, not by any unit test: Verify() builds its own request
+// instead of going through doJSON (needed for its 409-is-not-an-error
+// handling) and was missed by the ledger-auth fix above — it sent no
+// Authorization header at all and 401'd against the newly-authenticated
+// ledger on every real scan.
+func TestLedgerClient_SendsBearerTokenOnVerify(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"valid":true,"entries":3}`))
+	}))
+	defer srv.Close()
+
+	l := NewLedgerClient(srv.URL, "ledger-real-secret")
+	result, err := l.Verify(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Valid || result.Entries != 3 {
+		t.Fatalf("unexpected verify result: %+v", result)
+	}
+	if gotAuth != "Bearer ledger-real-secret" {
+		t.Fatalf("expected Authorization header 'Bearer ledger-real-secret', got %q", gotAuth)
 	}
 }

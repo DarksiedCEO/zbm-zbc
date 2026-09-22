@@ -13,8 +13,18 @@ type LedgerClient struct {
 	base *DetectionClient // reuses the same doJSON/http plumbing — same REST discipline, different service
 }
 
-func NewLedgerClient(baseURL string) *LedgerClient {
-	return &LedgerClient{base: NewDetectionClient(baseURL)}
+// NewLedgerClient wraps the same REST plumbing as DetectionClient.
+//
+// Independent review, Sep 22 2026 (CONFIRMED): ledger-rust had zero
+// authentication on any route, including POST /ledger/append — the
+// single most important service to protect, unauthenticated. Fixed
+// server-side (LEDGER_SERVICE_TOKEN, fail-closed). This constructor now
+// takes and sends a token, exactly as this comment previously said
+// whoever closed that gap should do — token must match ledger-rust's own
+// LEDGER_SERVICE_TOKEN, or every call fails with 401, loudly, not
+// silently, same failure mode as NewDetectionClient with a wrong token.
+func NewLedgerClient(baseURL, token string) *LedgerClient {
+	return &LedgerClient{base: NewDetectionClient(baseURL, token)}
 }
 
 type LedgerRecordInput struct {
@@ -72,6 +82,17 @@ func (l *LedgerClient) Verify(ctx context.Context) (*LedgerVerifyResult, error) 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.base.baseURL+"/ledger/verify", nil)
 	if err != nil {
 		return nil, fmt.Errorf("build verify request: %w", err)
+	}
+	// Caught live, Sep 22 2026, by an actual 3-process end-to-end run (not
+	// just unit tests): Verify() builds its own request instead of going
+	// through doJSON (deliberately, for the 409-is-not-an-error handling
+	// below) and had no Authorization header at all, so it 401'd against
+	// the newly-authenticated ledger even after AppendFinding's fix. A
+	// full pipeline scan surfaced this as "LEDGER INTEGRITY FAILURE after
+	// scan: missing ... Authorization header" — doJSON's fix alone did
+	// not cover this method, since it bypasses doJSON.
+	if l.base.token != "" {
+		req.Header.Set("Authorization", "Bearer "+l.base.token)
 	}
 	resp, err := l.base.httpClient.Do(req)
 	if err != nil {
