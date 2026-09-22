@@ -1,0 +1,73 @@
+[
+  {
+    "_fixture_note": "First missed call from this number today — should get the base 5-minute callback window.",
+    "call_id": "call_1001",
+    "customer_id": "cust_f1",
+    "phone_number": "+15550101",
+    "direction": "inbound",
+    "status": "missed",
+    "started_at": "2026-09-22T14:00:00Z",
+    "ended_at": "2026-09-22T14:00:22Z",
+    "duration_seconds": 22,
+    "line_id": "line_main"
+  },
+  {
+    "_fixture_note": "Second missed call from the SAME number within 24h of call_1001 — tightened 2-minute window, prior_misses=1.",
+    "call_id": "call_1002",
+    "customer_id": "cust_f1",
+    "phone_number": "+15550101",
+    "direction": "inbound",
+    "status": "missed",
+    "started_at": "2026-09-22T15:30:00Z",
+    "ended_at": "2026-09-22T15:30:19Z",
+    "duration_seconds": 19,
+    "line_id": "line_main"
+  },
+  {
+    "_fixture_note": "Voicemail left — unresolved, gets a callback task like any other missed call.",
+    "call_id": "call_1003",
+    "customer_id": "cust_f2",
+    "phone_number": "+15550202",
+    "direction": "inbound",
+    "status": "voicemail",
+    "started_at": "2026-09-22T09:15:00Z",
+    "ended_at": "2026-09-22T09:16:45Z",
+    "duration_seconds": 105,
+    "voicemail_transcript": "Hi, this is Maria, calling about getting a quote for a water heater replacement, please call me back.",
+    "line_id": "line_main"
+  },
+  {
+    "_fixture_note": "Control case — answered call, must NOT produce a follow-up task.",
+    "call_id": "call_1004",
+    "customer_id": "cust_f3",
+    "phone_number": "+15550303",
+    "direction": "inbound",
+    "status": "answered",
+    "started_at": "2026-09-22T10:00:00Z",
+    "ended_at": "2026-09-22T10:08:12Z",
+    "duration_seconds": 492,
+    "line_id": "line_main"
+  },
+  {
+    "_fixture_note": "Unmatched caller (no customer_id yet) — should still get a callback task, but is skipped by customer_dossier (known gap: no identity resolution).",
+    "call_id": "call_1005",
+    "customer_id": null,
+    "phone_number": "+15550404",
+    "direction": "inbound",
+    "status": "no_answer",
+    "started_at": "2026-09-22T18:45:00Z",
+    "duration_seconds": 0,
+    "line_id": "line_secondary"
+  },
+  {
+    "_fixture_note": "Busy signal — also unresolved.",
+    "call_id": "call_1006",
+    "customer_id": "cust_f4",
+    "phone_number": "+15550505",
+    "direction": "inbound",
+    "status": "busy",
+    "started_at": "2026-09-22T21:10:00Z",
+    "duration_seconds": 0,
+    "line_id": "line_main"
+  }
+]

@@ -1,0 +1,15 @@
+[
+  {
+    "_fixture_note": "Pre-existing dossier seed — used to test that customer_dossier.build_or_update merges into existing records (adds new call/appointment ids) without duplicating the ones already present.",
+    "customer_id": "cust_f1",
+    "name": "Devon Carter",
+    "phone_numbers": ["+15550101"],
+    "first_contact_at": "2026-08-01T10:00:00Z",
+    "last_contact_at": "2026-08-01T10:00:00Z",
+    "call_history": [],
+    "appointment_history": [],
+    "open_task_ids": [],
+    "tags": ["returning_customer"],
+    "notes": ["Prefers text over calls when possible."]
+  }
+]
