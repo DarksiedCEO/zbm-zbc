@@ -44,6 +44,13 @@ func main() {
 	if ledgerURL == "" {
 		ledgerURL = "http://localhost:8090"
 	}
+	// Same class of bug as ledger-rust's confirmed 0.0.0.0 finding: no host
+	// in ":"+port means Go's net/http binds every network interface, not
+	// just localhost. Fixed the same way — configurable, loopback default.
+	bindAddr := os.Getenv("ORCHESTRATOR_BIND_ADDR")
+	if bindAddr == "" {
+		bindAddr = "127.0.0.1"
+	}
 	port := os.Getenv("ORCHESTRATOR_PORT")
 	if port == "" {
 		port = "8080"
@@ -107,6 +114,6 @@ func main() {
 		_ = json.NewEncoder(w).Encode(result)
 	}))
 
-	log.Printf("orchestrator-go listening on :%s (detection service at %s, ledger at %s)", port, detectionURL, ledgerURL)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	log.Printf("orchestrator-go listening on %s:%s (detection service at %s, ledger at %s)", bindAddr, port, detectionURL, ledgerURL)
+	log.Fatal(http.ListenAndServe(bindAddr+":"+port, mux))
 }
