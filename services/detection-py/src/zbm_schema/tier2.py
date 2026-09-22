@@ -1,0 +1,58 @@
+"""
+Tier 2 entity models (server-side attribution, cross-channel touchpoints,
+platform integration status, contract terms). Kept in a separate module
+from the core Tier 1 commerce entities in __init__.py because these
+describe a different layer (marketing/attribution/contract data, not
+order/customer/subscription data) — Order/Customer/Subscription stay the
+platform-agnostic e-commerce core; these are additive.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+
+class ServerSideAttributionEvent(BaseModel):
+    """One order's client-side (pixel) vs server-side confirmed attribution."""
+    order_id: str
+    channel: str
+    order_value_usd: float = Field(gt=0)
+    pixel_attributed: bool  # did client-side pixel tracking record this conversion?
+    server_confirmed: bool  # did server-side tracking independently confirm the order happened?
+
+
+class ChannelTouchpoint(BaseModel):
+    order_id: str
+    channel: str
+    touchpoint_sequence: int = Field(ge=1)  # 1 = first touch, higher = later
+    is_paid_channel: bool
+    is_credited_conversion_channel: bool  # the channel the store's current (last-click) model credits
+
+
+class PlatformConnectionStatus(BaseModel):
+    client_id: str
+    platform: str
+    client_reports_using_it: bool  # client told onboarding they use this platform
+    integration_connected: bool  # ZBM actually has a working data connection to it
+
+
+class ContractTermType(str, Enum):
+    MINIMUM_SPEND = "minimum_spend"
+    ESCALATOR = "escalator"
+    OVERAGE_RATE = "overage_rate"
+
+
+class ContractTerm(BaseModel):
+    term_id: str  # unique per contract line — a client can have multiple terms of the same type/period
+    client_id: str
+    term_type: ContractTermType
+    contracted_value_usd: float = Field(gt=0)
+    actual_billed_value_usd: float = Field(ge=0)
+    period_label: str  # e.g. "2026-06"
+
+    @property
+    def drift_usd(self) -> float:
+        return round(self.contracted_value_usd - self.actual_billed_value_usd, 2)

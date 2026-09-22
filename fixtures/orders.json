@@ -1,0 +1,66 @@
+[
+  {
+    "_fixture_note": "CONTROL — legit affiliate order, click well within a 24h attribution window. Must NOT be flagged.",
+    "order_id": "ord_1001", "customer_id": "cust_1", "placed_at": "2026-06-01T15:00:00Z",
+    "status": "completed", "source_platform": "shopify",
+    "line_items": [{"sku": "SKU-100", "unit_price_usd": 48.00, "quantity": 1}],
+    "affiliate": {
+      "affiliate_id": "aff_legit_9", "click_timestamp": "2026-06-01T14:10:00Z",
+      "order_timestamp": "2026-06-01T15:00:00Z", "attribution_window_hours": 24
+    }
+  },
+  {
+    "_fixture_note": "LEAK — affiliate/coupon extension. Click is 11 DAYS before the order, way outside any honest attribution window, but an affiliate coupon was still honored on checkout. This is the fraud pattern: an affiliate cookie/coupon stretched far past any legitimate window.",
+    "order_id": "ord_1002", "customer_id": "cust_2", "placed_at": "2026-06-12T10:00:00Z",
+    "status": "completed", "source_platform": "shopify",
+    "line_items": [{"sku": "SKU-210", "unit_price_usd": 120.00, "quantity": 1}],
+    "discounts": [{"code": "AFF-EXTEND10", "percent_off": 10}],
+    "affiliate": {
+      "affiliate_id": "aff_stale_3", "click_timestamp": "2026-06-01T09:00:00Z",
+      "order_timestamp": "2026-06-12T10:00:00Z", "attribution_window_hours": 24
+    }
+  },
+  {
+    "_fixture_note": "LEAK — discount stacking misuse. Two discount codes applied to one order; store policy (encoded in the agent) is single-code-only. Combined effective discount exceeds any single authorized code.",
+    "order_id": "ord_1003", "customer_id": "cust_3", "placed_at": "2026-06-03T12:00:00Z",
+    "status": "completed", "source_platform": "woocommerce",
+    "line_items": [{"sku": "SKU-330", "unit_price_usd": 200.00, "quantity": 2}],
+    "discounts": [
+      {"code": "WELCOME15", "percent_off": 15},
+      {"code": "FLASH20", "percent_off": 20}
+    ]
+  },
+  {
+    "_fixture_note": "CONTROL — single legitimate discount code, no stacking. Must NOT be flagged.",
+    "order_id": "ord_1004", "customer_id": "cust_4", "placed_at": "2026-06-04T09:20:00Z",
+    "status": "completed", "source_platform": "tiktok_shop",
+    "line_items": [{"sku": "SKU-440", "unit_price_usd": 60.00, "quantity": 1}],
+    "discounts": [{"code": "WELCOME15", "percent_off": 15}]
+  },
+  {
+    "_fixture_note": "LEAK — abandoned cart, no recovery flow ever fired. recovery_attempted=false, 6+ days old, real recoverable value sitting unaddressed.",
+    "order_id": "ord_1005", "customer_id": "cust_5", "placed_at": "2026-06-05T20:00:00Z",
+    "status": "abandoned_cart", "source_platform": "shopify", "recovery_attempted": false,
+    "line_items": [{"sku": "SKU-550", "unit_price_usd": 89.99, "quantity": 1}]
+  },
+  {
+    "_fixture_note": "CONTROL — abandoned cart, but recovery flow DID fire (recovery_attempted=true). This is coverage working as intended; must NOT be flagged as a leak — flagging it would be a false positive against the store's own recovery system.",
+    "order_id": "ord_1006", "customer_id": "cust_6", "placed_at": "2026-06-06T21:00:00Z",
+    "status": "abandoned_cart", "source_platform": "amazon", "recovery_attempted": true,
+    "line_items": [{"sku": "SKU-660", "unit_price_usd": 55.00, "quantity": 1}]
+  },
+  {
+    "_fixture_note": "LEAK — same order as ord_1002 conceptually reused for correlation testing (separate id): a completed order with BOTH an affiliate anomaly and a stacked discount, to prove the orchestration layer's double-count correlation (Decision 3 / Failure Mode #2) catches two agents both claiming ord_1007 before either value is counted twice. Not asserted in tonight's per-agent unit tests — flagged for the orchestrator integration test.",
+    "order_id": "ord_1007", "customer_id": "cust_3", "placed_at": "2026-06-07T08:00:00Z",
+    "status": "completed", "source_platform": "shopify",
+    "line_items": [{"sku": "SKU-770", "unit_price_usd": 150.00, "quantity": 1}],
+    "discounts": [
+      {"code": "WELCOME15", "percent_off": 15},
+      {"code": "VIP25", "percent_off": 25}
+    ],
+    "affiliate": {
+      "affiliate_id": "aff_stale_3", "click_timestamp": "2026-05-20T09:00:00Z",
+      "order_timestamp": "2026-06-07T08:00:00Z", "attribution_window_hours": 24
+    }
+  }
+]

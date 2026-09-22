@@ -1,0 +1,12 @@
+[
+  {"_fixture_note": "LEAK candidate — ord_4001 touched a paid channel (meta_ads) first, then organic search last. Last-click credits organic_search with 100%, meta_ads gets nothing despite being the paid first touch that likely started the journey.",
+   "order_id": "ord_4001", "channel": "meta_ads", "touchpoint_sequence": 1, "is_paid_channel": true, "is_credited_conversion_channel": false},
+  {"order_id": "ord_4001", "channel": "organic_search", "touchpoint_sequence": 2, "is_paid_channel": false, "is_credited_conversion_channel": true},
+
+  {"_fixture_note": "CONTROL — single-touch order, only one channel involved. No multi-touch misattribution risk possible. Must NOT be flagged.",
+   "order_id": "ord_4002", "channel": "email", "touchpoint_sequence": 1, "is_paid_channel": false, "is_credited_conversion_channel": true},
+
+  {"_fixture_note": "CONTROL — multi-touch, but the paid first-touch channel IS the credited channel (no last-click override happened). Must NOT be flagged.",
+   "order_id": "ord_4003", "channel": "google_ads", "touchpoint_sequence": 1, "is_paid_channel": true, "is_credited_conversion_channel": true},
+  {"order_id": "ord_4003", "channel": "direct", "touchpoint_sequence": 2, "is_paid_channel": false, "is_credited_conversion_channel": false}
+]

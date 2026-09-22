@@ -1,0 +1,8 @@
+[
+  {"_fixture_note": "LEAK — contracted minimum spend commitment is $5,000 for the period, but only $4,100 was actually billed. The minimum was never enforced.",
+   "term_id": "term_b2_min_1", "client_id": "client_b2", "term_type": "minimum_spend", "contracted_value_usd": 5000.00, "actual_billed_value_usd": 4100.00, "period_label": "2026-06"},
+  {"_fixture_note": "CONTROL — contracted and billed match exactly. Must NOT be flagged.",
+   "term_id": "term_b2_overage_1", "client_id": "client_b2", "term_type": "overage_rate", "contracted_value_usd": 1200.00, "actual_billed_value_usd": 1200.00, "period_label": "2026-06"},
+  {"_fixture_note": "CONTROL — billed value exceeds the contracted floor (this is fine — a minimum is a floor, being billed above it is not drift). Must NOT be flagged.",
+   "term_id": "term_b2_min_2", "client_id": "client_b2", "term_type": "minimum_spend", "contracted_value_usd": 2000.00, "actual_billed_value_usd": 2450.00, "period_label": "2026-06"}
+]

@@ -1,0 +1,13 @@
+[package]
+name = "ledger-rust"
+version = "0.1.0"
+edition = "2021"
+description = "ZBM Revenue Recovery — tamper-evident evidence ledger (hash-chained append-only log)"
+
+[dependencies]
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+tiny_http = "0.12.0"
