@@ -10,7 +10,15 @@ __pycache__/
 
 # Rust
 target/
-Cargo.lock
+# Cargo.lock is intentionally tracked (not ignored): ledger-rust ships a
+# binary (server), and binaries should commit their lockfile for
+# reproducible builds.
+
+# Ledger runtime data — the persisted hash-chain log is generated at
+# runtime, per-environment, and must never be committed (it's evidence
+# data, not source).
+services/ledger-rust/ledger_data/
+*.jsonl
 
 # Node / Next.js
 node_modules/
@@ -21,7 +29,3 @@ npm-debug.log*
 # OS
 .DS_Store
 *.tsbuildinfo
-
-# IDE / local
-.idea/
-.git.backup-preimport/

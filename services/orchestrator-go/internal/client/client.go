@@ -15,12 +15,20 @@ import (
 // gRPC, no generated stubs, deliberately simple for a solo-builder team.
 type DetectionClient struct {
 	baseURL    string
+	token      string // bearer token sent as Authorization; empty means "send nothing"
 	httpClient *http.Client
 }
 
-func NewDetectionClient(baseURL string) *DetectionClient {
+// NewDetectionClient builds a client for detection-py. token must match
+// that service's ZBM_SERVICE_TOKEN — detection-py fails closed and
+// rejects every non-/health request without it. Pass "" only for a
+// service (like ledger-rust, via NewLedgerClient) that does not require
+// auth; passing "" against a token-requiring service will fail every
+// call with 401, loudly, not silently.
+func NewDetectionClient(baseURL, token string) *DetectionClient {
 	return &DetectionClient{
 		baseURL: baseURL,
+		token:   token,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -43,6 +51,9 @@ func (c *DetectionClient) doJSON(ctx context.Context, method, path string, body 
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
 	resp, err := c.httpClient.Do(req)

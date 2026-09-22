@@ -15,6 +15,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod persistence;
+pub use persistence::{PersistError, PersistentLedger};
+
 pub const GENESIS_HASH_SEED: &str = "ZBM-REVENUE-RECOVERY-LEDGER-GENESIS-2026";
 
 /// The caller-supplied facts for one ledger entry. Deliberately narrow —
@@ -128,10 +131,13 @@ impl Ledger {
         }
     }
 
-    /// Appends a new entry, chaining it to the previous entry's hash (or
-    /// the genesis hash if this is the first entry). Returns the newly
-    /// appended entry.
-    pub fn append(&mut self, record: LedgerRecordInput) -> &LedgerEntry {
+    /// Builds a new entry chained to the current last hash (or the genesis
+    /// hash if the ledger is empty), WITHOUT mutating the ledger. Exists so
+    /// callers that need durability-before-visibility (see
+    /// `persistence::PersistentLedger::append`) can compute the entry,
+    /// persist it, and only then commit it to memory via `push_entry` —
+    /// keeping the in-memory chain from ever advancing past what's on disk.
+    pub fn build_entry(&self, record: LedgerRecordInput) -> LedgerEntry {
         let seq = self.entries.len() as u64;
         let prev_hash = self.last_hash();
         let recorded_at = Utc::now();
@@ -149,7 +155,7 @@ impl Ledger {
             &prev_hash,
         );
 
-        let entry = LedgerEntry {
+        LedgerEntry {
             seq,
             finding_id: record.finding_id,
             agent_id: record.agent_id,
@@ -161,10 +167,33 @@ impl Ledger {
             recorded_at,
             prev_hash,
             hash,
-        };
+        }
+    }
 
+    /// Appends an already-built entry as-is, trusting the caller. Used by
+    /// `append` (below) and by replay-from-disk on startup. Does NOT
+    /// recompute or validate the hash — call `verify_chain` afterward if
+    /// the entries did not originate from this process's own hashing.
+    pub fn push_entry(&mut self, entry: LedgerEntry) {
         self.entries.push(entry);
+    }
+
+    /// Builds a new entry chaining it to the previous entry's hash (or the
+    /// genesis hash if this is the first entry) and appends it in-memory.
+    /// Returns the newly appended entry. In-memory only — for a durable
+    /// ledger, use `persistence::PersistentLedger` instead.
+    pub fn append(&mut self, record: LedgerRecordInput) -> &LedgerEntry {
+        let entry = self.build_entry(record);
+        self.push_entry(entry);
         self.entries.last().expect("just pushed")
+    }
+
+    /// Reconstructs a Ledger directly from a sequence of already-hashed
+    /// entries (e.g. replayed from a persisted log). Does not verify the
+    /// chain itself — callers must call `verify_chain()` afterward before
+    /// trusting the result.
+    pub fn from_entries(entries: Vec<LedgerEntry>) -> Self {
+        Ledger { entries }
     }
 
     /// Recomputes every entry's hash from its own fields and checks it

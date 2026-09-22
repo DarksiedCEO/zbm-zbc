@@ -27,10 +27,10 @@ type Orchestrator struct {
 	ledger    *client.LedgerClient
 }
 
-func New(detectionBaseURL, ledgerBaseURL string) *Orchestrator {
+func New(detectionBaseURL, detectionToken, ledgerBaseURL, ledgerToken string) *Orchestrator {
 	return &Orchestrator{
-		detection: client.NewDetectionClient(detectionBaseURL),
-		ledger:    client.NewLedgerClient(ledgerBaseURL),
+		detection: client.NewDetectionClient(detectionBaseURL, detectionToken),
+		ledger:    client.NewLedgerClient(ledgerBaseURL, ledgerToken),
 	}
 }
 
