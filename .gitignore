@@ -21,3 +21,7 @@ npm-debug.log*
 # OS
 .DS_Store
 *.tsbuildinfo
+
+# IDE / local
+.idea/
+.git.backup-preimport/
