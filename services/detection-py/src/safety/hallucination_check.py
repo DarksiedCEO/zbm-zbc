@@ -14,6 +14,7 @@ fabrication pattern this agent exists to catch.
 from __future__ import annotations
 
 import re
+from decimal import Decimal, InvalidOperation
 
 from pydantic import BaseModel
 
@@ -27,13 +28,13 @@ class HallucinationViolation(BaseModel):
     reason: str
 
 
-def _extract_dollar_amounts(text: str) -> list[float]:
+def _extract_dollar_amounts(text: str) -> list[Decimal]:
     amounts = []
     for match in _DOLLAR_PATTERN.finditer(text):
         raw = match.group(1).replace(",", "")
         try:
-            amounts.append(float(raw))
-        except ValueError:
+            amounts.append(Decimal(raw))
+        except InvalidOperation:
             continue
     return amounts
 
@@ -53,7 +54,7 @@ def check(finding: Finding) -> HallucinationViolation | None:
         return None
 
     claimed = finding.recoverable_value.amount_usd
-    if not any(abs(a - claimed) < 0.005 for a in amounts_in_text):
+    if not any(abs(a - claimed) < Decimal("0.005") for a in amounts_in_text):
         return HallucinationViolation(
             finding_id=finding.finding_id,
             reason=(

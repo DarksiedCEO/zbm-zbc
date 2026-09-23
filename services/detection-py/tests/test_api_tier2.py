@@ -36,4 +36,7 @@ def test_contract_pricing_term_drift_over_rest():
     assert r.status_code == 200
     findings = r.json()["findings"]
     assert len(findings) == 1
-    assert findings[0]["recoverable_value"]["amount_usd"] == 900.00
+    # amount_usd travels over JSON as a precise decimal STRING, not a float
+    # (that's the point of the Decimal fix — a float here would silently
+    # reintroduce the binary-floating-point imprecision this exists to avoid).
+    assert findings[0]["recoverable_value"]["amount_usd"] == "900.00"

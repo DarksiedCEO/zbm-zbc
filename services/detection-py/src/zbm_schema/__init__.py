@@ -23,10 +23,35 @@ Tonight's fixtures already speak this shape directly.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+TWO_PLACES = Decimal("0.01")
+
+
+def to_money(value: Decimal | float | int | str) -> Decimal:
+    """
+    Canonical conversion into a 2-decimal-place Decimal for currency.
+
+    Money is never constructed directly from a bare float past this
+    boundary — a float carries binary floating-point representation
+    error (e.g. 0.1 + 0.2 != 0.3) that compounds across arithmetic and
+    JSON round-trips. str(value) is used deliberately instead of
+    Decimal(value) when the input is a float, because Decimal(float)
+    reproduces the float's own imprecision (Decimal(0.1) is
+    0.1000000000000000055511151231257827021181583404541015625);
+    Decimal(str(0.1)) is exactly Decimal("0.1").
+    """
+    if isinstance(value, Decimal):
+        d = value
+    elif isinstance(value, float):
+        d = Decimal(str(value))
+    else:
+        d = Decimal(value)
+    return d.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
 
 
 # ---------------------------------------------------------------------------
@@ -59,16 +84,17 @@ class LabeledValue(BaseModel):
     """
     model_config = {"frozen": True}
 
-    amount_usd: float = Field(gt=0, description="Dollar amount, must be positive")
+    amount_usd: Decimal = Field(gt=0, description="Dollar amount, must be positive")
     classification: ValueClassification
     confidence: DecisionConfidence
 
-    @field_validator("amount_usd")
+    @field_validator("amount_usd", mode="before")
     @classmethod
-    def _finite_amount(cls, v: float) -> float:
-        if v != v or v in (float("inf"), float("-inf")):  # NaN / inf guard
+    def _finite_amount(cls, v) -> Decimal:
+        d = to_money(v)
+        if not d.is_finite():
             raise ValueError("amount_usd must be a finite positive number")
-        return round(v, 2)
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +124,26 @@ class Customer(BaseModel):
 
 class OrderLineItem(BaseModel):
     sku: str
-    unit_price_usd: float = Field(gt=0)
+    unit_price_usd: Decimal = Field(gt=0)
     quantity: int = Field(gt=0)
+
+    @field_validator("unit_price_usd", mode="before")
+    @classmethod
+    def _money(cls, v):
+        return to_money(v)
 
 
 class DiscountApplication(BaseModel):
     code: str
+    # percent_off is a ratio (0-100), not a currency amount — stays float,
+    # only amounts actually denominated in dollars go through Decimal.
     percent_off: Optional[float] = Field(default=None, ge=0, le=100)
-    amount_off_usd: Optional[float] = Field(default=None, gt=0)
+    amount_off_usd: Optional[Decimal] = Field(default=None, gt=0)
+
+    @field_validator("amount_off_usd", mode="before")
+    @classmethod
+    def _money(cls, v):
+        return None if v is None else to_money(v)
 
     @model_validator(mode="after")
     def _one_discount_mode(self):
@@ -140,8 +178,8 @@ class Order(BaseModel):
     recovery_attempted: bool = False  # abandoned-cart recovery flow (email/SMS) fired for this order
 
     @property
-    def subtotal_usd(self) -> float:
-        return round(sum(li.unit_price_usd * li.quantity for li in self.line_items), 2)
+    def subtotal_usd(self) -> Decimal:
+        return to_money(sum((li.unit_price_usd * li.quantity for li in self.line_items), Decimal("0")))
 
 
 class SubscriptionStatus(str, Enum):
@@ -154,11 +192,16 @@ class SubscriptionStatus(str, Enum):
 class Subscription(BaseModel):
     subscription_id: str
     customer_id: str
-    plan_price_usd: float = Field(gt=0)
+    plan_price_usd: Decimal = Field(gt=0)
     renewal_interval_days: int = Field(gt=0)
     last_renewal_at: Optional[datetime] = None
     next_renewal_due_at: datetime
     status: SubscriptionStatus
+
+    @field_validator("plan_price_usd", mode="before")
+    @classmethod
+    def _money(cls, v):
+        return to_money(v)
 
 
 # ---------------------------------------------------------------------------
