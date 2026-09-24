@@ -45,6 +45,12 @@ def detect(orders: list[Order]) -> list[Finding]:
     for order in orders:
         if order.affiliate is None:
             continue  # no affiliate attribution on this order — not in scope for this agent
+        if order.subtotal_usd <= 0:
+            # N6 sweep: a valid order may have no line items (subtotal 0.00).
+            # No order value means no commission at risk, in either branch
+            # below -> no finding (ADR 0001 "Zero-value findings"). The
+            # confident branch used to build a 0.00 LabeledValue -> HTTP 500.
+            continue
 
         elapsed_hours = _hours_between(order)
         window = order.affiliate.attribution_window_hours

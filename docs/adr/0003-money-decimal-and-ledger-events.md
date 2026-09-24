@@ -341,6 +341,25 @@ adds an unmaintained fork. Revisit if a caller can legitimately send
 non-ASCII header bytes (no current caller does: tokens and all headers
 they send are ASCII).
 
+## 6. Unknown fields and the empty chain (fix wave 3, Sep 24 2026)
+
+- **Unknown fields are refused (AEGIS N8).** A persisted finding or event
+  line with a field outside its known set (e.g. an injected
+  `"approved_by":"andre"`) used to load: serde dropped the field, the field
+  is not in the hash, so the chain still verified — the raw log could carry
+  unhashed "evidence" that looked recorded. `FindingEntry`, `EventEntry`
+  and `LedgerRecordInput` are now `#[serde(deny_unknown_fields)]`: such a
+  log refuses to open (`Corrupt`, the server does not start) and such an
+  append is a `400`. The known field sets are the ones the real binaries
+  wrote; every real fixture (`legacy_ledger_v1.jsonl`,
+  `legacy_ledger_v2_negatives.jsonl`, `ledger_v3_overbound_strings.jsonl`)
+  still loads and verifies. AEGIS's injected line is kept as
+  `tests/fixtures/aegis_unknown_field_injection.jsonl`.
+- **An empty ledger is a valid chain.** `GET /ledger/verify` on an empty
+  ledger now answers `200 {"valid":true,"entries":0}` (it was
+  `409 {"valid":false,"error":"Empty"}`, which every caller had to
+  special-case). `409` now always means the chain failed verification.
+
 ## Verification
 
 Commands, counts and a live three-process run are recorded in the README

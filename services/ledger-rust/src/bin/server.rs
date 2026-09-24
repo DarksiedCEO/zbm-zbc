@@ -46,6 +46,12 @@
 //!   - Known limitation: tiny_http closes the connection without any
 //!     response when the request head contains a non-ASCII byte; that
 //!     happens inside tiny_http before this code sees the request (see ADR).
+//!
+//! Fix wave 3, Sep 24 2026 (docs/adr/0003 section 6):
+//!   - GET /ledger/verify on an empty ledger is 200 {"valid":true,"entries":0}
+//!     (was 409 "Empty"); 409 now always means the chain failed to verify.
+//!   - Unknown fields are refused: in a persisted log line (startup refuses)
+//!     and in a POST /ledger/append body (400) (AEGIS N8).
 
 use std::io::Read;
 use std::sync::Mutex;

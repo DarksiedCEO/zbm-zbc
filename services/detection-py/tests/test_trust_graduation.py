@@ -71,3 +71,28 @@ def test_already_autonomous_never_eligible_for_further_promotion():
     )
     d = evaluate(h)
     assert d.eligible_for_promotion is False
+
+
+# Fix wave 3 (noticed during the N6 safety-module sweep): agreement counts
+# larger than the decision count made the agreement rate exceed 100% and
+# could graduate an action type on impossible history (20 decisions, 40
+# "agreements" -> 200%). An inconsistent history is now rejected at
+# construction instead of being judged.
+def test_more_agreements_than_decisions_is_rejected_not_graduated():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ActionTypeHistory(client_id="c", action_type="a", current_mode=AutonomyMode.SHADOW,
+                          shadow_decisions_made=20, shadow_decisions_agreed_with_human=40)
+
+
+def test_approval_window_ending_before_it_starts_is_rejected():
+    import pytest
+    from datetime import date
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ActionTypeHistory(client_id="c", action_type="a", current_mode=AutonomyMode.HUMAN_APPROVAL,
+                          human_approved_executions=30, human_approval_window_start=date(2026, 7, 1),
+                          human_approval_window_end=date(2026, 6, 1))

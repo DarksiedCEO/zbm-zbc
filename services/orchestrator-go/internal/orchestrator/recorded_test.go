@@ -132,8 +132,11 @@ func TestRecordedFindings_OverlapsAreDistinctAgentsOnOneEntityNotRepeatedScans(t
 	}
 }
 
+// Fix wave 3: ledger-rust now answers an empty ledger with 200
+// {"valid":true,"entries":0} (it used to be 409 {"valid":false,"error":"Empty"},
+// which this test fed in and every caller had to special-case).
 func TestRecordedFindings_EmptyLedgerIsNotAnError(t *testing.T) {
-	fl := &fakeLedger{entries: `[]`, verify: `{"valid":false,"error":"Empty"}`, verifyCode: http.StatusConflict}
+	fl := &fakeLedger{entries: `[]`, verify: `{"valid":true,"entries":0}`}
 	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
 	res, err := o.RecordedFindings(context.Background())
 	if err != nil {
@@ -141,6 +144,9 @@ func TestRecordedFindings_EmptyLedgerIsNotAnError(t *testing.T) {
 	}
 	if len(res.Findings) != 0 || res.Findings == nil || res.OverlappingClaims == nil || res.LedgerEntriesTotal != 0 {
 		t.Errorf("empty result should be empty (non-nil) collections: %+v", res)
+	}
+	if res.LedgerVerify == nil || !res.LedgerVerify.Valid || res.LedgerVerify.Entries != 0 {
+		t.Errorf("an empty ledger is a valid chain: %+v", res.LedgerVerify)
 	}
 }
 

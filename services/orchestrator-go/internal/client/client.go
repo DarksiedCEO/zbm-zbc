@@ -13,7 +13,13 @@ import (
 // DetectionClient calls the Python detection-py REST service. Plain
 // REST/JSON per the locked decision (voice session, Sep 21 2026) — no
 // gRPC, no generated stubs, deliberately simple for a solo-builder team.
+//
+// The same plumbing also serves ledger-rust (NewLedgerClient); `service`
+// names which upstream a client talks to, so every error names the service
+// that actually failed (fix wave 3, AEGIS D3: ledger failures used to be
+// labeled "detection-py").
 type DetectionClient struct {
+	service    string // "detection-py" or "ledger-rust"
 	baseURL    string
 	token      string // bearer token sent as Authorization; empty means "send nothing"
 	httpClient *http.Client
@@ -26,7 +32,12 @@ type DetectionClient struct {
 // auth; passing "" against a token-requiring service will fail every
 // call with 401, loudly, not silently.
 func NewDetectionClient(baseURL, token string) *DetectionClient {
+	return newServiceClient("detection-py", baseURL, token)
+}
+
+func newServiceClient(service, baseURL, token string) *DetectionClient {
 	return &DetectionClient{
+		service: service,
 		baseURL: baseURL,
 		token:   token,
 		httpClient: &http.Client{
@@ -35,19 +46,25 @@ func NewDetectionClient(baseURL, token string) *DetectionClient {
 	}
 }
 
+// upstreamErr builds the error for a failed call to this client's service.
+// Its Error() text (logged) may contain the base URL; Public() never does.
+func (c *DetectionClient) upstreamErr(kind UpstreamFailure, method, path string, status int, detail string) *UpstreamError {
+	return &UpstreamError{Service: c.service, Method: method, Path: path, StatusCode: status, Kind: kind, Detail: detail}
+}
+
 func (c *DetectionClient) doJSON(ctx context.Context, method, path string, body any, out any) error {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("marshal request body: %w", err)
+			return fmt.Errorf("marshal request body for %s %s: %w", c.service, path, err)
 		}
 		reqBody = bytes.NewReader(b)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
 	if err != nil {
-		return fmt.Errorf("build request: %w", err)
+		return c.upstreamErr(UpstreamBadRequest, method, path, 0, err.Error())
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -58,17 +75,17 @@ func (c *DetectionClient) doJSON(ctx context.Context, method, path string, body 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("detection-py request failed (%s %s): %w", method, path, err)
+		return c.upstreamErr(UpstreamUnreachable, method, path, 0, err.Error())
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
+		return c.upstreamErr(UpstreamBadResponse, method, path, resp.StatusCode, "read response body: "+err.Error())
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("detection-py returned %d for %s %s: %s", resp.StatusCode, method, path, string(respBody))
+		return c.upstreamErr(UpstreamStatus, method, path, resp.StatusCode, string(respBody))
 	}
 
 	if out != nil {
@@ -79,12 +96,25 @@ func (c *DetectionClient) doJSON(ctx context.Context, method, path string, body 
 		dec := json.NewDecoder(bytes.NewReader(respBody))
 		dec.UseNumber()
 		if err := dec.Decode(out); err != nil {
-			return fmt.Errorf("unmarshal response from %s: %w (body=%s)", path, err, string(respBody))
+			return &wrappedUpstreamError{
+				UpstreamError: c.upstreamErr(UpstreamBadResponse, method, path, resp.StatusCode,
+					fmt.Sprintf("unmarshal response: %v (body=%s)", err, string(respBody))),
+				cause: err,
+			}
 		}
 	}
 
 	return nil
 }
+
+// wrappedUpstreamError keeps the decode error reachable through errors.Is /
+// errors.As (e.g. ErrInvalidMoney from a finding with a float amount).
+type wrappedUpstreamError struct {
+	*UpstreamError
+	cause error
+}
+
+func (e *wrappedUpstreamError) Unwrap() []error { return []error{e.UpstreamError, e.cause} }
 
 func (c *DetectionClient) Health(ctx context.Context) error {
 	var out map[string]any

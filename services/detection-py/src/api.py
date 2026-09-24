@@ -259,45 +259,114 @@ def fixtures_contract_terms() -> list[ContractTerm]:
 
 
 # --- agent endpoints ---------------------------------------------------------
+#
+# N6 (AEGIS round 2, Sep 24 2026): a pydantic ValidationError raised INSIDE
+# an agent (a computed value that failed its own model, e.g. a 0.00
+# LabeledValue) used to escape as an unhandled exception -> HTTP 500, and
+# failed the whole batch with no hint of which item caused it. The agents
+# no longer do that for any valid input (ADR 0001 "Zero-value findings";
+# tests/test_zero_value_no_500.py fuzzes all eight). As defense in depth,
+# every agent now runs through _run_agent:
+#   - each item (each order/subscription/event/status/term; for cross-channel,
+#     each order's group of touchpoints, since that agent reasons per order)
+#     is run through the agent on its own;
+#   - a ValueError from the agent for an item (pydantic's ValidationError and
+#     zbm_schema's MoneyRangeError are both ValueErrors) is recorded against
+#     that item, and the other items still run so every failing item is named;
+#   - if any item failed, the response is 422 with one detail entry per
+#     failed item ({"type": "agent_value_error", "loc": ["body", <field>,
+#     <index>], "msg": ...}) and NO findings. Deliberately not a partial 200:
+#     the orchestrator writes every returned finding to the evidence ledger,
+#     and a silently shortened list would be recorded as a complete scan.
+# Any other exception is a bug and still surfaces as a 500.
+
+_T = TypeVar("_T")
+
+
+def _item_label(item: object) -> str:
+    for attr in ("order_id", "subscription_id", "term_id"):
+        value = getattr(item, attr, None)
+        if isinstance(value, str):
+            return f"{attr}={value[:64]}"
+    return type(item).__name__
+
+
+def _agent_error_message(item: object, err: ValueError) -> str:
+    if isinstance(err, ValidationError):
+        parts = [f"{'.'.join(map(str, e['loc'])) or '(model)'}: {e['msg']}"
+                 for e in err.errors(include_url=False, include_input=False, include_context=False)]
+        reason = f"{err.title}: " + "; ".join(parts)
+    else:
+        reason = str(err)
+    return f"agent could not produce a valid finding for {_item_label(item)} ({reason[:300]})"
+
+
+def _run_agent(detect: Callable[[list[_T]], list[Finding]], items: list[_T], field: str,
+               group_by: Callable[[_T], str] | None = None) -> list[Finding]:
+    if group_by is None:
+        groups = [([i], [item]) for i, item in enumerate(items)]
+    else:
+        by_key: dict[str, tuple[list[int], list[_T]]] = {}
+        for i, item in enumerate(items):
+            idx, members = by_key.setdefault(group_by(item), ([], []))
+            idx.append(i)
+            members.append(item)
+        groups = list(by_key.values())
+
+    findings: list[Finding] = []
+    errors: list[dict] = []
+    for indexes, members in groups:
+        try:
+            findings.extend(detect(members))
+        except ValueError as err:
+            msg = _agent_error_message(members[0], err)
+            errors.extend({"type": "agent_value_error", "loc": ["body", field, i], "msg": msg} for i in indexes)
+    if errors:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=errors)
+    return findings
+
 
 @app.post("/agents/affiliate-coupon-extension/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_affiliate_coupon_extension(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=affiliate_coupon_extension.detect(req.orders))
+    return FindingsResponse(findings=_run_agent(affiliate_coupon_extension.detect, req.orders, "orders"))
 
 
 @app.post("/agents/discount-misuse/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_discount_misuse(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=discount_misuse.detect(req.orders))
+    return FindingsResponse(findings=_run_agent(discount_misuse.detect, req.orders, "orders"))
 
 
 @app.post("/agents/abandoned-cart-coverage/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_abandoned_cart_coverage(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=abandoned_cart_coverage.detect(req.orders))
+    return FindingsResponse(findings=_run_agent(abandoned_cart_coverage.detect, req.orders, "orders"))
 
 
 @app.post("/agents/renewal-never-triggered/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_renewal_never_triggered(req: SubscriptionsRequest = Depends(wire_body(SubscriptionsRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=renewal_never_triggered.detect(req.subscriptions))
+    return FindingsResponse(findings=_run_agent(renewal_never_triggered.detect, req.subscriptions, "subscriptions"))
 
 
 @app.post("/agents/server-side-attribution/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_server_side_attribution(req: ServerSideEventsRequest = Depends(wire_body(ServerSideEventsRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=server_side_attribution.detect(req.events))
+    return FindingsResponse(findings=_run_agent(server_side_attribution.detect, req.events, "events"))
 
 
 @app.post("/agents/cross-channel-attribution/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_cross_channel_attribution(req: ChannelTouchpointsRequest = Depends(wire_body(ChannelTouchpointsRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=cross_channel_attribution.detect(req.touchpoints))
+    # This agent reasons over all touchpoints of one order together, so an
+    # order's touchpoints are one item.
+    return FindingsResponse(findings=_run_agent(
+        cross_channel_attribution.detect, req.touchpoints, "touchpoints", group_by=lambda t: t.order_id))
 
 
 @app.post("/agents/platform-integration/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_platform_integration(req: PlatformConnectionsRequest = Depends(wire_body(PlatformConnectionsRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=platform_integration.detect(req.statuses))
+    return FindingsResponse(findings=_run_agent(platform_integration.detect, req.statuses, "statuses"))
 
 
 @app.post("/agents/contract-pricing-term-drift/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_contract_pricing_term_drift(req: ContractTermsRequest = Depends(wire_body(ContractTermsRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=contract_pricing_term_drift.detect(req.terms))
+    return FindingsResponse(findings=_run_agent(contract_pricing_term_drift.detect, req.terms, "terms"))
 
 
 # --- correlation (Decision 3 / Failure Mode #2 safeguard) -------------------

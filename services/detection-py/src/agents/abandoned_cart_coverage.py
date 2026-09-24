@@ -34,6 +34,11 @@ def detect(orders: list[Order]) -> list[Finding]:
             continue
         if order.recovery_attempted:
             continue  # coverage worked as intended — not a leak
+        if order.subtotal_usd <= 0:
+            # N6 sweep: a valid order may have no line items (subtotal 0.00).
+            # Nothing to recover -> no finding (ADR 0001 "Zero-value
+            # findings"); a 0.00 LabeledValue used to raise -> HTTP 500.
+            continue
 
         findings.append(
             Finding(

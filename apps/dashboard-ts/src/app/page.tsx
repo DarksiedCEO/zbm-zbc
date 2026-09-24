@@ -1,4 +1,5 @@
 import { fetchRecordedFindings } from "@/lib/api";
+import { ledgerState } from "@/lib/ledger-status";
 import { formatUsd, isPositiveMoneyString } from "@/lib/money";
 import type { RecordedFinding, RecordedFindingsResult } from "@/types/finding";
 
@@ -76,15 +77,10 @@ function FindingRow({ finding }: { finding: RecordedFinding }) {
 
 function LedgerStatus({ result }: { result: RecordedFindingsResult }) {
   const v = result.ledger_verify;
-  if (result.ledger_entries_total === 0) {
-    return (
-      <div style={{ padding: 16, background: "#1f2328", border: "1px solid #2b2f36", borderRadius: 8, marginBottom: 20, fontSize: 13 }}>
-        No findings recorded in the evidence ledger yet. Run a scan with <code>POST /revenue-recovery/scan</code> on
-        orchestrator-go; this page only reads what the ledger has recorded.
-      </div>
-    );
-  }
-  if (!v || !v.valid) {
+  // The verdict is checked first (fix wave 3): an empty ledger is a valid
+  // chain, so "no findings yet" is only shown for a ledger that verified.
+  const state = ledgerState(result);
+  if (state === "invalid") {
     return (
       <div style={{ padding: 16, background: "#3a1f1f", border: "1px solid #6b2b2b", borderRadius: 8, marginBottom: 20 }}>
         <strong>LEDGER INTEGRITY FAILURE:</strong> the evidence ledger did not verify
@@ -92,9 +88,17 @@ function LedgerStatus({ result }: { result: RecordedFindingsResult }) {
       </div>
     );
   }
+  if (state === "empty") {
+    return (
+      <div style={{ padding: 16, background: "#1f2328", border: "1px solid #2b2f36", borderRadius: 8, marginBottom: 20, fontSize: 13 }}>
+        Evidence ledger verified and empty — no findings recorded yet. Run a scan with{" "}
+        <code>POST /revenue-recovery/scan</code> on orchestrator-go; this page only reads what the ledger has recorded.
+      </div>
+    );
+  }
   return (
     <div style={{ fontSize: 13, color: "#3fa34d", marginBottom: 12 }}>
-      Evidence ledger hash chain verified ({v.entries} entries).
+      Evidence ledger hash chain verified ({v?.entries} entries).
     </div>
   );
 }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -42,6 +44,24 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeUpstreamError answers 502 for a failed scan/read (fix wave 3, AEGIS
+// D3). The full error — which can contain upstream URLs, host:port and
+// upstream response bodies — is logged server-side under a random
+// correlation id; the caller (and the dashboard, which displays it) gets
+// only orchestrator.PublicMessage(err) plus that id.
+func writeUpstreamError(w http.ResponseWriter, route string, err error) {
+	var b [8]byte
+	id := "unavailable"
+	if _, rerr := rand.Read(b[:]); rerr == nil {
+		id = hex.EncodeToString(b[:])
+	}
+	log.Printf("correlation_id=%s route=%q error: %v", id, route, err)
+	writeJSON(w, http.StatusBadGateway, map[string]string{
+		"error":          orchestrator.PublicMessage(err),
+		"correlation_id": id,
+	})
+}
+
 // newMux builds the orchestrator's routes.
 //
 // Fix wave 1 (Sep 24 2026): the dashboard used to GET /revenue-recovery/scan
@@ -71,7 +91,7 @@ func newMux(orch *orchestrator.Orchestrator, orchestratorToken string) *http.Ser
 	mux.HandleFunc("POST /revenue-recovery/scan", requireAuth(orchestratorToken, func(w http.ResponseWriter, r *http.Request) {
 		result, err := orch.RunFullScan(r.Context())
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			writeUpstreamError(w, "POST /revenue-recovery/scan", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
@@ -80,7 +100,7 @@ func newMux(orch *orchestrator.Orchestrator, orchestratorToken string) *http.Ser
 	mux.HandleFunc("GET /revenue-recovery/findings", requireAuth(orchestratorToken, func(w http.ResponseWriter, r *http.Request) {
 		result, err := orch.RecordedFindings(r.Context())
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			writeUpstreamError(w, "GET /revenue-recovery/findings", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, result)

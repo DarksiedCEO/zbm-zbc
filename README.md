@@ -20,10 +20,10 @@ hash chain as findings.**
 
 | Service | Language | Tests | Status |
 |---|---|---|---|
-| `services/detection-py` | Python (FastAPI, pydantic) | 387/387 passing | Real, REST-exposed, hardened, money is exact `Decimal` |
-| `services/orchestrator-go` | Go | 41/41 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money` |
-| `services/ledger-rust` | Rust | 84/84 passing (56 unit + 28 real-binary integration) | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
-| `apps/dashboard-ts` | TypeScript (Next.js 16) | 5/5 `npm test` (shared money vectors), build + typecheck clean, 0 npm audit vulnerabilities | Real, rendered per request (`ƒ /`), reads recorded findings — viewing never writes |
+| `services/detection-py` | Python (FastAPI, pydantic) | 404/404 passing | Real, REST-exposed, hardened, money is exact `Decimal` |
+| `services/orchestrator-go` | Go | 48/48 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money` |
+| `services/ledger-rust` | Rust | 91/91 passing (60 unit + 31 real-binary integration), clippy `-D warnings` clean | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
+| `apps/dashboard-ts` | TypeScript (Next.js 16) | 14/14 `npm test` (money vectors, loopback bind, error sanitizing, ledger status), build + typecheck clean, 0 npm audit vulnerabilities | Real, rendered per request (`ƒ /`), binds 127.0.0.1 by default, reads recorded findings — viewing never writes |
 
 **Verified live, full-stack run** (Python + Go + Rust, real processes,
 real HTTP, no mocks, all three services requiring and presenting real
@@ -146,6 +146,26 @@ survive restart. Field rules are in ADR 0003.
 - **Other 4xx-not-500 fixes in detection-py:** timezone-less affiliate
   timestamps, NaN/Infinity in a body, and huge quantities now return 422.
 
+## Sep 24 2026 — fix wave 3 (Revenue Recovery + ledger)
+
+- **N6:** stacked codes that give away 0.00 (0% codes, 10% of $0.01) and
+  orders with no line items no longer 500: a finding whose value rounds to
+  0.00 is not emitted (ADR 0001 "Zero-value findings"); an agent error for
+  one item is a 422 naming that item, never a 500 or a partial list. All 8
+  agents are fuzzed over generated valid input.
+- **D2:** `npm start` / `npm run dev` bind `127.0.0.1` (`DASHBOARD_BIND_ADDR`
+  overrides); `tests/bind.test.mjs` fails if the default would not be loopback.
+- **D3:** orchestrator errors name the service that failed; callers get a
+  generic message plus a `correlation_id` (details only in the server log,
+  no internal URLs). A scan checks `GET /ledger/verify` first: ledger down
+  or chain invalid → 502 with zero detection calls.
+- **N8:** the ledger refuses unknown fields in persisted entries (startup
+  fails) and in `POST /ledger/append` (400). An empty ledger now verifies:
+  `200 {"valid":true,"entries":0}` (was `409 "Empty"`).
+- Live (ports 19640–19643, real processes): N6 bodies → 200; dashboard
+  socket `0100007F` (127.0.0.1); ledger down → scan 502 in <1 ms with 0
+  detection calls and no address in the body; empty ledger verify → 200.
+
 ## What's built
 
 **Tier 1 (rule-based, low-hanging fruit):**
@@ -217,7 +237,9 @@ go run ./cmd/orchestrator  # DETECTION_SERVICE_URL, LEDGER_SERVICE_URL, ORCHESTR
 # 4. Dashboard (TypeScript) — separate terminal
 cd apps/dashboard-ts
 npm install
-ORCHESTRATOR_URL=http://localhost:8080 npm run dev   # http://localhost:3000
+ORCHESTRATOR_URL=http://localhost:8080 ORCHESTRATOR_SERVICE_TOKEN=<same as above> npm run dev   # http://127.0.0.1:3000
+# `npm run build && npm start` for production. Both bind 127.0.0.1 (the
+# dashboard has no auth); DASHBOARD_BIND_ADDR overrides, PORT sets the port.
 # The page shows findings already recorded in the ledger (read-only);
 # run a scan first with the POST below. `npm test` runs the money vectors.
 ```
@@ -231,20 +253,23 @@ curl -s -X POST -H "Authorization: Bearer $ORCHESTRATOR_SERVICE_TOKEN" \
 ## Testing
 
 ```bash
-# Python — 387 tests. Use `python3 -m pytest`, not the bare `pytest`
+# Python — 404 tests. Use `python3 -m pytest`, not the bare `pytest`
 # binary, if pytest was installed as a standalone tool (e.g. via uv) —
 # it can silently run against a different interpreter than the one you
 # `pip install`ed into, and report a module-not-found collection error
 # that looks like a broken test suite rather than an environment mismatch.
-cd services/detection-py && PYTHONPATH=src python3 -m pytest tests/ -v
+cd services/detection-py && python3 -m pytest -q
 
-# Go — 41 tests
-cd services/orchestrator-go && go vet ./... && go test ./... -v
+# Go — 48 tests
+cd services/orchestrator-go && go vet ./... && go test -count=1 ./...
 
-# Rust — 84 tests (56 unit + 28 integration; the integration tests spawn
+# Rust — 91 tests (60 unit + 31 integration; the integration tests spawn
 # the real compiled binary and talk to it over a real TCP socket — see
 # tests/server_auth.rs, tests/server_events.rs, tests/server_hardening.rs)
-cd services/ledger-rust && cargo test && cargo clippy --all-targets
+cd services/ledger-rust && cargo test && cargo clippy --all-targets -- -D warnings
+
+# Dashboard — 14 tests
+cd apps/dashboard-ts && npm ci && npx tsc --noEmit && npm run build && npm test && npm audit
 ```
 
 ## Data
@@ -268,7 +293,8 @@ attaches later without touching agent logic.
   cannot show what an event's payload was, only prove it has not changed.
   Callers must keep the payload themselves.
 - Dashboard has no write actions, no auth, no multi-client view — it
-  renders one scan result, nothing more.
+  renders recorded findings, nothing more. It binds 127.0.0.1 by default
+  for that reason; do not set DASHBOARD_BIND_ADDR to a public address.
 - Tier 2's `escalator`/`overage_rate` contract-drift directionality
   rules are not implemented (only `minimum_spend` shortfall detection is
   real) — flagged in code rather than guessed at with no fixture behind it.

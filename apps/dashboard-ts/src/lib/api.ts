@@ -1,3 +1,4 @@
+import { describeFetchFailure, describeOrchestratorFailure } from "@/lib/orchestrator-error";
 import type { RecordedFindingsResult } from "@/types/finding";
 
 // Fix wave 1 (Sep 24 2026): the dashboard used to GET /revenue-recovery/scan
@@ -23,15 +24,27 @@ export async function fetchRecordedFindings(): Promise<RecordedFindingsResult> {
     );
   }
 
-  const res = await fetch(`${orchestratorUrl}/revenue-recovery/findings`, {
-    method: "GET",
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  // Fix wave 3 (AEGIS D3): the error thrown here is displayed on the page,
+  // so it never carries the raw response body or a transport error (both
+  // can contain internal URLs / host:port). Full detail goes to the server
+  // log; the page gets describeOrchestratorFailure/describeFetchFailure.
+  let res: Response;
+  try {
+    res = await fetch(`${orchestratorUrl}/revenue-recovery/findings`, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  } catch (e) {
+    console.error("dashboard: orchestrator request failed:", e);
+    throw new Error(describeFetchFailure(e));
+  }
   if (!res.ok) {
-    throw new Error(`orchestrator returned ${res.status}: ${await res.text()}`);
+    const body = await res.text();
+    console.error(`dashboard: orchestrator returned ${res.status}: ${body}`);
+    throw new Error(describeOrchestratorFailure(res.status, body));
   }
   return (await res.json()) as RecordedFindingsResult;
 }

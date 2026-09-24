@@ -253,9 +253,7 @@ impl PersistentLedger {
         }
 
         let ledger = Ledger::from_entries(entries);
-        if !ledger.is_empty() {
-            ledger.verify_chain().map_err(PersistError::ChainInvalid)?;
-        }
+        ledger.verify_chain().map_err(PersistError::ChainInvalid)?;
 
         // Only now — every complete line parsed and the whole chain verified —
         // is an unterminated tail treated as a torn, unacknowledged write.
@@ -962,6 +960,99 @@ mod tests {
         std::fs::write(&path, tampered).unwrap();
         let result = PersistentLedger::open(&path);
         assert!(matches!(result, Err(PersistError::ChainInvalid(_))), "got: {result:?}");
+    }
+
+    // --- N8 (AEGIS round 2): unknown fields in persisted entries -------------
+
+    /// tests/fixtures/aegis_unknown_field_injection.jsonl is AEGIS's probe
+    /// output: a real entry written by the current binary, then given an
+    /// extra `"approved_by":"andre"`. The field is not part of the hash, so
+    /// the chain still verifies — before this fix the loader silently
+    /// dropped it and the log opened, i.e. anyone with file access could
+    /// add unhashed "evidence" that a reader of the raw log would trust.
+    #[test]
+    fn aegis_unknown_field_injection_refuses_to_open() {
+        let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/aegis_unknown_field_injection.jsonl");
+        assert!(std::fs::read_to_string(fixture).unwrap().contains("\"approved_by\":\"andre\""));
+        match PersistentLedger::open(fixture) {
+            Err(PersistError::Corrupt { line: 1, reason }) => {
+                assert!(reason.contains("unknown field") && reason.contains("approved_by"), "{reason}")
+            }
+            other => panic!("expected Corrupt at line 1, got {other:?}"),
+        }
+    }
+
+    /// The same injection into every persisted shape: a legacy (no kind)
+    /// finding from the real old binary, a current finding, and an event.
+    #[test]
+    fn unknown_field_in_any_persisted_entry_kind_refuses_to_open() {
+        let legacy = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/legacy_ledger_v1.jsonl"
+        ))
+        .unwrap();
+        let path = scratch_path("unknown_field_src");
+        let _cleanup = ScratchFile(path.clone());
+        {
+            let mut pl = PersistentLedger::open(&path).unwrap();
+            pl.append(sample_record("f-0", "10.00")).unwrap();
+            pl.append_event(sample_event("onb-1", "s")).unwrap();
+        }
+        let current = std::fs::read_to_string(&path).unwrap();
+        let inject = |line: &str| -> String {
+            let mut v: serde_json::Value = serde_json::from_str(line).unwrap();
+            v["approved_by"] = "andre".into();
+            v.to_string()
+        };
+        let legacy_lines: Vec<&str> = legacy.lines().collect();
+        let cur: Vec<&str> = current.lines().collect();
+        let cases = [
+            ("legacy finding", format!("{}\n{}\n", inject(legacy_lines[0]), legacy_lines[1..].join("\n")), 1),
+            ("current finding", format!("{}\n{}\n", inject(cur[0]), cur[1]), 1),
+            ("event", format!("{}\n{}\n", cur[0], inject(cur[1])), 2),
+        ];
+        for (name, content, bad_line) in cases {
+            let p = scratch_path("unknown_field");
+            let _c = ScratchFile(p.clone());
+            std::fs::write(&p, &content).unwrap();
+            match PersistentLedger::open(&p) {
+                Err(PersistError::Corrupt { line, reason }) => {
+                    assert_eq!(line, bad_line, "{name}");
+                    assert!(reason.contains("unknown field"), "{name}: {reason}");
+                }
+                other => panic!("{name}: expected Corrupt, got {other:?}"),
+            }
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), content, "{name}: file untouched");
+        }
+    }
+
+    /// The field sets of the real old binaries are the ground truth for what
+    /// a persisted entry may contain: every legacy fixture must still load
+    /// and verify with unknown fields denied.
+    #[test]
+    fn every_real_legacy_fixture_still_loads_with_unknown_fields_denied() {
+        for (name, n) in [
+            ("legacy_ledger_v1.jsonl", 11),
+            ("legacy_ledger_v2_negatives.jsonl", 15),
+            ("ledger_v3_overbound_strings.jsonl", 4),
+        ] {
+            let fixture = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+            let path = scratch_path("fixture_fields");
+            let _cleanup = ScratchFile(path.clone());
+            std::fs::copy(&fixture, &path).unwrap();
+            let pl = PersistentLedger::open(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(pl.len(), n, "{name}");
+            assert_eq!(pl.verify_chain(), Ok(()), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_fresh_empty_ledger_verifies() {
+        let path = scratch_path("empty_verify");
+        let _cleanup = ScratchFile(path.clone());
+        let pl = PersistentLedger::open(&path).unwrap();
+        assert!(pl.is_empty());
+        assert_eq!(pl.verify_chain(), Ok(()));
     }
 
     /// RAII cleanup for the scratch files these tests write to /tmp.
