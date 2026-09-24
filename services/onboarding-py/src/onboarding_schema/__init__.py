@@ -30,7 +30,16 @@ from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field
 
 from redaction import contains_credential, refuse_credentials, scrub_obj
 
-from .money import Money, PositiveMoney, PositiveWireMoney, WireMoney, money_str, parse_wire_money, to_money  # noqa: F401
+from .money import (  # noqa: F401
+    Money,
+    PositiveMoney,
+    PositiveWireMoney,
+    WireMoney,
+    client_stated_amount,
+    money_str,
+    parse_wire_money,
+    to_money,
+)
 
 
 def _not_credential_like(v: str) -> str:
@@ -407,6 +416,7 @@ class Escalation(Outbound):
     briefing: BriefingPack
     push_delivered: bool
     push_detail: str
+    push_attempts: int = 0  # initial push + tick retries (bounded; fix wave 3)
     client_commitment_text: str
     client_commitment_due_at: datetime
     client_message_status: str  # "released" | "held: ..."

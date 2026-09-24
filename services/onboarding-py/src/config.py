@@ -62,6 +62,9 @@ class OnboardingConfig:
     # Fix wave 2: an undelivered nudge to Andre is retried on later ticks,
     # at most this many attempts per nudge (ADR 0004 choice).
     andre_nudge_max_attempts: int = 3
+    # An escalation briefing that did not reach Andre is retried on tick,
+    # like the Promise Keeper nudge: initial push + retries, this many in all.
+    escalation_push_max_attempts: int = 3
     default_quiet_start: time = time(21, 0)
     default_quiet_end: time = time(8, 0)
     stale_account_days: int = 90
@@ -87,6 +90,8 @@ class OnboardingConfig:
             raise ConfigError("stuck and soft-resolution windows must be positive")
         if self.andre_nudge_max_attempts < 1:
             raise ConfigError("andre_nudge_max_attempts must be at least 1")
+        if self.escalation_push_max_attempts < 1:
+            raise ConfigError("escalation_push_max_attempts must be at least 1")
         from zoneinfo import ZoneInfo  # validates the cutoff zone at startup
 
         try:
