@@ -31,6 +31,18 @@ with ones the caller cannot steer:
 State is in process memory: it resets on restart and is not shared across
 replicas (same limitation as the rest of this service — ADR 0002,
 Decision 8; the durable fix is the deferred persistence layer).
+
+Bounded (fix wave 1, audit: unbounded growth). Before, the attempt history
+kept a key per number and per customer ever contacted and only dropped
+expired keys on every 256th contact. Now: (a) attempts older than the 24h
+window are evicted on the gate's clock — a full sweep whenever that clock
+has moved a minute since the last one, or whenever the history is at its
+cap; (b) at most `max_tracked_keys` keys (numbers + customers) are held.
+At the cap with nothing expired, a contact that would add a key is REFUSED
+(fail closed, at authorize and again at redeem): dropping live history
+would silently re-open the per-number limit. Per key, at most
+`max_per_24h` attempts are ever inside the window, so the cap bounds the
+whole structure.
 """
 
 from __future__ import annotations
@@ -50,6 +62,10 @@ AUTOMATED_CHANNELS = frozenset({TaskChannel.CALL, TaskChannel.SMS, TaskChannel.E
 HARD_MAX_ATTEMPTS_PER_24H = 3
 HARD_MIN_SPACING = timedelta(hours=2)
 _ROLLING = timedelta(hours=24)
+DEFAULT_MAX_TRACKED_KEYS = 100_000
+_MAX_TRACKED_KEYS_CEILING = 1_000_000
+_SWEEP_EVERY = timedelta(minutes=1)
+_SWEEP_AT_CAP_EVERY = timedelta(seconds=1)
 
 
 class ContactRefused(Exception):
@@ -135,14 +151,22 @@ class OutboundContactGate:
         limits: AttemptLimits,
         clock: Callable[[], datetime],
         country_zones: dict[str, tuple[str, ...]] | None = None,
+        max_tracked_keys: int = DEFAULT_MAX_TRACKED_KEYS,
     ):
+        if (
+            isinstance(max_tracked_keys, bool)
+            or not isinstance(max_tracked_keys, int)
+            or not 1 <= max_tracked_keys <= _MAX_TRACKED_KEYS_CEILING
+        ):
+            raise ValueError(f"max_tracked_keys must be an integer 1-{_MAX_TRACKED_KEYS_CEILING}")
+        self._max_tracked_keys = max_tracked_keys
         self._window = window
         self._limits = limits
         self._clock = clock
         self._country_zones = dict(country_zones or {})
         self._lock = threading.Lock()
         self._attempts: dict[tuple[str, str], deque[datetime]] = {}
-        self._ops = 0
+        self._last_sweep: datetime | None = None
 
     @property
     def window(self) -> ContactWindow:
@@ -151,6 +175,16 @@ class OutboundContactGate:
     @property
     def limits(self) -> AttemptLimits:
         return self._limits
+
+    @property
+    def max_tracked_keys(self) -> int:
+        return self._max_tracked_keys
+
+    @property
+    def tracked_keys(self) -> int:
+        """Numbers + customers currently held in the attempt history."""
+        with self._lock:
+            return len(self._attempts)
 
     # -- public ------------------------------------------------------------
 
@@ -183,6 +217,7 @@ class OutboundContactGate:
         return keys
 
     def _check(self, now: datetime, zones: tuple[str, ...], phone: str, customer_id: str | None) -> str | None:
+        self._maybe_sweep(now)
         for z in zones:
             if not self._window.allows(now, z):
                 return (
@@ -206,6 +241,16 @@ class OutboundContactGate:
                         f"minimum spacing not met for this {kind}: last automated contact {shown} ago "
                         f"(minimum {self._limits.min_spacing}) — not contacted"
                     )
+        new_keys = sum(1 for k in self._keys(phone, customer_id) if k not in self._attempts)
+        if new_keys and len(self._attempts) + new_keys > self._max_tracked_keys:
+            if self._last_sweep is None or abs(now - self._last_sweep) >= _SWEEP_AT_CAP_EVERY:
+                self._sweep(now)
+            if len(self._attempts) + new_keys > self._max_tracked_keys:
+                return (
+                    f"attempt history is full ({len(self._attempts)} numbers/customers contacted in the "
+                    f"last 24h, max {self._max_tracked_keys}) — not contacted (fail closed: the attempt "
+                    "limit could not be enforced for a number it cannot remember)"
+                )
         return None
 
     def _redeem(self, auth: ContactAuthorization, channel: TaskChannel) -> str:
@@ -229,13 +274,26 @@ class OutboundContactGate:
                     ts.popleft()
                 ts.append(now)
             auth._redeemed = True
-            self._prune(now)
             return auth._phone
 
-    def _prune(self, now: datetime) -> None:
-        self._ops += 1
-        if self._ops % 256:
-            return
+    def _maybe_sweep(self, now: datetime) -> None:
+        # Time-based, not op-count-based: expired history goes within a
+        # minute of gate-clock time regardless of traffic. A clock that moved
+        # backwards also triggers a sweep (which then evicts nothing early).
+        if self._last_sweep is None or not (self._last_sweep <= now < self._last_sweep + _SWEEP_EVERY):
+            self._sweep(now)
+
+    def _sweep(self, now: datetime) -> None:
+        """Drop every attempt at or before now - 24h, and every key left empty.
+        Attempts stamped after `now` (clock moved backwards) are kept."""
+        self._last_sweep = now
         cutoff = now - _ROLLING
-        for key in [k for k, ts in self._attempts.items() if ts and max(ts) <= cutoff]:
-            del self._attempts[key]
+        for key in list(self._attempts):
+            ts = self._attempts[key]
+            if all(t > cutoff for t in ts):  # at most max_per_24h entries: cheap
+                continue
+            kept = deque(t for t in ts if t > cutoff)
+            if kept:
+                self._attempts[key] = kept
+            else:
+                del self._attempts[key]

@@ -201,6 +201,35 @@ used in Honolulu, claimed as New York) can still be reached at a time
 that is night where they physically are — no data this service has can
 detect that.
 
+## Fix wave 1, Sep 24 2026 — F15 money, 5xx sweep, bounded state
+
+| ID | Finding | Fix | Tests (each failed on the pre-fix code) |
+|---|---|---|---|
+| F15 (fulfillment part) | `LabeledValue.amount_usd` accepted `"1e3"`, `" 12.30 "`, `"012.30"`, `"12.3"` and rounded `"12.345"` up to `"12.35"` (any string `Decimal()` parses, then quantized). A10 above fixed the rounding mode but not this. | `src/fulfillment_schema/money.py` (copy of detection-py's `zbm_schema/money.py` rules): a wire string must be canonical (`^(0\|[1-9][0-9]{0,14})\.[0-9]{2}$`, max `999999999999999.99`), never rounded; a JSON number is refused when parsed from JSON text; computed `Decimal`/`int` values are rounded half-up under an explicit context. `LabeledValue.amount_usd` is `PositiveMoney`. | `tests/test_fix_wave_1_f15_money.py` runs every vector in `fixtures/money_vectors.json` (63 strings × Money/PositiveMoney × Python/JSON text, 9 raw JSON values). 196 of its cases failed before. **No route accepts money in a request body** (only `/fixtures/dossiers` and `/agents/customer-dossier/update` *return* `lifetime_value`, always `null` today); `test_no_http_route_accepts_money_in_its_request_body` walks every route's body model and fails if one is added. |
+| Sweep: 500s | Fuzzing every route found one class: `started_at` at the edge of Python's datetime range (`9999-12-31T23:59:59+00:00`) → `started_at + 5 min` overflowed → **500**. Years 0001/9999 were otherwise accepted. | All datetimes bounded to [2000-01-01, 2100-01-01) UTC (`BoundedAwareDatetime`); `FollowUpTask.due_at` (derived by an agent) gets one extra day. | `tests/test_fix_wave_1_fuzz.py` (malformed JSON, wrong types, 2 MB strings, 20 000-digit numbers, NaN/Infinity, lone surrogates, NUL, BOM, invalid UTF-8, 5 000-deep nesting, extreme datetimes, oversized batches, junk query strings — 276 cases). `tests/test_fix_wave_1_live_fuzz.py` replays the corpus against the real process over TCP plus raw malformed HTTP. |
+| Sweep: memory | Gate attempt history kept every number/customer and pruned only every 256th contact (21 keys still held 24 h later; 40 000 keys for 20 000 numbers, no cap). Dial dedupe (`set`), exhausted-escalation dedupe (`dict`) and the dossier store grew forever. | Gate: 24 h eviction on its own clock + cap 100 000 keys, refused at authorize and redeem when full. Dedupe stores: `src/bounded_state.py`, 24 h eviction, cap 100 000; at the cap new tasks are not dialed (skip reason) and new exhausted records are 503 before any write-back. Dossiers: cap 100 000 customers / 10 000 per history list, 503 with nothing applied. | `tests/test_fix_wave_1_bounded_state.py` (18). |
+
+**Tests changed, and why:** `test_money_is_half_up_two_decimal_string`
+fed the *strings* `"0.125"`, `"1.005"`, `"12.3"` and expected them rounded
+— it enshrined F15. It now feeds `Decimal("0.125")`/`Decimal("1.005")`
+(computed values, still rounded half-up) and the canonical `"12.30"`; the
+three strings moved to the rejection test. Four tests that reset
+`api._attempted_task_ids` to `set()` now reset it to `api._new_dedupe()`
+(same meaning, new type). No assertion was weakened.
+`tests/test_live_server.py` honors `FULFILLMENT_TEST_PORT_RANGE=LO-HI`
+for assigned port ranges.
+
+**Suite:** 213 passed before → 815 passed after
+(`FULFILLMENT_TEST_PORT_RANGE=19661-19679 python3 -m pytest`).
+
+**Live run:** the 249-case POST corpus against `python3 -m api` on
+127.0.0.1:19660: pre-fix code `{200: 68, 400: 31, 409: 2, 422: 146, 500: 2}`,
+fixed code `{200: 18, 400: 31, 409: 2, 422: 198}` — no 5xx.
+
+**Still open:** state is still process memory (restart/replicas forget
+it); `customer-dossier/update` deep-copies and returns the whole store on
+every request, so cost grows with the store up to the cap.
+
 ## What was actually verified (Sep 22, 2026, post-fix)
 
 - **64/64 `pytest` passing** — `cd services/fulfillment-py && pip install
@@ -252,7 +281,8 @@ detect that.
    refuses to redial a task_id it already dialed, and since fix wave 1
    F3 limits contacts per phone number and per customer — but only for
    the life of the process; a restart or a second replica forgets. The durable fix
-   is the persistence layer named in gap 3.
+   is the persistence layer named in gap 3. Since fix wave 1 all of it
+   is bounded (24 h eviction and hard caps, fail closed at a cap).
 7. **No real client connected.** Every endpoint takes request-supplied
    data or serves from `fixtures/fulfillment_*.json`.
 8. **Single shared-secret bearer token, not a real auth system.**

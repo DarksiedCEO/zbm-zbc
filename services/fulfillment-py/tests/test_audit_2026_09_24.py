@@ -187,7 +187,7 @@ def test_api_quiet_hours_use_the_server_clock(monkeypatch):
     dialer = InMemorySipDialer()
     monkeypatch.setattr(api, "_dialer", dialer)
     monkeypatch.setattr(api, "_now", lambda: UTC_0900)  # 02:00 in LA
-    monkeypatch.setattr(api, "_attempted_task_ids", set())
+    monkeypatch.setattr(api, "_attempted_task_ids", api._new_dedupe())
     r = client.post(
         "/agents/callback-orchestration/run",
         json={"tasks": [_task_json()], "phone_by_call_id": {"call_1": LA_PHONE}, "timezone_by_call_id": {"call_1": LA}},
@@ -229,7 +229,7 @@ def test_api_does_not_redial_the_same_task_across_requests(monkeypatch):
     dialer = InMemorySipDialer()
     monkeypatch.setattr(api, "_dialer", dialer)
     monkeypatch.setattr(api, "_now", lambda: UTC_1800)
-    monkeypatch.setattr(api, "_attempted_task_ids", set())
+    monkeypatch.setattr(api, "_attempted_task_ids", api._new_dedupe())
     body = {
         "tasks": [_task_json(created_at=UTC_1800 - timedelta(minutes=1))],
         "phone_by_call_id": {"call_1": LA_PHONE},
@@ -252,7 +252,7 @@ def test_api_concurrent_requests_for_the_same_task_dial_once(monkeypatch):
     dialer = SlowDialer()
     monkeypatch.setattr(api, "_dialer", dialer)
     monkeypatch.setattr(api, "_now", lambda: UTC_1800)
-    monkeypatch.setattr(api, "_attempted_task_ids", set())
+    monkeypatch.setattr(api, "_attempted_task_ids", api._new_dedupe())
     body = {
         "tasks": [_task_json(created_at=UTC_1800 - timedelta(minutes=1))],
         "phone_by_call_id": {"call_1": LA_PHONE},
@@ -416,8 +416,14 @@ def test_task_reason_does_not_carry_the_full_phone_number():
 
 # --- F5: money wire format per BUILD_CONTRACTS section 1 --------------------
 
+# Fix wave 1, F15: this test used to feed STRINGS "0.125", "1.005", "12.3"
+# and expect them rounded — i.e. it enshrined the defect (a wire string is
+# never rounded; those are rejected now, see test_fix_wave_1_f15_money.py).
+# Half-up rounding still applies to COMPUTED values, which is what is
+# asserted here.
 @pytest.mark.parametrize("given,expected", [
-    ("0.125", "0.13"), ("1.005", "1.01"), (1.005, "1.01"), (49.99, "49.99"), (12, "12.00"), ("12.3", "12.30"),
+    (Decimal("0.125"), "0.13"), (Decimal("1.005"), "1.01"), (1.005, "1.01"), (49.99, "49.99"), (12, "12.00"),
+    ("12.30", "12.30"),
 ])
 def test_money_is_half_up_two_decimal_string(given, expected):
     v = LabeledValue(amount_usd=given, confidence="low")
@@ -425,7 +431,7 @@ def test_money_is_half_up_two_decimal_string(given, expected):
     assert v.amount_usd == Decimal(expected)
 
 
-@pytest.mark.parametrize("given", ["0.004", 0.004, "0", "-1.00", "NaN", "Infinity"])
+@pytest.mark.parametrize("given", ["0.004", 0.004, "0", "-1.00", "NaN", "Infinity", "0.125", "1.005", "12.3"])
 def test_positive_money_rejects_zero_after_rounding_and_non_finite(given):
     with pytest.raises(ValidationError):
         LabeledValue(amount_usd=given, confidence="low")

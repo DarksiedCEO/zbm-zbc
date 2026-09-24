@@ -153,7 +153,7 @@ what changed architecturally, and why:
     phone numbers and voicemail transcripts). Money follows the
     monorepo wire contract (Decimal, ROUND_HALF_UP, two-decimal string).
 
-## Fix wave 1, Sep 24 2026 — decision it adds
+## Fix wave 1, Sep 24 2026 — decisions it adds
 
 11. **Every automated outbound contact is authorized by one gate
     (`src/outbound_gate.py`), and the caller decides neither the
@@ -185,10 +185,46 @@ what changed architecturally, and why:
       *creation* stays ungated: creating a task is not contact.
     - Same in-memory limitation as Decision 8.
 
+12. **Money: parse-from-wire and construct-from-Decimal are separate
+    paths (fix wave 1, F15).** `LabeledValue.amount_usd` still ran any
+    string through `Decimal()` and rounded it (`"1e3"`, `" 12.30 "`,
+    `"012.30"` accepted; `"12.345"` → `"12.35"`). It is now
+    `PositiveMoney` from `src/fulfillment_schema/money.py`, a copy (not an
+    import — services do not import each other) of detection-py's
+    `zbm_schema/money.py`: a string must match
+    `^(0|[1-9][0-9]{0,14})\.[0-9]{2}$` (ADR 0003 section 1a) and is never
+    rounded; a JSON number is refused when parsed from JSON text; a
+    computed `Decimal`/`int` (float only via `str()`) is quantized half-up
+    under an explicit `MONEY_CONTEXT`, never the ambient context. Held to
+    `fixtures/money_vectors.json`, both columns. No route accepts money in
+    a request body today (a test walks every route's body model and fails
+    if one ever does, so the HTTP-level vector run gets added with it).
+13. **Every datetime is bounded to [2000-01-01, 2100-01-01) UTC (fix wave
+    1, fuzz sweep).** `started_at = 9999-12-31T23:59:59Z` made
+    missed-call detection overflow computing `started_at + 5 min` → 500.
+    Bounding the input removes the whole class for every agent's
+    timedelta arithmetic. `FollowUpTask.due_at`, the one field an agent
+    derives from an input timestamp, gets one extra day of headroom so a
+    valid late-2099 event cannot fail validation inside the agent.
+14. **In-memory state is bounded and fails closed at its cap (fix wave
+    1).** The gate's attempt history evicts attempts older than 24 h (a
+    full sweep whenever the gate clock has moved a minute, or at the
+    cap) and holds at most 100 000 numbers+customers; the dial dedupe
+    and exhausted-escalation dedupe stores (`src/bounded_state.py`)
+    evict after 24 h and hold at most 100 000 entries each; the dossier
+    store holds at most 100 000 customers and 10 000 entries per history
+    list and never evicts (it is a record). At a cap with nothing
+    expired, the service refuses — no contact (gate refusal / skip
+    reason), no write-back (503), no dossier update (503) — because
+    dropping live history would silently re-open the redial limit or
+    duplicate a record. Rejected: LRU eviction of live entries (same
+    reason). Forgetting a task id after 24 h is accepted: the per-number
+    gate limit is the real redial protection beyond that.
+
 Still open after the audit (not decided here): an approval gate for a
 future real dialer/CRM adapter; idempotency keys for
 `resolution-writeback/resolve` across retries; per-customer time zone
-storage; bounded in-memory state.
+storage. (Bounded in-memory state: decided in Decision 14.)
 
 ## Verified so far (Sep 22, 2026 build session)
 

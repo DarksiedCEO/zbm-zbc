@@ -23,12 +23,13 @@ schema.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Annotated, Optional
 
-from pydantic import AwareDatetime, BaseModel, Field, StringConstraints, field_validator
+from pydantic import AfterValidator, AwareDatetime, BaseModel, Field, StringConstraints
+
+from fulfillment_schema.money import PositiveMoney
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +49,40 @@ TaskId = Annotated[str, StringConstraints(min_length=1, max_length=256, pattern=
 PhoneE164 = Annotated[str, StringConstraints(pattern=r"^\+[1-9][0-9]{1,14}$")]
 ShortText = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 
-MONEY_QUANTUM = Decimal("0.01")
+# Fix wave 1 (fuzz sweep): every datetime used to accept anything Python can
+# represent, so a call event with started_at "9999-12-31T23:59:59+00:00" made
+# missed-call detection compute started_at + 5 min -> OverflowError -> HTTP
+# 500. Every datetime in this schema is now bounded to [2000-01-01,
+# 2100-01-01) UTC, so no agent's timedelta arithmetic (at most days) can
+# leave the representable range. The comparison itself cannot overflow into
+# a 500 either: any OverflowError becomes the same validation error.
+DATETIME_MIN = datetime(2000, 1, 1, tzinfo=timezone.utc)
+DATETIME_MAX_EXCLUSIVE = datetime(2100, 1, 1, tzinfo=timezone.utc)
+# A deadline an agent DERIVES from an in-range event (missed-call due_at =
+# started_at + at most 5 min) may land just past DATETIME_MAX_EXCLUSIVE; it
+# must not fail validation inside the agent (that was itself a 500), so
+# FollowUpTask.due_at gets one day of headroom. Still far from overflow.
+DEADLINE_MAX_EXCLUSIVE = DATETIME_MAX_EXCLUSIVE + timedelta(days=1)
+
+
+def _range_check(max_exclusive: datetime):
+    def check(v: datetime) -> datetime:
+        try:
+            ok = DATETIME_MIN <= v < max_exclusive
+        except OverflowError:
+            ok = False
+        if not ok:
+            raise ValueError(
+                f"datetime must be between {DATETIME_MIN.isoformat()} (inclusive) and "
+                f"{max_exclusive.isoformat()} (exclusive)"
+            )
+        return v
+
+    return check
+
+
+BoundedAwareDatetime = Annotated[AwareDatetime, AfterValidator(_range_check(DATETIME_MAX_EXCLUSIVE))]
+DeadlineDatetime = Annotated[AwareDatetime, AfterValidator(_range_check(DEADLINE_MAX_EXCLUSIVE))]
 
 
 # ---------------------------------------------------------------------------
@@ -74,42 +108,20 @@ class LabeledValue(BaseModel):
     will eventually inform revenue decisions should be represented from
     the start, not retrofitted after it's wired into something real.
 
-    Sep 24 2026 audit: brought to BUILD_CONTRACTS section 1. Previously
-    quantized with the default context rounding (ROUND_HALF_EVEN, so
-    "0.125" -> "0.12", "1.005" -> "1.00") and checked `gt=0` BEFORE
-    rounding, so "0.004" became a positive-only amount of "0.00". Now:
-    float input only via str(value), ROUND_HALF_UP to 0.01, and the
-    positive check runs on the rounded value. Serializes as a two-decimal
-    JSON string ("12.30").
+    Sep 24 2026 audit: brought to BUILD_CONTRACTS section 1 (half-up to
+    0.01, positive check after rounding, two-decimal JSON string).
+
+    Fix wave 1, F15: the Sep 24 version still parsed ANY string Decimal()
+    understood and then rounded it, so "1e3", " 12.30 ", "012.30" were
+    accepted and "12.345" became "12.35". Now `PositiveMoney`
+    (fulfillment_schema/money.py): a string must be the canonical wire form
+    (fixtures/money_vectors.json), a JSON number is refused when parsed from
+    JSON text, and only computed Decimal/int values are rounded half-up.
     """
     model_config = {"frozen": True}
 
-    amount_usd: Decimal
+    amount_usd: PositiveMoney
     confidence: ValueConfidence
-
-    @field_validator("amount_usd", mode="before")
-    @classmethod
-    def _to_decimal(cls, v: object) -> Decimal:
-        if isinstance(v, bool):
-            raise ValueError("amount_usd must be a number, not a boolean")
-        if isinstance(v, float):
-            v = str(v)  # never Decimal(float): 1.005 must stay 1.005
-        if isinstance(v, (int, str, Decimal)):
-            try:
-                d = Decimal(v)
-            except InvalidOperation:
-                raise ValueError("amount_usd is not a valid decimal amount") from None
-        else:
-            raise ValueError("amount_usd must be a string, int, float or Decimal")
-        if not d.is_finite():
-            raise ValueError("amount_usd must be finite")
-        try:
-            q = d.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
-        except InvalidOperation:  # more digits than the 28-digit context holds
-            raise ValueError("amount_usd is out of range") from None
-        if q <= 0:
-            raise ValueError("amount_usd must be positive after rounding to 0.01")
-        return q
 
 
 # ---------------------------------------------------------------------------
@@ -136,8 +148,8 @@ class CallEvent(BaseModel):
     phone_number: PhoneE164
     direction: CallDirection
     status: CallStatus
-    started_at: AwareDatetime
-    ended_at: Optional[AwareDatetime] = None
+    started_at: BoundedAwareDatetime
+    ended_at: Optional[BoundedAwareDatetime] = None
     duration_seconds: int = Field(ge=0, le=86_400, default=0)
     voicemail_transcript: Optional[str] = Field(default=None, max_length=10_000)
     line_id: EntityId  # which configured SIP line/trunk this call rode in on
@@ -189,8 +201,8 @@ class FollowUpTask(BaseModel):
     customer_id: Optional[EntityId] = None
     source_call_id: Optional[EntityId] = None  # the CallEvent that triggered this, if any
     source_appointment_id: Optional[EntityId] = None  # the Appointment this concerns, if any
-    created_at: AwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    due_at: AwareDatetime
+    created_at: BoundedAwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    due_at: DeadlineDatetime
     attempt_number: int = Field(ge=1, le=100, default=1)
     status: TaskStatus = TaskStatus.PENDING
     reason: str = Field(min_length=1, max_length=2_000)  # human-readable: why this task exists
@@ -204,8 +216,8 @@ class CustomerDossier(BaseModel):
     customer_id: str
     name: Optional[str] = None
     phone_numbers: list[str] = Field(default_factory=list)
-    first_contact_at: Optional[AwareDatetime] = None
-    last_contact_at: Optional[AwareDatetime] = None
+    first_contact_at: Optional[BoundedAwareDatetime] = None
+    last_contact_at: Optional[BoundedAwareDatetime] = None
     call_history: list[str] = Field(default_factory=list)  # call_ids
     appointment_history: list[str] = Field(default_factory=list)  # appointment_ids
     open_task_ids: list[str] = Field(default_factory=list)
@@ -229,10 +241,10 @@ class AppointmentStatus(str, Enum):
 class Appointment(BaseModel):
     appointment_id: EntityId
     customer_id: EntityId
-    scheduled_at: AwareDatetime
+    scheduled_at: BoundedAwareDatetime
     service_type: ShortText
     status: AppointmentStatus
-    completion_confirmed_at: Optional[AwareDatetime] = None
+    completion_confirmed_at: Optional[BoundedAwareDatetime] = None
     technician_id: Optional[EntityId] = None
 
     def is_overdue_for_confirmation(self, now: datetime) -> bool:
@@ -272,6 +284,6 @@ class ResolutionRecord(BaseModel):
     entity_id: str
     customer_id: Optional[str] = None
     resolution_type: ResolutionType
-    resolved_at: AwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    resolved_at: BoundedAwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     write_back_status: WriteBackStatus
     write_back_detail: Optional[str] = None
