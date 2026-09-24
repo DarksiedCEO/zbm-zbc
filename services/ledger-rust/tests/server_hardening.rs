@@ -524,3 +524,80 @@ fn unwritable_stderr_does_not_kill_the_server() {
     let (_, v) = authed(s.port, "GET", "/ledger/verify", None);
     assert_eq!(v, json!({"valid": true, "entries": 1}));
 }
+
+// --- ADR 0003 section 1a: money magnitude bound on NEW appends (fix wave 2) ----------------
+
+/// Every `string_vectors` / `json_vectors` entry of the shared
+/// fixtures/money_vectors.json, POSTed to the REAL server: `accept` -> 201,
+/// `reject` -> 400 (column `ledger_append_expected`). Before the fix the
+/// over-bound canonical strings (e.g. "1000000000000000.00") got 201.
+#[test]
+fn money_bound_append_verdicts_match_shared_vectors_over_real_http() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/money_vectors.json");
+    let vectors: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut cases: Vec<(String, Value, &str)> = Vec::new();
+    for v in vectors["string_vectors"].as_array().unwrap() {
+        let input = v["input"].as_str().unwrap();
+        let shown: String = if input.len() > 40 { format!("{}...({} chars)", &input[..40], input.len()) } else { input.to_string() };
+        cases.push((format!("string {shown:?}"), json!(input), v["ledger_append_expected"].as_str().unwrap()));
+    }
+    for v in vectors["json_vectors"].as_array().unwrap() {
+        let raw = v["json"].as_str().unwrap();
+        cases.push((format!("json {raw}"), serde_json::from_str(raw).unwrap(), v["verdict"].as_str().unwrap()));
+    }
+
+    let log = scratch("money_vectors");
+    let s = start(&log, None);
+    let mut failures = Vec::new();
+    let mut accepted = 0;
+    for (i, (label, amount, want)) in cases.iter().enumerate() {
+        let mut f = finding(&format!("f-vec-{i}"));
+        f["amount_usd"] = amount.clone();
+        let (st, body) = authed(s.port, "POST", "/ledger/append", Some(&f.to_string()));
+        let want_status = if *want == "accept" { 201 } else { 400 };
+        if st != want_status {
+            failures.push(format!("{label}: want {want_status}, got {st}"));
+        }
+        if st == 201 {
+            accepted += 1;
+            assert_eq!(body["amount_usd"], *amount, "{label}: stored verbatim");
+        }
+    }
+    assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+    let (_, v) = authed(s.port, "GET", "/ledger/verify", None);
+    assert_eq!(v, json!({"valid": true, "entries": accepted}));
+}
+
+/// tests/fixtures/ledger_v3_overbound_strings.jsonl was written over HTTP by
+/// the REAL fix-wave-1 server binary (integration commit 23a1752), which
+/// accepted over-bound strings: "12.30", "1000000000000000.00",
+/// "99999999999999999999.99", "999999999999999.99" (its /ledger/verify said
+/// {"entries":4,"valid":true}). The bound applies to NEW appends only: this
+/// log must still load, verify, serve those amounts verbatim and extend.
+#[test]
+fn money_bound_log_with_over_bound_strings_from_previous_binary_still_loads() {
+    let log = scratch("overbound");
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ledger_v3_overbound_strings.jsonl");
+    std::fs::copy(fixture, &log.0).unwrap();
+    let original = std::fs::read(&log.0).unwrap();
+
+    let s = start(&log, None);
+    assert_eq!(authed(s.port, "GET", "/ledger/verify", None).1, json!({"valid": true, "entries": 4}));
+    let (_, entries) = authed(s.port, "GET", "/ledger/entries", None);
+    let amounts: Vec<Value> = entries.as_array().unwrap().iter().map(|e| e["amount_usd"].clone()).collect();
+    assert_eq!(
+        amounts,
+        [json!("12.30"), json!("1000000000000000.00"), json!("99999999999999999999.99"), json!("999999999999999.99")]
+    );
+    let mut over = finding("f-over");
+    over["amount_usd"] = json!("1000000000000000.00");
+    assert_eq!(authed(s.port, "POST", "/ledger/append", Some(&over.to_string())).0, 400);
+    let mut max = finding("f-max");
+    max["amount_usd"] = json!("999999999999999.99");
+    assert_eq!(authed(s.port, "POST", "/ledger/append", Some(&max.to_string())).0, 201);
+    drop(s);
+
+    let s = start(&log, None);
+    assert_eq!(authed(s.port, "GET", "/ledger/verify", None).1, json!({"valid": true, "entries": 5}));
+    assert!(std::fs::read(&log.0).unwrap().starts_with(&original), "existing lines never rewritten");
+}

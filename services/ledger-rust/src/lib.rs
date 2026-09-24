@@ -40,7 +40,7 @@ mod event;
 mod money;
 mod persistence;
 pub use event::{EventInput, EventValidationError};
-pub use money::{deserialize_persisted_amount, Money, MoneyError};
+pub use money::{deserialize_persisted_amount, Money, MoneyError, MAX_MONEY};
 pub use persistence::{EventAppendOutcome, PersistError, PersistentLedger, TornTailRecovery};
 
 pub const GENESIS_HASH_SEED: &str = "ZBM-REVENUE-RECOVERY-LEDGER-GENESIS-2026";

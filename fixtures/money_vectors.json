@@ -3,9 +3,9 @@
   "Shared money wire-format vectors (build contract section 1, as amended by ADR 0003 section 1a).",
   "Every language's test suite loads this file: detection-py (tests/test_money_vectors.py),",
   "orchestrator-go (internal/client/money_vectors_test.go), apps/dashboard-ts (tests/money.test.ts).",
-  "ledger-rust does not load it yet: 'ledger_append_expected' is the verdict POST /ledger/append",
-  "should give for amount_usd (a positive-only field) once the ledger adopts the amended bound.",
-  "As of Sep 24 2026 the ledger still accepts over-bound canonical strings (e.g. '1000000000000000.00').",
+  "ledger-rust (src/money.rs tests + tests/server_hardening.rs over real HTTP): 'ledger_append_expected' is",
+  "the verdict POST /ledger/append gives for amount_usd (a positive-only field); the ledger adopted the",
+  "amended bound in fix wave 2 (already-persisted over-bound entries still load, ADR 0003 section 1a).",
   "'money' = a field that allows 0.00; 'positive_money' = a positive-only field.",
   "string_vectors: 'input' is the JSON string value. json_vectors: 'json' is the raw JSON text of the value;",
   "the verdict applies to a positive-only money field (e.g. LabeledValue.amount_usd)."

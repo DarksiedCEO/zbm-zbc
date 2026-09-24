@@ -22,7 +22,7 @@ hash chain as findings.**
 |---|---|---|---|
 | `services/detection-py` | Python (FastAPI, pydantic) | 387/387 passing | Real, REST-exposed, hardened, money is exact `Decimal` |
 | `services/orchestrator-go` | Go | 41/41 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money` |
-| `services/ledger-rust` | Rust | 55/55 passing (39 unit + 16 real-binary integration) | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
+| `services/ledger-rust` | Rust | 84/84 passing (56 unit + 28 real-binary integration) | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
 | `apps/dashboard-ts` | TypeScript (Next.js 16) | 5/5 `npm test` (shared money vectors), build + typecheck clean, 0 npm audit vulnerabilities | Real, rendered per request (`ƒ /`), reads recorded findings — viewing never writes |
 
 **Verified live, full-stack run** (Python + Go + Rust, real processes,
@@ -85,8 +85,13 @@ backward-compatibility proof are in
   invalid events on disk refuse to load; logging can no longer crash the
   server. Known limitation: a non-ASCII byte in any request header gets an
   empty reply (tiny_http drops it before our code runs; fail-closed, pinned
-  by test). `cargo test`: 80 passed (54 unit, 8 `server_auth`, 8
-  `server_events`, 10 `server_hardening`).
+  by test). Fix wave 2: new appends enforce the money bound (ADR 0003
+  section 1a; over `"999999999999999.99"` is a 400), checked against every
+  `ledger_append_expected` verdict in `fixtures/money_vectors.json`;
+  already-persisted amounts (legacy `1e20`, over-bound strings the
+  fix-wave-1 binary accepted) still load and verify. `cargo test`: 84
+  passed (56 unit, 8 `server_auth`, 8 `server_events`, 12
+  `server_hardening`).
 - `apps/dashboard-ts`: `amount_usd: string`, displayed verbatim, never
   parsed to a JS number, no totals computed.
 
@@ -127,8 +132,8 @@ survive restart. Field rules are in ADR 0003.
   `"999999999999999.99"`, ADR 0003 section 1a) in detection-py (422),
   orchestrator-go (rejected on decode) and the dashboard (not displayed).
   Every Python money operation runs under an explicit `MONEY_CONTEXT`; an
-  order whose subtotal would exceed the bound is a 422. The ledger has not
-  adopted the bound yet (separate owner).
+  order whose subtotal would exceed the bound is a 422. The ledger adopted
+  the same bound for new appends in fix wave 2 (400).
 - **F15:** `fixtures/money_vectors.json` — one shared vector file run by all
   three test suites (and carrying the ledger's expected verdict). It found
   Python accepting `"1.00\n"`, `"012.30"`, `"12.3"`, `"12.345"` and JSON
@@ -236,9 +241,9 @@ cd services/detection-py && PYTHONPATH=src python3 -m pytest tests/ -v
 # Go — 41 tests
 cd services/orchestrator-go && go vet ./... && go test ./... -v
 
-# Rust — 55 tests (39 unit + 16 integration; the integration tests spawn
+# Rust — 84 tests (56 unit + 28 integration; the integration tests spawn
 # the real compiled binary and talk to it over a real TCP socket — see
-# tests/server_auth.rs and tests/server_events.rs)
+# tests/server_auth.rs, tests/server_events.rs, tests/server_hardening.rs)
 cd services/ledger-rust && cargo test && cargo clippy --all-targets
 ```
 
