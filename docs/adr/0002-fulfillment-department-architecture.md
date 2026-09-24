@@ -1,6 +1,6 @@
 # ADR 0002 — Fulfillment Department Architecture
 
-**Status:** Accepted (Sep 22, 2026)
+**Status:** Accepted (Sep 22, 2026); amended by the Sep 24, 2026 audit (Decisions 7–10)
 **Context:** Second department in the `zbm-zbc` monorepo. Built same night
 as a scoped, single-pass build (basics, not a separate intelligence-layer
 pass — see "Scope boundary" below), following the Revenue Recovery 1A
@@ -111,6 +111,50 @@ integration. Also out of scope, per the founder's own instruction this
 session: the ports-of-LA/Long-Beach logistics venture (parked pending
 founder review) and anything Aaliyah-facing (the founder said he will
 carry the SIP/LiveKit findings to her himself).
+
+## Audit, Sep 24 2026 — decisions it adds
+
+Full findings table with evidence and test names:
+`services/fulfillment-py/README.md`, "Audit, Sep 24 2026". Summary of
+what changed architecturally, and why:
+
+7. **Outbound-contact quiet hours are a hard rule in code, evaluated in
+   the recipient's local time, and fail closed.** Before the audit the
+   only check was `8 <= now.hour < 20` on a UTC clock (a Los Angeles
+   caller could be called back at 02:00 local — reproduced), and the API
+   accepted a caller-supplied `now` that could bypass even that. Now
+   `src/contact_window.py` gates every dial on 08:00–21:00 in the
+   recipient's IANA zone (DST via zoneinfo), refuses to dial when the
+   zone is unknown or invalid, uses only the server clock, and lets
+   configuration (`FULFILLMENT_CONTACT_WINDOW`) narrow the window but
+   never widen it. This replaces the old "business hours" rule rather
+   than sitting next to it: a per-line business-hours policy would need
+   per-line time zones, which still don't exist. Consequence: until a
+   recipient time zone is stored per customer, callers must pass
+   `timezone_by_call_id` or nothing is dialed. Any future SMS/email
+   sender must use the same gate — none exists today.
+8. **Duplicate suppression lives at the only place contact happens
+   (the dial), in process memory, under a lock.** Duplicate call events,
+   duplicate task_ids in a batch, the same task across requests, and
+   concurrent requests are all dialed at most once, and a dialer
+   exception becomes a FAILED outcome instead of a 500 that hid earlier
+   dials. This does not survive a restart or span replicas; Decision 2's
+   deferred persistence layer is still the durable fix.
+9. **The service owns its bind address**: `python3 -m api` binds
+   `FULFILLMENT_BIND_ADDR` (default `127.0.0.1`), matching
+   `LEDGER_BIND_ADDR` / `ORCHESTRATOR_BIND_ADDR`, verified from
+   `/proc/net/tcp` by a test that spawns the real process.
+10. **Input is bounded and typed at the edge**: timezone-aware datetimes
+    only, E.164 phones, bounded ids/text/batches, enums for
+    `resolution_type`/`entity_type`, unknown request fields rejected,
+    and 422 bodies carry no request payload (they previously echoed
+    phone numbers and voicemail transcripts). Money follows the
+    monorepo wire contract (Decimal, ROUND_HALF_UP, two-decimal string).
+
+Still open after the audit (not decided here): an approval gate for a
+future real dialer/CRM adapter; idempotency keys for
+`resolution-writeback/resolve` across retries; per-customer time zone
+storage; bounded in-memory state.
 
 ## Verified so far (Sep 22, 2026 build session)
 
