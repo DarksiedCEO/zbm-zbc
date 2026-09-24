@@ -155,14 +155,16 @@ def test_two_dollars_one_cent_style_value_is_exact():
 
 
 def test_many_line_item_subtotal_is_exact():
-    items = [("0.10", 1)] * 1000 + [("19.99", 3)] * 250 + [("0.07", 11)] * 333
+    # 50 lines: the per-order maximum (zbm_schema/limits.py, LOW-C fix wave 1;
+    # this test used 1,583 lines before orders had a line-item cap).
+    items = [("0.10", 1)] * 20 + [("19.99", 3)] * 20 + [("0.07", 11)] * 10
     o = _order(items)
-    expected = Decimal("0.10") * 1000 + Decimal("19.99") * 3 * 250 + Decimal("0.07") * 11 * 333
-    assert expected == Decimal("15348.91")
-    assert o.subtotal_usd == Decimal("15348.91")
+    expected = Decimal("0.10") * 20 + Decimal("19.99") * 3 * 20 + Decimal("0.07") * 11 * 10
+    assert expected == Decimal("1209.10")
+    assert o.subtotal_usd == Decimal("1209.10")
     # Sanity: the naive float sum of the same items is NOT exact.
     float_sum = sum(float(p) * q for p, q in items)
-    assert Decimal(float_sum) != Decimal("15348.91")
+    assert Decimal(float_sum) != Decimal("1209.10")
 
 
 def test_percent_of_rounds_half_up_exactly():

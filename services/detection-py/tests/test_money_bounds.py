@@ -133,12 +133,14 @@ def test_quantity_times_price_over_the_maximum_is_422():
 
 
 def test_subtotal_of_many_large_lines_is_exact_and_never_raises():
-    # 1000 lines of 999,999,999,999.99 = 999,999,999,999,990.00 (< max)
-    o = _order([("999999999999.99", 1)] * 1000)
-    assert o.subtotal_usd == Decimal("999999999999990.00")
-    assert format_money(o.subtotal_usd) == "999999999999990.00"
+    # 50 lines (the per-order maximum, zbm_schema/limits.py — this test used
+    # 1000 lines before orders had a line-item cap) of 19,999,999,999,999.99
+    # = 999,999,999,999,999.50 (< max)
+    o = _order([("19999999999999.99", 1)] * 50)
+    assert o.subtotal_usd == Decimal("999999999999999.50")
+    assert format_money(o.subtotal_usd) == "999999999999999.50"
     [f] = abandoned_cart_coverage.detect([o])
-    assert f.model_dump(mode="json")["recoverable_value"]["amount_usd"] == "999999999999990.00"
+    assert f.model_dump(mode="json")["recoverable_value"]["amount_usd"] == "999999999999999.50"
 
 
 def test_order_model_rejects_over_maximum_subtotal_with_validation_error():

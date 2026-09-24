@@ -20,8 +20,8 @@ from typing import Callable, TypeVar
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from agents import (
@@ -34,6 +34,7 @@ from agents import (
     renewal_never_triggered,
     server_side_attribution,
 )
+from request_limits import body_limit_for
 from fixtures_loader import (
     load_channel_touchpoints,
     load_contract_terms,
@@ -142,13 +143,27 @@ app = FastAPI(
 # accepted and run. Now (ADR 0001 "Request limits"):
 #   - MAX_BATCH_ITEMS caps every request list (orders, subscriptions, events,
 #     touchpoints, statuses, terms, findings): more is a 422 "too_long".
-#   - MAX_BODY_BYTES is sized from the largest batch the API accepts: 1000
-#     orders of ~1 KiB each (the fixture pool's largest order is 558 bytes of
-#     JSON; a 3-line-item order is ~700) is ~1 MiB, and the correlation call's
-#     1000 findings of ~650 bytes each is ~0.65 MiB. 2 MiB is that with 2x
-#     headroom. A larger body is refused with 413 BEFORE any parsing: from
-#     Content-Length without reading a byte of the body, and — for a chunked
-#     body with no Content-Length — as soon as the running total passes it.
+#   - Every field of every request model has a limit (zbm_schema/limits.py),
+#     and each route's body limit is the worst-case JSON size of its largest
+#     LEGAL batch at those limits, computed by request_limits.py, plus 25%
+#     headroom (ROUTE_BODY_LIMITS below). LOW-C (fix wave 1): the old single
+#     2 MiB limit was sized from a typical order, so 1,000 orders x 30 line
+#     items (2.12 MiB) — a batch the API advertised — got 413. A larger body
+#     is refused with 413 BEFORE any parsing: from Content-Length without
+#     reading a byte of the body, and — for a chunked body with no
+#     Content-Length — as soon as the running total passes it. Any path that
+#     takes no body (GET /health, the fixture routes, unknown paths) gets
+#     DEFAULT_BODY_BYTES.
+#   - At most MAX_CONCURRENT_HEAVY requests whose body may exceed
+#     HEAVY_BODY_BYTES (declared larger, or chunked with no length) run at
+#     once; one more is answered 503 + Retry-After at once, before its body
+#     is read. Parsing, agents and serialization hold the GIL (pydantic-core
+#     keeps it for tens of ms per call), so concurrent large batches do not
+#     run in parallel anyway — they only take turns delaying the event loop.
+#     Measured with 16 clients sending ~28 MiB worst-case batches: cap 2 ->
+#     /health max 0.43-0.52 s, p50 50-120 ms; cap 1 -> max 0.19-0.22 s, p50
+#     8 ms, with the same batch throughput. Small requests (every
+#     orchestrator scan sends fixture-sized batches) are never capped.
 #   - BODY_READ_TIMEOUT_S bounds how long one request may take to deliver its
 #     body (408), so a slow-drip body cannot hold a request open forever.
 #   - MAX_HEADER_BYTES bounds the request line + headers. The real bound is in
@@ -158,30 +173,44 @@ app = FastAPI(
 #     for any other launcher. uvicorn's default httptools parser has NO head
 #     size limit (a 20 MB header was accepted), which is why serve.py exists.
 #   - JSON parsing runs in the threadpool (run_in_threadpool below), and every
-#     route handler is a plain `def`, which FastAPI runs in the threadpool, so
-#     neither parsing nor agent execution blocks the event loop.
+#     agent route handler is a plain `def`, which FastAPI runs in the
+#     threadpool, so neither parsing nor agent execution runs on the event
+#     loop. /health is `async def`: it is answered on the event loop itself,
+#     never queued behind the threadpool.
 
-MAX_BODY_BYTES = 2 * 1024 * 1024
+DEFAULT_BODY_BYTES = 64 * 1024
 MAX_BATCH_ITEMS = 1000
 MAX_HEADER_BYTES = 16 * 1024
 BODY_READ_TIMEOUT_S = 30.0
+HEAVY_BODY_BYTES = 256 * 1024
+MAX_CONCURRENT_HEAVY = 1
+HEAVY_RETRY_AFTER_S = 1
 
 
 class _BodyLimitMiddleware:
     """Pure ASGI middleware (no buffering of its own) enforcing the head size,
-    the body size and the body read deadline on every HTTP request, before
-    routing, auth or parsing."""
+    the per-route body size, the heavy-request concurrency cap and the body
+    read deadline on every HTTP request, before routing, auth or parsing."""
 
-    def __init__(self, app, max_body: int = MAX_BODY_BYTES, max_head: int = MAX_HEADER_BYTES,
-                 read_timeout: float = BODY_READ_TIMEOUT_S):
+    def __init__(self, app, route_limits: dict[str, int] | None = None,
+                 default_body: int = DEFAULT_BODY_BYTES, max_head: int = MAX_HEADER_BYTES,
+                 read_timeout: float = BODY_READ_TIMEOUT_S, heavy_body: int = HEAVY_BODY_BYTES,
+                 max_heavy: int = MAX_CONCURRENT_HEAVY):
         self.app = app
-        self.max_body = max_body
+        self.route_limits = route_limits or {}
+        self.default_body = default_body
         self.max_head = max_head
         self.read_timeout = read_timeout
+        self.heavy_body = heavy_body
+        self.max_heavy = max_heavy
+        # One event loop, and the check-and-increment below has no await in
+        # between, so a plain counter is exact.
+        self.heavy_in_flight = 0
 
     @staticmethod
-    async def _refuse(send, code: int, detail: str) -> None:
-        body = JSONResponse(status_code=code, content={"detail": detail}, headers={"Connection": "close"})
+    async def _refuse(send, code: int, detail: str, extra_headers: dict[str, str] | None = None) -> None:
+        body = JSONResponse(status_code=code, content={"detail": detail},
+                            headers={"Connection": "close", **(extra_headers or {})})
         await send({"type": "http.response.start", "status": code, "headers": body.raw_headers})
         await send({"type": "http.response.body", "body": body.body})
 
@@ -194,12 +223,25 @@ class _BodyLimitMiddleware:
         if head > self.max_head:
             return await self._refuse(send, 431, f"request head exceeds {self.max_head} bytes")
 
+        max_body = self.route_limits.get(scope["path"], self.default_body)
         declared = [v for k, v in scope["headers"] if k == b"content-length"]
+        declared_len: int | None = None
         if declared:
             if len(declared) > 1 or not declared[0].isdigit():
                 return await self._refuse(send, 400, "invalid Content-Length")
-            if int(declared[0]) > self.max_body:
-                return await self._refuse(send, 413, f"request body exceeds {self.max_body} bytes")
+            declared_len = int(declared[0])
+            if declared_len > max_body:
+                return await self._refuse(send, 413, f"request body exceeds {max_body} bytes")
+
+        chunked = any(k == b"transfer-encoding" for k, _ in scope["headers"])
+        heavy = (declared_len is not None and declared_len > self.heavy_body) or (declared_len is None and chunked)
+        if heavy:
+            if self.heavy_in_flight >= self.max_heavy:
+                return await self._refuse(
+                    send, 503,
+                    f"busy: {self.max_heavy} large requests already in progress; retry shortly",
+                    {"Retry-After": str(HEAVY_RETRY_AFTER_S)})
+            self.heavy_in_flight += 1
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.read_timeout
@@ -221,11 +263,11 @@ class _BodyLimitMiddleware:
                                     headers={"Connection": "close"}) from None
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
-                if received > self.max_body:
+                if received > max_body:
                     # Raised inside the route, so FastAPI's HTTPException
                     # handler answers it (nothing has been sent yet).
                     raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                                        detail=f"request body exceeds {self.max_body} bytes",
+                                        detail=f"request body exceeds {max_body} bytes",
                                         headers={"Connection": "close"})
                 if not message.get("more_body", False):
                     body_done = True
@@ -233,10 +275,11 @@ class _BodyLimitMiddleware:
                 body_done = True
             return message
 
-        return await self.app(scope, limited_receive, send)
-
-
-app.add_middleware(_BodyLimitMiddleware)
+        try:
+            return await self.app(scope, limited_receive, send)
+        finally:
+            if heavy:
+                self.heavy_in_flight -= 1
 
 
 # --- request parsing and validation errors (fix wave 1, Sep 24 2026) ------
@@ -324,8 +367,30 @@ class FindingsResponse(BaseModel):
     findings: list[Finding]
 
 
+# Every route that takes a body, and its request model. The body limit of
+# each is computed from the model (request_limits.body_limit_for); a route
+# missing here would get DEFAULT_BODY_BYTES (64 KiB).
+ROUTE_REQUEST_MODELS: dict[str, type[BaseModel]] = {
+    "/agents/affiliate-coupon-extension/detect": OrdersRequest,
+    "/agents/discount-misuse/detect": OrdersRequest,
+    "/agents/abandoned-cart-coverage/detect": OrdersRequest,
+    "/agents/renewal-never-triggered/detect": SubscriptionsRequest,
+    "/agents/server-side-attribution/detect": ServerSideEventsRequest,
+    "/agents/cross-channel-attribution/detect": ChannelTouchpointsRequest,
+    "/agents/platform-integration/detect": PlatformConnectionsRequest,
+    "/agents/contract-pricing-term-drift/detect": ContractTermsRequest,
+    "/correlation/overlaps": FindingsRequest,
+}
+ROUTE_BODY_LIMITS: dict[str, int] = {path: body_limit_for(model) for path, model in ROUTE_REQUEST_MODELS.items()}
+MAX_BODY_BYTES = max(ROUTE_BODY_LIMITS.values())  # the largest limit of any route
+
+app.add_middleware(_BodyLimitMiddleware, route_limits=ROUTE_BODY_LIMITS)
+
+
 @app.get("/health")
-def health() -> dict:
+async def health() -> dict:
+    # async (LOW-C, fix wave 1): answered on the event loop, not queued in
+    # the threadpool behind parsing and agent work.
     return {"status": "ok", "service": "detection-py", "data_source": "non-live"}
 
 
@@ -390,6 +455,17 @@ def fixtures_contract_terms() -> list[ContractTerm]:
 
 _T = TypeVar("_T")
 
+# LOW-C (fix wave 1): the response JSON is built HERE, in the route's
+# threadpool thread. Returning a model made FastAPI validate it in the
+# threadpool but serialize it on the event loop — for 1,000 findings that
+# held /health. The findings are already validated Finding objects.
+_FINDINGS_RESPONSE = TypeAdapter(FindingsResponse)
+_OVERLAPS = TypeAdapter(dict[str, list[Finding]])
+
+
+def _findings_json(findings: list[Finding]) -> Response:
+    return Response(_FINDINGS_RESPONSE.dump_json(FindingsResponse(findings=findings)), media_type="application/json")
+
 
 def _item_label(item: object) -> str:
     for attr in ("order_id", "subscription_id", "term_id"):
@@ -435,50 +511,50 @@ def _run_agent(detect: Callable[[list[_T]], list[Finding]], items: list[_T], fie
 
 
 @app.post("/agents/affiliate-coupon-extension/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_affiliate_coupon_extension(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=_run_agent(affiliate_coupon_extension.detect, req.orders, "orders"))
+def detect_affiliate_coupon_extension(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> Response:
+    return _findings_json(_run_agent(affiliate_coupon_extension.detect, req.orders, "orders"))
 
 
 @app.post("/agents/discount-misuse/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_discount_misuse(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=_run_agent(discount_misuse.detect, req.orders, "orders"))
+def detect_discount_misuse(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> Response:
+    return _findings_json(_run_agent(discount_misuse.detect, req.orders, "orders"))
 
 
 @app.post("/agents/abandoned-cart-coverage/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_abandoned_cart_coverage(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=_run_agent(abandoned_cart_coverage.detect, req.orders, "orders"))
+def detect_abandoned_cart_coverage(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> Response:
+    return _findings_json(_run_agent(abandoned_cart_coverage.detect, req.orders, "orders"))
 
 
 @app.post("/agents/renewal-never-triggered/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_renewal_never_triggered(req: SubscriptionsRequest = Depends(wire_body(SubscriptionsRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=_run_agent(renewal_never_triggered.detect, req.subscriptions, "subscriptions"))
+def detect_renewal_never_triggered(req: SubscriptionsRequest = Depends(wire_body(SubscriptionsRequest))) -> Response:
+    return _findings_json(_run_agent(renewal_never_triggered.detect, req.subscriptions, "subscriptions"))
 
 
 @app.post("/agents/server-side-attribution/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_server_side_attribution(req: ServerSideEventsRequest = Depends(wire_body(ServerSideEventsRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=_run_agent(server_side_attribution.detect, req.events, "events"))
+def detect_server_side_attribution(req: ServerSideEventsRequest = Depends(wire_body(ServerSideEventsRequest))) -> Response:
+    return _findings_json(_run_agent(server_side_attribution.detect, req.events, "events"))
 
 
 @app.post("/agents/cross-channel-attribution/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_cross_channel_attribution(req: ChannelTouchpointsRequest = Depends(wire_body(ChannelTouchpointsRequest))) -> FindingsResponse:
+def detect_cross_channel_attribution(req: ChannelTouchpointsRequest = Depends(wire_body(ChannelTouchpointsRequest))) -> Response:
     # This agent reasons over all touchpoints of one order together, so an
     # order's touchpoints are one item.
-    return FindingsResponse(findings=_run_agent(
+    return _findings_json(_run_agent(
         cross_channel_attribution.detect, req.touchpoints, "touchpoints", group_by=lambda t: t.order_id))
 
 
 @app.post("/agents/platform-integration/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_platform_integration(req: PlatformConnectionsRequest = Depends(wire_body(PlatformConnectionsRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=_run_agent(platform_integration.detect, req.statuses, "statuses"))
+def detect_platform_integration(req: PlatformConnectionsRequest = Depends(wire_body(PlatformConnectionsRequest))) -> Response:
+    return _findings_json(_run_agent(platform_integration.detect, req.statuses, "statuses"))
 
 
 @app.post("/agents/contract-pricing-term-drift/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_contract_pricing_term_drift(req: ContractTermsRequest = Depends(wire_body(ContractTermsRequest))) -> FindingsResponse:
-    return FindingsResponse(findings=_run_agent(contract_pricing_term_drift.detect, req.terms, "terms"))
+def detect_contract_pricing_term_drift(req: ContractTermsRequest = Depends(wire_body(ContractTermsRequest))) -> Response:
+    return _findings_json(_run_agent(contract_pricing_term_drift.detect, req.terms, "terms"))
 
 
 # --- correlation (Decision 3 / Failure Mode #2 safeguard) -------------------
 
 @app.post("/correlation/overlaps", dependencies=[Depends(require_auth)])
-def correlation_overlaps(req: FindingsRequest = Depends(wire_body(FindingsRequest))) -> dict[str, list[Finding]]:
-    return find_overlapping_entities(req.findings)
+def correlation_overlaps(req: FindingsRequest = Depends(wire_body(FindingsRequest))) -> Response:
+    return Response(_OVERLAPS.dump_json(find_overlapping_entities(req.findings)), media_type="application/json")

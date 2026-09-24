@@ -20,7 +20,7 @@ hash chain as findings.**
 
 | Service | Language | Tests | Status |
 |---|---|---|---|
-| `services/detection-py` | Python (FastAPI, pydantic) | 427/427 passing | Real, REST-exposed, hardened, money is exact `Decimal`; request limits (2 MiB body, 1000 items, head size/deadline — ADR 0001 "Request limits"); run with `src/serve.py` |
+| `services/detection-py` | Python (FastAPI, pydantic) | 457/457 passing | Real, REST-exposed, hardened, money is exact `Decimal`; request limits (1000 items; every field bounded; per-route body limit = computed worst-case legal batch + 25%, 1–36 MiB; 1 large request at a time, else 503 + Retry-After; async `/health`; head size/deadline — ADR 0001 "Request limits"); run with `src/serve.py` |
 | `services/orchestrator-go` | Go | 59/59 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money`; server timeouts, body/header caps, bounded upstream responses (ADR 0001 "Request limits") |
 | `services/ledger-rust` | Rust | 91/91 passing (60 unit + 31 real-binary integration), clippy `-D warnings` clean | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
 | `apps/dashboard-ts` | TypeScript (Next.js 16) | 14/14 `npm test` (money vectors, loopback bind, error sanitizing, ledger status), build + typecheck clean, 0 npm audit vulnerabilities | Real, rendered per request (`ƒ /`), binds 127.0.0.1 by default, reads recorded findings — viewing never writes |

@@ -29,6 +29,20 @@ from typing import Optional
 
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
+from zbm_schema.limits import (
+    MAX_ATTRIBUTION_WINDOW_HOURS,
+    MAX_DISCOUNTS_PER_ORDER,
+    MAX_LINE_ITEMS_PER_ORDER,
+    MAX_QUANTITY,
+    MAX_RENEWAL_INTERVAL_DAYS,
+    AgentId,
+    CauseDescription,
+    DiscountCode,
+    FindingRef,
+    Id,
+    Label,
+    Sku,
+)
 from zbm_schema.money import (
     CENT,
     MAX_MONEY,
@@ -106,13 +120,13 @@ class Customer(BaseModel):
 
 
 class OrderLineItem(BaseModel):
-    sku: str
+    sku: Sku
     unit_price_usd: PositiveMoney
-    quantity: int = Field(gt=0)
+    quantity: int = Field(gt=0, le=MAX_QUANTITY)
 
 
 class DiscountApplication(BaseModel):
-    code: str
+    code: DiscountCode
     # percent_off is a percentage, not money — it stays a plain number on the
     # wire. Any money computed from it goes through zbm_schema.money.percent_of,
     # which converts it to Decimal via str() so the arithmetic stays exact.
@@ -129,13 +143,13 @@ class DiscountApplication(BaseModel):
 
 
 class AffiliateAttribution(BaseModel):
-    affiliate_id: str
+    affiliate_id: Id
     # Timezone required (fix wave 1): the affiliate agent subtracts these
     # two, and `aware - naive` raised TypeError -> 500. A naive timestamp is
     # also an ambiguous instant, so it is rejected at validation (422).
     click_timestamp: AwareDatetime
     order_timestamp: AwareDatetime
-    attribution_window_hours: int = Field(gt=0)
+    attribution_window_hours: int = Field(gt=0, le=MAX_ATTRIBUTION_WINDOW_HOURS)
 
     @property
     def within_window(self) -> bool:
@@ -144,14 +158,15 @@ class AffiliateAttribution(BaseModel):
 
 
 class Order(BaseModel):
-    order_id: str
-    customer_id: str
+    # Field limits: zbm_schema/limits.py (LOW-C, fix wave 1).
+    order_id: Id
+    customer_id: Id
     placed_at: datetime
-    status: str  # "completed" | "abandoned_cart" | "cancelled"
-    line_items: list[OrderLineItem]
-    discounts: list[DiscountApplication] = Field(default_factory=list)
+    status: Label  # "completed" | "abandoned_cart" | "cancelled"
+    line_items: list[OrderLineItem] = Field(max_length=MAX_LINE_ITEMS_PER_ORDER)
+    discounts: list[DiscountApplication] = Field(default_factory=list, max_length=MAX_DISCOUNTS_PER_ORDER)
     affiliate: Optional[AffiliateAttribution] = None
-    source_platform: str  # e.g. "shopify", "amazon", "tiktok_shop", "woocommerce" — informational only
+    source_platform: Label  # e.g. "shopify", "amazon", "tiktok_shop", "woocommerce" — informational only
     recovery_attempted: bool = False  # abandoned-cart recovery flow (email/SMS) fired for this order
 
     @model_validator(mode="after")
@@ -190,10 +205,10 @@ class SubscriptionStatus(str, Enum):
 
 
 class Subscription(BaseModel):
-    subscription_id: str
-    customer_id: str
+    subscription_id: Id
+    customer_id: Id
     plan_price_usd: PositiveMoney
-    renewal_interval_days: int = Field(gt=0)
+    renewal_interval_days: int = Field(gt=0, le=MAX_RENEWAL_INTERVAL_DAYS)
     last_renewal_at: Optional[datetime] = None
     next_renewal_due_at: datetime
     status: SubscriptionStatus
@@ -222,14 +237,14 @@ class Finding(BaseModel):
     is the shared entity reference required for double-count correlation
     across agents (Failure Mode #2) — never optional.
     """
-    finding_id: str
-    agent_id: str
+    finding_id: FindingRef
+    agent_id: AgentId
     leak_category: LeakCategory
-    entity_type: str  # "order" | "subscription"
-    entity_id: str  # order_id or subscription_id — the correlation key
-    customer_id: str
+    entity_type: Label  # "order" | "subscription"
+    entity_id: FindingRef  # order_id or subscription_id — the correlation key
+    customer_id: Id
     cause_certainty: CauseCertainty
-    cause_description: str
+    cause_description: CauseDescription
     recoverable_value: Optional[LabeledValue] = None
     detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
