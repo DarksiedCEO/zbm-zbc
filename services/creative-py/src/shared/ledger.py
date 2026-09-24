@@ -12,6 +12,11 @@ in `took_effect`:
   validation failure, ledger not configured, connection refused / connect
   timeout (the request never reached the ledger), or a 4xx refusal other
   than 409;
+  — and ledger-rust's own load-shed 503 (fix wave 5, LOW-D): its
+  `shed()` answers 503 with the fixed body LEDGER_SHED_BODY WITHOUT
+  reading the request, before any ledger work (services/ledger-rust/src/
+  bin/server.rs `serve` -> `shed`), so that exact answer certainly did not
+  append. Any other 503 (e.g. from a proxy in between) stays "unknown";
 - `LedgerConflict` (took_effect "unknown"): 409 — the ledger already holds
   a DIFFERENT record under this decision's deterministic id;
 - `LedgerRecordError` itself (took_effect "unknown"): the request may have
@@ -89,6 +94,10 @@ class LedgerNotRecorded(LedgerRecordError):
     took_effect = False
 
 
+class LedgerQueryFailed(LedgerNotRecorded):
+    """A READ of the ledger (find_event) failed; nothing was changed."""
+
+
 class LedgerConflict(LedgerRecordError):
     """409: the ledger already holds a different record under this
     decision's deterministic event id. The outcome is uncertain/conflicting
@@ -148,6 +157,19 @@ def validate_event_fields(
         raise LedgerNotRecorded(f"ledger event fails contract validation on: {', '.join(problems)}")
 
 
+# ledger-rust's load-shed answer (server.rs `shed`): status 503, this JSON body.
+LEDGER_SHED_BODY = {"error": "ledger-rust is at its connection limit; retry shortly"}
+
+
+def _is_ledger_shed(resp: httpx.Response) -> bool:
+    if resp.status_code != 503:
+        return False
+    try:
+        return resp.json() == LEDGER_SHED_BODY
+    except ValueError:
+        return False
+
+
 class LedgerClient(Protocol):
     def record_event(
         self,
@@ -159,6 +181,11 @@ class LedgerClient(Protocol):
         payload: dict,
         summary: str,
     ) -> None: ...
+
+    def find_event(self, event_id: str) -> dict | None:
+        """The ledger entry recorded under `event_id`, or None if the ledger
+        holds none. Raises LedgerQueryFailed if the ledger can't be read."""
+        ...
 
 
 class HttpLedgerClient:
@@ -209,7 +236,31 @@ class HttpLedgerClient:
             raise LedgerConflict("ledger already holds a DIFFERENT record under this decision's event id (409)")
         if 400 <= resp.status_code < 500:
             raise LedgerNotRecorded(f"ledger refused the event: HTTP {resp.status_code}")
+        if _is_ledger_shed(resp):
+            raise LedgerNotRecorded("ledger shed the request at its connection limit (HTTP 503, request not read)")
         raise LedgerRecordError(f"ledger answered HTTP {resp.status_code} (the ledger may have recorded it)")
+
+    def find_event(self, event_id: str) -> dict | None:
+        """GET /ledger/entries (ledger-rust has no by-id read) and look for
+        the event. A read, so any failure is LedgerQueryFailed."""
+        try:
+            with httpx.Client(timeout=max(self._timeout, 30.0), transport=self._transport) as client:
+                resp = client.get(f"{self._base_url}/ledger/entries",
+                                  headers={"Authorization": f"Bearer {self._token}"})
+        except (httpx.HTTPError, ValueError) as exc:
+            raise LedgerQueryFailed(f"ledger could not be read: {type(exc).__name__}") from exc
+        if resp.status_code != 200:
+            raise LedgerQueryFailed(f"ledger could not be read: HTTP {resp.status_code}")
+        try:
+            entries = resp.json()
+        except ValueError as exc:
+            raise LedgerQueryFailed("ledger entries were not JSON") from exc
+        if not isinstance(entries, list):
+            raise LedgerQueryFailed("ledger entries were not a list")
+        for e in entries:
+            if isinstance(e, dict) and e.get("event_id") == event_id:
+                return e
+        return None
 
 
 class UnconfiguredLedgerClient:
@@ -220,6 +271,9 @@ class UnconfiguredLedgerClient:
             "evidence ledger not configured (LEDGER_SERVICE_URL / LEDGER_SERVICE_TOKEN unset); "
             "no decision can take effect without a ledger record"
         )
+
+    def find_event(self, event_id: str) -> dict | None:
+        raise LedgerQueryFailed("evidence ledger not configured; it can't be read")
 
 
 def _rust_event_input_valid(body: dict) -> str | None:
@@ -292,6 +346,14 @@ class FakeLedgerClient:
                 raise LedgerConflict("ledger already holds a DIFFERENT record under this event id (409, test double)")
         self.events.append({**entry, "payload": payload})
 
+    def find_event(self, event_id: str) -> dict | None:
+        if self.fail_all:
+            raise LedgerQueryFailed("simulated ledger outage (test double)")
+        for e in self.events:
+            if e["event_id"] == event_id:
+                return dict(e)
+        return None
+
     def of_type(self, event_type: str) -> list[dict]:
         return [e for e in self.events if e["event_type"] == event_type]
 
@@ -338,6 +400,12 @@ class EvidenceRecorder:
         ident = _canonical({"i": self.instance_id, "d": DEPARTMENT, "t": event_type, "a": actor, "s": subject_id,
                             "n": seq, "op": op})
         return "cp:" + hashlib.sha256(ident.encode("utf-8", "surrogatepass")).hexdigest()
+
+    def planned_event_id(self, event_type: str, actor: str, subject_id: str, payload: dict[str, Any],
+                         summary: str = "", op_key: Any = None) -> str:
+        """The event id `record()` with these arguments would send now."""
+        with self.lock:
+            return self.event_id_for(event_type, actor, subject_id, payload if op_key is None else op_key)
 
     def record(self, event_type: str, actor: str, subject_id: str, payload: dict[str, Any], summary: str,
                op_key: Any = None) -> str:

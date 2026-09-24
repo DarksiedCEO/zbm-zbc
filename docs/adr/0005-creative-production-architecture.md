@@ -393,6 +393,67 @@ money. ZBC's unit of work is a campaign, not a clip.
     `devtools/fake_ledger_server.py` implement ledger-rust's rules
     independently, so tests can't be looser than production.
 
+19. **Never-say is a similarity gate, not a lookalike list (fix wave 5,
+    NEW-1).** Five waves enumerated evasions one class at a time; AEGIS
+    round 4 still passed plain-ASCII respellings ("Guaranteed retums",
+    "make rnoney", "guaranteecl returns"). `shared/text.visual_near_miss`
+    compares every never-say phrase with every window of caption words
+    (the phrase's word count, one more, one fewer) on visual skeletons
+    and a bounded Damerau–Levenshtein (OSA) distance. The multi-character
+    ASCII confusables: Unicode UTS #39 confusables.txt (Unicode 18.0.0,
+    2026-08-06, read for this fix) has exactly ONE entry whose source and
+    prototype are both plain ASCII letters with a multi-letter prototype,
+    m → rn; its other all-ASCII entries are single characters (I → l,
+    1 → l, 0 → O). The rest are hand-chosen typographic pairs the file
+    does not list: near-identical cl → d and vv → w (with rn → m they
+    form the skeleton that decides REJECT) and merely similar nn → m,
+    uu → w, ci → a, ri → n, ii → u (human review only). Views (both
+    sides mapped alike; the smallest distance counts): the skeleton
+    contracted, expanded, raw, the extended pairs in two orders, and each
+    view without the pairs the phrase itself contains; every view folds
+    i → l first (so an undotted i costs nothing to detect). Budget: 1
+    edit for 4–8 letters, 2 above, 0 for ≤ 3 letters. A window that is
+    the phrase word for word once rn/m, cl/d, vv/w are read alike →
+    **reject** ("make rnoney", "guaranteecl returns", "mirade cure");
+    otherwise within budget → **human_review**, never a pass — l for i
+    ("get rlch") stays a human's call, as before this wave. Measured
+    false-positive rate: 6 of 239 ordinary marketing captions (2.5%)
+    against a 16-phrase list, none rejected ("three money" ~ "free
+    money", "make more" ~ "make money", "get rid" ~ "get rich",
+    "core"/"care" ~ "cure", "no risky" ~ "no risk"). Cost is bounded and
+    near-linear (windows built once per text and view, grouped by length;
+    a pigeonhole substring filter; banded distance): 0.05–1.8 s per 100 KB
+    for 16 phrases on the build machine (worst case: random words over the
+    lookalike alphabet); the window cache is capped at one 65 KB text's
+    working set (~20 MB).
+
+20. **Launch limits on the socket (fix wave 5, NEW-3).** `serve.py` runs
+    uvicorn's h11 parser with a 16 KiB head cap, a 10 s request-head
+    deadline, 5 s keep-alive and `limit_concurrency`
+    (`CREATIVE_MAX_CONCURRENCY`, default 256), mirroring detection-py;
+    `BodyLimit` re-checks the head (431) and bounds body delivery to 30 s
+    (408). httptools had buffered a 200 MB unauthenticated header.
+
+21. **Uncertain outcomes can be classified and withdrawn (fix wave 5,
+    LOW-D).** ledger-rust's load-shed path (`serve` → `shed`, its only
+    503) answers with a fixed JSON body before reading the request, so
+    exactly that answer is "not recorded" (`took_effect: false`); any
+    other 503 stays "unknown". An uncertain human verdict can be withdrawn
+    (`POST /zbc/clips/{id}/human-review/withdraw`) only by the reviewer
+    who sent it (their own credential), only 2 minutes after it was last
+    sent (ledger-rust drops a connection after 15 s but an append already
+    on its blocking pool can finish later), and only when `GET
+    /ledger/entries` (the ledger's only read: the whole chain, so this is
+    O(ledger) and meant for a rare manual step) holds no entry under that
+    verdict's event id; the withdrawal is itself recorded first
+    (`clip_human_verdict_withdrawn`, naming the withdrawn id; a
+    deterministic payload, so a retry after a lost response re-sends the
+    identical record and the ledger answers idempotently). Residual: the
+    blocking pool is not time-bounded, so an append queued there for over
+    2 minutes could land after the withdrawal; the chain then shows the
+    withdrawal before the verdict it names, which an audit can see — the
+    ledger offers no conditional append to close this fully.
+
 ## Shared vs separate
 
 Shared (reference data and plumbing, `src/shared/`): the Platform Rules
@@ -515,9 +576,11 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     non-Latin letter in an English campaign), but a Latin-script
     lookalike the generated table doesn't cover (e.g. "turned" or
     "reversed" letters) is not matched but, since fix wave 4, is itself a
-    signal (human queue). Multi-letter ASCII lookalikes ("rn" for m, "vv"
-    for w, "cl" for d) and one character standing for two letters are not
-    matched; the near-miss matcher is word-by-word (a phrase split across
+    signal (human queue). Multi-letter ASCII lookalikes are handled by the
+    similarity gate (decision 19), which trades a measured ~2.5% of
+    ordinary captions sent to a human; phrases of ≤ 3 letters get no edit
+    budget, and inflections / paraphrases ("getting rich") are not
+    lookalikes and are not caught. The symbol near-miss matcher is word-by-word (a phrase split across
     words AND written with symbols is caught by the mixed-word rule, not
     by the phrase). Script detection is
     by Unicode character name (Python has no Script property). RLO text

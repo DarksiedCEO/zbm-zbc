@@ -38,7 +38,12 @@ NS  no never-say phrase in the clip's text                  -> reject
     only once split letters are rejoined or leetspeak folded is
     borderline -> human_review, never a pass; NS also: a NEAR MISS — the
     phrase appears once symbols/digits are read as letters ("return$",
-    "G€t", "6et") or treated as wildcards — is human_review)
+    "G€t", "6et") or treated as wildcards — is human_review;
+    fix wave 5: ASCII lookalike spellings — the words are the phrase once
+    rn/m, cl/d, vv/w are read alike ("make rnoney") -> reject; within a
+    small edit distance of the phrase on that skeleton ("Guaranteed
+    retrns", "miracle kure", "get rlch", "make nnoney", words split or run
+    together) -> human_review; shared/text.visual_near_miss)
 MIX any word mixing letters with symbols/digits in caption /
     on-screen text / transcript (shared/text.mixed_symbol_words; ordinary
     punctuation, #hashtags, prices and "2nd"/"1990s"-style numbers excepted)
@@ -71,6 +76,7 @@ from shared.text import (
     near_miss,
     non_latin_letters,
     obfuscation_signals,
+    visual_lookalike_exact,
 )
 from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
 from zbc.platform_rules import rows_usable
@@ -259,8 +265,12 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
     for r in rb.rules_of(RuleKind.NEVER_SAY):
         checks.append(r.rule_id)
         m = match_phrase(clip_text, r.params.get("phrase", ""))
+        lookalike = None if m is PhraseMatch.EXACT else visual_lookalike_exact(clip_text, r.params.get("phrase", ""))
         if m is PhraseMatch.EXACT:
             fail(r.rule_id, f"says never-say {r.params.get('phrase')!r}")
+        elif lookalike is not None:
+            fail(r.rule_id, f"says never-say {r.params.get('phrase')!r} with lookalike letters ({lookalike[:60]!r} "
+                            "reads the same once rn/m, cl/d and vv/w are read alike)")
         elif m is PhraseMatch.LOOSE:
             borderline.append(f"{r.rule_id}: possible never-say {r.params.get('phrase')!r} written with split/obfuscated letters")
         else:

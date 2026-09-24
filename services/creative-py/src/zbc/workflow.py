@@ -69,7 +69,7 @@ from pydantic import BaseModel, ConfigDict
 from shared.actors import ActorRegistry, Role
 from shared.clock import Clock
 from shared.departments import Departments
-from shared.errors import CreativeError, FrozenError, NotFound, PreconditionFailed, ValidationFailed
+from shared.errors import CreativeError, FrozenError, GuardrailViolation, NotFound, PreconditionFailed, ValidationFailed
 from shared.founder import FOUNDER_ACTOR, FounderGate
 from shared.ledger import (
     EvidenceRecorder,
@@ -111,6 +111,11 @@ RETRY_WINDOW = timedelta(minutes=15)
 # an identical retry of a dropped UNCERTAIN attempt then meets the ledger's
 # 409 and is reported as conflicting (never as "did not take effect").
 MAX_PENDING_ATTEMPTS = 10_000
+# An uncertain human verdict can be withdrawn (LOW-D) only this long after it
+# was sent: ledger-rust drops a connection after 15 s (REQUEST_DEADLINE), but
+# an append already queued on its blocking pool can still complete after
+# that, so the margin is generous.
+WITHDRAW_MIN_AGE = timedelta(minutes=2)
 
 
 @dataclass
@@ -122,6 +127,8 @@ class _Attempt:
     uncertain: bool  # the ledger may hold it: replay `record` exactly
     record: tuple[tuple, dict] = ((), {})
     result: Any = None
+    event_id: str = ""  # the event id the failed record was sent under
+    sent_at: datetime | None = None  # when it was last sent (a replay re-sends it)
 
 
 def _sha256(obj) -> str:
@@ -212,15 +219,18 @@ class ZbcWorkflow:
         if held is None or not held.uncertain or held.sha != content_sha:
             return None
         args, kwargs = held.record
+        held.sent_at = self.clock.now()
         self.recorder.record(*args, **kwargs)
         self._attempts.pop(op, None)
         return held.result
 
     def _record_op(self, op: str, content_sha: str, at: datetime, result, *args, **kwargs) -> str:
+        planned = self.recorder.planned_event_id(*args, **kwargs)
         try:
             eid = self.recorder.record(*args, **kwargs)
         except LedgerRecordError as exc:
-            self._attempts[op] = _Attempt(content_sha, at, exc.took_effect is not False, (args, kwargs), result)
+            self._attempts[op] = _Attempt(content_sha, at, exc.took_effect is not False, (args, kwargs), result,
+                                          planned, self.clock.now())
             self._attempts.move_to_end(op)
             while len(self._attempts) > MAX_PENDING_ATTEMPTS:
                 self._attempts.popitem(last=False)
@@ -594,6 +604,51 @@ class ZbcWorkflow:
                         + (f" (broke {', '.join(b.rule_id for b in decision.broken_rules)})" if decision.broken_rules else ""))
         self.decisions[submission_id] = decision
         return decision
+
+    @serialized
+    def withdraw_uncertain_verdict(self, submission_id: str, reviewer_id: str) -> dict:
+        """Fix wave 5 (LOW-D): clear an UNCERTAIN human verdict without
+        re-sending it. Only the reviewer who sent it (authenticated), only
+        once WITHDRAW_MIN_AGE has passed since it was sent, and only if the
+        ledger, read now, holds no entry under that verdict's event id.
+        The withdrawal is itself recorded first (`clip_human_verdict_withdrawn`,
+        naming the withdrawn event id; deterministic payload, so a retry
+        after a lost response re-sends the identical record); then the clip
+        is back in the queue and any verdict can be given. If the ledger
+        DOES hold it, nothing changes: re-send the same verdict to commit
+        it. Residual (documented, ADR 0005 decision 21): ledger-rust's
+        blocking pool is not time-bounded, so an append queued there for
+        longer than WITHDRAW_MIN_AGE could still land AFTER the withdrawal;
+        the ledger then shows the withdrawal before the verdict it names,
+        which an audit can see."""
+        self.get_decision(submission_id)
+        self._guard(lambda: self.actors.require_role(reviewer_id, Role.ZBC_CLIP_HUMAN_REVIEWER),
+                    reviewer_id, submission_id, "withdraw human verdict")
+        op = f"human:{submission_id}"
+        held = self._attempts.get(op)
+        if held is None or not held.uncertain:
+            raise PreconditionFailed(f"no human verdict on {submission_id} is awaiting an uncertain ledger outcome")
+        (event_type, sender, *_), _ = held.record
+        if sender != reviewer_id:
+            self._refuse(GuardrailViolation(f"only {sender!r}, who sent the uncertain verdict on {submission_id}, "
+                                            "may withdraw it"), reviewer_id, submission_id, "withdraw human verdict")
+        age = self.clock.now() - (held.sent_at or held.at)
+        if age < WITHDRAW_MIN_AGE:
+            raise PreconditionFailed(
+                f"the uncertain verdict on {submission_id} was sent {int(age.total_seconds())} s ago; a request "
+                f"still in flight could yet be recorded, so it can be withdrawn only after "
+                f"{int(WITHDRAW_MIN_AGE.total_seconds())} s (or re-send the same verdict now)")
+        if self.recorder.client.find_event(held.event_id) is not None:
+            raise PreconditionFailed(
+                f"the ledger holds the verdict on {submission_id} (event {held.event_id}); it can't be withdrawn — "
+                "re-send the same verdict to commit it")
+        eid = self.recorder.record(
+            "clip_human_verdict_withdrawn", reviewer_id, submission_id,
+            {"withdrawn_event_id": held.event_id, "withdrawn_event_type": event_type, "verdict_sha256": held.sha},
+            f"Human verdict on {submission_id} withdrawn by {reviewer_id}: ledger holds no event {held.event_id}")
+        self._attempts.pop(op, None)
+        return {"submission_id": submission_id, "withdrawn_event_id": held.event_id, "event_id": eid,
+                "outcome": self.decisions[submission_id].outcome}
 
     @serialized
     def payout_eligibility(self, submission_id: str) -> dict:

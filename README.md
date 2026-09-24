@@ -395,10 +395,15 @@ lookalike characters. Fix wave 4: never-say near misses with symbols/digits
 ("return$", "G€t", "6et") and unknown Latin letters go to a human; a lost
 ledger response no longer wedges a clip (`took_effect: "unknown"`, exact
 replay); `Idempotency-Key` on every creating POST; escalation clones matched
-with length tolerance and strict client ids; 1 MiB body limit.
+with length tolerance and strict client ids; 1 MiB body limit. Fix wave 5:
+never-say is a similarity gate (visual skeleton + bounded edit distance;
+"make rnoney" → reject, "miracle kure" → human; 2.5% measured false
+positives); `serve.py` caps request heads at 16 KiB with head/idle
+deadlines and bounded concurrency; ledger-rust's own load-shed 503 is "not
+recorded"; an uncertain human verdict can be withdrawn by its reviewer.
 
 ```bash
-cd services/creative-py && python3 -m pytest -q      # 428 tests
+cd services/creative-py && python3 -m pytest -q      # 469 tests
 export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
 export CREATIVE_ACTOR_TOKENS='{"<actor_id>": "<token>", ...}'   # per-actor credentials
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>

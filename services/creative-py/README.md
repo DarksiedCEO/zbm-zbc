@@ -85,9 +85,13 @@ Andre's actions also need `X-Andre-Approval-Token: $CREATIVE_ANDRE_APPROVAL_TOKE
 guardrail/founder, 404 not found, 409 out of order / frozen / blocked, 422
 validation (including any id whose ledger subject couldn't fit: campaign
 ids are at most 100 characters; client ids are lowercase `[a-z0-9_]`),
-413 body over 1 MiB, **503 `took_effect: false` = evidence ledger record
+413 body over 1 MiB, 408 body not delivered within 30 s, 400/431 request
+head over 16 KiB, 503 `Service Unavailable` (plain, no `took_effect`) when
+more than `CREATIVE_MAX_CONCURRENCY` connections are open (fix wave 5),
+**503 `took_effect: false` = evidence ledger record
 certainly failed, decision did not take effect** (and no outside
-department was called); **503 `took_effect: "unknown"`** = the ledger
+department was called; this includes ledger-rust's own load-shed 503, which
+answers without reading the request — fix wave 5); **503 `took_effect: "unknown"`** = the ledger
 may or may not hold the record (response lost, timeout, 5xx): nothing
 changed here yet, retry the IDENTICAL request and it takes effect exactly
 once (fix wave 4); **409 `LedgerConflict`, `took_effect: "unknown"`** = the
@@ -104,7 +108,7 @@ keyed by their own id and other creations by actor + canonical request
 - Registry: `GET /registry/rows`, `GET /registry/rows/{id}` (with `usable` + reason), `PUT /registry/rows/{id}` (owner-enforced)
 - Rights: `POST /rights/clearances`, `POST /rights/licenses` (actor `rights_desk`)
 - ZBM: `POST /zbm/briefs` → `POST /zbm/briefs/{id}/review` → `POST /zbm/briefs/{id}/jobs` → `POST /zbm/jobs/{id}/work` → `POST /zbm/work/{id}/export-validation` → `/rights` → `/quality` → (`/escalation`) → `/compliance` → `/final-approval`; `POST /zbm/hook-advice`, `POST /zbm/memory/results`
-- ZBC: `POST /zbc/campaigns/{cid}/rulebooks` → `PUT …/rulebooks/{v}` (drafts only) → `POST …/rulebooks/{v}/review` → `…/sign` → `POST /zbc/campaigns/{cid}/rights-check` → `POST …/rulebooks/{v}/go-live` → `POST /zbc/campaigns/{cid}/moment-map` → `…/hook-sheets` → `…/kit` → `…/kit/sign` → `POST /zbc/clips` → `POST /zbc/clips/{id}/human-review` → `POST /zbc/clips/{id}/payout-eligibility`; `POST /zbc/campaigns/{cid}/revisions`; `POST /zbc/memory/results`, `GET /zbc/memory/winners`
+- ZBC: `POST /zbc/campaigns/{cid}/rulebooks` → `PUT …/rulebooks/{v}` (drafts only) → `POST …/rulebooks/{v}/review` → `…/sign` → `POST /zbc/campaigns/{cid}/rights-check` → `POST …/rulebooks/{v}/go-live` → `POST /zbc/campaigns/{cid}/moment-map` → `…/hook-sheets` → `…/kit` → `…/kit/sign` → `POST /zbc/clips` → `POST /zbc/clips/{id}/human-review` (`…/human-review/withdraw`: the same reviewer clears an uncertain verdict the ledger confirms it doesn't hold, fix wave 5) → `POST /zbc/clips/{id}/payout-eligibility`; `POST /zbc/campaigns/{cid}/revisions`; `POST /zbc/memory/results`, `GET /zbc/memory/winners`
 
 Default actor ids (one per intelligence; add humans with
 `CREATIVE_EXTRA_ACTORS='{"jo": ["zbm_creative_lead"]}'`): `zbm_brief_writer`,
@@ -127,8 +131,16 @@ export CREATIVE_ACTOR_TOKENS='{"zbm_creative_lead": "<>=16 chars>", ...}'  # per
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090    # without both ledger vars every decision is refused (503)
 export LEDGER_SERVICE_TOKEN=<ledger secret>
 export CREATIVE_SUPERSEDED_GRACE_HOURS=72          # optional; 0..720, else refuses to start (ADR 0005 decision 10)
+export CREATIVE_MAX_CONCURRENCY=256                # optional; connections + in-flight requests, beyond it 503
 cd src && python3 serve.py                 # CREATIVE_BIND_ADDR (default 127.0.0.1), CREATIVE_PORT (default 8300)
 ```
+
+Always launch with `serve.py`, never `uvicorn api:app`: serve.py pins
+uvicorn's h11 parser with a 16 KiB request-head cap, a 10 s request-head
+deadline (from connect or from the previous response), 5 s idle
+keep-alive and `limit_concurrency` (fix wave 5, NEW-3; the same fix as
+detection-py). uvicorn's default httptools parser buffered a 200 MB header
+and kept idle / partial-head sockets open forever.
 
 ## Testing
 
@@ -136,9 +148,22 @@ cd src && python3 serve.py                 # CREATIVE_BIND_ADDR (default 127.0.0
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 24, 2026 after fix wave 4: **428 passed, 0 failed**
-(Python 3.11.15, pytest 9.1.1; 360 after fix wave 2, 310 after fix wave 1,
-205 before it). `test_fix_wave_4.py` reproduces AEGIS round-3 / integration
+Result on Sep 24, 2026 after fix wave 5: **469 passed, 0 failed**
+(Python 3.11.15, pytest 9.1.1; 428 after fix wave 4, 360 after fix wave 2,
+310 after fix wave 1, 205 before it). `test_fix_wave_5.py` reproduces AEGIS
+round-4 NEW-1 (ASCII lookalike spellings of never-say phrases: the AEGIS
+captions, an exhaustive every-single-edit sweep of the 16 phrases (every
+substitution, insertion, deletion, adjacent transposition, word split /
+join and multi-letter lookalike: 5,000+ variants, none auto-passes), a
+seeded 3,000-case fuzz of the same edit kinds combined with lookalikes,
+the false-positive rate on `tests/ordinary_captions.py` — 239 ordinary
+marketing captions, **6/239 = 2.5%** sent to a human by this rule, none
+rejected — and a 100 KB timing test), NEW-3 (real sockets against the
+real launcher: a 200 MB header refused with RSS flat, idle / partial /
+trickled heads closed within 12 s, keep-alive, bounded concurrency, 431 /
+408 in the middleware) and LOW-D (ledger-rust's shed 503 is "not
+recorded"; withdraw an uncertain human verdict, including a lost
+withdrawal response retried as the identical record). `test_fix_wave_4.py` reproduces AEGIS round-3 / integration
 run-3 findings: NS (symbol/digit/unfolded-Latin never-say variants, a
 seeded 2,500-case substitution+insertion fuzz, an 11-caption
 false-positive guard), LOST (lost ledger response over real HTTP through
@@ -275,6 +300,46 @@ armed) and on :19945 in front of creative-py B (:19944); creative-py A on
 - Final `/ledger/verify`: 111 entries, valid. All processes stopped (only
   PIDs this run started).
 
+## Live run — fix wave 5, against the REAL ledger-rust (Sep 24, 2026)
+
+ledger-rust built from this tree into a private target dir; :20100 (fresh
+log) and a second instance on :20105 with `LEDGER_MAX_CONNECTIONS=1`;
+`devtools/lossy_proxy.py` on :20103 in front of :20100; creative-py on
+:20101 (ledger direct), :20104 (through the proxy), :20106 (the 1-slot
+ledger).
+
+- `devtools/live_smoke.py` on :20101 → all 39 steps OK, 37 entries,
+  `/ledger/verify` valid.
+- AEGIS `cr_ns_live.py` captions plus the offline ones (:20104, 5-phrase
+  never-say list): "Guaranteed retums", "make rnoney fast", "guaranteecl
+  returns", "vvealth secrets" → `reject` (NS rule cited, "with lookalike
+  letters"); "make rnioney", "make nnoney", "miracle kure", "rniracle
+  kure", "Guaranteed retrns", "get rjch", "Get rlch", "Guaranteed
+  return$" → `human_review`; "Get rich" → `reject`; an ordinary caption →
+  `pass`. Pre-fix the first three were `pass` (AEGIS round 4).
+- AEGIS `bighead.py` (200 MB header) against :20101: refused `400 Invalid
+  HTTP request received.` after 2 MB had been sent (connection reset by
+  peer); RSS 72,480 → 72,608 KB (pre-fix 107 → 220 MB). A 10 KiB header →
+  200; a 20 KiB header that arrives whole → 431 from the middleware.
+  `lidle.py`: 10 idle, 10 partial-head and 10 trickling sockets each
+  reported open by the server at t = 8 s and closed at t = 10 s, `/health`
+  200 throughout. 300 idle sockets held against the default
+  `CREATIVE_MAX_CONCURRENCY=256` → `/health` 503 until t ≈ 10 s, then 200
+  once the head deadline closed them (see Known gaps).
+- LOW-D: with the 1-slot ledger's slot held, `POST /rights/licenses` on
+  :20106 → 503 `took_effect: false` ("ledger shed the request at its
+  connection limit (HTTP 503, request not read)"); slot freed → 201.
+  Through the proxy (:20104): a verdict whose ledger request got an
+  injected 503 (not forwarded) → 503 `unknown`; a different verdict →
+  409; withdraw at once → 409 ("sent 0 s ago"), without credential → 401,
+  with another actor's credential → 403; after 125 s → 200 (the ledger
+  held no such event), `clip_human_verdict_withdrawn` recorded, then a
+  `reject` verdict → 200. A verdict the ledger COMMITTED (response
+  dropped by the proxy) → withdraw 409 "the ledger holds the verdict",
+  re-sending it → 200 `pass`, exactly one `clip_human_reviewed`. Final
+  `/ledger/verify`: 69 entries, valid. All processes stopped (only PIDs
+  this run started).
+
 ## Known gaps
 
 See ADR 0005 "Honest gaps and open items" for the full list. The short
@@ -289,3 +354,12 @@ re-asked automatically; obfuscation handling is conservative (some honest
 mixed-script clips, and any word mixing letters with symbols or digits
 such as "mp4" or "Q4", go to the human queue); the pending-attempt and
 idempotency stores are bounded in memory (10,000 entries each).
+Fix wave 5: the never-say similarity gate sends ~2.5% of ordinary captions
+to a human (e.g. "make more" vs "make money", "core"/"care" vs "cure");
+phrases of 3 letters or fewer get no edit budget (one edit from "win" is
+"in", "wine", "won"), so a misspelt short phrase is caught only if it is a
+lookalike spelling or trips another backstop; inflections and paraphrases
+("getting rich", "100 percent guaranteed") are not lookalikes and are not
+caught. `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
+that many idle sockets gets everyone else 503s until the 10 s head
+deadline frees them — per-client limits belong in a proxy in front.
