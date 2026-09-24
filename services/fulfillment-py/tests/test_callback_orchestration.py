@@ -3,11 +3,29 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from agents import callback_orchestration
+from contact_window import ContactWindow
 from fulfillment_schema import FollowUpTask, TaskChannel, TaskPurpose, TaskStatus
 from integrations.sip_dialer import InMemorySipDialer, NotWiredSipDialer
 
 NOON_UTC = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
 LATE_NIGHT_UTC = datetime(2026, 9, 22, 23, 0, 0, tzinfo=timezone.utc)
+
+
+def _orchestrate(tasks, dialer, *, phone_by_call_id, line_by_call_id, now):
+    """Sep 24 2026 audit: orchestrate() now REQUIRES the recipient's time
+    zone and a contact window (fail closed without them). These pre-audit
+    tests are about other behavior, so every recipient here is in "UTC",
+    which keeps NOON_UTC inside and LATE_NIGHT_UTC outside the default
+    08:00-21:00 window. Recipient-local behavior is tested in
+    test_audit_2026_09_24.py."""
+    return callback_orchestration.orchestrate(
+        tasks, dialer,
+        phone_by_call_id=phone_by_call_id,
+        line_by_call_id=line_by_call_id,
+        timezone_by_call_id={cid: "UTC" for cid in phone_by_call_id},
+        contact_window=ContactWindow.default(),
+        now=now,
+    )
 
 
 def _task(**overrides) -> FollowUpTask:
@@ -28,7 +46,7 @@ def _task(**overrides) -> FollowUpTask:
 def test_pending_call_task_within_business_hours_is_dialed():
     dialer = InMemorySipDialer()
     task = _task()
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], dialer,
         phone_by_call_id={"call_1": "+15550101"},
         line_by_call_id={"call_1": "line_main"},
@@ -43,21 +61,21 @@ def test_pending_call_task_within_business_hours_is_dialed():
 def test_outside_business_hours_is_skipped_not_silently_dropped():
     dialer = InMemorySipDialer()
     task = _task()
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], dialer,
         phone_by_call_id={"call_1": "+15550101"},
         line_by_call_id={},
         now=LATE_NIGHT_UTC,
     )
     assert outcomes[0].attempted is False
-    assert "business hours" in outcomes[0].skip_reason
+    assert "contact window" in outcomes[0].skip_reason
     assert len(dialer.calls_placed) == 0
 
 
 def test_non_call_channel_task_is_ignored_by_this_agent():
     dialer = InMemorySipDialer()
     task = _task(channel=TaskChannel.SMS, purpose=TaskPurpose.ESCALATION)
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], dialer, phone_by_call_id={}, line_by_call_id={}, now=NOON_UTC
     )
     assert outcomes == []  # not this agent's job at all — no outcome recorded
@@ -66,7 +84,7 @@ def test_non_call_channel_task_is_ignored_by_this_agent():
 def test_missing_phone_number_is_skipped_with_reason():
     dialer = InMemorySipDialer()
     task = _task(source_call_id="unknown_call")
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], dialer, phone_by_call_id={}, line_by_call_id={}, now=NOON_UTC
     )
     assert outcomes[0].attempted is False
@@ -78,7 +96,7 @@ def test_not_wired_dialer_fails_loudly_and_is_surfaced_not_swallowed():
     dialer configured, the agent must record that the dialer isn't wired,
     never silently report a task as successfully called."""
     task = _task()
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], NotWiredSipDialer(),
         phone_by_call_id={"call_1": "+15550101"},
         line_by_call_id={},
@@ -91,7 +109,7 @@ def test_not_wired_dialer_fails_loudly_and_is_surfaced_not_swallowed():
 def test_already_completed_task_is_not_redialed():
     dialer = InMemorySipDialer()
     task = _task(status=TaskStatus.COMPLETED)
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], dialer, phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={}, now=NOON_UTC
     )
     assert outcomes == []
@@ -109,14 +127,14 @@ def test_status_is_advanced_so_a_persisting_caller_wont_redial():
     this agent has no persistence layer of its own (known gap)."""
     dialer = InMemorySipDialer()
     task = _task()
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], dialer, phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={}, now=NOON_UTC
     )
     assert outcomes[0].task.status == TaskStatus.SENT
 
     # Simulate a caller that DOES persist the returned status, then rescans:
     persisted = outcomes[0].task
-    outcomes2 = callback_orchestration.orchestrate(
+    outcomes2 = _orchestrate(
         [persisted], dialer, phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={}, now=NOON_UTC
     )
     assert outcomes2 == []  # no longer PENDING — correctly not redialed
@@ -132,7 +150,7 @@ def test_a_near_term_missed_call_deadline_does_not_block_the_callback():
     call-channel task from being dialed."""
     dialer = InMemorySipDialer()
     task = _task(due_at=NOON_UTC + timedelta(minutes=5))  # deadline is 5 min from "now"
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], dialer, phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={}, now=NOON_UTC
     )
     assert outcomes[0].attempted is True
@@ -145,7 +163,7 @@ def test_sla_breach_is_surfaced_not_silent():
     now visible on the outcome, not silently dropped."""
     dialer = InMemorySipDialer()
     task = _task(due_at=NOON_UTC - timedelta(minutes=30))  # deadline was 30 min ago
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], dialer, phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={}, now=NOON_UTC
     )
     assert outcomes[0].attempted is True
@@ -155,7 +173,7 @@ def test_sla_breach_is_surfaced_not_silent():
 def test_outside_business_hours_still_reports_sla_breach():
     dialer = InMemorySipDialer()
     task = _task(due_at=NOON_UTC - timedelta(hours=1))
-    outcomes = callback_orchestration.orchestrate(
+    outcomes = _orchestrate(
         [task], dialer, phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={}, now=LATE_NIGHT_UTC
     )
     assert outcomes[0].attempted is False

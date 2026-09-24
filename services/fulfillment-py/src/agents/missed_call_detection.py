@@ -37,9 +37,24 @@ _TIGHTENED_CALLBACK_WINDOW = timedelta(minutes=2)
 _REPEAT_LOOKBACK = timedelta(hours=24)
 
 
+def _mask_phone(phone: str) -> str:
+    """Last four digits only. `reason` is free text that ends up in logs,
+    CRM notes and dashboards; the full number is already reachable
+    structurally via source_call_id (Sep 24 2026 audit)."""
+    return f"***{phone[-4:]}" if len(phone) > 4 else "***"
+
+
 def detect(call_events: list[CallEvent], *, now: datetime | None = None) -> list[FollowUpTask]:
     now = now or datetime.now(timezone.utc)
     tasks: list[FollowUpTask] = []
+
+    # Sep 24 2026 audit: the same CallEvent delivered twice (webhook retry,
+    # overlapping scans) produced two identical "fu-{call_id}" tasks, which
+    # a caller would then dial twice. First occurrence of a call_id wins.
+    unique: dict[str, CallEvent] = {}
+    for ev in call_events:
+        unique.setdefault(ev.call_id, ev)
+    call_events = list(unique.values())
 
     # Group by phone number so repeat-miss urgency can be computed.
     by_number: dict[str, list[CallEvent]] = {}
@@ -65,7 +80,7 @@ def detect(call_events: list[CallEvent], *, now: datetime | None = None) -> list
         window = _TIGHTENED_CALLBACK_WINDOW if prior_misses > 0 else _BASE_CALLBACK_WINDOW
 
         reason = (
-            f"{ev.status.value} inbound call from {ev.phone_number} on line {ev.line_id}"
+            f"{ev.status.value} inbound call from {_mask_phone(ev.phone_number)} on line {ev.line_id}"
             + (f", {prior_misses} prior missed call(s) from this number in the last 24h"
                if prior_misses else "")
         )

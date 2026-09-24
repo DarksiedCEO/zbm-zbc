@@ -6,10 +6,21 @@ is due, and if so attempt the callback through the injected SipDialerPort
 now, on which line) — it never owns the transport. See
 integrations/sip_dialer.py for why no live dialer ships in this repo.
 
-Business hours policy (encoded here, the agent's rule): callbacks only
-fire between 08:00–20:00 in the line's local time. This build assumes
-UTC-normalized fixture data and does not implement per-line timezone
-resolution yet — documented as a known gap, not silently assumed away.
+Contact-window policy (Sep 24 2026 audit — replaces the old "business
+hours" check): a callback is only placed when `now` is inside the
+configured ContactWindow (default 08:00-21:00, never wider) in the
+RECIPIENT's local time zone, supplied per call via timezone_by_call_id.
+Unknown or invalid time zone => not dialed (fail closed). The previous
+rule was `8 <= now.hour < 20` on a UTC clock, which dialed a Los Angeles
+caller at 02:00 local time (reproduced; see
+tests/test_audit_2026_09_24.py). See src/contact_window.py.
+
+Duplicate handling (Sep 24 2026 audit): the same task_id appearing twice
+in one batch is dialed at most once. A dialer that RAISES is recorded as
+an attempted, FAILED outcome (the call may or may not have gone out —
+unknown), never propagated: propagating used to abort the batch with a
+500 after earlier tasks had already been dialed, so the caller never
+learned about those dials and a retry redialed them.
 
 due_at SEMANTICS (clarified after independent review, Sep 22 2026): for
 every CALL-channel task this agent actually receives — the only producer
@@ -47,13 +58,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from contact_window import ContactWindow, resolve_timezone
 from fulfillment_schema import FollowUpTask, TaskChannel, TaskStatus
 from integrations.sip_dialer import DialAttemptResult, SipDialerPort
 
 AGENT_ID = "callback-orchestration-v1"
-
-_BUSINESS_HOURS_START = 8
-_BUSINESS_HOURS_END = 20
 
 
 @dataclass(frozen=True)
@@ -65,33 +74,39 @@ class OrchestrationOutcome:
     sla_breached: bool = False  # now > task.due_at at decision time — visible, never silent
 
 
-def _within_business_hours(ts: datetime) -> bool:
-    return _BUSINESS_HOURS_START <= ts.hour < _BUSINESS_HOURS_END
-
-
 def orchestrate(
     tasks: list[FollowUpTask],
     dialer: SipDialerPort,
     *,
     phone_by_call_id: dict[str, str],
     line_by_call_id: dict[str, str],
+    timezone_by_call_id: dict[str, str],
+    contact_window: ContactWindow,
     now: datetime | None = None,
 ) -> list[OrchestrationOutcome]:
     """
-    phone_by_call_id / line_by_call_id: this agent works purely off
-    FollowUpTask + call metadata already resolved upstream (missed-call
-    detection knows the phone number and line; this agent does not
-    re-derive them) — keeps this agent single-purpose: decide + dial,
-    not look up call records itself.
+    phone_by_call_id / line_by_call_id / timezone_by_call_id: this agent
+    works purely off FollowUpTask + call metadata already resolved
+    upstream (missed-call detection knows the phone number and line; the
+    recipient's IANA time zone comes from whoever knows the customer) —
+    keeps this agent single-purpose: decide + dial, not look up call
+    records itself. timezone_by_call_id and contact_window are required
+    keywords on purpose: there is no default that could silently dial.
     """
     now = now or datetime.now(timezone.utc)
     outcomes: list[OrchestrationOutcome] = []
+    seen_task_ids: set[str] = set()
 
     for task in tasks:
         if task.channel != TaskChannel.CALL:
             continue  # not this agent's job — sequencing/other channels handled elsewhere
         if task.status != TaskStatus.PENDING:
             continue
+
+        if task.task_id in seen_task_ids:
+            outcomes.append(OrchestrationOutcome(task, False, None, "duplicate task_id in this batch — not dialed twice"))
+            continue
+        seen_task_ids.add(task.task_id)
 
         if task.source_call_id is None or task.source_call_id not in phone_by_call_id:
             outcomes.append(OrchestrationOutcome(task, False, None, "no phone number resolvable for task"))
@@ -103,8 +118,19 @@ def orchestrate(
 
         sla_breached = now > task.due_at  # visible signal, not a gate — see due_at SEMANTICS above
 
-        if not _within_business_hours(now):
-            outcomes.append(OrchestrationOutcome(task, False, None, "outside business hours (08:00-20:00)", sla_breached))
+        recipient_tz = timezone_by_call_id.get(task.source_call_id)
+        if resolve_timezone(recipient_tz) is None:
+            outcomes.append(OrchestrationOutcome(
+                task, False, None,
+                "recipient time zone unknown or invalid — not dialed (fail closed)", sla_breached,
+            ))
+            continue
+
+        if not contact_window.allows(now, recipient_tz):
+            outcomes.append(OrchestrationOutcome(
+                task, False, None,
+                f"outside permitted contact window ({contact_window.describe()})", sla_breached,
+            ))
             continue
 
         phone = phone_by_call_id[task.source_call_id]
@@ -114,6 +140,16 @@ def orchestrate(
             result = dialer.place_call(phone, line)
         except NotImplementedError as exc:
             outcomes.append(OrchestrationOutcome(task, False, None, f"dialer not wired: {exc}", sla_breached))
+            continue
+        except Exception as exc:  # noqa: BLE001 — any transport error must become an outcome, not a 500
+            # Outcome unknown: the call may have gone out. Mark FAILED (not
+            # PENDING) so nothing redials it automatically; escalation takes
+            # over from here. Only the exception TYPE is surfaced — a real
+            # dialer's message may contain the dialed number.
+            failed = task.model_copy(update={"status": TaskStatus.FAILED})
+            outcomes.append(OrchestrationOutcome(
+                failed, True, None, f"dialer raised {type(exc).__name__}; outcome unknown", sla_breached,
+            ))
             continue
 
         # Independent review finding (Sep 22 2026, CONFIRMED): the same

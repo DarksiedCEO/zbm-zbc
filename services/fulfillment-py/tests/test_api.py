@@ -47,14 +47,23 @@ def test_appointment_tracking_endpoint_against_real_fixtures():
         assert t["purpose"] == "completion_check"
 
 
-def test_callback_orchestration_endpoint_with_no_dialer_configured_reports_not_wired():
+def test_callback_orchestration_endpoint_with_no_dialer_configured_reports_not_wired(monkeypatch):
     """CRITICAL finding, Sep 22 2026 independent review, now fixed: this
     endpoint previously defaulted to InMemorySipDialer and reported
     dial_placed=true for a call that was never placed. With
     FULFILLMENT_SIP_DIALER unset (the honest default — see
     conftest.py), it must now report attempted=false and say plainly
     that the dialer isn't wired, over the real live HTTP round trip, not
-    just in the agent-level unit test."""
+    just in the agent-level unit test.
+
+    Sep 24 2026 audit: the request no longer accepts `now` (a caller-
+    controlled clock could bypass quiet hours); the server clock is
+    pinned via monkeypatch instead, and the recipient time zone is now
+    required."""
+    import api as api_module
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(api_module, "_now", lambda: datetime(2026, 9, 22, 14, 0, tzinfo=timezone.utc))
     r = client.post(
         "/agents/callback-orchestration/run",
         json={
@@ -74,7 +83,7 @@ def test_callback_orchestration_endpoint_with_no_dialer_configured_reports_not_w
             ],
             "phone_by_call_id": {"call_x": "+15551234"},
             "line_by_call_id": {},
-            "now": "2026-09-22T14:00:00Z",  # fixed, within business hours — isolates the dialer-not-wired path
+            "timezone_by_call_id": {"call_x": "UTC"},  # 14:00 local — inside the window, isolates the dialer-not-wired path
         },
     )
     assert r.status_code == 200
