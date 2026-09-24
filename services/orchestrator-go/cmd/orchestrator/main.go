@@ -35,6 +35,60 @@ func requireAuth(token string, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// writeJSON writes v as a JSON response with the given status.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// newMux builds the orchestrator's routes.
+//
+// Fix wave 1 (Sep 24 2026): the dashboard used to GET /revenue-recovery/scan
+// on every page view, and the scan route answered any method — so every
+// view ran all agents and appended ~10 duplicate findings to the evidence
+// ledger (219 -> 229 entries for one page load). Now:
+//   - POST /revenue-recovery/scan is the only way to run a scan (it writes
+//     every finding to the ledger, by design). Any other method is 405 and
+//     runs nothing.
+//   - GET /revenue-recovery/findings is read-only: it returns the findings
+//     already recorded in the ledger (GET /ledger/entries, kind "finding")
+//     with the ledger's verify verdict. It never calls a ledger write
+//     endpoint and never calls detection-py. The dashboard uses this.
+//
+// Both require the orchestrator bearer token; /health stays open.
+// Method-qualified patterns (Go 1.22+) make the mux answer 405 for a wrong
+// method before any handler (or upstream call) runs; "GET" also matches HEAD.
+func newMux(orch *orchestrator.Orchestrator, orchestratorToken string) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	// /health is intentionally open (no auth) — needed for basic
+	// liveness/readiness checks without requiring a token.
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "orchestrator-go"})
+	})
+
+	mux.HandleFunc("POST /revenue-recovery/scan", requireAuth(orchestratorToken, func(w http.ResponseWriter, r *http.Request) {
+		result, err := orch.RunFullScan(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}))
+
+	mux.HandleFunc("GET /revenue-recovery/findings", requireAuth(orchestratorToken, func(w http.ResponseWriter, r *http.Request) {
+		result, err := orch.RecordedFindings(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}))
+
+	return mux
+}
+
 func main() {
 	detectionURL := os.Getenv("DETECTION_SERVICE_URL")
 	if detectionURL == "" {
@@ -73,7 +127,7 @@ func main() {
 		log.Fatal(
 			"ORCHESTRATOR_SERVICE_TOKEN is not set. orchestrator-go refuses to start " +
 				"without it (fail closed, not open) — this is the token callers (e.g. the " +
-				"dashboard) must present to reach /revenue-recovery/scan.",
+				"dashboard) must present to reach /revenue-recovery/scan and /revenue-recovery/findings.",
 		)
 	}
 	// Independent review, Sep 22 2026 (CONFIRMED): ledger-rust had zero
@@ -93,27 +147,7 @@ func main() {
 
 	orch := orchestrator.New(detectionURL, detectionToken, ledgerURL, ledgerToken)
 
-	mux := http.NewServeMux()
-
-	// /health is intentionally open (no auth) — needed for basic
-	// liveness/readiness checks without requiring a token.
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "orchestrator-go"})
-	})
-
-	mux.HandleFunc("/revenue-recovery/scan", requireAuth(orchestratorToken, func(w http.ResponseWriter, r *http.Request) {
-		result, err := orch.RunFullScan(r.Context())
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(result)
-	}))
-
+	mux := newMux(orch, orchestratorToken)
 	log.Printf("orchestrator-go listening on %s:%s (detection service at %s, ledger at %s)", bindAddr, port, detectionURL, ledgerURL)
 	log.Fatal(http.ListenAndServe(bindAddr+":"+port, mux))
 }

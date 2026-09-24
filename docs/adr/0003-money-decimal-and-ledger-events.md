@@ -13,7 +13,8 @@ records how they are implemented and why the change is backward compatible.
 
 A JSON money value is a **string** matching `^(0|[1-9][0-9]*)\.[0-9]{2}$`,
 e.g. `"12.30"`. No sign, no exponent, no leading zeros, exactly two
-fraction digits. Positive-only fields (`LabeledValue.amount_usd`, prices,
+fraction digits — and, since the section 1a amendment, at most 15 integer
+digits (amounts < 10^15 dollars). Positive-only fields (`LabeledValue.amount_usd`, prices,
 order values, contracted values) additionally reject `"0.00"`.
 
 | Layer | Representation | Where |
@@ -23,14 +24,20 @@ order values, contracted values) additionally reject `"0.00"`.
 | Rust `ledger-rust` | `Money(String)`, validated; the ledger does no money arithmetic | `src/money.rs` |
 | TS `apps/dashboard-ts` | `amount_usd: string`, displayed verbatim (`"$" + amount`); never parsed to a JS number; no totals are computed | `src/lib/money.ts` |
 
-Python input rules: `Decimal`, `int` and plain decimal strings are
-accepted; `float` only through `str(value)` (never `Decimal(float)`), so a
-fixture JSON number `49.99` becomes exactly `Decimal("49.99")`. `bool`,
-NaN, ±Infinity, exponent notation, whitespace, thousands separators and
-negative values (including `"-0.00"` / `"-0.004"`) are rejected. Values
-with more than two fraction digits are rounded half-up to cents at the
-boundary (`"2.675"` → `2.68`, `"1.005"` → `1.01`). `quantize_money` never
-returns a signed zero.
+Python input rules (amended by fix wave 1, see section 1a): a `str` is
+accepted ONLY in the canonical wire form above — the same verdicts as Go,
+the dashboard and the ledger (`fixtures/money_vectors.json`); strings are
+never rounded (`"12.3"`, `"12.345"`, `"012.30"`, `"1.00\n"` are rejected).
+`Decimal` and `int` are accepted; `float` only through `str(value)` (never
+`Decimal(float)`), so a fixture JSON number `49.99` becomes exactly
+`Decimal("49.99")`. Decimal/int/float values with more than two fraction
+digits are rounded half-up to cents (`Decimal("2.675")` → `2.68`,
+`1.005` → `1.01`). When a request body is validated from JSON text (every
+detection-py HTTP route), a JSON number for a money field is rejected with
+422, as Go and the ledger already do. `bool`, NaN, ±Infinity, exponent
+notation, whitespace, thousands separators and negative values (including
+`"-0.00"` / `"-0.004"`) are rejected. `quantize_money` never returns a
+signed zero.
 
 Computation rules:
 - Subtotals: `sum(unit_price * quantity)` in Decimal, exact.
@@ -53,6 +60,48 @@ one would reintroduce float ambiguity), and decodes loosely typed
 pass-through payloads with `json.Decoder.UseNumber()` so no JSON number
 passes through `float64` on the way back out. The Rust ledger's
 `POST /ledger/append` also rejects a JSON number with 400.
+
+## 1a. Contract amendment: money magnitude bound (fix wave 1, Sep 24 2026)
+
+**Finding F14:** detection-py returned 500 for `unit_price_usd =
+"1" + "0"*30 + ".00"`. `Decimal.quantize` needs the result's coefficient to
+fit the context precision (28 digits by default); above that it raises
+`decimal.InvalidOperation`, which is not a `ValueError`, so pydantic did not
+turn it into a 422. The wire regex admitted amounts of any length, so no
+finite precision could cover "any value the contract admits".
+
+**Amendment:** every money amount is **less than 10^15 dollars**. The
+largest valid amount is `"999999999999999.99"`; the wire pattern becomes
+
+    ^(0|[1-9][0-9]{0,14})\.[0-9]{2}$        (at most 18 characters)
+
+10^15 dollars is far above any real order, subscription, contract or
+recoverable value, and keeps every amount at 17 significant digits.
+
+| Layer | Enforcement |
+|---|---|
+| Python `detection-py` | `to_money` rejects a string outside the pattern and any Decimal/int/float that is ≥ 10^15 after rounding to cents (`ValueError` → 422). An `Order` whose subtotal (computed in exact integer cents) exceeds the maximum is rejected at validation (422), so quantity × price can never leave the range. |
+| Go `orchestrator-go` | `ParseMoney` / `Money.UnmarshalJSON` reject it (`ErrInvalidMoney`); a detection response carrying one fails the scan (502), so it is never passed to the ledger. `client.MaxMoney`. |
+| TS `apps/dashboard-ts` | `isMoneyString` / `formatUsd` refuse to display it (`MAX_MONEY`, `MONEY_PATTERN`). |
+| Rust `ledger-rust` | **Not yet changed** (owned separately). `Money::parse` should apply the same bound; the expected verdicts are the `ledger_append_expected` column of `fixtures/money_vectors.json`. Until then the ledger accepts over-bound canonical strings; orchestrator-go's read route flags any such recorded amount as `amount_out_of_contract` instead of displaying it. |
+
+**Explicit Decimal context (Python):** every money operation runs under
+`zbm_schema.money.MONEY_CONTEXT` (precision 50, `ROUND_HALF_UP`, traps
+InvalidOperation / DivisionByZero / Overflow) via `money_context()`, never
+the ambient thread context. Precision 50 is enough for exact results:
+amounts have ≤ 17 significant digits, sums/differences of in-range amounts
+≤ 18, a line product exists only for an order already checked to be ≤ the
+maximum, and `percent_of` multiplies ≤ 17 digits by a float repr of ≤ 17
+digits (≤ 34) and divides exactly by 100. The only rounding is the
+deliberate half-up quantize to cents. Tested with the ambient precision
+lowered to 5 (`tests/test_money_bounds.py`).
+
+**Shared vectors:** `fixtures/money_vectors.json` holds string and JSON-value
+vectors with the verdict for a zero-allowed money field, a positive-only
+field, and the ledger's `POST /ledger/append`. detection-py
+(`tests/test_money_vectors.py`, including the real HTTP route: 200 or 422,
+never 500), orchestrator-go (`internal/client/money_vectors_test.go`) and the
+dashboard (`tests/money.test.ts`, `npm test`) all run against it.
 
 ## 2. Ledger backward compatibility (the hash proof)
 
@@ -155,6 +204,13 @@ Design:
   and fsync'd before it enters memory; a disk failure returns 500 and the
   caller must treat the event as not recorded.
 - No Go client method for events: the orchestrator does not record events.
+- Reading is not writing (fix wave 1): orchestrator-go's
+  `GET /revenue-recovery/findings` reads `GET /ledger/entries` (entries of
+  kind `"finding"`; events are counted, not shown) plus `GET /ledger/verify`
+  and never calls a ledger write endpoint. The dashboard renders that route.
+  A scan — which records every finding it detects — is only
+  `POST /revenue-recovery/scan`; any other method is 405. Before this, each
+  dashboard page view ran a scan and appended ~10 duplicate findings.
   Python callers use the `LedgerClient.record_event(...)` protocol defined
   in the build contracts (implemented by the calling services, not here).
 

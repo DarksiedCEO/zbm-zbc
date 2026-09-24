@@ -15,8 +15,12 @@ from __future__ import annotations
 import hmac
 import os
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
-from pydantic import BaseModel
+from typing import Callable, TypeVar
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ValidationError
 
 from agents import (
     abandoned_cart_coverage,
@@ -129,6 +133,57 @@ app = FastAPI(
 )
 
 
+# --- request parsing and validation errors (fix wave 1, Sep 24 2026) ------
+#
+# Every request body is parsed with pydantic's own JSON parser
+# (`model_validate_json`) instead of FastAPI's default json.loads +
+# python-mode validation, for two reasons:
+#   1. Money on the wire is a JSON string (build contract section 1). In
+#      JSON mode the money validator can see that a value was a JSON number
+#      and reject it, exactly as orchestrator-go and the ledger do; in
+#      python mode 12.345 and "12.345" are indistinguishable from a float
+#      fixture value and the number was silently rounded.
+#   2. json.loads accepts NaN/Infinity. FastAPI's default 422 handler then
+#      echoed the NaN back and json.dumps(allow_nan=False) crashed rendering
+#      the error: invalid input -> 500. Pydantic's parser rejects NaN.
+# And the 422 body never echoes the rejected input (it can be huge, or not
+# JSON-serializable) — only where it was and why.
+
+_M = TypeVar("_M", bound=BaseModel)
+
+
+def _clean_errors(errors) -> list[dict]:
+    return [{"type": e.get("type"), "loc": list(e.get("loc", ())), "msg": str(e.get("msg", ""))} for e in errors]
+
+
+def wire_body(model: type[_M]) -> Callable:
+    async def parse(request: Request) -> _M:
+        # Same requirement FastAPI's default body parsing had: a JSON body.
+        ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        if ctype != "application/json" and not (ctype.startswith("application/") and ctype.endswith("+json")):
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="request body must be JSON (Content-Type: application/json)",
+            )
+        raw = await request.body()
+        try:
+            return model.model_validate_json(raw)
+        except ValidationError as e:
+            errors = e.errors(include_url=False, include_input=False, include_context=False)
+            raise RequestValidationError(
+                [{**err, "loc": ("body", *err["loc"])} for err in errors]
+            ) from None
+
+    return parse
+
+
+async def _validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": _clean_errors(exc.errors())})
+
+
+app.add_exception_handler(RequestValidationError, _validation_error_handler)
+
+
 class OrdersRequest(BaseModel):
     orders: list[Order]
 
@@ -206,47 +261,47 @@ def fixtures_contract_terms() -> list[ContractTerm]:
 # --- agent endpoints ---------------------------------------------------------
 
 @app.post("/agents/affiliate-coupon-extension/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_affiliate_coupon_extension(req: OrdersRequest) -> FindingsResponse:
+def detect_affiliate_coupon_extension(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> FindingsResponse:
     return FindingsResponse(findings=affiliate_coupon_extension.detect(req.orders))
 
 
 @app.post("/agents/discount-misuse/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_discount_misuse(req: OrdersRequest) -> FindingsResponse:
+def detect_discount_misuse(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> FindingsResponse:
     return FindingsResponse(findings=discount_misuse.detect(req.orders))
 
 
 @app.post("/agents/abandoned-cart-coverage/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_abandoned_cart_coverage(req: OrdersRequest) -> FindingsResponse:
+def detect_abandoned_cart_coverage(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> FindingsResponse:
     return FindingsResponse(findings=abandoned_cart_coverage.detect(req.orders))
 
 
 @app.post("/agents/renewal-never-triggered/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_renewal_never_triggered(req: SubscriptionsRequest) -> FindingsResponse:
+def detect_renewal_never_triggered(req: SubscriptionsRequest = Depends(wire_body(SubscriptionsRequest))) -> FindingsResponse:
     return FindingsResponse(findings=renewal_never_triggered.detect(req.subscriptions))
 
 
 @app.post("/agents/server-side-attribution/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_server_side_attribution(req: ServerSideEventsRequest) -> FindingsResponse:
+def detect_server_side_attribution(req: ServerSideEventsRequest = Depends(wire_body(ServerSideEventsRequest))) -> FindingsResponse:
     return FindingsResponse(findings=server_side_attribution.detect(req.events))
 
 
 @app.post("/agents/cross-channel-attribution/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_cross_channel_attribution(req: ChannelTouchpointsRequest) -> FindingsResponse:
+def detect_cross_channel_attribution(req: ChannelTouchpointsRequest = Depends(wire_body(ChannelTouchpointsRequest))) -> FindingsResponse:
     return FindingsResponse(findings=cross_channel_attribution.detect(req.touchpoints))
 
 
 @app.post("/agents/platform-integration/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_platform_integration(req: PlatformConnectionsRequest) -> FindingsResponse:
+def detect_platform_integration(req: PlatformConnectionsRequest = Depends(wire_body(PlatformConnectionsRequest))) -> FindingsResponse:
     return FindingsResponse(findings=platform_integration.detect(req.statuses))
 
 
 @app.post("/agents/contract-pricing-term-drift/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
-def detect_contract_pricing_term_drift(req: ContractTermsRequest) -> FindingsResponse:
+def detect_contract_pricing_term_drift(req: ContractTermsRequest = Depends(wire_body(ContractTermsRequest))) -> FindingsResponse:
     return FindingsResponse(findings=contract_pricing_term_drift.detect(req.terms))
 
 
 # --- correlation (Decision 3 / Failure Mode #2 safeguard) -------------------
 
 @app.post("/correlation/overlaps", dependencies=[Depends(require_auth)])
-def correlation_overlaps(req: FindingsRequest) -> dict[str, list[Finding]]:
+def correlation_overlaps(req: FindingsRequest = Depends(wire_body(FindingsRequest))) -> dict[str, list[Finding]]:
     return find_overlapping_entities(req.findings)

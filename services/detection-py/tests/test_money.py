@@ -92,19 +92,28 @@ def test_float_fixture_input_49_99_stays_exactly_49_99():
 def test_int_str_and_decimal_inputs_all_normalize_to_cents():
     assert _lv(5).amount_usd == Decimal("5.00")
     assert str(_lv(5).amount_usd) == "5.00"
-    assert str(_lv("12.3").amount_usd) == "12.30"
+    # A non-canonical STRING is rejected (fix wave 1, F15: strings are wire
+    # values and must match the shared vectors); the same value as a Decimal
+    # is a computed amount and is quantized to cents.
+    with pytest.raises(ValidationError):
+        _lv("12.3")
+    assert str(_lv(Decimal("12.3")).amount_usd) == "12.30"
     assert str(_lv(Decimal("7")).amount_usd) == "7.00"
 
 
+# Fix wave 1: these used string inputs ("2.675"). Non-canonical strings are
+# now rejected (they are wire values — see fixtures/money_vectors.json), so
+# the half-up rule is exercised with Decimal inputs (computed amounts) and
+# float inputs (the fixture path), which is where rounding legitimately happens.
 @pytest.mark.parametrize("raw,expected", [
-    ("2.675", "2.68"),   # float gave round(2.675, 2) == 2.67
-    (2.675, "2.68"),     # same, via the float->str path
-    ("1.005", "1.01"),   # float gave round(1.005, 2) == 1.0
+    (Decimal("2.675"), "2.68"),   # float gave round(2.675, 2) == 2.67
+    (2.675, "2.68"),              # same, via the float->str path
+    (Decimal("1.005"), "1.01"),   # float gave round(1.005, 2) == 1.0
     (1.005, "1.01"),
-    ("0.125", "0.13"),   # float round-half-even gave 0.12
-    ("0.135", "0.14"),
-    ("10.004", "10.00"),
-    ("10.0049999", "10.00"),
+    (Decimal("0.125"), "0.13"),   # float round-half-even gave 0.12
+    (Decimal("0.135"), "0.14"),
+    (Decimal("10.004"), "10.00"),
+    (Decimal("10.0049999"), "10.00"),
 ])
 def test_rounding_is_half_up_at_the_005_boundary(raw, expected):
     assert str(_lv(raw).amount_usd) == expected
@@ -230,8 +239,16 @@ def test_json_round_trip_returns_identical_strings():
             assert isinstance(amt, str) and WIRE.match(amt), amt
 
 
-def test_json_number_input_is_accepted_via_str_and_serialized_as_string():
-    lv = LabeledValue.model_validate_json('{"amount_usd": 49.99, "classification": "observed", "confidence": "high"}')
+def test_json_number_input_is_rejected_but_python_float_fixture_input_is_accepted():
+    # Changed in fix wave 1 (F15): this test used to assert that a JSON
+    # NUMBER 49.99 was accepted from JSON text. Money on the wire is a
+    # string (contract section 1) and orchestrator-go and the ledger reject
+    # a JSON number, so JSON-text validation now rejects it too. The
+    # fixture path (json.loads + model_validate, python mode) still takes
+    # 49.99 through str() exactly.
+    with pytest.raises(ValidationError):
+        LabeledValue.model_validate_json('{"amount_usd": 49.99, "classification": "observed", "confidence": "high"}')
+    lv = LabeledValue.model_validate(json.loads('{"amount_usd": 49.99, "classification": "observed", "confidence": "high"}'))
     assert lv.amount_usd == Decimal("49.99")
     assert lv.model_dump_json() == '{"amount_usd":"49.99","classification":"observed","confidence":"high"}'
 
@@ -282,7 +299,7 @@ def test_detect_endpoint_accepts_string_money_and_returns_string_money():
         "order_id": "ord_x", "customer_id": "c", "placed_at": "2026-06-01T00:00:00Z",
         "status": "abandoned_cart", "source_platform": "shopify",
         "line_items": [{"sku": "a", "unit_price_usd": "0.10", "quantity": 1},
-                       {"sku": "b", "unit_price_usd": 0.20, "quantity": 1}],
+                       {"sku": "b", "unit_price_usd": "0.20", "quantity": 1}],
     }]}
     r = client.post("/agents/abandoned-cart-coverage/detect", json=body)
     assert r.status_code == 200

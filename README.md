@@ -20,10 +20,10 @@ hash chain as findings.**
 
 | Service | Language | Tests | Status |
 |---|---|---|---|
-| `services/detection-py` | Python (FastAPI, pydantic) | 138/138 passing | Real, REST-exposed, hardened, money is exact `Decimal` |
-| `services/orchestrator-go` | Go | 21/21 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money` |
+| `services/detection-py` | Python (FastAPI, pydantic) | 387/387 passing | Real, REST-exposed, hardened, money is exact `Decimal` |
+| `services/orchestrator-go` | Go | 41/41 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money` |
 | `services/ledger-rust` | Rust | 55/55 passing (39 unit + 16 real-binary integration) | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
-| `apps/dashboard-ts` | TypeScript (Next.js 16) | build + typecheck clean, 0 npm audit vulnerabilities | Real, server-rendered against a live orchestrator |
+| `apps/dashboard-ts` | TypeScript (Next.js 16) | 5/5 `npm test` (shared money vectors), build + typecheck clean, 0 npm audit vulnerabilities | Real, rendered per request (`ƒ /`), reads recorded findings — viewing never writes |
 
 **Verified live, full-stack run** (Python + Go + Rust, real processes,
 real HTTP, no mocks, all three services requiring and presenting real
@@ -121,6 +121,26 @@ survive restart. Field rules are in ADR 0003.
   answered the retry with `200`, and a second scan brought it to
   `{"valid":true,"entries":21}`.
 
+## Sep 24 2026 — fix wave 1 (Revenue Recovery)
+
+- **F14 (huge money → 500):** money is now bounded to < 10^15 dollars (max
+  `"999999999999999.99"`, ADR 0003 section 1a) in detection-py (422),
+  orchestrator-go (rejected on decode) and the dashboard (not displayed).
+  Every Python money operation runs under an explicit `MONEY_CONTEXT`; an
+  order whose subtotal would exceed the bound is a 422. The ledger has not
+  adopted the bound yet (separate owner).
+- **F15:** `fixtures/money_vectors.json` — one shared vector file run by all
+  three test suites (and carrying the ledger's expected verdict). It found
+  Python accepting `"1.00\n"`, `"012.30"`, `"12.3"`, `"12.345"` and JSON
+  numbers; all now rejected, same as Go and the dashboard.
+- **Viewing no longer writes:** new read-only `GET /revenue-recovery/findings`
+  (recorded ledger findings + ledger verify); the dashboard uses it and is
+  always rendered per request. `/revenue-recovery/scan` is POST-only (405
+  otherwise). Live: a scan wrote 10 entries; 5 reads and 3 page views left
+  the ledger at 10.
+- **Other 4xx-not-500 fixes in detection-py:** timezone-less affiliate
+  timestamps, NaN/Infinity in a body, and huge quantities now return 422.
+
 ## What's built
 
 **Tier 1 (rule-based, low-hanging fruit):**
@@ -193,6 +213,8 @@ go run ./cmd/orchestrator  # DETECTION_SERVICE_URL, LEDGER_SERVICE_URL, ORCHESTR
 cd apps/dashboard-ts
 npm install
 ORCHESTRATOR_URL=http://localhost:8080 npm run dev   # http://localhost:3000
+# The page shows findings already recorded in the ledger (read-only);
+# run a scan first with the POST below. `npm test` runs the money vectors.
 ```
 
 Or just run the full pipeline once without the dashboard:
@@ -204,14 +226,14 @@ curl -s -X POST -H "Authorization: Bearer $ORCHESTRATOR_SERVICE_TOKEN" \
 ## Testing
 
 ```bash
-# Python — 138 tests. Use `python3 -m pytest`, not the bare `pytest`
+# Python — 387 tests. Use `python3 -m pytest`, not the bare `pytest`
 # binary, if pytest was installed as a standalone tool (e.g. via uv) —
 # it can silently run against a different interpreter than the one you
 # `pip install`ed into, and report a module-not-found collection error
 # that looks like a broken test suite rather than an environment mismatch.
 cd services/detection-py && PYTHONPATH=src python3 -m pytest tests/ -v
 
-# Go — 21 tests
+# Go — 41 tests
 cd services/orchestrator-go && go vet ./... && go test ./... -v
 
 # Rust — 55 tests (39 unit + 16 integration; the integration tests spawn

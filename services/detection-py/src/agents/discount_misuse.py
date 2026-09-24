@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from zbm_schema import (
     format_money,
+    money_context,
     percent_of,
     quantize_money,
     CauseCertainty,
@@ -38,16 +39,18 @@ def _effective_discount_usd(order: Order) -> Decimal:
     and the running remainder is reduced by that recorded cent amount. No
     binary-float intermediate exists anywhere in this function.
     """
-    remaining = order.subtotal_usd
-    total_given = Decimal("0.00")
-    for d in order.discounts:
-        if d.percent_off is not None:
-            given = percent_of(remaining, d.percent_off)
-        else:
-            given = min(d.amount_off_usd, remaining)
-        total_given += given
-        remaining -= given
-    return quantize_money(total_given)
+    with money_context():
+        remaining = order.subtotal_usd
+        total_given = Decimal("0.00")
+        for d in order.discounts:
+            if d.percent_off is not None:
+                given = percent_of(remaining, d.percent_off)
+            else:
+                given = min(d.amount_off_usd, remaining)
+            total_given += given
+            remaining -= given
+        # total_given <= subtotal <= MAX_MONEY: every step stays in range.
+        return quantize_money(total_given)
 
 
 def detect(orders: list[Order]) -> list[Finding]:

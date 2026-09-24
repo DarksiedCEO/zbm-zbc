@@ -1,19 +1,21 @@
-import type { ScanResult } from "@/types/finding";
+import type { RecordedFindingsResult } from "@/types/finding";
 
-const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL ?? "http://localhost:8080";
-
-// Deliberately NOT prefixed with NEXT_PUBLIC_ — this token must stay
-// server-side only. fetchScanResult runs in a server component (this file
-// is never imported by client components), so process.env here reads the
-// real server-side value and the token never reaches the browser bundle.
-// orchestrator-go fails closed without ORCHESTRATOR_SERVICE_TOKEN set, so
-// a missing value here isn't a silent-empty-header problem in practice —
-// the request will just 401 — but failing fast with a clear message is
-// still better than an opaque 401 the first time someone loads the page.
-const ORCHESTRATOR_SERVICE_TOKEN = process.env.ORCHESTRATOR_SERVICE_TOKEN;
-
-export async function fetchScanResult(): Promise<ScanResult> {
-  if (!ORCHESTRATOR_SERVICE_TOKEN) {
+// Fix wave 1 (Sep 24 2026): the dashboard used to GET /revenue-recovery/scan
+// on every page view, which ran every agent and appended ~10 duplicate
+// findings to the evidence ledger per view. It now reads the findings the
+// ledger already recorded, from the orchestrator's read-only route. Running
+// a scan is an explicit POST /revenue-recovery/scan, never a page view.
+//
+// Read at request time (not module load) so a value set when the server
+// starts is always the one used.
+//
+// ORCHESTRATOR_SERVICE_TOKEN is deliberately NOT prefixed with NEXT_PUBLIC_ —
+// it must stay server-side only. This module is only imported by the server
+// component in src/app/page.tsx, so the token never reaches the browser.
+export async function fetchRecordedFindings(): Promise<RecordedFindingsResult> {
+  const orchestratorUrl = process.env.ORCHESTRATOR_URL ?? "http://localhost:8080";
+  const token = process.env.ORCHESTRATOR_SERVICE_TOKEN;
+  if (!token) {
     throw new Error(
       "ORCHESTRATOR_SERVICE_TOKEN is not set. The dashboard cannot call " +
         "orchestrator-go without it — set it to the same value orchestrator-go " +
@@ -21,14 +23,15 @@ export async function fetchScanResult(): Promise<ScanResult> {
     );
   }
 
-  const res = await fetch(`${ORCHESTRATOR_URL}/revenue-recovery/scan`, {
+  const res = await fetch(`${orchestratorUrl}/revenue-recovery/findings`, {
+    method: "GET",
     cache: "no-store",
     headers: {
-      Authorization: `Bearer ${ORCHESTRATOR_SERVICE_TOKEN}`,
+      Authorization: `Bearer ${token}`,
     },
   });
   if (!res.ok) {
     throw new Error(`orchestrator returned ${res.status}: ${await res.text()}`);
   }
-  return (await res.json()) as ScanResult;
+  return (await res.json()) as RecordedFindingsResult;
 }
