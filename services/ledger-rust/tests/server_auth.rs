@@ -7,8 +7,8 @@
 //! the HTTP wrapper around it), so it was possible for both bugs to exist
 //! with the full unit-test suite green, which is exactly what happened.
 //!
-//! No HTTP client crate is added as a dependency for this — `tiny_http`
-//! is a server, not a client — so a minimal raw HTTP/1.1 request is sent
+//! No HTTP client crate is added as a dependency for this (the server's
+//! HTTP stack, hyper, is used only server-side here), so a minimal raw HTTP/1.1 request is sent
 //! by hand over `std::net::TcpStream`. `CARGO_BIN_EXE_ledger-rust` is a
 //! built-in Cargo integration-test feature (stable since 1.43), not an
 //! external dependency.

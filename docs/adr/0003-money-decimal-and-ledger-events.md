@@ -320,7 +320,10 @@ failed log line killed the ledger (exit 101, reproduced with stderr on
 `/dev/full`). All logging now goes through `ledger_log!`, which drops a
 line it cannot write.
 
-**Known limitation: non-ASCII bytes in the request head.** `tiny_http`
+**Known limitation: non-ASCII bytes in the request head.** *(Superseded
+in fix wave 4 by section 7: the HTTP stack is now hyper, which answers
+these requests; the test was changed accordingly. Kept for the record.)*
+`tiny_http`
 0.12.0 (the latest release; the same code is on its `master` branch)
 reads each request-head line in `ClientConnection::read_next_line` and
 returns `io::ErrorKind::InvalidInput` ("Header is not in ASCII") if any
@@ -359,6 +362,108 @@ they send are ASCII).
   ledger now answers `200 {"valid":true,"entries":0}` (it was
   `409 {"valid":false,"error":"Empty"}`, which every caller had to
   special-case). `409` now always means the chain failed verification.
+
+## 7. One slow client must not freeze the ledger (fix wave 4, Sep 24 2026)
+
+**Finding (AEGIS, HIGH, no auth needed).** One socket sending a wrong
+token, `Content-Length: 5000` and 12 body bytes blocked `/health` for as
+long as it stayed open. Every department fails closed on the ledger, so
+this halts the company.
+
+**Exact blocking point (evidence).** The server handled requests one at a
+time on its main thread (`for request in server.incoming_requests()`).
+Auth ran before the body was read and the 401 *was* written, but
+`tiny_http::Request::respond(self, ..)` then drops the request, and the
+request's body reader is an `EqualReader` whose `Drop` reads and discards
+the rest of the declared body with no timeout. `gdb -p <pid>` on the live
+server during `slow.py` (wrong token) showed the main thread at:
+
+```
+#0  __libc_recv (fd=6, len=4988)
+#11 tiny_http::util::equal_reader::{impl#2}::drop   (equal_reader.rs:72)
+#17 core::ptr::drop_in_place<tiny_http::request::Request>
+#18 tiny_http::request::Request::respond            (request.rs:441)
+```
+
+`/health` meanwhile sat parsed in tiny_http's queue (`http=000` after the
+probe's 4 s hold; `200` in 3 ms right after the socket closed). Other
+blocking points of the same class, same thread: `read_body` on a slow
+right-token body (no deadline); the response write to a client that does
+not read (no write timeout; a 30 000-entry `/ledger/entries` stalled
+`/health`); an absurd `Content-Length` was read up to 64 KiB before the
+413. Header reading happened in tiny_http's per-connection threads, which
+are unbounded and also have no deadline (a silent connection was held
+forever).
+
+**Why tiny_http was replaced.** tiny_http 0.12 never exposes the socket
+(`Listener`/`Connection` are closed enums), so no read/write timeout or
+total deadline can be set; the drain-on-drop is inside the library; and it
+spawns one thread per connection without bound. A worker pool on top of it
+only moves the stall: each slow client then holds a worker forever. Socket
+options inherited from the listener would give per-read timeouts at best,
+which a byte-every-second trickle defeats. So the fix needs the socket.
+Options: hand-written HTTP/1.1 on `std::net` (no new crates, but a new
+parser for the most important service is its own risk), or **hyper 1.x on
+tokio** (chosen): the most widely used Rust HTTP implementation, with
+`header_read_timeout`, a bounded read buffer, `keep_alive(false)`, and
+cancellation by dropping the connection future. New crates: `tokio`,
+`hyper`, `hyper-util` (tokio adapter + timer), `http-body-util`
+(`Limited` body). tiny_http is removed. Every existing integration test
+passed unchanged except the one that pinned the old non-ASCII limitation.
+
+**Design (`src/bin/server.rs`).**
+
+| Limit | Value | Behavior |
+|---|---|---|
+| Request head (line + headers) | 5 s (`HEADER_READ_TIMEOUT`); head ≤ 16 KiB | connection closed (hyper); larger head → 431 |
+| Body | 5 s total from the start of the read (`BODY_READ_TIMEOUT`) | `408`, closed; a trickle is cut too |
+| Declared `Content-Length` > 64 KiB | checked before any body byte | `413`, closed, body never read |
+| Body > 64 KiB without a length (chunked) | `Limited` | `413` |
+| Whole connection: head, body, handling, response write | 15 s (`REQUEST_DEADLINE`) | socket dropped |
+| Concurrent connections | `LEDGER_MAX_CONNECTIONS`, default 512 | extra connections get an immediate `503` + `Retry-After: 1`, closed |
+| Listen backlog | 128 | kernel queue |
+| Threads | 4 async workers; ≤ 16 blocking threads for ledger work | |
+
+- One request per connection (`Connection: close`). A request answered
+  without reading its body (401, 404, 413) is closed with the body unread —
+  nothing is drained. Keep-alive is not needed on loopback and would make
+  the per-request deadline harder to reason about.
+- The total deadline is 15 s, not 10 s, so a request whose head and body
+  each arrive just before their 5 s limits still has 5 s for the append and
+  the response. If the deadline does expire during an append, the append
+  still completes (ledger work is never cancelled halfway); only the
+  response is lost, which is the same as any dropped connection: events
+  are idempotent by `event_id`, and a caller must treat a finding with no
+  response as unknown, as before.
+- The ledger `Mutex` is taken only inside `spawn_blocking`, after the body
+  has been fully read, parsed and validated. Every append still runs under
+  that one lock, so the chain, seq numbering, and event idempotency/conflict
+  rules are unchanged (tested: 800 parallel posts over 200 ids → exactly
+  200 `201`s with seqs 0..199 and 600 `200`s; 50 conflicting posts on one
+  id → one `201`, 49 `409`s; chain valid; restart reloads).
+- A panic during ledger work, or a poisoned lock, exits the process (the
+  old single-threaded server also died on any panic); restart re-verifies
+  the log.
+- Non-ASCII header values (obs-text) are now accepted by the HTTP layer;
+  an `Authorization` value that is not visible ASCII is a `401`.
+  `tests/server_hardening.rs::d4_*` was changed from "connection dropped"
+  to "real answers, auth never bypassed".
+
+**Residual limit, stated plainly.** A client able to open 512 connections
+at once can make other callers get `503` (fast, not a hang) until its
+connections hit their deadlines (5–15 s), and can repeat. There is no
+per-client limit: the ledger binds loopback and every caller is local.
+Raise `LEDGER_MAX_CONNECTIONS` (with the file-descriptor limit) if needed.
+
+**Tests** (`tests/server_slow_clients.rs`, real binary, real sockets):
+slow body with wrong token, slow body with right token, byte trickle,
+slow head, idle connection, oversized `Content-Length`, slow reader of a
+30 000-entry ledger, 150 concurrent slow clients, over-cap 503 and
+recovery; each asserts `/health` and an authenticated append finish in
+under 1 s while the bad clients are stalled, and that the server cuts the
+bad connection within its deadline. Plus the two concurrency tests above.
+Before the fix 9 of the 11 failed (the two concurrency tests passed; they
+guard against the new concurrency).
 
 ## Verification
 
