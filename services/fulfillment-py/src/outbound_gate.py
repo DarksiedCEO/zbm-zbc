@@ -59,6 +59,24 @@ numbers/customers, after which every NEW number is refused for up to 24h
       hour's new-key budget is exhausted, and the API logs a warning.
 Every refusal here is fail closed: there is no path that contacts a number
 the gate could not record. ADR 0002, Decision 10.
+
+Burst shaping (fix wave 5, AEGIS NEW-5, LOW): (c) alone let one burst spend
+the whole hour — 4,166 fresh numbers in 0.34 s, then every NEW legitimate
+number refused for 60 minutes. There is no caller identity to scope the
+budget by (one shared service token), so admission of new keys must ALSO
+pass a token bucket:
+  (e) capacity `new_key_burst` (default min(100, max_new_keys_per_hour)),
+      refilled continuously at max_new_keys_per_hour per hour — 1/60 of the
+      hourly budget per minute (69.4/min at the default) — on the gate's
+      clock; a clock that moves backwards refills nothing. Checked at
+      authorize and again at redeem, spent at redeem, like (c).
+Worst case now: a burst takes at most `new_key_burst` new keys at once; a
+legitimate new number is refused for at most ~1 s after a burst ends. An
+attacker who KEEPS offering fresh numbers still competes with legitimate new
+numbers for every token (up to the full hourly budget) for as long as the
+attack lasts — that is visible (status() and the capacity warning) and needs
+per-caller identity to fix, which this service does not have. Nothing here
+admits a key that (c) refuses; it only refuses more.
 """
 
 from __future__ import annotations
@@ -81,6 +99,7 @@ _ROLLING = timedelta(hours=24)
 DEFAULT_MAX_TRACKED_KEYS = 100_000
 _MAX_TRACKED_KEYS_CEILING = 1_000_000
 DEFAULT_MAX_NEW_KEYS_PER_HOUR = DEFAULT_MAX_TRACKED_KEYS // 24  # 4,166: 24h of admissions < cap
+DEFAULT_NEW_KEY_BURST = 100  # token bucket capacity; refill = hourly budget / 3600 per second
 _NEW_KEY_WINDOW = timedelta(hours=1)
 NEAR_CAPACITY_FRACTION = 0.8
 _SWEEP_EVERY = timedelta(minutes=1)
@@ -172,12 +191,23 @@ class OutboundContactGate:
         country_zones: dict[str, tuple[str, ...]] | None = None,
         max_tracked_keys: int = DEFAULT_MAX_TRACKED_KEYS,
         max_new_keys_per_hour: int = DEFAULT_MAX_NEW_KEYS_PER_HOUR,
+        new_key_burst: int | None = None,
     ):
         for name, value in (("max_tracked_keys", max_tracked_keys), ("max_new_keys_per_hour", max_new_keys_per_hour)):
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= _MAX_TRACKED_KEYS_CEILING:
                 raise ValueError(f"{name} must be an integer 1-{_MAX_TRACKED_KEYS_CEILING}")
+        if new_key_burst is None:
+            new_key_burst = min(DEFAULT_NEW_KEY_BURST, max_new_keys_per_hour)
+        if isinstance(new_key_burst, bool) or not isinstance(new_key_burst, int) or not 1 <= new_key_burst <= max_new_keys_per_hour:
+            raise ValueError(f"new_key_burst must be an integer 1-{max_new_keys_per_hour} (max_new_keys_per_hour)")
         self._max_tracked_keys = max_tracked_keys
         self._max_new_keys_per_hour = max_new_keys_per_hour
+        # (e) token bucket over new-key admissions: starts full, refills at
+        # max_new_keys_per_hour per hour of gate-clock time.
+        self._new_key_burst = new_key_burst
+        self._new_key_refill_per_s = max_new_keys_per_hour / 3600.0
+        self._new_key_tokens = float(new_key_burst)
+        self._new_key_refilled_at: datetime | None = None
         # gate-clock stamps of new-key admissions in the last hour; never
         # longer than max_new_keys_per_hour (the check refuses before that).
         self._new_key_stamps: deque[datetime] = deque()
@@ -213,8 +243,10 @@ class OutboundContactGate:
             now = self._now()
             self._maybe_sweep(now)
             self._prune_new_key_stamps(now)
+            self._refill_new_key_tokens(now)
             tracked = len(self._attempts)
             new_last_hour = len(self._new_key_stamps)
+            tokens = self._new_key_tokens
         utilization = round(tracked / self._max_tracked_keys, 4)
         return {
             "tracked_keys": tracked,
@@ -225,6 +257,10 @@ class OutboundContactGate:
             "new_keys_last_hour": new_last_hour,
             "max_new_keys_per_hour": self._max_new_keys_per_hour,
             "new_key_budget_exhausted": new_last_hour >= self._max_new_keys_per_hour,
+            "new_key_burst": self._new_key_burst,
+            "new_key_tokens_available": int(tokens),
+            "new_key_refill_per_minute": round(self._new_key_refill_per_s * 60, 2),
+            "new_key_burst_exhausted": tokens < 1,
         }
 
     # -- public ------------------------------------------------------------
@@ -300,7 +336,27 @@ class OutboundContactGate:
                     f"(max {self._max_new_keys_per_hour}) — not contacted (fail closed; numbers already "
                     "being contacted are unaffected); retry later"
                 )
+            self._refill_new_key_tokens(now)
+            if self._new_key_tokens < new_keys:
+                return (
+                    f"new numbers/customers are admitted at most {self._new_key_burst} at once, then "
+                    f"{self._new_key_refill_per_s * 60:.1f} per minute; none available right now — not "
+                    "contacted (fail closed; numbers already being contacted are unaffected); retry in a few seconds"
+                )
         return None
+
+    def _refill_new_key_tokens(self, now: datetime) -> None:
+        # Only forward clock movement refills; a clock that moved backwards
+        # refills nothing until it passes the last refill point again.
+        if self._new_key_refilled_at is None:
+            self._new_key_refilled_at = now
+            return
+        if now <= self._new_key_refilled_at:
+            return
+        elapsed = (now - self._new_key_refilled_at).total_seconds()
+        self._new_key_tokens = min(float(self._new_key_burst),
+                                   self._new_key_tokens + elapsed * self._new_key_refill_per_s)
+        self._new_key_refilled_at = now
 
     def _prune_new_key_stamps(self, now: datetime) -> None:
         # Stamps from a clock that later moved backwards stay until they are
@@ -327,6 +383,7 @@ class OutboundContactGate:
             for key in self._keys(auth._phone, auth._customer_id):
                 if key not in self._attempts:
                     self._new_key_stamps.append(now)  # budget checked by _check above
+                    self._new_key_tokens -= 1  # bucket checked (and refilled) by _check above
                 ts = self._attempts.setdefault(key, deque())
                 while ts and ts[0] <= now - _ROLLING:
                     ts.popleft()
