@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from agents import (
     contract_pricing_term_drift,
     cross_channel_attribution,
@@ -92,7 +94,7 @@ def test_minimum_spend_shortfall_flagged_with_correct_drift_amount():
     assert len(findings) == 1
     f = findings[0]
     assert f.entity_id == "term_b2_min_1"
-    assert f.recoverable_value.amount_usd == 900.00  # 5000 - 4100
+    assert f.recoverable_value.amount_usd == Decimal("900.00")  # 5000 - 4100
 
 
 def test_exact_match_not_flagged():

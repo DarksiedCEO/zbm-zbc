@@ -11,6 +11,7 @@ missing dollar.
 from __future__ import annotations
 
 from zbm_schema import (
+    format_money,
     CauseCertainty,
     DecisionConfidence,
     Finding,
@@ -40,7 +41,7 @@ def detect(events: list[ServerSideAttributionEvent]) -> list[Finding]:
                 customer_id="unknown",  # this event stream doesn't carry customer_id; correlation still keys on order_id
                 cause_certainty=CauseCertainty.NAMED,
                 cause_description=(
-                    f"Server confirmed a real ${event.order_value_usd:.2f} order on {event.channel}, "
+                    f"Server confirmed a real ${format_money(event.order_value_usd)} order on {event.channel}, "
                     f"but client-side pixel tracking never recorded it — likely iOS/ad-blocker loss. "
                     f"Channel is real revenue with no attribution credit."
                 ),

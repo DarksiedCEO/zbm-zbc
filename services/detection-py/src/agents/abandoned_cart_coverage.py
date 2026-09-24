@@ -13,6 +13,7 @@ whole reason the fixture pool has a control case for it).
 from __future__ import annotations
 
 from zbm_schema import (
+    format_money,
     CauseCertainty,
     DecisionConfidence,
     Finding,
@@ -44,7 +45,7 @@ def detect(orders: list[Order]) -> list[Finding]:
                 customer_id=order.customer_id,
                 cause_certainty=CauseCertainty.NAMED,
                 cause_description=(
-                    f"Order abandoned at checkout (${order.subtotal_usd:.2f} cart value) with no "
+                    f"Order abandoned at checkout (${format_money(order.subtotal_usd)} cart value) with no "
                     f"recovery email/SMS ever triggered — a gap in recovery-flow coverage, not a "
                     f"claim about whether recovery would have converted."
                 ),

@@ -8,7 +8,12 @@ beyond what any single authorized promotion intended.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from zbm_schema import (
+    format_money,
+    percent_of,
+    quantize_money,
     CauseCertainty,
     DecisionConfidence,
     Finding,
@@ -21,22 +26,28 @@ from zbm_schema import (
 AGENT_ID = "discount-misuse-v1"
 
 
-def _effective_discount_usd(order: Order) -> float:
+def _effective_discount_usd(order: Order) -> Decimal:
     """
-    Approximates the combined dollar value given away by all discounts on
-    the order, applied sequentially against the running subtotal — the
-    same way most cart engines actually stack percentage discounts.
+    The combined dollar value given away by all discounts on the order,
+    applied sequentially against the running subtotal — the same way most
+    cart engines actually stack percentage discounts.
+
+    Exact Decimal arithmetic (README gap #6): each discount line is
+    computed and quantized to cents (ROUND_HALF_UP) at the moment it is
+    computed, exactly as a cart engine would record a per-line discount,
+    and the running remainder is reduced by that recorded cent amount. No
+    binary-float intermediate exists anywhere in this function.
     """
     remaining = order.subtotal_usd
-    total_given = 0.0
+    total_given = Decimal("0.00")
     for d in order.discounts:
         if d.percent_off is not None:
-            given = remaining * (d.percent_off / 100)
+            given = percent_of(remaining, d.percent_off)
         else:
             given = min(d.amount_off_usd, remaining)
         total_given += given
         remaining -= given
-    return round(total_given, 2)
+    return quantize_money(total_given)
 
 
 def detect(orders: list[Order]) -> list[Finding]:
@@ -60,7 +71,7 @@ def detect(orders: list[Order]) -> list[Finding]:
                 cause_certainty=CauseCertainty.NAMED,
                 cause_description=(
                     f"{len(order.discounts)} discount codes stacked on one order ({codes}), "
-                    f"against single-code policy. Combined discount value ${given_away:.2f} "
+                    f"against single-code policy. Combined discount value ${format_money(given_away)} "
                     f"exceeds what any one authorized code should have given away."
                 ),
                 recoverable_value=LabeledValue(

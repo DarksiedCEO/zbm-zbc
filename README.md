@@ -12,15 +12,17 @@ doc for why).
 **8/8 detection agents (Tier 1 A–D, Tier 2 E–H) + full trust/safety net +
 3-service pipeline (Python → Go → Rust) + TypeScript dashboard, all real,
 all tested, all verified running together end-to-end — plus a hardening
-pass (below) against six real, independently-flagged gaps, five of them
-fixed and confirmed live, one (per-store leak thresholds/currency) still
-open by design decision, not oversight.**
+pass (below) against real, independently-flagged gaps — all now fixed and
+confirmed live, including gap #6 (money was `float`), fixed Sep 24 2026 by
+converting money to exact `Decimal` end to end. The evidence ledger also
+now records generic department events (`POST /ledger/events`) on the same
+hash chain as findings.**
 
 | Service | Language | Tests | Status |
 |---|---|---|---|
-| `services/detection-py` | Python (FastAPI, pydantic) | 72/72 passing | Real, REST-exposed, hardened |
-| `services/orchestrator-go` | Go | 8/8 passing | Real, live-tested against detection-py + ledger-rust, hardened |
-| `services/ledger-rust` | Rust | 19/19 passing | Real, hash-chained, tamper-evidence proven by test, now authenticated |
+| `services/detection-py` | Python (FastAPI, pydantic) | 138/138 passing | Real, REST-exposed, hardened, money is exact `Decimal` |
+| `services/orchestrator-go` | Go | 21/21 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money` |
+| `services/ledger-rust` | Rust | 55/55 passing (39 unit + 16 real-binary integration) | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
 | `apps/dashboard-ts` | TypeScript (Next.js 16) | build + typecheck clean, 0 npm audit vulnerabilities | Real, server-rendered against a live orchestrator |
 
 **Verified live, full-stack run** (Python + Go + Rust, real processes,
@@ -43,8 +45,67 @@ real, still-open, explicitly deferred gap.
 | 3 | `ledger-rust` hardcoded `0.0.0.0:{port}` — bound every network interface with no loopback default or override. | **Fixed** | `LEDGER_BIND_ADDR` env var, defaults to `127.0.0.1`. Confirmed by reading the actual bound socket from `/proc/net/tcp` while the process was running (`0100007F:...`, not `00000000:...`), not just by asserting the code changed. |
 | 4 | `ledger-rust` had **zero authentication on any route**, including `POST /ledger/append` (anyone reaching the port could forge entries in the evidence ledger) and `GET /ledger/entries` (read the whole ledger). Confirmed the single most important service to protect, and the one with the least protection. | **Fixed** | `LEDGER_SERVICE_TOKEN` env var, fail-closed at startup if unset (same pattern as the other two services), required as `Authorization: Bearer <token>` on every route except `/health`, checked with a hand-rolled constant-time comparison (no `hmac`-equivalent crate was already a dependency, so one wasn't added for a single comparison). 8 new integration tests spawn the real compiled binary and hit it over a real TCP socket — the layer the original unit tests never touched, which is exactly how both bugs (#3 and #4) shipped with a fully green test suite. |
 | 5 | Fixing #4 broke the actual calling code: `orchestrator-go`'s `NewLedgerClient` was built to send **no** Authorization header at all (there was a test explicitly asserting that, written when it was correct). A live 3-process pipeline run caught this — `AppendFinding` was fixed via the shared `doJSON` path, but `Verify()` builds its own request by hand (for its own documented reason — 409 is a valid non-error response it needs to parse, not just a transport error) and was missed on the first pass, 401ing every real scan's ledger-integrity check. | **Fixed** | `NewLedgerClient` now takes and sends a token; `Verify()` gets the header explicitly since it doesn't go through `doJSON`. Both `orchestrator-go`'s `main.go` (fail-closed on `LEDGER_SERVICE_TOKEN`, matching the other two required tokens) and the stale test comment referencing ledger-rust's old no-auth state were updated. Two new regression tests (`TestLedgerClient_SendsBearerTokenOnAppend`, `TestLedgerClient_SendsBearerTokenOnVerify`) — the second one specifically because the first alone would not have caught this. Re-verified with a second full live 3-process run after the fix: `ledger_verify: valid: true` over real HTTP, not just green `go test`. |
-| 6 | Money (`amount_usd`, `order_value_usd`, `unit_price_usd`, etc.) is `float` throughout `zbm_schema`, used in real arithmetic across 7 agent files — unlike `fulfillment-py`'s single unused `Decimal`-converted field, this is live, load-bearing math. | **Not fixed — flagged, not silently converted** | Confirmed real (grep-verified 39 arithmetic/comparison sites across 7 files). Deliberately NOT converted in this pass: swapping `float` → `Decimal` here touches every agent's math and every test's literals, a materially different blast radius than fulfillment-py's isolated stub field, and doing that silently risked introducing regressions across the whole Tier 1 detection layer without the founder having signed off on that scope. Tracked below as an open gap, not fixed quietly and not ignored. |
+| 6 | Money (`amount_usd`, `order_value_usd`, `unit_price_usd`, etc.) is `float` throughout `zbm_schema`, used in real arithmetic across 7 agent files — unlike `fulfillment-py`'s single unused `Decimal`-converted field, this is live, load-bearing math. | **Fixed Sep 24 2026** (founder-approved scope) | Deferred on Sep 22 for blast radius, then fixed end to end: Python `Decimal` quantized to cents `ROUND_HALF_UP` at every creation/computation point, JSON money is a two-decimal string (`"12.30"`), Go carries a validated string `Money`, the Rust ledger stores the string (legacy numeric entries still load and old chains still verify), the dashboard displays the string without parsing it. See ADR 0003 and the Sep 24 section below for how it was verified. |
 | 7 | `orchestrator-go` called `http.ListenAndServe(":"+port, mux)` with no host — same class of bug as `ledger-rust`'s #3, binding every network interface instead of just localhost. Found after the initial review pass, in a later session. | **Fixed** | `ORCHESTRATOR_BIND_ADDR` env var, defaults to `127.0.0.1`. Confirmed live by reading the actual bound socket from `/proc/net/tcp` (`0100007F:...`, not `00000000:...`), same method as #3. `cmd/orchestrator` had zero test coverage before this — 2 new tests build and spawn the real compiled binary and connect over a real socket, the same gap in coverage that let #3/#4/#7 all ship with green test suites. |
+
+## Sep 24 2026 — money is exact, ledger records events
+
+**Gap #6 fixed (money `float` → `Decimal` end to end).** Full design and the
+backward-compatibility proof are in
+`docs/adr/0003-money-decimal-and-ledger-events.md`. In short:
+
+- `detection-py`: every money field is a `Decimal` quantized to cents
+  `ROUND_HALF_UP` (`zbm_schema/money.py`); subtotals, stacked percent
+  discounts (quantized per discount line), contract drift and all Tier 2
+  values are exact; floats are accepted only through `str()`, so fixture
+  `49.99` stays exactly `49.99`; NaN/Infinity/negative/`-0.00` are rejected.
+  JSON money is a two-decimal string. Explanation text uses the same
+  formatter the Hallucination Agent compares against, exactly (no tolerance;
+  `$12.3` does not match `12.30`). Fixture results are unchanged in value
+  (e.g. the stacked discount on `ord_1007` is `54.38` = 22.50 + 31.88,
+  per-line half-up; the old float path also rounded to 54.38 here), but are
+  now exact `Decimal`s and two-decimal strings rather than floats.
+- `orchestrator-go`: `client.Money` is a validated string; JSON numbers for
+  money are rejected; the amount detection-py emits is the exact string the
+  ledger receives.
+- `ledger-rust`: `amount_usd` is the canonical string; a JSON number on
+  `POST /ledger/append` is a 400. Legacy log lines with numeric amounts
+  still load and verify — proven against a log written by the actual
+  pre-change server binary (commit 9531fc2), checked in as
+  `tests/fixtures/legacy_ledger_v1.jsonl`.
+- `apps/dashboard-ts`: `amount_usd: string`, displayed verbatim, never
+  parsed to a JS number, no totals computed.
+
+Tests added that fail under float include `0.10 + 0.20`, `0.67 × 3 = 2.01`,
+a 1,583-line subtotal, half-up at `.005` boundaries (`2.675`, `1.005`,
+`0.125`, `31.875`), identical-string JSON round trips, and `49.99` staying
+exact.
+
+**New: `POST /ledger/events`** (bearer auth, `LEDGER_SERVICE_TOKEN`). Records
+a department event — `event_id` (idempotency key), `department`,
+`event_type`, `actor`, `subject_id`, `payload_sha256`, `summary` — on the
+SAME hash chain as findings. `201` new, `200` identical retry, `409` same
+`event_id` with different content, `400` invalid, `401` bad token. Every
+entry in `GET /ledger/entries` now carries `"kind": "finding"` or
+`"kind": "event"`; `/ledger/verify` covers both; the event hash is
+domain-separated (`event|` prefix); events and the idempotency index
+survive restart. Field rules are in ADR 0003.
+
+**Verified Sep 24 2026:**
+- `python3 -m pytest -q` (detection-py): 138 passed.
+- `go vet ./...` clean; `go test ./...` (orchestrator-go): 21 passed.
+- `cargo test` (ledger-rust): 55 passed (39 unit, 8 `server_auth`, 8
+  `server_events`); `cargo clippy --all-targets`: no warnings.
+- `npm install` / `npx tsc --noEmit` / `npm run build` (dashboard-ts):
+  clean; `npm audit`: 0 vulnerabilities.
+- Live three-process run (real processes, real HTTP, real tokens): a scan
+  through the orchestrator ran 8 agents and wrote 10 findings to the ledger
+  with string amounts (`"120.00"`, `"54.38"`, `"89.99"`, …, `null` for the
+  two no-value findings); one event was posted (`201`), retried (`200`),
+  conflicted (`409`); `/ledger/verify` returned `{"valid":true,"entries":11}`;
+  after restarting the ledger process it reloaded 11 entries, still
+  answered the retry with `200`, and a second scan brought it to
+  `{"valid":true,"entries":21}`.
 
 ## What's built
 
@@ -88,7 +149,7 @@ exclusion, not an oversight.
 
 Requires: Python 3.11+, Go 1.24+, Rust/cargo, Node 22+.
 
-**All three backend services now fail closed and refuse to start without
+**All three backend services fail closed and refuse to start without
 their auth token set** (post-hardening, Sep 22 2026). Pick your own real
 shared secrets for local/private-network use — the values below are
 examples only, not defaults baked into the code.
@@ -129,20 +190,20 @@ curl -s -X POST -H "Authorization: Bearer $ORCHESTRATOR_SERVICE_TOKEN" \
 ## Testing
 
 ```bash
-# Python — 72 tests. Use `python3 -m pytest`, not the bare `pytest`
+# Python — 138 tests. Use `python3 -m pytest`, not the bare `pytest`
 # binary, if pytest was installed as a standalone tool (e.g. via uv) —
 # it can silently run against a different interpreter than the one you
 # `pip install`ed into, and report a module-not-found collection error
 # that looks like a broken test suite rather than an environment mismatch.
 cd services/detection-py && PYTHONPATH=src python3 -m pytest tests/ -v
 
-# Go — 8 tests
-cd services/orchestrator-go && go test ./... -v
+# Go — 21 tests
+cd services/orchestrator-go && go vet ./... && go test ./... -v
 
-# Rust — 19 tests (11 unit + 8 integration; the integration tests spawn
+# Rust — 55 tests (39 unit + 16 integration; the integration tests spawn
 # the real compiled binary and talk to it over a real TCP socket — see
-# tests/server_auth.rs)
-cd services/ledger-rust && cargo test
+# tests/server_auth.rs and tests/server_events.rs)
+cd services/ledger-rust && cargo test && cargo clippy --all-targets
 ```
 
 ## Data
@@ -160,10 +221,11 @@ attaches later without touching agent logic.
 - No per-platform translation layer yet (Shopify/Amazon/TikTok →
   the generic `zbm_schema.Order` shape) — the seam is designed for it,
   nothing is built.
-- **Money is `float`, not `Decimal`, throughout `zbm_schema`** — confirmed
-  real by review (finding #6 above), live arithmetic in 7 agent files,
-  deliberately not converted this pass given the blast radius. Real risk
-  once real currency flows through this, not yet fixed.
+- Money is exact and USD-only: there is still no multi-currency support
+  and no per-store leak thresholds (by design decision, not oversight).
+- The events endpoint stores only a payload hash and a summary; the ledger
+  cannot show what an event's payload was, only prove it has not changed.
+  Callers must keep the payload themselves.
 - Dashboard has no write actions, no auth, no multi-client view — it
   renders one scan result, nothing more.
 - Tier 2's `escalator`/`overage_rate` contract-drift directionality

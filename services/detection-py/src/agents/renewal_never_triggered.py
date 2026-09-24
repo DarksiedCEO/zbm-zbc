@@ -13,6 +13,7 @@ per the founder's original scope correction).
 from __future__ import annotations
 
 from zbm_schema import (
+    format_money,
     CauseCertainty,
     DecisionConfidence,
     Finding,
@@ -43,7 +44,7 @@ def detect(subscriptions: list[Subscription]) -> list[Finding]:
                 customer_id=sub.customer_id,
                 cause_certainty=CauseCertainty.NAMED,
                 cause_description=(
-                    f"Subscription (${sub.plan_price_usd:.2f}/{sub.renewal_interval_days}d) reached "
+                    f"Subscription (${format_money(sub.plan_price_usd)}/{sub.renewal_interval_days}d) reached "
                     f"its renewal date ({sub.next_renewal_due_at.date()}) with no renewal attempt "
                     f"ever fired — a trigger failure, not a customer cancellation or a failed charge."
                 ),

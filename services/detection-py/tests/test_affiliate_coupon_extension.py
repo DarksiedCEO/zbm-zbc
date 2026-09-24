@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from agents import affiliate_coupon_extension as agent
 from fixtures_loader import load_orders
 from zbm_schema import CauseCertainty
@@ -18,7 +20,7 @@ def test_stretched_affiliate_window_is_flagged_with_named_cause():
     finding = match[0]
     assert finding.cause_certainty == CauseCertainty.NAMED
     assert finding.recoverable_value is not None
-    assert finding.recoverable_value.amount_usd == 120.00
+    assert finding.recoverable_value.amount_usd == Decimal("120.00")
 
 
 def test_orders_without_affiliate_attribution_are_ignored():

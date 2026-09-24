@@ -11,6 +11,7 @@ contracted commitment is a leak.
 from __future__ import annotations
 
 from zbm_schema import (
+    format_money,
     CauseCertainty,
     DecisionConfidence,
     Finding,
@@ -46,9 +47,9 @@ def detect(terms: list[ContractTerm]) -> list[Finding]:
                 customer_id=term.client_id,
                 cause_certainty=CauseCertainty.NAMED,
                 cause_description=(
-                    f"Contracted minimum spend of ${term.contracted_value_usd:.2f} for "
-                    f"{term.period_label} was not enforced — only ${term.actual_billed_value_usd:.2f} "
-                    f"was actually billed, a ${term.drift_usd:.2f} shortfall against the client's "
+                    f"Contracted minimum spend of ${format_money(term.contracted_value_usd)} for "
+                    f"{term.period_label} was not enforced — only ${format_money(term.actual_billed_value_usd)} "
+                    f"was actually billed, a ${format_money(term.drift_usd)} shortfall against the client's "
                     f"own agreed commitment."
                 ),
                 recoverable_value=LabeledValue(

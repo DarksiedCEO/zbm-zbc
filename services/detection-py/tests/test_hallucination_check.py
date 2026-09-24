@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from agents import (
     abandoned_cart_coverage,
     affiliate_coupon_extension,
@@ -73,7 +75,7 @@ def test_catches_a_mismatched_dollar_figure():
         cause_certainty=CauseCertainty.NAMED,
         cause_description="This order leaked $500.00 in discounts.",
         recoverable_value=LabeledValue(
-            amount_usd=75.00,  # description says 500, evidence says 75 — divergence
+            amount_usd="75.00",  # description says 500, evidence says 75 — divergence
             classification=ValueClassification.OBSERVED, confidence=DecisionConfidence.HIGH,
         ),
     )
@@ -88,7 +90,7 @@ def test_matching_dollar_figure_passes():
         cause_certainty=CauseCertainty.NAMED,
         cause_description="This order leaked $75.00 in discounts.",
         recoverable_value=LabeledValue(
-            amount_usd=75.00, classification=ValueClassification.OBSERVED, confidence=DecisionConfidence.HIGH,
+            amount_usd=Decimal("75.00"), classification=ValueClassification.OBSERVED, confidence=DecisionConfidence.HIGH,
         ),
     )
     assert check(good_finding) is None

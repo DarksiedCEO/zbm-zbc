@@ -10,16 +10,19 @@ platform-agnostic e-commerce core; these are additive.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 
 from pydantic import BaseModel, Field
+
+from zbm_schema.money import Money, PositiveMoney, quantize_money
 
 
 class ServerSideAttributionEvent(BaseModel):
     """One order's client-side (pixel) vs server-side confirmed attribution."""
     order_id: str
     channel: str
-    order_value_usd: float = Field(gt=0)
+    order_value_usd: PositiveMoney
     pixel_attributed: bool  # did client-side pixel tracking record this conversion?
     server_confirmed: bool  # did server-side tracking independently confirm the order happened?
 
@@ -49,10 +52,12 @@ class ContractTerm(BaseModel):
     term_id: str  # unique per contract line — a client can have multiple terms of the same type/period
     client_id: str
     term_type: ContractTermType
-    contracted_value_usd: float = Field(gt=0)
-    actual_billed_value_usd: float = Field(ge=0)
+    contracted_value_usd: PositiveMoney
+    actual_billed_value_usd: Money
     period_label: str  # e.g. "2026-06"
 
     @property
-    def drift_usd(self) -> float:
-        return round(self.contracted_value_usd - self.actual_billed_value_usd, 2)
+    def drift_usd(self) -> Decimal:
+        # Exact Decimal subtraction; may be negative (billed above contract),
+        # which callers treat as "no drift". Never serialized.
+        return quantize_money(self.contracted_value_usd - self.actual_billed_value_usd)

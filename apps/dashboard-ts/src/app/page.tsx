@@ -1,4 +1,5 @@
 import { fetchScanResult } from "@/lib/api";
+import { formatUsd } from "@/lib/money";
 import type { Finding } from "@/types/finding";
 
 const CONFIDENCE_COLOR: Record<string, string> = {
@@ -38,7 +39,9 @@ function FindingRow({ finding }: { finding: Finding }) {
         {finding.cause_description}
       </td>
       <td style={{ padding: "10px 12px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-        {finding.recoverable_value ? `$${finding.recoverable_value.amount_usd.toFixed(2)}` : "—"}
+        {finding.recoverable_value
+          ? formatUsd(finding.recoverable_value.amount_usd) ?? "invalid amount"
+          : "—"}
       </td>
       <td style={{ padding: "10px 12px" }}>
         {finding.recoverable_value ? (

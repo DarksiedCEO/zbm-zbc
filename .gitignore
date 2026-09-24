@@ -19,6 +19,9 @@ target/
 # data, not source).
 services/ledger-rust/ledger_data/
 *.jsonl
+# ...except checked-in test fixtures: a legacy ledger log written by the
+# pre-Decimal server binary, used to prove old chains still verify.
+!services/ledger-rust/tests/fixtures/*.jsonl
 
 # Node / Next.js
 node_modules/
