@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -109,9 +110,106 @@ func (l *LedgerClient) Verify(ctx context.Context) (*LedgerVerifyResult, error) 
 		return nil, fmt.Errorf("read verify response: %w", err)
 	}
 
+	// Only 200 (valid) and 409 (tampered, or empty) carry a verify verdict.
+	// Anything else (401 wrong token, 404, 500 disk error, ...) is a failed
+	// request, not a verdict — before this check a 401 body parsed as
+	// {"valid":false} and was reported as a chain-integrity failure.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
+		return nil, fmt.Errorf("ledger verify returned %d: %s", resp.StatusCode, string(body))
+	}
 	var out LedgerVerifyResult
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, fmt.Errorf("unmarshal verify response: %w (body=%s)", err, string(body))
 	}
 	return &out, nil
+}
+
+// LedgerFindingRecord is one finding entry exactly as the ledger recorded it
+// (GET /ledger/entries, "kind":"finding"). The ledger stores less than a
+// detection Finding: no cause_description or customer_id, and the labels
+// are value_classification / decision_confidence (null when the finding
+// carried no recoverable value).
+type LedgerFindingRecord struct {
+	Seq                 uint64  `json:"seq"`
+	FindingID           string  `json:"finding_id"`
+	AgentID             string  `json:"agent_id"`
+	EntityID            string  `json:"entity_id"`
+	LeakCategory        string  `json:"leak_category"`
+	AmountUSD           *Money  `json:"amount_usd"`
+	ValueClassification *string `json:"value_classification"`
+	DecisionConfidence  *string `json:"decision_confidence"`
+	RecordedAt          string  `json:"recorded_at"`
+	PrevHash            string  `json:"prev_hash"`
+	Hash                string  `json:"hash"`
+	// AmountOutOfContract is true when the ledger holds an amount string
+	// that is not valid money under the current contract (e.g. a legacy
+	// entry above the ADR 0003 section 1a bound). AmountUSD is then null:
+	// the value is flagged, never passed on as if it were valid money.
+	AmountOutOfContract bool `json:"amount_out_of_contract"`
+}
+
+// LedgerEntriesResult is the finding view of GET /ledger/entries.
+type LedgerEntriesResult struct {
+	TotalEntries int                   // every entry, findings and events
+	Findings     []LedgerFindingRecord // finding entries, in seq order
+}
+
+// Entries reads the whole ledger (GET /ledger/entries) and returns its
+// finding entries. Read-only: it never calls a ledger write endpoint.
+// Fails closed on any entry whose kind it does not know, or a finding whose
+// amount_usd is neither a string nor null — an unexpected shape in the
+// evidence ledger is an error to surface, not something to skip.
+func (l *LedgerClient) Entries(ctx context.Context) (*LedgerEntriesResult, error) {
+	var raw []json.RawMessage
+	if err := l.base.doJSON(ctx, http.MethodGet, "/ledger/entries", nil, &raw); err != nil {
+		return nil, err
+	}
+	out := &LedgerEntriesResult{TotalEntries: len(raw), Findings: []LedgerFindingRecord{}}
+	for i, entry := range raw {
+		var head struct {
+			Kind *string `json:"kind"`
+		}
+		if err := json.Unmarshal(entry, &head); err != nil {
+			return nil, fmt.Errorf("ledger entry %d: %w", i, err)
+		}
+		if head.Kind == nil {
+			return nil, fmt.Errorf("ledger entry %d has no kind", i)
+		}
+		switch *head.Kind {
+		case "event":
+			continue
+		case "finding":
+		default:
+			return nil, fmt.Errorf("ledger entry %d has unknown kind %q", i, *head.Kind)
+		}
+		// amount_usd is decoded separately: an out-of-contract string must
+		// be flagged, not make the whole read fail.
+		var wire struct {
+			LedgerFindingRecord
+			AmountUSD json.RawMessage `json:"amount_usd"`
+		}
+		if err := json.Unmarshal(entry, &wire); err != nil {
+			return nil, fmt.Errorf("ledger finding entry %d: %w", i, err)
+		}
+		rec := wire.LedgerFindingRecord
+		rec.AmountUSD = nil
+		amt := bytes.TrimSpace(wire.AmountUSD)
+		switch {
+		case len(amt) == 0 || bytes.Equal(amt, []byte("null")):
+		case amt[0] == '"':
+			var s string
+			if err := json.Unmarshal(amt, &s); err != nil {
+				return nil, fmt.Errorf("ledger finding entry %d amount_usd: %w", i, err)
+			}
+			if m, err := ParseMoney(s); err == nil {
+				rec.AmountUSD = &m
+			} else {
+				rec.AmountOutOfContract = true
+			}
+		default:
+			return nil, fmt.Errorf("ledger finding entry %d: %w: amount_usd must be a string or null, got %s", i, ErrInvalidMoney, string(amt))
+		}
+		out.Findings = append(out.Findings, rec)
+	}
+	return out, nil
 }

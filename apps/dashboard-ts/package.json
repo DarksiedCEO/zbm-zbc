@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --test tests/money.test.ts",
+    "check:dynamic": "node scripts/check-dynamic.mjs"
   },
   "dependencies": {
     "next": "16.3.5",

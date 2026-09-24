@@ -15,7 +15,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from zbm_schema.money import Money, PositiveMoney, quantize_money
+from zbm_schema.money import Money, PositiveMoney, money_context, quantize_money
 
 
 class ServerSideAttributionEvent(BaseModel):
@@ -59,5 +59,7 @@ class ContractTerm(BaseModel):
     @property
     def drift_usd(self) -> Decimal:
         # Exact Decimal subtraction; may be negative (billed above contract),
-        # which callers treat as "no drift". Never serialized.
-        return quantize_money(self.contracted_value_usd - self.actual_billed_value_usd)
+        # which callers treat as "no drift". Never serialized. Both operands
+        # are in [0, MAX_MONEY], so the result is in range and exact.
+        with money_context():
+            return quantize_money(self.contracted_value_usd - self.actual_billed_value_usd)

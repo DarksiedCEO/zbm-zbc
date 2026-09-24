@@ -13,7 +13,10 @@ import (
 )
 
 func TestParseMoney_AcceptsCanonicalTwoDecimalStrings(t *testing.T) {
-	for _, s := range []string{"0.00", "0.01", "2.01", "12.30", "49.99", "120.00", "1000000.05", "99999999999999999999.99"} {
+	// Fix wave 1 (F14): "99999999999999999999.99" used to be listed here as
+	// valid. The contract is now bounded at < 10^15 dollars, so the largest
+	// valid value is MaxMoney; over-bound values are in the reject list below.
+	for _, s := range []string{"0.00", "0.01", "2.01", "12.30", "49.99", "120.00", "1000000.05", "999999999999999.99"} {
 		m, err := ParseMoney(s)
 		if err != nil {
 			t.Errorf("ParseMoney(%q) unexpected error: %v", s, err)
@@ -29,6 +32,7 @@ func TestParseMoney_RejectsEverythingElse(t *testing.T) {
 	bad := []string{
 		"", "12", "12.3", "12.300", ".50", "012.30", "00.00", "-1.00", "+1.00", "1e3", "1.2e1",
 		"NaN", "Infinity", " 12.30", "12.30 ", "12,30", "1,200.00", "$12.30", "abc", "12.3a",
+		"1000000000000000.00", "99999999999999999999.99",
 	}
 	for _, s := range bad {
 		if _, err := ParseMoney(s); err == nil || !errors.Is(err, ErrInvalidMoney) {
@@ -121,7 +125,9 @@ func TestDetectionClient_RejectsFindingWithFloatAmountWithClearError(t *testing.
 // Exact pass-through: the amount string detection-py emitted is the exact
 // string the ledger receives — no float64 in between.
 func TestLedgerClient_AppendFindingPassesAmountThroughExactly(t *testing.T) {
-	for _, amt := range []string{"0.30", "2.01", "49.99", "54.38", "12345678901234567.89"} {
+	// Fix wave 1 (F14): "12345678901234567.89" replaced by the contract
+	// maximum; 17 integer digits are now out of contract.
+	for _, amt := range []string{"0.30", "2.01", "49.99", "54.38", "999999999999999.99"} {
 		var body []byte
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ = io.ReadAll(r.Body)

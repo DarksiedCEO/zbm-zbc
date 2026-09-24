@@ -27,13 +27,16 @@ from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
 from zbm_schema.money import (
     CENT,
+    MAX_MONEY,
     Money,
     PositiveMoney,
+    MoneyRangeError,
     format_money,
+    money_context,
     percent_of,
     quantize_money,
     to_money,
@@ -127,8 +130,11 @@ class DiscountApplication(BaseModel):
 
 class AffiliateAttribution(BaseModel):
     affiliate_id: str
-    click_timestamp: datetime
-    order_timestamp: datetime
+    # Timezone required (fix wave 1): the affiliate agent subtracts these
+    # two, and `aware - naive` raised TypeError -> 500. A naive timestamp is
+    # also an ambiguous instant, so it is rejected at validation (422).
+    click_timestamp: AwareDatetime
+    order_timestamp: AwareDatetime
     attribution_window_hours: int = Field(gt=0)
 
     @property
@@ -148,11 +154,32 @@ class Order(BaseModel):
     source_platform: str  # e.g. "shopify", "amazon", "tiktok_shop", "woocommerce" — informational only
     recovery_attempted: bool = False  # abandoned-cart recovery flow (email/SMS) fired for this order
 
+    @model_validator(mode="after")
+    def _subtotal_within_money_bound(self):
+        # F14 (fix wave 1): each price is <= MAX_MONEY, but quantity is an
+        # unbounded int, so a subtotal could leave the contract range (and
+        # used to crash quantize with decimal.InvalidOperation -> 500). The
+        # check runs in exact integer cents (Python ints never overflow or
+        # round), so it cannot itself raise for any input that got this far.
+        # Rejecting here makes it a 422, and guarantees subtotal_usd — and
+        # every amount derived from it — stays within the contract bound.
+        with money_context():  # scaleb honours the context; 17 digits fit exactly
+            cents = sum(int(li.unit_price_usd.scaleb(2)) * li.quantity for li in self.line_items)
+            max_cents = int(MAX_MONEY.scaleb(2))
+        if cents > max_cents:
+            raise ValueError(
+                f"order subtotal exceeds the maximum money amount {MAX_MONEY} "
+                f"(ADR 0003 section 1a: amounts are < 10^15 dollars)"
+            )
+        return self
+
     @property
     def subtotal_usd(self) -> Decimal:
-        # Decimal * int is exact; the sum is quantized once more for safety
-        # (a no-op for cent-quantized inputs, but it pins the invariant).
-        return quantize_money(sum((li.unit_price_usd * li.quantity for li in self.line_items), Decimal("0")))
+        # Decimal * int is exact under MONEY_CONTEXT (the validator above
+        # bounds the result to <= MAX_MONEY, 17 significant digits); the sum
+        # is quantized once more to pin the invariant.
+        with money_context():
+            return quantize_money(sum((li.unit_price_usd * li.quantity for li in self.line_items), Decimal("0")))
 
 
 class SubscriptionStatus(str, Enum):

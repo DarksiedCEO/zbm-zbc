@@ -25,17 +25,35 @@ type Money struct {
 	s string
 }
 
+// MaxMoney is the largest amount the contract admits (ADR 0003 section 1a,
+// fix wave 1 F14): every money amount is < 10^15 dollars. detection-py
+// rejects anything larger with 422, the dashboard refuses to display it, and
+// this package rejects it on decode, so an out-of-contract amount can never
+// be passed through to the ledger.
+const MaxMoney = "999999999999999.99"
+
+// maxMoneyLen is len(MaxMoney): checked before the regexp so an arbitrarily
+// long string is rejected without scanning it.
+const maxMoneyLen = len(MaxMoney)
+
 // moneyPattern is the wire format: no sign, no leading zeros (except a lone
-// "0"), exactly two fraction digits.
-var moneyPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.[0-9]{2}$`)
+// "0"), at most 15 integer digits, exactly two fraction digits. Go's regexp
+// "$" (without the m flag) matches only at the end of the text, and [0-9]
+// is ASCII-only, so "1.00\n" and fullwidth digits are rejected — the same
+// verdicts as fixtures/money_vectors.json.
+var moneyPattern = regexp.MustCompile(`^(0|[1-9][0-9]{0,14})\.[0-9]{2}$`)
 
 // ErrInvalidMoney is wrapped by every Money validation error.
 var ErrInvalidMoney = errors.New("invalid money")
 
 // ParseMoney validates s against the wire format and returns it as Money.
 func ParseMoney(s string) (Money, error) {
-	if !moneyPattern.MatchString(s) {
-		return Money{}, fmt.Errorf("%w: %q does not match %s (expected e.g. \"12.30\")", ErrInvalidMoney, s, moneyPattern.String())
+	if len(s) > maxMoneyLen || !moneyPattern.MatchString(s) {
+		shown := s
+		if len(shown) > 32 {
+			shown = shown[:32] + "..."
+		}
+		return Money{}, fmt.Errorf("%w: %q does not match %s (expected e.g. \"12.30\", max %s)", ErrInvalidMoney, shown, moneyPattern.String(), MaxMoney)
 	}
 	return Money{s: s}, nil
 }
