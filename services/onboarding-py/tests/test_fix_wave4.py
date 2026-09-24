@@ -342,15 +342,21 @@ def test_r1_body_validation_and_scanning_run_off_the_event_loop(monkeypatch):
 
 def test_r1_scan_budget_refuses_a_body_it_could_not_check(monkeypatch):
     svc = make_service(all_fakes=True)
-    svc.config = replace(svc.config, scan_budget_seconds=1e-9)
+    # Fix wave 5 (NEW-2): the budget is floor + per-KB CPU time; both tiny.
+    svc.config = replace(svc.config, scan_budget_seconds=1e-9, scan_cpu_ms_per_kb=0)
     c = client_for(svc)
     r = c.post("/onboarding/clients", json=start_body())
     assert r.status_code == 422, r.text
     assert r.json()["detail"][0]["type"] == "scan_budget_exceeded"
     assert svc.ledger.events == [] and svc.clients == {}
+    # Fix wave 5 (NEW-2): the budget is the thread's CPU time, so the budget
+    # is spent by burning CPU (this test used time.sleep, i.e. asserted the
+    # wall-clock budget that refused concurrent benign bodies).
     with pytest.raises(redaction.ScanBudgetExceeded):
         with redaction.scan_budget(1e-9):
-            time.sleep(0.001)
+            end = time.thread_time() + 0.002
+            while time.thread_time() < end:
+                pass
             redaction.find_credential("hello")
     assert redaction.find_credential("hello") is None  # no budget outside a request
 

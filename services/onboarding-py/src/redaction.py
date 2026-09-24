@@ -34,6 +34,7 @@ import bisect
 import contextvars
 import logging
 import re
+import threading
 import time
 import unicodedata
 from contextlib import contextmanager
@@ -100,8 +101,17 @@ def _strip_format(text: str) -> str:
     # NFKC folds compatibility forms (fullwidth letters, ligatures, circled
     # letters); Cf removes zero-width space/joiners, soft hyphen, BOM, bidi
     # controls — characters that hide a keyword without changing how it looks.
+    #
+    # Fix wave 5 (NEW-2): same result, without a Python-level step per
+    # character. ASCII text is its own NFKC form and holds no Cf character;
+    # otherwise only the DISTINCT non-ASCII characters are classified.
+    if text.isascii():
+        return text
     t = unicodedata.normalize("NFKC", text)
-    return "".join(ch for ch in t if unicodedata.category(ch) != "Cf")
+    if t.isascii():
+        return t
+    fmt = {ord(ch): None for ch in set(t) if ch >= "\x80" and unicodedata.category(ch) == "Cf"}
+    return t.translate(fmt) if fmt else t
 
 
 def _collapse_separated(text: str) -> str:
@@ -111,7 +121,11 @@ def _collapse_separated(text: str) -> str:
 def normalize(text: str) -> str:
     """The form keyword rules run on: NFKC, format characters removed,
     separated single letters collapsed, casefolded, underscores as spaces."""
-    t = _collapse_separated(_strip_format(text)).casefold()
+    return _normalize_stripped(_strip_format(text))
+
+
+def _normalize_stripped(stripped: str) -> str:
+    t = _collapse_separated(stripped).casefold()
     return _collapse_separated(t.replace("_", " "))
 
 
@@ -329,35 +343,56 @@ def _wave3_shape(raw: str, n: str, leet: str) -> str | None:
     return None
 
 
-# --- per-request scan budget (fix wave 4, R1) -----------------------------------------
+# --- per-request scan budget (fix wave 4, R1; fix wave 5, NEW-2) -----------------------
 #
 # Every pattern here is linear-time and every input is length-capped before
-# it is scanned; the budget is the last line: while a ``scan_budget`` is
+# it is scanned (field limits, the 1 MiB body cap), so the size cap is the
+# real time bound. The budget is the last line: while a ``scan_budget`` is
 # active (the API sets one around the validation of each request body),
-# ``find_credential`` refuses to keep going past the deadline. The check runs
-# between rules, so the overshoot is at most one linear pass. Fail closed:
-# a text that could not be checked is refused, never accepted.
+# ``find_credential`` refuses to keep going past it. The check runs between
+# rules, so the overshoot is at most one linear pass. Fail closed: a text
+# that could not be checked is refused, never accepted.
+#
+# Fix wave 5 (NEW-2): the budget is the CPU time of the REQUEST'S OWN THREAD
+# (``time.thread_time``), not wall-clock time. Every request shares the GIL,
+# so a wall-clock budget charged one request for the others' work: five
+# concurrent benign 416 KB bodies were all refused. Waiting for the GIL (or
+# for anything else) costs no CPU time of the waiting thread.
+#
+# The scope also memoizes verdicts: the ingest check (``refuse_credentials``)
+# and the second layer (``scrub``) used to scan every clean string twice.
+# ``find_credential`` is a pure function of its text, so within one request
+# the verdict for an identical string is reused (the memo lives only as long
+# as the request's scope and holds strings the request already holds).
 
-_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("scan_deadline", default=None)
+_DEADLINE: contextvars.ContextVar[tuple[int, float] | None] = contextvars.ContextVar("scan_deadline", default=None)
+_MEMO: contextvars.ContextVar[dict | None] = contextvars.ContextVar("scan_memo", default=None)
+_MISS = object()
 
 
 class ScanBudgetExceeded(RuntimeError):
-    """The credential checks of one request did not finish within the budget."""
+    """The credential checks of one request used more than their CPU budget."""
 
 
 @contextmanager
-def scan_budget(seconds: float) -> Iterator[None]:
-    token = _DEADLINE.set(time.monotonic() + seconds)
+def scan_budget(cpu_seconds: float) -> Iterator[None]:
+    """Scope of one request's credential checks: at most ``cpu_seconds`` of
+    this thread's CPU time, and a per-scope verdict memo."""
+    token = _DEADLINE.set((threading.get_ident(), time.thread_time() + cpu_seconds))
+    mtoken = _MEMO.set({})
     try:
         yield
     finally:
+        _MEMO.reset(mtoken)
         _DEADLINE.reset(token)
 
 
 def _check_budget() -> None:
     deadline = _DEADLINE.get()
-    if deadline is not None and time.monotonic() > deadline:
-        raise ScanBudgetExceeded("credential checks exceeded the per-request time budget")
+    # The budget is this thread's CPU clock; a scope is only ever entered and
+    # checked on one thread (the API's sync body dependency).
+    if deadline is not None and deadline[0] == threading.get_ident() and time.thread_time() > deadline[1]:
+        raise ScanBudgetExceeded("credential checks exceeded the per-request CPU budget")
 
 
 def find_credential(text: str) -> str | None:
@@ -365,9 +400,21 @@ def find_credential(text: str) -> str | None:
     the value), or None. Runs on normalized forms; see module docstring."""
     if not isinstance(text, str) or not text:
         return None
+    memo = _MEMO.get()
+    if memo is not None:
+        hit = memo.get(text, _MISS)
+        if hit is not _MISS:
+            return hit
+    verdict = _find_credential_uncached(text)
+    if memo is not None:
+        memo[text] = verdict
+    return verdict
+
+
+def _find_credential_uncached(text: str) -> str | None:
     _check_budget()
     raw = _strip_format(text)  # case kept: key prefixes are case-sensitive
-    n = normalize(text)
+    n = _normalize_stripped(raw)
     leet = n.translate(_LEET)
     if _BEARER.search(raw):
         return "bearer_token"

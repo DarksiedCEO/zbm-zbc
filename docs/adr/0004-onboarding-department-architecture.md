@@ -48,6 +48,20 @@ The WIP commit was replaced; it doesn't remain in history.
      deferred to the end of a successful operation.
    - If a ledger write fails before any outside effect, nothing happened. State is
      unchanged, and the API returns 503 `{"proceeded": false}`.
+   - **Unknown outcome** (fix wave 5, NEW-4). Earlier, every httpx error counted as
+     a certain failure. Through a lossy proxy the ledger returned 201 while the API
+     said `proceeded: false`. `HttpLedgerClient` now classifies each failure:
+     - Not recorded: local contract validation, connect/pool errors (nothing sent),
+       4xx other than 409, and 503. Ledger-rust's only 503 is its load-shed
+       (`bin/server.rs` `shed`), written before the request is read.
+     - Unknown: timeout, reset or disconnect after sending, 5xx other than 503, and
+       409.
+     An unknown outcome returns 503 `{"proceeded": "unknown", "ledger_write":
+     "unknown", "retry": "..."}` with `Retry-After`. It never says "did not
+     proceed". The staged state stays uncommitted and the subject's sequence does not
+     advance, so the identical retry derives the same ids, gets 200 for what the
+     ledger holds, and commits. A 409 carries a different instruction: retrying won't
+     resolve it, so an operator must reconcile.
    - If a ledger write fails after an outside effect, nothing further happens. Only
      result records can fail at that point. State reflects what did happen (for
      example `payout_active` / `handoff_accepted`, so a retry never repeats it). The
@@ -266,11 +280,36 @@ The WIP commit was replaced; it doesn't remain in history.
        loop, so bodies are now validated in a sync dependency, which runs in the
        threadpool. Exception handlers that scrub are sync too. `/health` is `async`
        and does no work, so it answers even when every worker thread is busy.
-     - A time budget. Each body's credential checks run under `scan_budget`
-       (`ONBOARDING_SCAN_BUDGET_SECONDS`, default 5 s). `find_credential` checks the
-       deadline between rules; a body not checked in time is refused (422
-       `scan_budget_exceeded`), never accepted. Measured worst case is about 1.6 s for
-       1 MB of hostile text.
+     - A CPU budget (revised in fix wave 5, NEW-2). Each body's credential checks run
+       under `scan_budget`, and `find_credential` checks it between rules. A body not
+       checked within it is refused (422 `scan_budget_exceeded`), never accepted.
+       - The wave 4 budget was 5 s of wall-clock time. Every request shares the GIL,
+         so concurrent requests spent each other's budget: 5 concurrent benign 416 KB
+         bodies were all refused.
+       - The budget now counts the request thread's own CPU time
+         (`time.thread_time`). It is `ONBOARDING_SCAN_BUDGET_SECONDS` (1 s) plus
+         `ONBOARDING_SCAN_CPU_MS_PER_KB` (10 ms) per KB of body.
+       - Measured cost after the fix: 1.0–1.3 ms/KB for benign max-size bodies and
+         ~1.8 ms/KB at worst for hostile ones, so the budget is about 5x headroom.
+         The scanners are linear, so the size cap is the real time bound; the budget
+         is a backstop.
+       - Concurrency is bounded explicitly by `HeavyScanGate` (`api.py`). Bodies over
+         64 KiB take one of 2 slots. At most 16 wait, each for up to 30 s. Beyond that
+         the API returns 503 with `Retry-After` and `proceeded: false`, never 422.
+       - Per-request cost dropped: 1.65 s to 0.50 s of CPU for the 416 KB body. A
+         clean string is scanned once per request, not twice (the ingest check and
+         the `scrub` layer share a per-request verdict memo). The format-character
+         strip classifies only the distinct non-ASCII characters.
+     - The server itself (fix wave 5, NEW-3). `python3 -m api` runs `src/serve.py`,
+       modelled on detection-py's launcher. Default uvicorn (httptools) buffered a
+       100–200 MB header unauthenticated and never closed idle or half-sent sockets.
+       The launcher provides:
+       - h11, with a 16 KiB incomplete-head cap;
+       - a request-head deadline from connect and after each response (10 s);
+       - a keep-alive timeout (5 s);
+       - `limit_concurrency` (128).
+       `InputLimits` adds an exact 16 KiB head check (431) and a body-read deadline
+       (30 s, 408).
      - `tests/test_fix_wave4.py` runs every pattern (78) against hostile shapes and
        asserts under 50 ms per 100 KB. It checks that the scanners scale linearly to
        1 MB, and it runs a real uvicorn that must answer `/health` within 1 s while
@@ -401,6 +440,9 @@ The WIP commit was replaced; it doesn't remain in history.
 - A date of birth before 1900-01-01, or one that makes the applicant older than 120
   on the server's age date (UTC−12), is a 422 before anything is recorded (fix wave 4).
   `0001-01-01` used to be approved.
+  A date of birth after the server's date is also a 422 (fix wave 5, LOW-E).
+  `9999-12-31` used to be accepted and declined as "under 18". The server's date here
+  is the latest calendar date on Earth (UTC+14), so no real birth date is refused.
 - A non-regulated brand that asks for owned posting doesn't get it. The request is noted
   for Andre.
 
@@ -455,6 +497,12 @@ The WIP commit was replaced; it doesn't remain in history.
   - Multi-event operations aren't atomic: a failure mid-way leaves the earlier events.
     Event ids are deterministic, so a retry replays them (200) instead of duplicating
     them.
+  - After a failed or unknown write, the identical retry resolves it (fix wave 5,
+    NEW-4). Nothing forces the client to send it. If a different operation on the same
+    subject completes first, the subject's sequence advances. Any record the earlier
+    attempt left in the ledger then stays an orphan: a decision recorded for an action
+    that was never committed. Ledger-rust has no lookup by event id, so the service
+    can't tell afterwards. This was already true for certain mid-way failures.
   - A result record can fail after its outside effect has happened. The API reports
     that exactly (`proceeded: true, completed: false`). Since fix wave 3 the record is
     owed, not lost: the next operation on that subject writes it with the same id.

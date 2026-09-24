@@ -81,9 +81,27 @@ class OnboardingConfig:
     # Fix wave 4 (R1): hard input caps, enforced before any scanning.
     max_body_bytes: int = 1_048_576  # whole request body (Content-Length and while streaming) -> 413
     max_request_target_bytes: int = 8192  # path + query string -> 414
-    # Wall-clock budget for the credential checks of one request body; a
-    # body that cannot be checked in time is refused (422), never accepted.
-    scan_budget_seconds: float = 5.0
+    # CPU budget for the credential checks of one request body (fix wave 5,
+    # NEW-2): the request thread's OWN CPU time (time.thread_time), never
+    # wall-clock time, so waiting for the GIL behind other requests costs
+    # nothing. Budget = scan_budget_seconds + scan_cpu_ms_per_kb * body KB.
+    # Derivation: the scanners are linear; the worst measured cost on the
+    # dev box was ~1.8 ms of CPU per KB (hostile "password is x" text), benign
+    # bodies 1.0-1.3 ms/KB; 10 ms/KB is ~5x headroom (a 1 MiB body gets
+    # ~11 s). A body that cannot be checked within it is refused (422).
+    scan_budget_seconds: float = 1.0
+    scan_cpu_ms_per_kb: float = 10.0
+    # Heavy scans (body over heavy_body_bytes) are bounded explicitly: at
+    # most heavy_scan_slots run at once (CPU-bound under one GIL, more slots
+    # add no throughput), at most heavy_scan_max_waiting queue for a slot,
+    # each for at most heavy_scan_wait_seconds. Busy -> 503 + Retry-After
+    # ("nothing was done, retry"), never a 422.
+    heavy_body_bytes: int = 65_536
+    heavy_scan_slots: int = 2
+    heavy_scan_max_waiting: int = 16
+    heavy_scan_wait_seconds: float = 30.0
+    # A request body must arrive within this many seconds (NEW-3 sweep) -> 408.
+    body_read_timeout_seconds: float = 30.0
     # Stable instance component of every derived event id (ADR 0004, "Event
     # ids"): a restarted process with the same id derives the same ids for
     # the same first operations, so its retries dedupe at the ledger.
@@ -102,8 +120,13 @@ class OnboardingConfig:
             raise ConfigError("andre_nudge_max_attempts must be at least 1")
         if self.escalation_push_max_attempts < 1:
             raise ConfigError("escalation_push_max_attempts must be at least 1")
-        if self.max_body_bytes < 1 or self.max_request_target_bytes < 1 or self.scan_budget_seconds <= 0:
+        if self.max_body_bytes < 1 or self.max_request_target_bytes < 1 or self.scan_budget_seconds <= 0 \
+                or self.scan_cpu_ms_per_kb < 0:
             raise ConfigError("input caps and the scan budget must be positive")
+        if self.heavy_body_bytes < 1 or self.heavy_scan_slots < 1 or self.heavy_scan_max_waiting < 0 \
+                or self.heavy_scan_wait_seconds <= 0 or self.body_read_timeout_seconds <= 0:
+            raise ConfigError("heavy-scan limits and the body read timeout must be positive "
+                              "(heavy_scan_max_waiting may be 0)")
         if not self.instance_id or not all(ch.isascii() and (ch.isalnum() or ch in "._:-") for ch in self.instance_id) \
                 or len(self.instance_id) > 64:
             raise ConfigError("ONBOARDING_INSTANCE_ID must be 1-64 characters of [A-Za-z0-9._:-]")
@@ -149,6 +172,14 @@ def load_config(env: Mapping[str, str] | None = None) -> OnboardingConfig:
         kwargs["max_request_target_bytes"] = int(env["ONBOARDING_MAX_REQUEST_TARGET_BYTES"])
     if env.get("ONBOARDING_SCAN_BUDGET_SECONDS"):
         kwargs["scan_budget_seconds"] = float(env["ONBOARDING_SCAN_BUDGET_SECONDS"])
+    for var, key, conv in (("ONBOARDING_SCAN_CPU_MS_PER_KB", "scan_cpu_ms_per_kb", float),
+                           ("ONBOARDING_HEAVY_BODY_BYTES", "heavy_body_bytes", int),
+                           ("ONBOARDING_HEAVY_SCAN_SLOTS", "heavy_scan_slots", int),
+                           ("ONBOARDING_HEAVY_SCAN_MAX_WAITING", "heavy_scan_max_waiting", int),
+                           ("ONBOARDING_HEAVY_SCAN_WAIT_SECONDS", "heavy_scan_wait_seconds", float),
+                           ("ONBOARDING_BODY_READ_TIMEOUT_SECONDS", "body_read_timeout_seconds", float)):
+        if env.get(var):
+            kwargs[key] = conv(env[var])
     if env.get("ONBOARDING_INSTANCE_ID"):
         kwargs["instance_id"] = env["ONBOARDING_INSTANCE_ID"]
     return OnboardingConfig(**kwargs)

@@ -16,7 +16,13 @@ publishes, client-memory writes) are deferred to the end of a successful
 operation.
 
 - A ledger write that fails BEFORE any outside effect: nothing happened,
-  state is unchanged, the API answers 503 ``proceeded: false``.
+  state is unchanged, the API answers 503 ``proceeded: false`` — or, when
+  the write's outcome is UNKNOWN (the reply was lost after sending; fix wave
+  5, NEW-4), 503 ``proceeded: "unknown"`` with an instruction to retry the
+  identical request. Either way the staged state stays uncommitted and the
+  subject's sequence does not advance, so the retry derives the same event
+  ids, the ledger answers 200 for any it already holds, and the retry
+  commits the operation.
 - A ledger write that fails AFTER an outside effect (only result records
   can): nothing further happens, state reflects what did happen, and the
   API answers 503 ``proceeded: true, completed: false`` naming every
@@ -124,6 +130,7 @@ BUSINESS_TZ = ZoneInfo("America/Los_Angeles")
 # America/Los_Angeles date and the UTC date, so no applicant is approved
 # while still 17 in their own time zone.
 AGE_EVALUATION_TZ = timezone(timedelta(hours=-12))
+LATEST_TZ = timezone(timedelta(hours=14))
 
 
 # --- errors the API maps to status codes ---------------------------------------
@@ -354,6 +361,11 @@ class OnboardingService:
         """The date clipper age is computed on: the server's date at UTC-12."""
         return self.now().astimezone(AGE_EVALUATION_TZ).date()
 
+    def latest_calendar_date(self):
+        """The server's date in the latest time zone on Earth (UTC+14): no
+        real event can be dated after it."""
+        return self.now().astimezone(LATEST_TZ).date()
+
     def _not_in_future(self, when: Optional[datetime], what: str) -> None:
         if when is not None and when > self.now():
             raise Invalid(f"{what} is in the future by the server's clock; refused (no request can move the clock)")
@@ -415,7 +427,7 @@ class OnboardingService:
             raise
         except LedgerWriteError as exc:
             if self._effects:
-                raise LedgerWriteAfterEffects(str(exc), self._effects) from None
+                raise LedgerWriteAfterEffects(str(exc), self._effects, exc.outcome, exc.retry_hint) from None
             raise
 
     def _record(self, event_type: str, actor: str, subject_id: str, payload: dict, summary: str) -> str:
@@ -1675,6 +1687,12 @@ class OnboardingService:
                 raise Conflict("creator already applied")
             # Age is computed on the SERVER's date (UTC-12), never a caller date (F1).
             evaluated_on = self.age_evaluation_date()
+            if app.date_of_birth is not None and app.date_of_birth > self.latest_calendar_date():
+                # Fix wave 5 (LOW-E): a date of birth after today's date (the
+                # latest calendar date anywhere on Earth, UTC+14, so no real
+                # birth date is refused) is not a date of birth.
+                raise Invalid("date_of_birth is in the future by the server's date; a date of birth cannot be "
+                              "later than today")
             if app.date_of_birth is not None and i11.age_on(app.date_of_birth, evaluated_on) > MAX_PLAUSIBLE_AGE_YEARS:
                 # Fix wave 4 (D1): refused before anything is recorded.
                 raise Invalid(f"date_of_birth implies an age over {MAX_PLAUSIBLE_AGE_YEARS} on the server's date; "
