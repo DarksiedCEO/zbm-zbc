@@ -26,6 +26,7 @@ Rules:
 
 from __future__ import annotations
 
+import bisect
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -127,10 +128,31 @@ _CREDENTIAL_ASK = re.compile(
     r"(?i)\b(what|tell|show|give|send|reveal|read)\b.{0,40}\b(password|credentials?|login details|api key|token)\b"
 )
 
-_CHANGE_ASK = re.compile(
-    r"(?i)\b(change|increase|raise|lower|cut|pause|stop|turn off|turn on|edit|update|delete|remove|launch)\b"
-    r".{0,40}\b(budget|bids?|campaigns?|ad account|ads|store|prices?|products?|discounts?)\b"
-)
+# "change the budget", "pause my campaigns": an action word, then an account
+# object within 40 characters on the same line. Fix wave 4 (R1): the single
+# pattern ``action.{0,40}object`` re-tried the 41-character window after
+# EVERY action word ("cut cut cut ..."), linear but ~0.5 us per character;
+# ``_asks_for_change`` finds both word lists once and pairs them (same answer).
+_CHANGE_VERB = re.compile(r"(?i)\b(change|increase|raise|lower|cut|pause|stop|turn off|turn on|edit|update|delete|remove|launch)\b")
+_CHANGE_OBJECT = re.compile(r"(?i)\b(budget|bids?|campaigns?|ad account|ads|store|prices?|products?|discounts?)\b")
+_CHANGE_WINDOW = 40
+
+
+def _asks_for_change(message: str) -> bool:
+    objects = [m.start() for m in _CHANGE_OBJECT.finditer(message)]
+    if not objects:
+        return False
+    newlines = [i for i, ch in enumerate(message) if ch == "\n"]
+    for v in _CHANGE_VERB.finditer(message):
+        lo = v.end()
+        hi = lo + _CHANGE_WINDOW
+        k = bisect.bisect_left(newlines, lo)  # "." never crosses a line break
+        if k < len(newlines):
+            hi = min(hi, newlines[k])
+        j = bisect.bisect_left(objects, lo)
+        if j < len(objects) and objects[j] <= hi:
+            return True
+    return False
 CHANGE_REQUEST_REPLY = (
     "Nothing in your account changes without your explicit yes for that specific change. "
     "I'll write the exact change down for you to confirm first; until you confirm it, we only read."
@@ -163,7 +185,7 @@ def decide_reply(message: str, spanish_enabled: bool = False) -> ReplyDecision:
         return ReplyDecision("credential_request", check_outbound(CREDENTIAL_REQUEST_REPLY))
     if asks_for_guarantee(message):
         return ReplyDecision("guarantee_request", check_outbound(NO_GUARANTEE_REPLY))
-    if _CHANGE_ASK.search(message):
+    if _asks_for_change(message):
         return ReplyDecision("account_change_request", check_outbound(CHANGE_REQUEST_REPLY))
     if _SPANISH_REQUEST.search(message) and not spanish_enabled:
         return ReplyDecision("spanish_request", check_outbound(SPANISH_NOT_YET_REPLY))

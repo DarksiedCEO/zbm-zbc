@@ -49,9 +49,24 @@ _GUARANTEE = re.compile(
 _DOLLAR = re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?")
 # A figure written in words ("5,000 dollars", "USD 300") is still a dollar
 # figure; it can never carry the LabeledValue suffix, so it is always blocked.
-_WORD_DOLLAR = re.compile(r"(?i)\b\d[\d,]*(?:\.\d+)?\s*(?:k\s*)?(?:dollars|bucks|usd)\b|\busd\s*\d")
+#
+# Fix wave 4 (R1): the old ``\b\d[\d,]*...`` was retried at every digit after
+# a comma of one long "1,1,1,..." run, each retry rescanning the run
+# (quadratic). Every such start ends at the same place (the suffix can only
+# follow the run), so ONE start per run is tried — the first digit a word
+# boundary allows:
+#   - the run starts with a digit that is not glued to a word character;
+#   - the run starts with commas (the digit after them is at a boundary);
+#   - the run is glued to a letter/underscore: the first digit after a comma
+#     inside it (the atomic group commits to that one).
+_WORD_DOLLAR = re.compile(
+    r"(?i)(?:(?<![\w,])\d|(?<![\d,]),++\d|(?<=[^\W\d])(?>\d[\d,]*?,(?=\d))\d)[\d,]*+"
+    r"(?:\.\d+)?\s*(?:k\s*)?(?:dollars|bucks|usd)\b|\busd\s*\d"
+)
+# Matched AT the end of a ``$`` figure (``match(text, pos)``): no slicing of
+# the rest of the text per figure (fix wave 4, R1: that was quadratic).
 _LABEL_SUFFIX = re.compile(
-    r"^\s\((observed|attributed|incremental|financially_verified), (low|medium|high|very_high) confidence\)"
+    r"\s\((observed|attributed|incremental|financially_verified), (low|medium|high|very_high) confidence\)"
 )
 
 
@@ -63,7 +78,7 @@ def guarantee_violations(text: str) -> list[str]:
 def unlabeled_dollar_figures(text: str) -> list[str]:
     bad = []
     for m in _DOLLAR.finditer(text):
-        if not _LABEL_SUFFIX.match(text[m.end():]):
+        if not _LABEL_SUFFIX.match(text, m.end()):
             bad.append(m.group(0))
     return bad
 
@@ -86,7 +101,10 @@ _INJECTION = [
     ("ignore_instructions", re.compile(r"(?i)\b(ignore|disregard|forget|override|bypass)\b.{0,40}\b(previous|prior|above|all|your|the|any)\b.{0,20}\b(instructions?|rules?|guidelines?|policy|policies|prompt|guardrails?)")),
     ("role_reassignment", re.compile(r"(?i)\b(you are now|act as|pretend (?:to be|you are)|from now on you)\b")),
     ("system_prompt_probe", re.compile(r"(?i)\b(system prompt|developer message|hidden instructions?|jailbreak)\b")),
-    ("fake_role_marker", re.compile(r"(?im)^\s*(system|assistant|developer)\s*:")),
+    # ``[^\S\n]*`` not ``\s*`` (fix wave 4, R1): ``^\s*`` was retried at every
+    # line start of a run of blank lines, rescanning the run each time. A
+    # marker after blank lines is still found, from its own line start.
+    ("fake_role_marker", re.compile(r"(?im)^[^\S\n]*(system|assistant|developer)\s*:")),
     ("ai_directive_comment", re.compile(r"(?i)<!--\s*(ai|assistant|agent|llm|bot)\b")),
     ("approval_forgery", re.compile(r"(?i)\b(auto[- ]?approve|approve (?:this|me|all)|mark (?:as )?(?:approved|verified|compliant)|skip (?:the )?(?:vetting|verification|compliance|checks?))\b")),
     ("credential_exfiltration", re.compile(r"(?i)\b(reveal|show|send|print|output|tell me)\b.{0,30}\b(password|credential|token|secret|api key)s?\b")),

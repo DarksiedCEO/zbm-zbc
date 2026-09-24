@@ -9,7 +9,7 @@ window.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Literal, Optional, Union
+from typing import Annotated, ClassVar, Literal, Optional, Union
 
 from pydantic import Field, StringConstraints, model_validator
 
@@ -58,18 +58,16 @@ class FactIn(Inbound):
     # service (a future timestamp would out-rank a newer real fact).
     observed_at: AwareDatetime
 
-    @model_validator(mode="before")
-    @classmethod
-    def _field_and_value_together(cls, data: Any) -> Any:
+    @model_validator(mode="after")
+    def _field_and_value_together(self) -> "FactIn":
         # "shopify_password" + "tangerine" is a credential even though
-        # neither string is one on its own.
-        if isinstance(data, dict) and isinstance(data.get("field"), str):
-            v = data.get("value")
-            vals = v if isinstance(v, list) else [v]
-            for x in vals:
-                if isinstance(x, (str, int)) and not isinstance(x, bool) and find_credential(f"{data['field']}: {x}"):
-                    raise ValueError(CREDENTIAL_REFUSAL)
-        return data
+        # neither string is one on its own. After validation (fix wave 4,
+        # R1): the field and value lengths are bounded before this scan.
+        vals = self.value if isinstance(self.value, list) else [self.value]
+        for x in vals:
+            if isinstance(x, (str, int)) and not isinstance(x, bool) and find_credential(f"{self.field}: {x}"):
+                raise ValueError(CREDENTIAL_REFUSAL)
+        return self
 
 
 class FactsRequest(Inbound):

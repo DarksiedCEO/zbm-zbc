@@ -92,6 +92,29 @@ status says it is not certified.
     in-memory state, with and without the intake refusal and output scrub.
   - Log records keep their shape when scrubbed, so uvicorn's access lines
     work, with the request path redacted (`test_d1_*` runs the real server).
+- **Hostile input can't stall the service** (fix wave 4, R1). AEGIS found the
+  credential scanner quadratic: 20,000 `a` took 7.6 s, a 60 KB message held
+  the process 132 s, and a 30 KB URL blocked `/health` for 20.8 s without auth.
+  - Every regex in the service is linear-time on hostile input. The
+    quadratic ones were rewritten (anchored at run starts, possessive or
+    atomic groups, or a two-step scan) with the same results. A differential
+    run against the old code over 240,000 random texts found no difference
+    except where the new form redacts more (a URL scheme starting with a digit).
+  - Caps come before any scan. Field lengths are checked first (`Inbound`
+    validates `mode="after"`, and every inbound string has a `max_length`).
+    A body over 1 MiB is a 413 (Content-Length, or counted as it arrives). A
+    path plus query over 8 KiB is a 414. A log line is cut to a bounded prefix
+    before it is scrubbed.
+  - Scanning never runs on the event loop. Bodies are validated in a sync
+    dependency (the threadpool), exception handlers are sync, and `/health`
+    is `async` and does no work.
+  - Each body's credential checks run under a time budget (5 s). A body that
+    can't be checked in time is refused (422 `scan_budget_exceeded`).
+  - `tests/test_fix_wave4.py` runs every pattern against hostile shapes (runs
+    of `a`, `a@`, `a/`, `a:`, alternating classes, and each pattern's own
+    literals). It asserts under 50 ms per 100 KB, and linear scaling to 1 MB
+    for the whole scanners. A real-uvicorn test sends max-size hostile URLs
+    and bodies while polling `/health`, which must answer within 1 s.
 - **Only Andre can make Andre's decisions.**
   - Acknowledging or resolving an escalation needs his approval token
     (`approval_token`: HMAC-SHA256 keyed by `ONBOARDING_ANDRE_APPROVAL_KEY` over
@@ -149,6 +172,13 @@ status says it is not certified.
   - The 1099 threshold is configuration ($2,000.00 for 2026). An
     unconfigured year is treated as reportable.
   - A W-9 must be on file before payout activation.
+  - Payments are tracked only for a creator whose activation is complete:
+    vetting approved, gates 14 and 15 passed, payout account active. A W-9
+    alone isn't enough. Otherwise the answer is 409 with the reason, and
+    nothing is recorded (fix wave 4, owner ruling: refuse).
+  - A date of birth before 1900, or one that makes the applicant older than
+    120 on the server's date, is a 422 (fix wave 4). `0001-01-01` used to be
+    approved.
   - Spanish is off, and turning it on refuses startup.
 
 ## Run
@@ -174,6 +204,10 @@ Optional configuration (all open items have fail-closed defaults; see `src/confi
 | `ONBOARDING_P1_WORDING_COUNSEL_APPROVED`, `ONBOARDING_P23_CLAUSE_COUNSEL_APPROVED` | Counsel sign-offs |
 | `ONBOARDING_ANDRE_APPROVAL_KEY` | Andre's approval key (playbook changes, acknowledging and resolving escalations); unset means none of them is possible |
 | `ONBOARDING_CONTRACT_STORAGE=in_memory` | Local demos only; not the decided storage |
+| `ONBOARDING_MAX_BODY_BYTES` | Request body cap, default 1048576 (1 MiB); over it is a 413 |
+| `ONBOARDING_MAX_REQUEST_TARGET_BYTES` | Path plus query cap, default 8192; over it is a 414 |
+| `ONBOARDING_SCAN_BUDGET_SECONDS` | Time budget for one body's credential checks, default 5 |
+| `ONBOARDING_INSTANCE_ID` | Stable instance id in the event ids of `start_client` and `apply_creator`, default `onboarding-1`. Give each concurrently running instance its own. |
 
 Live runs should use the real ledger-rust (`cargo build --release` in
 `services/ledger-rust`, then `LEDGER_SERVICE_TOKEN=... LEDGER_PORT=... target/release/server`).
@@ -207,7 +241,7 @@ Every route except `/health` needs `Authorization: Bearer <token>`.
 ## Tests
 
 ```bash
-cd services/onboarding-py && python3 -m pytest -q     # 462 passed (fix wave 3, Sep 24 2026)
+cd services/onboarding-py && python3 -m pytest -q     # 577 passed (fix wave 4, Sep 24 2026)
 ```
 
 Tests are organised by certification type:
@@ -220,11 +254,14 @@ Tests are organised by certification type:
 | `test_fix_wave1.py` | Fix wave 1 regressions (F1, F2, F4, F9, F10, F11, F14–F16, L1), including the record-first harness | 104 |
 | `test_fix_wave2.py` | Fix wave 2: nudge counted only on delivery, bounded retries, warning unaffected (L2); no commitment without its record (L3) | 10 |
 | `test_fix_wave3.py` | Fix wave 3: stage then commit and retries that finish (N2), owed result records (N7), credential shapes, redacted storage and the state-inspecting spray (N5), the shared money vectors (F15), the real-server access log (D1), human-request dedupe and briefing retry on tick | 183 |
+| `test_fix_wave4.py` | Fix wave 4: linear-time scanning, input caps, off-loop validation, scan budget and a real-uvicorn `/health` test under attack (R1); owed audit rulings, no second detection call (A1); payments only after activation (P1); DOB plausibility (D1); restart-stable ids (I1). `redos_harness.py` builds the hostile inputs. | 115 |
 | `test_unit_*.py` | Unit tests | 84 |
 | `test_auth_and_entrypoint.py` | Auth, docs, real-socket bind | 14 |
 
 No test makes a network call outside loopback. The entrypoint test spawns
-the real process on 127.0.0.1/127.0.0.2 and reads `/proc/net/tcp`.
+the real process on 127.0.0.1/127.0.0.2 and reads `/proc/net/tcp`. Tests
+that start a real server bind only ports in `ONBOARDING_TEST_PORT_RANGE`
+(default 19920–19939).
 **Independent review (type 4) is not part of this build.**
 
 ## Known gaps and stand-ins, stated plainly
@@ -245,7 +282,15 @@ See ADR 0004 "Honest gaps" for the full list. The main ones:
   and Shopify facts are drafts that were never verified, so steps and
   receipts are held from clients. There is no route to mark them verified.
 - **State is in-process memory** and is lost on restart. It's one process
-  with one lock.
+  with one lock, so a long operation (up to about 2 s for a 1 MiB hostile
+  body) delays others, though never `/health`.
+  - After a restart, a retried `start_client` or `apply_creator` derives
+    the same event ids (from `ONBOARDING_INSTANCE_ID`), so the ledger
+    dedupes it (fix wave 4). Every other operation needs the state the
+    restart lost (404); their ids also carry a per-process boot id, so a new
+    event after a restart never takes the id of an old one.
+  - An owed result record is still lost if the process restarts before the
+    next operation writes it. Persistence isn't built.
 - **Auth is one shared bearer token**, plus Andre's HMAC approval key for the
   actions attributed to him: playbook changes, and acknowledging or resolving
   escalations. There's no other per-caller identity.

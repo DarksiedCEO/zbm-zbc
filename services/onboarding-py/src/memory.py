@@ -57,9 +57,40 @@ class ClientMemoryStore:
         return len(self._walls)
 
 
-_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
+# Fix wave 4 (R1): both used to be retried at every character of a long
+# run (quadratic); now each run is tried once, with the same replacements:
+# - ``_EMAIL`` starts where its local-part run starts; ``_EMAIL_AT`` is tried
+#   only exactly where the previous e-mail ended (the old pattern restarted
+#   there too, e.g. "a@b.cc1@d.ee" is two e-mails) — see ``_strip_emails``.
+# - ``_URL``'s bare-domain form starts once per [\w-] run (its leading
+#   hyphens, group 1, are kept: the old ``\b`` started at the first word
+#   character), or right after a matched domain (".com-x.com": the old
+#   pattern restarted at the hyphen and replaced it too).
+_EMAIL = re.compile(r"(?<![^@\s])[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
+_EMAIL_AT = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
 _PHONE = re.compile(r"\+?\d[\d\s().-]{7,}\d")
-_URL = re.compile(r"(?i)\b(?:https?://|www\.)\S+|\b[\w-]+\.(?:com|net|org|io|co|shop|store)\b")
+_TLD = r"\.(?:com|net|org|io|co|shop|store)\b"
+_URL = re.compile(
+    rf"(?i)\b(?:https?://|www\.)\S+|(?<![\w-])(-*+)\w[\w-]*+{_TLD}"
+    rf"|(?:(?<=\.com)|(?<=\.net)|(?<=\.org)|(?<=\.io)|(?<=\.co)|(?<=\.shop)|(?<=\.store))\b[\w-]++{_TLD}"
+)
+
+
+def _strip_emails(s: str) -> str:
+    out, pos, glued = [], 0, False
+    while True:
+        m = _EMAIL_AT.match(s, pos) if glued else None
+        if m is None:
+            m = _EMAIL.search(s, pos)
+        if m is None:
+            break
+        out.append(s[pos:m.start()])
+        out.append("[email]")
+        pos, glued = m.end(), True
+    out.append(s[pos:])
+    return "".join(out)
+
+
 _LONG_NUM = re.compile(r"\b\d{5,}\b")
 _ID_KEYS = {
     "client_id", "creator_id", "brand_id", "name", "business_name", "legal_name", "email", "phone",
@@ -74,8 +105,8 @@ def strip_identifiers(obj: Any, known_names: tuple[str, ...] = ()) -> Any:
     if isinstance(obj, (list, tuple)):
         return [strip_identifiers(v, known_names) for v in obj]
     if isinstance(obj, str):
-        s = _EMAIL.sub("[email]", obj)
-        s = _URL.sub("[url]", s)
+        s = _strip_emails(obj)
+        s = _URL.sub(lambda m: f"{m.group(1) or ''}[url]", s)
         s = _PHONE.sub("[phone]", s)
         s = _LONG_NUM.sub("[number]", s)
         for n in known_names:

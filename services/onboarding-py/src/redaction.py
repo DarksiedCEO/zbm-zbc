@@ -30,10 +30,14 @@ structural layer still holds for every field built to carry access.
 
 from __future__ import annotations
 
+import bisect
+import contextvars
 import logging
 import re
+import time
 import unicodedata
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 REDACTED = "[REDACTED]"
 # What an already-redacted span counts as when a text is re-checked: a
@@ -62,8 +66,19 @@ _PREFIXED = re.compile(
     r"\b(sk_(?:live|test)_[A-Za-z0-9]{6,}|rk_(?:live|test)_[A-Za-z0-9]{6,}|shp(?:at|ss|ca|pa)_[A-Za-z0-9]{8,}|"
     r"EAA[A-Za-z0-9]{20,}|ya29\.[A-Za-z0-9_\-.]{10,}|1//[A-Za-z0-9_\-]{10,}|gh[pousr]_[A-Za-z0-9]{10,}|"
     r"github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_\-]{16,}|AIza[A-Za-z0-9_\-]{30,}|"
-    r"(?:AKIA|ASIA)[0-9A-Z]{12,}|xox[abprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]*|"
+    r"(?:AKIA|ASIA)[0-9A-Z]{12,}|xox[abprs]-[A-Za-z0-9-]{10,}|"
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----)"
+)
+# JWT (header.payload.signature, header starting "eyJ"). Linear time (fix
+# wave 4, R1): the old ``\beyJ[...]{10,}\.`` form was tried again at every
+# "eyJ" inside one long run ("eyJ-eyJ-eyJ-...") and rescanned the run each
+# time. Now one attempt per run of token characters: the atomic group
+# commits to the FIRST "eyJ" of the run (which has the longest header, so it
+# decides for all later ones) and the possessive runs never backtrack. The
+# match starts at the run start (a prefix glued to the token is redacted too).
+_JWT = re.compile(
+    r"(?<![A-Za-z0-9_\-])(?>[A-Za-z0-9_\-]*?eyJ[A-Za-z0-9_\-]{10}[A-Za-z0-9_\-]*+)"
+    r"\.[A-Za-z0-9_\-]{10,}+\.[A-Za-z0-9_\-]*+"
 )
 # high-entropy token: >=20 chars, upper+lower+digit, token charset, no dots
 _TOKENISH = re.compile(r"(?<![A-Za-z0-9_\-+/=])[A-Za-z0-9_\-+/=]{20,}(?![A-Za-z0-9_\-+/=])")
@@ -137,12 +152,26 @@ _PW_VERB = re.compile(rf"(?<![^\W_])(?:{_PASSWORD_WORDS})(?![^\W_]){_SEP_VERB}([
 _PW_SPACE = re.compile(rf"(?<![^\W_])(?:{_PASSWORD_WORDS})(?![^\W_])\s+([^\s]+)")
 _SECRET_VALUE = re.compile(rf"(?<![^\W_])(?:{_SECRET_WORDS})(?![^\W_])(?:{_SEP_EXPLICIT}|{_SEP_VERB}|\s+)([^\s]+)")
 _PIN_VALUE = re.compile(rf"(?<![^\W_])(?:{_PIN_WORDS})(?![^\W_])(?:{_SEP_EXPLICIT}|{_SEP_VERB}|\s+)?#?\s*(\d[\d\s-]{{1,10}}\d)(?!\d)")
+# The user half (fix wave 4, R1): it was ``\S+?``, so every keyword inside
+# one long separator-free run ("acct=acct=acct=...") rescanned the rest of
+# the run (quadratic). Now it is one possessive run that stops where the lazy
+# form stopped (whitespace or the first pair separator) AND where another
+# keyword-with-label starts: that keyword gets its own attempt, which finds
+# the same second half. Each character is scanned by one attempt only.
+def _pair_user(words: str, seps: str) -> str:
+    return rf"(\S(?:(?!(?<![^\W_])(?:{words})(?![^\W_]){_SEP_EXPLICIT})[^\s{seps}])*+)"
+
+
+_LOGIN_USER = _pair_user(_LOGIN_WORDS, r"/|\\")
+_CREDS_USER = _pair_user(_CREDS_WORDS, r"/|\\:")
 _LOGIN_PAIR = re.compile(rf"(?<![^\W_])(?:{_LOGIN_WORDS})(?![^\W_])(?:{_SEP_EXPLICIT}|{_SEP_VERB}|\s+)"
-                         r"(\S+?)\s*[/|\\]\s*(\S+)")
+                         rf"{_LOGIN_USER}\s*[/|\\]\s*(\S+)")
 _CREDS_PAIR = re.compile(rf"(?<![^\W_])(?:{_CREDS_WORDS})(?![^\W_])(?:{_SEP_EXPLICIT}|{_SEP_VERB}|\s+)"
-                         r"(\S+?)\s*[/|\\:]\s*(\S+)")
+                         rf"{_CREDS_USER}\s*[/|\\:]\s*(\S+)")
 _CREDS_VALUE = re.compile(rf"(?<![^\W_])(?:{_CREDS_WORDS})(?![^\W_]){_SEP_EXPLICIT}(\S+)")
-_EMAIL_PAIR = re.compile(r"[^\s@/|]+@[^\s@/|]+\s*[/|\\:]\s*(\S+)")
+# Starts only where a run of the local-part class starts (fix wave 4, R1):
+# a start inside the run can only find what the run start finds.
+_EMAIL_PAIR = re.compile(r"(?<![^\s@/|])[^\s@/|]+@[^\s@/|]+\s*[/|\\:]\s*(\S+)")
 _NEAR_WORDS = (
     r"login|log\s?in|sign\s?in|signin|username|user\s?name|user|usuario|benutzer(?:name)?|utilisateur|identifiant"
 )
@@ -208,8 +237,11 @@ def _looks_high_entropy(tok: str) -> bool:
 # --- fix wave 3 (N5): the AEGIS round-2 shapes --------------------------------------
 
 # URL with a password in its userinfo: https://lee:<pw>@shop.example/admin
-_URL_USERINFO_SECRET = re.compile(r"(?i)\b[a-z][a-z0-9+.\-]*://[^\s/@:]+:[^\s/@]+@")
-_URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^\s/@]+@")
+# Anchored on "://" (fix wave 4, R1): the old ``\b[a-z][a-z0-9+.\-]*://``
+# was retried at every word start of a long "a.a.a.a..." run. Any scheme
+# character before "://" is enough now (slightly more is redacted/refused).
+_URL_USERINFO_SECRET = re.compile(r"(?i)(?<=[a-z0-9+.\-])://[^\s/@:]+:[^\s/@]+@")
+_URL_USERINFO = re.compile(r"(?i)(?<=[a-z0-9+.\-])(://)[^\s/@]+@")
 # "you can get in with lee and <pw>", "log in using admin / <pw>"
 _GET_IN_WITH = re.compile(r"(?<![^\W_])(?:get|log|sign)\s*(?:in|on)(?:to)?(?:\s+\S+){0,3}?\s+(?:with|using|via)\s+"
                           r"(\S+)\s+(?:and|&|\+|/|,|y|und|et|e)\s+(\S+)")
@@ -233,7 +265,10 @@ _IBAN = re.compile(r"(?<![A-Za-z0-9])([A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30})(?![A
 # "admin / <pw>", "lee | <pw>": a pair whose second half is password-shaped
 # (8+ chars with upper case, lower case AND a digit — so "America/New_York",
 # "sales/returns" and "compliance_15/p1_wording" are not pairs)
-_SLASH_PAIR = re.compile(r"(\S+)\s*[/|]\s*(\S+)")
+# Starts only at a token start (fix wave 4, R1: it was retried at every
+# character of a long token, each retry rescanning the token). Same matches:
+# a pair found from inside a token is found from its start.
+_SLASH_PAIR = re.compile(r"(?<!\S)(\S+)\s*[/|]\s*(\S+)")
 
 
 def _iban_valid(s: str) -> bool:
@@ -294,21 +329,55 @@ def _wave3_shape(raw: str, n: str, leet: str) -> str | None:
     return None
 
 
+# --- per-request scan budget (fix wave 4, R1) -----------------------------------------
+#
+# Every pattern here is linear-time and every input is length-capped before
+# it is scanned; the budget is the last line: while a ``scan_budget`` is
+# active (the API sets one around the validation of each request body),
+# ``find_credential`` refuses to keep going past the deadline. The check runs
+# between rules, so the overshoot is at most one linear pass. Fail closed:
+# a text that could not be checked is refused, never accepted.
+
+_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("scan_deadline", default=None)
+
+
+class ScanBudgetExceeded(RuntimeError):
+    """The credential checks of one request did not finish within the budget."""
+
+
+@contextmanager
+def scan_budget(seconds: float) -> Iterator[None]:
+    token = _DEADLINE.set(time.monotonic() + seconds)
+    try:
+        yield
+    finally:
+        _DEADLINE.reset(token)
+
+
+def _check_budget() -> None:
+    deadline = _DEADLINE.get()
+    if deadline is not None and time.monotonic() > deadline:
+        raise ScanBudgetExceeded("credential checks exceeded the per-request time budget")
+
+
 def find_credential(text: str) -> str | None:
     """Return the NAME of the first credential rule the text trips (never
     the value), or None. Runs on normalized forms; see module docstring."""
     if not isinstance(text, str) or not text:
         return None
+    _check_budget()
     raw = _strip_format(text)  # case kept: key prefixes are case-sensitive
     n = normalize(text)
     leet = n.translate(_LEET)
     if _BEARER.search(raw):
         return "bearer_token"
-    if _PREFIXED.search(raw) or _PREFIXED.search(_collapse_separated(raw)):
+    collapsed = _collapse_separated(raw)
+    if _PREFIXED.search(raw) or _PREFIXED.search(collapsed) or _JWT.search(raw) or _JWT.search(collapsed):
         return "api_key_shape"
     for m in _TOKENISH.finditer(raw):
         if _looks_high_entropy(m.group(0)):
             return "token_shape"
+    _check_budget()
     for form in (n, leet):
         for m in _PW_EXPLICIT.finditer(form):
             if _has_alnum(m.group(1)):
@@ -319,6 +388,7 @@ def find_credential(text: str) -> str | None:
         for m in _PW_SPACE.finditer(form):
             if _password_like(m.group(1)):
                 return "password_after_label"
+    _check_budget()
     for m in _SECRET_VALUE.finditer(n):
         if _password_like(m.group(1)) or len(_trim(m.group(1))) >= 12:
             return "secret_after_label"
@@ -336,25 +406,45 @@ def find_credential(text: str) -> str | None:
     for m in _EMAIL_PAIR.finditer(n):
         if _password_like(m.group(1)):
             return "login_secret_pair"
+    _check_budget()
     # a password-shaped token within a few words after a login / password word
+    near = _NearbyWords(raw, n)
     for m in _LOGIN_NEAR.finditer(n):
-        for w in _WORDISH.findall(_nearby_raw(raw, n, m.end())):
+        for w in near.after(m.end()):
             if _high_entropy(w):
                 return "password_near_login_word"
     for m in _CARD.finditer(raw):
         digits = re.sub(r"\D", "", m.group(0))
         if 13 <= len(digits) <= 19 and _luhn(digits) and len(set(digits)) > 1:
             return "card_number"
+    _check_budget()
     return _wave3_shape(raw, n, leet)
 
 
-def _nearby_raw(raw: str, n: str, n_end: int) -> str:
+class _NearbyWords:
     """The ~6 words of the case-preserving text that follow a keyword found
     at ``n_end`` in the normalized text. Normalization can shorten the text
-    (collapsed letters), so the position is mapped by word count."""
-    words_before = len(n[:n_end].split())
-    raw_words = raw.split()
-    return " ".join(raw_words[max(0, words_before - 1): words_before + 6])
+    (collapsed letters), so the position is mapped by word count.
+
+    Fix wave 4 (R1): both texts are split ONCE; the old helper re-split the
+    whole text for every keyword ("login login login ..." was quadratic)."""
+
+    def __init__(self, raw: str, n: str):
+        self._raw_words = raw.split()
+        self._n_starts = [m.start() for m in _WORDISH.finditer(n)]
+        self._seen_to = 0  # windows only move forward: words below this were handed out
+
+    def after(self, n_end: int) -> list[str]:
+        """The words of the window not handed out before: each word is
+        looked at once however many keywords share it (a 100 KB token made
+        of "user:user:..." is one word under 20,000 keywords)."""
+        words_before = bisect.bisect_left(self._n_starts, n_end)  # words starting before n_end
+        lo = max(0, words_before - 1, self._seen_to)
+        hi = min(len(self._raw_words), words_before + 6)
+        if hi <= lo:
+            return []
+        self._seen_to = hi
+        return self._raw_words[lo:hi]
 
 
 def contains_credential(text: str) -> bool:
@@ -382,7 +472,7 @@ def scrub(text: str) -> str:
     out = _BEARER.sub(f"Bearer {REDACTED}", text)
     out = _CUE_STRONG.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", out)
     out = _CUE.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", out)
-    out = _PREFIXED.sub(REDACTED, out)
+    out = _JWT.sub(REDACTED, _PREFIXED.sub(REDACTED, out))
     out = _TOKENISH.sub(lambda m: REDACTED if _looks_high_entropy(m.group(0)) else m.group(0), out)
     # Second pass on the normalized form: anything the plain patterns missed
     # (other languages, spaced or fullwidth letters, zero-width characters,
@@ -434,7 +524,7 @@ _KEYWORD = re.compile(
 )
 _TO_LOGIN = re.compile(r"(?:to|for)\s+(?:log|sign|get)\s*(?:in|on)")
 _LONG_DIGITS = re.compile(r"(?<![\d.,])\d{9,19}(?!\d|[.,]\d)")
-_EMAIL_TOKEN = re.compile(r"[^\s@/:]+@[^\s@/]+\.[A-Za-z]{2,}")
+_EMAIL_TOKEN = re.compile(r"(?<![^\s@/:])[^\s@/:]+@[^\s@/]+\.[A-Za-z]{2,}")
 _URL_TOKEN = re.compile(r"(?i)^(?:[a-z][a-z0-9+.\-]*://|www\.)")
 _URL_PART = re.compile(r"[^/?&=#;]+")
 _QUERY_PAIR = re.compile(r"([?&;#])([^=&#;?]+)=([^&#;]*)")
@@ -462,16 +552,35 @@ def _secret_key(k: str) -> bool:
     return k in _SECRET_KEYS or _KEYWORD.fullmatch(k) is not None or k in {"key", "sig", "signature", "auth", "code", "session"}
 
 
+_URL_HEAD = re.compile(r"(?is)((?:[a-z][a-z0-9+.\-]*://)?[^/?#]*)(.*)\Z")
+
+
 def redact_url(url: str) -> str:
     """Userinfo, secret-named query values and password-shaped path segments."""
     from urllib.parse import unquote
 
     u = _URL_USERINFO.sub(lambda m: f"{m.group(1)}{REDACTED}@", url)
-    m = re.match(r"(?i)^((?:[a-z][a-z0-9+.\-]*://)?[^/?#]*)(.*)$", u)
+    # DOTALL + \Z (fix wave 4, R1): with ``(.*)$`` a newline in the path made
+    # the engine retry every split of the head (quadratic).
+    m = _URL_HEAD.match(u)
     head, rest = (m.group(1), m.group(2)) if m else ("", u)
     rest = _QUERY_PAIR.sub(lambda q: f"{q.group(1)}{q.group(2)}={REDACTED}" if _secret_key(unquote(q.group(2))) else q.group(0), rest)
     rest = _URL_PART.sub(lambda p: REDACTED if p.group(0) != REDACTED and _entropic(unquote(p.group(0))) else p.group(0), rest)
     return head + rest
+
+
+def _replace_spans(t: str, spans: list[tuple[int, int]]) -> str:
+    """Replace non-overlapping, ordered spans with [REDACTED] in one pass
+    (fix wave 4, R1: slicing the whole text once per span was quadratic)."""
+    if not spans:
+        return t
+    out, last = [], 0
+    for a, b in spans:
+        out.append(t[last:a])
+        out.append(REDACTED)
+        last = b
+    out.append(t[last:])
+    return "".join(out)
 
 
 def _pattern_redactions(t: str) -> str:
@@ -479,7 +588,7 @@ def _pattern_redactions(t: str) -> str:
     t = _BEARER.sub(f"Bearer {REDACTED}", t)
     t = _CUE_STRONG.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", t)
     t = _CUE.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", t)
-    t = _PREFIXED.sub(REDACTED, t)
+    t = _JWT.sub(REDACTED, _PREFIXED.sub(REDACTED, t))
     t = _SSN.sub(REDACTED, t)
     for rx in (_SSN_VALUE, _BANK_VALUE, _ACCOUNT_LONG):
         # these match on case-folded text; the value is digits, so positions
@@ -488,8 +597,7 @@ def _pattern_redactions(t: str) -> str:
         if low is None:
             continue
         spans = [m.span(1) for m in rx.finditer(low) if _digit_count(m.group(1)) >= 4]
-        for a, b in reversed(spans):
-            t = t[:a] + REDACTED + t[b:]
+        t = _replace_spans(t, spans)
     t = _IBAN.sub(lambda m: REDACTED if _iban_valid(m.group(1)) else m.group(0), t)
 
     def card(m):
@@ -571,8 +679,22 @@ def redact_obj(obj: Any) -> Any:
     return obj
 
 
+# Fix wave 4 (R1): a log line is cut to a bounded prefix BEFORE it is
+# scrubbed. The access log runs for every request (also unauthenticated
+# ones) on the server's event loop, so its cost must not grow with the
+# length of a hostile request line.
+LOG_PATH_MAX = 2048
+LOG_TEXT_MAX = 8192
+
+
+def cap_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}...[truncated {len(text) - limit} chars]"
+
+
 def _scrub_arg(a: Any) -> Any:
-    return scrub(a) if isinstance(a, str) else a
+    return scrub(cap_text(a, LOG_TEXT_MAX)) if isinstance(a, str) else a
 
 
 def scrub_log_record(record: logging.LogRecord) -> None:
@@ -594,19 +716,23 @@ def scrub_log_record(record: logging.LogRecord) -> None:
     if record.name == "uvicorn.access" and isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
         # The request path can carry a secret anywhere (a path segment, a
         # query value, percent-encoded): URL-aware redaction first.
-        args = (args[0], args[1], redact_url(args[2]), args[3], args[4])
+        path = args[2]
+        cut = f"...[truncated {len(path) - LOG_PATH_MAX} chars]" if len(path) > LOG_PATH_MAX else ""
+        args = (args[0], args[1], redact_url(path[:LOG_PATH_MAX]) + cut, args[3], args[4])
     if isinstance(args, tuple):
         record.args = tuple(_scrub_arg(a) for a in args)
     elif isinstance(args, dict):
         record.args = {k: _scrub_arg(v) for k, v in args.items()}
     if not record.args:
-        record.msg = scrub(record.msg if isinstance(record.msg, str) else str(record.msg))
+        record.msg = scrub(cap_text(record.msg if isinstance(record.msg, str) else str(record.msg), LOG_TEXT_MAX))
         record.args = ()
         return
+    if isinstance(record.msg, str) and len(record.msg) > LOG_TEXT_MAX:
+        record.msg = cap_text(record.msg, LOG_TEXT_MAX)
     try:
         formatted = record.getMessage()
     except Exception:  # noqa: BLE001  (a malformed record: keep only its scrubbed text)
-        record.msg, record.args = scrub(str(record.msg)), ()
+        record.msg, record.args = scrub(cap_text(str(record.msg), LOG_TEXT_MAX)), ()
         return
     clean = scrub(formatted)
     if clean == formatted:

@@ -313,10 +313,15 @@ spec, with 15 deterministic single-task intelligences (no model calls).
 Architecture: `docs/adr/0004-onboarding-department-architecture.md`. Details
 and routes: `services/onboarding-py/README.md`.
 
-- **Status:** built and tested (462 tests, `python3 -m pytest -q`). **Not
+- **Status:** built and tested (577 tests, `python3 -m pytest -q`). **Not
   certified for any real client, clipper or brand.** Scenario, attack and
-  guardrail tests exist. The AEGIS review findings were fixed in fix waves 1–3
+  guardrail tests exist. The AEGIS review findings were fixed in fix waves 1–4
   (Sep 24); see ADR 0004.
+- **Hostile input can't stall it** (fix wave 4). Every regex is linear-time.
+  Input is capped before it is scanned: field lengths are checked first, a body
+  over 1 MiB is a 413, a request target over 8 KiB is a 414, and log lines are
+  cut. Scanning runs off the event loop under a per-request time budget, and
+  `/health` stays responsive under attack.
 - **Fails closed.**
   - Activation needs both the Contract (14) and Compliance (15) gates, and a
     blocked activation returns the exact unmet list.

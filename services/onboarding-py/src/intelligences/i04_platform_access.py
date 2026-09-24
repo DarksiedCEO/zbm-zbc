@@ -54,16 +54,54 @@ TAG_PATTERNS: list[tuple[Platform, re.Pattern]] = [
     (Platform.GOOGLE_ADS, re.compile(r"(?i)googleadservices\.com|gtag\(\s*['\"]config['\"]\s*,\s*['\"]AW-\d+|\bAW-\d{6,}")),
     (Platform.GOOGLE_TAG_MANAGER, re.compile(r"(?i)googletagmanager\.com/gtm\.js|\bGTM-[A-Z0-9]{4,}")),
     (Platform.GOOGLE_ANALYTICS, re.compile(r"(?i)\bG-[A-Z0-9]{6,}\b|google-analytics\.com")),
-    (Platform.META, re.compile(r"(?i)connect\.facebook\.net/[^\"']*fbevents\.js|\bfbq\(\s*['\"]init")),
+    # Meta: the ``fbq('init'`` call here; the pixel script URL is found by
+    # ``_meta_tag`` (fix wave 4, R1 — see below).
+    (Platform.META, re.compile(r"(?i)\bfbq\(\s*['\"]init")),
     (Platform.SHOPIFY, re.compile(r"(?i)cdn\.shopify\.com|\bShopify\.theme\b|myshopify\.com")),
     (Platform.TIKTOK, re.compile(r"(?i)analytics\.tiktok\.com|\bttq\.load\(")),
 ]
 
 
+# Fix wave 4 (R1): the Meta pattern ``connect\.facebook\.net/[^"']*fbevents\.js``
+# rescanned the rest of a quote-free stretch from EVERY host occurrence in it
+# (a page of repeated "connect.facebook.net/" was quadratic). ``_meta_tag``
+# gives the same answer checking each quote-free stretch once: the first
+# host occurrence in a stretch decides for every later one.
+_META_HOST = re.compile(r"(?i)connect\.facebook\.net/")
+_META_FILE = re.compile(r"(?i)fbevents\.js")
+_QUOTE = re.compile(r"[\"']")
+
+
+def _meta_tag(html: str) -> Optional[tuple[str, int]]:
+    pos = 0
+    while True:
+        h = _META_HOST.search(html, pos)
+        if h is None:
+            return None
+        q = _QUOTE.search(html, h.end())
+        stop = q.start() if q else len(html)
+        last = None
+        for last in _META_FILE.finditer(html, h.end(), stop):
+            pass
+        if last is not None:
+            return html[h.start():min(last.end(), h.start() + 80)], h.start()
+        if q is None:
+            return None
+        pos = q.end()
+
+
 def scan_tags(html: str) -> list[dict]:
+    html = html or ""
     found = []
     for platform, rx in TAG_PATTERNS:
-        m = rx.search(html or "")
+        m = rx.search(html)
+        if platform == Platform.META:
+            # The old single pattern was "script URL | fbq('init'": the
+            # leftmost of the two is the evidence.
+            script = _meta_tag(html)
+            if script is not None and (m is None or script[1] <= m.start()):
+                found.append({"platform": platform.value, "evidence": script[0]})
+                continue
         if m:
             found.append({"platform": platform.value, "evidence": m.group(0)[:80]})
     return found
