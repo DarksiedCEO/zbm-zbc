@@ -175,3 +175,38 @@ attaches later without touching agent logic.
 - This is one review pass (Sep 22 2026). A second, independent reviewer
   looking at the same code might find different things — see
   `fulfillment-py`'s README for the same caveat stated about that build.
+
+## Onboarding department (`services/onboarding-py`) — Sep 24, 2026
+
+Client onboarding from signed contract to a running account, across three
+lanes: client, ZBC creator and ZBC brand. It is built from the founder-locked
+spec, with 15 deterministic single-task intelligences (no model calls).
+Architecture: `docs/adr/0004-onboarding-department-architecture.md`. Details
+and routes: `services/onboarding-py/README.md`.
+
+- **Status:** built and tested (151 tests, `python3 -m pytest -q`). **Not
+  certified for any real client, clipper or brand.** Scenario, attack and
+  guardrail tests exist; independent review has not happened.
+- **Fails closed.**
+  - Activation needs both the Contract (14) and Compliance (15) gates, and a
+    blocked activation returns the exact unmet list.
+  - Every crossing and gate ruling is written to the ledger (`POST
+    /ledger/events`, department `onboarding`) first. If the write fails, the
+    action doesn't happen and the API says so (503).
+  - Compliance 38, the vault, platform APIs, push to Andre and contract
+    storage are stand-ins that answer "not allowed yet" / "not wired".
+- **Reuses Revenue Recovery** over HTTP (detection-py's real routes). It never
+  re-implements a detection agent.
+- **Run:** `cd services/onboarding-py/src && ONBOARDING_SERVICE_TOKEN=... python3 -m api`
+  - Binds 127.0.0.1:8200 by default.
+  - Needs `LEDGER_SERVICE_URL`/`LEDGER_SERVICE_TOKEN` to act, and
+    `DETECTION_SERVICE_URL`/`DETECTION_SERVICE_TOKEN` for the audit.
+- **Open items:**
+  - Deal-size threshold: unset, so every deal escalates.
+  - Stuck window: 48h suggested.
+  - Intake channel.
+  - Noon cutoff: to be revisited.
+  - Contract storage location.
+  - Compliance department: not built.
+  - Counsel: P1 wording and the P23 clause.
+  - Accountant: 1099 threshold from 2027.
