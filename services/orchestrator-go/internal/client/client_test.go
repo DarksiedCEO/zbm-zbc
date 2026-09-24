@@ -11,7 +11,9 @@ import (
 // This fixture is the REAL captured response body from the Python
 // detection-py /agents/affiliate-coupon-extension/detect endpoint
 // (captured via FastAPI TestClient against the actual agent + fixtures,
-// see build log) — not a guessed shape.
+// see build log) — not a guessed shape. Updated Sep 24 2026 for README
+// gap #6: amount_usd is now the two-decimal JSON string detection-py
+// actually emits ("120.00"), not the old float 120.0.
 const realAffiliateFindingsJSON = `{
   "findings": [
     {
@@ -24,7 +26,7 @@ const realAffiliateFindingsJSON = `{
       "cause_certainty": "named",
       "cause_description": "Affiliate commission honored 265.0h after click, 11.0x the stated 24h attribution window.",
       "recoverable_value": {
-        "amount_usd": 120.0,
+        "amount_usd": "120.00",
         "classification": "attributed",
         "confidence": "high"
       },
@@ -55,8 +57,8 @@ func TestDetectAffiliateCouponExtension_ParsesRealContractShape(t *testing.T) {
 	if f.EntityID != "ord_1002" || f.AgentID != "affiliate-coupon-extension-v1" {
 		t.Errorf("unexpected finding contents: %+v", f)
 	}
-	if f.RecoverableValue == nil || f.RecoverableValue.AmountUSD != 120.0 {
-		t.Errorf("expected recoverable value 120.0, got %+v", f.RecoverableValue)
+	if f.RecoverableValue == nil || f.RecoverableValue.AmountUSD.String() != "120.00" {
+		t.Errorf("expected recoverable value \"120.00\", got %+v", f.RecoverableValue)
 	}
 	if f.RecoverableValue.Classification == "" || f.RecoverableValue.Confidence == "" {
 		t.Errorf("Decision 2 violation: LabeledValue missing classification/confidence in %+v", f.RecoverableValue)
@@ -80,8 +82,8 @@ func TestDetectionClient_NonOKStatusReturnsError(t *testing.T) {
 func TestCorrelationOverlaps_ParsesMapOfFindings(t *testing.T) {
 	body := `{
 		"ord_1007": [
-			{"finding_id":"aff-ord_1007","agent_id":"affiliate-coupon-extension-v1","leak_category":"affiliate_coupon_extension","entity_type":"order","entity_id":"ord_1007","customer_id":"cust_3","cause_certainty":"named","cause_description":"x","recoverable_value":{"amount_usd":150.0,"classification":"attributed","confidence":"high"},"detected_at":"2026-09-22T04:00:00Z"},
-			{"finding_id":"disc-ord_1007","agent_id":"discount-misuse-v1","leak_category":"discount_misuse","entity_type":"order","entity_id":"ord_1007","customer_id":"cust_3","cause_certainty":"named","cause_description":"y","recoverable_value":{"amount_usd":55.0,"classification":"observed","confidence":"very_high"},"detected_at":"2026-09-22T04:00:01Z"}
+			{"finding_id":"aff-ord_1007","agent_id":"affiliate-coupon-extension-v1","leak_category":"affiliate_coupon_extension","entity_type":"order","entity_id":"ord_1007","customer_id":"cust_3","cause_certainty":"named","cause_description":"x","recoverable_value":{"amount_usd":"150.00","classification":"attributed","confidence":"high"},"detected_at":"2026-09-22T04:00:00Z"},
+			{"finding_id":"disc-ord_1007","agent_id":"discount-misuse-v1","leak_category":"discount_misuse","entity_type":"order","entity_id":"ord_1007","customer_id":"cust_3","cause_certainty":"named","cause_description":"y","recoverable_value":{"amount_usd":"54.38","classification":"observed","confidence":"very_high"},"detected_at":"2026-09-22T04:00:01Z"}
 		]
 	}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

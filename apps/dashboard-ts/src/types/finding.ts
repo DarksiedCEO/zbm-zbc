@@ -9,7 +9,9 @@ export type DecisionConfidence = "low" | "medium" | "high" | "very_high";
 export type CauseCertainty = "named" | "uncertain";
 
 export interface LabeledValue {
-  amount_usd: number;
+  // Canonical two-decimal money string, e.g. "54.38" (docs/adr/0003).
+  // Never parse this into a number for arithmetic — see src/lib/money.ts.
+  amount_usd: string;
   classification: ValueClassification;
   confidence: DecisionConfidence;
 }

@@ -23,10 +23,21 @@ Tonight's fixtures already speak this shape directly.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+from zbm_schema.money import (
+    CENT,
+    Money,
+    PositiveMoney,
+    format_money,
+    percent_of,
+    quantize_money,
+    to_money,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -59,16 +70,11 @@ class LabeledValue(BaseModel):
     """
     model_config = {"frozen": True}
 
-    amount_usd: float = Field(gt=0, description="Dollar amount, must be positive")
+    # Exact Decimal, cent-quantized half-up, positive-only; NaN/inf rejected
+    # by zbm_schema.money.to_money. Serializes as a two-decimal JSON string.
+    amount_usd: PositiveMoney = Field(description="Dollar amount, must be positive")
     classification: ValueClassification
     confidence: DecisionConfidence
-
-    @field_validator("amount_usd")
-    @classmethod
-    def _finite_amount(cls, v: float) -> float:
-        if v != v or v in (float("inf"), float("-inf")):  # NaN / inf guard
-            raise ValueError("amount_usd must be a finite positive number")
-        return round(v, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +104,17 @@ class Customer(BaseModel):
 
 class OrderLineItem(BaseModel):
     sku: str
-    unit_price_usd: float = Field(gt=0)
+    unit_price_usd: PositiveMoney
     quantity: int = Field(gt=0)
 
 
 class DiscountApplication(BaseModel):
     code: str
-    percent_off: Optional[float] = Field(default=None, ge=0, le=100)
-    amount_off_usd: Optional[float] = Field(default=None, gt=0)
+    # percent_off is a percentage, not money — it stays a plain number on the
+    # wire. Any money computed from it goes through zbm_schema.money.percent_of,
+    # which converts it to Decimal via str() so the arithmetic stays exact.
+    percent_off: Optional[float] = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    amount_off_usd: Optional[PositiveMoney] = None
 
     @model_validator(mode="after")
     def _one_discount_mode(self):
@@ -140,8 +149,10 @@ class Order(BaseModel):
     recovery_attempted: bool = False  # abandoned-cart recovery flow (email/SMS) fired for this order
 
     @property
-    def subtotal_usd(self) -> float:
-        return round(sum(li.unit_price_usd * li.quantity for li in self.line_items), 2)
+    def subtotal_usd(self) -> Decimal:
+        # Decimal * int is exact; the sum is quantized once more for safety
+        # (a no-op for cent-quantized inputs, but it pins the invariant).
+        return quantize_money(sum((li.unit_price_usd * li.quantity for li in self.line_items), Decimal("0")))
 
 
 class SubscriptionStatus(str, Enum):
@@ -154,7 +165,7 @@ class SubscriptionStatus(str, Enum):
 class Subscription(BaseModel):
     subscription_id: str
     customer_id: str
-    plan_price_usd: float = Field(gt=0)
+    plan_price_usd: PositiveMoney
     renewal_interval_days: int = Field(gt=0)
     last_renewal_at: Optional[datetime] = None
     next_renewal_due_at: datetime

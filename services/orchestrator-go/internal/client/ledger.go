@@ -28,13 +28,13 @@ func NewLedgerClient(baseURL, token string) *LedgerClient {
 }
 
 type LedgerRecordInput struct {
-	FindingID           string   `json:"finding_id"`
-	AgentID             string   `json:"agent_id"`
-	EntityID            string   `json:"entity_id"`
-	LeakCategory        string   `json:"leak_category"`
-	AmountUSD           *float64 `json:"amount_usd"`
-	ValueClassification string   `json:"value_classification"`
-	DecisionConfidence  string   `json:"decision_confidence"`
+	FindingID           string `json:"finding_id"`
+	AgentID             string `json:"agent_id"`
+	EntityID            string `json:"entity_id"`
+	LeakCategory        string `json:"leak_category"`
+	AmountUSD           *Money `json:"amount_usd"` // canonical two-decimal string, or null
+	ValueClassification string `json:"value_classification"`
+	DecisionConfidence  string `json:"decision_confidence"`
 }
 
 type LedgerEntry struct {
@@ -56,7 +56,11 @@ func (l *LedgerClient) AppendFinding(ctx context.Context, f Finding) (*LedgerEnt
 		LeakCategory: f.LeakCategory,
 	}
 	if f.RecoverableValue != nil {
+		// Exact pass-through of detection-py's string; no conversion.
 		amt := f.RecoverableValue.AmountUSD
+		if !amt.IsValid() {
+			return nil, fmt.Errorf("finding %s: %w: recoverable_value.amount_usd is unset", f.FindingID, ErrInvalidMoney)
+		}
 		record.AmountUSD = &amt
 		record.ValueClassification = f.RecoverableValue.Classification
 		record.DecisionConfidence = f.RecoverableValue.Confidence

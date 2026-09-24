@@ -13,6 +13,7 @@ retrains itself on feedback (Decision 3 — corroboration required).
 from __future__ import annotations
 
 from zbm_schema import (
+    format_money,
     CauseCertainty,
     DecisionConfidence,
     Finding,
@@ -89,7 +90,7 @@ def detect(orders: list[Order]) -> list[Finding]:
                     f"Affiliate commission honored {elapsed_hours:.1f}h after click, "
                     f"{overrun_ratio:.1f}x the stated {window}h attribution window — "
                     f"consistent with a stretched/extended affiliate cookie rather than "
-                    f"a genuinely attributed purchase. Order value ${order.subtotal_usd:.2f} "
+                    f"a genuinely attributed purchase. Order value ${format_money(order.subtotal_usd)} "
                     f"at risk of unearned commission."
                 ),
                 recoverable_value=LabeledValue(

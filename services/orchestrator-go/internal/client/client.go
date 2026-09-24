@@ -72,7 +72,13 @@ func (c *DetectionClient) doJSON(ctx context.Context, method, path string, body 
 	}
 
 	if out != nil {
-		if err := json.Unmarshal(respBody, out); err != nil {
+		// UseNumber: loosely-typed pass-through payloads (Order,
+		// Subscription and the Tier 2 maps are map[string]any) must never
+		// round-trip a JSON number through float64 on their way back to
+		// detection-py. json.Number keeps the original literal text.
+		dec := json.NewDecoder(bytes.NewReader(respBody))
+		dec.UseNumber()
+		if err := dec.Decode(out); err != nil {
 			return fmt.Errorf("unmarshal response from %s: %w (body=%s)", path, err, string(respBody))
 		}
 	}

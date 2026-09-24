@@ -25,11 +25,73 @@
 //!      checked with a constant-time byte comparison (no hmac crate is a
 //!      dependency here, so this is implemented directly rather than
 //!      pulled in for one comparison — see `constant_time_eq` below).
+//!
+//! Sep 24 2026 (docs/adr/0003):
+//!   - `amount_usd` on POST /ledger/append must be a two-decimal money
+//!     string ("12.30") or null; a JSON number is rejected with 400.
+//!   - POST /ledger/events records a generic, idempotent event on the same
+//!     hash chain (201 new / 200 identical retry / 409 conflicting content /
+//!     400 invalid / 401 unauthenticated). Every entry now carries `kind`.
+//!   - Request bodies are capped at MAX_BODY_BYTES; larger bodies get 413.
 
+use std::io::Read;
 use std::sync::Mutex;
 
-use ledger_rust::{LedgerRecordInput, PersistentLedger};
+use ledger_rust::{EventAppendOutcome, EventInput, LedgerRecordInput, PersistentLedger};
 use tiny_http::{Header, Method, Response, Server};
+
+/// Upper bound on a request body. A finding record or an event is well
+/// under 2 KiB; anything near this size is not a legitimate caller.
+const MAX_BODY_BYTES: u64 = 64 * 1024;
+
+/// Reads at most MAX_BODY_BYTES (+1 to detect overflow). Err carries the
+/// (status, body) response to send.
+fn read_body(request: &mut tiny_http::Request) -> Result<String, (u16, String)> {
+    let mut body = String::new();
+    let mut limited = request.as_reader().take(MAX_BODY_BYTES + 1);
+    if let Err(e) = limited.read_to_string(&mut body) {
+        return Err((400, serde_json::json!({"error": format!("failed to read body as UTF-8: {e}")}).to_string()));
+    }
+    if body.len() as u64 > MAX_BODY_BYTES {
+        return Err((413, serde_json::json!({"error": format!("request body exceeds {MAX_BODY_BYTES} bytes")}).to_string()));
+    }
+    Ok(body)
+}
+
+fn handle_event(ledger: &Mutex<PersistentLedger>, body: &str) -> (u16, String) {
+    let input: EventInput = match serde_json::from_str(body) {
+        Ok(i) => i,
+        Err(e) => {
+            return (400, serde_json::json!({"error": format!("invalid event: {e}")}).to_string());
+        }
+    };
+    if let Err(e) = input.validate() {
+        return (400, serde_json::json!({"error": format!("invalid event: {e}")}).to_string());
+    }
+    let event_id = input.event_id.clone();
+    let mut l = ledger.lock().unwrap();
+    match l.append_event(input) {
+        Ok(EventAppendOutcome::Created(entry)) => (201, serde_json::to_string(entry).unwrap()),
+        Ok(EventAppendOutcome::Existing(entry)) => (200, serde_json::to_string(entry).unwrap()),
+        Ok(EventAppendOutcome::Conflict(_)) => (
+            409,
+            serde_json::json!({
+                "error": format!(
+                    "event_id {event_id:?} is already recorded with different content; \
+                     an event_id can only ever describe one event"
+                ),
+                "event_id": event_id,
+            })
+            .to_string(),
+        ),
+        Err(e) => {
+            // Same rule as findings: in-memory state untouched, caller must
+            // treat this as NOT recorded.
+            eprintln!("ledger-rust: event append failed to persist: {e}");
+            (500, serde_json::json!({"error": format!("failed to persist event: {e}")}).to_string())
+        }
+    }
+}
 
 fn json_header() -> Header {
     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap()
@@ -165,12 +227,15 @@ fn main() {
                 }
             }
 
+            (Method::Post, "/ledger/events") => match read_body(&mut request) {
+                Err(resp) => resp,
+                Ok(body) => handle_event(&ledger, &body),
+            },
+
             (Method::Post, "/ledger/append") => {
-                let mut body = String::new();
-                if let Err(e) = request.as_reader().read_to_string(&mut body) {
-                    (400, serde_json::json!({"error": format!("failed to read body: {e}")}).to_string())
-                } else {
-                    match serde_json::from_str::<LedgerRecordInput>(&body) {
+                match read_body(&mut request) {
+                    Err(resp) => resp,
+                    Ok(body) => match serde_json::from_str::<LedgerRecordInput>(&body) {
                         Ok(record) => {
                             let mut l = ledger.lock().unwrap();
                             match l.append(record) {
@@ -196,7 +261,7 @@ fn main() {
                             400,
                             serde_json::json!({"error": format!("invalid LedgerRecordInput: {e}")}).to_string(),
                         ),
-                    }
+                    },
                 }
             }
 
