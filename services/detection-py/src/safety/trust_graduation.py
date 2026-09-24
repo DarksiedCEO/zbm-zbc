@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import date
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 SHADOW_MODE_MIN_DECISIONS = 20
 SHADOW_MODE_MIN_AGREEMENT = 0.95
@@ -50,6 +50,18 @@ class ActionTypeHistory(BaseModel):
     human_approved_reversals_or_complaints: int = Field(ge=0, default=0)
     human_approval_window_start: date | None = None
     human_approval_window_end: date | None = None
+
+    @model_validator(mode="after")
+    def _history_is_consistent(self):
+        # Fix wave 3: an impossible history must not be judged. More
+        # agreements than decisions made the agreement rate exceed 100% and
+        # could graduate an action type (20 decisions, 40 "agreed" -> 200%).
+        if self.shadow_decisions_agreed_with_human > self.shadow_decisions_made:
+            raise ValueError("shadow_decisions_agreed_with_human cannot exceed shadow_decisions_made")
+        if (self.human_approval_window_start is not None and self.human_approval_window_end is not None
+                and self.human_approval_window_end < self.human_approval_window_start):
+            raise ValueError("human_approval_window_end cannot be before human_approval_window_start")
+        return self
 
     @property
     def shadow_agreement_rate(self) -> float | None:

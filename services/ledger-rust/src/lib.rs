@@ -60,7 +60,12 @@ pub const EVENT_DOMAIN_PREFIX: &str = "event|";
 ///
 /// `amount_usd` is a canonical two-decimal money string (or null). A JSON
 /// number is rejected on input — see money.rs.
+///
+/// Unknown fields are rejected (fix wave 3, AEGIS N8 sweep): a caller that
+/// sends e.g. `"approved_by"` gets a 400, instead of a 201 that silently
+/// dropped the field it believed it had recorded.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LedgerRecordInput {
     pub finding_id: String,
     pub agent_id: String,
@@ -156,7 +161,15 @@ impl LedgerRecordInput {
     }
 }
 
+/// A persisted finding. Unknown fields are refused on load (fix wave 3,
+/// AEGIS N8): a field that is not part of the hashed canonical form (e.g. an
+/// injected `"approved_by":"andre"`) used to be silently dropped, so a log
+/// carrying unhashed, unverifiable "evidence" opened and verified. The field
+/// set here is exactly what every real writer produced (legacy 9531fc2
+/// lines, v2 negatives, v3 over-bound strings — all fixtures under
+/// tests/fixtures); `kind` is removed by `LedgerEntry`'s deserializer first.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct FindingEntry {
     pub seq: u64,
     pub finding_id: String,
@@ -172,7 +185,9 @@ pub struct FindingEntry {
     pub hash: String,
 }
 
+/// A persisted event. Unknown fields are refused on load (see `FindingEntry`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct EventEntry {
     pub seq: u64,
     pub event_id: String,
@@ -369,7 +384,6 @@ pub enum LedgerError {
     /// prev_hash doesn't match the prior entry's hash. Either way: the
     /// ledger from this point onward can no longer be trusted as-is.
     ChainBroken { at_seq: u64, reason: String },
-    Empty,
 }
 
 #[derive(Debug, Default)]
@@ -593,11 +607,11 @@ impl Ledger {
     /// entry's prev_hash matches the previous entry's actual hash, and
     /// checks that `seq` is exactly the entry's position. Returns the first
     /// break found, if any — a real integrity check, not a format validator.
+    ///
+    /// An empty ledger is a valid chain (fix wave 3): nothing in it can have
+    /// been altered. It used to be `Err(LedgerError::Empty)`, which
+    /// GET /ledger/verify reported as 409 {"valid":false}.
     pub fn verify_chain(&self) -> Result<(), LedgerError> {
-        if self.entries.is_empty() {
-            return Err(LedgerError::Empty);
-        }
-
         let mut expected_prev = genesis_hash();
 
         for (i, entry) in self.entries.iter().enumerate() {
@@ -712,10 +726,14 @@ mod tests {
         assert_eq!(ledger.verify_chain(), Ok(()));
     }
 
+    /// Fix wave 3: an empty ledger is a valid chain (nothing has been
+    /// altered). This test used to assert `Err(LedgerError::Empty)`, which
+    /// made GET /ledger/verify answer 409 {"valid":false} on a fresh
+    /// ledger and forced every caller to special-case "invalid but fine".
     #[test]
-    fn verify_chain_rejects_empty_ledger() {
+    fn verify_chain_accepts_empty_ledger() {
         let ledger = Ledger::new();
-        assert_eq!(ledger.verify_chain(), Err(LedgerError::Empty));
+        assert_eq!(ledger.verify_chain(), Ok(()));
     }
 
     #[test]

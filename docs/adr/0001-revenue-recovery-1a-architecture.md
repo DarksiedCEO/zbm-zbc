@@ -66,3 +66,34 @@ client yet, since there is no live client.
   plus a live end-to-end smoke test: real Python process + real Go
   process, real network calls, correctly surfaced the `ord_1007` overlap.
 - `apps/dashboard-ts` — not yet built.
+
+## Zero-value findings and agent errors (fix wave 3, Sep 24 2026 — AEGIS N6)
+
+**Rule.** When the dollar value a finding would claim computes to `0.00`
+after cent rounding, the agent emits **no finding**. Examples: two stacked
+0% codes, two 10% codes on a $0.01 item (each rounds to 0.00), or a valid
+order with no line items (subtotal 0.00) in the abandoned-cart, affiliate
+or discount agents.
+
+Why "no finding" rather than an UNCERTAIN finding without a value: each of
+these agents' single job is a revenue leak, and a zero-dollar outcome is
+not a leak — nothing was given away, nothing is at risk. Failure Mode #1
+forbids a dollar figure without both labels, and `LabeledValue` is
+positive-only, so `0.00` cannot be labeled; Failure Mode #3's UNCERTAIN is
+for doubt about the *cause*, and there is no doubt here. Agents whose
+findings never carry a value (cross-channel, platform integration) are
+unaffected. Before this rule, the agent built a `0.00` `LabeledValue`,
+pydantic raised inside the agent, and the whole request died with 500.
+
+**Agent errors never become a 500.** `api.py` runs every agent through
+`_run_agent`: each item (for cross-channel, each order's touchpoints) is
+run on its own; a `ValueError` raised by the agent for an item (pydantic
+`ValidationError` and `MoneyRangeError` are both `ValueError`s) is recorded
+against that item and the rest still run. If any item failed, the answer is
+`422` with one `{"type": "agent_value_error", "loc": ["body", <field>,
+<index>], "msg": ...}` entry per failed item and **no findings** — never a
+partial `200`, because the orchestrator records every returned finding in
+the evidence ledger and a silently shortened list would be recorded as a
+complete scan. `tests/test_zero_value_no_500.py` fuzzes all eight agents
+over generated valid input (0%, 100%, stacked codes, $0.01 items,
+maximum-bound amounts, empty collections) and asserts nothing raises.

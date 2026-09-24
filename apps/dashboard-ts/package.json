@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/serve.mjs dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node scripts/serve.mjs start",
     "lint": "next lint",
-    "test": "node --test tests/money.test.ts",
+    "test": "node --test tests/money.test.ts tests/bind.test.mjs tests/orchestrator-error.test.ts tests/ledger-status.test.ts",
     "check:dynamic": "node scripts/check-dynamic.mjs"
   },
   "dependencies": {

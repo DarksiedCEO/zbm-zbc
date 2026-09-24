@@ -99,3 +99,37 @@ func TestLedgerClient_VerifyNon200Non409IsARequestErrorNotAVerdict(t *testing.T)
 		}
 	}
 }
+
+// AEGIS D3 (fix wave 3): LedgerClient reuses DetectionClient's plumbing, and
+// every ledger failure used to be labeled "detection-py" — sending whoever
+// read the error to the wrong service.
+func TestLedgerClient_ErrorsNameLedgerRustNotDetection(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"x"}`))
+	}))
+	defer failing.Close()
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close()
+
+	for name, base := range map[string]string{"500": failing.URL, "unreachable": deadURL} {
+		l := NewLedgerClient(base, "t")
+		_, errAppend := l.AppendFinding(context.Background(), Finding{FindingID: "f"})
+		_, errEntries := l.Entries(context.Background())
+		_, errVerify := l.Verify(context.Background())
+		for op, err := range map[string]error{"append": errAppend, "entries": errEntries, "verify": errVerify} {
+			if err == nil {
+				t.Errorf("%s/%s: want an error", name, op)
+				continue
+			}
+			if !strings.Contains(err.Error(), "ledger-rust") || strings.Contains(err.Error(), "detection-py") {
+				t.Errorf("%s/%s: error must name ledger-rust only: %v", name, op, err)
+			}
+		}
+	}
+	d := NewDetectionClient(deadURL, "t")
+	if _, err := d.FixtureOrders(context.Background()); err == nil || !strings.Contains(err.Error(), "detection-py") {
+		t.Errorf("detection errors still name detection-py: %v", err)
+	}
+}

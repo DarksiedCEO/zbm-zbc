@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/client"
 )
@@ -53,11 +52,11 @@ func sameAmount(a, b *client.Money) bool {
 func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsResult, error) {
 	entries, err := o.ledger.Entries(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ledger entries: %w", err)
+		return nil, stepErr("ledger entries", err)
 	}
 	verify, err := o.ledger.Verify(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ledger verify: %w", err)
+		return nil, stepErr("ledger verify", err)
 	}
 
 	findings := []RecordedFinding{}

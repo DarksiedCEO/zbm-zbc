@@ -61,6 +61,13 @@ def detect(orders: list[Order]) -> list[Finding]:
             continue  # zero or one discount code is within policy — not a leak
 
         given_away = _effective_discount_usd(order)
+        if given_away <= 0:
+            # N6 (AEGIS round 2): stacked codes that gave away nothing after
+            # cent rounding (0% codes, 10% of $0.01, no line items) leak no
+            # revenue. ADR 0001 "Zero-value findings": no finding — a 0.00
+            # figure cannot be labeled (LabeledValue is positive-only), and
+            # constructing one used to raise inside this loop -> HTTP 500.
+            continue
         codes = ", ".join(d.code for d in order.discounts)
 
         findings.append(

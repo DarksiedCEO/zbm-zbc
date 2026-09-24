@@ -25,7 +25,7 @@ type LedgerClient struct {
 // LEDGER_SERVICE_TOKEN, or every call fails with 401, loudly, not
 // silently, same failure mode as NewDetectionClient with a wrong token.
 func NewLedgerClient(baseURL, token string) *LedgerClient {
-	return &LedgerClient{base: NewDetectionClient(baseURL, token)}
+	return &LedgerClient{base: newServiceClient("ledger-rust", baseURL, token)}
 }
 
 type LedgerRecordInput struct {
@@ -79,47 +79,51 @@ type LedgerVerifyResult struct {
 }
 
 // Verify reads the ledger's own /ledger/verify judgment. Deliberately
-// bypasses doJSON's 2xx-only success handling: the Rust service returns
-// 409 for BOTH "chain tampered" and "ledger empty" (a legitimate, non-
-// error state before the first append), and callers need the parsed
-// body in either case, not just a generic transport error.
+// bypasses doJSON's 2xx-only success handling: the Rust service answers 409
+// for a chain that fails verification, and callers need the parsed verdict,
+// not just a generic transport error. An empty ledger is a valid chain:
+// 200 {"valid":true,"entries":0} (fix wave 3; it used to be a 409 "Empty"
+// verdict that every caller had to special-case).
 func (l *LedgerClient) Verify(ctx context.Context) (*LedgerVerifyResult, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.base.baseURL+"/ledger/verify", nil)
+	const path = "/ledger/verify"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.base.baseURL+path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("build verify request: %w", err)
+		return nil, l.base.upstreamErr(UpstreamBadRequest, http.MethodGet, path, 0, err.Error())
 	}
 	// Caught live, Sep 22 2026, by an actual 3-process end-to-end run (not
 	// just unit tests): Verify() builds its own request instead of going
-	// through doJSON (deliberately, for the 409-is-not-an-error handling
+	// through doJSON (deliberately, for the 409-is-a-verdict handling
 	// below) and had no Authorization header at all, so it 401'd against
-	// the newly-authenticated ledger even after AppendFinding's fix. A
-	// full pipeline scan surfaced this as "LEDGER INTEGRITY FAILURE after
-	// scan: missing ... Authorization header" — doJSON's fix alone did
-	// not cover this method, since it bypasses doJSON.
+	// the newly-authenticated ledger even after AppendFinding's fix.
 	if l.base.token != "" {
 		req.Header.Set("Authorization", "Bearer "+l.base.token)
 	}
 	resp, err := l.base.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("ledger verify request failed: %w", err)
+		return nil, l.base.upstreamErr(UpstreamUnreachable, http.MethodGet, path, 0, err.Error())
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read verify response: %w", err)
+		return nil, l.base.upstreamErr(UpstreamBadResponse, http.MethodGet, path, resp.StatusCode, "read response body: "+err.Error())
 	}
 
-	// Only 200 (valid) and 409 (tampered, or empty) carry a verify verdict.
+	// Only 200 (valid) and 409 (chain failed verification) carry a verdict.
 	// Anything else (401 wrong token, 404, 500 disk error, ...) is a failed
 	// request, not a verdict — before this check a 401 body parsed as
 	// {"valid":false} and was reported as a chain-integrity failure.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
-		return nil, fmt.Errorf("ledger verify returned %d: %s", resp.StatusCode, string(body))
+		return nil, l.base.upstreamErr(UpstreamStatus, http.MethodGet, path, resp.StatusCode, string(body))
 	}
 	var out LedgerVerifyResult
 	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, fmt.Errorf("unmarshal verify response: %w (body=%s)", err, string(body))
+		return nil, l.base.upstreamErr(UpstreamBadResponse, http.MethodGet, path, resp.StatusCode,
+			fmt.Sprintf("unmarshal verify response: %v (body=%s)", err, string(body)))
+	}
+	if out.Valid != (resp.StatusCode == http.StatusOK) {
+		return nil, l.base.upstreamErr(UpstreamBadResponse, http.MethodGet, path, resp.StatusCode,
+			fmt.Sprintf("verify verdict valid=%v contradicts HTTP status (body=%s)", out.Valid, string(body)))
 	}
 	return &out, nil
 }

@@ -398,3 +398,68 @@ fn legacy_log_from_old_binary_is_served_and_extended() {
     let (_, v) = authed(s.port, "GET", "/ledger/verify", None);
     assert_eq!(v, json!({"valid": true, "entries": 13}));
 }
+
+// --- fix wave 3 -------------------------------------------------------------
+
+/// An empty ledger is a valid chain: 200 {"valid":true,"entries":0}. It used
+/// to answer 409 {"valid":false,"error":"Empty"}, and every caller had to
+/// special-case "invalid, but actually fine".
+#[test]
+fn empty_ledger_verifies_as_valid_with_200() {
+    let log = scratch_log("empty_verify");
+    let s = start_server_at(&log.0);
+    let (st, v) = authed(s.port, "GET", "/ledger/verify", None);
+    assert_eq!(st, 200, "{v}");
+    assert_eq!(v, json!({"valid": true, "entries": 0}));
+}
+
+/// N8 sweep: the finding append body drops nothing silently either. An
+/// extra field (e.g. "approved_by") is a 400, never accepted-and-ignored,
+/// matching POST /ledger/events (contract section 2).
+#[test]
+fn append_with_unknown_field_is_400_and_records_nothing() {
+    let log = scratch_log("append_unknown");
+    let s = start_server_at(&log.0);
+    let mut body = finding("f-0", json!("10.00"));
+    body["approved_by"] = json!("andre");
+    let (st, v) = authed(s.port, "POST", "/ledger/append", Some(&body.to_string()));
+    assert_eq!(st, 400, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("unknown field"), "{v}");
+    let (_, entries) = authed(s.port, "GET", "/ledger/entries", None);
+    assert_eq!(entries, json!([]));
+}
+
+/// N8 end to end: a log with an injected unknown field is refused at
+/// startup (fail closed), exactly like any other corrupt line.
+#[test]
+fn injected_unknown_field_on_disk_refuses_to_start() {
+    let log = scratch_log("inject_unknown");
+    std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/aegis_unknown_field_injection.jsonl"), &log.0).unwrap();
+    let port = free_port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_server"))
+        .env("LEDGER_SERVICE_TOKEN", TOKEN)
+        .env("LEDGER_PORT", port.to_string())
+        .env("LEDGER_LOG_PATH", log.0.to_str().unwrap())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn server");
+    // Bounded wait: on the old code the server starts and serves forever.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(st) = child.try_wait().unwrap() {
+            break Some(st);
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let status = status.expect("server started on a log with an injected unknown field (must refuse)");
+    assert!(!status.success(), "server must refuse to start");
+    let mut stderr = String::new();
+    child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    assert!(stderr.contains("unknown field") && stderr.contains("approved_by"), "{stderr}");
+}
