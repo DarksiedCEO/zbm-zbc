@@ -227,8 +227,51 @@ for assigned port ranges.
 fixed code `{200: 18, 400: 31, 409: 2, 422: 198}` — no 5xx.
 
 **Still open:** state is still process memory (restart/replicas forget
-it); `customer-dossier/update` deep-copies and returns the whole store on
-every request, so cost grows with the store up to the cap.
+it). (The dossier whole-store copy was fixed in fix wave 4, below.)
+
+## Fix wave 4, Sep 24 2026 — classes found in sibling services, checked here
+
+AEGIS round 3 found no fulfillment defects; these are the classes it found
+elsewhere, each either fixed here (failing test first) or proven absent.
+Tests: `tests/test_fix4_limits.py`, `tests/test_fix4_live.py` (real
+`python3 -m api` over TCP).
+
+| Class | Before (evidence) | Now |
+|---|---|---|
+| Body size | No limit. A `Content-Length: 4194305` request with no body bytes sent got no answer (server waiting); an 8 MiB chunked body was read and json-decoded (422). | 4 MiB limit (`BodySizeLimitMiddleware`, `src/api.py`): 413 from `Content-Length` before any body byte is read, 413 while streaming a chunked body. Sized from the max batch: every route's worst-case 1000-item batch (all bounded fields at maximum) fits and returns 200 — largest is orchestrate at 3.57 MB. `voicemail_transcript` cannot be at its 10 000-char maximum across 1000 events (~3 400 chars average fits); such a batch gets 413 and must be split. Item caps (1000 per list/map) were already 422; now tested for every list and map. |
+| Event-loop blocking | FastAPI decoded and validated every body on the event loop (only the handler ran in the thread pool) and serialized responses there. `/health` took **3.32 s** while a 64 MiB body was in flight (live test). | No route declares a body parameter: it awaits the bytes, then one thread-pool call parses (pydantic JSON mode), runs the agent, and renders the response. `/health` is a coroutine. Live: worst `/health` 0.15 s with a 4.1 MB valid batch plus a 64 MiB body (with and without `Content-Length`) in flight. Side effect: auth runs before the body is parsed (anonymous invalid JSON: 422 → 401). Non-JSON `Content-Type` is 415. |
+| Regex | Every regex site in `src/` inventoried (a test fails if one is added untimed): `E164`, `_NANP`, country-code pattern (`recipient_zones.py`), `_WINDOW_RE` (`contact_window.py`), `_FLOAT_TEXT`, `WIRE_PATTERN` (`money.py`), `_ID_PATTERN` and the `PhoneE164` pattern (pydantic-core's linear Rust engine). None has nested/overlapping quantifiers; all are < 50 ms on 17 adversarial 100 KB inputs each (they passed before the fix — class absent). There is no PII-redaction or error-scrubbing regex in this service (422 bodies are built field-by-field, no `re.sub`). One real defect found: `E164`/`_NANP` used `.match`, where `$` also matches before a trailing `\n`, so the gate accepted `"+12125550101\n"` as a separate key from `"+12125550101"` (API input was already rejected by pydantic). Now `.fullmatch`. |
+| Gate cap fill (AEGIS PLAUSIBLE/low) | The 100 000-key history could be filled by a burst of ~50 000 contacts, then every new number was refused for 24 h. | New-key admission budget: ≤ 4 166 new numbers+customers per rolling hour (24 h of admissions < the cap), checked at authorize and redeem; tracked numbers unaffected; still fail closed. `GET /gate/status` (auth) and `gate` in each orchestrate response report utilization / `near_capacity` (≥ 80 %) / budget use; a warning is logged. ADR 0002 Decision 15. A scaled simulation (cap 240, budget 9/h, attacker 100 fresh numbers every 10 min for 24 h) never reaches the cap and a real customer is never refused for capacity. |
+| Dossier update cost | Deep-copied the whole store and returned every customer's dossier on every request: **0.96 s** for one update against 20 000 small dossiers (and it disclosed every customer to every caller). | `customer_dossier.apply_updates` copies and returns only the dossiers the request touches; history de-duplication uses sets. Same request: well under 0.25 s, one dossier returned. |
+
+**Found while profiling (not in the brief), fixed test-first:**
+missed-call detection rescanned every call from the same number for every
+event — quadratic, **3.47 s CPU** for a 1000-call batch from one number;
+now two binary searches per event (results checked against the old
+definition on random batches). `resolve_timezone` re-read tz files from
+disk on every check (zoneinfo strongly caches only 8 zones; the gate checks
+44 per +1 number): a 1000-task orchestrate batch held the dial lock for
+**4.2 s**; now an `lru_cache(maxsize=1024)` (a cached `None` still refuses).
+
+**Tests changed, and why:** `test_concurrent_dossier_updates_do_not_lose_writes`
+slowed `build_or_update`; the route now calls `apply_updates`, so the test
+slows that instead (same assertion). No assertion was weakened.
+**API behavior changes:** `customer-dossier/update` returns only the
+affected dossiers; orchestrate responses gain a `gate` object; anonymous
+requests are 401 before any body parsing; oversized bodies are 413; a
+non-JSON `Content-Type` is 415.
+
+**Suite:** 815 passed before → 880 passed after
+(`FULFILLMENT_TEST_PORT_RANGE=19980-19999 python3 -m pytest`).
+
+**Live run** (`python3 -m api`, `FULFILLMENT_SIP_DIALER=in_memory`, random
+token, pre-fix tree on 127.0.0.1:19991 → fixed on :19992, then terminated):
+anonymous invalid JSON 422 → 401; `Content-Length: 4194305` with no body no
+response (30 s) → 413; 4 MiB+1 chunked 422 → 413; 4.1 MB valid batch 200 →
+200; `/health` worst 2.878 s → 0.152 s during max + two 64 MiB bodies;
+second dossier update returned `[a, b, c]` → `[b]`; `/gate/status` 404 →
+401 anonymous / 200 authenticated; orchestrate at 19:57Z dialed one NY
+number and reported `gate.tracked_keys: 2`.
 
 ## What was actually verified (Sep 22, 2026, post-fix)
 
@@ -322,6 +365,8 @@ PYTHONPATH=src python3 -m api
 #   FULFILLMENT_CONTACT_MIN_SPACING_MINUTES   default 120; 120-1440 only
 #   FULFILLMENT_COUNTRY_ZONES  unset = only +1 numbers are ever contacted;
 #                              e.g. "44=Europe/London"; bad value refuses startup
+# Request bodies over 4 MiB are refused (413). Monitor GET /gate/status
+# (authenticated): alert on near_capacity or new_key_budget_exhausted.
 curl http://127.0.0.1:8091/health
 curl -H "Authorization: Bearer $FULFILLMENT_SERVICE_TOKEN" http://127.0.0.1:8091/fixtures/call-events
 ```

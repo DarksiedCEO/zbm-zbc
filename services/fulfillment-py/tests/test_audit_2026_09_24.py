@@ -308,14 +308,16 @@ def test_exhausted_escalation_retry_returns_the_same_resolution():
 # --- F3: concurrency on in-memory dossier state ------------------------------
 
 def test_concurrent_dossier_updates_do_not_lose_writes(monkeypatch):
-    real = customer_dossier.build_or_update
+    # Fix wave 4: the route now calls apply_updates (only the touched
+    # dossiers), so that is what gets slowed down here.
+    real = customer_dossier.apply_updates
 
     def slow_build(existing, calls, appts):
         out = real(existing, calls, appts)
         time.sleep(0.2)  # widen the read-modify-write window
         return out
 
-    monkeypatch.setattr(api.customer_dossier, "build_or_update", slow_build)
+    monkeypatch.setattr(api.customer_dossier, "apply_updates", slow_build)
     monkeypatch.setattr(api, "_dossiers", {})
 
     def post(cid):

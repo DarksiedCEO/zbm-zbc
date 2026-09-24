@@ -43,6 +43,22 @@ At the cap with nothing expired, a contact that would add a key is REFUSED
 would silently re-open the per-number limit. Per key, at most
 `max_per_24h` attempts are ever inside the window, so the cap bounds the
 whole structure.
+
+Capacity exhaustion (fix wave 4, AEGIS round 3, PLAUSIBLE/low): a holder of
+the service token could fill the tracked-key cap with contacts to fresh
+numbers/customers, after which every NEW number is refused for up to 24h
+(fail closed — correct, but a denial of service). Mitigation, never a relaxation:
+  (c) admission of NEW keys is rate limited: at most `max_new_keys_per_hour`
+      in any rolling hour (checked at authorize and again at redeem). The
+      default is floor(cap / 24), so 24 hours of admissions cannot reach the
+      cap: filling it takes more than a day of sustained real contacts that
+      are also kept alive by re-contacting, not a burst. Already-tracked
+      numbers are unaffected (their own limits still decide).
+  (d) capacity is visible: status() (GET /gate/status and every orchestrate
+      response) reports utilization, near_capacity (>= 80%) and whether this
+      hour's new-key budget is exhausted, and the API logs a warning.
+Every refusal here is fail closed: there is no path that contacts a number
+the gate could not record. ADR 0002, Decision 10.
 """
 
 from __future__ import annotations
@@ -64,6 +80,9 @@ HARD_MIN_SPACING = timedelta(hours=2)
 _ROLLING = timedelta(hours=24)
 DEFAULT_MAX_TRACKED_KEYS = 100_000
 _MAX_TRACKED_KEYS_CEILING = 1_000_000
+DEFAULT_MAX_NEW_KEYS_PER_HOUR = DEFAULT_MAX_TRACKED_KEYS // 24  # 4,166: 24h of admissions < cap
+_NEW_KEY_WINDOW = timedelta(hours=1)
+NEAR_CAPACITY_FRACTION = 0.8
 _SWEEP_EVERY = timedelta(minutes=1)
 _SWEEP_AT_CAP_EVERY = timedelta(seconds=1)
 
@@ -152,14 +171,16 @@ class OutboundContactGate:
         clock: Callable[[], datetime],
         country_zones: dict[str, tuple[str, ...]] | None = None,
         max_tracked_keys: int = DEFAULT_MAX_TRACKED_KEYS,
+        max_new_keys_per_hour: int = DEFAULT_MAX_NEW_KEYS_PER_HOUR,
     ):
-        if (
-            isinstance(max_tracked_keys, bool)
-            or not isinstance(max_tracked_keys, int)
-            or not 1 <= max_tracked_keys <= _MAX_TRACKED_KEYS_CEILING
-        ):
-            raise ValueError(f"max_tracked_keys must be an integer 1-{_MAX_TRACKED_KEYS_CEILING}")
+        for name, value in (("max_tracked_keys", max_tracked_keys), ("max_new_keys_per_hour", max_new_keys_per_hour)):
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= _MAX_TRACKED_KEYS_CEILING:
+                raise ValueError(f"{name} must be an integer 1-{_MAX_TRACKED_KEYS_CEILING}")
         self._max_tracked_keys = max_tracked_keys
+        self._max_new_keys_per_hour = max_new_keys_per_hour
+        # gate-clock stamps of new-key admissions in the last hour; never
+        # longer than max_new_keys_per_hour (the check refuses before that).
+        self._new_key_stamps: deque[datetime] = deque()
         self._window = window
         self._limits = limits
         self._clock = clock
@@ -185,6 +206,26 @@ class OutboundContactGate:
         """Numbers + customers currently held in the attempt history."""
         with self._lock:
             return len(self._attempts)
+
+    def status(self) -> dict:
+        """Capacity metrics for monitoring/alerting (fix wave 4)."""
+        with self._lock:
+            now = self._now()
+            self._maybe_sweep(now)
+            self._prune_new_key_stamps(now)
+            tracked = len(self._attempts)
+            new_last_hour = len(self._new_key_stamps)
+        utilization = round(tracked / self._max_tracked_keys, 4)
+        return {
+            "tracked_keys": tracked,
+            "max_tracked_keys": self._max_tracked_keys,
+            "utilization": utilization,
+            "near_capacity": utilization >= NEAR_CAPACITY_FRACTION,
+            "at_capacity": tracked >= self._max_tracked_keys,
+            "new_keys_last_hour": new_last_hour,
+            "max_new_keys_per_hour": self._max_new_keys_per_hour,
+            "new_key_budget_exhausted": new_last_hour >= self._max_new_keys_per_hour,
+        }
 
     # -- public ------------------------------------------------------------
 
@@ -251,7 +292,22 @@ class OutboundContactGate:
                     f"last 24h, max {self._max_tracked_keys}) — not contacted (fail closed: the attempt "
                     "limit could not be enforced for a number it cannot remember)"
                 )
+        if new_keys:
+            self._prune_new_key_stamps(now)
+            if len(self._new_key_stamps) + new_keys > self._max_new_keys_per_hour:
+                return (
+                    f"new numbers/customers admitted in the last hour: {len(self._new_key_stamps)} "
+                    f"(max {self._max_new_keys_per_hour}) — not contacted (fail closed; numbers already "
+                    "being contacted are unaffected); retry later"
+                )
         return None
+
+    def _prune_new_key_stamps(self, now: datetime) -> None:
+        # Stamps from a clock that later moved backwards stay until they are
+        # an hour old: counted longer, never shorter (conservative).
+        cutoff = now - _NEW_KEY_WINDOW
+        while self._new_key_stamps and self._new_key_stamps[0] <= cutoff:
+            self._new_key_stamps.popleft()
 
     def _redeem(self, auth: ContactAuthorization, channel: TaskChannel) -> str:
         with self._lock:
@@ -269,6 +325,8 @@ class OutboundContactGate:
                 auth._redeemed = True  # a refused authorization is spent, never retried later
                 raise ContactRefused(reason)
             for key in self._keys(auth._phone, auth._customer_id):
+                if key not in self._attempts:
+                    self._new_key_stamps.append(now)  # budget checked by _check above
                 ts = self._attempts.setdefault(key, deque())
                 while ts and ts[0] <= now - _ROLLING:
                     ts.popleft()

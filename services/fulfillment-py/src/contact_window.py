@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from datetime import datetime, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -40,9 +41,15 @@ HARD_LATEST = time(21, 0)
 _WINDOW_RE = re.compile(r"^([01][0-9]|2[0-3]):([0-5][0-9])-([01][0-9]|2[0-3]):([0-5][0-9])$")
 
 
+@lru_cache(maxsize=1024)
 def resolve_timezone(name: str | None) -> ZoneInfo | None:
     """Returns the ZoneInfo, or None for anything unknown/invalid (callers
-    treat None as "do not contact")."""
+    treat None as "do not contact").
+
+    Memoized, bounded (fix wave 4): zoneinfo itself keeps only 8 zones
+    strongly cached and the gate checks up to 44 per +1 number, so every
+    check re-read tz files from disk (~4.2 s for one 1000-task batch, under
+    the dial lock). A cached None is still None: fail closed is unchanged."""
     if not name:
         return None
     try:

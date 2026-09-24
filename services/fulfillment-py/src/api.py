@@ -30,15 +30,19 @@ deployment sets neither and gets the honest default).
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal
+from typing import Annotated, Any, Callable, Literal, TypeVar
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from starlette.concurrency import run_in_threadpool
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agents import (
     appointment_tracking,
@@ -94,6 +98,7 @@ def _load_required_token() -> str:
 
 
 _REQUIRED_TOKEN = _load_required_token()
+_log = logging.getLogger("fulfillment")
 
 
 def require_auth(authorization: str | None = Header(default=None)) -> None:
@@ -144,6 +149,129 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+
+# --- request body limit (fix wave 4) ------------------------------------------
+# Before: no limit at all. A body of any size was read into memory and
+# json-decoded; with the decode on the event loop (below), a 64 MiB body
+# stalled /health for 3.3 s for every client of the process.
+#
+# Sized from the max batch (every list/map is capped at _MAX_BATCH = 1000):
+# the largest legitimate body is a 1000-task orchestrate batch with every
+# bounded field at its maximum and every task `reason` at its full 2,000
+# ASCII chars — 3.57 MB (tests/test_fix4_limits.py::MAX_BATCHES builds each
+# route's worst case and asserts it fits and is accepted). The one field that
+# cannot be at its maximum across a full batch is voicemail_transcript
+# (10,000 chars x 1000 = 10 MB): a 1000-event batch fits transcripts averaging
+# ~3,400 ASCII chars; a larger one gets 413 and must be split.
+_MAX_BODY_BYTES = 4 * 1024 * 1024
+
+
+class _BodyTooLarge(Exception):
+    pass
+
+
+def _too_large_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+        content={"detail": f"request body exceeds {_MAX_BODY_BYTES} bytes; split the batch"},
+        headers={"Connection": "close"},
+    )
+
+
+class BodySizeLimitMiddleware:
+    """413 from Content-Length before a byte of the body is read, and — for a
+    chunked body or a lying client — as soon as the bytes received pass the
+    limit while streaming. Runs before auth: refusing an oversized body costs
+    nothing, and reading it is exactly the cost being refused."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = _MAX_BODY_BYTES
+        for name, value in scope["headers"]:
+            if name == b"content-length":
+                if not value.isdigit():
+                    await JSONResponse(status_code=400, content={"detail": "invalid Content-Length"},
+                                       headers={"Connection": "close"})(scope, receive, send)
+                    return
+                if int(value) > limit:
+                    await _too_large_response()(scope, receive, send)
+                    return
+        received = 0
+        started = False
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    raise _BodyTooLarge()
+            return message
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracking_send)
+        except _BodyTooLarge:
+            if started:
+                raise
+            await _too_large_response()(scope, receive, send)
+
+
+app.add_middleware(BodySizeLimitMiddleware)
+
+
+# --- off-event-loop request handling (fix wave 4) -----------------------------
+# Before: every POST route declared a pydantic body parameter, and FastAPI
+# reads, json-decodes AND validates such a body on the event loop — only the
+# handler function itself ran in the thread pool — and then serialized the
+# response on the event loop too. Now no route declares a body parameter:
+# the async route only awaits the (size-limited) body bytes, then ONE thread
+# pool call parses + validates (pydantic's JSON parser, in JSON mode), runs
+# the agent, and renders the response bytes. Side effect, intended: auth (a
+# dependency) now runs before the body is read or parsed; an anonymous
+# caller gets 401, not a JSON-parse 422.
+
+_M = TypeVar("_M", bound=BaseModel)
+
+
+def _is_json_content_type(value: str | None) -> bool:
+    if not value:
+        return True  # FastAPI's rule: no Content-Type is parsed as JSON
+    main = value.split(";", 1)[0].strip().lower()
+    return main == "application/json" or (main.startswith("application/") and main.endswith("+json"))
+
+
+def _parse(model: type[_M], body: bytes) -> _M:
+    try:
+        return model.model_validate_json(body)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{"loc": ("body", *e["loc"]), "type": e["type"], "msg": e["msg"]} for e in exc.errors(include_url=False)]
+        ) from None
+
+
+def _render(result: Any) -> Response:
+    # The same encoder FastAPI applied to these return values, run here so the
+    # json.dumps happens in the worker thread, not on the event loop.
+    return JSONResponse(content=jsonable_encoder(result))
+
+
+async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]) -> Response:
+    if not _is_json_content_type(request.headers.get("content-type")):
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="expected application/json")
+    body = await request.body()  # bounded by BodySizeLimitMiddleware
+    return await run_in_threadpool(lambda: _render(work(_parse(model, body))))
 
 
 @app.exception_handler(RequestValidationError)
@@ -256,7 +384,7 @@ _GATE: OutboundContactGate = _build_gate()
 _dialer: SipDialerPort = _build_dialer()
 _system_of_record: SystemOfRecordPort = _build_system_of_record()
 
-# In-memory state. FastAPI runs these sync handlers in a thread pool, so
+# In-memory state. The agent work runs in the thread pool (_off_loop), so
 # every read-modify-write below is under a lock (Sep 24 2026 audit: four
 # concurrent dossier updates kept one customer and silently dropped three).
 _dossiers: dict[str, CustomerDossier] = {}
@@ -353,7 +481,9 @@ class ResolveResponse(BaseModel):
 
 
 @app.get("/health")
-def health() -> dict:
+async def health() -> dict:
+    # A coroutine on purpose (fix wave 4): it does no work, so it must not
+    # queue for a thread-pool slot behind batch requests.
     return {"status": "ok", "service": "fulfillment-py", "data_source": "non-live"}
 
 
@@ -376,18 +506,30 @@ def fixtures_dossiers() -> list[CustomerDossier]:
 
 # --- agent endpoints ---------------------------------------------------------
 
-@app.post("/agents/missed-call-detection/detect", response_model=TasksResponse, dependencies=[Depends(require_auth)])
-def detect_missed_calls(req: CallEventsRequest) -> TasksResponse:
+@app.post("/agents/missed-call-detection/detect", dependencies=[Depends(require_auth)])
+async def detect_missed_calls(request: Request) -> Response:
+    return await _off_loop(request, CallEventsRequest, _detect_missed_calls)
+
+
+def _detect_missed_calls(req: CallEventsRequest) -> TasksResponse:
     return TasksResponse(tasks=missed_call_detection.detect(req.call_events))
 
 
-@app.post("/agents/appointment-tracking/detect", response_model=TasksResponse, dependencies=[Depends(require_auth)])
-def detect_overdue_appointments(req: AppointmentsRequest) -> TasksResponse:
+@app.post("/agents/appointment-tracking/detect", dependencies=[Depends(require_auth)])
+async def detect_overdue_appointments(request: Request) -> Response:
+    return await _off_loop(request, AppointmentsRequest, _detect_overdue_appointments)
+
+
+def _detect_overdue_appointments(req: AppointmentsRequest) -> TasksResponse:
     return TasksResponse(tasks=appointment_tracking.find_overdue(req.appointments))
 
 
 @app.post("/agents/followup-sequencing/escalate", dependencies=[Depends(require_auth)])
-def escalate_task(req: EscalateRequest) -> dict:
+async def escalate_task(request: Request) -> Response:
+    return await _off_loop(request, EscalateRequest, _escalate_task)
+
+
+def _escalate_task(req: EscalateRequest) -> dict:
     try:
         result = followup_sequencing.escalate(req.task)
     except ValueError:
@@ -453,7 +595,11 @@ def _outcome_row(o: callback_orchestration.OrchestrationOutcome) -> dict:
 
 
 @app.post("/agents/callback-orchestration/run", dependencies=[Depends(require_auth)])
-def run_callback_orchestration(req: OrchestrateRequest) -> dict:
+async def run_callback_orchestration(request: Request) -> Response:
+    return await _off_loop(request, OrchestrateRequest, _run_callback_orchestration)
+
+
+def _run_callback_orchestration(req: OrchestrateRequest) -> dict:
     # Sep 24 2026 audit: (1) the clock is the server's, never the caller's;
     # (2) a task_id this process already handed to the dialer is never
     # dialed again, even if the caller resubmits it still PENDING — a
@@ -519,15 +665,37 @@ def run_callback_orchestration(req: OrchestrateRequest) -> dict:
         }
         for t in repeats
     ]
-    return {"outcomes": rows}
+    capacity = _GATE.status()
+    if capacity["near_capacity"] or capacity["new_key_budget_exhausted"]:
+        _log.warning("outbound gate capacity alert: %s", capacity)
+    return {"outcomes": rows, "gate": capacity}
 
 
-@app.post("/agents/customer-dossier/update", response_model=DossiersResponse, dependencies=[Depends(require_auth)])
-def update_dossiers(req: DossierUpdateRequest) -> DossiersResponse:
-    global _dossiers
+@app.get("/gate/status", dependencies=[Depends(require_auth)])
+def gate_status() -> dict:
+    """Outbound gate capacity (fix wave 4): how full the tracked-number
+    history is and how much of this hour's new-number budget is used. Alert
+    on near_capacity / new_key_budget_exhausted — at_capacity means no NEW
+    number or customer can be contacted until history expires (fail closed)."""
+    return _GATE.status()
+
+
+@app.post("/agents/customer-dossier/update", dependencies=[Depends(require_auth)])
+async def update_dossiers(request: Request) -> Response:
+    return await _off_loop(request, DossierUpdateRequest, _update_dossiers)
+
+
+def _update_dossiers(req: DossierUpdateRequest) -> DossiersResponse:
+    # Fix wave 4: this used to deep-copy the WHOLE store on every request and
+    # return every customer's dossier to every caller (0.96 s for one update
+    # against 20,000 small dossiers; up to the 100,000-customer cap). Now only
+    # the dossiers this request touches are copied, checked and returned.
+    # Stored dossiers are never mutated in place (apply_updates works on
+    # copies), so the response can be rendered after the lock is released.
     with _dossiers_lock:
-        updated = customer_dossier.build_or_update(_dossiers, req.call_events, req.appointments)
-        if len(updated) > _MAX_DOSSIERS:
+        changed = customer_dossier.apply_updates(_dossiers, req.call_events, req.appointments)
+        new_customers = sum(1 for cid in changed if cid not in _dossiers)
+        if len(_dossiers) + new_customers > _MAX_DOSSIERS:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"dossier store is full (max {_MAX_DOSSIERS} customers); update not applied (fail closed)",
@@ -535,7 +703,7 @@ def update_dossiers(req: DossierUpdateRequest) -> DossiersResponse:
             )
         if any(
             len(lst) > _MAX_DOSSIER_HISTORY
-            for d in updated.values()
+            for d in changed.values()
             for lst in (d.call_history, d.appointment_history, d.phone_numbers)
         ):
             raise HTTPException(
@@ -543,13 +711,16 @@ def update_dossiers(req: DossierUpdateRequest) -> DossiersResponse:
                 detail=f"a dossier's history is full (max {_MAX_DOSSIER_HISTORY} entries per list); update not applied (fail closed)",
                 headers={"Retry-After": "60"},
             )
-        _dossiers = updated
-        snapshot = list(_dossiers.values())
-    return DossiersResponse(dossiers=snapshot)
+        _dossiers.update(changed)
+    return DossiersResponse(dossiers=list(changed.values()))
 
 
-@app.post("/agents/resolution-writeback/resolve", response_model=ResolveResponse, dependencies=[Depends(require_auth)])
-def resolve_and_writeback(req: ResolveRequest) -> ResolveResponse:
+@app.post("/agents/resolution-writeback/resolve", dependencies=[Depends(require_auth)])
+async def resolve_and_writeback(request: Request) -> Response:
+    return await _off_loop(request, ResolveRequest, _resolve_and_writeback)
+
+
+def _resolve_and_writeback(req: ResolveRequest) -> ResolveResponse:
     events = [
         TerminalEvent(
             entity_type=e.entity_type,

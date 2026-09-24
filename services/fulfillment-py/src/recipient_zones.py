@@ -61,8 +61,14 @@ from dataclasses import dataclass
 
 from contact_window import resolve_timezone
 
-E164 = re.compile(r"^\+[1-9][0-9]{1,14}$")
-_NANP = re.compile(r"^\+1([2-9][0-9]{2})([2-9][0-9]{2})([0-9]{4})$")
+# Always .fullmatch (fix wave 4): with .match, "$" also matches before a
+# trailing "\n", so "+12125550101\n" passed as E.164 and the gate keyed it as
+# a different number from "+12125550101" — a second attempt budget for the
+# same phone. (The API's PhoneE164 check, pydantic-core's regex, already
+# rejected it; this is the gate's own check.) Both patterns are linear: no
+# nested or overlapping quantifiers (tests/test_fix4_limits.py times them).
+E164 = re.compile(r"\+[1-9][0-9]{1,14}")
+_NANP = re.compile(r"\+1([2-9][0-9]{2})([2-9][0-9]{2})([0-9]{4})")
 
 CONTINENTAL_US_CA_ZONES: tuple[str, ...] = (
     # United States, contiguous 48
@@ -148,13 +154,13 @@ def _refuse(reason: str) -> ZoneVerdict:
 
 
 def zones_to_check(phone: str, claimed_tz: str | None, country_zones: dict[str, tuple[str, ...]]) -> ZoneVerdict:
-    if not isinstance(phone, str) or not E164.match(phone):
+    if not isinstance(phone, str) or not E164.fullmatch(phone):
         return _refuse("phone number is not E.164")
     if resolve_timezone(claimed_tz) is None:
         return _refuse("recipient time zone unknown or invalid")
 
     if phone.startswith("+1"):
-        m = _NANP.match(phone)
+        m = _NANP.fullmatch(phone)
         if not m:
             return _refuse("+1 number is not a valid 10-digit NANP number")
         npa = m.group(1)
