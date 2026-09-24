@@ -65,7 +65,7 @@ def test_attack_hidden_instructions_on_website_are_flagged_logged_and_change_not
 
 
 def test_attack_injection_in_bio_document_message_and_facts_changes_no_decision():
-    base_app = {"creator_id": "clip_x", "legal_name": "Kim Clip", "date_of_birth": "2010-01-01", "applied_on": "2026-09-24",
+    base_app = {"creator_id": "clip_x", "legal_name": "Kim Clip", "date_of_birth": "2010-01-01",
                 "follower_count": 5000, "avg_engagement_rate": 0.05, "fake_follower_ratio": 0.01, "content_history_posts": 50,
                 "network_fit_tags": ["gaming"], "bio": "I post gaming clips."}
     outcomes = []
@@ -177,10 +177,31 @@ def test_attack_change_ad_account_without_approval_is_refused():
 SECRET = "FAKEsecret9Zq7Hunter2Xy81Lp"  # high-entropy token shape
 SECRET_CUED = "tangerine-walrus-42"  # low-entropy password; only recognisable by its cue
 SECRET_KEYS = ("password", "access_token", "refresh_token", "client_secret", "api_key")
+# Fix wave 1 (F10): every shape the AEGIS review got past the old
+# pattern-only redaction. Each is (value sprayed, secret fragment that must
+# never appear anywhere).
+AEGIS_MISSES = [
+    ("login lee / Hunter2-Sup3rS3cret!", "Sup3rS3cret"),
+    ("contraseña: mandarina7731", "mandarina7731"),
+    ("Passwort: Apfelbaum8842", "Apfelbaum8842"),
+    ("p a s s w o r d : walrusmoon5528", "walrusmoon5528"),
+    ("password\u200b: zerowidth6613", "zerowidth6613"),
+    ("ｐａｓｓｗｏｒｄ: fullwidth4471", "fullwidth4471"),
+    ("creds admin / Gl0wworm!", "Gl0wworm"),
+    ("my PIN is 48213", "48213"),
+    ("card 4111 1111 1111 1111", "4111 1111 1111 1111"),
+    ("card 5500005555555559", "5500005555555559"),
+    ("api key AKIAQWERTYUIOPASDFGH", "AKIAQWERTYUIOPASDFGH"),
+    ("mot de passe: fromage9931", "fromage9931"),
+    ("пароль: medved7719", "medved7719"),
+    ("p@ssw0rd = leetspeak3317", "leetspeak3317"),
+    ("lee@acme.example / Kumquat-99x!", "Kumquat-99x"),
+    ("otp 739104", "739104"),
+]
 
 
 def _routes():
-    app = {"creator_id": "clip_s", "legal_name": "Spray Tester", "date_of_birth": "1995-01-01", "applied_on": "2026-09-24",
+    app = {"creator_id": "clip_s", "legal_name": "Spray Tester", "date_of_birth": "1995-01-01",
            "follower_count": 1000, "avg_engagement_rate": 0.05, "fake_follower_ratio": 0.01, "content_history_posts": 50,
            "network_fit_tags": ["x"], "bio": "hello"}
     return [
@@ -249,7 +270,8 @@ def _variants(body):
         return [None]
     out = [dict(body, **{k: SECRET for k in SECRET_KEYS}), dict(body, **{k: SECRET_CUED for k in SECRET_KEYS})]
     for p in _string_paths(body):
-        for val in (SECRET, f"my password is {SECRET_CUED}", f"note: token={SECRET} ok", f"pw: {SECRET_CUED}"):
+        for val in (SECRET, f"my password is {SECRET_CUED}", f"note: token={SECRET} ok", f"pw: {SECRET_CUED}",
+                    *(miss for miss, _ in AEGIS_MISSES)):
             b = copy.deepcopy(body)
             _set(b, p, val)
             out.append(b)
@@ -265,7 +287,7 @@ def _seeded():
     brand["contract"]["services"] = ["zbc_brand_campaign"]
     _ok(c.post("/onboarding/clients", json=brand), 201)
     _ok(c.post("/zbc/brands/brand_1/campaigns", json={"campaign_id": "camp_1", "regulated": False}), 201)
-    ok_app = {"creator_id": "clip_ok", "legal_name": "Ria Good", "date_of_birth": "2000-01-01", "applied_on": "2026-09-24",
+    ok_app = {"creator_id": "clip_ok", "legal_name": "Ria Good", "date_of_birth": "2000-01-01",
               "follower_count": 20000, "avg_engagement_rate": 0.05, "fake_follower_ratio": 0.02, "content_history_posts": 120,
               "network_fit_tags": ["beauty"], "w9_received": True, "creator_agreement_signed": True, "disclosure_training_completed": True}
     _ok(c.post("/zbc/creators/applications", json=ok_app), 201)
@@ -302,6 +324,8 @@ def test_credential_spray_never_leaks_anywhere(caplog):
     everything += json.dumps([e.model_dump(mode="json") for e in svc.escalations.values()])
     assert SECRET not in everything
     assert SECRET_CUED not in everything
+    for miss, fragment in AEGIS_MISSES:
+        assert fragment not in everything, miss
 
 
 def test_ledger_http_client_errors_never_include_token_or_payload():

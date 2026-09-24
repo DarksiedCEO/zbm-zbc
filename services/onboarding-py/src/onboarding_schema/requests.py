@@ -9,10 +9,11 @@ window.
 
 from __future__ import annotations
 
-from datetime import date
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Any, ClassVar, Literal, Optional, Union
 
-from pydantic import Field, StringConstraints
+from pydantic import Field, StringConstraints, model_validator
+
+from redaction import CREDENTIAL_REFUSAL, find_credential
 
 from . import (
     Channel,
@@ -53,7 +54,22 @@ class FactIn(Inbound):
     value: FactValue
     provenance: Provenance
     evidence: ShortText
+    # Must not be in the future: checked against the SERVER clock by the
+    # service (a future timestamp would out-rank a newer real fact).
     observed_at: AwareDatetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def _field_and_value_together(cls, data: Any) -> Any:
+        # "shopify_password" + "tangerine" is a credential even though
+        # neither string is one on its own.
+        if isinstance(data, dict) and isinstance(data.get("field"), str):
+            v = data.get("value")
+            vals = v if isinstance(v, list) else [v]
+            for x in vals:
+                if isinstance(x, (str, int)) and not isinstance(x, bool) and find_credential(f"{data['field']}: {x}"):
+                    raise ValueError(CREDENTIAL_REFUSAL)
+        return data
 
 
 class FactsRequest(Inbound):
@@ -71,11 +87,17 @@ class MessageRequest(Inbound):
 
 
 class WebsiteScanRequest(Inbound):
+    # A public web page: third-party content, scrubbed rather than refused.
+    SCRUB_ONLY_FIELDS: ClassVar[frozenset[str]] = frozenset({"html"})
+
     html: Annotated[str, StringConstraints(max_length=500_000)]
 
 
 class AuditRequest(Inbound):
     # Raw account-pull rows, forwarded to Revenue Recovery unchanged in shape.
+    # Platform data, not client-typed text: scrubbed rather than refused.
+    SCRUB_ONLY_FIELDS: ClassVar[frozenset[str]] = frozenset({"account_data"})
+
     account_data: dict[Name64, list[dict]]
     observed_monthly_revenue_usd: Optional[Money] = None
     risk_signals: list[Name64] = Field(default_factory=list)
@@ -117,9 +139,22 @@ class IssueOutcomeRequest(Inbound):
     note: ShortText = ""
 
 
+ApprovalToken = Annotated[str, StringConstraints(max_length=128)]
+
+
+class EscalationAckRequest(Inbound):
+    """Acknowledging an escalation is Andre's action: it needs his approval
+    token (HMAC-SHA256 keyed by ONBOARDING_ANDRE_APPROVAL_KEY over the exact
+    action — see ``memory.andre_action_token``). The shared service token
+    alone is refused (403)."""
+
+    approval_token: Optional[ApprovalToken] = None
+
+
 class EscalationResolveRequest(Inbound):
     resolution: ShortText
     snag_category: Name64
+    approval_token: Optional[ApprovalToken] = None  # Andre's, over (client, escalation, resolution, snag_category)
 
 
 class ExitRequest(Inbound):
@@ -131,8 +166,9 @@ class CreatorFlagRequest(Inbound):
 
 
 class CreatorPaymentRequest(Inbound):
+    # No payment-date field: the 1099 tax year is the SERVER's date
+    # (America/Los_Angeles) when the payment is recorded (fix wave 1, F1 sweep).
     amount_usd: PositiveMoney
-    paid_on: date
 
 
 class CaptionRequest(Inbound):
@@ -161,4 +197,4 @@ class PlaybookRuleRequest(Inbound):
     rule_id: Name64
     version: int = Field(ge=1)
     text: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
-    approval_token: Annotated[str, StringConstraints(max_length=128)]
+    approval_token: ApprovalToken

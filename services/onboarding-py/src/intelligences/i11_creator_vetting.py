@@ -9,7 +9,9 @@ Rules (explicit; thresholds are dated knowledge in ``THRESHOLDS``, a draft
 to be tuned with real applications — changes go through the playbook
 approval path):
 - AGE (hard, written in stone, locked Sep 24 2026): the applicant must be
-  18 or older on the application date. Under 18 => DECLINE, with no
+  18 or older on ``evaluated_on`` — a date the SERVICE derives from the
+  server clock (the date at UTC-12, see service.AGE_EVALUATION_TZ). There
+  is no caller-supplied application date (fix wave 1, F1). Under 18 => DECLINE, with no
   guardian / parental-consent path — there is no field, flag, config or
   route that can create one. No date of birth => INCOMPLETE (we ask; we do
   not guess). A self-reported date of birth is NOT verification: activation
@@ -68,7 +70,7 @@ def age_on(dob: date, on: date) -> int:
     return years
 
 
-def vet(app: ClipperApplication) -> VettingDecision:
+def vet(app: ClipperApplication, evaluated_on: date) -> VettingDecision:
     t = THRESHOLDS
     declines: list[str] = []
     incomplete: list[str] = []
@@ -77,10 +79,10 @@ def vet(app: ClipperApplication) -> VettingDecision:
     if app.date_of_birth is None:
         incomplete.append("date of birth missing: clippers must be 18 or older; we need it before vetting")
     else:
-        age = age_on(app.date_of_birth, app.applied_on)
+        age = age_on(app.date_of_birth, evaluated_on)
         if age < CLIPPER_MINIMUM_AGE_YEARS:
             declines.append(
-                f"under {CLIPPER_MINIMUM_AGE_YEARS} on the application date: clippers must be "
+                f"under {CLIPPER_MINIMUM_AGE_YEARS} on the server's date: clippers must be "
                 f"{CLIPPER_MINIMUM_AGE_YEARS} or older; there is no guardian or parental-consent path"
             )
 

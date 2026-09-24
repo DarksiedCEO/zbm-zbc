@@ -1,6 +1,8 @@
 """
 A SMALL FAKE of ledger-rust's ``POST /ledger/events`` (BUILD_CONTRACTS.md
-section 2), for local live runs of onboarding-py only. Standard library
+section 2), for local runs of onboarding-py only. Prefer the real
+ledger-rust (see the README's live-run section); this fake validates
+exactly like it (event.rs) so it is never looser. Standard library
 only. NOT the real ledger: in-memory, no persistence, a simple SHA-256
 chain for show — the real events endpoint is being built in ledger-rust by
 the Decimal/ledger workstream.
@@ -28,14 +30,17 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 FIELDS = {
-    "event_id": re.compile(r"^[A-Za-z0-9._:-]{1,128}$"),
-    "department": re.compile(r"^[a-z0-9_]{1,64}$"),
-    "event_type": re.compile(r"^[a-z0-9_]{1,64}$"),
-    "actor": re.compile(r"^[a-z0-9_]{1,64}$"),
-    "subject_id": re.compile(r"^[A-Za-z0-9._:-]{1,128}$"),
-    "payload_sha256": re.compile(r"^[0-9a-f]{64}$"),
+    "event_id": re.compile(r"[A-Za-z0-9._:-]{1,128}"),
+    "department": re.compile(r"[a-z0-9_]{1,64}"),
+    "event_type": re.compile(r"[a-z0-9_]{1,64}"),
+    "actor": re.compile(r"[a-z0-9_]{1,64}"),
+    "subject_id": re.compile(r"[A-Za-z0-9._:-]{1,128}"),
+    "payload_sha256": re.compile(r"[0-9a-f]{64}"),
 }
-CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# Same as ledger-rust (event.rs): Rust's char::is_control is Unicode Cc —
+# C0, DEL AND C1 (U+0080-U+009F). Lone surrogates are not Unicode scalar
+# values, so serde rejects them too.
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
 
 TOKEN = os.environ.get("LEDGER_SERVICE_TOKEN", "")
 ENTRIES: list[dict] = []
@@ -50,7 +55,8 @@ def validate(body) -> str | None:
     if set(body) != expected:
         return "unknown or missing fields"
     for k, rx in FIELDS.items():
-        if not isinstance(body[k], str) or not rx.match(body[k]):
+        # fullmatch: Python's "$" would accept a trailing newline; Rust does not.
+        if not isinstance(body[k], str) or not rx.fullmatch(body[k]):
             return f"invalid {k}"
     s = body["summary"]
     if not isinstance(s, str) or not 1 <= len(s) <= 280 or CONTROL.search(s):

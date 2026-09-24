@@ -113,6 +113,36 @@ class PlaybookApprovalError(PermissionError):
     pass
 
 
+class AndreApprovalError(PermissionError):
+    pass
+
+
+def andre_action_digest(action: str, *fields: str) -> str:
+    return hashlib.sha256(json.dumps(["andre_action", action, *fields], separators=(",", ":")).encode()).hexdigest()
+
+
+def andre_action_token(key: str, action: str, *fields: str) -> str:
+    """Andre's approval for ONE exact action (e.g. resolving escalation X of
+    client Y with this resolution text): HMAC-SHA256 keyed by
+    ONBOARDING_ANDRE_APPROVAL_KEY. Same mechanism as the playbook approval
+    token; a token for one action/escalation/text is useless for another."""
+    return hmac.new(key.encode(), andre_action_digest(action, *fields).encode(), hashlib.sha256).hexdigest()
+
+
+def verify_andre_token(key: Optional[str], expected_fn, token: Optional[str]) -> None:
+    """Constant-time check of an Andre approval token. No key configured =>
+    nothing attributed to Andre is possible (fail closed)."""
+    if not key:
+        raise AndreApprovalError("no Andre approval key configured (ONBOARDING_ANDRE_APPROVAL_KEY); refused")
+    expected = expected_fn(key)
+    try:
+        ok = isinstance(token, str) and hmac.compare_digest(token, expected)
+    except TypeError:
+        ok = False
+    if not ok:
+        raise AndreApprovalError("missing or invalid Andre approval token for this exact action")
+
+
 @dataclass
 class PlaybookRule:
     rule_id: str
