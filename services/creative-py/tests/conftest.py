@@ -70,7 +70,7 @@ def recorder(ledger):
 class Api:
     """A TestClient bound to an app built with injected fakes."""
 
-    def __init__(self, *, ledger, clock, departments=None, actors=None, founder_token=TEST_FOUNDER_TOKEN):
+    def __init__(self, *, ledger, clock, departments=None, actors=None, founder_token=TEST_FOUNDER_TOKEN, **build_kw):
         from fastapi.testclient import TestClient
 
         from api import build_app
@@ -78,7 +78,7 @@ class Api:
         self.ledger = ledger
         self.clock = clock
         self.app = build_app(service_token=TEST_SERVICE_TOKEN, ledger=ledger, founder_token=founder_token,
-                             clock=clock, departments=departments, actors=actors)
+                             clock=clock, departments=departments, actors=actors, **build_kw)
         self.client = TestClient(self.app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"})
         self.zbm = self.app.state.zbm
         self.zbc = self.app.state.zbc

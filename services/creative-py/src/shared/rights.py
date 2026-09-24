@@ -22,7 +22,7 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from shared.errors import PreconditionFailed
-from shared.types import NonEmptyStr, SafeId
+from shared.types import CampaignId, NonEmptyStr, SafeId
 
 
 class AssetKind(str, Enum):
@@ -65,7 +65,7 @@ class CampaignLicense(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     license_id: SafeId
-    campaign_id: SafeId
+    campaign_id: CampaignId
     licensor: NonEmptyStr
     licensee: NonEmptyStr
     covered_asset_ids: frozenset[SafeId]

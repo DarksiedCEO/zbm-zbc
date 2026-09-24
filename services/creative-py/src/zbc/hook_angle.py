@@ -23,7 +23,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from shared.errors import GuardrailViolation
-from shared.text import contains_phrase, normalize
+from shared.text import mentions_phrase, normalize
 from zbc.rulebook import Rulebook, RuleKind
 from zbc.source_mining import Moment, MomentMap
 
@@ -69,7 +69,7 @@ def sheet_for(moment: Moment, angle_id: str, rb: Rulebook) -> HookSheet:
         if len(n.split()) > HOOK_MAX_WORDS:
             rejected.append({"hook": h, "reason": f"H3 more than {HOOK_MAX_WORDS} words; won't land in {HOOK_WINDOW_SECONDS}s"})
             continue
-        broken = [rid for rid, p in never if contains_phrase(h, p)]
+        broken = [rid for rid, p in never if mentions_phrase(h, p)]
         if broken:
             rejected.append({"hook": h, "reason": f"H4 breaks never-say {', '.join(broken)}"})
             continue

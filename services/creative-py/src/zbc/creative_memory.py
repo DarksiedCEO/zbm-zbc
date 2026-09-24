@@ -26,14 +26,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from shared.departments import VerificationAttestation, VerificationIntegrityPort
-from shared.types import NonEmptyStr, SafeId
+from shared.types import CampaignId, NonEmptyStr, SafeId
 
 
 class ClipResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     result_id: SafeId
-    campaign_id: SafeId
+    campaign_id: CampaignId
     submission_id: SafeId
     vertical: NonEmptyStr
     platform: NonEmptyStr

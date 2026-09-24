@@ -33,6 +33,13 @@ OW  declared third-party watermark                          -> reject
 DC  disclosure token in caption, or paid-partnership label  -> reject
 MS  each must-say phrase present in the clip's text         -> reject
 NS  no never-say phrase in the clip's text                  -> reject
+    (DC/MS/NS match on canonical text — confusables, diacritics, format
+    characters and fullwidth forms folded, shared/text.py; a phrase found
+    only once split letters are rejoined or leetspeak folded is
+    borderline -> human_review, never a pass)
+OBF caption / on-screen text / transcript shows an obfuscation
+    signal (mixed-script lookalikes, hidden format characters,
+    separator-split letters)                                -> human_review
 QF  resolution >= floor; not declared => human_review       -> reject / human_review
 RC  every source/added asset is in the allow-list           -> reject
 MD  min days live is NOT judged here (Verification and Integrity).
@@ -46,8 +53,8 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, model_validator
 
 from shared.registry import PlatformRulesRegistry
-from shared.text import contains_phrase
-from shared.types import NonEmptyStr, SafeId
+from shared.text import PhraseMatch, contains_phrase, match_phrase, obfuscation_signals
+from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
 from zbc.platform_rules import rows_usable
 from zbc.rulebook import Rulebook, RuleKind
 
@@ -56,8 +63,8 @@ class ClipSubmission(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     submission_id: SafeId
-    campaign_id: SafeId
-    rulebook_version: int = Field(ge=1)
+    campaign_id: CampaignId
+    rulebook_version: int = Field(ge=1, le=MAX_RULEBOOK_VERSION)
     clipper_id: SafeId
     posted_at: AwareDatetime
     platform: NonEmptyStr
@@ -105,6 +112,7 @@ class ClipReviewDecision(BaseModel):
     checks: tuple[str, ...] = ()
     decided_by: str
     decided_at: datetime
+    received_at: datetime | None = None  # server receipt time of the submission (never submitter-asserted)
 
     @model_validator(mode="after")
     def _cites_only_rules_on_the_page(self, info: ValidationInfo) -> "ClipReviewDecision":
@@ -140,7 +148,12 @@ def make_decision(rb: Rulebook, **data) -> ClipReviewDecision:
 
 
 def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, now: datetime,
-           decided_by: str = "zbc_clip_review") -> ClipReviewDecision:
+           decided_by: str = "zbc_clip_review", received_at: datetime | None = None,
+           route_to_human: tuple[str, ...] = ()) -> ClipReviewDecision:
+    """`route_to_human`: reasons from outside the rulebook (e.g. a declared
+    version outside its grace window) that make this clip ineligible for
+    ANY automatic outcome; the automatic result is kept as a reason for
+    the human reviewer."""
     today = now.date()
     broken: list[BrokenRule] = []
     borderline: list[str] = []
@@ -210,18 +223,32 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
         borderline.append("no disclosure rule in this version (not governed)")
     else:
         checks.append(dc.rule_id)
-        ok = any(contains_phrase(sub.caption, t) for t in dc.params.get("any_of", []))
-        if not ok and not (dc.params.get("or_platform_label") and sub.paid_partnership_label):
-            fail(dc.rule_id, "no disclosure in the caption and no paid-partnership label")
+        found = [match_phrase(sub.caption, t) for t in dc.params.get("any_of", [])]
+        label = bool(dc.params.get("or_platform_label") and sub.paid_partnership_label)
+        if PhraseMatch.EXACT not in found and not label:
+            if PhraseMatch.LOOSE in found:
+                borderline.append(f"{dc.rule_id}: disclosure only found with split/obfuscated letters")
+            else:
+                fail(dc.rule_id, "no disclosure in the caption and no paid-partnership label")
 
     for r in rb.rules_of(RuleKind.MUST_SAY):
         checks.append(r.rule_id)
-        if not contains_phrase(clip_text, r.params.get("phrase", "")):
+        m = match_phrase(clip_text, r.params.get("phrase", ""))
+        if m is PhraseMatch.LOOSE:
+            borderline.append(f"{r.rule_id}: must-say {r.params.get('phrase')!r} only found with split/obfuscated letters")
+        elif m is PhraseMatch.NONE:
             fail(r.rule_id, f"missing must-say {r.params.get('phrase')!r}")
     for r in rb.rules_of(RuleKind.NEVER_SAY):
         checks.append(r.rule_id)
-        if contains_phrase(clip_text, r.params.get("phrase", "")):
+        m = match_phrase(clip_text, r.params.get("phrase", ""))
+        if m is PhraseMatch.EXACT:
             fail(r.rule_id, f"says never-say {r.params.get('phrase')!r}")
+        elif m is PhraseMatch.LOOSE:
+            borderline.append(f"{r.rule_id}: possible never-say {r.params.get('phrase')!r} written with split/obfuscated letters")
+
+    for field_name in ("caption", "on_screen_text", "transcript"):
+        for sig in obfuscation_signals(getattr(sub, field_name)):
+            borderline.append(f"obfuscation in {field_name}: {sig}")
 
     qf = rb.one(RuleKind.QUALITY_FLOOR)
     if qf is not None:
@@ -246,9 +273,14 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
         borderline.append("assets declared but no rights rule in this version")
 
     outcome = "reject" if broken else ("human_review" if borderline else "pass")
+    if route_to_human:
+        automatic = f"automatic result would have been {outcome}" + (
+            f" (broke {', '.join(b.rule_id for b in broken)})" if broken else "")
+        borderline = [*route_to_human, automatic, *borderline]
+        outcome, broken = "human_review", []
     return make_decision(
         rb, submission_id=sub.submission_id, campaign_id=sub.campaign_id, rulebook_version=rb.version,
         outcome=outcome, broken_rules=tuple(broken),
         human_review_reasons=tuple(borderline) if outcome == "human_review" else (),
-        checks=tuple(checks), decided_by=decided_by, decided_at=now,
+        checks=tuple(checks), decided_by=decided_by, decided_at=now, received_at=received_at,
     )

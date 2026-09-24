@@ -33,7 +33,7 @@ from typing import Literal
 from shared.actors import ActorRegistry, Role, require_not_self
 from shared.errors import PreconditionFailed
 from shared.registry import PlatformRulesRegistry
-from shared.text import contains_phrase
+from shared.text import contains_phrase, mentions_phrase
 from zbc.platform_rules import rows_usable
 from zbc.rulebook import Rulebook, RuleKind, RulebookStatus
 
@@ -78,7 +78,7 @@ def review(rb: Rulebook, approver_id: str, actors: ActorRegistry, registry: Plat
     for a in rb.approved_angles:
         for line in a.approved_hook_lines:
             for rid, n in never:
-                if contains_phrase(line, n):
+                if mentions_phrase(line, n):
                     issues.append(f"R5 hook line {line!r} of {a.angle_id} breaks never-say {rid}")
         if not a.keywords:
             issues.append(f"R6 angle {a.angle_id} has no keywords")

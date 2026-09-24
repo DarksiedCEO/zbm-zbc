@@ -83,7 +83,12 @@ All routes except `GET /health` need `Authorization: Bearer $CREATIVE_SERVICE_TO
 Andre's actions also need `X-Andre-Approval-Token: $CREATIVE_ANDRE_APPROVAL_TOKEN`.
 `/docs`, `/redoc`, `/openapi.json` are disabled. Errors: 401 auth, 403
 guardrail/founder, 404 not found, 409 out of order / frozen / blocked, 422
-validation, **503 = evidence ledger record failed, decision did not take effect**.
+validation (including any id whose ledger subject couldn't fit: campaign
+ids are at most 100 characters), **503 `took_effect: false` = evidence
+ledger record failed, decision did not take effect** (and no outside
+department was called); **503 `took_effect: "partial"`** = the decision
+and its outside request were recorded and sent, but recording the outside
+party's answer failed, so that answer is not applied (`effect` says what).
 
 - Registry: `GET /registry/rows`, `GET /registry/rows/{id}` (with `usable` + reason), `PUT /registry/rows/{id}` (owner-enforced)
 - Rights: `POST /rights/clearances`, `POST /rights/licenses` (actor `rights_desk`)
@@ -105,6 +110,7 @@ export CREATIVE_SERVICE_TOKEN=<secret>             # required; refuses to start 
 export CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret> # without it every founder action is refused
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090    # without both ledger vars every decision is refused (503)
 export LEDGER_SERVICE_TOKEN=<ledger secret>
+export CREATIVE_SUPERSEDED_GRACE_HOURS=72          # optional; 0..720, else refuses to start (ADR 0005 decision 10)
 cd src && python3 serve.py                 # CREATIVE_BIND_ADDR (default 127.0.0.1), CREATIVE_PORT (default 8300)
 ```
 
@@ -114,8 +120,12 @@ cd src && python3 serve.py                 # CREATIVE_BIND_ADDR (default 127.0.0
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 24, 2026: **205 passed, 0 failed** (Python 3.11.15,
-pytest 9.1.1). Unit tests per intelligence (`test_zbm_*`, `test_zbc_*`),
+Result on Sep 24, 2026 after fix wave 1: **310 passed, 0 failed**
+(Python 3.11.15, pytest 9.1.1; 205 before the fix wave). `test_fix_wave_1.py`
+holds one reproduction per fix-wave finding (F8 review cap, F9 record-first
+per outside call site, F11 deterministic ids, F12 text evasion, F13 grace
+window, F14 Decimal guard, F16 ledger-rust validation parity, integration
+defects 2 and 3). Unit tests per intelligence (`test_zbm_*`, `test_zbc_*`),
 shared reference data (`test_shared.py`), ledger contract (`test_ledger.py`,
 HTTP via `httpx.MockTransport`), end-to-end flows for both layers
 (`test_e2e_zbm.py`, `test_e2e_zbc.py`), guardrails (`test_guardrails.py`),
@@ -146,6 +156,37 @@ BUILD_CONTRACTS §2 request/response shape; NOT ledger-rust) and
 - with `CREATIVE_SERVICE_TOKEN` unset, `serve.py` refused to start;
 - all processes stopped afterwards; none remained.
 
+## Live run — fix wave 1, against the REAL ledger-rust (Sep 24, 2026)
+
+ledger-rust built from this tree (`cargo build --release`, own target
+dir) on 127.0.0.1:19240 with a fresh log and two finding entries
+appended first; the ORIGINAL service (exported from the pre-fix commit)
+and the fixed one side by side, each as `serve.py` and as a harness that
+wraps every department port in a call-counting spy. Observed:
+
+- **Integration defect 3:** original `live_smoke.py` → `KeyError: 'department'`
+  on the finding entries; fixed `live_smoke.py` → every step as expected,
+  `71 entries (2 finding(s), 69 event(s))`, `/ledger/verify` → `valid: true`.
+- **F8:** original — after round 2 escalated to Andre, a new job on the same
+  brief → 201 and work in it → 201 as *round 1*; fixed → 409 "brief … has
+  work escalated to Andre … until Andre resolves it".
+- **F12:** transcript with "Guarant<Cyrillic е>ed returns": original `pass`,
+  fixed `reject` NS-01; "g u a r a n t e e d  r e t u r n s": original
+  `pass`, fixed `human_review` (possible never-say + obfuscation signal).
+- **Integration defect 2:** 126-character campaign id with a healthy ledger:
+  original 503 "decision did NOT take effect: the evidence ledger record
+  failed"; fixed 422 (path pattern `{1,100}`); ledger `/health` 200 throughout.
+- **F9:** real ledger stopped: original open-job → 503 but
+  `creative_agents.commission` called twice, go-live → 503 but
+  `clipper_network.announce_rulebook_version` called; fixed → both 503
+  with **zero** outside calls, rulebook still `signed`. Ledger restarted on
+  the same log (chain verified at load, 149 entries): fixed open-job → 201
+  `job-0006` (no id consumed by the failed attempt), `production_opened`
+  (seq 152) before `crossing_creative_agents` (153); go-live `rulebook_live`
+  (154) before `crossing_clipper_network` (155). Final `/ledger/verify`:
+  156 entries, valid.
+- all processes stopped afterwards (only PIDs this run started).
+
 ## Known gaps
 
 See ADR 0005 "Honest gaps and open items" for the full list. The short
@@ -154,4 +195,6 @@ clip properties are declared, not detected; only length rows are sourced
 and they all expire 2026-10-23; TikTok is blocked; every department
 Creative depends on is a fail-closed stand-in, so no ZBM work reaches
 Andre's final approval and no ZBC clip is ever payout-eligible today;
-not yet run against the real ledger-rust `/ledger/events`.
+a lost outside answer is reported as `took_effect: "partial"` and not
+re-asked automatically; obfuscation handling is conservative (some honest
+mixed-script clips go to the human queue).
