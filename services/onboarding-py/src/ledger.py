@@ -40,8 +40,26 @@ _NAME = re.compile(r"[a-z0-9_]{1,64}")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
+NOT_RECORDED = "not_recorded"
+UNKNOWN = "unknown"
+
+
 class LedgerWriteError(RuntimeError):
-    """The ledger write failed; the action must not proceed."""
+    """The ledger write did not succeed; the action must not proceed.
+
+    ``outcome`` (fix wave 5, NEW-4) says what is known about the record:
+    ``"not_recorded"`` — certainly not recorded (never sent, or refused by a
+    status that means nothing was appended); ``"unknown"`` — sent, and the
+    ledger may have recorded it (the reply was lost, or a status that does
+    not rule it out). The API reports "did not proceed" only for the first.
+    ``retry_hint`` overrides the API's default retry instruction."""
+
+    def __init__(self, message: str, outcome: str = NOT_RECORDED, retry_hint: Optional[str] = None):
+        super().__init__(message)
+        if outcome not in (NOT_RECORDED, UNKNOWN):
+            raise ValueError("outcome must be 'not_recorded' or 'unknown'")
+        self.outcome = outcome
+        self.retry_hint = retry_hint
 
 
 class LedgerWriteAfterEffects(LedgerWriteError):
@@ -50,8 +68,8 @@ class LedgerWriteAfterEffects(LedgerWriteError):
     written before it). Nothing further happens; the API reports exactly
     which effects were done instead of claiming the action did not proceed."""
 
-    def __init__(self, message: str, effects: list[str]):
-        super().__init__(message)
+    def __init__(self, message: str, effects: list[str], outcome: str = NOT_RECORDED, retry_hint: Optional[str] = None):
+        super().__init__(message, outcome, retry_hint)
         self.effects = list(effects)
 
 
@@ -170,11 +188,33 @@ def build_body(event_id, department, event_type, actor, subject_id, payload, sum
     }
 
 
+# Transport errors raised before any byte of the request left this process:
+# the ledger cannot have recorded anything (fix wave 5, NEW-4).
+_NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout, httpx.UnsupportedProtocol,
+             httpx.LocalProtocolError, httpx.InvalidURL)
+_RETRY_409 = ("the ledger already holds a DIFFERENT event under this operation's id; retrying will not resolve it — "
+              "an operator must reconcile the ledger before this action is attempted again")
+
+
 class HttpLedgerClient:
     """POST /ledger/events on ledger-rust. 201 (new) and 200 (idempotent
-    retry) are success; anything else — 409, 400, 401, 5xx, timeout,
-    connection refused — is a LedgerWriteError. Error messages never
-    include the token or the payload."""
+    retry) are success; anything else is a LedgerWriteError, classified
+    (fix wave 5, NEW-4) by what is known about the record:
+
+    certainly NOT recorded (``outcome="not_recorded"``):
+      - local contract validation failed (nothing sent);
+      - the connection was never made (refused, connect/pool timeout);
+      - 4xx other than 409 (400 invalid, 401 token, 408 body too slow, 413):
+        ledger-rust answers these without appending;
+      - 503: ledger-rust's only 503 is its load-shed, written BEFORE the
+        request is read (bin/server.rs ``shed``), so nothing is appended.
+    UNKNOWN (``outcome="unknown"``):
+      - the request was (or may have been) sent and no reply arrived: read
+        timeout, reset, "server disconnected", write error/timeout;
+      - 5xx other than 503 (a 500 "failed to persist" or a gateway error:
+        the append may be on disk);
+      - 409: an event with this id and different content is already there.
+    Error messages never include the token or the payload."""
 
     def __init__(self, base_url: str, token: str, timeout_s: float = 5.0, transport: Optional[httpx.BaseTransport] = None):
         if not base_url or not token:
@@ -192,13 +232,17 @@ class HttpLedgerClient:
             raise LedgerWriteError("event does not meet the ledger contract; not sent")
         try:
             r = self._client.post("/ledger/events", json=body)
+        except _NOT_SENT as exc:
+            raise LedgerWriteError(f"ledger unreachable ({type(exc).__name__}); nothing was sent") from None
         except httpx.HTTPError as exc:
-            raise LedgerWriteError(f"ledger unreachable ({type(exc).__name__})") from None
+            raise LedgerWriteError(f"no reply from the ledger after sending ({type(exc).__name__})", UNKNOWN) from None
         if r.status_code in (200, 201):
             return
         if r.status_code == 409:
-            raise LedgerWriteError("ledger rejected event: same event_id with different content (409)")
-        raise LedgerWriteError(f"ledger rejected event (HTTP {r.status_code})")
+            raise LedgerWriteError("ledger rejected event: same event_id with different content (409)", UNKNOWN, _RETRY_409)
+        if r.status_code == 503 or 400 <= r.status_code < 500:
+            raise LedgerWriteError(f"ledger rejected event (HTTP {r.status_code}); nothing was recorded")
+        raise LedgerWriteError(f"ledger answered HTTP {r.status_code}; the event may or may not be recorded", UNKNOWN)
 
 
 class UnconfiguredLedgerClient:

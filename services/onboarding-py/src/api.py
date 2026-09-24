@@ -33,7 +33,16 @@ the whole process for minutes, /health included):
 - Request bodies are validated in a SYNC dependency, i.e. in the threadpool,
   never on the event loop; field lengths are checked before any credential
   scan (``Inbound`` validates ``mode="after"``), and the scans of one body
-  run under ``redaction.scan_budget`` (a body not checked in time -> 422).
+  run under ``redaction.scan_budget`` — a budget of the request thread's OWN
+  CPU time, proportional to the body size (fix wave 5, NEW-2: it was
+  wall-clock, so concurrent benign bodies were refused for each other's
+  work). A body not checked within it -> 422.
+- Heavy scans (fix wave 5, NEW-2) are bounded by ``HeavyScanGate``: a few
+  run at once, a bounded number wait a bounded time; busy -> 503 with
+  Retry-After and ``proceeded: false``, never 422.
+- The body must arrive within ``body_read_timeout_seconds`` -> 408; the
+  request head is capped and timed by the hardened launcher (src/serve.py,
+  fix wave 5, NEW-3), which ``python3 -m api`` uses.
 - /health is ``async`` and does no work, so it answers from the event loop
   even while every worker thread is busy.
 - Log lines are cut to a bounded prefix before they are scrubbed.
@@ -41,9 +50,14 @@ the whole process for minutes, /health included):
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
+import math
 import os
+import threading
+import time
+from contextlib import contextmanager
 from typing import Any, Callable, Optional
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
@@ -152,6 +166,59 @@ def _plain_response(status_code: int, detail: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail})
 
 
+class ServiceBusy(RuntimeError):
+    """No heavy-scan slot within the queue limits: nothing was done."""
+
+    def __init__(self, retry_after_s: int):
+        super().__init__("busy")
+        self.retry_after_s = retry_after_s
+
+
+class HeavyScanGate:
+    """Explicit concurrency bound on heavy credential scans (fix wave 5,
+    NEW-2). CPU-bound work under one GIL gains nothing from running many at
+    once — it only makes each slower — so at most ``slots`` run; at most
+    ``max_waiting`` requests wait for a slot, each at most ``wait_s``
+    seconds. Beyond that the request is refused as BUSY (503 + Retry-After,
+    nothing done), never as a failed check (422). Waiters block a threadpool
+    thread each, so ``max_waiting`` also keeps threads free for light
+    requests (the pool has 40)."""
+
+    def __init__(self, slots: int, max_waiting: int, wait_s: float):
+        self._sem = threading.BoundedSemaphore(slots)
+        self._lock = threading.Lock()
+        self._waiting = 0
+        self._max_waiting = max_waiting
+        self._wait_s = wait_s
+        self.retry_after_s = max(1, min(30, math.ceil(wait_s / 4)))
+
+    @contextmanager
+    def hold(self):
+        if not self._sem.acquire(blocking=False):
+            with self._lock:
+                if self._waiting >= self._max_waiting:
+                    raise ServiceBusy(self.retry_after_s)
+                self._waiting += 1
+            try:
+                got = self._sem.acquire(timeout=self._wait_s)
+            finally:
+                with self._lock:
+                    self._waiting -= 1
+            if not got:
+                raise ServiceBusy(self.retry_after_s)
+        try:
+            yield
+        finally:
+            self._sem.release()
+
+    # tests only: occupy / free one slot without a request
+    def try_hold_for_test(self) -> bool:
+        return self._sem.acquire(blocking=False)
+
+    def release_for_test(self) -> None:
+        self._sem.release()
+
+
 class InputLimits:
     """Outermost ASGI middleware (fix wave 4, R1): refuse an over-long
     request target (414) and an over-size body (413) before any route,
@@ -161,10 +228,17 @@ class InputLimits:
     piece — a body that goes past the cap is answered 413 at once, and the
     rest of it is never read."""
 
-    def __init__(self, app, max_body_bytes: int, max_target_bytes: int):
+    # Request line + header block (fix wave 5, NEW-3). The launcher's h11
+    # limit refuses a head that is still incomplete past 16 KiB (so a huge
+    # head is never buffered), but a head that arrives whole in one socket
+    # read (up to 256 KiB) is parsed; this check makes 16 KiB exact.
+    MAX_HEAD_BYTES = 16 * 1024
+
+    def __init__(self, app, max_body_bytes: int, max_target_bytes: int, body_timeout_s: float = 30.0):
         self.app = app
         self.max_body = max_body_bytes
         self.max_target = max_target_bytes
+        self.body_timeout = body_timeout_s
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -172,6 +246,9 @@ class InputLimits:
         target = len(scope.get("raw_path") or scope.get("path", "").encode("utf-8", "surrogatepass")) + len(scope.get("query_string") or b"")
         if target > self.max_target:
             return await _plain_response(414, f"request target longer than {self.max_target} bytes; refused")(scope, receive, send)
+        head = target + sum(len(k) + len(v) + 4 for k, v in scope.get("headers") or ())
+        if head > self.MAX_HEAD_BYTES:
+            return await _plain_response(431, f"request head larger than {self.MAX_HEAD_BYTES} bytes; refused")(scope, receive, send)
         too_large = _plain_response(413, f"request body larger than {self.max_body} bytes; refused")
         for name, value in scope.get("headers") or ():
             if name == b"content-length":
@@ -180,8 +257,15 @@ class InputLimits:
                 if int(value) > self.max_body:
                     return await too_large(scope, receive, send)
         chunks, size = [], 0
+        # The whole body must arrive within body_timeout (fix wave 5, NEW-3
+        # sweep): a client trickling its body held the connection forever.
+        deadline = time.monotonic() + self.body_timeout
         while True:
-            message = await receive()
+            try:
+                message = await asyncio.wait_for(receive(), max(0.0, deadline - time.monotonic()))
+            except asyncio.TimeoutError:
+                return await _plain_response(408, f"request body not received within {self.body_timeout:g}s; refused")(
+                    scope, receive, send)
             if message["type"] != "http.request":  # client went away
                 return
             chunk = message.get("body") or b""
@@ -192,6 +276,7 @@ class InputLimits:
             if not message.get("more_body"):
                 break
         body, replayed = b"".join(chunks), False
+        scope.setdefault("state", {})["onb_body_bytes"] = len(body)
 
         async def replay():
             nonlocal replayed
@@ -214,25 +299,39 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
     )
     auth = [Depends(make_require_auth(required_token))]
     app.state.service = service
-    budget_s = service.config.scan_budget_seconds
+    cfg = service.config
+    gate = HeavyScanGate(cfg.heavy_scan_slots, cfg.heavy_scan_max_waiting, cfg.heavy_scan_wait_seconds)
+    app.state.heavy_scans = gate
+
+    def cpu_budget(nbytes: int) -> float:
+        return cfg.scan_budget_seconds + cfg.scan_cpu_ms_per_kb * (nbytes / 1024) / 1000
 
     def body(model: type[BaseModel], optional: bool = False) -> Callable:
         """The request body, validated IN THE THREADPOOL (a sync dependency;
         fix wave 4, R1). FastAPI validates declared body models on the event
         loop, so credential scanning there stalled every request, /health
         included. Field constraints run first, then the credential checks
-        under the per-request scan budget."""
+        under the per-request CPU budget; a heavy body first takes a slot of
+        the heavy-scan gate (fix wave 5, NEW-2)."""
 
-        def parse(payload: Any = Body(default=None)) -> Any:
+        def parse(request: Request, payload: Any = Body(default=None)) -> Any:
             if payload is None and optional:
                 return None
-            with scan_budget(budget_s):
-                try:
-                    return model.model_validate(payload)
-                except ValidationError as exc:
-                    raise RequestValidationError(
-                        [{**e, "loc": ("body", *e.get("loc", ()))} for e in exc.errors(include_url=False, include_input=False)]
-                    ) from None
+            nbytes = request.scope.get("state", {}).get("onb_body_bytes", 0)
+
+            def validate() -> Any:
+                with scan_budget(cpu_budget(nbytes)):
+                    try:
+                        return model.model_validate(payload)
+                    except ValidationError as exc:
+                        raise RequestValidationError(
+                            [{**e, "loc": ("body", *e.get("loc", ()))} for e in exc.errors(include_url=False, include_input=False)]
+                        ) from None
+
+            if nbytes > cfg.heavy_body_bytes:
+                with gate.hold():
+                    return validate()
+            return validate()
 
         return parse
     # Output-side scrub (third credential layer, F10): every route's return
@@ -247,35 +346,72 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
 
     @app.exception_handler(ScanBudgetExceeded)
     def _scan_budget(_: Request, exc: ScanBudgetExceeded):
-        log.warning("request body refused: credential checks exceeded the %.1fs budget", budget_s)
+        log.warning("request body refused: credential checks exceeded their CPU budget")
         return JSONResponse(status_code=422, content={"detail": [{
             "loc": ["body"], "type": "scan_budget_exceeded",
-            "msg": "the request could not be checked for credentials within the time budget, so it was not accepted"}]})
+            "msg": "the request could not be checked for credentials within its CPU budget, so it was not accepted"}]})
+
+    @app.exception_handler(ServiceBusy)
+    def _busy(_: Request, exc: ServiceBusy):
+        log.warning("request refused: busy (heavy-scan queue full or wait limit reached)")
+        return JSONResponse(status_code=503, headers={"Retry-After": str(exc.retry_after_s)}, content={
+            "detail": "the service is busy checking other large requests; nothing was done — retry the identical "
+                      f"request after {exc.retry_after_s}s",
+            "proceeded": False,
+        })
 
     @app.exception_handler(OnboardingError)
     def _onboarding(_: Request, exc: OnboardingError):
         return JSONResponse(status_code=exc.status_code, content=scrub_obj({"detail": exc.detail, **exc.body}))
 
+    # Fix wave 5 (NEW-4): a ledger write whose outcome is UNKNOWN (reply lost
+    # after sending, 5xx other than 503, 409) is never reported as "did not
+    # proceed". Event ids are deterministic, so retrying the identical
+    # request is safe: an event the ledger already holds is its 200, and the
+    # staged state was not committed, so the retry finishes the operation.
+    retry_identical = ("retry the identical request (same body, same path): the event ids are deterministic, so "
+                       "anything the ledger already recorded is recognised and not recorded twice, and the "
+                       "operation is finished by the retry")
+
+    def _ledger_outcome(exc: LedgerWriteError) -> dict:
+        if exc.outcome == "unknown":
+            return {"ledger_write": "unknown", "retry": exc.retry_hint or retry_identical}
+        return {"ledger_write": "not_recorded"}
+
     @app.exception_handler(LedgerWriteAfterEffects)
     def _ledger_after_effects(_: Request, exc: LedgerWriteAfterEffects):
         # Honest partial result: outside effects already happened (each was
-        # recorded before it was made); the record of a later step failed,
-        # so nothing further happened. Never "did not proceed".
-        log.error("ledger write failed after outside effects %s; stopped", exc.effects)
-        return JSONResponse(status_code=503, content={
-            "detail": (f"evidence ledger write failed ({scrub(str(exc))}) after these outside effects had already "
-                       f"happened: {', '.join(exc.effects)}; nothing further was done"),
+        # recorded before it was made); the record of a later step failed
+        # (or its fate is unknown), so nothing further happened. Never "did
+        # not proceed".
+        log.error("ledger write failed (%s) after outside effects %s; stopped", exc.outcome, exc.effects)
+        record = "may or may not have been recorded" if exc.outcome == "unknown" else "failed"
+        content = {
+            "detail": (f"an evidence ledger write {record} ({scrub(str(exc))}) after these outside effects had "
+                       f"already happened: {', '.join(exc.effects)}; nothing further was done"),
             "proceeded": True,
             "completed": False,
             "outside_effects_done": list(exc.effects),
-        })
+            **_ledger_outcome(exc),
+        }
+        content.setdefault("retry", retry_identical)
+        return JSONResponse(status_code=503, headers={"Retry-After": "1"}, content=content)
 
     @app.exception_handler(LedgerWriteError)
     def _ledger(_: Request, exc: LedgerWriteError):
+        if exc.outcome == "unknown":
+            log.error("ledger write outcome unknown; action not completed: %s", exc)
+            return JSONResponse(status_code=503, headers={"Retry-After": "1"}, content={
+                "detail": (f"the evidence ledger write may or may not have been recorded ({scrub(str(exc))}); "
+                           "the action was not completed here and it is not known whether its record exists"),
+                "proceeded": "unknown",
+                **_ledger_outcome(exc),
+            })
         log.error("ledger write failed; action refused: %s", exc)
         return JSONResponse(status_code=503, content={
             "detail": f"evidence ledger write failed ({scrub(str(exc))}); the action did not proceed",
             "proceeded": False,
+            **_ledger_outcome(exc),
         })
 
     @app.exception_handler(OutboundBlocked)
@@ -295,8 +431,8 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
             log.error("unhandled error: %s", type(exc).__name__)
             return JSONResponse(status_code=500, content={"detail": "internal error"})
 
-    cfg = service.config
-    app.add_middleware(InputLimits, max_body_bytes=cfg.max_body_bytes, max_target_bytes=cfg.max_request_target_bytes)
+    app.add_middleware(InputLimits, max_body_bytes=cfg.max_body_bytes, max_target_bytes=cfg.max_request_target_bytes,
+                       body_timeout_s=cfg.body_read_timeout_seconds)
 
     @app.get("/health")
     async def health() -> dict:
@@ -478,11 +614,15 @@ app = create_app(build_service_from_env(), _REQUIRED_TOKEN)
 
 
 def main() -> None:
-    import uvicorn
+    # Fix wave 5 (NEW-3): the hardened launcher (h11, 16 KiB request-head
+    # cap, request-head deadline, keep-alive timeout, limit_concurrency).
+    # Default uvicorn (httptools) buffered a 100-200 MB header and never
+    # closed idle or half-sent connections.
+    import serve
 
     host = os.environ.get("ONBOARDING_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("ONBOARDING_PORT", "8200"))
-    uvicorn.run(app, host=host, port=port)
+    serve.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":

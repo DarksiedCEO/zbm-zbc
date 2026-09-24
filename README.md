@@ -318,15 +318,17 @@ spec, with 15 deterministic single-task intelligences (no model calls).
 Architecture: `docs/adr/0004-onboarding-department-architecture.md`. Details
 and routes: `services/onboarding-py/README.md`.
 
-- **Status:** built and tested (577 tests, `python3 -m pytest -q`). **Not
+- **Status:** built and tested (624 tests, `python3 -m pytest -q`). **Not
   certified for any real client, clipper or brand.** Scenario, attack and
-  guardrail tests exist. The AEGIS review findings were fixed in fix waves 1–4
+  guardrail tests exist. The AEGIS review findings were fixed in fix waves 1–5
   (Sep 24); see ADR 0004.
 - **Hostile input can't stall it** (fix wave 4). Every regex is linear-time.
   Input is capped before it is scanned: field lengths are checked first, a body
   over 1 MiB is a 413, a request target over 8 KiB is a 414, and log lines are
-  cut. Scanning runs off the event loop under a per-request time budget, and
-  `/health` stays responsive under attack.
+  cut. Scanning runs off the event loop. Each request's budget counts its own
+  CPU time, not time spent waiting on other requests, and heavy scans are
+  bounded (busy returns 503 with Retry-After). `/health` stays responsive under
+  attack.
 - **Fails closed.**
   - Activation needs both the Contract (14) and Compliance (15) gates, and a
     blocked activation returns the exact unmet list.
@@ -334,7 +336,9 @@ and routes: `services/onboarding-py/README.md`.
     `onboarding`) before any outside effect, such as a payout or handoff. If the
     write fails, the action doesn't happen and the API says so (503). If it
     fails after an effect, the API names the effect. The next call writes the
-    missing record, and a retry finishes the job. Retries are idempotent.
+    missing record, and a retry finishes the job. Retries are idempotent. If
+    the ledger reply was lost, the API says `proceeded: "unknown"` and asks for
+    the identical retry.
   - Only the server's clock decides. Clipper 18+ is checked on the server's
     date at UTC−12. Credentials are refused at intake, and client free text is
     stored only redacted. Money is the contract string only. Escalation
@@ -345,6 +349,9 @@ and routes: `services/onboarding-py/README.md`.
   re-implements a detection agent.
 - **Run:** `cd services/onboarding-py/src && ONBOARDING_SERVICE_TOKEN=... python3 -m api`
   - Binds 127.0.0.1:8200 by default.
+  - Uses the hardened launcher (`src/serve.py`): 16 KiB head cap, head and
+    idle timeouts, and a concurrency limit. Don't start it with plain
+    `uvicorn api:app`.
   - Needs `LEDGER_SERVICE_URL`/`LEDGER_SERVICE_TOKEN` to act, and
     `DETECTION_SERVICE_URL`/`DETECTION_SERVICE_TOKEN` for the audit.
 - **Open items:**

@@ -45,9 +45,19 @@ status says it is not certified.
   Andre, or data sent to Revenue Recovery. For example, `activation_ruling` is
   recorded before the payout or handoff.
   - If a record fails before any effect, nothing happens. The API returns 503
-    `{"proceeded": false}`.
+    `{"proceeded": false, "ledger_write": "not_recorded"}`.
+  - If the record's fate is unknown (fix wave 5), the API never says "did not
+    proceed". This covers a reply lost after the request was sent, a 5xx other
+    than 503, and a 409. It returns 503
+    `{"proceeded": "unknown", "ledger_write": "unknown", "retry": "..."}` with
+    `Retry-After`. Staged state stays uncommitted. Retrying the identical
+    request is safe: the ids are deterministic, so the ledger answers 200 for
+    what it already holds, and the retry finishes the operation. A 503 from
+    ledger-rust is its load-shed, sent before the request is read, so it
+    counts as not recorded.
   - If a result record fails after an effect, nothing further happens. The API
-    returns 503 `{"proceeded": true, "completed": false, "outside_effects_done": [...]}`.
+    returns 503 `{"proceeded": true, "completed": false, "outside_effects_done": [...]}`,
+    with `ledger_write` set to `not_recorded` or `unknown`.
   - Bus publishes and memory writes happen only when the operation completes.
   - Stage then commit (fix wave 3): state that depends on a record (a new
     client, an escalation, a creator, an activation, a warning the client
@@ -108,8 +118,19 @@ status says it is not certified.
   - Scanning never runs on the event loop. Bodies are validated in a sync
     dependency (the threadpool), exception handlers are sync, and `/health`
     is `async` and does no work.
-  - Each body's credential checks run under a time budget (5 s). A body that
-    can't be checked in time is refused (422 `scan_budget_exceeded`).
+  - Each body's credential checks run under a CPU budget (fix wave 5). It
+    counts the request thread's own CPU time (`time.thread_time`), not
+    wall-clock time, so waiting behind other requests for the GIL costs
+    nothing. The budget is 1 s plus 10 ms per KB of body, about 5x the worst
+    cost measured (~1.8 ms/KB). A body that can't be checked within it is
+    refused (422 `scan_budget_exceeded`). The old 5 s wall-clock budget refused
+    5 of 5 concurrent benign 416 KB bodies.
+  - Heavy scans (bodies over 64 KiB) are capped: 2 run at once, up to 16
+    wait, each for up to 30 s. Beyond that the API returns 503 with
+    `Retry-After` and `proceeded: false` (busy, nothing done), never 422. A
+    clean string is scanned once per request, not twice, and the format-character
+    strip no longer does a Python step per character. The 416 KB body dropped
+    from 1.6 s to 0.5 s of CPU.
   - `tests/test_fix_wave4.py` runs every pattern against hostile shapes (runs
     of `a`, `a@`, `a/`, `a:`, alternating classes, and each pattern's own
     literals). It asserts under 50 ms per 100 KB, and linear scaling to 1 MB
@@ -192,6 +213,19 @@ export DETECTION_SERVICE_URL=http://127.0.0.1:8000 DETECTION_SERVICE_TOKEN=<ZBM_
 cd src && python3 -m api        # ONBOARDING_BIND_ADDR (default 127.0.0.1), ONBOARDING_PORT (default 8200)
 ```
 
+`python3 -m api` runs the hardened launcher, `src/serve.py` (fix wave 5,
+NEW-3). Don't start it with a plain `uvicorn api:app`: default uvicorn uses
+httptools, which buffered a 100–200 MB header and never closed idle or
+half-sent connections. The launcher provides:
+- the h11 parser, with the request head capped at 16 KiB (431 or 400);
+- a request-head deadline counted from connect and after every response
+  (`ONBOARDING_REQUEST_HEAD_TIMEOUT_SECONDS`, default 10);
+- a keep-alive idle timeout (`ONBOARDING_KEEP_ALIVE_TIMEOUT_SECONDS`, default 5);
+- `limit_concurrency` (`ONBOARDING_LIMIT_CONCURRENCY`, default 128).
+
+The body must arrive within `ONBOARDING_BODY_READ_TIMEOUT_SECONDS` (default
+30), or the API returns 408.
+
 Optional configuration (all open items have fail-closed defaults; see `src/config.py`):
 
 | Variable | What it sets |
@@ -206,7 +240,8 @@ Optional configuration (all open items have fail-closed defaults; see `src/confi
 | `ONBOARDING_CONTRACT_STORAGE=in_memory` | Local demos only; not the decided storage |
 | `ONBOARDING_MAX_BODY_BYTES` | Request body cap, default 1048576 (1 MiB); over it is a 413 |
 | `ONBOARDING_MAX_REQUEST_TARGET_BYTES` | Path plus query cap, default 8192; over it is a 414 |
-| `ONBOARDING_SCAN_BUDGET_SECONDS` | Time budget for one body's credential checks, default 5 |
+| `ONBOARDING_SCAN_BUDGET_SECONDS`, `ONBOARDING_SCAN_CPU_MS_PER_KB` | CPU budget for one body's credential checks: seconds plus ms per KB, defaults 1 and 10 |
+| `ONBOARDING_HEAVY_BODY_BYTES`, `ONBOARDING_HEAVY_SCAN_SLOTS`, `ONBOARDING_HEAVY_SCAN_MAX_WAITING`, `ONBOARDING_HEAVY_SCAN_WAIT_SECONDS` | Heavy-scan gate, defaults 65536, 2, 16, 30; busy is a 503 with Retry-After |
 | `ONBOARDING_INSTANCE_ID` | Stable instance id in the event ids of `start_client` and `apply_creator`, default `onboarding-1`. Give each concurrently running instance its own. |
 
 Live runs should use the real ledger-rust (`cargo build --release` in
@@ -241,7 +276,7 @@ Every route except `/health` needs `Authorization: Bearer <token>`.
 ## Tests
 
 ```bash
-cd services/onboarding-py && python3 -m pytest -q     # 577 passed (fix wave 4, Sep 24 2026)
+cd services/onboarding-py && python3 -m pytest -q     # 624 passed (fix wave 5, Sep 24 2026)
 ```
 
 Tests are organised by certification type:
@@ -255,6 +290,7 @@ Tests are organised by certification type:
 | `test_fix_wave2.py` | Fix wave 2: nudge counted only on delivery, bounded retries, warning unaffected (L2); no commitment without its record (L3) | 10 |
 | `test_fix_wave3.py` | Fix wave 3: stage then commit and retries that finish (N2), owed result records (N7), credential shapes, redacted storage and the state-inspecting spray (N5), the shared money vectors (F15), the real-server access log (D1), human-request dedupe and briefing retry on tick | 183 |
 | `test_fix_wave4.py` | Fix wave 4: linear-time scanning, input caps, off-loop validation, scan budget and a real-uvicorn `/health` test under attack (R1); owed audit rulings, no second detection call (A1); payments only after activation (P1); DOB plausibility (D1); restart-stable ids (I1). `redos_harness.py` builds the hostile inputs. | 115 |
+| `test_fix_wave5.py` | Fix wave 5 covers four findings. NEW-2: the CPU-time budget, one scan per clean string, busy as 503 not 422, and 12 concurrent max-size bodies on a real server. NEW-3: real-socket header, idle, partial-head, trickled-head and trickled-body probes against `python3 -m api`. NEW-4: `proceeded: "unknown"` on a lost reply, then a retry with no duplicate. LOW-E: a future DOB. | 47 |
 | `test_unit_*.py` | Unit tests | 84 |
 | `test_auth_and_entrypoint.py` | Auth, docs, real-socket bind | 14 |
 

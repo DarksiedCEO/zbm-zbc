@@ -617,7 +617,10 @@ def test_f11_http_ledger_retry_gets_200_and_conflicting_content_409():
     svc = make_service(all_fakes=True, ledger=lc)
     c = client_for(svc)
     r = c.post("/onboarding/clients", json=start_body())
-    assert r.status_code == 503 and r.json()["proceeded"] is False  # refused: the service could not confirm the record
+    # Fix wave 5 (NEW-4): the reply was lost AFTER the ledger committed, so
+    # the outcome is unknown — never "did not proceed" (this line used to
+    # assert proceeded is False, which was the defect).
+    assert r.status_code == 503 and r.json()["proceeded"] == "unknown", r.text
     _ok(c.post("/onboarding/clients", json=start_body()), 201)  # the retry
     assert responses[:2] == [201, 200]  # the retried identical event got the ledger's 200
     assert len(store) == len(set(store))
