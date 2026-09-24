@@ -54,10 +54,23 @@ refused with 413 BEFORE it is read into the JSON parser — by Content-Length
 when declared, by counting bytes when streamed. Every route handler is a
 plain `def`, so FastAPI runs it in its worker thread pool: text scanning
 never blocks the event loop (tests/test_fix_wave_4.py checks both).
+
+Request head and connection limits (fix wave 5, NEW-3; mirrors
+detection-py): `serve.py` runs uvicorn's h11 parser with
+h11_max_incomplete_event_size = MAX_HEADER_BYTES (16 KiB), so an oversized
+request line / header block is refused (400) while it is being read instead
+of buffered (httptools buffered a 200 MB header: 107 -> 220 MB RSS); a
+request head must arrive within serve.REQUEST_HEAD_TIMEOUT_S of connect or
+of the previous response; idle keep-alive is closed after 5 s; at most
+serve.MAX_CONCURRENCY connections/requests at once (uvicorn
+limit_concurrency; beyond it, 503). BodyLimit re-checks the head size (431)
+for any other launcher and bounds body delivery to BODY_READ_TIMEOUT_S
+(408), so a slow-drip body can't hold a request open forever.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -115,6 +128,8 @@ FOUNDER_HEADER = "X-Andre-Approval-Token"
 IDEMPOTENCY_HEADER = "Idempotency-Key"
 IDEMPOTENCY_MAX_ENTRIES = 10_000
 MAX_BODY_BYTES = 1024 * 1024
+MAX_HEADER_BYTES = 16 * 1024
+BODY_READ_TIMEOUT_S = 30.0
 _IDEM_KEY_RE = re.compile(r"[\x21-\x7e]{1,128}")
 ACTOR_HEADER = "X-Creative-Actor-Token"
 ACTOR_TOKEN_MIN_LEN = 16
@@ -230,15 +245,21 @@ class IdempotencyStore:
 
 
 class BodyLimit:
-    """ASGI middleware: refuse a request body over `limit` bytes with 413
-    before any of it reaches the JSON parser."""
+    """ASGI middleware: refuse a request head over `max_head` bytes (431), a
+    body over `limit` bytes (413) before any of it reaches the JSON parser,
+    and a body not delivered within `read_timeout` seconds in total (408)."""
 
-    def __init__(self, app, limit: int = MAX_BODY_BYTES):
-        self.app, self.limit = app, limit
+    def __init__(self, app, limit: int = MAX_BODY_BYTES, max_head: int = MAX_HEADER_BYTES,
+                 read_timeout: float = BODY_READ_TIMEOUT_S):
+        self.app, self.limit, self.max_head, self.read_timeout = app, limit, max_head, read_timeout
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
+        head = len(scope.get("raw_path") or b"") + len(scope.get("query_string") or b"")
+        head += sum(len(k) + len(v) + 4 for k, v in scope.get("headers") or [])
+        if head > self.max_head:
+            return await self._refuse(send, 431, f"request head over {self.max_head} bytes", "RequestHeaderTooLarge")
         declared = dict(scope.get("headers") or []).get(b"content-length")
         if declared is not None:
             try:
@@ -247,9 +268,15 @@ class BodyLimit:
                 too_big = True
             if too_big:
                 return await self._refuse(send)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.read_timeout
         chunks, total, more = [], 0, True
         while more:
-            msg = await receive()
+            try:
+                msg = await asyncio.wait_for(receive(), max(0.0, deadline - loop.time()))
+            except (TimeoutError, asyncio.TimeoutError):
+                return await self._refuse(send, 408, f"request body not received within {self.read_timeout:g}s",
+                                          "RequestTimeout")
             if msg["type"] == "http.disconnect":
                 return
             chunk = msg.get("body", b"")
@@ -270,9 +297,9 @@ class BodyLimit:
 
         return await self.app(scope, replay, send)
 
-    async def _refuse(self, send):
-        raw = json.dumps({"detail": f"request body over {self.limit} bytes", "error": "PayloadTooLarge"}).encode()
-        await send({"type": "http.response.start", "status": 413,
+    async def _refuse(self, send, code: int = 413, detail: str | None = None, error: str = "PayloadTooLarge"):
+        raw = json.dumps({"detail": detail or f"request body over {self.limit} bytes", "error": error}).encode()
+        await send({"type": "http.response.start", "status": code,
                     "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(raw)).encode()),
                                 (b"connection", b"close")]})
         await send({"type": "http.response.body", "body": raw})
@@ -350,6 +377,10 @@ class HumanReviewIn(_In):
     outcome: Literal["pass", "reject"]
     broken_rules: list[BrokenRule] = []
     note: str = Field(default="", max_length=2000)
+
+
+class WithdrawVerdictIn(_In):
+    actor_id: str | None = None
 
 
 # --- app factory ------------------------------------------------------------------------
@@ -737,6 +768,11 @@ def build_app(
     def zbc_human(submission_id: IdPath, body: HumanReviewIn, who: str = Depends(authenticate_actor)) -> dict:
         verdict = HumanVerdict(outcome=body.outcome, broken_rules=body.broken_rules, note=body.note)
         return zbc.human_review(submission_id, acting(body.actor_id, who), verdict).model_dump(mode="json")
+
+    @app.post("/zbc/clips/{submission_id}/human-review/withdraw", dependencies=auth)
+    def zbc_human_withdraw(submission_id: IdPath, body: WithdrawVerdictIn,
+                           who: str = Depends(authenticate_actor)) -> dict:
+        return zbc.withdraw_uncertain_verdict(submission_id, acting(body.actor_id, who))
 
     @app.post("/zbc/clips/{submission_id}/payout-eligibility", dependencies=auth)
     def zbc_eligibility(submission_id: IdPath) -> dict:

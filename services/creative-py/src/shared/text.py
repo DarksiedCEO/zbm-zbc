@@ -56,6 +56,16 @@ with a unit suffix such as 2nd, 1990s, 9am, $40k, 1080p); and
 the Latin-1 letters and the fold table — unknown lookalikes are routed to
 a human instead of being enumerated. Both are never an automatic pass.
 
+ASCII lookalike SPELLINGS (fix wave 5, NEW-1): "retums" (rn for m),
+"rnoney", "guaranteecl" (cl for d), "vv" for w, "kure". Instead of another
+enumeration, `visual_near_miss()` is a similarity gate: windows of words
+compared with the phrase on visual skeletons (UTS #39's m -> rn plus
+typographic pairs) under a bounded Damerau-Levenshtein distance; see the
+block comment above VISUAL_SKELETON. `near_miss()` includes it, so every
+caller of `near_miss()` / `mentions_phrase()` gets it;
+`visual_lookalike_exact()` names a window that READS AS the phrase
+(Clip Review rejects it).
+
 `obfuscation_signals()` says whether text shows evasion patterns at all:
 any bidi control, Hangul/Mongolian filler or tag character ANYWHERE; any
 other default-ignorable or format character touching a letter or digit;
@@ -419,6 +429,233 @@ def near_miss(haystack: str, phrase: str) -> str | None:
         for w in words:
             if fits(w, squashed, cap):
                 return "symbols, digits or unknown letters in place of letters (words run together)"
+    hit = visual_near_miss(haystack, phrase)
+    if hit is not None:
+        dist, _, window = hit
+        return (f"lookalike letters or a small misspelling ({window[:60]!r} is {dist} edit(s) from it once "
+                "rn/m, cl/d, vv/w, nn/m, ri/n, ii/u and l/i are read alike)")
+    return None
+
+
+# --- visual-lookalike SPELLINGS in plain ASCII (fix wave 5, NEW-1) ---------------------
+#
+# Earlier waves enumerated lookalikes one class at a time (Unicode letters,
+# symbols, digits, the l/i pair); plain-ASCII respellings still passed:
+# "Guaranteed retums" (rn for m), "make rnoney", "guaranteecl returns" (cl
+# for d), "vv" for w, "miracle kure". Instead of a sixth enumeration, a
+# SIMILARITY gate: every window of caption words is compared with every
+# never-say phrase on a visual SKELETON with a bounded edit distance.
+#
+# The multi-character ASCII confusables. Unicode UTS #39 confusables.txt
+# (Unicode 18.0.0, 2026-08-06, read for this fix) has exactly ONE entry
+# whose source and prototype are both plain ASCII letters and whose
+# prototype is more than one letter: m -> rn (006D ; 0072 006E). Its only
+# other all-ASCII entries are single characters: I -> l, 1 -> l, 0 -> O
+# (digits are already handled by SKELETON / _word_cost above). Everything
+# else below is a typographic (kerning) lookalike that confusables.txt does
+# NOT list, chosen by hand:
+#   near-identical in common sans-serif faces — cl -> d, vv -> w
+#     (VISUAL_SKELETON, together with UTS #39's rn -> m);
+#   merely similar — nn -> m, uu -> w, ci -> a, ri -> n, ii -> u
+#     (VISUAL_EXTENDED / VISUAL_EXTENDED_2).
+# Only the first group decides REJECT (below); the second only ever sends
+# the clip to a human.
+#
+# Skeleton VIEWS; the phrase and the text are always mapped the same way,
+# and the smallest distance over the views counts.
+# (A) STANDARD — rn -> m (UTS #39), cl -> d, vv -> w, applied as
+#     contractions so an inserted m costs one edit, not two.
+# (0) RAW — I -> l only, so a transposition across "rn" ("retunrs") stays
+#     one edit.
+# (B) EXTENDED — the "merely similar" pairs as well, contracted to the
+#     letter they imitate, taken in two orders (pairs overlap: "ciire" is
+#     ci+i or c+ii).
+# (A-, B-) The same views without the pairs the PHRASE itself contains
+#     ("returns" has rn, "miracle" has cl once i -> l): otherwise an edit
+#     that splits the phrase's own pair ("returens") plus a lookalike
+#     elsewhere ("guaranteecl") would cost more than it looks.
+# (A+) The expansion direction (m -> rn, d -> cl, w -> vv), see below.
+# Any other misspelling ("kure", "retrns") is caught by the edit budget
+# (visual_budget) in every view.
+# Every view first maps i -> l (UTS #39: I -> l; text is casefolded), so a
+# dotless/undotted i costs nothing to DETECT; it still never REJECTS by
+# itself ("get rlch" is a human's call, as it was before this wave —
+# `_reads_as_phrase` ignores the i/l fold).
+VISUAL_SKELETON: tuple[tuple[str, str], ...] = (("rn", "m"), ("cl", "d"), ("vv", "w"))
+VISUAL_EXTENDED: tuple[tuple[str, str], ...] = (
+    ("rn", "m"), ("nn", "m"), ("vv", "w"), ("uu", "w"), ("cl", "d"), ("rl", "n"), ("ll", "u"))
+# View B works after i -> l, so its pairs are written with l for i
+# (ri -> "rl", ii -> "ll", ci -> "cl"); "cl" imitates both d and a, and
+# pairs overlap ("ciire" = ci+i or c+ii), so B is taken in two orders.
+VISUAL_EXTENDED_2: tuple[tuple[str, str], ...] = (
+    ("ll", "u"), ("rl", "n"), ("cl", "a"), ("uu", "w"), ("vv", "w"), ("nn", "m"), ("rn", "m"))
+# (A+) The expansion direction (m -> rn, d -> cl, w -> vv): the phrase's
+#     own letters are expanded too, so a split pair in the text
+#     ("financaial" next to "freeclorn") still lines up.
+VISUAL_EXPANDED: tuple[tuple[str, str], ...] = (("m", "rn"), ("d", "cl"), ("w", "vv"))
+
+
+def visual_view(word: str, rules: tuple[tuple[str, str], ...]) -> str:
+    """`word` (casefolded) with i -> l, then each (pair -> letter) rule in order."""
+    word = word.replace("i", "l")
+    for src, proto in rules:
+        word = word.replace(src, proto)
+    return word
+
+
+def visual_skeleton(word: str) -> str:
+    """rn -> m (UTS #39), cl -> d, vv -> w — the near-identical pairs only,
+    WITHOUT the i/l fold. Two words with the same skeleton read as each
+    other ("rnoney" / "money", "guaranteecl" / "guaranteed"); contraction
+    instead of expansion, so an inserted m is one edit, not two."""
+    for src, proto in VISUAL_SKELETON:
+        word = word.replace(src, proto)
+    return word
+
+
+def _reads_as_phrase(tokens: tuple[str, ...], pwords: list[str]) -> bool:
+    """The text words `tokens` are `pwords`, word for word, once the
+    near-identical pairs are read alike (visual_skeleton). Decides REJECT;
+    the i/l fold and the merely-similar pairs never do."""
+    return len(tokens) == len(pwords) and all(visual_skeleton(t) == visual_skeleton(p) for t, p in zip(tokens, pwords))
+
+
+def _views_for(phrase_l: str) -> list[tuple[tuple[str, str], ...]]:
+    views: list[tuple[tuple[str, str], ...]] = [(), VISUAL_SKELETON, VISUAL_EXPANDED, VISUAL_EXTENDED,
+                                                 VISUAL_EXTENDED_2]
+    for rules in (VISUAL_SKELETON, VISUAL_EXTENDED, VISUAL_EXTENDED_2):
+        kept = tuple(r for r in rules if r[0] not in phrase_l)
+        if kept != rules and kept not in views:
+            views.append(kept)
+    return views
+
+
+def visual_budget(letters: int) -> int:
+    """Edit budget (Damerau-Levenshtein, optimal string alignment) for a
+    phrase of `letters` letters: 1 up to 8 letters, 2 above. Phrases of 3
+    letters or fewer get 0 (skeleton-identical only): one edit from "win" or
+    "fee" is half the ordinary words of English ("in", "wine", "won", "few",
+    "free", "see"), which would send almost every caption to a human."""
+    if letters <= 3:
+        return 0
+    return 1 if letters <= 8 else 2
+
+
+def _osa_within(a: str, b: str, k: int) -> int | None:
+    """Optimal-string-alignment distance between a and b if <= k, else None.
+    Banded: O(len(a) * (2k + 1))."""
+    la, lb = len(a), len(b)
+    if abs(la - lb) > k:
+        return None
+    if k == 0:
+        return 0 if a == b else None
+    inf = k + 1
+    prev2: list[int] = []
+    prev = [j if j <= k else inf for j in range(lb + 1)]
+    for i in range(1, la + 1):
+        cur = [inf] * (lb + 1)
+        if i <= k:
+            cur[0] = i
+        lo, hi = max(1, i - k), min(lb, i + k)
+        best = cur[0]
+        ai = a[i - 1]
+        for j in range(lo, hi + 1):
+            bj = b[j - 1]
+            v = prev[j - 1] + (ai != bj)
+            if prev[j] + 1 < v:
+                v = prev[j] + 1
+            if cur[j - 1] + 1 < v:
+                v = cur[j - 1] + 1
+            if i > 1 and j > 1 and ai == b[j - 2] and a[i - 2] == bj and prev2[j - 2] + 1 < v:
+                v = prev2[j - 2] + 1
+            cur[j] = v if v < inf else inf
+            if cur[j] < best:
+                best = cur[j]
+        if best > k:
+            return None
+        prev2, prev = prev, cur
+    return prev[lb] if prev[lb] <= k else None
+
+
+@functools.lru_cache(maxsize=16)
+def _canonical_tokens(text: str) -> tuple[str, ...]:
+    return tuple(canonical(text).split())
+
+
+@functools.lru_cache(maxsize=64)
+def _view_windows(text: str, rules: tuple[tuple[str, str], ...], size: int) -> dict[int, dict[str, int]]:
+    """Every window of `size` consecutive tokens of `text` in one view,
+    spaces removed, grouped by length: {length: {window: first start}}.
+    Built once per (text, view, size) and shared by every phrase. Bounded
+    memory: one 65 KB text (the largest clip text) needs ~52 entries and
+    ~20 MB, so 64 entries hold one text's working set and little more."""
+    toks = _canonical_tokens(text)
+    memo = {t: visual_view(t, rules) for t in set(toks)}
+    skels = [memo[t] for t in toks]
+    out: dict[int, dict[str, int]] = {}
+    for i in range(len(skels) - size + 1):
+        w = "".join(skels[i:i + size])
+        out.setdefault(len(w), {}).setdefault(w, i)
+    return out
+
+
+@functools.lru_cache(maxsize=64)
+def visual_near_miss(haystack: str, phrase: str) -> tuple[int, bool, str] | None:
+    """The closest window of `haystack` words to `phrase` over the skeleton
+    views, if within `visual_budget()`: (distance, reads_as_phrase, window
+    text). reads_as_phrase is True only for a window with the phrase's word
+    boundaries that is IDENTICAL to it once rn/m, cl/d, vv/w are read alike
+    (`_reads_as_phrase`; the i/l fold and the merely-similar pairs don't
+    count). None if no window is within budget. Windows have the
+    phrase's word count, one more, or one fewer (never zero) and are
+    compared with spaces removed. Linear in the text: per view (at most 8)
+    and window size, the distinct windows are built once and grouped by
+    length; a phrase looks only at windows within its budget in length,
+    then a pigeonhole substring filter (with budget k, one of 2k+1 pieces
+    of the phrase survives intact — each edit, a transposition included,
+    touches at most two pieces), then a banded distance."""
+    p = canonical(phrase)
+    if not p:
+        return None
+    pwords = p.split()
+    m = len(pwords)
+    k = visual_budget(len(p.replace(" ", "")))
+    toks = _canonical_tokens(haystack)
+    best: tuple[int, bool, str] | None = None
+    for rules in _views_for(p.replace("i", "l")):
+        pskel = "".join(visual_view(w, rules) for w in pwords)
+        npieces = 2 * k + 1
+        step = len(pskel) / npieces
+        pieces = [x for x in (pskel[round(i * step):round((i + 1) * step)] for i in range(npieces)) if x] or [pskel]
+        has_piece = re.compile("|".join(map(re.escape, pieces))).search
+        for size in (m, m - 1, m + 1):
+            if size < 1:
+                continue
+            by_len = _view_windows(haystack, rules, size)
+            for length in range(len(pskel) - k, len(pskel) + k + 1):
+                for window, i in by_len.get(length, {}).items():
+                    if not has_piece(window):
+                        continue
+                    d = _osa_within(window, pskel, k)
+                    if d is None:
+                        continue
+                    reads = d == 0 and size == m and _reads_as_phrase(toks[i:i + size], pwords)
+                    cand = (d, reads, " ".join(toks[i:i + size]))
+                    if best is None or (cand[0], not cand[1]) < (best[0], not best[1]):
+                        best = cand
+                        if reads:
+                            return best
+    return best
+
+
+def visual_lookalike_exact(haystack: str, phrase: str) -> str | None:
+    """The words of `haystack` that READ AS `phrase` once the near-identical
+    pairs rn/m (UTS #39), cl/d, vv/w are read alike — same words,
+    skeleton-identical: "make rnoney", "guaranteecl returns" — or None.
+    ("get rlch" is NOT one: l for i is a human's call, see near_miss.)"""
+    hit = visual_near_miss(haystack, phrase)
+    if hit is not None and hit[1]:
+        return hit[2]
     return None
 
 
