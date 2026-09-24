@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -72,6 +73,10 @@ class CampaignGoal(BaseModel):
     min_transformation_elements: int = Field(default=2, ge=1, le=len(TRANSFORMATION_ELEMENTS))
     min_resolution_height_px: int = Field(default=720, ge=240, le=4320)
     campaign_max_length_seconds: int | None = Field(default=None, ge=3, le=3600)
+    # Language of the campaign's customer-facing text. Only English rulebooks
+    # exist in this build; Clip Review sends any clip whose text contains a
+    # letter outside the Latin script to a human (N3).
+    language: Literal["en"] = "en"
 
 
 def _rule(kind: RuleKind, n: int, text: str, params: dict, rows: tuple[str, ...] = ()) -> Rule:
@@ -159,7 +164,7 @@ def draft(goal: CampaignGoal, registry: PlatformRulesRegistry, today: date, vers
         campaign_id=goal.campaign_id, client_id=goal.client_id, vertical=goal.vertical, version=version,
         status=RulebookStatus.DRAFT, objective=goal.objective, source_asset_ids=tuple(goal.source_asset_ids),
         approved_angles=tuple(angles), platforms=tuple(goal.platforms), rules=tuple(rules),
-        blocking_issues=tuple(blocking), drafted_by=drafted_by,
+        blocking_issues=tuple(blocking), drafted_by=drafted_by, language=goal.language,
     )
 
 
@@ -194,5 +199,5 @@ def revise(previous: Rulebook, goal: CampaignGoal, registry: PlatformRulesRegist
         status=RulebookStatus.DRAFT, objective=goal.objective, source_asset_ids=tuple(goal.source_asset_ids),
         approved_angles=tuple(angles), platforms=tuple(goal.platforms), rules=tuple(out),
         retired_rule_ids=retired, blocking_issues=tuple(blocking), drafted_by=drafted_by,
-        supersedes_version=previous.version,
+        supersedes_version=previous.version, language=goal.language,
     )

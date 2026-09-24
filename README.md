@@ -368,10 +368,15 @@ Andre's final approval and no ZBC clip is payout-eligible. Fix wave 1
 ledger; deterministic ledger event ids; review cap per brief deliverable
 across jobs; confusable/split-letter text evasion caught; bounded ids
 (422, never a fake 503); verified live against the real ledger-rust.
+Fix wave 2: per-actor credentials (`CREATIVE_ACTOR_TOKENS`,
+`X-Creative-Actor-Token`); review cap per client deliverable; retry
+receipt time bound to content (15 min); never-say survives invisible and
+lookalike characters.
 
 ```bash
-cd services/creative-py && python3 -m pytest -q      # 310 tests
+cd services/creative-py && python3 -m pytest -q      # 360 tests
 export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
+export CREATIVE_ACTOR_TOKENS='{"<actor_id>": "<token>", ...}'   # per-actor credentials
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>
 cd src && python3 serve.py   # CREATIVE_BIND_ADDR (default 127.0.0.1), CREATIVE_PORT (default 8300)
 ```

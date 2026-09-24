@@ -38,8 +38,11 @@ NS  no never-say phrase in the clip's text                  -> reject
     only once split letters are rejoined or leetspeak folded is
     borderline -> human_review, never a pass)
 OBF caption / on-screen text / transcript shows an obfuscation
-    signal (mixed-script lookalikes, hidden format characters,
-    separator-split letters)                                -> human_review
+    signal (bidi controls, fillers, tag characters anywhere;
+    other invisibles beside a letter; lookalikes among Latin;
+    two scripts inside one word; separator-split letters)   -> human_review
+LAT English-language campaign (every rulebook in this build):
+    any letter outside the Latin script in those fields     -> human_review
 QF  resolution >= floor; not declared => human_review       -> reject / human_review
 RC  every source/added asset is in the allow-list           -> reject
 MD  min days live is NOT judged here (Verification and Integrity).
@@ -53,7 +56,7 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, model_validator
 
 from shared.registry import PlatformRulesRegistry
-from shared.text import PhraseMatch, contains_phrase, match_phrase, obfuscation_signals
+from shared.text import PhraseMatch, contains_phrase, match_phrase, non_latin_letters, obfuscation_signals
 from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
 from zbc.platform_rules import rows_usable
 from zbc.rulebook import Rulebook, RuleKind
@@ -249,6 +252,11 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
     for field_name in ("caption", "on_screen_text", "transcript"):
         for sig in obfuscation_signals(getattr(sub, field_name)):
             borderline.append(f"obfuscation in {field_name}: {sig}")
+        if rb.language == "en":
+            foreign = non_latin_letters(getattr(sub, field_name))
+            if foreign:
+                borderline.append(f"non-Latin letter(s) in {field_name} of an English-language campaign "
+                                  f"({', '.join(foreign[:5])}): a human reads it")
 
     qf = rb.one(RuleKind.QUALITY_FLOOR)
     if qf is not None:

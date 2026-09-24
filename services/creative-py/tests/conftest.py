@@ -24,6 +24,25 @@ os.environ.pop("LEDGER_SERVICE_TOKEN", None)
 
 NOW = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
 
+# Per-actor credentials (fix wave 2, N4): one test-only token per default actor.
+TEST_ACTOR_TOKENS = {a: f"test-actor-token-{a}-do-not-use" for a in (
+    "zbm_brief_writer", "zbm_creative_lead", "zbm_creative_quality", "zbm_placement_spec", "zbc_rulebook_writer",
+    "zbc_campaign_rulebook", "zbc_platform_rules", "zbc_clip_human_reviewer", "rights_desk")}
+ACTOR_HEADER = "X-Creative-Actor-Token"
+_AUTO = object()
+
+
+def _DEFAULT_DRAFTER(path: str) -> str | None:
+    """Tests that omit actor_id when drafting act as the default writer
+    intelligence (the server used to default to it; now it must be proven)."""
+    import re
+
+    if path == "/zbm/briefs":
+        return "zbm_brief_writer"
+    if re.fullmatch(r"/zbc/campaigns/[^/]+/(rulebooks(/\d+)?|revisions)", path):
+        return "zbc_rulebook_writer"
+    return None
+
 
 @pytest.fixture
 def clock():
@@ -70,28 +89,46 @@ def recorder(ledger):
 class Api:
     """A TestClient bound to an app built with injected fakes."""
 
-    def __init__(self, *, ledger, clock, departments=None, actors=None, founder_token=TEST_FOUNDER_TOKEN, **build_kw):
+    def __init__(self, *, ledger, clock, departments=None, actors=None, founder_token=TEST_FOUNDER_TOKEN,
+                 actor_tokens=None, **build_kw):
         from fastapi.testclient import TestClient
 
         from api import build_app
 
         self.ledger = ledger
         self.clock = clock
+        if actor_tokens is None:  # every actor in the registry gets a test credential
+            actor_tokens = {**{a: f"test-actor-token-{a}-do-not-use" for a in (actors.actors if actors else ())},
+                            **TEST_ACTOR_TOKENS}
+        self.actor_tokens = dict(actor_tokens)
         self.app = build_app(service_token=TEST_SERVICE_TOKEN, ledger=ledger, founder_token=founder_token,
-                             clock=clock, departments=departments, actors=actors, **build_kw)
+                             clock=clock, departments=departments, actors=actors, actor_tokens=self.actor_tokens,
+                             **build_kw)
         self.client = TestClient(self.app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"})
         self.zbm = self.app.state.zbm
         self.zbc = self.app.state.zbc
 
-    def post(self, path, json=None, andre=None, **kw):
-        headers = {"X-Andre-Approval-Token": andre} if andre is not None else {}
+    def _actor_headers(self, json, as_actor, path=None) -> dict:
+        """Test convenience: act as `as_actor`, or (by default) as the actor the
+        body names — the SERVER only ever trusts the credential."""
+        if as_actor is _AUTO:
+            as_actor = json.get("actor_id") if isinstance(json, dict) else None
+            if as_actor is None and path is not None:
+                as_actor = _DEFAULT_DRAFTER(path)
+        tok = self.actor_tokens.get(as_actor) if as_actor else None
+        return {ACTOR_HEADER: tok} if tok else {}
+
+    def post(self, path, json=None, andre=None, as_actor=_AUTO, **kw):
+        headers = self._actor_headers(json, as_actor, path)
+        if andre is not None:
+            headers["X-Andre-Approval-Token"] = andre
         return self.client.post(path, json=json, headers=headers, **kw)
 
     def get(self, path, **kw):
         return self.client.get(path, **kw)
 
-    def put(self, path, json=None, **kw):
-        return self.client.put(path, json=json, **kw)
+    def put(self, path, json=None, as_actor=_AUTO, **kw):
+        return self.client.put(path, json=json, headers=self._actor_headers(json, as_actor, path), **kw)
 
 
 @pytest.fixture

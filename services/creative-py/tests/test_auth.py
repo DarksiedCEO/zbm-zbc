@@ -54,7 +54,12 @@ def test_module_app_defaults_to_unconfigured_ledger_so_decisions_are_refused():
     assert authed.get("/health").json()["ledger_configured"] is False
     from samples import zbm_requirements
 
+    # fix wave 2 (N4): the module app has no actor credentials either -> actor actions refused first
     r = authed.post("/zbm/briefs", json={"requirements": zbm_requirements()})
+    assert r.status_code == 403 and "not configured" in r.json()["detail"]
+    from samples import ZBC_ASSETS
+
+    r = authed.post("/zbc/campaigns/c1/rights-check", json={"assets": ZBC_ASSETS})
     assert r.status_code == 503 and r.json()["took_effect"] is False
 
 

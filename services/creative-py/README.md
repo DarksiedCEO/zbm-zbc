@@ -99,7 +99,9 @@ Default actor ids (one per intelligence; add humans with
 `CREATIVE_EXTRA_ACTORS='{"jo": ["zbm_creative_lead"]}'`): `zbm_brief_writer`,
 `zbm_creative_lead`, `zbm_creative_quality`, `zbm_placement_spec`,
 `zbc_rulebook_writer`, `zbc_campaign_rulebook`, `zbc_platform_rules`,
-`zbc_clip_human_reviewer`, `rights_desk`.
+`zbc_clip_human_reviewer`, `rights_desk`. Every actor action needs that
+actor's own credential in `X-Creative-Actor-Token` (configured in
+`CREATIVE_ACTOR_TOKENS`); a body `actor_id` is optional and must match it.
 
 ## Running it
 
@@ -108,6 +110,9 @@ cd services/creative-py
 pip install -r requirements.txt            # same pins as the other Python services
 export CREATIVE_SERVICE_TOKEN=<secret>             # required; refuses to start without it
 export CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret> # without it every founder action is refused
+export CREATIVE_ACTOR_TOKENS='{"zbm_creative_lead": "<>=16 chars>", ...}'  # per-actor credentials (ADR 0005
+                                                   # decision 18); unset = every actor action refused (403);
+                                                   # callers send X-Creative-Actor-Token
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090    # without both ledger vars every decision is refused (503)
 export LEDGER_SERVICE_TOKEN=<ledger secret>
 export CREATIVE_SUPERSEDED_GRACE_HOURS=72          # optional; 0..720, else refuses to start (ADR 0005 decision 10)
@@ -120,8 +125,14 @@ cd src && python3 serve.py                 # CREATIVE_BIND_ADDR (default 127.0.0
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 24, 2026 after fix wave 1: **310 passed, 0 failed**
-(Python 3.11.15, pytest 9.1.1; 205 before the fix wave). `test_fix_wave_1.py`
+Result on Sep 24, 2026 after fix wave 2: **360 passed, 0 failed**
+(Python 3.11.15, pytest 9.1.1; 310 after fix wave 1, 205 before it).
+`test_fix_wave_2.py` reproduces AEGIS round-2 N1 (receipt time bound to
+content, 15-minute window, content-hashed clip event ids), F13 (backdating
+route closed), N4 (per-actor credentials; review cap per client
+deliverable) and N3 (every AEGIS never-say variant, the complete
+Default_Ignorable table, and a seeded 1,500-case fuzz of ignorables and
+lookalikes inserted into never-say phrases — never an automatic pass). `test_fix_wave_1.py`
 holds one reproduction per fix-wave finding (F8 review cap, F9 record-first
 per outside call site, F11 deterministic ids, F12 text evasion, F13 grace
 window, F14 Decimal guard, F16 ledger-rust validation parity, integration
@@ -187,10 +198,39 @@ wraps every department port in a call-counting spy. Observed:
   156 entries, valid.
 - all processes stopped afterwards (only PIDs this run started).
 
+## Live run — fix wave 2, against the REAL ledger-rust (Sep 24, 2026)
+
+ledger-rust built from this tree into a private target dir
+(`cargo build --release`), on 127.0.0.1:19601 with a fresh log; the
+pre-fix service (`git archive ae75124`) on :19602 and the fixed one on
+:19600, same probe script over HTTP (AEGIS cr2/cr4/cr5 as live calls):
+
+- **N1:** ledger-rust stopped (its own PID), `clip_r` with junk → 503;
+  ledger restarted on the same log. Pre-fix: different content under
+  `clip_r` → 201, recorded as a new decision. Fixed → 409 "submission id
+  clip_r was already used … with different content"; an identical retry of
+  another outage attempt inside 15 min → 201 with the first attempt's
+  receipt time, one ledger event. (The 30-day half of the scenario needs a
+  controlled clock: covered by `test_n1_f13_aegis_backdating_route_is_closed`.)
+- **N3** (never-say "get rich"): pre-fix, the Hangul-filler, small-capital
+  G, halfwidth-filler, RLO, stroked-letter and Cherokee variants all →
+  `pass`. Fixed → `reject` NS-02 (filler, ɢ, ǥ/ħ, Cherokee Ꮐ) or
+  `human_review` (split by a filler; RLO).
+- **N4:** pre-fix, a body-asserted `zbm_creative_lead` with no credential
+  approved the brief (200) and a cloned brief while an escalation was open
+  → 201. Fixed: no credential → 401, a forged credential → 401, the
+  drafter's credential claiming the Creative Lead → 403; the clone → 409
+  (same spec fingerprint), a renamed clone with aspect "18:32" → 409;
+  after Andre killed the escalation a new brief → 201.
+- `devtools/live_smoke.py` (now sending per-actor credentials, with three
+  new refusal steps) → "LIVE SMOKE: ALL STEPS AS EXPECTED", 37 entries,
+  `/ledger/verify` valid. All processes stopped (only PIDs this run started).
+
 ## Known gaps
 
 See ADR 0005 "Honest gaps and open items" for the full list. The short
-version: state is in memory; actor ids are asserted (Andre excepted);
+version: state is in memory; actor credentials are static bearer tokens
+(no rotation/expiry);
 clip properties are declared, not detected; only length rows are sourced
 and they all expire 2026-10-23; TikTok is blocked; every department
 Creative depends on is a fail-closed stand-in, so no ZBM work reaches

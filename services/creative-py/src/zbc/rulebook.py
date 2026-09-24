@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -136,6 +136,7 @@ class Rulebook(BaseModel):
     signed_at: datetime | None = None
     live_at: datetime | None = None
     superseded_at: datetime | None = None
+    language: Literal["en"] = "en"
 
     @model_validator(mode="after")
     def _ids_unique(self) -> "Rulebook":
