@@ -83,9 +83,14 @@ backward-compatibility proof are in
   `POST /ledger/append` rejects `|`, control characters and the string
   `"null"` in optional fields, and ambiguous (re-splittable) findings or
   invalid events on disk refuse to load; logging can no longer crash the
-  server. Known limitation: a non-ASCII byte in any request header gets an
-  empty reply (tiny_http drops it before our code runs; fail-closed, pinned
-  by test). Fix wave 2: new appends enforce the money bound (ADR 0003
+  server. (The fix-wave-1 non-ASCII-header limitation is gone since fix
+  wave 4.) Fix wave 4 (ADR 0003 section 7): one slow client can no longer
+  freeze the ledger. The server moved from tiny_http to hyper/tokio; each
+  connection has deadlines (head 5 s, body 5 s, whole connection 15 s),
+  a declared body over 64 KiB is a 413 before it is read, unauthenticated
+  requests are answered and closed without reading their body, and over
+  `LEDGER_MAX_CONNECTIONS` (default 512) open connections a caller gets an
+  immediate 503. Appends stay strictly serialized. Fix wave 2: new appends enforce the money bound (ADR 0003
   section 1a; over `"999999999999999.99"` is a 400), checked against every
   `ledger_append_expected` verdict in `fixtures/money_vectors.json`;
   already-persisted amounts (legacy `1e20`, over-bound strings the

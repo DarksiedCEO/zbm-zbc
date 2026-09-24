@@ -9,9 +9,10 @@
 //!   F7  the finding canonical string must be unambiguous: `|`, control
 //!       characters and the literal "null" are refused on append, and a
 //!       re-split / null-forged log refuses to start.
-//!   D4  a non-ASCII header byte: tiny_http drops the connection before any
-//!       of our code runs (documented limitation, ADR 0003 section 5). Pinned
-//!       here: connection closed, process stays up, nothing bypassed.
+//!   D4  a non-ASCII header byte: until fix wave 4 tiny_http dropped the
+//!       connection before any of our code ran (ADR 0003 section 5). Since the
+//!       move to hyper (section 7) such requests get real answers; pinned
+//!       here: auth is never bypassed, process stays up.
 //!   Cosmetic: the startup log names the real bind address.
 //!
 //! The F5 tests use RLIMIT_FSIZE (`ulimit -f`) on the real process to make
@@ -444,42 +445,58 @@ fn f7_ambiguous_legacy_entries_from_old_binary_are_refused() {
     }
 }
 
-// --- D4: non-ASCII header bytes (known tiny_http limitation, pinned) -------------------------
+// --- D4: non-ASCII header bytes (was a pinned tiny_http limitation) ------------------------
 
-/// tiny_http 0.12.0 (latest release; also unchanged on its master branch)
-/// rejects any non-ASCII byte in the request head inside its connection
-/// thread (`ClientConnection::read_next_line` -> `ReadIoError` -> `return
-/// None`) and closes the socket without a response, before any request
-/// reaches this server's code. This pins the observable behavior: zero bytes
-/// back, the process stays up, and nothing is read or written.
+/// Before fix wave 4, tiny_http 0.12.0 rejected any non-ASCII byte in the
+/// request head inside its connection thread and closed the socket without a
+/// response (this test used to pin that). The server now runs on hyper,
+/// which accepts obs-text bytes (0x80-0xFF) in header VALUES as RFC 9110
+/// allows, so these requests get real answers. What must still hold:
+/// nothing bypasses auth — an Authorization value that is not visible ASCII
+/// is a 401 — and a correctly authenticated request with an unrelated
+/// non-ASCII header is processed normally (recorded exactly once).
 #[test]
-fn d4_non_ascii_header_closes_connection_process_stays_up_nothing_bypassed() {
+fn d4_non_ascii_header_bytes_get_real_answers_and_never_bypass_auth() {
     let log = scratch("d4");
     let mut s = start(&log, None);
     let body = finding("f-nonascii").to_string();
-    let cases: Vec<Vec<u8>> = vec![
-        b"GET /health HTTP/1.1\r\nHost: x\r\nX-Note: caf\xc3\xa9\r\nConnection: close\r\n\r\n".to_vec(),
-        format!("GET /ledger/entries HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nX-Note: \u{e9}\r\nConnection: close\r\n\r\n").into_bytes(),
-        b"GET /ledger/entries HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer caf\xe9\r\nConnection: close\r\n\r\n".to_vec(),
-        format!(
-            "POST /ledger/append HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nX-Note: \u{2713}\r\n\
-             Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        )
-        .into_bytes(),
+    let cases: Vec<(Vec<u8>, u16)> = vec![
+        (b"GET /health HTTP/1.1\r\nHost: x\r\nX-Note: caf\xc3\xa9\r\nConnection: close\r\n\r\n".to_vec(), 200),
+        (
+            format!("GET /ledger/entries HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nX-Note: \u{e9}\r\nConnection: close\r\n\r\n").into_bytes(),
+            200,
+        ),
+        (b"GET /ledger/entries HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer caf\xe9\r\nConnection: close\r\n\r\n".to_vec(), 401),
+        (
+            format!("GET /ledger/entries HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\u{e9}\r\nConnection: close\r\n\r\n")
+                .into_bytes(),
+            401,
+        ),
+        (
+            format!(
+                "POST /ledger/append HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nX-Note: \u{2713}\r\n\
+                 Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .into_bytes(),
+            201,
+        ),
     ];
-    for (i, req) in cases.iter().enumerate() {
-        let resp = raw(s.port, req).unwrap_or_default();
-        assert!(resp.is_empty(), "case {i}: expected a dropped connection, got {:?}", String::from_utf8_lossy(&resp));
+    for (i, (req, want)) in cases.iter().enumerate() {
+        let resp = String::from_utf8_lossy(&raw(s.port, req).unwrap()).to_string();
+        let status: u16 = resp.lines().next().and_then(|l| l.split_whitespace().nth(1)).and_then(|v| v.parse().ok()).unwrap_or(0);
+        assert_eq!(status, *want, "case {i}: {resp:?}");
         assert!(s.child.try_wait().unwrap().is_none(), "case {i}: process must stay up");
     }
-    // Still serving, still enforcing auth, and nothing was written.
+    // Still serving, still enforcing auth; only the authenticated POST wrote.
     assert_eq!(request(s.port, "GET", "/health", None, None).unwrap().0, 200);
     assert_eq!(request(s.port, "GET", "/ledger/entries", None, None).unwrap().0, 401);
     let (st, entries) = authed(s.port, "GET", "/ledger/entries", None);
     assert_eq!(st, 200);
-    assert_eq!(entries.as_array().unwrap().len(), 0, "the non-ASCII POST recorded nothing");
-    assert_eq!(file_len(&log.0), 0);
+    let entries = entries.as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["finding_id"], "f-nonascii");
+    assert_eq!(std::fs::read_to_string(&log.0).unwrap().lines().count(), 1);
 }
 
 // --- cosmetic: real bind address in the startup log ------------------------------------------
