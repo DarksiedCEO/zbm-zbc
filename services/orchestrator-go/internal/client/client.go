@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 )
@@ -19,10 +20,69 @@ import (
 // that actually failed (fix wave 3, AEGIS D3: ledger failures used to be
 // labeled "detection-py").
 type DetectionClient struct {
-	service    string // "detection-py" or "ledger-rust"
-	baseURL    string
-	token      string // bearer token sent as Authorization; empty means "send nothing"
-	httpClient *http.Client
+	service     string // "detection-py" or "ledger-rust"
+	baseURL     string
+	token       string // bearer token sent as Authorization; empty means "send nothing"
+	httpClient  *http.Client
+	maxResponse int64 // largest response body accepted from this service
+}
+
+// Outbound limits (fix wave 1, Sep 24 2026; ADR 0001 "Request limits").
+// Response bodies used to be read with an unbounded io.ReadAll and the
+// transport accepted Go's default 10 MB of response headers.
+const (
+	// upstreamCallTimeout bounds one whole call: connect, request, response
+	// headers and body. (It existed before this fix; unchanged.)
+	upstreamCallTimeout = 10 * time.Second
+	// maxDetectionResponseBytes: detection-py accepts at most 1000 items per
+	// request (2 MiB of JSON), and its largest response — one finding
+	// (~650 bytes) per item, or the correlation map of those findings — is
+	// about 1 MiB. 8 MiB is that with generous headroom.
+	maxDetectionResponseBytes = 8 << 20
+	// maxLedgerResponseBytes: GET /ledger/entries returns the WHOLE ledger
+	// (ledger-rust has no pagination). A finding entry is ~470-500 bytes, so
+	// 64 MiB is ~130,000 entries (~13,000 fixture scans). Past that, reads
+	// fail closed with a clear "exceeds" error in the log (502 to the
+	// caller) instead of buffering without bound: a known limit until the
+	// ledger paginates.
+	maxLedgerResponseBytes = 64 << 20
+	// maxResponseHeaderBytes: every upstream sends a handful of short headers.
+	maxResponseHeaderBytes = 64 << 10
+	// maxLoggedBodyBytes: how much of an upstream body an error carries into
+	// the server log.
+	maxLoggedBodyBytes = 2 << 10
+)
+
+func newTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	t.TLSHandshakeTimeout = 5 * time.Second
+	t.ResponseHeaderTimeout = upstreamCallTimeout
+	t.MaxResponseHeaderBytes = maxResponseHeaderBytes
+	return t
+}
+
+// readBody reads at most c.maxResponse bytes of a response body and fails
+// (without reading further) on a longer one.
+func (c *DetectionClient) readBody(method, path string, resp *http.Response) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(resp.Body, c.maxResponse+1))
+	if err != nil {
+		return nil, c.upstreamErr(UpstreamBadResponse, method, path, resp.StatusCode, "read response body: "+err.Error())
+	}
+	if int64(len(b)) > c.maxResponse {
+		return nil, c.upstreamErr(UpstreamBadResponse, method, path, resp.StatusCode,
+			fmt.Sprintf("response body exceeds %d bytes", c.maxResponse))
+	}
+	return b, nil
+}
+
+// snippet is the part of an upstream body that goes into an error (and so
+// the server log): at most maxLoggedBodyBytes.
+func snippet(b []byte) string {
+	if len(b) <= maxLoggedBodyBytes {
+		return string(b)
+	}
+	return fmt.Sprintf("%s... (%d bytes total)", b[:maxLoggedBodyBytes], len(b))
 }
 
 // NewDetectionClient builds a client for detection-py. token must match
@@ -32,17 +92,19 @@ type DetectionClient struct {
 // auth; passing "" against a token-requiring service will fail every
 // call with 401, loudly, not silently.
 func NewDetectionClient(baseURL, token string) *DetectionClient {
-	return newServiceClient("detection-py", baseURL, token)
+	return newServiceClient("detection-py", baseURL, token, maxDetectionResponseBytes)
 }
 
-func newServiceClient(service, baseURL, token string) *DetectionClient {
+func newServiceClient(service, baseURL, token string, maxResponse int64) *DetectionClient {
 	return &DetectionClient{
 		service: service,
 		baseURL: baseURL,
 		token:   token,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout:   upstreamCallTimeout,
+			Transport: newTransport(),
 		},
+		maxResponse: maxResponse,
 	}
 }
 
@@ -79,13 +141,13 @@ func (c *DetectionClient) doJSON(ctx context.Context, method, path string, body 
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := c.readBody(method, path, resp)
 	if err != nil {
-		return c.upstreamErr(UpstreamBadResponse, method, path, resp.StatusCode, "read response body: "+err.Error())
+		return err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return c.upstreamErr(UpstreamStatus, method, path, resp.StatusCode, string(respBody))
+		return c.upstreamErr(UpstreamStatus, method, path, resp.StatusCode, snippet(respBody))
 	}
 
 	if out != nil {
@@ -98,7 +160,7 @@ func (c *DetectionClient) doJSON(ctx context.Context, method, path string, body 
 		if err := dec.Decode(out); err != nil {
 			return &wrappedUpstreamError{
 				UpstreamError: c.upstreamErr(UpstreamBadResponse, method, path, resp.StatusCode,
-					fmt.Sprintf("unmarshal response: %v (body=%s)", err, string(respBody))),
+					fmt.Sprintf("unmarshal response: %v (body=%s)", err, snippet(respBody))),
 				cause: err,
 			}
 		}

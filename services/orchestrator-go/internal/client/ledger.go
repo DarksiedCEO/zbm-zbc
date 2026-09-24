@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -25,7 +24,7 @@ type LedgerClient struct {
 // LEDGER_SERVICE_TOKEN, or every call fails with 401, loudly, not
 // silently, same failure mode as NewDetectionClient with a wrong token.
 func NewLedgerClient(baseURL, token string) *LedgerClient {
-	return &LedgerClient{base: newServiceClient("ledger-rust", baseURL, token)}
+	return &LedgerClient{base: newServiceClient("ledger-rust", baseURL, token, maxLedgerResponseBytes)}
 }
 
 type LedgerRecordInput struct {
@@ -104,9 +103,9 @@ func (l *LedgerClient) Verify(ctx context.Context) (*LedgerVerifyResult, error) 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := l.base.readBody(http.MethodGet, path, resp)
 	if err != nil {
-		return nil, l.base.upstreamErr(UpstreamBadResponse, http.MethodGet, path, resp.StatusCode, "read response body: "+err.Error())
+		return nil, err
 	}
 
 	// Only 200 (valid) and 409 (chain failed verification) carry a verdict.
@@ -114,16 +113,16 @@ func (l *LedgerClient) Verify(ctx context.Context) (*LedgerVerifyResult, error) 
 	// request, not a verdict — before this check a 401 body parsed as
 	// {"valid":false} and was reported as a chain-integrity failure.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
-		return nil, l.base.upstreamErr(UpstreamStatus, http.MethodGet, path, resp.StatusCode, string(body))
+		return nil, l.base.upstreamErr(UpstreamStatus, http.MethodGet, path, resp.StatusCode, snippet(body))
 	}
 	var out LedgerVerifyResult
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, l.base.upstreamErr(UpstreamBadResponse, http.MethodGet, path, resp.StatusCode,
-			fmt.Sprintf("unmarshal verify response: %v (body=%s)", err, string(body)))
+			fmt.Sprintf("unmarshal verify response: %v (body=%s)", err, snippet(body)))
 	}
 	if out.Valid != (resp.StatusCode == http.StatusOK) {
 		return nil, l.base.upstreamErr(UpstreamBadResponse, http.MethodGet, path, resp.StatusCode,
-			fmt.Sprintf("verify verdict valid=%v contradicts HTTP status (body=%s)", out.Valid, string(body)))
+			fmt.Sprintf("verify verdict valid=%v contradicts HTTP status (body=%s)", out.Valid, snippet(body)))
 	}
 	return &out, nil
 }
@@ -184,7 +183,7 @@ func (l *LedgerClient) Entries(ctx context.Context) (*LedgerEntriesResult, error
 			continue
 		case "finding":
 		default:
-			return nil, fmt.Errorf("ledger entry %d has unknown kind %q", i, *head.Kind)
+			return nil, fmt.Errorf("ledger entry %d has unknown kind %q", i, snippet([]byte(*head.Kind)))
 		}
 		// amount_usd is decoded separately: an out-of-contract string must
 		// be flagged, not make the whole read fail.
@@ -211,7 +210,7 @@ func (l *LedgerClient) Entries(ctx context.Context) (*LedgerEntriesResult, error
 				rec.AmountOutOfContract = true
 			}
 		default:
-			return nil, fmt.Errorf("ledger finding entry %d: %w: amount_usd must be a string or null, got %s", i, ErrInvalidMoney, string(amt))
+			return nil, fmt.Errorf("ledger finding entry %d: %w: amount_usd must be a string or null, got %s", i, ErrInvalidMoney, snippet(amt))
 		}
 		out.Findings = append(out.Findings, rec)
 	}

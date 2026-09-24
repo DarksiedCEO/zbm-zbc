@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/orchestrator"
 )
@@ -59,6 +63,81 @@ func writeUpstreamError(w http.ResponseWriter, route string, err error) {
 	writeJSON(w, http.StatusBadGateway, map[string]string{
 		"error":          orchestrator.PublicMessage(err),
 		"correlation_id": id,
+	})
+}
+
+// Server limits (fix wave 1, Sep 24 2026; ADR 0001 "Request limits").
+// Finding: main() used http.ListenAndServe, i.e. an http.Server with no
+// timeouts at all — a client sending its request head or body one byte at a
+// time held a connection and goroutine forever — and no body limit.
+const (
+	// readHeaderTimeout: the whole request line + headers must arrive in 5s.
+	readHeaderTimeout = 5 * time.Second
+	// readTimeout: the whole request, body included, must arrive in 15s.
+	readTimeout = 15 * time.Second
+	// handlerTimeout is the budget for one request's work, i.e. one full scan
+	// (every upstream call is additionally bounded by the client's own 10s).
+	// Measured on the live 3-process stack (Sep 24 2026): a full fixture scan
+	// (15 detection calls, 10 ledger appends, 2 verifies) took 25-100 ms;
+	// 60s is several hundred times that, and still bounded.
+	handlerTimeout = 60 * time.Second
+	// writeTimeout must exceed handlerTimeout so the response of a scan that
+	// used its whole budget (a 502 naming the step that timed out) can still
+	// be written.
+	writeTimeout = handlerTimeout + 15*time.Second
+	idleTimeout  = 60 * time.Second
+	// maxHeaderBytes: the request line (with its query string) and headers.
+	// Callers send a few short headers (a bearer token is < 100 bytes).
+	maxHeaderBytes = 16 << 10
+	// maxRequestBodyBytes: no route takes a request body; anything a client
+	// does send is read (up to this) and discarded before the handler runs.
+	maxRequestBodyBytes = 64 << 10
+)
+
+// newServer is the orchestrator's http.Server with every limit set.
+func newServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           limitRequests(h),
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
+	}
+}
+
+// limitRequests runs before routing and auth: a body declared larger than
+// maxRequestBodyBytes is refused with 413 without reading it; any other body
+// is read through http.MaxBytesReader and discarded BEFORE the handler runs,
+// so a scan never starts until its whole request has arrived (a slow body
+// runs into readTimeout and is answered 408, an undeclared oversized one
+// 413). The handler then gets a context bounded by handlerTimeout.
+func limitRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > maxRequestBodyBytes {
+			w.Header().Set("Connection", "close")
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			w.Header().Set("Connection", "close")
+			var tooLarge *http.MaxBytesError
+			var timeout interface{ Timeout() bool }
+			switch {
+			case errors.As(err, &tooLarge):
+				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+			case errors.As(err, &timeout) && timeout.Timeout():
+				writeJSON(w, http.StatusRequestTimeout, map[string]string{"error": "request body not received in time"})
+			default:
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read request body"})
+			}
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), handlerTimeout)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -167,7 +246,7 @@ func main() {
 
 	orch := orchestrator.New(detectionURL, detectionToken, ledgerURL, ledgerToken)
 
-	mux := newMux(orch, orchestratorToken)
+	srv := newServer(bindAddr+":"+port, newMux(orch, orchestratorToken))
 	log.Printf("orchestrator-go listening on %s:%s (detection service at %s, ledger at %s)", bindAddr, port, detectionURL, ledgerURL)
-	log.Fatal(http.ListenAndServe(bindAddr+":"+port, mux))
+	log.Fatal(srv.ListenAndServe())
 }

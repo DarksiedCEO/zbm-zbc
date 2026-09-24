@@ -20,8 +20,8 @@ hash chain as findings.**
 
 | Service | Language | Tests | Status |
 |---|---|---|---|
-| `services/detection-py` | Python (FastAPI, pydantic) | 404/404 passing | Real, REST-exposed, hardened, money is exact `Decimal` |
-| `services/orchestrator-go` | Go | 48/48 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money` |
+| `services/detection-py` | Python (FastAPI, pydantic) | 427/427 passing | Real, REST-exposed, hardened, money is exact `Decimal`; request limits (2 MiB body, 1000 items, head size/deadline — ADR 0001 "Request limits"); run with `src/serve.py` |
+| `services/orchestrator-go` | Go | 59/59 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money`; server timeouts, body/header caps, bounded upstream responses (ADR 0001 "Request limits") |
 | `services/ledger-rust` | Rust | 91/91 passing (60 unit + 31 real-binary integration), clippy `-D warnings` clean | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
 | `apps/dashboard-ts` | TypeScript (Next.js 16) | 14/14 `npm test` (money vectors, loopback bind, error sanitizing, ledger status), build + typecheck clean, 0 npm audit vulnerabilities | Real, rendered per request (`ƒ /`), binds 127.0.0.1 by default, reads recorded findings — viewing never writes |
 
@@ -224,7 +224,7 @@ cargo run --bin server   # LEDGER_PORT (default 8090), LEDGER_BIND_ADDR (default
 cd services/detection-py
 pip install -r requirements.txt
 export ZBM_SERVICE_TOKEN=<your-shared-secret>
-cd src && python3 -m uvicorn api:app --port 8000
+cd src && python3 serve.py --port 8000   # not `uvicorn api:app`: serve.py adds the request-head limits (ADR 0001)
 
 # 3. Orchestrator (Go) — separate terminal. Needs the SAME token values
 #    as the two services it calls, plus its own token for callers of it.
@@ -253,14 +253,14 @@ curl -s -X POST -H "Authorization: Bearer $ORCHESTRATOR_SERVICE_TOKEN" \
 ## Testing
 
 ```bash
-# Python — 404 tests. Use `python3 -m pytest`, not the bare `pytest`
+# Python — 427 tests. Use `python3 -m pytest`, not the bare `pytest`
 # binary, if pytest was installed as a standalone tool (e.g. via uv) —
 # it can silently run against a different interpreter than the one you
 # `pip install`ed into, and report a module-not-found collection error
 # that looks like a broken test suite rather than an environment mismatch.
 cd services/detection-py && python3 -m pytest -q
 
-# Go — 48 tests
+# Go — 59 tests
 cd services/orchestrator-go && go vet ./... && go test -count=1 ./...
 
 # Rust — 91 tests (60 unit + 31 integration; the integration tests spawn
