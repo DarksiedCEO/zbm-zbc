@@ -30,6 +30,30 @@ actor action is refused (403); missing / unknown token -> 401. At start-up
 each token must be >= 16 printable ASCII characters, unique, for a known
 actor (never "andre"), and differ from the service and Andre tokens —
 otherwise the service refuses to start.
+
+Idempotent creation (fix wave 4, IDEM): every creating POST (brief, job,
+work, rulebook draft, revision, kit, clip, clearance record, licence)
+accepts an `Idempotency-Key` header (1-128 printable ASCII). The key is
+scoped to (route, path, authenticated actor). A retry with the same key and
+the same canonical request returns the ORIGINAL response (same status,
+same body, header `Idempotent-Replayed: true`) and records nothing new; the
+same key with different content is a 409. Without a header:
+- routes whose body carries the caller's own id (clip `submission_id`,
+  clearance `record_id`, licence `license_id`) use that id as the key;
+- every other creating route derives the key from (actor, route, path,
+  canonical body) and replays only while the resource it created is still
+  exactly as created — so a lost response + retry never duplicates, while
+  a deliberate second, identical request made after things moved on (e.g.
+  a new job on a brief whose first job already has work) is a new request.
+  Send a fresh Idempotency-Key to create a deliberate duplicate.
+The store is in memory and bounded (IDEMPOTENCY_MAX_ENTRIES, oldest
+evicted first), like every other piece of state in this service.
+
+Request size (fix wave 4, LIM): a body over MAX_BODY_BYTES (1 MiB) is
+refused with 413 BEFORE it is read into the JSON parser — by Content-Length
+when declared, by counting bytes when streamed. Every route handler is a
+plain `def`, so FastAPI runs it in its worker thread pool: text scanning
+never blocks the event loop (tests/test_fix_wave_4.py checks both).
 """
 
 from __future__ import annotations
@@ -39,9 +63,11 @@ import hmac
 import json
 import os
 import re
-from typing import Annotated, Literal
+from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Annotated, Any, Callable, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -63,6 +89,7 @@ from shared.ledger import (
     EvidenceRecorder,
     HttpLedgerClient,
     LedgerClient,
+    LedgerConflict,
     LedgerRecordError,
     OutcomeNotRecorded,
     UnconfiguredLedgerClient,
@@ -85,6 +112,10 @@ from zbm.results import PerformanceResult
 from zbm.workflow import WorkSubmission, ZbmWorkflow
 
 FOUNDER_HEADER = "X-Andre-Approval-Token"
+IDEMPOTENCY_HEADER = "Idempotency-Key"
+IDEMPOTENCY_MAX_ENTRIES = 10_000
+MAX_BODY_BYTES = 1024 * 1024
+_IDEM_KEY_RE = re.compile(r"[\x21-\x7e]{1,128}")
 ACTOR_HEADER = "X-Creative-Actor-Token"
 ACTOR_TOKEN_MIN_LEN = 16
 
@@ -169,6 +200,82 @@ def _check_actor_tokens(tokens: dict[str, str], actors: ActorRegistry, service_t
             raise RuntimeError(f"CREATIVE_ACTOR_TOKENS: token for {actor_id!r} equals the service or Andre token")
         seen.add(tok)
     return {a: _digest(t) for a, t in tokens.items()}
+
+
+@dataclass
+class _Created:
+    content: str            # SHA-256 of the canonical request
+    body: dict              # the original response body
+    snapshot: Any           # the created resource as it was right after creation
+
+
+class IdempotencyStore:
+    """Bounded map key -> original creation (oldest evicted first)."""
+
+    def __init__(self, max_entries: int = IDEMPOTENCY_MAX_ENTRIES):
+        self._max = max_entries
+        self._d: OrderedDict = OrderedDict()
+
+    def get(self, key) -> _Created | None:
+        return self._d.get(key)
+
+    def put(self, key, value: _Created) -> None:
+        self._d[key] = value
+        self._d.move_to_end(key)
+        while len(self._d) > self._max:
+            self._d.popitem(last=False)
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+
+class BodyLimit:
+    """ASGI middleware: refuse a request body over `limit` bytes with 413
+    before any of it reaches the JSON parser."""
+
+    def __init__(self, app, limit: int = MAX_BODY_BYTES):
+        self.app, self.limit = app, limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared is not None:
+            try:
+                too_big = int(declared) > self.limit
+            except ValueError:
+                too_big = True
+            if too_big:
+                return await self._refuse(send)
+        chunks, total, more = [], 0, True
+        while more:
+            msg = await receive()
+            if msg["type"] == "http.disconnect":
+                return
+            chunk = msg.get("body", b"")
+            total += len(chunk)
+            if total > self.limit:
+                return await self._refuse(send)
+            chunks.append(chunk)
+            more = msg.get("more_body", False)
+        body = b"".join(chunks)
+        sent = False
+
+        async def replay():
+            nonlocal sent
+            if sent:
+                return await receive()
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        return await self.app(scope, replay, send)
+
+    async def _refuse(self, send):
+        raw = json.dumps({"detail": f"request body over {self.limit} bytes", "error": "PayloadTooLarge"}).encode()
+        await send({"type": "http.response.start", "status": 413,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(raw)).encode()),
+                                (b"connection", b"close")]})
+        await send({"type": "http.response.body", "body": raw})
 
 
 def ledger_from_env() -> LedgerClient:
@@ -317,11 +424,53 @@ def build_app(
         return actor
 
 
+    idem = IdempotencyStore()
+
+    def creating(response: Response, route: str, path: dict, actor: str | None, key: str | None,
+                 request: Any, create: Callable[[], dict], view: Callable[[dict], Any] | None = None,
+                 caller_id: str | None = None) -> dict:
+        """Run a creating request at most once per idempotency key (IDEM)."""
+        content = hashlib.sha256(json.dumps({"route": route, "path": path, "actor": actor, "request": request},
+                                            sort_keys=True, separators=(",", ":"), default=str)
+                                 .encode("utf-8", "surrogatepass")).hexdigest()
+        if key is not None:
+            if not _IDEM_KEY_RE.fullmatch(key):
+                raise ValidationFailed(f"{IDEMPOTENCY_HEADER} must be 1-128 printable ASCII characters",
+                                       [IDEMPOTENCY_HEADER])
+            k = ("key", route, json.dumps(path, sort_keys=True), actor or "", key)
+        elif caller_id is not None:
+            k = ("id", route, json.dumps(path, sort_keys=True), caller_id)
+        else:
+            k = ("derived", route, json.dumps(path, sort_keys=True), actor or "", content)
+        with lock:
+            hit = idem.get(k)
+            if hit is not None:
+                if hit.content != content:
+                    what = (f"{IDEMPOTENCY_HEADER} {key!r}" if k[0] == "key" else f"id {caller_id!r}")
+                    raise PreconditionFailed(f"{what} was already used for a different request on this route; "
+                                             "nothing was recorded or changed")
+                if k[0] != "derived" or view is None or view(hit.body) == hit.snapshot:
+                    response.headers["Idempotent-Replayed"] = "true"
+                    return hit.body
+            body = create()
+            idem.put(k, _Created(content, body, view(body) if view is not None else None))
+            return body
+
+    def _safe(fn):
+        def run(body):
+            try:
+                return fn(body)
+            except CreativeError:
+                return None
+        return run
+
     app = FastAPI(
         title="Creative Production (ZBM advertising + ZBC clipping agency)",
         version="0.1.0",
         docs_url=None, redoc_url=None, openapi_url=None,
     )
+    app.add_middleware(BodyLimit, limit=MAX_BODY_BYTES)
+    app.state.idempotency = idem
     app.state.zbm = zbm
     app.state.zbc = zbc
     app.state.registry = registry
@@ -343,9 +492,22 @@ def build_app(
                 "detail": f"decision PARTLY took effect: {exc}",
                 "error": "OutcomeNotRecorded", "took_effect": "partial", "effect": exc.effect,
             })
+        if isinstance(exc, LedgerConflict):
+            return JSONResponse(status_code=409, content={
+                "detail": f"outcome UNCERTAIN / CONFLICTING: {exc}. Nothing changed in this service; the ledger "
+                          "holds another version of this decision, so it was not applied here",
+                "error": "LedgerConflict", "took_effect": "unknown",
+            })
+        if exc.took_effect is False:
+            return JSONResponse(status_code=503, content={
+                "detail": f"decision did NOT take effect: the evidence ledger record failed ({exc})",
+                "error": "LedgerRecordError", "took_effect": False,
+            })
         return JSONResponse(status_code=503, content={
-            "detail": f"decision did NOT take effect: the evidence ledger record failed ({exc})",
-            "error": "LedgerRecordError", "took_effect": False,
+            "detail": f"outcome UNKNOWN: {exc}. Nothing changed in this service yet; the ledger may or may not "
+                      "hold the record. Retry the IDENTICAL request to resolve it (it replays the exact record "
+                      "and takes effect once)",
+            "error": "LedgerOutcomeUnknown", "took_effect": "unknown",
         })
 
     auth = [Depends(require_auth)]
@@ -388,21 +550,37 @@ def build_app(
 
     # --- shared: rights records ------------------------------------------------------------
     @app.post("/rights/clearances", status_code=201, dependencies=auth)
-    def add_clearance(body: ClearanceIn, who: str = Depends(authenticate_actor)) -> dict:
-        with lock:
-            eid = record_clearance(rights, recorder, actors, acting(body.actor_id, who), body.record)
-        return {"record": body.record.model_dump(mode="json"), "ledger_event_id": eid}
+    def add_clearance(body: ClearanceIn, response: Response, who: str = Depends(authenticate_actor),
+                      idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+        actor = acting(body.actor_id, who)
+
+        def create() -> dict:
+            eid = record_clearance(rights, recorder, actors, actor, body.record)
+            return {"record": body.record.model_dump(mode="json"), "ledger_event_id": eid}
+
+        return creating(response, "clearance", {}, actor, idempotency_key, body.record.model_dump(mode="json"),
+                        create, caller_id=body.record.record_id)
 
     @app.post("/rights/licenses", status_code=201, dependencies=auth)
-    def add_license(body: LicenseIn, who: str = Depends(authenticate_actor)) -> dict:
-        with lock:
-            eid = record_license(rights, recorder, actors, acting(body.actor_id, who), body.license)
-        return {"license": body.license.model_dump(mode="json"), "ledger_event_id": eid}
+    def add_license(body: LicenseIn, response: Response, who: str = Depends(authenticate_actor),
+                    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+        actor = acting(body.actor_id, who)
+
+        def create() -> dict:
+            eid = record_license(rights, recorder, actors, actor, body.license)
+            return {"license": body.license.model_dump(mode="json"), "ledger_event_id": eid}
+
+        return creating(response, "license", {}, actor, idempotency_key, body.license.model_dump(mode="json"),
+                        create, caller_id=body.license.license_id)
 
     # --- ZBM -----------------------------------------------------------------------------------
     @app.post("/zbm/briefs", status_code=201, dependencies=auth)
-    def zbm_draft(body: DraftBriefIn, who: str = Depends(authenticate_actor)) -> dict:
-        return zbm.draft_brief(body.requirements, acting(body.actor_id, who)).model_dump(mode="json")
+    def zbm_draft(body: DraftBriefIn, response: Response, who: str = Depends(authenticate_actor),
+                  idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+        actor = acting(body.actor_id, who)
+        return creating(response, "brief", {}, actor, idempotency_key, body.requirements.model_dump(mode="json"),
+                        lambda: zbm.draft_brief(body.requirements, actor).model_dump(mode="json"),
+                        _safe(lambda b: zbm.get_brief(b["brief_id"]).model_dump(mode="json")))
 
     @app.get("/zbm/briefs/{brief_id}", dependencies=auth)
     def zbm_get_brief(brief_id: IdPath) -> dict:
@@ -413,12 +591,20 @@ def build_app(
         return zbm.review_brief(brief_id, acting(body.actor_id, who)).model_dump(mode="json")
 
     @app.post("/zbm/briefs/{brief_id}/jobs", status_code=201, dependencies=auth)
-    def zbm_open_job(brief_id: IdPath) -> dict:
-        return zbm.open_job(brief_id).model_dump(mode="json")
+    def zbm_open_job(brief_id: IdPath, response: Response, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+        def view(b: dict):
+            job = zbm.jobs.get(b["job_id"])
+            return None if job is None else [job.model_dump(mode="json"),
+                                             sorted(w for w, x in zbm.work.items() if x.job_id == b["job_id"])]
+
+        return creating(response, "job", {"brief_id": brief_id}, None, idempotency_key, None,
+                        lambda: zbm.open_job(brief_id).model_dump(mode="json"), view)
 
     @app.post("/zbm/jobs/{job_id}/work", status_code=201, dependencies=auth)
-    def zbm_submit(job_id: IdPath, body: WorkSubmission) -> dict:
-        return zbm.submit_work(job_id, body).model_dump(mode="json")
+    def zbm_submit(job_id: IdPath, body: WorkSubmission, response: Response, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+        return creating(response, "work", {"job_id": job_id}, None, idempotency_key, body.model_dump(mode="json"),
+                        lambda: zbm.submit_work(job_id, body).model_dump(mode="json"),
+                        _safe(lambda b: zbm.get_work(b["work_id"]).model_dump(mode="json")))
 
     @app.get("/zbm/work/{work_id}", dependencies=auth)
     def zbm_get_work(work_id: IdPath) -> dict:
@@ -464,11 +650,21 @@ def build_app(
     def _rb(campaign_id: str, version: int) -> dict:
         return zbc.rulebooks.get(campaign_id, version).model_dump(mode="json")
 
+    def _rb_view(b: dict):
+        try:
+            return zbc.rulebooks.get(b["campaign_id"], b["version"]).model_dump(mode="json")
+        except CreativeError:
+            return None
+
     @app.post("/zbc/campaigns/{campaign_id}/rulebooks", status_code=201, dependencies=auth)
-    def zbc_draft(campaign_id: CampaignIdPath, body: DraftRulebookIn, who: str = Depends(authenticate_actor)) -> dict:
+    def zbc_draft(campaign_id: CampaignIdPath, body: DraftRulebookIn, response: Response,
+                  who: str = Depends(authenticate_actor), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
         if body.goal.campaign_id != campaign_id:
             raise ValidationFailed("campaign_id in path and goal differ", ["campaign_id"])
-        return zbc.draft_rulebook(body.goal, acting(body.actor_id, who)).model_dump(mode="json")
+        actor = acting(body.actor_id, who)
+        return creating(response, "rulebook", {"campaign_id": campaign_id}, actor, idempotency_key,
+                        body.goal.model_dump(mode="json"),
+                        lambda: zbc.draft_rulebook(body.goal, actor).model_dump(mode="json"), _rb_view)
 
     @app.get("/zbc/campaigns/{campaign_id}/rulebooks", dependencies=auth)
     def zbc_versions(campaign_id: CampaignIdPath) -> dict:
@@ -499,8 +695,12 @@ def build_app(
         return zbc.go_live(campaign_id, version).model_dump(mode="json")
 
     @app.post("/zbc/campaigns/{campaign_id}/revisions", status_code=201, dependencies=auth)
-    def zbc_revise(campaign_id: CampaignIdPath, body: DraftRulebookIn, who: str = Depends(authenticate_actor)) -> dict:
-        return zbc.revise_rulebook(campaign_id, body.goal, acting(body.actor_id, who)).model_dump(mode="json")
+    def zbc_revise(campaign_id: CampaignIdPath, body: DraftRulebookIn, response: Response,
+                   who: str = Depends(authenticate_actor), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+        actor = acting(body.actor_id, who)
+        return creating(response, "revision", {"campaign_id": campaign_id}, actor, idempotency_key,
+                        body.goal.model_dump(mode="json"),
+                        lambda: zbc.revise_rulebook(campaign_id, body.goal, actor).model_dump(mode="json"), _rb_view)
 
     @app.post("/zbc/campaigns/{campaign_id}/moment-map", dependencies=auth)
     def zbc_moments(campaign_id: CampaignIdPath, body: SourceMaterial) -> dict:
@@ -511,16 +711,23 @@ def build_app(
         return {"sheets": [s.model_dump(mode="json") for s in zbc.build_hook_sheets(campaign_id)]}
 
     @app.post("/zbc/campaigns/{campaign_id}/kit", status_code=201, dependencies=auth)
-    def zbc_kit(campaign_id: CampaignIdPath, body: KitRequest) -> dict:
-        return zbc.build_kit(campaign_id, body).model_dump(mode="json")
+    def zbc_kit(campaign_id: CampaignIdPath, body: KitRequest, response: Response, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+        def view(b: dict):
+            kit = zbc.kits.get(campaign_id)
+            return kit.model_dump(mode="json") if kit is not None and kit.kit_id == b["kit_id"] else None
+
+        return creating(response, "kit", {"campaign_id": campaign_id}, None, idempotency_key,
+                        body.model_dump(mode="json"),
+                        lambda: zbc.build_kit(campaign_id, body).model_dump(mode="json"), view)
 
     @app.post("/zbc/campaigns/{campaign_id}/kit/sign", dependencies=auth)
     def zbc_kit_sign(campaign_id: CampaignIdPath, x_andre_approval_token: str | None = Header(default=None)) -> dict:
         return zbc.sign_kit(campaign_id, x_andre_approval_token).model_dump(mode="json")
 
     @app.post("/zbc/clips", status_code=201, dependencies=auth)
-    def zbc_submit(body: ClipSubmission) -> dict:
-        return zbc.submit_clip(body).model_dump(mode="json")
+    def zbc_submit(body: ClipSubmission, response: Response, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+        return creating(response, "clip", {}, None, idempotency_key, body.model_dump(mode="json"),
+                        lambda: zbc.submit_clip(body).model_dump(mode="json"), caller_id=body.submission_id)
 
     @app.get("/zbc/clips/{submission_id}", dependencies=auth)
     def zbc_get_clip(submission_id: IdPath) -> dict:

@@ -125,11 +125,13 @@ def test_n1_event_id_bound_to_content_ledger_refuses_second_version():
     assert len(_clip_events(led, "clip_x")) == 1  # it IS on the ledger
     # different content under the same id: refused by the service
     assert api.post("/zbc/clips", zbc_clip("clip_x", caption="other #ad")).status_code == 409
-    # identical content after the window: fresh receipt time -> same event id, different
-    # payload -> the ledger's own 409 -> 503; never a second decision on the ledger
+    # identical content after the window. Fix wave 4 (LOST) — this test used to assert the
+    # WEDGE (ledger 409 -> 503 "did NOT take effect" forever while the ledger held the
+    # decision). Now the uncertain attempt's exact record is replayed: the ledger answers
+    # 200, the decision takes effect once, with its first (true) receipt time.
     clock.at = clock.at + timedelta(hours=1)
-    r = api.post("/zbc/clips", zbc_clip("clip_x"))
-    assert r.status_code == 503 and r.json()["took_effect"] is False
+    d = ok(api.post("/zbc/clips", zbc_clip("clip_x")), 201)
+    assert d["received_at"].startswith(NOW.isoformat()[:19])
     assert len(_clip_events(led, "clip_x")) == 1
 
 

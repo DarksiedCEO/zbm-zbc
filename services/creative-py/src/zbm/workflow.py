@@ -25,23 +25,35 @@ Andre and unresolved, no new job and no new work submission on that brief
 is accepted; only Andre, with his own token, resolves it. A chain that was
 escalated never gets a third round, whatever Andre decided.
 
-Review cap per CLIENT DELIVERABLE (fix wave 2, N4): the brief id is not
-the unit — a cloned brief is the same order. Every deliverable has a
-DELIVERABLE KEY = (client_id, spec fingerprint, variant_index), where the
-spec fingerprint (`deliverable_fingerprint`) is SHA-256 over the canonical
-JSON of the normalised spec {platform, placement, length_seconds,
-aspect_ratio reduced to lowest terms ("18:32" -> "9:16"), format}. The
-deliverable_id, count, brief id and job id are NOT part of it. Rules:
+Review cap per CLIENT DELIVERABLE (fix wave 2, N4; fix wave 4, F8): the
+brief id is not the unit — a cloned brief is the same order. Every
+deliverable has a DELIVERABLE KEY = (client, spec, variant_index):
+- client: the client id, which is validated strictly at creation
+  (lowercase [a-z0-9_] only, shared.types.ClientId) so "Client_Acme" or
+  "client_acme." can't exist, and is additionally compared NORMALISED
+  (`normalize_client_id`: NFKC, casefold, punctuation/whitespace/underscores
+  removed);
+- spec: {platform, placement, aspect_ratio reduced to lowest terms
+  ("18:32" -> "9:16"), length_seconds}. Two specs are the SAME deliverable
+  when platform, placement and reduced ratio are equal and their lengths are
+  within 2 x the export tolerance (placement_spec.LENGTH_TOLERANCE_SECONDS,
+  0.5 s) of each other — i.e. one render could pass export validation for
+  both (a 30.5 s render fits a 30 s and a 31 s spec). The FORMAT is not part
+  of it: re-wrapping the same cut (mp4 -> m4v) is the same deliverable.
+  The deliverable_id, count, brief id and job id are not part of it either.
+Rules:
 - rounds are counted per deliverable key across every brief of that
   client; a pass closes the count (the next order starts at round 1);
 - only one version per deliverable key is in flight (submitted / export
   passed / rights cleared) at a time, across all briefs;
 - while work on a key is escalated to Andre and unresolved, any brief of
-  that client whose deliverables include that fingerprint (any variant)
-  is refused (409) at draft, approval, job opening and work submission;
+  that client with a deliverable matching that spec (any variant) is
+  refused (409) at draft, approval, job opening and work submission;
 - Andre's decision (his token) resolves it; after that a NEW brief for
   the same deliverable starts a fresh count; the escalated brief's own
   chain still never gets a third round.
+`deliverable_fingerprint` (SHA-256 of the canonical spec) is only a label
+for messages; matching never compares fingerprints.
 """
 
 from __future__ import annotations
@@ -59,7 +71,15 @@ from shared.clock import Clock
 from shared.departments import CommissionRequest, Departments
 from shared.errors import CreativeError, NotFound, PreconditionFailed
 from shared.founder import FOUNDER_ACTOR, FounderGate
-from shared.ledger import EvidenceRecorder, LedgerRecordError, OutcomeNotRecorded, RecordedPort, serialized
+from shared.ledger import (
+    EvidenceRecorder,
+    LedgerRecordError,
+    OutcomeNotRecorded,
+    PendingCreations,
+    RecordedPort,
+    content_sha256,
+    serialized,
+)
 from shared.media import C2paStandIn
 from shared.registry import PlatformRulesRegistry
 from shared.rights import RightsRegistry
@@ -93,12 +113,33 @@ REWORK_STAGES = frozenset({WorkStage.EXPORT_FAILED, WorkStage.RIGHTS_BLOCKED, Wo
 IN_FLIGHT_STAGES = frozenset({WorkStage.SUBMITTED, WorkStage.EXPORT_PASSED, WorkStage.RIGHTS_CLEARED})
 
 
-def deliverable_fingerprint(d: Deliverable) -> str:
-    """Spec fingerprint of a deliverable (N4) — see the module docstring."""
-    w, h = (int(x) for x in d.aspect_ratio.split(":"))
+def _ratio(aspect_ratio: str) -> str:
+    w, h = (int(x) for x in aspect_ratio.split(":"))
     g = gcd(w, h) or 1
+    return f"{w // g}:{h // g}"
+
+
+def normalize_client_id(client_id: str) -> str:
+    """Client id as compared (F8): NFKC, casefold, only letters and digits."""
+    import unicodedata
+
+    return "".join(ch for ch in unicodedata.normalize("NFKC", client_id or "").casefold() if ch.isalnum())
+
+
+def deliverable_spec(d: Deliverable) -> tuple:
+    """(platform, placement, reduced aspect ratio, length_seconds) — format excluded."""
+    return (d.platform.strip().lower(), d.placement.strip().lower(), _ratio(d.aspect_ratio), float(d.length_seconds))
+
+
+def same_spec(a: tuple, b: tuple) -> bool:
+    """One render could pass export validation for both specs (see the module docstring)."""
+    return a[:3] == b[:3] and abs(a[3] - b[3]) <= 2 * placement_spec.LENGTH_TOLERANCE_SECONDS
+
+
+def deliverable_fingerprint(d: Deliverable) -> str:
+    """Label for messages only (N4) — matching uses `same_spec`."""
     spec = {"platform": d.platform.strip().lower(), "placement": d.placement.strip().lower(),
-            "length_seconds": int(d.length_seconds), "aspect_ratio": f"{w // g}:{h // g}",
+            "length_seconds": int(d.length_seconds), "aspect_ratio": _ratio(d.aspect_ratio),
             "format": d.format.strip().lower()}
     return hashlib.sha256(json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -152,10 +193,17 @@ class ZbmWorkflow:
     _rounds_used: dict[tuple, int] = field(default_factory=dict)
     _escalated_chains: set = field(default_factory=set)
     _n: int = 1
+    _pending: PendingCreations = field(default_factory=PendingCreations)  # LOST sweep
 
     def _peek(self, prefix: str) -> str:
-        """The next id, NOT yet consumed: `_consume()` only after the record succeeded."""
+        """The next id, NOT yet consumed: `_consume()` only after the record
+        succeeded — or after it failed with an UNKNOWN outcome (the ledger
+        may hold it), see shared.ledger.PendingCreations."""
         return f"{prefix}-{self._n:04d}"
+
+    def _new_id(self, kind: str, sha: str, prefix: str) -> str:
+        held = self._pending.get(kind, sha)
+        return held[0] if held is not None else self._peek(prefix)
 
     def _consume(self) -> None:
         self._n += 1
@@ -165,34 +213,48 @@ class ZbmWorkflow:
         return (brief_id, deliverable_id, variant_index)
 
     def _key(self, brief: BriefRecord, deliverable_id: str, variant_index: int) -> tuple:
-        """Deliverable key (N4): (client_id, spec fingerprint, variant_index)."""
-        return (brief.client_id, deliverable_fingerprint(self._deliverable(brief, deliverable_id)), variant_index)
+        """Deliverable key (N4/F8): (normalised client, spec, variant_index)."""
+        return (normalize_client_id(brief.client_id), deliverable_spec(self._deliverable(brief, deliverable_id)),
+                variant_index)
+
+    @staticmethod
+    def _same_key(a: tuple, b: tuple) -> bool:
+        return a[0] == b[0] and a[2] == b[2] and same_spec(a[1], b[1])
 
     def _work_key(self, w: WorkItem) -> tuple:
         return self._key(self.get_brief(w.brief_id), w.submission.deliverable_id, w.submission.variant_index)
 
-    def _escalated_fingerprints(self, client_id: str) -> dict[str, list[str]]:
-        """Spec fingerprints of this client with work escalated to Andre and unresolved -> work ids."""
-        out: dict[str, list[str]] = {}
+    def _rounds_for(self, key: tuple) -> int:
+        return max((n for k, n in self._rounds_used.items() if self._same_key(k, key)), default=0)
+
+    def _clear_rounds(self, key: tuple) -> None:
+        for k in [k for k in self._rounds_used if self._same_key(k, key)]:
+            del self._rounds_used[k]
+
+    def _escalated_specs(self, client_id: str) -> list[tuple[tuple, str]]:
+        """(spec, work id) of this client's work escalated to Andre and unresolved."""
+        c = normalize_client_id(client_id)
+        out = []
         for w in self.work.values():
             if w.stage is WorkStage.ESCALATED_TO_ANDRE:
-                c, fp, _ = self._work_key(w)
-                if c == client_id:
-                    out.setdefault(fp, []).append(w.work_id)
+                wc, spec, _ = self._work_key(w)
+                if wc == c:
+                    out.append((spec, w.work_id))
         return out
 
     def _refuse_if_deliverable_escalated(self, client_id: str, deliverables, subject: str, action: str) -> None:
-        blocked = self._escalated_fingerprints(client_id)
+        blocked = self._escalated_specs(client_id)
         if not blocked:
             return
-        hits = [(d.deliverable_id, deliverable_fingerprint(d)) for d in deliverables]
-        hits = [(did, fp) for did, fp in hits if fp in blocked]
+        hits = [(d.deliverable_id, wid) for d in deliverables for spec, wid in blocked
+                if same_spec(deliverable_spec(d), spec)]
         if hits:
             self._refuse(PreconditionFailed(
-                f"client {client_id}: deliverable(s) {', '.join(d for d, _ in hits)} have the same spec fingerprint as "
-                f"work escalated to Andre after {creative_quality.MAX_ROUNDS} review rounds "
-                f"({', '.join(sorted({w for _, fp in hits for w in blocked[fp]}))}); a new or cloned brief for that "
-                "deliverable is refused until Andre resolves the escalation with his approval token"),
+                f"client {client_id}: deliverable(s) {', '.join(sorted({d for d, _ in hits}))} match the spec of work "
+                f"escalated to Andre after {creative_quality.MAX_ROUNDS} review rounds "
+                f"({', '.join(sorted({w for _, w in hits}))}) — same platform, placement and aspect ratio, length "
+                f"within {2 * placement_spec.LENGTH_TOLERANCE_SECONDS:g}s, any format; a new or cloned brief for "
+                "that deliverable is refused until Andre resolves the escalation with his approval token"),
                 "zbm_creative_lead", subject, action)
 
     def _open_escalations(self, brief_id: str) -> list[WorkItem]:
@@ -222,15 +284,16 @@ class ZbmWorkflow:
     @serialized
     def draft_brief(self, req: ClientRequirements, actor_id: str = brief_writer.WRITER_ACTOR) -> BriefRecord:
         self.actors.require_role(actor_id, Role.ZBM_BRIEF_WRITER)
-        brief_id = self._peek("brief")
+        sha = content_sha256({"actor": actor_id, "requirements": req.model_dump(mode="json")})
+        brief_id = self._new_id("brief", sha, "brief")
         rec = brief_writer.draft(req, brief_id, self.registry, self.clock.today(), drafted_by=actor_id)
         if rec.fields is not None:
             self._refuse_if_deliverable_escalated(rec.client_id, rec.fields.deliverables, brief_id, "brief draft")
-        eid = self.recorder.record("brief_drafted", actor_id, brief_id,
-                                   rec.model_dump(mode="json", exclude={"ledger_event_ids"}),
-                                   f"Brief {brief_id} drafted for {req.client_id}: {rec.status.value}")
-        self._consume()
-        rec.ledger_event_ids.append(eid)
+        eid, rec = self._pending.record(self.recorder, "brief", sha, brief_id, rec, self._consume,
+                                        "brief_drafted", actor_id, brief_id,
+                                        rec.model_dump(mode="json", exclude={"ledger_event_ids"}),
+                                        f"Brief {brief_id} drafted for {req.client_id}: {rec.status.value}")
+        rec = rec.model_copy(update={"ledger_event_ids": [*rec.ledger_event_ids, eid]})
         self.briefs[brief_id] = rec
         return rec
 
@@ -277,15 +340,17 @@ class ZbmWorkflow:
                 "zbm_creative_lead", brief_id, "production start")
         self._refuse_if_escalated(brief_id, "production start")
         self._refuse_if_deliverable_escalated(b.client_id, b.fields.deliverables, brief_id, "production start")
-        job_id = self._peek("job")
+        sha = content_sha256({"brief_id": brief_id})
+        job_id = self._new_id("job", sha, "job")
         requests = [{"request_id": f"{job_id}.{d.deliverable_id}.{agent}", "agent": agent,
                      "deliverable_id": d.deliverable_id}
                     for d in b.fields.deliverables for agent in ("enigma", "phantom_canvas")]
-        eid = self.recorder.record("production_opened", "zbm_creative_lead", job_id,
-                                   {"brief_id": brief_id, "job_id": job_id, "commission_requests": requests},
-                                   f"Job {job_id} opened on approved brief {brief_id}; {len(requests)} commission "
-                                   "request(s) to Enigma/Phantom Canvas follow")
-        self._consume()
+        eid, requests = self._pending.record(
+            self.recorder, "job", sha, job_id, requests, self._consume,
+            "production_opened", "zbm_creative_lead", job_id,
+            {"brief_id": brief_id, "job_id": job_id, "commission_requests": requests},
+            f"Job {job_id} opened on approved brief {brief_id}; {len(requests)} commission "
+            "request(s) to Enigma/Phantom Canvas follow")
         job = ProductionJob(job_id=job_id, brief_id=brief_id, ledger_event_ids=[eid], commissions=[
             {**r, "status": "requested", "commissioned": None, "reason": None, "external_ref": None} for r in requests])
         self.jobs[job_id] = job
@@ -354,25 +419,28 @@ class ZbmWorkflow:
         # N4: the same client deliverable across ALL briefs (cloned briefs are the same order)
         self._refuse_if_deliverable_escalated(brief.client_id, [d], brief.brief_id, "work submission")
         key = self._key(brief, sub.deliverable_id, sub.variant_index)
-        elsewhere = [w for w in self.work.values() if w.stage in IN_FLIGHT_STAGES and self._work_key(w) == key]
+        fp = deliverable_fingerprint(d)[:12]
+        elsewhere = [w for w in self.work.values()
+                     if w.stage in IN_FLIGHT_STAGES and self._same_key(self._work_key(w), key)]
         if elsewhere:
             raise PreconditionFailed(
                 f"work {elsewhere[-1].work_id} (brief {elsewhere[-1].brief_id}) for the same client deliverable "
-                f"(spec fingerprint {key[1][:12]}…, variant {key[2]}) is at {elsewhere[-1].stage.value}; one version "
+                f"(spec {fp}…, variant {key[2]}) is at {elsewhere[-1].stage.value}; one version "
                 "at a time per client deliverable, across all briefs")
-        used = self._rounds_used.get(key, 0)
+        used = self._rounds_for(key)
         if used >= creative_quality.MAX_ROUNDS:
             self._refuse(PreconditionFailed(
-                f"client deliverable (spec fingerprint {key[1][:12]}…, variant {key[2]}) has used its "
+                f"client deliverable (spec {fp}…, variant {key[2]}) has used its "
                 f"{creative_quality.MAX_ROUNDS} review rounds; only Andre can resolve it"),
                 "zbm_creative_quality", brief.brief_id, "work submission")
         rnd = used + 1
-        work_id = self._peek("work")
-        eid = self.recorder.record("work_submitted", "zbm_creative_quality", work_id,
-                                   {"job_id": job_id, "brief_id": brief.brief_id, "submission": sub.model_dump(mode="json"),
-                                    "round": rnd},
-                                   f"Work {work_id} submitted for {brief.brief_id}/{sub.deliverable_id} (round {rnd})")
-        self._consume()
+        sha = content_sha256({"job_id": job_id, "submission": sub.model_dump(mode="json"), "round": rnd})
+        work_id = self._new_id("work", sha, "work")
+        eid, _ = self._pending.record(
+            self.recorder, "work", sha, work_id, None, self._consume,
+            "work_submitted", "zbm_creative_quality", work_id,
+            {"job_id": job_id, "brief_id": brief.brief_id, "submission": sub.model_dump(mode="json"), "round": rnd},
+            f"Work {work_id} submitted for {brief.brief_id}/{sub.deliverable_id} (round {rnd})")
         item = WorkItem(work_id=work_id, job_id=job_id, brief_id=brief.brief_id, submission=sub, round=rnd,
                         stage=WorkStage.SUBMITTED, ledger_event_ids=[eid])
         self.work[work_id] = item
@@ -443,9 +511,9 @@ class ZbmWorkflow:
         chain = self._chain(w.brief_id, w.submission.deliverable_id, w.submission.variant_index)
         key = self._work_key(w)
         if dec.outcome == "pass":
-            self._rounds_used.pop(key, None)  # the deliverable is done; a later order starts at round 1
+            self._clear_rounds(key)  # the deliverable is done; a later order starts at round 1
         else:
-            self._rounds_used[key] = max(self._rounds_used.get(key, 0), w.round)
+            self._rounds_used[key] = max(self._rounds_for(key), w.round)
         stage = {"pass": WorkStage.QUALITY_PASSED, "send_back": WorkStage.SENT_BACK,
                  "escalate_to_andre": WorkStage.ESCALATED_TO_ANDRE}[dec.outcome]
         if stage is WorkStage.ESCALATED_TO_ANDRE:
@@ -472,7 +540,7 @@ class ZbmWorkflow:
         stage = WorkStage.ESCALATION_ACCEPTED if decision == "accept" else WorkStage.KILLED_BY_ANDRE
         w = w.model_copy(update={"stage": stage, "ledger_event_ids": [*w.ledger_event_ids, eid]})
         self.work[work_id] = w
-        self._rounds_used.pop(self._work_key(w), None)  # resolved: a NEW brief for it starts fresh (this chain never does)
+        self._clear_rounds(self._work_key(w))  # resolved: a NEW brief for it starts fresh (this chain never does)
         return w
 
     @serialized

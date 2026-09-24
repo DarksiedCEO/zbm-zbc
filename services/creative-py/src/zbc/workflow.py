@@ -42,12 +42,27 @@ recorded as a new decision — and the clip's ledger event id is derived
 from (submission_id, content hash), so a second version of the same
 content (e.g. a stale retry with a fresh receipt time) is refused by the
 ledger's own 409.
+
+Uncertain outcomes (fix wave 4, LOST): when the record call fails in a way
+that leaves the LEDGER's outcome unknown (response lost, timeout, 5xx, 409
+— `took_effect != False`), the attempt is remembered — its content hash,
+its time, the EXACT record it sent and the decision it would commit — in a
+bounded store (`MAX_PENDING_ATTEMPTS`, oldest evicted first) until it is
+resolved. An identical-content retry at ANY later time replays that exact
+record: the ledger answers 200 (it had it) or 201 (it didn't), and the
+decision takes effect once, with its original, true receipt/decision time
+(the content is bound, so this is not backdating). Different content under
+the same operation stays refused (409) while it is unresolved. Only a
+failure that CERTAINLY did not reach the ledger (connection refused,
+4xx refusal) keeps the short RETRY_WINDOW reservation of N1.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -56,7 +71,16 @@ from shared.clock import Clock
 from shared.departments import Departments
 from shared.errors import CreativeError, FrozenError, NotFound, PreconditionFailed, ValidationFailed
 from shared.founder import FOUNDER_ACTOR, FounderGate
-from shared.ledger import EvidenceRecorder, LedgerRecordError, OutcomeNotRecorded, RecordedPort, check_subject, serialized
+from shared.ledger import (
+    EvidenceRecorder,
+    LedgerRecordError,
+    OutcomeNotRecorded,
+    PendingCreations,
+    RecordedPort,
+    check_subject,
+    content_sha256,
+    serialized,
+)
 from shared.registry import PlatformRulesRegistry
 from shared.rights import RightsRegistry
 from zbc import campaign_kit, campaign_rulebook, clip_review, hook_angle, payout_eligibility, rights_clearance
@@ -83,6 +107,21 @@ DEFAULT_SUPERSEDED_GRACE_HOURS = 72
 # How long a failed operation's first-attempt time may be reused by an
 # identical retry (N1). Short on purpose: a retry, not a reservation.
 RETRY_WINDOW = timedelta(minutes=15)
+# Bound on remembered failed attempts (LOST). Past it the oldest is dropped;
+# an identical retry of a dropped UNCERTAIN attempt then meets the ledger's
+# 409 and is reported as conflicting (never as "did not take effect").
+MAX_PENDING_ATTEMPTS = 10_000
+
+
+@dataclass
+class _Attempt:
+    """A failed attempt of one operation (N1 / LOST)."""
+
+    sha: str
+    at: datetime
+    uncertain: bool  # the ledger may hold it: replay `record` exactly
+    record: tuple[tuple, dict] = ((), {})
+    result: Any = None
 
 
 def _sha256(obj) -> str:
@@ -126,10 +165,11 @@ class ZbcWorkflow:
     decisions: dict[str, ClipReviewDecision] = field(default_factory=dict)
     superseded_grace_hours: int = DEFAULT_SUPERSEDED_GRACE_HOURS
     _n: int = 1
-    # First-attempt (content hash, time) of an operation whose record failed,
-    # so an IDENTICAL retry within RETRY_WINDOW rebuilds the identical event
-    # (F11) instead of a second record (N1: bound to content, expiring).
-    _op_times: dict[str, tuple[str, datetime]] = field(default_factory=dict)
+    # Failed attempts by operation (N1 / LOST): a CERTAIN failure keeps its
+    # time for an identical retry within RETRY_WINDOW; an UNCERTAIN one keeps
+    # its exact record until resolved (bounded, see MAX_PENDING_ATTEMPTS).
+    _attempts: "OrderedDict[str, _Attempt]" = field(default_factory=OrderedDict)
+    _pending_new: PendingCreations = field(default_factory=PendingCreations)  # server-assigned kit ids
     # submission_id -> content hash, from the first attempt on (N1).
     _submission_content: dict[str, str] = field(default_factory=dict)
 
@@ -141,35 +181,51 @@ class ZbcWorkflow:
     def _op_now(self, op: str, content_sha: str) -> datetime:
         """The time of this operation: the clock, or — ONLY when an earlier
         attempt of the SAME operation with the SAME content failed at the
-        ledger less than RETRY_WINDOW ago — that attempt's time, so the
-        retry rebuilds the identical event. Different content, or an expired
-        reservation, gets the clock (N1). A refusal for any other reason
-        never reserves a time (no "early receipt" games)."""
+        ledger (certainly-not-recorded: less than RETRY_WINDOW ago) — that
+        attempt's time, so the retry rebuilds the identical event.
+        Different content, or an expired reservation, gets the clock (N1).
+        A refusal for any other reason never reserves a time."""
         now = self.clock.now()
-        held = self._op_times.get(op)
-        if held is not None:
-            sha, at = held
-            if sha == content_sha and timedelta(0) <= now - at <= RETRY_WINDOW:
-                return at
-            if now - at > RETRY_WINDOW or now < at:
-                self._op_times.pop(op, None)
+        held = self._attempts.get(op)
+        if held is not None and not held.uncertain:
+            if held.sha == content_sha and timedelta(0) <= now - held.at <= RETRY_WINDOW:
+                return held.at
+            if now - held.at > RETRY_WINDOW or now < held.at:
+                self._attempts.pop(op, None)
         return now
 
     def _pending_other_content(self, op: str, content_sha: str) -> bool:
         """An earlier attempt of `op` with DIFFERENT content failed at the
-        ledger less than RETRY_WINDOW ago: its outcome is unknown (the
-        ledger may have committed it), so a different decision now is
-        refused until the window has passed."""
-        held = self._op_times.get(op)
-        return held is not None and held[0] != content_sha and self.clock.now() - held[1] <= RETRY_WINDOW
+        ledger and its outcome may be on the ledger — uncertain (until
+        resolved) or certain but less than RETRY_WINDOW ago: a different
+        decision now is refused."""
+        held = self._attempts.get(op)
+        return held is not None and held.sha != content_sha and (
+            held.uncertain or self.clock.now() - held.at <= RETRY_WINDOW)
 
-    def _record_op(self, op: str, content_sha: str, at: datetime, *args, **kwargs) -> str:
+    def _replay_uncertain(self, op: str, content_sha: str):
+        """LOST: an identical retry of an attempt whose outcome is unknown
+        replays its EXACT record (ledger 200 if it had it, 201 if not) and
+        returns the decision that attempt would have committed; None when
+        there is nothing to replay. A failed replay raises and stays pending."""
+        held = self._attempts.get(op)
+        if held is None or not held.uncertain or held.sha != content_sha:
+            return None
+        args, kwargs = held.record
+        self.recorder.record(*args, **kwargs)
+        self._attempts.pop(op, None)
+        return held.result
+
+    def _record_op(self, op: str, content_sha: str, at: datetime, result, *args, **kwargs) -> str:
         try:
             eid = self.recorder.record(*args, **kwargs)
-        except LedgerRecordError:
-            self._op_times[op] = (content_sha, at)
+        except LedgerRecordError as exc:
+            self._attempts[op] = _Attempt(content_sha, at, exc.took_effect is not False, (args, kwargs), result)
+            self._attempts.move_to_end(op)
+            while len(self._attempts) > MAX_PENDING_ATTEMPTS:
+                self._attempts.popitem(last=False)
             raise
-        self._op_times.pop(op, None)
+        self._attempts.pop(op, None)
         return eid
 
     def _refuse(self, exc: CreativeError, actor: str, subject_id: str, action: str):
@@ -388,12 +444,19 @@ class ZbcWorkflow:
         sh = self.hook_sheets.get((campaign_id, rb.version))
         if mm is None or sh is None:
             raise PreconditionFailed(f"the kit needs a Moment Map and hook sheets for {campaign_id} v{rb.version}")
-        kit_id = f"kit-{self._n:04d}"  # consumed only once the kit is recorded
+        sha = content_sha256({"campaign_id": campaign_id, "version": rb.version, "request": req.model_dump(mode="json")})
+        held = self._pending_new.get("kit", sha)
+        # consumed only once the kit is recorded — or its outcome is unknown (LOST sweep)
+        kit_id = held[0] if held is not None else f"kit-{self._n:04d}"
         kit = campaign_kit.build(kit_id, rb, mm, sh, req)
-        self.recorder.record("campaign_kit_built", A_KIT, kit_id, kit.model_dump(mode="json"),
-                             f"Kit {kit_id} for {campaign_id} v{rb.version}: {len(kit.seeds)} seed clip spec(s); "
-                             f"{len(kit.commissions)} commission request(s) to Enigma/Phantom Canvas follow")
-        self._n += 1
+
+        def burn() -> None:
+            self._n += 1
+
+        _, kit = self._pending_new.record(
+            self.recorder, "kit", sha, kit_id, kit, burn, "campaign_kit_built", A_KIT, kit_id, kit.model_dump(mode="json"),
+            f"Kit {kit_id} for {campaign_id} v{rb.version}: {len(kit.seeds)} seed clip spec(s); "
+            f"{len(kit.commissions)} commission request(s) to Enigma/Phantom Canvas follow")
         self.kits[campaign_id] = kit
         receipts = campaign_kit.commission_seeds(kit, self.departments.creative_agents)
         try:
@@ -445,10 +508,15 @@ class ZbcWorkflow:
                 f"submission id {sub.submission_id} was already used (an earlier attempt whose record failed) with "
                 "different content; a submission id is bound to its first content — submit under a new id"),
                 A_REVIEW, sub.submission_id, "clip submission")
+        op = f"clip:{sub.submission_id}"
+        replayed = self._replay_uncertain(op, sha)  # LOST: the first attempt's exact record and decision
+        if replayed is not None:
+            self.submissions[sub.submission_id] = sub
+            self.decisions[sub.submission_id] = replayed
+            return replayed
         rb = self.rulebooks.get(cid, sub.rulebook_version)
         if rb.live_at is None:
             raise PreconditionFailed(f"rulebook {cid} v{rb.version} never went live; clips can't be made under it")
-        op = f"clip:{sub.submission_id}"
         # server receipt time; the first attempt's only on an identical retry inside RETRY_WINDOW (N1)
         received_at = self._op_now(op, sha)
         if sub.posted_at > self.clock.now():
@@ -468,7 +536,7 @@ class ZbcWorkflow:
                                       received_at=received_at, route_to_human=to_human)
         # The id is bound to this content from the first attempt that reaches the ledger call on.
         self._submission_content[sub.submission_id] = sha
-        self._record_op(op, sha, received_at, "clip_reviewed", A_REVIEW, sub.submission_id,
+        self._record_op(op, sha, received_at, decision, "clip_reviewed", A_REVIEW, sub.submission_id,
                         {"decision": decision.model_dump(mode="json"), "submission": sub.model_dump(mode="json"),
                          "content_sha256": sha, "received_at": received_at.isoformat(),
                          "superseded_grace_hours": self.superseded_grace_hours},
@@ -500,9 +568,14 @@ class ZbcWorkflow:
         sha = _sha256({"reviewer": reviewer_id, "verdict": verdict.model_dump(mode="json")})
         if self._pending_other_content(op, sha):
             raise PreconditionFailed(
-                f"a different human verdict on {submission_id} was attempted less than "
-                f"{int(RETRY_WINDOW.total_seconds() // 60)} minutes ago and its record failed (outcome unknown); "
-                "retry that same verdict, or wait for the window to pass")
+                f"a different human verdict on {submission_id} was attempted and its ledger record failed with "
+                "an outcome that may be on the ledger; retry that same verdict to resolve it"
+                + ("" if self._attempts[op].uncertain else
+                   f", or wait {int(RETRY_WINDOW.total_seconds() // 60)} minutes"))
+        replayed = self._replay_uncertain(op, sha)  # LOST
+        if replayed is not None:
+            self.decisions[submission_id] = replayed
+            return replayed
         decided_at = self._op_now(op, sha)
         try:
             decision = clip_review.make_decision(
@@ -514,7 +587,7 @@ class ZbcWorkflow:
         except (RuleCitationError, ValueError) as exc:
             self._refuse(ValidationFailed("human verdict cites rules that are not in this rulebook version",
                                           [str(exc)]), reviewer_id, submission_id, "human clip review")
-        self._record_op(op, sha, decided_at, "clip_human_reviewed", reviewer_id, submission_id,
+        self._record_op(op, sha, decided_at, decision, "clip_human_reviewed", reviewer_id, submission_id,
                         {"decision": decision.model_dump(mode="json"), "note": verdict.note,
                          "previous_reasons": list(current.human_review_reasons)},
                         f"Human review of {submission_id}: {decision.outcome}"

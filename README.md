@@ -381,10 +381,14 @@ across jobs; confusable/split-letter text evasion caught; bounded ids
 Fix wave 2: per-actor credentials (`CREATIVE_ACTOR_TOKENS`,
 `X-Creative-Actor-Token`); review cap per client deliverable; retry
 receipt time bound to content (15 min); never-say survives invisible and
-lookalike characters.
+lookalike characters. Fix wave 4: never-say near misses with symbols/digits
+("return$", "G€t", "6et") and unknown Latin letters go to a human; a lost
+ledger response no longer wedges a clip (`took_effect: "unknown"`, exact
+replay); `Idempotency-Key` on every creating POST; escalation clones matched
+with length tolerance and strict client ids; 1 MiB body limit.
 
 ```bash
-cd services/creative-py && python3 -m pytest -q      # 360 tests
+cd services/creative-py && python3 -m pytest -q      # 428 tests
 export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
 export CREATIVE_ACTOR_TOKENS='{"<actor_id>": "<token>", ...}'   # per-actor credentials
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>

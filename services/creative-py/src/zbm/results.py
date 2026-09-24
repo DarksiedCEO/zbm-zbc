@@ -15,7 +15,7 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from shared.types import NonEmptyStr, SafeId
+from shared.types import ClientId, NonEmptyStr, SafeId
 
 
 class ResultProvenance(str, Enum):
@@ -28,7 +28,7 @@ class PerformanceResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     result_id: SafeId
-    client_id: SafeId
+    client_id: ClientId
     creative_id: SafeId
     vertical: NonEmptyStr
     platform: NonEmptyStr

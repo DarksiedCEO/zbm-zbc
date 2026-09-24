@@ -176,14 +176,14 @@ def test_f9_open_job_ledger_down_no_commission_no_job(spy_api):
 
 def test_f9_open_job_probe_c2_outcome_record_failure_is_reported_honestly(make_api):
     from shared.departments import Departments
-    from shared.ledger import FakeLedgerClient, LedgerRecordError
+    from shared.ledger import FakeLedgerClient, LedgerNotRecorded
 
     class FailType(FakeLedgerClient):
         target: str = ""
 
         def record_event(self, **kw):
             if kw["event_type"] == self.target:
-                raise LedgerRecordError("down")
+                raise LedgerNotRecorded("down: connection refused")  # fix wave 4: only a CERTAIN failure is "did not take effect"
             return super().record_event(**kw)
 
     led = FailType()
@@ -267,14 +267,14 @@ def test_f9_go_live_ledger_down_no_announcement_no_legal_no_state(spy_api):
 
 
 def test_f9_go_live_probe_c3_live_record_failure_means_no_announcement(make_api):
-    from shared.ledger import FakeLedgerClient, LedgerRecordError
+    from shared.ledger import FakeLedgerClient, LedgerNotRecorded
 
     class FailType(FakeLedgerClient):
         target: str = ""
 
         def record_event(self, **kw):
             if kw["event_type"] == self.target:
-                raise LedgerRecordError("down")
+                raise LedgerNotRecorded("down: connection refused")  # fix wave 4: only a CERTAIN failure is "did not take effect"
             return super().record_event(**kw)
 
     led = FailType()
@@ -838,6 +838,21 @@ def test_f8_concurrent_submissions_cannot_open_two_rounds(make_api):
     codes = []
     ts = [threading.Thread(target=lambda: codes.append(api.post(f"/zbm/jobs/{job['job_id']}/work", zbm_work()).status_code))
           for _ in range(4)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    # fix wave 4 (IDEM): four IDENTICAL requests without a key are one request retried —
+    # one work item, the same body four times; never two rounds
+    assert sorted(codes) == [201, 201, 201, 201]
+    assert len([x for x in api.zbm.work.values() if x.round == 2]) == 1
+    # four DIFFERENT requests (distinct Idempotency-Keys) race: exactly one opens the round
+    ok(api.post(f"/zbm/work/{[x for x in api.zbm.work.values() if x.round == 2][0].work_id}/export-validation"))
+    api2 = make_api(ledger=Slow())
+    brief, job, w = zbm_work_at_quality(api2)
+    ok(api2.post(f"/zbm/work/{w['work_id']}/quality", Q))
+    codes = []
+    ts = [threading.Thread(target=lambda i=i: codes.append(api2.client.post(
+        f"/zbm/jobs/{job['job_id']}/work", json=zbm_work(), headers={"Idempotency-Key": f"race-{i}"}).status_code))
+          for i in range(4)]
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert sorted(codes) == [201, 409, 409, 409]

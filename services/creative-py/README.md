@@ -84,11 +84,22 @@ Andre's actions also need `X-Andre-Approval-Token: $CREATIVE_ANDRE_APPROVAL_TOKE
 `/docs`, `/redoc`, `/openapi.json` are disabled. Errors: 401 auth, 403
 guardrail/founder, 404 not found, 409 out of order / frozen / blocked, 422
 validation (including any id whose ledger subject couldn't fit: campaign
-ids are at most 100 characters), **503 `took_effect: false` = evidence
-ledger record failed, decision did not take effect** (and no outside
-department was called); **503 `took_effect: "partial"`** = the decision
-and its outside request were recorded and sent, but recording the outside
-party's answer failed, so that answer is not applied (`effect` says what).
+ids are at most 100 characters; client ids are lowercase `[a-z0-9_]`),
+413 body over 1 MiB, **503 `took_effect: false` = evidence ledger record
+certainly failed, decision did not take effect** (and no outside
+department was called); **503 `took_effect: "unknown"`** = the ledger
+may or may not hold the record (response lost, timeout, 5xx): nothing
+changed here yet, retry the IDENTICAL request and it takes effect exactly
+once (fix wave 4); **409 `LedgerConflict`, `took_effect: "unknown"`** = the
+ledger holds a different record under this decision's id; **503
+`took_effect: "partial"`** = the decision and its outside request were
+recorded and sent, but recording the outside party's answer failed, so
+that answer is not applied (`effect` says what). Every creating POST
+accepts `Idempotency-Key` (1-128 printable ASCII): a retry returns the
+original response (`Idempotent-Replayed: true`), the same key with
+different content is 409; without it, clips / clearances / licences are
+keyed by their own id and other creations by actor + canonical request
+(ADR 0005 decision 10).
 
 - Registry: `GET /registry/rows`, `GET /registry/rows/{id}` (with `usable` + reason), `PUT /registry/rows/{id}` (owner-enforced)
 - Rights: `POST /rights/clearances`, `POST /rights/licenses` (actor `rights_desk`)
@@ -125,8 +136,16 @@ cd src && python3 serve.py                 # CREATIVE_BIND_ADDR (default 127.0.0
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 24, 2026 after fix wave 2: **360 passed, 0 failed**
-(Python 3.11.15, pytest 9.1.1; 310 after fix wave 1, 205 before it).
+Result on Sep 24, 2026 after fix wave 4: **428 passed, 0 failed**
+(Python 3.11.15, pytest 9.1.1; 360 after fix wave 2, 310 after fix wave 1,
+205 before it). `test_fix_wave_4.py` reproduces AEGIS round-3 / integration
+run-3 findings: NS (symbol/digit/unfolded-Latin never-say variants, a
+seeded 2,500-case substitution+insertion fuzz, an 11-caption
+false-positive guard), LOST (lost ledger response over real HTTP through
+`devtools/lossy_proxy.py`, retries 16 min and 40 days later, honest
+`took_effect`), IDEM (Idempotency-Key / derived keys on every creating
+POST), F8 (tolerance clones, client-id variants) and LIM (413 before
+parsing, sync handlers, linear-time scanners and regexes).
 `test_fix_wave_2.py` reproduces AEGIS round-2 N1 (receipt time bound to
 content, 15-minute window, content-hashed clip event ids), F13 (backdating
 route closed), N4 (per-actor credentials; review cap per client
@@ -226,6 +245,36 @@ pre-fix service (`git archive ae75124`) on :19602 and the fixed one on
   new refusal steps) → "LIVE SMOKE: ALL STEPS AS EXPECTED", 37 entries,
   `/ledger/verify` valid. All processes stopped (only PIDs this run started).
 
+## Live run — fix wave 4, against the REAL ledger-rust (Sep 24, 2026)
+
+ledger-rust built from this tree into a private target dir, on
+127.0.0.1:19940 (fresh log); `devtools/lossy_proxy.py` on :19941 in front
+of it (forwards, lets the ledger COMMIT, then drops the response when
+armed) and on :19945 in front of creative-py B (:19944); creative-py A on
+:19942. Both creative instances used the ledger through the proxy.
+
+- `devtools/live_smoke.py` on A → "LIVE SMOKE: ALL STEPS AS EXPECTED",
+  37 entries, `/ledger/verify` valid.
+- 98/98 live checks on B: every AEGIS `ns.py` variant (plus "#GetRich",
+  "Get r!ch", "ri™sk") → `reject` or `human_review`, never `pass`; an
+  ordinary caption with "$20" and "Don't" → `pass`. Ledger response to
+  `clip_reviewed` dropped → 503 `took_effect: "unknown"`; identical retry
+  → 201, one ledger event, a second retry replays the same body,
+  different content → 409. Brief response dropped between client and
+  service → retry (no key) returns the same brief, one `brief_drafted`;
+  keyed retries replay with `Idempotent-Replayed: true`, same key with
+  other content → 409; ledger response dropped on `brief_drafted` → 503
+  unknown, retry → 201, one event. After two review rounds escalated:
+  clones at 31 s, 29 s, m4v, 18:32 → 409; "Client_F8", "client_f8." →
+  422. A 1 MiB + 1 byte body → 413.
+- The AEGIS `lost.py` wedge, live: ledger response dropped on a clip,
+  identical retry **16.5 minutes later** (past the old 15-minute window)
+  → 201 three times with the first attempt's receipt time, exactly one
+  `clip_reviewed` on the ledger, `GET` 200. Pre-fix this was 503 "did NOT
+  take effect" forever.
+- Final `/ledger/verify`: 111 entries, valid. All processes stopped (only
+  PIDs this run started).
+
 ## Known gaps
 
 See ADR 0005 "Honest gaps and open items" for the full list. The short
@@ -237,4 +286,6 @@ Creative depends on is a fail-closed stand-in, so no ZBM work reaches
 Andre's final approval and no ZBC clip is ever payout-eligible today;
 a lost outside answer is reported as `took_effect: "partial"` and not
 re-asked automatically; obfuscation handling is conservative (some honest
-mixed-script clips go to the human queue).
+mixed-script clips, and any word mixing letters with symbols or digits
+such as "mp4" or "Q4", go to the human queue); the pending-attempt and
+idempotency stores are bounded in memory (10,000 entries each).
