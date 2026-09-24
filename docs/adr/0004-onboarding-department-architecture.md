@@ -53,6 +53,47 @@ The WIP commit was replaced; it doesn't remain in history.
      example `payout_active` / `handoff_accepted`, so a retry never repeats it). The
      API returns 503 `{"proceeded": true, "completed": false, "outside_effects_done":
      [...]}`. It never says "did not proceed" when something did.
+   - **Stage then commit** (fix wave 3, N2). State that depends on a record becomes
+     visible only after that record is written. `start_client` builds the client
+     record and its escalation first, and adds them to state only when every record
+     is written. An escalation from any operation is attached only after its push
+     result record. `apply_creator` adds the creator the same way. State the client
+     learns from the reply (a tick's warning or breach notice, a soft-trigger
+     check-in and the stall count, a commitment made on tick, an undelivered-attempt
+     counter) is applied only when the operation completes.
+   - **Result records are owed until written** (fix wave 3, N2/N7). A record of an
+     effect's result (`contract_storage_ruling`, `andre_push_not_delivered`,
+     `andre_push_result`, `promise_nudge_result` after a delivered nudge,
+     `activation_handoff_ruling`, `payout_activation_ruling`) is queued with its
+     deterministic id before it is written. If it fails after the effect, the next
+     operation on that subject writes it first, with the same id. So an "already
+     active / already accepted" retry path can't skip it, and it's never written
+     twice. If the operation fails before any effect, the queued record is dropped,
+     because nothing it describes happened.
+   - **A retry finishes the job.** Retrying `start_client` after a partial failure
+     writes the owed records. It then delivers a briefing that was never attempted,
+     or makes the commitment whose record failed, and returns the start's reply.
+     It never answers 409. A retry with a different body still gets 409, after the
+     owed records are written. `apply_creator` works the same way and finishes the
+     creator's activation (the payout is never activated twice). Retrying an
+     operation that raised an escalation finds it by its deterministic id and
+     completes it; it never pushes Andre again.
+   - Sweep (fix wave 3): every operation was checked for state changed before a
+     record it depends on. Found and fixed:
+     - `start_client`: client and escalation before `contract_storage_ruling` or the
+       push result.
+     - `_escalate` (message, audit, issue outcome, tick, recommend score): the
+       escalation before its push result.
+     - `apply_creator`: the referred creator before `andre_push_result`.
+     - `message`, `website_scan`, `add_facts`, `add_document`: the injection counter
+       before later records.
+     - `recommend_score_submit`: the score before the soft-trigger record.
+     - `tick`: the nudge failure counter before `promise_nudge_result`; the warning
+       and breach state, the soft issue and stalls before later records of the tick.
+     - `activate_client` / `activate_creator`: `activation` before
+       `activation_outcome`; `handoff_accepted` / `payout_active` with their ruling
+       never written on retry (N7).
+     - All other operations write their record before changing state.
    - `tests/test_fix_wave1.py::test_f9_record_first_at_every_write_position` checks this.
      It fails the ledger at every write position of 21 call sites, and asserts:
      - no effect follows a failed write;
@@ -84,13 +125,18 @@ The WIP commit was replaced; it doesn't remain in history.
      (`HttpRevenueRecoveryClient`). The route map is checked against
      `services/detection-py/src/api.py` by a test.
    - It consumes findings as JSON, with `amount_usd` as a two-decimal string (contract
-     section 1). This is validated strictly (F14). Only the canonical
-     `^(0|[1-9][0-9]*)\.[0-9]{2}$` string is accepted, up to 999,999,999,999.99.
-     A JSON number, whitespace, leading zeros, a sign, an exponent or a third decimal
-     rejects the finding. Nothing is rounded.
-   - Request money (F15) is never rounded either. `"12.3"`, `12` and `49.99` are
-     exact and accepted. `"12.345"`, `" 12.30"`, `"012.30"` and `0.1 + 0.2` are 422.
-     Huge values are 422, not a `decimal.InvalidOperation` 500.
+     section 1). This is validated strictly (F14).
+   - **One money rule** (fix wave 3, F15), for findings, requests and configuration:
+     the contract string of ADR 0003 section 1a,
+     `^(0|[1-9][0-9]{0,14})\.[0-9]{2}$`, so amounts are below 10^15 and the largest
+     is `"999999999999999.99"`. `"12.3"`, `"12"`, a JSON number (`12.30`, `0.1`,
+     `12`, `1e3`), whitespace, leading zeros, a sign, an exponent or a third decimal
+     is 422. Nothing is rounded, and there's never a `decimal.InvalidOperation` 500.
+     Zero is allowed only where the field allows it. `tests/test_fix_wave3.py` checks
+     every string and JSON vector of `fixtures/money_vectors.json`, in the model and
+     over HTTP. A figure the client types as an intake fact, such as stated monthly
+     revenue, isn't contract money. `client_stated_amount` reads it only for the Risk
+     comparison.
    - A finding without both labels is rejected, not shown.
 5. **Missing departments and infrastructure are ports with fail-closed stand-ins.**
 
@@ -129,14 +175,43 @@ The WIP commit was replaced; it doesn't remain in history.
        refuses today.
      - Only third-party content is scrubbed instead of refused: a website's HTML and raw
        account-pull rows.
-   - Output scrub stays as a second layer. Every route's result, every error body, log
+   - Fix wave 3 (N5) refuses these shapes too:
+     - a URL with a password in its userinfo;
+     - "get in with X and Y" and "use X to log in";
+     - leetspeak password words (`p@ss`, `p4ssw0rd`);
+     - SSNs;
+     - bank account or routing numbers after a bank word, and IBANs;
+     - an `admin / <mixed-case+digit secret>` pair.
+   - **Raw client free text is never stored or served** (fix wave 3, N5). Messages,
+     documents, fact values and evidence, a clipper's bio, and Andre's resolution text
+     are kept only as `redaction.redact_text(...)`, and GET and the exit export return
+     only that form. It replaces the following with `[REDACTED]`:
+     - URL userinfo, and secret-named or password-shaped URL parts;
+     - SSNs, bank and routing numbers, IBANs, Luhn-valid cards, and 9–19 digit runs;
+     - high-entropy tokens of 10 or more characters that mix letters and digits;
+     - everything after a login, password, PIN, secret, credentials or bank word, in
+       any supported language, up to the end of that sentence;
+     - the few words before "to log in".
+     Emails and plain URLs are kept. A fact outside the lane's profile keeps its name
+     but not its value. `test_n5_credential_spray_zero_occurrences_anywhere` sprays
+     every AEGIS shape and a `creds.txt` document. It asserts zero occurrences in
+     responses, logs, the exit export, the ledger and the service's in-memory state,
+     including a run with intake refusal and the output scrub removed.
+   - Output scrub stays as the last layer. Every route's result, every error body, log
      record, ledger payload and summary, and memory write passes through `scrub`. If the
      normalized text is still credential-shaped, `scrub` replaces the whole string.
    - Credential-looking identifiers are refused.
    - 422 bodies drop `input`/`ctx`.
    - Unhandled errors are caught by a middleware that logs only the exception type.
      A Starlette 500 handler would re-raise and let the server log the message.
-   - A log-record factory scrubs every record from every logger.
+   - A log-record factory scrubs every record from every logger (fixed in fix wave 3,
+     D1). String args are scrubbed one by one and non-strings are kept, so args stay
+     a tuple of the same shape. A message that is still credential-shaped is rewritten
+     with `args = ()`, never `None`. The old `None` crashed uvicorn's access formatter
+     on every request. For `uvicorn.access` the request path goes through
+     `redact_url`, which handles userinfo, secret-named query values and
+     password-shaped path segments, percent-encoded ones included.
+     `test_d1_real_uvicorn_access_log_*` runs the real server on a real socket.
 7. **The activation gate is two independent gates.**
    - 14 (contract) and 15 (compliance) each produce a `GateResult`, and both are
      ledgered.
@@ -222,12 +297,20 @@ The WIP commit was replaced; it doesn't remain in history.
   client gets no reply with a time. The escalation keeps `push_delivered: true`,
   `commitment_id: null` and `client_message_status` "held: ... the client has not been
   told a time". No commitment is stored, so Promise Keeper never nudges, warns or
-  breaches on a promise the client never received. We chose this over storing a "not yet
-  communicated" commitment and retrying it: that would need a delivery channel to the
-  client, and none exists (the time is only ever given in the API reply). Known gaps,
-  checked by hand: retrying a human-request message raises a second escalation and
-  pushes Andre a second briefing. Retrying `start_client` gets 409, and its deal-size
-  escalation stays with no time given to the client until Andre acts.
+  breaches on a promise the client never received. The time is only ever given in an
+  API reply, so the commitment is made by the next operation whose reply carries it:
+  a retry of the same operation, or a tick (`escalation_deliveries[].client_message`).
+  Fix wave 3 closed the two wave-2 gaps:
+  - A human-request message while one is open (or a retry of one that stopped part
+    way) reuses the open escalation. It never pushes Andre a second briefing.
+  - Retrying `start_client` completes it.
+- An undelivered briefing is retried on tick (fix wave 3), like the nudge. Each retry
+  writes `andre_push_retry_request` before the push and `andre_push_result`
+  (`delivered`, `attempt`, `max_attempts`, `will_retry`) after it. Retries stop at
+  `escalation_push_max_attempts` (default 3, initial push included) or when Andre
+  acknowledges or resolves the escalation. On delivery, the commitment is made with a
+  fresh time, because the client hears it now. With the real stand-in (push not
+  wired), every escalation is tried 3 times and then waits in Andre's queue.
 - A deal with an unknown size escalates.
 
 **Access and platform facts**
@@ -295,10 +378,10 @@ The WIP commit was replaced; it doesn't remain in history.
   - Multi-event operations aren't atomic: a failure mid-way leaves the earlier events.
     Event ids are deterministic, so a retry replays them (200) instead of duplicating
     them.
-  - A result record can fail after its outside effect has happened, for example the
-    push reached Andre and then `client_commitment_made` failed. The API reports that
-    exactly (`proceeded: true, completed: false`). The ledger then lacks that one result
-    record, though the request record that authorized the effect is there.
+  - A result record can fail after its outside effect has happened. The API reports
+    that exactly (`proceeded: true, completed: false`). Since fix wave 3 the record is
+    owed, not lost: the next operation on that subject writes it with the same id.
+    It is lost only if the process restarts first, because state is in-process.
 - Fix wave 1 ran live against the real ledger-rust (built from this tree) and the real
   detection-py. `tools/fake_ledger_server.py` still exists for quick local runs. It
   validates exactly like ledger-rust, and C1 controls count as control characters, as
@@ -307,7 +390,13 @@ The WIP commit was replaced; it doesn't remain in history.
 **Detection is pattern-based**
 - Injection, guarantee and credential detection are rules over normalized text, which
   is best effort on free text.
-  - A password that is an ordinary word, typed with no cue, can't be recognised.
+  - A password that is an ordinary word, typed with no cue, can't be recognised. Some
+    cued phrasings are still accepted at intake, for example "my password is correct
+    horse battery staple" ("correct" reads as an ordinary answer). The stored copy is
+    still redacted after the cue word, and nothing raw is kept.
+  - The stored redacted copy is deliberately aggressive. Order numbers, phone numbers
+    of 9+ digits, ISO timestamps and whatever follows "login" are also replaced in the
+    stored messages and documents.
   - A 13–19 digit Luhn-valid number that stands alone is refused as a card number, even
     if it was something else.
 - Decisions never read injection flags. No secret-bearing field exists. These
@@ -326,7 +415,8 @@ The WIP commit was replaced; it doesn't remain in history.
   one, a ledger event proves a payload existed but nobody can later show which. A
   payload store (or payload-in-ledger for non-sensitive fields) needs deciding.
 - **Section 1** says "accept `str`" for money but doesn't say whether exponent strings
-  (`"1e3"`) are valid. Onboarding rejects them.
+  (`"1e3"`) are valid. Onboarding rejects them, and since fix wave 3 accepts only the
+  section 1a contract string (`fixtures/money_vectors.json`).
 - detection-py now emits money as canonical strings, and the fix wave 1 live run
   consumed them. A legacy float finding is now rejected, not converted. Section 1 allows
   the float fallback for fixtures, but findings from another service are held to the

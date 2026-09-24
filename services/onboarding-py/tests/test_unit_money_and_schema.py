@@ -14,8 +14,11 @@ class M(BaseModel):
     p: PositiveMoney = Decimal("1.00")
 
 
-@pytest.mark.parametrize("inp,out", [("12.3", "12.30"), (12, "12.00"), (49.99, "49.99"), (Decimal("0.5"), "0.50"),
-                                     ("0.00", "0.00"), ("1.01", "1.01"), (12.0, "12.00")])
+# Fix wave 3 (F15): request money is ONLY the contract string (ADR 0003 1a);
+# this test previously accepted "12.3", 12, 49.99 and 12.0 — those are now
+# rejected (see test_money_rejects_bad_input and test_fix_wave3's vectors).
+@pytest.mark.parametrize("inp,out", [("12.30", "12.30"), (Decimal("0.5"), "0.50"), ("0.00", "0.00"), ("1.01", "1.01"),
+                                     ("999999999999999.99", "999999999999999.99")])
 def test_money_is_exact_and_serializes_as_two_decimal_string(inp, out):
     assert M(m=inp).model_dump(mode="json")["m"] == out
 
@@ -25,7 +28,7 @@ def test_money_is_exact_and_serializes_as_two_decimal_string(inp, out):
 # 0.00, 1.005 -> 1.01 and 0.1 + 0.2 -> 0.30).
 @pytest.mark.parametrize("bad", ["NaN", "Infinity", "-1.00", "1e3", "abc", True, None, float("nan"), float("inf"),
                                  Decimal("0.005"), "0.004", "1.005", 0.1 + 0.2, " 12.30", "012.30", "9" * 40,
-                                 Decimal("1E+30"), 10**30])
+                                 Decimal("1E+30"), 10**30, "12.3", "12", 12, 49.99, 12.0, 0.1, "1000000000000000.00"])
 def test_money_rejects_bad_input(bad):
     with pytest.raises(ValidationError):
         M(m=bad)
@@ -41,7 +44,7 @@ def test_positive_money_rejects_zero():
 def test_labeled_value_needs_both_labels_and_renders_with_them():
     with pytest.raises(ValidationError):
         LabeledValue(amount_usd="5.00", classification="observed")
-    v = LabeledValue(amount_usd="5", classification="observed", confidence="high")
+    v = LabeledValue(amount_usd="5.00", classification="observed", confidence="high")
     assert v.render() == "$5.00 (observed, high confidence)"
     assert v.model_dump(mode="json")["amount_usd"] == "5.00"
 
@@ -67,4 +70,6 @@ def test_credential_looking_ids_are_refused():
 
 
 def test_money_str_and_to_money():
-    assert money_str(to_money("7")) == "7.00"
+    assert money_str(to_money("7.00")) == "7.00"
+    with pytest.raises(ValueError):
+        to_money("7")  # fix wave 3 (F15): previously accepted; not the contract form

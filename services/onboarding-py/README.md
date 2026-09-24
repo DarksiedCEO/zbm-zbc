@@ -49,6 +49,14 @@ status says it is not certified.
   - If a result record fails after an effect, nothing further happens. The API
     returns 503 `{"proceeded": true, "completed": false, "outside_effects_done": [...]}`.
   - Bus publishes and memory writes happen only when the operation completes.
+  - Stage then commit (fix wave 3): state that depends on a record (a new
+    client, an escalation, a creator, an activation, a warning the client
+    reads in the reply) becomes visible only after that record is written.
+  - A result record that fails after its effect is owed. The next operation
+    on that subject writes it with the same id, so an "already done" retry
+    path can't skip it. Retrying `start_client` or `apply_creator` after a
+    partial failure finishes the job instead of answering 409. See
+    `test_fix_wave3.py::test_n2_*` and `test_n7_*`.
   - Event ids are deterministic, so a retry after a lost ledger response records
     nothing twice.
   - See `test_fix_wave1.py::test_f9_*`: every write position of 21 call sites is
@@ -62,15 +70,28 @@ status says it is not certified.
     - Keywords are multilingual.
     - Credential-shaped means: a password, PIN or OTP after its label, a
       `user / secret` pair, a password-like token next to a login word, a
-      Luhn-valid card number, or a key or token shape.
+      Luhn-valid card number, or a key or token shape. Since fix wave 3 it
+      also means a URL with a password in it, "get in with X and Y", "use X
+      to log in", `p@ss`/`p4ssw0rd`, an SSN, and a bank account, routing
+      number or IBAN.
+  - Raw client free text is never kept (fix wave 3). Messages, documents,
+    fact values, a clipper's bio and resolution text are stored, and served,
+    only as `redaction.redact_text(...)`. That replaces URL userinfo, SSNs,
+    bank and card numbers, high-entropy tokens of 10+ characters, and
+    everything after a login or password word with `[REDACTED]`.
   - Every response, error body, log record, ledger payload and memory write is
     also scrubbed.
   - Credential-looking IDs are refused, and 422 bodies don't echo input.
   - Unhandled errors log only the exception type. The vault stand-in refuses to
     store, and the credentials route never reads its body.
   - Proven by `test_credential_spray_never_leaks_anywhere`, a spray of 1,000+
-    requests that includes every AEGIS miss. The extended spray fails on the
-    pre-fix code.
+    requests that includes every AEGIS miss, and by
+    `test_fix_wave3.py::test_n5_credential_spray_zero_occurrences_anywhere`.
+    The second covers the round-2 shapes and a `creds.txt` document. It
+    checks responses, logs, the exit export, the ledger and the service's
+    in-memory state, with and without the intake refusal and output scrub.
+  - Log records keep their shape when scrubbed, so uvicorn's access lines
+    work, with the request path redacted (`test_d1_*` runs the real server).
 - **Only Andre can make Andre's decisions.**
   - Acknowledging or resolving an escalation needs his approval token
     (`approval_token`: HMAC-SHA256 keyed by `ONBOARDING_ANDRE_APPROVAL_KEY` over
@@ -96,6 +117,11 @@ status says it is not certified.
     score of 6 or below.
   - The briefing is pushed before Andre engages. If the push isn't
     delivered, the client gets no promised time.
+  - An undelivered briefing is retried on tick, up to
+    `escalation_push_max_attempts` (3, first push included), with every
+    attempt recorded. Once it is delivered, the commitment is made and
+    returned in `escalation_deliveries`.
+  - A second human request while one is open doesn't page Andre again.
 - **Time.** All time comes from the service clock. No request can set "now",
   or any date a decision is evaluated against.
   - There is no `applied_on` and no `paid_on`; sending either is a 422.
@@ -106,11 +132,12 @@ status says it is not certified.
   - A future `observed_at`, `account_last_activity_at` or `signed_at` is a 422.
   - The tests cover exactly noon, spring-forward and fall-back, and quiet hours
     in the client's time zone.
-- **Money is never rounded on the way in.**
-  - Revenue Recovery amounts must be canonical two-decimal strings; any other
-    form rejects the finding.
-  - Request money with more than two decimals, whitespace or leading zeros is a
-    422, and so is anything above 999,999,999,999.99.
+- **Money is exactly the contract string** (ADR 0003 section 1a; fix wave 3).
+  - Findings, request money and configuration accept only
+    `^(0|[1-9][0-9]{0,14})\.[0-9]{2}$`, below 10^15. `"12.3"`, `"12"` and any
+    JSON number (`0.1`, `12`) are 422. Nothing is rounded.
+  - Checked against every vector in `fixtures/money_vectors.json`, in the
+    model and over HTTP.
 - **Other rules.**
   - Momentum never picks an unproven win.
   - The recommend score is asked only after the first real win.
@@ -139,11 +166,11 @@ Optional configuration (all open items have fail-closed defaults; see `src/confi
 
 | Variable | What it sets |
 |---|---|
-| `ONBOARDING_DEAL_SIZE_THRESHOLD_USD` | Deal-size threshold |
+| `ONBOARDING_DEAL_SIZE_THRESHOLD_USD` | Deal-size threshold, in the contract money form (e.g. `5000.00`) |
 | `ONBOARDING_STUCK_WINDOW_HOURS` | Stuck window |
 | `ONBOARDING_SOFT_RESOLUTION_WINDOW_HOURS` | Wait after the one soft-trigger attempt |
 | `ONBOARDING_COMMITMENT_CUTOFF`, `ONBOARDING_COMMITMENT_TZ` | Noon cutoff and its time zone |
-| `ONBOARDING_1099_THRESHOLDS` | JSON map of year to threshold |
+| `ONBOARDING_1099_THRESHOLDS` | JSON map of year to threshold, amounts as contract money strings (`{"2026": "2000.00"}`) |
 | `ONBOARDING_P1_WORDING_COUNSEL_APPROVED`, `ONBOARDING_P23_CLAUSE_COUNSEL_APPROVED` | Counsel sign-offs |
 | `ONBOARDING_ANDRE_APPROVAL_KEY` | Andre's approval key (playbook changes, acknowledging and resolving escalations); unset means none of them is possible |
 | `ONBOARDING_CONTRACT_STORAGE=in_memory` | Local demos only; not the decided storage |
@@ -180,7 +207,7 @@ Every route except `/health` needs `Authorization: Bearer <token>`.
 ## Tests
 
 ```bash
-cd services/onboarding-py && python3 -m pytest -q     # 274 passed (fix wave 2, Sep 24 2026)
+cd services/onboarding-py && python3 -m pytest -q     # 462 passed (fix wave 3, Sep 24 2026)
 ```
 
 Tests are organised by certification type:
@@ -192,7 +219,8 @@ Tests are organised by certification type:
 | `test_cert_guardrail.py` | Guardrails | 52 |
 | `test_fix_wave1.py` | Fix wave 1 regressions (F1, F2, F4, F9, F10, F11, F14–F16, L1), including the record-first harness | 104 |
 | `test_fix_wave2.py` | Fix wave 2: nudge counted only on delivery, bounded retries, warning unaffected (L2); no commitment without its record (L3) | 10 |
-| `test_unit_*.py` | Unit tests | 79 |
+| `test_fix_wave3.py` | Fix wave 3: stage then commit and retries that finish (N2), owed result records (N7), credential shapes, redacted storage and the state-inspecting spray (N5), the shared money vectors (F15), the real-server access log (D1), human-request dedupe and briefing retry on tick | 183 |
+| `test_unit_*.py` | Unit tests | 84 |
 | `test_auth_and_entrypoint.py` | Auth, docs, real-socket bind | 14 |
 
 No test makes a network call outside loopback. The entrypoint test spawns
@@ -208,7 +236,8 @@ See ADR 0004 "Honest gaps" for the full list. The main ones:
     live), site fetching and platform writes aren't built.
   - The vault refuses to store anything. There is no tier-2 or tier-3 access.
   - Push to Andre's phone isn't wired, so escalations queue at
-    `GET /onboarding/escalations` and the client gets no promised time.
+    `GET /onboarding/escalations` after 3 recorded tries, and the client gets
+    no promised time.
   - Not built, each behind a fail-closed stand-in: Compliance 38,
     Verification and Integrity, Billing, ZBC payouts/tax, handoff intake
     (RR/DA/Fulfillment), contract storage.
@@ -227,10 +256,17 @@ See ADR 0004 "Honest gaps" for the full list. The main ones:
 - **Multi-event operations aren't atomic.** A ledger failure mid-operation
   leaves earlier events recorded. Ids are deterministic, so a retry replays
   them instead of duplicating them. A result record can fail after its effect;
-  the API reports exactly which effects happened.
+  the API reports exactly which effects happened, and the next operation on
+  that subject writes the owed record. It is lost only if the process restarts
+  first.
 - **Detection is pattern-based.** Guarantee, injection and credential
   detection are rules over normalized text: best effort for free text.
   - A password that is an ordinary word with no cue can't be recognised.
+    Some cued phrasings pass intake ("my password is correct horse battery
+    staple"). Only the redacted copy is kept.
+  - The redacted copy of messages and documents is deliberately aggressive:
+    long digit runs, ISO timestamps and whatever follows "login" are
+    replaced too.
   - A standalone 13–19 digit Luhn-valid number is refused as a card.
   - The structural defences above don't depend on these rules.
 - **Several values are drafts** for Andre to tune through the playbook: the

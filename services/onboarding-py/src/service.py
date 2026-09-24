@@ -88,7 +88,7 @@ from memory import (
     andre_action_token,
     verify_andre_token,
 )
-from redaction import scrub_obj
+from redaction import redact_text, scrub_obj
 from onboarding_schema import (
     HARD_TRIGGERS,
     AccessGrantIn,
@@ -107,8 +107,8 @@ from onboarding_schema import (
     TriggerKind,
     VettingDecision,
     VettingOutcome,
+    client_stated_amount,
     money_str,
-    to_money,
 )
 from onboarding_schema import requests as rq
 from practices import ad_disclosure, clean_exit, creator_tax, permission_receipt, recommend_score
@@ -214,6 +214,10 @@ class ClientRecord:
     handoff_accepted: bool = False
     exited: bool = False
     injection_flags: int = 0
+    # Fix wave 3 (N2): set only when start_client stopped after an outside
+    # effect; a retry of the same start completes the missing records.
+    start_digest: Optional[str] = None
+    start_view: Optional[dict] = None
 
 
 @dataclass
@@ -228,6 +232,10 @@ class CreatorRecord:
     activation: Optional[ActivationDecision] = None
     payout_active: bool = False
     payments: list = field(default_factory=list)  # (date, Decimal)
+    # Fix wave 3 (N2): set only when apply_creator stopped after an outside
+    # effect; a retry of the same application completes it.
+    apply_digest: Optional[str] = None
+    apply_out: Optional[dict] = None
 
 
 def _hhmm(s: Optional[str], default: time) -> time:
@@ -246,6 +254,15 @@ def _utc_now() -> datetime:
 
 def _dump(model) -> Any:
     return model.model_dump(mode="json") if model is not None else None
+
+
+def _redact_value(v: Any) -> Any:
+    """Fix wave 3 (N5): client free text is kept only in redacted form."""
+    if isinstance(v, str):
+        return redact_text(v)
+    if isinstance(v, list):
+        return [redact_text(x) if isinstance(x, str) else x for x in v]
+    return v
 
 
 class OnboardingService:
@@ -295,6 +312,13 @@ class OnboardingService:
         self._occ: dict[tuple, int] = {}
         self._idc: dict[tuple, int] = {}
         self._touched: set[str] = set()
+        # Fix wave 3 (N2/N7): result records of an outside effect that could
+        # not be written yet, per subject, keyed by their deterministic event
+        # id. The next operation on that subject writes them first (same id:
+        # idempotent at the ledger).
+        self._pending: dict[str, dict[str, tuple]] = {}
+        self._op_pending: list[tuple[str, str]] = []
+        self._esc_plans: dict[str, "OnboardingService._EscalationPlan"] = {}
 
     # --- infrastructure --------------------------------------------------------
 
@@ -328,6 +352,7 @@ class OnboardingService:
             if outer:
                 self._op_name, self._effects, self._deferred = name, [], []
                 self._occ, self._idc, self._touched = {}, {}, set()
+                self._op_pending = []
             self._depth += 1
             completed = False
             try:
@@ -335,6 +360,15 @@ class OnboardingService:
                 completed = True
             except OnboardingError:
                 completed = True
+                raise
+            except LedgerWriteAfterEffects:
+                raise  # pending result records stay: the next operation writes them
+            except LedgerWriteError:
+                if outer:
+                    # Nothing outside happened and no state was committed:
+                    # the result records this operation queued are not owed.
+                    for sid, eid in self._op_pending:
+                        self._pending.get(sid, {}).pop(eid, None)
                 raise
             finally:
                 self._depth -= 1
@@ -346,18 +380,16 @@ class OnboardingService:
                 if outer:
                     self._deferred = []
 
-    def _record(self, event_type: str, actor: str, subject_id: str, payload: dict, summary: str) -> str:
-        """Write one ledger event with a deterministic id. Raises
-        LedgerWriteError on failure — nothing further happens. If outside
-        effects of this operation already happened, the error says which
-        (LedgerWriteAfterEffects) so the API can report them honestly."""
+    def _event_id(self, event_type: str, subject_id: str, payload: dict) -> str:
         ph = payload_sha256(scrub_obj(payload))
         key = (subject_id, event_type, ph)
         occ = self._occ.get(key, 0)
         self._occ[key] = occ + 1
-        eid = derive_event_id(f"{self._epoch}:{self._op_name}", DEPARTMENT, event_type, subject_id,
-                              self._seq.get(subject_id, 0), occ, ph)
         self._touched.add(subject_id)
+        return derive_event_id(f"{self._epoch}:{self._op_name}", DEPARTMENT, event_type, subject_id,
+                               self._seq.get(subject_id, 0), occ, ph)
+
+    def _write(self, eid: str, event_type: str, actor: str, subject_id: str, payload: dict, summary: str) -> None:
         try:
             self.ledger.record_event(eid, DEPARTMENT, event_type, actor, subject_id, payload, summary)
         except LedgerWriteAfterEffects:
@@ -366,7 +398,36 @@ class OnboardingService:
             if self._effects:
                 raise LedgerWriteAfterEffects(str(exc), self._effects) from None
             raise
+
+    def _record(self, event_type: str, actor: str, subject_id: str, payload: dict, summary: str) -> str:
+        """Write one ledger event with a deterministic id. Raises
+        LedgerWriteError on failure — nothing further happens. If outside
+        effects of this operation already happened, the error says which
+        (LedgerWriteAfterEffects) so the API can report them honestly."""
+        eid = self._event_id(event_type, subject_id, payload)
+        self._write(eid, event_type, actor, subject_id, payload, summary)
         return eid
+
+    def _record_result(self, event_type: str, actor: str, subject_id: str, payload: dict, summary: str) -> str:
+        """The record of an outside effect's RESULT (fix wave 3, N2/N7). It
+        is queued with its deterministic id before the write; if the write
+        fails after an effect happened, the next operation on the subject
+        (a retry, or any other) writes it first with the SAME id — so a
+        missing result record is never skipped by an "already done" path
+        and never written twice."""
+        eid = self._event_id(event_type, subject_id, payload)
+        self._pending.setdefault(subject_id, {})[eid] = (event_type, actor, payload, summary)
+        self._op_pending.append((subject_id, eid))
+        self._write(eid, event_type, actor, subject_id, payload, summary)
+        self._pending[subject_id].pop(eid, None)
+        return eid
+
+    def _flush_pending(self, subject_id: str) -> None:
+        """Write the result records a previous operation owes (same ids)."""
+        pend = self._pending.get(subject_id)
+        for eid, (event_type, actor, payload, summary) in list((pend or {}).items()):
+            self._write(eid, event_type, actor, subject_id, payload, summary)
+            pend.pop(eid, None)
 
     def _effect(self, name: str, fn: Callable[[], Any], done: Optional[Callable[[Any], bool]] = None) -> Any:
         """Make one outside effect. Only call after the record that
@@ -414,12 +475,16 @@ class OnboardingService:
             raise NotFound("unknown client")
         if rec.exited:
             raise Conflict("client has exited (P4); no further onboarding actions")
+        if self._depth > 0:
+            self._flush_pending(client_id)
         return rec
 
     def _creator(self, creator_id: str) -> CreatorRecord:
         rec = self.creators.get(creator_id)
         if rec is None:
             raise NotFound("unknown creator")
+        if self._depth > 0:
+            self._flush_pending(creator_id)
         return rec
 
     def _flag_injection(self, subject_id: str, text: str, source: str) -> list[dict]:
@@ -437,11 +502,29 @@ class OnboardingService:
         ev = DomainEvent(event_type=event_type, subject_id=subject_id, payload=payload, at=self.now())
         self._defer(lambda: self.bus.publish(ev))
 
+    def _count_flags(self, rec: ClientRecord, flags: list) -> None:
+        """The injection counter changes only when the operation completes
+        (its records are all written) — fix wave 3, N2 sweep."""
+        n = len(flags)
+        if n:
+            self._defer(lambda: setattr(rec, "injection_flags", rec.injection_flags + n))
+
     # --- client lane: start -------------------------------------------------------
 
     def start_client(self, req: rq.StartClientRequest) -> dict:
+        """Stage then commit (fix wave 3, N2): the client record and its
+        escalation become visible only after every record they depend on is
+        written. If a result record fails AFTER an outside effect (contract
+        stored, briefing delivered), the state that did happen is committed,
+        the API says ``proceeded: true, completed: false``, and a retry of
+        the same start writes the missing records (same event ids) and
+        finishes the start instead of answering 409."""
         with self._op("start_client"):
-            if req.client_id in self.clients:
+            digest = hashlib.sha256(req.model_dump_json().encode()).hexdigest()
+            existing = self.clients.get(req.client_id)
+            if existing is not None:
+                if existing.start_view is not None:
+                    return self._complete_start(existing, digest)
                 raise Conflict("client already onboarding")
             try:
                 ZoneInfo(req.time_zone)
@@ -485,29 +568,16 @@ class OnboardingService:
                              "Store signed contract terms in contract storage")
             plan = None
             if deal_escalate:
-                plan = self._prepare_escalation(rec, TriggerKind.DEAL_SIZE, deal_reason, attempted=None, client_live=True)
+                plan = self._prepare_escalation(rec, TriggerKind.DEAL_SIZE, deal_reason, attempted=None, client_live=True,
+                                                eid=self._derive_id("esc", rec.client_id))
 
-            # 2. Outside effects, each authorized by a record above; state.
+            # 2. Outside effects, each authorized by a record above, each
+            #    followed by the record of its result. State is staged on
+            #    ``rec``/``esc`` and committed only at the end.
             contract_status = "none supplied"
-            if req.contract is not None:
-                try:
-                    self._effect("contract_storage_put", lambda: self.depts.contracts.put(req.contract))
-                    contract_status = "stored"
-                except Exception as exc:  # noqa: BLE001  (stand-in refuses)
-                    contract_status = f"not stored: {exc}"
             rec.p1_disclosure_sent = True
-            self.clients[rec.client_id] = rec
-            escalation = None
-            if plan is not None:
-                escalation = self._commit_escalation(rec, plan)
-                self._deliver_escalation(rec, escalation, plan)
-
-            # 3. Results of the outside effects.
-            if req.contract is not None:
-                self._record("contract_storage_ruling", "intel_14_contract", rec.client_id,
-                             {"stored": contract_status == "stored"}, f"Contract storage: {contract_status}"[:280])
-            self._mem_put(rec.client_id, "business_name", rec.business_name)
-            return {
+            esc = self._build_escalation(rec, plan) if plan is not None else None
+            view = {
                 "client_id": rec.client_id,
                 "lane": rec.lane.value,
                 "first_message": first_message,
@@ -521,8 +591,58 @@ class OnboardingService:
                 },
                 "contract_storage": contract_status,
                 "deal_size_ruling": {"escalate": deal_escalate, "reason": deal_reason},
-                "escalation": _dump(escalation),
+                "escalation_id": esc.escalation_id if esc is not None else None,
             }
+            try:
+                if req.contract is not None:
+                    try:
+                        self._effect("contract_storage_put", lambda: self.depts.contracts.put(req.contract))
+                        contract_status = "stored"
+                    except Exception as exc:  # noqa: BLE001  (stand-in refuses)
+                        contract_status = f"not stored: {exc}"
+                    view["contract_storage"] = contract_status
+                    self._record_result("contract_storage_ruling", "intel_14_contract", rec.client_id,
+                                        {"stored": contract_status == "stored"}, f"Contract storage: {contract_status}"[:280])
+                if esc is not None:
+                    self._deliver_escalation(rec, esc, plan)
+            except LedgerWriteAfterEffects:
+                rec.start_digest, rec.start_view = digest, view
+                self._commit_start(rec, esc, plan)
+                raise
+            self._commit_start(rec, esc, plan)
+            self._mem_put(rec.client_id, "business_name", rec.business_name)
+            return self._start_response(view)
+
+    def _commit_start(self, rec: ClientRecord, esc: Optional[Escalation], plan) -> None:
+        self.clients[rec.client_id] = rec
+        if esc is not None:
+            self._attach_escalation(rec, esc, plan)
+
+    def _start_response(self, view: dict) -> dict:
+        out = {k: v for k, v in view.items() if k != "escalation_id"}
+        eid = view.get("escalation_id")
+        out["escalation"] = _dump(self.escalations.get(eid)) if eid else None
+        return out
+
+    def _complete_start(self, rec: ClientRecord, digest: str) -> dict:
+        """Retry of a start that stopped after an outside effect: write the
+        owed result records (same ids), deliver a briefing that was never
+        attempted or make the commitment whose record failed — never a
+        second push for a briefing already attempted."""
+        self._flush_pending(rec.client_id)
+        eid = rec.start_view.get("escalation_id")
+        if eid:
+            esc = self.escalations[eid]
+            if esc.push_attempts == 0:
+                self._deliver_escalation(rec, esc, self._esc_plans[eid])
+            else:
+                self._complete_escalation(rec, esc)
+        view, same = rec.start_view, digest == rec.start_digest
+        rec.start_digest = rec.start_view = None
+        self._mem_put(rec.client_id, "business_name", rec.business_name)
+        if not same:
+            raise Conflict("client already onboarding (the earlier start's missing records are now written)")
+        return self._start_response(view)
 
     def _deal_size_ruling(self, deal: Optional[Decimal]) -> tuple[bool, str]:
         threshold = self.config.deal_size_threshold_usd
@@ -550,7 +670,7 @@ class OnboardingService:
         raised_at: datetime
 
     def _prepare_escalation(self, rec: ClientRecord, trigger: TriggerKind, snag: str, attempted: Optional[str],
-                            client_live: bool) -> "OnboardingService._EscalationPlan":
+                            client_live: bool, eid: Optional[str] = None) -> "OnboardingService._EscalationPlan":
         """Decide and RECORD an escalation (and the client commitment that
         will be made if, and only if, the briefing reaches Andre). No
         outside effect, no state change."""
@@ -566,7 +686,7 @@ class OnboardingService:
             attempted=attempted,
         )
         c = i09.escalation_commitment(now, cfg.commitment_cutoff_local, cfg.commitment_tz, cfg.today_due_local, cfg.first_thing_local)
-        eid = self._derive_id("esc", rec.client_id)
+        eid = eid or self._derive_id("esc", rec.client_id)
         commitment_id = self._derive_id("cmt", rec.client_id)
         self._record("escalation_raised", "intel_10_escalation_briefing", rec.client_id,
                      {"escalation_id": eid, "trigger": trigger.value, "hard": hard, "snag": snag,
@@ -578,37 +698,51 @@ class OnboardingService:
                      "Briefing pack pushed to Andre's phone before he engages")
         return self._EscalationPlan(eid, trigger, hard, snag, attempted, briefing, c, commitment_id, client_live, now)
 
-    def _commit_escalation(self, rec: ClientRecord, p: "OnboardingService._EscalationPlan") -> Escalation:
-        esc = Escalation(
+    def _build_escalation(self, rec: ClientRecord, p: "OnboardingService._EscalationPlan") -> Escalation:
+        """The escalation object, NOT yet in state (stage then commit, N2)."""
+        return Escalation(
             escalation_id=p.eid, client_id=rec.client_id, trigger=p.trigger, hard=p.hard, reason=p.snag, snag=p.snag,
             attempted_resolution=p.attempted, raised_at=p.raised_at, briefing=p.briefing, push_delivered=False,
-            push_detail="push not attempted yet", client_commitment_text=p.commitment.text,
+            push_detail="push not attempted yet", push_attempts=0, client_commitment_text=p.commitment.text,
             client_commitment_due_at=p.commitment.due_at,
             client_message_status="held: briefing not delivered to Andre; no commitment is made to the client until "
                                   "Andre acknowledges",
             commitment_id=None,
         )
-        self.escalations[p.eid] = esc
-        rec.escalation_ids.append(p.eid)
-        return esc
 
-    def _deliver_escalation(self, rec: ClientRecord, esc: Escalation, p: "OnboardingService._EscalationPlan") -> None:
-        """The outside effect (push to Andre's phone), the state it implies,
-        then the record of its result."""
+    def _attach_escalation(self, rec: ClientRecord, esc: Escalation, p: "OnboardingService._EscalationPlan") -> None:
+        if esc.escalation_id not in self.escalations:
+            rec.escalation_ids.append(esc.escalation_id)
+        self.escalations[esc.escalation_id] = esc
+        self._esc_plans[esc.escalation_id] = p
+
+    def _deliver_escalation(self, rec: ClientRecord, esc: Escalation, p: "OnboardingService._EscalationPlan",
+                            attempt: int = 1) -> None:
+        """The outside effect (push to Andre's phone), then the record of its
+        result, then (only if delivered) the client commitment."""
         delivered, detail = self._effect("andre_push", lambda: self._push_andre(p.eid, p.briefing.model_dump(mode="json")),
                                          done=lambda r: bool(r[0]))
-        esc.push_delivered, esc.push_detail = delivered, detail
-        c = p.commitment
+        esc.push_attempts, esc.push_delivered, esc.push_detail = attempt, delivered, detail
         if not delivered:
             esc.client_message_status = ("held: briefing not delivered to Andre (" + detail + "); no commitment is made to "
                                          "the client until Andre acknowledges")
-            self._record("andre_push_not_delivered", "intel_10_escalation_briefing", rec.client_id,
-                         {"escalation_id": p.eid, "delivered": False}, "Briefing NOT delivered to Andre; no client commitment made")
+            self._record_result("andre_push_not_delivered", "intel_10_escalation_briefing", rec.client_id,
+                                {"escalation_id": p.eid, "delivered": False, "attempt": attempt,
+                                 "max_attempts": self.config.escalation_push_max_attempts,
+                                 "will_retry": attempt < self.config.escalation_push_max_attempts},
+                                "Briefing NOT delivered to Andre; no client commitment made; retried on tick")
             return
+        self._make_commitment(rec, esc, p)
+
+    def _make_commitment(self, rec: ClientRecord, esc: Escalation, p: "OnboardingService._EscalationPlan",
+                         defer: bool = False) -> str:
+        """Returns the client message status ("released" / "held: ...")."""
         # Fix wave 2 (L3): the commitment exists in state only once its record
         # is written. If that record fails (after the push was delivered),
         # the operation stops with a 503, the client is never given the time,
-        # and state says so: no commitment, message held (ADR 0004).
+        # and state says so: no commitment, message held (ADR 0004). A retry
+        # of the operation (or the next tick) makes it then (fix wave 3).
+        c = p.commitment
         esc.client_message_status = ("held: briefing delivered to Andre, but the commitment could not be recorded; "
                                      "the client has not been told a time")
         self._record("client_commitment_made", "intel_09_promise_keeper", rec.client_id,
@@ -617,18 +751,67 @@ class OnboardingService:
                      f"Client told: {c.text}")
         now = self.now()
         send_ok = p.client_live or not i09.in_quiet_hours(now, rec.time_zone, rec.quiet_start, rec.quiet_end)
-        esc.client_message_status = "released" if send_ok else "held: client quiet hours; send at the next allowed moment"
-        esc.commitment_id = p.commitment_id
-        rec.commitments[p.commitment_id] = Commitment(
-            commitment_id=p.commitment_id, client_id=rec.client_id, kind="escalation_callback", category=c.form, text=c.text,
-            owner="andre", created_at=p.raised_at, due_at=c.due_at,
-        )
+        status = "released" if send_ok else "held: client quiet hours; send at the next allowed moment"
+
+        def commit() -> None:
+            esc.client_message_status = status
+            esc.commitment_id = p.commitment_id
+            esc.client_commitment_text, esc.client_commitment_due_at = c.text, c.due_at
+            rec.commitments[p.commitment_id] = Commitment(
+                commitment_id=p.commitment_id, client_id=rec.client_id, kind="escalation_callback", category=c.form,
+                text=c.text, owner="andre", created_at=now, due_at=c.due_at,
+            )
+
+        # ``defer``: the time reaches the client only in the reply of an
+        # operation that may still write records after this one (tick); the
+        # commitment exists once that reply is certain (fix wave 3).
+        if defer:
+            self._defer(commit)
+        else:
+            commit()
+        return status
+
+    def _complete_escalation(self, rec: ClientRecord, esc: Escalation, client_live: Optional[bool] = None,
+                             defer: bool = False) -> Optional[str]:
+        """Finish an escalation left incomplete by a failed record: if the
+        briefing reached Andre but the commitment was never recorded, make it
+        now (a fresh time if the planned one has passed). Never pushes."""
+        if esc.resolved_at is not None or not esc.push_delivered or esc.commitment_id is not None:
+            return None
+        p = self._esc_plans[esc.escalation_id]
+        now = self.now()
+        if client_live is not None:
+            p.client_live = client_live
+        if p.commitment.due_at <= now:
+            cfg = self.config
+            p.commitment = i09.escalation_commitment(now, cfg.commitment_cutoff_local, cfg.commitment_tz,
+                                                     cfg.today_due_local, cfg.first_thing_local)
+        return self._make_commitment(rec, esc, p, defer=defer)
 
     def _escalate(self, rec: ClientRecord, trigger: TriggerKind, snag: str, attempted: Optional[str], client_live: bool) -> Escalation:
-        plan = self._prepare_escalation(rec, trigger, snag, attempted, client_live)
-        esc = self._commit_escalation(rec, plan)
-        self._deliver_escalation(rec, esc, plan)
+        eid = self._derive_id("esc", rec.client_id)
+        existing = self.escalations.get(eid)
+        if existing is not None:
+            # A retry of this same operation after it stopped part-way: the
+            # escalation (and its push) already exist — complete, never push again.
+            self._complete_escalation(rec, existing, client_live)
+            return existing
+        plan = self._prepare_escalation(rec, trigger, snag, attempted, client_live, eid=eid)
+        esc = self._build_escalation(rec, plan)
+        try:
+            self._deliver_escalation(rec, esc, plan)
+        except LedgerWriteAfterEffects:
+            self._attach_escalation(rec, esc, plan)  # it happened: state says so
+            raise
+        self._attach_escalation(rec, esc, plan)
         return esc
+
+    def _open_escalation(self, rec: ClientRecord, trigger: TriggerKind) -> Optional[Escalation]:
+        for eid in rec.escalation_ids:
+            e = self.escalations[eid]
+            if e.trigger == trigger and e.resolved_at is None:
+                return e
+        return None
 
     def _soft_trigger(self, rec: ClientRecord, trigger: TriggerKind, snag: str, attempt_text: str) -> dict:
         """Soft trigger: ONE resolution attempt first. A second firing of the
@@ -647,7 +830,10 @@ class OnboardingService:
                      {"issue_id": iid, "trigger": trigger.value, "snag": snag},
                      f"Soft trigger {trigger.value}: one resolution attempt before escalating")
         issue = SoftIssue(iid, trigger, snag, attempt, now)
-        rec.soft_issues[iid] = issue
+        # The attempt message goes to the client in THIS response: the issue
+        # ("one attempt made") exists only once the operation completes
+        # (fix wave 3, N2 sweep) — a later failed record means it was not sent.
+        self._defer(lambda: rec.soft_issues.__setitem__(iid, issue))
         if i09.in_quiet_hours(now, rec.time_zone, rec.quiet_start, rec.quiet_end):
             nxt = i09._next_allowed(now, now + timedelta(hours=24), rec.time_zone, rec.quiet_start, rec.quiet_end)
             status = f"held: client quiet hours; send at {nxt.isoformat() if nxt else 'next allowed moment'}"
@@ -723,13 +909,14 @@ class OnboardingService:
             if esc.resolved_at is not None:
                 raise Conflict("already resolved")
             now = self.now()
-            entry = self._learn(rec, esc.trigger, req.snag_category, esc.attempted_resolution, req.resolution, dry=True)
+            resolution = redact_text(req.resolution)  # fix wave 3 (N5): free text kept only redacted
+            entry = self._learn(rec, esc.trigger, req.snag_category, esc.attempted_resolution, resolution, dry=True)
             self._record("escalation_resolved", "andre", rec.client_id,
                          {"escalation_id": escalation_id, "log": entry, "approved_by": "andre"},
                          "Andre resolved the escalation (approval token verified); snag and resolution logged")
             names = self._known_names(rec)
             self._defer(lambda: self.institutional.record(entry, names))
-            esc.resolution, esc.resolved_at = req.resolution, now
+            esc.resolution, esc.resolved_at = resolution, now
             if esc.acknowledged_at is None:
                 esc.acknowledged_at = now
             if esc.commitment_id and esc.commitment_id in rec.commitments:
@@ -777,7 +964,12 @@ class OnboardingService:
                 for v in vals:
                     if isinstance(v, str):
                         flags += self._flag_injection(rec.client_id, v, f"intake_fact:{f.field}")
-            new = [i01.Fact(f.field, f.value, f.provenance, f.evidence, f.observed_at) for f in req.facts]
+            # Fix wave 3 (N5): only structured facts are kept — a field outside
+            # this lane's profile keeps its name (reported as dropped) but not
+            # its value — and every kept value/evidence is the redacted copy.
+            allowed = i01.LANE_FIELDS[rec.lane]
+            new = [i01.Fact(f.field, _redact_value(f.value) if f.field in allowed else None, f.provenance,
+                            redact_text(f.evidence), f.observed_at) for f in req.facts]
             rec.facts.extend(new)
             if req.vertical:
                 rec.vertical = req.vertical
@@ -786,7 +978,7 @@ class OnboardingService:
                     rec.ask_counts.pop(f.field)
             rec.profile = i01.build_profile(rec.client_id, rec.lane, rec.facts, self.config.gaps_short_list_size)
             rec.last_progress_at = self.now()
-            rec.injection_flags += len(flags)
+            self._count_flags(rec, flags)
             for f in new:
                 if f.field in i01.LANE_FIELDS[rec.lane]:
                     self._mem_put(rec.client_id, f"fact:{f.field}", f.value)
@@ -799,9 +991,10 @@ class OnboardingService:
         with self._op("add_document"):
             rec = self._client(client_id)
             flags = self._flag_injection(rec.client_id, req.text, "document")
-            rec.injection_flags += len(flags)
+            self._count_flags(rec, flags)
             docs = self.memory.get(rec.client_id, "documents", [])
-            docs.append({"name": req.name, "chars": len(req.text)})
+            # Fix wave 3 (N5): the raw text is never kept; the redacted copy is.
+            docs.append({"name": redact_text(req.name), "chars": len(req.text), "redacted_text": redact_text(req.text)})
             self._mem_put(rec.client_id, "documents", docs)
             return {"stored": True, "injection_flags": flags,
                     "extraction": "not built: turning a document into profile facts needs a model; facts must be entered via /intake/facts"}
@@ -810,19 +1003,28 @@ class OnboardingService:
         with self._op("message"):
             rec = self._client(client_id)
             flags = self._flag_injection(rec.client_id, req.text, "client_message")
-            rec.injection_flags += len(flags)
+            self._count_flags(rec, flags)
             d = i02.decide_reply(req.text, self.config.spanish_enabled)
             if d.intent != "answer":
                 self._record("client_intent_ruling", "intel_02_conversation", rec.client_id, {"intent": d.intent},
                              f"Client message classified as {d.intent}")
             msgs = self.memory.get(rec.client_id, "messages", [])
-            msgs.append({"from": "client", "text": req.text})
+            msgs.append({"from": "client", "text": redact_text(req.text)})  # fix wave 3 (N5): redacted copy only
             if d.reply:
                 msgs.append({"from": "agent", "text": d.reply})
             self._mem_put(rec.client_id, "messages", msgs)
             escalation = None
             if d.intent == "human_request":
-                escalation = self._escalate(rec, TriggerKind.HUMAN_REQUESTED, "Client asked to talk to a human", attempted=None, client_live=True)
+                # Fix wave 3: one open human request pages Andre once. A repeat
+                # (or a retry of a request that stopped part-way) reuses it and
+                # only completes what is missing; an undelivered briefing is
+                # retried by tick, not by the client asking again.
+                escalation = self._open_escalation(rec, TriggerKind.HUMAN_REQUESTED)
+                if escalation is not None:
+                    self._complete_escalation(rec, escalation, client_live=True)
+                else:
+                    escalation = self._escalate(rec, TriggerKind.HUMAN_REQUESTED, "Client asked to talk to a human",
+                                                attempted=None, client_live=True)
             nq = None
             if d.intent == "answer" and rec.profile is not None:
                 q = i02.next_question(rec.profile, rec.vertical, rec.ask_counts)
@@ -869,7 +1071,7 @@ class OnboardingService:
         with self._op("website_scan"):
             rec = self._client(client_id)
             flags = self._flag_injection(rec.client_id, req.html, "website")
-            rec.injection_flags += len(flags)
+            self._count_flags(rec, flags)
             tags = i04.scan_tags(req.html)
             detected = [t["platform"] for t in tags]
             today = self.business_date()
@@ -992,8 +1194,9 @@ class OnboardingService:
         pf = rec.profile.fields.get("monthly_revenue_usd")
         if pf is None:
             return None
+        # A figure the client typed, not contract money (see money.py).
         try:
-            return to_money(pf.value)
+            return client_stated_amount(pf.value)
         except ValueError:
             return None
 
@@ -1098,11 +1301,11 @@ class OnboardingService:
             path, text = recommend_score.route(req.score)
             self._record("recommend_score", "intel_13_learning_loop", rec.client_id, {"score": req.score, "path": path},
                          f"P20 recommend score {req.score}: {path}")
-            rec.recommend_score = req.score
             out = {"path": path, "client_message": text, "soft_issue": None, "escalation": None}
             if path == "soft_escalation":
                 r = self._soft_trigger(rec, TriggerKind.LOW_RECOMMEND_SCORE, f"Recommend score {req.score}", text)
                 out.update({"soft_issue": r.get("soft_issue"), "escalation": r.get("escalation")})
+            rec.recommend_score = req.score  # after every record it depends on (fix wave 3, N2 sweep)
             return out
 
     # --- promise keeper + stuck (tick) ---------------------------------------------------
@@ -1121,7 +1324,7 @@ class OnboardingService:
                                        "Quick check-in: we're waiting on one step to keep your setup moving. "
                                        "Is anything getting in the way? If it's easier to talk to a person, just say so.")
                 if is_new:
-                    rec.stalls += 1
+                    self._defer(lambda: setattr(rec, "stalls", rec.stalls + 1))
                 out["stuck"] = {"reason": s.reason, **r}
             for c in list(rec.commitments.values()):
                 actions = i09.decide(c, now, rec.time_zone, rec.quiet_start, rec.quiet_end, cfg.commitment_cutoff_local,
@@ -1136,46 +1339,117 @@ class OnboardingService:
                                   "quiet_hours_override": a.quiet_hours_override},
                                  f"Promise Keeper: {a.action} ({a.reason})"[:280])
                     if a.action == "nudge_andre":
-                        if now >= c.due_at and c.status != CommitmentStatus.BREACHED:
-                            # The breach nudge is a new nudge with its own budget.
-                            c.andre_nudged, c.andre_nudge_failures = False, 0
+                        # The breach nudge is a new nudge with its own budget.
+                        new_breach_nudge = now >= c.due_at and c.status != CommitmentStatus.BREACHED
+                        failures = 0 if new_breach_nudge else c.andre_nudge_failures
                         delivered, detail = self._effect("andre_push", lambda: self._push_andre(
                             f"nudge-{c.commitment_id}", {"commitment": c.text, "due_at": c.due_at.isoformat(), "reason": a.reason}),
                             done=lambda r: bool(r[0]))
                         # Fix wave 2 (L2): nudged ONLY on confirmed delivery;
                         # otherwise counted, recorded and retried next tick.
-                        attempt = c.andre_nudge_failures + 1
+                        attempt = failures + 1
+                        will_retry = (not delivered) and attempt < cfg.andre_nudge_max_attempts
+                        payload = {"commitment_id": c.commitment_id, "delivered": delivered, "attempt": attempt,
+                                   "max_attempts": cfg.andre_nudge_max_attempts, "will_retry": will_retry}
+                        summary = ("Nudge to Andre delivered" if delivered else
+                                   f"Nudge to Andre NOT delivered ({detail}); "
+                                   + ("retry next tick" if will_retry else "no retries left"))[:280]
                         if delivered:
+                            # It happened: state says so; the result record is
+                            # owed until written (fix wave 3, N7 class).
                             c.andre_nudged, c.andre_nudge_failures, c.breach_nudge_pending = True, 0, False
+                            self._record_result("promise_nudge_result", "intel_09_promise_keeper", rec.client_id, payload, summary)
                         else:
-                            c.andre_nudge_failures += 1
-                            c.breach_nudge_pending = now >= c.due_at
-                        will_retry = (not delivered) and c.andre_nudge_failures < cfg.andre_nudge_max_attempts
-                        self._record("promise_nudge_result", "intel_09_promise_keeper", rec.client_id,
-                                     {"commitment_id": c.commitment_id, "delivered": delivered, "attempt": attempt,
-                                      "max_attempts": cfg.andre_nudge_max_attempts, "will_retry": will_retry},
-                                     ("Nudge to Andre delivered" if delivered else
-                                      f"Nudge to Andre NOT delivered ({detail}); "
-                                      + ("retry next tick" if will_retry else "no retries left"))[:280])
+                            # Nothing happened outside: the attempt is counted
+                            # when the tick completes (fix wave 3, N2 sweep), so
+                            # a tick that stops later is retried as the SAME
+                            # attempt (same event ids and summaries: 200, never
+                            # a 409 from a changed summary).
+                            self._record("promise_nudge_result", "intel_09_promise_keeper", rec.client_id, payload, summary)
+
+                            def _not_delivered(c=c, attempt=attempt, reset=new_breach_nudge, pending=now >= c.due_at):
+                                if reset:
+                                    c.andre_nudged = False
+                                c.andre_nudge_failures = attempt
+                                c.breach_nudge_pending = pending
+                            self._defer(_not_delivered)
                     elif a.action == "warn_client":
-                        # The client has been told the new real time BEFORE the
-                        # old one passed: the commitment now tracks the new time,
-                        # with fresh nudge/warn state for it.
-                        c.status = CommitmentStatus.RESCHEDULED
-                        c.proposed_new_due_at = a.new_due_at
-                        c.due_at = a.new_due_at
-                        c.andre_nudged = False
-                        c.andre_nudge_failures = 0
-                        c.breach_nudge_pending = False
-                        c.client_warned = False
-                        c.category = "first_thing_tomorrow"
+                        # The client is told the new real time in THIS response:
+                        # the commitment tracks the new time (fresh nudge/warn
+                        # state) once the tick completes — if a later record
+                        # fails, the warning was not sent and the retry re-sends
+                        # it (fix wave 3, N2 sweep). Actions of one commitment
+                        # come nudge-first, so the order of effects is unchanged.
+                        def _rescheduled(c=c, a=a):
+                            c.status = CommitmentStatus.RESCHEDULED
+                            c.proposed_new_due_at = a.new_due_at
+                            c.due_at = a.new_due_at
+                            c.andre_nudged = False
+                            c.andre_nudge_failures = 0
+                            c.breach_nudge_pending = False
+                            c.client_warned = False
+                            c.category = "first_thing_tomorrow"
+                        self._defer(_rescheduled)
                     elif a.action == "breached":
-                        c.status = CommitmentStatus.BREACHED
+                        self._defer(lambda c=c: setattr(c, "status", CommitmentStatus.BREACHED))
                     out["commitment_actions"].append({"commitment_id": c.commitment_id, "action": a.action, "reason": a.reason,
                                                       "send_at": a.send_at.isoformat() if a.send_at else None,
                                                       "client_message": a.message, "new_due_at": a.new_due_at.isoformat() if a.new_due_at else None,
                                                       "quiet_hours_override": a.quiet_hours_override})
+            out["escalation_deliveries"] = self._retry_escalation_pushes(rec)
             return out
+
+    def _retry_escalation_pushes(self, rec: ClientRecord) -> list[dict]:
+        """Fix wave 3 (wave-2 leftover): a briefing that did not reach Andre
+        is retried on tick — bounded by ``escalation_push_max_attempts``
+        (initial push included), every attempt recorded before and after,
+        like the Promise Keeper nudge. Once delivered, the client commitment
+        is made (a fresh time, since the client hears it now). A briefing
+        delivered whose commitment record failed is completed here too."""
+        cfg = self.config
+        out = []
+        for eid in list(rec.escalation_ids):
+            esc = self.escalations[eid]
+            if esc.resolved_at is not None or esc.acknowledged_at is not None:
+                continue
+            p = self._esc_plans[eid]
+            if esc.push_delivered:
+                status = self._complete_escalation(rec, esc, client_live=False, defer=True)
+                if status is not None:
+                    out.append(self._delivery_view(esc, p, True, esc.push_attempts, False, status))
+                continue
+            if esc.push_attempts >= cfg.escalation_push_max_attempts:
+                continue
+            attempt = esc.push_attempts + 1
+            self._record("andre_push_retry_request", "intel_10_escalation_briefing", rec.client_id,
+                         {"escalation_id": eid, "attempt": attempt, "max_attempts": cfg.escalation_push_max_attempts},
+                         f"Briefing push to Andre retried (attempt {attempt})")
+            delivered, detail = self._effect("andre_push", lambda: self._push_andre(eid, p.briefing.model_dump(mode="json")),
+                                             done=lambda r: bool(r[0]))
+            will_retry = (not delivered) and attempt < cfg.escalation_push_max_attempts
+            payload = {"escalation_id": eid, "delivered": delivered, "attempt": attempt,
+                       "max_attempts": cfg.escalation_push_max_attempts, "will_retry": will_retry}
+            summary = ("Briefing delivered to Andre on retry" if delivered else
+                       f"Briefing NOT delivered to Andre ({detail}); " + ("retry next tick" if will_retry else "no retries left"))[:280]
+            status = esc.client_message_status
+            if delivered:
+                esc.push_attempts, esc.push_delivered, esc.push_detail = attempt, True, detail
+                self._record_result("andre_push_result", "intel_10_escalation_briefing", rec.client_id, payload, summary)
+                status = self._complete_escalation(rec, esc, client_live=False, defer=True) or status
+            else:
+                self._record("andre_push_result", "intel_10_escalation_briefing", rec.client_id, payload, summary)
+
+                def _not_delivered(esc=esc, attempt=attempt, detail=detail):
+                    esc.push_attempts, esc.push_detail = attempt, detail
+                self._defer(_not_delivered)  # counted when the tick completes (as the nudge)
+            out.append(self._delivery_view(esc, p, delivered, attempt, will_retry, status))
+        return out
+
+    @staticmethod
+    def _delivery_view(esc: Escalation, p, delivered: bool, attempt: int, will_retry: bool, status: str) -> dict:
+        return {"escalation_id": esc.escalation_id, "delivered": delivered, "attempt": attempt, "will_retry": will_retry,
+                "client_message": check_outbound(p.commitment.text) if (delivered and status == "released") else None,
+                "client_message_status": status}
 
     # --- health (13), view, memory, exit ----------------------------------------------
 
@@ -1221,6 +1495,7 @@ class OnboardingService:
             rec = self.clients.get(client_id)
             if rec is None:
                 raise NotFound("unknown client")
+            self._flush_pending(rec.client_id)
             self._record("client_memory_deleted", "memory_client", rec.client_id, {}, "Client requested deletion of their memory (P11)")
             deleted = self.memory.delete(rec.client_id)
             return {"deleted": deleted}
@@ -1279,9 +1554,9 @@ class OnboardingService:
                              "Full client file handed to the receiving department")
                 ruling = self._effect("activation_handoff", lambda: self.depts.handoff.accept(self._client_file(rec)),
                                       done=lambda r: r.allowed)
-                rec.handoff_accepted = ruling.allowed
-                self._record("activation_handoff_ruling", "onboarding_service", rec.client_id, {"accepted": ruling.allowed},
-                             f"Handoff {'accepted' if ruling.allowed else 'not accepted'}")
+                rec.handoff_accepted = ruling.allowed  # reality; its result record is owed until written (N7 class)
+                self._record_result("activation_handoff_ruling", "onboarding_service", rec.client_id, {"accepted": ruling.allowed},
+                                    f"Handoff {'accepted' if ruling.allowed else 'not accepted'}")
                 info = {"accepted": ruling.allowed, "detail": ruling.detail or "; ".join(ruling.unmet)}
                 return info, ([] if ruling.allowed else [f"handoff/{u}" for u in ruling.unmet])
 
@@ -1321,10 +1596,10 @@ class OnboardingService:
         activated = not unmet
         decision = ActivationDecision(subject_id=subject_id, lane=lane, activated=activated, contract=g14, compliance=g15,
                                       unmet=unmet, handoff=handoff)
-        rec.activation = decision
         if gates_passed:
             self._record("activation_outcome", "intel_15_compliance", subject_id, {"activated": activated, "unmet": unmet},
                          f"Activation {'complete' if activated else f'not complete: {crossing} failed'}")
+        rec.activation = decision  # only after every record it depends on (fix wave 3, N2 sweep)
         if not activated:
             raise Conflict("activation blocked", _dump(decision))
         return _dump(decision)
@@ -1333,7 +1608,11 @@ class OnboardingService:
 
     def apply_creator(self, app: ClipperApplication) -> dict:
         with self._op("apply_creator"):
-            if app.creator_id in self.creators:
+            digest = hashlib.sha256(app.model_dump_json().encode()).hexdigest()
+            existing = self.creators.get(app.creator_id)
+            if existing is not None:
+                if existing.apply_out is not None:
+                    return self._complete_apply(existing, digest)
                 raise Conflict("creator already applied")
             flags = self._flag_injection(app.creator_id, app.bio, "creator_bio")
             # Age is computed on the SERVER's date (UTC-12), never a caller date (F1).
@@ -1351,7 +1630,9 @@ class OnboardingService:
             if decision.outcome == VettingOutcome.SEND_TO_ANDRE:
                 self._record("andre_push_request", "intel_11_creator_vetting", app.creator_id, {"reasons": decision.reasons},
                              "Clipper application sent to Andre with written reasons")
-            rec = CreatorRecord(app.creator_id, app, decision, True, app.w9_received, app.disclosure_training_completed,
+            # Fix wave 3 (N5): the bio is client free text — kept only redacted.
+            stored_app = app.model_copy(update={"bio": redact_text(app.bio)})
+            rec = CreatorRecord(app.creator_id, stored_app, decision, True, app.w9_received, app.disclosure_training_completed,
                                 app.creator_agreement_signed)
             message = {
                 VettingOutcome.APPROVE: "You're approved. We're setting up your materials, tracking links and payment details now.",
@@ -1362,14 +1643,17 @@ class OnboardingService:
             }[decision.outcome]
             out = {"first_message": first, "vetting": _dump(decision), "applicant_message": check_outbound(message),
                    "andre_referral": referral, "activation": None}
+            # Stage then commit (fix wave 3, N2): the creator becomes visible
+            # only after every record it depends on — or, if an outside
+            # effect already happened, as it really is, with a retry of the
+            # same application completing it (never a permanent 409).
             try:
                 if decision.outcome == VettingOutcome.SEND_TO_ANDRE:
                     delivered, detail = self._effect("andre_push", lambda: self._push_andre(
                         f"vet-{app.creator_id}", {"reasons": decision.reasons}), done=lambda r: bool(r[0]))
                     out["andre_referral"] = {"delivered": delivered, "detail": detail}
-                    self.creators[app.creator_id] = rec
-                    self._record("andre_push_result", "intel_11_creator_vetting", app.creator_id, {"delivered": delivered},
-                                 f"Clipper referral {'delivered to' if delivered else 'NOT delivered to'} Andre")
+                    self._record_result("andre_push_result", "intel_11_creator_vetting", app.creator_id, {"delivered": delivered},
+                                        f"Clipper referral {'delivered to' if delivered else 'NOT delivered to'} Andre")
                 elif decision.outcome == VettingOutcome.APPROVE:
                     # Approval triggers INSTANT activation (spec) — through the same gates.
                     try:
@@ -1377,12 +1661,27 @@ class OnboardingService:
                     except Conflict as exc:
                         out["activation"] = exc.body
             except LedgerWriteAfterEffects:
-                # Something outside already happened for this applicant: keep the
-                # record of them so state matches reality (and a retry cannot redo it).
+                rec.apply_digest, rec.apply_out = digest, out
                 self.creators[app.creator_id] = rec
                 raise
             self.creators[app.creator_id] = rec
             return out
+
+    def _complete_apply(self, rec: CreatorRecord, digest: str) -> dict:
+        """Retry of an application that stopped after an outside effect:
+        write the owed result records (same ids) and finish the activation
+        (the payout is never activated twice)."""
+        self._flush_pending(rec.creator_id)
+        out, same = rec.apply_out, digest == rec.apply_digest
+        if rec.vetting.outcome == VettingOutcome.APPROVE and (rec.activation is None or not rec.activation.activated):
+            try:
+                out["activation"] = self._activate_creator(rec)
+            except Conflict as exc:
+                out["activation"] = exc.body
+        rec.apply_digest = rec.apply_out = None
+        if not same:
+            raise Conflict("creator already applied (the earlier application's missing records are now written)")
+        return out
 
     def creator_flag(self, creator_id: str, which: str, req: rq.CreatorFlagRequest) -> dict:
         with self._op("creator_flag"):
@@ -1399,6 +1698,7 @@ class OnboardingService:
             return self._activate_creator(self._creator(creator_id))
 
     def _activate_creator(self, rec: CreatorRecord) -> dict:
+        self._flush_pending(rec.creator_id)
         self._record("age_verification_request", "intel_15_compliance", rec.creator_id, {},
                      "18+ verification requested from Verification and Integrity")
         age = self.depts.verification.age_verified_18_plus(rec.creator_id)
@@ -1427,9 +1727,11 @@ class OnboardingService:
                          "Approved clipper with W-9 on file -> payout account activation requested")
             r = self._effect("payout_account_activation", lambda: self.depts.payouts.activate_payout_account(rec.creator_id),
                              done=lambda x: x.allowed)
-            rec.payout_active = r.allowed
-            self._record("payout_activation_ruling", "intel_11_creator_vetting", rec.creator_id, {"allowed": r.allowed},
-                         f"Payout account {'active' if r.allowed else 'not activated'}")
+            rec.payout_active = r.allowed  # reality
+            # Fix wave 3 (N7): owed until written; a retry (which takes the
+            # "already active" path above) writes it first, same event id.
+            self._record_result("payout_activation_ruling", "intel_11_creator_vetting", rec.creator_id, {"allowed": r.allowed},
+                                f"Payout account {'active' if r.allowed else 'not activated'}")
             return {"payout_account": r.allowed, "detail": r.detail or "; ".join(r.unmet)}, [f"payout/{u}" for u in r.unmet]
 
         result = self._finish_activation(rec.creator_id, Lane.ZBC_CREATOR, g14, g15, payout, rec, "payout account activation")
