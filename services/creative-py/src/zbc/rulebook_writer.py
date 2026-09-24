@@ -26,7 +26,7 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict, Field
 
 from shared.registry import PlatformRulesRegistry
-from shared.types import NonEmptyStr, SafeId
+from shared.types import CampaignId, NonEmptyStr, SafeId
 from zbc.platform_rules import length_rows, originality_rows
 from zbc.rulebook import (
     PREFIX,
@@ -57,7 +57,7 @@ class CampaignGoal(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    campaign_id: SafeId
+    campaign_id: CampaignId
     client_id: SafeId
     vertical: NonEmptyStr
     objective: NonEmptyStr

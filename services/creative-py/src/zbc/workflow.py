@@ -13,15 +13,29 @@ eligibility (Clip Review AND Verification and Integrity AND Compliance 38).
 Creative Memory (7) learns only attested results.
 
 Evidence rule: every approval, rejection, signature and crossing is
-recorded through the ledger BEFORE state changes. If the record fails,
-LedgerRecordError propagates, nothing changed, and the API says so (503).
-Guardrail refusals are recorded best-effort and always stand.
+recorded through the ledger BEFORE state changes, and every request to an
+outside department is on the ledger BEFORE it is made (`RecordedPort`, or
+the intent record that lists it: `rulebook_live` before the Clipper
+Network announcement, `campaign_kit_built` before the seed commissions).
+If the record fails, LedgerRecordError propagates, nothing changed, no one
+was called, and the API says so (503). Guardrail refusals are recorded
+best-effort and always stand.
+
+Rulebook version of a clip (fix wave 1, F13): `posted_at` and
+`rulebook_version` are ASSERTED by the clipper; the server records its own
+receipt time (`received_at`). A post dated in the future is refused. A
+clip may declare the version that was live when it says it posted, but a
+version that has been superseded is judged automatically only if the clip
+reaches us within `superseded_grace_hours` (default 72, config
+CREATIVE_SUPERSEDED_GRACE_HOURS) of the supersession; later, the clip goes
+to the human queue with the reason — a backdated post can't buy older,
+more lenient rules automatically.
 """
 
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict
 
@@ -30,7 +44,7 @@ from shared.clock import Clock
 from shared.departments import Departments
 from shared.errors import CreativeError, FrozenError, NotFound, PreconditionFailed, ValidationFailed
 from shared.founder import FOUNDER_ACTOR, FounderGate
-from shared.ledger import EvidenceRecorder
+from shared.ledger import EvidenceRecorder, LedgerRecordError, OutcomeNotRecorded, RecordedPort, check_subject, serialized
 from shared.registry import PlatformRulesRegistry
 from shared.rights import RightsRegistry
 from zbc import campaign_kit, campaign_rulebook, clip_review, hook_angle, payout_eligibility, rights_clearance
@@ -52,6 +66,8 @@ A_KIT = "zbc_campaign_kit"
 A_REVIEW = "zbc_clip_review"
 A_MEMORY = "zbc_creative_memory"
 A_ELIGIBILITY = "zbc_payout_gate"
+
+DEFAULT_SUPERSEDED_GRACE_HOURS = 72
 
 
 class HumanVerdict(BaseModel):
@@ -80,9 +96,33 @@ class ZbcWorkflow:
     kits: dict[str, CampaignKit] = field(default_factory=dict)
     submissions: dict[str, ClipSubmission] = field(default_factory=dict)
     decisions: dict[str, ClipReviewDecision] = field(default_factory=dict)
-    _ids: itertools.count = field(default_factory=lambda: itertools.count(1))
+    superseded_grace_hours: int = DEFAULT_SUPERSEDED_GRACE_HOURS
+    _n: int = 1
+    # First-attempt time of an operation whose record failed, so an identical
+    # retry rebuilds the identical event (F11) instead of a second record.
+    _op_times: dict[str, datetime] = field(default_factory=dict)
 
     # --- helpers ------------------------------------------------------------------
+    @staticmethod
+    def _subject(campaign_id: str, version: int) -> str:
+        return check_subject(f"{campaign_id}:v{version}", "rulebook subject")
+
+    def _op_now(self, op: str) -> datetime:
+        """The time of this operation: the clock, or — ONLY when an earlier
+        attempt of the same operation failed at the ledger — that attempt's
+        time, so the retry rebuilds the identical event. A refusal for any
+        other reason never reserves a time (no "early receipt" games)."""
+        return self._op_times.get(op) or self.clock.now()
+
+    def _record_op(self, op: str, at: datetime, *args, **kwargs) -> str:
+        try:
+            eid = self.recorder.record(*args, **kwargs)
+        except LedgerRecordError:
+            self._op_times[op] = at
+            raise
+        self._op_times.pop(op, None)
+        return eid
+
     def _refuse(self, exc: CreativeError, actor: str, subject_id: str, action: str):
         self.recorder.try_record("guardrail_refusal", actor if _actor_like(actor) else "unknown", subject_id,
                                  {"action": action, "reason": exc.reason}, f"Refused {action}: {exc.reason}")
@@ -101,21 +141,24 @@ class ZbcWorkflow:
         return rb
 
     # --- Job 1: set the standard ----------------------------------------------------
+    @serialized
     def draft_rulebook(self, goal: CampaignGoal, actor_id: str) -> Rulebook:
         cid = goal.campaign_id
+        subject = self._subject(cid, 1)
         self._guard(lambda: self.actors.require_role(actor_id, Role.ZBC_RULEBOOK_WRITER), actor_id, cid, "rulebook draft")
         if self.rulebooks.versions(cid):
             raise PreconditionFailed(f"campaign {cid} already has a rulebook; edit the draft or revise the live version")
         rb = rulebook_writer.draft(goal, self.registry, self.clock.today(), version=1, drafted_by=actor_id)
         self.rulebooks.check_add(rb)
-        self.recorder.record("rulebook_drafted", actor_id, f"{cid}:v1", {"rulebook": rb.model_dump(mode="json")},
+        self.recorder.record("rulebook_drafted", actor_id, subject, {"rulebook": rb.model_dump(mode="json")},
                              f"Rulebook {cid} v1 drafted; {len(rb.rules)} rules, {len(rb.blocking_issues)} blocking issue(s)")
         self.rulebooks.commit(rb)
         self.goals[(cid, 1)] = goal
         return rb
 
+    @serialized
     def edit_rulebook(self, campaign_id: str, version: int, goal: CampaignGoal, actor_id: str) -> Rulebook:
-        subject = f"{campaign_id}:v{version}"
+        subject = self._subject(campaign_id, version)
         existing = self.rulebooks.get(campaign_id, version)
         if existing.frozen:
             self._refuse(FrozenError(
@@ -137,6 +180,7 @@ class ZbcWorkflow:
         self.goals[(campaign_id, version)] = goal
         return rb
 
+    @serialized
     def revise_rulebook(self, campaign_id: str, goal: CampaignGoal, actor_id: str) -> Rulebook:
         self._guard(lambda: self.actors.require_role(actor_id, Role.ZBC_RULEBOOK_WRITER), actor_id, campaign_id, "revision")
         live = self._live(campaign_id)
@@ -144,17 +188,19 @@ class ZbcWorkflow:
         if latest.version != live.version:
             raise PreconditionFailed(f"revision v{latest.version} is already open ({latest.status.value}); edit it instead")
         v = self.rulebooks.next_version(campaign_id)
+        subject = self._subject(campaign_id, v)
         rb = rulebook_writer.revise(live, goal, self.registry, self.clock.today(), v, drafted_by=actor_id)
         self.rulebooks.check_add(rb)
-        self.recorder.record("rulebook_revision_drafted", actor_id, f"{campaign_id}:v{v}",
+        self.recorder.record("rulebook_revision_drafted", actor_id, subject,
                              {"rulebook": rb.model_dump(mode="json"), "supersedes": live.version},
                              f"Rulebook {campaign_id} v{v} drafted as a revision of live v{live.version}")
         self.rulebooks.commit(rb)
         self.goals[(campaign_id, v)] = goal
         return rb
 
+    @serialized
     def review_rulebook(self, campaign_id: str, version: int, approver_id: str) -> Rulebook:
-        subject = f"{campaign_id}:v{version}"
+        subject = self._subject(campaign_id, version)
         rb = self.rulebooks.get(campaign_id, version)
         result = self._guard(lambda: campaign_rulebook.review(rb, approver_id, self.actors, self.registry, self.clock.today()),
                              approver_id, subject, "rulebook approval")
@@ -171,8 +217,9 @@ class ZbcWorkflow:
         self.rulebooks.commit(new)
         return new
 
+    @serialized
     def sign_rulebook(self, campaign_id: str, version: int, founder_token: str | None) -> Rulebook:
-        subject = f"{campaign_id}:v{version}"
+        subject = self._subject(campaign_id, version)
         rb = self.rulebooks.get(campaign_id, version)
         if rb.status is not RulebookStatus.APPROVED:
             self._refuse(PreconditionFailed(
@@ -187,8 +234,11 @@ class ZbcWorkflow:
         self.rulebooks.commit(new)
         return new
 
+    @serialized
     def check_rights(self, campaign_id: str, assets: list[DeclaredAsset], uses_ai_generative_fill: bool = False) -> ClearanceResult:
-        res = rights_clearance.check_campaign(campaign_id, assets, self.rights, self.departments.legal,
+        check_subject(campaign_id, "campaign id")
+        legal = RecordedPort(self.departments.legal, "legal_37", self.recorder, A_RIGHTS, campaign_id)
+        res = rights_clearance.check_campaign(campaign_id, assets, self.rights, legal,
                                               self.clock.today(), uses_ai_generative_fill)
         self.recorder.record("rights_clearance_checked", A_RIGHTS, campaign_id, res.as_dict(),
                              f"Rights for {campaign_id}: {'cleared' if res.cleared else 'NOT cleared'} "
@@ -196,8 +246,13 @@ class ZbcWorkflow:
         self.rights_checks[campaign_id] = (list(assets), uses_ai_generative_fill, res)
         return res
 
+    @serialized
     def go_live(self, campaign_id: str, version: int) -> Rulebook:
-        subject = f"{campaign_id}:v{version}"
+        """Record first (F9): `rulebook_live` is recorded and the version
+        committed LIVE before Clipper Network is told anything; the
+        announcement's answer is recorded afterwards (a failure there is
+        `took_effect: "partial"` — the version IS live)."""
+        subject = self._subject(campaign_id, version)
         rb = self.rulebooks.get(campaign_id, version)
         if rb.status is not RulebookStatus.SIGNED:
             self._refuse(PreconditionFailed(
@@ -208,7 +263,8 @@ class ZbcWorkflow:
             self._refuse(PreconditionFailed(f"no rights clearance check on file for {campaign_id} (fails closed)"),
                          A_RIGHTS, subject, "go live")
         assets, gen_fill, _ = stored
-        res = rights_clearance.check_campaign(campaign_id, assets, self.rights, self.departments.legal,
+        legal = RecordedPort(self.departments.legal, "legal_37", self.recorder, A_RIGHTS, subject)
+        res = rights_clearance.check_campaign(campaign_id, assets, self.rights, legal,
                                               self.clock.today(), gen_fill)  # re-checked, not trusted
         rc = rb.one(RuleKind.RIGHTS_CLEARED_ONLY)
         unchecked = sorted(set(rc.params.get("allowed_asset_ids", [])) - {a.asset_id for a in assets}) if rc else []
@@ -219,63 +275,93 @@ class ZbcWorkflow:
             self._refuse(PreconditionFailed("rights not cleared: " + "; ".join(reasons)), A_RIGHTS, subject, "go live")
         previous = self.rulebooks.live(campaign_id)
         now = self.clock.now()
-        announcement = self.departments.clipper_network.announce_rulebook_version(
-            campaign_id, version, {"supersedes": previous.version if previous else None})
-        self.recorder.record("crossing_clipper_network", A_RULEBOOK, subject, announcement.__dict__,
-                             f"Clipper Network announcement of {campaign_id} v{version}: "
-                             f"{'delivered' if announcement.allowed else 'NOT delivered'} — {announcement.reason}")
+        sup = previous.model_copy(update={"status": RulebookStatus.SUPERSEDED, "superseded_at": now}) if previous else None
+        live = rb.model_copy(update={"status": RulebookStatus.LIVE, "live_at": now})
+        if sup is not None:
+            self.rulebooks.check_replace(sup)
+        self.rulebooks.check_replace(live)
+        facts = {"supersedes": previous.version if previous else None}
         self.recorder.record("rulebook_live", A_RULEBOOK, subject,
                              {"version": version, "superseded_version": previous.version if previous else None,
-                              "rights": res.as_dict(), "announcement_delivered": announcement.allowed},
+                              "rights": res.as_dict(),
+                              "clipper_network_announcement": {"status": "requested", "facts": facts}},
                              f"Rulebook {campaign_id} v{version} is LIVE and frozen"
-                             + (f"; v{previous.version} superseded" if previous else ""))
-        if previous is not None:
-            sup = previous.model_copy(update={"status": RulebookStatus.SUPERSEDED, "superseded_at": now})
-            self.rulebooks.check_replace(sup)
+                             + (f"; v{previous.version} superseded" if previous else "")
+                             + "; Clipper Network announcement follows")
+        if sup is not None:
             self.rulebooks.commit(sup)
-        live = rb.model_copy(update={"status": RulebookStatus.LIVE, "live_at": now})
-        self.rulebooks.check_replace(live)
         self.rulebooks.commit(live)
+        try:
+            announcement = self.departments.clipper_network.announce_rulebook_version(campaign_id, version, facts)
+        except Exception as exc:  # an unreachable department is an answer ("not delivered"), never a 500
+            from shared.departments import GateResult
+            announcement = GateResult("clipper_network", False, f"announcement call failed: {type(exc).__name__}")
+        try:
+            self.recorder.record("crossing_clipper_network", A_RULEBOOK, subject, announcement.__dict__,
+                                 f"Clipper Network announcement of {campaign_id} v{version}: "
+                                 f"{'delivered' if announcement.allowed else 'NOT delivered'} — {announcement.reason}")
+        except LedgerRecordError as exc:
+            raise OutcomeNotRecorded(
+                f"rulebook {campaign_id} v{version} IS live (recorded) and Clipper Network was sent the announcement, "
+                f"but recording its answer failed ({exc})",
+                {"rulebook": subject, "recorded": ["rulebook_live"], "outside_calls_made": 1,
+                 "not_recorded": "crossing_clipper_network"}) from exc
         return live
 
     # --- Job 2: make the kit --------------------------------------------------------
+    @serialized
     def build_moment_map(self, campaign_id: str, material: SourceMaterial) -> MomentMap:
         rb = self._live(campaign_id)
         mm = source_mining.build(material, rb, self.registry, self.clock.today())
-        self.recorder.record("moment_map_built", A_MINING, f"{campaign_id}:v{rb.version}", mm.model_dump(mode="json"),
+        self.recorder.record("moment_map_built", A_MINING, self._subject(campaign_id, rb.version), mm.model_dump(mode="json"),
                              f"Moment Map for {campaign_id} v{rb.version}: {len(mm.moments)} moment(s), "
                              f"{len(mm.rejected)} segment(s) rejected")
         self.moment_maps[(campaign_id, rb.version)] = mm
         return mm
 
+    @serialized
     def build_hook_sheets(self, campaign_id: str) -> list[HookSheet]:
         rb = self._live(campaign_id)
         mm = self.moment_maps.get((campaign_id, rb.version))
         if mm is None:
             raise PreconditionFailed(f"no Moment Map for {campaign_id} v{rb.version}")
         sh = hook_angle.sheets(mm, rb)
-        self.recorder.record("hook_sheets_built", A_HOOKS, f"{campaign_id}:v{rb.version}",
+        self.recorder.record("hook_sheets_built", A_HOOKS, self._subject(campaign_id, rb.version),
                              {"sheets": [s.model_dump(mode="json") for s in sh]},
                              f"{len(sh)} hook sheet(s) for {campaign_id} v{rb.version}")
         self.hook_sheets[(campaign_id, rb.version)] = sh
         return sh
 
+    @serialized
     def build_kit(self, campaign_id: str, req: KitRequest) -> CampaignKit:
         rb = self._live(campaign_id)
         mm = self.moment_maps.get((campaign_id, rb.version))
         sh = self.hook_sheets.get((campaign_id, rb.version))
         if mm is None or sh is None:
             raise PreconditionFailed(f"the kit needs a Moment Map and hook sheets for {campaign_id} v{rb.version}")
-        kit_id = f"kit-{next(self._ids):04d}"
-        kit = campaign_kit.build(kit_id, rb, mm, sh, req, self.departments.creative_agents)
-        self.recorder.record("crossing_creative_agents", A_KIT, kit_id, {"commissions": kit.commissions},
-                             f"Kit {kit_id}: {sum(c['commissioned'] for c in kit.commissions)}/{len(kit.commissions)} "
-                             "seed-clip commissions accepted by Enigma/Phantom Canvas")
+        kit_id = f"kit-{self._n:04d}"  # consumed only once the kit is recorded
+        kit = campaign_kit.build(kit_id, rb, mm, sh, req)
         self.recorder.record("campaign_kit_built", A_KIT, kit_id, kit.model_dump(mode="json"),
-                             f"Kit {kit_id} for {campaign_id} v{rb.version}: {len(kit.seeds)} seed clip spec(s)")
+                             f"Kit {kit_id} for {campaign_id} v{rb.version}: {len(kit.seeds)} seed clip spec(s); "
+                             f"{len(kit.commissions)} commission request(s) to Enigma/Phantom Canvas follow")
+        self._n += 1
+        self.kits[campaign_id] = kit
+        receipts = campaign_kit.commission_seeds(kit, self.departments.creative_agents)
+        try:
+            self.recorder.record("crossing_creative_agents", A_KIT, kit_id, {"kit_id": kit_id, "receipts": receipts},
+                                 f"Kit {kit_id}: {sum(bool(r['commissioned']) for r in receipts)}/{len(receipts)} "
+                                 "seed-clip commissions accepted by Enigma/Phantom Canvas")
+        except LedgerRecordError as exc:
+            raise OutcomeNotRecorded(
+                f"kit {kit_id} WAS built and recorded and its {len(receipts)} commission request(s) were sent, but "
+                f"recording the agents' answers failed ({exc}); the answers are not applied",
+                {"kit_id": kit_id, "recorded": ["campaign_kit_built"], "outside_calls_made": len(receipts),
+                 "not_recorded": "crossing_creative_agents"}) from exc
+        kit = campaign_kit.apply_receipts(kit, receipts)
         self.kits[campaign_id] = kit
         return kit
 
+    @serialized
     def sign_kit(self, campaign_id: str, founder_token: str | None) -> CampaignKit:
         kit = self.kits.get(campaign_id)
         if kit is None:
@@ -295,6 +381,7 @@ class ZbcWorkflow:
         return signed
 
     # --- Job 3: judge the work ------------------------------------------------------
+    @serialized
     def submit_clip(self, sub: ClipSubmission) -> ClipReviewDecision:
         cid = sub.campaign_id
         kit = self.kits.get(cid)
@@ -305,17 +392,30 @@ class ZbcWorkflow:
         rb = self.rulebooks.get(cid, sub.rulebook_version)
         if rb.live_at is None:
             raise PreconditionFailed(f"rulebook {cid} v{rb.version} never went live; clips can't be made under it")
+        op = f"clip:{sub.submission_id}"
+        received_at = self._op_now(op)  # server receipt time; the first attempt's on a retry
         if sub.posted_at > self.clock.now():
-            raise PreconditionFailed("posted_at is in the future")
+            raise PreconditionFailed(
+                f"posted_at {sub.posted_at.isoformat()} is in the future (server time {self.clock.now().isoformat()})")
         if sub.posted_at < rb.live_at or (rb.superseded_at is not None and sub.posted_at >= rb.superseded_at):
             raise PreconditionFailed(
                 f"clip posted {sub.posted_at.isoformat()} is outside v{rb.version}'s live window; "
                 "declare the version that was live when it was made")
-        decision = clip_review.review(sub, rb, self.registry, self.clock.now(), decided_by=A_REVIEW)
-        self.recorder.record("clip_reviewed", A_REVIEW, sub.submission_id,
-                             {"decision": decision.model_dump(mode="json"), "submission": sub.model_dump(mode="json")},
+        to_human: tuple[str, ...] = ()
+        grace = timedelta(hours=self.superseded_grace_hours)
+        if rb.superseded_at is not None and received_at - rb.superseded_at > grace:
+            to_human = (f"declared v{rb.version} was superseded at {rb.superseded_at.isoformat()}; this clip reached "
+                        f"us at {received_at.isoformat()}, beyond the {self.superseded_grace_hours}h grace window, and "
+                        "its posted_at is self-asserted — a human confirms which version it was made under",)
+        decision = clip_review.review(sub, rb, self.registry, received_at, decided_by=A_REVIEW,
+                                      received_at=received_at, route_to_human=to_human)
+        self._record_op(op, received_at, "clip_reviewed", A_REVIEW, sub.submission_id,
+                             {"decision": decision.model_dump(mode="json"), "submission": sub.model_dump(mode="json"),
+                              "received_at": received_at.isoformat(),
+                              "superseded_grace_hours": self.superseded_grace_hours},
                              f"Clip {sub.submission_id} under {cid} v{rb.version}: {decision.outcome}"
-                             + (f" (broke {', '.join(b.rule_id for b in decision.broken_rules)})" if decision.broken_rules else ""))
+                             + (f" (broke {', '.join(b.rule_id for b in decision.broken_rules)})" if decision.broken_rules else ""),
+                             op_key={"submission_id": sub.submission_id})
         self.submissions[sub.submission_id] = sub
         self.decisions[sub.submission_id] = decision
         return decision
@@ -326,6 +426,7 @@ class ZbcWorkflow:
             raise NotFound(f"submission {submission_id!r} not found")
         return d
 
+    @serialized
     def human_review(self, submission_id: str, reviewer_id: str, verdict: HumanVerdict) -> ClipReviewDecision:
         current = self.get_decision(submission_id)
         sub = self.submissions[submission_id]
@@ -336,16 +437,19 @@ class ZbcWorkflow:
         if verdict.outcome not in ("pass", "reject"):
             raise ValidationFailed("human verdict must be 'pass' or 'reject'", ["outcome"])
         rb = self.rulebooks.get(sub.campaign_id, sub.rulebook_version)
+        op = f"human:{submission_id}"
+        decided_at = self._op_now(op)
         try:
             decision = clip_review.make_decision(
                 rb, submission_id=submission_id, campaign_id=sub.campaign_id, rulebook_version=rb.version,
                 outcome=verdict.outcome, broken_rules=tuple(verdict.broken_rules), human_review_reasons=(),
-                checks=current.checks, decided_by=reviewer_id, decided_at=self.clock.now(),
+                checks=current.checks, decided_by=reviewer_id, decided_at=decided_at,
+                received_at=current.received_at,
             )
         except (RuleCitationError, ValueError) as exc:
             self._refuse(ValidationFailed("human verdict cites rules that are not in this rulebook version",
                                           [str(exc)]), reviewer_id, submission_id, "human clip review")
-        self.recorder.record("clip_human_reviewed", reviewer_id, submission_id,
+        self._record_op(op, decided_at, "clip_human_reviewed", reviewer_id, submission_id,
                              {"decision": decision.model_dump(mode="json"), "note": verdict.note,
                               "previous_reasons": list(current.human_review_reasons)},
                              f"Human review of {submission_id}: {decision.outcome}"
@@ -353,10 +457,14 @@ class ZbcWorkflow:
         self.decisions[submission_id] = decision
         return decision
 
+    @serialized
     def payout_eligibility(self, submission_id: str) -> dict:
         decision = self.get_decision(submission_id)
         sub = self.submissions[submission_id]
-        res = payout_eligibility.evaluate(sub, decision, self.departments.verification, self.departments.compliance)
+        res = payout_eligibility.evaluate(
+            sub, decision,
+            RecordedPort(self.departments.verification, "verification_integrity", self.recorder, A_ELIGIBILITY, submission_id),
+            RecordedPort(self.departments.compliance, "compliance_38", self.recorder, A_ELIGIBILITY, submission_id))
         self.recorder.record("crossing_verification_integrity", A_ELIGIBILITY, submission_id,
                              res.as_dict()["verification"],
                              f"Verification and Integrity on {submission_id}: "
@@ -370,11 +478,14 @@ class ZbcWorkflow:
         return res.as_dict()
 
     # --- memory ---------------------------------------------------------------------
+    @serialized
     def learn_result(self, result: ClipResult) -> MemoryDecision:
         sub = self.submissions.get(result.submission_id)
         if sub is None or sub.campaign_id != result.campaign_id:
             raise NotFound(f"no reviewed submission {result.submission_id} in campaign {result.campaign_id}")
-        decision = self.memory.evaluate(result, self.departments.verification)
+        decision = self.memory.evaluate(
+            result, RecordedPort(self.departments.verification, "verification_integrity", self.recorder, A_MEMORY,
+                                 result.result_id))
         if decision.attestation is not None:
             self.recorder.record("crossing_verification_integrity", A_MEMORY, result.result_id,
                                  {"verified": decision.attestation.verified, "reason": decision.attestation.reason,

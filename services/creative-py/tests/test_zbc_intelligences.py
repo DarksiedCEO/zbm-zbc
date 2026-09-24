@@ -268,8 +268,10 @@ def _kit_inputs(registry):
 
 def test_kit_builds_seeds_and_commissions_via_contract(registry):
     rb, mm, sh = _kit_inputs(registry)
-    kit = campaign_kit.build("kit-1", rb, mm, sh, campaign_kit.KitRequest.model_validate(zbc_kit_request()),
-                             NotWiredCreativeAgents())
+    spec = campaign_kit.build("kit-1", rb, mm, sh, campaign_kit.KitRequest.model_validate(zbc_kit_request()))
+    # build is pure: every commission is only REQUESTED until the workflow has recorded the kit
+    assert all(c["status"] == "requested" and c["commissioned"] is None for c in spec.commissions)
+    kit = campaign_kit.apply_receipts(spec, campaign_kit.commission_seeds(spec, NotWiredCreativeAgents()))
     assert [s.moment_id for s in kit.seeds] == ["m-s1", "m-s2", "m-s3"]  # all score 2 -> by start time
     s = kit.seeds[0]
     assert s.disclosure == "#ad" and s.must_say == ["Listen on Pod Plus"]
@@ -278,16 +280,15 @@ def test_kit_builds_seeds_and_commissions_via_contract(registry):
     assert len(kit.commissions) == 6 and not kit.seed_clips_produced
     assert all("not wired" in c["reason"] for c in kit.commissions)
     assert any("NS-01" in d for d in kit.dont) and any("OW-01" in d for d in kit.dont)
-    kit2 = campaign_kit.build("kit-2", rb, mm, sh, campaign_kit.KitRequest.model_validate(zbc_kit_request()),
-                              AcceptingCreativeAgents())
+    spec2 = campaign_kit.build("kit-2", rb, mm, sh, campaign_kit.KitRequest.model_validate(zbc_kit_request()))
+    kit2 = campaign_kit.apply_receipts(spec2, campaign_kit.commission_seeds(spec2, AcceptingCreativeAgents()))
     assert kit2.seed_clips_produced
 
 
 def test_kit_needs_enough_moments_and_bounds(registry):
     rb, mm, sh = _kit_inputs(registry)
     with pytest.raises(PreconditionFailed, match="K2"):
-        campaign_kit.build("k", rb, mm, sh, campaign_kit.KitRequest.model_validate(zbc_kit_request(seed_count=5)),
-                           NotWiredCreativeAgents())
+        campaign_kit.build("k", rb, mm, sh, campaign_kit.KitRequest.model_validate(zbc_kit_request(seed_count=5)))
     with pytest.raises(ValueError):
         campaign_kit.KitRequest.model_validate(zbc_kit_request(seed_count=6))
     with pytest.raises(ValueError):
@@ -298,8 +299,7 @@ def test_kit_refuses_uncleared_brand_asset_and_never_say_do_example(registry):
     rb, mm, sh = _kit_inputs(registry)
     with pytest.raises(ValidationFailed) as e:
         campaign_kit.build("k", rb, mm, sh, campaign_kit.KitRequest.model_validate(
-            zbc_kit_request(brand_asset_ids=["random_song"], do_examples=["Promise guaranteed returns"])),
-            NotWiredCreativeAgents())
+            zbc_kit_request(brand_asset_ids=["random_song"], do_examples=["Promise guaranteed returns"])))
     assert any("K5" in i for i in e.value.issues) and any("K6" in i for i in e.value.issues)
 
 
@@ -307,7 +307,7 @@ def test_kit_only_from_live_rulebook(registry):
     rb, mm, sh = _kit_inputs(registry)
     with pytest.raises(PreconditionFailed, match="K1"):
         campaign_kit.build("k", rb.model_copy(update={"status": RulebookStatus.SIGNED}), mm, sh,
-                           campaign_kit.KitRequest.model_validate(zbc_kit_request()), NotWiredCreativeAgents())
+                           campaign_kit.KitRequest.model_validate(zbc_kit_request()))
 
 
 # --- 7 Creative Memory ----------------------------------------------------------------------

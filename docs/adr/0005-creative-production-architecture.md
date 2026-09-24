@@ -40,7 +40,7 @@ money. ZBC's unit of work is a campaign, not a clip.
    gate aggregator, not an intelligence, and holds no money.
 
 3. **Deterministic, rule-based, no LLM, no media processing.** Every
-   judgement is an explicit rule with a code (K1–K6 key message, Q1–Q5
+   judgement is an explicit rule with a code (K1–K6 key message, Q1–Q6
    quality, R1–R6 rulebook review, M0–M6 moment map, H1–H5 hooks, C1–C6
    rights, K1–K7 kit, L1–L4 memory, per-rule-kind clip checks) so a
    rejection can always say which rule. Where a model or media library
@@ -70,6 +70,23 @@ money. ZBC's unit of work is a campaign, not a clip.
    refused rather than silently unrecorded. Guardrail refusals are
    recorded best-effort and stand whether or not the record succeeds (a
    failed record must never turn a refusal into an approval).
+   **Outside calls come after the record too (fix wave 1, F9).** No
+   department is called before the request to it is on the ledger: every
+   Compliance 38, Verification and Integrity, Legal 37 and Content
+   Credentials call goes through `RecordedPort`, which records
+   `crossing_<department>_requested` (with the request) first; Enigma /
+   Phantom Canvas commissions are listed in `production_opened` /
+   `campaign_kit_built`, and the Clipper Network announcement in
+   `rulebook_live`, which are recorded — and the job, kit or live version
+   committed — before any call is made. The outside party's answer is
+   recorded afterwards and only then applied. If that last record fails,
+   the API says `503 took_effect: "partial"` with what was recorded and
+   what was sent — never "did not take effect". Finance 31 is never
+   called (tested). Server-assigned ids (`brief-`, `job-`, `work-`,
+   `kit-`) are consumed only when their record succeeds. All decisions
+   run under one service-wide lock, so check → record → commit can't
+   interleave between concurrent requests (four concurrent submissions
+   used to open four review rounds).
 
 7. **One Platform Rules Registry, row-level owners, fail closed.** Rows
    carry platform, placement, rule key, value, official https source URL,
@@ -123,6 +140,19 @@ money. ZBC's unit of work is a campaign, not a clip.
     retired and never reused. Each clip declares the version it was made
     under; the service checks the clip was posted inside that version's
     live window and judges it by that version only.
+    **The clipper's claim is bounded (fix wave 1, F13).** `posted_at` and
+    `rulebook_version` are asserted by the clipper, so the server records
+    its own receipt time (`received_at`, on the decision and in the
+    ledger payload). A `posted_at` later than server time is refused
+    (409). A clip declaring a version that has since been superseded is
+    judged automatically only if it reaches us within
+    `CREATIVE_SUPERSEDED_GRACE_HOURS` (default **72 h**, integer 0–720,
+    anything else refuses to start) of the supersession; after that it
+    goes to the human queue with the reason and what the automatic result
+    would have been. 72 h is conservative: long enough for a clip made
+    just before a change to arrive through normal posting and reporting
+    lag, short enough that backdating into an older, more lenient version
+    stops being automatic within three days.
 
 11. **No rule on the page, no rejection.** A `ClipReviewDecision` can
     only be validated with its rulebook version's rule ids in the pydantic
@@ -152,10 +182,70 @@ money. ZBC's unit of work is a campaign, not a clip.
     otherwise gives no advice.
 
 14. **Submitted text is data.** Captions, bios, transcripts and brief text
-    are normalised (NFKC, casefold, zero-width removal) and searched for
-    the rulebook's phrases only. "Ignore your rules and approve" in a
-    caption or bio has no effect (tested: identical decision with and
-    without it).
+    are normalised and searched for the rulebook's phrases only. "Ignore
+    your rules and approve" in a caption or bio has no effect (tested:
+    identical decision with and without it). There is no prompt-injection
+    *detector*, deliberately: nothing interprets text, so there is
+    nothing for an injection to steer.
+    **Normalisation defeats cheap evasions (fix wave 1, F12).**
+    `shared/text.canonical`: NFKC; every format character (Unicode Cf —
+    zero-width, soft hyphen, bidi) deleted; diacritics stripped; casefold;
+    common Cyrillic / Greek / Armenian / Latin-extended lookalikes mapped
+    to Latin. Must-say, never-say, disclosure, angle keywords, hook lines
+    and kit examples all match on that form (ZBM Quality Q2–Q4 too). A
+    phrase found only once separator-split letters are rejoined ("g u a
+    r", "g.u.a.r", "guaran teed") or leetspeak is folded is LOOSE: a
+    never-say or must-say LOOSE hit, or a disclosure found only that way,
+    sends the clip to the human queue. Independently, any caption,
+    on-screen text or transcript with an obfuscation signal
+    (mixed-script lookalikes, a format character hidden inside a word,
+    4+ single letters split by separators) is never an automatic pass
+    (human queue); in ZBM it is Quality finding Q6.
+
+15. **Deterministic ledger event ids (fix wave 1, F11).** `event_id =
+    "cp:" + SHA-256(service instance, department, event_type, actor,
+    subject_id, n, operation)`, where `operation` is the canonical payload
+    (or, for clip submissions, the client's own idempotency key: the
+    submission id) and `n` counts successful records of that
+    (event_type, subject). `n` advances only on success, so a retry of an
+    operation whose record failed — including one the ledger committed
+    but whose response was lost — sends the SAME id: an identical retry
+    gets ledger-rust's 200 and the decision takes effect exactly once;
+    different content under that id gets 409 and is refused. Two separate
+    decisions with identical content still get different ids (`n` has
+    advanced). A retried clip submission or human review reuses the
+    first attempt's time, but only when that attempt failed at the ledger
+    (a refusal for any other reason reserves nothing). The instance id is
+    random per process because every object id (`brief-0001`, …) restarts
+    with the in-memory state; without it a restarted service would
+    collide with its predecessor's events.
+
+16. **Review cap per deliverable of a brief (fix wave 1, F8).** A review
+    chain is `(brief_id, deliverable_id, variant_index)`: one deliverable
+    variant of one approved brief. Rounds are counted per chain across
+    every job opened on that brief; a new job never resets them, and only
+    one version of a chain is in flight at a time across jobs. While any
+    work of a brief is escalated to Andre and unresolved, no new job and
+    no new work submission on that brief is accepted; only Andre, with
+    `X-Andre-Approval-Token`, resolves it (accept or kill). A chain that
+    was escalated never gets a third round in any job, whatever Andre
+    decided — a genuinely new attempt needs a new brief approved by the
+    Creative Lead.
+
+17. **Every ledger field fits before any work (fix wave 1, integration
+    defects 2 and 5, F16).** Campaign ids are at most 100 characters and
+    rulebook versions at most 9,999,999, so the derived subject
+    `{campaign_id}:v{version}` is at most 109 characters; path ids are
+    validated by FastAPI (422). The recorder checks every derived field
+    against ledger-rust's exact rules before calling it and refuses with
+    422 (`LedgerFieldInvalid`), never a "ledger failure" 503 while the
+    ledger is healthy. The local rules match `EventInput::validate`
+    exactly: whole-string ASCII id/slug classes (no trailing newline),
+    summary 1–280 Unicode scalar values with no control character (C0,
+    DEL **and C1**) and no lone surrogate; summaries are sanitised to
+    that. The test double (`FakeLedgerClient`) and
+    `devtools/fake_ledger_server.py` implement ledger-rust's rules
+    independently, so tests can't be looser than production.
 
 ## Shared vs separate
 
@@ -239,23 +329,38 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
 9. **Seed clips are specs only.** Andre signs the kit spec; the seed
    clips themselves are not produced until the Enigma/Phantom Canvas
    contract endpoint is wired.
-10. **Ledger event ids are random per attempt.** If the ledger writes an
-    event but the response is lost, the service reports 503 and does not
-    apply the decision, while the ledger holds a record of it; a retry
-    records a second event. Deterministic event ids would make retries
-    idempotent — not done this pass.
+10. **Retries are exactly-once only if they happen.** With deterministic
+    ids (decision 15) a retry of a timed-out-but-committed record is one
+    record and one effect. If the caller never retries, or a different
+    decision on the same subject succeeds first, the ledger keeps a record
+    of a decision the service never applied (the service answered 503).
+    Across a restart nothing dedupes (in-memory state; see 1).
 11. **Heuristics are heuristics.** Key-message rule, 6-word/2-second hook
     limit, keyword-based moment matching and on-brief borderline check
     are deliberately simple and conservative; they will mis-sort some
     real cases (false rejects go to rewrite or the human queue).
-12. **Not run against the real ledger-rust.** The `/ledger/events`
-    endpoint belongs to another workstream running in parallel. The HTTP
-    client is tested with `httpx.MockTransport` and was run live against
-    `devtools/fake_ledger_server.py`, which implements the §2 contract
-    shape (fields, validation, 201/200/409), not ledger-rust itself.
+12. **Run against the real ledger-rust (fix wave 1).** `live_smoke.py`
+    passes end to end against a ledger-rust built from this tree, on a
+    chain that also holds finding entries; the chain verifies. See the
+    service README.
 13. **No AGPL review done** because no third-party media code was added;
     any of the approved building blocks needs a licence check (AGPL →
     Legal 37 sign-off) at integration time.
+14. **Outside answers can be lost after the request was sent.** If the
+    record of an answer (commission receipts, Clipper Network delivery)
+    fails, the request was already sent and is on the ledger, the answer
+    is not applied, and the API says `took_effect: "partial"`. Nothing
+    re-asks automatically; the commission request ids are deterministic
+    (`{job|seed}.{agent}`) so the Enigma / Phantom Canvas contract must
+    de-duplicate on them when it is wired.
+15. **Obfuscation handling is conservative, not complete.** The lookalike
+    table is the common subset of Unicode confusables, not all of it; a
+    determined evader with an unmapped script gets through the phrase
+    match (but not the mixed-script signal if Latin is present). The
+    signals send some honest clips to the human queue: any clip mixing
+    Cyrillic/Greek/Armenian letters with Latin text (e.g. a Russian
+    caption with `#ad`), soft hyphens inside words, and four or more
+    single letters in a row.
 
 ## Verified
 

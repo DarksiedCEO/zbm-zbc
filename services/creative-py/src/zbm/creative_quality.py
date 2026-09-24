@@ -10,6 +10,11 @@ Decides: pass / send back / escalate to Andre.
     Q2 the key message appears (normalised) in the script or supers
     Q3 every mandatory appears in the script or supers
     Q4 every disclosure requirement appears in the disclosure text or supers
+    Q6 no obfuscated text (mixed-script lookalikes, hidden format
+       characters, separator-split letters) in the declared hook, script,
+       supers or disclosure — Q2-Q4 match on canonical text with
+       lookalikes folded, so obfuscated text is never an automatic pass
+       (fix wave 1, F12)
 - Q5 premium bar: the Quality reviewer may send ANY work back with written
   notes, even when Q1–Q4 pass.
 - Review rounds are capped at MAX_ROUNDS (2). A failure in round 2 is
@@ -27,7 +32,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from shared.errors import PreconditionFailed
-from shared.text import contains_phrase
+from shared.text import contains_phrase, obfuscation_signals
 from zbm.brief import BriefFields
 
 MAX_ROUNDS = 2
@@ -74,6 +79,10 @@ def judge(fields: BriefFields, decl: QualityDeclaration, reviewer_notes: list[st
     for d in fields.disclosure_requirements:
         if not contains_phrase(disclosure_body, d):
             findings.append(f"Q4: disclosure missing: {d!r}")
+    for label, text in (("opening", decl.opening_text), ("script", decl.script_text),
+                        *((f"super {i + 1}", t) for i, t in enumerate(decl.supers)), ("disclosure", decl.disclosure_text)):
+        for sig in obfuscation_signals(text):
+            findings.append(f"Q6 obfuscated text in {label}: {sig}")
     for note in reviewer_notes:
         if note.strip():
             findings.append(f"Q5 premium bar: {note.strip()}")

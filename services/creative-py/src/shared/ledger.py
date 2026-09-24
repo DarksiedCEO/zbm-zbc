@@ -13,33 +13,79 @@ Implementations:
 - `UnconfiguredLedgerClient` — the API default when LEDGER_SERVICE_URL /
   LEDGER_SERVICE_TOKEN are unset: every record fails, so every decision is
   refused (fail closed, never silently unrecorded).
-- `FakeLedgerClient`   — in-memory test double that enforces the same
-  field contract and idempotency semantics (201/200/409) as the real one.
+- `FakeLedgerClient`   — in-memory test double that enforces ledger-rust's
+  field rules (an independent port of `EventInput::validate` in
+  services/ledger-rust/src/event.rs, so the client's own validator can't
+  make tests looser than production) and its idempotency (201/200/409).
+
+Event ids are DETERMINISTIC (fix wave 1, F11; ADR 0005 decision 15):
+`cp:` + SHA-256 over (service instance, department, event_type, actor,
+subject_id, per-(event_type, subject_id) sequence number, canonical
+operation). The sequence number advances only when a record succeeds, so
+a retry of an operation whose record failed — including a record the
+ledger committed but whose response was lost — sends the SAME event id and
+gets the ledger's 200 (identical) or 409 (different content), and the
+decision takes effect exactly once. Two genuinely separate decisions with
+identical content get different ids because the sequence has advanced.
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
 import re
+import threading
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
 
+from shared.errors import ValidationFailed
+
 DEPARTMENT = "creative_production"
 
-_EVENT_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-_NAME_RE = re.compile(r"^[a-z0-9_]{1,64}$")
-_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
-_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+# Mirrors ledger-rust src/event.rs exactly: ids/slugs are ASCII-only and
+# length-checked in bytes (== chars for ASCII); `fullmatch`, never `match`
+# with `$` (which would accept a trailing newline the ledger rejects).
+ID_MAX = 128
+NAME_MAX = 64
+SUMMARY_MAX = 280
+_EVENT_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+_NAME_RE = re.compile(r"[a-z0-9_]{1,64}")
+_HEX64_RE = re.compile(r"[0-9a-f]{64}")
+# Rust `char::is_control` == Unicode general category Cc: C0, DEL and C1.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 
 
 class LedgerRecordError(Exception):
     """The event was NOT recorded. The decision that needed it must not
     take effect."""
+
+    took_effect: bool | str = False
+
+
+class OutcomeNotRecorded(LedgerRecordError):
+    """The decision and its outside request WERE recorded and took effect,
+    and the outside call was made; only the record of the outside party's
+    answer failed. That answer is not applied. Reported as 503 with
+    `took_effect: "partial"` — never as "did not take effect"."""
+
+    took_effect = "partial"
+
+    def __init__(self, message: str, effect: dict):
+        super().__init__(message)
+        self.effect = effect
+
+
+class LedgerFieldInvalid(ValidationFailed):
+    """A derived ledger field (subject_id, event_type, actor, summary) would
+    be rejected by ledger-rust. Raised BEFORE the ledger is called and
+    before any work: a 422 about the input, never a fake "ledger failure"
+    503 while the ledger is healthy."""
 
 
 def payload_sha256(payload: dict) -> str:
@@ -47,21 +93,28 @@ def payload_sha256(payload: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def event_field_problems(
+    event_id: str, department: str, event_type: str, actor: str, subject_id: str, summary: str
+) -> list[str]:
+    """The section-2 field rules exactly as ledger-rust enforces them."""
+    problems = []
+    for name, value, rx in (("event_id", event_id, _EVENT_ID_RE), ("department", department, _NAME_RE),
+                            ("event_type", event_type, _NAME_RE), ("actor", actor, _NAME_RE),
+                            ("subject_id", subject_id, _EVENT_ID_RE)):
+        if not isinstance(value, str) or not rx.fullmatch(value):
+            problems.append(name)
+    if (not isinstance(summary, str) or not (1 <= len(summary) <= SUMMARY_MAX)
+            or _CONTROL_RE.search(summary) or _SURROGATE_RE.search(summary)):
+        problems.append("summary")
+    return problems
+
+
 def validate_event_fields(
     event_id: str, department: str, event_type: str, actor: str, subject_id: str, summary: str
 ) -> None:
     """Local check of the section-2 field rules so a malformed event fails
     here, loudly, instead of as an opaque 400 from the ledger."""
-    problems = []
-    if not _EVENT_ID_RE.match(event_id):
-        problems.append("event_id")
-    for name, value in (("department", department), ("event_type", event_type), ("actor", actor)):
-        if not _NAME_RE.match(value):
-            problems.append(name)
-    if not _EVENT_ID_RE.match(subject_id):
-        problems.append("subject_id")
-    if not (1 <= len(summary) <= 280) or _CONTROL_RE.search(summary):
-        problems.append("summary")
+    problems = event_field_problems(event_id, department, event_type, actor, subject_id, summary)
     if problems:
         raise LedgerRecordError(f"ledger event fails contract validation on: {', '.join(problems)}")
 
@@ -116,7 +169,7 @@ class HttpLedgerClient:
                     json=body,
                     headers={"Authorization": f"Bearer {self._token}"},
                 )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:  # never a 500: "not recorded"
             raise LedgerRecordError(f"ledger unreachable: {type(exc).__name__}") from exc
         if resp.status_code in (200, 201):
             return
@@ -135,20 +188,60 @@ class UnconfiguredLedgerClient:
         )
 
 
+def _rust_event_input_valid(body: dict) -> str | None:
+    """Independent port of ledger-rust `EventInput::validate` (+ what its
+    JSON parser refuses). Deliberately NOT sharing code with
+    `event_field_problems`, so a bug there can't hide in the tests."""
+    def check_id(v, mx):
+        return isinstance(v, str) and 0 < len(v.encode("utf-8", "surrogatepass")) <= mx and all(
+            (48 <= b <= 57) or (65 <= b <= 90) or (97 <= b <= 122) or b in b"._:-" for b in v.encode("utf-8", "surrogatepass"))
+
+    def check_slug(v, mx):
+        return isinstance(v, str) and 0 < len(v.encode("utf-8", "surrogatepass")) <= mx and all(
+            (48 <= b <= 57) or (97 <= b <= 122) or b == 95 for b in v.encode("utf-8", "surrogatepass"))
+
+    for k in ("event_id", "subject_id"):
+        if not check_id(body[k], 128):
+            return k
+    for k in ("department", "event_type", "actor"):
+        if not check_slug(body[k], 64):
+            return k
+    h = body["payload_sha256"]
+    if not (isinstance(h, str) and len(h) == 64 and all(c in "0123456789abcdef" for c in h)):
+        return "payload_sha256"
+    s = body["summary"]
+    if not isinstance(s, str):
+        return "summary"
+    try:
+        s.encode("utf-8")  # a lone surrogate can't cross JSON into a Rust String
+    except UnicodeEncodeError:
+        return "summary"
+    if not 1 <= len(s) <= 280 or any(ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f for c in s):
+        return "summary"
+    return None
+
+
 @dataclass
 class FakeLedgerClient:
-    """Test double. Same validation and idempotency semantics as the
-    contract; `fail_all` / `fail_next` simulate an unreachable ledger."""
+    """Test double. Enforces ledger-rust's validation (independent port)
+    and idempotency semantics; `fail_all` / `fail_next` simulate an
+    unreachable ledger."""
 
     events: list[dict] = field(default_factory=list)
     fail_all: bool = False
     fail_next: bool = False
+    calls: int = 0
 
     def record_event(self, event_id, department, event_type, actor, subject_id, payload, summary) -> None:
+        self.calls += 1
         if self.fail_all or self.fail_next:
             self.fail_next = False
             raise LedgerRecordError("simulated ledger outage (test double)")
-        validate_event_fields(event_id, department, event_type, actor, subject_id, summary)
+        bad = _rust_event_input_valid({"event_id": event_id, "department": department, "event_type": event_type,
+                                       "actor": actor, "subject_id": subject_id,
+                                       "payload_sha256": payload_sha256(payload), "summary": summary})
+        if bad:
+            raise LedgerRecordError(f"ledger refused the event: HTTP 400 (invalid {bad}, test double)")
         entry = {
             "event_id": event_id,
             "department": department,
@@ -162,7 +255,7 @@ class FakeLedgerClient:
             if existing["event_id"] == event_id:
                 if {k: existing[k] for k in entry} == entry:
                     return  # idempotent retry
-                raise LedgerRecordError("event_id conflict (409, test double)")
+                raise LedgerRecordError("ledger refused: event_id already recorded with different content (409, test double)")
         self.events.append({**entry, "payload": payload})
 
     def of_type(self, event_type: str) -> list[dict]:
@@ -170,30 +263,73 @@ class FakeLedgerClient:
 
 
 def _clean_summary(summary: str) -> str:
-    cleaned = _CONTROL_RE.sub(" ", summary).strip() or "(no summary)"
-    return cleaned[:280]
+    """Make any text acceptable to ledger-rust: control chars (C0, DEL, C1)
+    and lone surrogates become spaces; 1..280 Unicode scalar values."""
+    cleaned = _SURROGATE_RE.sub(" ", _CONTROL_RE.sub(" ", str(summary)))
+    cleaned = " ".join(cleaned.split()) or "(no summary)"
+    return cleaned[:SUMMARY_MAX]
+
+
+def check_subject(subject_id: str, what: str = "subject") -> str:
+    """A derived ledger subject must fit ledger-rust's subject_id rule;
+    otherwise the INPUT is refused (422) before any work."""
+    if not isinstance(subject_id, str) or not _EVENT_ID_RE.fullmatch(subject_id):
+        raise LedgerFieldInvalid(
+            f"{what} {subject_id!r} can't be recorded on the evidence ledger (subject_id must be 1-{ID_MAX} "
+            "characters of [A-Za-z0-9._:-]); nothing was recorded or changed", ["subject_id"])
+    return subject_id
+
+
+def _canonical(obj: Any) -> str:
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
 
 
 @dataclass
 class EvidenceRecorder:
     """Thin wrapper every workflow uses. Always department
     "creative_production". Returns the event_id on success; raises
-    LedgerRecordError otherwise (callers must not commit)."""
+    LedgerRecordError otherwise (callers must not commit).
+
+    `lock` serialises every decision in the service (both workflows and
+    the shared registry/rights writes), so check-then-record-then-commit
+    can't interleave between concurrent requests."""
 
     client: LedgerClient
+    instance_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    _seq: dict[tuple[str, str], int] = field(default_factory=dict, repr=False)
 
-    def record(self, event_type: str, actor: str, subject_id: str, payload: dict[str, Any], summary: str) -> str:
-        event_id = f"cp:{event_type}:{uuid.uuid4().hex}"
-        self.client.record_event(
-            event_id=event_id,
-            department=DEPARTMENT,
-            event_type=event_type,
-            actor=actor,
-            subject_id=subject_id,
-            payload=payload,
-            summary=_clean_summary(summary),
-        )
-        return event_id
+    def event_id_for(self, event_type: str, actor: str, subject_id: str, op: Any) -> str:
+        seq = self._seq.get((event_type, subject_id), 0)
+        ident = _canonical({"i": self.instance_id, "d": DEPARTMENT, "t": event_type, "a": actor, "s": subject_id,
+                            "n": seq, "op": op})
+        return "cp:" + hashlib.sha256(ident.encode("utf-8", "surrogatepass")).hexdigest()
+
+    def record(self, event_type: str, actor: str, subject_id: str, payload: dict[str, Any], summary: str,
+               op_key: Any = None) -> str:
+        """`op_key` (optional) is the operation's identity when the caller
+        has a client-chosen idempotency key (e.g. a clip's submission_id);
+        by default the canonical payload is the identity."""
+        clean = _clean_summary(summary)
+        with self.lock:
+            event_id = self.event_id_for(event_type, actor, subject_id, payload if op_key is None else op_key)
+            problems = event_field_problems(event_id, DEPARTMENT, event_type, actor, subject_id, clean)
+            if problems:
+                raise LedgerFieldInvalid(
+                    f"this decision can't be recorded on the evidence ledger: {', '.join(problems)} "
+                    "outside ledger-rust's field rules; nothing was recorded or changed", problems)
+            self.client.record_event(
+                event_id=event_id,
+                department=DEPARTMENT,
+                event_type=event_type,
+                actor=actor,
+                subject_id=subject_id,
+                payload=payload,
+                summary=clean,
+            )
+            key = (event_type, subject_id)
+            self._seq[key] = self._seq.get(key, 0) + 1
+            return event_id
 
     def try_record(self, event_type: str, actor: str, subject_id: str, payload: dict[str, Any], summary: str) -> str | None:
         """Best-effort record for REFUSALS (guardrail trips). A refusal
@@ -201,5 +337,50 @@ class EvidenceRecorder:
         refusal must never turn it into an approval."""
         try:
             return self.record(event_type, actor, subject_id, payload, summary)
-        except LedgerRecordError:
+        except (LedgerRecordError, LedgerFieldInvalid):
             return None
+
+
+def serialized(fn):
+    """Run a workflow method under the recorder's lock."""
+    @functools.wraps(fn)
+    def wrapper(self, *a, **k):
+        with self.recorder.lock:
+            return fn(self, *a, **k)
+    return wrapper
+
+
+class RecordedPort:
+    """Record-first proxy for an outside department (F9). Every method call
+    is recorded on the ledger as `crossing_<department>_requested` — with
+    the request it carries — BEFORE it is made. If that record fails,
+    LedgerRecordError propagates and the department is never called. The
+    answer is recorded by the workflow's own decision record afterwards."""
+
+    def __init__(self, port: Any, department: str, recorder: EvidenceRecorder, actor: str, subject_id: str):
+        self._port, self._department, self._recorder = port, department, recorder
+        self._actor, self._subject = actor, subject_id
+
+    def __getattr__(self, name: str):
+        fn = getattr(self._port, name)
+
+        def call(*args, **kwargs):
+            request = [_plain(a) for a in args]
+            self._recorder.record(
+                f"crossing_{self._department}_requested", self._actor, self._subject,
+                {"department": self._department, "action": name, "args": request,
+                 "kwargs": {k: _plain(v) for k, v in kwargs.items()}},
+                f"Request to {self._department}: {name} for {self._subject}")
+            return fn(*args, **kwargs)
+
+        return call
+
+
+def _plain(v: Any) -> Any:
+    import dataclasses
+
+    if dataclasses.is_dataclass(v) and not isinstance(v, type):
+        return dataclasses.asdict(v)
+    if hasattr(v, "model_dump"):
+        return v.model_dump(mode="json")
+    return v

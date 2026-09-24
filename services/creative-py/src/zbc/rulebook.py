@@ -23,7 +23,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from shared.errors import FrozenError, NotFound, PreconditionFailed
-from shared.types import NonEmptyStr, SafeId
+from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
 
 RuleId = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}-[0-9]{2}$")]
 AngleId = Annotated[str, StringConstraints(pattern=r"^A[0-9]{2}$")]
@@ -116,10 +116,10 @@ FROZEN_STATUSES = frozenset({RulebookStatus.LIVE, RulebookStatus.SUPERSEDED})
 class Rulebook(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    campaign_id: SafeId
+    campaign_id: CampaignId
     client_id: SafeId
     vertical: NonEmptyStr
-    version: int = Field(ge=1)
+    version: int = Field(ge=1, le=MAX_RULEBOOK_VERSION)
     status: RulebookStatus
     objective: NonEmptyStr
     source_asset_ids: tuple[SafeId, ...] = Field(min_length=1)

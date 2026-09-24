@@ -23,6 +23,10 @@ K7  commissioning goes through CreativeAgentsPort; today's stand-in
     answers "not commissioned", so `seed_clips_produced` is false and the
     kit says so. Andre signs the kit SPEC (workflow); production of the
     seed clips themselves is an open item.
+    Record first (fix wave 1, F9): `build` is pure — it returns the kit
+    with every commission `requested`; the workflow records the kit, and
+    only then `commission_seeds` calls the agents; `apply_receipts` applies
+    their answers after those are recorded.
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from shared.departments import CommissionRequest, CreativeAgentsPort
 from shared.errors import PreconditionFailed, ValidationFailed
-from shared.text import contains_phrase
+from shared.text import mentions_phrase
 from shared.types import NonEmptyStr, SafeId
 from zbc.hook_angle import HookSheet
 from zbc.rulebook import Rulebook, RuleKind, RulebookStatus
@@ -87,8 +91,7 @@ class CampaignKit(BaseModel):
     signed_by: str | None = None
 
 
-def build(kit_id: str, rb: Rulebook, moment_map: MomentMap, sheets: list[HookSheet], req: KitRequest,
-          agents: CreativeAgentsPort) -> CampaignKit:
+def build(kit_id: str, rb: Rulebook, moment_map: MomentMap, sheets: list[HookSheet], req: KitRequest) -> CampaignKit:
     if rb.status is not RulebookStatus.LIVE:
         raise PreconditionFailed(f"K1 the kit is built from the LIVE rulebook; {rb.campaign_id} v{rb.version} is {rb.status.value}")
     if (moment_map.campaign_id, moment_map.rulebook_version) != (rb.campaign_id, rb.version):
@@ -101,7 +104,7 @@ def build(kit_id: str, rb: Rulebook, moment_map: MomentMap, sheets: list[HookShe
     issues = [f"K5 brand asset {a} is not cleared in {rc.rule_id if rc else 'the rights rule'}" for a in bad_assets]
     for ex in req.do_examples:
         for rid, p in never:
-            if contains_phrase(ex, p):
+            if mentions_phrase(ex, p):
                 issues.append(f"K6 'do' example {ex!r} breaks never-say {rid}")
     if issues:
         raise ValidationFailed("kit request breaks the rulebook", issues)
@@ -158,16 +161,36 @@ def build(kit_id: str, rb: Rulebook, moment_map: MomentMap, sheets: list[HookShe
         dont.append(f"Don't add music, faces or footage that aren't cleared ({rc.rule_id})")
     dont += list(req.dont_examples)
 
-    commissions = []
-    for s in seeds:
-        for agent in AGENTS:
-            receipt = agents.commission(CommissionRequest(f"{s.seed_id}.{agent}", "zbc", agent, s.model_dump()))
-            commissions.append({"request_id": receipt.request_id, "agent": receipt.agent,
-                                "commissioned": receipt.commissioned, "reason": receipt.reason,
-                                "external_ref": receipt.external_ref})
+    commissions = [{"request_id": f"{s.seed_id}.{agent}", "agent": agent, "seed_id": s.seed_id, "status": "requested",
+                    "commissioned": None, "reason": None, "external_ref": None}
+                   for s in seeds for agent in AGENTS]
     return CampaignKit(
         kit_id=kit_id, campaign_id=rb.campaign_id, rulebook_version=rb.version, seeds=seeds,
         caption_styles=list(req.caption_styles), overlays=list(req.overlays), templates=list(req.templates),
         brand_asset_ids=list(req.brand_asset_ids), do=do, dont=dont, commissions=commissions,
-        seed_clips_produced=bool(commissions) and all(c["commissioned"] for c in commissions),
+        seed_clips_produced=False,
     )
+
+
+def commission_seeds(kit: CampaignKit, agents: CreativeAgentsPort) -> list[dict]:
+    """Send the kit's recorded commission requests. Call ONLY after the kit is on the ledger."""
+    seeds = {s.seed_id: s for s in kit.seeds}
+    receipts = []
+    for c in kit.commissions:
+        req = CommissionRequest(c["request_id"], "zbc", c["agent"], seeds[c["seed_id"]].model_dump())
+        try:
+            r = agents.commission(req)
+            receipts.append({"request_id": r.request_id, "agent": r.agent, "commissioned": r.commissioned,
+                             "reason": r.reason, "external_ref": r.external_ref})
+        except Exception as exc:  # an unreachable agent is an answer ("not commissioned"), never a 500
+            receipts.append({"request_id": req.request_id, "agent": req.agent, "commissioned": False,
+                             "reason": f"commission call failed: {type(exc).__name__}", "external_ref": None})
+    return receipts
+
+
+def apply_receipts(kit: CampaignKit, receipts: list[dict]) -> CampaignKit:
+    by_id = {r["request_id"]: r for r in receipts}
+    commissions = [{**c, **by_id.get(c["request_id"], {}), "status": "answered"} for c in kit.commissions]
+    return kit.model_copy(update={
+        "commissions": commissions,
+        "seed_clips_produced": bool(commissions) and all(c["commissioned"] is True for c in commissions)})

@@ -19,15 +19,33 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = os.environ.get("FAKE_LEDGER_TOKEN") or sys.exit("FAKE_LEDGER_TOKEN must be set")
+# Same rules as ledger-rust src/event.rs `EventInput::validate`: fullmatch
+# (a trailing newline is invalid), ASCII-only ids, summary 1-280 Unicode
+# scalar values with no control character (C0, DEL or C1 — Rust
+# `char::is_control`), and no lone surrogate (invalid JSON for serde).
 FIELDS = {
-    "event_id": re.compile(r"^[A-Za-z0-9._:-]{1,128}$"),
-    "department": re.compile(r"^[a-z0-9_]{1,64}$"),
-    "event_type": re.compile(r"^[a-z0-9_]{1,64}$"),
-    "actor": re.compile(r"^[a-z0-9_]{1,64}$"),
-    "subject_id": re.compile(r"^[A-Za-z0-9._:-]{1,128}$"),
-    "payload_sha256": re.compile(r"^[0-9a-f]{64}$"),
+    "event_id": re.compile(r"[A-Za-z0-9._:-]{1,128}"),
+    "department": re.compile(r"[a-z0-9_]{1,64}"),
+    "event_type": re.compile(r"[a-z0-9_]{1,64}"),
+    "actor": re.compile(r"[a-z0-9_]{1,64}"),
+    "subject_id": re.compile(r"[A-Za-z0-9._:-]{1,128}"),
+    "payload_sha256": re.compile(r"[0-9a-f]{64}"),
 }
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
 ENTRIES: list[dict] = []
+
+
+def validate(body) -> str | None:
+    """None if ledger-rust would accept `body`, else the error."""
+    if not isinstance(body, dict) or set(body) != set(FIELDS) | {"summary"}:
+        return "fields must be exactly the contract fields"
+    for k, rx in FIELDS.items():
+        if not isinstance(body[k], str) or not rx.fullmatch(body[k]):
+            return f"invalid {k}"
+    s = body["summary"]
+    if not isinstance(s, str) or not 1 <= len(s) <= 280 or _CONTROL.search(s):
+        return "invalid summary"
+    return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -62,14 +80,9 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
         except Exception:
             return self._send(400, {"error": "invalid json"})
-        if not isinstance(body, dict) or set(body) != set(FIELDS) | {"summary"}:
-            return self._send(400, {"error": "fields must be exactly the contract fields"})
-        for k, rx in FIELDS.items():
-            if not isinstance(body[k], str) or not rx.match(body[k]):
-                return self._send(400, {"error": f"invalid {k}"})
-        s = body["summary"]
-        if not isinstance(s, str) or not 1 <= len(s) <= 280 or re.search(r"[\x00-\x1f\x7f]", s):
-            return self._send(400, {"error": "invalid summary"})
+        err = validate(body)
+        if err:
+            return self._send(400, {"error": err})
         for e in ENTRIES:
             if e["event_id"] == body["event_id"]:
                 same = all(e[k] == body[k] for k in body)

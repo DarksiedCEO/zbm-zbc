@@ -10,13 +10,24 @@ approval (founder token).
 
 Evidence rule: every approval, rejection, signature and cross-department
 crossing is recorded through the ledger FIRST; state changes only after
-the record succeeds. If the ledger call fails, `LedgerRecordError`
-propagates and nothing changed (the API returns 503 and says so).
+the record succeeds, and no outside department is called before the
+request to it is on the ledger (`RecordedPort`, or the intent record that
+lists the requests, e.g. `production_opened`). If the ledger call fails,
+`LedgerRecordError` propagates and nothing changed (the API returns 503
+and says so). Server-assigned ids are consumed only when the record
+succeeds, so a retry of a failed step reuses them (deterministic event ids).
+
+Review cap (spec: "TWO rounds, then escalate"): rounds are counted per
+REVIEW CHAIN = (brief_id, deliverable_id, variant_index) — one deliverable
+variant of one approved brief — across EVERY job opened on that brief. A
+new job never resets the count. While any work of a brief is escalated to
+Andre and unresolved, no new job and no new work submission on that brief
+is accepted; only Andre, with his own token, resolves it. A chain that was
+escalated never gets a third round, whatever Andre decided.
 """
 
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -27,7 +38,8 @@ from shared.clock import Clock
 from shared.departments import CommissionRequest, Departments
 from shared.errors import CreativeError, NotFound, PreconditionFailed
 from shared.founder import FOUNDER_ACTOR, FounderGate
-from shared.ledger import EvidenceRecorder
+from shared.ledger import EvidenceRecorder, LedgerRecordError, OutcomeNotRecorded, RecordedPort, serialized
+from shared.media import C2paStandIn
 from shared.registry import PlatformRulesRegistry
 from shared.rights import RightsRegistry
 from shared.types import SafeId
@@ -107,10 +119,29 @@ class ZbmWorkflow:
     work: dict[str, WorkItem] = field(default_factory=dict)
     _rounds_used: dict[tuple, int] = field(default_factory=dict)
     _escalated_chains: set = field(default_factory=set)
-    _ids: itertools.count = field(default_factory=lambda: itertools.count(1))
+    _n: int = 1
 
-    def _next(self, prefix: str) -> str:
-        return f"{prefix}-{next(self._ids):04d}"
+    def _peek(self, prefix: str) -> str:
+        """The next id, NOT yet consumed: `_consume()` only after the record succeeded."""
+        return f"{prefix}-{self._n:04d}"
+
+    def _consume(self) -> None:
+        self._n += 1
+
+    @staticmethod
+    def _chain(brief_id: str, deliverable_id: str, variant_index: int) -> tuple:
+        return (brief_id, deliverable_id, variant_index)
+
+    def _open_escalations(self, brief_id: str) -> list[WorkItem]:
+        return [w for w in self.work.values() if w.brief_id == brief_id and w.stage is WorkStage.ESCALATED_TO_ANDRE]
+
+    def _refuse_if_escalated(self, brief_id: str, action: str) -> None:
+        pending = self._open_escalations(brief_id)
+        if pending:
+            self._refuse(PreconditionFailed(
+                f"brief {brief_id} has work escalated to Andre after {creative_quality.MAX_ROUNDS} review rounds "
+                f"({', '.join(w.work_id for w in pending)}); no new job or review round on this brief until Andre "
+                "resolves it with his approval token"), "zbm_creative_lead", brief_id, action)
 
     # --- guardrail refusals are recorded best-effort, and always stand ------
     def _refuse(self, exc: CreativeError, actor: str, subject_id: str, action: str) -> None:
@@ -125,17 +156,20 @@ class ZbmWorkflow:
             raise NotFound(f"brief {brief_id!r} not found")
         return b
 
+    @serialized
     def draft_brief(self, req: ClientRequirements, actor_id: str = brief_writer.WRITER_ACTOR) -> BriefRecord:
         self.actors.require_role(actor_id, Role.ZBM_BRIEF_WRITER)
-        brief_id = self._next("brief")
+        brief_id = self._peek("brief")
         rec = brief_writer.draft(req, brief_id, self.registry, self.clock.today(), drafted_by=actor_id)
         eid = self.recorder.record("brief_drafted", actor_id, brief_id,
                                    rec.model_dump(mode="json", exclude={"ledger_event_ids"}),
                                    f"Brief {brief_id} drafted for {req.client_id}: {rec.status.value}")
+        self._consume()
         rec.ledger_event_ids.append(eid)
         self.briefs[brief_id] = rec
         return rec
 
+    @serialized
     def review_brief(self, brief_id: str, approver_id: str) -> BriefRecord:
         b = self.get_brief(brief_id)
         try:
@@ -160,26 +194,62 @@ class ZbmWorkflow:
         return updated
 
     # --- production ------------------------------------------------------------------
+    @serialized
     def open_job(self, brief_id: str) -> ProductionJob:
+        """Record-first (F9): 1. `production_opened` lists every commission
+        request; 2. the job is committed with those requests `requested`;
+        3. only then are Enigma / Phantom Canvas called (request ids are
+        deterministic, so the external contract can de-duplicate);
+        4. their answers are recorded (`crossing_creative_agents`) and only
+        then applied. A failure at 1 changes nothing and calls no one; a
+        failure at 4 is reported as `took_effect: "partial"`."""
         b = self.get_brief(brief_id)
         if b.status is not BriefStatus.APPROVED or b.fields is None:
             self._refuse(PreconditionFailed(
                 f"brief {brief_id} is {b.status.value}; nothing enters production without an approved brief"),
                 "zbm_creative_lead", brief_id, "production start")
-        job_id = self._next("job")
-        commissions = []
-        for d in b.fields.deliverables:
-            for agent in ("enigma", "phantom_canvas"):
-                req = CommissionRequest(f"{job_id}.{d.deliverable_id}.{agent}", "zbm", agent,
-                                        {"brief_id": brief_id, "deliverable": d.model_dump(), "maker_summary": b.maker_summary})
-                receipt = self.departments.creative_agents.commission(req)
-                commissions.append({"request_id": receipt.request_id, "agent": receipt.agent,
-                                    "commissioned": receipt.commissioned, "reason": receipt.reason})
+        self._refuse_if_escalated(brief_id, "production start")
+        job_id = self._peek("job")
+        requests = [{"request_id": f"{job_id}.{d.deliverable_id}.{agent}", "agent": agent,
+                     "deliverable_id": d.deliverable_id}
+                    for d in b.fields.deliverables for agent in ("enigma", "phantom_canvas")]
         eid = self.recorder.record("production_opened", "zbm_creative_lead", job_id,
-                                   {"brief_id": brief_id, "commissions": commissions},
-                                   f"Job {job_id} opened on approved brief {brief_id}; "
-                                   f"{sum(c['commissioned'] for c in commissions)}/{len(commissions)} commissions accepted")
-        job = ProductionJob(job_id=job_id, brief_id=brief_id, commissions=commissions, ledger_event_ids=[eid])
+                                   {"brief_id": brief_id, "job_id": job_id, "commission_requests": requests},
+                                   f"Job {job_id} opened on approved brief {brief_id}; {len(requests)} commission "
+                                   "request(s) to Enigma/Phantom Canvas follow")
+        self._consume()
+        job = ProductionJob(job_id=job_id, brief_id=brief_id, ledger_event_ids=[eid], commissions=[
+            {**r, "status": "requested", "commissioned": None, "reason": None, "external_ref": None} for r in requests])
+        self.jobs[job_id] = job
+
+        receipts = []
+        for r in requests:
+            d = self._deliverable(b, r["deliverable_id"])
+            req = CommissionRequest(r["request_id"], "zbm", r["agent"],
+                                    {"brief_id": brief_id, "deliverable": d.model_dump(), "maker_summary": b.maker_summary})
+            try:
+                receipt = self.departments.creative_agents.commission(req)
+                receipts.append({"request_id": receipt.request_id, "agent": receipt.agent,
+                                 "commissioned": receipt.commissioned, "reason": receipt.reason,
+                                 "external_ref": receipt.external_ref})
+            except Exception as exc:  # an unreachable agent is an answer ("not commissioned"), never a 500
+                receipts.append({"request_id": req.request_id, "agent": req.agent, "commissioned": False,
+                                 "reason": f"commission call failed: {type(exc).__name__}", "external_ref": None})
+        try:
+            eid2 = self.recorder.record("crossing_creative_agents", "zbm_creative_lead", job_id,
+                                        {"job_id": job_id, "receipts": receipts},
+                                        f"Job {job_id}: {sum(bool(x['commissioned']) for x in receipts)}/{len(receipts)} "
+                                        "commissions accepted by Enigma/Phantom Canvas")
+        except LedgerRecordError as exc:
+            raise OutcomeNotRecorded(
+                f"job {job_id} WAS opened and recorded and its {len(receipts)} commission request(s) were sent, but "
+                f"recording the agents' answers failed ({exc}); the answers are not applied (commissions stay "
+                "'requested')", {"job_id": job_id, "recorded": ["production_opened"],
+                                 "outside_calls_made": len(receipts), "not_recorded": "crossing_creative_agents"}) from exc
+        by_id = {x["request_id"]: x for x in receipts}
+        job = job.model_copy(update={
+            "commissions": [{**c, **by_id.get(c["request_id"], {}), "status": "answered"} for c in job.commissions],
+            "ledger_event_ids": [eid, eid2]})
         self.jobs[job_id] = job
         return job
 
@@ -189,6 +259,7 @@ class ZbmWorkflow:
                 return d
         raise PreconditionFailed(f"deliverable {deliverable_id!r} is not in approved brief {brief.brief_id}")
 
+    @serialized
     def submit_work(self, job_id: str, sub: WorkSubmission) -> WorkItem:
         job = self.jobs.get(job_id)
         if job is None:
@@ -197,21 +268,28 @@ class ZbmWorkflow:
         d = self._deliverable(brief, sub.deliverable_id)
         if not 0 <= sub.variant_index < d.count:
             raise PreconditionFailed(f"variant_index {sub.variant_index} outside the brief's count ({d.count})")
-        chain = (job_id, sub.deliverable_id, sub.variant_index)
+        self._refuse_if_escalated(brief.brief_id, "work submission")
+        chain = self._chain(brief.brief_id, sub.deliverable_id, sub.variant_index)
+        if chain in self._escalated_chains:
+            self._refuse(PreconditionFailed(
+                f"deliverable {sub.deliverable_id} (variant {sub.variant_index}) of brief {brief.brief_id} was escalated "
+                f"to Andre after {creative_quality.MAX_ROUNDS} review rounds; no more rounds, in this or any other job"),
+                "zbm_creative_quality", brief.brief_id, "work submission")
         open_items = [w for w in self.work.values()
-                      if (w.job_id, w.submission.deliverable_id, w.submission.variant_index) == chain
+                      if self._chain(w.brief_id, w.submission.deliverable_id, w.submission.variant_index) == chain
                       and w.stage not in REWORK_STAGES]
         if open_items:
             raise PreconditionFailed(
-                f"work {open_items[-1].work_id} for this deliverable is at {open_items[-1].stage.value}; "
-                "a new version can only follow export failure, rights block or a send-back")
-        if chain in self._escalated_chains:
-            raise PreconditionFailed("this deliverable was escalated to Andre after 2 review rounds; no more rounds")
+                f"work {open_items[-1].work_id} (job {open_items[-1].job_id}) for this deliverable of brief "
+                f"{brief.brief_id} is at {open_items[-1].stage.value}; a new version can only follow export failure, "
+                "rights block or a send-back")
         rnd = self._rounds_used.get(chain, 0) + 1
-        work_id = self._next("work")
+        work_id = self._peek("work")
         eid = self.recorder.record("work_submitted", "zbm_creative_quality", work_id,
-                                   {"job_id": job_id, "submission": sub.model_dump(mode="json"), "round": rnd},
-                                   f"Work {work_id} submitted for {sub.deliverable_id} (round {rnd})")
+                                   {"job_id": job_id, "brief_id": brief.brief_id, "submission": sub.model_dump(mode="json"),
+                                    "round": rnd},
+                                   f"Work {work_id} submitted for {brief.brief_id}/{sub.deliverable_id} (round {rnd})")
+        self._consume()
         item = WorkItem(work_id=work_id, job_id=job_id, brief_id=brief.brief_id, submission=sub, round=rnd,
                         stage=WorkStage.SUBMITTED, ledger_event_ids=[eid])
         self.work[work_id] = item
@@ -228,6 +306,7 @@ class ZbmWorkflow:
             raise PreconditionFailed(
                 f"work {w.work_id} is at stage {w.stage.value}; this step needs {', '.join(s.value for s in stages)}")
 
+    @serialized
     def validate_export(self, work_id: str) -> WorkItem:
         w = self.get_work(work_id)
         self._require_stage(w, WorkStage.SUBMITTED)
@@ -242,13 +321,17 @@ class ZbmWorkflow:
         self.work[work_id] = w
         return w
 
+    @serialized
     def check_rights(self, work_id: str) -> WorkItem:
         w = self.get_work(work_id)
         self._require_stage(w, WorkStage.EXPORT_PASSED)
         brief = self.get_brief(w.brief_id)
+        A = "zbm_rights_provenance"
         res = rights_provenance.check(work_id, list(w.submission.asset_ids), list(brief.fields.rights_and_permissions),
-                                      w.submission.uses_ai_generative_fill, self.rights, self.departments.legal,
-                                      self.clock.today())
+                                      w.submission.uses_ai_generative_fill, self.rights,
+                                      RecordedPort(self.departments.legal, "legal_37", self.recorder, A, work_id),
+                                      self.clock.today(),
+                                      stamper=RecordedPort(C2paStandIn(), "content_credentials", self.recorder, A, work_id))
         payload = {
             "cleared": res.cleared, "blockers": res.blockers, "provenance_stamp": res.provenance_stamp,
             "asset_checks": [c.__dict__ for c in res.asset_checks],
@@ -261,6 +344,7 @@ class ZbmWorkflow:
         self.work[work_id] = w
         return w
 
+    @serialized
     def quality_review(self, work_id: str, reviewer_id: str, notes: list[str]) -> WorkItem:
         w = self.get_work(work_id)
         try:
@@ -273,8 +357,8 @@ class ZbmWorkflow:
         event = {"pass": "quality_passed", "send_back": "quality_sent_back", "escalate_to_andre": "quality_escalated"}[dec.outcome]
         eid = self.recorder.record(event, reviewer_id, work_id, dec.__dict__,
                                    f"Quality round {dec.round} on {work_id}: {dec.outcome} (reported to {dec.reported_to})")
-        chain = (w.job_id, w.submission.deliverable_id, w.submission.variant_index)
-        self._rounds_used[chain] = w.round
+        chain = self._chain(w.brief_id, w.submission.deliverable_id, w.submission.variant_index)
+        self._rounds_used[chain] = max(self._rounds_used.get(chain, 0), w.round)
         stage = {"pass": WorkStage.QUALITY_PASSED, "send_back": WorkStage.SENT_BACK,
                  "escalate_to_andre": WorkStage.ESCALATED_TO_ANDRE}[dec.outcome]
         if stage is WorkStage.ESCALATED_TO_ANDRE:
@@ -286,6 +370,7 @@ class ZbmWorkflow:
         self.work[work_id] = w
         return w
 
+    @serialized
     def resolve_escalation(self, work_id: str, approval_token: str | None, decision: str) -> WorkItem:
         w = self.get_work(work_id)
         self._require_stage(w, WorkStage.ESCALATED_TO_ANDRE)
@@ -302,10 +387,12 @@ class ZbmWorkflow:
         self.work[work_id] = w
         return w
 
+    @serialized
     def compliance_gate(self, work_id: str) -> WorkItem:
         w = self.get_work(work_id)
         self._require_stage(w, WorkStage.QUALITY_PASSED, WorkStage.ESCALATION_ACCEPTED, WorkStage.COMPLIANCE_BLOCKED)
-        gate = self.departments.compliance.review("zbm_work", work_id, {"brief_id": w.brief_id,
+        compliance = RecordedPort(self.departments.compliance, "compliance_38", self.recorder, "zbm_creative_quality", work_id)
+        gate = compliance.review("zbm_work", work_id, {"brief_id": w.brief_id,
                                                                           "export": w.export_validation,
                                                                           "rights": w.rights})
         eid = self.recorder.record("crossing_compliance_38", "zbm_creative_quality", work_id, gate.__dict__,
@@ -315,6 +402,7 @@ class ZbmWorkflow:
         self.work[work_id] = w
         return w
 
+    @serialized
     def final_approval(self, work_id: str, approval_token: str | None) -> WorkItem:
         w = self.get_work(work_id)
         if w.stage is not WorkStage.COMPLIANCE_PASSED:
@@ -334,6 +422,7 @@ class ZbmWorkflow:
         return w
 
     # --- memory ----------------------------------------------------------------------
+    @serialized
     def learn_result(self, result: PerformanceResult, brief_id: str) -> MemoryDecision:
         brief = self.get_brief(brief_id)
         if brief.fields is None:

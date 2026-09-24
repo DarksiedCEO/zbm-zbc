@@ -289,10 +289,14 @@ through the ledger's `POST /ledger/events` first; if that fails the
 decision does not take effect (503). Compliance 38, Verification and
 Integrity, Legal 37, Finance 31, Clipper Network and the Enigma/Phantom
 Canvas contract are fail-closed stand-ins, so today no ZBM work reaches
-Andre's final approval and no ZBC clip is payout-eligible.
+Andre's final approval and no ZBC clip is payout-eligible. Fix wave 1
+(Sep 24): no outside department is called before its request is on the
+ledger; deterministic ledger event ids; review cap per brief deliverable
+across jobs; confusable/split-letter text evasion caught; bounded ids
+(422, never a fake 503); verified live against the real ledger-rust.
 
 ```bash
-cd services/creative-py && python3 -m pytest -q      # 205 tests
+cd services/creative-py && python3 -m pytest -q      # 310 tests
 export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>
 cd src && python3 serve.py   # CREATIVE_BIND_ADDR (default 127.0.0.1), CREATIVE_PORT (default 8300)
