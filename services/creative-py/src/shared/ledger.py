@@ -4,9 +4,19 @@ Evidence ledger client — BUILD_CONTRACTS.md section 2, implemented as written.
 `LedgerClient.record_event(event_id, department, event_type, actor,
 subject_id, payload, summary) -> None` raises `LedgerRecordError` on ANY
 failure (transport error, non-2xx, 409 conflict, local validation failure).
-Callers treat that as "the decision did not take effect" — see
-`EvidenceRecorder` and every workflow in `zbm/` and `zbc/`, which record
-FIRST and only then commit state.
+Every workflow in `zbm/` and `zbc/` records FIRST and only then commits
+state, so on any failure nothing changed IN THIS SERVICE. Whether the
+LEDGER holds the record is a separate question (fix wave 4, LOST), carried
+in `took_effect`:
+- `LedgerNotRecorded` (took_effect False): certainly not recorded — local
+  validation failure, ledger not configured, connection refused / connect
+  timeout (the request never reached the ledger), or a 4xx refusal other
+  than 409;
+- `LedgerConflict` (took_effect "unknown"): 409 — the ledger already holds
+  a DIFFERENT record under this decision's deterministic id;
+- `LedgerRecordError` itself (took_effect "unknown"): the request may have
+  reached the ledger and been committed — read timeout, dropped
+  connection, 5xx. Never reported as "did not take effect".
 
 Implementations:
 - `HttpLedgerClient`   — real HTTP against ledger-rust `POST /ledger/events`.
@@ -38,6 +48,7 @@ import os
 import re
 import threading
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -62,10 +73,28 @@ _SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 
 
 class LedgerRecordError(Exception):
-    """The event was NOT recorded. The decision that needed it must not
-    take effect."""
+    """The record call failed: the decision that needed it did not take
+    effect in this service. Whether the ledger committed it is UNKNOWN
+    (took_effect "unknown") unless a subclass says otherwise — e.g. the
+    request reached the ledger, which committed it, and the response was
+    lost."""
 
-    took_effect: bool | str = False
+    took_effect: bool | str = "unknown"
+
+
+class LedgerNotRecorded(LedgerRecordError):
+    """Certainly NOT recorded: the ledger never got the request, or refused
+    it outright (4xx other than 409), or the event failed local validation."""
+
+    took_effect = False
+
+
+class LedgerConflict(LedgerRecordError):
+    """409: the ledger already holds a different record under this
+    decision's deterministic event id. The outcome is uncertain/conflicting
+    — never "did not take effect"."""
+
+    took_effect = "unknown"
 
 
 class OutcomeNotRecorded(LedgerRecordError):
@@ -116,7 +145,7 @@ def validate_event_fields(
     here, loudly, instead of as an opaque 400 from the ledger."""
     problems = event_field_problems(event_id, department, event_type, actor, subject_id, summary)
     if problems:
-        raise LedgerRecordError(f"ledger event fails contract validation on: {', '.join(problems)}")
+        raise LedgerNotRecorded(f"ledger event fails contract validation on: {', '.join(problems)}")
 
 
 class LedgerClient(Protocol):
@@ -169,20 +198,25 @@ class HttpLedgerClient:
                     json=body,
                     headers={"Authorization": f"Bearer {self._token}"},
                 )
-        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:  # never a 500: "not recorded"
-            raise LedgerRecordError(f"ledger unreachable: {type(exc).__name__}") from exc
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.InvalidURL, httpx.UnsupportedProtocol,
+                ValueError) as exc:  # the request never reached the ledger
+            raise LedgerNotRecorded(f"ledger unreachable: {type(exc).__name__} (the request never reached it)") from exc
+        except httpx.HTTPError as exc:  # sent, answer lost: the ledger may have committed it (never a 500)
+            raise LedgerRecordError(f"ledger response lost: {type(exc).__name__} (the ledger may have recorded it)") from exc
         if resp.status_code in (200, 201):
             return
         if resp.status_code == 409:
-            raise LedgerRecordError("ledger refused: event_id already recorded with different content (409)")
-        raise LedgerRecordError(f"ledger refused the event: HTTP {resp.status_code}")
+            raise LedgerConflict("ledger already holds a DIFFERENT record under this decision's event id (409)")
+        if 400 <= resp.status_code < 500:
+            raise LedgerNotRecorded(f"ledger refused the event: HTTP {resp.status_code}")
+        raise LedgerRecordError(f"ledger answered HTTP {resp.status_code} (the ledger may have recorded it)")
 
 
 class UnconfiguredLedgerClient:
     """Default when the ledger isn't configured: every record fails."""
 
     def record_event(self, event_id, department, event_type, actor, subject_id, payload, summary) -> None:
-        raise LedgerRecordError(
+        raise LedgerNotRecorded(
             "evidence ledger not configured (LEDGER_SERVICE_URL / LEDGER_SERVICE_TOKEN unset); "
             "no decision can take effect without a ledger record"
         )
@@ -236,12 +270,12 @@ class FakeLedgerClient:
         self.calls += 1
         if self.fail_all or self.fail_next:
             self.fail_next = False
-            raise LedgerRecordError("simulated ledger outage (test double)")
+            raise LedgerNotRecorded("simulated ledger outage: connection refused (test double)")
         bad = _rust_event_input_valid({"event_id": event_id, "department": department, "event_type": event_type,
                                        "actor": actor, "subject_id": subject_id,
                                        "payload_sha256": payload_sha256(payload), "summary": summary})
         if bad:
-            raise LedgerRecordError(f"ledger refused the event: HTTP 400 (invalid {bad}, test double)")
+            raise LedgerNotRecorded(f"ledger refused the event: HTTP 400 (invalid {bad}, test double)")
         entry = {
             "event_id": event_id,
             "department": department,
@@ -255,7 +289,7 @@ class FakeLedgerClient:
             if existing["event_id"] == event_id:
                 if {k: existing[k] for k in entry} == entry:
                     return  # idempotent retry
-                raise LedgerRecordError("ledger refused: event_id already recorded with different content (409, test double)")
+                raise LedgerConflict("ledger already holds a DIFFERENT record under this event id (409, test double)")
         self.events.append({**entry, "payload": payload})
 
     def of_type(self, event_type: str) -> list[dict]:
@@ -339,6 +373,53 @@ class EvidenceRecorder:
             return self.record(event_type, actor, subject_id, payload, summary)
         except (LedgerRecordError, LedgerFieldInvalid):
             return None
+
+
+MAX_PENDING_CREATIONS = 10_000
+
+
+def content_sha256(obj: Any) -> str:
+    return hashlib.sha256(_canonical(obj).encode("utf-8", "surrogatepass")).hexdigest()
+
+
+@dataclass
+class PendingCreations:
+    """Creations under a SERVER-ASSIGNED id (brief-0001, job-0002, kit-0003)
+    whose ledger record failed with an UNKNOWN outcome (fix wave 4, LOST
+    sweep). Such an id may already be taken on the ledger, so it is burned
+    (never reused for other content), and the attempt — its id, the EXACT
+    record and the object it would commit — is kept per (kind, content hash)
+    so an identical retry, at any later time, replays that record (ledger
+    200/201) and commits that object: one creation, no duplicate, no two
+    different records under one id. Bounded; oldest dropped first."""
+
+    held: "OrderedDict[tuple[str, str], tuple[str, tuple, dict, Any]]" = field(default_factory=OrderedDict)
+
+    def get(self, kind: str, sha: str) -> tuple[str, tuple, dict, Any] | None:
+        return self.held.get((kind, sha))
+
+    def record(self, recorder: "EvidenceRecorder", kind: str, sha: str, obj_id: str, obj: Any,
+               burn, *args, **kwargs) -> tuple[str, Any]:
+        """Record the creation (or replay a pending one). Returns (event_id,
+        the object to commit). `burn()` consumes the server id; it is called
+        on success of a fresh attempt and on an UNCERTAIN failure."""
+        pending = self.held.get((kind, sha))
+        if pending is not None:
+            _, args, kwargs, obj = pending
+            eid = recorder.record(*args, **kwargs)
+            self.held.pop((kind, sha), None)
+            return eid, obj
+        try:
+            eid = recorder.record(*args, **kwargs)
+        except LedgerRecordError as exc:
+            if exc.took_effect is not False:
+                burn()
+                self.held[(kind, sha)] = (obj_id, args, kwargs, obj)
+                while len(self.held) > MAX_PENDING_CREATIONS:
+                    self.held.popitem(last=False)
+            raise
+        burn()
+        return eid, obj
 
 
 def serialized(fn):

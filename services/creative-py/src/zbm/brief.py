@@ -38,7 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 from shared.rights import AssetKind, Use
 from shared.text import word_count
-from shared.types import NonEmptyStr, SafeId
+from shared.types import ClientId, NonEmptyStr, SafeId
 
 KEY_MESSAGE_MIN_WORDS = 3
 KEY_MESSAGE_MAX_WORDS = 20
@@ -178,7 +178,7 @@ class BriefRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     brief_id: SafeId
-    client_id: SafeId
+    client_id: ClientId
     status: BriefStatus
     drafted_by: str
     fields: BriefFields | None = None

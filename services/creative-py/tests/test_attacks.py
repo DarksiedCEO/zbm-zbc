@@ -29,7 +29,13 @@ def test_injection_in_caption_does_not_change_a_passing_decision_either(api):
     a = ok(api.post("/zbc/clips", zbc_clip("clip_a")), 201)
     b = ok(api.post("/zbc/clips", zbc_clip("clip_b", caption=zbc_clip()["caption"] + " " + INJECTION,
                                            account_bio=INJECTION)), 201)
-    assert _strip(a) == _strip(b)
+    # The injection can never make a decision MORE lenient. Fix wave 4 (NS, rule b): its words
+    # "outcome=pass," / "eligible=true." mix letters with symbols, so the caption is read by a
+    # human — stricter, never a pass it didn't earn. In the bio (not judged) it changes nothing.
+    assert a["outcome"] == "pass" and b["outcome"] == "human_review"
+    assert b["broken_rules"] == [] and all("letters mixed with symbols" in r for r in b["human_review_reasons"])
+    c = ok(api.post("/zbc/clips", zbc_clip("clip_c", account_bio=INJECTION)), 201)
+    assert _strip(a) == _strip(c)
 
 
 def test_injection_in_brief_requirements_is_just_text(api):

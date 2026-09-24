@@ -24,7 +24,7 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from shared.registry import PlatformRulesRegistry
-from shared.types import SafeId
+from shared.types import ClientId
 from zbm.audience_insight import InsightCandidate, select_insight
 from zbm.brief import BRIEF_FIELD_NAMES, BriefFields, BriefRecord, BriefStatus, Deliverable, RightsNeed, SuccessMetric, field_issues
 from zbm.placement_spec import check_deliverable_spec
@@ -38,7 +38,7 @@ class ClientRequirements(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    client_id: SafeId
+    client_id: ClientId
     objective: str | None = None
     audience: str | None = None
     key_message: str | None = None

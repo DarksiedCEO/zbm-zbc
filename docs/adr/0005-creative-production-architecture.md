@@ -163,6 +163,21 @@ money. ZBC's unit of work is a campaign, not a clip.
     backdated clip under `clip_r` a month later" gets 409, and the same
     content a month later is judged with a fresh receipt time (grace
     window long past → human queue).
+    **An uncertain outcome is remembered until resolved (fix wave 4,
+    LOST).** The 15-minute window above applies only to a failure that
+    CERTAINLY did not reach the ledger (connection refused, 4xx refusal).
+    When the outcome is unknown (response lost, timeout, 5xx, 409), the
+    attempt is kept — content hash, time, the exact record sent and the
+    decision it would commit — in a bounded store (10,000, oldest dropped)
+    until an identical-content retry replays that exact record at any
+    later time: the ledger answers 200 (it had it) or 201 (it didn't) and
+    the decision takes effect once with its original, true receipt time.
+    That is not backdating: the content is bound, and the service did
+    receive it then. Different content under the same submission id (or a
+    different human verdict) stays 409 while it is unresolved. Before this,
+    a committed-but-lost clip record was wedged forever after 15 minutes
+    (fresh receipt time → same event id → ledger 409) while the API said
+    "did NOT take effect".
 
 11. **No rule on the page, no rejection.** A `ClipReviewDecision` can
     only be validated with its rulebook version's rule ids in the pydantic
@@ -224,6 +239,52 @@ money. ZBC's unit of work is a campaign, not a clip.
     English (`language: "en"`, the only value accepted): a clip whose
     caption, on-screen text or transcript contains ANY letter outside the
     Latin script goes to the human queue (N3).
+    **Symbols and digits standing in for letters (fix wave 4, NS).**
+    `canonical()` turns every symbol into a space, so "Guaranteed
+    return$", "G€t rich", "Get r¡ch", "Get ri¢h" and "6et rich" used to
+    auto-pass. Not fixed by enumerating more characters alone — three
+    layers, each sending the clip to the human queue, never to a pass:
+    (a) a SKELETON map of symbols/digits that commonly stand in for
+    letters ($→s, €→e, ¢→c, ¡ ! | 1→i/l, 6→g, 2→z, + 7→t, ( <→c, ¥→y,
+    £→l/e, 0→o, 3→e, 4 @→a, 5→s, 8 ß→b, 9→g, …) applied inside words that
+    contain letters, and (b) a WILDCARD near-miss: any non-letter inside a
+    word may stand for one letter or be an extra inserted character, an
+    ASCII l may stand for i and vice versa, with at most half of each
+    phrase word's letters stood in for (so "$20" alone never matches a
+    word) — both per never-say phrase (`near_miss()`); (b') independently
+    of any phrase, any word mixing letters with symbols or digits
+    (`mixed_symbol_words()`). Decided false-positive boundary: surrounding
+    punctuation and emoji are ignored; apostrophes, hyphens, periods and
+    ampersands between letters ("don't", "co-op", "U.S.", "R&D"),
+    letters-only #hashtags/@mentions, and numbers/prices with an optional
+    unit suffix ("$20", "$1,200", "20%", "2nd", "1990s", "9am", "$40k",
+    "1080p", "60s") are ordinary and still pass. Letter+digit mixes
+    ("mp4", "Q4", "b2b") and symbols inside words ("t@lks", "a=b") go to a
+    human. A price is only relevant to a never-say phrase through (a)/(b),
+    which read symbols as letters only inside words that already contain
+    letters — so "$20 off" is never read as a phrase word. Characters
+    that NFKC turns into a space + mark (¨ ¯ ´ …) or into letters (™ → TM)
+    are treated as symbols for these word-level checks, so they can't
+    split or disguise a word. (c) Any Latin-script letter outside Basic
+    Latin, the Latin-1 letters and the fold table (`unfolded_latin_letters()`)
+    is an obfuscation signal: unknown lookalikes (e.g. "turned"/"reversed"
+    letters, ꜷ, œ) go to a human instead of being enumerated. The insular
+    letters AEGIS used (ꭇ ꞃ ᵹ ꞅ ꜧ, plus ꝛ ꞇ ꝺ ꝼ) are now also folded, and
+    letters in a compatibility form (superscript ª ᵃ, circled, squared) are
+    a signal. Fuzzed: 2,500 random symbol/digit/lookalike substitutions and
+    insertions per run into four never-say phrases (50,000 more across 20
+    seeds during the fix) — none auto-passes; a guard set of 11 ordinary
+    captions (prices, percentages, ordinals, abbreviations, contractions)
+    still auto-passes.
+    **Scanning is linear and off the event loop (fix wave 4, LIM).** The
+    "invisible character beside a word" scan re-walked every run of
+    invisibles for each one — quadratic: 5,000 zero-width spaces took
+    23.5 s, 10,000 took 94 s, and the transcript allows 50,000 (tens of
+    minutes of CPU under the service-wide lock). It is now one pass each
+    way. Every regex in `shared/text.py` is checked against adversarial
+    100 KB inputs (< 50 ms each); every route handler is a plain `def`
+    (FastAPI's thread pool), and bodies over 1 MiB are refused (413)
+    before parsing.
 
 15. **Deterministic ledger event ids (fix wave 1, F11).** `event_id =
     "cp:" + SHA-256(service instance, department, event_type, actor,
@@ -245,7 +306,18 @@ money. ZBC's unit of work is a campaign, not a clip.
     any second version of it (e.g. a stale retry with a fresh receipt
     time after a lost response → 503, never two decisions). A different
     human verdict while an earlier one's record is unresolved (inside the
-    window) is refused (409). The instance id is
+    window) is refused (409). Fix wave 4 (LOST): "the ledger's own 409 →
+    503" no longer wedges a clip — an uncertain attempt's exact record is
+    replayed by an identical retry (decision 10); a 409 on our own
+    deterministic id is reported as `LedgerConflict` (409, `took_effect:
+    "unknown"`), never as "did not take effect". The API now distinguishes
+    `took_effect: false` (certainly not recorded: local validation,
+    ledger not configured, connection refused, 4xx refusal) from
+    `took_effect: "unknown"` (read timeout, dropped connection, 5xx, 409).
+    Server-assigned ids (brief, job, work, kit) whose record's outcome is
+    unknown are burned — never reused for other content — and an identical
+    retry replays the pending record under the same id
+    (`shared/ledger.PendingCreations`). The instance id is
     random per process because every object id (`brief-0001`, …) restarts
     with the in-memory state; without it a restarted service would
     collide with its predecessor's events.
@@ -275,6 +347,21 @@ money. ZBC's unit of work is a campaign, not a clip.
     brief's own chain still never gets a third round). Consequence: two
     genuinely separate concurrent orders of an identical spec for the
     same client share one review budget.
+    **Matched with tolerance, not by exact fingerprint (fix wave 4, F8).**
+    With round 2 escalated, a clone at `length_seconds: 31` (a 30.5 s
+    render passes export validation for both a 30 s and a 31 s spec),
+    `client_id: "Client_Acme"` / `"client_acme."`, or a format re-wrap
+    (mp4 → m4v) got a fresh round 1. Now: client ids are validated
+    strictly at creation (lowercase `[a-z0-9_]` only; ZBM requirements and
+    results) so variants can't exist, and are compared normalised (NFKC,
+    casefold, only letters and digits) as defence in depth; two specs are
+    the same deliverable when platform, placement and aspect ratio in
+    lowest terms are equal and the lengths are within 2 × the export
+    tolerance (1.0 s) — one render could satisfy both; the format is not
+    part of the match. That applies to the escalation block, the round
+    count and the one-in-flight rule. The fingerprint is now only a label
+    in messages. Consequence: one client ordering a 30 s and a 31 s cut of
+    the same placement shares one review budget and one escalation.
 
 18. **Actors are authenticated (fix wave 2, N4).** Every action
     attributed to an actor — drafting (brief, rulebook), approving
@@ -391,9 +478,18 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
    contract endpoint is wired.
 10. **Retries are exactly-once only if they happen.** With deterministic
     ids (decision 15) a retry of a timed-out-but-committed record is one
-    record and one effect. If the caller never retries, or a different
-    decision on the same subject succeeds first, the ledger keeps a record
-    of a decision the service never applied (the service answered 503).
+    record and one effect, at any later time (fix wave 4: uncertain
+    attempts are replayed exactly; creating POSTs take an
+    `Idempotency-Key`, or derive one from actor + canonical request, so a
+    lost HTTP response + retry never creates a second brief, job, work
+    item, rulebook, kit, clip, clearance or licence). If the caller never
+    retries, the ledger keeps a record of a decision the service never
+    applied (the service answered 503 `took_effect: "unknown"` and says
+    so). The pending-attempt and idempotency stores are bounded (10,000
+    each, oldest dropped): a retry after eviction of an uncertain attempt
+    meets the ledger's 409 and is reported as conflicting. A derived key
+    (no header) replays only while the created resource is unchanged, so
+    a deliberate identical second request after things moved on is new.
     Across a restart nothing dedupes (in-memory state; see 1).
 11. **Heuristics are heuristics.** Key-message rule, 6-word/2-second hook
     limit, keyword-based moment matching and on-brief borderline check
@@ -418,7 +514,12 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     script that isn't mapped still goes to the human queue (any
     non-Latin letter in an English campaign), but a Latin-script
     lookalike the generated table doesn't cover (e.g. "turned" or
-    "reversed" letters) is matched only if it folds. Script detection is
+    "reversed" letters) is not matched but, since fix wave 4, is itself a
+    signal (human queue). Multi-letter ASCII lookalikes ("rn" for m, "vv"
+    for w, "cl" for d) and one character standing for two letters are not
+    matched; the near-miss matcher is word-by-word (a phrase split across
+    words AND written with symbols is caught by the mixed-word rule, not
+    by the phrase). Script detection is
     by Unicode character name (Python has no Script property). RLO text
     is flagged, not un-reversed. Costs: every clip with any non-Latin
     letter (a Spanish-only "ñ" is Latin and fine; a Russian word, a

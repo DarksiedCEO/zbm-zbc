@@ -36,11 +36,18 @@ NS  no never-say phrase in the clip's text                  -> reject
     (DC/MS/NS match on canonical text — confusables, diacritics, format
     characters and fullwidth forms folded, shared/text.py; a phrase found
     only once split letters are rejoined or leetspeak folded is
-    borderline -> human_review, never a pass)
+    borderline -> human_review, never a pass; NS also: a NEAR MISS — the
+    phrase appears once symbols/digits are read as letters ("return$",
+    "G€t", "6et") or treated as wildcards — is human_review)
+MIX any word mixing letters with symbols/digits in caption /
+    on-screen text / transcript (shared/text.mixed_symbol_words; ordinary
+    punctuation, #hashtags, prices and "2nd"/"1990s"-style numbers excepted)
+                                                            -> human_review
 OBF caption / on-screen text / transcript shows an obfuscation
     signal (bidi controls, fillers, tag characters anywhere;
     other invisibles beside a letter; lookalikes among Latin;
-    two scripts inside one word; separator-split letters)   -> human_review
+    two scripts inside one word; separator-split letters; a Latin
+    letter outside Basic Latin + Latin-1 + the fold table)  -> human_review
 LAT English-language campaign (every rulebook in this build):
     any letter outside the Latin script in those fields     -> human_review
 QF  resolution >= floor; not declared => human_review       -> reject / human_review
@@ -56,7 +63,15 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, model_validator
 
 from shared.registry import PlatformRulesRegistry
-from shared.text import PhraseMatch, contains_phrase, match_phrase, non_latin_letters, obfuscation_signals
+from shared.text import (
+    PhraseMatch,
+    contains_phrase,
+    match_phrase,
+    mixed_symbol_words,
+    near_miss,
+    non_latin_letters,
+    obfuscation_signals,
+)
 from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
 from zbc.platform_rules import rows_usable
 from zbc.rulebook import Rulebook, RuleKind
@@ -248,10 +263,18 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
             fail(r.rule_id, f"says never-say {r.params.get('phrase')!r}")
         elif m is PhraseMatch.LOOSE:
             borderline.append(f"{r.rule_id}: possible never-say {r.params.get('phrase')!r} written with split/obfuscated letters")
+        else:
+            how = near_miss(clip_text, r.params.get("phrase", ""))
+            if how:
+                borderline.append(f"{r.rule_id}: possible never-say {r.params.get('phrase')!r} written with {how}")
 
     for field_name in ("caption", "on_screen_text", "transcript"):
         for sig in obfuscation_signals(getattr(sub, field_name)):
             borderline.append(f"obfuscation in {field_name}: {sig}")
+        mixed = mixed_symbol_words(getattr(sub, field_name))
+        if mixed:
+            borderline.append(f"letters mixed with symbols/digits in {field_name} ({', '.join(repr(w) for w in mixed)}): "
+                              "a symbol or digit can stand in for a letter, so a human reads it")
         if rb.language == "en":
             foreign = non_latin_letters(getattr(sub, field_name))
             if foreign:
