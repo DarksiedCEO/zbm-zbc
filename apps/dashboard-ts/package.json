@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "node scripts/serve.mjs start",
     "lint": "next lint",
-    "test": "node --test tests/money.test.ts tests/bind.test.mjs tests/orchestrator-error.test.ts tests/ledger-status.test.ts",
+    "test": "node --test tests/money.test.ts tests/bind.test.mjs tests/orchestrator-error.test.ts tests/ledger-status.test.ts tests/load-outcome.test.ts tests/status.live.test.mjs",
     "check:dynamic": "node scripts/check-dynamic.mjs"
   },
   "dependencies": {

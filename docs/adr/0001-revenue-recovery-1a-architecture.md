@@ -115,14 +115,60 @@ whole upstream bodies into its log lines.
 | Limit | Value | Answer | Why this size |
 |---|---|---|---|
 | Items per request list (orders, subscriptions, events, touchpoints, statuses, terms, findings) | 1000 | 422 `too_long` | Same batch cap as fulfillment-py. The orchestrator sends the fixture pools (≤ 7 items) and ≤ ~10 findings. |
-| Request body | 2 MiB | 413, before any parsing | The largest accepted batch: 1000 orders × ~0.5–1 KiB (the fixture pool's largest order is 558 bytes of JSON; a 1000-order batch of it is 495 KB) or 1000 findings × ~650 bytes. 2 MiB is that with ≥ 2× headroom. Checked from `Content-Length` without reading the body, and as a running total for a chunked body. |
-| Body delivery | 30 s | 408 | A 2 MiB body on any working link takes well under a second. |
+| Every field of every request model (`src/zbm_schema/limits.py`) | ids 64 chars; finding_id/entity_id 128; labels 32; agent_id, SKU, discount code 64; cause_description 1024; line items per order 50; discounts per order 10; every int bounded | 422 naming the field | See "Body limit sizing" below. |
+| Request body, per route | orders routes 36 MiB; `/correlation/overlaps` 11 MiB; subscriptions, contract terms 2 MiB; events, touchpoints, platform statuses 1 MiB; any path without a body 64 KiB | 413, before any parsing | The computed worst case of the route's largest legal batch + 25%, rounded up to a MiB (below). Checked from `Content-Length` without reading the body, and as a running total for a chunked body. |
+| Large requests in progress | 1 (a body declared > 256 KiB, or chunked) | 503 + `Retry-After: 1`, before the body is read | Parsing, agents and serialization hold the GIL; a second large batch only delays the event loop. Smaller requests (every orchestrator scan) are never capped. The slot is held from the request head to the end of the response. A request without a valid token is answered 401 before its body is read, so it holds the slot only for that (checked on a real socket); a caller with a valid token that sends its body slowly holds it for at most the 30 s body deadline. |
+| Body delivery | 30 s | 408 | A 36 MiB body on a 100 Mbit/s link takes ~3 s. |
 | Request line + headers | 16 KiB | 400 (h11 parser, while reading); 431 (middleware, any launcher) | Callers send a few short headers. |
 | Request head delivery | 10 s | connection closed | uvicorn has none; `serve.py` adds it (`_HeadDeadlineH11Protocol`). |
 
-JSON parsing runs in the threadpool (`run_in_threadpool`) and every route
-handler is a plain `def` (FastAPI runs those in the threadpool), so neither
-parsing nor agent execution runs on the event loop. The supported launcher
+**Body limit sizing (fix wave 1, LOW-C).** The flat 2 MiB limit was sized
+from a typical order, so 1,000 orders × 30 line items (2.12 MiB) — a batch
+the API advertised — got 413. It could not have been sized from the worst
+case: no field had a limit, so a legal batch had no maximum size. Of the two
+ways out (a body limit from the true worst case, or a per-order line-item
+cap small enough that 1,000 orders fit 2 MiB), only the first is consistent
+with this ADR's rule that the limit is the largest accepted batch plus
+headroom: at the worst-case encoding below, 2 MiB holds 1,000 orders only
+with no line items at all. So every field got a limit and the body limit is
+computed from them: `src/request_limits.py` walks each route's request model
+and bounds its compact JSON size with every field at its limit — a string of
+N characters as 2 + 6N bytes (the most one character takes in minimal JSON
+escaping, `\u00XX`, and in Go's encoder, which also escapes `<>&`), money
+20, datetime 37 (RFC 3339 with 9 fractional digits and an offset), float 24,
+ints by their bound, every list full, every optional present. Results:
+1,000 worst-case orders 28.3 MiB (29,713 bytes per order, 50 line items of
+~460 bytes), 1,000 findings 8.6 MiB, 1,000 contract terms 1.07 MiB,
+subscriptions 0.98 MiB, events/touchpoints/statuses ~0.66 MiB. The limit is
+that × 1.25, rounded up to a MiB (the headroom covers encoders that are not
+compact or escape astral characters as 12-byte surrogate pairs). Not
+counted, because no finite limit could admit them: insignificant whitespace,
+zero-padded numbers, over-long fractional seconds. A realistic ASCII batch is
+~5× smaller than the worst case (1,000 orders × 30 line items ≈ 2.6 MiB).
+`tests/test_body_limits.py` builds the worst-case legal batch of every route
+(max-length strings of characters JSON must escape), checks it is within 5%
+of the computed bound, is accepted (200) and that one byte over the limit is
+413; the limits are not hardcoded but recomputed at import, and a request
+model with an unbounded field fails to load.
+
+JSON parsing runs in the threadpool (`run_in_threadpool`), every agent
+route handler is a plain `def` (FastAPI runs those in the threadpool), and
+the response JSON is built in that thread too (FastAPI serialized returned
+models on the event loop), so neither parsing, agent execution nor response
+serialization runs on the event loop. `/health` is `async def`: answered on
+the event loop, never queued behind the threadpool. **Bound:** with 16
+clients sending ~28 MiB worst-case batches at once, `/health` answered in
+p50 6–17 ms, max 0.08–0.22 s (8 runs, 2-CPU host, the 16 clients on the same
+host); `tests/test_request_limits_live.py` asserts max < 0.5 s. Before this
+fix, 16 concurrent 1,000-order batches (0.61 MiB each) held `/health` at p50
+0.89 s, max 1.08 s; after it, the same load gives p50 6 ms, max 47 ms, with
+the same batch throughput (one run each).
+
+Largest detection-py *responses* at these limits: 5.3 MiB (discount-misuse on
+1,000 worst-case orders) and 8.6 MiB (`/correlation/overlaps` echoing 1,000
+worst-case findings). The latter is above orchestrator-go's 8 MiB cap on
+detection-py responses below; the orchestrator sends ≤ ~10 findings, so this
+is not reachable from a scan today, but the two limits disagree. The supported launcher
 is now `cd src && python3 serve.py --port 8000`: it pins uvicorn's h11
 parser with the head-size cap and adds the head deadline. Running
 `python3 -m uvicorn api:app` still enforces every body limit, but the head
@@ -142,13 +188,39 @@ httptools).
 | Request body | 64 KiB (`MaxBytesReader`; 413) | No route takes a body. Any body is read and discarded **before** routing, so a scan never starts until its whole request has arrived (a slow body gets 408 at `ReadTimeout`). |
 | Upstream call | 10 s total (unchanged), dial 5 s, response headers 10 s | |
 | Upstream response headers | 64 KiB | |
-| detection-py response body | 8 MiB | its largest response is ~1 MiB (one finding per item, ≤ 1000 items) |
+| detection-py response body | 8 MiB | its largest response was ~1 MiB (one finding per item, ≤ 1000 items); since fix wave 1 LOW-C it can reach 8.6 MiB for a 1,000-finding correlation call (see detection-py above) |
 | ledger-rust response body | 64 MiB | `GET /ledger/entries` returns the whole ledger (no pagination); a finding entry is ~470–500 bytes, so this is ~130,000 entries (~13,000 fixture scans). Beyond that, reads fail closed (502; the log says "response body exceeds"). **Known limit until the ledger paginates.** |
 | Upstream text in errors/logs | 2 KiB | |
 
+**dashboard-ts** (fix wave 1, LOW-A). The page rendered an orchestrator
+failure with HTTP 200, so a monitor saw a healthy dashboard, and the
+orchestrator call had no timeout. Now the call is bounded by
+`ORCHESTRATOR_TIMEOUT_MS` (default 10 s) and the status on the wire is
+503 when the dashboard cannot get an answer (orchestrator unreachable,
+timed out, `ORCHESTRATOR_SERVICE_TOKEN` unset), 502 when the orchestrator
+answered but not with usable findings (token rejected, any other non-2xx,
+a body that is not the contract, or a ledger that does not verify), and
+200 only when findings loaded and the ledger verified. Mechanism: an App
+Router page component cannot set a 5xx status (only `notFound()`,
+`forbidden()`, `unauthorized()`, `redirect()`, or a throw, which is a 500
+with the message replaced by a digest), so `src/proxy.ts` reads the
+findings once per `GET /`, decides the status, and answers
+`NextResponse.next({ status })` while handing the very same outcome to the
+page through an overridden request header (`src/lib/handoff.ts`; a
+client-supplied copy of that header is dropped on every request). The
+page renders exactly that outcome, so the status and the message can never
+disagree. `GET /healthz` returns the same verdict as JSON for monitoring.
+Verified with curl against the built server; `tests/status.live.test.mjs`
+checks every case on the wire, `tests/load-outcome.test.ts` the mapping.
+The handoff header lives in process memory only (a 50,000-finding ledger,
+19 MB of JSON, passed through it in a manual run); the page itself, which
+renders the whole ledger, is the practical size limit.
+
 Tests: `services/detection-py/tests/test_request_limits.py`,
 `tests/test_request_limits_live.py` (real uvicorn on a real socket: `/health`
-stays under 1 s while a 1000-order batch and ~33 MB bodies are in flight;
+stays under 1 s while a 1000-order batch and ~44 MB bodies are in flight, and
+under 0.5 s with 16 concurrent worst-case batches; a stalled large request
+without a valid token is answered 401 and frees the heavy slot at once;
 413 from `Content-Length` and while streaming chunked data; head cap; head
 deadline); `services/orchestrator-go/cmd/orchestrator/server_limits_test.go`
 (the real binary on a real socket: slow-header and slow-body clients are

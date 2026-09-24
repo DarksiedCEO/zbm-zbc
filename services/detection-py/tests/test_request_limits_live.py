@@ -11,14 +11,20 @@ real concurrency), so these tests start the service exactly as the README
 launches it (src/serve.py) and talk to it over TCP from several threads.
 
 What must hold:
-  - a body larger than MAX_BODY_BYTES is refused with 413 before any parsing:
+  - a body larger than the route's limit is refused with 413 before any parsing:
     immediately from Content-Length (no body byte has to be sent), and while
     streaming for a chunked body with no Content-Length;
   - /health answers within 1 s while a large valid batch and an oversized
     body are in flight;
-  - a request head larger than the header cap is refused, not buffered.
+  - LOW-C (fix wave 1): with 16 clients sending worst-case legal batches
+    (~28 MiB each) at once, /health stays under HEALTH_BOUND_S, at most
+    MAX_CONCURRENT_HEAVY batches run and the rest get 503 + Retry-After;
+  - a request head larger than the header cap is refused, not buffered;
+  - a stalled large request without a valid token is answered 401 at once
+    and does not hold the heavy slot.
 
-Ports: 19960-19969 (this wave's assigned range for detection-py tests).
+Ports: 19960-19969 by default; DETECTION_LIVE_TEST_PORTS=20160-20169 (for
+example) moves them to a fix engineer's assigned range.
 """
 
 from __future__ import annotations
@@ -38,7 +44,8 @@ import pytest
 from conftest import TEST_SERVICE_TOKEN
 
 SRC = Path(__file__).resolve().parents[1] / "src"
-PORTS = range(19960, 19970)
+_lo, _, _hi = os.environ.get("DETECTION_LIVE_TEST_PORTS", "19960-19969").partition("-")
+PORTS = range(int(_lo), int(_hi) + 1)
 MIB = 1024 * 1024
 AUTH = f"Bearer {TEST_SERVICE_TOKEN}"
 
@@ -51,7 +58,7 @@ def _free_port() -> int:
             except OSError:
                 continue
             return port
-    raise RuntimeError("no free port in 19960-19969")
+    raise RuntimeError(f"no free port in {PORTS.start}-{PORTS.stop - 1}")
 
 
 @pytest.fixture(scope="module")
@@ -151,10 +158,10 @@ DETECT = "/agents/affiliate-coupon-extension/detect"
 
 
 def test_health_stays_responsive_while_large_and_oversized_bodies_are_in_flight(server):
-    from api import MAX_BATCH_ITEMS
-    large_valid = _orders_body(MAX_BATCH_ITEMS)   # the biggest batch the API accepts
-    oversized = _orders_body(52_000)              # ~33 MB, the reproduction's size
-    assert len(oversized) > 30 * MIB
+    from api import MAX_BATCH_ITEMS, ROUTE_BODY_LIMITS
+    large_valid = _orders_body(MAX_BATCH_ITEMS)   # a 1000-order batch
+    oversized = _orders_body(70_000)              # ~44 MB: over the orders routes' limit
+    assert len(oversized) > ROUTE_BODY_LIMITS[DETECT]
 
     results: dict[str, list] = {"valid": [], "oversized": []}
     stop = threading.Event()
@@ -187,25 +194,118 @@ def test_health_stays_responsive_while_large_and_oversized_bodies_are_in_flight(
     assert all(r[0] == 413 for r in results["oversized"]), {r[0] for r in results["oversized"]}
 
 
+# LOW-C (fix wave 1): the documented bound (ADR 0001 "Request limits") on
+# /health latency while 16 clients send worst-case legal batches at once.
+HEALTH_BOUND_S = 0.5
+
+
+def test_health_latency_bound_under_16_concurrent_worst_case_batches(server):
+    from api import MAX_CONCURRENT_HEAVY, ROUTE_BODY_LIMITS
+    from test_body_limits import worst_body
+
+    body = worst_body("orders")  # the largest legal batch of any route
+    assert len(body) > 25 * MIB and len(body) <= ROUTE_BODY_LIMITS[DETECT]
+
+    results: list[tuple[int, bytes, float]] = []
+    lock = threading.Lock()
+    stop = threading.Event()
+
+    def client():
+        while not stop.is_set():
+            r = _request(server, "POST", DETECT, body, timeout=120, headers={"Authorization": AUTH})
+            with lock:
+                results.append(r)
+            if r[0] == 503:
+                time.sleep(0.2)
+
+    threads = [threading.Thread(target=client) for _ in range(16)]
+    for t in threads:
+        t.start()
+    health = []
+    try:
+        time.sleep(0.5)  # let all 16 get going
+        end = time.monotonic() + 8
+        while time.monotonic() < end:
+            status, _, elapsed = _request(server, "GET", "/health", timeout=10)
+            health.append((status, elapsed))
+            time.sleep(0.05)
+    finally:
+        stop.set()
+        for t in threads:
+            t.join(timeout=180)
+
+    latencies = sorted(e for _, e in health)
+    worst = latencies[-1]
+    p50 = latencies[len(latencies) // 2]
+    print(f"\n/health under 16 concurrent worst-case batches: n={len(latencies)} "
+          f"p50={p50 * 1000:.0f}ms max={worst * 1000:.0f}ms; batches: "
+          f"{sum(r[0] == 200 for r in results)} x 200, {sum(r[0] == 503 for r in results)} x 503")
+    assert all(s == 200 for s, _ in health)
+    assert worst < HEALTH_BOUND_S, f"/health took {worst:.3f}s (bound {HEALTH_BOUND_S}s)"
+    codes = {r[0] for r in results}
+    assert codes <= {200, 503}, codes
+    assert any(r[0] == 200 for r in results), "no worst-case batch was ever served"
+    assert any(r[0] == 503 for r in results), f"16 concurrent batches never hit the cap of {MAX_CONCURRENT_HEAVY}"
+    for status, resp, _ in results:
+        if status == 503:
+            assert b"busy" in resp
+
+
+def test_heavy_slot_is_not_held_by_a_stalled_request_without_a_valid_token(server):
+    """The heavy slot is taken at the request head, before auth. A client
+    without a valid token that declares a large body and never sends it must
+    be answered 401 at once (freeing the slot), so it cannot starve real
+    batches. With a valid token the same stall does hold the slot (bounded
+    by the body deadline) — the documented trade-off (ADR 0001)."""
+    from api import HEAVY_BODY_BYTES
+    batch = _orders_body(1000)
+    assert len(batch) > HEAVY_BODY_BYTES  # a real heavy request
+
+    def stalled_then_batch(auth_line: str) -> tuple[bytes, int]:
+        with socket.create_connection(("127.0.0.1", server), timeout=5) as s:
+            s.sendall((f"POST {DETECT} HTTP/1.1\r\nHost: t\r\n{auth_line}"
+                       f"Content-Type: application/json\r\nContent-Length: {HEAVY_BODY_BYTES + 1}\r\n\r\n").encode())
+            time.sleep(0.3)  # head parsed; the body is never sent
+            status, _, _ = _request(server, "POST", DETECT, batch, timeout=60, headers={"Authorization": AUTH})
+            s.settimeout(0.5)
+            try:
+                first_line = s.recv(200).split(b"\r\n")[0]
+            except (TimeoutError, socket.timeout):
+                first_line = b""
+        return first_line, status
+
+    for auth_line in ("", "Authorization: Bearer not-the-token\r\n"):
+        first_line, status = stalled_then_batch(auth_line)
+        assert first_line.startswith(b"HTTP/1.1 401"), first_line
+        assert status == 200, status
+    first_line, status = stalled_then_batch(f"Authorization: {AUTH}\r\n")
+    assert first_line == b""  # still waiting for its body: it holds the slot
+    assert status == 503
+
+
 def test_oversized_content_length_is_refused_before_the_body_is_sent(server):
+    from api import ROUTE_BODY_LIMITS
+    limit = ROUTE_BODY_LIMITS[DETECT]
     with socket.create_connection(("127.0.0.1", server), timeout=5) as s:
         s.sendall((f"POST {DETECT} HTTP/1.1\r\nHost: t\r\nAuthorization: {AUTH}\r\n"
-                   "Content-Type: application/json\r\nContent-Length: 34603008\r\n\r\n").encode())
+                   f"Content-Type: application/json\r\nContent-Length: {limit + 1}\r\n\r\n").encode())
         t0 = time.monotonic()
         status, body = _read_response(s)  # no body byte sent at all
     assert status == 413
     assert time.monotonic() - t0 < 1.0
-    assert b"2097152" in body  # the limit is named
+    assert str(limit).encode() in body  # the limit is named
 
 
 def test_oversized_chunked_body_is_refused_while_streaming(server):
+    from api import ROUTE_BODY_LIMITS
+    limit = ROUTE_BODY_LIMITS[DETECT]
     with socket.create_connection(("127.0.0.1", server), timeout=10) as s:
         s.sendall((f"POST {DETECT} HTTP/1.1\r\nHost: t\r\nAuthorization: {AUTH}\r\n"
                    "Content-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n").encode())
         chunk = b" " * (256 * 1024)
         sent = 0
         answered = False
-        while sent < 64 * MIB:
+        while sent < limit + 64 * MIB:
             if select.select([s], [], [], 0)[0]:
                 answered = True
                 break
@@ -219,8 +319,8 @@ def test_oversized_chunked_body_is_refused_while_streaming(server):
     # The 413 arrived while the client was still streaming. `sent` counts
     # bytes handed to the kernel, which includes loopback socket buffers
     # (several MiB), so the bound is loose; the point is it is not 64 MiB.
-    assert answered or sent < 64 * MIB
-    assert sent <= 16 * MIB, f"client streamed {sent} bytes of a chunked body before it was refused"
+    assert answered or sent < limit + 64 * MIB
+    assert sent <= limit + 16 * MIB, f"client streamed {sent} bytes of a chunked body before it was refused"
 
 
 def test_request_head_larger_than_the_header_cap_is_refused(server):

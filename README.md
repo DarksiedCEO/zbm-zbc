@@ -20,10 +20,10 @@ hash chain as findings.**
 
 | Service | Language | Tests | Status |
 |---|---|---|---|
-| `services/detection-py` | Python (FastAPI, pydantic) | 427/427 passing | Real, REST-exposed, hardened, money is exact `Decimal`; request limits (2 MiB body, 1000 items, head size/deadline — ADR 0001 "Request limits"); run with `src/serve.py` |
+| `services/detection-py` | Python (FastAPI, pydantic) | 457/457 passing | Real, REST-exposed, hardened, money is exact `Decimal`; request limits (1000 items; every field bounded; per-route body limit = computed worst-case legal batch + 25%, 1–36 MiB; 1 large request at a time, else 503 + Retry-After; async `/health`; head size/deadline — ADR 0001 "Request limits"); run with `src/serve.py` |
 | `services/orchestrator-go` | Go | 59/59 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money`; server timeouts, body/header caps, bounded upstream responses (ADR 0001 "Request limits") |
 | `services/ledger-rust` | Rust | 91/91 passing (60 unit + 31 real-binary integration), clippy `-D warnings` clean | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
-| `apps/dashboard-ts` | TypeScript (Next.js 16) | 14/14 `npm test` (money vectors, loopback bind, error sanitizing, ledger status), build + typecheck clean, 0 npm audit vulnerabilities | Real, rendered per request (`ƒ /`), binds 127.0.0.1 by default, reads recorded findings — viewing never writes |
+| `apps/dashboard-ts` | TypeScript (Next.js 16) | 27/27 `npm test` after `npm run build` (money vectors, loopback bind, error sanitizing, ledger status, load outcome → HTTP status, live status codes on the wire), build + typecheck clean, 0 npm audit vulnerabilities | Real, rendered per request (`ƒ /`), binds 127.0.0.1 by default, reads recorded findings — viewing never writes; `/` and `/healthz` answer 503 (orchestrator unreachable/timeout, token unset) or 502 (token rejected, orchestrator error, ledger does not verify), 200 only when findings loaded and the ledger verified |
 
 **Verified live, full-stack run** (Python + Go + Rust, real processes,
 real HTTP, no mocks, all three services requiring and presenting real
@@ -247,6 +247,9 @@ ORCHESTRATOR_URL=http://localhost:8080 ORCHESTRATOR_SERVICE_TOKEN=<same as above
 # dashboard has no auth); DASHBOARD_BIND_ADDR overrides, PORT sets the port.
 # The page shows findings already recorded in the ledger (read-only);
 # run a scan first with the POST below. `npm test` runs the money vectors.
+# Monitoring: GET /healthz (JSON) and GET / answer 200 only when findings
+# loaded and the ledger verified; 503/502 otherwise (ORCHESTRATOR_TIMEOUT_MS,
+# default 10000, bounds the orchestrator call).
 ```
 
 Or just run the full pipeline once without the dashboard:
@@ -273,7 +276,7 @@ cd services/orchestrator-go && go vet ./... && go test -count=1 ./...
 # tests/server_auth.rs, tests/server_events.rs, tests/server_hardening.rs)
 cd services/ledger-rust && cargo test && cargo clippy --all-targets -- -D warnings
 
-# Dashboard — 14 tests
+# Dashboard — 27 tests (3 start the built server: run `npm run build` first)
 cd apps/dashboard-ts && npm ci && npx tsc --noEmit && npm run build && npm test && npm audit
 ```
 

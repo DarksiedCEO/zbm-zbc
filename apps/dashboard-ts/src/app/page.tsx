@@ -1,4 +1,6 @@
-import { fetchRecordedFindings } from "@/lib/api";
+import { headers } from "next/headers";
+
+import { decodeHandoff, HANDOFF_HEADER } from "@/lib/handoff";
 import { ledgerState } from "@/lib/ledger-status";
 import { formatUsd, isPositiveMoneyString } from "@/lib/money";
 import type { RecordedFinding, RecordedFindingsResult } from "@/types/finding";
@@ -103,15 +105,19 @@ function LedgerStatus({ result }: { result: RecordedFindingsResult }) {
   );
 }
 
+// LOW-A (fix wave 1): the findings are read by src/proxy.ts, which also sets
+// the HTTP status (200/502/503) from the same outcome and hands it here — a
+// page component cannot set a 5xx status itself (src/lib/handoff.ts). The
+// page renders exactly that outcome and does not call the orchestrator.
 export default async function Page() {
-  let result: RecordedFindingsResult | undefined;
-  let loadError: string | null = null;
-
-  try {
-    result = await fetchRecordedFindings();
-  } catch (e) {
-    loadError = e instanceof Error ? e.message : String(e);
+  const outcome = decodeHandoff((await headers()).get(HANDOFF_HEADER));
+  if (!outcome) {
+    // Fail closed: without the proxy's outcome the status on the wire could
+    // not match the page (the LOW-A bug). Throwing makes Next answer 500.
+    throw new Error("dashboard: no findings handoff from src/proxy.ts — the proxy did not run for this request");
   }
+  const result: RecordedFindingsResult | undefined = outcome.ok ? outcome.result : undefined;
+  const loadError: string | null = outcome.ok ? null : `${outcome.message} (correlation id ${outcome.correlationId})`;
 
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 24px" }}>

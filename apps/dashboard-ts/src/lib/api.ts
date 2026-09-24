@@ -1,5 +1,6 @@
-import { describeFetchFailure, describeOrchestratorFailure } from "@/lib/orchestrator-error";
-import type { RecordedFindingsResult } from "@/types/finding";
+import { newCorrelationId, type FailureKind, type LoadOutcome } from "./load-outcome.ts";
+import { describeFetchFailure, describeTimeout, parseOrchestratorFailure } from "./orchestrator-error.ts";
+import type { RecordedFindingsResult } from "../types/finding.ts";
 
 // Fix wave 1 (Sep 24 2026): the dashboard used to GET /revenue-recovery/scan
 // on every page view, which ran every agent and appended ~10 duplicate
@@ -11,40 +12,102 @@ import type { RecordedFindingsResult } from "@/types/finding";
 // starts is always the one used.
 //
 // ORCHESTRATOR_SERVICE_TOKEN is deliberately NOT prefixed with NEXT_PUBLIC_ —
-// it must stay server-side only. This module is only imported by the server
-// component in src/app/page.tsx, so the token never reaches the browser.
-export async function fetchRecordedFindings(): Promise<RecordedFindingsResult> {
-  const orchestratorUrl = process.env.ORCHESTRATOR_URL ?? "http://localhost:8080";
-  const token = process.env.ORCHESTRATOR_SERVICE_TOKEN;
+// it must stay server-side only. This module is only imported server-side
+// (src/proxy.ts, src/app/healthz/route.ts), so the token never reaches the
+// browser.
+//
+// LOW-A (fix wave 1): this never throws. Every failure becomes a
+// LoadOutcome with a kind (-> HTTP 502/503, see load-outcome.ts), a
+// page-safe message and a correlation id. The request is bounded by
+// ORCHESTRATOR_TIMEOUT_MS (default 10000) — it used to have no timeout.
+export const DEFAULT_TIMEOUT_MS = 10_000;
+
+export function timeoutMs(env: Record<string, string | undefined>): number {
+  const raw = env.ORCHESTRATOR_TIMEOUT_MS;
+  if (raw === undefined || raw === "") return DEFAULT_TIMEOUT_MS;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n <= 600_000 ? n : DEFAULT_TIMEOUT_MS;
+}
+
+function isTimeout(e: unknown): boolean {
+  return e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+}
+
+function fail(kind: FailureKind, message: string, correlationId: string | null, detail: unknown): LoadOutcome {
+  const id = correlationId ?? newCorrelationId();
+  // Fix wave 3 (AEGIS D3): full detail (it can hold internal URLs,
+  // host:port, raw bodies) goes to the server log only, under the same id.
+  console.error(`dashboard: load failed [${kind}] correlation_id=${id}:`, detail);
+  return { ok: false, kind, message, correlationId: id };
+}
+
+function looksLikeFindings(v: unknown): v is RecordedFindingsResult {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return (
+    Array.isArray(o.findings) &&
+    !!o.overlapping_claims &&
+    typeof o.overlapping_claims === "object" &&
+    typeof o.ledger_entries_total === "number" &&
+    typeof o.finding_entries_total === "number" &&
+    "ledger_verify" in o
+  );
+}
+
+export async function loadRecordedFindings(
+  env: Record<string, string | undefined> = process.env,
+  fetchImpl: typeof fetch = fetch
+): Promise<LoadOutcome> {
+  const orchestratorUrl = env.ORCHESTRATOR_URL ?? "http://localhost:8080";
+  const token = env.ORCHESTRATOR_SERVICE_TOKEN;
   if (!token) {
-    throw new Error(
+    return fail(
+      "not_configured",
       "ORCHESTRATOR_SERVICE_TOKEN is not set. The dashboard cannot call " +
         "orchestrator-go without it — set it to the same value orchestrator-go " +
-        "was started with (its ORCHESTRATOR_SERVICE_TOKEN env var)."
+        "was started with (its ORCHESTRATOR_SERVICE_TOKEN env var).",
+      null,
+      "ORCHESTRATOR_SERVICE_TOKEN is not set"
     );
   }
 
-  // Fix wave 3 (AEGIS D3): the error thrown here is displayed on the page,
-  // so it never carries the raw response body or a transport error (both
-  // can contain internal URLs / host:port). Full detail goes to the server
-  // log; the page gets describeOrchestratorFailure/describeFetchFailure.
+  const ms = timeoutMs(env);
+  const signal = AbortSignal.timeout(ms);
   let res: Response;
   try {
-    res = await fetch(`${orchestratorUrl}/revenue-recovery/findings`, {
+    res = await fetchImpl(`${orchestratorUrl}/revenue-recovery/findings`, {
       method: "GET",
       cache: "no-store",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
     });
   } catch (e) {
-    console.error("dashboard: orchestrator request failed:", e);
-    throw new Error(describeFetchFailure(e));
+    if (isTimeout(e)) return fail("timeout", describeTimeout(ms), null, e);
+    return fail("unreachable", describeFetchFailure(e), null, e);
   }
+
+  let body: string;
+  try {
+    body = await res.text();
+  } catch (e) {
+    if (isTimeout(e)) return fail("timeout", describeTimeout(ms), null, e);
+    return fail("bad_response", `orchestrator returned ${res.status} with an unreadable body`, null, e);
+  }
+
   if (!res.ok) {
-    const body = await res.text();
-    console.error(`dashboard: orchestrator returned ${res.status}: ${body}`);
-    throw new Error(describeOrchestratorFailure(res.status, body));
+    const { message, correlationId } = parseOrchestratorFailure(res.status, body);
+    const kind: FailureKind = res.status === 401 || res.status === 403 ? "upstream_auth" : "upstream_error";
+    return fail(kind, message, correlationId, `orchestrator returned ${res.status}: ${body}`);
   }
-  return (await res.json()) as RecordedFindingsResult;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    return fail("bad_response", "orchestrator returned a body that is not JSON", null, e);
+  }
+  if (!looksLikeFindings(parsed)) {
+    return fail("bad_response", "orchestrator returned JSON that is not the recorded-findings contract", null, body.slice(0, 2000));
+  }
+  return { ok: true, result: parsed };
 }

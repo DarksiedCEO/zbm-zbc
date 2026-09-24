@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from api import MAX_BATCH_ITEMS, MAX_BODY_BYTES, _BodyLimitMiddleware, app
+from api import MAX_BATCH_ITEMS, MAX_BODY_BYTES, ROUTE_BODY_LIMITS, _BodyLimitMiddleware, app
 from conftest import TEST_SERVICE_TOKEN
 
 client = TestClient(app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"})
@@ -40,7 +40,11 @@ ROUTES = {
 
 
 def test_limits_are_the_documented_values():
-    assert MAX_BODY_BYTES == 2 * 1024 * 1024
+    # LOW-C (fix wave 1): the body limit is per route, computed from the
+    # worst case of the route's largest legal batch (test_body_limits.py);
+    # MAX_BODY_BYTES is the largest of them. It used to be a flat 2 MiB,
+    # which refused 1,000 orders of 30 line items.
+    assert MAX_BODY_BYTES == 36 * 1024 * 1024
     assert MAX_BATCH_ITEMS == 1000
 
 
@@ -59,7 +63,7 @@ def test_batch_at_the_item_cap_is_accepted():
 
 
 def test_oversized_content_length_is_413_on_every_route_even_unauthenticated():
-    big = b" " * (MAX_BODY_BYTES + 1)
+    big = b" " * (MAX_BODY_BYTES + 1)  # over every route's limit
     for path in [*ROUTES, "/health", "/fixtures/orders"]:
         r = anon.request("POST" if path in ROUTES else "GET", path, content=big,
                          headers={"Content-Type": "application/json"})
@@ -67,8 +71,10 @@ def test_oversized_content_length_is_413_on_every_route_even_unauthenticated():
 
 
 def test_oversized_chunked_body_is_413():
+    limit = ROUTE_BODY_LIMITS["/agents/discount-misuse/detect"]
+
     def gen():
-        for _ in range(MAX_BODY_BYTES // 65536 + 2):
+        for _ in range(limit // 65536 + 2):
             yield b" " * 65536
     r = client.post("/agents/discount-misuse/detect", content=gen(), headers={"Content-Type": "application/json"})
     assert r.status_code == 413
@@ -76,7 +82,7 @@ def test_oversized_chunked_body_is_413():
 
 def test_body_at_the_limit_is_parsed_not_refused():
     body = b'{"orders": []}'
-    body = body + b" " * (MAX_BODY_BYTES - len(body))
+    body = body + b" " * (ROUTE_BODY_LIMITS["/agents/discount-misuse/detect"] - len(body))
     r = client.post("/agents/discount-misuse/detect", content=body, headers={"Content-Type": "application/json"})
     assert r.status_code == 200, r.text
 

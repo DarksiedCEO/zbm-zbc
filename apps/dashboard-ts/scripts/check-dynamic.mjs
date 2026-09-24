@@ -5,9 +5,13 @@
 import { readFileSync } from "node:fs";
 
 const manifest = JSON.parse(readFileSync(new URL("../.next/prerender-manifest.json", import.meta.url), "utf8"));
+// /healthz (LOW-A, fix wave 1) reports live upstream health: a build-time
+// snapshot of it would be the same bug.
 const prerendered = Object.keys(manifest.routes ?? {});
-if (prerendered.includes("/")) {
-  console.error(`FAIL: "/" was prerendered at build time (static routes: ${prerendered.join(", ")})`);
-  process.exit(1);
+for (const route of ["/", "/healthz"]) {
+  if (prerendered.includes(route)) {
+    console.error(`FAIL: "${route}" was prerendered at build time (static routes: ${prerendered.join(", ")})`);
+    process.exit(1);
+  }
 }
-console.log(`OK: "/" is dynamic (prerendered routes: ${prerendered.join(", ") || "none"})`);
+console.log(`OK: "/" and "/healthz" are dynamic (prerendered routes: ${prerendered.join(", ") || "none"})`);
