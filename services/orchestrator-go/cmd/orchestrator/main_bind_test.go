@@ -23,6 +23,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -39,21 +41,33 @@ func buildOrchestratorBinary(t *testing.T) string {
 	return binPath
 }
 
+// freePort picks a free port in 19970-19979 (the range assigned to these
+// binary tests). Ports are handed out once per test process, so parallel
+// tests never race for the same one.
+var (
+	portMu   sync.Mutex
+	nextPort = 19970
+)
+
 func freePort(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to find a free port: %v", err)
+	portMu.Lock()
+	defer portMu.Unlock()
+	for ; nextPort <= 19979; nextPort++ {
+		l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(nextPort))
+		if err != nil {
+			continue
+		}
+		l.Close()
+		p := strconv.Itoa(nextPort)
+		nextPort++
+		return p
 	}
-	defer l.Close()
-	_, port, err := net.SplitHostPort(l.Addr().String())
-	if err != nil {
-		t.Fatalf("failed to parse free port: %v", err)
-	}
-	return port
+	t.Fatalf("no free port left in 19970-19979")
+	return ""
 }
 
-func startOrchestrator(t *testing.T, bindAddr string) (port string, waitForExit func()) {
+func startOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (port string, waitForExit func()) {
 	t.Helper()
 	binPath := buildOrchestratorBinary(t)
 	port = freePort(t)
@@ -68,6 +82,7 @@ func startOrchestrator(t *testing.T, bindAddr string) (port string, waitForExit 
 	if bindAddr != "" {
 		cmd.Env = append(cmd.Env, "ORCHESTRATOR_BIND_ADDR="+bindAddr)
 	}
+	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {

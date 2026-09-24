@@ -12,6 +12,7 @@ dev/testing convenience only and are explicitly labeled non-live.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
 
@@ -20,7 +21,8 @@ from typing import Callable, TypeVar
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from agents import (
     abandoned_cart_coverage,
@@ -133,6 +135,110 @@ app = FastAPI(
 )
 
 
+# --- request limits (fix wave 1, Sep 24 2026) --------------------------------
+#
+# Finding (LOW, CONFIRMED): no body-size limit, and the body was parsed ON the
+# event loop — a 33 MB body held /health for 3.2 s, and a 33 MB batch was
+# accepted and run. Now (ADR 0001 "Request limits"):
+#   - MAX_BATCH_ITEMS caps every request list (orders, subscriptions, events,
+#     touchpoints, statuses, terms, findings): more is a 422 "too_long".
+#   - MAX_BODY_BYTES is sized from the largest batch the API accepts: 1000
+#     orders of ~1 KiB each (the fixture pool's largest order is 558 bytes of
+#     JSON; a 3-line-item order is ~700) is ~1 MiB, and the correlation call's
+#     1000 findings of ~650 bytes each is ~0.65 MiB. 2 MiB is that with 2x
+#     headroom. A larger body is refused with 413 BEFORE any parsing: from
+#     Content-Length without reading a byte of the body, and — for a chunked
+#     body with no Content-Length — as soon as the running total passes it.
+#   - BODY_READ_TIMEOUT_S bounds how long one request may take to deliver its
+#     body (408), so a slow-drip body cannot hold a request open forever.
+#   - MAX_HEADER_BYTES bounds the request line + headers. The real bound is in
+#     the HTTP parser (serve.py runs uvicorn's h11 parser with
+#     h11_max_incomplete_event_size = MAX_HEADER_BYTES, so an oversized head
+#     is refused while it is being read); the middleware re-checks it (431)
+#     for any other launcher. uvicorn's default httptools parser has NO head
+#     size limit (a 20 MB header was accepted), which is why serve.py exists.
+#   - JSON parsing runs in the threadpool (run_in_threadpool below), and every
+#     route handler is a plain `def`, which FastAPI runs in the threadpool, so
+#     neither parsing nor agent execution blocks the event loop.
+
+MAX_BODY_BYTES = 2 * 1024 * 1024
+MAX_BATCH_ITEMS = 1000
+MAX_HEADER_BYTES = 16 * 1024
+BODY_READ_TIMEOUT_S = 30.0
+
+
+class _BodyLimitMiddleware:
+    """Pure ASGI middleware (no buffering of its own) enforcing the head size,
+    the body size and the body read deadline on every HTTP request, before
+    routing, auth or parsing."""
+
+    def __init__(self, app, max_body: int = MAX_BODY_BYTES, max_head: int = MAX_HEADER_BYTES,
+                 read_timeout: float = BODY_READ_TIMEOUT_S):
+        self.app = app
+        self.max_body = max_body
+        self.max_head = max_head
+        self.read_timeout = read_timeout
+
+    @staticmethod
+    async def _refuse(send, code: int, detail: str) -> None:
+        body = JSONResponse(status_code=code, content={"detail": detail}, headers={"Connection": "close"})
+        await send({"type": "http.response.start", "status": code, "headers": body.raw_headers})
+        await send({"type": "http.response.body", "body": body.body})
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        head = len(scope.get("raw_path") or b"") + len(scope.get("query_string") or b"")
+        head += sum(len(k) + len(v) + 4 for k, v in scope["headers"])
+        if head > self.max_head:
+            return await self._refuse(send, 431, f"request head exceeds {self.max_head} bytes")
+
+        declared = [v for k, v in scope["headers"] if k == b"content-length"]
+        if declared:
+            if len(declared) > 1 or not declared[0].isdigit():
+                return await self._refuse(send, 400, "invalid Content-Length")
+            if int(declared[0]) > self.max_body:
+                return await self._refuse(send, 413, f"request body exceeds {self.max_body} bytes")
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.read_timeout
+        received = 0
+        body_done = False
+
+        async def limited_receive():
+            nonlocal received, body_done
+            if body_done:
+                return await receive()
+            remaining = deadline - loop.time()
+            try:
+                if remaining <= 0:
+                    raise TimeoutError
+                message = await asyncio.wait_for(receive(), remaining)
+            except TimeoutError:
+                raise HTTPException(status_code=status.HTTP_408_REQUEST_TIMEOUT,
+                                    detail=f"request body not received within {self.read_timeout:g}s",
+                                    headers={"Connection": "close"}) from None
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_body:
+                    # Raised inside the route, so FastAPI's HTTPException
+                    # handler answers it (nothing has been sent yet).
+                    raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                                        detail=f"request body exceeds {self.max_body} bytes",
+                                        headers={"Connection": "close"})
+                if not message.get("more_body", False):
+                    body_done = True
+            else:
+                body_done = True
+            return message
+
+        return await self.app(scope, limited_receive, send)
+
+
+app.add_middleware(_BodyLimitMiddleware)
+
+
 # --- request parsing and validation errors (fix wave 1, Sep 24 2026) ------
 #
 # Every request body is parsed with pydantic's own JSON parser
@@ -165,9 +271,11 @@ def wire_body(model: type[_M]) -> Callable:
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                 detail="request body must be JSON (Content-Type: application/json)",
             )
+        # Size and read deadline are enforced by _BodyLimitMiddleware while
+        # this reads; parsing happens off the event loop.
         raw = await request.body()
         try:
-            return model.model_validate_json(raw)
+            return await run_in_threadpool(model.model_validate_json, raw)
         except ValidationError as e:
             errors = e.errors(include_url=False, include_input=False, include_context=False)
             raise RequestValidationError(
@@ -185,31 +293,31 @@ app.add_exception_handler(RequestValidationError, _validation_error_handler)
 
 
 class OrdersRequest(BaseModel):
-    orders: list[Order]
+    orders: list[Order] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class SubscriptionsRequest(BaseModel):
-    subscriptions: list[Subscription]
+    subscriptions: list[Subscription] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class ServerSideEventsRequest(BaseModel):
-    events: list[ServerSideAttributionEvent]
+    events: list[ServerSideAttributionEvent] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class ChannelTouchpointsRequest(BaseModel):
-    touchpoints: list[ChannelTouchpoint]
+    touchpoints: list[ChannelTouchpoint] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class PlatformConnectionsRequest(BaseModel):
-    statuses: list[PlatformConnectionStatus]
+    statuses: list[PlatformConnectionStatus] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class ContractTermsRequest(BaseModel):
-    terms: list[ContractTerm]
+    terms: list[ContractTerm] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class FindingsRequest(BaseModel):
-    findings: list[Finding]
+    findings: list[Finding] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class FindingsResponse(BaseModel):
