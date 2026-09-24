@@ -37,6 +37,7 @@ from fulfillment_schema import (
     TaskStatus,
 )
 from integrations.sip_dialer import DialAttemptResult, InMemorySipDialer
+from outbound_gate import AttemptLimits, OutboundContactGate
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 client = TestClient(api.app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"})
@@ -48,6 +49,17 @@ UTC_2000 = datetime(2026, 9, 22, 20, 0, tzinfo=timezone.utc)  # 13:00 in Los Ang
 
 LA = "America/Los_Angeles"
 DEFAULT_WINDOW = ContactWindow.default()
+# Fix wave 1, F3: the dialing tests below used "+15550101" (7 digits after
+# +1, not a real NANP number) with a recipient "in UTC" — the unchecked
+# number/zone pairing AEGIS exploited. They now use a real Los Angeles
+# number in its real zone, at a time inside the strict +1 window.
+LA_PHONE = "+12135550101"
+LA_PHONE_2 = "+12135550202"
+UTC_1800 = datetime(2026, 9, 22, 18, 0, tzinfo=timezone.utc)  # 11:00 in Los Angeles
+
+
+def _gate(now: datetime) -> OutboundContactGate:
+    return OutboundContactGate(window=DEFAULT_WINDOW, limits=AttemptLimits(), clock=lambda: now)
 
 
 def _task(**overrides) -> FollowUpTask:
@@ -92,8 +104,8 @@ def test_callback_at_2am_recipient_local_is_blocked_even_though_utc_is_daytime()
     dialer = InMemorySipDialer()
     outcomes = callback_orchestration.orchestrate(
         [_task()], dialer,
-        phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={},
-        timezone_by_call_id={"call_1": LA}, contact_window=DEFAULT_WINDOW, now=UTC_0900,
+        phone_by_call_id={"call_1": LA_PHONE}, line_by_call_id={},
+        timezone_by_call_id={"call_1": LA}, gate=_gate(UTC_0900), now=UTC_0900,
     )
     assert outcomes[0].attempted is False
     assert "contact window" in outcomes[0].skip_reason
@@ -105,8 +117,8 @@ def test_callback_at_1pm_recipient_local_is_allowed_even_though_utc_is_evening()
     task = _task(created_at=UTC_2000 - timedelta(minutes=1), due_at=UTC_2000 + timedelta(minutes=5))
     outcomes = callback_orchestration.orchestrate(
         [task], dialer,
-        phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={},
-        timezone_by_call_id={"call_1": LA}, contact_window=DEFAULT_WINDOW, now=UTC_2000,
+        phone_by_call_id={"call_1": LA_PHONE}, line_by_call_id={},
+        timezone_by_call_id={"call_1": LA}, gate=_gate(UTC_2000), now=UTC_2000,
     )
     assert outcomes[0].attempted is True
     assert len(dialer.calls_placed) == 1
@@ -117,8 +129,8 @@ def test_unknown_or_invalid_recipient_timezone_fails_closed(tz_map):
     dialer = InMemorySipDialer()
     outcomes = callback_orchestration.orchestrate(
         [_task(created_at=NOON_UTC - timedelta(minutes=1))], dialer,
-        phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={},
-        timezone_by_call_id=tz_map, contact_window=DEFAULT_WINDOW, now=NOON_UTC,
+        phone_by_call_id={"call_1": LA_PHONE}, line_by_call_id={},
+        timezone_by_call_id=tz_map, gate=_gate(NOON_UTC), now=NOON_UTC,
     )
     assert outcomes[0].attempted is False
     assert "time zone" in outcomes[0].skip_reason
@@ -163,7 +175,7 @@ def test_api_refuses_caller_supplied_now_which_could_bypass_quiet_hours():
         "/agents/callback-orchestration/run",
         json={
             "tasks": [_task_json()],
-            "phone_by_call_id": {"call_1": "+15550101"},
+            "phone_by_call_id": {"call_1": LA_PHONE},
             "timezone_by_call_id": {"call_1": LA},
             "now": "2026-09-22T19:00:00Z",
         },
@@ -178,10 +190,11 @@ def test_api_quiet_hours_use_the_server_clock(monkeypatch):
     monkeypatch.setattr(api, "_attempted_task_ids", set())
     r = client.post(
         "/agents/callback-orchestration/run",
-        json={"tasks": [_task_json()], "phone_by_call_id": {"call_1": "+15550101"}, "timezone_by_call_id": {"call_1": LA}},
+        json={"tasks": [_task_json()], "phone_by_call_id": {"call_1": LA_PHONE}, "timezone_by_call_id": {"call_1": LA}},
     )
     assert r.status_code == 200
     assert r.json()["outcomes"][0]["attempted"] is False
+    assert "contact window" in r.json()["outcomes"][0]["skip_reason"]
     assert dialer.calls_placed == []
 
 
@@ -199,11 +212,11 @@ def test_duplicate_call_event_in_one_batch_produces_one_task():
 
 def test_duplicate_task_id_in_one_batch_is_dialed_once():
     dialer = InMemorySipDialer()
-    t = _task(created_at=NOON_UTC - timedelta(minutes=1))
+    t = _task(created_at=UTC_1800 - timedelta(minutes=1))
     outcomes = callback_orchestration.orchestrate(
         [t, t], dialer,
-        phone_by_call_id={"call_1": "+15550101"}, line_by_call_id={},
-        timezone_by_call_id={"call_1": "UTC"}, contact_window=DEFAULT_WINDOW, now=NOON_UTC,
+        phone_by_call_id={"call_1": LA_PHONE}, line_by_call_id={},
+        timezone_by_call_id={"call_1": LA}, gate=_gate(UTC_1800), now=UTC_1800,
     )
     assert len(dialer.calls_placed) == 1
     assert [o.attempted for o in outcomes] == [True, False]
@@ -215,12 +228,12 @@ def test_api_does_not_redial_the_same_task_across_requests(monkeypatch):
     resubmits the same still-PENDING task no longer gets a second dial."""
     dialer = InMemorySipDialer()
     monkeypatch.setattr(api, "_dialer", dialer)
-    monkeypatch.setattr(api, "_now", lambda: NOON_UTC)
+    monkeypatch.setattr(api, "_now", lambda: UTC_1800)
     monkeypatch.setattr(api, "_attempted_task_ids", set())
     body = {
-        "tasks": [_task_json(created_at=NOON_UTC - timedelta(minutes=1))],
-        "phone_by_call_id": {"call_1": "+15550101"},
-        "timezone_by_call_id": {"call_1": "UTC"},
+        "tasks": [_task_json(created_at=UTC_1800 - timedelta(minutes=1))],
+        "phone_by_call_id": {"call_1": LA_PHONE},
+        "timezone_by_call_id": {"call_1": LA},
     }
     r1 = client.post("/agents/callback-orchestration/run", json=body)
     r2 = client.post("/agents/callback-orchestration/run", json=body)
@@ -232,18 +245,18 @@ def test_api_does_not_redial_the_same_task_across_requests(monkeypatch):
 
 def test_api_concurrent_requests_for_the_same_task_dial_once(monkeypatch):
     class SlowDialer(InMemorySipDialer):
-        def place_call(self, phone_number, line_id):
+        def place_call(self, authorization, line_id):
             time.sleep(0.2)
-            return super().place_call(phone_number, line_id)
+            return super().place_call(authorization, line_id)
 
     dialer = SlowDialer()
     monkeypatch.setattr(api, "_dialer", dialer)
-    monkeypatch.setattr(api, "_now", lambda: NOON_UTC)
+    monkeypatch.setattr(api, "_now", lambda: UTC_1800)
     monkeypatch.setattr(api, "_attempted_task_ids", set())
     body = {
-        "tasks": [_task_json(created_at=NOON_UTC - timedelta(minutes=1))],
-        "phone_by_call_id": {"call_1": "+15550101"},
-        "timezone_by_call_id": {"call_1": "UTC"},
+        "tasks": [_task_json(created_at=UTC_1800 - timedelta(minutes=1))],
+        "phone_by_call_id": {"call_1": LA_PHONE},
+        "timezone_by_call_id": {"call_1": LA},
     }
     threads = [threading.Thread(target=client.post, args=("/agents/callback-orchestration/run",), kwargs={"json": body}) for _ in range(4)]
     for th in threads:
@@ -261,24 +274,25 @@ def test_dialer_exception_mid_batch_keeps_earlier_outcomes_and_marks_unknown_as_
     (outcome unknown), never left PENDING for an automatic redial."""
 
     class FlakyDialer(InMemorySipDialer):
-        def place_call(self, phone_number, line_id):
-            if phone_number == "+15550202":
-                raise ConnectionError("carrier unreachable")
-            return super().place_call(phone_number, line_id)
+        def place_call(self, authorization, line_id):
+            if authorization.customer_id == "cust_2":
+                authorization.redeem(TaskChannel.CALL)  # number handed to the carrier...
+                raise ConnectionError("carrier unreachable")  # ...then the carrier fails
+            return super().place_call(authorization, line_id)
 
     dialer = FlakyDialer()
-    t1 = _task(task_id="fu-1", source_call_id="call_1", created_at=NOON_UTC - timedelta(minutes=1))
-    t2 = _task(task_id="fu-2", source_call_id="call_2", created_at=NOON_UTC - timedelta(minutes=1))
+    t1 = _task(task_id="fu-1", source_call_id="call_1", created_at=UTC_1800 - timedelta(minutes=1))
+    t2 = _task(task_id="fu-2", source_call_id="call_2", customer_id="cust_2", created_at=UTC_1800 - timedelta(minutes=1))
     outcomes = callback_orchestration.orchestrate(
         [t1, t2], dialer,
-        phone_by_call_id={"call_1": "+15550101", "call_2": "+15550202"}, line_by_call_id={},
-        timezone_by_call_id={"call_1": "UTC", "call_2": "UTC"}, contact_window=DEFAULT_WINDOW, now=NOON_UTC,
+        phone_by_call_id={"call_1": LA_PHONE, "call_2": LA_PHONE_2}, line_by_call_id={},
+        timezone_by_call_id={"call_1": LA, "call_2": LA}, gate=_gate(UTC_1800), now=UTC_1800,
     )
     assert outcomes[0].task.status == TaskStatus.SENT
     assert outcomes[1].attempted is True
     assert outcomes[1].task.status == TaskStatus.FAILED
     assert "ConnectionError" in outcomes[1].skip_reason
-    assert "+15550202" not in outcomes[1].skip_reason
+    assert LA_PHONE_2 not in outcomes[1].skip_reason
 
 
 def test_exhausted_escalation_retry_returns_the_same_resolution():

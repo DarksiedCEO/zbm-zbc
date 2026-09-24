@@ -64,6 +64,8 @@ from fulfillment_schema import (
     TaskStatus,
 )
 from integrations.sip_dialer import InMemorySipDialer, NotWiredSipDialer, SipDialerPort
+from outbound_gate import AttemptLimits, OutboundContactGate, parse_attempt_limits
+from recipient_zones import parse_country_zones
 from integrations.system_of_record import (
     InMemorySystemOfRecord,
     NotConfiguredSystemOfRecord,
@@ -197,12 +199,57 @@ def _load_contact_window() -> ContactWindow:
 _CONTACT_WINDOW: ContactWindow = _load_contact_window()
 
 
+def _load_attempt_limits() -> AttemptLimits:
+    # Fix wave 1, F3: per-number/per-customer attempt limits. Narrow-only,
+    # like the contact window; a bad value refuses startup.
+    try:
+        return parse_attempt_limits(
+            os.environ.get("FULFILLMENT_CONTACT_MAX_ATTEMPTS_PER_24H"),
+            os.environ.get("FULFILLMENT_CONTACT_MIN_SPACING_MINUTES"),
+        )
+    except ValueError as exc:
+        raise RuntimeError(
+            f"FULFILLMENT_CONTACT_MAX_ATTEMPTS_PER_24H / FULFILLMENT_CONTACT_MIN_SPACING_MINUTES "
+            f"invalid ({exc}). This service refuses to start rather than guess."
+        ) from None
+
+
+def _load_country_zones() -> dict[str, tuple[str, ...]]:
+    # Fix wave 1, F3: non-+1 numbers are never contacted unless a zone rule
+    # for their country code is configured here. A bad value refuses startup.
+    raw = os.environ.get("FULFILLMENT_COUNTRY_ZONES")
+    if not raw:
+        return {}
+    try:
+        return parse_country_zones(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"FULFILLMENT_COUNTRY_ZONES is invalid ({exc}). Expected e.g. "
+            "'44=Europe/London;61=Australia/Perth,Australia/Sydney'. This service refuses to start."
+        ) from None
+
+
 def _now() -> datetime:
     """The ONLY clock the quiet-hours check sees. Sep 24 2026 audit: the
     orchestrate route used to accept `now` from the request body, letting
     any caller evaluate quiet hours against a time of its choosing. Tests
     monkeypatch this function instead."""
     return datetime.now(timezone.utc)
+
+
+def _build_gate() -> OutboundContactGate:
+    # The clock is looked up on every read (not bound once), so the gate
+    # always reads the current module-level _now — per task, at dial time.
+    return OutboundContactGate(
+        window=_CONTACT_WINDOW,
+        limits=_load_attempt_limits(),
+        clock=lambda: _now(),
+        country_zones=_load_country_zones(),
+    )
+
+
+# Fix wave 1, F3: the single place automated outbound contact is authorized.
+_GATE: OutboundContactGate = _build_gate()
 
 
 _dialer: SipDialerPort = _build_dialer()
@@ -263,7 +310,9 @@ class OrchestrateRequest(_Req):
     phone_by_call_id: dict[EntityId, PhoneE164] = Field(max_length=_MAX_BATCH)
     line_by_call_id: dict[EntityId, EntityId] = Field(default_factory=dict, max_length=_MAX_BATCH)
     # Recipient IANA time zone per call (e.g. "America/Chicago"). A call
-    # with no entry here is not dialed — fail closed, see contact_window.py.
+    # with no entry here is not dialed — fail closed. Fix wave 1, F3: this
+    # is a CLAIM, checked against the number by the gate (recipient_zones.py);
+    # it can narrow the window, never widen it.
     timezone_by_call_id: dict[EntityId, TimezoneName] = Field(default_factory=dict, max_length=_MAX_BATCH)
 
 
@@ -377,7 +426,9 @@ def _outcome_row(o: callback_orchestration.OrchestrationOutcome) -> dict:
 def run_callback_orchestration(req: OrchestrateRequest) -> dict:
     # Sep 24 2026 audit: (1) the clock is the server's, never the caller's;
     # (2) a task_id this process already handed to the dialer is never
-    # dialed again, even if the caller resubmits it still PENDING; (3) the
+    # dialed again, even if the caller resubmits it still PENDING — a
+    # convenience only since fix wave 1 F3: task ids are caller-chosen, so
+    # the real redial limit is the gate's per-number/per-customer limit; (3) the
     # check-then-dial is serialized so concurrent requests for the same
     # task can't both pass the check. Serializing dials is a throughput
     # cost accepted deliberately: correctness over speed for outbound calls.
@@ -394,7 +445,7 @@ def run_callback_orchestration(req: OrchestrateRequest) -> dict:
             phone_by_call_id=req.phone_by_call_id,
             line_by_call_id=req.line_by_call_id,
             timezone_by_call_id=req.timezone_by_call_id,
-            contact_window=_CONTACT_WINDOW,
+            gate=_GATE,
             now=_now(),
         )
         for o in outcomes:

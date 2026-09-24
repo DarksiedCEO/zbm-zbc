@@ -14,6 +14,11 @@ against the unmodified code before being fixed; 7 known limitations
 remain open. See "Audit, Sep 24 2026" below. Still
 CONDITIONAL.
 
+**Sep 24 2026, fix wave 1 (F3, High):** an independent AEGIS review showed
+the audit's calling-hours fix could still be bypassed — the caller chose
+the recipient's time zone and the redial key. Fixed; see "Fix wave 1,
+Sep 24 2026 — F3" below.
+
 See `docs/adr/0002-fulfillment-department-architecture.md` for why this
 department exists, what it competes against, and the architecture
 decisions behind it.
@@ -98,12 +103,103 @@ assertion was weakened; the only assertion text changed is
 **Left open, on purpose:**
 
 - **No approval gate exists for a future real dialer/CRM adapter**, because no real adapter exists. When `LiveKitSipDialer` or a CRM adapter is added it must be behind an explicit opt-in *and* a human approval step; `_build_dialer()` today has no concept of one. Not built speculatively.
-- **Quiet hours are enforced only where contact actually happens**: CALL-channel tasks in `callback_orchestration`. `followup_sequencing` and `appointment_tracking` emit SMS/EMAIL tasks with a `due_at` that ignores the recipient's local time; no SMS/email sender exists, so nothing is sent. Any future sender must call `ContactWindow.allows()` — stated in `contact_window.py`.
-- **The recipient time zone has to be supplied by the caller** (`timezone_by_call_id`). There is no per-customer time zone on `CustomerDossier` or `CallEvent` yet, and no phone-prefix inference (area codes don't reliably give a time zone). Until one exists, callbacks without a supplied zone are not dialed — the safe failure.
+- ~~**Quiet hours are enforced only where contact actually happens** … any future sender must call `ContactWindow.allows()`.~~ Superseded by fix wave 1 F3: every transport (dialer, SMS/email sender) needs a `ContactAuthorization` from `OutboundContactGate`.
+- **The recipient time zone has to be supplied by the caller** (`timezone_by_call_id`). There is no per-customer time zone on `CustomerDossier` or `CallEvent` yet. Since fix wave 1 F3 it is only a *claim*, checked against the number; see that section.
 - **Redial/duplicate protection (A3, A11) lives in process memory.** Restart and it is gone; multiple replicas would not share it. Real fix = the persistence layer (gap 6 below).
 - **`/agents/resolution-writeback/resolve` is not idempotent across retries.** `resolution_id` is a fresh uuid per call (the Sep 22 fix for ID *collisions*), so a retried request writes a second record. A deterministic idempotency key is a design decision (can the same entity legitimately resolve twice?) — not made here.
 - **`_attempted_task_ids`, `_exhausted_resolutions` and `_dossiers` grow without bound**, and the dossier route returns the whole store on every call. Acceptable for a non-live service; not for production.
 - **A non-ASCII `FULFILLMENT_SERVICE_TOKEN`** would make every request 401 (the `TypeError` guard fires on every compare). Fails closed, so not a vulnerability; not changed.
+
+## Fix wave 1, Sep 24 2026 — F3: quiet-hours bypass and unlimited redials
+
+**Finding (AEGIS, High, CONFIRMED; latent because no live dialer ships).**
+`timezone_by_call_id` was trusted as "the recipient's local zone" without
+any check against the number, and the only redial protection was keyed by
+the caller-chosen `task_id`. AEGIS probe at 02:00 America/Los_Angeles
+dialing `+12135550101`: zone `"UTC"` → `attempted: true`; `"Asia/Tokyo"` →
+`attempted: true`; three fresh task ids → **5 calls placed at 02:00 LA
+local**. The suite's own tests enshrined it: every dialing test paired
+`"+15550101"` (not even a 10-digit NANP number) with `"UTC"`.
+
+**Fix — one gate for every automated contact** (`src/outbound_gate.py`,
+`src/recipient_zones.py`; ADR 0002 Decision 11):
+
+- **Zone must fit the number.** For `+1`, the number must be a valid
+  10-digit NANP number with a geographic area code (toll-free, premium,
+  personal-communications, N11, reserved → refused), and the claimed zone
+  must be on an explicit NANP allowlist (US, Canada, US territories,
+  Caribbean NANP members; `UTC`, `Asia/Tokyo`, `US/Eastern` … refused).
+  The window must then hold in **every zone the number could be in plus
+  the claimed zone**: Hawaii (808), Alaska (907), Puerto Rico (787/939),
+  USVI (340), Guam (671), CNMI (670) and American Samoa (684) use their
+  own zones; every other area code is treated as possibly anywhere in
+  continental US/Canada. **Trade-off, accepted:** no area-code table, so
+  a continental `+1` number is contacted only 08:00–16:30 Pacific
+  (= 12:30–21:00 Newfoundland) — a narrower day, never a night call. A
+  claimed zone can narrow that further (a 212 number claimed to be in
+  Honolulu needs both New York and Honolulu daytime), never widen it.
+- **Other country codes fail closed** unless `FULFILLMENT_COUNTRY_ZONES`
+  configures a zone set for that code (e.g.
+  `44=Europe/London;61=Australia/Perth,Australia/Sydney`); the claimed
+  zone must be in the set and the window must hold in every zone of it.
+- **Attempt limits keyed by the phone number (and customer), not the
+  task.** Across calls, SMS and email together: at most 3 automated
+  contacts per number per rolling 24 h and at least 2 h between them
+  (`FULFILLMENT_CONTACT_MAX_ATTEMPTS_PER_24H`,
+  `FULFILLMENT_CONTACT_MIN_SPACING_MINUTES` may only narrow). The same
+  limits apply per `customer_id` when one is present, so neither a fresh
+  task id, a fresh call id nor a fresh customer id buys another contact.
+  Thread-safe (one lock around check-and-record). Consequence: the
+  escalation sequence's "SMS 10 minutes after a failed call" now waits for
+  the 2 h spacing.
+- **Enforced where contact happens.** `SipDialerPort.place_call` and the
+  new `MessageSenderPort.send` (SMS/email; no sender exists) take a
+  single-use, channel-bound `ContactAuthorization`, never a number. Only
+  the gate can mint one; the transport gets the number from `redeem()`,
+  which re-checks window and limits **on the gate's clock at that moment**
+  and records the attempt atomically. SMS/email *task creation* is not
+  gated — a task created at 02:00 may properly go out at 09:00 — but no
+  sender can reach anyone without passing the gate.
+- **Sweep, same class — stale clock (fixed).** The route read the clock
+  once per request and reused it for the whole batch, so with a real
+  dialer a batch started at 20:59 kept dialing after 21:00. The gate now
+  reads the clock per task, at authorization and again at redeem.
+  Test: `test_window_is_rechecked_at_dial_time_not_once_per_request`.
+
+**Tests** — `tests/test_fix_wave_1_f3_api.py` (HTTP route; 15 of its 16
+tests failed on the pre-fix code, the 16th is the positive control) and
+`tests/test_outbound_gate.py` (81 unit tests: window edges in the
+strictest zones in daylight and standard time, Hawaii/Alaska edges, zone
+allowlist, invalid/non-geographic numbers, country rules, limits,
+channel binding, forgery, single use, redeem-time recheck, 16-thread
+race, startup refusal of bad config). Mutation-checked: trusting the
+claimed zone alone fails 21 tests; dropping the 808 row fails 8; removing
+the limits fails 9; removing the recheck at redeem fails 2; removing the
+redeem lock fails the race test.
+
+**Tests changed, and why:** every dialing test in
+`test_callback_orchestration.py`, `test_audit_2026_09_24.py` and
+`test_api.py` used `"+15550101"`/`"+15551234"` with `"UTC"`, the exact
+pairing the gate now refuses; they now use real LA/NY numbers in their
+real zones at times inside the strict window (`NOON_UTC`/`LATE_NIGHT_UTC`
+became `LA_11AM`/`LA_11PM`). The three custom test dialers take an
+authorization instead of a number. `FlakyDialer`'s two tasks got
+different customers (one customer can no longer be called twice in two
+hours). `test_api_quiet_hours_use_the_server_clock` now also asserts the
+refusal is for the contact window, not for an invalid number. No
+assertion was weakened.
+
+**Suite:** 116 passed before → 213 passed after.
+
+**Still open:** state is in process memory (restart/replicas forget the
+attempt history — the persistence layer is still the durable fix);
+escalation state (`status`, `attempt_number`) is caller-asserted, which
+can mint extra SMS/email *tasks* or NO_RESOLUTION records but no extra
+contact, since every contact passes the per-number gate; a person whose
+number's area code and claimed zone are both wrong (e.g. a 212 mobile
+used in Honolulu, claimed as New York) can still be reached at a time
+that is night where they physically are — no data this service has can
+detect that.
 
 ## What was actually verified (Sep 22, 2026, post-fix)
 
@@ -148,11 +244,14 @@ assertion was weakened; the only assertion text changed is
    Sep 24 2026 (audit A1)**: calls are gated on 08:00–21:00 in the
    recipient's local time and fail closed without a known time zone. What
    remains: the time zone must be supplied per request
-   (`timezone_by_call_id`); nothing stores it per customer yet.
+   (`timezone_by_call_id`); nothing stores it per customer yet. Since fix
+   wave 1 F3 that claim is checked against the number and can only
+   narrow the window.
 6. **In-memory state only.** `api.py` keeps dossiers, dial attempts, and
    write-backs in process memory. Since the Sep 24 audit (A3) the API
-   refuses to redial a task_id it already dialed — but only for the life
-   of the process; a restart or a second replica forgets. The durable fix
+   refuses to redial a task_id it already dialed, and since fix wave 1
+   F3 limits contacts per phone number and per customer — but only for
+   the life of the process; a restart or a second replica forgets. The durable fix
    is the persistence layer named in gap 3.
 7. **No real client connected.** Every endpoint takes request-supplied
    data or serves from `fixtures/fulfillment_*.json`.
@@ -176,7 +275,7 @@ pip install -r requirements.txt
 # sets a fixed test-only token via os.environ.setdefault(...), and it
 # will silently lose to any value already in the environment, breaking
 # the auth tests with a token mismatch (verified).
-python3 -m pytest -q                     # 116 tests (tests/conftest.py puts src/ on sys.path)
+python3 -m pytest -q                     # 213 tests (tests/conftest.py puts src/ on sys.path)
 
 # Live service: THIS is where you set your own real shared secret.
 # Leave FULFILLMENT_SIP_DIALER / FULFILLMENT_SYSTEM_OF_RECORD unset for
@@ -188,6 +287,11 @@ PYTHONPATH=src python3 -m api
 #   FULFILLMENT_CONTACT_WINDOW default 08:00-21:00 recipient local time;
 #                              may be narrowed, never widened; a bad value
 #                              refuses startup
+#   FULFILLMENT_CONTACT_MAX_ATTEMPTS_PER_24H  default 3 per phone number
+#                              (and per customer); 1-3 only
+#   FULFILLMENT_CONTACT_MIN_SPACING_MINUTES   default 120; 120-1440 only
+#   FULFILLMENT_COUNTRY_ZONES  unset = only +1 numbers are ever contacted;
+#                              e.g. "44=Europe/London"; bad value refuses startup
 curl http://127.0.0.1:8091/health
 curl -H "Authorization: Bearer $FULFILLMENT_SERVICE_TOKEN" http://127.0.0.1:8091/fixtures/call-events
 ```
@@ -196,7 +300,10 @@ curl -H "Authorization: Bearer $FULFILLMENT_SERVICE_TOKEN" http://127.0.0.1:8091
 `{"tasks": [...], "phone_by_call_id": {"<call_id>": "+E164"},
 "line_by_call_id": {...}, "timezone_by_call_id": {"<call_id>": "America/Chicago"}}`.
 A call with no (or an invalid) time zone is **not dialed**. There is no
-`now` field; the server clock is used.
+`now` field; the server clock is used. The time zone is a claim checked
+against the number, and a number already contacted in the last 2 h (or 3
+times in 24 h) is not dialed again, whatever the task id — see "Fix wave
+1, Sep 24 2026 — F3".
 
 ### Live run, Sep 24 2026 (post-audit)
 
@@ -215,17 +322,36 @@ Startup without the token: exit code 1, RuntimeError. Startup with
 comparison, the old README command (`uvicorn api:app --port 18092`, no
 `--host`) also bound `0100007F` — uvicorn's CLI default is loopback.
 
+### Live run, fix wave 1 F3 (Sep 24 2026)
+
+Two real `python3 -m api` processes with `FULFILLMENT_SIP_DIALER=in_memory`,
+real HTTP on 127.0.0.1:19260 and :19261, then terminated. On :19260 the
+test harness pinned `api._now` before `api.main()` (not a request field)
+to replay the AEGIS probe: at 09:00Z (02:00 LA) `+12135550101` claimed
+`UTC`, `Asia/Tokyo`, `America/Los_Angeles`, and three fresh task ids →
+all `attempted:false` (`'UTC' is not a valid zone for a +1 (NANP)
+number`, `outside permitted contact window … in America/New_York`); at
+06:00Z a 212 number claimed `Pacific/Honolulu` → refused (New York
+02:00); at 18:00Z five fresh task ids to one LA number → 1 call, 4
+refused (`minimum spacing not met for this phone number`). On :19261,
+fully unpatched, real clock 17:43Z: `UTC`/`Asia/Tokyo` claims, a 212
+number claimed Honolulu (07:43 HST), `+44…`, and toll-free `+1800…` all
+refused; four fresh task ids to one NY number → 1 call, 3 refused.
+
 ## Next steps, in priority order
 
 1. Implement `LiveKitSipDialer(SipDialerPort)` against a real LiveKit
    SIP trunk once a phone number/carrier account exists — behind an
-   explicit opt-in **and** a human approval gate (neither exists yet),
-   and still going through `ContactWindow.allows()`.
+   explicit opt-in **and** a human approval gate (neither exists yet).
+   It receives a `ContactAuthorization` and must get the number from
+   `redeem(TaskChannel.CALL)` — the calling-hours and attempt-limit gate
+   cannot be skipped.
 2. Name the first real client's CRM/job-management system and implement
    one concrete `SystemOfRecordPort` adapter for it, with an idempotency
    key decision for `resolution_id` (Sep 24 audit, left open).
 3. Store the recipient time zone per customer so callers don't have to
-   supply `timezone_by_call_id` on every request.
+   supply `timezone_by_call_id` on every request; a sourced area-code →
+   zone table would widen the strict continental +1 window.
 4. Build the persistence/orchestration layer named in gap 3/6 — this is
    what makes the redial protection survive a restart.
 5. A review by a human (or at least a non-Claude) reviewer before any

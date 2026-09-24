@@ -18,10 +18,13 @@ Rules enforced here:
     but can only be NARROWED inside 08:00-21:00, never widened, and must
     be non-empty. A bad value refuses service startup.
 
-Every outbound-contact path must go through `ContactWindow.allows`. Today
-the only path that contacts anyone is callback_orchestration (CALL
-channel). No SMS/email sender exists yet; when one is built it must use
-this same gate.
+Fix wave 1, F3: `allows()` answers "is it daytime in THIS zone"; it does
+not decide which zone. Callers must not use it directly for contact
+decisions. Every outbound contact (call, SMS, email) is authorized by
+OutboundContactGate (src/outbound_gate.py), which applies this window in
+every zone the NUMBER could be in (src/recipient_zones.py) plus the
+claimed zone, adds per-number attempt limits, and is the only source of
+the ContactAuthorization a dialer or message sender needs to reach anyone.
 """
 
 from __future__ import annotations
