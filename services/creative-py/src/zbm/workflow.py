@@ -1,0 +1,358 @@
+"""
+ZBM workflow — sequencing, evidence and gates. It makes NO creative
+judgement itself; every judgement is delegated to one intelligence module.
+
+brief draft (1+3+4) -> Creative Lead approval (2) -> production job
+(commission Enigma/Phantom Canvas, contract only) -> work submitted ->
+Export Validator (4) -> Rights and Provenance (5) -> Creative Quality (8,
+2-round cap, then Andre) -> Compliance (38) hard gate -> Andre final
+approval (founder token).
+
+Evidence rule: every approval, rejection, signature and cross-department
+crossing is recorded through the ledger FIRST; state changes only after
+the record succeeds. If the ledger call fails, `LedgerRecordError`
+propagates and nothing changed (the API returns 503 and says so).
+"""
+
+from __future__ import annotations
+
+import itertools
+from dataclasses import dataclass, field
+from enum import Enum
+
+from pydantic import BaseModel, ConfigDict
+
+from shared.actors import ActorRegistry, Role
+from shared.clock import Clock
+from shared.departments import CommissionRequest, Departments
+from shared.errors import CreativeError, NotFound, PreconditionFailed
+from shared.founder import FOUNDER_ACTOR, FounderGate
+from shared.ledger import EvidenceRecorder
+from shared.registry import PlatformRulesRegistry
+from shared.rights import RightsRegistry
+from shared.types import SafeId
+from zbm import brief_writer, creative_lead, creative_quality, placement_spec, rights_provenance
+from zbm.brief import BriefRecord, BriefStatus, Deliverable
+from zbm.brief_writer import ClientRequirements
+from zbm.creative_memory import MemoryDecision, ZbmCreativeMemory
+from zbm.creative_quality import QualityDeclaration
+from zbm.placement_spec import DeclaredExport
+from zbm.results import PerformanceResult
+
+
+class WorkStage(str, Enum):
+    SUBMITTED = "submitted"
+    EXPORT_FAILED = "export_failed"
+    EXPORT_PASSED = "export_passed"
+    RIGHTS_BLOCKED = "rights_blocked"
+    RIGHTS_CLEARED = "rights_cleared"
+    SENT_BACK = "sent_back"
+    ESCALATED_TO_ANDRE = "escalated_to_andre"
+    ESCALATION_ACCEPTED = "escalation_accepted_by_andre"
+    KILLED_BY_ANDRE = "killed_by_andre"
+    QUALITY_PASSED = "quality_passed"
+    COMPLIANCE_BLOCKED = "compliance_blocked"
+    COMPLIANCE_PASSED = "compliance_passed"
+    APPROVED_BY_ANDRE = "approved_by_andre"
+
+
+REWORK_STAGES = frozenset({WorkStage.EXPORT_FAILED, WorkStage.RIGHTS_BLOCKED, WorkStage.SENT_BACK})
+
+
+class ProductionJob(BaseModel):
+    job_id: str
+    brief_id: str
+    commissions: list[dict] = []
+    ledger_event_ids: list[str] = []
+
+
+class WorkSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deliverable_id: SafeId
+    variant_index: int = 0
+    declared: DeclaredExport
+    asset_ids: list[SafeId]
+    uses_ai_generative_fill: bool = False
+    quality: QualityDeclaration
+
+
+class WorkItem(BaseModel):
+    work_id: str
+    job_id: str
+    brief_id: str
+    submission: WorkSubmission
+    round: int
+    stage: WorkStage
+    export_validation: dict | None = None
+    rights: dict | None = None
+    quality_decision: dict | None = None
+    compliance: dict | None = None
+    final_approval: dict | None = None
+    ledger_event_ids: list[str] = []
+
+
+@dataclass
+class ZbmWorkflow:
+    registry: PlatformRulesRegistry
+    rights: RightsRegistry
+    actors: ActorRegistry
+    recorder: EvidenceRecorder
+    clock: Clock
+    departments: Departments
+    founder: FounderGate
+    memory: ZbmCreativeMemory = field(default_factory=ZbmCreativeMemory)
+    briefs: dict[str, BriefRecord] = field(default_factory=dict)
+    jobs: dict[str, ProductionJob] = field(default_factory=dict)
+    work: dict[str, WorkItem] = field(default_factory=dict)
+    _rounds_used: dict[tuple, int] = field(default_factory=dict)
+    _escalated_chains: set = field(default_factory=set)
+    _ids: itertools.count = field(default_factory=lambda: itertools.count(1))
+
+    def _next(self, prefix: str) -> str:
+        return f"{prefix}-{next(self._ids):04d}"
+
+    # --- guardrail refusals are recorded best-effort, and always stand ------
+    def _refuse(self, exc: CreativeError, actor: str, subject_id: str, action: str) -> None:
+        self.recorder.try_record("guardrail_refusal", actor if actor else "unknown", subject_id,
+                                 {"action": action, "reason": exc.reason}, f"Refused {action}: {exc.reason}")
+        raise exc
+
+    # --- briefs -----------------------------------------------------------------
+    def get_brief(self, brief_id: str) -> BriefRecord:
+        b = self.briefs.get(brief_id)
+        if b is None:
+            raise NotFound(f"brief {brief_id!r} not found")
+        return b
+
+    def draft_brief(self, req: ClientRequirements, actor_id: str = brief_writer.WRITER_ACTOR) -> BriefRecord:
+        self.actors.require_role(actor_id, Role.ZBM_BRIEF_WRITER)
+        brief_id = self._next("brief")
+        rec = brief_writer.draft(req, brief_id, self.registry, self.clock.today(), drafted_by=actor_id)
+        eid = self.recorder.record("brief_drafted", actor_id, brief_id,
+                                   rec.model_dump(mode="json", exclude={"ledger_event_ids"}),
+                                   f"Brief {brief_id} drafted for {req.client_id}: {rec.status.value}")
+        rec.ledger_event_ids.append(eid)
+        self.briefs[brief_id] = rec
+        return rec
+
+    def review_brief(self, brief_id: str, approver_id: str) -> BriefRecord:
+        b = self.get_brief(brief_id)
+        try:
+            result = creative_lead.review(b, approver_id, self.actors, self.registry, self.clock.today())
+        except CreativeError as exc:
+            self._refuse(exc, approver_id if _is_actor_like(approver_id) else "unknown", brief_id, "brief approval")
+        approved = result.outcome == "approved"
+        eid = self.recorder.record(
+            "brief_approved" if approved else "brief_sent_back", approver_id, brief_id,
+            {"outcome": result.outcome, "issues": result.issues, "spec_row_ids": result.spec_row_ids},
+            f"Brief {brief_id} {result.outcome} by {approver_id}" + ("" if approved else f" ({len(result.issues)} issue(s))"),
+        )
+        updated = b.model_copy(update={
+            "status": BriefStatus.APPROVED if approved else BriefStatus.SENT_BACK,
+            "approved_by": approver_id if approved else None,
+            "approved_at": self.clock.now() if approved else None,
+            "review_issues": result.issues,
+            "spec_row_ids": result.spec_row_ids or b.spec_row_ids,
+            "ledger_event_ids": [*b.ledger_event_ids, eid],
+        })
+        self.briefs[brief_id] = updated
+        return updated
+
+    # --- production ------------------------------------------------------------------
+    def open_job(self, brief_id: str) -> ProductionJob:
+        b = self.get_brief(brief_id)
+        if b.status is not BriefStatus.APPROVED or b.fields is None:
+            self._refuse(PreconditionFailed(
+                f"brief {brief_id} is {b.status.value}; nothing enters production without an approved brief"),
+                "zbm_creative_lead", brief_id, "production start")
+        job_id = self._next("job")
+        commissions = []
+        for d in b.fields.deliverables:
+            for agent in ("enigma", "phantom_canvas"):
+                req = CommissionRequest(f"{job_id}.{d.deliverable_id}.{agent}", "zbm", agent,
+                                        {"brief_id": brief_id, "deliverable": d.model_dump(), "maker_summary": b.maker_summary})
+                receipt = self.departments.creative_agents.commission(req)
+                commissions.append({"request_id": receipt.request_id, "agent": receipt.agent,
+                                    "commissioned": receipt.commissioned, "reason": receipt.reason})
+        eid = self.recorder.record("production_opened", "zbm_creative_lead", job_id,
+                                   {"brief_id": brief_id, "commissions": commissions},
+                                   f"Job {job_id} opened on approved brief {brief_id}; "
+                                   f"{sum(c['commissioned'] for c in commissions)}/{len(commissions)} commissions accepted")
+        job = ProductionJob(job_id=job_id, brief_id=brief_id, commissions=commissions, ledger_event_ids=[eid])
+        self.jobs[job_id] = job
+        return job
+
+    def _deliverable(self, brief: BriefRecord, deliverable_id: str) -> Deliverable:
+        for d in brief.fields.deliverables:
+            if d.deliverable_id == deliverable_id:
+                return d
+        raise PreconditionFailed(f"deliverable {deliverable_id!r} is not in approved brief {brief.brief_id}")
+
+    def submit_work(self, job_id: str, sub: WorkSubmission) -> WorkItem:
+        job = self.jobs.get(job_id)
+        if job is None:
+            raise NotFound(f"job {job_id!r} not found")
+        brief = self.get_brief(job.brief_id)
+        d = self._deliverable(brief, sub.deliverable_id)
+        if not 0 <= sub.variant_index < d.count:
+            raise PreconditionFailed(f"variant_index {sub.variant_index} outside the brief's count ({d.count})")
+        chain = (job_id, sub.deliverable_id, sub.variant_index)
+        open_items = [w for w in self.work.values()
+                      if (w.job_id, w.submission.deliverable_id, w.submission.variant_index) == chain
+                      and w.stage not in REWORK_STAGES]
+        if open_items:
+            raise PreconditionFailed(
+                f"work {open_items[-1].work_id} for this deliverable is at {open_items[-1].stage.value}; "
+                "a new version can only follow export failure, rights block or a send-back")
+        if chain in self._escalated_chains:
+            raise PreconditionFailed("this deliverable was escalated to Andre after 2 review rounds; no more rounds")
+        rnd = self._rounds_used.get(chain, 0) + 1
+        work_id = self._next("work")
+        eid = self.recorder.record("work_submitted", "zbm_creative_quality", work_id,
+                                   {"job_id": job_id, "submission": sub.model_dump(mode="json"), "round": rnd},
+                                   f"Work {work_id} submitted for {sub.deliverable_id} (round {rnd})")
+        item = WorkItem(work_id=work_id, job_id=job_id, brief_id=brief.brief_id, submission=sub, round=rnd,
+                        stage=WorkStage.SUBMITTED, ledger_event_ids=[eid])
+        self.work[work_id] = item
+        return item
+
+    def get_work(self, work_id: str) -> WorkItem:
+        w = self.work.get(work_id)
+        if w is None:
+            raise NotFound(f"work {work_id!r} not found")
+        return w
+
+    def _require_stage(self, w: WorkItem, *stages: WorkStage) -> None:
+        if w.stage not in stages:
+            raise PreconditionFailed(
+                f"work {w.work_id} is at stage {w.stage.value}; this step needs {', '.join(s.value for s in stages)}")
+
+    def validate_export(self, work_id: str) -> WorkItem:
+        w = self.get_work(work_id)
+        self._require_stage(w, WorkStage.SUBMITTED)
+        brief = self.get_brief(w.brief_id)
+        result = placement_spec.validate_export(w.submission.declared, self._deliverable(brief, w.submission.deliverable_id),
+                                                self.registry, self.clock.today())
+        eid = self.recorder.record("export_validated", "zbm_placement_spec", work_id, result.model_dump(mode="json"),
+                                   f"Export {work_id}: {result.verdict}")
+        stage = WorkStage.EXPORT_PASSED if result.verdict == "pass" else WorkStage.EXPORT_FAILED
+        w = w.model_copy(update={"stage": stage, "export_validation": result.model_dump(mode="json"),
+                                 "ledger_event_ids": [*w.ledger_event_ids, eid]})
+        self.work[work_id] = w
+        return w
+
+    def check_rights(self, work_id: str) -> WorkItem:
+        w = self.get_work(work_id)
+        self._require_stage(w, WorkStage.EXPORT_PASSED)
+        brief = self.get_brief(w.brief_id)
+        res = rights_provenance.check(work_id, list(w.submission.asset_ids), list(brief.fields.rights_and_permissions),
+                                      w.submission.uses_ai_generative_fill, self.rights, self.departments.legal,
+                                      self.clock.today())
+        payload = {
+            "cleared": res.cleared, "blockers": res.blockers, "provenance_stamp": res.provenance_stamp,
+            "asset_checks": [c.__dict__ for c in res.asset_checks],
+            "legal_crossing": res.legal_crossing.__dict__ if res.legal_crossing else None,
+        }
+        eid = self.recorder.record("rights_checked", "zbm_rights_provenance", work_id, payload,
+                                   f"Rights for {work_id}: {'cleared' if res.cleared else 'NOT cleared'}")
+        w = w.model_copy(update={"stage": WorkStage.RIGHTS_CLEARED if res.cleared else WorkStage.RIGHTS_BLOCKED,
+                                 "rights": payload, "ledger_event_ids": [*w.ledger_event_ids, eid]})
+        self.work[work_id] = w
+        return w
+
+    def quality_review(self, work_id: str, reviewer_id: str, notes: list[str]) -> WorkItem:
+        w = self.get_work(work_id)
+        try:
+            self.actors.require_role(reviewer_id, Role.ZBM_CREATIVE_QUALITY)
+        except CreativeError as exc:
+            self._refuse(exc, reviewer_id if _is_actor_like(reviewer_id) else "unknown", work_id, "quality review")
+        self._require_stage(w, WorkStage.RIGHTS_CLEARED)
+        brief = self.get_brief(w.brief_id)
+        dec = creative_quality.judge(brief.fields, w.submission.quality, notes, w.round)
+        event = {"pass": "quality_passed", "send_back": "quality_sent_back", "escalate_to_andre": "quality_escalated"}[dec.outcome]
+        eid = self.recorder.record(event, reviewer_id, work_id, dec.__dict__,
+                                   f"Quality round {dec.round} on {work_id}: {dec.outcome} (reported to {dec.reported_to})")
+        chain = (w.job_id, w.submission.deliverable_id, w.submission.variant_index)
+        self._rounds_used[chain] = w.round
+        stage = {"pass": WorkStage.QUALITY_PASSED, "send_back": WorkStage.SENT_BACK,
+                 "escalate_to_andre": WorkStage.ESCALATED_TO_ANDRE}[dec.outcome]
+        if stage is WorkStage.ESCALATED_TO_ANDRE:
+            self._escalated_chains.add(chain)
+        for f in dec.findings:
+            self.memory.add_feedback(brief.client_id, reviewer_id, f)
+        w = w.model_copy(update={"stage": stage, "quality_decision": dec.__dict__,
+                                 "ledger_event_ids": [*w.ledger_event_ids, eid]})
+        self.work[work_id] = w
+        return w
+
+    def resolve_escalation(self, work_id: str, approval_token: str | None, decision: str) -> WorkItem:
+        w = self.get_work(work_id)
+        self._require_stage(w, WorkStage.ESCALATED_TO_ANDRE)
+        try:
+            self.founder.verify(approval_token)
+        except CreativeError as exc:
+            self._refuse(exc, FOUNDER_ACTOR, work_id, "escalation decision")
+        if decision not in ("accept", "kill"):
+            raise PreconditionFailed("decision must be 'accept' or 'kill'")
+        eid = self.recorder.record("andre_escalation_decision", FOUNDER_ACTOR, work_id, {"decision": decision},
+                                   f"Andre {decision}ed escalated work {work_id}")
+        stage = WorkStage.ESCALATION_ACCEPTED if decision == "accept" else WorkStage.KILLED_BY_ANDRE
+        w = w.model_copy(update={"stage": stage, "ledger_event_ids": [*w.ledger_event_ids, eid]})
+        self.work[work_id] = w
+        return w
+
+    def compliance_gate(self, work_id: str) -> WorkItem:
+        w = self.get_work(work_id)
+        self._require_stage(w, WorkStage.QUALITY_PASSED, WorkStage.ESCALATION_ACCEPTED, WorkStage.COMPLIANCE_BLOCKED)
+        gate = self.departments.compliance.review("zbm_work", work_id, {"brief_id": w.brief_id,
+                                                                          "export": w.export_validation,
+                                                                          "rights": w.rights})
+        eid = self.recorder.record("crossing_compliance_38", "zbm_creative_quality", work_id, gate.__dict__,
+                                   f"Compliance (38) on {work_id}: {'allowed' if gate.allowed else 'NOT allowed'} — {gate.reason}")
+        w = w.model_copy(update={"stage": WorkStage.COMPLIANCE_PASSED if gate.allowed else WorkStage.COMPLIANCE_BLOCKED,
+                                 "compliance": gate.__dict__, "ledger_event_ids": [*w.ledger_event_ids, eid]})
+        self.work[work_id] = w
+        return w
+
+    def final_approval(self, work_id: str, approval_token: str | None) -> WorkItem:
+        w = self.get_work(work_id)
+        if w.stage is not WorkStage.COMPLIANCE_PASSED:
+            self._refuse(PreconditionFailed(
+                f"work {work_id} is at {w.stage.value}; Andre's final approval needs Compliance (38) to have passed first "
+                "— not allowed yet"), FOUNDER_ACTOR, work_id, "final approval")
+        try:
+            self.founder.verify(approval_token)
+        except CreativeError as exc:
+            self._refuse(exc, FOUNDER_ACTOR, work_id, "final approval")
+        eid = self.recorder.record("andre_final_approval", FOUNDER_ACTOR, work_id, {"work_id": work_id},
+                                   f"Andre approved client-facing work {work_id}")
+        w = w.model_copy(update={"stage": WorkStage.APPROVED_BY_ANDRE,
+                                 "final_approval": {"approved_by": FOUNDER_ACTOR, "at": self.clock.now().isoformat()},
+                                 "ledger_event_ids": [*w.ledger_event_ids, eid]})
+        self.work[work_id] = w
+        return w
+
+    # --- memory ----------------------------------------------------------------------
+    def learn_result(self, result: PerformanceResult, brief_id: str) -> MemoryDecision:
+        brief = self.get_brief(brief_id)
+        if brief.fields is None:
+            raise PreconditionFailed("brief has no success targets")
+        if result.client_id != brief.client_id:
+            raise PreconditionFailed(f"result {result.result_id} is for client {result.client_id}, not {brief.client_id}")
+        targets = [t for t in brief.fields.success_in_numbers]
+        decisions = [self.memory.evaluate_winner(result, t) for t in targets]
+        decision = next((d for d in decisions if d.learned), decisions[0])
+        eid = self.recorder.record("memory_winner_admitted" if decision.learned else "memory_result_rejected",
+                                   "zbm_creative_memory", result.result_id,
+                                   {"result": result.model_dump(mode="json"), "reason": decision.reason},
+                                   decision.reason)
+        if decision.learned:
+            self.memory.commit_winner(result)
+        return MemoryDecision(decision.learned, f"{decision.reason} [ledger {eid}]")
+
+
+def _is_actor_like(s: str) -> bool:
+    import re
+
+    return bool(re.fullmatch(r"[a-z0-9_]{1,64}", s or ""))

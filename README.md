@@ -175,3 +175,31 @@ attaches later without touching agent logic.
 - This is one review pass (Sep 22 2026). A second, independent reviewer
   looking at the same code might find different things — see
   `fulfillment-py`'s README for the same caveat stated about that build.
+
+## Creative Production (services/creative-py)
+
+Added Sep 24, 2026 from the founder-locked Creative Production spec (rev 1).
+One department with two structurally separate intelligence layers: **ZBM**
+(advertising agency: 8 intelligences, brief → Creative Lead approval →
+export validation → rights → quality with a 2-round cap → Compliance 38
+gate → Andre) and **ZBC** (clipping agency, per campaign: 9 intelligences,
+rulebook draft → approval by a different actor → Andre signs → frozen
+when live → Moment Map → hooks → kit → clip review citing rule ids →
+payout *eligibility* only). They share the Platform Rules Registry, rights
+records and the evidence ledger, never decision-makers (enforced by an
+import test). Every approval, rejection, signature and crossing goes
+through the ledger's `POST /ledger/events` first; if that fails the
+decision does not take effect (503). Compliance 38, Verification and
+Integrity, Legal 37, Finance 31, Clipper Network and the Enigma/Phantom
+Canvas contract are fail-closed stand-ins, so today no ZBM work reaches
+Andre's final approval and no ZBC clip is payout-eligible.
+
+```bash
+cd services/creative-py && python3 -m pytest -q      # 205 tests
+export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
+export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>
+cd src && python3 serve.py   # CREATIVE_BIND_ADDR (default 127.0.0.1), CREATIVE_PORT (default 8300)
+```
+
+Details, live-run evidence and gaps: `services/creative-py/README.md`;
+decisions: `docs/adr/0005-creative-production-architecture.md`.
