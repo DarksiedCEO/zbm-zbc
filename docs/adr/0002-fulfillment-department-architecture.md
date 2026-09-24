@@ -1,6 +1,6 @@
 # ADR 0002 — Fulfillment Department Architecture
 
-**Status:** Accepted (Sep 22, 2026); amended by the Sep 24, 2026 audit (Decisions 7–10)
+**Status:** Accepted (Sep 22, 2026); amended by the Sep 24, 2026 audit (Decisions 7–10) and fix wave 1 (Decision 11)
 **Context:** Second department in the `zbm-zbc` monorepo. Built same night
 as a scoped, single-pass build (basics, not a separate intelligence-layer
 pass — see "Scope boundary" below), following the Revenue Recovery 1A
@@ -132,7 +132,9 @@ what changed architecturally, and why:
    per-line time zones, which still don't exist. Consequence: until a
    recipient time zone is stored per customer, callers must pass
    `timezone_by_call_id` or nothing is dialed. Any future SMS/email
-   sender must use the same gate — none exists today.
+   sender must use the same gate — none exists today. *(Superseded in
+   part by Decision 11: the supplied zone was trusted as-is, which AEGIS
+   showed was a bypass.)*
 8. **Duplicate suppression lives at the only place contact happens
    (the dial), in process memory, under a lock.** Duplicate call events,
    duplicate task_ids in a batch, the same task across requests, and
@@ -150,6 +152,38 @@ what changed architecturally, and why:
     and 422 bodies carry no request payload (they previously echoed
     phone numbers and voicemail transcripts). Money follows the
     monorepo wire contract (Decimal, ROUND_HALF_UP, two-decimal string).
+
+## Fix wave 1, Sep 24 2026 — decision it adds
+
+11. **Every automated outbound contact is authorized by one gate
+    (`src/outbound_gate.py`), and the caller decides neither the
+    recipient's zone nor the redial key.** AEGIS (F3, High) reproduced
+    calls to a Los Angeles number at 02:00 local because the caller
+    claimed `UTC`/`Asia/Tokyo`, and five calls to one number via fresh
+    task ids. Decided:
+    - *Zone from the number, claim only narrows.* `+1` numbers must be
+      valid geographic NANP numbers and the claimed zone must be on an
+      explicit NANP allowlist; the window (Decision 7) must hold in every
+      zone plausible for the number plus the claimed zone. Hawaii, Alaska
+      and the US territories are mapped by area code; every other area
+      code is treated as possibly anywhere in continental US/Canada.
+      Rejected: a full area-code → zone table (several area codes span
+      two zones, overlays and porting make rows silently wrong in the
+      dangerous direction) and a new phone-metadata dependency. Cost: a
+      continental `+1` day of 08:00–16:30 Pacific. Other country codes
+      fail closed unless a zone set is configured for the code.
+    - *Limits per phone number and per customer, across channels*: 3 per
+      rolling 24 h, 2 h apart by default, configuration can only narrow.
+      Consequence: the escalation SMS 10 minutes after a failed call
+      (sequencing policy) now waits for the spacing.
+    - *Enforced at the transport seam.* `SipDialerPort` and the new
+      `MessageSenderPort` take a single-use, channel-bound
+      `ContactAuthorization` instead of a number; its `redeem()` re-checks
+      the window and limits on the gate's clock at the moment of contact
+      and records the attempt atomically. This also closes a stale-clock
+      gap (one `now` per request reused across a long batch). Task
+      *creation* stays ungated: creating a task is not contact.
+    - Same in-memory limitation as Decision 8.
 
 Still open after the audit (not decided here): an approval gate for a
 future real dialer/CRM adapter; idempotency keys for

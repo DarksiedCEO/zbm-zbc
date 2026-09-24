@@ -63,7 +63,7 @@ def test_callback_orchestration_endpoint_with_no_dialer_configured_reports_not_w
     import api as api_module
     from datetime import datetime, timezone
 
-    monkeypatch.setattr(api_module, "_now", lambda: datetime(2026, 9, 22, 14, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr(api_module, "_now", lambda: datetime(2026, 9, 22, 18, 0, tzinfo=timezone.utc))
     r = client.post(
         "/agents/callback-orchestration/run",
         json={
@@ -81,9 +81,12 @@ def test_callback_orchestration_endpoint_with_no_dialer_configured_reports_not_w
                     "reason": "test",
                 }
             ],
-            "phone_by_call_id": {"call_x": "+15551234"},
+            # Fix wave 1, F3: was "+15551234" (not a 10-digit NANP number) "in UTC",
+            # a pairing the gate now refuses. A real New York number at 14:00 EDT
+            # is inside the strict +1 window, which isolates the dialer-not-wired path.
+            "phone_by_call_id": {"call_x": "+12125551234"},
             "line_by_call_id": {},
-            "timezone_by_call_id": {"call_x": "UTC"},  # 14:00 local — inside the window, isolates the dialer-not-wired path
+            "timezone_by_call_id": {"call_x": "America/New_York"},
         },
     )
     assert r.status_code == 200

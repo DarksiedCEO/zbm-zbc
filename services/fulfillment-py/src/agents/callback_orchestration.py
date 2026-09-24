@@ -15,6 +15,17 @@ rule was `8 <= now.hour < 20` on a UTC clock, which dialed a Los Angeles
 caller at 02:00 local time (reproduced; see
 tests/test_audit_2026_09_24.py). See src/contact_window.py.
 
+Fix wave 1, F3 (Sep 24 2026, High, CONFIRMED by AEGIS): the zone above
+was never checked against the number (a Los Angeles number at 02:00 local
+was dialed because the caller said "UTC" or "Asia/Tokyo"), and the only
+redial protection was the caller-chosen task_id (five fresh ids -> five
+calls). Both decisions now belong to OutboundContactGate
+(src/outbound_gate.py): the window must hold in every zone plausible for
+the NUMBER plus the claimed zone, attempts are limited per phone number
+and per customer (not per task), and the dialer receives a single-use
+ContactAuthorization instead of a number, re-checked on the gate's clock
+at the moment of dialing.
+
 Duplicate handling (Sep 24 2026 audit): the same task_id appearing twice
 in one batch is dialed at most once. A dialer that RAISES is recorded as
 an attempted, FAILED outcome (the call may or may not have gone out —
@@ -58,9 +69,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from contact_window import ContactWindow, resolve_timezone
 from fulfillment_schema import FollowUpTask, TaskChannel, TaskStatus
 from integrations.sip_dialer import DialAttemptResult, SipDialerPort
+from outbound_gate import ContactRefused, OutboundContactGate
 
 AGENT_ID = "callback-orchestration-v1"
 
@@ -81,7 +92,7 @@ def orchestrate(
     phone_by_call_id: dict[str, str],
     line_by_call_id: dict[str, str],
     timezone_by_call_id: dict[str, str],
-    contact_window: ContactWindow,
+    gate: OutboundContactGate,
     now: datetime | None = None,
 ) -> list[OrchestrationOutcome]:
     """
@@ -90,8 +101,11 @@ def orchestrate(
     upstream (missed-call detection knows the phone number and line; the
     recipient's IANA time zone comes from whoever knows the customer) —
     keeps this agent single-purpose: decide + dial, not look up call
-    records itself. timezone_by_call_id and contact_window are required
-    keywords on purpose: there is no default that could silently dial.
+    records itself. timezone_by_call_id and gate are required keywords on
+    purpose: there is no default that could silently dial. The claimed zone
+    is only an input to the gate, which checks it against the number. `now`
+    decides task activity and SLA breach only; whether contact is permitted
+    is decided by the gate on its own clock, per task, at dial time.
     """
     now = now or datetime.now(timezone.utc)
     outcomes: list[OrchestrationOutcome] = []
@@ -118,28 +132,27 @@ def orchestrate(
 
         sla_breached = now > task.due_at  # visible signal, not a gate — see due_at SEMANTICS above
 
-        recipient_tz = timezone_by_call_id.get(task.source_call_id)
-        if resolve_timezone(recipient_tz) is None:
-            outcomes.append(OrchestrationOutcome(
-                task, False, None,
-                "recipient time zone unknown or invalid — not dialed (fail closed)", sla_breached,
-            ))
+        decision = gate.authorize(
+            channel=TaskChannel.CALL,
+            phone=phone_by_call_id[task.source_call_id],
+            claimed_tz=timezone_by_call_id.get(task.source_call_id),
+            customer_id=task.customer_id,
+        )
+        if not decision.allowed:
+            outcomes.append(OrchestrationOutcome(task, False, None, decision.reason, sla_breached))
             continue
 
-        if not contact_window.allows(now, recipient_tz):
-            outcomes.append(OrchestrationOutcome(
-                task, False, None,
-                f"outside permitted contact window ({contact_window.describe()})", sla_breached,
-            ))
-            continue
-
-        phone = phone_by_call_id[task.source_call_id]
         line = line_by_call_id.get(task.source_call_id, "default")
 
         try:
-            result = dialer.place_call(phone, line)
+            result = dialer.place_call(decision.authorization, line)
         except NotImplementedError as exc:
             outcomes.append(OrchestrationOutcome(task, False, None, f"dialer not wired: {exc}", sla_breached))
+            continue
+        except ContactRefused as exc:
+            # Re-checked at dial time and refused (e.g. the window closed while
+            # earlier calls in this batch were being placed). Nothing was dialed.
+            outcomes.append(OrchestrationOutcome(task, False, None, str(exc), sla_breached))
             continue
         except Exception as exc:  # noqa: BLE001 — any transport error must become an outcome, not a 500
             # Outcome unknown: the call may have gone out. Mark FAILED (not
