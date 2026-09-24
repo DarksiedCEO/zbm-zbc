@@ -29,6 +29,7 @@ deployment sets neither and gets the honest default).
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
@@ -53,6 +54,7 @@ from agents import (
     resolution_writeback,
 )
 from bounded_state import BoundedExpiringMap
+import http_limits
 from contact_window import ContactWindow, parse_contact_window
 from fixtures_loader import load_appointments, load_call_events, load_dossiers
 from fulfillment_schema import (
@@ -165,10 +167,24 @@ app = FastAPI(
 # (10,000 chars x 1000 = 10 MB): a 1000-event batch fits transcripts averaging
 # ~3,400 ASCII chars; a larger one gets 413 and must be split.
 _MAX_BODY_BYTES = 4 * 1024 * 1024
+# Fix wave 5, NEW-3: head size and body read deadline, enforced here under
+# any launcher (TestClient, a bare `uvicorn api:app`). The real head bound
+# is in the parser and the hard connection deadlines are in the protocol:
+# see http_limits.py, which `python3 -m api` runs (main() below).
+_MAX_HEADER_BYTES = http_limits.MAX_HEADER_BYTES
+_BODY_READ_TIMEOUT_S = http_limits.load_body_read_timeout()  # refuses startup if invalid
 
 
 class _BodyTooLarge(Exception):
     pass
+
+
+class _BodyTimeout(Exception):
+    pass
+
+
+def _refusal(code: int, detail: str) -> JSONResponse:
+    return JSONResponse(status_code=code, content={"detail": detail}, headers={"Connection": "close"})
 
 
 def _too_large_response() -> JSONResponse:
@@ -183,7 +199,13 @@ class BodySizeLimitMiddleware:
     """413 from Content-Length before a byte of the body is read, and — for a
     chunked body or a lying client — as soon as the bytes received pass the
     limit while streaming. Runs before auth: refusing an oversized body costs
-    nothing, and reading it is exactly the cost being refused."""
+    nothing, and reading it is exactly the cost being refused.
+
+    Fix wave 5, NEW-3: also 431 for a request head over _MAX_HEADER_BYTES
+    (a re-check; `python3 -m api` refuses it in the parser first), and 408
+    when the body has not fully arrived _BODY_READ_TIMEOUT_S after the
+    request reached the app (the protocol in http_limits.py closes the
+    connection shortly after, even if the app never reads the body)."""
 
     def __init__(self, app: ASGIApp):
         self.app = app
@@ -191,6 +213,11 @@ class BodySizeLimitMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
+            return
+        head = len(scope.get("raw_path") or b"") + len(scope.get("query_string") or b"")
+        head += sum(len(k) + len(v) + 4 for k, v in scope["headers"])
+        if head > _MAX_HEADER_BYTES:
+            await _refusal(431, f"request head exceeds {_MAX_HEADER_BYTES} bytes")(scope, receive, send)
             return
         limit = _MAX_BODY_BYTES
         for name, value in scope["headers"]:
@@ -204,14 +231,29 @@ class BodySizeLimitMiddleware:
                     return
         received = 0
         started = False
+        body_done = False
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _BODY_READ_TIMEOUT_S
 
         async def limited_receive() -> Message:
-            nonlocal received
-            message = await receive()
+            nonlocal received, body_done
+            if body_done:
+                return await receive()  # e.g. waiting for http.disconnect: no deadline
+            remaining = deadline - loop.time()
+            try:
+                if remaining <= 0:
+                    raise TimeoutError
+                message = await asyncio.wait_for(receive(), remaining)
+            except TimeoutError:
+                raise _BodyTimeout() from None
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
                 if received > limit:
                     raise _BodyTooLarge()
+                if not message.get("more_body", False):
+                    body_done = True
+            else:
+                body_done = True
             return message
 
         async def tracking_send(message: Message) -> None:
@@ -226,6 +268,10 @@ class BodySizeLimitMiddleware:
             if started:
                 raise
             await _too_large_response()(scope, receive, send)
+        except _BodyTimeout:
+            if started:
+                raise
+            await _refusal(408, f"request body not received within {_BODY_READ_TIMEOUT_S:g}s")(scope, receive, send)
 
 
 app.add_middleware(BodySizeLimitMiddleware)
@@ -666,7 +712,7 @@ def _run_callback_orchestration(req: OrchestrateRequest) -> dict:
         for t in repeats
     ]
     capacity = _GATE.status()
-    if capacity["near_capacity"] or capacity["new_key_budget_exhausted"]:
+    if capacity["near_capacity"] or capacity["new_key_budget_exhausted"] or capacity["new_key_burst_exhausted"]:
         _log.warning("outbound gate capacity alert: %s", capacity)
     return {"outcomes": rows, "gate": capacity}
 
@@ -743,13 +789,29 @@ def _resolve_and_writeback(req: ResolveRequest) -> ResolveResponse:
 # (ORCHESTRATOR_BIND_ADDR), and `--reload` is a dev file-watcher, not a
 # way to run a service. `python3 -m api` now owns its bind: 127.0.0.1 by
 # default, FULFILLMENT_BIND_ADDR to override, FULFILLMENT_PORT (8091).
+#
+# Fix wave 5, NEW-3: it also owns its transport limits. uvicorn's defaults
+# (httptools parser, no head/body deadline) buffered a 150 MB header in full
+# and held idle, partial-head and slow-body sockets forever, all without a
+# token. It now runs the h11 parser with a 16 KiB head cap, head and body
+# deadlines, and bounded connections — values and trade-offs in
+# http_limits.py and the README ("Transport limits").
 
 def main() -> None:
     import uvicorn
 
     host = os.environ.get("FULFILLMENT_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("FULFILLMENT_PORT", "8091"))
-    uvicorn.run(app, host=host, port=port)
+    http_limits.DeadlineH11Protocol.body_timeout_s = _BODY_READ_TIMEOUT_S
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        http=http_limits.DeadlineH11Protocol,
+        h11_max_incomplete_event_size=http_limits.MAX_HEADER_BYTES,
+        timeout_keep_alive=http_limits.KEEP_ALIVE_TIMEOUT_S,
+        limit_concurrency=http_limits.LIMIT_CONCURRENCY,
+    )
 
 
 if __name__ == "__main__":

@@ -270,6 +270,57 @@ what changed architecturally, and why:
     one thread-pool call; `/health` is a coroutine. Auth now runs before
     the body is parsed.
 
+## Fix wave 5, Sep 24 2026 — decisions it adds
+
+17. **The entrypoint owns its transport limits** (NEW-3, MED, CONFIRMED).
+    `python3 -m api` ran uvicorn's defaults: the httptools parser (no
+    request-head size limit — one 100–200 MB header was buffered in full,
+    RSS 53 → 415 MB) and no head or body deadline (idle, partial-head and
+    slow-body sockets held indefinitely), all before auth. Decided, same
+    approach as detection-py's `serve.py`, values in
+    `src/http_limits.py`: h11 parser with a 16 KiB head cap (400 while the
+    head is being read; the middleware re-checks with 431 under any other
+    launcher); a 10 s request-head deadline from connect / end of the
+    previous response; 5 s idle keep-alive; a 30 s body deadline (408 from
+    the middleware when the app is reading; the protocol closes the
+    connection 5 s later regardless, e.g. after an early 401 — each
+    trickled byte used to reset uvicorn's keep-alive timer);
+    `limit_concurrency` 128 (bounds in-flight 4 MiB bodies to ~512 MiB) and
+    a hard cap of 256 open sockets. `FULFILLMENT_BODY_READ_TIMEOUT_S` may
+    only narrow the body deadline. *Trade-off, accepted:* ≥ 128 held
+    sockets make the service answer 503 (including `/health`) until they
+    are closed — at most 10 s for sockets that never send a head — instead
+    of letting one client hold every file descriptor and unbounded memory
+    indefinitely. *Not addressed:* a client that never reads its response
+    (bounded by the socket send buffer and the 4 MiB response size, not
+    by a deadline).
+18. **New-key admission is burst-shaped, not only hourly** (AEGIS NEW-5,
+    LOW, design trade-off). Decision 15's rolling-hour budget could be
+    spent in one burst: 4 166 fresh numbers in 0.34 s blocked every new
+    legitimate number for 60 minutes. The budget cannot be scoped per
+    caller — there is one shared service token and no caller identity.
+    Decided: new keys must *also* pass a token bucket of capacity 100
+    (`new_key_burst`, default `min(100, max_new_keys_per_hour)`), refilled
+    at `max_new_keys_per_hour` per hour, i.e. 1/60 of the hourly budget
+    per minute (69.4/min); checked at `authorize()` and `redeem()`, spent
+    at `redeem()`; a gate clock that moves backwards refills nothing. The
+    rolling-hour budget (Decision 15) still applies on top, so nothing is
+    admitted that it refuses — fail closed is unchanged.
+    **New worst case:** a burst takes at most 100 new keys (50 new
+    customers) at once, and a legitimate new number is refused for about
+    1–2 s after the burst ends (live run: 5 000 fresh numbers in 0.24 s →
+    50 contacted; a legitimate new number refused immediately, contacted
+    2.5 s later). In any one minute at most 100 + 69.4 new keys are
+    admitted (tokens that accrue while the hourly budget is the one
+    refusing form the next burst). An attacker who *keeps* offering fresh
+    numbers still competes with legitimate new numbers for every token,
+    for as long as the attack lasts, up to the hourly budget — visible via
+    `new_key_burst_exhausted` in `GET /gate/status` and the logged warning;
+    fixing that needs per-caller identity (a per-caller token), which this
+    service does not have. *Cost:* a legitimate orchestrate batch with more
+    than 50 new customers gets the excess refused with "retry in a few
+    seconds" (tasks stay PENDING); sustained, ~34 new customers per minute.
+
 Still open after the audit (not decided here): an approval gate for a
 future real dialer/CRM adapter; idempotency keys for
 `resolution-writeback/resolve` across retries; per-customer time zone

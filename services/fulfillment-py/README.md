@@ -338,6 +338,29 @@ number and reported `gate.tracked_keys: 2`.
     were done by Claude sessions, not by a human security reviewer. A
     different reviewer may find different things.
 
+## Fix wave 5, Sep 24 2026 — transport limits (NEW-3) and burst-shaped new-key budget (NEW-5)
+
+Tests first, failing on the pre-fix tree, then passing:
+`tests/test_fix5_http_limits_live.py` (real `python3 -m api` over TCP) and
+`tests/test_fix5_new_key_burst.py`. ADR 0002 Decisions 17 and 18.
+
+| Finding | Before (evidence) | Now |
+|---|---|---|
+| NEW-3 (MED): unauthenticated, unbounded request heads; no idle / partial-head / slow-body deadline | `python3 -m api` ran uvicorn defaults (httptools, no deadlines). Pre-fix run of the new tests: a 150 MB header was accepted in full; 0/20 idle + partial-head sockets closed within 15.5 s; a slow body got no 408 and, unauthenticated (early 401), was held > 10.5 s; 0 of 296 sockets closed (no connection cap). | **Transport limits** (`src/http_limits.py`, used by `python3 -m api`): h11 parser, 16 KiB head cap (400 while reading; middleware 431 under other launchers); 10 s head deadline; 5 s idle keep-alive; 30 s body deadline (408, and the connection is closed 5 s later even if the app never reads the body); `limit_concurrency` 128; hard cap 256 open sockets. Live: 150 MB header → 400 after the first 1 MiB, RSS 51 088 → 51 176 KiB; 10 idle sockets closed at 10.02 s; `/health` < 1 s throughout. Trade-off: ≥ 128 held sockets → 503 (incl. `/health`) until they are closed (≤ 10 s if they never send a head). |
+| NEW-5 (LOW): one burst spends the hour's new-key budget | 4 166 fresh numbers in 0.34 s admitted all 4 166; a legitimate new number was then refused at +2 s, +30 min and +59 min 59 s. | Token bucket on new keys: burst 100, refill 1/60 of the hourly budget per minute (69.4/min); the rolling-hour budget still applies on top. Same burst: ≤ 100 new keys admitted, a legitimate number admitted at +2 s. Live (`python3 -m api`): 5 000 fresh numbers+customers in 0.24 s → 50 contacted, legitimate new number refused at once, contacted 2.5 s later. Still open: a *sustained* attacker competes for every token (no per-caller identity exists to scope by). `/gate/status` adds `new_key_burst`, `new_key_tokens_available`, `new_key_refill_per_minute`, `new_key_burst_exhausted`. |
+
+**Tests changed, and why:** `test_fix4_limits.py::test_gate_decisions_for_a_max_batch_do_not_reread_the_tz_database`
+now passes `new_key_burst=10_000`: it measures tz-file reads for 1 000
+new numbers at one instant, which the new bucket would otherwise stop
+after 100. No assertion was weakened.
+**API behavior changes:** an oversized head is 400/431; a slow body is 408
+or closed; over 128 concurrent connections/requests is 503; a batch with
+more than 50 new customers at once gets the excess refused ("retry in a
+few seconds").
+
+**Suite:** 880 passed before → 901 passed after
+(`FULFILLMENT_TEST_PORT_RANGE=20140-20159 python3 -m pytest`).
+
 ## Running it
 
 ```bash
@@ -365,8 +388,15 @@ PYTHONPATH=src python3 -m api
 #   FULFILLMENT_CONTACT_MIN_SPACING_MINUTES   default 120; 120-1440 only
 #   FULFILLMENT_COUNTRY_ZONES  unset = only +1 numbers are ever contacted;
 #                              e.g. "44=Europe/London"; bad value refuses startup
-# Request bodies over 4 MiB are refused (413). Monitor GET /gate/status
-# (authenticated): alert on near_capacity or new_key_budget_exhausted.
+#   FULFILLMENT_BODY_READ_TIMEOUT_S  default 30; may only narrow (0 < s <= 30)
+# Request bodies over 4 MiB are refused (413). Transport limits (fix wave 5,
+# src/http_limits.py): request head <= 16 KiB, complete within 10 s; idle
+# keep-alive 5 s; body complete within 30 s (408); 503 at 128 concurrent
+# connections/requests; at most 256 open sockets. Run it with
+# `python3 -m api` — a bare `uvicorn api:app` gets none of the parser cap or
+# deadlines (only the middleware's 431/408/413). Monitor GET /gate/status
+# (authenticated): alert on near_capacity, new_key_budget_exhausted or
+# new_key_burst_exhausted.
 curl http://127.0.0.1:8091/health
 curl -H "Authorization: Bearer $FULFILLMENT_SERVICE_TOKEN" http://127.0.0.1:8091/fixtures/call-events
 ```

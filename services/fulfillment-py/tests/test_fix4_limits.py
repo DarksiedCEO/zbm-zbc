@@ -506,7 +506,10 @@ def test_gate_decisions_for_a_max_batch_do_not_reread_the_tz_database():
     """zoneinfo keeps only 8 zones strongly cached; the gate checks 44 for a
     continental +1 number, so every check re-read tz files from disk: one
     1000-task orchestrate batch held the dial lock for ~4.2 s."""
-    g = _gate(Clock(T0), max_tracked_keys=10_000, max_new_keys_per_hour=10_000)
+    # new_key_burst (fix wave 5, NEW-5) opened to the batch: this test is about
+    # tz-file reads per decision, not new-key admission, which it would
+    # otherwise stop after 100 new numbers at one instant.
+    g = _gate(Clock(T0), max_tracked_keys=10_000, max_new_keys_per_hour=10_000, new_key_burst=10_000)
     _contact(g, "+12125550000")  # warm
     t = time.perf_counter()
     for i in range(1, 1000):
