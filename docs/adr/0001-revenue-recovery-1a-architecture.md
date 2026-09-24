@@ -192,6 +192,30 @@ httptools).
 | ledger-rust response body | 64 MiB | `GET /ledger/entries` returns the whole ledger (no pagination); a finding entry is ~470–500 bytes, so this is ~130,000 entries (~13,000 fixture scans). Beyond that, reads fail closed (502; the log says "response body exceeds"). **Known limit until the ledger paginates.** |
 | Upstream text in errors/logs | 2 KiB | |
 
+**dashboard-ts** (fix wave 1, LOW-A). The page rendered an orchestrator
+failure with HTTP 200, so a monitor saw a healthy dashboard, and the
+orchestrator call had no timeout. Now the call is bounded by
+`ORCHESTRATOR_TIMEOUT_MS` (default 10 s) and the status on the wire is
+503 when the dashboard cannot get an answer (orchestrator unreachable,
+timed out, `ORCHESTRATOR_SERVICE_TOKEN` unset), 502 when the orchestrator
+answered but not with usable findings (token rejected, any other non-2xx,
+a body that is not the contract, or a ledger that does not verify), and
+200 only when findings loaded and the ledger verified. Mechanism: an App
+Router page component cannot set a 5xx status (only `notFound()`,
+`forbidden()`, `unauthorized()`, `redirect()`, or a throw, which is a 500
+with the message replaced by a digest), so `src/proxy.ts` reads the
+findings once per `GET /`, decides the status, and answers
+`NextResponse.next({ status })` while handing the very same outcome to the
+page through an overridden request header (`src/lib/handoff.ts`; a
+client-supplied copy of that header is dropped on every request). The
+page renders exactly that outcome, so the status and the message can never
+disagree. `GET /healthz` returns the same verdict as JSON for monitoring.
+Verified with curl against the built server; `tests/status.live.test.mjs`
+checks every case on the wire, `tests/load-outcome.test.ts` the mapping.
+The handoff header lives in process memory only (a 50,000-finding ledger,
+19 MB of JSON, passed through it in a manual run); the page itself, which
+renders the whole ledger, is the practical size limit.
+
 Tests: `services/detection-py/tests/test_request_limits.py`,
 `tests/test_request_limits_live.py` (real uvicorn on a real socket: `/health`
 stays under 1 s while a 1000-order batch and ~44 MB bodies are in flight, and

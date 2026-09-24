@@ -9,12 +9,15 @@
 const URL_LIKE = /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi;
 const HOST_PORT = /(\[[0-9a-f:.]+\]|\b[a-z0-9][a-z0-9.-]*|\b\d{1,3}(?:\.\d{1,3}){3}):\d{1,5}\b/gi;
 const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
+const CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 function scrub(text: string): string {
   return text.replace(URL_LIKE, "[address hidden]").replace(HOST_PORT, "[address hidden]").replace(IPV4, "[address hidden]");
 }
 
-export function describeOrchestratorFailure(status: number, bodyText: string): string {
+// LOW-A (fix wave 1): the message and the orchestrator's correlation id,
+// separately, so the page, the server log and /healthz carry the same id.
+export function parseOrchestratorFailure(status: number, bodyText: string): { message: string; correlationId: string | null } {
   let error: unknown;
   let correlationId: unknown;
   try {
@@ -27,13 +30,22 @@ export function describeOrchestratorFailure(status: number, bodyText: string): s
     // not JSON — fall through to the generic message
   }
   const head = `orchestrator returned ${status}`;
+  const id = typeof correlationId === "string" && CORRELATION_ID.test(correlationId) ? correlationId : null;
   if (typeof error !== "string" || error === "") {
-    return `${head} (details in the dashboard server log)`;
+    return { message: `${head} (details in the dashboard server log)`, correlationId: id };
   }
-  const id = typeof correlationId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(correlationId) ? correlationId : null;
-  return `${head}: ${scrub(error).slice(0, 500)}${id ? ` (correlation id ${id})` : ""}`;
+  return { message: `${head}: ${scrub(error).slice(0, 500)}`, correlationId: id };
+}
+
+export function describeOrchestratorFailure(status: number, bodyText: string): string {
+  const { message, correlationId } = parseOrchestratorFailure(status, bodyText);
+  return correlationId ? `${message} (correlation id ${correlationId})` : message;
 }
 
 export function describeFetchFailure(_err: unknown): string {
   return "could not reach the orchestrator (details in the dashboard server log)";
+}
+
+export function describeTimeout(ms: number): string {
+  return `the orchestrator did not answer within ${ms} ms (request timed out)`;
 }
