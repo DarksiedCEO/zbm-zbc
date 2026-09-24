@@ -1,0 +1,20 @@
+"""Constrained scalar types shared by both layers.
+
+`SafeId` uses the exact character class the ledger contract (BUILD_CONTRACTS
+section 2) requires for `event_id` / `subject_id`, so any object id in this
+service can be used as a ledger subject without re-encoding.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from pydantic import StringConstraints
+
+SAFE_ID_PATTERN = r"^[A-Za-z0-9._:-]{1,128}$"
+ACTOR_PATTERN = r"^[a-z0-9_]{1,64}$"
+
+SafeId = Annotated[str, StringConstraints(pattern=SAFE_ID_PATTERN)]
+ActorId = Annotated[str, StringConstraints(pattern=ACTOR_PATTERN)]
+NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+ShortStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=280)]
