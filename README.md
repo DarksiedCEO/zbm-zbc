@@ -72,7 +72,21 @@ backward-compatibility proof are in
   `POST /ledger/append` is a 400. Legacy log lines with numeric amounts
   still load and verify — proven against a log written by the actual
   pre-change server binary (commit 9531fc2), checked in as
-  `tests/fixtures/legacy_ledger_v1.jsonl`.
+  `tests/fixtures/legacy_ledger_v1.jsonl`, and (fix wave 1) a second log
+  from that binary with negative, `-0.0` and sub-cent negative amounts,
+  which are served verbatim as their old hashed rendering (`"-5.00"`,
+  `"-0.00"`).
+- `ledger-rust` fix wave 1 (ADR 0003 sections 4-5): a torn final log line
+  from a crash is preserved to `<log>.torn-<nanos>` and truncated on
+  startup instead of bricking the ledger (other corruption still refuses
+  to start); a failed write is truncated back and never advances memory;
+  `POST /ledger/append` rejects `|`, control characters and the string
+  `"null"` in optional fields, and ambiguous (re-splittable) findings or
+  invalid events on disk refuse to load; logging can no longer crash the
+  server. Known limitation: a non-ASCII byte in any request header gets an
+  empty reply (tiny_http drops it before our code runs; fail-closed, pinned
+  by test). `cargo test`: 80 passed (54 unit, 8 `server_auth`, 8
+  `server_events`, 10 `server_hardening`).
 - `apps/dashboard-ts`: `amount_usd: string`, displayed verbatim, never
   parsed to a JS number, no totals computed.
 

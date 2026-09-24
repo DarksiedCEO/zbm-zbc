@@ -33,11 +33,21 @@
 //!     hash chain (201 new / 200 identical retry / 409 conflicting content /
 //!     400 invalid / 401 unauthenticated). Every entry now carries `kind`.
 //!   - Request bodies are capped at MAX_BODY_BYTES; larger bodies get 413.
+//!
+//! Fix wave 1, Sep 24 2026 (docs/adr/0003 sections 4-5):
+//!   - POST /ledger/append rejects `|`, control characters, and the literal
+//!     string "null" in optional fields with 400 (AEGIS F7).
+//!   - A torn final log line left by a crash is preserved and truncated on
+//!     startup instead of refusing to start (AEGIS F5); see persistence.rs.
+//!   - The startup log names the real bound address.
+//!   - Known limitation: tiny_http closes the connection without any
+//!     response when the request head contains a non-ASCII byte; that
+//!     happens inside tiny_http before this code sees the request (see ADR).
 
 use std::io::Read;
 use std::sync::Mutex;
 
-use ledger_rust::{EventAppendOutcome, EventInput, LedgerRecordInput, PersistentLedger};
+use ledger_rust::{ledger_log, EventAppendOutcome, EventInput, LedgerRecordInput, PersistError, PersistentLedger};
 use tiny_http::{Header, Method, Response, Server};
 
 /// Upper bound on a request body. A finding record or an event is well
@@ -84,10 +94,13 @@ fn handle_event(ledger: &Mutex<PersistentLedger>, body: &str) -> (u16, String) {
             })
             .to_string(),
         ),
+        Err(PersistError::Invalid(reason)) => {
+            (400, serde_json::json!({"error": format!("invalid event: {reason}")}).to_string())
+        }
         Err(e) => {
             // Same rule as findings: in-memory state untouched, caller must
             // treat this as NOT recorded.
-            eprintln!("ledger-rust: event append failed to persist: {e}");
+            ledger_log!("ledger-rust: event append failed to persist: {e}");
             (500, serde_json::json!({"error": format!("failed to persist event: {e}")}).to_string())
         }
     }
@@ -137,7 +150,7 @@ fn load_required_token() -> String {
     match std::env::var("LEDGER_SERVICE_TOKEN") {
         Ok(t) if !t.is_empty() => t,
         _ => {
-            eprintln!(
+            ledger_log!(
                 "ledger-rust: REFUSING TO START — LEDGER_SERVICE_TOKEN is not set. This is \
                  the evidence ledger; it does not start unauthenticated. Set \
                  LEDGER_SERVICE_TOKEN to a shared secret before starting ledger-rust, and set \
@@ -159,17 +172,17 @@ fn main() {
 
     let ledger = match PersistentLedger::open(&log_path) {
         Ok(l) => {
-            eprintln!(
+            ledger_log!(
                 "ledger-rust: loaded {} existing entries from {log_path}, chain verified",
                 l.len()
             );
             Mutex::new(l)
         }
         Err(e) => {
-            eprintln!(
+            ledger_log!(
                 "ledger-rust: REFUSING TO START — ledger log at {log_path} failed to load: {e}"
             );
-            eprintln!(
+            ledger_log!(
                 "ledger-rust: this is a fail-closed integrity check, not a crash — the log file \
                  is either corrupted or has been tampered with, and starting anyway would hide \
                  that. Resolve manually (restore from backup, or move the file aside if you \
@@ -179,7 +192,7 @@ fn main() {
         }
     };
 
-    eprintln!("ledger-rust listening on :{port} (log: {log_path})");
+    ledger_log!("ledger-rust listening on {} (log: {log_path})", server.server_addr());
 
     for mut request in server.incoming_requests() {
         let method = request.method().clone();
@@ -235,18 +248,26 @@ fn main() {
             (Method::Post, "/ledger/append") => {
                 match read_body(&mut request) {
                     Err(resp) => resp,
-                    Ok(body) => match serde_json::from_str::<LedgerRecordInput>(&body) {
+                    Ok(body) => match serde_json::from_str::<LedgerRecordInput>(&body)
+                        .map_err(|e| e.to_string())
+                        .and_then(|r| r.validate().map(|()| r))
+                    {
                         Ok(record) => {
                             let mut l = ledger.lock().unwrap();
                             match l.append(record) {
                                 Ok(entry) => (201, serde_json::to_string(entry).unwrap()),
+                                Err(PersistError::Invalid(reason)) => (
+                                    400,
+                                    serde_json::json!({"error": format!("invalid LedgerRecordInput: {reason}")})
+                                        .to_string(),
+                                ),
                                 Err(e) => {
                                     // Disk write failed — the in-memory ledger was
                                     // deliberately left untouched (see
                                     // PersistentLedger::append). Surface this as a
                                     // hard server error: the caller must not treat
                                     // this as "recorded."
-                                    eprintln!("ledger-rust: append failed to persist: {e}");
+                                    ledger_log!("ledger-rust: append failed to persist: {e}");
                                     (
                                         500,
                                         serde_json::json!({
