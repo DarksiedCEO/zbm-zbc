@@ -26,9 +26,24 @@ TOKEN = "live-test-token-not-a-secret"
 
 
 def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    """An OS-assigned free port, or — when FULFILLMENT_TEST_PORT_RANGE="LO-HI"
+    is set (fix wave 1: engineers run in assigned port ranges) — the first
+    free port in that range, checked on both loopback addresses used here."""
+    rng = os.environ.get("FULFILLMENT_TEST_PORT_RANGE")
+    if not rng:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+    lo, hi = (int(x) for x in rng.split("-"))
+    for port in range(lo, hi + 1):
+        try:
+            for host in ("127.0.0.1", "127.0.0.2"):
+                with socket.socket() as s:
+                    s.bind((host, port))
+            return port
+        except OSError:
+            continue
+    raise AssertionError(f"no free port in FULFILLMENT_TEST_PORT_RANGE={rng}")
 
 
 def _listening_addrs(port: int) -> set[str]:

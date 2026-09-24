@@ -55,7 +55,7 @@ def env(monkeypatch):
     clock = _Clock(UTC_1800)
     monkeypatch.setattr(api, "_dialer", dialer)
     monkeypatch.setattr(api, "_now", clock)
-    monkeypatch.setattr(api, "_attempted_task_ids", set())
+    monkeypatch.setattr(api, "_attempted_task_ids", api._new_dedupe())
     return dialer, clock
 
 

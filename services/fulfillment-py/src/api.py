@@ -32,7 +32,7 @@ from __future__ import annotations
 import hmac
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
@@ -48,6 +48,7 @@ from agents import (
     missed_call_detection,
     resolution_writeback,
 )
+from bounded_state import BoundedExpiringMap
 from contact_window import ContactWindow, parse_contact_window
 from fixtures_loader import load_appointments, load_call_events, load_dossiers
 from fulfillment_schema import (
@@ -260,13 +261,33 @@ _system_of_record: SystemOfRecordPort = _build_system_of_record()
 # concurrent dossier updates kept one customer and silently dropped three).
 _dossiers: dict[str, CustomerDossier] = {}
 _dossiers_lock = threading.Lock()
-# task_ids this process has already handed to the dialer. Closes README
-# gap 6 for the life of the process only — lost on restart (no datastore).
-_attempted_task_ids: set[str] = set()
+# Fix wave 1: the dossier store grew without limit (every customer ever
+# seen, every call/appointment id). It is a record, not a 24h window, so
+# nothing is evicted: at a cap the update is refused whole (503, nothing
+# applied) rather than silently truncating a customer's history.
+_MAX_DOSSIERS = 100_000
+_MAX_DOSSIER_HISTORY = 10_000  # per dossier, per list (calls, appointments, numbers)
+# Dedupe state (process lifetime, lost on restart — no datastore). Fix
+# wave 1: both stores used to be a plain set/dict that grew forever. Each is
+# now a BoundedExpiringMap: entries older than 24h are evicted (the gate's
+# per-number limit is the real redial protection over any longer span), and
+# at the hard cap with nothing expired the route FAILS CLOSED — no dial, no
+# write-back — instead of forgetting what it already did.
+_DEDUPE_TTL = timedelta(hours=24)
+_DEDUPE_MAX_ENTRIES = 100_000
+
+
+def _new_dedupe(max_entries: int = _DEDUPE_MAX_ENTRIES) -> BoundedExpiringMap:
+    return BoundedExpiringMap(ttl=_DEDUPE_TTL, max_entries=max_entries)
+
+
+# task_id -> True for task ids this process has already handed to the dialer
+# (closes README gap 6 for 24h within the life of the process).
+_attempted_task_ids: BoundedExpiringMap[str, bool] = _new_dedupe()
 _dial_lock = threading.Lock()
 # exhausted-escalation task_id -> the NO_RESOLUTION record already made
-# for it, so a retried request returns the same record (process lifetime).
-_exhausted_resolutions: dict[str, ResolutionRecord] = {}
+# for it, so a retried request returns the same record.
+_exhausted_resolutions: BoundedExpiringMap[str, ResolutionRecord] = _new_dedupe()
 _exhausted_lock = threading.Lock()
 
 _MAX_BATCH = 1000
@@ -392,8 +413,17 @@ def escalate_task(req: EscalateRequest) -> dict:
         # used to mint a second NO_RESOLUTION record and a second
         # write-back. Now the first record is returned (process lifetime).
         with _exhausted_lock:
-            record = _exhausted_resolutions.get(req.task.task_id)
+            now = _now()
+            record = _exhausted_resolutions.get(req.task.task_id, now)
             if record is None:
+                if _exhausted_resolutions.room(now) < 1:
+                    # Fail closed BEFORE the write-back: without room to
+                    # remember this record, a retry would mint a duplicate.
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="exhausted-escalation dedupe state is full (fail closed); no record written — retry later",
+                        headers={"Retry-After": "60"},
+                    )
                 [record] = resolution_writeback.resolve_and_writeback(
                     [
                         TerminalEvent(
@@ -405,7 +435,7 @@ def escalate_task(req: EscalateRequest) -> dict:
                     ],
                     _system_of_record,
                 )
-                _exhausted_resolutions[req.task.task_id] = record
+                _exhausted_resolutions.put(req.task.task_id, record, now)
         resolution = record.model_dump()
 
     return {"next_task": None, "sequence_exhausted": exhausted, "resolution": resolution}
@@ -433,26 +463,51 @@ def run_callback_orchestration(req: OrchestrateRequest) -> dict:
     # task can't both pass the check. Serializing dials is a throughput
     # cost accepted deliberately: correctness over speed for outbound calls.
     with _dial_lock:
-        fresh = [t for t in req.tasks if t.task_id not in _attempted_task_ids]
+        now = _now()
+        fresh = [t for t in req.tasks if not _attempted_task_ids.contains(t.task_id, now)]
         repeats = [
             t for t in req.tasks
-            if t.task_id in _attempted_task_ids
+            if _attempted_task_ids.contains(t.task_id, now)
             and t.channel == TaskChannel.CALL and t.status == TaskStatus.PENDING
         ]
+        # Fix wave 1: a task this service cannot remember having dialed is
+        # not dialed (fail closed). Only as many distinct new ids as the
+        # dedupe store has room for go on to the orchestrator.
+        room = _attempted_task_ids.room(now)
+        admitted: list[FollowUpTask] = []
+        over_capacity: list[FollowUpTask] = []
+        admitted_ids: set[str] = set()
+        for t in fresh:
+            if t.task_id in admitted_ids or len(admitted_ids) < room:
+                admitted_ids.add(t.task_id)
+                admitted.append(t)
+            else:
+                over_capacity.append(t)
         outcomes = callback_orchestration.orchestrate(
-            fresh,
+            admitted,
             _dialer,
             phone_by_call_id=req.phone_by_call_id,
             line_by_call_id=req.line_by_call_id,
             timezone_by_call_id=req.timezone_by_call_id,
             gate=_GATE,
-            now=_now(),
+            now=now,
         )
         for o in outcomes:
             if o.attempted:
-                _attempted_task_ids.add(o.task.task_id)
+                _attempted_task_ids.put(o.task.task_id, True, now)  # room reserved above
 
     rows = [_outcome_row(o) for o in outcomes]
+    rows += [
+        {
+            "task_id": t.task_id,
+            "attempted": False,
+            "skip_reason": "dedupe state is full — not dialed (fail closed); retry later",
+            "dial_placed": None,
+            "sla_breached": False,
+            "resulting_task_status": t.status.value,
+        }
+        for t in over_capacity
+    ]
     rows += [
         {
             "task_id": t.task_id,
@@ -471,7 +526,24 @@ def run_callback_orchestration(req: OrchestrateRequest) -> dict:
 def update_dossiers(req: DossierUpdateRequest) -> DossiersResponse:
     global _dossiers
     with _dossiers_lock:
-        _dossiers = customer_dossier.build_or_update(_dossiers, req.call_events, req.appointments)
+        updated = customer_dossier.build_or_update(_dossiers, req.call_events, req.appointments)
+        if len(updated) > _MAX_DOSSIERS:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"dossier store is full (max {_MAX_DOSSIERS} customers); update not applied (fail closed)",
+                headers={"Retry-After": "60"},
+            )
+        if any(
+            len(lst) > _MAX_DOSSIER_HISTORY
+            for d in updated.values()
+            for lst in (d.call_history, d.appointment_history, d.phone_numbers)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"a dossier's history is full (max {_MAX_DOSSIER_HISTORY} entries per list); update not applied (fail closed)",
+                headers={"Retry-After": "60"},
+            )
+        _dossiers = updated
         snapshot = list(_dossiers.values())
     return DossiersResponse(dossiers=snapshot)
 
