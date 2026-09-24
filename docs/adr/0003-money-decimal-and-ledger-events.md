@@ -90,11 +90,31 @@ Proof by test, not just argument:
   `tampered_legacy_numeric_amount_is_detected` shows a one-cent edit to a
   legacy number still breaks the chain.
 
-Known limit: a legacy line whose number formats to a negative value
-(e.g. `-5.0`, or `-0.0` → `"-0.00"`) fails to load with an explicit error
-(fail closed). The old `detection-py` schema never produced a non-positive
-amount, so no such line is expected; if one exists the ledger refuses to
-start and says why instead of silently rewriting it.
+**Negative legacy amounts (corrected in fix wave 1, AEGIS F6).** This ADR
+originally said a legacy line whose number formats negative (`-5.0`, `-0.0`)
+would refuse to load, on the assumption that none existed. That was wrong
+in the way that matters: the 9531fc2 binary accepted ANY finite JSON number
+(checked against the real old binary: `-0.0`, `-5`, `-0.001` all got `201`
+and a valid chain), so such logs can exist, and refusing them bricks the
+ledger. `Money::from_legacy_f64` now keeps the exact old rendering for
+every finite `f64`, sign included: `-0.0` → `"-0.00"`, `-5` → `"-5.00"`,
+`-0.001` → `"-0.00"`, `-12.345` → `"-12.35"`, `-0.005` → `"-0.01"`.
+`GET /ledger/entries` shows that string verbatim, so what is shown is
+exactly what the old hash covered. Such a string can only come from a
+legacy line: a line with `kind` must carry a strict string amount, and
+every new append still requires a positive two-decimal string (`"-5.00"`,
+`"-0.00"`, `"0.00"` → `400`). Consumers should expect a non-canonical,
+possibly negative `amount_usd` only on legacy entries (log lines written
+before Sep 24 2026, which have no `kind` on disk; the API reports them as
+`"kind":"finding"`).
+Proof: `tests/fixtures/legacy_ledger_v2_negatives.jsonl`, 15 entries
+written by the real 9531fc2 binary over HTTP (the old binary's own
+`/ledger/verify` said `{"entries":15,"valid":true}`), containing `-0.0`,
+`-5`, `-0.001`, `-12.345`, `-0.005`, `-1e-9` and the earlier positives
+(`120.0`, `54.38`, `0.1`, `0.30000000000000004`, `1234567.89`, `2.675`,
+`1e20`, `null`). Loaded, verified, served, extended and re-opened by
+`persistence::tests::legacy_negative_amount_log_from_old_binary_loads_verifies_and_extends`
+and `tests/server_hardening.rs::f6_legacy_log_with_negative_amounts_from_old_binary_is_served_and_extended`.
 
 ## 3. Event records (`POST /ledger/events`)
 
@@ -137,6 +157,133 @@ Design:
 - No Go client method for events: the orchestrator does not record events.
   Python callers use the `LedgerClient.record_event(...)` protocol defined
   in the build contracts (implemented by the calling services, not here).
+
+## 4. Finding canonical form must be unambiguous (fix wave 1, AEGIS F7)
+
+The finding hash covers
+`{seq}|{finding_id}|{agent_id}|{entity_id}|{leak_category}|{amount}|{vc}|{dc}|{ts}|{prev}`
+with a missing optional value written as `null`. That format cannot change:
+every existing chain was hashed with it. But as written it is ambiguous:
+`agent_id="agent-A"`, `entity_id="ord_1|ord_999"`, `dc=None` and
+`agent_id="agent-A|ord_1"`, `entity_id="ord_999"`, `dc="null"` produce the
+same string, so the same hash. AEGIS forged exactly that on disk and the
+log opened and verified.
+
+The canonical string maps back to exactly one entry if and only if **no
+string field contains `|`** and **no optional field (`value_classification`,
+`decision_confidence`) is the literal string `"null"`**. (`amount` is a
+validated money string or a legacy `{:.2}` rendering, neither of which can
+be `null` or contain `|`; `seq`, the RFC3339 timestamp and the hex hashes
+cannot contain `|`.) With no `|` inside fields there are exactly nine
+separators, so any re-split must produce the same fields.
+
+Rules:
+- **Append** (`POST /ledger/append`, and `PersistentLedger::append` itself
+  for library callers): `400` if any of `finding_id`, `agent_id`,
+  `entity_id`, `leak_category`, `value_classification`, `decision_confidence`
+  contains `|` or a control character (C0, DEL, C1), or if an optional field
+  is the string `"null"` (send JSON `null`). Real callers' values
+  (`aff-ord_1002`, `discount-misuse-v1`, `observed`, `very_high`, …) are
+  unaffected.
+- **Load and `verify_chain`**: a finding that breaks the ambiguity rule is
+  refused (startup refuses; `/ledger/verify` reports it), **legacy or
+  not**. In addition, a line must have the shape one of the two real
+  writers produced: no `kind` → numeric or null `amount_usd` (the old
+  `Option<f64>`); `kind:"finding"` → string or null `amount_usd` and no
+  control characters. Legacy lines may contain control characters (the old
+  binary did no validation, and they do not make the string ambiguous).
+
+**Decision on legacy entries that contain `|` or `"null"`.** The old binary
+validated nothing, so it could have written such an entry legitimately
+(`tests/fixtures/legacy_ambiguous_pipe.jsonl` and
+`legacy_ambiguous_null.jsonl` were written by the real 9531fc2 binary and
+it verified them). But such an entry is, byte for byte, indistinguishable
+from a forged re-split of another entry with the same hash: no rule can
+accept one and refuse the other, because they share a hash, and a forger
+can write any JSON formatting the old binary could. Requirements (a) never
+accept a forged re-split and (b) load every real legacy log therefore
+conflict for exactly these entries. **We choose (a): they are refused
+(the ledger does not start) with a message naming the field and the word
+"ambiguous".** No real caller ever produced one: detection-py ids, agent
+ids, categories and the value/confidence enums contain no `|` and never
+the string `"null"`. If an operator ever meets this refusal, the entry must
+be resolved by a human against an independent record, not by the ledger.
+
+**Same class, swept:** event canonical strings were only unambiguous
+because append validates event fields, but a loaded event was never
+re-validated — and `summary` may contain `|`, so a forger could shift
+`department`…`payload_sha256` one slot right into the summary with the
+same hash (reproduced in
+`lib::tests::event_resplit_forgery_is_refused_by_verify_and_load`, which
+fails on the pre-fix code). Every event entry is now re-validated with the
+full `EventInput::validate` rules on load and in `verify_chain`, and
+`PersistentLedger::append_event` validates its input itself.
+
+Regression tests: `tests/fixtures/aegis_forged_resplit.jsonl` (the AEGIS
+forgery file) refuses to open (`persistence::tests::aegis_forged_resplit_log_refuses_to_open`,
+`tests/server_hardening.rs::f7_aegis_forged_resplit_log_refuses_to_start`);
+`lib::tests::aegis_resplit_and_null_forgery_is_refused_by_verify_and_load`
+builds the colliding pair in memory and shows both are refused.
+
+## 5. Crash safety and a known HTTP limitation (fix wave 1)
+
+**Torn final line (AEGIS F5).** An append returns success only after the
+whole line **and its trailing newline** are written and `fsync`'d. So an
+unterminated final segment of the log was never acknowledged. On open,
+after every complete line has parsed and the whole chain has verified,
+such a segment is treated as a torn write: its bytes are copied to
+`<log>.torn-<unix_nanos>` (fsync'd), the log is truncated to the end of its
+last complete line (fsync'd, directory fsync'd), and a
+`WARNING — TORN FINAL LINE` line is logged. If the side file cannot be
+written, the log is not truncated and startup fails. This applies whether
+or not the unterminated segment happens to parse as JSON: in both cases it
+was never acknowledged, and someone able to rewrite the file could delete
+the final line outright anyway (truncating the tail of a hash chain is not
+detectable without an external anchor; that is unchanged). Everything else
+still refuses to start and leaves the file untouched: a bad mid-file line,
+a complete newline-terminated line that fails to parse, fails hash
+verification, or breaks the ambiguity rules, or invalid UTF-8 in a
+complete line. A torn tail never excuses corruption earlier in the file.
+
+**Failed write (AEGIS F5, related).** If `write_all`, `flush` or `fsync`
+fails part-way, the file is truncated back to its pre-append length and
+`fsync`'d before the `500` is returned, and neither the ledger nor the
+event idempotency index advances. If that truncation also fails, the
+ledger is poisoned: every further append is refused until restart, because
+writing after an unknown partial line would turn a recoverable torn tail
+into mid-file corruption; restart then applies the torn-tail rule. Tested
+with a real kernel failure (`ulimit -f` with `SIGXFSZ` ignored → `EFBIG`
+after a partial write) in `tests/server_hardening.rs`, and with an
+injected failing writer (partial write, failed fsync, failed rollback) in
+`persistence::tests`.
+
+**Logging never kills the server (found during this fix).** `eprintln!`
+panics if stderr cannot be written (full disk under a redirected log,
+closed pipe, `RLIMIT_FSIZE`), and the server is a single-threaded loop, so a
+failed log line killed the ledger (exit 101, reproduced with stderr on
+`/dev/full`). All logging now goes through `ledger_log!`, which drops a
+line it cannot write.
+
+**Known limitation: non-ASCII bytes in the request head.** `tiny_http`
+0.12.0 (the latest release; the same code is on its `master` branch)
+reads each request-head line in `ClientConnection::read_next_line` and
+returns `io::ErrorKind::InvalidInput` ("Header is not in ASCII") if any
+byte is non-ASCII; its iterator maps that `ReadIoError` to `return None`,
+which closes the connection without writing any response. This happens in
+tiny_http's connection thread before a `Request` exists, so this service's
+code never sees it and the library offers no hook to change it (verified
+by reading `tiny_http-0.12.0/src/client.rs`). Consequences: a request with
+any non-ASCII header byte (even on `/health`, even with a valid token) gets
+an empty reply instead of `401`/`400`. It is fail-closed: nothing is read,
+nothing is written, auth is not bypassed, and the process stays up
+(`tests/server_hardening.rs::d4_non_ascii_header_closes_connection_process_stays_up_nothing_bypassed`
+pins exactly that). Replacing the HTTP stack was evaluated and rejected
+for this pass: the only mature alternatives (hyper-based) bring an async
+runtime and a rewrite of the server loop, which is not a small or safe
+change for the evidence ledger; forking tiny_http for a one-line change
+adds an unmaintained fork. Revisit if a caller can legitimately send
+non-ASCII header bytes (no current caller does: tokens and all headers
+they send are ASCII).
 
 ## Verification
 

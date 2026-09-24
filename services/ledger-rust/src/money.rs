@@ -15,6 +15,13 @@
 //! existing chains still verify. For every amount that has exactly two
 //! decimals, the new string form and the old formatted form are the same
 //! bytes (proven by `two_decimal_strings_match_old_f64_formatting` below).
+//!
+//! Fix wave 1 (Sep 24 2026, AEGIS F6): the old binary accepted ANY finite
+//! JSON number, including negatives and -0.0, so a legacy amount may render
+//! as e.g. "-5.00" or "-0.00". `from_legacy_f64` keeps that rendering
+//! byte-for-byte (it is what the old hash covered) instead of refusing it.
+//! Such a value can only ever come from a legacy log line; every NEW value
+//! still goes through the strict, positive `parse_positive`.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -72,17 +79,18 @@ impl Money {
     /// Converts a LEGACY persisted `f64` amount using exactly the formatting
     /// the old hash function used (`format!("{:.2}", f64)`), so the hash
     /// canonical string is unchanged. Only used when reading old log lines.
+    ///
+    /// Every finite `f64` is accepted, because the 9531fc2 binary accepted
+    /// every finite JSON number: negatives render with a sign ("-5.00"),
+    /// negative zero and tiny negatives render as "-0.00". The result is NOT
+    /// necessarily canonical wire money; it is the legacy entry's hashed
+    /// rendering, shown verbatim. Non-finite values cannot occur in a legacy
+    /// log (JSON has no NaN/Infinity) and are refused.
     pub fn from_legacy_f64(v: f64) -> Result<Money, MoneyError> {
         if !v.is_finite() {
             return Err(MoneyError(format!("legacy amount_usd {v} is not finite")));
         }
-        let formatted = format!("{:.2}", v);
-        Money::parse(&formatted).map_err(|_| {
-            MoneyError(format!(
-                "legacy amount_usd {v} formats to {formatted:?}, which is not a valid \
-                 non-negative money string"
-            ))
-        })
+        Ok(Money(format!("{:.2}", v)))
     }
 
     pub fn as_str(&self) -> &str {
@@ -183,7 +191,28 @@ mod tests {
         }
         assert!(Money::from_legacy_f64(f64::NAN).is_err());
         assert!(Money::from_legacy_f64(f64::INFINITY).is_err());
-        assert!(Money::from_legacy_f64(-5.0).is_err());
+    }
+
+    /// AEGIS F6: the 9531fc2 binary accepted negatives and -0.0 (verified
+    /// against the real old binary: 201 and a valid chain). Their legacy
+    /// rendering must be the exact old `format!("{:.2}", f64)` output.
+    /// (Replaces an earlier assertion that `-5.0` must be rejected, which
+    /// enshrined the defect.)
+    #[test]
+    fn legacy_f64_conversion_reproduces_negative_and_negative_zero_rendering() {
+        let cases: [(f64, &str); 8] = [
+            (-0.0, "-0.00"), (-5.0, "-5.00"), (-0.001, "-0.00"), (-12.345, "-12.35"),
+            (-0.005, "-0.01"), (-1e-9, "-0.00"), (-1234567.89, "-1234567.89"), (0.0, "0.00"),
+        ];
+        for (v, want) in cases {
+            assert_eq!(Money::from_legacy_f64(v).unwrap().as_str(), want, "{v:?}");
+            assert_eq!(Money::from_legacy_f64(v).unwrap().as_str(), format!("{:.2}", v), "{v:?}");
+        }
+        // The strict parsers used for every NEW value still refuse all of them.
+        for s in ["-0.00", "-5.00", "-0.01", "-12.35"] {
+            assert!(Money::parse(s).is_err(), "{s}");
+            assert!(serde_json::from_str::<Money>(&format!("\"{s}\"")).is_err(), "{s}");
+        }
     }
 
     /// The backward-compatibility property the hash depends on: for every
