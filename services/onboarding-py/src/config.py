@@ -59,6 +59,9 @@ class OnboardingConfig:
     first_thing_local: time = time(9, 0)  # "first thing tomorrow" means this local time (ADR choice)
     andre_nudge_lead_hours: int = 3
     client_warn_lead_hours: int = 1
+    # Fix wave 2: an undelivered nudge to Andre is retried on later ticks,
+    # at most this many attempts per nudge (ADR 0004 choice).
+    andre_nudge_max_attempts: int = 3
     default_quiet_start: time = time(21, 0)
     default_quiet_end: time = time(8, 0)
     stale_account_days: int = 90
@@ -82,6 +85,8 @@ class OnboardingConfig:
             )
         if self.stuck_window_hours <= 0 or self.soft_resolution_window_hours <= 0:
             raise ConfigError("stuck and soft-resolution windows must be positive")
+        if self.andre_nudge_max_attempts < 1:
+            raise ConfigError("andre_nudge_max_attempts must be at least 1")
         from zoneinfo import ZoneInfo  # validates the cutoff zone at startup
 
         try:

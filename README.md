@@ -287,7 +287,7 @@ spec, with 15 deterministic single-task intelligences (no model calls).
 Architecture: `docs/adr/0004-onboarding-department-architecture.md`. Details
 and routes: `services/onboarding-py/README.md`.
 
-- **Status:** built and tested (264 tests, `python3 -m pytest -q`). **Not
+- **Status:** built and tested (274 tests, `python3 -m pytest -q`). **Not
   certified for any real client, clipper or brand.** Scenario, attack and
   guardrail tests exist. The AEGIS review findings were fixed in fix wave 1
   (Sep 24); see ADR 0004.

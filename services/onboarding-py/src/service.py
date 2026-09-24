@@ -377,6 +377,17 @@ class OnboardingService:
             self._effects.append(name)
         return result
 
+    def _push_andre(self, key: str, payload: dict) -> tuple[bool, str]:
+        """Push to Andre's phone. A channel that raises is a push that was
+        NOT delivered (fix wave 2): it is recorded and handled like any other
+        undelivered push, never a 500 that skips the rest of the operation
+        (e.g. the client warning in the same tick)."""
+        try:
+            delivered, detail = self.depts.notifier.push(key, payload)
+        except Exception as exc:  # noqa: BLE001  (any channel failure = not delivered)
+            return False, f"push channel raised {type(exc).__name__}; not delivered"
+        return bool(delivered), str(detail)
+
     def _defer(self, fn: Callable[[], None]) -> None:
         """In-process effects (bus publish, client memory) run only when the
         operation completes — never before a record that might still fail."""
@@ -584,7 +595,7 @@ class OnboardingService:
     def _deliver_escalation(self, rec: ClientRecord, esc: Escalation, p: "OnboardingService._EscalationPlan") -> None:
         """The outside effect (push to Andre's phone), the state it implies,
         then the record of its result."""
-        delivered, detail = self._effect("andre_push", lambda: self.depts.notifier.push(p.eid, p.briefing.model_dump(mode="json")),
+        delivered, detail = self._effect("andre_push", lambda: self._push_andre(p.eid, p.briefing.model_dump(mode="json")),
                                          done=lambda r: bool(r[0]))
         esc.push_delivered, esc.push_detail = delivered, detail
         c = p.commitment
@@ -594,6 +605,16 @@ class OnboardingService:
             self._record("andre_push_not_delivered", "intel_10_escalation_briefing", rec.client_id,
                          {"escalation_id": p.eid, "delivered": False}, "Briefing NOT delivered to Andre; no client commitment made")
             return
+        # Fix wave 2 (L3): the commitment exists in state only once its record
+        # is written. If that record fails (after the push was delivered),
+        # the operation stops with a 503, the client is never given the time,
+        # and state says so: no commitment, message held (ADR 0004).
+        esc.client_message_status = ("held: briefing delivered to Andre, but the commitment could not be recorded; "
+                                     "the client has not been told a time")
+        self._record("client_commitment_made", "intel_09_promise_keeper", rec.client_id,
+                     {"commitment_id": p.commitment_id, "escalation_id": p.eid, "form": c.form, "due_at": c.due_at.isoformat(),
+                      "push_delivered": True},
+                     f"Client told: {c.text}")
         now = self.now()
         send_ok = p.client_live or not i09.in_quiet_hours(now, rec.time_zone, rec.quiet_start, rec.quiet_end)
         esc.client_message_status = "released" if send_ok else "held: client quiet hours; send at the next allowed moment"
@@ -602,10 +623,6 @@ class OnboardingService:
             commitment_id=p.commitment_id, client_id=rec.client_id, kind="escalation_callback", category=c.form, text=c.text,
             owner="andre", created_at=p.raised_at, due_at=c.due_at,
         )
-        self._record("client_commitment_made", "intel_09_promise_keeper", rec.client_id,
-                     {"commitment_id": p.commitment_id, "escalation_id": p.eid, "form": c.form, "due_at": c.due_at.isoformat(),
-                      "push_delivered": True},
-                     f"Client told: {c.text}")
 
     def _escalate(self, rec: ClientRecord, trigger: TriggerKind, snag: str, attempted: Optional[str], client_live: bool) -> Escalation:
         plan = self._prepare_escalation(rec, trigger, snag, attempted, client_live)
@@ -718,6 +735,7 @@ class OnboardingService:
             if esc.commitment_id and esc.commitment_id in rec.commitments:
                 cm = rec.commitments[esc.commitment_id]
                 cm.engaged = True
+                cm.breach_nudge_pending = False  # Andre resolved it; nothing left to nudge about
                 if cm.status != CommitmentStatus.BREACHED:
                     cm.status = CommitmentStatus.KEPT if now <= cm.due_at else CommitmentStatus.BREACHED
             return _dump(esc)
@@ -1108,7 +1126,7 @@ class OnboardingService:
             for c in list(rec.commitments.values()):
                 actions = i09.decide(c, now, rec.time_zone, rec.quiet_start, rec.quiet_end, cfg.commitment_cutoff_local,
                                      cfg.commitment_tz, cfg.today_due_local, cfg.first_thing_local,
-                                     cfg.andre_nudge_lead_hours, cfg.client_warn_lead_hours)
+                                     cfg.andre_nudge_lead_hours, cfg.client_warn_lead_hours, cfg.andre_nudge_max_attempts)
                 for a in actions:
                     if a.action == "none":
                         continue
@@ -1118,10 +1136,27 @@ class OnboardingService:
                                   "quiet_hours_override": a.quiet_hours_override},
                                  f"Promise Keeper: {a.action} ({a.reason})"[:280])
                     if a.action == "nudge_andre":
-                        self._effect("andre_push", lambda: self.depts.notifier.push(
+                        if now >= c.due_at and c.status != CommitmentStatus.BREACHED:
+                            # The breach nudge is a new nudge with its own budget.
+                            c.andre_nudged, c.andre_nudge_failures = False, 0
+                        delivered, detail = self._effect("andre_push", lambda: self._push_andre(
                             f"nudge-{c.commitment_id}", {"commitment": c.text, "due_at": c.due_at.isoformat(), "reason": a.reason}),
                             done=lambda r: bool(r[0]))
-                        c.andre_nudged = True
+                        # Fix wave 2 (L2): nudged ONLY on confirmed delivery;
+                        # otherwise counted, recorded and retried next tick.
+                        attempt = c.andre_nudge_failures + 1
+                        if delivered:
+                            c.andre_nudged, c.andre_nudge_failures, c.breach_nudge_pending = True, 0, False
+                        else:
+                            c.andre_nudge_failures += 1
+                            c.breach_nudge_pending = now >= c.due_at
+                        will_retry = (not delivered) and c.andre_nudge_failures < cfg.andre_nudge_max_attempts
+                        self._record("promise_nudge_result", "intel_09_promise_keeper", rec.client_id,
+                                     {"commitment_id": c.commitment_id, "delivered": delivered, "attempt": attempt,
+                                      "max_attempts": cfg.andre_nudge_max_attempts, "will_retry": will_retry},
+                                     ("Nudge to Andre delivered" if delivered else
+                                      f"Nudge to Andre NOT delivered ({detail}); "
+                                      + ("retry next tick" if will_retry else "no retries left"))[:280])
                     elif a.action == "warn_client":
                         # The client has been told the new real time BEFORE the
                         # old one passed: the commitment now tracks the new time,
@@ -1130,6 +1165,8 @@ class OnboardingService:
                         c.proposed_new_due_at = a.new_due_at
                         c.due_at = a.new_due_at
                         c.andre_nudged = False
+                        c.andre_nudge_failures = 0
+                        c.breach_nudge_pending = False
                         c.client_warned = False
                         c.category = "first_thing_tomorrow"
                     elif a.action == "breached":
@@ -1327,7 +1364,7 @@ class OnboardingService:
                    "andre_referral": referral, "activation": None}
             try:
                 if decision.outcome == VettingOutcome.SEND_TO_ANDRE:
-                    delivered, detail = self._effect("andre_push", lambda: self.depts.notifier.push(
+                    delivered, detail = self._effect("andre_push", lambda: self._push_andre(
                         f"vet-{app.creator_id}", {"reasons": decision.reasons}), done=lambda r: bool(r[0]))
                     out["andre_referral"] = {"delivered": delivered, "detail": detail}
                     self.creators[app.creator_id] = rec

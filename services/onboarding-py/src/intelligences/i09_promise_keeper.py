@@ -27,6 +27,11 @@ Rules:
   for Andre to confirm).
 - Past due: breached — nudge Andre and tell the client the new real time
   at the next moment outside quiet hours.
+- Nudges count only when delivered (fix wave 2): ``andre_nudged`` is set by
+  the service only on a confirmed push. An undelivered nudge is retried on
+  the next tick while ``andre_nudge_failures < max_nudge_attempts``; that
+  includes the breach nudge (``breach_nudge_pending``) after the commitment
+  is already breached. Nudge retries never gate the client warning.
 """
 
 from __future__ import annotations
@@ -128,9 +133,13 @@ def _next_allowed(now: datetime, until: datetime, client_tz: str, qs: time, qe: 
 def decide(
     c: Commitment, now: datetime, client_tz: str, quiet_start: time, quiet_end: time,
     cutoff: time, cutoff_tz: str, today_due: time, first_thing: time,
-    nudge_lead_hours: int = 3, warn_lead_hours: int = 1,
+    nudge_lead_hours: int = 3, warn_lead_hours: int = 1, max_nudge_attempts: int = 3,
 ) -> list[PromiseAction]:
     now = _aware(now)
+    retry_left = c.andre_nudge_failures < max_nudge_attempts
+    attempt_note = f" (attempt {c.andre_nudge_failures + 1} of {max_nudge_attempts})" if c.andre_nudge_failures else ""
+    if c.status == CommitmentStatus.BREACHED and c.breach_nudge_pending and retry_left:
+        return [PromiseAction("nudge_andre", now, "breached; the breach nudge to Andre was not delivered yet" + attempt_note)]
     if c.status in (CommitmentStatus.KEPT, CommitmentStatus.BREACHED):
         return [PromiseAction("none", None, f"commitment is {c.status.value}")]
     fallback = escalation_commitment(now, cutoff, cutoff_tz, today_due, first_thing)
@@ -158,8 +167,8 @@ def decide(
         tz = ZoneInfo(cutoff_tz)
         cutoff_dt = datetime.combine(c.due_at.astimezone(tz).date(), cutoff, tzinfo=tz)
         if now >= cutoff_dt:
-            if not c.andre_nudged:
-                actions.append(PromiseAction("nudge_andre", now, "not engaged by the noon cutoff; rolling to next day"))
+            if not c.andre_nudged and retry_left:
+                actions.append(PromiseAction("nudge_andre", now, "not engaged by the noon cutoff; rolling to next day" + attempt_note))
             if not c.client_warned:
                 rolled = escalation_commitment(now, cutoff, cutoff_tz, today_due, first_thing)
                 new_due = c.proposed_new_due_at or rolled.due_at
@@ -173,8 +182,8 @@ def decide(
                     actions.append(warn("not engaged by the noon cutoff; rolled to first thing tomorrow", now))
             return actions or [PromiseAction("none", None, "roll already handled")]
 
-    if not on_track and not c.engaged and not c.andre_nudged and now >= c.due_at - timedelta(hours=nudge_lead_hours):
-        actions.append(PromiseAction("nudge_andre", now, f"due within {nudge_lead_hours}h and not confirmed on track"))
+    if not on_track and not c.engaged and not c.andre_nudged and retry_left and now >= c.due_at - timedelta(hours=nudge_lead_hours):
+        actions.append(PromiseAction("nudge_andre", now, f"due within {nudge_lead_hours}h and not confirmed on track" + attempt_note))
     if not on_track and not c.client_warned:
         warn_at, override = plan_warn_time(c.created_at, c.due_at, warn_lead_hours, client_tz, quiet_start, quiet_end)
         if now >= warn_at:
