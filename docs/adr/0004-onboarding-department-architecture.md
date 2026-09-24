@@ -189,6 +189,16 @@ The WIP commit was replaced; it doesn't remain in history.
 - Exactly 12:00:00 counts as after the cutoff, so it gets "first thing tomorrow".
 - Promise Keeper nudges Andre 3h before a commitment is due and warns the client 1h
   before.
+- A nudge counts only when the push to Andre is confirmed delivered (fix wave 2).
+  `andre_nudged` is set on delivery only. An undelivered push, including a channel that
+  raises, is counted in `andre_nudge_failures` and recorded as `promise_nudge_result`
+  (`delivered`, `attempt`, `max_attempts`, `will_retry`). It is retried on the next tick,
+  up to `andre_nudge_max_attempts` (default 3) per nudge. After that it stops, and the
+  last record says `will_retry: false`. The breach nudge gets its own budget; while it
+  is undelivered the commitment carries `breach_nudge_pending` and is retried after it
+  is breached. Resolving the escalation clears it. Nudges never gate the client
+  warning: it fires on time in the same tick whatever the push does. A ledger failure
+  still stops the whole tick (record-first).
 - The warning moves to the latest non-quiet minute before the due time. If there is
   none, it's sent anyway and flagged `quiet_hours_override`. A silently missed promise
   is worse than a message in quiet hours.
@@ -205,6 +215,19 @@ The WIP commit was replaced; it doesn't remain in history.
   lists audit anomaly as soft, but a hard stop can't wait on an attempt.
 - If the briefing push isn't delivered, the client isn't promised a time. The human-
   request reply says Andre will be brought in and that a time will follow.
+- A commitment exists in state only after its `client_commitment_made` record is
+  written (fix wave 2). This follows the record-first rule: state reflects what did
+  happen. If the push to Andre is delivered but that record fails, the operation stops
+  with 503 `{"proceeded": true, "outside_effects_done": ["andre_push", ...]}`. The
+  client gets no reply with a time. The escalation keeps `push_delivered: true`,
+  `commitment_id: null` and `client_message_status` "held: ... the client has not been
+  told a time". No commitment is stored, so Promise Keeper never nudges, warns or
+  breaches on a promise the client never received. We chose this over storing a "not yet
+  communicated" commitment and retrying it: that would need a delivery channel to the
+  client, and none exists (the time is only ever given in the API reply). Known gaps,
+  checked by hand: retrying a human-request message raises a second escalation and
+  pushes Andre a second briefing. Retrying `start_client` gets 409, and its deal-size
+  escalation stays with no time given to the client until Andre acts.
 - A deal with an unknown size escalates.
 
 **Access and platform facts**

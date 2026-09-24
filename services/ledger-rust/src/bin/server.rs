@@ -29,6 +29,9 @@
 //! Sep 24 2026 (docs/adr/0003):
 //!   - `amount_usd` on POST /ledger/append must be a two-decimal money
 //!     string ("12.30") or null; a JSON number is rejected with 400.
+//!     Since fix wave 2 (ADR 0003 section 1a) it must also be at most
+//!     "999999999999999.99"; larger amounts get 400. Already-persisted
+//!     over-bound amounts still load and verify.
 //!   - POST /ledger/events records a generic, idempotent event on the same
 //!     hash chain (201 new / 200 identical retry / 409 conflicting content /
 //!     400 invalid / 401 unauthenticated). Every entry now carries `kind`.

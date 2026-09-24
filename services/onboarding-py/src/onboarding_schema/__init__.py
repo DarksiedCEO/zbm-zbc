@@ -350,7 +350,13 @@ class Commitment(Outbound):
     due_at: datetime
     status: CommitmentStatus = CommitmentStatus.OPEN
     engaged: bool = False
+    # True only once a nudge push to Andre was confirmed delivered (fix wave 2).
     andre_nudged: bool = False
+    # Undelivered attempts of the current nudge; retried while below
+    # OnboardingConfig.andre_nudge_max_attempts.
+    andre_nudge_failures: int = 0
+    # The breach nudge (sent when the time passed) was not delivered yet.
+    breach_nudge_pending: bool = False
     client_warned: bool = False
     proposed_new_due_at: Optional[datetime] = None
 

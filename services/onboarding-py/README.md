@@ -180,7 +180,7 @@ Every route except `/health` needs `Authorization: Bearer <token>`.
 ## Tests
 
 ```bash
-cd services/onboarding-py && python3 -m pytest -q     # 264 passed (fix wave 1, Sep 24 2026)
+cd services/onboarding-py && python3 -m pytest -q     # 274 passed (fix wave 2, Sep 24 2026)
 ```
 
 Tests are organised by certification type:
@@ -191,6 +191,7 @@ Tests are organised by certification type:
 | `test_cert_attack.py` | The four named attacks plus the credential spray | 8 |
 | `test_cert_guardrail.py` | Guardrails | 52 |
 | `test_fix_wave1.py` | Fix wave 1 regressions (F1, F2, F4, F9, F10, F11, F14–F16, L1), including the record-first harness | 104 |
+| `test_fix_wave2.py` | Fix wave 2: nudge counted only on delivery, bounded retries, warning unaffected (L2); no commitment without its record (L3) | 10 |
 | `test_unit_*.py` | Unit tests | 79 |
 | `test_auth_and_entrypoint.py` | Auth, docs, real-socket bind | 14 |
 
