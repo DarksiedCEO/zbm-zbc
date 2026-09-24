@@ -14,14 +14,31 @@ rights records. Same discipline as services/fulfillment-py/src/api.py:
 
 Andre's approvals need a SECOND secret in the `X-Andre-Approval-Token`
 header (CREATIVE_ANDRE_APPROVAL_TOKEN), so API access alone can't sign as
-Andre. Actor ids in request bodies are ASSERTED by the caller (one shared
-service token; see ADR 0005 "honest gaps").
+Andre.
+
+Actor authentication (fix wave 2, N4): every action attributed to an actor
+(drafting, approving, reviewing, registry/rights writes) needs that
+actor's OWN credential in the `X-Creative-Actor-Token` header. Credentials
+are configured server-side in CREATIVE_ACTOR_TOKENS (JSON object
+{"actor_id": "token"}); the identity is the actor whose token matches
+(SHA-256 digests compared with hmac.compare_digest against EVERY
+configured token, no early exit). A body `actor_id` is optional and, if
+present, must equal the authenticated actor (else 403) — the body can no
+longer assert who is acting, so drafter != approver is enforced on
+authenticated identity. Fail closed: no actor tokens configured -> every
+actor action is refused (403); missing / unknown token -> 401. At start-up
+each token must be >= 16 printable ASCII characters, unique, for a known
+actor (never "andre"), and differ from the service and Andre tokens —
+otherwise the service refuses to start.
 """
 
 from __future__ import annotations
 
+import hashlib
 import hmac
+import json
 import os
+import re
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, status
@@ -58,16 +75,18 @@ from zbc.campaign_kit import KitRequest
 from zbc.clip_review import BrokenRule, ClipSubmission
 from zbc.creative_memory import ClipResult
 from zbc.rights_clearance import DeclaredAsset
-from zbc.rulebook_writer import WRITER_ACTOR as ZBC_WRITER, CampaignGoal
+from zbc.rulebook_writer import CampaignGoal
 from zbc.source_mining import SourceMaterial
 from zbc.workflow import DEFAULT_SUPERSEDED_GRACE_HOURS, HumanVerdict, ZbcWorkflow
 from zbm import hook_retention
 from zbm import placement_spec as zbm_placement_spec
-from zbm.brief_writer import WRITER_ACTOR as ZBM_WRITER, ClientRequirements
+from zbm.brief_writer import ClientRequirements
 from zbm.results import PerformanceResult
 from zbm.workflow import WorkSubmission, ZbmWorkflow
 
 FOUNDER_HEADER = "X-Andre-Approval-Token"
+ACTOR_HEADER = "X-Creative-Actor-Token"
+ACTOR_TOKEN_MIN_LEN = 16
 
 # Path ids are validated BEFORE any work (integration defect 2): a campaign
 # id is at most 100 characters so every derived ledger subject
@@ -114,6 +133,44 @@ def grace_hours_from_env() -> int:
     return hours
 
 
+def actor_tokens_from_env() -> dict[str, str]:
+    """CREATIVE_ACTOR_TOKENS: JSON object {"actor_id": "token", ...}. Unset
+    or empty -> {} (every actor action refused). Malformed -> refuse to start."""
+    raw = os.environ.get("CREATIVE_ACTOR_TOKENS")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()):
+        raise RuntimeError('CREATIVE_ACTOR_TOKENS must be a JSON object {"actor_id": "token", ...}')
+    return data
+
+
+def _digest(token: str) -> bytes:
+    return hashlib.sha256(token.encode("utf-8", "surrogatepass")).digest()
+
+
+def _check_actor_tokens(tokens: dict[str, str], actors: ActorRegistry, service_token: str,
+                        founder_token: str | None) -> dict[str, bytes]:
+    seen: set[str] = set()
+    for actor_id, tok in tokens.items():
+        if actor_id == "andre":
+            raise RuntimeError("CREATIVE_ACTOR_TOKENS: 'andre' acts only through the Andre approval token")
+        if actor_id not in actors.actors:
+            raise RuntimeError(f"CREATIVE_ACTOR_TOKENS: unknown actor {actor_id!r}")
+        if not isinstance(tok, str) or len(tok) < ACTOR_TOKEN_MIN_LEN or not re.fullmatch(r"[\x21-\x7e]+", tok):
+            raise RuntimeError(f"CREATIVE_ACTOR_TOKENS: token for {actor_id!r} must be >= {ACTOR_TOKEN_MIN_LEN} "
+                               "printable ASCII characters")
+        if tok in seen:
+            raise RuntimeError("CREATIVE_ACTOR_TOKENS: two actors share one token")
+        if tok == service_token or (founder_token and tok == founder_token):
+            raise RuntimeError(f"CREATIVE_ACTOR_TOKENS: token for {actor_id!r} equals the service or Andre token")
+        seen.add(tok)
+    return {a: _digest(t) for a, t in tokens.items()}
+
+
 def ledger_from_env() -> LedgerClient:
     if os.environ.get("LEDGER_SERVICE_URL") and os.environ.get("LEDGER_SERVICE_TOKEN"):
         return HttpLedgerClient.from_env()
@@ -127,31 +184,31 @@ class _In(BaseModel):
 
 
 class ActorIn(_In):
-    actor_id: str = Field(min_length=1, max_length=64)
+    actor_id: str | None = Field(default=None, min_length=1, max_length=64)  # optional; must match the credential
 
 
 class RegistryWriteIn(_In):
-    actor_id: str = Field(min_length=1, max_length=64)
+    actor_id: str | None = Field(default=None, min_length=1, max_length=64)
     row: RegistryRow
 
 
 class ClearanceIn(_In):
-    actor_id: str
+    actor_id: str | None = None
     record: ClearanceRecord
 
 
 class LicenseIn(_In):
-    actor_id: str
+    actor_id: str | None = None
     license: CampaignLicense
 
 
 class DraftBriefIn(_In):
-    actor_id: str = ZBM_WRITER
+    actor_id: str | None = None
     requirements: ClientRequirements
 
 
 class QualityIn(_In):
-    actor_id: str
+    actor_id: str | None = None
     notes: list[str] = []
 
 
@@ -172,7 +229,7 @@ class ZbmMemoryIn(_In):
 
 
 class DraftRulebookIn(_In):
-    actor_id: str = ZBC_WRITER
+    actor_id: str | None = None
     goal: CampaignGoal
 
 
@@ -182,7 +239,7 @@ class RightsCheckIn(_In):
 
 
 class HumanReviewIn(_In):
-    actor_id: str
+    actor_id: str | None = None
     outcome: Literal["pass", "reject"]
     broken_rules: list[BrokenRule] = []
     note: str = Field(default="", max_length=2000)
@@ -201,6 +258,7 @@ def build_app(
     registry: PlatformRulesRegistry | None = None,
     rights: RightsRegistry | None = None,
     superseded_grace_hours: int = DEFAULT_SUPERSEDED_GRACE_HOURS,
+    actor_tokens: dict[str, str] | None = None,
 ) -> FastAPI:
     if not service_token:
         raise RuntimeError("service token required (fail closed)")
@@ -213,6 +271,7 @@ def build_app(
     rights = rights if rights is not None else RightsRegistry()
     recorder = EvidenceRecorder(ledger)
     founder = FounderGate.build(founder_token, service_token)
+    actor_digests = _check_actor_tokens(dict(actor_tokens or {}), actors, service_token, founder_token)
     common = dict(registry=registry, rights=rights, actors=actors, recorder=recorder, clock=clock,
                   departments=departments, founder=founder)
     zbm = ZbmWorkflow(**common)
@@ -233,6 +292,30 @@ def build_app(
         if not valid:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token",
                                 headers={"WWW-Authenticate": "Bearer"})
+
+    def authenticate_actor(x_creative_actor_token: str | None = Header(default=None)) -> str:
+        """The acting actor, proven by its own credential (N4)."""
+        if not actor_digests:
+            raise GuardrailViolation("actor credentials are not configured on this service (CREATIVE_ACTOR_TOKENS); "
+                                     "no action can be attributed to an actor (fail closed)")
+        if not x_creative_actor_token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail=f"missing actor credential ({ACTOR_HEADER} header)")
+        supplied = _digest(x_creative_actor_token)
+        match = None
+        for actor_id, dig in actor_digests.items():  # every entry compared, no early exit
+            if hmac.compare_digest(supplied, dig):
+                match = actor_id
+        if match is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid actor credential")
+        return match
+
+    def acting(claimed: str | None, actor: str) -> str:
+        if claimed is not None and claimed != actor:
+            raise GuardrailViolation(f"the request body names actor {claimed!r} but the credential is {actor!r}; "
+                                     "identity comes from the credential only")
+        return actor
+
 
     app = FastAPI(
         title="Creative Production (ZBM advertising + ZBC clipping agency)",
@@ -287,48 +370,47 @@ def build_app(
         return _row_view(registry.get(row_id))
 
     @app.put("/registry/rows/{row_id}", dependencies=auth)
-    def registry_write(row_id: IdPath, body: RegistryWriteIn) -> dict:
+    def registry_write(row_id: IdPath, body: RegistryWriteIn, who: str = Depends(authenticate_actor)) -> dict:
         if body.row.row_id != row_id:
             raise ValidationFailed("row_id in path and body differ", ["row_id"])
         from shared.actors import Role
 
-        actor = actors.get(body.actor_id) if _actor_known(actors, body.actor_id) else None
-        if actor is None:
-            raise GuardrailViolation(f"unknown actor {body.actor_id!r}")
+        who = acting(body.actor_id, who)
+        actor = actors.get(who)
         with lock:
             if Role.REGISTRY_ZBM_PLACEMENT_SPEC in actor.roles:
-                eid = zbm_placement_spec.write_spec_row(registry, recorder, actors, body.actor_id, body.row)
+                eid = zbm_placement_spec.write_spec_row(registry, recorder, actors, who, body.row)
             elif Role.REGISTRY_ZBC_PLATFORM_RULES in actor.roles:
-                eid = zbc_platform_rules.write_originality_row(registry, recorder, actors, body.actor_id, body.row)
+                eid = zbc_platform_rules.write_originality_row(registry, recorder, actors, who, body.row)
             else:
-                raise GuardrailViolation(f"actor {body.actor_id!r} owns no registry rows")
+                raise GuardrailViolation(f"actor {who!r} owns no registry rows")
         return {"row": _row_view(registry.get(row_id)), "ledger_event_id": eid}
 
     # --- shared: rights records ------------------------------------------------------------
     @app.post("/rights/clearances", status_code=201, dependencies=auth)
-    def add_clearance(body: ClearanceIn) -> dict:
+    def add_clearance(body: ClearanceIn, who: str = Depends(authenticate_actor)) -> dict:
         with lock:
-            eid = record_clearance(rights, recorder, actors, body.actor_id, body.record)
+            eid = record_clearance(rights, recorder, actors, acting(body.actor_id, who), body.record)
         return {"record": body.record.model_dump(mode="json"), "ledger_event_id": eid}
 
     @app.post("/rights/licenses", status_code=201, dependencies=auth)
-    def add_license(body: LicenseIn) -> dict:
+    def add_license(body: LicenseIn, who: str = Depends(authenticate_actor)) -> dict:
         with lock:
-            eid = record_license(rights, recorder, actors, body.actor_id, body.license)
+            eid = record_license(rights, recorder, actors, acting(body.actor_id, who), body.license)
         return {"license": body.license.model_dump(mode="json"), "ledger_event_id": eid}
 
     # --- ZBM -----------------------------------------------------------------------------------
     @app.post("/zbm/briefs", status_code=201, dependencies=auth)
-    def zbm_draft(body: DraftBriefIn) -> dict:
-        return zbm.draft_brief(body.requirements, body.actor_id).model_dump(mode="json")
+    def zbm_draft(body: DraftBriefIn, who: str = Depends(authenticate_actor)) -> dict:
+        return zbm.draft_brief(body.requirements, acting(body.actor_id, who)).model_dump(mode="json")
 
     @app.get("/zbm/briefs/{brief_id}", dependencies=auth)
     def zbm_get_brief(brief_id: IdPath) -> dict:
         return zbm.get_brief(brief_id).model_dump(mode="json")
 
     @app.post("/zbm/briefs/{brief_id}/review", dependencies=auth)
-    def zbm_review(brief_id: IdPath, body: ActorIn) -> dict:
-        return zbm.review_brief(brief_id, body.actor_id).model_dump(mode="json")
+    def zbm_review(brief_id: IdPath, body: ActorIn, who: str = Depends(authenticate_actor)) -> dict:
+        return zbm.review_brief(brief_id, acting(body.actor_id, who)).model_dump(mode="json")
 
     @app.post("/zbm/briefs/{brief_id}/jobs", status_code=201, dependencies=auth)
     def zbm_open_job(brief_id: IdPath) -> dict:
@@ -351,8 +433,8 @@ def build_app(
         return zbm.check_rights(work_id).model_dump(mode="json")
 
     @app.post("/zbm/work/{work_id}/quality", dependencies=auth)
-    def zbm_quality(work_id: IdPath, body: QualityIn) -> dict:
-        return zbm.quality_review(work_id, body.actor_id, body.notes).model_dump(mode="json")
+    def zbm_quality(work_id: IdPath, body: QualityIn, who: str = Depends(authenticate_actor)) -> dict:
+        return zbm.quality_review(work_id, acting(body.actor_id, who), body.notes).model_dump(mode="json")
 
     @app.post("/zbm/work/{work_id}/escalation", dependencies=auth)
     def zbm_escalation(work_id: IdPath, body: EscalationIn,
@@ -383,10 +465,10 @@ def build_app(
         return zbc.rulebooks.get(campaign_id, version).model_dump(mode="json")
 
     @app.post("/zbc/campaigns/{campaign_id}/rulebooks", status_code=201, dependencies=auth)
-    def zbc_draft(campaign_id: CampaignIdPath, body: DraftRulebookIn) -> dict:
+    def zbc_draft(campaign_id: CampaignIdPath, body: DraftRulebookIn, who: str = Depends(authenticate_actor)) -> dict:
         if body.goal.campaign_id != campaign_id:
             raise ValidationFailed("campaign_id in path and goal differ", ["campaign_id"])
-        return zbc.draft_rulebook(body.goal, body.actor_id).model_dump(mode="json")
+        return zbc.draft_rulebook(body.goal, acting(body.actor_id, who)).model_dump(mode="json")
 
     @app.get("/zbc/campaigns/{campaign_id}/rulebooks", dependencies=auth)
     def zbc_versions(campaign_id: CampaignIdPath) -> dict:
@@ -397,12 +479,12 @@ def build_app(
         return _rb(campaign_id, version)
 
     @app.put("/zbc/campaigns/{campaign_id}/rulebooks/{version}", dependencies=auth)
-    def zbc_edit(campaign_id: CampaignIdPath, version: VersionPath, body: DraftRulebookIn) -> dict:
-        return zbc.edit_rulebook(campaign_id, version, body.goal, body.actor_id).model_dump(mode="json")
+    def zbc_edit(campaign_id: CampaignIdPath, version: VersionPath, body: DraftRulebookIn, who: str = Depends(authenticate_actor)) -> dict:
+        return zbc.edit_rulebook(campaign_id, version, body.goal, acting(body.actor_id, who)).model_dump(mode="json")
 
     @app.post("/zbc/campaigns/{campaign_id}/rulebooks/{version}/review", dependencies=auth)
-    def zbc_review(campaign_id: CampaignIdPath, version: VersionPath, body: ActorIn) -> dict:
-        return zbc.review_rulebook(campaign_id, version, body.actor_id).model_dump(mode="json")
+    def zbc_review(campaign_id: CampaignIdPath, version: VersionPath, body: ActorIn, who: str = Depends(authenticate_actor)) -> dict:
+        return zbc.review_rulebook(campaign_id, version, acting(body.actor_id, who)).model_dump(mode="json")
 
     @app.post("/zbc/campaigns/{campaign_id}/rulebooks/{version}/sign", dependencies=auth)
     def zbc_sign(campaign_id: CampaignIdPath, version: VersionPath, x_andre_approval_token: str | None = Header(default=None)) -> dict:
@@ -417,8 +499,8 @@ def build_app(
         return zbc.go_live(campaign_id, version).model_dump(mode="json")
 
     @app.post("/zbc/campaigns/{campaign_id}/revisions", status_code=201, dependencies=auth)
-    def zbc_revise(campaign_id: CampaignIdPath, body: DraftRulebookIn) -> dict:
-        return zbc.revise_rulebook(campaign_id, body.goal, body.actor_id).model_dump(mode="json")
+    def zbc_revise(campaign_id: CampaignIdPath, body: DraftRulebookIn, who: str = Depends(authenticate_actor)) -> dict:
+        return zbc.revise_rulebook(campaign_id, body.goal, acting(body.actor_id, who)).model_dump(mode="json")
 
     @app.post("/zbc/campaigns/{campaign_id}/moment-map", dependencies=auth)
     def zbc_moments(campaign_id: CampaignIdPath, body: SourceMaterial) -> dict:
@@ -445,9 +527,9 @@ def build_app(
         return zbc.get_decision(submission_id).model_dump(mode="json")
 
     @app.post("/zbc/clips/{submission_id}/human-review", dependencies=auth)
-    def zbc_human(submission_id: IdPath, body: HumanReviewIn) -> dict:
+    def zbc_human(submission_id: IdPath, body: HumanReviewIn, who: str = Depends(authenticate_actor)) -> dict:
         verdict = HumanVerdict(outcome=body.outcome, broken_rules=body.broken_rules, note=body.note)
-        return zbc.human_review(submission_id, body.actor_id, verdict).model_dump(mode="json")
+        return zbc.human_review(submission_id, acting(body.actor_id, who), verdict).model_dump(mode="json")
 
     @app.post("/zbc/clips/{submission_id}/payout-eligibility", dependencies=auth)
     def zbc_eligibility(submission_id: IdPath) -> dict:
@@ -465,10 +547,6 @@ def build_app(
     return app
 
 
-def _actor_known(actors: ActorRegistry, actor_id: str) -> bool:
-    return actor_id in actors.actors
-
-
 def _app_from_env() -> FastAPI:
     token = _load_required_token()
     return build_app(
@@ -477,6 +555,7 @@ def _app_from_env() -> FastAPI:
         founder_token=os.environ.get("CREATIVE_ANDRE_APPROVAL_TOKEN"),
         actors=ActorRegistry.from_env(),
         superseded_grace_hours=grace_hours_from_env(),
+        actor_tokens=actor_tokens_from_env(),
     )
 
 

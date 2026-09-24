@@ -414,7 +414,8 @@ def test_f11_retry_with_different_content_under_same_submission_is_a_conflict(ma
     flaky_ledger.timeout_on.add("clip_reviewed")
     assert api.post("/zbc/clips", zbc_clip()).status_code == 503
     r = api.post("/zbc/clips", zbc_clip(caption="something else entirely #ad"))
-    assert r.status_code == 503 and "409" in r.json()["detail"]
+    # fix wave 2 (N1): refused by the service itself (409) — never reaches the ledger as a new decision
+    assert r.status_code == 409
     assert "clip_001" not in api.zbc.decisions and len(flaky_ledger.of_type("clip_reviewed")) == 1
 
 

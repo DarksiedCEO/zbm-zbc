@@ -61,8 +61,11 @@ def test_drafter_approving_own_rulebook_is_refused(make_api):
 
 def test_andre_cannot_be_asserted_as_an_actor(api):
     b = ok(api.post("/zbm/briefs", {"requirements": zbm_requirements()}), 201)
+    # "andre" is not an actor; he acts only via his token (fix wave 2: and a body can't name anyone)
     r = api.post(f"/zbm/briefs/{b['brief_id']}/review", {"actor_id": "andre"})
-    assert r.status_code == 403  # "andre" is not an actor; he acts only via his token
+    assert r.status_code == 401  # no actor credential for "andre" exists
+    r = api.post(f"/zbm/briefs/{b['brief_id']}/review", {"actor_id": "andre"}, as_actor="zbm_creative_lead")
+    assert r.status_code == 403  # a real credential can't claim to be andre
 
 
 def test_changing_a_live_rulebook_in_place_is_refused_every_way(api):

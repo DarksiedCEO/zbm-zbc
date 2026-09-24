@@ -4,12 +4,16 @@ ledger (ledger-rust or devtools/fake_ledger_server.py). Reuses the test
 sample payloads. Prints one line per step; exits non-zero on any mismatch.
 
     CREATIVE_URL=http://127.0.0.1:18300 CREATIVE_SERVICE_TOKEN=... \
-    CREATIVE_ANDRE_APPROVAL_TOKEN=... LEDGER_SERVICE_URL=http://127.0.0.1:18390 \
-    LEDGER_SERVICE_TOKEN=... python3 devtools/live_smoke.py
+    CREATIVE_ANDRE_APPROVAL_TOKEN=... CREATIVE_ACTOR_TOKENS='{"actor_id": "token", ...}' \
+    LEDGER_SERVICE_URL=http://127.0.0.1:18390 LEDGER_SERVICE_TOKEN=... python3 devtools/live_smoke.py
+
+CREATIVE_ACTOR_TOKENS must be the same JSON the service was started with
+(every actor action carries its actor's own X-Creative-Actor-Token).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -47,6 +51,10 @@ def main() -> None:
     ANDRE = os.environ["CREATIVE_ANDRE_APPROVAL_TOKEN"]
     LEDGER_URL = os.environ["LEDGER_SERVICE_URL"]
     LEDGER_TOKEN = os.environ["LEDGER_SERVICE_TOKEN"]
+    ACTOR_TOKENS = json.loads(os.environ["CREATIVE_ACTOR_TOKENS"])
+
+    def as_(actor: str) -> dict:
+        return {"X-Creative-Actor-Token": ACTOR_TOKENS[actor]}
 
     # read env BEFORE this import: tests/conftest.py (imported by samples) clears the ledger env vars
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
@@ -65,19 +73,22 @@ def main() -> None:
     print("   ", h)
 
     print("== ZBC campaign")
-    step("licence (sublicense_to_clippers)", cli.post("/rights/licenses", json={"actor_id": "rights_desk", "license": samples.zbc_license()}), 201)
-    step("music clearance", cli.post("/rights/clearances", json={"actor_id": "rights_desk", "record": samples.zbc_music_clearance()}), 201)
-    rb = step("rulebook drafted", cli.post(f"{C}/rulebooks", json={"actor_id": "zbc_rulebook_writer", "goal": samples.zbc_goal()}), 201)
+    step("licence w/o actor credential refused", cli.post("/rights/licenses", json={"actor_id": "rights_desk", "license": samples.zbc_license()}), 401)
+    step("licence (sublicense_to_clippers)", cli.post("/rights/licenses", json={"license": samples.zbc_license()}, headers=as_("rights_desk")), 201)
+    step("music clearance", cli.post("/rights/clearances", json={"record": samples.zbc_music_clearance()}, headers=as_("rights_desk")), 201)
+    rb = step("rulebook drafted", cli.post(f"{C}/rulebooks", json={"goal": samples.zbc_goal()}, headers=as_("zbc_rulebook_writer")), 201)
     print("    rules:", [r["rule_id"] for r in rb["rules"]], "blocking:", rb["blocking_issues"])
-    step("drafter self-approval refused", cli.post(f"{C}/rulebooks/1/review", json={"actor_id": "zbc_rulebook_writer"}), 403)
-    step("approved by Campaign Rulebook", cli.post(f"{C}/rulebooks/1/review", json={"actor_id": "zbc_campaign_rulebook"}), 200)
+    step("drafter self-approval refused", cli.post(f"{C}/rulebooks/1/review", json={}, headers=as_("zbc_rulebook_writer")), 403)
+    step("body-asserted approver w/o credential refused", cli.post(f"{C}/rulebooks/1/review", json={"actor_id": "zbc_campaign_rulebook"}), 401)
+    step("drafter's credential claiming the approver refused", cli.post(f"{C}/rulebooks/1/review", json={"actor_id": "zbc_campaign_rulebook"}, headers=as_("zbc_rulebook_writer")), 403)
+    step("approved by Campaign Rulebook", cli.post(f"{C}/rulebooks/1/review", json={}, headers=as_("zbc_campaign_rulebook")), 200)
     step("sign w/o Andre token refused", cli.post(f"{C}/rulebooks/1/sign"), 403)
     step("Andre signs", cli.post(f"{C}/rulebooks/1/sign", headers={"X-Andre-Approval-Token": ANDRE}), 200)
     rc = step("rights check", cli.post(f"{C}/rights-check", json={"assets": samples.ZBC_ASSETS}), 200)
     print("    cleared:", rc["cleared"])
     live = step("go live", cli.post(f"{C}/rulebooks/1/go-live"), 200)
     print("    status:", live["status"])
-    step("in-place change of live rulebook refused", cli.put(f"{C}/rulebooks/1", json={"actor_id": "zbc_rulebook_writer", "goal": samples.zbc_goal(never_say=[])}), 409)
+    step("in-place change of live rulebook refused", cli.put(f"{C}/rulebooks/1", json={"goal": samples.zbc_goal(never_say=[])}, headers=as_("zbc_rulebook_writer")), 409)
     mm = step("moment map", cli.post(f"{C}/moment-map", json=samples.zbc_source()), 200)
     print("    moments:", [m["segment_id"] for m in mm["moments"]], "rejected:", {r["segment_id"]: r["reasons"][0][:2] for r in mm["rejected"]})
     step("hook sheets", cli.post(f"{C}/hook-sheets"), 200)
@@ -97,19 +108,20 @@ def main() -> None:
         sys.exit("payout must not be eligible while stand-ins fail closed")
 
     print("== ZBM brief")
-    step("clearance", cli.post("/rights/clearances", json={"actor_id": "rights_desk", "record": samples.zbm_clearance()}), 201)
-    b = step("brief drafted", cli.post("/zbm/briefs", json={"requirements": samples.zbm_requirements()}), 201)
+    step("clearance", cli.post("/rights/clearances", json={"record": samples.zbm_clearance()}, headers=as_("rights_desk")), 201)
+    b = step("brief drafted", cli.post("/zbm/briefs", json={"requirements": samples.zbm_requirements()}, headers=as_("zbm_brief_writer")), 201)
     bid = b["brief_id"]
     print("    status:", b["status"], "issues:", b["issues"])
     step("production before approval refused", cli.post(f"/zbm/briefs/{bid}/jobs"), 409)
-    b = step("Creative Lead approves", cli.post(f"/zbm/briefs/{bid}/review", json={"actor_id": "zbm_creative_lead"}), 200)
+    step("drafter's credential claiming the Creative Lead refused", cli.post(f"/zbm/briefs/{bid}/review", json={"actor_id": "zbm_creative_lead"}, headers=as_("zbm_brief_writer")), 403)
+    b = step("Creative Lead approves", cli.post(f"/zbm/briefs/{bid}/review", json={}, headers=as_("zbm_creative_lead")), 200)
     job = step("job opened", cli.post(f"/zbm/briefs/{bid}/jobs"), 201)
     w = step("work submitted", cli.post(f"/zbm/jobs/{job['job_id']}/work", json=samples.zbm_work()), 201)
     wid = w["work_id"]
     ev = step("export validation", cli.post(f"/zbm/work/{wid}/export-validation"), 200)
     print("    verdict:", ev["export_validation"]["verdict"])
     step("rights", cli.post(f"/zbm/work/{wid}/rights"), 200)
-    q = step("quality", cli.post(f"/zbm/work/{wid}/quality", json={"actor_id": "zbm_creative_quality", "notes": []}), 200)
+    q = step("quality", cli.post(f"/zbm/work/{wid}/quality", json={"notes": []}, headers=as_("zbm_creative_quality")), 200)
     print("    stage:", q["stage"])
     g = step("Compliance 38 gate", cli.post(f"/zbm/work/{wid}/compliance"), 200)
     print("    stage:", g["stage"], "|", g["compliance"]["reason"])

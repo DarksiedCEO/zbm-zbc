@@ -30,6 +30,18 @@ reaches us within `superseded_grace_hours` (default 72, config
 CREATIVE_SUPERSEDED_GRACE_HOURS) of the supersession; later, the clip goes
 to the human queue with the reason — a backdated post can't buy older,
 more lenient rules automatically.
+
+Retry receipt time (fix wave 2, N1): when an operation's ledger record
+fails, its time is kept ONLY so an identical retry rebuilds the identical
+event. That reservation is bound to the exact content (SHA-256 of the
+canonical submission / verdict) and expires after `RETRY_WINDOW` (15
+minutes). A retry with different content never inherits the old time.
+A clip `submission_id` is bound to its content from its first attempt,
+permanently: different content under a used id is refused (409), never
+recorded as a new decision — and the clip's ledger event id is derived
+from (submission_id, content hash), so a second version of the same
+content (e.g. a stale retry with a fresh receipt time) is refused by the
+ledger's own 409.
 """
 
 from __future__ import annotations
@@ -68,6 +80,22 @@ A_MEMORY = "zbc_creative_memory"
 A_ELIGIBILITY = "zbc_payout_gate"
 
 DEFAULT_SUPERSEDED_GRACE_HOURS = 72
+# How long a failed operation's first-attempt time may be reused by an
+# identical retry (N1). Short on purpose: a retry, not a reservation.
+RETRY_WINDOW = timedelta(minutes=15)
+
+
+def _sha256(obj) -> str:
+    import hashlib
+    import json
+
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+                          .encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def submission_sha256(sub: ClipSubmission) -> str:
+    """Canonical content hash of a clip submission (every field)."""
+    return _sha256(sub.model_dump(mode="json"))
 
 
 class HumanVerdict(BaseModel):
@@ -98,27 +126,48 @@ class ZbcWorkflow:
     decisions: dict[str, ClipReviewDecision] = field(default_factory=dict)
     superseded_grace_hours: int = DEFAULT_SUPERSEDED_GRACE_HOURS
     _n: int = 1
-    # First-attempt time of an operation whose record failed, so an identical
-    # retry rebuilds the identical event (F11) instead of a second record.
-    _op_times: dict[str, datetime] = field(default_factory=dict)
+    # First-attempt (content hash, time) of an operation whose record failed,
+    # so an IDENTICAL retry within RETRY_WINDOW rebuilds the identical event
+    # (F11) instead of a second record (N1: bound to content, expiring).
+    _op_times: dict[str, tuple[str, datetime]] = field(default_factory=dict)
+    # submission_id -> content hash, from the first attempt on (N1).
+    _submission_content: dict[str, str] = field(default_factory=dict)
 
     # --- helpers ------------------------------------------------------------------
     @staticmethod
     def _subject(campaign_id: str, version: int) -> str:
         return check_subject(f"{campaign_id}:v{version}", "rulebook subject")
 
-    def _op_now(self, op: str) -> datetime:
+    def _op_now(self, op: str, content_sha: str) -> datetime:
         """The time of this operation: the clock, or — ONLY when an earlier
-        attempt of the same operation failed at the ledger — that attempt's
-        time, so the retry rebuilds the identical event. A refusal for any
-        other reason never reserves a time (no "early receipt" games)."""
-        return self._op_times.get(op) or self.clock.now()
+        attempt of the SAME operation with the SAME content failed at the
+        ledger less than RETRY_WINDOW ago — that attempt's time, so the
+        retry rebuilds the identical event. Different content, or an expired
+        reservation, gets the clock (N1). A refusal for any other reason
+        never reserves a time (no "early receipt" games)."""
+        now = self.clock.now()
+        held = self._op_times.get(op)
+        if held is not None:
+            sha, at = held
+            if sha == content_sha and timedelta(0) <= now - at <= RETRY_WINDOW:
+                return at
+            if now - at > RETRY_WINDOW or now < at:
+                self._op_times.pop(op, None)
+        return now
 
-    def _record_op(self, op: str, at: datetime, *args, **kwargs) -> str:
+    def _pending_other_content(self, op: str, content_sha: str) -> bool:
+        """An earlier attempt of `op` with DIFFERENT content failed at the
+        ledger less than RETRY_WINDOW ago: its outcome is unknown (the
+        ledger may have committed it), so a different decision now is
+        refused until the window has passed."""
+        held = self._op_times.get(op)
+        return held is not None and held[0] != content_sha and self.clock.now() - held[1] <= RETRY_WINDOW
+
+    def _record_op(self, op: str, content_sha: str, at: datetime, *args, **kwargs) -> str:
         try:
             eid = self.recorder.record(*args, **kwargs)
         except LedgerRecordError:
-            self._op_times[op] = at
+            self._op_times[op] = (content_sha, at)
             raise
         self._op_times.pop(op, None)
         return eid
@@ -389,11 +438,19 @@ class ZbcWorkflow:
             raise PreconditionFailed(f"campaign {cid} is not open for clips: Andre has not signed its kit")
         if sub.submission_id in self.submissions:
             raise PreconditionFailed(f"submission {sub.submission_id} already exists")
+        sha = submission_sha256(sub)
+        bound = self._submission_content.get(sub.submission_id)
+        if bound is not None and bound != sha:
+            self._refuse(PreconditionFailed(
+                f"submission id {sub.submission_id} was already used (an earlier attempt whose record failed) with "
+                "different content; a submission id is bound to its first content — submit under a new id"),
+                A_REVIEW, sub.submission_id, "clip submission")
         rb = self.rulebooks.get(cid, sub.rulebook_version)
         if rb.live_at is None:
             raise PreconditionFailed(f"rulebook {cid} v{rb.version} never went live; clips can't be made under it")
         op = f"clip:{sub.submission_id}"
-        received_at = self._op_now(op)  # server receipt time; the first attempt's on a retry
+        # server receipt time; the first attempt's only on an identical retry inside RETRY_WINDOW (N1)
+        received_at = self._op_now(op, sha)
         if sub.posted_at > self.clock.now():
             raise PreconditionFailed(
                 f"posted_at {sub.posted_at.isoformat()} is in the future (server time {self.clock.now().isoformat()})")
@@ -409,13 +466,15 @@ class ZbcWorkflow:
                         "its posted_at is self-asserted — a human confirms which version it was made under",)
         decision = clip_review.review(sub, rb, self.registry, received_at, decided_by=A_REVIEW,
                                       received_at=received_at, route_to_human=to_human)
-        self._record_op(op, received_at, "clip_reviewed", A_REVIEW, sub.submission_id,
-                             {"decision": decision.model_dump(mode="json"), "submission": sub.model_dump(mode="json"),
-                              "received_at": received_at.isoformat(),
-                              "superseded_grace_hours": self.superseded_grace_hours},
-                             f"Clip {sub.submission_id} under {cid} v{rb.version}: {decision.outcome}"
-                             + (f" (broke {', '.join(b.rule_id for b in decision.broken_rules)})" if decision.broken_rules else ""),
-                             op_key={"submission_id": sub.submission_id})
+        # The id is bound to this content from the first attempt that reaches the ledger call on.
+        self._submission_content[sub.submission_id] = sha
+        self._record_op(op, sha, received_at, "clip_reviewed", A_REVIEW, sub.submission_id,
+                        {"decision": decision.model_dump(mode="json"), "submission": sub.model_dump(mode="json"),
+                         "content_sha256": sha, "received_at": received_at.isoformat(),
+                         "superseded_grace_hours": self.superseded_grace_hours},
+                        f"Clip {sub.submission_id} under {cid} v{rb.version}: {decision.outcome}"
+                        + (f" (broke {', '.join(b.rule_id for b in decision.broken_rules)})" if decision.broken_rules else ""),
+                        op_key={"submission_id": sub.submission_id, "content_sha256": sha})
         self.submissions[sub.submission_id] = sub
         self.decisions[sub.submission_id] = decision
         return decision
@@ -438,7 +497,13 @@ class ZbcWorkflow:
             raise ValidationFailed("human verdict must be 'pass' or 'reject'", ["outcome"])
         rb = self.rulebooks.get(sub.campaign_id, sub.rulebook_version)
         op = f"human:{submission_id}"
-        decided_at = self._op_now(op)
+        sha = _sha256({"reviewer": reviewer_id, "verdict": verdict.model_dump(mode="json")})
+        if self._pending_other_content(op, sha):
+            raise PreconditionFailed(
+                f"a different human verdict on {submission_id} was attempted less than "
+                f"{int(RETRY_WINDOW.total_seconds() // 60)} minutes ago and its record failed (outcome unknown); "
+                "retry that same verdict, or wait for the window to pass")
+        decided_at = self._op_now(op, sha)
         try:
             decision = clip_review.make_decision(
                 rb, submission_id=submission_id, campaign_id=sub.campaign_id, rulebook_version=rb.version,
@@ -449,11 +514,11 @@ class ZbcWorkflow:
         except (RuleCitationError, ValueError) as exc:
             self._refuse(ValidationFailed("human verdict cites rules that are not in this rulebook version",
                                           [str(exc)]), reviewer_id, submission_id, "human clip review")
-        self._record_op(op, decided_at, "clip_human_reviewed", reviewer_id, submission_id,
-                             {"decision": decision.model_dump(mode="json"), "note": verdict.note,
-                              "previous_reasons": list(current.human_review_reasons)},
-                             f"Human review of {submission_id}: {decision.outcome}"
-                             + (f" (broke {', '.join(b.rule_id for b in decision.broken_rules)})" if decision.broken_rules else ""))
+        self._record_op(op, sha, decided_at, "clip_human_reviewed", reviewer_id, submission_id,
+                        {"decision": decision.model_dump(mode="json"), "note": verdict.note,
+                         "previous_reasons": list(current.human_review_reasons)},
+                        f"Human review of {submission_id}: {decision.outcome}"
+                        + (f" (broke {', '.join(b.rule_id for b in decision.broken_rules)})" if decision.broken_rules else ""))
         self.decisions[submission_id] = decision
         return decision
 

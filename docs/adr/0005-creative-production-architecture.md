@@ -153,6 +153,16 @@ money. ZBC's unit of work is a campaign, not a clip.
     just before a change to arrive through normal posting and reporting
     lag, short enough that backdating into an older, more lenient version
     stops being automatic within three days.
+    **A failed record can't reserve a receipt time (fix wave 2, N1).**
+    A retry reuses the first attempt's receipt time only if its content
+    is byte-for-byte the same (SHA-256 of the canonical submission) and it
+    arrives within **15 minutes** (`RETRY_WINDOW`); otherwise the receipt
+    time is the clock. A submission id is bound to its content from its
+    first attempt: different content under a used id is refused (409),
+    never recorded. So "junk under `clip_r` during an outage, then a real
+    backdated clip under `clip_r` a month later" gets 409, and the same
+    content a month later is judged with a fresh receipt time (grace
+    window long past → human queue).
 
 11. **No rule on the page, no rejection.** A `ClipReviewDecision` can
     only be validated with its rulebook version's rule ids in the pydantic
@@ -187,20 +197,33 @@ money. ZBC's unit of work is a campaign, not a clip.
     identical decision with and without it). There is no prompt-injection
     *detector*, deliberately: nothing interprets text, so there is
     nothing for an injection to steer.
-    **Normalisation defeats cheap evasions (fix wave 1, F12).**
-    `shared/text.canonical`: NFKC; every format character (Unicode Cf —
-    zero-width, soft hyphen, bidi) deleted; diacritics stripped; casefold;
-    common Cyrillic / Greek / Armenian / Latin-extended lookalikes mapped
-    to Latin. Must-say, never-say, disclosure, angle keywords, hook lines
+    **Normalisation defeats cheap evasions (fix wave 1, F12; wave 2, N3).**
+    `shared/text.canonical`: NFKC; every Unicode Default_Ignorable_Code_Point
+    (the complete DerivedCoreProperties list — Hangul fillers, zero-width
+    characters, bidi controls, variation selectors, tag characters, …)
+    removed, the blank-rendering fillers (U+115F, U+1160, U+3164, U+FFA0,
+    U+180E) becoming a space; any other format character deleted;
+    diacritics stripped; casefold; lookalikes mapped to Latin — a hand
+    table from Unicode confusables.txt (Cyrillic, Greek, Armenian,
+    Cherokee, IPA / small capitals) plus a table GENERATED from Unicode
+    names of every Latin letter "… LETTER [SMALL CAPITAL|SCRIPT|DOTLESS|
+    LONG] X [WITH …]" (stroked, barred, hooked, small-capital: ǥ ħ ɨ ł ɢ ʀ
+    → g h i l g r); mathematical and fullwidth forms fold via NFKC. No
+    dependency added (derived from Python's `unicodedata`). Must-say, never-say, disclosure, angle keywords, hook lines
     and kit examples all match on that form (ZBM Quality Q2–Q4 too). A
     phrase found only once separator-split letters are rejoined ("g u a
     r", "g.u.a.r", "guaran teed") or leetspeak is folded is LOOSE: a
     never-say or must-say LOOSE hit, or a disclosure found only that way,
     sends the clip to the human queue. Independently, any caption,
-    on-screen text or transcript with an obfuscation signal
-    (mixed-script lookalikes, a format character hidden inside a word,
-    4+ single letters split by separators) is never an automatic pass
-    (human queue); in ZBM it is Quality finding Q6.
+    on-screen text or transcript with an obfuscation signal is never an
+    automatic pass (human queue); in ZBM it is Quality finding Q6. Signals:
+    any bidi control, filler or tag character anywhere; any other
+    ignorable/format character beside a letter or digit; lookalikes among
+    Latin letters; letters of two scripts inside one word; 4+ single
+    letters split by separators. And every rulebook in this build is
+    English (`language: "en"`, the only value accepted): a clip whose
+    caption, on-screen text or transcript contains ANY letter outside the
+    Latin script goes to the human queue (N3).
 
 15. **Deterministic ledger event ids (fix wave 1, F11).** `event_id =
     "cp:" + SHA-256(service instance, department, event_type, actor,
@@ -214,8 +237,15 @@ money. ZBC's unit of work is a campaign, not a clip.
     different content under that id gets 409 and is refused. Two separate
     decisions with identical content still get different ids (`n` has
     advanced). A retried clip submission or human review reuses the
-    first attempt's time, but only when that attempt failed at the ledger
-    (a refusal for any other reason reserves nothing). The instance id is
+    first attempt's time only when that attempt failed at the ledger (a
+    refusal for any other reason reserves nothing), its content is
+    identical (hash) and it is inside the 15-minute window (N1). A clip's
+    event id is built from (submission id, content hash), so for one
+    content there is exactly one event id and the ledger's own 409 refuses
+    any second version of it (e.g. a stale retry with a fresh receipt
+    time after a lost response → 503, never two decisions). A different
+    human verdict while an earlier one's record is unresolved (inside the
+    window) is refused (409). The instance id is
     random per process because every object id (`brief-0001`, …) restarts
     with the in-memory state; without it a restarted service would
     collide with its predecessor's events.
@@ -231,6 +261,35 @@ money. ZBC's unit of work is a campaign, not a clip.
     was escalated never gets a third round in any job, whatever Andre
     decided — a genuinely new attempt needs a new brief approved by the
     Creative Lead.
+    **Per client deliverable, not per brief id (fix wave 2, N4).** A
+    cloned brief is the same order. DELIVERABLE KEY = (client_id, spec
+    fingerprint, variant_index); the spec fingerprint is SHA-256 of the
+    canonical JSON {platform, placement, length_seconds, aspect_ratio in
+    lowest terms, format} — deliverable_id, count, brief and job ids are
+    not part of it. Rounds are counted per key across all of the client's
+    briefs (a pass closes the count); one version per key is in flight at
+    a time across briefs; while work on a fingerprint is escalated and
+    unresolved, any brief of that client containing that fingerprint is
+    refused (409) at draft, approval, job opening and work submission.
+    After Andre resolves, a NEW brief starts a fresh count (the escalated
+    brief's own chain still never gets a third round). Consequence: two
+    genuinely separate concurrent orders of an identical spec for the
+    same client share one review budget.
+
+18. **Actors are authenticated (fix wave 2, N4).** Every action
+    attributed to an actor — drafting (brief, rulebook), approving
+    (Creative Lead, Campaign Rulebook), reviewing (Quality, human clip
+    reviewer), registry and rights writes — needs that actor's own
+    credential in `X-Creative-Actor-Token`. Credentials are configured
+    server-side: `CREATIVE_ACTOR_TOKENS` = JSON {"actor_id": "token"}.
+    The identity is the actor whose token matches (SHA-256 digests,
+    `hmac.compare_digest` against every configured token, no early exit);
+    a body `actor_id` is optional and must equal it (else 403). Drafter ≠
+    approver is therefore enforced on authenticated identity. Fail closed:
+    no tokens configured → every actor action 403; missing/unknown token
+    → 401. Start-up refuses tokens shorter than 16 printable ASCII
+    characters, shared between actors, for unknown actors or "andre", or
+    equal to the service / Andre token. Andre keeps his separate token.
 
 17. **Every ledger field fits before any work (fix wave 1, integration
     defects 2 and 5, F16).** Campaign ids are at most 100 characters and
@@ -295,11 +354,12 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
 1. **In-memory state.** Briefs, jobs, work, rulebooks, kits, submissions,
    decisions and memory live in process memory; a restart loses them (the
    ledger keeps the evidence). No database this pass.
-2. **Asserted actor identity.** One shared service token; actor ids in
-   request bodies are asserted by the caller. Drafter≠approver is
-   enforced on asserted identity — a caller willing to lie about who they
-   are defeats it. Andre is the exception (separate token). Per-actor
-   credentials are an open item.
+2. **Actor identity is only as good as token custody (fix wave 2).**
+   Per-actor tokens (decision 18) replace asserted identity. They are
+   static bearer secrets in an environment variable: no rotation, expiry
+   or revocation beyond a restart, and whoever holds two actors' tokens
+   can act as both. The intelligence "actors" (e.g. `zbm_creative_lead`)
+   are credentials held by whatever process or person drives them.
 3. **Declared, not detected.** No media is read. Clip Review judges the
    submitter's declarations plus the clip's text; a clipper who lies about
    transformation or watermarks passes until Chromaprint / scene analysis
@@ -354,12 +414,16 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     (`{job|seed}.{agent}`) so the Enigma / Phantom Canvas contract must
     de-duplicate on them when it is wired.
 15. **Obfuscation handling is conservative, not complete.** The lookalike
-    table is the common subset of Unicode confusables, not all of it; a
-    determined evader with an unmapped script gets through the phrase
-    match (but not the mixed-script signal if Latin is present). The
-    signals send some honest clips to the human queue: any clip mixing
-    Cyrillic/Greek/Armenian letters with Latin text (e.g. a Russian
-    caption with `#ad`), soft hyphens inside words, and four or more
+    table is not the whole of confusables.txt; a lookalike from another
+    script that isn't mapped still goes to the human queue (any
+    non-Latin letter in an English campaign), but a Latin-script
+    lookalike the generated table doesn't cover (e.g. "turned" or
+    "reversed" letters) is matched only if it folds. Script detection is
+    by Unicode character name (Python has no Script property). RLO text
+    is flagged, not un-reversed. Costs: every clip with any non-Latin
+    letter (a Spanish-only "ñ" is Latin and fine; a Russian word, a
+    Japanese title, a Greek µ in "µs") goes to the human queue, as do
+    emoji keycaps ("1️⃣"), soft hyphens inside words and four or more
     single letters in a row.
 
 ## Verified

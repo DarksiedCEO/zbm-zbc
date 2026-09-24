@@ -7,12 +7,12 @@ Every approve/draft action names an actor. The rules enforced here:
 - the approver can never be the drafter (`require_not_self`), even when a
   single human legitimately holds both roles.
 
-HONEST LIMIT: the service authenticates callers with ONE shared bearer
-token, so the actor id in a request is ASSERTED by the caller, not proven.
-The drafter!=approver rule is enforced on asserted identity; a caller who
-lies about identity defeats it. Per-actor credentials are an open item
-(ADR 0005). Andre's approvals are the exception: they need a separate
-founder token (`shared/founder.py`), not just an asserted name.
+Identity is AUTHENTICATED (fix wave 2, N4): the API resolves the acting
+actor from that actor's own credential (`X-Creative-Actor-Token`, tokens
+configured server-side in CREATIVE_ACTOR_TOKENS; see api.py), never from
+the request body, so drafter!=approver is enforced on proven identity.
+Two actors who share one person's token are one identity. Andre's
+approvals need his separate founder token (`shared/founder.py`).
 """
 
 from __future__ import annotations
