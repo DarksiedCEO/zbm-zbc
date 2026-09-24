@@ -100,6 +100,7 @@ from onboarding_schema import (
     CommitmentStatus,
     DomainEvent,
     Escalation,
+    MAX_PLAUSIBLE_AGE_YEARS,
     Lane,
     MergedPlan,
     Person,
@@ -218,6 +219,11 @@ class ClientRecord:
     # effect; a retry of the same start completes the missing records.
     start_digest: Optional[str] = None
     start_view: Optional[dict] = None
+    # Fix wave 4 (A1): the detection result of an audit that stopped after
+    # Revenue Recovery answered (its result records are owed). A retry of the
+    # same audit uses it instead of sending the account data again. Holds
+    # the request digest and what detection returned — never the account data.
+    audit_known: Optional[dict] = None
 
 
 @dataclass
@@ -299,11 +305,23 @@ class OnboardingService:
         self.campaigns: dict[tuple[str, str], dict] = {}
         self._andre_key = andre_approval_key
         self._lock = threading.RLock()
-        # Deterministic-id state (ADR 0004 "Event ids"): a random epoch per
-        # service instance (state is in-process, so a restart is a new
-        # history), a per-subject operation sequence that advances only when
-        # an operation completes, and per-operation occurrence counters.
-        self._epoch = uuid.uuid4().hex
+        # Deterministic-id state (ADR 0004 "Event ids"): an epoch, a
+        # per-subject operation sequence that advances only when an operation
+        # completes, and per-operation occurrence counters.
+        #
+        # Fix wave 4 (restart): the operations that CREATE a subject
+        # (start_client, apply_creator) use the configured, stable instance id
+        # as their epoch, so a restarted process's retry of them derives the
+        # same ids and dedupes at the ledger. Every other operation also
+        # carries a per-process boot id: state is in-process, so after a
+        # restart a subject's history starts again at sequence 0 and, with a
+        # stable epoch alone, a NEW event could take the id of a pre-restart
+        # event (it would be silently deduped, or refused as a 409). Only the
+        # creating operations can be retried across a restart anyway — every
+        # other one needs state the restart lost (404).
+        self._instance = config.instance_id
+        self._boot = uuid.uuid4().hex[:16]
+        self._epoch = f"{self._instance}:{self._boot}"
         self._seq: dict[str, int] = {}
         self._depth = 0
         self._op_name = ""
@@ -341,7 +359,7 @@ class OnboardingService:
             raise Invalid(f"{what} is in the future by the server's clock; refused (no request can move the clock)")
 
     @contextmanager
-    def _op(self, name: str):
+    def _op(self, name: str, *, creates_subject: bool = False):
         """One operation: serialized, with its own effect list, deferred
         in-process effects and occurrence counters. On completion (a result,
         or a recorded refusal) deferred effects run and the sequence of
@@ -351,6 +369,7 @@ class OnboardingService:
             outer = self._depth == 0
             if outer:
                 self._op_name, self._effects, self._deferred = name, [], []
+                self._epoch = self._instance if creates_subject else f"{self._instance}:{self._boot}"
                 self._occ, self._idc, self._touched = {}, {}, set()
                 self._op_pending = []
             self._depth += 1
@@ -415,12 +434,22 @@ class OnboardingService:
         (a retry, or any other) writes it first with the SAME id — so a
         missing result record is never skipped by an "already done" path
         and never written twice."""
-        eid = self._event_id(event_type, subject_id, payload)
-        self._pending.setdefault(subject_id, {})[eid] = (event_type, actor, payload, summary)
-        self._op_pending.append((subject_id, eid))
-        self._write(eid, event_type, actor, subject_id, payload, summary)
-        self._pending[subject_id].pop(eid, None)
-        return eid
+        return self._record_results([(event_type, actor, subject_id, payload, summary)])[0]
+
+    def _record_results(self, records: list[tuple[str, str, str, dict, str]]) -> list[str]:
+        """Several result records of one outside effect: ALL are queued as
+        owed before the first is written (fix wave 4, A1), so a failure on
+        the first still leaves the later ones owed, in order."""
+        queued = []
+        for event_type, actor, subject_id, payload, summary in records:
+            eid = self._event_id(event_type, subject_id, payload)
+            self._pending.setdefault(subject_id, {})[eid] = (event_type, actor, payload, summary)
+            self._op_pending.append((subject_id, eid))
+            queued.append((eid, event_type, actor, subject_id, payload, summary))
+        for eid, event_type, actor, subject_id, payload, summary in queued:
+            self._write(eid, event_type, actor, subject_id, payload, summary)
+            self._pending[subject_id].pop(eid, None)
+        return [q[0] for q in queued]
 
     def _flush_pending(self, subject_id: str) -> None:
         """Write the result records a previous operation owes (same ids)."""
@@ -519,7 +548,7 @@ class OnboardingService:
         the API says ``proceeded: true, completed: false``, and a retry of
         the same start writes the missing records (same event ids) and
         finishes the start instead of answering 409."""
-        with self._op("start_client"):
+        with self._op("start_client", creates_subject=True):
             digest = hashlib.sha256(req.model_dump_json().encode()).hexdigest()
             existing = self.clients.get(req.client_id)
             if existing is not None:
@@ -1142,34 +1171,64 @@ class OnboardingService:
     # --- audit (6) + risk (8) --------------------------------------------------------
 
     def audit(self, client_id: str, req: rq.AuditRequest) -> dict:
+        """Fix wave 4 (A1): the two rulings are the RESULT of the detection
+        call (an outside effect that sends the account data), so they are
+        owed records (``_record_results``): if either write fails, the next
+        operation on the client writes both, same ids. The detection result
+        is kept on the client (``audit_known``) from the moment it is known,
+        so a retry of the same audit never sends the account data again."""
         with self._op("audit"):
-            rec = self._client(client_id)
-            kinds = sorted(k for k, v in req.account_data.items() if v)
-            self._record("revenue_recovery_request", "intel_06_audit_baseline", rec.client_id,
-                         {"data_kinds": kinds, "rows": sum(len(v) for v in req.account_data.values())},
-                         "Account pull sent to Revenue Recovery detection")
-            try:
-                raw = self._effect("revenue_recovery_detect", lambda: self.rr.detect(req.account_data))
-                overlaps = self.rr.overlaps(raw)
-            except RevenueRecoveryError as exc:
-                self._record("revenue_recovery_failed", "intel_06_audit_baseline", rec.client_id,
-                             {"data_kinds": kinds, "error": str(exc)[:200]},
-                             "Revenue Recovery unavailable; no audit recorded")
-                raise UpstreamUnavailable(f"Revenue Recovery unavailable: {exc}; no audit recorded") from None
-            findings, rejected = i06.consume(raw, overlaps)
-            base = i06.baseline(findings)
-            stated = self._stated_revenue(rec)
-            risk = i08.assess(req.risk_signals, stated, req.observed_monthly_revenue_usd, self.config.revenue_mismatch_tolerance)
-            self._record("revenue_recovery_ruling", "intel_06_audit_baseline", rec.client_id,
-                         {"finding_ids": [f.finding_id for f in findings], "rejected": rejected,
-                          "totals_by_classification": {k: money_str(v) for k, v in base.totals_by_classification.items()}},
-                         f"Revenue Recovery returned {len(findings)} finding(s), {len(rejected)} rejected")
-            self._record("risk_ruling", "intel_08_risk_anomaly", rec.client_id, {"kind": risk.kind, "reasons": list(risk.reasons)},
-                         f"Risk and Anomaly: {risk.kind}")
-            if risk.kind != "nothing":
-                self._record("risk_event_published", "intel_08_risk_anomaly", rec.client_id, {"kind": risk.kind},
-                             "Anomaly event published to the risk watcher / AEGIS when the audit completes (consumers not built)")
+            rec = self._client(client_id)  # writes any owed result records first
+            digest = hashlib.sha256(req.model_dump_json().encode()).hexdigest()
+            known = rec.audit_known if rec.audit_known is not None and rec.audit_known["digest"] == digest else None
+            if known is None:
+                kinds = sorted(k for k, v in req.account_data.items() if v)
+                self._record("revenue_recovery_request", "intel_06_audit_baseline", rec.client_id,
+                             {"data_kinds": kinds, "rows": sum(len(v) for v in req.account_data.values())},
+                             "Account pull sent to Revenue Recovery detection")
+                try:
+                    raw = self._effect("revenue_recovery_detect", lambda: self.rr.detect(req.account_data))
+                    overlaps = self.rr.overlaps(raw)
+                except RevenueRecoveryError as exc:
+                    # The call failed: no result exists, nothing was detected
+                    # (as an undelivered push, not counted as an effect).
+                    self._record("revenue_recovery_failed", "intel_06_audit_baseline", rec.client_id,
+                                 {"data_kinds": kinds, "error": str(exc)[:200]},
+                                 "Revenue Recovery unavailable; no audit recorded")
+                    raise UpstreamUnavailable(f"Revenue Recovery unavailable: {exc}; no audit recorded") from None
+                findings, rejected = i06.consume(raw, overlaps)
+                base = i06.baseline(findings)
+                stated = self._stated_revenue(rec)
+                risk = i08.assess(req.risk_signals, stated, req.observed_monthly_revenue_usd, self.config.revenue_mismatch_tolerance)
+                known = {"digest": digest, "raw": raw, "findings": findings, "rejected": rejected, "base": base, "risk": risk,
+                         "risk_event_recorded": False, "risk_event_published": False}
+                rec.audit_known = known  # it happened: a retry reuses it
+                self._record_results([
+                    ("revenue_recovery_ruling", "intel_06_audit_baseline", rec.client_id,
+                     {"finding_ids": [f.finding_id for f in findings], "rejected": rejected,
+                      "totals_by_classification": {k: money_str(v) for k, v in base.totals_by_classification.items()}},
+                     f"Revenue Recovery returned {len(findings)} finding(s), {len(rejected)} rejected"),
+                    ("risk_ruling", "intel_08_risk_anomaly", rec.client_id, {"kind": risk.kind, "reasons": list(risk.reasons)},
+                     f"Risk and Anomaly: {risk.kind}"),
+                ])
+            else:
+                # Reusing the known result writes no new ruling, but this is
+                # still an audit of the subject: its completion must advance
+                # the subject's sequence, or the NEXT audit (same payload)
+                # would derive the ids of these rulings and be deduped away.
+                self._touched.add(rec.client_id)
+            raw, findings, rejected, base, risk = (known["raw"], known["findings"], known["rejected"], known["base"],
+                                                   known["risk"])
+            if risk.kind != "nothing" and not known["risk_event_published"]:
+                if not known["risk_event_recorded"]:
+                    self._record("risk_event_published", "intel_08_risk_anomaly", rec.client_id, {"kind": risk.kind},
+                                 "Anomaly event published to the risk watcher / AEGIS when the audit completes (consumers not built)")
+                    known["risk_event_recorded"] = True
                 self._publish("risk_anomaly", rec.client_id, {"kind": risk.kind, "reasons": list(risk.reasons)})
+                self._defer(lambda: known.__setitem__("risk_event_published", True))
+            # The audit is finished once this operation completes; until then a
+            # retry keeps using the known detection result.
+            self._defer(lambda: setattr(rec, "audit_known", None) if rec.audit_known is known else None)
             rec.raw_findings, rec.findings, rec.baseline, rec.risk = raw, findings, base, risk
             rec.last_progress_at = self.now()
             out = {"baseline": _dump(base), "findings": [_dump(f) for f in findings], "rejected_findings": rejected,
@@ -1607,16 +1666,20 @@ class OnboardingService:
     # --- ZBC creator lane (11, P8, P9) ----------------------------------------------------
 
     def apply_creator(self, app: ClipperApplication) -> dict:
-        with self._op("apply_creator"):
+        with self._op("apply_creator", creates_subject=True):
             digest = hashlib.sha256(app.model_dump_json().encode()).hexdigest()
             existing = self.creators.get(app.creator_id)
             if existing is not None:
                 if existing.apply_out is not None:
                     return self._complete_apply(existing, digest)
                 raise Conflict("creator already applied")
-            flags = self._flag_injection(app.creator_id, app.bio, "creator_bio")
             # Age is computed on the SERVER's date (UTC-12), never a caller date (F1).
             evaluated_on = self.age_evaluation_date()
+            if app.date_of_birth is not None and i11.age_on(app.date_of_birth, evaluated_on) > MAX_PLAUSIBLE_AGE_YEARS:
+                # Fix wave 4 (D1): refused before anything is recorded.
+                raise Invalid(f"date_of_birth implies an age over {MAX_PLAUSIBLE_AGE_YEARS} on the server's date; "
+                              "not a plausible date of birth")
+            flags = self._flag_injection(app.creator_id, app.bio, "creator_bio")
             decision = i11.vet(app, evaluated_on)
             decision = decision.model_copy(update={"injection_flags": [f["rule"] for f in flags]})
             first = ai_disclosure_first_message(app.legal_name.split()[0], company="ZBC")
@@ -1742,9 +1805,20 @@ class OnboardingService:
     def creator_payment(self, creator_id: str, req: rq.CreatorPaymentRequest) -> dict:
         with self._op("creator_payment"):
             rec = self._creator(creator_id)
+            # Owner ruling (fix wave 4, P1: refuse): payments are tracked only
+            # for a creator whose activation is COMPLETE (gates passed and the
+            # payout account active). A W-9 alone is not enough; a declined,
+            # under-18 or not-yet-activated creator gets a 409 with the
+            # reason and nothing is recorded.
             ok, why = creator_tax.payout_activation_allowed(rec.w9_on_file)
             if not ok:
                 raise Conflict(why)
+            if rec.activation is None or not rec.activation.activated or not rec.payout_active:
+                reason = ("creator is not activated: payments are tracked only for a creator whose activation is "
+                          "complete (vetting approved, gates 14 and 15 passed, payout account active)")
+                if rec.vetting.outcome != VettingOutcome.APPROVE:
+                    reason += f"; vetting outcome is {rec.vetting.outcome.value}"
+                raise Conflict(reason, {"activated": False, "vetting_outcome": rec.vetting.outcome.value})
             # The tax year is the server's business date, never a caller date (F1 sweep).
             paid_on = self.business_date()
             year = paid_on.year

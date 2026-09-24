@@ -78,6 +78,16 @@ class OnboardingConfig:
     )
     proving_campaign_budget_cap_usd: Decimal = Decimal("500.00")
     gaps_short_list_size: int = 5
+    # Fix wave 4 (R1): hard input caps, enforced before any scanning.
+    max_body_bytes: int = 1_048_576  # whole request body (Content-Length and while streaming) -> 413
+    max_request_target_bytes: int = 8192  # path + query string -> 414
+    # Wall-clock budget for the credential checks of one request body; a
+    # body that cannot be checked in time is refused (422), never accepted.
+    scan_budget_seconds: float = 5.0
+    # Stable instance component of every derived event id (ADR 0004, "Event
+    # ids"): a restarted process with the same id derives the same ids for
+    # the same first operations, so its retries dedupe at the ledger.
+    instance_id: str = "onboarding-1"
 
     def __post_init__(self) -> None:
         if self.spanish_enabled:
@@ -92,6 +102,11 @@ class OnboardingConfig:
             raise ConfigError("andre_nudge_max_attempts must be at least 1")
         if self.escalation_push_max_attempts < 1:
             raise ConfigError("escalation_push_max_attempts must be at least 1")
+        if self.max_body_bytes < 1 or self.max_request_target_bytes < 1 or self.scan_budget_seconds <= 0:
+            raise ConfigError("input caps and the scan budget must be positive")
+        if not self.instance_id or not all(ch.isascii() and (ch.isalnum() or ch in "._:-") for ch in self.instance_id) \
+                or len(self.instance_id) > 64:
+            raise ConfigError("ONBOARDING_INSTANCE_ID must be 1-64 characters of [A-Za-z0-9._:-]")
         from zoneinfo import ZoneInfo  # validates the cutoff zone at startup
 
         try:
@@ -128,4 +143,12 @@ def load_config(env: Mapping[str, str] | None = None) -> OnboardingConfig:
     kwargs["p1_wording_counsel_approved"] = _bool(env.get("ONBOARDING_P1_WORDING_COUNSEL_APPROVED"))
     kwargs["p23_clause_counsel_approved"] = _bool(env.get("ONBOARDING_P23_CLAUSE_COUNSEL_APPROVED"))
     kwargs["spanish_enabled"] = _bool(env.get("ONBOARDING_SPANISH_ENABLED"))
+    if env.get("ONBOARDING_MAX_BODY_BYTES"):
+        kwargs["max_body_bytes"] = int(env["ONBOARDING_MAX_BODY_BYTES"])
+    if env.get("ONBOARDING_MAX_REQUEST_TARGET_BYTES"):
+        kwargs["max_request_target_bytes"] = int(env["ONBOARDING_MAX_REQUEST_TARGET_BYTES"])
+    if env.get("ONBOARDING_SCAN_BUDGET_SECONDS"):
+        kwargs["scan_budget_seconds"] = float(env["ONBOARDING_SCAN_BUDGET_SECONDS"])
+    if env.get("ONBOARDING_INSTANCE_ID"):
+        kwargs["instance_id"] = env["ONBOARDING_INSTANCE_ID"]
     return OnboardingConfig(**kwargs)

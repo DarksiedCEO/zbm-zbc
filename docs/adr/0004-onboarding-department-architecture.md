@@ -64,7 +64,8 @@ The WIP commit was replaced; it doesn't remain in history.
    - **Result records are owed until written** (fix wave 3, N2/N7). A record of an
      effect's result (`contract_storage_ruling`, `andre_push_not_delivered`,
      `andre_push_result`, `promise_nudge_result` after a delivered nudge,
-     `activation_handoff_ruling`, `payout_activation_ruling`) is queued with its
+     `activation_handoff_ruling`, `payout_activation_ruling`, and since fix wave 4 the
+     audit's `revenue_recovery_ruling` and `risk_ruling`) is queued with its
      deterministic id before it is written. If it fails after the effect, the next
      operation on that subject writes it first, with the same id. So an "already
      active / already accepted" retry path can't skip it, and it's never written
@@ -78,6 +79,20 @@ The WIP commit was replaced; it doesn't remain in history.
      creator's activation (the payout is never activated twice). Retrying an
      operation that raised an escalation finds it by its deterministic id and
      completes it; it never pushes Andre again.
+   - **The audit's rulings are owed, and a retry never re-sends the account data**
+     (fix wave 4, A1). They were written with the plain record call, so after a
+     failure the next operation didn't write them, and a retry sent the account data
+     to detection again. Both rulings are now queued as owed before the first is
+     written (`_record_results`), so a failure on the first leaves both owed, in order.
+     The detection result is kept on the client (`audit_known`: the request digest
+     and what detection returned, never the account data) from the moment it's known.
+     A retry of the same audit uses it: no second request record, no second call.
+     A different audit is new data and is sent. A failed detection call has no
+     result, so its `revenue_recovery_failed` record stays a plain record and a retry
+     calls again, like an undelivered push. Sweep: every other record written after
+     an outside call is either already owed (the list above) or records a read or
+     a ruling request (platform probe, contract lookup, Compliance, Billing, age
+     verification). A retry repeats those reads; nothing changes outside.
    - Sweep (fix wave 3): every operation was checked for state changed before a
      record it depends on. Found and fixed:
      - `start_client`: client and escalation before `contract_storage_ruling` or the
@@ -105,8 +120,15 @@ The WIP commit was replaced; it doesn't remain in history.
    - **Event ids are deterministic** (F11), from `ledger.derive_event_id`:
      `"onb-" + SHA-256(json([epoch:operation, department, event_type, subject_id,
      subject_seq, occurrence, payload_sha256]))`.
-     - `epoch` is random per service instance. State is in-process, so a restart is a
-       new history.
+     - `epoch` (fix wave 4): for the operations that create a subject
+       (`start_client`, `apply_creator`) it's the configured `ONBOARDING_INSTANCE_ID`
+       (default `onboarding-1`). A restarted process's retry of them derives the same
+       ids, and the ledger dedupes it (200). For every other operation it's the
+       instance id plus a per-process boot id. State is in-process, so after a restart
+       a subject's history starts again at sequence 0. With the stable id alone, a
+       new event could take the id of an old one and be silently deduped or refused
+       (409); a probe showed exactly that. Those operations can't be retried across
+       a restart anyway: they need state the restart lost (404).
      - `operation` is the service method.
      - `subject_seq` is the subject's operation counter. It advances only when an
        operation completes, including a recorded refusal.
@@ -117,8 +139,9 @@ The WIP commit was replaced; it doesn't remain in history.
      - So a retry of an operation whose write committed but whose response was lost
        reproduces the same ids. The ledger answers 200, and each event is recorded once.
      - The same id with different content is still the ledger's 409, which is refused.
-     - Limit: idempotency holds within one process lifetime, and only while the retry
-       computes the same decision. A retry that crosses a time boundary, such as the noon
+     - Limit: idempotency holds within one process lifetime (across a restart only for
+       `start_client` and `apply_creator`), and only while the retry computes the same
+       decision. A retry that crosses a time boundary, such as the noon
        cutoff, is a different decision and is recorded as one.
 4. **Revenue Recovery is reused, never rebuilt.**
    - Audit and Baseline calls detection-py's real routes over HTTP
@@ -212,6 +235,46 @@ The WIP commit was replaced; it doesn't remain in history.
      `redact_url`, which handles userinfo, secret-named query values and
      password-shaped path segments, percent-encoded ones included.
      `test_d1_real_uvicorn_access_log_*` runs the real server on a real socket.
+   - **Hostile input is bounded before it is scanned** (fix wave 4, R1). AEGIS found
+     the credential scanner quadratic: 20,000 `a` took 7.6 s in `find_credential`, a
+     60 KB message held the process for 132 s (the check ran in a `mode="before"`
+     validator, before `max_length`), and the access-log scrubber let a 30 KB URL
+     block `/health` for 20.8 s without auth. Fixed at the root:
+     - Every regex in the service is linear-time on hostile input. The quadratic ones
+       (`_SLASH_PAIR`, `_EMAIL_PAIR`, `_EMAIL_TOKEN`, `_LOGIN_PAIR`, `_CREDS_PAIR`,
+       `_URL_USERINFO*`, the JWT shape, `redact_url`'s head split, the guardrail's
+       worded dollar figure, the injection role marker, memory's e-mail and domain
+       strippers, the Meta pixel tag) now start once per run (lookbehind anchors),
+       use possessive or atomic groups, or scan in two steps. Superlinear non-regex
+       code was fixed too: the login-word window re-split the whole text per keyword,
+       the span redaction and the `$` label check re-sliced the text per match.
+     - The new forms give the old results. A differential run of the final code against
+       the base code over 240,000 random texts built from credential, URL, dollar, tag
+       and change-request fragments (`find_credential`, `scrub`, `redact_text`,
+       `redact_url`, the outbound guardrails, the injection scan, the identifier
+       stripper, the change-request detector, the tag scan) differed only where the new
+       form redacts more: a URL scheme that starts with a digit (`4821://user@`) now has
+       its userinfo redacted.
+     - Caps first. `Inbound` validates `mode="after"`, so type, pattern and
+       `max_length` checks run before any credential scan, and every inbound string
+       has a `max_length`. `InputLimits`, the outermost middleware, answers 414 to a
+       path plus query over 8 KiB and 413 to a body over 1 MiB. It checks
+       Content-Length, then reads the body itself and stops at the cap, so a chunked
+       body is cut off too. A log line is cut to a bounded prefix (2,048 characters of
+       path, 8,192 of message) before it is scrubbed.
+     - Never on the event loop. FastAPI validates declared body models on the event
+       loop, so bodies are now validated in a sync dependency, which runs in the
+       threadpool. Exception handlers that scrub are sync too. `/health` is `async`
+       and does no work, so it answers even when every worker thread is busy.
+     - A time budget. Each body's credential checks run under `scan_budget`
+       (`ONBOARDING_SCAN_BUDGET_SECONDS`, default 5 s). `find_credential` checks the
+       deadline between rules; a body not checked in time is refused (422
+       `scan_budget_exceeded`), never accepted. Measured worst case is about 1.6 s for
+       1 MB of hostile text.
+     - `tests/test_fix_wave4.py` runs every pattern (78) against hostile shapes and
+       asserts under 50 ms per 100 KB. It checks that the scanners scale linearly to
+       1 MB, and it runs a real uvicorn that must answer `/health` within 1 s while
+       max-size hostile URLs and bodies arrive.
 7. **The activation gate is two independent gates.**
    - 14 (contract) and 15 (compliance) each produce a `GateResult`, and both are
      ledgered.
@@ -331,6 +394,13 @@ The WIP commit was replaced; it doesn't remain in history.
 - Contract gate 14 for creators checks only that the clipper agreement was signed. No
   clipper terms are stored.
 - The proving campaign is capped at $500.00, 3 creators, 14 days (draft).
+- Payments are tracked only for a creator whose activation is complete: vetting
+  approved, gates 14 and 15 passed, payout account active (fix wave 4, owner ruling
+  by the founder's operator: refuse). A W-9 alone isn't enough. Otherwise 409 with the
+  reason, and nothing is recorded as a tracked payment.
+- A date of birth before 1900-01-01, or one that makes the applicant older than 120
+  on the server's age date (UTC−12), is a 422 before anything is recorded (fix wave 4).
+  `0001-01-01` used to be approved.
 - A non-regulated brand that asks for owned posting doesn't get it. The request is noted
   for Andre.
 
@@ -369,6 +439,13 @@ The WIP commit was replaced; it doesn't remain in history.
 
 **State, auth and the ledger**
 - State is in-process memory, one process. It's lost on restart.
+  - Verified in fix wave 4: before it, a restarted process answered the same
+    `start_client` with a new set of ledger events (a random epoch per process).
+    Now a restarted process's `start_client` or `apply_creator` derives the same
+    ids and the ledger dedupes it (`test_i1_*`). Persistence isn't built: every
+    other operation needs the state the restart lost.
+  - One lock serializes operations. A long one (about 2 s for a 1 MiB hostile body)
+    delays others, never `/health`.
 - Auth is one shared bearer token, plus Andre's approval key for actions attributed to
   him: playbook changes, and acknowledging or resolving escalations. There's no other
   per-caller identity.

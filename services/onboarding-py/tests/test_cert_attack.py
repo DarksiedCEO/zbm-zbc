@@ -318,7 +318,11 @@ def test_credential_spray_never_leaks_anywhere(caplog):
 
     everything = "\n".join(outputs)
     everything += "\n".join(r.getMessage() for r in caplog.records)
-    everything += json.dumps(svc.ledger.events) + json.dumps(svc.ledger.payloads, default=str)
+    # event_id / payload_sha256 are SHA-256 hex digests of scrubbed material:
+    # they cannot carry a secret, but any 5-digit fragment can occur in a
+    # digest by chance (fix wave 4: with stable event ids, "48213" did).
+    everything += json.dumps([{k: v for k, v in e.items() if k not in ("event_id", "payload_sha256")}
+                              for e in svc.ledger.events]) + json.dumps(svc.ledger.payloads, default=str)
     everything += json.dumps([e.model_dump(mode="json") for e in svc.bus.events])
     everything += json.dumps({cid: svc.memory.view(cid) for cid in svc.clients}, default=str)
     everything += json.dumps([e.model_dump(mode="json") for e in svc.escalations.values()])

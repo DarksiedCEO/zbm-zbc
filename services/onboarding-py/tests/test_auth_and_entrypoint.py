@@ -2,7 +2,6 @@
 the module-level app AND on a real process bound to a real socket."""
 
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -60,9 +59,9 @@ def test_refuses_to_start_without_token():
 
 
 def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    from conftest import free_test_port
+
+    return free_test_port()  # fix wave 4: the assigned test port range only
 
 
 def _listening(port):

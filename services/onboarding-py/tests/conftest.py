@@ -149,6 +149,23 @@ GOOD_GRANT = {
 }
 
 
+def free_test_port() -> int:
+    """A free port in the range this service's live tests may use
+    (ONBOARDING_TEST_PORT_RANGE, default 19920-19939: fix wave 4's assigned
+    range). Tests never bind outside it."""
+    import socket
+
+    lo, hi = (int(x) for x in os.environ.get("ONBOARDING_TEST_PORT_RANGE", "19920-19939").split("-"))
+    for port in range(lo, hi + 1):
+        with socket.socket() as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    pytest.skip(f"no free port in {lo}-{hi}")
+
+
 @pytest.fixture
 def clock():
     return Clock()

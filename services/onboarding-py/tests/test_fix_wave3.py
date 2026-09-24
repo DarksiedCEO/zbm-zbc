@@ -24,7 +24,6 @@ import io
 import json
 import logging
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -594,14 +593,9 @@ def test_f15_contract_bound_is_accepted():
 
 
 def _free_port():
-    for port in range(19630, 19640):
-        with socket.socket() as s:
-            try:
-                s.bind(("127.0.0.1", port))
-                return port
-            except OSError:
-                continue
-    pytest.skip("no free port in 19630-19639")
+    from conftest import free_test_port
+
+    return free_test_port()  # fix wave 4: the assigned test port range only
 
 
 def test_d1_real_uvicorn_access_log_has_lines_no_logging_error_and_no_secret():

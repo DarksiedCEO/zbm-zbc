@@ -59,6 +59,17 @@ LongText = Annotated[str, StringConstraints(max_length=20000)]
 AccountId = Annotated[str, StringConstraints(min_length=1, max_length=128), AfterValidator(_not_credential_like)]
 
 
+def _scrub_validated(v: Any) -> Any:
+    """``scrub_obj`` over a VALIDATED value: nested models scrubbed
+    themselves and enum members are fixed vocabulary, so both are kept
+    (dict values are plain JSON, so ``scrub_obj`` handles them whole)."""
+    if isinstance(v, (BaseModel, Enum)):
+        return v
+    if isinstance(v, list):
+        return [_scrub_validated(x) for x in v]
+    return scrub_obj(v)
+
+
 class Inbound(BaseModel):
     """Base for request-side models.
 
@@ -72,20 +83,27 @@ class Inbound(BaseModel):
       account-pull rows); they are scrubbed, not refused.
     - Every string is then still passed through ``redaction.scrub_obj``
       (second layer).
+    - Fix wave 4 (R1): both run AFTER field validation (``mode="after"``), so
+      every ``max_length`` (and type, pattern, unknown-field) check has
+      already bounded the input before any credential scanning starts. The
+      old ``mode="before"`` validator scanned a 60 KB message for 132 s
+      before its 5,000-character limit was ever checked.
     """
 
     model_config = ConfigDict(extra="forbid")
     SCRUB_ONLY_FIELDS: ClassVar[frozenset[str]] = frozenset()
 
-    @model_validator(mode="before")
-    @classmethod
-    def _refuse_credentials_at_ingest(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        for k, v in data.items():
-            if k not in cls.SCRUB_ONLY_FIELDS:
-                refuse_credentials(v)
-        return scrub_obj(data)
+    @model_validator(mode="after")
+    def _refuse_credentials_at_ingest(self) -> "Inbound":
+        names = list(type(self).model_fields)
+        for name in names:
+            if name not in self.SCRUB_ONLY_FIELDS:
+                v = getattr(self, name)
+                if not isinstance(v, (BaseModel, Enum)):
+                    refuse_credentials(v)
+        for name in names:
+            self.__dict__[name] = _scrub_validated(getattr(self, name))
+        return self
 
 
 class Outbound(BaseModel):
@@ -459,8 +477,10 @@ class ContractTerms(Inbound):
     signed_at: Optional[AwareDatetime] = None
     start_date: date
     end_date: Optional[date] = None
-    services: list[str]  # e.g. ["revenue_recovery", "digital_advertising"]
-    allowed_commitment_categories: list[str] = Field(default_factory=lambda: ["callback", "report", "audit"])
+    # Bounded (fix wave 4, R1 sweep: every inbound string has a length cap).
+    services: list[Annotated[str, StringConstraints(max_length=64)]] = Field(max_length=50)  # e.g. ["revenue_recovery"]
+    allowed_commitment_categories: list[Annotated[str, StringConstraints(max_length=64)]] = Field(
+        default_factory=lambda: ["callback", "report", "audit"], max_length=50)
     monthly_spend_cap_usd: Optional[Money] = None
     ccpa_cpra_clause_present: bool = False
 
@@ -468,6 +488,16 @@ class ContractTerms(Inbound):
 # ---------------------------------------------------------------------------
 # ZBC creators / brands
 # ---------------------------------------------------------------------------
+
+
+EARLIEST_PLAUSIBLE_DOB = date(1900, 1, 1)
+MAX_PLAUSIBLE_AGE_YEARS = 120
+
+
+def _dob_not_before_1900(v: date) -> date:
+    if v < EARLIEST_PLAUSIBLE_DOB:
+        raise ValueError(f"date_of_birth before {EARLIEST_PLAUSIBLE_DOB.isoformat()} is not a plausible date of birth")
+    return v
 
 
 class ClipperApplication(Inbound):
@@ -478,7 +508,10 @@ class ClipperApplication(Inbound):
 
     creator_id: SubjectId
     legal_name: Annotated[str, StringConstraints(min_length=1, max_length=200)]
-    date_of_birth: Optional[date] = None
+    # Plausibility (fix wave 4, D1): a date before 1900 is refused here (422);
+    # an age above MAX_PLAUSIBLE_AGE_YEARS on the SERVER's date is refused by
+    # the service (it owns the clock) — "0001-01-01" was approved as 2025.
+    date_of_birth: Optional[Annotated[date, AfterValidator(_dob_not_before_1900)]] = None
     # There is deliberately NO application-date field: age is computed
     # against the SERVER's clock (fix wave 1, F1). A request that carries
     # ``applied_on`` (or any other unknown field) is rejected with 422.
