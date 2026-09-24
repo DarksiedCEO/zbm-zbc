@@ -31,10 +31,14 @@ from __future__ import annotations
 
 import hmac
 import os
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
+from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
-from pydantic import BaseModel
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from agents import (
     appointment_tracking,
@@ -44,13 +48,20 @@ from agents import (
     missed_call_detection,
     resolution_writeback,
 )
+from contact_window import ContactWindow, parse_contact_window
 from fixtures_loader import load_appointments, load_call_events, load_dossiers
 from fulfillment_schema import (
     Appointment,
     CallEvent,
     CustomerDossier,
+    EntityId,
     FollowUpTask,
+    PhoneE164,
     ResolutionRecord,
+    ResolutionType,
+    TaskChannel,
+    TaskId,
+    TaskStatus,
 )
 from integrations.sip_dialer import InMemorySipDialer, NotWiredSipDialer, SipDialerPort
 from integrations.system_of_record import (
@@ -132,6 +143,20 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def _validation_error_without_input(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Sep 24 2026 audit: FastAPI's default 422 body echoes each error's
+    # `input` (and `ctx`). For a missing field, `input` is the whole
+    # submitted object — so a malformed call event echoed the caller's
+    # phone number and voicemail transcript back in the error, and into
+    # any proxy or client log that records error bodies. Keep only
+    # location, type and message: enough to fix the request, no payload.
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={"detail": [{"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")} for e in exc.errors()]},
+    )
+
+
 def _build_dialer() -> SipDialerPort:
     # Independent review finding (Sep 22 2026, CRITICAL, CONFIRMED): this
     # previously hardcoded InMemorySipDialer() — a TEST DOUBLE — as the
@@ -153,52 +178,104 @@ def _build_system_of_record() -> SystemOfRecordPort:
     return NotConfiguredSystemOfRecord()
 
 
+def _load_contact_window() -> ContactWindow:
+    # Sep 24 2026 audit: outbound-contact quiet hours, recipient local time.
+    # Narrowable via env, never widenable past 08:00-21:00; a malformed or
+    # too-wide value refuses startup (fail closed), same as a missing token.
+    raw = os.environ.get("FULFILLMENT_CONTACT_WINDOW")
+    if raw is None:
+        return ContactWindow.default()
+    try:
+        return parse_contact_window(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"FULFILLMENT_CONTACT_WINDOW is invalid ({exc}). Expected HH:MM-HH:MM "
+            "inside 08:00-21:00. This service refuses to start rather than guess."
+        ) from None
+
+
+_CONTACT_WINDOW: ContactWindow = _load_contact_window()
+
+
+def _now() -> datetime:
+    """The ONLY clock the quiet-hours check sees. Sep 24 2026 audit: the
+    orchestrate route used to accept `now` from the request body, letting
+    any caller evaluate quiet hours against a time of its choosing. Tests
+    monkeypatch this function instead."""
+    return datetime.now(timezone.utc)
+
+
 _dialer: SipDialerPort = _build_dialer()
 _system_of_record: SystemOfRecordPort = _build_system_of_record()
+
+# In-memory state. FastAPI runs these sync handlers in a thread pool, so
+# every read-modify-write below is under a lock (Sep 24 2026 audit: four
+# concurrent dossier updates kept one customer and silently dropped three).
 _dossiers: dict[str, CustomerDossier] = {}
+_dossiers_lock = threading.Lock()
+# task_ids this process has already handed to the dialer. Closes README
+# gap 6 for the life of the process only — lost on restart (no datastore).
+_attempted_task_ids: set[str] = set()
+_dial_lock = threading.Lock()
+# exhausted-escalation task_id -> the NO_RESOLUTION record already made
+# for it, so a retried request returns the same record (process lifetime).
+_exhausted_resolutions: dict[str, ResolutionRecord] = {}
+_exhausted_lock = threading.Lock()
+
+_MAX_BATCH = 1000
+TimezoneName = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 
 
-class CallEventsRequest(BaseModel):
-    call_events: list[CallEvent]
+class _Req(BaseModel):
+    # Unknown fields are an error, not silently ignored — this is what
+    # makes a stale client still sending `now` get a 422 instead of
+    # believing its clock override worked.
+    model_config = ConfigDict(extra="forbid")
 
 
-class AppointmentsRequest(BaseModel):
-    appointments: list[Appointment]
+class CallEventsRequest(_Req):
+    call_events: list[CallEvent] = Field(max_length=_MAX_BATCH)
+
+
+class AppointmentsRequest(_Req):
+    appointments: list[Appointment] = Field(max_length=_MAX_BATCH)
 
 
 class TasksResponse(BaseModel):
     tasks: list[FollowUpTask]
 
 
-class DossierUpdateRequest(BaseModel):
-    call_events: list[CallEvent] = []
-    appointments: list[Appointment] = []
+class DossierUpdateRequest(_Req):
+    call_events: list[CallEvent] = Field(default_factory=list, max_length=_MAX_BATCH)
+    appointments: list[Appointment] = Field(default_factory=list, max_length=_MAX_BATCH)
 
 
 class DossiersResponse(BaseModel):
     dossiers: list[CustomerDossier]
 
 
-class EscalateRequest(BaseModel):
+class EscalateRequest(_Req):
     task: FollowUpTask
 
 
-class OrchestrateRequest(BaseModel):
-    tasks: list[FollowUpTask]
-    phone_by_call_id: dict[str, str]
-    line_by_call_id: dict[str, str] = {}
-    now: datetime | None = None  # override for deterministic testing; defaults to real time
+class OrchestrateRequest(_Req):
+    tasks: list[FollowUpTask] = Field(max_length=_MAX_BATCH)
+    phone_by_call_id: dict[EntityId, PhoneE164] = Field(max_length=_MAX_BATCH)
+    line_by_call_id: dict[EntityId, EntityId] = Field(default_factory=dict, max_length=_MAX_BATCH)
+    # Recipient IANA time zone per call (e.g. "America/Chicago"). A call
+    # with no entry here is not dialed — fail closed, see contact_window.py.
+    timezone_by_call_id: dict[EntityId, TimezoneName] = Field(default_factory=dict, max_length=_MAX_BATCH)
 
 
-class TerminalEventIn(BaseModel):
-    entity_type: str
-    entity_id: str
-    customer_id: str | None = None
-    resolution_type: str
+class TerminalEventIn(_Req):
+    entity_type: Literal["call", "appointment", "task"]
+    entity_id: TaskId
+    customer_id: EntityId | None = None
+    resolution_type: ResolutionType
 
 
-class ResolveRequest(BaseModel):
-    events: list[TerminalEventIn]
+class ResolveRequest(_Req):
+    events: list[TerminalEventIn] = Field(max_length=_MAX_BATCH)
 
 
 class ResolveResponse(BaseModel):
@@ -241,7 +318,15 @@ def detect_overdue_appointments(req: AppointmentsRequest) -> TasksResponse:
 
 @app.post("/agents/followup-sequencing/escalate", dependencies=[Depends(require_auth)])
 def escalate_task(req: EscalateRequest) -> dict:
-    result = followup_sequencing.escalate(req.task)
+    try:
+        result = followup_sequencing.escalate(req.task)
+    except ValueError:
+        # Sep 24 2026 audit: escalate() raises on a non-FAILED task by
+        # design; that was unhandled here and surfaced as a 500.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"only FAILED tasks escalate; task status is {req.task.status.value!r}",
+        ) from None
     if result is not None:
         return {"next_task": result.model_dump(), "sequence_exhausted": False, "resolution": None}
 
@@ -251,70 +336,127 @@ def escalate_task(req: EscalateRequest) -> dict:
     # is itself recorded as a resolution (NO_RESOLUTION — explicit, not
     # silence) and an attempted write-back, same as any other terminal
     # event, so it shows up wherever resolution records are reviewed.
-    from fulfillment_schema import ResolutionType
-
     exhausted = followup_sequencing.is_sequence_exhausted(req.task)
     resolution = None
     if exhausted:
-        [record] = resolution_writeback.resolve_and_writeback(
-            [
-                TerminalEvent(
-                    entity_type="task",
-                    entity_id=req.task.task_id,
-                    customer_id=req.task.customer_id,
-                    resolution_type=ResolutionType.NO_RESOLUTION,
+        # Sep 24 2026 audit: a retried request for the same exhausted task
+        # used to mint a second NO_RESOLUTION record and a second
+        # write-back. Now the first record is returned (process lifetime).
+        with _exhausted_lock:
+            record = _exhausted_resolutions.get(req.task.task_id)
+            if record is None:
+                [record] = resolution_writeback.resolve_and_writeback(
+                    [
+                        TerminalEvent(
+                            entity_type="task",
+                            entity_id=req.task.task_id,
+                            customer_id=req.task.customer_id,
+                            resolution_type=ResolutionType.NO_RESOLUTION,
+                        )
+                    ],
+                    _system_of_record,
                 )
-            ],
-            _system_of_record,
-        )
+                _exhausted_resolutions[req.task.task_id] = record
         resolution = record.model_dump()
 
     return {"next_task": None, "sequence_exhausted": exhausted, "resolution": resolution}
 
 
+def _outcome_row(o: callback_orchestration.OrchestrationOutcome) -> dict:
+    return {
+        "task_id": o.task.task_id,
+        "attempted": o.attempted,
+        "skip_reason": o.skip_reason,
+        "dial_placed": o.dial_result.placed if o.dial_result else None,
+        "sla_breached": o.sla_breached,
+        "resulting_task_status": o.task.status.value,
+    }
+
+
 @app.post("/agents/callback-orchestration/run", dependencies=[Depends(require_auth)])
 def run_callback_orchestration(req: OrchestrateRequest) -> dict:
-    outcomes = callback_orchestration.orchestrate(
-        req.tasks,
-        _dialer,
-        phone_by_call_id=req.phone_by_call_id,
-        line_by_call_id=req.line_by_call_id,
-        now=req.now,
-    )
-    return {
-        "outcomes": [
-            {
-                "task_id": o.task.task_id,
-                "attempted": o.attempted,
-                "skip_reason": o.skip_reason,
-                "dial_placed": o.dial_result.placed if o.dial_result else None,
-                "sla_breached": o.sla_breached,
-                "resulting_task_status": o.task.status.value,
-            }
-            for o in outcomes
+    # Sep 24 2026 audit: (1) the clock is the server's, never the caller's;
+    # (2) a task_id this process already handed to the dialer is never
+    # dialed again, even if the caller resubmits it still PENDING; (3) the
+    # check-then-dial is serialized so concurrent requests for the same
+    # task can't both pass the check. Serializing dials is a throughput
+    # cost accepted deliberately: correctness over speed for outbound calls.
+    with _dial_lock:
+        fresh = [t for t in req.tasks if t.task_id not in _attempted_task_ids]
+        repeats = [
+            t for t in req.tasks
+            if t.task_id in _attempted_task_ids
+            and t.channel == TaskChannel.CALL and t.status == TaskStatus.PENDING
         ]
-    }
+        outcomes = callback_orchestration.orchestrate(
+            fresh,
+            _dialer,
+            phone_by_call_id=req.phone_by_call_id,
+            line_by_call_id=req.line_by_call_id,
+            timezone_by_call_id=req.timezone_by_call_id,
+            contact_window=_CONTACT_WINDOW,
+            now=_now(),
+        )
+        for o in outcomes:
+            if o.attempted:
+                _attempted_task_ids.add(o.task.task_id)
+
+    rows = [_outcome_row(o) for o in outcomes]
+    rows += [
+        {
+            "task_id": t.task_id,
+            "attempted": False,
+            "skip_reason": "already attempted by this service — not redialed",
+            "dial_placed": None,
+            "sla_breached": False,
+            "resulting_task_status": t.status.value,
+        }
+        for t in repeats
+    ]
+    return {"outcomes": rows}
 
 
 @app.post("/agents/customer-dossier/update", response_model=DossiersResponse, dependencies=[Depends(require_auth)])
 def update_dossiers(req: DossierUpdateRequest) -> DossiersResponse:
     global _dossiers
-    _dossiers = customer_dossier.build_or_update(_dossiers, req.call_events, req.appointments)
-    return DossiersResponse(dossiers=list(_dossiers.values()))
+    with _dossiers_lock:
+        _dossiers = customer_dossier.build_or_update(_dossiers, req.call_events, req.appointments)
+        snapshot = list(_dossiers.values())
+    return DossiersResponse(dossiers=snapshot)
 
 
 @app.post("/agents/resolution-writeback/resolve", response_model=ResolveResponse, dependencies=[Depends(require_auth)])
 def resolve_and_writeback(req: ResolveRequest) -> ResolveResponse:
-    from fulfillment_schema import ResolutionType
-
     events = [
         TerminalEvent(
             entity_type=e.entity_type,
             entity_id=e.entity_id,
             customer_id=e.customer_id,
-            resolution_type=ResolutionType(e.resolution_type),
+            resolution_type=e.resolution_type,
         )
         for e in req.events
     ]
     records = resolution_writeback.resolve_and_writeback(events, _system_of_record)
     return ResolveResponse(records=records)
+
+
+# --- entrypoint --------------------------------------------------------------
+# Sep 24 2026 audit: this service had no entrypoint of its own; the README
+# told people to run `uvicorn api:app --reload --port 8091`. uvicorn's own
+# CLI default host is 127.0.0.1, so that was not an all-interfaces bind —
+# but the bind address was not the service's decision and had no env
+# override, unlike ledger-rust (LEDGER_BIND_ADDR) and orchestrator-go
+# (ORCHESTRATOR_BIND_ADDR), and `--reload` is a dev file-watcher, not a
+# way to run a service. `python3 -m api` now owns its bind: 127.0.0.1 by
+# default, FULFILLMENT_BIND_ADDR to override, FULFILLMENT_PORT (8091).
+
+def main() -> None:
+    import uvicorn
+
+    host = os.environ.get("FULFILLMENT_BIND_ADDR", "127.0.0.1")
+    port = int(os.environ.get("FULFILLMENT_PORT", "8091"))
+    uvicorn.run(app, host=host, port=port)
+
+
+if __name__ == "__main__":
+    main()
