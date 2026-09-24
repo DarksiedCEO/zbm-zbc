@@ -1,6 +1,6 @@
 # ADR 0002 — Fulfillment Department Architecture
 
-**Status:** Accepted (Sep 22, 2026); amended by the Sep 24, 2026 audit (Decisions 7–10) and fix wave 1 (Decision 11)
+**Status:** Accepted (Sep 22, 2026); amended by the Sep 24, 2026 audit (Decisions 7–10), fix wave 1 (Decisions 11–14) and fix wave 4 (Decisions 15–16)
 **Context:** Second department in the `zbm-zbc` monorepo. Built same night
 as a scoped, single-pass build (basics, not a separate intelligence-layer
 pass — see "Scope boundary" below), following the Revenue Recovery 1A
@@ -220,6 +220,55 @@ what changed architecturally, and why:
     duplicate a record. Rejected: LRU eviction of live entries (same
     reason). Forgetting a task id after 24 h is accepted: the per-number
     gate limit is the real redial protection beyond that.
+
+## Fix wave 4, Sep 24 2026 — decisions it adds
+
+15. **The gate's tracked-number cap is protected by a new-key admission
+    budget, never by relaxing the fail-closed rule.** AEGIS round 3
+    (PLAUSIBLE/low): a holder of the service token could fill the
+    100 000-key attempt history (Decision 14) with contacts to fresh
+    numbers/customers; from then on every NEW number is refused for up to
+    24 h. Refusing is correct (Decision 14) — the problem is how cheaply
+    the cap could be reached (a burst of ~50 000 contacts). Decided:
+    - *Rolling-hour budget for new keys*: at most
+      `max_new_keys_per_hour` numbers+customers not already in the history
+      may be admitted in any rolling hour, checked at `authorize()` and
+      again at `redeem()`. Default `100 000 // 24 = 4 166`, so 24 h of
+      admissions (99 984) cannot fill the cap: filling it now takes more
+      than a day of sustained real contacts that are also kept alive by
+      re-contacting, instead of a burst. Numbers already being contacted
+      are unaffected — their own limits still decide. Cost: at most ~2 083
+      new customers (number + customer key) per hour; a legitimate burst
+      above that is refused (task stays PENDING, reason says retry later),
+      which is the cap's own sustainable rate anyway.
+    - *Capacity is visible*: `OutboundContactGate.status()` — served at
+      authenticated `GET /gate/status` and as `gate` in every
+      callback-orchestration response — reports utilization,
+      `near_capacity` (≥ 80 %), `at_capacity`, and new keys used/allowed
+      this hour; the API logs a warning when near capacity or out of
+      budget. At the default budget the 80 % mark is reached no sooner
+      than ~19 h into a fill, so an alert on it gives hours of warning.
+    - *Rejected*: evicting live history or allowing contact without a
+      record at the cap (re-opens the per-number limit — never); counting
+      only numbers from "known call events" (the service stores no call
+      events, and the same token holder can submit call events, so
+      "known" would be attacker-controlled and protect nothing); a
+      per-request cap on new numbers (defeated by sending more requests —
+      the time budget bounds the total regardless of request count).
+    - Not solved: a token holder can still make the service contact real
+      numbers — that is the token's authority; this decision bounds the
+      collateral denial of service, not that.
+16. **Request bodies are bounded, and parsed off the event loop.** No
+    route had a body limit, and FastAPI read, json-decoded and validated
+    every body on the event loop before the (thread-pool) handler ran: a
+    64 MiB body stalled `/health` for 2.9–3.3 s for every client. Now: a
+    4 MiB limit (413 from `Content-Length` before any body byte is read,
+    and while streaming for chunked bodies), sized so the worst-case
+    1000-item batch of every route fits (largest: orchestrate, 3.57 MB
+    with every field at its maximum); each route awaits only the body
+    bytes and does parse + validate + agent work + response rendering in
+    one thread-pool call; `/health` is a coroutine. Auth now runs before
+    the body is parsed.
 
 Still open after the audit (not decided here): an approval gate for a
 future real dialer/CRM adapter; idempotency keys for

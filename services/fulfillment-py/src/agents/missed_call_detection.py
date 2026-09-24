@@ -24,6 +24,7 @@ reports dial_result.placed=False for that), not this agent's.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta, timezone
 
 from fulfillment_schema import CallDirection, CallEvent, FollowUpTask, TaskChannel, TaskPurpose
@@ -56,10 +57,16 @@ def detect(call_events: list[CallEvent], *, now: datetime | None = None) -> list
         unique.setdefault(ev.call_id, ev)
     call_events = list(unique.values())
 
-    # Group by phone number so repeat-miss urgency can be computed.
-    by_number: dict[str, list[CallEvent]] = {}
+    # Repeat-miss urgency: per number, the sorted start times of its inbound
+    # unresolved calls. Fix wave 4: this used to rescan every sibling for
+    # every event — quadratic, 3.47 s of CPU for a 1000-call batch from one
+    # number. Now two binary searches per event.
+    miss_times: dict[str, list[datetime]] = {}
     for ev in call_events:
-        by_number.setdefault(ev.phone_number, []).append(ev)
+        if ev.direction == CallDirection.INBOUND and ev.is_unresolved:
+            miss_times.setdefault(ev.phone_number, []).append(ev.started_at)
+    for times in miss_times.values():
+        times.sort()
 
     for ev in call_events:
         if ev.direction != CallDirection.INBOUND:
@@ -67,15 +74,12 @@ def detect(call_events: list[CallEvent], *, now: datetime | None = None) -> list
         if not ev.is_unresolved:
             continue
 
-        siblings = by_number[ev.phone_number]
-        prior_misses = sum(
-            1
-            for s in siblings
-            if s.direction == CallDirection.INBOUND
-            and s.is_unresolved
-            and s.call_id != ev.call_id
-            and s.started_at <= ev.started_at
-            and (ev.started_at - s.started_at) <= _REPEAT_LOOKBACK
+        # Other inbound unresolved calls from this number with
+        # ev.started_at - 24h <= started_at <= ev.started_at (call_ids are
+        # unique here, so "- 1" removes exactly this event itself).
+        times = miss_times[ev.phone_number]
+        prior_misses = (
+            bisect_right(times, ev.started_at) - bisect_left(times, ev.started_at - _REPEAT_LOOKBACK) - 1
         )
         window = _TIGHTENED_CALLBACK_WINDOW if prior_misses > 0 else _BASE_CALLBACK_WINDOW
 
