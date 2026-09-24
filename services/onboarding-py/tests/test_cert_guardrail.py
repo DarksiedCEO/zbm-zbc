@@ -8,12 +8,13 @@ Independent review (certification type 4) happens outside this workstream.
 
 import json
 from dataclasses import replace
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
 
 from config import ConfigError, OnboardingConfig, load_config
-from conftest import ANDRE_KEY, GOOD_GRANT, Clock, client_for, finding, make_service, start_body
+from conftest import ANDRE_KEY, GOOD_GRANT, Clock, andre_resolve_body, client_for, finding, make_service, start_body
 from guardrails import OutboundBlocked, check_outbound
 from integrations.departments import NotBuiltComplianceDepartment
 from integrations.vault import RefusingVault, VaultRefused
@@ -65,7 +66,8 @@ def _ready_client(svc, c):
     _ok(c.post("/onboarding/clients/client_a/audit", json={"account_data": {"orders": [{"order_id": "o1"}]}}))
     _ok(c.post("/onboarding/clients/client_a/plan", json={"client_priorities": ["abandoned_carts"]}))
     esc = svc.clients["client_a"].escalation_ids[0]
-    _ok(c.post(f"/onboarding/clients/client_a/escalations/{esc}/resolve", json={"resolution": "ok", "snag_category": "deal_review"}))
+    _ok(c.post(f"/onboarding/clients/client_a/escalations/{esc}/resolve",
+               json=andre_resolve_body("client_a", esc, "ok", "deal_review")))
 
 
 def test_gate_14_fails_alone_blocks_activation():
@@ -132,7 +134,7 @@ def test_unconfigured_ledger_refuses_everything_that_needs_a_record():
     c = client_for(svc)
     r = c.post("/onboarding/clients", json=start_body())
     assert r.status_code == 503 and "not configured" in r.json()["detail"]
-    r = c.post("/zbc/creators/applications", json={"creator_id": "c1", "legal_name": "A B", "applied_on": "2026-09-24",
+    r = c.post("/zbc/creators/applications", json={"creator_id": "c1", "legal_name": "A B",
                                                    "follower_count": 1, "avg_engagement_rate": 0.1})
     assert r.status_code == 503 and svc.creators == {}
 
@@ -224,7 +226,7 @@ def test_first_message_discloses_ai_and_offers_a_human_in_every_lane():
         m = _ok(c.post("/onboarding/clients", json=body), 201)["first_message"]
         assert "I'm an AI, not a person" in m and "talk to a human" in m and "Andre" in m
     a = _ok(c.post("/zbc/creators/applications", json={"creator_id": "c1", "legal_name": "Al B", "date_of_birth": "1990-01-01",
-                                                       "applied_on": "2026-09-24", "follower_count": 1, "avg_engagement_rate": 0.1}), 201)
+                                                       "follower_count": 1, "avg_engagement_rate": 0.1}), 201)
     assert "I'm an AI, not a person" in a["first_message"] and "Andre" in a["first_message"]
 
 
@@ -361,9 +363,10 @@ def test_institutional_memory_strips_identifiers():
     c = client_for(svc)
     _ok(c.post("/onboarding/clients", json=start_body(business_name="Zanzibar Marmalade Works")), 201)
     esc = svc.clients["client_a"].escalation_ids[0]
-    _ok(c.post(f"/onboarding/clients/client_a/escalations/{esc}/resolve", json={
-        "resolution": "Called Dana at dana@acme.example / +1 (415) 555-0100 about Zanzibar Marmalade Works, site zanzibar.com, order 1234567",
-        "snag_category": "deal_review"}))
+    _ok(c.post(f"/onboarding/clients/client_a/escalations/{esc}/resolve", json=andre_resolve_body(
+        "client_a", esc,
+        "Called Dana at dana@acme.example / +1 (415) 555-0100 about Zanzibar Marmalade Works, site zanzibar.com, order 1234567",
+        "deal_review")))
     pats = _ok(c.get("/learning/proposals"))["institutional_patterns"]
     blob = json.dumps(pats)
     for ident in ["Dana", "dana@acme.example", "555-0100", "Zanzibar", "zanzibar.com", "1234567", "client_a"]:
@@ -405,7 +408,7 @@ def test_learning_loop_proposals_never_change_the_playbook():
 
 
 def _app(**over):
-    base = {"creator_id": "clip_1", "legal_name": "Pat Young", "date_of_birth": "2008-09-25", "applied_on": "2026-09-24",
+    base = {"creator_id": "clip_1", "legal_name": "Pat Young", "date_of_birth": "2008-09-25",
             "follower_count": 20000, "avg_engagement_rate": 0.05, "fake_follower_ratio": 0.02, "content_history_posts": 120,
             "network_fit_tags": ["beauty"], "w9_received": True, "creator_agreement_signed": True, "disclosure_training_completed": True}
     base.update(over)
@@ -443,7 +446,7 @@ def test_w9_required_before_payout_activation():
     assert r["activation"]["activated"] is False
     assert "compliance_15/w9_on_file_p8: W-9 not on file (P8): required before payout activation" in r["activation"]["unmet"]
     assert svc.depts.payouts.activated == []
-    assert c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "50.00", "paid_on": "2026-09-24"}).status_code == 409
+    assert c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "50.00"}).status_code == 409
     _ok(c.post("/zbc/creators/clip_1/w9", json={"received": True}))
     act = _ok(c.post("/zbc/creators/clip_1/activate"))
     assert act["activated"] is True and svc.depts.payouts.activated == ["clip_1"]
@@ -462,15 +465,24 @@ def test_creator_activation_blocked_by_honest_stand_ins():
 
 
 def test_1099_threshold_is_configuration():
-    svc = make_service(all_fakes=True)
+    # The tax year is the SERVER's business date (America/Los_Angeles); a
+    # caller cannot date a payment (fix wave 1, F1 sweep: ``paid_on`` removed).
+    clock = Clock(datetime(2026, 3, 1, 17, 0, tzinfo=timezone.utc))
+    svc = make_service(all_fakes=True, clock=clock)
     c = client_for(svc)
     _ok(c.post("/zbc/creators/applications", json=_app(date_of_birth="2000-01-01")), 201)
-    r1 = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "1999.99", "paid_on": "2026-03-01"}))
-    assert r1["threshold_usd"] == "2000.00" and r1["form_1099_required"] is False
-    r2 = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "0.01", "paid_on": "2026-04-01"}))
+    r1 = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "1999.99"}))
+    assert r1["year"] == 2026 and r1["threshold_usd"] == "2000.00" and r1["form_1099_required"] is False
+    clock.advance(days=31)
+    r2 = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "0.01"}))
     assert r2["paid_to_date_usd"] == "2000.00" and r2["form_1099_required"] is True
-    r3 = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "5.00", "paid_on": "2027-01-02"}))
-    assert r3["threshold_usd"] is None and r3["form_1099_required"] is True and "accountant" in r3["detail"]
+    clock.t = datetime(2027, 1, 2, 17, 0, tzinfo=timezone.utc)
+    r3 = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "5.00"}))
+    assert r3["year"] == 2027 and r3["threshold_usd"] is None and r3["form_1099_required"] is True and "accountant" in r3["detail"]
+    # 07:30 UTC on Jan 1 is still Dec 31 in Los Angeles: the 2026 tax year.
+    clock.t = datetime(2027, 1, 1, 7, 30, tzinfo=timezone.utc)
+    assert _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "1.00"}))["year"] == 2026
+    assert c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "1.00", "paid_on": "2025-12-31"}).status_code == 422
     cfg = load_config({"ONBOARDING_1099_THRESHOLDS": '{"2026": "2000.00", "2027": "2100.00"}'})
     assert cfg.threshold_1099(2027) == Decimal("2100.00")
 
@@ -592,9 +604,16 @@ def test_unlabeled_or_malformed_findings_are_rejected_not_shown():
     bad["recoverable_value"].pop("confidence")
     nan = finding("fn", "discount_misuse", "NaN")
     neg = finding("fneg", "discount_misuse", "-5.00")
-    svc = make_service(all_fakes=True, findings=[bad, nan, neg, finding("fok", "discount_misuse", 49.99)])
+    # Money from another service must be the canonical contract string
+    # (fix wave 1, F14): a legacy JSON number, a non-canonical string and a
+    # third decimal are all rejected, never converted or rounded.
+    legacy_float = finding("ffloat", "discount_misuse", 49.99)
+    third_decimal = finding("f3dp", "discount_misuse", "12.345")
+    svc = make_service(all_fakes=True, findings=[bad, nan, neg, legacy_float, third_decimal,
+                                                 finding("fok", "discount_misuse", "49.99")])
     c = client_for(svc)
     _ok(c.post("/onboarding/clients", json=start_body()), 201)
     a = _ok(c.post("/onboarding/clients/client_a/audit", json={"account_data": {"orders": [{"order_id": "o1"}]}}))
-    assert sorted(a["rejected_findings"]) == ["fn", "fneg", "fx"]
-    assert a["findings"][0]["recoverable_value"]["amount_usd"] == "49.99"  # legacy float -> exact via str()
+    assert sorted(a["rejected_findings"]) == ["f3dp", "ffloat", "fn", "fneg", "fx"]
+    assert [f["finding_id"] for f in a["findings"]] == ["fok"]
+    assert a["findings"][0]["recoverable_value"]["amount_usd"] == "49.99"

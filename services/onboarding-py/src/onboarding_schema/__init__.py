@@ -24,13 +24,13 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from enum import Enum
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, ClassVar, Optional
 
 from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from redaction import contains_credential, scrub_obj
+from redaction import contains_credential, refuse_credentials, scrub_obj
 
-from .money import Money, PositiveMoney, money_str, to_money  # noqa: F401
+from .money import Money, PositiveMoney, PositiveWireMoney, WireMoney, money_str, parse_wire_money, to_money  # noqa: F401
 
 
 def _not_credential_like(v: str) -> str:
@@ -55,18 +55,28 @@ class Inbound(BaseModel):
 
     - Unknown fields are rejected (so ``password`` / ``access_token`` cannot
       be smuggled in; the API's 422 handler never echoes the input).
-    - Every string in the incoming data is passed through
-      ``redaction.scrub_obj`` BEFORE validation, so a credential pasted into
-      free text is replaced by ``[REDACTED]`` before it can be stored,
-      echoed, logged or hashed (ingest-time redaction, defense in depth).
+    - A credential-shaped string anywhere in the incoming data is REFUSED
+      (422 with ``redaction.CREDENTIAL_REFUSAL``, telling the client never to
+      send credentials) instead of being stored and scrubbed later
+      (fix wave 1, F10). Fields listed in ``SCRUB_ONLY_FIELDS`` carry
+      third-party content the client did not type (a public web page, raw
+      account-pull rows); they are scrubbed, not refused.
+    - Every string is then still passed through ``redaction.scrub_obj``
+      (second layer).
     """
 
     model_config = ConfigDict(extra="forbid")
+    SCRUB_ONLY_FIELDS: ClassVar[frozenset[str]] = frozenset()
 
     @model_validator(mode="before")
     @classmethod
-    def _scrub_credentials_at_ingest(cls, data: Any) -> Any:
-        return scrub_obj(data) if isinstance(data, dict) else data
+    def _refuse_credentials_at_ingest(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        for k, v in data.items():
+            if k not in cls.SCRUB_ONLY_FIELDS:
+                refuse_credentials(v)
+        return scrub_obj(data)
 
 
 class Outbound(BaseModel):
@@ -247,6 +257,14 @@ class PermissionReceipt(Outbound):
 # ---------------------------------------------------------------------------
 
 
+class ConsumedLabeledValue(LabeledValue):
+    """A labeled value as it arrives from Revenue Recovery: the amount must
+    be the canonical contract string (section 1), never rounded, never a
+    JSON number, never an exponent (fix wave 1, F14)."""
+
+    amount_usd: PositiveWireMoney
+
+
 class ConsumedFinding(BaseModel):
     """A detection-py Finding as Onboarding consumes it. ``extra`` ignored
     so detection-py can add fields without breaking Onboarding."""
@@ -261,7 +279,7 @@ class ConsumedFinding(BaseModel):
     customer_id: str
     cause_certainty: str  # "named" | "uncertain"
     cause_description: str
-    recoverable_value: Optional[LabeledValue] = None
+    recoverable_value: Optional[ConsumedLabeledValue] = None
     detected_at: Optional[datetime] = None
     double_count_risk: bool = False
 
@@ -445,7 +463,9 @@ class ClipperApplication(Inbound):
     creator_id: SubjectId
     legal_name: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     date_of_birth: Optional[date] = None
-    applied_on: date
+    # There is deliberately NO application-date field: age is computed
+    # against the SERVER's clock (fix wave 1, F1). A request that carries
+    # ``applied_on`` (or any other unknown field) is rejected with 422.
     time_zone: Annotated[str, StringConstraints(min_length=1, max_length=64)] = "America/Los_Angeles"
     platforms: list[Annotated[str, StringConstraints(max_length=64)]] = Field(default_factory=list)
     follower_count: int = Field(ge=0)

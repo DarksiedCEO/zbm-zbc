@@ -109,6 +109,15 @@ def make_service(*, all_fakes=False, config=None, findings=None, ledger=None, cl
     )
 
 
+def andre_resolve_body(client_id, escalation_id, resolution, snag_category):
+    """A resolve body carrying Andre's approval token for exactly this action
+    (the shared service token alone is refused — fix wave 1, F4)."""
+    from memory import andre_action_token
+
+    return {"resolution": resolution, "snag_category": snag_category,
+            "approval_token": andre_action_token(ANDRE_KEY, "escalation_resolve", client_id, escalation_id, resolution, snag_category)}
+
+
 def client_for(service) -> TestClient:
     from api import create_app
 

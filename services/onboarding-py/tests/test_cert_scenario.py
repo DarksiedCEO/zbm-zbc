@@ -12,7 +12,7 @@ workstream; passing these tests does not certify any intelligence for real
 clients.
 """
 
-from conftest import GOOD_GRANT, Clock, client_for, make_service, start_body
+from conftest import GOOD_GRANT, Clock, andre_resolve_body, client_for, make_service, start_body
 
 SHOPIFY_META_HTML = """
 <html><head>
@@ -72,8 +72,13 @@ def test_full_client_lane_flow_activates_only_when_everything_is_met():
         "compliance_15/no_unacknowledged_hard_escalation: a hard escalation is open and not yet resolved by Andre"
     ]
 
+    # Resolving is Andre's decision: the shared service token alone is refused
+    # (fix wave 1, F4); his approval token for exactly this action is required.
+    shared_only = c.post(f"/onboarding/clients/client_a/escalations/{deal_esc['escalation_id']}/resolve",
+                         json={"resolution": "Andre approved the deal as scoped", "snag_category": "deal_review"})
+    assert shared_only.status_code == 403
     _ok(c.post(f"/onboarding/clients/client_a/escalations/{deal_esc['escalation_id']}/resolve",
-               json={"resolution": "Andre approved the deal as scoped", "snag_category": "deal_review"}))
+               json=andre_resolve_body("client_a", deal_esc["escalation_id"], "Andre approved the deal as scoped", "deal_review")))
     act = _ok(c.post("/onboarding/clients/client_a/activate"))
     assert act["activated"] is True and act["unmet"] == []
     assert act["handoff"]["accepted"] is True
@@ -128,7 +133,7 @@ def test_scenario_stale_account_and_insufficient_role_get_exact_fixes():
 def test_scenario_clipper_with_bought_followers_is_declined():
     svc = make_service(all_fakes=True)
     c = client_for(svc)
-    app = {"creator_id": "clip_1", "legal_name": "Sam Clipper", "date_of_birth": "1998-05-01", "applied_on": "2026-09-24",
+    app = {"creator_id": "clip_1", "legal_name": "Sam Clipper", "date_of_birth": "1998-05-01",
            "follower_count": 250000, "avg_engagement_rate": 0.002, "follower_growth_30d_ratio": 3.0,
            "fake_follower_ratio": 0.45, "content_history_posts": 300, "network_fit_tags": ["gaming"],
            "w9_received": True, "creator_agreement_signed": True, "disclosure_training_completed": True}
@@ -165,7 +170,7 @@ def test_scenario_stated_numbers_disagree_one_attempt_then_escalate():
 def test_zbc_creator_lane_instant_activation_on_approval():
     svc = make_service(all_fakes=True)
     c = client_for(svc)
-    app = {"creator_id": "clip_ok", "legal_name": "Ria Good", "date_of_birth": "2000-01-01", "applied_on": "2026-09-24",
+    app = {"creator_id": "clip_ok", "legal_name": "Ria Good", "date_of_birth": "2000-01-01",
            "follower_count": 20000, "avg_engagement_rate": 0.05, "fake_follower_ratio": 0.02, "content_history_posts": 120,
            "network_fit_tags": ["beauty"], "w9_received": True, "creator_agreement_signed": True,
            "disclosure_training_completed": True}

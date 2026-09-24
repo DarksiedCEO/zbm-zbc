@@ -42,10 +42,10 @@ from guardrails import OutboundBlocked
 from integrations.departments import Departments, InMemoryContractStorage
 from integrations.revenue_recovery import HttpRevenueRecoveryClient, NotConfiguredRevenueRecovery
 from intelligences import registry
-from ledger import HttpLedgerClient, LedgerWriteError, UnconfiguredLedgerClient
+from ledger import HttpLedgerClient, LedgerWriteAfterEffects, LedgerWriteError, UnconfiguredLedgerClient
 from onboarding_schema import AccessGrantIn, ClipperApplication
 from onboarding_schema import requests as rq
-from redaction import install_log_scrubbing, scrub
+from redaction import install_log_scrubbing, scrub, scrub_obj
 from service import OnboardingError, OnboardingService
 
 install_log_scrubbing()
@@ -87,6 +87,23 @@ def make_require_auth(required_token: str) -> Callable:
     return require_auth
 
 
+class _ScrubbedResponses:
+    """Wraps the service so every public method's result is scrubbed."""
+
+    def __init__(self, service: OnboardingService):
+        self._svc = service
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._svc, name)
+        if not callable(attr) or name.startswith("_"):
+            return attr
+
+        def call(*a, **kw):
+            return scrub_obj(attr(*a, **kw))
+
+        return call
+
+
 def build_service_from_env(env: dict | None = None) -> OnboardingService:
     env = dict(os.environ) if env is None else env
     config = load_config(env)
@@ -125,8 +142,10 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
         openapi_url=None,
     )
     auth = [Depends(make_require_auth(required_token))]
-    svc = service
-    app.state.service = svc
+    app.state.service = service
+    # Output-side scrub (third credential layer, F10): every route's return
+    # value passes through scrub_obj on its way out.
+    svc = _ScrubbedResponses(service)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError):
@@ -134,7 +153,21 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
 
     @app.exception_handler(OnboardingError)
     async def _onboarding(_: Request, exc: OnboardingError):
-        return JSONResponse(status_code=exc.status_code, content={"detail": scrub(exc.detail), **exc.body})
+        return JSONResponse(status_code=exc.status_code, content=scrub_obj({"detail": exc.detail, **exc.body}))
+
+    @app.exception_handler(LedgerWriteAfterEffects)
+    async def _ledger_after_effects(_: Request, exc: LedgerWriteAfterEffects):
+        # Honest partial result: outside effects already happened (each was
+        # recorded before it was made); the record of a later step failed,
+        # so nothing further happened. Never "did not proceed".
+        log.error("ledger write failed after outside effects %s; stopped", exc.effects)
+        return JSONResponse(status_code=503, content={
+            "detail": (f"evidence ledger write failed ({scrub(str(exc))}) after these outside effects had already "
+                       f"happened: {', '.join(exc.effects)}; nothing further was done"),
+            "proceeded": True,
+            "completed": False,
+            "outside_effects_done": list(exc.effects),
+        })
 
     @app.exception_handler(LedgerWriteError)
     async def _ledger(_: Request, exc: LedgerWriteError):
@@ -249,8 +282,10 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
         return svc.issue_outcome(client_id, issue_id, req)
 
     @app.post("/onboarding/clients/{client_id}/escalations/{escalation_id}/acknowledge", dependencies=auth)
-    def ack(client_id: str, escalation_id: str) -> dict:
-        return svc.acknowledge_escalation(client_id, escalation_id)
+    def ack(client_id: str, escalation_id: str, req: rq.EscalationAckRequest | None = None) -> dict:
+        # Andre-only: needs his approval token in the body; the shared
+        # service token alone is 403 (F4).
+        return svc.acknowledge_escalation(client_id, escalation_id, req)
 
     @app.post("/onboarding/clients/{client_id}/escalations/{escalation_id}/resolve", dependencies=auth)
     def resolve(client_id: str, escalation_id: str, req: rq.EscalationResolveRequest) -> dict:

@@ -195,8 +195,11 @@ def test_i10_briefing_decision_table_is_fixed_per_trigger_and_summary_capped():
 # --- 11 Creator Vetting -------------------------------------------------------------------------
 
 
+TODAY = date(2026, 9, 24)
+
+
 def _app(**kw):
-    base = dict(creator_id="c1", legal_name="A B", date_of_birth=date(2000, 1, 1), applied_on=date(2026, 9, 24),
+    base = dict(creator_id="c1", legal_name="A B", date_of_birth=date(2000, 1, 1),
                 follower_count=10000, avg_engagement_rate=0.05, fake_follower_ratio=0.02, content_history_posts=50,
                 network_fit_tags=["x"])
     base.update(kw)
@@ -206,19 +209,20 @@ def _app(**kw):
 def test_i11_age_math_including_leap_day():
     assert i11.age_on(date(2008, 2, 29), date(2026, 2, 28)) == 17
     assert i11.age_on(date(2008, 2, 29), date(2026, 3, 1)) == 18
-    assert i11.vet(_app(date_of_birth=date(2008, 2, 29), applied_on=date(2026, 2, 28))).outcome.value == "decline"
+    assert i11.vet(_app(date_of_birth=date(2008, 2, 29)), date(2026, 2, 28)).outcome.value == "decline"
+    assert i11.vet(_app(date_of_birth=date(2008, 2, 29)), date(2026, 3, 1)).outcome.value == "approve"
 
 
 def test_i11_outcomes():
-    assert i11.vet(_app()).outcome.value == "approve"
-    assert i11.vet(_app(fake_follower_ratio=None)).outcome.value == "send_to_andre"
-    assert i11.vet(_app(fake_follower_ratio=0.2)).outcome.value == "send_to_andre"
-    assert i11.vet(_app(engagement_pod_signal=0.8)).outcome.value == "decline"
-    assert i11.vet(_app(brand_safety_flags=["hate_speech"])).outcome.value == "decline"
-    assert i11.vet(_app(brand_safety_flags=["profanity"])).outcome.value == "send_to_andre"
-    assert i11.vet(_app(follower_growth_30d_ratio=2.0, avg_engagement_rate=0.001)).outcome.value == "send_to_andre"
+    assert i11.vet(_app(), TODAY).outcome.value == "approve"
+    assert i11.vet(_app(fake_follower_ratio=None), TODAY).outcome.value == "send_to_andre"
+    assert i11.vet(_app(fake_follower_ratio=0.2), TODAY).outcome.value == "send_to_andre"
+    assert i11.vet(_app(engagement_pod_signal=0.8), TODAY).outcome.value == "decline"
+    assert i11.vet(_app(brand_safety_flags=["hate_speech"]), TODAY).outcome.value == "decline"
+    assert i11.vet(_app(brand_safety_flags=["profanity"]), TODAY).outcome.value == "send_to_andre"
+    assert i11.vet(_app(follower_growth_30d_ratio=2.0, avg_engagement_rate=0.001), TODAY).outcome.value == "send_to_andre"
     # decline outranks everything, including a missing date of birth
-    assert i11.vet(_app(date_of_birth=None, fake_follower_ratio=0.9)).outcome.value == "decline"
+    assert i11.vet(_app(date_of_birth=None, fake_follower_ratio=0.9), TODAY).outcome.value == "decline"
 
 
 # --- 12 Brand Campaign ------------------------------------------------------------------------------

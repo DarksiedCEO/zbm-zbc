@@ -246,15 +246,20 @@ spec, with 15 deterministic single-task intelligences (no model calls).
 Architecture: `docs/adr/0004-onboarding-department-architecture.md`. Details
 and routes: `services/onboarding-py/README.md`.
 
-- **Status:** built and tested (151 tests, `python3 -m pytest -q`). **Not
+- **Status:** built and tested (264 tests, `python3 -m pytest -q`). **Not
   certified for any real client, clipper or brand.** Scenario, attack and
-  guardrail tests exist; independent review has not happened.
+  guardrail tests exist. The AEGIS review findings were fixed in fix wave 1
+  (Sep 24); see ADR 0004.
 - **Fails closed.**
   - Activation needs both the Contract (14) and Compliance (15) gates, and a
     blocked activation returns the exact unmet list.
-  - Every crossing and gate ruling is written to the ledger (`POST
-    /ledger/events`, department `onboarding`) first. If the write fails, the
-    action doesn't happen and the API says so (503).
+  - Every decision is written to the ledger (`POST /ledger/events`, department
+    `onboarding`) before any outside effect, such as a payout or handoff. If the
+    write fails, the action doesn't happen and the API says so (503). If it
+    fails after an effect, the API names the effect. Retries are idempotent.
+  - Only the server's clock decides. Clipper 18+ is checked on the server's
+    date at UTC−12. Credentials are refused at intake. Escalation decisions
+    need Andre's own key.
   - Compliance 38, the vault, platform APIs, push to Andre and contract
     storage are stand-ins that answer "not allowed yet" / "not wired".
 - **Reuses Revenue Recovery** over HTTP (detection-py's real routes). It never

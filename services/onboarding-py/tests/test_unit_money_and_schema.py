@@ -14,13 +14,18 @@ class M(BaseModel):
     p: PositiveMoney = Decimal("1.00")
 
 
-@pytest.mark.parametrize("inp,out", [("12.3", "12.30"), (12, "12.00"), (49.99, "49.99"), (Decimal("0.005"), "0.01"),
-                                     ("0.004", "0.00"), ("1.005", "1.01"), (0.1 + 0.2, "0.30")])
-def test_money_quantizes_half_up_and_serializes_as_two_decimal_string(inp, out):
+@pytest.mark.parametrize("inp,out", [("12.3", "12.30"), (12, "12.00"), (49.99, "49.99"), (Decimal("0.5"), "0.50"),
+                                     ("0.00", "0.00"), ("1.01", "1.01"), (12.0, "12.00")])
+def test_money_is_exact_and_serializes_as_two_decimal_string(inp, out):
     assert M(m=inp).model_dump(mode="json")["m"] == out
 
 
-@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-1.00", "1e3", "abc", True, None, float("nan"), float("inf")])
+# Fix wave 1 (F14/F15): inputs that would need ROUNDING are rejected, never
+# silently quantized (this test previously asserted 0.005 -> 0.01, 0.004 ->
+# 0.00, 1.005 -> 1.01 and 0.1 + 0.2 -> 0.30).
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-1.00", "1e3", "abc", True, None, float("nan"), float("inf"),
+                                 Decimal("0.005"), "0.004", "1.005", 0.1 + 0.2, " 12.30", "012.30", "9" * 40,
+                                 Decimal("1E+30"), 10**30])
 def test_money_rejects_bad_input(bad):
     with pytest.raises(ValidationError):
         M(m=bad)

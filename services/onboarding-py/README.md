@@ -40,17 +40,43 @@ status says it is not certified.
 - **Activation needs both gates (14 and 15).** A blocked activation returns
   409 with the exact unmet list. No handoff or payout crossing happens until
   both pass. See `test_cert_guardrail.py::test_activation_*` and `test_gate_1[45]_fails_alone*`.
-- **Every crossing and gate ruling is written to the ledger first.** If the
-  write fails, the action stops and state is unchanged. The API returns 503
-  `{"proceeded": false}`. See `test_ledger_*`.
-- **No credential appears in any output.** No model has a secret field.
-  Inbound models reject unknown fields and scrub every string at ingest.
-  Credential-looking IDs are refused. 422 bodies don't echo input. Unhandled
-  errors log only the exception type. Every log record is scrubbed. The vault
-  stand-in refuses to store. The credentials route never reads its body.
-  Proven by a spray of 150+ requests (`test_credential_spray_never_leaks_anywhere`),
-  which was mutation-checked: disabling either ingest scrubbing or the 422
-  sanitizer makes it fail.
+- **Record first, then act.** The record of every decision is written to the
+  ledger before any outside effect: payout, handoff, contract storage, push to
+  Andre, or data sent to Revenue Recovery. For example, `activation_ruling` is
+  recorded before the payout or handoff.
+  - If a record fails before any effect, nothing happens. The API returns 503
+    `{"proceeded": false}`.
+  - If a result record fails after an effect, nothing further happens. The API
+    returns 503 `{"proceeded": true, "completed": false, "outside_effects_done": [...]}`.
+  - Bus publishes and memory writes happen only when the operation completes.
+  - Event ids are deterministic, so a retry after a lost ledger response records
+    nothing twice.
+  - See `test_fix_wave1.py::test_f9_*`: every write position of 21 call sites is
+    failed in turn. See also `test_f2_*`, `test_f11_*` and `test_ledger_*`.
+- **No credential appears in any output.**
+  - No model has a secret field, and inbound models reject unknown fields.
+  - Every inbound string is normalized, then refused (422, "never send
+    credentials") if it is credential-shaped.
+    - Normalization: NFKC, zero-width characters removed, spaced letters
+      collapsed, casefolded.
+    - Keywords are multilingual.
+    - Credential-shaped means: a password, PIN or OTP after its label, a
+      `user / secret` pair, a password-like token next to a login word, a
+      Luhn-valid card number, or a key or token shape.
+  - Every response, error body, log record, ledger payload and memory write is
+    also scrubbed.
+  - Credential-looking IDs are refused, and 422 bodies don't echo input.
+  - Unhandled errors log only the exception type. The vault stand-in refuses to
+    store, and the credentials route never reads its body.
+  - Proven by `test_credential_spray_never_leaks_anywhere`, a spray of 1,000+
+    requests that includes every AEGIS miss. The extended spray fails on the
+    pre-fix code.
+- **Only Andre can make Andre's decisions.**
+  - Acknowledging or resolving an escalation needs his approval token
+    (`approval_token`: HMAC-SHA256 keyed by `ONBOARDING_ANDRE_APPROVAL_KEY` over
+    the exact action; see `memory.andre_action_token`).
+  - The shared service token alone gets 403, and so does a token for another
+    escalation, action or text. The same mechanism covers playbook changes.
 - **Guarantee filter on all outbound text** (`guardrails.check_outbound`).
   It blocks guarantees, `100%`, and unlabeled dollar figures ($-figures
   without the LabeledValue suffix, or "N dollars"/"USD N").
@@ -70,9 +96,21 @@ status says it is not certified.
     score of 6 or below.
   - The briefing is pushed before Andre engages. If the push isn't
     delivered, the client gets no promised time.
-- **Time.** All time comes from the service clock. No request can set "now".
-  The tests cover exactly noon, spring-forward and fall-back, and quiet hours
-  in the client's time zone.
+- **Time.** All time comes from the service clock. No request can set "now",
+  or any date a decision is evaluated against.
+  - There is no `applied_on` and no `paid_on`; sending either is a 422.
+  - Clipper age is computed on the server's date at UTC−12, the most
+    conservative date anywhere on Earth.
+  - The contract term and the 1099 tax year use the server's America/Los_Angeles
+    date.
+  - A future `observed_at`, `account_last_activity_at` or `signed_at` is a 422.
+  - The tests cover exactly noon, spring-forward and fall-back, and quiet hours
+    in the client's time zone.
+- **Money is never rounded on the way in.**
+  - Revenue Recovery amounts must be canonical two-decimal strings; any other
+    form rejects the finding.
+  - Request money with more than two decimals, whitespace or leading zeros is a
+    422, and so is anything above 999,999,999,999.99.
 - **Other rules.**
   - Momentum never picks an unproven win.
   - The recommend score is asked only after the first real win.
@@ -107,12 +145,15 @@ Optional configuration (all open items have fail-closed defaults; see `src/confi
 | `ONBOARDING_COMMITMENT_CUTOFF`, `ONBOARDING_COMMITMENT_TZ` | Noon cutoff and its time zone |
 | `ONBOARDING_1099_THRESHOLDS` | JSON map of year to threshold |
 | `ONBOARDING_P1_WORDING_COUNSEL_APPROVED`, `ONBOARDING_P23_CLAUSE_COUNSEL_APPROVED` | Counsel sign-offs |
-| `ONBOARDING_ANDRE_APPROVAL_KEY` | Playbook approval key; unset means the playbook can't change |
+| `ONBOARDING_ANDRE_APPROVAL_KEY` | Andre's approval key (playbook changes, acknowledging and resolving escalations); unset means none of them is possible |
 | `ONBOARDING_CONTRACT_STORAGE=in_memory` | Local demos only; not the decided storage |
 
-For a local live run without ledger-rust's events endpoint,
+Live runs should use the real ledger-rust (`cargo build --release` in
+`services/ledger-rust`, then `LEDGER_SERVICE_TOKEN=... LEDGER_PORT=... target/release/server`).
 `tools/fake_ledger_server.py` is a small stdlib fake of `POST /ledger/events`
-(contract section 2). It is not the real ledger.
+for quick local runs. It validates exactly like ledger-rust: C1 controls are
+control characters there too, ids are fullmatched, and it follows the same
+200/409 rules. It is not the real ledger.
 
 ## Routes
 
@@ -127,7 +168,7 @@ Every route except `/health` needs `Authorization: Bearer <token>`.
 | `POST /onboarding/clients/{id}/audit`, `/plan`, `/plan/choices` | Audit via Revenue Recovery, then the merged plan |
 | `POST /onboarding/clients/{id}/setup-plan`, `/account-changes`, `/momentum`, `/first-win`, `/recommend-score` | Setup, account changes, first win, recommend score |
 | `POST /onboarding/clients/{id}/tick` | Stuck check and Promise Keeper |
-| `POST /onboarding/clients/{id}/issues/{iid}/outcome`, `/escalations/{eid}/acknowledge`, `/escalations/{eid}/resolve` | Soft-trigger outcomes and escalations |
+| `POST /onboarding/clients/{id}/issues/{iid}/outcome`, `/escalations/{eid}/acknowledge`, `/escalations/{eid}/resolve` | Soft-trigger outcomes and escalations. Acknowledge and resolve need Andre's `approval_token` in the body; without it, 403. |
 | `GET /onboarding/escalations` | Andre's queue |
 | `GET /onboarding/clients/{id}`, `GET .../health`, `DELETE .../memory` | Client view, health score, memory deletion |
 | `POST .../exit` | P4 clean exit |
@@ -139,7 +180,7 @@ Every route except `/health` needs `Authorization: Bearer <token>`.
 ## Tests
 
 ```bash
-cd services/onboarding-py && python3 -m pytest -q     # 151 passed (Sep 24 2026)
+cd services/onboarding-py && python3 -m pytest -q     # 264 passed (fix wave 1, Sep 24 2026)
 ```
 
 Tests are organised by certification type:
@@ -149,7 +190,8 @@ Tests are organised by certification type:
 | `test_cert_scenario.py` | The three named scenarios plus full lane flows | 7 |
 | `test_cert_attack.py` | The four named attacks plus the credential spray | 8 |
 | `test_cert_guardrail.py` | Guardrails | 52 |
-| `test_unit_*.py` | Unit tests | 70 |
+| `test_fix_wave1.py` | Fix wave 1 regressions (F1, F2, F4, F9, F10, F11, F14–F16, L1), including the record-first harness | 104 |
+| `test_unit_*.py` | Unit tests | 79 |
 | `test_auth_and_entrypoint.py` | Auth, docs, real-socket bind | 14 |
 
 No test makes a network call outside loopback. The entrypoint test spawns
@@ -174,19 +216,22 @@ See ADR 0004 "Honest gaps" for the full list. The main ones:
   receipts are held from clients. There is no route to mark them verified.
 - **State is in-process memory** and is lost on restart. It's one process
   with one lock.
-- **Auth is one shared bearer token.** Any token holder can acknowledge or
-  resolve escalations. Only playbook changes are bound to Andre, through the
-  HMAC approval key.
+- **Auth is one shared bearer token**, plus Andre's HMAC approval key for the
+  actions attributed to him: playbook changes, and acknowledging or resolving
+  escalations. There's no other per-caller identity.
 - **Ledger payloads are hashed but not kept.** The ledger stores only
   `payload_sha256`, and this service doesn't persist the payload, so a hash
   can't be re-verified later. This also appears under contract items in the
   ADR.
 - **Multi-event operations aren't atomic.** A ledger failure mid-operation
-  leaves earlier events recorded without the action. That's the safe
-  direction, but it's noise. Event ids are random per attempt.
+  leaves earlier events recorded. Ids are deterministic, so a retry replays
+  them instead of duplicating them. A result record can fail after its effect;
+  the API reports exactly which effects happened.
 - **Detection is pattern-based.** Guarantee, injection and credential
-  detection are regexes: best effort for free text. The structural defences
-  above don't depend on them.
+  detection are rules over normalized text: best effort for free text.
+  - A password that is an ordinary word with no cue can't be recognised.
+  - A standalone 13–19 digit Luhn-valid number is refused as a card.
+  - The structural defences above don't depend on these rules.
 - **Several values are drafts** for Andre to tune through the playbook: the
   vetting thresholds, momentum traits, health weights, proving-campaign size
   and the P9 caption rule.
