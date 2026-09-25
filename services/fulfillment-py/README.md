@@ -361,6 +361,53 @@ few seconds").
 **Suite:** 880 passed before → 901 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20140-20159 python3 -m pytest`).
 
+## Fix wave 6, Sep 24 2026 — 422 amplification (N2) and over-cap connections (N7)
+
+Tests first, failing on the pre-fix tree, then passing:
+`tests/test_fix6_n2_422_amplification.py` (in-process and against the real
+`python3 -m api` over TCP) and `tests/test_fix6_n7_over_cap_503.py` (real
+process). ADR 0002 Decisions 19 and 20.
+
+| Finding | Before (evidence) | Now |
+|---|---|---|
+| N2 (MED, CONFIRMED): 422 amplification | The A8 handler stripped `input` but listed every error. A 868 KB body of 60 000 unknown keys against an `extra="forbid"` request model → 60 000 `extra_forbidden` errors, a **5 388 973-byte** 422, built on the event loop; a single 1 MiB unknown key echoed whole in its `loc` (1 048 743-byte 422); 1 000 empty events → 518 KB. Live (`ful_amp.py`, 20 senders × 5 × 60k-key bodies): peak RSS **821 MB**, `/health` p50 838 ms, max 2.58 s; with 3.9 MB bodies of 260k keys: 23.5 MB per 422, RSS 4.4 GB, `/health` up to 11.5 s, ten 408s. | **Bounded 422** (`src/api.py`, `_bounded_validation_body`): at most 20 errors listed (pydantic's order) plus the honest `error_count` and `truncated: true`; each `loc` ≤ 8 items of ≤ 40 chars; `type` ≤ 64, `msg` ≤ 200 chars; the serialized body is kept ≤ 8 KiB. **Not enumerated:** a request object with more than 20 unknown keys is refused with one `too_many_fields` error before any field is looked at (up to 20 unknown keys are still named — a stale client sending `now` still learns that); a map field over 1 000 entries is refused by size before its entries are validated (pydantic checked every entry of a dict first — 250 000 errors for a 4 MiB map — but a list's length first). **Off-loop, one at a time:** parsing + the 422 render happen in the worker thread; bodies are parsed one at a time (a parse holds the GIL in Rust for its whole duration — a second one adds memory and loop latency, not throughput; the agent work itself is not behind that slot) and the body is held once (bytearray), not twice. `python3 -m api` also limits glibc to one malloc arena: per-thread arenas kept tens of MB of freed parse memory. Live, same probe: 60k × 20: 422s of **139 bytes**, peak RSS 89 MB (49 MB idle), `/health` p50 56 ms, max 194 ms; 260k × 20: 140 bytes, peak 224 MB, `/health` p50 78 ms, max 424 ms, no 408; RSS settles at 93 MB. |
+| N7 (INFO): over-cap connections aborted | With 256 sockets held, a new connection was aborted with no response (curl exit 000, "connection reset"). Between 128 and 256 held sockets every new request, `/health` included, is 503. | A connection made while 256 are held is answered a minimal `503 Service Unavailable` (`Connection: close`, `Retry-After: 1`) and closed as soon as its request bytes arrive, or after 1 s if none do; it is never counted as held. The 128–256 behavior is unchanged and now stated exactly below ("Transport limits, exactly"). |
+
+**Transport limits, exactly** (values in `src/http_limits.py`):
+- fewer than 128 open connections: normal service;
+- 128 or more held sockets (and fewer than 256): uvicorn answers every
+  *new* request — `/health` included — 503 for as long as they are held.
+  Sockets that never send a head are closed after 10 s; idle keep-alives
+  5 s after their last response; unfinished bodies 35 s after their head.
+  A client that keeps sending complete requests on 128 sockets keeps the
+  service at 503 for everyone else for as long as it does;
+- a connection made while 256 are held: minimal 503, then closed (above);
+  `/health` from a fresh connection is therefore 503, not a reset, in that
+  state too.
+
+**Tests changed, and why:**
+`test_fix5_http_limits_live.py::test_connection_count_is_bounded_and_health_recovers`
+asserted a bare EOF on over-cap sockets — i.e. the abort. It now asserts
+a 503 followed by EOF within 1 s. Nothing was weakened.
+**API behavior changes:** 422 bodies carry `error_count` (and `truncated`
+when the list is cut); more than 20 unknown top-level keys is one
+`too_many_fields` error at `["body"]`; a >1 000-entry map is `too_long`
+before its entries are checked. Otherwise the documented shape is
+unchanged (`{"detail":[{"loc":[...],"type":"...","msg":"..."}],"error_count":1}`).
+**Sweep** of every other path that could echo or enumerate request
+content: 413/408/431/400/415 bodies are fixed strings; 401/409/503
+`detail`s are fixed strings or an enum value; the escalate 409 reports the
+task status enum; orchestrate skip reasons come from the gate/dialer
+(a dialer exception surfaces its type only, A4); `recipient_zones`
+messages include the claimed zone, bounded to 64 chars by `TimezoneName`;
+the only log line with request-derived content is the gate capacity dict.
+uvicorn's own access log prints the request line (path ≤ 16 KiB head) —
+1:1, not amplification. No 500 handler renders anything (FastAPI's default
+`Internal Server Error`).
+
+**Suite:** 901 passed before → 926 passed after
+(`FULFILLMENT_TEST_PORT_RANGE=20320-20339 python3 -m pytest`).
+
 ## Running it
 
 ```bash
@@ -391,8 +438,10 @@ PYTHONPATH=src python3 -m api
 #   FULFILLMENT_BODY_READ_TIMEOUT_S  default 30; may only narrow (0 < s <= 30)
 # Request bodies over 4 MiB are refused (413). Transport limits (fix wave 5,
 # src/http_limits.py): request head <= 16 KiB, complete within 10 s; idle
-# keep-alive 5 s; body complete within 30 s (408); 503 at 128 concurrent
-# connections/requests; at most 256 open sockets. Run it with
+# keep-alive 5 s; body complete within 30 s (408); 503 for every new
+# request (incl. /health) while >= 128 sockets are held; a connection made
+# while 256 are held gets a minimal 503 and is closed (fix wave 6; see
+# "Transport limits, exactly"). 422 bodies are <= 8 KiB (fix wave 6). Run it with
 # `python3 -m api` — a bare `uvicorn api:app` gets none of the parser cap or
 # deadlines (only the middleware's 431/408/413). Monitor GET /gate/status
 # (authenticated): alert on near_capacity, new_key_budget_exhausted or
@@ -419,7 +468,7 @@ token 401, non-ASCII token (`café`, raw UTF-8 bytes) 401; `/docs`,
 `/redoc`, `/openapi.json` 404; orchestrate with `"now"` 422; bad
 `resolution_type` 422; naive datetime 422; escalate a PENDING task 409;
 422 body for a missing field = `{"detail":[{"loc":["body","call_events",0,"direction"],"type":"missing","msg":"Field required"}]}`
-(no phone, no transcript); orchestrate with no time zone →
+(no phone, no transcript; since fix wave 6 the body also carries `"error_count":1`); orchestrate with no time zone →
 `attempted:false`, `"recipient time zone unknown or invalid — not dialed
 (fail closed)"`. `/proc/net/tcp` LISTEN row: `0100007F:46AB` (127.0.0.1).
 Startup without the token: exit code 1, RuntimeError. Startup with

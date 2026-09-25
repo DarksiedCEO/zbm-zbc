@@ -321,6 +321,52 @@ what changed architecturally, and why:
     than 50 new customers gets the excess refused with "retry in a few
     seconds" (tasks stay PENDING); sustained, ~34 new customers per minute.
 
+## Fix wave 6, Sep 24 2026 — decisions it adds
+
+19. **Validation errors are reported bounded, never enumerated** (AEGIS N2,
+    MED, CONFIRMED). The 422 handler had stopped echoing `input` (A8) but
+    still listed every error: an 868 KB body of 60 000 unknown keys against
+    an `extra="forbid"` request model became 60 000 `extra_forbidden`
+    errors, a 5.4 MB response built on the event loop; a 1 MiB unknown key
+    came back whole in its `loc`. 20 concurrent senders: RSS 821 MB and
+    `/health` p50 838 ms (live); 3.9 MB bodies: 23.5 MB per 422, RSS 4.4 GB.
+    Decided: a 422 body is bounded whatever the request was — the first 20
+    errors plus the honest `error_count` (and `truncated: true`), `loc`
+    cut to 8 items of 40 chars, `type`/`msg` bounded, the serialized body
+    kept ≤ 8 KiB — and the causes of enumeration are refused before they
+    are enumerated: a request object with more than 20 unknown keys is one
+    `too_many_fields` error before any field is looked at (up to 20 unknown
+    keys are still named, so Decision 10's "unknown request fields
+    rejected" still tells a stale client that `now` is unknown), and a map field over its 1 000-entry cap is `too_long`
+    before its entries are validated (pydantic validates every dict entry
+    first; a list's length first). Parsing and the 422 render happen in the
+    worker thread; bodies are parsed one at a time — a parse holds the GIL
+    in Rust for its whole duration, so a second concurrent parse adds
+    memory (a 4 MiB body of ~260k keys is ~45 MB as Python objects) and
+    loop latency, not throughput; the agent work is not behind that slot.
+    `python3 -m api` limits glibc to one malloc arena: per-thread arenas
+    kept most of a parse's freed memory (+102 MB retained after 20
+    concurrent 60k-key bodies with default arenas, +24 MB with one). Live
+    after: 139-byte 422s, peak RSS 89 MB (idle 49), `/health` max 194 ms;
+    with 3.9 MB bodies peak 224 MB, `/health` p50 78 ms, max 424 ms.
+    *Cost, accepted:* a caller with more than 20 errors sees only the first
+    20 and a count, and must fix and resend to see the rest; the worst-case
+    junk body (4 MiB of unknown keys) still costs ~0.2–0.4 s of CPU per
+    request, bounded by the body limit, and queues other bodies behind it.
+20. **Over-cap connections are answered, not aborted** (AEGIS N7, INFO).
+    Decision 17's hard cap aborted the 257th connection with no response
+    (curl 000). Decided: it is written a minimal `503 Service Unavailable`
+    (`Connection: close`, `Retry-After: 1`) and closed once its request
+    bytes arrive or after 1 s, and is never counted as held. The exact
+    behavior, now also stated in the README: below 128 open connections,
+    normal service; with 128–255 sockets held, uvicorn answers every new
+    request (`/health` included) 503 for as long as they are held — ≤ 10 s
+    for sockets that never send a head, ≤ 5 s idle keep-alives, ≤ 35 s
+    unfinished bodies, indefinitely for a client that keeps sending complete
+    requests on 128 sockets; with 256 held, a new connection gets the
+    minimal 503 and is closed. *Not addressed:* the 128–255 window itself,
+    which needs per-client identity or a reserved health listener.
+
 Still open after the audit (not decided here): an approval gate for a
 future real dialer/CRM adapter; idempotency keys for
 `resolution-writeback/resolve` across retries; per-customer time zone

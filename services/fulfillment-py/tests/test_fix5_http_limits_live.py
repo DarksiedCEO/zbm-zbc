@@ -311,10 +311,26 @@ def test_connection_count_is_bounded_and_health_recovers(server):
     try:
         for _ in range(http_limits.MAX_OPEN_CONNECTIONS + extra):
             socks.append(socket.create_connection(("127.0.0.1", port), timeout=5))
-        time.sleep(1.0)
-        closed_now = sum(_closed_by_peer(s) for s in socks)
-        # every socket over the cap is dropped at once, not held for 10 s
-        assert closed_now >= extra, f"only {closed_now} of {len(socks)} closed; cap {http_limits.MAX_OPEN_CONNECTIONS}"
+        time.sleep(http_limits.OVER_CAP_CLOSE_S + 0.5)
+        # Fix wave 6, N7: every socket over the cap is answered 503 and closed
+        # within OVER_CAP_CLOSE_S (it used to be aborted with no response, and
+        # this test asserted a bare EOF). Not held for 10 s either way.
+        refused = 0
+        for s in socks:
+            s.setblocking(False)
+            try:
+                data = s.recv(65536)
+            except BlockingIOError:
+                continue
+            except ConnectionResetError:
+                refused += 1
+                continue
+            finally:
+                s.setblocking(True)
+            if data.startswith(b"HTTP/1.1 503"):
+                refused += 1
+                assert _closed_by_peer(s), "over-cap socket answered 503 but still held"
+        assert refused >= extra, f"only {refused} of {len(socks)} refused; cap {http_limits.MAX_OPEN_CONNECTIONS}"
         # while saturated, /health gets a prompt answer or refusal, never a hang
         try:
             status, took = _health(port, timeout=3)

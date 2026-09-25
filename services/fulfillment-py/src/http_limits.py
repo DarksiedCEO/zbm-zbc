@@ -38,14 +38,29 @@ The limits, all enforced before routing and auth:
   MAX_OPEN_CONNECTIONS   256     hard cap on held sockets: uvicorn's
                                  limit_concurrency still accepts and holds
                                  connections, so a connection made while this
-                                 many are open is closed at once.
+                                 many are open is answered with a minimal 503
+                                 (Connection: close) and closed as soon as its
+                                 request bytes arrive, or after
+                                 OVER_CAP_CLOSE_S if none do. It is never
+                                 counted as held. (Fix wave 6, N7: it used to
+                                 be aborted without a response — curl 000.)
+  OVER_CAP_CLOSE_S       1 s     see above.
 
-Trade-off (bounded, not free): a client holding >= LIMIT_CONCURRENCY sockets
-makes the service answer 503 (including /health) until those sockets are
-closed — at most REQUEST_HEAD_TIMEOUT_S for sockets that never send a head —
-and cannot make it hold more than MAX_OPEN_CONNECTIONS sockets or more than
-MAX_HEADER_BYTES of head per socket. Before, the same client could hold every
-file descriptor and unbounded memory indefinitely.
+Trade-off (bounded, not free), exactly:
+  - with >= LIMIT_CONCURRENCY (128) and < MAX_OPEN_CONNECTIONS (256) sockets
+    held, every NEW request — /health included — is answered 503 by uvicorn
+    for as long as they are held: at most REQUEST_HEAD_TIMEOUT_S (10 s) for
+    sockets that never send a head, KEEP_ALIVE_TIMEOUT_S after a response
+    for idle keep-alives, BODY_READ_TIMEOUT_S + BODY_DEADLINE_GRACE_S for
+    sockets that never finish a body; a client that keeps sending complete
+    requests on 128 sockets keeps the service at 503 for others while it does;
+  - a connection made while MAX_OPEN_CONNECTIONS are held gets a minimal 503
+    and is closed (see above), so /health from a fresh connection is 503, not
+    a reset, in that state as well;
+  - a client cannot make the service hold more than MAX_OPEN_CONNECTIONS
+    sockets, or more than MAX_HEADER_BYTES of head per socket. Before, the
+    same client could hold every file descriptor and unbounded memory
+    indefinitely.
 """
 
 from __future__ import annotations
@@ -63,6 +78,17 @@ BODY_READ_TIMEOUT_S = 30.0
 BODY_DEADLINE_GRACE_S = 5.0
 LIMIT_CONCURRENCY = 128
 MAX_OPEN_CONNECTIONS = 256
+OVER_CAP_CLOSE_S = 1.0
+
+_OVER_CAP_RESPONSE = (
+    b"HTTP/1.1 503 Service Unavailable\r\n"
+    b"Content-Type: text/plain; charset=utf-8\r\n"
+    b"Content-Length: 19\r\n"
+    b"Connection: close\r\n"
+    b"Retry-After: 1\r\n"
+    b"\r\n"
+    b"Service Unavailable"
+)
 
 
 def load_body_read_timeout() -> float:
@@ -98,14 +124,30 @@ class DeadlineH11Protocol(H11Protocol):
 
     _deadline_timer = None
     _deadline_state = None
+    _over_cap = False
 
     def connection_made(self, transport) -> None:  # type: ignore[override]
         super().connection_made(transport)
         if len(self.connections) > MAX_OPEN_CONNECTIONS:
+            # Fix wave 6, N7: answer, don't abort. The 503 is written now; the
+            # socket is closed once the client's request bytes have arrived
+            # (closing with unread bytes in the socket makes the kernel send
+            # RST and the client may never see the 503) or after
+            # OVER_CAP_CLOSE_S, whichever is first. Not counted as held.
             self.connections.discard(self)
-            transport.abort()
+            self._over_cap = True
+            transport.write(_OVER_CAP_RESPONSE)
+            self._deadline_timer = self.loop.call_later(OVER_CAP_CLOSE_S, self._deadline_passed)
             return
         self._update_deadline()
+
+    def data_received(self, data: bytes) -> None:
+        if self._over_cap:
+            self._cancel_deadline()
+            if not self.transport.is_closing():
+                self.transport.close()
+            return
+        super().data_received(data)
 
     def handle_events(self) -> None:
         super().handle_events()
