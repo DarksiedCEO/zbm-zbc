@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from shared.registry import PlatformRulesRegistry
 from shared.types import ClientId
@@ -42,17 +42,17 @@ class ClientRequirements(BaseModel):
     objective: str | None = None
     audience: str | None = None
     key_message: str | None = None
-    deliverables: list[Deliverable] | None = None
-    mandatories: list[str] | None = None
-    approvers: list[str] | None = None
-    distribution: list[str] | None = None
+    deliverables: list[Deliverable] | None = Field(default=None, max_length=100)
+    mandatories: list[str] | None = Field(default=None, max_length=100)
+    approvers: list[str] | None = Field(default=None, max_length=50)
+    distribution: list[str] | None = Field(default=None, max_length=100)
     deadline: date | None = None
-    disclosure_requirements: list[str] | None = None
+    disclosure_requirements: list[str] | None = Field(default=None, max_length=50)
     hook: str | None = None
-    success_in_numbers: list[SuccessMetric] | None = None
-    insight_candidates: list[InsightCandidate] = []
+    success_in_numbers: list[SuccessMetric] | None = Field(default=None, max_length=50)
+    insight_candidates: list[InsightCandidate] = Field(default_factory=list, max_length=50)
     tone_of_voice: str | None = None
-    rights_and_permissions: list[RightsNeed] | None = None
+    rights_and_permissions: list[RightsNeed] | None = Field(default=None, max_length=200)
     transformation_plan: str | None = None
 
 

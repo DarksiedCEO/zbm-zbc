@@ -45,7 +45,7 @@ class QualityDeclaration(BaseModel):
     opening_text: str
     hook_ends_at_seconds: float = Field(ge=0)
     script_text: str
-    supers: list[str] = []
+    supers: list[str] = Field(default_factory=list, max_length=200)
     disclosure_text: str = ""
 
 

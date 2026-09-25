@@ -38,7 +38,7 @@ class PerformanceResult(BaseModel):
     measurement_source: str | None = None
     measurement_ref: str | None = None
     impressions: int = Field(ge=0)
-    metrics: dict[str, float]
+    metrics: dict[str, float] = Field(max_length=20)
 
     @field_validator("metrics")
     @classmethod

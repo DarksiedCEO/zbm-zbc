@@ -669,11 +669,13 @@ def test_n2_validation_error_body_is_bounded_and_never_echoes_input(api, name, b
 def test_n2_unknown_keys_are_counted_not_enumerated(api):
     """Under the member cap the framework validates and every unknown key
     is an error: counted, first few named, never all listed. Over the cap
-    the body is refused before the framework sees it."""
-    body = json.dumps({**zbc_clip("x"), **{f"k{i}": "x" for i in range(3000)}}).encode()
+    the body is refused before the framework sees it. (Fix wave 7, NEW-1:
+    the cap is per route, computed from the model — 896 for a clip — so
+    this uses 500 unknown keys where it used 3,000 under the old 4,096.)"""
+    body = json.dumps({**zbc_clip("x"), **{f"k{i}": "x" for i in range(500)}}).encode()
     r = api.client.post("/zbc/clips", content=body, headers={"Content-Type": "application/json"})
     d = r.json()
-    assert r.status_code == 422 and d["unknown_fields"]["count"] == 3000, d
+    assert r.status_code == 422 and d["unknown_fields"]["count"] == 500, d
     assert len(d["unknown_fields"]["first"]) <= 20 and d["truncated"] is True and len(r.content) < 8 * 1024
     r = api.client.post("/zbc/clips", content=JUNK_60K_KEYS, headers={"Content-Type": "application/json"})
     assert r.status_code == 422 and r.json()["error"] == "PayloadTooManyMembers" and len(r.content) < 1024
@@ -698,10 +700,18 @@ def test_n2_other_error_bodies_are_bounded(api):
     r = api.client.post(f"{C}/rulebooks", content=b'{"goal": ' + b'[' * 40 + b']' * 40 + b'}',
                         headers={"Content-Type": "application/json"})
     assert r.status_code == 400 and r.json()["error"] == "PayloadTooDeep", r.text
+    # fix wave 7 (NEW-1): the member cap is per route — a rulebook draft may hold 10,176
+    # members (5,001 items are validated, and refused by the model), a clip 896
     r = api.client.post(f"{C}/rulebooks", content=b'{"goal": {"angles": [' + b'"k",' * 5000 + b'"k"]}}',
+                        headers={"Content-Type": "application/json"})
+    assert r.json().get("error") != "PayloadTooManyMembers" and len(r.content) < 8 * 1024, r.text  # (401: no credential)
+    r = api.client.post(f"{C}/rulebooks", content=b'{"goal": {"angles": [' + b'"k",' * 20000 + b'"k"]}}',
                         headers={"Content-Type": "application/json"})
     assert r.status_code == 422 and r.json()["error"] == "PayloadTooManyMembers", r.text
     r = api.client.post("/zbc/clips", content=b'{"moment_ids": [' + b'"k",' * 4000 + b'"k"]}',
+                        headers={"Content-Type": "application/json"})
+    assert r.status_code == 422 and r.json()["error"] == "PayloadTooManyMembers" and len(r.content) < 1024, r.text
+    r = api.client.post("/zbc/clips", content=b'{"moment_ids": [' + b'"k",' * 500 + b'"k"]}',
                         headers={"Content-Type": "application/json"})
     assert r.status_code == 422 and r.json()["error"] == "RequestValidationError" and len(r.content) < 8 * 1024, r.text
 
