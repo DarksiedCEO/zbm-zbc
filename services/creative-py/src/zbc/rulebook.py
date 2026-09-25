@@ -26,9 +26,12 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from enum import Enum
+import bisect
+import functools
+from collections.abc import Sequence
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, computed_field, model_validator
 
 from shared.errors import FrozenError, NotFound, PreconditionFailed
 from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
@@ -137,7 +140,12 @@ class Rulebook(BaseModel):
     approved_angles: tuple[Angle, ...]
     platforms: tuple[PlatformTarget, ...]
     rules: tuple[Rule, ...]
-    retired_rule_ids: tuple[str, ...] = ()
+    # Fix wave 9 (AEGIS round 8 L2): per id prefix, the highest rule number ever issued in this
+    # campaign up to this version. The retired ids are DERIVED from it (`retired_rule_ids`): every
+    # number up to it that is not a rule of this version. Every version used to carry the whole list
+    # (60 churn revisions of 1,000 phrases: 60,000 ids per version, 96 MiB, a 30 MiB GET); this is a
+    # handful of integers whatever the history (memory O(rules of the version + prefixes)).
+    rule_number_high_water: dict[str, int] = Field(default_factory=dict)
     blocking_issues: tuple[str, ...] = ()
     # Non-blocking notes from the writer (fix wave 6, N3): e.g. a never-say
     # entry of <= 4 letters, which is matched exactly only unless opted in.
@@ -153,13 +161,32 @@ class Rulebook(BaseModel):
     superseded_at: datetime | None = None
     language: Literal["en"] = "en"
 
+    @model_validator(mode="before")
+    @classmethod
+    def _high_water(cls, data: Any) -> Any:
+        """The high-water marks cover every rule of the version (numbers
+        only ever grow); a dump from before fix wave 9 (`retired_rule_ids`,
+        a list) is read as the marks it implies — every number up to the
+        highest one listed counts as used, so nothing it retired can be
+        reused; the derived count is output only."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        data.pop("retired_rule_count", None)
+        legacy = data.pop("retired_rule_ids", None) or ()
+        hw = dict(data.get("rule_number_high_water") or {})
+        ids = [r.rule_id if isinstance(r, Rule) else (r or {}).get("rule_id", "") for r in data.get("rules") or ()]
+        for prefix, n in highest_rule_numbers({*ids, *legacy}).items():
+            if n > hw.get(prefix, 0):
+                hw[prefix] = n
+        data["rule_number_high_water"] = hw
+        return data
+
     @model_validator(mode="after")
     def _ids_unique(self) -> "Rulebook":
         ids = [r.rule_id for r in self.rules]
         if len(ids) != len(set(ids)):
             raise ValueError("rule ids must be unique within a rulebook version")
-        if set(ids) & set(self.retired_rule_ids):
-            raise ValueError("a retired rule id cannot be reused")
         angle_ids = [a.angle_id for a in self.approved_angles]
         if len(angle_ids) != len(set(angle_ids)):
             raise ValueError("angle ids must be unique")
@@ -171,6 +198,22 @@ class Rulebook(BaseModel):
 
     def rule_ids(self) -> frozenset[str]:
         return frozenset(r.rule_id for r in self.rules)
+
+    @functools.cached_property
+    def retired_rule_ids(self) -> "RetiredRuleIds":
+        """Every id issued in this campaign up to this version that is not
+        one of its rules — derived from `rule_number_high_water`, never
+        stored (fix wave 9, L2). A read-only sequence: len(), indexing,
+        slicing, `in`, iteration."""
+        return RetiredRuleIds(self.rule_number_high_water, self.rule_ids())
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def retired_rule_count(self) -> int:
+        return len(self.retired_rule_ids)
+
+    def is_retired(self, rule_id: str) -> bool:
+        return rule_id in self.retired_rule_ids
 
     def rules_of(self, kind: RuleKind) -> list[Rule]:
         return [r for r in self.rules if r.kind is kind]
@@ -208,6 +251,76 @@ def highest_rule_numbers(used: set[str]) -> dict[str, int]:
     return out
 
 
+class RetiredRuleIds(Sequence):
+    """The retired rule ids of one version, derived from its high-water
+    marks and its current rules: for each prefix (in order) the numbers 1
+    to the mark (ascending) that are not current. O(current rules +
+    prefixes) memory; `in` is O(1); indexing is O(log) (fix wave 9, L2)."""
+
+    def __init__(self, high_water: dict[str, int], current: frozenset[str]):
+        self._blocks: list[tuple[str, int, list[int]]] = []  # (prefix, high water, sorted current numbers)
+        self._starts: list[int] = []
+        by_prefix: dict[str, list[int]] = {}
+        for rid in current:
+            n = parse_rule_number(rid[:2], rid)
+            if n is not None and 1 <= n <= high_water.get(rid[:2], 0):
+                by_prefix.setdefault(rid[:2], []).append(n)
+        total = 0
+        for prefix in sorted(high_water):
+            hw = high_water[prefix]
+            nums = sorted(by_prefix.get(prefix, ()))
+            self._starts.append(total)
+            self._blocks.append((prefix, hw, nums))
+            total += hw - len(nums)
+        self._len = total
+        self._current = current
+
+    def __len__(self) -> int:
+        return self._len
+
+    def __contains__(self, rule_id: object) -> bool:
+        if not isinstance(rule_id, str) or rule_id in self._current or not _RULE_ID.fullmatch(rule_id):
+            return False
+        prefix, n = rule_id[:2], int(rule_id[3:])
+        if rule_id != format_rule_id(prefix, n):
+            return False  # not a form format_rule_id issues (e.g. "NS-007"): never issued, never retired
+        return any(p == prefix and 1 <= n <= hw for p, hw, _ in self._blocks)
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return tuple(self[j] for j in range(*i.indices(self._len)))
+        if i < 0:
+            i += self._len
+        if not 0 <= i < self._len:
+            raise IndexError("retired rule id index out of range")
+        b = bisect.bisect_right(self._starts, i) - 1
+        prefix, hw, nums = self._blocks[b]
+        want = i - self._starts[b]  # the want-th (0-based) number in 1..hw that is not current
+        lo, hi = 1, hw
+        while lo < hi:  # the smallest n with n - (current numbers <= n) > want
+            mid = (lo + hi) // 2
+            if mid - bisect.bisect_right(nums, mid) > want:
+                hi = mid
+            else:
+                lo = mid + 1
+        return format_rule_id(prefix, lo)
+
+    def __iter__(self):
+        for prefix, hw, nums in self._blocks:
+            cur = set(nums)
+            for n in range(1, hw + 1):
+                if n not in cur:
+                    yield format_rule_id(prefix, n)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (tuple, list, RetiredRuleIds)):
+            return len(other) == self._len and tuple(self) == tuple(other)
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return f"RetiredRuleIds({self._len} ids)"
+
+
 def next_rule_number(prefix: str, used: set[str]) -> int:
     """One more than the highest number used with `prefix` (1 if none)."""
     return highest_rule_numbers(used).get(prefix, 0) + 1
@@ -219,7 +332,7 @@ def next_rule_number(prefix: str, used: set[str]) -> int:
 # remaining fields are lifecycle metadata (status, who approved/signed, when).
 CONTENT_FIELDS = (
     "campaign_id", "client_id", "vertical", "version", "objective", "source_asset_ids",
-    "approved_angles", "platforms", "rules", "retired_rule_ids", "drafted_by", "supersedes_version",
+    "approved_angles", "platforms", "rules", "rule_number_high_water", "drafted_by", "supersedes_version",
 )
 
 
@@ -265,6 +378,22 @@ class RulebookStore:
             raise PreconditionFailed(f"rulebook {rb.campaign_id} v{rb.version} already exists; versions are never reused")
         if rb.version != self.next_version(rb.campaign_id):
             raise PreconditionFailed(f"next version for {rb.campaign_id} is v{self.next_version(rb.campaign_id)}")
+        self.check_no_reuse(rb)
+
+    def check_no_reuse(self, rb: Rulebook) -> None:
+        """A retired id is never reused (fix wave 9, L2: this guard was the
+        model's, against its own stored list): every rule of `rb` that is
+        not a rule of the version it supersedes carries a number above that
+        version's high-water mark."""
+        if rb.supersedes_version is None or (rb.campaign_id, rb.supersedes_version) not in self._by_key:
+            return
+        prev = self._by_key[(rb.campaign_id, rb.supersedes_version)]
+        kept = prev.rule_ids()
+        for rid in rb.rule_ids() - kept:
+            n = parse_rule_number(rid[:2], rid)
+            if n is not None and n <= prev.rule_number_high_water.get(rid[:2], 0):
+                raise PreconditionFailed(f"rule id {rid} was already issued in {rb.campaign_id} (v{prev.version} or "
+                                         "before); retired ids are never reused")
 
     def check_replace(self, rb: Rulebook) -> Rulebook:
         existing = self.get(rb.campaign_id, rb.version)

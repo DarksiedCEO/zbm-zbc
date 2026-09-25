@@ -54,7 +54,10 @@ def test_live_rulebook_is_frozen_and_changes_create_a_new_version(api):
     assert api.post(f"{C}/rulebooks/1/sign", andre=TEST_FOUNDER_TOKEN).status_code == 409
     v2 = ok(api.post(f"{C}/revisions", {"actor_id": "zbc_rulebook_writer", "goal": zbc_goal(never_say=[])}), 201)
     assert v2["version"] == 2 and v2["status"] == "draft"
-    assert "NS-01" in v2["retired_rule_ids"]
+    # fix wave 9 (AEGIS round 8 L2): a version carries its retired-id COUNT; the ids are paginated
+    assert v2["retired_rule_count"] >= 1 and "retired_rule_ids" not in v2
+    page = ok(api.get(f"{C}/rulebooks/2/retired-rule-ids"))
+    assert "NS-01" in page["ids"]
 
 
 def test_store_refuses_in_place_replacement_of_frozen_version(api):

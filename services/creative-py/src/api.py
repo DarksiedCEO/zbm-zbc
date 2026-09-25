@@ -106,7 +106,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Annotated, Any, Callable, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -195,6 +195,8 @@ TRIM_IDLE_S = 1.0
 CampaignIdPath = Annotated[str, Path(pattern=BOUNDED_ID_PATTERN)]
 IdPath = Annotated[str, Path(pattern=SAFE_ID_PATTERN)]
 VersionPath = Annotated[int, Path(ge=1, le=MAX_RULEBOOK_VERSION)]
+RULEBOOK_PAGE = 100  # version summaries per GET .../rulebooks page (fix wave 9, L2)
+RETIRED_PAGE = 1000  # retired rule ids per GET .../retired-rule-ids page
 
 _STATUS = {
     NotFound: 404,
@@ -351,6 +353,27 @@ def route_member_limits(app: FastAPI) -> list[tuple[frozenset[str], "re.Pattern[
     return out
 
 
+BEARER_MISSING = "missing or malformed Authorization header (expected: Bearer <token>)"
+
+
+def _bearer_refusal(authorization: bytes | str | None, service_token: str) -> str | None:
+    """None if `authorization` is `Bearer <the service token>`, else the
+    401 detail. Constant-time; a header that cannot be compared is not the
+    token (401, never 500)."""
+    if isinstance(authorization, bytes):
+        try:
+            authorization = authorization.decode("latin-1")
+        except UnicodeDecodeError:  # pragma: no cover (latin-1 decodes every byte)
+            return "invalid token"
+    if authorization is None or not authorization.startswith("Bearer "):
+        return BEARER_MISSING
+    try:
+        valid = hmac.compare_digest(authorization.removeprefix("Bearer "), service_token)
+    except TypeError:
+        valid = False
+    return None if valid else "invalid token"
+
+
 def is_json_content_type(value: bytes | str | None) -> bool:
     """Would FastAPI parse a body under this Content-Type as JSON? The same
     decision, made with the same parser (email.message, as
@@ -402,13 +425,16 @@ class BodyLimit:
 
     def __init__(self, app, limit: int = MAX_BODY_BYTES, max_head: int = MAX_HEADER_BYTES,
                  read_timeout: float = BODY_READ_TIMEOUT_S, member_limits=None,
-                 default_members: int = DEFAULT_JSON_MEMBERS, large: int = LARGE_BODY_BYTES):
+                 default_members: int = DEFAULT_JSON_MEMBERS, large: int = LARGE_BODY_BYTES,
+                 service_token: str | None = None):
         self.app, self.limit, self.max_head, self.read_timeout = app, limit, max_head, read_timeout
+        self.service_token = service_token
         self.member_limits = list(member_limits or [])
         self.default_members = default_members
         self.large = large
         self.large_in_flight = 0
         self.trim_timer = None
+        self.scan_gate: asyncio.Semaphore | None = None
 
     def members_for(self, method: str, path: str) -> int:
         for methods, regex, _, cap in self.member_limits:
@@ -423,7 +449,7 @@ class BodyLimit:
         head += sum(len(k) + len(v) + 4 for k, v in scope.get("headers") or [])
         if head > self.max_head:
             return await self._refuse(send, 431, f"request head over {self.max_head} bytes", "RequestHeaderTooLarge")
-        declared = content_type = transfer_encoding = None
+        declared = content_type = transfer_encoding = authorization = None
         for k, v in scope.get("headers") or []:  # the FIRST of each, as the framework reads them
             if k == b"content-length" and declared is None:
                 declared = v
@@ -431,6 +457,15 @@ class BodyLimit:
                 content_type = v
             elif k == b"transfer-encoding" and transfer_encoding is None:
                 transfer_encoding = v
+            elif k == b"authorization" and authorization is None:
+                authorization = v
+        # Fix wave 9 (AEGIS round 8 L4): authentication FIRST. The 415 / 413 / shape answers below used to
+        # reach an unauthenticated caller, who could probe which content types and sizes are accepted.
+        # Every route but /health needs the bearer token (the route dependency checks it again).
+        if self.service_token is not None and scope.get("path") != "/health":
+            refused = _bearer_refusal(authorization, self.service_token)
+            if refused is not None:
+                return await self._unauthorized(send, refused)
         if declared is not None:
             try:
                 too_big = int(declared) > self.limit
@@ -470,7 +505,17 @@ class BodyLimit:
         try:
             if body:
                 cap = self.members_for(scope.get("method", ""), scope.get("path", ""))
-                bad = await run_in_threadpool(json_shape_violation, body, cap)
+                if large:
+                    # Fix wave 9 (AEGIS round 8 L3): one large body's shape scan at a time. json.loads holds
+                    # the GIL for the whole parse, so 20 of them at once kept the event loop from running
+                    # between them (/health p50 390 ms under 20 junk senders); queued, the loop runs
+                    # between every two. Small bodies are not queued behind them.
+                    if self.scan_gate is None:
+                        self.scan_gate = asyncio.Semaphore(1)
+                    async with self.scan_gate:
+                        bad = await run_in_threadpool(json_shape_violation, body, cap)
+                else:
+                    bad = await run_in_threadpool(json_shape_violation, body, cap)
                 if bad is not None:
                     return await self._refuse(send, *bad)
             sent = False
@@ -494,6 +539,14 @@ class BodyLimit:
         self.trim_timer = None
         if self.large_in_flight == 0:
             loop.run_in_executor(None, _malloc_trim)
+
+    async def _unauthorized(self, send, detail: str):
+        """The same 401 the route's `require_auth` dependency answers."""
+        raw = json.dumps({"detail": detail}).encode()
+        await send({"type": "http.response.start", "status": 401,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(raw)).encode()),
+                                (b"www-authenticate", b"Bearer"), (b"connection", b"close")]})
+        await send({"type": "http.response.body", "body": raw})
 
     async def _refuse(self, send, code: int = 413, detail: str | None = None, error: str = "PayloadTooLarge"):
         raw = json.dumps({"detail": detail or f"request body over {self.limit} bytes", "error": error}).encode()
@@ -657,18 +710,10 @@ def build_app(
     lock = recorder.lock
 
     def require_auth(authorization: str | None = Header(default=None)) -> None:
-        if authorization is None or not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                                detail="missing or malformed Authorization header (expected: Bearer <token>)",
-                                headers={"WWW-Authenticate": "Bearer"})
-        supplied = authorization.removeprefix("Bearer ")
-        try:
-            valid = hmac.compare_digest(supplied, service_token)
-        except TypeError:
-            # non-ASCII str: compare_digest raises; anything it can't compare is not the token (401, never 500)
-            valid = False
-        if not valid:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token",
+        # non-ASCII str: compare_digest raises; anything it can't compare is not the token (401, never 500)
+        refused = _bearer_refusal(authorization, service_token)
+        if refused is not None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=refused,
                                 headers={"WWW-Authenticate": "Bearer"})
 
     def authenticate_actor(x_creative_actor_token: str | None = Header(default=None)) -> str:
@@ -698,9 +743,12 @@ def build_app(
     idem = IdempotencyStore()
 
     def creating(response: Response, route: str, path: dict, actor: str | None, key: str | None,
-                 request: Any, create: Callable[[], dict], view: Callable[[dict], Any] | None = None,
-                 caller_id: str | None = None) -> dict:
-        """Run a creating request at most once per idempotency key (IDEM)."""
+                 request: Any, create: Callable[..., dict], view: Callable[[dict], Any] | None = None,
+                 caller_id: str | None = None, unlocked: Callable[[], Any] | None = None) -> dict:
+        """Run a creating request at most once per idempotency key (IDEM).
+        `unlocked` (fix wave 9, M1): work that needs no lock — a clip
+        review — run between a first replay check and the locked create,
+        which receives its result (`create(result)`)."""
         content = hashlib.sha256(json.dumps({"route": route, "path": path, "actor": actor, "request": request},
                                             sort_keys=True, separators=(",", ":"), default=str)
                                  .encode("utf-8", "surrogatepass")).hexdigest()
@@ -713,7 +761,7 @@ def build_app(
             k = ("id", route, json.dumps(path, sort_keys=True), caller_id)
         else:
             k = ("derived", route, json.dumps(path, sort_keys=True), actor or "", content)
-        with lock:
+        def replay():
             hit = idem.get(k)
             if hit is not None:
                 if hit.content != content:
@@ -723,7 +771,20 @@ def build_app(
                 if k[0] != "derived" or view is None or view(hit.body) == hit.snapshot:
                     response.headers["Idempotent-Replayed"] = "true"
                     return hit.body
-            body = create()
+            return None
+
+        pre = None
+        if unlocked is not None:
+            with lock:
+                got = replay()
+            if got is not None:
+                return got
+            pre = unlocked()  # no lock held: other requests proceed meanwhile
+        with lock:
+            got = replay()
+            if got is not None:
+                return got
+            body = create(pre) if unlocked is not None else create()
             idem.put(k, _Created(content, body, view(body) if view is not None else None))
             return body
 
@@ -935,6 +996,16 @@ def build_app(
         return {"learned": d.learned, "reason": d.reason}
 
     # --- ZBC -------------------------------------------------------------------------------------
+    def _rb_summary(rb) -> dict:
+        return {"campaign_id": rb.campaign_id, "version": rb.version, "status": rb.status.value,
+                "supersedes_version": rb.supersedes_version, "rule_count": len(rb.rules),
+                "retired_rule_count": rb.retired_rule_count, "rule_number_high_water": rb.rule_number_high_water,
+                "blocking_issue_count": len(rb.blocking_issues), "drafted_by": rb.drafted_by,
+                "approved_by": rb.approved_by, "signed_by": rb.signed_by,
+                "signed_at": rb.signed_at.isoformat() if rb.signed_at else None,
+                "live_at": rb.live_at.isoformat() if rb.live_at else None,
+                "superseded_at": rb.superseded_at.isoformat() if rb.superseded_at else None}
+
     def _rb(campaign_id: str, version: int) -> dict:
         return zbc.rulebooks.get(campaign_id, version).model_dump(mode="json")
 
@@ -954,9 +1025,27 @@ def build_app(
                         body.goal.model_dump(mode="json"),
                         lambda: zbc.draft_rulebook(body.goal, actor).model_dump(mode="json"), _rb_view)
 
+    # Fix wave 9 (AEGIS round 8 L2): every version with every rule and every retired id made this GET
+    # 30 MiB after 60 churn revisions. The list is now a page of version SUMMARIES; one version is read
+    # with GET .../rulebooks/{version} (its rules and a retired-id count), and its retired ids a page at
+    # a time with GET .../rulebooks/{version}/retired-rule-ids.
     @app.get("/zbc/campaigns/{campaign_id}/rulebooks", dependencies=auth)
-    def zbc_versions(campaign_id: CampaignIdPath) -> dict:
-        return {"versions": [rb.model_dump(mode="json") for rb in zbc.rulebooks.versions(campaign_id)]}
+    def zbc_versions(campaign_id: CampaignIdPath, offset: int = Query(0, ge=0, le=MAX_RULEBOOK_VERSION),
+                     limit: int = Query(RULEBOOK_PAGE, ge=1, le=RULEBOOK_PAGE)) -> dict:
+        versions = zbc.rulebooks.versions(campaign_id)
+        page = versions[offset:offset + limit]
+        return {"campaign_id": campaign_id, "total": len(versions), "offset": offset, "limit": limit,
+                "next_offset": offset + limit if offset + limit < len(versions) else None,
+                "versions": [_rb_summary(rb) for rb in page]}
+
+    @app.get("/zbc/campaigns/{campaign_id}/rulebooks/{version}/retired-rule-ids", dependencies=auth)
+    def zbc_retired_ids(campaign_id: CampaignIdPath, version: VersionPath, offset: int = Query(0, ge=0),
+                        limit: int = Query(RETIRED_PAGE, ge=1, le=RETIRED_PAGE)) -> dict:
+        retired = zbc.rulebooks.get(campaign_id, version).retired_rule_ids
+        total = len(retired)
+        return {"campaign_id": campaign_id, "version": version, "total": total, "offset": offset, "limit": limit,
+                "next_offset": offset + limit if offset + limit < total else None,
+                "ids": list(retired[offset:offset + limit])}
 
     @app.get("/zbc/campaigns/{campaign_id}/rulebooks/{version}", dependencies=auth)
     def zbc_get_rb(campaign_id: CampaignIdPath, version: VersionPath) -> dict:
@@ -1014,8 +1103,10 @@ def build_app(
 
     @app.post("/zbc/clips", status_code=201, dependencies=auth)
     def zbc_submit(body: ClipSubmission, response: Response, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+        # the review runs off the workflow lock; the lock is taken to check and commit (fix wave 9, M1)
         return creating(response, "clip", {}, None, idempotency_key, body.model_dump(mode="json"),
-                        lambda: zbc.submit_clip(body).model_dump(mode="json"), caller_id=body.submission_id)
+                        lambda plan: zbc.submit_clip(body, plan).model_dump(mode="json"), caller_id=body.submission_id,
+                        unlocked=lambda: zbc.review_clip_unlocked(body))
 
     @app.get("/zbc/clips/{submission_id}", dependencies=auth)
     def zbc_get_clip(submission_id: IdPath) -> dict:
@@ -1046,7 +1137,8 @@ def build_app(
 
     # after every route exists: the per-route member caps come from the routes' body models
     app.state.member_limits = route_member_limits(app)
-    app.add_middleware(BodyLimit, limit=MAX_BODY_BYTES, member_limits=app.state.member_limits)
+    app.add_middleware(BodyLimit, limit=MAX_BODY_BYTES, member_limits=app.state.member_limits,
+                       service_token=service_token)
     return app
 
 

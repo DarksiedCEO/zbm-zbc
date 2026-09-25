@@ -626,14 +626,17 @@ def test_n7_4_symbol_lexicon_is_documented_and_applied():
     assert symbol_stand_in("guaranteed 🎯", "guaranteed returns")
     assert symbol_stand_in("guaranteed 🎯 #ad", "guaranteed returns")
     assert symbol_stand_in("make 🤞\nMyth #1", "make money")  # a line break closes the statement
-    # ... but not when the fragment left is only function words, the emoji is not in a word's place, or an
-    # ordinary word follows it (the emoji illustrates that word: "Get 🎟 tickets")
+    # fix wave 9 (AEGIS round 8 M2) CHANGED the next four: wave 8 let an ordinary word after the emoji
+    # ("the emoji illustrates that word") and a line break end the rule, so "make 💱 This budget myth" and
+    # "make\n💰" passed. ANY symbol in a missing word's place is now a stand-in, whatever follows it, and
+    # line breaks are read across (tests/test_fix_wave_9.py measures the cost on emoji captions).
+    assert symbol_stand_in("make 🤞 today", "make money")
+    assert symbol_stand_in("Get 🎟️ tickets before Friday", "get rich")
+    assert symbol_stand_in("Free 🚚 shipping this weekend", "free money")
+    assert symbol_stand_in("get 🍕\nquick", "get rich quick")
+    # ... but not when the fragment left is only function words
     assert not symbol_stand_in("no 🎯", "no risk")
     assert not symbol_stand_in("your 💰", "double your money")
-    assert not symbol_stand_in("make 🤞 today", "make money")
-    assert not symbol_stand_in("Get 🎟️ tickets before Friday", "get rich")
-    assert not symbol_stand_in("Free 🚚 shipping this weekend", "free money")
-    assert not symbol_stand_in("get 🍕\nquick", "get rich quick")  # never read across a line break
     assert not symbol_stand_in("make money 💰", "make money")  # the phrase is there (exact, not a stand-in)
     assert not symbol_stand_in("Sold out twice 🎉 Back Friday", "make money")
     assert not symbol_stand_in("New drop 🔥 five colours", "get rich")
@@ -675,8 +678,12 @@ def test_n7_4_decorative_emoji_elsewhere_still_passes(registry):
 
 
 # Thirty ordinary captions WITH emoji (the corpora have none), written for this wave: the cost of the
-# symbol rule on emoji-heavy creator text. Two are flagged, both lexicon hits a human should see
-# ("Get 💸 back on every referral" ~ get rich, "Make 💰 moves this quarter" ~ make money).
+# symbol rule on emoji-heavy creator text. Wave 8 flagged two, both lexicon hits a human should see
+# ("Get 💸 back on every referral" ~ get rich, "Make 💰 moves this quarter" ~ make money). Fix wave 9
+# (AEGIS round 8 M2) made ANY symbol in a missing word's place a stand-in, whatever follows it: these
+# captions were written to START with a never-say phrase's first word followed by an emoji, the worst
+# case of that rule, and 18 of 30 now go to a human (the AEGIS round-8 corpus, 40 emoji captions of
+# ordinary creator text: 0 — tests/test_fix_wave_9.py).
 EMOJI_CAPTIONS = [
     "New drop 🔥 five colours of the everyday tee", "Sold out twice 🎉 Back on the shelf Friday",
     "Get 🎟️ tickets before Friday", "Free 🚚 shipping this weekend", "Make 🎄 memories with the family bundle",
@@ -701,8 +708,19 @@ def test_n7_4_symbol_rule_on_ordinary_emoji_captions():
     print(f"\nN7-4 symbol stand-in on {len(EMOJI_CAPTIONS)} ordinary emoji captions: {len(flagged)} flagged")
     for f in flagged:
         print("   ", f)
-    assert {c for c, _, _ in flagged} == {"Get 💸 back on every referral", "Make 💰 moves this quarter (finance course)"}, flagged
-    assert all("standing for" in how for _, _, how in flagged)  # lexicon hits only; no unknown-emoji flag
+    assert {c for c, _, _ in flagged} == WAVE9_FLAGGED, {c for c, _, _ in flagged} ^ WAVE9_FLAGGED
+    # every one is a caption that opens with a never-say phrase's word and puts an emoji in the next word's place
+    assert all(c.split()[0].lower() in {w for p in NEVER_SAY for w in p.split()} for c, _, _ in flagged)
+
+
+WAVE9_FLAGGED = {
+    "Get 🎟️ tickets before Friday", "Free 🚚 shipping this weekend", "Make 🎄 memories with the family bundle",
+    "Free ☕ with every pastry before nine", "Get 🔥 deals in the app", "Make 🍕 night easy with the sourdough kit",
+    "Free 🎁 with orders over $40", "Get 💌 the newsletter every Sunday", "Risk 🧗 assessment for the climb is in the guide",
+    "Get 💸 back on every referral", "Guaranteed 🌱 to grow in any light", "Make 💰 moves this quarter (finance course)",
+    "Lose ⚖️ the guesswork with our scale", "Passive 🎧 listening playlist for study", "Financial 📚 literacy course for teens",
+    "Free 💧 refills all summer", "Get 🚴 fit this spring with our bike plan", "Make 🎨 something this weekend",
+}
 
 
 @pytest.mark.parametrize("name,captions", CORPORA)
@@ -899,6 +917,7 @@ def _clear_every_cache():
         v = getattr(text, name)
         if name.startswith("_") and name.endswith(("MEMO", "SPANS", "STARTS")) and hasattr(v, "clear"):
             v.clear()
+    text.clear_memos()  # fix wave 9: the per-text memos are per thread (reviews run off the workflow lock)
 
 
 def test_n7_7_clip_review_worst_case_is_bounded(registry):

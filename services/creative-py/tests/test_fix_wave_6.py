@@ -50,7 +50,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from conftest import NOW, TEST_SERVICE_TOKEN, Api
+from conftest import NOW, TEST_SERVICE_TOKEN, Api, port_range
 from flows import ok, zbc_open
 from ordinary_captions import CAPTIONS, NEVER_SAY_FP_LIST
 from samples import TODAY, zbc_clip, zbc_goal
@@ -592,7 +592,7 @@ def test_n3_fuzzy_entry_flows_through_clip_review(registry):
 # N2 — 422 amplification
 # =====================================================================================
 
-PORTS = range(20300, 20320)
+PORTS = port_range(range(20300, 20320))  # CREATIVE_TEST_PORTS overrides (fix wave 9)
 JUNK_1MIB = json.dumps({"caption": "x" * 1_000_000}).encode()          # 12 missing fields, each echoing the input
 JUNK_60K_KEYS = json.dumps({f"k{i}": "x" for i in range(60_000)}).encode()  # 60k extra_forbidden errors
 
@@ -791,9 +791,32 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
           f"/health p50={health[len(health) // 2] * 1000:.0f}ms max={health[-1] * 1000:.0f}ms; RSS {rss} MB; legit {legit}")
     assert codes == {422: 60}, codes
     assert max(sizes) < 8 * 1024
-    assert health and health[-1] < 0.5, health[-1]
+    # Fix wave 9 (AEGIS round 8 L3): the bound is scaled by how much slower this machine runs a fixed
+    # CPU workload right now than it did when the bound was set (1x on an idle machine, so the 500 ms
+    # guarantee is unchanged there; the flake was 502 ms under a concurrent test run), and the p50 is
+    # bound as well since large-body shape scans run one at a time (p50 was ~390 ms, now ~80 ms).
+    slow = _slowdown()
+    print(f"   machine slowdown {slow:.2f}x -> bounds max {0.5 * slow * 1000:.0f} ms, p50 {0.15 * slow * 1000:.0f} ms")
+    assert health and health[-1] < 0.5 * slow, (health[-1], slow)
+    assert health[len(health) // 2] < 0.15 * slow, (health[len(health) // 2], slow)
     assert 408 not in legit and sum(v for k, v in legit.items() if isinstance(k, int)) == 10, legit
     assert rss < 250, rss
+
+
+CALIBRATION_S = 0.12  # json.loads of JUNK_60K_KEYS x5, best of 7, on the reference 2-vCPU host, idle (fix wave 9)
+
+
+def _slowdown() -> float:
+    """How much slower than CALIBRATION_S this machine is right now (best
+    of 7), between 1x and 4x (the onboarding-py timing harness, fix wave 6)."""
+    best = min(_time(lambda: [json.loads(JUNK_60K_KEYS) for _ in range(5)]) for _ in range(7))
+    return min(4.0, max(1.0, best / CALIBRATION_S))
+
+
+def _time(fn) -> float:
+    t0 = time.perf_counter()
+    fn()
+    return time.perf_counter() - t0
 
 
 def test_n2_single_junk_post_is_answered_in_under_100ms_on_the_socket(server):

@@ -68,7 +68,12 @@ def main() -> None:
     step("wrong token", httpx.get(f"{BASE}/registry/rows", headers={"Authorization": "Bearer nope"}), 401)
     step("non-ASCII token", httpx.get(f"{BASE}/registry/rows", headers={"Authorization": b"Bearer caf\xc3\xa9"}), 401)
     for p in ("/docs", "/redoc", "/openapi.json"):
-        step(p, httpx.get(f"{BASE}{p}"), 404)
+        # fix wave 9 (L4): authentication first on every path but /health — anonymous 401, then 404
+        step(f"{p} anonymous", httpx.get(f"{BASE}{p}"), 401)
+        step(f"{p} authenticated", cli.get(p), 404)
+    step("text/plain body, anonymous: 401 before 415",
+         httpx.post(f"{BASE}/zbc/clips", content=b"hello", headers={"Content-Type": "text/plain"}), 401)
+    step("text/plain body, authenticated: 415", cli.post("/zbc/clips", content=b"hello", headers={"Content-Type": "text/plain"}), 415)
     h = step("health", httpx.get(f"{BASE}/health"), 200)
     print("   ", h)
 

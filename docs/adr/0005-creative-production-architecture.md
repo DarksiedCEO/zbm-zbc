@@ -791,7 +791,9 @@ money. ZBC's unit of work is a campaign, not a clip.
     no emoji); 2 of the 30 emoji captions, both lexicon hits a human
     should see ("Get 💸 back on every referral", "Make 💰 moves this
     quarter"). "💰 make" (the words in the other order) is not caught,
-    like "rich get" (decision 22).
+    like "rich get" (decision 22). Fix wave 9 replaced this boundary:
+    see decision 35 (any symbol in a missing word's place, whatever
+    follows it, across line breaks and field boundaries).
 
 31. **Every ordered pair of fields is read across its boundary with
     every signal (fix wave 8; N7-5).** The fields were adjacent only in
@@ -900,6 +902,169 @@ money. ZBC's unit of work is a campaign, not a clip.
     1,000 three-word phrases against the vowel-dropped 50 KB transcript
     cost 1.7 / 2.4 / 4.3 / 9.1 s. Capping the list (or moving review off
     the workflow lock) is a contract decision left open (Honest gaps).
+    CORRECTED in fix wave 9 (AEGIS round 8 M1): the "worst 1.14 s at ~100
+    phrases" held only for this wave's own generator. AEGIS's round-8
+    generator (near-miss tokens built from the phrases' own words, every
+    field at its maximum) measured 1.1 / 4.7 / 3.5 s at 100 phrases. See
+    decision 36 for what was changed and what is measured now.
+
+34. **Letter-like symbols are letters, and styled text is a signal (fix
+    wave 9; AEGIS round 8 H1).** An exact never-say phrase written in
+    negative squared (🅼🅰🅺🅴), negative circled (🅜🅐🅚🅔) or regional-
+    indicator (🇲🇦🇰🇪) letters passed, 36 of 36: those are symbols with
+    no NFKC decomposition, and `canonical()` turned every such symbol
+    into a space. `shared/text.LETTERLIKE` now maps EVERY letter-like
+    symbol to the Latin letter it depicts; it is generated at import
+    from Unicode character names (Python's own `unicodedata`, no new
+    dependency, nothing hand-listed): a style word (MATHEMATICAL,
+    FULLWIDTH, CIRCLED, PARENTHESIZED, SQUARED, NEGATIVE, CROSSED,
+    TORTOISE SHELL BRACKETED, REGIONAL INDICATOR, DOUBLE-STRUCK, SCRIPT,
+    BLACK-LETTER, TURNED, REVERSED, ROTATED, INVERTED, MODIFIER LETTER,
+    SUPERSCRIPT, SUBSCRIPT, LATIN) followed by CAPITAL / SMALL / LETTER
+    and one letter A–Z, minus other scripts' names, digits, combining and
+    tag characters and letters "WITH" a diacritic — 1,054 code points
+    (Enclosed Alphanumerics, the Enclosed Alphanumeric Supplement,
+    Mathematical Alphanumerics, Letterlike Symbols, fullwidth forms,
+    small capitals, superscript / subscript / modifier letters). A test
+    derives the set independently, by block, over every code point, and
+    requires every entry to fold to its letter (the independent
+    derivation found one the first regex missed: ROTATED CAPITAL Q).
+    Regional indicators are also flags: a text whose regional indicators
+    all come in runs of exactly two is read as flags; any run of another
+    length ("🇲🇦🇰🇪" is four; letters split by zero-width spaces are runs
+    of one) makes every regional indicator of that text a letter — a
+    string of flags cannot be told from a word, so it is read as the
+    word. Then: an exact phrase once mapped is a REJECT (every never-say
+    phrase of the AEGIS lists in every one of the 35 styles, caption and
+    bio: 1,960 of 1,960 rejected; the 48 AEGIS round-8 cases: 48
+    rejected); any letter-like symbol in any text field is itself an
+    obfuscation signal (`letterlike_chars`), so styled text is never an
+    automatic pass (a single flag is not styled text). Fail-safe
+    (`stripped_share`, `STRIPPED_SHARE_LIMIT` = 30%): a field in which
+    canonicalisation strips more than 30% of the non-space characters —
+    over the whole field or over any run of 1–4 words holding at least 3
+    stripped characters (a field-wide share alone is diluted by the
+    ordinary text around the styled words) — is a human's call, so a
+    style nobody mapped (Braille patterns, box drawing, block elements,
+    private-use glyphs, a future block) cannot produce an automatic pass.
+    Not counted as stripped: punctuation, currency / math / modifier
+    symbols, invisible characters (their own signals cover them), the
+    emoji keycap, Latin-1, and the emoji / pictograph blocks. Cost:
+    decorative box-drawing separators ("━━━━") and letter emoji (🅰️ 🅿️
+    Ⓜ️) now go to a human. Fuzz: 336 phrases with random per-letter
+    styles and zero-width characters, 0 automatic passes; the AEGIS
+    round-8 corpus (170 captions): no caption flagged by these rules.
+
+35. **Any symbol in a missing word's place is a stand-in (fix wave 9;
+    AEGIS round 8 M2).** Decision 30 counted a pictograph outside the
+    lexicon only where it closed the statement, never across a line
+    break, never in another field: "make 💱 This budget myth", "risk ∅",
+    "beat the 📈", "make\n💰" and "make" in the caption + "💰" as the
+    bio passed (17/41, 7/12, 12/12). Now (`symbol_stand_in`): any
+    symbol — a character that is neither a letter nor punctuation
+    (Unicode So / Sk / Sc / Sm, unassigned and private-use code points; a
+    run is one symbol) — immediately beside the rest of a never-say
+    phrase, in the place of one of its words, is a stand-in, a human's
+    call, whatever follows it; line breaks are read across. A lexicon
+    symbol naming the missing word may sit within the adjacency gap, may
+    stand for several words, and in a phrase of three or more words may
+    stand in with the first or last word left out ("no ⚖ fast": "lose
+    weight fast"). Across fields, one mechanism with decision 31: the
+    last words of one field read with the first words of the next,
+    symbols kept, for every ordered pair; and a field that is nothing but
+    symbols (a bio of "💰") sits beside both ends of every other field —
+    fields have no reading order — so the phrase minus one word at either
+    edge of another field is a stand-in. Unchanged: a price ("$20"), a
+    fragment of function words alone ("no 🎯", "your 💰"), symbols alone.
+    One exception to "any symbol", measured: a LEXICON symbol that names
+    the written word beside it and not the missing one illustrates that
+    word ("Guaranteed ✅ delivery", "Doctor 🩺 appointments") — without
+    it 2 of the 40 emoji captions of the AEGIS round-8 corpus were
+    flagged. Measured: AEGIS round-8 classes Q / R / S: 0 of 41 / 12 /
+    12 pass; the round-8 corpus (170 captions, lists A+B): 3 flagged as
+    before, 0 by this rule. Cost, measured on the fix-wave-8 set of 30
+    emoji captions written to open with a never-say phrase's first word
+    ("Get 🎟 tickets", "Free 🚚 shipping", "Make 🎄 memories"): 18 of 30
+    now go to a human (2 before).
+
+36. **Clip Review cost, and the review is off the workflow lock (fix wave
+    9; AEGIS round 8 M1).** Hot paths found by profiling the AEGIS
+    generator (not guessed): the symbol-as-letter reading of `near_miss`
+    costed every word with a symbol or digit against every phrase word
+    (488,870 DPs; now `_other_candidates`: a word's ASCII letters must be
+    a subsequence of the phrase word, so an index on their first and last
+    letters leaves the candidates); the phonetic run-of-tokens loop keyed
+    every run of tokens for every phrase (now `_run_keys`: once per text,
+    reading and first key letter for the whole batch, the key built
+    incrementally, a start abandoned as soon as its key part is no prefix
+    of any phrase's key; a differential test against the previous code on
+    thousands of random texts: identical results); relaxed-budget hits
+    were confirmed for every phrase although only a phrase no other
+    signal catches ever uses them (now recorded during the scan and
+    confirmed only when the stacked rule asks — same hits, same spans);
+    the skeleton and phonetic batches ran for phrases an earlier signal
+    already caught (now staged: each batch covers only the phrases every
+    earlier signal left, so each phrase gets the same first signal in the
+    same order); the similarity signals ran even when a written rule
+    already rejected the clip, although a rejection carries no human
+    review reasons (now skipped unless the clip is routed to a human);
+    plus constant factors (a translate table for format characters, cached
+    padded texts, a cache split so 100 phrases no longer evict their own
+    canonical forms, one regex pass for symbol tokens). Measured on the
+    2-CPU test machine, every cache cold, this thread's CPU, the AEGIS
+    `ns_cost8.py` generator at 100 phrases: 0.14 / 0.8-0.85 / 1.23-1.28 s
+    (round 8: 1.1 / 4.7 / 3.5 s); the stricter variant of the all-fields
+    case routed to a human (so no rejection cuts the signals short):
+    1.5-1.6 s. A test asserts ≤ 1.5 s for the three AEGIS cases (and
+    ≤ 2.0 s for the routed variant), scaled by a measured slowdown factor
+    (1x on an idle machine, the onboarding-py harness). The review no
+    longer runs under the service-wide workflow lock: its inputs (the
+    rulebook version, a copy of the registry rows, the receipt time) are
+    taken under the lock, the review runs without it, and the decision is
+    committed under the lock only if every input is still current — a
+    registry row or reservation that changed meanwhile makes the commit
+    review again under the lock (tested: a registry write landing during
+    the review is never committed stale; a rulebook draft and a brief go
+    through while a review is held). The per-text memos are per thread.
+    Still linear in the never-say list's total length (see Honest gaps).
+
+37. **Retired rule ids are derived, not stored (fix wave 9; AEGIS round 8
+    L2).** Every version carried its own list of every retired id (60
+    churn revisions of 1,000 phrases: 60,000 ids per version; a 30 MiB
+    GET of the version list). A version now carries, per id prefix, the
+    highest rule number ever issued in the campaign up to it
+    (`rule_number_high_water`, a handful of integers); its retired ids
+    are derived — every number up to the mark that is not one of its
+    rules (`RetiredRuleIds`: len, index, slice, `in`, iteration; O(its
+    rules) memory). This works because numbers are issued in sequence and
+    never reused (decision 29); the store refuses a version whose new
+    rule carries a number at or below its predecessor's mark. A pre-wave-9
+    dump with a `retired_rule_ids` list is read as the marks it implies.
+    The API: GET `.../rulebooks` is a page of version summaries (100 per
+    page, with `retired_rule_count`), GET `.../rulebooks/{v}` one version
+    (its rules and the count), GET `.../rulebooks/{v}/retired-rule-ids` the
+    ids 1,000 at a time. Measured: 60 churn revisions × 1,000 phrases —
+    per-version metadata 1.1 KB whatever the history (was up to 60,000
+    ids), the list GET 24 KB in ~0.1 s (was 29.4 MB in 0.87 s), one
+    revision's memory flat from the 2nd to the 60th. The 61 versions
+    still hold 61,000 distinct rules (about 1.5 MiB per 1,000-rule
+    version, 89 MiB in all): keeping every version judgeable is the cost;
+    see Honest gaps.
+
+38. **/health under junk floods (fix wave 9; AEGIS round 8 L3).** Large
+    bodies' JSON shape scans run one at a time (`BodyLimit.scan_gate`):
+    json.loads holds the GIL for a whole parse, so 20 at once kept the
+    event loop from running between them. /health p50 under 20 junk
+    senders: 390-430 → ~80 ms (60,000-key bodies), 88 → ~28 ms (1 MiB
+    bodies). The timing test is scaled by a measured slowdown factor
+    (the onboarding-py harness) and bounds the p50 as well.
+
+39. **Authentication before content type (fix wave 9; AEGIS round 8
+    L4).** The body gate answered 415 (and 413, 408) before
+    authentication, so an anonymous caller could learn which content
+    types and sizes are accepted. `BodyLimit` now checks the bearer
+    token first on every path but /health (the same check as the route
+    dependency, `_bearer_refusal`): 401 first, then 413 / 415.
 
 ## Shared vs separate
 
@@ -1044,9 +1209,9 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     words AND written with symbols is caught by the mixed-word rule, not
     by the phrase); a never-say word inside a hashtag ("get #rich") is a
     human's call (a symbol in the word), not a reject. The symbol
-    lexicon (decision 30) is a bounded list: a pictograph it does not
-    know is read only where it occupies a phrase word's place, so an
-    unknown emoji followed by an ordinary word ("make 🤞 today") passes.
+    lexicon (decision 30) is a bounded list; since fix wave 9 any other
+    symbol in a missing word's place is read as a stand-in too
+    (decision 35), at the cost measured there.
     Script detection is
     by Unicode character name (Python has no Script property). RLO text
     is flagged, not un-reversed. Costs: every clip with any non-Latin
@@ -1054,14 +1219,25 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     Japanese title, a Greek µ in "µs") goes to the human queue, as do
     emoji keycaps ("1️⃣"), soft hyphens inside words and four or more
     single letters in a row.
-16. **Review cost with a long never-say list (fix wave 8, open).** A
-    goal may list 1,000 never-say entries of up to 4,000 characters; the
-    review cost is linear in their total length (9.1 s of CPU for 1,000
-    three-word phrases against a 50 KB transcript, under the serialised
-    workflow lock), so a campaign with a long list plus a clipper sending
-    long transcripts can hold the service. Open item for Andre: cap the
-    never-say list (about 100 phrases keeps a review near 1 s), or move
-    Clip Review off the workflow lock.
+16. **Review cost with a long never-say list (fix wave 8; fix wave 9,
+    still open).** A goal may list 1,000 never-say entries of up to 4,000
+    characters; the review cost is linear in their total length. Fix wave
+    9 bounded the AEGIS generator's cases at 100 phrases (decision 36)
+    and moved the review off the workflow lock, so a slow review no
+    longer holds briefs, rulebooks or other clips (it still occupies a
+    worker thread and, under one GIL, CPU). At 1,000 phrases the same
+    generator measured 2.0 / 5.0 / 3.8 s per review (one run, wall
+    clock; round 8: 10.5 / 275.6 / 61.5 s). Open item for Andre: cap the
+    never-say list (about 100 phrases keeps a worst-case review near
+    1.3 s), or bound review CPU per clip (routing a clip that exceeds it
+    to a human).
+17. **Memory of a churned campaign (fix wave 9, open).** Retired ids are
+    no longer copied into every version (decision 37), but every version
+    keeps its own rules so a clip made under it can be judged: 60
+    revisions of 1,000 never-say phrases hold 61,000 rules, about 89
+    MiB. Open item: cap the versions a campaign keeps in memory, or keep
+    superseded versions compactly (serialised) and load one only to
+    judge a clip made under it.
 
 ## Verified
 

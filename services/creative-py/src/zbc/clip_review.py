@@ -73,12 +73,24 @@ NS  no never-say phrase in ANY text field (bio included)   -> reject
     judged by every signal, respelled halves included ("gt" in the
     caption + "ritch" in the bio) -> human_review (N7-5; the fields are
     joined by a line break, a token boundary, not a hard wall))
+    fix wave 9 (AEGIS round 8): letter-like symbols (🅼🅰🅺🅴, 🇲🇦🇰🇪, 𝐦𝐚𝐤𝐞)
+    are read as letters, so an exact phrase in them is a reject (H1);
+    ANY symbol in the place of one phrase word, whatever follows it,
+    across line breaks and across field boundaries (a field of nothing
+    but symbols sits beside both ends of every other field) ->
+    human_review (M2); the similarity signals run in stages, each batch
+    only for the phrases the earlier signals left, and not at all when a
+    written rule already rejects the clip (a rejection carries no human
+    review reasons) unless it is routed to a human (M1; the review itself
+    runs off the workflow lock, zbc/workflow.review_clip_unlocked)
 MIX any word mixing letters with symbols/digits in any text field
     (shared/text.mixed_symbol_words; ordinary
     punctuation, #hashtags, prices and "2nd"/"1990s"-style numbers excepted)
                                                             -> human_review
 OBF any text field shows an obfuscation
-    signal (bidi controls, fillers, tag characters anywhere;
+    signal (letter-like symbols, fix wave 9; more than 30% of a field or
+    of a run of its words stripped by canonicalisation, the fail-safe;
+    bidi controls, fillers, tag characters anywhere;
     other invisibles beside a letter; lookalikes among Latin;
     two scripts inside one word; separator-split letters; a Latin
     letter outside Basic Latin + Latin-1 + the fold table)  -> human_review
@@ -92,7 +104,6 @@ MD  min days live is NOT judged here (Verification and Integrity).
 from __future__ import annotations
 
 import functools
-import unicodedata
 from datetime import datetime
 from typing import Literal
 
@@ -101,7 +112,6 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 from shared.registry import PlatformRulesRegistry
 from shared.text import (
     READINGS,
-    SYMBOL_LEXICON,
     PhraseMatch,
     _osa_within,
     _vis,
@@ -113,14 +123,22 @@ from shared.text import (
     near_miss,
     non_latin_letters,
     obfuscation_signals,
+    _has_symbol,
+    _is_symbol_char,
     phonetic_key,
+    phonetic_signal,
     phrase_words_in_order,
     relaxed_skeleton_spans,
     relaxed_visual_spans,
     skeleton_near_misses,
+    skeleton_signal,
     stacked_or_symbol,
+    symbol_fragment_at_edges,
+    symbol_only,
+    symbol_stand_in,
     visual_lookalike_exact,
     visual_near_misses,
+    warm_phonetic_runs,
     word_key,
 )
 from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
@@ -289,7 +307,7 @@ def _close(token: str, word: str) -> bool:
             return False  # a tag or a number is not a word of the phrase
         if any(c.isalpha() for c in token):
             return True  # letters mixed with symbols / digits: a symbol may stand for a letter
-        return any(c in SYMBOL_LEXICON or unicodedata.category(c) == "So" for c in token)  # a symbol run
+        return any(_is_symbol_char(c) for c in token)  # a symbol run (fix wave 9: any symbol, M2)
     return (word_key(token) == word_key(word)
             or any(consonant_skeleton(_vis(token, v)) == consonant_skeleton(_vis(word, v))
                    or phonetic_key(_vis(token, v)) == phonetic_key(_vis(word, v)) for v in READINGS)
@@ -325,6 +343,134 @@ def _spreads(joints: list[tuple[str, str, str, str, str]],
             if _mentions(joint, phrase, fuzzy) and not _mentions(tail, phrase, fuzzy) and not _mentions(head, phrase, fuzzy):
                 out[key] = (a, b, joint)
     return out
+
+
+def _raw_edges(text: str, n: int = BOUNDARY_WORDS) -> tuple[str, str]:
+    """(first n, last n) whitespace-separated chunks of `text` as written
+    — symbols, prices and line breaks' neighbours kept — each side stopping
+    at a chunk over EDGE_TOKEN_CHARS characters (as `_field_edges`)."""
+    chunks = text.split()
+    head, tail = chunks[:n], chunks[-n:]
+    long_h = [i for i, t in enumerate(head) if len(t) > EDGE_TOKEN_CHARS]
+    long_t = [i for i, t in enumerate(tail) if len(t) > EDGE_TOKEN_CHARS]
+    head = head[:long_h[0]] if long_h else head
+    tail = tail[long_t[-1] + 1:] if long_t else tail
+    return " ".join(head), " ".join(tail)
+
+
+def _symbol_spreads(sub: ClipSubmission, phrases: list[tuple[str, bool]]) -> dict[tuple[str, bool], tuple[str, str, str]]:
+    """{(phrase, fuzzy): (field a, field b, what)} for each multi-word
+    phrase whose SYMBOL stand-in (`symbol_stand_in`) is only there across
+    a field boundary (fix wave 9, AEGIS round 8 M2, one mechanism with the
+    wave-8 spreads): (1) the last words of field a read with the first
+    words of field b, symbols kept ("... make" + "💰 daily vlogs"), for
+    every ordered pair; (2) a field that is NOTHING but symbols ("💰" as
+    the bio) with the phrase minus one word at either edge of another
+    field ("make ..." opening the caption) — fields have no reading order,
+    so a symbol-only field sits beside both ends of every other one."""
+    out: dict[tuple[str, bool], tuple[str, str, str]] = {}
+    fields = {f: getattr(sub, f) for f in TEXT_FIELDS if getattr(sub, f).strip()}
+    multi = [key for key in phrases if len(canonical(key[0]).split()) >= 2]
+    if not multi:
+        return out
+    only = [f for f, t in fields.items() if symbol_only(t)]
+    for s in only:
+        for x, t in fields.items():
+            if x in only:
+                continue
+            head, tail = _raw_edges(t)
+            for key in multi:
+                if key in out:
+                    continue
+                hit = symbol_fragment_at_edges(head, key[0]) or symbol_fragment_at_edges(tail, key[0])
+                if hit:
+                    out[key] = (x, s, f"{hit}; the {s} is only {fields[s].strip()[:20]!r}")
+    edges = {f: _raw_edges(t) for f, t in fields.items()}
+    for a, (_, tail) in edges.items():
+        for b, (head, _) in edges.items():
+            if a == b or not tail or not head:
+                continue
+            joint = tail + " " + head
+            if not _has_symbol(joint):
+                continue
+            for key in multi:
+                if key in out:
+                    continue
+                how = symbol_stand_in(joint, key[0])
+                if how and not symbol_stand_in(tail, key[0]) and not symbol_stand_in(head, key[0]):
+                    out[key] = (a, b, how)
+    return out
+
+
+def _rejected_later(sub: ClipSubmission, rb: Rulebook) -> bool:
+    """The quality-floor or rights rule rejects this clip (the same tests
+    `review` makes below, made early; fix wave 9, M1)."""
+    qf = rb.one(RuleKind.QUALITY_FLOOR)
+    if qf is not None and sub.resolution_height_px is not None and sub.resolution_height_px < int(qf.params.get("min_height_px", 0)):
+        return True
+    rc = rb.one(RuleKind.RIGHTS_CLEARED_ONLY)
+    if rc is not None:
+        allowed = set(rc.params.get("allowed_asset_ids", []))
+        if any(a not in allowed for a in [*sub.source_asset_ids, *sub.added_asset_ids]):
+            return True
+    return False
+
+
+def _borderline_never_say(sub: ClipSubmission, all_text: str, edges, open_rules: list[tuple], borderline: list[str]) -> None:
+    """The never-say signals that make a clip a human's call, for the
+    rules no exact or lookalike reading broke (in rule order)."""
+    # near_miss() in stages (fix wave 9, M1): each batched scan runs only for the phrases every earlier
+    # signal left, so a phrase gets the same first signal as before, in the same rule order
+    found: dict[str, str] = {}
+    pending: list[tuple] = []
+    for r, phrase, fz, m in open_rules:
+        if m is PhraseMatch.LOOSE:
+            found[r.rule_id] = f"{r.rule_id}: possible never-say {phrase!r} written with split/obfuscated letters"
+            continue
+        how = near_miss(all_text, phrase, fz, stacked=False, stage="early")
+        if how:
+            found[r.rule_id] = f"{r.rule_id}: possible never-say {phrase!r} written with {how}"
+        else:
+            pending.append((r, phrase, fz))
+    for signal, prepare in ((skeleton_signal, skeleton_near_misses), (phonetic_signal, warm_phonetic_runs)):
+        if not pending:
+            break
+        prepare(all_text, tuple((p, fz) for _, p, fz in pending))
+        left_over = []
+        for r, phrase, fz in pending:
+            how = signal(all_text, phrase, fz)
+            if how:
+                found[r.rule_id] = f"{r.rule_id}: possible never-say {phrase!r} written with {how}"
+            else:
+                left_over.append((r, phrase, fz))
+        pending = left_over
+    unmatched: list[tuple] = pending
+    borderline.extend(found[r.rule_id] for r, _, _, _ in open_rules if r.rule_id in found)
+    # the phrases no signal caught: the stacked rule (its relaxed scans batched, fix wave 8 class B),
+    # a symbol standing for a word (N7-4), then the phrase spread over two fields (N7-5)
+    if unmatched:
+        relaxed_visual_spans(all_text, tuple((p, fz) for _, p, fz in unmatched))
+        relaxed_skeleton_spans(all_text, tuple((p, fz) for _, p, fz in unmatched))
+        spreads = _spreads(_field_joints(edges), [(p, fz) for _, p, fz in unmatched])
+        left = []
+        for r, phrase, fz in unmatched:
+            how = stacked_or_symbol(all_text, phrase, fz)
+            if how:
+                borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with {how}")
+                continue
+            spread = spreads.get((phrase, fz))
+            if spread:
+                borderline.append(f"{r.rule_id}: possible never-say {phrase!r} spread over {spread[0]} and "
+                                  f"{spread[1]} ({spread[2][:60]!r})")
+                continue
+            left.append((r, phrase, fz))
+        # a symbol standing for a word across a field boundary (fix wave 9, M2)
+        sym = _symbol_spreads(sub, [(p, fz) for _, p, fz in left]) if left else {}
+        for r, phrase, fz in left:
+            hit = sym.get((phrase, fz))
+            if hit:
+                borderline.append(f"{r.rule_id}: possible never-say {phrase!r} with a symbol standing for one of "
+                                  f"its words across {hit[0]} and {hit[1]} ({hit[2][:120]})")
 
 
 def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, now: datetime,
@@ -423,11 +569,11 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
         elif m is PhraseMatch.NONE:
             fail(r.rule_id, f"missing must-say {r.params.get('phrase')!r}")
     never = [(r, r.params.get("phrase", ""), bool(r.params.get("fuzzy"))) for r in rb.rules_of(RuleKind.NEVER_SAY)]
+    batch = tuple((p, fz) for _, p, fz in never)
     # one scan of the submission's letter stream (every text field, bio included) for every
     # never-say phrase at once (fix wave 6, N1; fix wave 7, NEW-7 / the skeleton scan)
-    visual_near_misses(all_text, tuple((p, fz) for _, p, fz in never))
-    skeleton_near_misses(all_text, tuple((p, fz) for _, p, fz in never))
-    unmatched: list[tuple] = []
+    visual_near_misses(all_text, batch)
+    open_rules: list[tuple] = []
     for r, phrase, fz in never:
         checks.append(r.rule_id)
         m = match_phrase(all_text, phrase)
@@ -438,42 +584,27 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
             fail(r.rule_id, f"says never-say {phrase!r} with lookalike letters ({lookalike[:60]!r} "
                             "reads the same once rn/m, cl/d and vv/w are read alike, stretched letters collapsed "
                             "and spaces ignored)")
-        elif m is PhraseMatch.LOOSE:
-            borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with split/obfuscated letters")
         else:
-            how = near_miss(all_text, phrase, fz, stacked=False)
-            if how:
-                borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with {how}")
-            else:
-                unmatched.append((r, phrase, fz))
-    # the phrases no signal caught: the stacked rule (its relaxed scans batched, fix wave 8 class B),
-    # a symbol standing for a word (N7-4), then the phrase spread over two fields (N7-5)
-    if unmatched:
-        relaxed_visual_spans(all_text, tuple((p, fz) for _, p, fz in unmatched))
-        relaxed_skeleton_spans(all_text, tuple((p, fz) for _, p, fz in unmatched))
-        spreads = _spreads(_field_joints(edges), [(p, fz) for _, p, fz in unmatched])
-        for r, phrase, fz in unmatched:
-            how = stacked_or_symbol(all_text, phrase, fz)
-            if how:
-                borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with {how}")
-                continue
-            spread = spreads.get((phrase, fz))
-            if spread:
-                borderline.append(f"{r.rule_id}: possible never-say {phrase!r} spread over {spread[0]} and "
-                                  f"{spread[1]} ({spread[2][:60]!r})")
-
-    for field_name in TEXT_FIELDS:
-        for sig in obfuscation_signals(getattr(sub, field_name)):
-            borderline.append(f"obfuscation in {field_name}: {sig}")
-        mixed = mixed_symbol_words(getattr(sub, field_name))
-        if mixed:
-            borderline.append(f"letters mixed with symbols/digits in {field_name} ({', '.join(repr(w) for w in mixed)}): "
-                              "a symbol or digit can stand in for a letter, so a human reads it")
-        if rb.language == "en":
-            foreign = non_latin_letters(getattr(sub, field_name))
-            if foreign:
-                borderline.append(f"non-Latin letter(s) in {field_name} of an English-language campaign "
-                                  f"({', '.join(foreign[:5])}): a human reads it")
+            open_rules.append((r, phrase, fz, m))
+    # Fix wave 9 (AEGIS round 8 M1): the similarity signals below only ever add a human_review REASON,
+    # and a rejection carries none. When a written rule is already broken (or will be: the quality
+    # floor and rights rules below are decided here, from the same inputs) and nothing routes the
+    # clip to a human, the outcome is a rejection whatever they find, so they are not computed.
+    rejecting = not route_to_human and (bool(broken) or _rejected_later(sub, rb))
+    if not rejecting:
+        _borderline_never_say(sub, all_text, edges, open_rules, borderline)
+        for field_name in TEXT_FIELDS:
+            for sig in obfuscation_signals(getattr(sub, field_name)):
+                borderline.append(f"obfuscation in {field_name}: {sig}")
+            mixed = mixed_symbol_words(getattr(sub, field_name))
+            if mixed:
+                borderline.append(f"letters mixed with symbols/digits in {field_name} ({', '.join(repr(w) for w in mixed)}): "
+                                  "a symbol or digit can stand in for a letter, so a human reads it")
+            if rb.language == "en":
+                foreign = non_latin_letters(getattr(sub, field_name))
+                if foreign:
+                    borderline.append(f"non-Latin letter(s) in {field_name} of an English-language campaign "
+                                      f"({', '.join(foreign[:5])}): a human reads it")
 
     qf = rb.one(RuleKind.QUALITY_FLOOR)
     if qf is not None:
