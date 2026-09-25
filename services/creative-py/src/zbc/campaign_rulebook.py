@@ -22,6 +22,11 @@ R3  every registry row a rule rests on is usable TODAY (re-checked, not
 R4  no phrase is both must-say and never-say;
 R5  no approved hook line contains a never-say phrase;
 R6  every approved angle has at least one keyword (so on-brief can be judged).
+
+Refused outright (422, fix wave 10, AEGIS round 9 N9-3): a rulebook with
+more than MAX_NEVER_SAY never-say phrases — Clip Review's cost per clip
+grows with the list (rulebook_writer.MAX_NEVER_SAY says how it was chosen).
+The draft is left as it is: nothing is truncated.
 """
 
 from __future__ import annotations
@@ -31,10 +36,10 @@ from datetime import date
 from typing import Literal
 
 from shared.actors import ActorRegistry, Role, require_not_self
-from shared.errors import PreconditionFailed
+from shared.errors import PreconditionFailed, ValidationFailed
 from shared.registry import PlatformRulesRegistry
 from shared.text import contains_phrase, mentions_phrase
-from zbc.rulebook_writer import NeverSayEntry, short_entry_warnings
+from zbc.rulebook_writer import MAX_NEVER_SAY, NeverSayEntry, short_entry_warnings
 from zbc.platform_rules import rows_usable
 from zbc.rulebook import Rulebook, RuleKind, RulebookStatus
 
@@ -57,6 +62,12 @@ def review(rb: Rulebook, approver_id: str, actors: ActorRegistry, registry: Plat
     actors.require_role(approver_id, Role.ZBC_CAMPAIGN_RULEBOOK)
     if rb.status is not RulebookStatus.DRAFT:
         raise PreconditionFailed(f"rulebook {rb.campaign_id} v{rb.version} is {rb.status.value}; only a draft can be reviewed")
+    n_never = len(rb.rules_of(RuleKind.NEVER_SAY))
+    if n_never > MAX_NEVER_SAY:
+        raise ValidationFailed(
+            f"rulebook {rb.campaign_id} v{rb.version} has {n_never} never-say phrases; at most {MAX_NEVER_SAY} "
+            "can be approved (Clip Review's cost per clip grows with the list). Nothing was dropped: shorten the "
+            "list and submit a new draft", ["never_say"])
 
     issues: list[str] = [f"R1 blocking: {b}" for b in rb.blocking_issues]
     for kind in REQUIRED_SINGLE:

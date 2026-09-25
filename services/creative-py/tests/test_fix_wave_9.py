@@ -120,22 +120,35 @@ def test_h1_reference_derivation_is_not_empty():
         assert ch in REFERENCE, ch
 
 
-def test_h1_every_letterlike_code_point_folds_to_its_letter():
-    """Coverage of the generated map against every code point of the blocks."""
-    from shared.text import canonical
+_REGIONAL_REF = {ch: letter for ch, letter in REFERENCE.items() if unicodedata.name(ch).startswith("REGIONAL INDICATOR")}
 
+
+def test_h1_every_letterlike_code_point_folds_to_its_letter():
+    """Coverage of the generated map against every code point of the blocks. Fix wave 10 (N9-2): the
+    regional indicators are the exception — canonical() no longer folds them (a run of them is also a
+    row of flags); they are READ as their letters only by `regional_reading`, whose never-say hits Clip
+    Review sends to a human."""
+    from shared.text import canonical, regional_reading
+
+    assert len(_REGIONAL_REF) == 26
     wrong = [(f"U+{ord(ch):04X}", unicodedata.name(ch), canonical(ch)) for ch, letter in REFERENCE.items()
-             if canonical(ch) != letter]
+             if ch not in _REGIONAL_REF and canonical(ch) != letter]
     print(f"\nH1 letter-like code points: {len(REFERENCE)}; not folded to their letter: {len(wrong)}")
     assert not wrong, wrong[:20]
+    for ch, letter in _REGIONAL_REF.items():
+        assert canonical(ch) == "" and regional_reading(ch) == letter, ch
 
 
 def test_h1_the_map_is_generated_from_unicode_names_and_covers_the_reference():
     from shared import text
 
-    assert set(REFERENCE) <= set(text.LETTERLIKE), sorted(f"U+{ord(c):04X}" for c in set(REFERENCE) - set(text.LETTERLIKE))[:20]
-    for ch, letter in REFERENCE.items():
+    plain = {ch: letter for ch, letter in REFERENCE.items() if ch not in _REGIONAL_REF}
+    assert set(plain) <= set(text.LETTERLIKE), sorted(f"U+{ord(c):04X}" for c in set(plain) - set(text.LETTERLIKE))[:20]
+    for ch, letter in plain.items():
         assert text.LETTERLIKE[ch] == letter, (ch, unicodedata.name(ch))
+    # fix wave 10 (N9-2): regional indicators are a separate reading, never in the letter-like map
+    assert text.REGIONAL_LETTERS == _REGIONAL_REF
+    assert not set(_REGIONAL_REF) & set(text.LETTERLIKE)
     # nothing ordinary is in it: no ASCII, no Latin-1 letter, no letter with a diacritic
     for ch in text.LETTERLIKE:
         assert ord(ch) >= 0x80 and not ("À" <= ch <= "ÿ"), ch
@@ -160,26 +173,31 @@ def _write(phrase: str, style: dict[str, str]) -> str:
 
 
 def test_h1_aegis_round8_enclosed_phrases_are_rejected(registry):
-    """The AEGIS probe's exact cases (ns_q8.py / ns_scripts8.py): 36/36 passed."""
+    """The AEGIS probe's exact cases (ns_q8.py / ns_scripts8.py): 36/36 passed. Fix wave 10 (N9-2): the
+    regional-indicator cases (ri, riz) are a human's call with a never-say reason, never a rejection
+    (a run of regional indicators is also a row of flags); the enclosed styles are still rejected."""
     rb = _rulebook(registry)
     sq = lambda s: "".join(chr(0x1F170 + ord(c) - 97) if c.isalpha() else c for c in s)
     nc = lambda s: "".join(chr(0x1F150 + ord(c) - 97) if c.isalpha() else c for c in s)
     ri = lambda s: "".join(chr(0x1F1E6 + ord(c) - 97) if c.isalpha() else c for c in s)
     riz = lambda s: "".join(chr(0x1F1E6 + ord(c) - 97) + "​" if c.isalpha() else c for c in s)
     out = []
-    for f in (sq, nc, ri, riz):
+    for f, want in ((sq, "reject"), (nc, "reject"), (ri, "human_review"), (riz, "human_review")):
         for p in ("get rich", "make money", "guaranteed returns", "zero fees", "burn fat", "easy money"):
             for field in ("caption", "account_bio"):
                 d = _run(registry, rb, {field: f(p)})
-                out.append((f(p), field, d.outcome, [b.rule_id for b in d.broken_rules]))
-    bad = [o for o in out if o[2] != "reject"]
-    print(f"\nH1 AEGIS enclosed styles: {len(out)} cases, not rejected {len(bad)}")
+                named = want == "reject" or any("never-say" in r and repr(p) in r for r in d.human_review_reasons)
+                out.append((f(p), field, d.outcome if named else "no never-say reason", want,
+                            [b.rule_id for b in d.broken_rules]))
+    bad = [o for o in out if o[2] != o[3]]
+    print(f"\nH1 AEGIS enclosed styles: {len(out)} cases, not as expected {len(bad)}")
     assert not bad, bad[:10]
 
 
 def test_h1_every_style_every_phrase_exact_is_rejected(registry):
     """(b)/(d): every never-say phrase of lists A+B written in every letter-like style (a letter the
-    style lacks stays ASCII, as an evader would write it) is a REJECT, in the caption and the bio."""
+    style lacks stays ASCII, as an evader would write it) is a REJECT, in the caption and the bio —
+    except regional indicators (fix wave 10, N9-2): a human's call with a never-say reason."""
     rb = _rulebook(registry)
     misses, n = [], 0
     for name, style in sorted(STYLES.items()):
@@ -187,9 +205,12 @@ def test_h1_every_style_every_phrase_exact_is_rejected(registry):
             for field in ("caption", "account_bio"):
                 n += 1
                 d = _run(registry, rb, {field: _write(p, style)})
-                if d.outcome != "reject":
+                if name.startswith("REGIONAL INDICATOR"):
+                    if d.outcome != "human_review" or not any("never-say" in r and repr(p) in r for r in d.human_review_reasons):
+                        misses.append((name, _write(p, style), field, d.outcome))
+                elif d.outcome != "reject":
                     misses.append((name, _write(p, style), field, d.outcome))
-    print(f"\nH1 {len(STYLES)} styles x {len(NS8)} phrases x 2 fields = {n}: not rejected {len(misses)}")
+    print(f"\nH1 {len(STYLES)} styles x {len(NS8)} phrases x 2 fields = {n}: not as expected {len(misses)}")
     assert not misses, misses[:10]
 
 
@@ -218,10 +239,12 @@ def test_h1_fuzz_mixed_styles_and_invisibles_never_auto_pass(registry):
 
 
 def test_h1_styled_text_is_itself_a_signal(registry):
-    """Styled letters are an obfuscation signal even when no phrase is there."""
+    """Styled letters are an obfuscation signal even when no phrase is there. Fix wave 10: regional
+    indicators are not (N9-2: "🇭🇪🇱🇱🇴 🇫🇷🇮🇪🇳🇩🇸" is also a row of flags; with no never-say reading it
+    passes, tests/test_fix_wave_10.py), Braille letters are (N9-7)."""
     rb = _rulebook(registry)
-    for t in ["𝐇𝐞𝐥𝐥𝐨 𝐟𝐫𝐢𝐞𝐧𝐝𝐬", "🅷🅴🅻🅻🅾 🅵🆁🅸🅴🅽🅳🆂", "🅗🅔🅛🅛🅞", "🇭🇪🇱🇱🇴 🇫🇷🇮🇪🇳🇩🇸", "ｈｅｌｌｏ ｆｒｉｅｎｄｓ",
-              "ʜᴇʟʟᴏ ꜰʀɪᴇɴᴅꜱ", "ʰᵉˡˡᵒ", "ⓗⓔⓛⓛⓞ", "⒣⒠⒧⒧⒪"]:
+    for t in ["𝐇𝐞𝐥𝐥𝐨 𝐟𝐫𝐢𝐞𝐧𝐝𝐬", "🅷🅴🅻🅻🅾 🅵🆁🅸🅴🅽🅳🆂", "🅗🅔🅛🅛🅞", "ｈｅｌｌｏ ｆｒｉｅｎｄｓ",
+              "ʜᴇʟʟᴏ ꜰʀɪᴇɴᴅꜱ", "ʰᵉˡˡᵒ", "ⓗⓔⓛⓛⓞ", "⒣⒠⒧⒧⒪", "⠓⠑⠇⠇⠕ ⠋⠗⠊⠑⠝⠙⠎"]:
         d = _run(registry, rb, {"caption": t})
         assert d.outcome == "human_review", (t, d.outcome, d.human_review_reasons)
         assert any("letter-like" in r or "compatibility form" in r or "lookalike" in r for r in d.human_review_reasons), (t, d.human_review_reasons)
@@ -236,15 +259,16 @@ def test_h1_a_flag_is_not_styled_text(registry):
 
 
 def test_h1_failsafe_unknown_symbol_style_never_auto_passes(registry):
-    """(c): a style nobody mapped — Braille patterns, box drawing, private-use glyphs — is stripped
-    by canonicalisation; a field losing more than STRIPPED_SHARE_LIMIT of its characters is a
-    human's call."""
+    """(c): a style nobody mapped — 8-dot Braille patterns, box drawing, private-use glyphs — is
+    stripped by canonicalisation; a field losing more than STRIPPED_SHARE_LIMIT of its characters is a
+    human's call. (Fix wave 10, N9-7: the 26 grade-1 Braille LETTERS are now read as letters, so the
+    unmapped style here is the same cells with dot 7 added, which are no letter.)"""
     from shared.text import STRIPPED_SHARE_LIMIT, stripped_share
 
     assert 0.2 <= STRIPPED_SHARE_LIMIT <= 0.5
-    assert stripped_share("⠍⠁⠅⠑ ⠍⠕⠝⠑⠽" + TAIL) > STRIPPED_SHARE_LIMIT  # not diluted by ordinary text around it
+    assert stripped_share("⡍⡁⡅⡑ ⡍⡕⡝⡑⡽" + TAIL) > STRIPPED_SHARE_LIMIT  # not diluted by ordinary text around it
     rb = _rulebook(registry)
-    braille = dict(zip("abcdefghijklmnopqrstuvwxyz", "⠁⠃⠉⠙⠑⠋⠛⠓⠊⠚⠅⠇⠍⠝⠕⠏⠟⠗⠎⠞⠥⠧⠺⠭⠽⠵"))
+    braille = {c: chr(ord(b) + 0x40) for c, b in zip("abcdefghijklmnopqrstuvwxyz", "⠁⠃⠉⠙⠑⠋⠛⠓⠊⠚⠅⠇⠍⠝⠕⠏⠟⠗⠎⠞⠥⠧⠺⠭⠽⠵")}
     for t in ["".join(braille.get(c, c) for c in p) for p in ("make money", "get rich", "zero fees")] + [
             " ", "▟▙▛▜ ▚▞▚", "𝌀𝌁𝌂 𝌃𝌄"]:
         assert stripped_share(t) > STRIPPED_SHARE_LIMIT, t

@@ -123,6 +123,20 @@ are keyed once per text (`_run_keys`), relaxed hits are confirmed only when
 the stacked rule asks (`_materialised`), memos are per thread (Clip Review
 runs off the workflow lock), and short texts have their own caches.
 
+Fix wave 10 (AEGIS round 9). (1) N9-1: currency / math-symbol "fancy text"
+("₥₳₭€ ₥⊙₦€¥": no letter at all) — `CURRENCY_MATH_LOOKALIKES`, a curated,
+glyph-checked table, is part of the SKELETON reading (a hit is a human's
+call: a currency sign is also money), and a word made mostly of symbols
+that can be letters counts toward the fail-safe (`_symbol_word_count`;
+prices, percentages and math do not). (2) N9-2: regional indicators are
+never a signal and never folded; `regional_reading()` is a candidate
+reading whose never-say hits Clip Review sends to a human. (3) N9-7: the 26
+grade-1 Braille letters are letter-like (read and a signal), U+2800 is a
+space, and a run of STRIPPED_MIN consecutive stripped characters is a
+fail-safe window of its own. (4) N9-5: the England / Scotland / Wales flag
+tag sequences and a standalone enclosed-letter emoji with VS16 are not
+signals (`_signal_view`); a #hashtag may hold ASCII digits.
+
 `obfuscation_signals()` says whether text shows evasion patterns at all:
 any bidi control, Hangul/Mongolian filler or tag character ANYWHERE; any
 other default-ignorable or format character touching a letter or digit;
@@ -251,11 +265,37 @@ SKELETON: dict[str, str] = {
     "2": "z", "+": "t", "7": "tl", "†": "t", "¥": "y", "0": "o", "°": "o", "4": "a", "@": "a", "^": "a",
     "8": "b", "ß": "b", "®": "r", "#": "h", "%": "x", "×": "x", "µ": "u", "¿": "i",
 }
+# Currency / math-symbol "fancy text" (fix wave 10, AEGIS round 9 N9-1): "₥₳₭€ ₥⊙₦€¥" is make money
+# written with NO letter at all, so neither the letter maps nor the letter-bearing SKELETON reading
+# saw it, and it passed. Each entry below was checked against its Unicode name and glyph: the symbol
+# IS a Latin letter with strokes / bars / an enclosing circle, or the letter's Greek / math twin used
+# for it by fancy-text generators. Read like the rest of SKELETON (a stand-in, never a fold), so a
+# never-say phrase read through them is a human's call, never a reject: "€", "₹", "₿" are also money.
+# Left out on purpose (no single Latin letter in the glyph, or NFKC already reads it): ₪ NEW SHEQEL
+# (two interlocked hooks), ₨ RUPEE (NFKC "Rs"), ₠ ₧ ₯ ₰ ₶ ₷ (multi-letter ligatures), ₻ ₼ ₾ ⃀
+# (no clear letter). A word made mostly of such symbols is also the fail-safe's business
+# (`stripped_share`), whether or not it is in this table.
+CURRENCY_MATH_LOOKALIKES: dict[str, str] = {
+    # Sc: currency signs drawn as a stroked / barred Latin letter
+    "₥": "m", "₳": "a", "₭": "k", "₦": "n", "₩": "w", "₣": "f", "₫": "d", "฿": "b", "₮": "t", "₤": "le",
+    "₱": "p", "₴": "s", "₲": "g", "₵": "c", "₡": "c", "₢": "c", "₺": "tl", "₸": "t", "₹": "r", "₽": "p",
+    "₿": "b",
+    # Sm: math operators shaped like a letter (circled operators read as o; ⊕ is also the q of
+    # fancy-text generators, its second reading)
+    "⊙": "o", "⊕": "oq", "⊗": "o", "⊘": "o", "⊖": "o", "∅": "o", "∪": "u", "∩": "n", "∈": "e", "∊": "e",
+    "∃": "e", "∀": "a", "∆": "a", "∂": "d", "√": "v", "∨": "v", "⨯": "x", "⌡": "j", "∏": "n", "∑": "e",
+    "⊤": "t",
+    # So: symbols drawn as a letter
+    "♄": "h", "℮": "e", "℗": "p",
+}
+SKELETON.update({k: v for k, v in CURRENCY_MATH_LOOKALIKES.items() if k not in SKELETON})
 # ASCII letters that pass for each other in most fonts (near-miss only).
 _HOMOGLYPH_PAIRS = frozenset({("l", "i"), ("i", "l")})
 # Word-internal punctuation that ordinary English uses between letters.
 _ORDINARY_WORD = re.compile(r"[^\W\d_]+(?:['’.&-][^\W\d_]+)*")
-_TAG_WORD = re.compile(r"[#@][^\W\d_]+(?:_[^\W\d_]+)*")
+# a #hashtag / @mention of letters and ASCII digits ("#5k", "#35mm", "#tram28": fix wave 10, N9-5); a
+# phrase written in one ("#g3t #r1ch", "#getrich") is still read by near_miss() — the digits are stand-ins there
+_TAG_WORD = re.compile(r"[#@](?:[^\W\d_]|[0-9])+(?:_(?:[^\W\d_]|[0-9])+)*")
 _NUMBER_WORD = re.compile(
     r"[$€£¥]?[0-9][0-9,.]*(?:st|nd|rd|th|s|k|m|b|x|p|am|pm|h|hr|hrs|min|mins|yr|yrs|mo)?", re.IGNORECASE)
 _WORD_SPLIT = re.compile(r"[\s/–—…]+")
@@ -286,7 +326,8 @@ _SPACING_DIACRITICS = {cp: "\u00b7" for cp in range(0x80, 0x30000)
 # "🇲🇦🇰🇪" (regional indicators) are symbols (Unicode So) with NO NFKC
 # decomposition, so canonical() turned them into spaces and an exact never-
 # say phrase passed (36/36). LETTERLIKE maps EVERY letter-like symbol to
-# the Latin letter it depicts. It is GENERATED at import from Unicode names
+# the Latin letter it depicts (regional indicators excepted since fix wave
+# 10: see below). It is GENERATED at import from Unicode names
 # (Python's own unicodedata, no dependency, nothing hand-listed): every
 # code point whose name is a style prefix followed by CAPITAL / SMALL /
 # LETTER and one Latin letter A-Z — Enclosed Alphanumerics (circled,
@@ -300,12 +341,23 @@ _SPACING_DIACRITICS = {cp: "\u00b7" for cp in range(0x80, 0x30000)
 # checks the map against an independent derivation over every code point
 # of those blocks.
 #
-# Regional indicators are also FLAGS: two of them side by side are one
-# flag emoji ("🇬🇧"). A text whose regional indicators all come in runs of
-# exactly two is read as flags; one run of any other length ("🇲🇦🇰🇪" is a
-# run of four; "🇬​🇪​🇹" three runs of one) makes every regional
-# indicator of that text a letter (a flag pair cannot then be told from
-# two letters, so it is read as letters: a human's call either way).
+# Regional indicators (fix wave 10, AEGIS round 9 N9-2) are NOT in LETTERLIKE.
+# Two of them side by side are one flag emoji ("🇬🇧"), and a run of them is
+# a row of flags as often as it is a word, so no rule on run lengths can
+# tell them apart: wave 9's "every run exactly two long means flags" passed
+# "🇲🇦 🇰🇪 🇨🇦 🇸🇭" (make cash, four valid flags) and sent a genuine row of
+# eight flags to a human. Now they are never a signal by themselves and
+# never read as letters by canonical(); `regional_reading()` gives the text
+# with every regional indicator read as its letter, and Clip Review matches
+# every never-say phrase against that reading as well — a hit there is a
+# human's call (it may be flags), never a rejection; no hit, no flag.
+#
+# Braille (fix wave 10, N9-7): the 26 letters of grade-1 (uncontracted)
+# Braille, U+2801.., are letter-like — READ as their letters by every view
+# and a styled-letter signal like the rest. They are derived from the dot
+# numbers in the code points' Unicode names ("BRAILLE PATTERN DOTS-134" is
+# m), not typed in. U+2800 BRAILLE PATTERN BLANK is a space: creators paste
+# it for blank caption lines, and it separates Braille words.
 _LETTERLIKE_NAME = re.compile(
     r"(?:MATHEMATICAL|FULLWIDTH|CIRCLED|PARENTHESIZED|SQUARED|NEGATIVE|CROSSED|TORTOISE SHELL BRACKETED|"
     r"REGIONAL INDICATOR|DOUBLE-STRUCK|SCRIPT|BLACK-LETTER|TURNED|REVERSED|ROTATED|INVERTED|MODIFIER LETTER|SUPERSCRIPT|"
@@ -323,10 +375,32 @@ def _generated_letterlike() -> dict[str, str]:
     return out
 
 
-LETTERLIKE: dict[str, str] = _generated_letterlike()
+# Grade-1 Braille letters by their dots (the standard alphabet: a = 1, b = 12, ... z = 1356).
+BRAILLE_DOTS = {"a": "1", "b": "12", "c": "14", "d": "145", "e": "15", "f": "124", "g": "1245", "h": "125",
+                "i": "24", "j": "245", "k": "13", "l": "123", "m": "134", "n": "1345", "o": "135", "p": "1234",
+                "q": "12345", "r": "1235", "s": "234", "t": "2345", "u": "136", "v": "1236", "w": "2456",
+                "x": "1346", "y": "13456", "z": "1356"}
+
+
+def _braille_letters() -> dict[str, str]:
+    """{Braille cell: letter}, found by NAME ("BRAILLE PATTERN DOTS-<dots>") in U+2800..U+28FF."""
+    by_dots = {dots: letter for letter, dots in BRAILLE_DOTS.items()}
+    out = {}
+    for cp in range(0x2801, 0x2900):
+        name = unicodedata.name(chr(cp), "")
+        if name.startswith("BRAILLE PATTERN DOTS-") and name[len("BRAILLE PATTERN DOTS-"):] in by_dots:
+            out[chr(cp)] = by_dots[name[len("BRAILLE PATTERN DOTS-"):]]
+    return out
+
+
+BRAILLE_LETTERS: dict[str, str] = _braille_letters()
+BRAILLE_BLANK = "\u2800"
 _REGIONAL = frozenset(chr(cp) for cp in range(0x1F1E6, 0x1F200))
-_LETTERLIKE_ALL = str.maketrans(LETTERLIKE)
-_LETTERLIKE_NO_FLAGS = str.maketrans({k: v for k, v in LETTERLIKE.items() if k not in _REGIONAL})
+_GENERATED = _generated_letterlike()
+REGIONAL_LETTERS: dict[str, str] = {k: v for k, v in _GENERATED.items() if k in _REGIONAL}
+LETTERLIKE: dict[str, str] = {**{k: v for k, v in _GENERATED.items() if k not in _REGIONAL}, **BRAILLE_LETTERS}
+_LETTERLIKE_TABLE = str.maketrans({**LETTERLIKE, BRAILLE_BLANK: " "})
+_REGIONAL_TABLE = str.maketrans(REGIONAL_LETTERS)
 
 
 def _char_class(chars) -> str:
@@ -344,21 +418,26 @@ def _char_class(chars) -> str:
 
 
 _LETTERLIKE_RE = re.compile(_char_class(LETTERLIKE))
+_MAPPED_RE = re.compile(_char_class({*LETTERLIKE, BRAILLE_BLANK}))
 _REGIONAL_RUN = re.compile("[\U0001F1E6-\U0001F1FF]+")
 
 
-def _regional_are_letters(text: str) -> bool:
-    """Some run of regional indicators is not exactly two long (not a flag)."""
-    return any(len(m.group()) != 2 for m in _REGIONAL_RUN.finditer(text))
-
-
 def letterlike_chars(text: str) -> list[str]:
-    """The letter-like symbols in `text` (a flag is not one), as 'U+XXXX'."""
+    """The letter-like symbols in `text`, as 'U+XXXX'. Regional indicators
+    are not (fix wave 10, N9-2: they are a reading, `regional_reading`)."""
     if not text or text.isascii() or not _LETTERLIKE_RE.search(text):
         return []
-    letters_mode = _regional_are_letters(text)
-    return list(dict.fromkeys(f"U+{ord(c):04X}" for c in _LETTERLIKE_RE.findall(text)
-                              if letters_mode or c not in _REGIONAL))
+    return list(dict.fromkeys(f"U+{ord(c):04X}" for c in _LETTERLIKE_RE.findall(text)))
+
+
+def regional_reading(text: str) -> str | None:
+    """`text` with every regional indicator read as the letter it depicts
+    ("🇲🇦 🇰🇪 🇨🇦 🇸🇭" -> "ma ke ca sh"), or None if it has none. A
+    CANDIDATE reading only (fix wave 10, N9-2): Clip Review looks for the
+    never-say phrases in it, and a hit is a human's call (it may be flags)."""
+    if not text or text.isascii() or not _REGIONAL_RUN.search(text):
+        return None
+    return text.translate(_REGIONAL_TABLE)
 
 
 def _map_letterlike(text: str) -> str:
@@ -369,9 +448,9 @@ def _map_letterlike(text: str) -> str:
 
 @functools.lru_cache(maxsize=32)
 def _map_letterlike_cached(text: str) -> str:
-    if not _LETTERLIKE_RE.search(text):
+    if not _MAPPED_RE.search(text):
         return text
-    return text.translate(_LETTERLIKE_ALL if _regional_are_letters(text) else _LETTERLIKE_NO_FLAGS)
+    return text.translate(_LETTERLIKE_TABLE)
 
 
 def _nfkc(text: str) -> str:
@@ -2973,10 +3052,13 @@ def non_latin_letters(text: str) -> list[str]:
 # taken over the whole field AND over every run of 1 to STRIPPED_WINDOW
 # consecutive words holding at least STRIPPED_MIN characters that are
 # stripped: a field-wide share alone is diluted by ordinary text around
-# the styled words ("⠍⠁⠅⠑ ⠍⠕⠝⠑⠽ This budget myth. Listen on Pod Plus.
-# #ad" strips 23% overall, 100% of its first two words). Not counted as
-# stripped (ordinary text, measured on the round-8 corpus and the emoji
-# captions): punctuation, currency / math / modifier symbols, format and
+# the styled words ("⡍⡁⡅⡑ ⡍⡕⡝⡑⡽ This budget myth. Listen on Pod Plus.
+# #ad" strips 23% overall, 100% of its first two words); since fix wave 10
+# (N9-7) also over any run of STRIPPED_MIN consecutive stripped characters
+# on its own, so one long word glued to them cannot dilute the window. Not
+# counted as stripped (ordinary text, measured on the round-8 corpus and the
+# emoji captions): punctuation, currency / math / modifier symbols (except
+# in a word made mostly of them, fix wave 10 N9-1: `_symbol_word_count`), format and
 # default-ignorable characters (their own signals cover them), the emoji
 # keycap, anything in Latin-1, and the emoji / pictograph blocks (arrows,
 # technical, geometric shapes, miscellaneous symbols, dingbats,
@@ -3004,23 +3086,70 @@ def _stripped(ch: str) -> bool:
     return not any(lo <= cp <= hi for lo, hi in _PICTOGRAPH_RANGES)
 
 
+@functools.lru_cache(maxsize=65536)
+def _symbol_letter(ch: str) -> bool:
+    """A symbol that can be drawn as a letter: one of CURRENCY_MATH_LOOKALIKES, or any other currency,
+    math or modifier symbol (Sc / Sm / Sk) outside the pictograph blocks (fix wave 10, N9-1)."""
+    if ch in CURRENCY_MATH_LOOKALIKES:
+        return True
+    if unicodedata.category(ch) not in ("Sc", "Sm", "Sk"):
+        return False
+    cp = ord(ch)
+    return not any(lo <= cp <= hi for lo, hi in _PICTOGRAPH_RANGES)
+
+
+SYMBOL_WORD_RUN = 3  # consecutive symbols that can be letters, in one word, before the word is a styled word
+
+
+def _symbol_word_count(word: str) -> int:
+    """How many characters of `word` count toward the fail-safe as a SYMBOL-LETTERED word (fix wave 10,
+    N9-1 (b)): "₥₳₭€", "¢®€₫¡₮" — a word whose symbols-that-can-be-letters (`_symbol_letter`) come in a
+    run of at least SYMBOL_WORD_RUN, at least two different ones, not all ASCII, and make up at least
+    half of it. Else 0: a price ("€5", "$10", "$49.99"), a percentage, "$$$", "$/€/£", "3 × $12" and
+    "x² + y²" are not styled words. Canonicalisation strips these symbols (they become spaces), so
+    counting them is what the fail-safe exists for; they were exempt only because ONE of them is an
+    ordinary price sign."""
+    n = run = best = 0
+    distinct: set[str] = set()
+    for ch in word:
+        if _symbol_letter(ch):
+            n += 1
+            run += 1
+            best = max(best, run)
+            distinct.add(ch)
+        else:
+            run = 0
+    if best < SYMBOL_WORD_RUN or len(distinct) < 2 or 2 * n < len(word) or all(c.isascii() for c in distinct):
+        return 0
+    return n
+
+
 def stripped_share(text: str) -> float:
     """The largest share of stripped characters (`_stripped`) over the
     whole of `text` and over every window of 1..STRIPPED_WINDOW
     consecutive words with at least STRIPPED_MIN stripped characters;
-    letter-like symbols count as the letters they are. 0.0 if nothing
-    is stripped."""
+    letter-like symbols count as the letters they are. A symbol-lettered
+    word's symbols (`_symbol_word_count`) count as stripped (fix wave 10,
+    N9-1). 0.0 if nothing is stripped."""
     if not text or text.isascii():
         return 0.0
     t = _map_letterlike(text)
-    bad = {ch for ch in set(t) if _stripped(ch)}
-    if not bad:
+    chars = set(t)
+    bad = {ch for ch in chars if _stripped(ch)}
+    symbolic = any(_symbol_letter(ch) and not ch.isascii() for ch in chars)
+    if not bad and not symbolic:
         return 0.0
     words = t.split()
     sizes = [len(w) for w in words]
-    counts = [sum(w.count(c) for c in bad) if not w.isascii() else 0 for w in words]
+    counts = [(sum(w.count(c) for c in bad) + (_symbol_word_count(w) if symbolic else 0)) if not w.isascii() else 0
+              for w in words]
     total = sum(sizes)
     best = sum(counts) / total if total else 0.0
+    if bad and re.search(_char_class(bad) + "{%d}" % STRIPPED_MIN, t):
+        # a run of STRIPPED_MIN consecutive stripped characters is a window of its own (fix wave 10,
+        # N9-7): a styled phrase glued to a long ordinary word ("𝌀𝌁𝌂Supercalifragilistic...") no
+        # longer dilutes a word window below the limit
+        return 1.0
     for i in range(len(words)):
         n = s = 0
         for j in range(i, min(len(words), i + STRIPPED_WINDOW)):
@@ -3031,15 +3160,44 @@ def stripped_share(text: str) -> float:
     return best
 
 
+# Ordinary emoji that the signals below would otherwise read as evasion (fix wave 10, AEGIS round 9 N9-5):
+# (1) the three emoji tag sequences Unicode defines as RGI flags — England, Scotland, Wales: U+1F3F4 WAVING
+#     BLACK FLAG, the tag letters of gbeng / gbsct / gbwls, U+E007F CANCEL TAG. Any other tag sequence,
+#     tag letters anywhere else, or anything glued on is still a signal;
+# (2) an enclosed-letter emoji with its emoji presentation selector (VS16) standing alone as a word:
+#     "🅿️ Free parking", "Ⓜ️ Two stops", "Blood types 🅰️🅱️🅾️" — every character of the word is an enclosed
+#     letter followed by U+FE0F. Only the SIGNALS skip it: every phrase check still reads it as its letters,
+#     so a never-say phrase spelled that way is still found (and rejected when exact).
+_RGI_SUBDIVISION_FLAGS = tuple("\U0001F3F4" + "".join(chr(0xE0000 + ord(c)) for c in code) + "\U000E007F"
+                               for code in ("gbeng", "gbsct", "gbwls"))
+_ENCLOSED_LETTERS = frozenset(ch for ch in LETTERLIKE if 0x2460 <= ord(ch) <= 0x24FF or 0x1F100 <= ord(ch) <= 0x1F1FF)
+_EMOJI_LETTER_WORD = re.compile("(?<!\\S)(?:" + _char_class(_ENCLOSED_LETTERS) + "\uFE0F)+(?=[\\s.,!?;:]|$)")
+
+
+def _signal_view(text: str) -> str:
+    """`text` for the obfuscation signals: the RGI subdivision flags and standalone enclosed-letter emoji
+    (see above) replaced by a plain pictograph (U+1F3F4) — nothing else changes."""
+    if not text or text.isascii():
+        return text
+    if "\U0001F3F4" in text:
+        for flag in _RGI_SUBDIVISION_FLAGS:
+            text = text.replace(flag, "\U0001F3F4")
+    if "\uFE0F" in text:
+        text = _EMOJI_LETTER_WORD.sub("\U0001F3F4", text)
+    return text
+
+
 def obfuscation_signals(text: str) -> list[str]:
     """Evasion patterns in `text` (empty list = none). Conservative on
     purpose: a false positive costs a human look, a false negative lets a
-    never-say line through automatically."""
+    never-say line through automatically. Judged on `_signal_view(text)`
+    (fix wave 10, N9-5: three flags and standalone letter emoji are emoji)."""
     signals: list[str] = []
+    text = _signal_view(text)
     styled = letterlike_chars(text)
     if styled:
-        signals.append("letter-like symbol(s), i.e. styled letters (enclosed, squared, circled, regional-indicator, "
-                       "mathematical, fullwidth, small-capital, superscript/subscript): " + ", ".join(styled[:5]))
+        signals.append("letter-like symbol(s), i.e. styled letters (enclosed, squared, circled, mathematical, "
+                       "fullwidth, small-capital, superscript/subscript, Braille): " + ", ".join(styled[:5]))
     share = stripped_share(text)
     if share > STRIPPED_SHARE_LIMIT:
         signals.append(f"{share:.0%} of the text is stripped by canonicalisation (symbols it cannot read as letters, "

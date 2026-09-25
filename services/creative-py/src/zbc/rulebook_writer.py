@@ -107,6 +107,32 @@ def never_say_entries(goal: CampaignGoal) -> list[NeverSayEntry]:
     return list(out.values())
 
 
+# Fix wave 10 (AEGIS round 9 N9-3): the most never-say phrases one rulebook may carry. Clip Review's
+# cost grows with the list (every phrase is judged by every similarity signal over every text field);
+# measured on the reference host (2 vCPU Intel Xeon @ 2.80 GHz, Python 3.11) with the AEGIS round-9
+# worst-case generator (probes/ns_cost8b.py's construction, three phrase sets, every field at its
+# maximum, the clip routed to a human so no rejection cuts the signals short, a regional indicator in
+# every field so the regional-indicator reading runs too; wall clock, every cache cold, one process
+# per measurement): 30 phrases 1.47-1.56 s per review (0.88-0.89 s without a regional indicator), 35
+# phrases 1.52-1.66 s, 40 1.60-1.79 s, 50 1.80-1.85 s, 100 2.28-2.33 s. Inside the full test run (a
+# large heap: more collector time) the same case at 50 phrases measured 2.05 s CPU against 1.69 s
+# alone, about 21% more. One review must stay under 2 s with that margin, so 30 (1.56 s x 1.21 =
+# 1.89 s; measured inside the full test run at 30: 1.77 s CPU, tests/test_fix_wave_10.py). Most of the cost is fixed (every per-text view built over ~65 KB, twice when the
+# regional-indicator reading runs: 10 phrases already cost 1.23 s), so a longer list needs a faster
+# gate, not a higher cap. A draft keeps every phrase (nothing is ever dropped silently) and says so;
+# Campaign Rulebook refuses to approve it (422) until the list is at most this long. See
+# docs/adr/0005 (decision 44, gap 16).
+MAX_NEVER_SAY = 30
+
+
+def never_say_cap_warnings(entries: list[NeverSayEntry]) -> list[str]:
+    """N9-3: a draft with more never-say phrases than MAX_NEVER_SAY cannot be approved — say so."""
+    if len(entries) <= MAX_NEVER_SAY:
+        return []
+    return [f"{len(entries)} never-say phrases: at most {MAX_NEVER_SAY} per rulebook can be approved "
+            "(review cost); nothing was dropped — shorten the list before review"]
+
+
 def short_entry_warnings(entries: list[NeverSayEntry], rule_ids: dict[str, str] | None = None) -> list[str]:
     """N3: a never-say entry of <= SHORT_ENTRY_LETTERS letters is matched
     exactly (on canonical text, lookalikes folded, split or run together)
@@ -123,6 +149,11 @@ def short_entry_warnings(entries: list[NeverSayEntry], rule_ids: dict[str, str] 
                 out.append(f"never-say {rid}{e.phrase!r} has {letters} letters (<= {SHORT_ENTRY_LETTERS}): matched "
                            "exactly only, misspellings are not caught; set \"fuzzy\": true on the entry to opt in")
     return out
+
+
+def _warnings(goal: CampaignGoal) -> list[str]:
+    entries = never_say_entries(goal)
+    return never_say_cap_warnings(entries) + short_entry_warnings(entries)
 
 
 def _build(goal: CampaignGoal, registry: PlatformRulesRegistry, today: date) -> tuple[list[Angle], list[Rule], list[str]]:
@@ -210,7 +241,7 @@ def draft(goal: CampaignGoal, registry: PlatformRulesRegistry, today: date, vers
         campaign_id=goal.campaign_id, client_id=goal.client_id, vertical=goal.vertical, version=version,
         status=RulebookStatus.DRAFT, objective=goal.objective, source_asset_ids=tuple(goal.source_asset_ids),
         approved_angles=tuple(angles), platforms=tuple(goal.platforms), rules=tuple(rules),
-        blocking_issues=tuple(blocking), warnings=tuple(short_entry_warnings(never_say_entries(goal))),
+        blocking_issues=tuple(blocking), warnings=tuple(_warnings(goal)),
         drafted_by=drafted_by, language=goal.language,
     )
 
@@ -244,6 +275,6 @@ def revise(previous: Rulebook, goal: CampaignGoal, registry: PlatformRulesRegist
         status=RulebookStatus.DRAFT, objective=goal.objective, source_asset_ids=tuple(goal.source_asset_ids),
         approved_angles=tuple(angles), platforms=tuple(goal.platforms), rules=tuple(out),
         rule_number_high_water=dict(previous.rule_number_high_water), blocking_issues=tuple(blocking),
-        warnings=tuple(short_entry_warnings(never_say_entries(goal))), drafted_by=drafted_by,
+        warnings=tuple(_warnings(goal)), drafted_by=drafted_by,
         supersedes_version=previous.version, language=goal.language,
     )
