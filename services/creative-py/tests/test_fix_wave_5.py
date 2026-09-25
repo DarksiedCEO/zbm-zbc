@@ -527,7 +527,10 @@ def test_new3_middleware_rechecks_head_size_and_bounds_body_delivery(api):
 
     mw = BodyLimit(app, read_timeout=0.3)
     t0 = time.monotonic()
-    asyncio.run(mw({"type": "http", "headers": [(b"content-length", b"10")], "raw_path": b"/x"}, receive, send))
+    # fix wave 8 (N7-1): a body under no / a non-JSON content type is 415 before it is read, so the
+    # delivery deadline is exercised on a JSON body
+    asyncio.run(mw({"type": "http", "headers": [(b"content-length", b"10"), (b"content-type", b"application/json")],
+                    "raw_path": b"/x"}, receive, send))
     assert time.monotonic() - t0 < 2
     assert sent and sent[0]["status"] == 408
 

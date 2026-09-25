@@ -6,7 +6,7 @@ Decides: nothing final. It turns the goal into written, numbered rules and
 lists every blocking issue it can see. Campaign Rulebook (1) approves; a
 different actor is enforced. Andre then signs.
 
-Every rule gets a stable id (`XX-NN`, prefix = kind). Platform-dependent
+Every rule gets a stable id (`XX-N`, prefix = kind; see zbc.rulebook). Platform-dependent
 rules cite the registry rows they rest on (`rationale_row_ids`); a target
 platform with no usable length row or no usable originality row is a
 BLOCKING issue (e.g. TikTok today: its only row is unverified).
@@ -39,7 +39,8 @@ from zbc.rulebook import (
     Rulebook,
     RuleKind,
     RulebookStatus,
-    next_rule_number,
+    format_rule_id,
+    highest_rule_numbers,
 )
 
 WRITER_ACTOR = "zbc_rulebook_writer"
@@ -93,7 +94,7 @@ class CampaignGoal(BaseModel):
 
 
 def _rule(kind: RuleKind, n: int, text: str, params: dict, rows: tuple[str, ...] = ()) -> Rule:
-    return Rule(rule_id=f"{PREFIX[kind]}-{n:02d}", kind=kind, text=text, params=params, rationale_row_ids=rows)
+    return Rule(rule_id=format_rule_id(PREFIX[kind], n), kind=kind, text=text, params=params, rationale_row_ids=rows)
 
 
 def never_say_entries(goal: CampaignGoal) -> list[NeverSayEntry]:
@@ -152,14 +153,17 @@ def _build(goal: CampaignGoal, registry: PlatformRulesRegistry, today: date) -> 
                        "The caption carries a paid-partnership disclosure (one of: "
                        + ", ".join(goal.disclosure_any_of) + ") or the platform's paid-partnership label is on.",
                        {"any_of": list(goal.disclosure_any_of), "or_platform_label": True}))
-    targets = [{"platform": p.platform, "placement": p.placement} for p in goal.platforms]
+    # a target listed twice is one target (fix wave 8, N7-3 fuzz: two identical spec rules
+    # collapsed onto one id at revision time, a duplicate-id 500)
+    platforms = list(dict.fromkeys(goal.platforms))
+    targets = [{"platform": p.platform, "placement": p.placement} for p in platforms]
     rules.append(_rule(RuleKind.PLATFORM, nxt(RuleKind.PLATFORM),
                        "Post only to: " + ", ".join(f"{t['platform']}/{t['placement']}" for t in targets) + ".",
                        {"targets": targets}))
 
     originality_row_ids: list[str] = []
     watermark_row_ids: list[str] = []
-    for p in goal.platforms:
+    for p in platforms:
         lr = length_rows(registry, p.platform, p.placement, today)
         if not lr.usable:
             why = "; ".join(lr.blocked) or "no length row in the Platform Rules Registry"
@@ -221,23 +225,27 @@ def revise(previous: Rulebook, goal: CampaignGoal, registry: PlatformRulesRegist
     if goal.campaign_id != previous.campaign_id:
         raise ValueError("a revision must be for the same campaign")
     angles, fresh, blocking = _build(goal, registry, today)
-    old_by_key = {_content_key(r): r for r in previous.rules}
+    old_by_key = {_content_key(r): r for r in previous.rules}  # each old rule is matched at most once
     used = {r.rule_id for r in previous.rules} | set(previous.retired_rule_ids)
+    # the next unused number per prefix, computed ONCE over the ids ever used (fix wave 8, N7-3:
+    # a scan of every used id per new rule was quadratic once a campaign had churned thousands)
+    counters: dict[str, int] = {k: v + 1 for k, v in highest_rule_numbers(used).items()}
     kept_ids: set[str] = set()
     out: list[Rule] = []
     for r in fresh:
-        old = old_by_key.get(_content_key(r))
+        old = old_by_key.pop(_content_key(r), None)
         if old is not None:
             out.append(r.model_copy(update={"rule_id": old.rule_id}))
             kept_ids.add(old.rule_id)
         else:
             prefix = PREFIX[r.kind]
-            n = next_rule_number(prefix, used)
-            new_id = f"{prefix}-{n:02d}"
-            used.add(new_id)
-            out.append(Rule(rule_id=new_id, kind=r.kind, text=r.text, params=r.params,
+            n = counters.get(prefix, 1)
+            counters[prefix] = n + 1
+            out.append(Rule(rule_id=format_rule_id(prefix, n), kind=r.kind, text=r.text, params=r.params,
                             rationale_row_ids=r.rationale_row_ids))
-    retired = tuple(sorted(set(previous.retired_rule_ids) | ({r.rule_id for r in previous.rules} - kept_ids)))
+    # the ids retired before, in their order, then this revision's in id order (never re-sorted as a
+    # whole: a churned campaign carries hundreds of thousands, fix wave 8 N7-3)
+    retired = (*previous.retired_rule_ids, *sorted({r.rule_id for r in previous.rules} - kept_ids))
     return Rulebook(
         campaign_id=goal.campaign_id, client_id=goal.client_id, vertical=goal.vertical, version=version,
         status=RulebookStatus.DRAFT, objective=goal.objective, source_asset_ids=tuple(goal.source_asset_ids),

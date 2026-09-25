@@ -3,9 +3,17 @@ The ZBC campaign rulebook — versioned, and FROZEN once live.
 
 Sections (spec): objective, approved angles, must-say, never-say,
 disclosure requirement, platforms, specs, originality rules, minimum days
-live. Every rule carries a STABLE rule id `XX-NN` whose prefix names its
-kind. Ids are never reused within a campaign: a revision keeps the ids of
-unchanged rules and gives new rules the next unused number.
+live. Every rule carries a STABLE rule id `XX-N` whose prefix names its
+kind: two capital letters, a dash, and a decimal number written with at
+least two digits and no other leading zero (`NS-01` ... `NS-99`, `NS-100`,
+`NS-1000`, ...; up to nine digits, RULE_ID_PATTERN). Fix wave 8 (AEGIS
+round 7, N7-3): the space used to be `XX-NN` (01-99) while a goal admits
+1,000 never-say and 100 must-say entries — the 100th entry was a 500 and,
+since ids are never reused, a churning campaign wedged at NS-100. The
+two-digit form is unchanged, so every id ever issued still parses
+(`parse_rule_number`). Ids are never reused within a campaign: a revision
+keeps the ids of unchanged rules and gives new rules the next unused
+number (`next_rule_number`, computed once per prefix per revision).
 
 Frozen: a `Rulebook` is an immutable pydantic model; the store refuses to
 overwrite a live or superseded version. Changes after go-live create a
@@ -25,7 +33,10 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from shared.errors import FrozenError, NotFound, PreconditionFailed
 from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
 
-RuleId = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}-[0-9]{2}$")]
+RULE_ID_PATTERN = r"^[A-Z]{2}-(?:[0-9]{2}|[1-9][0-9]{2,8})$"
+RuleId = Annotated[str, StringConstraints(pattern=RULE_ID_PATTERN)]
+_RULE_NUMBER = re.compile(r"(?:[0-9]{2}|[1-9][0-9]{2,8})")
+_RULE_ID = re.compile(RULE_ID_PATTERN)
 AngleId = Annotated[str, StringConstraints(pattern=r"^A[0-9]{2}$")]
 
 TRANSFORMATION_ELEMENTS = frozenset({
@@ -172,9 +183,34 @@ class Rulebook(BaseModel):
         return next((a for a in self.approved_angles if a.angle_id == angle_id), None)
 
 
+def parse_rule_number(prefix: str, rule_id: str) -> int | None:
+    """The number of `rule_id` if it is a well-formed id with `prefix`
+    (`NS-07` -> 7, `NS-100` -> 100), else None."""
+    if len(rule_id) < 5 or rule_id[:2] != prefix or rule_id[2] != "-" or not _RULE_NUMBER.fullmatch(rule_id[3:]):
+        return None
+    return int(rule_id[3:])
+
+
+def format_rule_id(prefix: str, n: int) -> str:
+    return f"{prefix}-{n:02d}"
+
+
+def highest_rule_numbers(used: set[str]) -> dict[str, int]:
+    """{prefix: highest number used with it} in one pass over `used`
+    (a churned campaign has hundreds of thousands of retired ids)."""
+    out: dict[str, int] = {}
+    for u in used:
+        if _RULE_ID.fullmatch(u):  # anything else was never issued by format_rule_id: not a number in use
+            n = int(u[3:])
+            prefix = u[:2]
+            if n > out.get(prefix, 0):
+                out[prefix] = n
+    return out
+
+
 def next_rule_number(prefix: str, used: set[str]) -> int:
-    nums = [int(m.group(1)) for u in used if (m := re.fullmatch(rf"{prefix}-([0-9]{{2}})", u))]
-    return (max(nums) if nums else 0) + 1
+    """One more than the highest number used with `prefix` (1 if none)."""
+    return highest_rule_numbers(used).get(prefix, 0) + 1
 
 
 # --- content identity ---------------------------------------------------------

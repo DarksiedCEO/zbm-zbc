@@ -87,6 +87,29 @@ per-word share rule of the visual gate is a 60% letter share
 (`letter_share`, WORD_SHARE), no longer a hard per-word cap that could
 reduce a match the budget allowed ("get rchi", "make munny").
 
+Fix wave 8 (AEGIS round 7): three more things reach every caller through
+`near_miss()`. (1) The consonant and phonetic signals read each token
+both as written and with the near-identical pairs contracted (rn -> m,
+cl -> d, vv -> w; `READINGS`), so "mk rnunny", "phree rnny" and "lose
+vvait fst" are judged as "mk munny", "phree mny", "lose wait fst"; the
+skeleton signal's vowel-drop evidence counts every token that dropped
+vowels and kept its consonants ("grnteed"). (2) `stacked_near_miss()`:
+two of the three similarity signals each within their budget +
+STACK_EXTRA on the SAME token window, with respelling evidence, is a
+human's call ("ovrnlte success"). (3) `symbol_stand_in()`: a phrase word
+stood in by a symbol from SYMBOL_LEXICON ("make 💰", "make $$$ fast",
+"guaranteed 📈") or by any other pictograph occupying that word's place.
+Cost (N7-7): every per-text view (`_span_index`, `_leet_view`,
+`_skeleton_views`, `_folded_words`, `_word_keys`, `_key_positions`,
+`_run_starts`, phrase streams) is built once per distinct text and
+shared by every phrase; ASCII text skips the Unicode normalisation (the
+same result); the packed scans report a lower-bound distance per hit,
+take a strict and a relaxed budget per pattern and let the consumer
+switch a decided pattern off mid-scan; one DP confirms every start of a
+hit (`_osa_suffixes`). The skeleton signal's one-edit tolerance for a
+two-consonant word ("luze" / "lose") needs the token to sound like the
+word ("made" is not "money").
+
 `obfuscation_signals()` says whether text shows evasion patterns at all:
 any bidi control, Hangul/Mongolian filler or tag character ANYWHERE; any
 other default-ignorable or format character touching a letter or digit;
@@ -284,6 +307,9 @@ def _drop_format(t: str) -> str:
 
 @functools.lru_cache(maxsize=64)
 def canonical(text: str) -> str:
+    text = text or ""
+    if text.isascii():  # nothing to normalise, fold or strip below U+0080 (fix wave 8, N7-7: 50 KB in C)
+        return " ".join(_NON_WORD.sub(" ", text.lower()).split())
     t = _nfkc(text)
     t = _drop_format(t)
     t = _strip_marks(t).casefold()
@@ -301,19 +327,51 @@ def _tokens(text: str) -> list[str]:
     return canonical(text).split()
 
 
-def _span_match(tokens: list[str], target: str) -> bool:
+@functools.lru_cache(maxsize=64)
+def _span_index(text: str) -> tuple[str, bytes, bytes]:
+    """`text`'s tokens concatenated, with start / end flags per position
+    (start[p]: a token starts at p; end[p]: one ends there). Built once
+    per distinct text and shared by every phrase (fix wave 8, N7-7: the
+    per-phrase token walk was 3 s of a 99-phrase review)."""
+    toks = text.split()
+    S = "".join(toks)
+    n = len(S)
+    st = bytearray(n + 1)
+    en = bytearray(n + 1)
+    pos = 0
+    for t in toks:
+        st[pos] = 1
+        pos += len(t)
+        en[pos] = 1
+    return S, bytes(st), bytes(en)
+
+
+def _span_match(tokens: list[str] | tuple[str, ...], target: str) -> bool:
     """Does some contiguous run of tokens, concatenated, equal `target`
     exactly (starting and ending on token boundaries)?"""
-    n = len(tokens)
-    for i in range(n):
-        acc = ""
-        for j in range(i, n):
-            acc += tokens[j]
-            if acc == target:
-                return True
-            if len(acc) >= len(target) or not target.startswith(acc):
-                break
+    return _span_in(_span_index(" ".join(tokens)), target)
+
+
+def _span_in(index: tuple[str, bytes, bytes], target: str) -> bool:
+    S, ST, EN = index
+    if not target:
+        return False
+    m = len(target)
+    i = S.find(target)
+    while i >= 0:
+        if ST[i] and EN[i + m]:
+            return True
+        i = S.find(target, i + 1)
     return False
+
+
+@functools.lru_cache(maxsize=64)
+def _leet_view(canonical_text: str) -> str | None:
+    """The canonical text with leetspeak folded inside tokens that contain
+    a letter, or None if that changes nothing. Once per distinct text."""
+    toks = canonical_text.split()
+    leet = [t.translate(_LEET) if any(c.isalpha() for c in t) else t for t in toks]
+    return None if leet == toks else " ".join(leet)
 
 
 def match_phrase(haystack: str, phrase: str) -> PhraseMatch:
@@ -324,11 +382,10 @@ def match_phrase(haystack: str, phrase: str) -> PhraseMatch:
     if f" {p} " in f" {h} ":
         return PhraseMatch.EXACT
     squashed = p.replace(" ", "")
-    toks = h.split()
-    if _span_match(toks, squashed):
+    if _span_in(_span_index(h), squashed):
         return PhraseMatch.LOOSE
-    leet = [t.translate(_LEET) if any(c.isalpha() for c in t) else t for t in toks]
-    if leet != toks and (f" {p} " in f" {' '.join(leet)} " or _span_match(leet, squashed)):
+    leet = _leet_view(h)
+    if leet is not None and (f" {p} " in f" {leet} " or _span_in(_span_index(leet), squashed)):
         return PhraseMatch.LOOSE
     return PhraseMatch.NONE
 
@@ -347,6 +404,9 @@ def mentions_phrase(haystack: str, phrase: str, fuzzy: bool = False) -> bool:
 @functools.lru_cache(maxsize=16)
 def _folded(text: str) -> str:
     """canonical() minus the last step: symbols are KEPT (near-miss input)."""
+    text = text or ""
+    if text.isascii():
+        return text.lower()
     t = _nfkc_words(text)
     t = _drop_format(t)
     # ß is kept as one character (casefold would make it "ss"), so its
@@ -355,18 +415,43 @@ def _folded(text: str) -> str:
     return t.casefold().translate(_CONFUSABLE_TABLE).replace("\ue000", "\u00df")
 
 
-def _skeleton_views(folded: str) -> list[str]:
+@functools.lru_cache(maxsize=16)
+def _skeleton_views(folded: str) -> tuple[str, str]:
     """The folded text with SKELETON symbols read as letters inside words
     that contain a letter — once with each symbol's first reading, once
-    with its second — then canonicalised (other symbols -> space)."""
+    with its second — then canonicalised (other symbols -> space). Once
+    per distinct text (fix wave 8, N7-7)."""
     views = []
     for alt in (0, 1):
         table = {ord(k): v[min(alt, len(v) - 1)] for k, v in SKELETON.items()}
         words = [w.translate(table) if any(c.isalpha() for c in w) else w for w in folded.split()]
         views.append(" ".join(_NON_WORD.sub(" ", " ".join(words)).split()))
-    return views
+    return tuple(views)
 
 
+@functools.lru_cache(maxsize=16)
+def _folded_words(haystack: str) -> tuple[tuple[str, ...], dict[str, tuple[int, ...]], dict[str, tuple[str, ...]], tuple[str, ...]]:
+    """The folded text's words; the positions of each distinct word; for
+    the plain-ASCII-letter words, the distinct words under each l/i
+    normalisation (the only way one plain word can stand for another in
+    `_word_cost`); and the distinct words that are NOT plain ASCII
+    letters. Once per distinct text (fix wave 8, N7-7)."""
+    words = tuple(_folded(haystack).split())
+    positions: dict[str, list[int]] = {}
+    for i, w in enumerate(words):
+        positions.setdefault(w, []).append(i)
+    plain: dict[str, list[str]] = {}
+    other: list[str] = []
+    for w in positions:
+        if w.isascii() and w.isalpha():
+            plain.setdefault(w.replace("l", "i"), []).append(w)
+        else:
+            other.append(w)
+    return (words, {w: tuple(v) for w, v in positions.items()}, {k: tuple(v) for k, v in plain.items()},
+            tuple(other))
+
+
+@functools.lru_cache(maxsize=65536)
 def _word_cost(w: str, p: str, cap: int) -> int | None:
     """Least number of stand-ins needed to read text word `w` as phrase word
     `p` (None if more than `cap`). Linear in len(w) * len(p), both bounded.
@@ -419,42 +504,47 @@ def _word_cost(w: str, p: str, cap: int) -> int | None:
     return prev[m] if prev[m] <= cap else None
 
 
-def near_miss(haystack: str, phrase: str, fuzzy: bool = False) -> str | None:
+def near_miss(haystack: str, phrase: str, fuzzy: bool = False, stacked: bool = True) -> str | None:
     """How `phrase` shows up in `haystack` only once symbols/digits are read
     as letters (see the module docstring), as a readable respelling
     (`visual_near_miss`), or as its words in order with a filler between
     them (`phrase_words_in_order`) — or None. A description, e.g.
     "symbols/digits standing in for letters", for the human reviewer.
     `fuzzy`: the rulebook author opted a short entry into the similarity
-    gate (N3)."""
+    gate (N3). `stacked`: also the stacked rule and the symbol lexicon
+    (fix wave 8; Clip Review runs those itself, batched, for the phrases
+    no other signal caught)."""
     p = canonical(phrase)
     if not p:
         return None
     folded = _folded(haystack)
     squashed = p.replace(" ", "")
     for v in _skeleton_views(folded):
-        if f" {p} " in f" {v} " or _span_match(v.split(), squashed):
+        if f" {p} " in f" {v} " or _span_in(_span_index(v), squashed):
             return "symbols/digits standing in for letters"
-    words = folded.split()
+    words, positions, plain, other = _folded_words(haystack)
     pwords = p.split()
-    memo: dict[tuple[str, str], bool] = {}
 
-    def fits(w: str, pw: str, cap: int) -> bool:
-        key = (w, pw)
-        if key not in memo:
-            memo[key] = _word_cost(w, pw, cap) is not None
-        return memo[key]
+    def fitting(pw: str, cap: int) -> list[str]:
+        """The distinct text words that can be read as `pw`."""
+        out = [w for w in plain.get(pw.replace("l", "i"), ()) if _word_cost(w, pw, cap) is not None]
+        out += [w for w in other if _word_cost(w, pw, cap) is not None]
+        return out
 
     caps = [max(1, (len(pw) + 1) // 2) for pw in pwords]
     m = len(pwords)
-    for k in range(len(words) - m + 1):
-        if all(fits(words[k + t], pwords[t], caps[t]) for t in range(m)):
-            return "symbols, digits or unknown letters in place of letters"
+    fits = [fitting(pw, cap) for pw, cap in zip(pwords, caps)]
+    if all(fits):
+        rest = [frozenset(f) for f in fits[1:]]
+        n = len(words)
+        for w0 in fits[0]:
+            for k in positions[w0]:
+                if k + m <= n and all(words[k + t] in rest[t - 1] for t in range(1, m)):
+                    return "symbols, digits or unknown letters in place of letters"
     if m > 1:
         cap = max(1, len(squashed) // 3)
-        for w in words:
-            if fits(w, squashed, cap):
-                return "symbols, digits or unknown letters in place of letters (words run together)"
+        if fitting(squashed, cap):
+            return "symbols, digits or unknown letters in place of letters (words run together)"
     hit = visual_near_miss(haystack, phrase, fuzzy)
     if hit is not None:
         dist, _, window = hit
@@ -472,6 +562,19 @@ def near_miss(haystack: str, phrase: str, fuzzy: bool = False) -> str | None:
     sound = phonetic_near_miss(haystack, phrase, fuzzy)
     if sound is not None:
         return f"a phonetic respelling ({sound[:60]!r} sounds like it)"
+    return stacked_or_symbol(haystack, phrase, fuzzy) if stacked else None
+
+
+def stacked_or_symbol(haystack: str, phrase: str, fuzzy: bool = False) -> str | None:
+    """The last two signals of `near_miss()` (fix wave 8): the stacked
+    rule, then a symbol standing for a word."""
+    stacked = stacked_near_miss(haystack, phrase, fuzzy)
+    if stacked is not None:
+        return (f"a respelling that two similarity signals each nearly accept ({stacked[:60]!r}: letters, "
+                "consonants and sound are all close to it)")
+    sym = symbol_stand_in(haystack, phrase)
+    if sym is not None:
+        return f"a symbol standing for one of its words ({sym[:120]})"
     return None
 
 
@@ -638,6 +741,53 @@ def _osa_within(a: str, b: str, k: int) -> int | None:
     return prev[lb] if prev[lb] <= k else None
 
 
+def _osa_suffixes(tail: str, p: str, k: int) -> list[int | None]:
+    """[OSA distance between `p` and tail[len(tail) - t:] if <= k, else
+    None, for t = 0 .. len(tail)] — every window ending at the end of
+    `tail` at once, in one banded DP over the reversed strings (OSA is
+    unchanged by reversing both). Equal, per window, to
+    `_osa_within(tail[-t:], p, k)` (fix wave 8, N7-7: the confirmation of a
+    scan hit computed one DP per candidate start)."""
+    m, n = len(p), len(tail)
+    out: list[int | None] = [None] * (n + 1)
+    if m <= k:
+        out[0] = m
+    if n == 0:
+        return out
+    a = tail[::-1]  # the text, reversed: column t is the window of the last t characters
+    b = p[::-1]
+    inf = k + 1
+    # rows over the pattern (i), columns over the text (t), band |i - t| <= k
+    prev2: list[int] = []
+    prev = [t if t <= k else inf for t in range(n + 1)]
+    for i in range(1, m + 1):
+        cur = [inf] * (n + 1)
+        if i <= k:
+            cur[0] = i
+        lo, hi = max(1, i - k), min(n, i + k)
+        best = cur[0]
+        bi = b[i - 1]
+        for t in range(lo, hi + 1):
+            at = a[t - 1]
+            v = prev[t - 1] + (bi != at)
+            if prev[t] + 1 < v:
+                v = prev[t] + 1
+            if cur[t - 1] + 1 < v:
+                v = cur[t - 1] + 1
+            if i > 1 and t > 1 and bi == a[t - 2] and b[i - 2] == at and prev2[t - 2] + 1 < v:
+                v = prev2[t - 2] + 1
+            cur[t] = v if v < inf else inf
+            if cur[t] < best:
+                best = cur[t]
+        if best > k:
+            return out
+        prev2, prev = prev, cur
+    for t in range(n + 1):
+        if prev[t] <= k:
+            out[t] = prev[t]
+    return out
+
+
 @functools.lru_cache(maxsize=16)
 def _canonical_tokens(text: str) -> tuple[str, ...]:
     return tuple(canonical(text).split())
@@ -748,7 +898,7 @@ def _tracked_collapse(s: str, st: bytearray, en: bytearray, tok: list[int]):
     return "".join(out), nst, nen, ntok
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=16)
 def _stream(text: str, rules: tuple[tuple[str, str], ...], collapse: bool = True) -> tuple[str, bytes, bytes, tuple[int, ...]]:
     """The letter stream of `text` in one view: (stream, start flags, end
     flags, token index per character). start[p] == 1 if a window may start
@@ -760,6 +910,17 @@ def _stream(text: str, rules: tuple[tuple[str, str], ...], collapse: bool = True
     flag moves to the surviving character, its end flag to just after it —
     "sell lemons" -> "selemons" still has a window "lemons" and a window
     "sel"; "pas si ve" -> "pasive" like the phrase."""
+    return _build_stream(text, rules, collapse)
+
+
+@functools.lru_cache(maxsize=8192)
+def _phrase_stream(text: str, rules: tuple[tuple[str, str], ...], collapse: bool = True) -> tuple[str, bytes, bytes, tuple[int, ...]]:
+    """`_stream` for PHRASES and phrase words: a separate, larger cache so
+    a long phrase list does not evict the text streams (fix wave 8, N7-7)."""
+    return _build_stream(text, rules, collapse)
+
+
+def _build_stream(text: str, rules: tuple[tuple[str, str], ...], collapse: bool) -> tuple[str, bytes, bytes, tuple[int, ...]]:
     toks = _canonical_tokens(text)
     s = "".join(toks).replace("i", "l")
     n = len(s)
@@ -783,21 +944,28 @@ def _stream(text: str, rules: tuple[tuple[str, str], ...], collapse: bool = True
 class _Pack:
     """Several patterns packed into one big integer, one W-bit field each
     (pattern bits at the top of the field, the lowest bit a carry guard),
-    scanned together (see the block comment above)."""
+    scanned together (see the block comment above). A pattern is
+    (text, k) or (text, k, kx) with kx >= k: hits within k are reported
+    always, hits within kx only while the pattern's RELAXED bit is live
+    (fix wave 8: the stacked rule's budget + STACK_EXTRA candidates, cut
+    off per pattern once its consumer has enough of them)."""
 
-    __slots__ = ("W", "n", "PAT", "FIRST", "TOPS", "LSBS", "CK", "scores0", "pm")
+    __slots__ = ("W", "n", "PAT", "FIRST", "TOPS", "LSBS", "CK", "CKX", "relaxable", "scores0", "pm")
 
-    def __init__(self, pats: list[tuple[str, int]]):
+    def __init__(self, pats: list[tuple]):
         # A field holds the pattern's bits (top m bits), a carry guard (the
         # lowest bit), and doubles as a W-bit distance counter that the
         # "<= k" test adds 2^(W-1) - 1 - k to: so 2^(W-1) > max(m, k).
-        m_max = max(len(p) for p, _ in pats)
-        k_max = max(k for _, k in pats)
+        m_max = max(len(p[0]) for p in pats)
+        k_max = max(p[-1] for p in pats)
         W = max(m_max + 1, max(m_max, k_max).bit_length() + 1)
         self.W, self.n = W, len(pats)
-        PAT = FIRST = TOPS = LSBS = CK = scores0 = 0
+        PAT = FIRST = TOPS = LSBS = CK = CKX = scores0 = 0
+        relaxable = False
         pm: dict[str, int] = {}
-        for i, (p, k) in enumerate(pats):
+        for i, pat in enumerate(pats):
+            p, k, kx = pat[0], pat[1], pat[-1]
+            relaxable = relaxable or kx > k
             base = i * W
             m = len(p)
             first = base + W - m
@@ -806,21 +974,40 @@ class _Pack:
             TOPS |= 1 << (base + W - 1)
             LSBS |= 1 << base
             CK |= ((1 << (W - 1)) - 1 - k) << base
+            CKX |= ((1 << (W - 1)) - 1 - kx) << base
             scores0 |= m << base
             for q, ch in enumerate(p):
                 pm[ch] = pm.get(ch, 0) | (1 << (first + q))
-        self.PAT, self.FIRST, self.TOPS, self.LSBS, self.CK, self.scores0, self.pm = PAT, FIRST, TOPS, LSBS, CK, scores0, pm
+        self.PAT, self.FIRST, self.TOPS, self.LSBS, self.CK, self.CKX = PAT, FIRST, TOPS, LSBS, CK, CKX
+        self.relaxable, self.scores0, self.pm = relaxable, scores0, pm
 
-    def scan(self, S: str, ST: bytes, EN: bytes):
-        """Yields (end position j, pattern index) for every token end j
-        (EN[j]) at which some pattern is within its budget of a window
-        ending there (the relaxed-start superset — the top row is 0 at a
-        token start ST[j], 1 elsewhere; confirm with _osa_within)."""
-        W, PAT, FIRST, TOPS, LSBS, CK = self.W, self.PAT, self.FIRST, self.TOPS, self.LSBS, self.CK
+    def bit(self, i: int) -> int:
+        """Pattern i's bit in a `live` mask."""
+        return 1 << (i * self.W + self.W - 1)
+
+    def scan(self, S: str, ST: bytes, EN: bytes, live: list[int] | None = None):
+        """Yields (end position j, pattern index, distance) for every token
+        end j (EN[j]) at which some pattern is within its budget of a
+        window ending there (the relaxed-start superset — the top row is 0
+        at a token start ST[j], 1 elsewhere — so the distance is a LOWER
+        bound of the token-aligned one; confirm with _osa_within).
+        `live`: [patterns still wanted, patterns whose kx hits are still
+        wanted] as masks of `bit(i)`, read at every token end, so the
+        consumer can switch a pattern off while the scan runs (default:
+        all, both)."""
+        W, PAT, FIRST, TOPS, LSBS, CK, CKX = self.W, self.PAT, self.FIRST, self.TOPS, self.LSBS, self.CK, self.CKX
+        if live is None:
+            live = [TOPS, TOPS]
+        relaxable = self.relaxable
+        field = (1 << W) - 1
         get = self.pm.get
         sh = W - 1
         Pv, Mv, scores, D0p, Eqp = PAT, 0, self.scores0, 0, 0
         top = 0 if ST[0] else 1
+        # Every term below stays inside PAT (Pv, Mv, Ph, Mh, Eq and FIRST are
+        # subsets of it), so `~x & PAT` is written `PAT ^ x` and the outer
+        # masks of the textbook form are dropped (fix wave 8, N7-7: 6 fewer
+        # big-integer operations per character; same values).
         for j, c in enumerate(S, 1):
             Eq = get(c, 0)
             ntop = 0 if ST[j] else 1
@@ -831,11 +1018,12 @@ class _Pack:
             # pseudo-match in the first cell of every field (Eqm); the real
             # Eq alone feeds the transposition term.
             Eqm = Eq | FIRST if ntop < top else Eq
-            D0 = (((((Eqm & Pv) + Pv) & PAT) ^ Pv) | Eqm | Mv | (((~D0p & Eq) << 1) & Eqp)) & PAT
-            Ph = (Mv | ~(D0 | Pv)) & PAT
+            D0 = ((((Eqm & Pv) + Pv) & PAT) ^ Pv) | Eqm | Mv | (((Eq ^ (Eq & D0p)) << 1) & Eqp)
+            Ph = Mv | (PAT ^ (D0 | Pv))
             Mh = Pv & D0
-            scores += (Ph >> sh) & LSBS
-            scores -= (Mh >> sh) & LSBS
+            # the top-row deltas, one per field: both masked values are multiples of 2^sh, so the
+            # shift of their difference is exact (= the difference of the shifted bits)
+            scores += ((Ph & TOPS) - (Mh & TOPS)) >> sh
             Ph = (Ph << 1) & PAT
             Mh = (Mh << 1) & PAT
             if ntop > top:
@@ -843,18 +1031,24 @@ class _Pack:
             elif ntop < top:
                 Mh |= FIRST
             top = ntop
-            Pv = (Mh | ~(D0 | Ph)) & PAT  # Hyyro's form: the vertical deltas follow D0 (which holds the transposition)
+            Pv = Mh | (PAT ^ (D0 | Ph))  # Hyyro's form: the vertical deltas follow D0 (which holds the transposition)
             Mv = Ph & D0
             D0p, Eqp = D0, Eq
             if EN[j]:
-                h = ~(scores + CK) & TOPS
+                h = ~(scores + CKX) & TOPS
+                if h:
+                    if relaxable:
+                        h = ((~(scores + CK) & h) | (h & live[1])) & live[0]
+                    else:
+                        h &= live[0]
                 while h:
                     low = h & -h
                     h ^= low
-                    yield j, (low.bit_length() - W) // W
+                    base = low.bit_length() - W
+                    yield j, base // W, (scores >> base) & field
 
 
-PACK_BITS = 1024  # patterns are packed into integers of about this many bits
+PACK_BITS = 4096  # patterns are packed into integers of about this many bits (4,096: measured best, fix wave 8)
 
 
 def _packs(pats: list[tuple[str, int]]) -> list[tuple[list[int], _Pack]]:
@@ -940,71 +1134,174 @@ def _collapse_stretched(s: str) -> str:
 # rule. Bounded by DISTINCT haystacks (a key is a reference to the text).
 _VNM_MEMO: "OrderedDict[str, dict[tuple[str, bool], tuple[int, bool, str] | None]]" = OrderedDict()
 _VNM_MEMO_TEXTS = 16
+# The token spans (start index, end index) of the same haystack within the
+# phrase's visual budget PLUS STACK_EXTRA (fix wave 8, class B: the
+# stacked rule's relaxed windows). Filled by a SEPARATE, lazy scan
+# (`relaxed_visual_spans`) for the phrases that had no other hit, so the
+# ordinary path costs what it did; at most MAX_RELAXED_SPANS per phrase.
+_VNM_SPANS: "OrderedDict[str, dict[tuple[str, bool], frozenset[tuple[int, int]]]]" = OrderedDict()
+STACK_EXTRA = 1  # each signal's budget is relaxed by this much for the stacked rule
+MAX_RELAXED_SPANS = 16
+
+
+def _memo_batch(memo_store, span_store, haystack: str, phrases, scan):
+    """Shared memo discipline: one batch `scan` per haystack for the
+    (phrase, fuzzy) keys not yet known, filling the result memo and the
+    relaxed-span memo together; bounded by distinct haystacks."""
+    memo = memo_store.get(haystack)
+    if memo is None:
+        memo = memo_store[haystack] = {}
+        span_store[haystack] = {}
+        while len(memo_store) > _VNM_MEMO_TEXTS:
+            gone, _ = memo_store.popitem(last=False)
+            span_store.pop(gone, None)
+    memo_store.move_to_end(haystack)
+    todo = [(p, bool(f)) for p, f in dict.fromkeys((p, bool(f)) for p, f in phrases) if (p, bool(f)) not in memo]
+    if todo:
+        res, spans = scan(haystack, tuple(todo))
+        memo.update(res)
+        span_store[haystack].update(spans)
+    return {p: memo[(p, bool(f))] for p, f in phrases}
 
 
 def visual_near_misses(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[str, tuple[int, bool, str] | None]:
     """`visual_near_miss()` for several (phrase, fuzzy) at once — one scan
     of the stream per view for the whole set. Returns {phrase: result}."""
-    memo = _VNM_MEMO.get(haystack)
-    if memo is None:
-        memo = _VNM_MEMO[haystack] = {}
-        while len(_VNM_MEMO) > _VNM_MEMO_TEXTS:
-            _VNM_MEMO.popitem(last=False)
-    _VNM_MEMO.move_to_end(haystack)
-    todo = [(p, bool(f)) for p, f in dict.fromkeys((p, bool(f)) for p, f in phrases) if (p, bool(f)) not in memo]
-    if todo:
-        for (p, f), res in _scan_phrases(haystack, tuple(todo)).items():
-            memo[(p, f)] = res
-    return {p: memo[(p, bool(f))] for p, f in phrases}
+    return _memo_batch(_VNM_MEMO, _VNM_SPANS, haystack, phrases, _scan_phrases)
 
 
-def _scan_phrases(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[tuple[str, bool], tuple[int, bool, str] | None]:
+def relaxed_visual_spans(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[str, frozenset[tuple[int, int]]]:
+    """{phrase: token spans of `haystack` within the phrase's visual
+    budget + STACK_EXTRA (share rule applied at that level)}, from the
+    same scan; empty for a short entry (N3) and for a phrase found
+    exactly (the stacked rule is never consulted for it)."""
+    visual_near_misses(haystack, phrases)
+    spans = _VNM_SPANS.get(haystack, {})
+    return {p: spans.get((p, bool(f)), frozenset()) for p, f in phrases}
+
+
+def visual_spans(haystack: str, phrase: str, fuzzy: bool = False) -> frozenset[tuple[int, int]]:
+    return relaxed_visual_spans(haystack, ((phrase, bool(fuzzy)),))[phrase]
+
+
+MAX_RELAXED_CONFIRMS = 32  # per phrase: scan hits beyond the budget proper confirmed for the stacked rule
+
+
+def _scan_phrases(haystack: str, phrases: tuple[tuple[str, bool], ...]):
+    """-> ({(phrase, fuzzy): best}, {(phrase, fuzzy): relaxed spans}); see
+    `visual_near_misses` / `relaxed_visual_spans`. The packed scan runs
+    at budget + STACK_EXTRA and reports a lower bound of each hit's
+    distance: a hit within the budget proper is confirmed and judged as
+    before (`best`); a hit beyond it is only a relaxed candidate, skipped
+    once the phrase is found within budget (the stacked rule is then
+    never consulted) or after MAX_RELAXED_CONFIRMS such hits (bounded
+    work: the stacked rule needs one window), else confirmed at budget +
+    STACK_EXTRA with the share rule at that level and recorded as a span
+    (at most MAX_RELAXED_SPANS). Cost (fix wave 8, N7-7): a pattern whose
+    phrase is decided is switched off in the running scan (`_Pack.scan`
+    `live`), a view whose stream equals an earlier one's scans only the
+    patterns it has not seen, a hit that cannot beat the best window
+    found (its distance is a lower bound) is skipped, and one DP per hit
+    confirms every candidate start (`_osa_suffixes`)."""
     toks = _canonical_tokens(haystack)
     specs: list[tuple[tuple[str, bool], str, int, bool]] = []  # (key, squashed, raw letters, fuzzy)
     result: dict[tuple[str, bool], tuple[int, bool, str] | None] = {}
+    spans: dict[tuple[str, bool], set[tuple[int, int]]] = {}
+    relaxed_left: dict[tuple[str, bool], int] = {}
     for phrase, fuzzy in phrases:
         p = canonical(phrase)
         result[(phrase, fuzzy)] = None
+        spans[(phrase, fuzzy)] = set()
+        relaxed_left[(phrase, fuzzy)] = 0 if _short_entry(phrase, fuzzy) else MAX_RELAXED_CONFIRMS  # N3
         if p:
             sq = p.replace(" ", "")
             specs.append(((phrase, fuzzy), sq, len(sq), fuzzy))
     if not specs or not toks:
-        return result
+        return result, {k: frozenset(v) for k, v in spans.items()}
+    # (text tail, pattern, bound) -> distances of every window ending there (`_osa_suffixes`); the
+    # key is plain text, so it holds across views, and repeated text repeats tails
+    dist_memo: dict[tuple[str, str, int], list[int | None]] = {}
+    share_memo: dict[tuple[str, tuple, int], bool] = {}
+    # patterns already scanned against an identical stream (views often leave the text unchanged:
+    # a text without the pairs of VISUAL_EXTENDED reads the same in both of its orders): a second
+    # scan of the same (stream, pattern, budgets) finds exactly the same windows
+    scanned: dict[tuple, set[tuple[int, str, int, int]]] = {}
     for rules in _views_for(""):
         S, ST, EN, tok = _stream(haystack, rules)
+        done_here = scanned.setdefault((S, ST, EN, tok), set())
         # Two skeletons per phrase against the collapsed text: the phrase
         # collapsed ("geeet" ~ "get" at no cost) and as written (an
         # insertion that splits the phrase's own double, "frete" for
         # "free", is one edit against "free" but two against "fre"). The
         # budget is the collapsed skeleton's tier either way.
-        pats: list[tuple[str, int]] = []
+        pats: list[tuple[str, int, int]] = []
         owner: list[int] = []
-        wskels: list[list[tuple[str, str]]] = []
+        wskels: list[tuple[tuple[str, str], ...]] = []
         for i, (key, sq, raw, fz) in enumerate(specs):
-            pskel = _stream(key[0], rules)[0]  # the phrase through the same transform as the text
+            if result[key] is not None and result[key][1]:
+                continue  # read as the phrase in an earlier view: nothing left to find
+            pskel = _phrase_stream(key[0], rules)[0]  # the phrase through the same transform as the text
             k = visual_budget(len(pskel), fz, raw)
+            extra = STACK_EXTRA if relaxed_left[key] > 0 and not (result[key] is not None and result[key][0] == 0) else 0
             pwords = canonical(key[0]).split()
             for collapse in (True, False):
-                variant = _stream(key[0], rules, collapse)[0]
+                variant = _phrase_stream(key[0], rules, collapse)[0]
                 if not collapse and variant == pskel:
                     continue
-                pats.append((variant, k))
+                if (i, variant, k, k + extra) in done_here:
+                    continue
+                done_here.add((i, variant, k, k + extra))
+                pats.append((variant, k, k + extra))
                 owner.append(i)
-                wskels.append([(_stream(w, rules, collapse)[0], _stream(w, rules, False)[0]) for w in pwords])
-        dist_memo: dict[tuple[str, str], int | None] = {}  # (window, pattern) -> distance; repeated text repeats windows
-        share_memo: dict[tuple[str, int], bool] = {}
-        for group, pack in _packs(pats):
-            for j, gi in pack.scan(S, ST, EN):
+                wskels.append(tuple((_phrase_stream(w, rules, collapse)[0], _phrase_stream(w, rules, False)[0]) for w in pwords))
+        if not pats:
+            continue
+        packs = _packs(pats)
+        # each key's patterns as (live masks of its pack, its bit): switched off in the running scans
+        # once the key is decided (read as the phrase) or wants no more relaxed candidates
+        bits: dict[tuple[str, bool], list[tuple[list[int], int]]] = {}
+        lives = []
+        for group, pack in packs:
+            live = [pack.TOPS, pack.TOPS]
+            lives.append(live)
+            for gi, pidx in enumerate(group):
+                bits.setdefault(specs[owner[pidx]][0], []).append((live, pack.bit(gi)))
+
+        def switch_off(key, which: int) -> None:
+            for live, bit in bits[key]:
+                for w in range(which, 2):
+                    live[w] &= ~bit
+
+        for (group, pack), live in zip(packs, lives):
+            for j, gi, dscan in pack.scan(S, ST, EN, live):
                 pidx = group[gi]
                 idx = owner[pidx]
                 key, sq, _, _ = specs[idx]
                 best = result[key]
                 if best is not None and best[1]:
+                    switch_off(key, 0)
                     continue
-                pskel, k = pats[pidx]
-                m = len(pskel)
+                pskel, k, kx = pats[pidx]
                 exact_only = best is not None and best[0] == 0  # only a READING could still improve on it
-                for s in range(max(0, j - m - k), j - m + k + 1):
+                relaxed = dscan > k  # beyond the budget proper for sure (the scan's distance is a lower bound)
+                if best is not None and 0 < best[0] <= dscan:
+                    continue  # no window ending here can be closer than the one found (a lower bound)
+                if relaxed:
+                    if best is not None or relaxed_left[key] <= 0:
+                        # found within budget (the stacked rule is never consulted for it), or enough
+                        switch_off(key, 1)
+                        continue
+                    # every relaxed hit costs its confirmations, found or not: at most MAX_RELAXED_CONFIRMS
+                    # of them per phrase (bounded work, see the docstring)
+                    relaxed_left[key] -= 1
+                m = len(pskel)
+                if not exact_only:
+                    t0 = max(0, j - m - kx)
+                    mk = (S[t0:j], pskel, kx)
+                    dists = dist_memo.get(mk)
+                    if dists is None:
+                        dists = dist_memo[mk] = _osa_suffixes(mk[0], pskel, kx)
+                for s in range(max(0, j - m - kx), j - m + kx + 1):
                     if s >= j or not ST[s]:
                         continue
                     w = S[s:j]
@@ -1013,29 +1310,40 @@ def _scan_phrases(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[
                             continue
                         d = 0
                     else:
-                        mk = (w, pskel)
-                        d = dist_memo.get(mk, -1)
-                        if d == -1:
-                            d = dist_memo[mk] = _osa_within(w, pskel, k)
+                        d = dists[j - s]
                         if d is None:
                             continue
+                        total = k if d <= k else kx
                         if d >= 2 and len(wskels[pidx]) > 1:
-                            sk = (w, pidx)
+                            sk = (w, wskels[pidx], total)
                             okay = share_memo.get(sk)
                             if okay is None:
-                                okay = share_memo[sk] = _word_shares_ok(w, wskels[pidx], k)
+                                okay = share_memo[sk] = _word_shares_ok(w, wskels[pidx], total)
                             if not okay:
                                 continue  # the edits are one whole short word swapped for another
-                    window = " ".join(toks[tok[s]:tok[j - 1] + 1])
+                        if d > k:
+                            if len(spans[key]) < MAX_RELAXED_SPANS:
+                                spans[key].add((tok[s], tok[j - 1] + 1))
+                            continue
+                    lo, hi = tok[s], tok[j - 1] + 1
+                    if d <= kx and len(spans[key]) < MAX_RELAXED_SPANS:
+                        spans[key].add((lo, hi))
+                    window = " ".join(toks[lo:hi])
                     reads = d == 0 and _reads_as_phrase(window, sq)
                     cand = (d, reads, window)
                     if best is None or (cand[0], not cand[1]) < (best[0], not best[1]):
                         best = cand
                         exact_only = d == 0
+                        if exact_only:
+                            switch_off(key, 1)  # found exactly: the stacked rule is never consulted
                         if reads:
+                            switch_off(key, 0)
                             break
                 result[key] = best
-    return result
+    for key, best in result.items():
+        if best is not None and best[0] == 0:
+            spans[key] = set()  # found exactly: the stacked rule is never consulted
+    return result, {k: frozenset(v) for k, v in spans.items()}
 
 
 def visual_near_miss(haystack: str, phrase: str, fuzzy: bool = False) -> tuple[int, bool, str] | None:
@@ -1081,6 +1389,11 @@ def word_key(w: str) -> str:
     return collapse_runs(visual_view(w, VISUAL_SKELETON))
 
 
+@functools.lru_cache(maxsize=16)
+def _word_keys(text: str) -> tuple[str, ...]:
+    return tuple(word_key(t) for t in _canonical_tokens(text))
+
+
 def phrase_words_in_order(haystack: str, phrase: str, max_gap: int = ADJACENCY_GAP) -> str | None:
     """The shortest span of `haystack` words that contains the words of the
     multi-word `phrase` in order with at most `max_gap` words between
@@ -1092,7 +1405,7 @@ def phrase_words_in_order(haystack: str, phrase: str, max_gap: int = ADJACENCY_G
         return None
     toks = _canonical_tokens(haystack)
     pkeys = [word_key(w) for w in pwords]
-    keys = [word_key(t) for t in toks]
+    keys = _word_keys(haystack)
     best: tuple[int, int] | None = None
     for start in (i for i, k in enumerate(keys) if k == pkeys[0]):
         pos = start
@@ -1169,6 +1482,7 @@ here there now then today
 """.split())
 
 
+@functools.lru_cache(maxsize=16384)
 def consonant_skeleton(word: str) -> str:
     """`word` (canonical, a-z) without its vowels (a e i o u y) except a
     word-initial one, runs collapsed: "money" -> "mn", "income" -> "incm",
@@ -1194,9 +1508,18 @@ def letter_share(piece: str, word: str) -> float:
 
 _PH_INITIAL = (("kn", "n"), ("gn", "n"), ("pn", "n"), ("wr", "r"), ("wh", "w"), ("ps", "s"), ("x", "s"))
 _SOFT = ("e", "i", "y")
+# The first letter of a key, from the first letter of the word (fix wave 8,
+# N7-7: prunes the run-of-tokens phonetic pass — a run whose first letter
+# cannot start the phrase's key is never keyed). Every rule that decides
+# the first key letter looks at the first letter and at most three more.
+_FIRST_KEY: dict[str, str] = {
+    "a": "A", "e": "A", "i": "A", "o": "A", "u": "A", "y": "A", "b": "P", "c": "KSX", "d": "TJ", "f": "F",
+    "g": "KNJ", "h": "HAPKSXTJFNLMRWFTS0", "j": "J", "k": "KN", "l": "L", "m": "M", "n": "N", "p": "PFNSX",
+    "q": "K", "r": "R", "s": "SXK", "t": "TX0", "v": "F", "w": "WR", "x": "SKX", "z": "S",
+}
 
 
-@functools.lru_cache(maxsize=4096)
+@functools.lru_cache(maxsize=65536)
 def phonetic_key(word: str) -> str:
     """Simplified Metaphone-style key of a canonical word (see the block
     comment above): phonetic_key("phree") == phonetic_key("free") == "FR",
@@ -1316,13 +1639,30 @@ def _vowel_count(w: str) -> int:
     return sum(1 for c in w if c in VOWELS)
 
 
-@functools.lru_cache(maxsize=16)
-def _skeleton_stream(text: str) -> tuple[str, bytes, bytes, tuple[int, ...], tuple[str, ...]]:
-    """The consonant skeleton of every token, concatenated, with token
-    start / end flags and the token index per character (like `_stream`),
-    plus the per-token skeletons."""
+@functools.lru_cache(maxsize=4096)
+def _vis(word: str, vis: bool = True) -> str:
+    """A token as the consonant and phonetic signals ALSO read it (fix
+    wave 8, class B): the near-identical pairs contracted, rn -> m,
+    cl -> d, vv -> w (`visual_skeleton`), so "rnunny" is judged as "munny"
+    and "vvght" as "wght". Both readings are scanned, the phrase's words
+    read the same way each time, because a genuine rn / cl ("grnteed",
+    "miracle") must keep matching as written. `vis=False`: as written."""
+    return visual_skeleton(word) if vis else word
+
+
+READINGS = (False, True)  # the consonant / phonetic signals judge each token as written and contracted
+
+
+@functools.lru_cache(maxsize=32)
+def _skeleton_stream(text: str, vis: bool = False) -> tuple[str, bytes, bytes, tuple[int, ...], tuple[str, ...]]:
+    """The consonant skeleton of every token (as written, or with the
+    visual pairs contracted, `_vis`), concatenated, with token start / end
+    flags and the token index per character (like `_stream`), plus the
+    per-token skeletons. A #hashtag / @mention is not a word: its
+    skeleton is empty (fix wave 8, N7-5: "pssv #ad incum" is "passive
+    income" with the disclosure tag between the halves)."""
     toks = _canonical_tokens(text)
-    skels = tuple(consonant_skeleton(t) for t in toks)
+    skels = tuple("" if t[0] in "#@" else consonant_skeleton(_vis(t, vis)) for t in toks)
     n = sum(map(len, skels))
     st = bytearray(n + 1)
     en = bytearray(n + 1)
@@ -1337,20 +1677,56 @@ def _skeleton_stream(text: str) -> tuple[str, bytes, bytes, tuple[int, ...], tup
     return "".join(skels), bytes(st), bytes(en), tuple(tok), skels
 
 
-@functools.lru_cache(maxsize=16)
-def _token_keys(text: str) -> tuple[str, ...]:
-    return tuple(phonetic_key(t) for t in _canonical_tokens(text))
+@functools.lru_cache(maxsize=32)
+def _token_keys(text: str, vis: bool = False) -> tuple[str, ...]:
+    return tuple(phonetic_key(_vis(t, vis)) for t in _canonical_tokens(text))
 
 
-@functools.lru_cache(maxsize=16)
-def _token_consonants(text: str) -> tuple[tuple[int, ...], tuple[str, ...]]:
-    """Per token: its consonant count, and — for a token of 4+ letters — the
+_AZ_ONLY = re.compile(r"[^a-z]+")
+
+
+@functools.lru_cache(maxsize=32)
+def _token_consonants(text: str, vis: bool = False) -> tuple[tuple[int, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Per token: its consonant count; for a token of 4+ a-z letters, the
     first letter of the key of any run of tokens it starts (every rule
     that decides the first key letter looks at most 3 letters ahead:
-    "tsch"), else ''."""
-    toks = _canonical_tokens(text)
+    "tsch"), else ''; the token as read (`_vis`); and its a-z letters
+    (all `phonetic_key` reads of it)."""
+    toks = tuple(_vis(t, vis) for t in _canonical_tokens(text))
+    letters = tuple(_AZ_ONLY.sub("", t) for t in toks)
     return (tuple(len(t) - _vowel_count(t) for t in toks),
-            tuple(phonetic_key(t[:4])[:1] if len(t) >= 4 else "" for t in toks))
+            tuple(phonetic_key(t[:4])[:1] if len(t) >= 4 else "" for t in letters), toks, letters)
+
+
+@functools.lru_cache(maxsize=32)
+def _key_positions(text: str, vis: bool = False) -> dict[str, tuple[int, ...]]:
+    """{phonetic key: the token positions with it}. Once per text (N7-7)."""
+    out: dict[str, list[int]] = {}
+    for i, k in enumerate(_token_keys(text, vis)):
+        out.setdefault(k, []).append(i)
+    return {k: tuple(v) for k, v in out.items()}
+
+
+_RUN_STARTS: "OrderedDict[tuple[str, bool], dict[str, tuple[int, ...]]]" = OrderedDict()
+
+
+def _run_starts(text: str, vis: bool, letter: str) -> tuple[int, ...]:
+    """The token positions that can start a run of tokens whose joined key
+    starts with `letter` (`_FIRST_KEY`, and a 4+-letter token's own first
+    key letter). Per text and letter, once (fix wave 8, N7-7: the scan of
+    every token per phrase was a third of a 99-phrase review)."""
+    per = _RUN_STARTS.get((text, vis))
+    if per is None:
+        per = _RUN_STARTS[(text, vis)] = {}
+        while len(_RUN_STARTS) > 32:
+            _RUN_STARTS.popitem(last=False)
+    got = per.get(letter)
+    if got is None:
+        _, heads, _, letters = _token_consonants(text, vis)
+        # a token without any a-z letter contributes nothing to a run's key: never pruned
+        got = per[letter] = tuple(i for i, (h, t) in enumerate(zip(heads, letters))
+                                  if (not h or h == letter) and (not t or letter in _FIRST_KEY[t[0]]))
+    return got
 
 
 def _short_entry(phrase: str, fuzzy: bool) -> bool:
@@ -1364,80 +1740,140 @@ def _no_function_word(window: list[str], pwords: list[str]) -> bool:
 
 
 _SNM_MEMO: "OrderedDict[str, dict[tuple[str, bool], tuple[int, str] | None]]" = OrderedDict()
+_SNM_SPANS: "OrderedDict[str, dict[tuple[str, bool], frozenset[tuple[int, int]]]]" = OrderedDict()
 
 
 def skeleton_near_misses(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[str, tuple[int, str] | None]:
     """`skeleton_near_miss()` for several (phrase, fuzzy) at once: one
-    bit-parallel scan of the text's skeleton stream for the whole set."""
-    memo = _SNM_MEMO.get(haystack)
-    if memo is None:
-        memo = _SNM_MEMO[haystack] = {}
-        while len(_SNM_MEMO) > _VNM_MEMO_TEXTS:
-            _SNM_MEMO.popitem(last=False)
-    _SNM_MEMO.move_to_end(haystack)
-    todo = [(p, bool(f)) for p, f in dict.fromkeys((p, bool(f)) for p, f in phrases) if (p, bool(f)) not in memo]
-    if todo:
-        for key, res in _scan_skeletons(haystack, tuple(todo)).items():
-            memo[key] = res
-    return {p: memo[(p, bool(f))] for p, f in phrases}
+    bit-parallel scan of the text's skeleton stream per reading for the
+    whole set."""
+    return _memo_batch(_SNM_MEMO, _SNM_SPANS, haystack, phrases, _scan_skeletons)
 
 
-def _scan_skeletons(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[tuple[str, bool], tuple[int, str] | None]:
-    S, ST, EN, tok, skels = _skeleton_stream(haystack)
+def relaxed_skeleton_spans(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[str, frozenset[tuple[int, int]]]:
+    """{phrase: token spans of `haystack` whose consonant skeleton is
+    within the phrase's skeleton budget + STACK_EXTRA under the guards
+    (one token per phrase word, no foreign function word, the strict
+    letter share — but not the vowel-drop evidence: the stacked rule
+    supplies it)}, from the same scan; empty for a short entry (N3) and
+    for a phrase found exactly."""
+    skeleton_near_misses(haystack, phrases)
+    spans = _SNM_SPANS.get(haystack, {})
+    return {p: spans.get((p, bool(f)), frozenset()) for p, f in phrases}
+
+
+def skeleton_spans(haystack: str, phrase: str, fuzzy: bool = False) -> frozenset[tuple[int, int]]:
+    return relaxed_skeleton_spans(haystack, ((phrase, bool(fuzzy)),))[phrase]
+
+
+def _scan_skeletons(haystack: str, phrases: tuple[tuple[str, bool], ...]):
+    """-> ({(phrase, fuzzy): best}, {(phrase, fuzzy): relaxed spans}); see
+    `skeleton_near_misses` / `relaxed_skeleton_spans`. Once per reading
+    (READINGS: tokens as written, and with the visual pairs contracted),
+    the closest window over both; relaxed candidates bounded as in
+    `_scan_phrases`."""
     toks = _canonical_tokens(haystack)
     result: dict[tuple[str, bool], tuple[int, str] | None] = {key: None for key in phrases}
-    pats: list[tuple[str, int]] = []
-    owner: list[tuple[str, bool]] = []
-    pwords_of: dict[tuple[str, bool], list[str]] = {}
-    for phrase, fuzzy in phrases:
-        pwords = canonical(phrase).split()
-        if not pwords or _short_entry(phrase, fuzzy):
-            continue
-        pskel = "".join(consonant_skeleton(w) for w in pwords)
-        pats.append((pskel, skeleton_budget(len(pskel))))
-        owner.append((phrase, fuzzy))
-        pwords_of[(phrase, fuzzy)] = pwords
-    if not pats or not S:
-        return result
-    for group, pack in _packs(pats):
-        for j, gi in pack.scan(S, ST, EN):
-            key = owner[group[gi]]
-            best = result[key]
-            if best is not None and best[0] == 0:
+    spans: dict[tuple[str, bool], set[tuple[int, int]]] = {key: set() for key in phrases}
+    relaxed_left: dict[tuple[str, bool], int] = {key: MAX_RELAXED_CONFIRMS for key in phrases}
+    dist_memo: dict[tuple[str, str, int], list[int | None]] = {}  # as in `_scan_phrases`
+    scanned: dict[tuple, set[tuple]] = {}  # as in `_scan_phrases`
+    for vis in READINGS:
+        S, ST, EN, tok, skels = _skeleton_stream(haystack, vis)
+        done_here = scanned.setdefault((S, ST, EN, tok, skels), set())
+        pats: list[tuple[str, int, int]] = []
+        owner: list[tuple[str, bool]] = []
+        pwords_of: dict[tuple[str, bool], list[str]] = {}
+        for phrase, fuzzy in phrases:
+            pwords = canonical(phrase).split()
+            key = (phrase, fuzzy)
+            if not pwords or _short_entry(phrase, fuzzy) or (result[key] is not None and result[key][0] == 0):
                 continue
-            pskel, k = pats[group[gi]]
-            pwords = pwords_of[key]
-            m = len(pskel)
-            for s in range(max(0, j - m - k), j - m + k + 1):
-                if s >= j or not ST[s]:
+            wskel = tuple(consonant_skeleton(_vis(w, vis)) for w in pwords)
+            pskel = "".join(wskel)
+            k = skeleton_budget(len(pskel))
+            pat = (pskel, k, k + (STACK_EXTRA if relaxed_left[key] > 0 else 0))
+            if (key, wskel, *pat) in done_here:
+                continue  # the same words against the same stream in the other reading: nothing new
+            done_here.add((key, wskel, *pat))
+            pats.append(pat)
+            owner.append(key)
+            pwords_of[key] = pwords
+        if not pats or not S:
+            continue
+        for group, pack in _packs(pats):
+            live = [pack.TOPS, pack.TOPS]
+            for j, gi, dscan in pack.scan(S, ST, EN, live):
+                key = owner[group[gi]]
+                best = result[key]
+                if best is not None and best[0] == 0:
+                    live[0] &= ~pack.bit(gi)
                     continue
-                d = _osa_within(S[s:j], pskel, k)
-                if d is None or (best is not None and d >= best[0]):
-                    continue
-                lo, hi = tok[s], tok[j - 1] + 1
-                window = list(toks[lo:hi])
-                if not _no_function_word(window, pwords):
-                    continue
-                if d >= 1:
-                    if hi - lo != len(pwords):
+                pskel, k, kx = pats[group[gi]]
+                if best is not None and best[0] <= dscan:
+                    continue  # no window ending here can be closer than the one found (a lower bound)
+                if dscan > k:
+                    if best is not None or relaxed_left[key] <= 0:
+                        live[1] &= ~pack.bit(gi)  # found (the stacked rule is never consulted), or enough
                         continue
-                    okay, dropped = True, False
-                    for t, ts, w in zip(window, skels[lo:hi], pwords):
-                        ws = consonant_skeleton(w)
-                        if ts == ws:
+                    relaxed_left[key] -= 1  # a relaxed hit: bounded as in `_scan_phrases`
+                pwords = pwords_of[key]
+                m = len(pskel)
+                t0 = max(0, j - m - kx)
+                mk = (S[t0:j], pskel, kx)
+                dists = dist_memo.get(mk)
+                if dists is None:
+                    dists = dist_memo[mk] = _osa_suffixes(mk[0], pskel, kx)
+                for s in range(t0, j - m + kx + 1):
+                    if s >= j or not ST[s]:
+                        continue
+                    d = dists[j - s]
+                    if d is None:
+                        continue
+                    if d <= k and best is not None and d >= best[0]:
+                        continue
+                    lo, hi = tok[s], tok[j - 1] + 1
+                    words_here = [(t, ts) for t, ts in zip(toks[lo:hi], skels[lo:hi]) if t[0] not in "#@"]  # tags are not words
+                    window = [t for t, _ in words_here]
+                    if not _no_function_word(window, pwords):
+                        continue
+                    if d >= 1:
+                        if len(window) != len(pwords):
                             continue
-                        if letter_share(ts, ws) < WORD_SHARE:
-                            okay = False
-                            break
-                        if _vowel_count(t) < _vowel_count(w):
-                            dropped = True
-                    if not (okay and dropped):
-                        continue
-                best = (d, " ".join(window))
-                if d == 0:
-                    break
-            result[key] = best
-    return result
+                        okay, strict, dropped = True, True, False
+                        for (t, ts), w in zip(words_here, pwords):
+                            # fix wave 8 (class B): a token that dropped vowels is evidence whether or not
+                            # its skeleton still equals the word's ("grnteed" for "guaranteed" does); a
+                            # drop keeps the consonants ("recommend" for "recommended" is an inflection)
+                            if _vowel_count(t) < _vowel_count(w) and len(t) - _vowel_count(t) >= len(w) - _vowel_count(w):
+                                dropped = True
+                            ws = consonant_skeleton(_vis(w, vis))
+                            if ts != ws and letter_share(ts, ws) < WORD_SHARE:
+                                # a two-consonant skeleton cannot keep 60% after one edit ("lz" for
+                                # "ls"): one edit is tolerated by the signal proper — which also needs
+                                # the vowel-drop evidence — when the token SOUNDS like the word ("luze"
+                                # / "lose"; not "made" / "money": "fragrance free, made" is not "free
+                                # money"); a relaxed span keeps the strict share ("mn" is not "mk")
+                                strict = False
+                                if d > k or not (len(ws) <= 2 and _osa_within(ts, ws, 1) is not None
+                                                 and any(phonetic_key(_vis(t, v)) == phonetic_key(_vis(w, v))
+                                                         for v in READINGS)):
+                                    okay = False
+                                    break
+                        if not okay:
+                            continue
+                        if strict and len(spans[key]) < MAX_RELAXED_SPANS:
+                            spans[key].add((lo, hi))
+                        if d > k or not dropped:
+                            continue
+                    best = (d, " ".join(window))
+                    if d == 0:
+                        break
+                result[key] = best
+    for key, best in result.items():
+        if best is not None and best[0] == 0:
+            spans[key] = set()
+    return result, {k: frozenset(v) for k, v in spans.items()}
 
 
 def skeleton_near_miss(haystack: str, phrase: str, fuzzy: bool = False) -> tuple[int, str] | None:
@@ -1454,17 +1890,26 @@ def phonetic_near_miss(haystack: str, phrase: str, fuzzy: bool = False, max_gap:
     ritch", "kno risque", "luze wait fast"), else the first run of tokens
     whose letters, joined, have the key of the phrase's letters joined
     ("rizkphree", "phree m oney"), or None; the phrase written exactly is
-    not reported (it is an exact match, not a respelling)."""
+    not reported (it is an exact match, not a respelling). Tokens are
+    read as written and with the visual pairs contracted (READINGS)."""
+    for vis in READINGS:
+        hit = _phonetic_near_miss(haystack, phrase, fuzzy, max_gap, vis)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _phonetic_near_miss(haystack: str, phrase: str, fuzzy: bool, max_gap: int, vis: bool) -> str | None:
     pwords = canonical(phrase).split()
     if not pwords or _short_entry(phrase, fuzzy):
         return None
-    pkeys = [phonetic_key(w) for w in pwords]
+    pkeys = [phonetic_key(_vis(w, vis)) for w in pwords]
     if any(not k for k in pkeys):
         return None
     toks = _canonical_tokens(haystack)
-    keys = _token_keys(haystack)
+    keys = _token_keys(haystack, vis)
     best: tuple[int, int] | None = None
-    for start in (i for i, k in enumerate(keys) if k == pkeys[0]):
+    for start in _key_positions(haystack, vis).get(pkeys[0], ()):
         pos = start
         hits = [start]
         okay = True
@@ -1484,18 +1929,18 @@ def phonetic_near_miss(haystack: str, phrase: str, fuzzy: bool = False, max_gap:
     if best is None:
         # the phrase's letters run together or split otherwise ("rizkphree", "phree m oney", "risk ph
         # rree"): the key of a run of up to len(pwords) + max_gap tokens, joined, equals the phrase's
-        squashed = "".join(pwords)
+        squashed = _vis("".join(pwords), vis)
         pkey = phonetic_key(squashed)
         width = len(pwords) + max_gap
         pcons = len(squashed) - _vowel_count(squashed)
-        cons, heads = _token_consonants(haystack)
-        for start in range(len(toks)):
-            if heads[start] and heads[start] != pkey[0]:
-                continue  # a token of 4+ letters fixes the first key letter of any run it starts
+        cons, _, vtoks, _ = _token_consonants(haystack, vis)
+        # a token of 4+ letters fixes the first key letter of any run it starts; any other token's first
+        # letter bounds it (_FIRST_KEY): only the tokens that can start the phrase's key are tried
+        for start in _run_starts(haystack, vis, pkey[0]):
             joined = ""
             c = 0
             for end in range(start, min(len(toks), start + width)):
-                joined += toks[end]
+                joined += vtoks[end]
                 c += cons[end]
                 if len(joined) > len(squashed) + 4 or c > pcons + 3:
                     break
@@ -1509,6 +1954,261 @@ def phonetic_near_miss(haystack: str, phrase: str, fuzzy: bool = False, max_gap:
                         break
                     return " ".join(window)
     return " ".join(toks[best[0]:best[1] + 1]) if best else None
+
+
+# --- stacked respellings (fix wave 8; AEGIS round 7 class B) --------------------------------
+#
+# "grnteed retunrs", "overnlte sccss", "lose vvait fst" — a vowel drop, a
+# homophone AND a lookalike in one phrase — were outside every single
+# signal's budget. Two root causes are fixed above (the skeleton signal's
+# vowel-drop evidence skipped the token that dropped them). On top, as
+# required: when TWO of the three independent similarity signals — the
+# visual gate (letter edits), the consonant skeleton, the phonetic key —
+# each score within their budget + STACK_EXTRA on the SAME token window,
+# that window is a human's call even if neither alone is within budget.
+# The relaxed visual and skeleton windows come from the same packed scans
+# as the signals themselves (`visual_spans`, `skeleton_spans`); the
+# phonetic check (joined word keys within one edit, no foreign function
+# word) is only made on those windows, so the cost is a few edit distances
+# per phrase. N3 holds: a short entry is exact-only.
+
+
+def _phonetic_within(haystack: str, span: tuple[int, int], pwords: list[str], k: int = STACK_EXTRA) -> bool:
+    lo, hi = span
+    toks = _canonical_tokens(haystack)
+    window = list(toks[lo:hi])
+    if not window or not _no_function_word(window, pwords):
+        return False
+    return any(_osa_within("".join(_token_keys(haystack, vis)[lo:hi]),
+                           "".join(phonetic_key(_vis(w, vis)) for w in pwords), k) is not None for vis in READINGS)
+
+
+def _dropped_vowels(t: str, w: str) -> bool:
+    """`t` is `w` with vowels dropped: fewer vowels, no fewer consonants
+    ("grnteed" for "guaranteed"; "recommend" for "recommended" is not)."""
+    return _vowel_count(t) < _vowel_count(w) and len(t) - _vowel_count(t) >= len(w) - _vowel_count(w)
+
+
+def _respelling_evidence(window: list[str], pwords: list[str]) -> bool:
+    """The window shows a RESPELLING, not merely a nearby ordinary word:
+    a token that dropped vowels (`_dropped_vowels`), a lookalike pair
+    (rn / cl / vv) or an l for an i that the phrase word lacks; for a
+    window that is not one token per word, a token without any vowel or
+    with a pair. "target rich" and "doctors recommend" have none."""
+    if len(window) == len(pwords):
+        for t, w in zip(window, pwords):
+            if _dropped_vowels(t, w):
+                return True
+            if any(pr in t and pr not in w for pr in ("rn", "cl", "vv")):
+                return True
+            if t.count("l") > w.count("l") and t.count("i") < w.count("i"):
+                return True
+        return False
+    return any(_vowel_count(t) == 0 or any(pr in t for pr in ("rn", "cl", "vv")) for t in window)
+
+
+def stacked_near_miss(haystack: str, phrase: str, fuzzy: bool = False) -> str | None:
+    """The first token window of `haystack` on which at least two of the
+    three signals (visual, consonant skeleton, phonetic) are each within
+    their budget + STACK_EXTRA and which shows respelling evidence
+    (`_respelling_evidence`), as text — or None."""
+    pwords = canonical(phrase).split()
+    if not pwords or _short_entry(phrase, fuzzy):
+        return None
+    v = visual_spans(haystack, phrase, fuzzy)
+    sk = skeleton_spans(haystack, phrase, fuzzy)
+    toks = _canonical_tokens(haystack)
+    for span in sorted(v | sk):
+        lo, hi = span
+        window = list(toks[lo:hi])
+        if window == pwords or not _respelling_evidence(window, pwords):
+            continue  # the phrase itself (an exact match), or ordinary words near it
+        score = (span in v) + (span in sk)
+        if score < 2 and _phonetic_within(haystack, span, pwords):
+            score += 1
+        if score >= 2:
+            return " ".join(window)
+    return None
+
+
+# --- symbols standing for words (fix wave 8; AEGIS round 7 N7-4) ------------------------------
+#
+# "make 💰", "make $$$ fast", "free 💸", "guaranteed 📈", "get 💎 quick"
+# passed: canonical() turns a symbol into a space, so the phrase was simply
+# missing a word. SYMBOL_LEXICON maps the pictographs and symbol runs that
+# stand for a CONCEPT in marketing text to the words they stand for; a
+# never-say phrase whose words appear in order (adjacency policy) with one
+# or more of them stood in by a lexicon symbol whose concepts include that
+# word is a human's call (`symbol_stand_in`). Any OTHER pictograph
+# (Unicode So/Sk) exactly where a phrase word would be, next to the rest
+# of the phrase, is a human's call too — when it OCCUPIES that place:
+# between the phrase's words ("get 🍕 quick") or closing the statement
+# ("guaranteed 🎯", nothing but a hashtag, a symbol, a line break or the
+# end of the text after it) — provided the words that ARE there include a
+# content word (a fragment of function words alone, "no 🎯" / "your 🎯",
+# is not). An unknown pictograph followed by an ordinary word illustrates
+# that word ("Get 🎟 tickets", "Free 🚚 shipping", "Make 🎄 memories":
+# 16 of 30 ordinary emoji captions in the fix-wave-8 sample) and is not
+# a stand-in. A run of one or more symbols is one symbol; a currency sign
+# attached to digits ("$20", "20$", "$40k") is a price, never a stand-in;
+# a line break is a boundary this rule never reads across (Clip Review
+# joins the text fields with one). Decorative emoji anywhere else change
+# nothing. The lexicon is a bounded, documented list; extend it here, not
+# in the rulebook.
+
+_MONEY = ("money", "cash", "dollars", "dollar", "rich", "wealth", "wealthy", "profit", "profits", "income",
+          "returns", "earnings", "pay", "paid")
+_GROWTH = ("growth", "returns", "gains", "profit", "profits", "success", "results", "up")
+SYMBOL_LEXICON: dict[str, tuple[str, ...]] = {
+    # money / wealth
+    "💰": _MONEY, "💵": _MONEY, "💴": _MONEY, "💶": _MONEY, "💷": _MONEY, "💸": _MONEY, "🪙": _MONEY, "💲": _MONEY,
+    "🤑": _MONEY, "🏦": _MONEY + ("bank",), "💳": _MONEY, "💹": _MONEY + _GROWTH,
+    "$": _MONEY, "€": _MONEY, "£": _MONEY, "¥": _MONEY, "₹": _MONEY, "₿": _MONEY,
+    # gems / wealth
+    "💎": ("rich", "wealth", "wealthy", "gem", "gems", "diamond", "diamonds", "luxury", "premium"),
+    "👑": ("rich", "wealth", "king", "queen", "royal", "premium"),
+    # growth / gains
+    "📈": _GROWTH, "🚀": _GROWTH + ("rocket", "fast", "quick"), "📊": _GROWTH, "🔥": ("fire", "hot", "fast", "quick"),
+    "⚡": ("fast", "quick", "instant", "instantly"), "💨": ("fast", "quick"),
+    # certainty
+    "🔒": ("guaranteed", "guarantee", "secure", "safe", "locked", "lock"), "🔐": ("guaranteed", "guarantee", "secure", "safe"),
+    "✅": ("guaranteed", "guarantee", "proven", "approved", "verified", "certified", "yes", "check"),
+    "✔": ("guaranteed", "guarantee", "proven", "approved", "verified", "certified", "yes", "check"),
+    "☑": ("guaranteed", "guarantee", "proven", "approved", "verified", "certified", "yes", "check"),
+    "💯": ("guaranteed", "proven", "percent"), "🏆": ("success", "win", "winner", "winning", "best"),
+    "🥇": ("success", "win", "winner", "winning", "best"),
+    # free / no
+    "🆓": ("free",), "🚫": ("no", "zero", "never"), "❌": ("no", "zero", "never"), "⛔": ("no", "zero", "never"),
+    # health
+    "💊": ("cure", "cures", "pill", "pills", "medicine", "drug"), "🩺": ("doctor", "doctors", "medical"),
+    "⚕": ("doctor", "doctors", "medical"), "🧑": ("doctor",), "👨": ("doctor",), "👩": ("doctor",),
+    "🔬": ("clinically", "scientifically", "proven", "lab"), "🧪": ("clinically", "scientifically", "proven", "lab"),
+    "⚖": ("weight",), "🏃": ("fast", "quick", "run"), "😴": ("overnight", "sleep", "night"), "💤": ("overnight", "sleep", "night"),
+    "🌙": ("overnight", "night"), "🛌": ("overnight", "sleep"),
+}
+_SYMBOL_CATEGORIES = ("So", "Sk", "Sc")
+
+
+def _is_symbol_char(ch: str) -> bool:
+    return ch in SYMBOL_LEXICON or unicodedata.category(ch) in _SYMBOL_CATEGORIES
+
+
+@functools.lru_cache(maxsize=16)
+def _symbol_tokens(text: str) -> tuple[tuple[str, str, frozenset[str]], ...]:
+    """The folded text as (kind, token, concepts): kind "w" for a word,
+    "t" for a #hashtag / @mention, "s" for a run of symbols (concepts:
+    the union of the lexicon's, empty for pictographs it does not know),
+    "n" for a number with a currency sign, "b" for a line break. Only
+    computed for a text that has a symbol at all."""
+    folded = _folded(text)
+    out: list[tuple[str, str, frozenset[str]]] = []
+    i, n = 0, len(folded)
+    while i < n:
+        ch = folded[i]
+        if ch == "\n":
+            out.append(("b", ch, frozenset()))
+            i += 1
+        elif ch.isalnum() or ch in "#@_":
+            j = i + 1
+            while j < n and (folded[j].isalnum() or folded[j] in "#@_"):
+                j += 1
+            out.append(("t" if ch in "#@" else "w", folded[i:j], frozenset()))
+            i = j
+        elif _is_symbol_char(ch):
+            j = i + 1
+            while j < n and _is_symbol_char(folded[j]):
+                j += 1
+            run = folded[i:j]
+            price = (j < n and folded[j].isdigit()) or (out and out[-1][0] == "w" and folded[i - 1].isdigit())
+            if price:
+                out.append(("n", run, frozenset()))
+            else:
+                concepts = frozenset(w for c in run for w in SYMBOL_LEXICON.get(c, ()))
+                out.append(("s", run, concepts))
+            i = j
+        else:
+            i += 1
+    return tuple(out)
+
+
+_ASCII_SYMBOLS = frozenset(ch for ch in map(chr, range(128)) if unicodedata.category(ch) in _SYMBOL_CATEGORIES)  # $ ^ `
+
+
+def _has_symbol(text: str) -> bool:
+    return any(_is_symbol_char(ch) for ch in text) if not text.isascii() else not _ASCII_SYMBOLS.isdisjoint(text)
+
+
+def symbol_stand_in(haystack: str, phrase: str, max_gap: int = ADJACENCY_GAP) -> str | None:
+    """A description of how the multi-word `phrase` appears in `haystack`
+    with one or more words stood in by a symbol (see the block comment
+    above), or None. Single-word phrases: None (a symbol alone says
+    nothing)."""
+    pwords = canonical(phrase).split()
+    if len(pwords) < 2 or not _has_symbol(haystack):
+        return None
+    toks = _symbol_tokens(haystack)
+    pkeys = [word_key(w) for w in pwords]
+    words = [(kind, tok, word_key(tok) if kind == "w" else None, concepts) for kind, tok, concepts in toks]
+    content = [w for w in pwords if w not in FUNCTION_WORDS]
+    last = len(pwords) - 1
+
+    def stands(t, pw, pk):
+        kind, tok, key, concepts = t
+        if kind == "w":
+            return "word" if key == pk else None
+        if kind == "s":
+            return "known" if pw in concepts else "unknown"
+        return None
+
+    def closes(h: int) -> bool:
+        """Nothing but a hashtag, a symbol, a line break or the end follows token h."""
+        return h + 1 >= len(words) or words[h + 1][0] in ("t", "s", "b")
+
+    for start in range(len(words)):
+        if stands(words[start], pwords[0], pkeys[0]) is None:
+            continue
+        pos = start
+        hits = [start]
+        okay = True
+        for pw, pk in zip(pwords[1:], pkeys[1:]):
+            nxt = None
+            for j in range(pos + 1, min(len(words), pos + max_gap + 2)):
+                if words[j][0] == "b":
+                    break  # a line break: never read across
+                if stands(words[j], pw, pk) is not None:
+                    nxt = j
+                    break
+            if nxt is None:
+                okay = False
+                break
+            pos = nxt
+            hits.append(pos)
+        if not okay:
+            continue
+        kinds = [stands(words[h], pw, pk) for h, pw, pk in zip(hits, pwords, pkeys)]
+        if "known" not in kinds and "unknown" not in kinds:
+            continue  # the phrase's own words: an exact match, not a stand-in
+        if not any(pw in content for pw, kd in zip(pwords, kinds) if kd == "word"):
+            # symbols alone ("$ $", "💰 🚀") or beside function words only ("your 💰") say no phrase: at
+            # least one CONTENT word of the phrase must be written (the unverified wave-8 draft read
+            # "$ $" as "make money", "get rich", ... — 7 reasons on the round-7 symbols transcript)
+            continue
+        if "unknown" in kinds:
+            # an unknown pictograph counts once, directly in the word's place, and only where it occupies
+            # that place: between the phrase's words or closing the statement — beside a lexicon symbol
+            # too ("🎉 $" is not "guaranteed returns")
+            u = kinds.index("unknown")
+            if (kinds.count("unknown") > 1 or hits != list(range(start, start + len(pwords)))
+                    or (u in (0, last) and not (u == last and closes(hits[u])))):
+                continue
+        parts = []
+        for h, pw, kd in zip(hits, pwords, kinds):
+            if kd == "known":
+                parts.append(f"{words[h][1]!r} standing for {pw!r}")
+            elif kd == "unknown":
+                parts.append(f"{words[h][1]!r} where {pw!r} would be")
+        return "; ".join(parts) + f" ({' '.join(words[h][1] for h in hits)!r})"
+    return None
 
 
 def mixed_symbol_words(text: str, limit: int = 5) -> list[str]:
