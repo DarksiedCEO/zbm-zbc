@@ -102,6 +102,7 @@ import hmac
 import json
 import os
 import re
+import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Annotated, Any, Callable, Literal
@@ -741,6 +742,9 @@ def build_app(
 
 
     idem = IdempotencyStore()
+    # Fix wave 10 (AEGIS round 9 N9-4): the expensive `unlocked` work (a clip review) in flight per
+    # idempotency key. A retry that arrives while it runs waits for it instead of paying for its own.
+    in_flight: dict[tuple, threading.Event] = {}
 
     def creating(response: Response, route: str, path: dict, actor: str | None, key: str | None,
                  request: Any, create: Callable[..., dict], view: Callable[[dict], Any] | None = None,
@@ -748,7 +752,10 @@ def build_app(
         """Run a creating request at most once per idempotency key (IDEM).
         `unlocked` (fix wave 9, M1): work that needs no lock — a clip
         review — run between a first replay check and the locked create,
-        which receives its result (`create(result)`)."""
+        which receives its result (`create(result)`). Fix wave 10 (N9-4):
+        at most ONE request per key runs it at a time; one that arrives
+        meanwhile waits for it and then replays its body (or, if it
+        failed and recorded nothing, runs it itself)."""
         content = hashlib.sha256(json.dumps({"route": route, "path": path, "actor": actor, "request": request},
                                             sort_keys=True, separators=(",", ":"), default=str)
                                  .encode("utf-8", "surrogatepass")).hexdigest()
@@ -773,20 +780,37 @@ def build_app(
                     return hit.body
             return None
 
-        pre = None
-        if unlocked is not None:
+        if unlocked is None:
             with lock:
                 got = replay()
-            if got is not None:
-                return got
+                if got is not None:
+                    return got
+                body = create()
+                idem.put(k, _Created(content, body, view(body) if view is not None else None))
+                return body
+        while True:
+            with lock:
+                got = replay()
+                if got is not None:
+                    return got
+                running = in_flight.get(k)
+                if running is None:
+                    mine = in_flight[k] = threading.Event()
+                    break
+            running.wait()  # no lock held; the owner always sets it (finally, below)
+        try:
             pre = unlocked()  # no lock held: other requests proceed meanwhile
-        with lock:
-            got = replay()
-            if got is not None:
-                return got
-            body = create(pre) if unlocked is not None else create()
-            idem.put(k, _Created(content, body, view(body) if view is not None else None))
-            return body
+            with lock:
+                got = replay()
+                if got is not None:
+                    return got
+                body = create(pre)
+                idem.put(k, _Created(content, body, view(body) if view is not None else None))
+                return body
+        finally:
+            with lock:
+                in_flight.pop(k, None)
+            mine.set()
 
     def _safe(fn):
         def run(body):

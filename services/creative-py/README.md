@@ -122,6 +122,9 @@ keyed by their own id and other creations by actor + canonical request
   `rule_number_high_water`, status and dates); `GET …/rulebooks/{v}` one version (its rules,
   `rule_number_high_water`, `retired_rule_count`); `GET …/rulebooks/{v}/retired-rule-ids?offset=&limit=`
   its retired ids, ≤ 1,000 per page (derived from the high-water marks, never stored per version)
+- Never-say cap (fix wave 10, N9-3): a goal may list up to 1,000 never-say entries and the draft keeps
+  them all (with a warning above 30), but `POST …/rulebooks/{v}/review` answers 422 for a rulebook with
+  more than `MAX_NEVER_SAY` = 30 (Clip Review's cost per clip grows with the list; ADR 0005 decision 44)
 
 Default actor ids (one per intelligence; add humans with
 `CREATIVE_EXTRA_ACTORS='{"jo": ["zbm_creative_lead"]}'`): `zbm_brief_writer`,
@@ -161,8 +164,9 @@ and kept idle / partial-head sockets open forever.
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 25, 2026 after fix wave 9: **664 passed, 0 failed, 0 skipped,
-three consecutive runs** (Python 3.11.15, pytest 9.1.1; 641 after fix wave 8, 557 after fix wave 7, 515 after fix wave 6, 469 after fix wave 5,
+Result on Sep 25, 2026 after fix wave 10: **684 passed, 0 failed, 0 skipped**
+(`CREATIVE_TEST_PORTS=18500-18549`; 664 after fix wave 9, three consecutive
+runs; Python 3.11.15, pytest 9.1.1; 641 after fix wave 8, 557 after fix wave 7, 515 after fix wave 6, 469 after fix wave 5,
 428 after fix wave 4, 360 after fix wave 2, 310 after fix wave 1, 205
 before it). No test in this service skips: none uses an env-provided
 ledger binary (the real-ledger runs are the live runs below), and
@@ -170,6 +174,34 @@ ledger binary (the real-ledger runs are the live runs below), and
 Real-socket tests bind ports from `CREATIVE_TEST_PORTS` ("lo-hi") when it
 is set (fix wave 9; defaults: 20110-20119 and 20300-20319, OS-assigned for
 the lossy-proxy tests); the fix-wave-9 runs used `CREATIVE_TEST_PORTS=20900-20919`.
+`test_fix_wave_10.py` reproduces the AEGIS round-9 findings: N9-1 (the
+nine round-9 currency / math-symbol cases → human_review with a never-say
+reason; every table symbol is a SKELETON reading of its letter; the
+symbol-lettered word in the fail-safe; every phrase of lists A+B+C in the
+table's symbols, caption and bio, 0 automatic passes; a 24-caption price /
+percentage / math guard, 0 flagged), N9-2 (the five round-9 flag-pair
+phrases and 30 glued / pair-spaced / first-letter / zero-width readings →
+human_review, never reject; real flag rows pass and are not letter-like),
+N9-7 (glued and interleaved Braille never pass; Braille letters are read,
+an exact phrase is a reject; a run of stripped characters is judged on
+its own; the Braille blank as a line spacer passes), N9-5 (the round-9
+false positives pass; the exemptions open no hole: other tag sequences,
+stray tags, emoji-letter phrases, hashtag phrases, non-Latin routing),
+N9-3 (approval above `MAX_NEVER_SAY` is a 422 with the draft untouched;
+approval at the cap succeeds; the round-9 generator at the cap, with and
+without a regional indicator, automatic and routed: ≤ 2 s CPU scaled by a
+measured slowdown) and N9-4 (two concurrent requests with one
+Idempotency-Key, or one submission id, run one review; a failed first
+attempt does not strand the waiter). Tests changed because they enshrined
+the old behaviour, all in `test_fix_wave_9.py`: the fold test and the
+map-coverage test (regional indicators are no longer folded or in
+`LETTERLIKE`: they are `REGIONAL_LETTERS`, read only by
+`regional_reading`), the AEGIS enclosed-phrases test and the
+every-style test (a regional-indicator phrase is human_review with a
+never-say reason, not a reject), the styled-text-is-a-signal test ("🇭🇪🇱🇱🇴
+🇫🇷🇮🇪🇳🇩🇸" is also a row of flags and now passes; Braille letters added
+as a signal) and the fail-safe test (the unmapped style is now 8-dot
+Braille: the 26 grade-1 letters are read).
 `test_fix_wave_9.py` reproduces the AEGIS round-8 findings: H1 (the
 letter-like map against an independent derivation over every code point
 of the blocks; the 48 AEGIS enclosed-style cases; every never-say phrase
@@ -607,7 +639,9 @@ stopped at the end. Round-8 numbers in brackets:
   clips): 174 × 201, clip p50 518 ms; brief POST p50 230 ms [582 ms];
   `/health` p50 26 ms. `ns_cost8.py` (in-process, one run, 100 phrases):
   0.18 / 0.91 / 1.34 s [1.1 / 4.7 / 3.5 s]; 1,000 phrases 2.0 / 5.0 /
-  3.8 s [10.5 / 275.6 / 61.5 s].
+  3.8 s [10.5 / 275.6 / 61.5 s]. (CORRECTED in fix wave 10: AEGIS
+  round 9's worst-case generator, `ns_cost8b.py`, measured 144.3 s at
+  1,000 phrases on this code; see the fix-wave-10 run below.)
 - H1 / M2, `live_aegis9.py` (28 clips): 18 styled-letter, Braille and
   symbol stand-in cases → 4 reject, 14 `human_review`, 0 pass; 10
   ordinary emoji captions → 10 pass. In-process: `ns_scripts8.py` 0
@@ -615,6 +649,36 @@ stopped at the end. Round-8 numbers in brackets:
   `ns_evade8.py` gap classes 4/176 = 2.3% missed [22.7%], Q / R / S 0
   ["rnk nnny", "eezy nnoney", "noh side effex", "kwit your job" remain];
   `ns_fp8.py` unchanged (170 captions: 1 / 3 / 3; pairs 12/300).
+
+## Live run — fix wave 10 (Sep 25, 2026)
+
+ledger-rust release binary built from this tree for AEGIS round 9 (its
+`src/` is identical to this branch's), on :18510 with a fresh log;
+creative-py from this branch on :18500 (ledger direct). Only PIDs this run
+started, both stopped at the end.
+
+- `devtools/live_smoke.py` → "LIVE SMOKE: ALL STEPS AS EXPECTED" (37
+  entries, valid), and again after a creative-py restart on the same log
+  (147 entries, valid). No traceback in either service log.
+- `live10.py` (scratch probe, over HTTP): a 31-phrase rulebook drafted
+  (201, with the cap warning), its approval refused (422, draft
+  untouched), edited to 30 phrases (every phrase the cases below use,
+  the rest from the round-9 lists), approved, signed, live, kit signed;
+  then clips: N9-1 currency cases 9 → 9 human_review; N9-2 flag pairs 5 →
+  5 human_review; N9-7 glued / interleaved Braille 5 → 5 human_review,
+  exact Braille 2 → 2 reject; N9-5 round-9 false positives 11 → 11 pass;
+  real flag rows 2 → 2 pass; prices / percentages / math 24 → 24 pass;
+  N9-4 two concurrent POSTs with one Idempotency-Key and a 49 KB
+  transcript → 201 / 201, identical bodies, one `Idempotent-Replayed:
+  true`, one `clip_reviewed` ledger event; ledger verify valid (110).
+- In-process, AEGIS round-9 probes (unmodified copies): `ns_evade9.py`
+  MISS 28 → 5 of 463 (the five: "make cash" / "easy cash" flag pairs,
+  phrases the probe's own list lacks; "🏠 work from"; two symbol-in-
+  another-field spreads — round-9 MISSes outside this wave's findings);
+  `ns_fp9.py` corpus-9 emoji 6/40 → 0/40, hashtag 3/20 → 0/20, plain
+  0/30, non-Latin 10/20, decor 8/30, corpus-8 3/170 unchanged;
+  `ns_cost8b.py` at 1,000 phrases 1.5 / 142.7 / 6.1 s → 1.5 / 8.2 /
+  6.2 s (the cliff was a memo eviction, ADR 0005 decision 44).
 
 ## Known gaps
 
@@ -656,9 +720,16 @@ windows before the real one hide it from that rule (not from the single
 signals); retired ids are now derived from per-prefix high-water marks,
 but every rulebook version still keeps its full rule list, so 60 churn
 revisions of a 1,000-phrase list hold about 89 MiB (ADR 0005 gap 17);
-Clip Review now runs off the workflow lock, but a review still costs
-up to about 1.3 s of CPU per 100 never-say phrases (about 1.6 s when
-the clip is already bound for a human) and 2-5 s at the 1,000 the goal
-model admits (ADR 0005 gap 16). `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
+Clip Review now runs off the workflow lock; a rulebook may carry at most
+30 never-say phrases (fix wave 10: the Campaign Rulebook refuses more with
+a 422; a review then costs at most about 1.56 s on the reference host,
+measured, 1.77 s CPU inside the full test run) — the "2-5 s at 1,000 phrases" this README claimed after fix
+wave 9 was wrong, 142.7 s measured (ADR 0005 gap 16). Fix wave 10: a
+never-say phrase written in regional indicators is only ever a human's
+call (a run of them can be flags); a phrase read through the currency /
+math-symbol table is a human's call, never a reject; a lone circled
+letter without VS16 ("Warranty ⓘ") is still a styled-letter signal, and
+a styled word made only of enclosed-letter emoji with VS16 that spells
+no never-say phrase passes. `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
 that many idle sockets gets everyone else 503s until the 10 s head
 deadline frees them — per-client limits belong in a proxy in front.

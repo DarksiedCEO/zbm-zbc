@@ -939,7 +939,10 @@ money. ZBC's unit of work is a campaign, not a clip.
     bio: 1,960 of 1,960 rejected; the 48 AEGIS round-8 cases: 48
     rejected); any letter-like symbol in any text field is itself an
     obfuscation signal (`letterlike_chars`), so styled text is never an
-    automatic pass (a single flag is not styled text). Fail-safe
+    automatic pass (a single flag is not styled text). CHANGED in fix
+    wave 10 (decision 41): the run-length rule for regional indicators
+    was backwards — they are now never a signal and never folded, only a
+    candidate reading whose never-say hits go to a human. Fail-safe
     (`stripped_share`, `STRIPPED_SHARE_LIMIT` = 30%): a field in which
     canonicalisation strips more than 30% of the non-space characters —
     over the whole field or over any run of 1–4 words holding at least 3
@@ -1065,6 +1068,123 @@ money. ZBC's unit of work is a campaign, not a clip.
     types and sizes are accepted. `BodyLimit` now checks the bearer
     token first on every path but /health (the same check as the route
     dependency, `_bearer_refusal`): 401 first, then 413 / 415.
+
+40. **Currency / math-symbol letters (fix wave 10; AEGIS round 9 N9-1,
+    blocker).** Exact never-say phrases written with NO letter at all —
+    currency and math symbols drawn as letters ("₥₳₭€ ₥⊙₦€¥", "₫€฿₮
+    ₣®€€", "⊕∪¡₮ ¥⊙∪® ⌡⊙฿", "₥₳₭€ money") — passed clean: those code
+    points were in no letter map, the SKELETON reading only ran inside
+    words that contain a letter, and the fail-safe exempted every Sc / Sm
+    / Sk character. Two halves. (a) `CURRENCY_MATH_LOOKALIKES`: a curated
+    table, each entry checked against its Unicode name and glyph (a
+    currency sign drawn as a stroked or barred Latin letter — ₥ ₳ ₭ ₦ ₩ ₣
+    ₫ ฿ ₮ ₤ ₱ ₴ ₲ ₵ ₡ ₢ ₺ ₸ ₹ ₽ ₿; math operators shaped like a letter —
+    ⊙ ⊕ ⊗ ⊘ ⊖ ∅ ∪ ∩ ∈ ∊ ∃ ∀ ∆ ∂ √ ∨ ⨯ ⌡ ∏ ∑ ⊤; ♄ ℮ ℗), merged into the
+    SKELETON stand-in reading. Left out on purpose: ₪ (two interlocked
+    hooks, no Latin letter), ₨ (NFKC already reads "Rs"), the
+    multi-letter ligature signs ₠ ₧ ₯ ₰ ₶ ₷ and ₻ ₼ ₾ ⃀ (no clear
+    letter); the fail-safe covers them. A phrase read through the table
+    is a human's call, never a reject: a currency sign is also money.
+    (b) the fail-safe counts a SYMBOL-LETTERED word (`_symbol_word_count`):
+    a run of at least 3 symbols that can be letters (the table, or any
+    Sc / Sm / Sk outside the pictograph blocks), at least two different
+    ones, not all ASCII, making up at least half of the word. A price, a
+    percentage, "$$$", "$/€/£", "3 × $12 = $36", "±5%" are not.
+    Measured: the round-9 currency cases 9 of 9 → human_review with a
+    never-say reason (0 before); every phrase of lists A+B+C (+ "tax
+    refund" for x) written in the table's symbols, caption and bio: 0 of
+    74 automatic passes (56 before); a 24-caption price / percentage /
+    math guard: 0 flagged before and after.
+41. **Regional indicators are a reading, never a signal (fix wave 10;
+    AEGIS round 9 N9-2, blocker, a wave-9 regression).** Decision 34 read a
+    text as flags when every run of regional indicators was exactly two
+    long, so a phrase written as valid flag pairs ("🇲🇦 🇰🇪 🇨🇦 🇸🇭", make
+    cash; "🇼🇮 🇳🇧 🇮🇬", win big) passed, and a genuine row of flags ("Team
+    🇧🇷🇯🇵🇰🇪🇨🇦 watch party", one run of eight) went to a human. No rule on
+    run lengths can tell flags from letters. Now regional indicators are
+    not in `LETTERLIKE`: `canonical()` does not fold them and
+    `letterlike_chars()` does not report them. `regional_reading()` reads
+    every one as its letter, and Clip Review (`_regional_never_say`) looks
+    for every never-say rule no other signal flagged in the fields read
+    that way — glued or pair-spaced, exact, split, lookalike or any
+    similarity signal: a hit is human_review with a never-say reason,
+    never a reject (it may be flags); no hit adds nothing, whatever the
+    run lengths. Measured: the 5 round-9 flag-pair cases → human_review
+    (with "make cash" / "easy cash" on the list; the round-9 probe's list
+    lacks them, so its log still shows those two as MISS); 30 more
+    glued / pair-spaced / first-letter / zero-width-split readings →
+    human_review; the corpus-9 flag row passes. Cost: every clip with a
+    regional indicator runs the never-say signals a second time for the
+    rules not yet flagged (measured into the cap, decision 44).
+42. **Braille letters are read (fix wave 10; AEGIS round 9 N9-7).** A
+    Braille-styled phrase glued to one long word ("⠍⠁⠅⠑⠀⠍⠕⠝⠑⠽Supercali
+    fragilisticexpialidocious ...") or interleaved with ordinary words
+    passed: the fail-safe judged whole words, and the long word diluted
+    the window. The 26 grade-1 (uncontracted) Braille letters are now
+    letter-like — READ by every view (so an exact phrase is a reject) and
+    a styled-letter signal — derived from the dot numbers in their Unicode
+    names; U+2800 BRAILLE PATTERN BLANK is a space (creators paste it for
+    blank caption lines: still a pass). The fail-safe also judges any run
+    of STRIPPED_MIN (3) consecutive stripped characters on its own, for
+    the styles still unmapped (8-dot patterns, box drawing, private use).
+    Measured: the 10 round-9 glued / interleaved Braille cases → never a
+    pass (all 12 of the class); `ns_evade9.py` S-pad-braille and
+    H-braille now reject.
+43. **Three round-9 false positives (fix wave 10; AEGIS round 9 N9-5).**
+    (1) An enclosed-letter emoji with its emoji presentation selector
+    standing alone as a word ("🅿️ Free parking", "Ⓜ️ Two stops", "🅰️🅱️🅾️
+    blood types") is an emoji to the obfuscation signals
+    (`_signal_view`); every phrase check still reads it as letters, so a
+    never-say phrase spelled that way is still found (and rejected when
+    exact). (2) A #hashtag / @mention may hold ASCII digits ("#5k",
+    "#35mm", "#tram28"); a phrase written in hashtags ("#g3t #r1ch",
+    "#getrich") is still read by `near_miss()`. (3) The three RGI flag
+    tag sequences — England, Scotland, Wales (U+1F3F4 + tag letters
+    gbeng / gbsct / gbwls + U+E007F) — are not tag-character signals;
+    any other tag sequence, stray tag letters, or a valid flag with tags
+    glued on still is. Non-Latin routing is unchanged. Measured on
+    `ns_fp9.py`: corpus-9 emoji 6/40 → 0/40, hashtag 3/20 → 0/20; plain
+    0/30, non-Latin 10/20 (by design), decor 8/30 and corpus-8 3/170
+    unchanged. Not changed (outside the finding): "Warranty ⓘ details"
+    (a lone circled letter without VS16) is still a letter-like signal.
+44. **A cap on never-say phrases, and the cost cliff behind gap 16 (fix
+    wave 10; AEGIS round 9 N9-3).** Gap 16 claimed 2.0 / 5.0 / 3.8 s per
+    review at 1,000 phrases; `ns_cost8b.py` measured 1.5 / 142.7 / 6.1 s
+    on this code (this machine, fix wave 10; round 9: 1.5 / 144.3 /
+    6.2 s). The 142.7 s was a defect, found by profiling: Clip Review
+    batch-scans the fields once for every never-say phrase, keeping the
+    result in a per-thread memo of 16 texts; the cross-field check then
+    scanned up to 36 field-joint texts and evicted the fields' entry, so
+    the stacked rule re-scanned the whole 65 KB text once PER PHRASE (117
+    full scans at 200 phrases). The stacked / symbol rules now read the
+    batch before the joints are scanned; every decision is unchanged
+    (differential run, old vs new order: 18 reviews at 100 / 150 / 200
+    phrases byte-identical, every reason included). After: 1.5 / 8.2 /
+    6.2 s at 1,000 phrases. Cap: `rulebook_writer.MAX_NEVER_SAY` = 30,
+    chosen from measurement (2 vCPU Intel Xeon @ 2.80 GHz, Python 3.11.15,
+    the round-9 generator's construction with three phrase sets, every
+    field at its maximum, routed to a human, a regional indicator in every
+    field so decision 41's second pass runs, cold caches, wall clock, one
+    process per measurement): 30 phrases 1.47-1.56 s per review, 35
+    1.52-1.66 s, 40 1.60-1.79 s, 50 1.80-1.85 s, 60 1.96-2.05 s, 100
+    2.28-2.33 s (without a regional indicator: 30 phrases 0.88-0.89 s, 50
+    1.06-1.15 s, 100 1.45-1.65 s). Inside the full test run (a large heap,
+    more collector time) the 50-phrase case measured 2.05 s CPU against
+    1.69 s alone (+21%), so 50 left no margin; 30 does (measured inside
+    the full test run: 1.77 s CPU worst). Most of the cost is fixed — every per-text view built over
+    ~65 KB, twice when the regional reading runs (10 phrases: 1.23 s) —
+    so a longer list needs a faster gate, not a higher cap. A draft keeps
+    every phrase and carries a warning; the Campaign Rulebook refuses to
+    approve more than 30 with a 422 (no silent truncation; the goal model
+    still admits 1,000 so nothing a client sends is dropped at the door).
+45. **One review per idempotency key (fix wave 10; AEGIS round 9 N9-4).**
+    The idempotent-create helper ran the review (`unlocked`) before taking
+    the lock, so two concurrent requests with one Idempotency-Key (or one
+    submission id) each paid for a full review. An in-flight marker per
+    key (a `threading.Event`, set in a `finally`) makes the second wait
+    for the first and replay its body; if the first failed and recorded
+    nothing, the waiter runs the review itself. Tested with a slow fake
+    review and two threads (1 review, not 2; both 201, one replayed).
 
 ## Shared vs separate
 
@@ -1219,18 +1339,23 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     Japanese title, a Greek µ in "µs") goes to the human queue, as do
     emoji keycaps ("1️⃣"), soft hyphens inside words and four or more
     single letters in a row.
-16. **Review cost with a long never-say list (fix wave 8; fix wave 9,
-    still open).** A goal may list 1,000 never-say entries of up to 4,000
-    characters; the review cost is linear in their total length. Fix wave
-    9 bounded the AEGIS generator's cases at 100 phrases (decision 36)
-    and moved the review off the workflow lock, so a slow review no
-    longer holds briefs, rulebooks or other clips (it still occupies a
-    worker thread and, under one GIL, CPU). At 1,000 phrases the same
-    generator measured 2.0 / 5.0 / 3.8 s per review (one run, wall
-    clock; round 8: 10.5 / 275.6 / 61.5 s). Open item for Andre: cap the
-    never-say list (about 100 phrases keeps a worst-case review near
-    1.3 s), or bound review CPU per clip (routing a clip that exceeds it
-    to a human).
+16. **Review cost with a long never-say list (fix wave 8; fix wave 9;
+    CORRECTED and capped in fix wave 10, decision 44).** The figure this
+    gap gave for 1,000 phrases ("2.0 / 5.0 / 3.8 s per review") was about
+    30 times too low for the all-fields case: AEGIS round 9 measured
+    144.3 s, and fix wave 10 measured 142.7 s on the same code (2 vCPU
+    Intel Xeon @ 2.80 GHz, Python 3.11.15, `ns_cost8b.py`, one run, wall
+    clock). Most of it was a memo-eviction defect (decision 44), fixed:
+    1.5 / 8.2 / 6.2 s at 1,000 phrases now. The cost is still linear in
+    the list, so a rulebook may carry at most 30 never-say phrases
+    (`MAX_NEVER_SAY`; approval refuses more with a 422): the worst case
+    measured at 30 is 1.47-1.56 s per review alone, 1.77 s CPU inside the
+    full test run (a long-running process with a large heap). Still open: the review
+    occupies a worker thread and, under one GIL, CPU for that long; a
+    long phrase (up to 4,000 characters) costs more than a short one and
+    is not capped separately; a campaign that needs more than 50 phrases
+    needs a faster gate, not a higher cap (most of the cost is fixed per
+    text: 10 phrases already cost 1.23 s in the same worst case).
 17. **Memory of a churned campaign (fix wave 9, open).** Retired ids are
     no longer copied into every version (decision 37), but every version
     keeps its own rules so a clip made under it can be judged: 60
