@@ -195,6 +195,24 @@ _NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout, httpx.
 _RETRY_409 = ("the ledger already holds a DIFFERENT event under this operation's id; retrying will not resolve it — "
               "an operator must reconcile the ledger before this action is attempted again")
 
+# ledger-rust's load-shed answer (bin/server.rs ``shed``): status 503 with
+# exactly this JSON body, written before the request is read. The SAME rule
+# as services/creative-py/src/shared/ledger.py ``LEDGER_SHED_BODY`` (ADR 0004
+# / ADR 0005): only that exact answer proves nothing was appended.
+LEDGER_SHED_BODY = {"error": "ledger-rust is at its connection limit; retry shortly"}
+
+
+def is_ledger_shed(resp: httpx.Response) -> bool:
+    """True only for ledger-rust's own load-shed 503: the exact body. A 503
+    with any other body (a proxy or gateway in front of the ledger, which
+    may have forwarded the request before answering) is not one."""
+    if resp.status_code != 503:
+        return False
+    try:
+        return resp.json() == LEDGER_SHED_BODY
+    except ValueError:
+        return False
+
 
 class HttpLedgerClient:
     """POST /ledger/events on ledger-rust. 201 (new) and 200 (idempotent
@@ -206,13 +224,17 @@ class HttpLedgerClient:
       - the connection was never made (refused, connect/pool timeout);
       - 4xx other than 409 (400 invalid, 401 token, 408 body too slow, 413):
         ledger-rust answers these without appending;
-      - 503: ledger-rust's only 503 is its load-shed, written BEFORE the
-        request is read (bin/server.rs ``shed``), so nothing is appended.
+      - ledger-rust's load-shed 503 — status 503 WITH its exact body
+        (``LEDGER_SHED_BODY``), written BEFORE the request is read
+        (bin/server.rs ``shed``), so nothing is appended.
     UNKNOWN (``outcome="unknown"``):
       - the request was (or may have been) sent and no reply arrived: read
         timeout, reset, "server disconnected", write error/timeout;
-      - 5xx other than 503 (a 500 "failed to persist" or a gateway error:
-        the append may be on disk);
+      - any other 5xx, INCLUDING a 503 with a different body (fix wave 6,
+        N6): only ledger-rust itself answers the shed body; an intermediary's
+        503 may have been sent after it forwarded the request, and a 500
+        "failed to persist" or a gateway error means the append may be on
+        disk. This is the rule creative-py applies (ADR 0005, LOW-D);
       - 409: an event with this id and different content is already there.
     Error messages never include the token or the payload."""
 
@@ -240,8 +262,11 @@ class HttpLedgerClient:
             return
         if r.status_code == 409:
             raise LedgerWriteError("ledger rejected event: same event_id with different content (409)", UNKNOWN, _RETRY_409)
-        if r.status_code == 503 or 400 <= r.status_code < 500:
+        if 400 <= r.status_code < 500:
             raise LedgerWriteError(f"ledger rejected event (HTTP {r.status_code}); nothing was recorded")
+        if is_ledger_shed(r):
+            raise LedgerWriteError("ledger shed the request at its connection limit (HTTP 503, request not read); "
+                                   "nothing was recorded")
         raise LedgerWriteError(f"ledger answered HTTP {r.status_code}; the event may or may not be recorded", UNKNOWN)
 
 

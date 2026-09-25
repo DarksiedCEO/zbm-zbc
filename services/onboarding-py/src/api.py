@@ -37,9 +37,10 @@ the whole process for minutes, /health included):
   CPU time, proportional to the body size (fix wave 5, NEW-2: it was
   wall-clock, so concurrent benign bodies were refused for each other's
   work). A body not checked within it -> 422.
-- Heavy scans (fix wave 5, NEW-2) are bounded by ``HeavyScanGate``: a few
-  run at once, a bounded number wait a bounded time; busy -> 503 with
-  Retry-After and ``proceeded: false``, never 422.
+- Scanning concurrency (fix wave 5, NEW-2; weighted in fix wave 6, N4) is
+  bounded by ``ScanAdmission``: every body takes cost proportional to its
+  size from a shared in-flight budget, a bounded number wait a bounded time;
+  busy -> 503 with Retry-After and ``proceeded: false``, never 422.
 - The body must arrive within ``body_read_timeout_seconds`` -> 408; the
   request head is capped and timed by the hardened launcher (src/serve.py,
   fix wave 5, NEW-3), which ``python3 -m api`` uses.
@@ -167,56 +168,120 @@ def _plain_response(status_code: int, detail: str) -> JSONResponse:
 
 
 class ServiceBusy(RuntimeError):
-    """No heavy-scan slot within the queue limits: nothing was done."""
+    """No scan budget within the queue limits: nothing was done."""
 
     def __init__(self, retry_after_s: int):
         super().__init__("busy")
         self.retry_after_s = retry_after_s
 
 
-class HeavyScanGate:
-    """Explicit concurrency bound on heavy credential scans (fix wave 5,
-    NEW-2). CPU-bound work under one GIL gains nothing from running many at
-    once — it only makes each slower — so at most ``slots`` run; at most
-    ``max_waiting`` requests wait for a slot, each at most ``wait_s``
-    seconds. Beyond that the request is refused as BUSY (503 + Retry-After,
+class ScanAdmission:
+    """Weighted concurrency limiter on request-body validation and credential
+    scanning (fix wave 6, N4; fix wave 5's ``HeavyScanGate`` was a step at
+    64 KiB, so 40 concurrent 58 KB bodies bypassed it, filled the 40-thread
+    pool and starved light GETs and /health of threads and the GIL).
+
+    Every scanning request takes ``cost(nbytes) = min(max(nbytes, min_cost),
+    budget)`` bytes out of a shared ``budget`` of in-flight scanned bytes and
+    gives them back when its scan ends, so many medium bodies fill the budget
+    exactly like one large one and a body larger than the budget takes all
+    of it. The defaults (config.py) are set by measurement, not by throughput
+    arithmetic: scanning is CPU-bound under one GIL, so running N scans at
+    once gains nothing and every extra CPU-bound thread lengthens the event
+    loop's wait for the GIL (40x16 KB bodies at 4 concurrent scans: /health
+    p50 300 ms, light GET p50 790 ms; at 1 concurrent scan: 16 ms / 70 ms).
+
+    At most ``max_waiting`` requests wait for budget, each at most ``wait_s``
+    seconds; beyond that the request is refused as BUSY (503 + Retry-After,
     nothing done), never as a failed check (422). Waiters block a threadpool
     thread each, so ``max_waiting`` also keeps threads free for light
-    requests (the pool has 40)."""
+    requests (the pool has 40). Budget is granted to waiters oldest-first,
+    skipping a waiter that does not fit yet, so a small body never queues
+    behind a large one; each waiter is woken once, when its grant is made
+    (never a thundering herd). Under sustained overload a max-size body can
+    therefore reach its wait limit and be answered busy (retry later)."""
 
-    def __init__(self, slots: int, max_waiting: int, wait_s: float):
-        self._sem = threading.BoundedSemaphore(slots)
+    class _Waiter:
+        __slots__ = ("cost", "event", "granted")
+
+        def __init__(self, cost: int):
+            self.cost, self.event, self.granted = cost, threading.Event(), False
+
+    def __init__(self, budget_bytes: int, min_cost_bytes: int, max_waiting: int, wait_s: float):
         self._lock = threading.Lock()
-        self._waiting = 0
+        self.budget = budget_bytes
+        self.min_cost = min(min_cost_bytes, budget_bytes)
+        self._available = budget_bytes
+        self._waiters: list[ScanAdmission._Waiter] = []
         self._max_waiting = max_waiting
         self._wait_s = wait_s
         self.retry_after_s = max(1, min(30, math.ceil(wait_s / 4)))
 
-    @contextmanager
-    def hold(self):
-        if not self._sem.acquire(blocking=False):
-            with self._lock:
-                if self._waiting >= self._max_waiting:
-                    raise ServiceBusy(self.retry_after_s)
-                self._waiting += 1
-            try:
-                got = self._sem.acquire(timeout=self._wait_s)
-            finally:
-                with self._lock:
-                    self._waiting -= 1
-            if not got:
-                raise ServiceBusy(self.retry_after_s)
-        try:
-            yield
-        finally:
-            self._sem.release()
+    def cost(self, nbytes: int) -> int:
+        return min(max(int(nbytes), self.min_cost), self.budget)
 
-    # tests only: occupy / free one slot without a request
-    def try_hold_for_test(self) -> bool:
-        return self._sem.acquire(blocking=False)
+    @property
+    def available(self) -> int:
+        with self._lock:
+            return self._available
+
+    @property
+    def waiting(self) -> int:
+        with self._lock:
+            return len(self._waiters)
+
+    def _grant(self) -> None:
+        # caller holds the lock: hand freed budget to the oldest waiters that fit
+        still = []
+        for w in self._waiters:
+            if w.cost <= self._available:
+                self._available -= w.cost
+                w.granted = True
+                w.event.set()
+            else:
+                still.append(w)
+        self._waiters = still
+
+    def _release(self, c: int) -> None:
+        with self._lock:
+            self._available += c
+            self._grant()
+
+    @contextmanager
+    def hold(self, nbytes: int):
+        c = self.cost(nbytes)
+        with self._lock:
+            if self._available >= c and not self._waiters:
+                self._available -= c
+                w = None
+            else:
+                if len(self._waiters) >= self._max_waiting:
+                    raise ServiceBusy(self.retry_after_s)
+                w = self._Waiter(c)
+                self._waiters.append(w)
+                self._grant()  # budget may already fit it (it was queued behind larger waiters)
+        if w is not None and not w.event.wait(self._wait_s):
+            with self._lock:
+                if not w.granted:  # not granted in the meantime: give up the place
+                    self._waiters.remove(w)
+                    raise ServiceBusy(self.retry_after_s)
+        try:
+            yield c
+        finally:
+            self._release(c)
+
+    # tests only: take / give back budget without a request
+    def try_hold_for_test(self, nbytes: Optional[int] = None) -> bool:
+        c = self.budget if nbytes is None else self.cost(nbytes)
+        with self._lock:
+            if self._available < c:
+                return False
+            self._available -= c
+            self._held_for_test = getattr(self, "_held_for_test", []) + [c]
+            return True
 
     def release_for_test(self) -> None:
-        self._sem.release()
+        self._release(self._held_for_test.pop())
 
 
 class InputLimits:
@@ -300,8 +365,8 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
     auth = [Depends(make_require_auth(required_token))]
     app.state.service = service
     cfg = service.config
-    gate = HeavyScanGate(cfg.heavy_scan_slots, cfg.heavy_scan_max_waiting, cfg.heavy_scan_wait_seconds)
-    app.state.heavy_scans = gate
+    gate = ScanAdmission(cfg.scan_inflight_bytes, cfg.scan_min_cost_bytes, cfg.scan_max_waiting, cfg.scan_wait_seconds)
+    app.state.scan_admission = gate
 
     def cpu_budget(nbytes: int) -> float:
         return cfg.scan_budget_seconds + cfg.scan_cpu_ms_per_kb * (nbytes / 1024) / 1000
@@ -311,8 +376,8 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
         fix wave 4, R1). FastAPI validates declared body models on the event
         loop, so credential scanning there stalled every request, /health
         included. Field constraints run first, then the credential checks
-        under the per-request CPU budget; a heavy body first takes a slot of
-        the heavy-scan gate (fix wave 5, NEW-2)."""
+        under the per-request CPU budget; every body first takes its share
+        of the scan admission budget (fix wave 6, N4)."""
 
         def parse(request: Request, payload: Any = Body(default=None)) -> Any:
             if payload is None and optional:
@@ -328,10 +393,8 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
                             [{**e, "loc": ("body", *e.get("loc", ()))} for e in exc.errors(include_url=False, include_input=False)]
                         ) from None
 
-            if nbytes > cfg.heavy_body_bytes:
-                with gate.hold():
-                    return validate()
-            return validate()
+            with gate.hold(nbytes):
+                return validate()
 
         return parse
     # Output-side scrub (third credential layer, F10): every route's return
@@ -353,9 +416,9 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
 
     @app.exception_handler(ServiceBusy)
     def _busy(_: Request, exc: ServiceBusy):
-        log.warning("request refused: busy (heavy-scan queue full or wait limit reached)")
+        log.warning("request refused: busy (scan admission queue full or wait limit reached)")
         return JSONResponse(status_code=503, headers={"Retry-After": str(exc.retry_after_s)}, content={
-            "detail": "the service is busy checking other large requests; nothing was done — retry the identical "
+            "detail": "the service is busy checking other requests; nothing was done — retry the identical "
                       f"request after {exc.retry_after_s}s",
             "proceeded": False,
         })

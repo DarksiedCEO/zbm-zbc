@@ -91,15 +91,38 @@ class OnboardingConfig:
     # ~11 s). A body that cannot be checked within it is refused (422).
     scan_budget_seconds: float = 1.0
     scan_cpu_ms_per_kb: float = 10.0
-    # Heavy scans (body over heavy_body_bytes) are bounded explicitly: at
-    # most heavy_scan_slots run at once (CPU-bound under one GIL, more slots
-    # add no throughput), at most heavy_scan_max_waiting queue for a slot,
-    # each for at most heavy_scan_wait_seconds. Busy -> 503 + Retry-After
-    # ("nothing was done, retry"), never a 422.
-    heavy_body_bytes: int = 65_536
-    heavy_scan_slots: int = 2
-    heavy_scan_max_waiting: int = 16
-    heavy_scan_wait_seconds: float = 30.0
+    # Scanning concurrency is a WEIGHTED budget (fix wave 6, N4; it was a
+    # step at 64 KiB, so 40 concurrent 58 KB bodies bypassed it and light
+    # requests waited seconds for a thread and the GIL): every request body
+    # takes max(body bytes, scan_min_cost_bytes), capped at the whole budget,
+    # out of scan_inflight_bytes while it is validated and scanned, so many
+    # medium bodies are throttled exactly like one large one. The defaults
+    # are set by measurement (tests/test_fix_wave6.py, real uvicorn, 40
+    # concurrent clients): scanning is CPU-bound under one GIL, so N scans
+    # at once add no throughput, and EVERY extra CPU-bound thread lengthens
+    # the event loop's wait for the GIL — 40x16 KB bodies at 4 concurrent
+    # scans: /health p50 300 ms, light GET p50 790 ms; at 2: 320 / 700 ms;
+    # at 1: 16 / 70 ms. So the minimum cost equals the budget: one scan at
+    # a time, whatever the size (a 64 KiB body is ~100 ms of CPU; a tiny
+    # message body ~1 ms, so 40 concurrent messages queue for ~40 ms).
+    # Raising scan_inflight_bytes above scan_min_cost_bytes admits several
+    # small bodies at once; on CPython that measurably slows light requests,
+    # so do it only on a runtime without a GIL. At most scan_max_waiting
+    # requests wait for budget, each for at most scan_wait_seconds (budget
+    # goes to the oldest waiter that fits, so a small body never queues
+    # behind a large one). Busy -> 503 + Retry-After ("nothing was done,
+    # retry"), never a 422.
+    scan_inflight_bytes: int = 65_536
+    scan_min_cost_bytes: int = 65_536
+    scan_max_waiting: int = 16
+    scan_wait_seconds: float = 30.0
+    # Intake facts per client are bounded (fix wave 6, wave-5 leftover: they
+    # grew without a cap and the profile was rebuilt over all of them): a
+    # request that would take a client past max_facts_per_client is refused
+    # (409, nothing stored), and each field keeps only its latest
+    # facts_history_per_field observations, so a profile rebuild is O(cap).
+    max_facts_per_client: int = 2000
+    facts_history_per_field: int = 20
     # A request body must arrive within this many seconds (NEW-3 sweep) -> 408.
     body_read_timeout_seconds: float = 30.0
     # Stable instance component of every derived event id (ADR 0004, "Event
@@ -123,10 +146,12 @@ class OnboardingConfig:
         if self.max_body_bytes < 1 or self.max_request_target_bytes < 1 or self.scan_budget_seconds <= 0 \
                 or self.scan_cpu_ms_per_kb < 0:
             raise ConfigError("input caps and the scan budget must be positive")
-        if self.heavy_body_bytes < 1 or self.heavy_scan_slots < 1 or self.heavy_scan_max_waiting < 0 \
-                or self.heavy_scan_wait_seconds <= 0 or self.body_read_timeout_seconds <= 0:
-            raise ConfigError("heavy-scan limits and the body read timeout must be positive "
-                              "(heavy_scan_max_waiting may be 0)")
+        if self.scan_inflight_bytes < 1 or self.scan_min_cost_bytes < 1 or self.scan_max_waiting < 0 \
+                or self.scan_wait_seconds <= 0 or self.body_read_timeout_seconds <= 0:
+            raise ConfigError("scan admission limits and the body read timeout must be positive "
+                              "(scan_max_waiting may be 0)")
+        if self.max_facts_per_client < 1 or self.facts_history_per_field < 1:
+            raise ConfigError("facts caps must be positive")
         if not self.instance_id or not all(ch.isascii() and (ch.isalnum() or ch in "._:-") for ch in self.instance_id) \
                 or len(self.instance_id) > 64:
             raise ConfigError("ONBOARDING_INSTANCE_ID must be 1-64 characters of [A-Za-z0-9._:-]")
@@ -173,10 +198,12 @@ def load_config(env: Mapping[str, str] | None = None) -> OnboardingConfig:
     if env.get("ONBOARDING_SCAN_BUDGET_SECONDS"):
         kwargs["scan_budget_seconds"] = float(env["ONBOARDING_SCAN_BUDGET_SECONDS"])
     for var, key, conv in (("ONBOARDING_SCAN_CPU_MS_PER_KB", "scan_cpu_ms_per_kb", float),
-                           ("ONBOARDING_HEAVY_BODY_BYTES", "heavy_body_bytes", int),
-                           ("ONBOARDING_HEAVY_SCAN_SLOTS", "heavy_scan_slots", int),
-                           ("ONBOARDING_HEAVY_SCAN_MAX_WAITING", "heavy_scan_max_waiting", int),
-                           ("ONBOARDING_HEAVY_SCAN_WAIT_SECONDS", "heavy_scan_wait_seconds", float),
+                           ("ONBOARDING_SCAN_INFLIGHT_BYTES", "scan_inflight_bytes", int),
+                           ("ONBOARDING_SCAN_MIN_COST_BYTES", "scan_min_cost_bytes", int),
+                           ("ONBOARDING_SCAN_MAX_WAITING", "scan_max_waiting", int),
+                           ("ONBOARDING_SCAN_WAIT_SECONDS", "scan_wait_seconds", float),
+                           ("ONBOARDING_MAX_FACTS_PER_CLIENT", "max_facts_per_client", int),
+                           ("ONBOARDING_FACTS_HISTORY_PER_FIELD", "facts_history_per_field", int),
                            ("ONBOARDING_BODY_READ_TIMEOUT_SECONDS", "body_read_timeout_seconds", float)):
         if env.get(var):
             kwargs[key] = conv(env[var])

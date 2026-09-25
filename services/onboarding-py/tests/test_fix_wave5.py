@@ -214,34 +214,38 @@ def test_new2_max_size_benign_body_is_cheap_enough():
 
 
 def test_new2_scan_config_is_validated_and_loaded():
-    cfg = load_config({"ONBOARDING_SCAN_BUDGET_SECONDS": "7.5", "ONBOARDING_HEAVY_BODY_BYTES": "1000",
-                       "ONBOARDING_HEAVY_SCAN_SLOTS": "3", "ONBOARDING_HEAVY_SCAN_MAX_WAITING": "4",
-                       "ONBOARDING_HEAVY_SCAN_WAIT_SECONDS": "2.5", "ONBOARDING_BODY_READ_TIMEOUT_SECONDS": "9"})
-    assert (cfg.scan_budget_seconds, cfg.heavy_body_bytes, cfg.heavy_scan_slots, cfg.heavy_scan_max_waiting,
-            cfg.heavy_scan_wait_seconds, cfg.body_read_timeout_seconds) == (7.5, 1000, 3, 4, 2.5, 9.0)
-    for bad in ({"heavy_scan_slots": 0}, {"heavy_scan_max_waiting": -1}, {"heavy_scan_wait_seconds": 0},
-                {"body_read_timeout_seconds": 0}, {"heavy_body_bytes": 0}):
+    # Fix wave 6 (N4): the step gate's knobs became the weighted budget's.
+    cfg = load_config({"ONBOARDING_SCAN_BUDGET_SECONDS": "7.5", "ONBOARDING_SCAN_INFLIGHT_BYTES": "1000",
+                       "ONBOARDING_SCAN_MIN_COST_BYTES": "3", "ONBOARDING_SCAN_MAX_WAITING": "4",
+                       "ONBOARDING_SCAN_WAIT_SECONDS": "2.5", "ONBOARDING_BODY_READ_TIMEOUT_SECONDS": "9"})
+    assert (cfg.scan_budget_seconds, cfg.scan_inflight_bytes, cfg.scan_min_cost_bytes, cfg.scan_max_waiting,
+            cfg.scan_wait_seconds, cfg.body_read_timeout_seconds) == (7.5, 1000, 3, 4, 2.5, 9.0)
+    for bad in ({"scan_min_cost_bytes": 0}, {"scan_max_waiting": -1}, {"scan_wait_seconds": 0},
+                {"body_read_timeout_seconds": 0}, {"scan_inflight_bytes": 0}):
         with pytest.raises(Exception):
             OnboardingConfig(**bad)
 
 
 def test_new2_busy_is_503_with_retry_after_and_never_422():
-    # One slot, nobody may wait: while one heavy scan runs, a second heavy
-    # body is answered 503 + Retry-After ("busy"), with proceeded: false.
+    # Nobody may wait: while the scan budget is (almost) all taken, a body
+    # that does not fit is answered 503 + Retry-After ("busy"), with
+    # proceeded: false. (Fix wave 6, N4: the gate is a weighted budget; with
+    # a budget above the per-body minimum the test holds all but a sliver of
+    # it — a light body still fits, a heavy one does not.)
     import api as api_mod
 
     svc = make_service(all_fakes=True)
-    svc.config = replace(svc.config, heavy_scan_slots=1, heavy_scan_max_waiting=0, heavy_body_bytes=1024)
+    svc.config = replace(svc.config, scan_max_waiting=0, scan_inflight_bytes=512 * 1024, scan_min_cost_bytes=8 * 1024)
     c = client_for(svc)
     assert c.post("/onboarding/clients", json=start_body()).status_code == 201
-    gate = c.app.state.heavy_scans
-    assert gate.try_hold_for_test()  # the one slot is taken
+    gate = c.app.state.scan_admission
+    assert gate.try_hold_for_test(gate.budget - 2 * gate.min_cost)  # room for a light body, not a heavy one
     try:
         r = c.post("/onboarding/clients/client_a/intake/facts", json=MAX_FACTS)
         assert r.status_code == 503, r.text
         assert int(r.headers["Retry-After"]) >= 1
         assert r.json()["proceeded"] is False and "busy" in r.json()["detail"]
-        # a light body does not queue behind heavy scans
+        # a light body does not queue behind heavy scans: it fits in what is left
         assert c.post("/onboarding/clients/client_a/messages", json={"text": "hello"}).status_code == 200
     finally:
         gate.release_for_test()
@@ -251,12 +255,11 @@ def test_new2_busy_is_503_with_retry_after_and_never_422():
 
 def test_new2_queue_wait_limit_is_503_not_422():
     svc = make_service(all_fakes=True)
-    svc.config = replace(svc.config, heavy_scan_slots=1, heavy_scan_max_waiting=4, heavy_scan_wait_seconds=0.3,
-                         heavy_body_bytes=1024)
+    svc.config = replace(svc.config, scan_max_waiting=4, scan_wait_seconds=0.3)
     c = client_for(svc)
     assert c.post("/onboarding/clients", json=start_body()).status_code == 201
-    gate = c.app.state.heavy_scans
-    assert gate.try_hold_for_test()
+    gate = c.app.state.scan_admission
+    assert gate.try_hold_for_test()  # the whole budget
     try:
         t = time.monotonic()
         r = c.post("/onboarding/clients/client_a/intake/facts", json=MAX_FACTS)
@@ -499,8 +502,11 @@ def test_new4_lost_after_sending_is_unknown(exc):
     assert ei.value.outcome == "unknown"
 
 
+# Fix wave 6 (N6): a bare 503 (body ``{}``) is no longer "not recorded" —
+# only ledger-rust's exact shed body is (test_fix_wave6.py); any other 503
+# may come from an intermediary that already forwarded the request.
 @pytest.mark.parametrize("status,outcome", [(400, "not_recorded"), (401, "not_recorded"), (403, "not_recorded"),
-                                            (408, "not_recorded"), (413, "not_recorded"), (503, "not_recorded"),
+                                            (408, "not_recorded"), (413, "not_recorded"), (503, "unknown"),
                                             (409, "unknown"), (500, "unknown"), (502, "unknown"), (504, "unknown")])
 def test_new4_status_classification(status, outcome):
     with pytest.raises(LedgerWriteError) as ei:

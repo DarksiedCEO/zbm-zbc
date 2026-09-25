@@ -321,17 +321,18 @@ spec, with 15 deterministic single-task intelligences (no model calls).
 Architecture: `docs/adr/0004-onboarding-department-architecture.md`. Details
 and routes: `services/onboarding-py/README.md`.
 
-- **Status:** built and tested (624 tests, `python3 -m pytest -q`). **Not
+- **Status:** built and tested (648 tests, `python3 -m pytest -q`). **Not
   certified for any real client, clipper or brand.** Scenario, attack and
-  guardrail tests exist. The AEGIS review findings were fixed in fix waves 1–5
+  guardrail tests exist. The AEGIS review findings were fixed in fix waves 1–6
   (Sep 24); see ADR 0004.
 - **Hostile input can't stall it** (fix wave 4). Every regex is linear-time.
   Input is capped before it is scanned: field lengths are checked first, a body
   over 1 MiB is a 413, a request target over 8 KiB is a 414, and log lines are
   cut. Scanning runs off the event loop. Each request's budget counts its own
-  CPU time, not time spent waiting on other requests, and heavy scans are
-  bounded (busy returns 503 with Retry-After). `/health` stays responsive under
-  attack.
+  CPU time, not time spent waiting on other requests, and scanning is admitted
+  through a weighted budget with measured defaults of one scan at a time (busy
+  returns 503 with Retry-After; fix wave 6). Intake facts are capped per client
+  (409 past 2,000). `/health` stays responsive under attack.
 - **Fails closed.**
   - Activation needs both the Contract (14) and Compliance (15) gates, and a
     blocked activation returns the exact unmet list.
@@ -341,7 +342,8 @@ and routes: `services/onboarding-py/README.md`.
     fails after an effect, the API names the effect. The next call writes the
     missing record, and a retry finishes the job. Retries are idempotent. If
     the ledger reply was lost, the API says `proceeded: "unknown"` and asks for
-    the identical retry.
+    the identical retry. Only ledger-rust's exact load-shed answer counts as
+    "not recorded" (the same rule as creative-py).
   - Only the server's clock decides. Clipper 18+ is checked on the server's
     date at UTC−12. Credentials are refused at intake, and client free text is
     stored only redacted. Money is the contract string only. Escalation

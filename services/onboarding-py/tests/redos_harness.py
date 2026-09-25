@@ -96,9 +96,13 @@ def use_of(name: str, p: re.Pattern) -> Callable[[str], object]:
 
 
 def best_time(fn: Callable[[str], object], s: str, runs: int = 3) -> float:
+    """Best of ``runs`` of the calling thread's OWN CPU time (fix wave 6:
+    wall-clock time made the bounds depend on machine load — a 1 ms run fits
+    in one scheduler quantum, a 40 ms run is pre-empted by other processes —
+    and the cost being bounded is CPU work, not waiting)."""
     best = float("inf")
     for _ in range(runs):
-        t = time.perf_counter()
+        t = time.thread_time()
         fn(s)
-        best = min(best, time.perf_counter() - t)
+        best = min(best, time.thread_time() - t)
     return best

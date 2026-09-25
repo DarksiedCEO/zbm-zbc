@@ -52,10 +52,24 @@ The WIP commit was replaced; it doesn't remain in history.
      a certain failure. Through a lossy proxy the ledger returned 201 while the API
      said `proceeded: false`. `HttpLedgerClient` now classifies each failure:
      - Not recorded: local contract validation, connect/pool errors (nothing sent),
-       4xx other than 409, and 503. Ledger-rust's only 503 is its load-shed
-       (`bin/server.rs` `shed`), written before the request is read.
-     - Unknown: timeout, reset or disconnect after sending, 5xx other than 503, and
+       4xx other than 409, and ledger-rust's own load-shed answer.
+     - Unknown: timeout, reset or disconnect after sending, every other 5xx, and
        409.
+     - **The shed rule is shared with creative-py** (fix wave 6, N6; ADR 0005,
+       decision 21). Fix wave 5 counted ANY 503 as not recorded, reasoning that
+       ledger-rust's only 503 is its load-shed. That is true only with no
+       intermediary: a proxy or gateway between the services can forward the
+       request, see the ledger append it, and still answer 503. So "not recorded"
+       needs the exact answer `shed()` writes before it reads the request: status
+       503 with the body `{"error": "ledger-rust is at its connection limit; retry
+       shortly"}` (`LEDGER_SHED_BODY` in both `services/onboarding-py/src/ledger.py`
+       and `services/creative-py/src/shared/ledger.py`). A 503 with any other body,
+       like every other 5xx, is unknown. `test_fix_wave6.py` checks the constant
+       against creative-py's and against `bin/server.rs`, and proves both cases
+       against the real binary: `LEDGER_MAX_CONNECTIONS=1` with a held socket gives
+       `proceeded: false, ledger_write: not_recorded`, and an intermediary that
+       forwards then answers 503 with its own body gives `proceeded: "unknown"`
+       while `GET /ledger/entries` shows the event was appended.
      An unknown outcome returns 503 `{"proceeded": "unknown", "ledger_write":
      "unknown", "retry": "..."}` with `Retry-After`. It never says "did not
      proceed". The staged state stays uncommitted and the subject's sequence does not
@@ -293,9 +307,30 @@ The WIP commit was replaced; it doesn't remain in history.
          ~1.8 ms/KB at worst for hostile ones, so the budget is about 5x headroom.
          The scanners are linear, so the size cap is the real time bound; the budget
          is a backstop.
-       - Concurrency is bounded explicitly by `HeavyScanGate` (`api.py`). Bodies over
-         64 KiB take one of 2 slots. At most 16 wait, each for up to 30 s. Beyond that
-         the API returns 503 with `Retry-After` and `proceeded: false`, never 422.
+       - Concurrency is bounded explicitly (revised in fix wave 6, N4). Fix wave 5's
+         `HeavyScanGate` was a step: bodies over 64 KiB took one of 2 slots, smaller
+         ones nothing, so 40 concurrent 58 KB bodies bypassed it, filled the 40-thread
+         pool and starved light GETs (p50 3.1 s) and `/health` (2.4 s). It is now
+         `ScanAdmission`, a weighted budget: every body takes `max(size,
+         scan_min_cost_bytes)` (capped at the budget) out of `scan_inflight_bytes`
+         while it is validated and scanned, so many medium bodies are throttled like
+         one large one and no size class bypasses it. At most 16 wait, each up to
+         30 s, granted oldest-first among those that fit (a small body never queues
+         behind a large one, and each waiter is woken once). Beyond that the API
+         returns 503 with `Retry-After` and `proceeded: false`, never 422.
+       - The defaults are measured, not derived (real uvicorn, real ledger-rust, 40
+         concurrent clients, `test_fix_wave6.py`). Under one GIL, N concurrent scans
+         add no throughput, and every extra CPU-bound thread lengthens the event
+         loop's wait for the GIL: 40x16 KB bodies at 4 concurrent scans gave `/health`
+         p50 300 ms and light GET p50 790 ms, at 2 concurrent 320 / 700 ms, at 1
+         concurrent 16 / 70 ms; 40x58 KB at 1 concurrent gave `/health` p50 20 ms,
+         p95 42 ms, light GET p50 27 ms. So the minimum cost equals the 64 KiB budget:
+         one scan at a time whatever the size (a tiny message body is ~1 ms, so 40 of
+         them queue for ~40 ms; a max-size body is ~0.5 s, so 12 concurrent max-size
+         bodies finish in ~7 s, within the wait). The weighting is kept and
+         configurable — raising the budget above the minimum cost admits several small
+         bodies at once — because it is the right shape on a runtime without a GIL; on
+         CPython it measurably slows light requests, and the README says so.
        - Per-request cost dropped: 1.65 s to 0.50 s of CPU for the 416 KB body. A
          clean string is scanned once per request, not twice (the ingest check and
          the `scrub` layer share a per-request verdict memo). The format-character
@@ -332,6 +367,18 @@ The WIP commit was replaced; it doesn't remain in history.
      their own time zone. The clock is injectable for tests.
    - The contract term (gate 14), the 1099 tax year and platform-fact shelf life use the
      server's business date in America/Los_Angeles.
+   - **Intake facts are bounded** (fix wave 6, a wave-5 leftover). Facts appended
+     without a cap and the profile was rebuilt over all of them on every request, so
+     repeated large submissions grew memory and latency without bound. A client holds
+     at most `max_facts_per_client` (2,000) facts; a request that would pass it is
+     refused whole with 409 (the message names the counts and the cap) before
+     anything is flagged, recorded or stored. Each field keeps its latest
+     `facts_history_per_field` (20) observations in arrival order, so restating a
+     field replaces its oldest observation rather than adding one, and a profile
+     rebuild is O(cap). Consequence, stated in the README: an observation that falls
+     out of a field's history no longer counts in the profile (a conflict can be
+     aged out by 20 newer consistent values), so a value that must count should be
+     confirmed (`client_confirmed` / `contract` provenance), not repeated.
    - Caller timestamps that are facts, not "now", are refused (422) when they are in
      the server's future. They are a fact's `observed_at`, a grant's
      `account_last_activity_at` and a contract's `signed_at`. A future value would
