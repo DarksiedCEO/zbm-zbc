@@ -177,18 +177,65 @@ LEDGER_RUST_DEFAULT_BIN = LEDGER_RUST_DIR / "target" / "release" / "server"
 _ledger_bin_cache: list = []
 
 
+def _ledger_rust_source_mtime(crate_dir: Path) -> float:
+    """Newest mtime among what a build of the crate depends on here:
+    Cargo.toml, Cargo.lock and everything under src/."""
+    files = [crate_dir / "Cargo.toml", crate_dir / "Cargo.lock", *(crate_dir / "src").rglob("*")]
+    return max((f.stat().st_mtime for f in files if f.is_file()), default=0.0)
+
+
+def _cargo_built_binary(crate_dir: Path) -> Path:
+    """``cargo build --release --bin server`` and the artifact path cargo
+    itself reports (``--message-format=json``, the ``compiler-artifact``
+    message for the ``server`` bin). Cargo runs unconditionally: when the
+    binary is up to date that is a no-op well under a second, and when a
+    source changed it rebuilds, so the answer is never stale. Reading the
+    path from cargo, not guessing ``target/release/server``, is what makes
+    CARGO_TARGET_DIR (or a ``.cargo/config.toml`` ``build.target-dir``) work
+    (fix wave 8, N7-6: with it set the fixture failed with "exit 0" or
+    silently used an old binary at the guessed path)."""
+    import json
+    import subprocess
+
+    r = subprocess.run(["cargo", "build", "--release", "--bin", "server", "--message-format=json-render-diagnostics"],
+                       cwd=str(crate_dir), capture_output=True, text=True, timeout=1200)
+    if r.returncode != 0:
+        pytest.fail(f"cargo build of ledger-rust failed (exit {r.returncode}) in {crate_dir}:\n{r.stderr[-3000:]}",
+                    pytrace=False)
+    executables = []
+    for line in r.stdout.splitlines():
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if msg.get("reason") == "compiler-artifact" and msg.get("target", {}).get("name") == "server" \
+                and "bin" in msg["target"].get("kind", []) and msg.get("executable"):
+            executables.append(Path(msg["executable"]))
+    if len(executables) != 1 or not executables[0].is_file():
+        pytest.fail(f"cargo build of ledger-rust (exit 0) reported no usable 'server' executable "
+                    f"(found {executables}); cargo's messages:\n{r.stdout[-3000:]}\n{r.stderr[-1000:]}", pytrace=False)
+    return executables[0]
+
+
 def ledger_rust_binary() -> Path:
     """The REAL ledger-rust binary for the live tests (fix wave 7; they
     skipped silently when ONBOARDING_LEDGER_RUST_BIN was unset).
     ONBOARDING_LEDGER_RUST_BIN names it explicitly; otherwise it is built
-    here with ``cargo build --release`` into services/ledger-rust/target
-    (git-ignored; a warm build is under a second). Only a missing cargo
-    skips, with a reason ``-rs`` prints; a failed build is a failure."""
+    here with ``cargo build --release`` (into CARGO_TARGET_DIR if set, else
+    services/ledger-rust/target, both git-ignored; a warm build is under a
+    second) and the path is the one cargo reports. Only a missing cargo
+    skips, with a reason ``-rs`` prints; a failed build is a failure.
+    Without cargo, a previously built binary is used from where cargo would
+    have put it, unless it is older than the sources: then it skips too,
+    saying so, rather than testing an old server (N7-6)."""
     if _ledger_bin_cache:
         return _ledger_bin_cache[0]
     import shutil
-    import subprocess
 
+    crate_dir, default_bin = LEDGER_RUST_DIR, LEDGER_RUST_DEFAULT_BIN
+    target_dir = os.environ.get("CARGO_TARGET_DIR")
+    if target_dir:
+        default_bin = Path(target_dir) / "release" / "server"
     named = os.environ.get("ONBOARDING_LEDGER_RUST_BIN")
     if named:
         p = Path(named)
@@ -196,18 +243,18 @@ def ledger_rust_binary() -> Path:
             pytest.skip(f"ledger-rust binary named by ONBOARDING_LEDGER_RUST_BIN not found at {p}; "
                         "unset it to build one with cargo")
     elif shutil.which("cargo"):
-        if not (LEDGER_RUST_DIR / "Cargo.toml").is_file():
-            pytest.fail(f"no ledger-rust crate at {LEDGER_RUST_DIR}: run from the repo checkout, or set "
+        if not (crate_dir / "Cargo.toml").is_file():
+            pytest.fail(f"no ledger-rust crate at {crate_dir}: run from the repo checkout, or set "
                         "ONBOARDING_LEDGER_RUST_BIN", pytrace=False)
-        r = subprocess.run(["cargo", "build", "--release", "--bin", "server"], cwd=str(LEDGER_RUST_DIR),
-                           capture_output=True, text=True, timeout=1200)
-        if r.returncode != 0 or not LEDGER_RUST_DEFAULT_BIN.is_file():
-            pytest.fail(f"cargo build of ledger-rust failed (exit {r.returncode}):\n{r.stderr[-3000:]}", pytrace=False)
-        p = LEDGER_RUST_DEFAULT_BIN
-    elif LEDGER_RUST_DEFAULT_BIN.is_file():
-        p = LEDGER_RUST_DEFAULT_BIN  # a previous build; cargo is not on PATH to refresh it
+        p = _cargo_built_binary(crate_dir)
+    elif default_bin.is_file():
+        p = default_bin  # a previous build; cargo is not on PATH to refresh it
+        if (crate_dir / "Cargo.toml").is_file() and p.stat().st_mtime < _ledger_rust_source_mtime(crate_dir):
+            pytest.skip(f"the ledger-rust binary at {p} is older than the crate's sources in {crate_dir} and cargo "
+                        "is not on PATH to rebuild it: install Rust (rustup), or set ONBOARDING_LEDGER_RUST_BIN "
+                        "to a current build")
     else:
-        pytest.skip(f"cargo is not on PATH and no ledger-rust binary is at {LEDGER_RUST_DEFAULT_BIN}: install Rust "
+        pytest.skip(f"cargo is not on PATH and no ledger-rust binary is at {default_bin}: install Rust "
                     "(rustup) or set ONBOARDING_LEDGER_RUST_BIN to a built ledger-rust server")
     _ledger_bin_cache.append(p)
     return p
