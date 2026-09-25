@@ -312,10 +312,12 @@ def test_chunked_body_pays_the_budget_as_it_streams(monkeypatch):
 
 @pytest.mark.parametrize("declared", [5, 18, 100, None])
 def test_understated_overstated_or_missing_content_length_still_parses_the_bytes_sent(declared):
-    """The body buffer is pre-sized from Content-Length. Drive _off_loop with
-    a hand-built ASGI request whose header lies (h11 would not let a real
-    client, but the buffer logic must not depend on that): the parse sees
-    exactly the bytes sent — no zero padding, nothing dropped."""
+    """Drive _off_loop with a hand-built ASGI request whose Content-Length
+    lies (h11 would not let a real client, but the buffer logic must not
+    depend on that): the parse sees exactly the bytes sent — no zero padding,
+    nothing dropped. (Fix wave 7 pre-sized the buffer from Content-Length;
+    fix wave 8, N7-2, removed that — the buffer grows with the bytes — and
+    this must still hold.)"""
     import asyncio
     from starlette.requests import Request
 

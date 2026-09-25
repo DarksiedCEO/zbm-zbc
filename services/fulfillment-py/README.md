@@ -378,7 +378,9 @@ process). ADR 0002 Decisions 19 and 20.
 - 128 or more held sockets (and fewer than 256): uvicorn answers every
   *new* request — `/health` included — 503 for as long as they are held.
   Sockets that never send a head are closed after 10 s; idle keep-alives
-  5 s after their last response; unfinished bodies 35 s after their head.
+  5 s after their last response; unfinished bodies 35 s after their head
+  (fix wave 8: stalled or trickling ones ~5 s after they stop, 10 s when
+  the app is not reading them).
   A client that keeps sending complete requests on 128 sockets keeps the
   service at 503 for everyone else for as long as it does;
 - a connection made while 256 are held: minimal 503, then closed (above);
@@ -447,6 +449,54 @@ may get 503 + `Retry-After: 1` under load and must retry; 413/431/400
 **Suite:** 926 passed before → 969 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20520-20539 python3 -m pytest`).
 
+## Fix wave 8, Sep 24 2026 — Content-Length pre-allocation pinned memory (N7-2)
+
+Tests first, failing on the pre-fix tree, then passing:
+`tests/test_fix8_n7_2_body_prealloc.py` (20 tests: allocation, the in-flight
+budget and the throughput rule in-process against the ASGI app with
+hand-driven chunk delivery; the AEGIS scenario, a trickle, a front-loaded
+stall by 128 senders, and legit large batches against the real
+`python3 -m api` over TCP). ADR 0002 Decision 22.
+
+| Finding | Before (evidence) | Now |
+|---|---|---|
+| N7-2 (MED-HIGH, CONFIRMED; a fix wave 7 regression): the body buffer was pre-allocated from the client's Content-Length | Fix wave 7 sized the buffer up front — `bytearray(declared)`, a 4 MiB memset per request before a byte of the body had arrived. AEGIS `ful_idle7b.py`: 128 connections each sending a head with `Content-Length: 4194304` plus ONE byte → RSS **55 → 569 MB**, held until the 30 s body deadline, at ~zero bandwidth. Pre-fix run of the new tests: 32 such requests in-process traced 21 MiB at 0.3 s (the large-lane budget admits ~8/s, each allocating 4 MiB on admission); live, 128 idle bodies: RSS **50 → 138 MB** after 4 s. Two more things the deadline alone allowed: a body trickling 1 byte per 20 s, or 3.9 MB sent at once and then nothing, was held for the whole 30 s; and the only bound on bytes buffered across connections was 128 × 4 MiB = 512 MiB. | **Nothing is allocated ahead of the bytes received** (`src/api.py`, `_off_loop`): the buffer grows as chunks arrive (bytearray's own amortized growth — grown pages are not touched until bytes land in them, so resident memory tracks bytes received; measured 0.13 ms per 3.4 MiB in 64 KiB chunks vs 0.32 ms for the pre-sized-and-memset buffer). **One in-flight byte budget** (`_INFLIGHT_BODY_BYTES`, 64 MiB = the large lane's 2 s at 32 MiB/s): every chunk is reserved from it before it is buffered; a request that cannot buffer its next chunk within 2 s gets **503 + `Retry-After: 1`**; the reservation is released when the body is parsed or the request ends (disconnect included). **Minimum throughput** (`http_limits.BODY_MIN_BYTES_PER_S` 1 KiB/s, `BODY_MIN_RATE_GRACE_S` 5 s): a body that sends nothing for 5 s of waiting (a stall, however much it sent first) or has averaged under 1 KiB/s after 5 s of waiting (a trickle) is **408** — measured on time spent waiting for the client only, so the service's own budget wait is never charged to the client; for a body the app is not reading (after an early 401) the protocol closes the socket on the same rule judged 5 s later, so an app-side 408 is always written first. Live after (`ful_idle7b.py`, 40 s, 320 connections): RSS **50 → peak 52 MB**, 53 MB after close, `/health` 200 in 0.10 s during the hold (the idle bodies are cut, freeing their slots). 128 senders of 3.9 MB then a stall: peak RSS 138–142 MB (base 54: the 64 MiB budget plus uvicorn's own per-connection buffers), 20 admitted bodies 408'd at ~5 s, 108 refused 503, RSS back under base + 24 MB by ~10 s — not 30. |
+
+**Sweep** (allocations driven by a client-declared size): the body buffer was
+the only one. Heads are capped at 16 KiB by the parser before anything is
+allocated for them (`h11_max_incomplete_event_size`) and re-checked by the
+middleware; the query string is part of that head; there is no multipart;
+the 422 builder and the JSON pre-scan allocate from bytes actually received
+(the pre-scan's split is bounded by its quote-count check). Bytes uvicorn
+itself buffers before the app reads them (≤ 64 KiB per connection, its
+flow-control high-water mark; ≤ 256 connections) are outside the in-flight
+budget and are the remaining per-connection cost.
+
+**Fairness re-checked** (`ful_lanes7.py`, 10 s runs after the fix): 8 hot
+junk senders — legit small p50 **5 ms**, p90 8 ms, `/health` p50 2 ms, legit
+large batch 8/8, RSS peak 67 MB, 58 MB 2 s after; 32 hot — legit small p50
+5 ms, p90 8 ms, `/health` p50 2 ms, RSS peak 89 MB, 58 MB after; 32 polite —
+legit small p50 3–4 ms, `/health` p50 2 ms. The legit *large* batch under 32
+continuous senders is the wave-7 limit (b), unchanged: over ten 10 s runs it
+succeeded 15/33 attempts (the pre-fix tree, same box, alternated: 16/27);
+every refusal was the large lane's 32 MiB/s budget (`detail` says so), never
+the new in-flight budget. **Harness:** `tests/test_live_server._start` piped
+the server's stdout to an undrained `PIPE`; uvicorn's access log filled the
+64 KiB pipe and blocked the server (measured: after ~1 100 `/health`
+requests). It now writes to a temp file (read back on an early exit), like
+the DEVNULL starter in `test_fix5_http_limits_live.py`; a new test sends
+1 500 requests through it.
+
+**Tests changed, and why:** none weakened. The wave-7 test
+`test_understated_overstated_or_missing_content_length_still_parses_the_bytes_sent`
+keeps its assertions (its docstring no longer describes a pre-sized buffer).
+**API behavior changes:** 408 for a stalled or trickling body after 5 s (was:
+only at 30 s); 503 + `Retry-After: 1` when 64 MiB of body bytes are already
+buffered and a chunk cannot be admitted within 2 s.
+
+**Suite:** 969 passed before → 990 passed after
+(`FULFILLMENT_TEST_PORT_RANGE=20720-20739 python3 -m pytest`).
+
 ## Running it
 
 ```bash
@@ -477,7 +527,9 @@ PYTHONPATH=src python3 -m api
 #   FULFILLMENT_BODY_READ_TIMEOUT_S  default 30; may only narrow (0 < s <= 30)
 # Request bodies over 4 MiB are refused (413). Transport limits (fix wave 5,
 # src/http_limits.py): request head <= 16 KiB, complete within 10 s; idle
-# keep-alive 5 s; body complete within 30 s (408); 503 for every new
+# keep-alive 5 s; body complete within 30 s and never stalled for 5 s or
+# under 1 KiB/s after 5 s (408, fix wave 8); at most 64 MiB of body bytes
+# buffered across all requests (503 + Retry-After: 1 beyond); 503 for every new
 # request (incl. /health) while >= 128 sockets are held; a connection made
 # while 256 are held gets a minimal 503 and is closed (fix wave 6; see
 # "Transport limits, exactly"). 422 bodies are <= 8 KiB (fix wave 6). A JSON
