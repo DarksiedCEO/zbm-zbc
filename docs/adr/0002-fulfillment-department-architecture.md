@@ -497,6 +497,42 @@ what changed architecturally, and why:
     attempts over ten runs, 16/27 on the pre-fix tree; every refusal the
     large lane's budget, none the new one).
 
+23. **Small bodies have their own in-flight reserve; slow large holders
+    are preempted under contention; a body must be able to arrive by the
+    deadline** (fix wave 9; AEGIS round 8 questions Q1/Q2, assessed with real
+    sockets). Measured before: senders that declared 4 MiB, front-loaded
+    1 MiB and then sent 2 KiB/s (above the 1 KiB/s floor) held the whole
+    64 MiB budget to the 30 s deadline — legit 200-byte `detect` p99 1.94 s
+    (N = 64), legit max batches 1/6; plain 2 KiB/s senders (N = 16, 64)
+    starved nobody; N = 128 starved everyone through uvicorn's connection
+    limit, not the budget. A max 4 MiB body at 64 KiB/s needs 64 s and was
+    cut at 30 s; and every large body taking > 2 s to upload was 503'd after
+    arriving (the large lane's admission window ran from arrival). Decided:
+    - *Small reserve.* Each body's first `_SMALL_BODY_BYTES` (64 KiB) is
+      reserved from `_SMALL_RESERVE_BYTES` = `LIMIT_CONCURRENCY` × 64 KiB,
+      which the real launcher cannot exhaust; only bytes past 64 KiB draw
+      on the shared 64 MiB. A small body never waits for bytes.
+    - *Time-weighted charge, preemption.* Each body is charged shared bytes
+      held × seconds the service spent waiting on its client (its own waits
+      are not charged). A body that cannot reserve its next chunk preempts
+      (408) the in-flight body with the largest charge if it is ≥
+      `_PREEMPT_BYTE_SECONDS` (4 MiB·s) and above its own. Holding the
+      budget against newcomers then costs ~1 024 / N MiB/s of real upload
+      bandwidth (N holders), not time; a body at ≥ 2 MiB/s is never
+      preempted; a legit slow large body is, under contention.
+    - *Arrival projection; the deadline is not raised.* From the 5 s grace,
+      a declared body whose remainder cannot arrive by the deadline at its
+      observed rate is 408 at once, with a split hint. Rejected: raising the
+      deadline to size / 128 KiB/s for large bodies — it would lengthen how
+      long every slow sender holds memory. So a body needs ≥ size / 30 s (a
+      4 MiB batch ≥ 136.5 KiB/s); slow clients split.
+    - *Admission windows run from when each wait starts* (parse slot: body
+      completion; chunked takes: each take), and declared bytes that never
+      arrive are refunded to the 32 MiB/s large-lane budget.
+    Not decided here: connection slots — 128 held connections still make
+    uvicorn 503 everyone (Decision 17's trade-off); it needs per-client
+    identity. Numbers and tests: README, "Fix wave 9".
+
 Still open after the audit (not decided here): an approval gate for a
 future real dialer/CRM adapter; idempotency keys for
 `resolution-writeback/resolve` across retries; per-customer time zone

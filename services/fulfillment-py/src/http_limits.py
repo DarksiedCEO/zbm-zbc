@@ -44,7 +44,11 @@ The limits, all enforced before routing and auth:
                                  rule judged BODY_DEADLINE_GRACE_S later (so the
                                  app's 408 is written first). Before, one byte
                                  per 20 s kept a body alive for the whole 30 s
-                                 deadline.
+                                 deadline. (Fix wave 9: the app also refuses,
+                                 at the grace, a declared body that cannot
+                                 arrive by the deadline at its observed rate —
+                                 api._BodyWontArrive; not applied here to
+                                 unread bodies, which buffer nothing.)
   LIMIT_CONCURRENCY      128     uvicorn's limit: at or above this many open
                                  connections or in-flight requests, a new
                                  request gets 503. Bounds concurrent request

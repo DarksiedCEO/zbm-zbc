@@ -175,6 +175,10 @@ def test_a_large_body_delivered_in_small_chunks_is_reassembled_and_accepted():
 # --- (2) one budget for the bytes actually buffered, across connections ------------
 
 def test_stalled_bodies_exhaust_the_inflight_budget_and_the_next_chunk_is_503_until_released(monkeypatch):
+    # Fix wave 9: bodies' first _SMALL_BODY_BYTES come from a separate reserve,
+    # so these 8-16 KiB bodies would never touch the shared budget; count them
+    # as large (past 1 KiB) so the shared budget is what is exercised here.
+    monkeypatch.setattr(api, "_SMALL_BODY_BYTES", 1024)
     chunk = b" " * 16 * 1024
     tail = b'{"call_events":[]}'
     monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", 2 * (len(chunk) + len(tail)))  # exactly two whole bodies
@@ -213,6 +217,10 @@ def test_stalled_bodies_exhaust_the_inflight_budget_and_the_next_chunk_is_503_un
 
 
 def test_inflight_budget_is_released_when_a_sender_disconnects_mid_body(monkeypatch):
+    # Fix wave 9: bodies' first _SMALL_BODY_BYTES come from a separate reserve,
+    # so these 8-16 KiB bodies would never touch the shared budget; count them
+    # as large (past 1 KiB) so the shared budget is what is exercised here.
+    monkeypatch.setattr(api, "_SMALL_BODY_BYTES", 1024)
     chunk = b" " * 8 * 1024
     monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", len(chunk) + 18)  # exactly one whole body
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 0.2)
@@ -311,6 +319,10 @@ def test_time_spent_waiting_for_the_inflight_budget_is_not_charged_to_the_client
     """The service's own wait must not turn into a 408 for a fast client
     (the budget is held directly here: a stalled request holding it would
     itself be cut by the stall rule and release it)."""
+    # Fix wave 9: bodies' first _SMALL_BODY_BYTES come from a separate reserve,
+    # so these 8-16 KiB bodies would never touch the shared budget; count them
+    # as large (past 1 KiB) so the shared budget is what is exercised here.
+    monkeypatch.setattr(api, "_SMALL_BODY_BYTES", 1024)
     chunk = b" " * 8 * 1024
     monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", len(chunk) + 18)  # exactly one whole body
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 3.0)

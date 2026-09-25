@@ -497,6 +497,69 @@ buffered and a chunk cannot be admitted within 2 s.
 **Suite:** 969 passed before → 990 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20720-20739 python3 -m pytest`).
 
+## Fix wave 9, Sep 25 2026 — in-flight budget fairness and slow uploads (AEGIS round 8, Q1/Q2)
+
+AEGIS round 8 could not finish two questions about the wave-8 body handling;
+assessed here with real sockets against `python3 -m api` (ports 20920–20939),
+then fixed. Tests first, failing on the pre-fix tree, then passing:
+`tests/test_fix9_inflight_fairness.py` (15 tests: 12 in-process against the
+ASGI app with hand-driven chunk delivery, 3 against the real launcher over
+TCP). ADR 0002 Decision 23. Harness numbers below are 25–30 s runs: N
+authenticated senders on `detect` reconnecting whenever answered; a legit
+200-byte `detect` every 0.1 s (sequential) and a legit 3.57 MB
+`callback-orchestration/run` max batch every ~1 s; 2-core box.
+
+| Question | Before (evidence) | Now |
+|---|---|---|
+| **Q1**: can an authenticated client exhaust the 64 MiB in-flight budget and starve legit clients while staying above the 1 KiB/s floor? | **Plain 2 KiB/s, Content-Length 4 MiB — no in-flight starvation:** N=16: small p50 3.7 ms, p99 20 ms, large 18/18; N=64: p50 3.7 ms, p99 29 ms, large 18/18. At 2 KiB/s a body holds ≤ 60 KiB by the 30 s deadline; 64 × 60 KiB ≪ 64 MiB. **N=128: total starvation, but not via the byte budget** — uvicorn's `limit_concurrency` (128) answers 503 before any app code: small 182/186 503, large 0/19 (see "Not fixed"). **Front-loaded senders — yes, starvation:** declare 4 MiB, send 1 MiB at once, then 2 KiB/s (the 1 KiB/s rule credits the front-load for ~1 000 s): N=64 → small p99 **1 940 ms** (waiting on the shared budget at the 2 s refusal edge; 100 requests in 24 s instead of ~225), large **1/6**. Declaring only what is sent (1.06 MiB, 1 MiB front) N=64: small p99 **1 975 ms**, large **1/7**; N=100 × 0.6 MiB: small p99 **1 973 ms**, large **0/7**. | **Small bodies never touch the shared budget:** each body's first 64 KiB comes from a reserve of `LIMIT_CONCURRENCY` × 64 KiB (8 MiB) that the real launcher's concurrency limit cannot exhaust. **Time-weighted charge + preemption:** each body is charged (shared bytes held) × (seconds the service waited on *its client*); when a body cannot reserve its next chunk, the in-flight body with the largest charge — if ≥ 4 MiB·s and more than the waiter's — is cut with 408 (`detail` says "preempted") and its bytes go to the waiter. **Arrival projection** (Q2 below) refuses a declared body that cannot arrive in time at ~5 s. **Refund:** declared bytes never received go back to the large lane's 32 MiB/s budget (otherwise senders cut early would drain it faster). Same runs after: front 1 MiB N=64 → small p99 **35 ms**, large **22/22**; fit 1.06 MiB N=64 → p99 **62 ms**, large **22/22** (all 64 senders answered 408 — this shape is not refused by the projection until ~28 s, so preemption is what freed the bytes); N=100 × 0.6 MiB → p99 **25 ms**, large **23/23**; plain 2 KiB/s N=16/64 → p99 18/48 ms, large 19/19, 17/17 (the senders now get 408 at ~5 s from the projection). N=128: unchanged (connection slots). |
+| **Q2**: does a legit slow mobile upload of a max body succeed? | **No, and worse than the question assumed.** 4 MiB at 64 KiB/s needs 64 s > the 30 s deadline: 408 at **30.0 s**, after uploading ~1.9 MB. At 0.85 × the rate the size needs: 408 at 30.0 s. And a **new defect** found here: at **1.15 ×** that rate (160 KiB/s, arrives in 26 s) the body was **503 at 26.1 s** after arriving whole — `_off_loop` measured the large lane's 2 s admission window from the request's *arrival* and applied it to the parse-slot wait after the body was complete (and to every pay-as-it-streams take of a chunked body), so **every large body that took > 2 s to upload was refused** (in-process: a 600 kB body over 2.6 s → 503, with or without Content-Length). | **Decision: keep the 30 s deadline; a body must arrive at ≥ size / 30 s** (a 4 MiB batch ≥ 136.5 KiB/s; a 64 KiB/s client must split into requests of ≤ ~1.5–1.9 MB). A longer deadline for large bodies would lengthen how long every slow sender holds memory — the budget Q1 is about. A body with a Content-Length that, from the 5 s grace on, cannot arrive by the deadline at its observed rate (bytes ÷ time waiting on the client) is **408 at once**: `request body of N bytes is arriving at ~R bytes/s and cannot complete within the 30s body deadline (this size needs >= N/30 bytes/s); split the batch into requests of at most ~0.8·R·30 bytes at this rate, or send faster`. The admission windows now run from when each wait starts (parse slot: from body completion; chunked takes: per take). Live, same 4 186 017-byte body, in parallel: 1.15 × → **200 at 26.2 s**; 0.85 × → **408 at 5.0 s**; 64 KiB/s → **408 at 5.0 s**, both with the split message. In-process at a scaled boundary (3 s deadline, 0.5 s grace): 1.3 × → 200, 0.75 × → 408 at ~0.5 s. |
+
+**The guarantee, exactly** (ADR 0002 Decision 23). Under `python3 -m api`:
+(1) a body ≤ 64 KiB never waits for in-flight bytes; (2) a large body is
+refused 503 for in-flight bytes only when every body holding them has
+accrued < 4 MiB·s — so keeping the budget full against newcomers needs
+bodies that turn over: N holders of 64 MiB / N each must finish within
+4 MiB·s ÷ (64 MiB / N), i.e. a sustained **1 024 / N MiB/s of real upload
+bandwidth** (8 MiB/s at N = 128, 16 MiB/s at N = 64) — bounded by bandwidth
+spent, no longer by time held; (3) a body arriving at ≥ 2 MiB/s is never
+preempted (a max 4 MiB body at 2 MiB/s accrues < 4 MiB·s); (4) a declared
+body that cannot arrive in time is told so at ~5 s.
+**Limits:** (a) a legit *slow* large body (a mobile client at a few hundred
+KiB/s) accrues byte-seconds like an attacker's and **is** preempted under
+contention (408; retry or split) — nothing is preempted unless someone is
+waiting; (b) no caller identity (one shared token), so this is not
+per-client fairness; (c) a chunked body has no size to project and is bound
+by the 1 KiB/s floor, the deadline and preemption; (d) the projection uses
+the average rate so far — a client that would speed up later is refused
+anyway; (e) the small reserve cannot be exhausted only because of
+`limit_concurrency`; under another launcher it can (503 after the wait, as
+before).
+
+**Not fixed — connection slots (N = 128).** 128 held connections, at any
+rate ≥ 1 KiB/s (or idle heads for 10 s, or keep-alives for 5 s), make
+uvicorn answer every new request 503 before the app runs — the fix wave 5
+trade-off in `src/http_limits.py`, unchanged here: measured before and after
+this fix, small 180–182/186 503, large 0/19. The projection cuts declared
+slow senders at ~5 s instead of 30 s, but a sender that reconnects at once
+keeps its slot. Fixing it needs per-client identity (separate tokens) or a
+fronting proxy with per-client connection limits; not in scope of this wave.
+
+**Tests changed, and why:** three wave-8 tests in
+`test_fix8_n7_2_body_prealloc.py` exercised the shared budget with 8–16 KiB
+bodies — which, by design now, never draw on it (that was the flaw). They
+now set `_SMALL_BODY_BYTES` to 1 KiB for the test so the same bodies count
+as large and the shared budget is still what they exercise; assertions
+unchanged: `test_stalled_bodies_exhaust_the_inflight_budget_and_the_next_chunk_is_503_until_released`,
+`test_inflight_budget_is_released_when_a_sender_disconnects_mid_body` (would
+otherwise pass vacuously), `test_time_spent_waiting_for_the_inflight_budget_is_not_charged_to_the_client`.
+**API behavior changes:** 408 at ~5 s (not 30 s) for a declared body that
+cannot arrive in time, with a split hint; 408 "preempted" for the heaviest
+slow large body when the shared budget is contended; large bodies that take
+> 2 s to upload are no longer 503'd after arriving.
+
+**Suite:** 990 passed before → 1005 passed after
+(`FULFILLMENT_TEST_PORT_RANGE=20920-20939 python3 -m pytest`).
+
 ## Running it
 
 ```bash
@@ -528,8 +591,13 @@ PYTHONPATH=src python3 -m api
 # Request bodies over 4 MiB are refused (413). Transport limits (fix wave 5,
 # src/http_limits.py): request head <= 16 KiB, complete within 10 s; idle
 # keep-alive 5 s; body complete within 30 s and never stalled for 5 s or
-# under 1 KiB/s after 5 s (408, fix wave 8); at most 64 MiB of body bytes
-# buffered across all requests (503 + Retry-After: 1 beyond); 503 for every new
+# under 1 KiB/s after 5 s (408, fix wave 8); a body with a Content-Length
+# that cannot arrive by the 30 s deadline at its observed rate is 408 at ~5 s
+# with "split the batch" (fix wave 9: a body needs >= size / 30 s, i.e. a
+# 4 MiB batch >= 136.5 KiB/s); at most 64 MiB of body bytes past each body's
+# first 64 KiB buffered across all requests (503 + Retry-After: 1 beyond; the
+# slowest large holder may be preempted with 408 instead — fix wave 9; bodies
+# <= 64 KiB never wait for it); 503 for every new
 # request (incl. /health) while >= 128 sockets are held; a connection made
 # while 256 are held gets a minimal 503 and is closed (fix wave 6; see
 # "Transport limits, exactly"). 422 bodies are <= 8 KiB (fix wave 6). A JSON
