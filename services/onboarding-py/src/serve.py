@@ -28,12 +28,24 @@ The body has its own deadline and size cap in ``api.InputLimits``
 
 Tuning (env, read at start): ONBOARDING_REQUEST_HEAD_TIMEOUT_SECONDS
 (default 10), ONBOARDING_KEEP_ALIVE_TIMEOUT_SECONDS (default 5),
-ONBOARDING_LIMIT_CONCURRENCY (default 128).
+ONBOARDING_LIMIT_CONCURRENCY (default 128),
+ONBOARDING_SWITCH_INTERVAL_SECONDS (default 0.001).
+
+The switch interval (fix wave 7, NEW-5): the interpreter lets a thread hold
+the GIL for ``sys.getswitchinterval()`` (5 ms by default) before another
+thread that wants it is served. A body scan is one CPU-bound thread for up
+to ~1 s, and a light request needs the GIL several times on its way through
+(the event loop parses it, a worker checks the body, the handler runs, the
+loop writes the response), so with 5 ms slices a 40-byte message beside a
+416 KB scan was p50 49-67 ms; at 1 ms it is 12-25 ms (test_fix_wave7.py,
+live). The scan pays for the extra switches: measured +3-4% of CPU with
+three chatty threads beside it, nothing when it runs alone.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
@@ -53,6 +65,7 @@ MAX_HEADER_BYTES = 16 * 1024
 REQUEST_HEAD_TIMEOUT_S: float = _positive("ONBOARDING_REQUEST_HEAD_TIMEOUT_SECONDS", 10.0)
 KEEP_ALIVE_TIMEOUT_S: int = _positive("ONBOARDING_KEEP_ALIVE_TIMEOUT_SECONDS", 5, int)
 LIMIT_CONCURRENCY: int = _positive("ONBOARDING_LIMIT_CONCURRENCY", 128, int)
+SWITCH_INTERVAL_S: float = _positive("ONBOARDING_SWITCH_INTERVAL_SECONDS", 0.001)
 
 
 class HeadDeadlineH11Protocol(H11Protocol):
@@ -110,4 +123,5 @@ def uvicorn_kwargs() -> dict:
 
 
 def run(app, host: str, port: int) -> None:
+    sys.setswitchinterval(SWITCH_INTERVAL_S)
     uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())

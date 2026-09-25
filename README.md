@@ -321,18 +321,22 @@ spec, with 15 deterministic single-task intelligences (no model calls).
 Architecture: `docs/adr/0004-onboarding-department-architecture.md`. Details
 and routes: `services/onboarding-py/README.md`.
 
-- **Status:** built and tested (648 tests, `python3 -m pytest -q`). **Not
+- **Status:** built and tested (663 tests, `python3 -m pytest -q`; the live
+  ledger-rust tests build the binary with cargo and run by default). **Not
   certified for any real client, clipper or brand.** Scenario, attack and
-  guardrail tests exist. The AEGIS review findings were fixed in fix waves 1–6
+  guardrail tests exist. The AEGIS review findings were fixed in fix waves 1–7
   (Sep 24); see ADR 0004.
 - **Hostile input can't stall it** (fix wave 4). Every regex is linear-time.
   Input is capped before it is scanned: field lengths are checked first, a body
   over 1 MiB is a 413, a request target over 8 KiB is a 414, and log lines are
   cut. Scanning runs off the event loop. Each request's budget counts its own
   CPU time, not time spent waiting on other requests, and scanning is admitted
-  through a weighted budget with measured defaults of one scan at a time (busy
-  returns 503 with Retry-After; fix wave 6). Intake facts are capped per client
-  (409 past 2,000). `/health` stays responsive under attack.
+  through a weighted budget with measured defaults of one large scan at a time
+  (busy returns 503 with Retry-After; fix wave 6); bodies up to 16 KiB have a
+  lane of their own, so a client's small messages are not queued behind other
+  clients' large uploads (p50 12–25 ms beside 1–12 uploaders; fix wave 7).
+  Intake facts are capped per client (409 past 2,000, counted after per-field
+  trimming). `/health` stays responsive under attack.
 - **Fails closed.**
   - Activation needs both the Contract (14) and Compliance (15) gates, and a
     blocked activation returns the exact unmet list.

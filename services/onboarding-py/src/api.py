@@ -40,7 +40,10 @@ the whole process for minutes, /health included):
 - Scanning concurrency (fix wave 5, NEW-2; weighted in fix wave 6, N4) is
   bounded by ``ScanAdmission``: every body takes cost proportional to its
   size from a shared in-flight budget, a bounded number wait a bounded time;
-  busy -> 503 with Retry-After and ``proceeded: false``, never 422.
+  busy -> 503 with Retry-After and ``proceeded: false``, never 422. Bodies
+  of at most 16 KiB have a lane of their own (``ScanLanes``, fix wave 7,
+  NEW-5): they never wait behind a large scan, and large bodies cannot
+  fill their queue.
 - The body must arrive within ``body_read_timeout_seconds`` -> 408; the
   request head is capped and timed by the hardened launcher (src/serve.py,
   fix wave 5, NEW-3), which ``python3 -m api`` uses.
@@ -74,7 +77,7 @@ from intelligences import registry
 from ledger import HttpLedgerClient, LedgerWriteAfterEffects, LedgerWriteError, UnconfiguredLedgerClient
 from onboarding_schema import AccessGrantIn, ClipperApplication
 from onboarding_schema import requests as rq
-from redaction import ScanBudgetExceeded, cap_text, install_log_scrubbing, scan_budget, scrub, scrub_obj
+from redaction import ScanBudgetExceeded, cap_text, install_log_scrubbing, scan_budget, scan_memo, scrub, scrub_obj
 from service import OnboardingError, OnboardingService
 
 install_log_scrubbing()
@@ -196,10 +199,14 @@ class ScanAdmission:
     nothing done), never as a failed check (422). Waiters block a threadpool
     thread each, so ``max_waiting`` also keeps threads free for light
     requests (the pool has 40). Budget is granted to waiters oldest-first,
-    skipping a waiter that does not fit yet, so a small body never queues
-    behind a large one; each waiter is woken once, when its grant is made
-    (never a thundering herd). Under sustained overload a max-size body can
-    therefore reach its wait limit and be answered busy (retry later)."""
+    skipping a waiter that does not fit yet (with a budget above the minimum
+    cost a small body can therefore pass a queued large one; with the
+    defaults every body takes the whole budget and they wait in order);
+    each waiter is woken once, when its grant is made (never a thundering
+    herd). Under sustained overload a max-size body can therefore reach its
+    wait limit and be answered busy (retry later). Small bodies do not come
+    here at all with the defaults: ``ScanLanes`` gives them a lane of their
+    own (fix wave 7, NEW-5)."""
 
     class _Waiter:
         __slots__ = ("cost", "event", "granted")
@@ -284,6 +291,36 @@ class ScanAdmission:
         self._release(self._held_for_test.pop())
 
 
+class ScanLanes:
+    """Two ``ScanAdmission`` lanes (fix wave 7, NEW-5). With the measured
+    defaults the large lane runs one scan at a time, so its queue is a line:
+    one client's 416 KB bodies back-to-back put every other client's 40-byte
+    message at p50 294 ms (4 uploaders 1.6 s, 12 uploaders 6 s), and once 16
+    large bodies were queued a tiny message was 503. A body of at most
+    ``scan_small_body_bytes`` (~1 ms of scan at 16 KiB) is admitted by the
+    small lane instead: its own in-flight budget (``scan_small_inflight``
+    bodies) and its own queue (``scan_small_max_waiting``), so it never
+    waits for a large scan and no flood of large bodies can fill its queue.
+    Large bodies stay serialized in the large lane. A small request does
+    share the GIL with the large scan in flight, one switch interval per
+    turn (1 ms under the launcher, src/serve.py; 5 ms is the interpreter's
+    default), which is what remains of its latency beside a scan."""
+
+    def __init__(self, cfg):
+        self.large = ScanAdmission(cfg.scan_inflight_bytes, cfg.scan_min_cost_bytes, cfg.scan_max_waiting, cfg.scan_wait_seconds)
+        self.small_bytes = cfg.scan_small_body_bytes
+        self.small: Optional[ScanAdmission] = None
+        if self.small_bytes > 0:
+            self.small = ScanAdmission(self.small_bytes * cfg.scan_small_inflight, self.small_bytes,
+                                       cfg.scan_small_max_waiting, cfg.scan_wait_seconds)
+
+    def lane(self, nbytes: int) -> ScanAdmission:
+        return self.small if self.small is not None and nbytes <= self.small_bytes else self.large
+
+    def hold(self, nbytes: int):
+        return self.lane(nbytes).hold(nbytes)
+
+
 class InputLimits:
     """Outermost ASGI middleware (fix wave 4, R1): refuse an over-long
     request target (414) and an over-size body (413) before any route,
@@ -350,7 +387,8 @@ class InputLimits:
                 return {"type": "http.request", "body": body, "more_body": False}
             return await receive()
 
-        await self.app(scope, replay, send)
+        with scan_memo():  # one verdict memo for the whole request (fix wave 7)
+            await self.app(scope, replay, send)
 
 
 def create_app(service: OnboardingService, required_token: str) -> FastAPI:
@@ -365,8 +403,10 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
     auth = [Depends(make_require_auth(required_token))]
     app.state.service = service
     cfg = service.config
-    gate = ScanAdmission(cfg.scan_inflight_bytes, cfg.scan_min_cost_bytes, cfg.scan_max_waiting, cfg.scan_wait_seconds)
-    app.state.scan_admission = gate
+    lanes = ScanLanes(cfg)
+    app.state.scan_lanes = lanes
+    app.state.scan_admission = lanes.large  # the large lane (tests hold its budget)
+    app.state.scan_admission_small = lanes.small
 
     def cpu_budget(nbytes: int) -> float:
         return cfg.scan_budget_seconds + cfg.scan_cpu_ms_per_kb * (nbytes / 1024) / 1000
@@ -377,11 +417,13 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
         loop, so credential scanning there stalled every request, /health
         included. Field constraints run first, then the credential checks
         under the per-request CPU budget; every body first takes its share
-        of the scan admission budget (fix wave 6, N4)."""
+        of the scan admission budget of its lane (fix wave 6, N4; lanes in
+        fix wave 7, NEW-5)."""
 
         def parse(request: Request, payload: Any = Body(default=None)) -> Any:
             if payload is None and optional:
-                return None
+                yield None
+                return
             nbytes = request.scope.get("state", {}).get("onb_body_bytes", 0)
 
             def validate() -> Any:
@@ -393,8 +435,20 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
                             [{**e, "loc": ("body", *e.get("loc", ()))} for e in exc.errors(include_url=False, include_input=False)]
                         ) from None
 
-            with gate.hold(nbytes):
-                return validate()
+            lane = lanes.lane(nbytes)
+            with lane.hold(nbytes):
+                parsed = validate()
+                if lane is lanes.large:
+                    # A large body's heavy work is not only its check: the
+                    # service redacts the same text (~1.5 s of CPU for 416 KB
+                    # of profile fields) and the response is scrubbed. The
+                    # large lane is held through the handler (this is a
+                    # generator dependency: its exit runs after the response),
+                    # so that work stays one-at-a-time too (fix wave 7,
+                    # NEW-5 class). The small lane covers only the check.
+                    yield parsed
+                    return
+            yield parsed
 
         return parse
     # Output-side scrub (third credential layer, F10): every route's return

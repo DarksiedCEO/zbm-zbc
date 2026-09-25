@@ -103,19 +103,33 @@ class OnboardingConfig:
     # the event loop's wait for the GIL — 40x16 KB bodies at 4 concurrent
     # scans: /health p50 300 ms, light GET p50 790 ms; at 2: 320 / 700 ms;
     # at 1: 16 / 70 ms. So the minimum cost equals the budget: one scan at
-    # a time, whatever the size (a 64 KiB body is ~100 ms of CPU; a tiny
-    # message body ~1 ms, so 40 concurrent messages queue for ~40 ms).
-    # Raising scan_inflight_bytes above scan_min_cost_bytes admits several
-    # small bodies at once; on CPython that measurably slows light requests,
-    # so do it only on a runtime without a GIL. At most scan_max_waiting
-    # requests wait for budget, each for at most scan_wait_seconds (budget
-    # goes to the oldest waiter that fits, so a small body never queues
-    # behind a large one). Busy -> 503 + Retry-After ("nothing was done,
-    # retry"), never a 422.
+    # a time, whatever the size (a 64 KiB body is ~100 ms of CPU). Raising
+    # scan_inflight_bytes above scan_min_cost_bytes admits several bodies
+    # at once; on CPython that measurably slows light requests, so do it
+    # only on a runtime without a GIL. At most scan_max_waiting requests
+    # wait for budget, each for at most scan_wait_seconds (budget goes to
+    # the oldest waiter that fits). Busy -> 503 + Retry-After ("nothing was
+    # done, retry"), never a 422.
+    # These four describe the LARGE lane. Fix wave 7 (NEW-5): with the
+    # minimum cost equal to the budget every body waited its turn behind
+    # every other, so one client's 416 KB bodies back-to-back put other
+    # clients' 40-byte messages at p50 294 ms (4 uploaders: 1.6 s; 12: 6 s),
+    # and 16 queued large bodies answered a tiny message 503. A body of at
+    # most scan_small_body_bytes (its scan is ~1 ms) now takes a SMALL lane
+    # instead: scan_small_inflight of them at a time, at most
+    # scan_small_max_waiting waiting (its own queue, so a flood of large
+    # bodies cannot fill it), the same scan_wait_seconds. A small body never
+    # waits for the large lane; large bodies stay serialized. 0 disables
+    # the small lane (every body is large). Waiters block a threadpool
+    # thread each: 1+16 large and 1+8 small leave 14 of the 40 threads for
+    # light requests.
     scan_inflight_bytes: int = 65_536
     scan_min_cost_bytes: int = 65_536
     scan_max_waiting: int = 16
     scan_wait_seconds: float = 30.0
+    scan_small_body_bytes: int = 16_384
+    scan_small_inflight: int = 1
+    scan_small_max_waiting: int = 8
     # Intake facts per client are bounded (fix wave 6, wave-5 leftover: they
     # grew without a cap and the profile was rebuilt over all of them): a
     # request that would take a client past max_facts_per_client is refused
@@ -150,6 +164,9 @@ class OnboardingConfig:
                 or self.scan_wait_seconds <= 0 or self.body_read_timeout_seconds <= 0:
             raise ConfigError("scan admission limits and the body read timeout must be positive "
                               "(scan_max_waiting may be 0)")
+        if self.scan_small_body_bytes < 0 or self.scan_small_inflight < 1 or self.scan_small_max_waiting < 0:
+            raise ConfigError("scan_small_body_bytes and scan_small_max_waiting must be 0 or more and "
+                              "scan_small_inflight at least 1")
         if self.max_facts_per_client < 1 or self.facts_history_per_field < 1:
             raise ConfigError("facts caps must be positive")
         if not self.instance_id or not all(ch.isascii() and (ch.isalnum() or ch in "._:-") for ch in self.instance_id) \
@@ -202,6 +219,9 @@ def load_config(env: Mapping[str, str] | None = None) -> OnboardingConfig:
                            ("ONBOARDING_SCAN_MIN_COST_BYTES", "scan_min_cost_bytes", int),
                            ("ONBOARDING_SCAN_MAX_WAITING", "scan_max_waiting", int),
                            ("ONBOARDING_SCAN_WAIT_SECONDS", "scan_wait_seconds", float),
+                           ("ONBOARDING_SCAN_SMALL_BODY_BYTES", "scan_small_body_bytes", int),
+                           ("ONBOARDING_SCAN_SMALL_INFLIGHT", "scan_small_inflight", int),
+                           ("ONBOARDING_SCAN_SMALL_MAX_WAITING", "scan_small_max_waiting", int),
                            ("ONBOARDING_MAX_FACTS_PER_CLIENT", "max_facts_per_client", int),
                            ("ONBOARDING_FACTS_HISTORY_PER_FIELD", "facts_history_per_field", int),
                            ("ONBOARDING_BODY_READ_TIMEOUT_SECONDS", "body_read_timeout_seconds", float)):
