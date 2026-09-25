@@ -299,9 +299,9 @@ def test_connect_refused_is_a_certain_failure_and_timeout_is_uncertain():
 
 
 def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    from conftest import free_port
+
+    return free_port()  # CREATIVE_TEST_PORTS keeps the run inside a given range (fix wave 9)
 
 
 def _wait(url: str, headers=None) -> None:

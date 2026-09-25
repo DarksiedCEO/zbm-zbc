@@ -46,7 +46,9 @@ def test_correct_token_accepted():
 
 def test_docs_redoc_openapi_disabled():
     for path in ("/docs", "/redoc", "/openapi.json"):
-        assert anon.get(path).status_code == 404, path
+        # fix wave 9 (AEGIS round 8 L4): authentication comes first on every path but /health, so an
+        # anonymous caller gets 401 (it learns nothing, not even that the docs are off); with the token, 404
+        assert anon.get(path).status_code == 401, path
         assert authed.get(path).status_code == 404, path
 
 

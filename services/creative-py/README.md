@@ -79,7 +79,9 @@ today, with both blockers named.
 
 ## API
 
-All routes except `GET /health` need `Authorization: Bearer $CREATIVE_SERVICE_TOKEN`.
+All routes except `GET /health` need `Authorization: Bearer $CREATIVE_SERVICE_TOKEN`
+(checked FIRST, before the body gate: an unauthenticated request is 401,
+never 413 / 415 / 408 — fix wave 9, L4; any path, unknown ones included).
 Andre's actions also need `X-Andre-Approval-Token: $CREATIVE_ANDRE_APPROVAL_TOKEN`.
 `/docs`, `/redoc`, `/openapi.json` are disabled. Errors: 401 auth, 403
 guardrail/founder, 404 not found, 409 out of order / frozen / blocked, 422
@@ -115,6 +117,11 @@ keyed by their own id and other creations by actor + canonical request
 - Rights: `POST /rights/clearances`, `POST /rights/licenses` (actor `rights_desk`)
 - ZBM: `POST /zbm/briefs` → `POST /zbm/briefs/{id}/review` → `POST /zbm/briefs/{id}/jobs` → `POST /zbm/jobs/{id}/work` → `POST /zbm/work/{id}/export-validation` → `/rights` → `/quality` → (`/escalation`) → `/compliance` → `/final-approval`; `POST /zbm/hook-advice`, `POST /zbm/memory/results`
 - ZBC: `POST /zbc/campaigns/{cid}/rulebooks` → `PUT …/rulebooks/{v}` (drafts only) → `POST …/rulebooks/{v}/review` → `…/sign` → `POST /zbc/campaigns/{cid}/rights-check` → `POST …/rulebooks/{v}/go-live` → `POST /zbc/campaigns/{cid}/moment-map` → `…/hook-sheets` → `…/kit` → `…/kit/sign` → `POST /zbc/clips` → `POST /zbc/clips/{id}/human-review` (`…/human-review/withdraw`: the same reviewer clears an uncertain verdict the ledger confirms it doesn't hold, fix wave 5) → `POST /zbc/clips/{id}/payout-eligibility`; `POST /zbc/campaigns/{cid}/revisions`; `POST /zbc/memory/results`, `GET /zbc/memory/winners`
+- ZBC rulebooks (fix wave 9, L2): `GET /zbc/campaigns/{cid}/rulebooks?offset=&limit=` is a page of version
+  SUMMARIES (≤ 100; `total`, `next_offset`; each with `rule_count`, `retired_rule_count`,
+  `rule_number_high_water`, status and dates); `GET …/rulebooks/{v}` one version (its rules,
+  `rule_number_high_water`, `retired_rule_count`); `GET …/rulebooks/{v}/retired-rule-ids?offset=&limit=`
+  its retired ids, ≤ 1,000 per page (derived from the high-water marks, never stored per version)
 
 Default actor ids (one per intelligence; add humans with
 `CREATIVE_EXTRA_ACTORS='{"jo": ["zbm_creative_lead"]}'`): `zbm_brief_writer`,
@@ -154,12 +161,37 @@ and kept idle / partial-head sockets open forever.
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 25, 2026 after fix wave 8: **641 passed, 0 failed, 0 skipped**
-(Python 3.11.15, pytest 9.1.1; 557 after fix wave 7, 515 after fix wave 6, 469 after fix wave 5,
+Result on Sep 25, 2026 after fix wave 9: **664 passed, 0 failed, 0 skipped,
+three consecutive runs** (Python 3.11.15, pytest 9.1.1; 641 after fix wave 8, 557 after fix wave 7, 515 after fix wave 6, 469 after fix wave 5,
 428 after fix wave 4, 360 after fix wave 2, 310 after fix wave 1, 205
 before it). No test in this service skips: none uses an env-provided
 ledger binary (the real-ledger runs are the live runs below), and
 `pytest -rs` reports no skip.
+Real-socket tests bind ports from `CREATIVE_TEST_PORTS` ("lo-hi") when it
+is set (fix wave 9; defaults: 20110-20119 and 20300-20319, OS-assigned for
+the lossy-proxy tests); the fix-wave-9 runs used `CREATIVE_TEST_PORTS=20900-20919`.
+`test_fix_wave_9.py` reproduces the AEGIS round-8 findings: H1 (the
+letter-like map against an independent derivation over every code point
+of the blocks; the 48 AEGIS enclosed-style cases; every never-say phrase
+in all 35 styles in the caption and the bio, 1,960 rejects; a mixed-style
+fuzz with zero-width characters, 0 automatic passes; styled text alone is
+a signal, a single flag is not; the stripped-share fail-safe on Braille,
+block elements, private-use and Tai Xuan Jing text; the 170-caption
+round-8 corpus), M2 (classes Q / R / S verbatim, the disclosure-first
+variants, the rule's unit cases), M1 (the `ns_cost8.py` generator at 100
+phrases, cold, this thread's CPU, ≤ 1.5 s scaled by a measured slowdown
+factor; a clip review held on an event while a rulebook draft and a
+brief go through; a registry write during the review makes the commit
+review again), L2 (60 churn revisions: per-version metadata, flat
+per-revision memory, the summarised list GET < 1 MiB and < 200 ms, the
+retired ids paged) and L4 (401 before 415 / 413, in-process and on a real
+socket); L3 is the rescaled `test_fix_wave_6.py` /health test (max and
+p50 bounds). Tests changed because they enshrined the old behaviour:
+`test_fix_wave_8.py` (four symbol cases the old boundary let pass, the
+30-emoji-caption expectation, the cold-cache helper now also empties the
+per-thread memos), `test_guardrails.py` (the retired ids of a revision are
+paged, not inlined), `test_auth.py` (an anonymous `/docs` is 401 before it
+is 404), `test_fix_wave_6.py` (the scaled /health bounds).
 `test_fix_wave_8.py` reproduces the AEGIS round-7 findings: N7-1 (the
 shape gate for every JSON content type — ten spellings — and 415 for
 nine others and for none, before the body is read; the predicate fuzzed
@@ -553,6 +585,37 @@ numbers compares):
   pairs: 0 spreads; 30 ordinary emoji captions: 2 lexicon hits ("Get 💸
   back on every referral", "Make 💰 moves this quarter").
 
+## Live run — fix wave 9, against the REAL ledger-rust (Sep 25, 2026)
+
+ledger-rust built from this tree into a private target dir
+(`cargo build --release --offline`), on :20910 with a fresh log;
+creative-py on :20900 (ledger direct). Only PIDs this run started, all
+stopped at the end. Round-8 numbers in brackets:
+
+- `devtools/live_smoke.py` → "LIVE SMOKE: ALL STEPS AS EXPECTED" on the
+  fresh ledger (37 entries, valid) and again after a creative-py restart
+  on the same log after every probe below (445 entries, valid).
+- L3 / L4, `cre_ct_bypass` (20 senders × 60k-key body, 10 s each):
+  `application/json` 258 × 422, `/health` p50 82 ms [437 ms];
+  `application/hal+json` 292 × 422, p50 73 ms [423 ms]; `text/plain`
+  5,036 × 415, p50 18 ms. Anonymous `text/plain` and anonymous 2 MB JSON
+  → 401 [415 / 413].
+- L2, `rev_wedge9_live.py`: 25 full-churn revisions through the live API
+  in 13.0 s, v26 live, NS-482..NS-501, 481 retired ids (paged endpoint:
+  481), none reused; `GET /zbc/campaigns/{cid}/rulebooks` 12,951 B in 3 ms.
+- M1, `cre_clipflood9.py` (4 senders × 25 s of 50 KB vowel-dropped
+  clips): 174 × 201, clip p50 518 ms; brief POST p50 230 ms [582 ms];
+  `/health` p50 26 ms. `ns_cost8.py` (in-process, one run, 100 phrases):
+  0.18 / 0.91 / 1.34 s [1.1 / 4.7 / 3.5 s]; 1,000 phrases 2.0 / 5.0 /
+  3.8 s [10.5 / 275.6 / 61.5 s].
+- H1 / M2, `live_aegis9.py` (28 clips): 18 styled-letter, Braille and
+  symbol stand-in cases → 4 reject, 14 `human_review`, 0 pass; 10
+  ordinary emoji captions → 10 pass. In-process: `ns_scripts8.py` 0
+  misses in 15 styles; `ns_q8.py` / `ns_rs8.py` every case non-pass;
+  `ns_evade8.py` gap classes 4/176 = 2.3% missed [22.7%], Q / R / S 0
+  ["rnk nnny", "eezy nnoney", "noh side effex", "kwit your job" remain];
+  `ns_fp8.py` unchanged (170 captions: 1 / 3 / 3; pairs 12/300).
+
 ## Known gaps
 
 See ADR 0005 "Honest gaps and open items" for the full list. The short
@@ -583,19 +646,19 @@ order ("rich get", "💰 make") are not caught; a transposition stacked on other
 in a 2-4 letter word ("nu riks") can pass (0.7-1.8% of the wave-7 stacked
 generator); a JSON body may carry at most the members its route's model
 admits plus 25%; inflections and paraphrases ("getting rich", "100 percent
-guaranteed") are not lookalikes and are not caught. Fix wave 8: the
-symbol lexicon is a bounded list — a pictograph it does not know is read
-only where it occupies a phrase word's place, so an unknown emoji
-followed by an ordinary word ("make 🤞 today") passes, and symbols need
-a written content word of the phrase beside them; a never-say word
+guaranteed") are not lookalikes and are not caught. Fix wave 8 / 9: an
+unknown symbol counts only directly beside a written word of the phrase,
+and a phrase must keep a written content word ("🤑 💰" alone is not read);
+18 ordinary emoji captions of the wave-8 corpus now go to a human; a never-say word
 inside a hashtag ("get #rich") is a human's call, not a reject; the
 stacked rule reads at most 32 relaxed hits per phrase, so enough decoy
 windows before the real one hide it from that rule (not from the single
-signals); a campaign that churns its never-say list keeps every retired
-id forever (never reused), so its rulebook grows by the list's size per
-revision; **a review costs about 1 s of CPU per 100 never-say phrases
-against a 50 KB transcript, and the goal model admits 1,000 (9.1 s)** —
-capping the list or moving Clip Review off the workflow lock is an open
-decision (ADR 0005 gap 16). `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
+signals); retired ids are now derived from per-prefix high-water marks,
+but every rulebook version still keeps its full rule list, so 60 churn
+revisions of a 1,000-phrase list hold about 89 MiB (ADR 0005 gap 17);
+Clip Review now runs off the workflow lock, but a review still costs
+up to about 1.3 s of CPU per 100 never-say phrases (about 1.6 s when
+the clip is already bound for a human) and 2-5 s at the 1,000 the goal
+model admits (ADR 0005 gap 16). `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
 that many idle sockets gets everyone else 503s until the 10 s head
 deadline frees them — per-client limits belong in a proxy in front.

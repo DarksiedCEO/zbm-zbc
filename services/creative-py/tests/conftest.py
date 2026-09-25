@@ -142,3 +142,43 @@ def make_api(ledger, clock):
 @pytest.fixture
 def api(make_api):
     return make_api()
+
+
+def port_range(default: range) -> range:
+    """The ports real-socket tests may bind: `default`, or the range in
+    CREATIVE_TEST_PORTS ("lo-hi", inclusive) so a run can stay inside the
+    port range its operator was given (fix wave 9)."""
+    spec = os.environ.get("CREATIVE_TEST_PORTS")
+    if not spec:
+        return default
+    lo, hi = (int(x) for x in spec.split("-"))
+    return range(lo, hi + 1)
+
+
+_HANDED_OUT: list[int] = []
+
+
+def free_port() -> int:
+    """A free local port: OS-assigned, or — with CREATIVE_TEST_PORTS set —
+    the next free one of that range not handed out lately (two calls in a
+    row never return the same port)."""
+    import socket
+
+    spec = os.environ.get("CREATIVE_TEST_PORTS")
+    if not spec:
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            return sock.getsockname()[1]
+    ports = list(port_range(range(0)))
+    recent = set(_HANDED_OUT[-(len(ports) // 2):])
+    for port in ports:
+        if port in recent:
+            continue
+        with socket.socket() as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+        _HANDED_OUT.append(port)
+        return port
+    raise RuntimeError(f"no free port in CREATIVE_TEST_PORTS={spec}")

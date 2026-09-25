@@ -44,7 +44,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from conftest import NOW, TEST_SERVICE_TOKEN, Api
+from conftest import NOW, TEST_SERVICE_TOKEN, Api, port_range
 from flows import ok, zbc_open
 from ordinary_captions import CAPTIONS, NEVER_SAY_FP_LIST
 from samples import TODAY, zbc_clip, zbc_goal
@@ -329,7 +329,7 @@ def test_new1_osa_distance_is_correct():
 # NEW-3 — request head limits and idle / partial-head deadlines, real socket
 # =====================================================================================
 
-PORTS = range(20110, 20120)
+PORTS = port_range(range(20110, 20120))  # CREATIVE_TEST_PORTS overrides (fix wave 9)
 # The documented bounds (serve.py; pinned by test_new3_launcher_config_is_pinned).
 REQUEST_HEAD_TIMEOUT_S = 10.0
 KEEP_ALIVE_TIMEOUT_S = 5

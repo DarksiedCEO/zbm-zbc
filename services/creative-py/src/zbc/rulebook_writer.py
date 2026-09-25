@@ -40,7 +40,6 @@ from zbc.rulebook import (
     RuleKind,
     RulebookStatus,
     format_rule_id,
-    highest_rule_numbers,
 )
 
 WRITER_ACTOR = "zbc_rulebook_writer"
@@ -226,31 +225,25 @@ def revise(previous: Rulebook, goal: CampaignGoal, registry: PlatformRulesRegist
         raise ValueError("a revision must be for the same campaign")
     angles, fresh, blocking = _build(goal, registry, today)
     old_by_key = {_content_key(r): r for r in previous.rules}  # each old rule is matched at most once
-    used = {r.rule_id for r in previous.rules} | set(previous.retired_rule_ids)
-    # the next unused number per prefix, computed ONCE over the ids ever used (fix wave 8, N7-3:
-    # a scan of every used id per new rule was quadratic once a campaign had churned thousands)
-    counters: dict[str, int] = {k: v + 1 for k, v in highest_rule_numbers(used).items()}
-    kept_ids: set[str] = set()
+    # the next unused number per prefix: one above the campaign's high-water mark (fix wave 9, L2: the
+    # marks replace the stored list of every retired id; fix wave 8, N7-3: computed once per revision)
+    counters: dict[str, int] = {k: v + 1 for k, v in previous.rule_number_high_water.items()}
     out: list[Rule] = []
     for r in fresh:
         old = old_by_key.pop(_content_key(r), None)
         if old is not None:
             out.append(r.model_copy(update={"rule_id": old.rule_id}))
-            kept_ids.add(old.rule_id)
         else:
             prefix = PREFIX[r.kind]
             n = counters.get(prefix, 1)
             counters[prefix] = n + 1
             out.append(Rule(rule_id=format_rule_id(prefix, n), kind=r.kind, text=r.text, params=r.params,
                             rationale_row_ids=r.rationale_row_ids))
-    # the ids retired before, in their order, then this revision's in id order (never re-sorted as a
-    # whole: a churned campaign carries hundreds of thousands, fix wave 8 N7-3)
-    retired = (*previous.retired_rule_ids, *sorted({r.rule_id for r in previous.rules} - kept_ids))
     return Rulebook(
         campaign_id=goal.campaign_id, client_id=goal.client_id, vertical=goal.vertical, version=version,
         status=RulebookStatus.DRAFT, objective=goal.objective, source_asset_ids=tuple(goal.source_asset_ids),
         approved_angles=tuple(angles), platforms=tuple(goal.platforms), rules=tuple(out),
-        retired_rule_ids=retired, blocking_issues=tuple(blocking),
+        rule_number_high_water=dict(previous.rule_number_high_water), blocking_issues=tuple(blocking),
         warnings=tuple(short_entry_warnings(never_say_entries(goal))), drafted_by=drafted_by,
         supersedes_version=previous.version, language=goal.language,
     )

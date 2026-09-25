@@ -133,6 +133,20 @@ class _Attempt:
     sent_at: datetime | None = None  # when it was last sent (a replay re-sends it)
 
 
+@dataclass(frozen=True)
+class ClipPlan:
+    """A clip review computed off the workflow lock, with the inputs it
+    read (fix wave 9, M1): committed only while they are still current."""
+
+    sha: str
+    rb: Rulebook
+    received_at: datetime
+    to_human: tuple[str, ...]
+    rows: dict
+    attempt: Any
+    decision: ClipReviewDecision
+
+
 def _sha256(obj) -> str:
     import hashlib
     import json
@@ -293,6 +307,7 @@ class ZbcWorkflow:
         else:
             rb = rulebook_writer.draft(goal, self.registry, self.clock.today(), version=version, drafted_by=actor_id)
         self.rulebooks.check_replace(rb)
+        self.rulebooks.check_no_reuse(rb)
         self.recorder.record("rulebook_edited", actor_id, subject,
                              {"rulebook": rb.model_dump(mode="json"), "previous_status": existing.status.value},
                              f"Rulebook {campaign_id} v{version} edited; back to draft (approval/signature cleared)")
@@ -509,8 +524,67 @@ class ZbcWorkflow:
         return signed
 
     # --- Job 3: judge the work ------------------------------------------------------
+    def review_clip_unlocked(self, sub: ClipSubmission) -> "ClipPlan | None":
+        """Fix wave 9 (AEGIS round 8 M1): Clip Review is pure over its inputs
+        (the submission, one frozen rulebook version, the registry rows, the
+        receipt time), and a worst-case review costs a second of CPU; run
+        under the service-wide workflow lock it stalled every brief and
+        rulebook action behind it. The inputs are taken under the lock (a
+        few dictionary reads and a copy of the registry rows), the review
+        runs WITHOUT it, and `submit_clip(sub, plan)` commits under the lock
+        only if every input is still what the review saw — otherwise it
+        reviews again, under the lock, on the current state. None when there
+        is nothing to precompute (a precondition fails, or an uncertain
+        attempt is to be replayed): `submit_clip` then does everything,
+        refusals included, exactly as before."""
+        with self.recorder.lock:
+            cid = sub.campaign_id
+            kit = self.kits.get(cid)
+            if kit is None or kit.status != "signed" or sub.submission_id in self.submissions:
+                return None
+            sha = submission_sha256(sub)
+            bound = self._submission_content.get(sub.submission_id)
+            if bound is not None and bound != sha:
+                return None
+            op = f"clip:{sub.submission_id}"
+            held = self._attempts.get(op)
+            if held is not None and held.uncertain:
+                return None  # a replay (or a refusal of different content) decides; nothing to review
+            try:
+                rb = self.rulebooks.get(cid, sub.rulebook_version)
+            except CreativeError:
+                return None
+            if rb.live_at is None:
+                return None
+            received_at = self._op_now(op, sha)
+            now = self.clock.now()
+            if sub.posted_at > now or sub.posted_at < rb.live_at or (
+                    rb.superseded_at is not None and sub.posted_at >= rb.superseded_at):
+                return None
+            to_human = self._grace_route(rb, received_at)
+            rows = dict(self.registry.rows)
+            attempt = self._attempts.get(op)
+        snapshot = PlatformRulesRegistry(rows=rows)
+        decision = clip_review.review(sub, rb, snapshot, received_at, decided_by=A_REVIEW,
+                                      received_at=received_at, route_to_human=to_human)
+        return ClipPlan(sha, rb, received_at, to_human, rows, attempt, decision)
+
+    def _grace_route(self, rb: Rulebook, received_at: datetime) -> tuple[str, ...]:
+        grace = timedelta(hours=self.superseded_grace_hours)
+        if rb.superseded_at is not None and received_at - rb.superseded_at > grace:
+            return (f"declared v{rb.version} was superseded at {rb.superseded_at.isoformat()}; this clip reached "
+                    f"us at {received_at.isoformat()}, beyond the {self.superseded_grace_hours}h grace window, and "
+                    "its posted_at is self-asserted — a human confirms which version it was made under",)
+        return ()
+
+    def _plan_still_holds(self, plan: "ClipPlan", sha: str, op: str, rb: Rulebook) -> bool:
+        """Every input the unlocked review read is still the current one."""
+        rows = self.registry.rows
+        return (plan.sha == sha and plan.rb is rb and self._attempts.get(op) is plan.attempt
+                and len(rows) == len(plan.rows) and all(rows.get(k) is v for k, v in plan.rows.items()))
+
     @serialized
-    def submit_clip(self, sub: ClipSubmission) -> ClipReviewDecision:
+    def submit_clip(self, sub: ClipSubmission, plan: "ClipPlan | None" = None) -> ClipReviewDecision:
         cid = sub.campaign_id
         kit = self.kits.get(cid)
         if kit is None or kit.status != "signed":
@@ -533,8 +607,10 @@ class ZbcWorkflow:
         rb = self.rulebooks.get(cid, sub.rulebook_version)
         if rb.live_at is None:
             raise PreconditionFailed(f"rulebook {cid} v{rb.version} never went live; clips can't be made under it")
+        # the unlocked review's inputs, if they all still hold (M1); else review here, under the lock
+        fresh = plan is not None and self._plan_still_holds(plan, sha, op, rb)
         # server receipt time; the first attempt's only on an identical retry inside RETRY_WINDOW (N1)
-        received_at = self._op_now(op, sha)
+        received_at = plan.received_at if fresh else self._op_now(op, sha)
         if sub.posted_at > self.clock.now():
             raise PreconditionFailed(
                 f"posted_at {sub.posted_at.isoformat()} is in the future (server time {self.clock.now().isoformat()})")
@@ -542,14 +618,12 @@ class ZbcWorkflow:
             raise PreconditionFailed(
                 f"clip posted {sub.posted_at.isoformat()} is outside v{rb.version}'s live window; "
                 "declare the version that was live when it was made")
-        to_human: tuple[str, ...] = ()
-        grace = timedelta(hours=self.superseded_grace_hours)
-        if rb.superseded_at is not None and received_at - rb.superseded_at > grace:
-            to_human = (f"declared v{rb.version} was superseded at {rb.superseded_at.isoformat()}; this clip reached "
-                        f"us at {received_at.isoformat()}, beyond the {self.superseded_grace_hours}h grace window, and "
-                        "its posted_at is self-asserted — a human confirms which version it was made under",)
-        decision = clip_review.review(sub, rb, self.registry, received_at, decided_by=A_REVIEW,
-                                      received_at=received_at, route_to_human=to_human)
+        to_human = self._grace_route(rb, received_at)
+        if fresh and to_human == plan.to_human:
+            decision = plan.decision
+        else:
+            decision = clip_review.review(sub, rb, self.registry, received_at, decided_by=A_REVIEW,
+                                          received_at=received_at, route_to_human=to_human)
         # The id is bound to this content from the first attempt that reaches the ledger call on.
         self._submission_content[sub.submission_id] = sha
         self._record_op(op, sha, received_at, decision, "clip_reviewed", A_REVIEW, sub.submission_id,

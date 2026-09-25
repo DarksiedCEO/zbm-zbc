@@ -426,10 +426,18 @@ fast") and a respelled phrase split across any two fields go to a human;
 stacked respellings ("grnteed retunrs", "lose vvait fst") are caught (0/30
 auto-pass, was 9/30; false positives unchanged); a 99-phrase review of a
 50 KB transcript is ≤ 1.2 s CPU (was 5.9 s) — not bounded for the
-1,000-phrase lists the goal model admits (9 s; open decision).
+1,000-phrase lists the goal model admits (9 s; open decision). Fix wave 9:
+never-say phrases in any letter-like style (🅼🅰🅺🅴, 🅜🅐🅚🅔, 🇲🇦🇰🇪, math,
+fullwidth, small caps, super/subscript; a map generated from Unicode names)
+are rejected, styled text and text canonicalisation mostly strips are a
+human's call; any symbol in a never-say word's place (across line breaks
+and fields) goes to a human; Clip Review at 100 phrases ≤ 1.3 s CPU on the
+AEGIS generator (was 4.7 s) and runs off the workflow lock; retired rule
+ids are derived, not stored, and the rulebook list is paginated; 401
+before 415.
 
 ```bash
-cd services/creative-py && python3 -m pytest -q      # 641 tests
+cd services/creative-py && python3 -m pytest -q      # 664 tests
 export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
 export CREATIVE_ACTOR_TOKENS='{"<actor_id>": "<token>", ...}'   # per-actor credentials
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>
