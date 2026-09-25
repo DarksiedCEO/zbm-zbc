@@ -344,18 +344,24 @@ Every route except `/health` needs `Authorization: Bearer <token>`.
 ## Tests
 
 ```bash
-cd services/onboarding-py && python3 -m pytest -q     # 663 passed (fix wave 7, Sep 24 2026)
+cd services/onboarding-py && python3 -m pytest -q     # 670 passed (fix wave 8, Sep 24 2026)
 ```
 
 The live tests against the REAL ledger-rust (`test_fix_wave6.py`,
 `test_fix_wave7.py`) run by default: a session fixture (`ledger_bin`,
 `tests/conftest.py`) builds it with `cargo build --release --bin server`
-into `services/ledger-rust/target` (git-ignored; a warm build takes under a
-second), or uses the binary named by `ONBOARDING_LEDGER_RUST_BIN`. They skip
-only when cargo is not on PATH (or the named binary is missing), and then
-say so: `pytest.ini` sets `-rs`, so every skip's reason is in the summary
-(fix wave 7; before, they skipped silently). A failed build is a failure,
-not a skip. A run with cargo present shows 0 skipped.
+into `CARGO_TARGET_DIR` if set, else `services/ledger-rust/target` (both
+git-ignored; a warm build takes under a second), taking the artifact path
+from cargo's own `--message-format=json` output rather than guessing it
+(fix wave 8, N7-6: the guess ignored `CARGO_TARGET_DIR`, so the run failed
+with "exit 0" or silently used a stale binary), or uses the binary named
+by `ONBOARDING_LEDGER_RUST_BIN`. Cargo runs on every session, so a binary
+older than the sources is always rebuilt. They skip only when cargo is not
+on PATH (or the named binary is missing, or the only binary without cargo
+is older than the sources), and then say so: `pytest.ini` sets `-rs`, so
+every skip's reason is in the summary (fix wave 7; before, they skipped
+silently). A failed build is a failure, not a skip. A run with cargo
+present shows 0 skipped.
 
 Tests are organised by certification type:
 
@@ -371,6 +377,7 @@ Tests are organised by certification type:
 | `test_fix_wave5.py` | Fix wave 5 covers four findings. NEW-2: the CPU-time budget, one scan per clean string, busy as 503 not 422, and 12 concurrent max-size bodies on a real server. NEW-3: real-socket header, idle, partial-head, trickled-head and trickled-body probes against `python3 -m api`. NEW-4: `proceeded: "unknown"` on a lost reply, then a retry with no duplicate. LOW-E: a future DOB. | 47 |
 | `test_fix_wave6.py` | Fix wave 6 (AEGIS round 5). N6: only ledger-rust's exact shed body is "not recorded", any other 5xx is unknown, the rule matches creative-py and `server.rs`; live against the REAL ledger-rust (`LEDGER_MAX_CONNECTIONS=1` shed, and an intermediary's 503 that hid a real append). N4: the weighted `ScanAdmission` (cost floor and cap, waiters, no over-admission in-process) and the live 40x58 KB flood with `/health` and light-GET bounds. Facts caps: 409 past the cap with nothing stored, latest-N per field, bounded cost over 30 large submissions. The live tests use the ledger-rust binary the `ledger_bin` fixture builds (see above). | 24 |
 | `test_fix_wave7.py` | Fix wave 7 (AEGIS round 6). NEW-5: the small lane (config, routing, a tiny message answered while the large lane is held and its queue full, no 503 for small bodies under a large flood, the large lane held through the handler and no redaction under the service lock, one scan per string per request, the launcher's switch interval) and, live against the real ledger-rust, the `onb_serial6` scenario with 1 / 4 / 12 uploaders (small p50 < 50 ms, none 503) and 4 concurrent 416 KB bodies still serialized. NEW-6: a correction to a field at its history limit accepted at the cap, the boundary of the post-trim count, refusals still cheap. Skips: the binary is built by the fixture and a skip's reason is printed. | 16 |
+| `test_fix_wave8.py` | Fix wave 8 (AEGIS round 7). N7-6: the ledger-rust fixture resolves the binary from cargo's reported artifact path: `CARGO_TARGET_DIR` set with no binary at the crate's default path, `CARGO_TARGET_DIR` set with a stale binary planted at the default path (not used), a source change after the build rebuilds, `CARGO_TARGET_DIR` unset uses the crate default, without cargo a fresh binary under `CARGO_TARGET_DIR` is used and one older than the sources is a printed skip, a broken crate fails with cargo's error (never "exit 0"). Driven in a fresh interpreter against a copy of the crate in pytest's temp dir. | 7 |
 | `test_unit_*.py` | Unit tests | 84 |
 | `test_auth_and_entrypoint.py` | Auth, docs, real-socket bind | 14 |
 

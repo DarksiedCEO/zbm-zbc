@@ -23,7 +23,8 @@ T         the per-pattern timing tests were flaky under machine load: bounds
 The live tests (``real_stack``) run ``python3 -m api`` against the REAL
 ledger-rust binary: the ``ledger_bin`` session fixture (conftest.py, fix
 wave 7) uses ONBOARDING_LEDGER_RUST_BIN if set, else builds it with cargo
-into services/ledger-rust/target; only a missing cargo skips them, with a
+(into CARGO_TARGET_DIR or services/ledger-rust/target, at the path cargo
+reports — fix wave 8, N7-6); only a missing cargo skips them, with a
 reason that ``-rs`` prints (they used to skip silently).
 """
 
