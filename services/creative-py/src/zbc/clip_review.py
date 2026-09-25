@@ -61,7 +61,18 @@ NS  no never-say phrase in ANY text field (bio included)   -> reject
     fix wave 7: a vowel-drop or phonetic respelling — the phrase's
     consonant skeleton ("mk mny", "grnteed rtrns") or its words' phonetic
     keys ("phree money", "get ritch", "kno risque") -> human_review,
-    shared/text.skeleton_near_miss / phonetic_near_miss)
+    shared/text.skeleton_near_miss / phonetic_near_miss;
+    fix wave 8 (AEGIS round 7): a stacked respelling — vowel drop +
+    homophone + lookalike ("grnteed retunrs", "lose vvait fst", "mk
+    rnunny") -> human_review (the pairs rn/m cl/d vv/w read alike before
+    the consonant and phonetic signals; two signals each nearly accepting
+    the same window, shared/text.stacked_near_miss); a symbol standing
+    for a word ("make 💰", "make $$$ fast", "free 💸", "guaranteed 📈",
+    "get 💎 quick"; shared/text.SYMBOL_LEXICON / symbol_stand_in) ->
+    human_review; and a phrase SPREAD over ANY ordered pair of fields is
+    judged by every signal, respelled halves included ("gt" in the
+    caption + "ritch" in the bio) -> human_review (N7-5; the fields are
+    joined by a line break, a token boundary, not a hard wall))
 MIX any word mixing letters with symbols/digits in any text field
     (shared/text.mixed_symbol_words; ordinary
     punctuation, #hashtags, prices and "2nd"/"1990s"-style numbers excepted)
@@ -80,6 +91,8 @@ MD  min days live is NOT judged here (Verification and Integrity).
 
 from __future__ import annotations
 
+import functools
+import unicodedata
 from datetime import datetime
 from typing import Literal
 
@@ -87,20 +100,28 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 
 from shared.registry import PlatformRulesRegistry
 from shared.text import (
-    ADJACENCY_GAP,
+    READINGS,
+    SYMBOL_LEXICON,
     PhraseMatch,
+    _osa_within,
+    _vis,
     canonical,
+    consonant_skeleton,
     contains_phrase,
     match_phrase,
     mixed_symbol_words,
     near_miss,
     non_latin_letters,
     obfuscation_signals,
+    phonetic_key,
     phrase_words_in_order,
+    relaxed_skeleton_spans,
+    relaxed_visual_spans,
     skeleton_near_misses,
-    word_key,
+    stacked_or_symbol,
     visual_lookalike_exact,
     visual_near_misses,
+    word_key,
 )
 from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
 from zbc.platform_rules import rows_usable
@@ -208,49 +229,102 @@ def make_decision(rb: Rulebook, **data) -> ClipReviewDecision:
 BOUNDARY_WORDS = 8  # words read together across two fields: the longest never-say phrase plus the adjacency gap
 
 
-def _said(text: str, phrase: str) -> bool:
-    """The phrase's words are there: exact, split / leet-folded, or in order
-    within the adjacency policy. (Not the similarity signals: a near miss
-    that only exists across a field boundary — "clips daily" + "proven
-    by" — is not a phrase spread over two fields.)"""
-    return match_phrase(text, phrase) is not PhraseMatch.NONE or phrase_words_in_order(text, phrase) is not None
+def _mentions(text: str, phrase: str, fuzzy: bool) -> bool:
+    """The phrase is there by ANY never-say signal: exact, split / leet-folded,
+    in order within the adjacency policy, or any similarity signal
+    (symbols, visual, skeleton, phonetic, stacked, a symbol for a word)."""
+    return (match_phrase(text, phrase) is not PhraseMatch.NONE or phrase_words_in_order(text, phrase) is not None
+            or near_miss(text, phrase, fuzzy) is not None)
+
+
+EDGE_TOKEN_CHARS = 64  # a token longer than this ends a field edge (fix wave 8, N7-7)
 
 
 def _field_edges(sub: ClipSubmission, n: int = BOUNDARY_WORDS) -> dict[str, tuple[list[str], list[str]]]:
-    """Per non-empty text field: (its first n canonical tokens, its last n)."""
+    """Per non-empty text field: (its first n canonical tokens, its last n).
+    An edge stops at a token of more than EDGE_TOKEN_CHARS characters (fix
+    wave 8, N7-7: a field that is one 50,000-letter "word" made every
+    field joint 50 KB, scanned per phrase — 4.5 s): no signal reads a
+    phrase across such a token (a window starts at a token start), so the
+    words beyond it cannot be part of a phrase spread over the boundary."""
     edges = {}
     for f in TEXT_FIELDS:
         toks = canonical(getattr(sub, f)).split()
         if toks:
-            edges[f] = (toks[:n], toks[-n:])
+            head, tail = toks[:n], toks[-n:]
+            long_h = [i for i, t in enumerate(head) if len(t) > EDGE_TOKEN_CHARS]
+            long_t = [i for i, t in enumerate(tail) if len(t) > EDGE_TOKEN_CHARS]
+            head = head[:long_h[0]] if long_h else head
+            tail = tail[long_t[-1] + 1:] if long_t else tail
+            edges[f] = (head, tail)
     return edges
 
 
-def _spread_over_fields(edges: dict[str, tuple[list[str], list[str]]], phrase: str) -> tuple[str, str, str] | None:
-    """(field a, field b, the words) if the multi-word `phrase`'s words are
-    said only by the last words of field a read together with the first
-    words of field b, for any ordered pair of distinct text fields — a
-    phrase spread over two fields ("get" in the caption, "rich" in the
-    bio), whichever order the fields are in. Bounded: at most
-    BOUNDARY_WORDS words a side; a pair is only read when a's tail has the
-    phrase's first word and b's head its last."""
-    pwords = canonical(phrase).split()
-    if len(pwords) < 2:
-        return None
-    n = min(BOUNDARY_WORDS, len(pwords) + ADJACENCY_GAP)
-    first, last = word_key(pwords[0]), word_key(pwords[-1])
+def _field_joints(edges: dict[str, tuple[list[str], list[str]]]) -> list[tuple[str, str, str, str, str]]:
+    """Every ORDERED pair (a, b) of distinct non-empty text fields, read
+    across the boundary: (a, b, a's tail, b's head, tail + head). Fix
+    wave 8 (AEGIS round 7, N7-5): the fields used to be adjacent only in
+    model order (caption, on-screen text, transcript, bio), so "gt" in the
+    caption + "ritch" in the bio passed while the same halves in the
+    caption + on-screen text went to a human. Bounded: BOUNDARY_WORDS a
+    side, at most 12 pairs."""
+    out = []
     for a, (_, tail) in edges.items():
-        tail = tail[-n:]
-        if not any(word_key(t) == first for t in tail) or _said(" ".join(tail), phrase):
-            continue  # the phrase cannot start here; or is said inside field a (already judged)
         for b, (head, _) in edges.items():
-            head = head[:n]
-            if a == b or not any(word_key(t) == last for t in head) or _said(" ".join(head), phrase):
-                continue
-            joint = " ".join(tail + head)
-            if _said(joint, phrase):
-                return a, b, joint
-    return None
+            if a != b:
+                out.append((a, b, " ".join(tail), " ".join(head), " ".join(tail + head)))
+    return out
+
+
+@functools.lru_cache(maxsize=65536)
+def _close(token: str, word: str) -> bool:
+    """`token` could be `word` under SOME never-say signal: the same once
+    lookalike pairs are read alike, the same consonant skeleton or sound
+    (as written or with the pairs contracted), one letter edit away, or
+    carrying a symbol / digit (a stand-in). A cheap pre-filter: a joint
+    is only scanned for a phrase when its tail holds a token close to
+    the phrase's first word and its head one close to its last."""
+    if not token.isalpha():
+        if token[0] in "#@":
+            return False  # a tag or a number is not a word of the phrase
+        if any(c.isalpha() for c in token):
+            return True  # letters mixed with symbols / digits: a symbol may stand for a letter
+        return any(c in SYMBOL_LEXICON or unicodedata.category(c) == "So" for c in token)  # a symbol run
+    return (word_key(token) == word_key(word)
+            or any(consonant_skeleton(_vis(token, v)) == consonant_skeleton(_vis(word, v))
+                   or phonetic_key(_vis(token, v)) == phonetic_key(_vis(word, v)) for v in READINGS)
+            or _osa_within(token, word, 1) is not None)
+
+
+def _spreads(joints: list[tuple[str, str, str, str, str]],
+             phrases: list[tuple[str, bool]]) -> dict[tuple[str, bool], tuple[str, str, str]]:
+    """{(phrase, fuzzy): (field a, field b, the words)} for each multi-word
+    phrase said — by any signal, `_mentions` — only by the last words of
+    field a read together with the first words of field b, for some
+    ordered pair of distinct text fields (the first such pair in
+    `joints` order): a phrase spread over two fields, exactly ("get" in
+    the caption, "rich" in the bio) or respelled ("gt" + "ritch"),
+    whichever order the fields are in. Joint by joint, the phrases that
+    pass the `_close` pre-filter are scanned in ONE batch per text (fix
+    wave 8, N7-7)."""
+    out: dict[tuple[str, bool], tuple[str, str, str]] = {}
+    words = {key: canonical(key[0]).split() for key in phrases}
+    for a, b, tail, head, joint in joints:
+        tail_toks, head_toks = tail.split(), head.split()
+        cands = [key for key in phrases if key not in out and len(words[key]) >= 2
+                 and any(_close(t, words[key][0]) for t in tail_toks)
+                 and any(_close(t, words[key][-1]) for t in head_toks)]
+        if not cands:
+            continue
+        batch = tuple(cands)
+        for text in (joint, tail, head):
+            visual_near_misses(text, batch)
+            skeleton_near_misses(text, batch)
+        for key in cands:
+            phrase, fuzzy = key
+            if _mentions(joint, phrase, fuzzy) and not _mentions(tail, phrase, fuzzy) and not _mentions(head, phrase, fuzzy):
+                out[key] = (a, b, joint)
+    return out
 
 
 def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, now: datetime,
@@ -265,7 +339,9 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
     borderline: list[str] = []
     checks: list[str] = []
     clip_text = " ".join(getattr(sub, f) for f in CLIP_TEXT_FIELDS)
-    all_text = " ".join(getattr(sub, f) for f in TEXT_FIELDS)
+    # the fields as one text, in model order, joined by a line break: a token boundary for every
+    # stream gate (the phrase's letters never cross it mid-word) and a stop for the symbol rule
+    all_text = "\n".join(getattr(sub, f) for f in TEXT_FIELDS)
     edges = _field_edges(sub)
 
     def fail(rule_id: str, reason: str) -> None:
@@ -351,6 +427,7 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
     # never-say phrase at once (fix wave 6, N1; fix wave 7, NEW-7 / the skeleton scan)
     visual_near_misses(all_text, tuple((p, fz) for _, p, fz in never))
     skeleton_near_misses(all_text, tuple((p, fz) for _, p, fz in never))
+    unmatched: list[tuple] = []
     for r, phrase, fz in never:
         checks.append(r.rule_id)
         m = match_phrase(all_text, phrase)
@@ -364,14 +441,26 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
         elif m is PhraseMatch.LOOSE:
             borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with split/obfuscated letters")
         else:
-            how = near_miss(all_text, phrase, fz)
+            how = near_miss(all_text, phrase, fz, stacked=False)
             if how:
                 borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with {how}")
             else:
-                spread = _spread_over_fields(edges, phrase)
-                if spread:
-                    borderline.append(f"{r.rule_id}: possible never-say {phrase!r} spread over {spread[0]} and "
-                                      f"{spread[1]} ({spread[2][:60]!r})")
+                unmatched.append((r, phrase, fz))
+    # the phrases no signal caught: the stacked rule (its relaxed scans batched, fix wave 8 class B),
+    # a symbol standing for a word (N7-4), then the phrase spread over two fields (N7-5)
+    if unmatched:
+        relaxed_visual_spans(all_text, tuple((p, fz) for _, p, fz in unmatched))
+        relaxed_skeleton_spans(all_text, tuple((p, fz) for _, p, fz in unmatched))
+        spreads = _spreads(_field_joints(edges), [(p, fz) for _, p, fz in unmatched])
+        for r, phrase, fz in unmatched:
+            how = stacked_or_symbol(all_text, phrase, fz)
+            if how:
+                borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with {how}")
+                continue
+            spread = spreads.get((phrase, fz))
+            if spread:
+                borderline.append(f"{r.rule_id}: possible never-say {phrase!r} spread over {spread[0]} and "
+                                  f"{spread[1]} ({spread[2][:60]!r})")
 
     for field_name in TEXT_FIELDS:
         for sig in obfuscation_signals(getattr(sub, field_name)):

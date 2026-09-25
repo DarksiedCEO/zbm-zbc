@@ -717,6 +717,190 @@ money. ZBC's unit of work is a campaign, not a clip.
     (decision 14): a bio is searched for the rulebook's phrases, never
     interpreted.
 
+28. **The JSON shape gate covers every JSON content type; anything else
+    is 415 unread (fix wave 8; AEGIS round 7, N7-1).** The pre-scan of
+    decision 23 gated on the exact `application/json` while FastAPI
+    parses every `application/*+json` body, so `application/hal+json`
+    with 60,000 keys reached the framework (60,001 validation errors,
+    `/health` 3.7 s under 20 senders, RSS 590 MB never released). Now
+    `api.is_json_content_type` makes the decision with the same parser
+    FastAPI uses (`email.message`: main type `application`, subtype
+    `json` or `<x>+json`, parameters and case ignored; a fuzz test
+    checks the two agree on 2,000 random content types) and every such
+    body is pre-scanned; a body under any other content type, or under
+    none, is refused 415 — before it is read when its length or chunked
+    encoding is declared. After a body of 64 KiB or more has been parsed
+    and no other large body is in flight, `malloc_trim(0)` hands the
+    freed pages back after one idle second, off the event loop (the
+    fulfillment-py fix of wave 7). Sweep: no other content-type decision
+    exists in the service (a test greps for one).
+
+29. **Rule ids have room for the model (fix wave 8; N7-3).** Ids were
+    `XX-NN` (01–99) while a goal admits 1,000 never-say and 100 must-say
+    entries: the 100th never-say entry was a 500, and because retired
+    ids are never reused (decision 10) a campaign that churned its list
+    wedged at NS-100 after a few revisions. The id is now `XX-` + a
+    decimal number of two to nine digits with no other leading zero
+    (`NS-01` … `NS-99`, `NS-100`, `NS-1000`; `rulebook.RULE_ID_PATTERN`,
+    `parse_rule_number`, `format_rule_id`): every id ever issued is
+    unchanged and parses; ids stay stable across revisions; the next
+    number per prefix is computed once per revision over the ids ever
+    used, and the retired list is appended to, never re-sorted. A test
+    builds the maximal legal rulebook (1,000 never-say, 100 must-say, 20
+    angles × 100 keywords, 50 targets) and revises it 200 times replacing
+    every entry (NS-201000, 220,000 retired ids; 25-46 s in total on the
+    2-CPU test machine, linear in the ids ever used) and a fuzz
+    drafts and revises random model-legal goals through the model and
+    the API without a 500. The fuzz found a second defect: a target
+    listed twice produced two identical spec rules, which `revise()`
+    mapped onto one old id (duplicate ids, a 500) — targets are now
+    de-duplicated and each old rule is matched at most once. The
+    number scan reads only well-formed ids (`RULE_ID_PATTERN`), so an
+    odd string in a stored retired list cannot raise.
+
+30. **A symbol standing for a phrase word is a human's call (fix wave 8;
+    N7-4).** `canonical()` turns every symbol into a space, so "make 💰",
+    "make $$$ fast", "free 💸", "guaranteed 📈", "get 💎 quick" were
+    simply a phrase missing a word: pass. `shared/text.SYMBOL_LEXICON` is
+    a bounded, documented map of the pictographs and symbol runs that
+    stand for a concept in marketing text (money bag, banknotes, money
+    with wings, money-mouth face, coin, bank, card, `$` `€` `£` `¥` and
+    their runs → money / cash / rich / profit / income / returns; gem
+    and crown → rich / wealth; chart, rocket → growth / returns / gains;
+    lock, check marks, 💯 → guaranteed / proven; 🆓 → free; 🚫 ❌ → no /
+    zero; pill → cure; stethoscope, ⚕ → doctor; microscope → clinically
+    / proven; scale → weight; moon, sleep → overnight; ...). A never-say
+    phrase whose words appear in order (adjacency policy) with one or
+    more stood in by a lexicon symbol whose concepts include that word
+    is a human's call (`symbol_stand_in`); so is any OTHER pictograph
+    that OCCUPIES a phrase word's place — between the phrase's words
+    ("get 🍕 quick") or closing the statement ("guaranteed 🎯": nothing
+    but a hashtag, a symbol, a line break or the end after it). Either
+    way at least one CONTENT word of the phrase must be written: symbols
+    alone ("$ $", "💸 💸", "🎉 $") say no phrase (an unverified draft of
+    this wave read "$ $" as every money phrase — 7 reasons on the round-7
+    50 KB symbols transcript). Decided boundary: an unknown pictograph
+    followed by an ordinary word illustrates that word ("Get 🎟 tickets",
+    "Free 🚚 shipping", "Make 🎄 memories" — 16 of 30 ordinary emoji
+    captions written for this wave would otherwise go to a human) and is
+    not a stand-in; a fragment of function words alone ("no 🎯", "your
+    💰") is not; a currency sign attached to digits ("$20", "20$",
+    "$40k") is a price; a run of symbols is one symbol; the rule never
+    reads across a line break (Clip Review joins the text fields with
+    one). Measured: 0 of 616 corpus captions flagged (the corpora have
+    no emoji); 2 of the 30 emoji captions, both lexicon hits a human
+    should see ("Get 💸 back on every referral", "Make 💰 moves this
+    quarter"). "💰 make" (the words in the other order) is not caught,
+    like "rich get" (decision 22).
+
+31. **Every ordered pair of fields is read across its boundary with
+    every signal (fix wave 8; N7-5).** The fields were adjacent only in
+    model order (caption, on-screen text, transcript, bio), so "gt" in
+    the caption + "ritch" in the bio passed while the same halves in the
+    caption + on-screen text went to a human. Now the fields are joined
+    by a line break (a token boundary for every stream gate, never a
+    hard wall) and, for a phrase no signal found in the whole text, the
+    last eight words of each field are read together with the first
+    eight of each other field, in both orders (`_field_joints`, at most
+    12 pairs), with every never-say signal (`_mentions`: exact, split,
+    in order, symbols, visual, skeleton, phonetic, stacked, symbol
+    stand-in); a phrase said only across a boundary is a human's call
+    naming both fields. A joint is only scanned for the phrases whose
+    first word has a close token in its tail and whose last word has one
+    in its head (`_close`: same word once pairs are read alike, same
+    consonant skeleton or sound, one edit away, or a mixed word), in one
+    batch per text (`_spreads`), which keeps "clips daily" + "proven by
+    ..." out (nothing in "clips daily" is close to "clinically"). An edge
+    stops at a token of more than 64 characters (`EDGE_TOKEN_CHARS`):
+    no signal reads a phrase across such a token, and an unverified
+    draft that read a 50,000-letter one-word transcript into every joint
+    spent 4.5 s per review. A #hashtag
+    or @mention is not a word of the phrase: the consonant gate gives
+    it an empty skeleton, so "pssv #ad incum" is "passive income" with
+    the disclosure tag between the halves. Measured: 0 of 300 random
+    corpus caption pairs (caption + bio) flagged as a spread; the 13
+    AEGIS class-C pairs are a human's call in five field arrangements.
+
+32. **Stacked respellings (fix wave 8; AEGIS round 7 class B, 9 of 30
+    passed).** "grnteed retunrs", "overnlte sccss", "lose vvait fst",
+    "mk rnunny" — a vowel drop, a homophone and a lookalike in one
+    phrase — were outside every single signal's budget. Root causes:
+    (a) the skeleton signal's vowel-drop evidence skipped the very token
+    whose skeleton equalled the word's ("grnteed"), so a window with one
+    respelled word and one dropped word had "no evidence" — every token
+    that dropped vowels and kept its consonants now counts (an
+    inflection, "recommend" for "recommended", does not); (b) the
+    consonant and phonetic signals read the letters as written, so "rn"
+    in "rnunny" and "vv" in "vvait" were consonants — each token is now
+    read as written AND with rn/m, cl/d, vv/w contracted (`READINGS`;
+    the phrase's words read the same way each time, since a genuine rn
+    or cl — "grnteed", "miracle" — must keep matching as written); (c) a
+    two-consonant skeleton cannot keep 60% of its letters after one edit
+    ("lz" for "ls"), so the signal proper tolerates one edit there when
+    the window shows a vowel drop AND the token sounds like the word
+    ("luze" / "lose"; "made" / "money" do not — without the sound check
+    "fragrance free, made in small batches" was "free money"). And, as
+    required, `stacked_near_miss`:
+    when two of the three similarity signals (visual, consonant
+    skeleton, phonetic key) each score within their budget + 1 on the
+    SAME token window, and the window shows respelling evidence (a
+    vowel drop that kept its consonants, a lookalike pair or an l for an
+    i the phrase word lacks), the window is a human's call even if no
+    signal alone is within budget ("ovrnlte success": three letter edits
+    against a budget of two, two skeleton edits without a vowel drop,
+    one key edit). The relaxed windows come from the same packed scans
+    (the scan reports a lower-bound distance per hit; relaxed candidates
+    are confirmed only while a bounded budget remains and the phrase has
+    not been found exactly); the strict letter share holds on relaxed
+    windows ("mn" is not "mk": "myth money", "money money" and "more
+    money" are not "make money"; "target rich" and "doctors recommend"
+    show no respelling). The relaxed windows are bounded per phrase (32
+    relaxed scan hits, 16 spans): a text with more decoy windows within
+    budget + 1 before the real one can hide it from the stacked rule
+    (not from the single signals). Measured: class B 0 of 30 auto-pass
+    (round 7: 9; the root causes (a)-(c) catch all nine, the stacked
+    rule alone adds "ovrnlte success"); `ns_evade7.py` 20 of 297 = 6.7%
+    auto-pass (round 7: 48 = 16.2%), the rest being the documented
+    inflections / paraphrases (H 14: "getting rich", "cures", "zero
+    risk"), I 4 ("get rij", "get ridge", "make mummy", "lose whey
+    fast"; unchanged), K 1 ("on rsk") and M 1 ("💰 make"); the
+    never-say gate's false positives are unchanged from wave 7 at 0.0% /
+    0.0% / 2.7% / 2.1% on corpus7 / corpus6 / the round-5 corpus / the
+    implementer corpus.
+
+33. **Clip Review cost is bounded for the finding's case (fix wave 8;
+    N7-7).** 99 never-say phrases against a 50 KB vowel-dropped
+    transcript cost 5.9 s of CPU under the serialised workflow lock (the
+    AEGIS `ns_cost7b.py` probe). The per-phrase loop rebuilt views of
+    the whole text for every phrase. Now: every per-text view is built
+    once per distinct text and shared by every phrase (`_span_index`,
+    `_leet_view`, `_folded_words`, `_word_keys`, `_key_positions`,
+    `_run_starts`; a separate cache for phrase streams); ASCII text
+    skips the Unicode normalisation (a test proves the same result for
+    every ASCII character); the bit-parallel scan carries a strict and a
+    relaxed budget per pattern and a live mask the consumer clears for a
+    phrase that is decided (read as the phrase, found within budget, or
+    out of relaxed budget), so a decided phrase stops costing; a view
+    whose stream equals an earlier one scans only patterns it has not
+    seen; a hit that cannot beat the closest window found (the scan's
+    distance is a lower bound) is skipped; one DP per hit gives the
+    distance of every candidate start (`_osa_suffixes`, checked against
+    the per-window DP); field edges stop at a giant token (decision 31).
+    Measured on the 2-CPU test machine, CPU time of one review with
+    every cache cleared, best of three, 99 phrases: plain / symbols /
+    vowel-dropped / emoji 50 KB 0.45 / 0.61 / 1.05 / 0.55 s, and four
+    adversarial transcripts written for this wave (consonant soup,
+    lookalike pairs everywhere, one 50,000-letter word, the phrases run
+    together without vowels) 0.88-1.07 s; worst 1.14 s (a test asserts
+    ≤ 1.5 s for all eight, with and without an exact phrase present).
+    `ns_cost7b.py` (one run, wall clock): 99 phrases 0.47 / 0.62 / 1.11
+    s (round 7: 0.92 / 1.03 / 5.86 s). NOT bounded: the goal model
+    admits 1,000 never-say entries (of up to 4,000 characters each), and
+    the cost is linear in the phrases' total length — 150 / 250 / 500 /
+    1,000 three-word phrases against the vowel-dropped 50 KB transcript
+    cost 1.7 / 2.4 / 4.3 / 9.1 s. Capping the list (or moving review off
+    the workflow lock) is a contract decision left open (Honest gaps).
+
 ## Shared vs separate
 
 Shared (reference data and plumbing, `src/shared/`): the Platform Rules
@@ -852,17 +1036,32 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     stacks a transposition on other edits in a 2–4 letter word ("nu
     riks") can pass (0.7–1.8% of this wave's stacked generator), and
     inflections / paraphrases ("getting rich") are not lookalikes and
-    are not caught. A JSON body may carry at most the members its
+    are not caught (fix wave 8: stacked respellings are, decision 32;
+    the phrase's words in another order, "💰 make", still are not). A
+    JSON body may carry at most the members its
     route's model admits plus 25% (decision 23; 12,544 for a Moment Map)
     and nest 32 deep. The symbol near-miss matcher is word-by-word (a phrase split across
     words AND written with symbols is caught by the mixed-word rule, not
-    by the phrase). Script detection is
+    by the phrase); a never-say word inside a hashtag ("get #rich") is a
+    human's call (a symbol in the word), not a reject. The symbol
+    lexicon (decision 30) is a bounded list: a pictograph it does not
+    know is read only where it occupies a phrase word's place, so an
+    unknown emoji followed by an ordinary word ("make 🤞 today") passes.
+    Script detection is
     by Unicode character name (Python has no Script property). RLO text
     is flagged, not un-reversed. Costs: every clip with any non-Latin
     letter (a Spanish-only "ñ" is Latin and fine; a Russian word, a
     Japanese title, a Greek µ in "µs") goes to the human queue, as do
     emoji keycaps ("1️⃣"), soft hyphens inside words and four or more
     single letters in a row.
+16. **Review cost with a long never-say list (fix wave 8, open).** A
+    goal may list 1,000 never-say entries of up to 4,000 characters; the
+    review cost is linear in their total length (9.1 s of CPU for 1,000
+    three-word phrases against a 50 KB transcript, under the serialised
+    workflow lock), so a campaign with a long list plus a clipper sending
+    long transcripts can hold the service. Open item for Andre: cap the
+    never-say list (about 100 phrases keeps a review near 1 s), or move
+    Clip Review off the workflow lock.
 
 ## Verified
 

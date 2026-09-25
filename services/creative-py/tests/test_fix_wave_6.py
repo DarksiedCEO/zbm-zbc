@@ -487,13 +487,16 @@ def test_n1_bit_parallel_scan_matches_the_reference_osa():
         ST = bytes(1 if p == 0 or rng.random() < 0.3 else 0 for p in range(n + 1))
         EN = bytes(1 if p == n or rng.random() < 0.3 else 0 for p in range(n + 1))
         pack = _Pack(pats)
-        got = {(j, i) for j, i in pack.scan(S, ST, EN)}
+        # fix wave 8: each hit also carries the scan's distance (the relaxed-start lower bound)
+        got = {(j, i): d for j, i, d in pack.scan(S, ST, EN)}
         for j in range(1, n + 1):
             if not EN[j]:
                 continue
             for i, (p, k) in enumerate(pats):
                 best = min((0 if ST[s] else 1) + ref_osa(p, S[s:j]) for s in range(0, j + 1))
                 assert ((j, i) in got) == (best <= k), (trial, S, ST, EN, pats, j, i, best)
+                if (j, i) in got:
+                    assert got[(j, i)] == best, (trial, S, ST, EN, pats, j, i, best, got[(j, i)])
         # the exact confirmation used on a hit agrees with the reference too
         for p, k in pats:
             for s in range(n):

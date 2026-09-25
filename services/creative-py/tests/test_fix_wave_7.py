@@ -90,8 +90,13 @@ AEGIS_BIO = [
     ({"caption": "get", "account_bio": "rich"}, "human_review"),        # spread over two fields: a human's call
     ({"caption": "rich", "on_screen_text": "get"}, "human_review"),      # ... in either order
     ({"on_screen_text": "get", "account_bio": "rich"}, "human_review"),
-    ({"caption": "make", "account_bio": "mny"}, "pass"),                # a spread is the phrase's WORDS, not a respelling
-    ({"caption": "Proven by 3 years of daily use, not a lab", "account_bio": "Clips daily"}, "pass"),  # not "clinically proven"
+    # fix wave 8 (AEGIS round 7, N7-5): a phrase spread over two fields is judged by EVERY signal, so a
+    # respelled half in each field is a human's call (was "pass": only the exact words counted)
+    ({"caption": "make", "account_bio": "mny"}, "human_review"),
+    # ... but a joint is only read when the tail holds something close to the phrase's first word: "clips
+    # daily" has nothing close to "clinically", so the stream's 3-edit window "clips daily proven" is not
+    # a spread (still "pass", as ADR 0005 decision 27 wanted)
+    ({"caption": "Proven by 3 years of daily use, not a lab", "account_bio": "Clips daily"}, "pass"),
     ({"caption": "hello", "account_bio": "mk mny with my link"}, "human_review"),
     ({"caption": "hello", "account_bio": "Guarantеed returns"}, "reject"),        # Cyrillic е: folded, exact
     ({"caption": "hello", "account_bio": "make rnoney"}, "reject"),                    # rn for m: reads as the phrase

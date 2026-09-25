@@ -418,10 +418,18 @@ vowel-drop ("mk mny") and phonetic ("phree money") respellings go to a
 human (consonant-skeleton and phonetic-key signals; 0.0% / 2.7% / 2.1%
 false positives on three corpora); the per-word share rule is a 60%
 letter share, never a hard cap; every text field, the bio included, is
-scanned by every prohibiting rule.
+scanned by every prohibiting rule. Fix wave 8: the JSON shape gate covers
+every `application/*+json` content type and anything else is 415 unread;
+rule ids have room for the model (`NS-100`, `NS-1000`, ...; two-digit ids
+unchanged); a symbol standing for a never-say word ("make 💰", "make $$$
+fast") and a respelled phrase split across any two fields go to a human;
+stacked respellings ("grnteed retunrs", "lose vvait fst") are caught (0/30
+auto-pass, was 9/30; false positives unchanged); a 99-phrase review of a
+50 KB transcript is ≤ 1.2 s CPU (was 5.9 s) — not bounded for the
+1,000-phrase lists the goal model admits (9 s; open decision).
 
 ```bash
-cd services/creative-py && python3 -m pytest -q      # 557 tests
+cd services/creative-py && python3 -m pytest -q      # 641 tests
 export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
 export CREATIVE_ACTOR_TOKENS='{"<actor_id>": "<token>", ...}'   # per-actor credentials
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>

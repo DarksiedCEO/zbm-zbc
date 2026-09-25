@@ -78,6 +78,20 @@ JSON body with more members than its route's model can legally hold
 (`route_member_limits`, fix wave 7 NEW-1; fix wave 6 had one 4,096 cap,
 which refused a legal Moment Map) or nested deeper than MAX_JSON_DEPTH is
 refused in a worker thread before the framework sees it.
+
+Content types (fix wave 8, AEGIS round 7 N7-1): the shape pre-scan gated
+on the exact `application/json` while FastAPI parses every
+`application/*+json` body, so `application/hal+json` with 60,000 keys
+reached the framework (60,001 validation errors, /health 3.7 s under 20
+senders, RSS never released). Now `is_json_content_type` decides with the
+SAME parser FastAPI uses (email.message: main type `application`, subtype
+`json` or `<x>+json`, parameters and case ignored): every such body is
+pre-scanned; a body under any OTHER content type, or with none, is
+refused 415 — with a declared length or chunked encoding BEFORE the body
+is read. After a body of LARGE_BODY_BYTES or more has been parsed and no
+other large body is in flight, freed heap pages are handed back to the OS
+(`malloc_trim(0)` after TRIM_IDLE_S, off the event loop; the same fix as
+fulfillment-py's fix wave 7).
 """
 
 from __future__ import annotations
@@ -170,6 +184,9 @@ ERROR_OFFLOAD_ABOVE = 1000   # validation errors: build the body off the event l
 # DEFAULT_JSON_MEMBERS. The depth cap is unchanged.
 DEFAULT_JSON_MEMBERS = 64
 MAX_JSON_DEPTH = 32
+# Heap trim after large parses (fix wave 8, N7-1; see the module docstring).
+LARGE_BODY_BYTES = 64 * 1024
+TRIM_IDLE_S = 1.0
 
 # Path ids are validated BEFORE any work (integration defect 2): a campaign
 # id is at most 100 characters so every derived ledger subject
@@ -334,21 +351,64 @@ def route_member_limits(app: FastAPI) -> list[tuple[frozenset[str], "re.Pattern[
     return out
 
 
+def is_json_content_type(value: bytes | str | None) -> bool:
+    """Would FastAPI parse a body under this Content-Type as JSON? The same
+    decision, made with the same parser (email.message, as
+    fastapi.routing does): main type `application` and subtype `json` or
+    `<x>+json`; parameters (charset, q) and case are ignored. None / empty
+    -> False (FastAPI's strict mode does not parse a body with no type)."""
+    if not value:
+        return False
+    import email.message
+
+    msg = email.message.Message()
+    msg["content-type"] = value.decode("latin-1") if isinstance(value, bytes) else value
+    return msg.get_content_maintype() == "application" and (
+        msg.get_content_subtype() == "json" or msg.get_content_subtype().endswith("+json"))
+
+
+def _libc():
+    try:
+        import ctypes
+
+        return ctypes.CDLL("libc.so.6")
+    except OSError:
+        return None
+
+
+_LIBC = _libc()
+
+
+def _malloc_trim() -> None:
+    """Return freed heap pages to the OS (fix wave 8, N7-1). glibc only; a
+    no-op elsewhere."""
+    try:
+        _LIBC.malloc_trim(0)
+    except AttributeError:
+        pass
+
+
 class BodyLimit:
     """ASGI middleware: refuse a request head over `max_head` bytes (431), a
-    body over `limit` bytes (413) before any of it reaches the JSON parser,
-    a body not delivered within `read_timeout` seconds in total (408), and
-    a JSON body over the route's member cap (`member_limits`, from
-    `route_member_limits`; DEFAULT_JSON_MEMBERS for any other path) or the
-    depth limit (`json_shape_violation`, fix wave 6, N2 / fix wave 7,
-    NEW-1 — checked in a worker thread)."""
+    body under a content type FastAPI would not parse as JSON (415, before
+    the body is read when its length or chunking is declared; fix wave 8,
+    N7-1), a body over `limit` bytes (413) before any of it reaches the
+    JSON parser, a body not delivered within `read_timeout` seconds in
+    total (408), and a JSON body over the route's member cap
+    (`member_limits`, from `route_member_limits`; DEFAULT_JSON_MEMBERS for
+    any other path) or the depth limit (`json_shape_violation`, fix wave
+    6, N2 / fix wave 7, NEW-1 — checked in a worker thread). After a body
+    of `large` bytes or more, the heap is trimmed once idle."""
 
     def __init__(self, app, limit: int = MAX_BODY_BYTES, max_head: int = MAX_HEADER_BYTES,
                  read_timeout: float = BODY_READ_TIMEOUT_S, member_limits=None,
-                 default_members: int = DEFAULT_JSON_MEMBERS):
+                 default_members: int = DEFAULT_JSON_MEMBERS, large: int = LARGE_BODY_BYTES):
         self.app, self.limit, self.max_head, self.read_timeout = app, limit, max_head, read_timeout
         self.member_limits = list(member_limits or [])
         self.default_members = default_members
+        self.large = large
+        self.large_in_flight = 0
+        self.trim_timer = None
 
     def members_for(self, method: str, path: str) -> int:
         for methods, regex, _, cap in self.member_limits:
@@ -363,7 +423,14 @@ class BodyLimit:
         head += sum(len(k) + len(v) + 4 for k, v in scope.get("headers") or [])
         if head > self.max_head:
             return await self._refuse(send, 431, f"request head over {self.max_head} bytes", "RequestHeaderTooLarge")
-        declared = dict(scope.get("headers") or []).get(b"content-length")
+        declared = content_type = transfer_encoding = None
+        for k, v in scope.get("headers") or []:  # the FIRST of each, as the framework reads them
+            if k == b"content-length" and declared is None:
+                declared = v
+            elif k == b"content-type" and content_type is None:
+                content_type = v
+            elif k == b"transfer-encoding" and transfer_encoding is None:
+                transfer_encoding = v
         if declared is not None:
             try:
                 too_big = int(declared) > self.limit
@@ -371,6 +438,11 @@ class BodyLimit:
                 too_big = True
             if too_big:
                 return await self._refuse(send)
+        is_json = is_json_content_type(content_type)
+        if not is_json and ((declared is not None and int(declared) > 0) or transfer_encoding is not None):
+            # a body is coming under a type the framework would not parse as JSON: refused unread
+            return await self._refuse(send, 415, "request body must be JSON (Content-Type: application/json "
+                                      "or application/<x>+json)", "UnsupportedMediaType")
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.read_timeout
         chunks, total, more = [], 0, True
@@ -389,22 +461,39 @@ class BodyLimit:
             chunks.append(chunk)
             more = msg.get("more_body", False)
         body = b"".join(chunks)
-        if body and any(k == b"content-type" and v.split(b";", 1)[0].strip().lower() == b"application/json"
-                        for k, v in scope.get("headers") or []):
-            cap = self.members_for(scope.get("method", ""), scope.get("path", ""))
-            bad = await run_in_threadpool(json_shape_violation, body, cap)
-            if bad is not None:
-                return await self._refuse(send, *bad)
-        sent = False
+        if body and not is_json:  # no declared length, no chunking, yet a body arrived
+            return await self._refuse(send, 415, "request body must be JSON (Content-Type: application/json "
+                                      "or application/<x>+json)", "UnsupportedMediaType")
+        large = len(body) >= self.large
+        if large:
+            self.large_in_flight += 1
+        try:
+            if body:
+                cap = self.members_for(scope.get("method", ""), scope.get("path", ""))
+                bad = await run_in_threadpool(json_shape_violation, body, cap)
+                if bad is not None:
+                    return await self._refuse(send, *bad)
+            sent = False
 
-        async def replay():
-            nonlocal sent
-            if sent:
-                return await receive()
-            sent = True
-            return {"type": "http.request", "body": body, "more_body": False}
+            async def replay():
+                nonlocal sent
+                if sent:
+                    return await receive()
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
 
-        return await self.app(scope, replay, send)
+            return await self.app(scope, replay, send)
+        finally:
+            if large:
+                self.large_in_flight -= 1
+                if self.trim_timer is not None:
+                    self.trim_timer.cancel()
+                self.trim_timer = loop.call_later(TRIM_IDLE_S, self._trim_if_idle, loop)
+
+    def _trim_if_idle(self, loop) -> None:
+        self.trim_timer = None
+        if self.large_in_flight == 0:
+            loop.run_in_executor(None, _malloc_trim)
 
     async def _refuse(self, send, code: int = 413, detail: str | None = None, error: str = "PayloadTooLarge"):
         raw = json.dumps({"detail": detail or f"request body over {self.limit} bytes", "error": error}).encode()

@@ -154,12 +154,30 @@ and kept idle / partial-head sockets open forever.
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 24, 2026 after fix wave 7: **557 passed, 0 failed, 0 skipped**
-(Python 3.11.15, pytest 9.1.1; 515 after fix wave 6, 469 after fix wave 5,
+Result on Sep 25, 2026 after fix wave 8: **641 passed, 0 failed, 0 skipped**
+(Python 3.11.15, pytest 9.1.1; 557 after fix wave 7, 515 after fix wave 6, 469 after fix wave 5,
 428 after fix wave 4, 360 after fix wave 2, 310 after fix wave 1, 205
 before it). No test in this service skips: none uses an env-provided
 ledger binary (the real-ledger runs are the live runs below), and
 `pytest -rs` reports no skip.
+`test_fix_wave_8.py` reproduces the AEGIS round-7 findings: N7-1 (the
+shape gate for every JSON content type — ten spellings — and 415 for
+nine others and for none, before the body is read; the predicate fuzzed
+against FastAPI's own decision; the heap trim), N7-3 (the 100th entry,
+the maximal rulebook + 200 full-churn revisions, the `rev_wedge7` probe,
+backward-compatible ids, fuzzed goals through the model and the API),
+N7-4 (the ten AEGIS emoji cases, class M, the lexicon, symbols alone are
+no phrase, decorative emoji, 30 ordinary emoji captions, four corpora),
+N7-5 (the 13 class-C pairs in five field arrangements, 300 corpus
+pairs), class B (0/30, the stacked rule, the readings, the sound-alike
+guard of the two-consonant tolerance, the first-key table fuzzed) and
+N7-7 (99 phrases × eight 50 KB transcripts, CPU with every cache
+cleared, ≤ 1.5 s; the all-suffix DP and the masked scan against the
+reference; the ASCII fast path; field edges at a giant token). Changed
+expectations: "make" + "mny" across fields is now `human_review` (N7-5,
+`test_fix_wave_7.py`); the bit-parallel scan's hits carry their distance
+(`test_fix_wave_6.py`); a wave-5 test sends its slow body as JSON (a body
+with no content type is now 415 before it is read).
 `test_fix_wave_7.py` reproduces AEGIS round-6 NEW-1 (a legal Moment Map
 of 820 and of 2,000 segments accepted; for EVERY route with a JSON body
 the maximal legal body is built from the model, counts exactly
@@ -477,6 +495,64 @@ started, both stopped at the end.
 - Final `/ledger/verify`: 2,180 entries, valid. All processes stopped
   (only PIDs this run started).
 
+## Live run — fix wave 8, against the REAL ledger-rust (Sep 25, 2026)
+
+ledger-rust built from this tree into a private target dir
+(`cargo build --release --offline`), on :20710 with a fresh log;
+creative-py on :20700 (ledger direct). Only PIDs this run started, all
+stopped at the end. The AEGIS round-7 probes re-run (round-7 numbers in
+brackets; round 7 ran on another machine, so only the shape of the
+numbers compares):
+
+- `devtools/live_smoke.py` → "LIVE SMOKE: ALL STEPS AS EXPECTED" on the
+  fresh ledger (37 entries, `/ledger/verify` valid) and again after a
+  creative-py restart on the same ledger log after every probe below
+  (380 entries, valid).
+- **N7-1**, `cre_ct_bypass7.py` (20 senders × 60k-key body, 10 s each):
+  `application/json` 263 × 422, `/health` p50 437 ms; **`application/hal+json`
+  265 × 422, `/health` p50 423 ms** [47 requests, `/health` p50 3,685
+  ms]; `application/vnd.api+json; charset=utf-8` 287 × 422, p50 400 ms;
+  `text/plain` 5,063 × 415, p50 15 ms. RSS 112 MB before, 98 MB after
+  the floods [590 MB, never released]. Single 60k-key requests
+  (`cre_limits8.py`): `application/json`, `application/hal+json`,
+  `Application/Problem+JSON; charset=utf-8`, `application/json;charset=UTF-8`,
+  `application/+json` → 422 `PayloadTooManyMembers`, 117 B, 25-30 ms
+  [hal+json: `RequestValidationError` with 60,001 errors];
+  `text/plain`, `text/json`, form-encoded, `application/jsonx`, no type
+  → 415 `UnsupportedMediaType`, 129 B, 1-2 ms.
+- **N7-3**, `cre_limits8.py` (`cre_limits7.py` with each goal's campaign
+  id matching its path): a goal at the maxima (1,000 never-say, 100
+  must-say, 20 angles, 50 targets with one listed twice) → 201 in 0.11 s,
+  1,109 rules, NS-1000, MS-100; never-say × 99 / 100 / 150 → 201, last
+  NS-99 / **NS-100** / NS-150 [× 100 → 500]; must-say × 100 → 201,
+  MS-100. `rev_wedge7.py` / `rev_wedge7b.py` (in-process): 19 full-churn
+  revisions → v20, NS-400 [wedged at NS-100]. Through the live API
+  (`rev_wedge8_live.py`), 25 full-churn revisions of the live rulebook,
+  each drafted, reviewed, signed and taken live: 12.9 s, v26 live,
+  NS-482..NS-501, 481 retired ids, none reused.
+- **N7-7**, `cre_clipflood7.py` (4 senders × 25 s of 50 KB vowel-dropped
+  clips): 150 × 201, clip p50 652 ms, p90 708 ms [70, p50 1,449 ms];
+  `/health` p50 15 ms; brief POST p50 582 ms [1,140 ms]. `ns_cost7b.py`
+  (in-process, one run each): 99 phrases × plain / symbols /
+  vowel-dropped 0.47 / 0.62 / 1.11 s [0.92 / 1.03 / 5.86 s]; 16 phrases
+  0.71 / 1.01 / 0.78 s [1.16 / 1.18 / 1.77 s].
+- **N7-4 / N7-5 / class B**, `ns_evade7.py` (297 cases, full pipeline):
+  **20 auto-pass = 6.7% [48 = 16.2%]**: A 0/32 [1], **B 0/30 [9]**, **C
+  0/26 [10]**, D-G, J, L 0, **M 1/12 [9]** ("💰 make": the words in the
+  other order), K 1/18 ("on rsk") [1], I 4/35 [4], H 14/42 (inflections
+  and paraphrases) [14]. `ns_probe7b.py`: every class-C pair →
+  `human_review` (caption + bio names both fields: "spread over caption
+  and account_bio ('gt #ad ritch')") [caption + bio: all 12 `pass`]; the
+  five stacked cases each caught [none]; the ten emoji-for-word cases →
+  `human_review` "a symbol standing for one of its words" [all `pass`];
+  the phonetic FP candidates 8 pass / 29 flagged [the same].
+- False positives (`ns_fp7.py` and the tests; never-say gate, every
+  signal): corpus7 0/130, corpus6 0/130, the round-5 corpus 3/111 = 2.7%,
+  the implementer corpus 5/239 = 2.1% (all four as before this wave);
+  full Clip Review on corpus7 130 × `pass`; 300 random caption + bio
+  pairs: 0 spreads; 30 ordinary emoji captions: 2 lexicon hits ("Get 💸
+  back on every referral", "Make 💰 moves this quarter").
+
 ## Known gaps
 
 See ADR 0005 "Honest gaps and open items" for the full list. The short
@@ -503,10 +579,23 @@ so a misspelt short phrase is caught only if it is a lookalike spelling,
 a split, or trips another backstop; a doubled letter ("gget ricch") is a
 human's call, never a reject; the phrase's words more than two words apart
 ("make a lot of money", "get so very incredibly rich") or in another
-order ("rich get") are not caught; a transposition stacked on other edits
+order ("rich get", "💰 make") are not caught; a transposition stacked on other edits
 in a 2-4 letter word ("nu riks") can pass (0.7-1.8% of the wave-7 stacked
 generator); a JSON body may carry at most the members its route's model
 admits plus 25%; inflections and paraphrases ("getting rich", "100 percent
-guaranteed") are not lookalikes and are not caught. `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
+guaranteed") are not lookalikes and are not caught. Fix wave 8: the
+symbol lexicon is a bounded list — a pictograph it does not know is read
+only where it occupies a phrase word's place, so an unknown emoji
+followed by an ordinary word ("make 🤞 today") passes, and symbols need
+a written content word of the phrase beside them; a never-say word
+inside a hashtag ("get #rich") is a human's call, not a reject; the
+stacked rule reads at most 32 relaxed hits per phrase, so enough decoy
+windows before the real one hide it from that rule (not from the single
+signals); a campaign that churns its never-say list keeps every retired
+id forever (never reused), so its rulebook grows by the list's size per
+revision; **a review costs about 1 s of CPU per 100 never-say phrases
+against a 50 KB transcript, and the goal model admits 1,000 (9.1 s)** —
+capping the list or moving Clip Review off the workflow lock is an open
+decision (ADR 0005 gap 16). `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
 that many idle sockets gets everyone else 503s until the 10 s head
 deadline frees them — per-client limits belong in a proxy in front.
