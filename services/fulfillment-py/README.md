@@ -560,6 +560,47 @@ slow large body when the shared budget is contended; large bodies that take
 **Suite:** 990 passed before → 1005 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20920-20939 python3 -m pytest`).
 
+## Fix wave 10, Sep 25 2026 — one clock for the early 408 (N9-6), disconnect log noise (N9-8)
+
+AEGIS round 9. Tests first, failing on ea708a1, then passing:
+`tests/test_fix10_body_clock_and_disconnect.py` (10 tests: 8 in-process
+against the ASGI app, 2 against the real launcher with its log captured).
+
+| Finding | Before (evidence) | Now |
+|---|---|---|
+| **N9-6**: the early 408 mixed clocks | The arrival projection (fix wave 9) took the rate on the time the service spent *waiting on the client* (`received / waited`) and compared `now + (declared − received) / rate` with the *wall-clock* deadline. Whenever the service itself holds a body (large-lane admission, a wait for in-flight bytes) the two clocks part: the hold left the wall budget but not the rate's denominator, and the bytes the client sent during it were still unread. New test, scaled boundary (3 s deadline, 0.5 s grace, 300 kB body needs 100 kB/s), client steady at 1.3×, service holds the body 1.3 s: **408 at 2.1 s** "arriving at ~133 581 bytes/s … needs >= 100 000 bytes/s" — the client had sent its last byte at 2.3 s. Round-9 probe showed the same inconsistency live (r138000: "arriving at ~141 102 bytes/s … needs >= 139 810"). | **One clock: the time the service spent waiting for the client's bytes** — the clock of every other rule that judges the client (the stall and 1 KiB/s rules, the preemption charge). A declared body is 408 from the grace on iff `waited + (declared − received) / (received / waited) > 30 s`, i.e. iff its rate on that clock × 30 s < its size (`src/api.py`, `BodySizeLimitMiddleware`, rule (c)). 30 s is the most waiting any body can get, because waiting only happens before the wall-clock deadline. **Why not wall time for both:** the rule's job is to tell a *client* it is too slow; time the service holds the body is not the client's, and at the end of a hold the client's bytes sent meanwhile are still unread, so a wall-clock rate reads low exactly then. The wall-clock 30 s deadline stays, unchanged, as the hard bound (408, and the protocol closes 5 s later). Same test after: **200**. A 0.8× client with the same hold: still 408 at the grace (0.5 s). No hold: 1.1× → 200, 0.9× → 408 at the grace; the 408's reported rate is now always below the needed rate. |
+| **N9-8**: `ClientDisconnect` traceback per disconnect | A client that went away mid-body raised starlette's `ClientDisconnect` out of the app; uvicorn logged `Exception in ASGI application` and a ~60-line traceback each time. Pre-fix live run of the round-9 probes on this box: **78** tracebacks, all `ClientDisconnect`. | When the client's `http.disconnect` actually reached the app, one line at WARNING, no traceback, nothing answered: `client disconnected mid-body: route=<path> bytes_received=<n> declared=<Content-Length or none> elapsed_s=<s since the request reached the app>` (the path is escaped and cut to 200 chars — it is client-supplied). A `ClientDisconnect` without a disconnect, and every other exception, propagate unchanged, so the launcher still logs their tracebacks (tested live with a deliberate `RuntimeError`: 500 + traceback). Same probes after: **0** tracebacks, 78 one-line warnings. |
+
+**Live probes** (round-9 `ful_rate9.py`, `ful_reserve9.py`, `starve9.py`,
+ports 18580/18581, before = ea708a1): `ful_rate9` (8 concurrent 4 MiB − 16
+byte bodies): ≥ 139 810 B/s → 200 both; 120 000 and 65 536 B/s → 408 at
+5.4–5.6 s both; **138 000 B/s (0.987× the needed rate): before 408 at
+14.7 s, after 408 at 24.6 s** (having sent 3.4 of 4.2 MB), reported rate
+139 809 B/s — see limit (1). `ful_reserve9` N=64: legit p50 3 ms both.
+`starve9` front 1 MiB N=64 / front 3.72 MiB N=16: small p99 28.6 → 23.1 ms /
+14.9 → 28.8 ms, large all 200 both (run-to-run noise; no preemption either
+run).
+
+**Limits, exactly.** (1) Bytes that arrive while the service is not waiting
+(its own processing between reads, its holds) are credited at no waiting
+time, so the rate on this clock reads slightly high — without contention
+~1 % on the probe box (138 000 B/s measured as 139 809). A body within that
+margin below the needed rate is refused later than the grace, or cut by the
+30 s deadline instead; before this fix the wall-clock remainder happened to
+offset that margin (14.7 s vs 24.6 s above). (2) The projection no longer
+counts service holds against the client, so a body the service delays past
+the wall-clock deadline is cut by the deadline (408 "not received within
+30s"), not refused early by the projection.
+
+**Tests changed:** none. **API behavior changes:** a declared body a service
+hold used to push over the projection is no longer refused 408; a client
+disconnect mid-body no longer produces an error-level log with a
+traceback. The disconnect line is the only new log line with
+request-derived content (the escaped path).
+
+**Suite:** 1005 passed before → 1015 passed after
+(`FULFILLMENT_TEST_PORT_RANGE=18550-18569 python3 -m pytest`).
+
 ## Running it
 
 ```bash
@@ -594,7 +635,9 @@ PYTHONPATH=src python3 -m api
 # under 1 KiB/s after 5 s (408, fix wave 8); a body with a Content-Length
 # that cannot arrive by the 30 s deadline at its observed rate is 408 at ~5 s
 # with "split the batch" (fix wave 9: a body needs >= size / 30 s, i.e. a
-# 4 MiB batch >= 136.5 KiB/s); at most 64 MiB of body bytes past each body's
+# 4 MiB batch >= 136.5 KiB/s; fix wave 10: rate and time both measured on
+# the time the service waited on the client); a client that disconnects
+# mid-body is one "client disconnected mid-body" warning line; at most 64 MiB of body bytes past each body's
 # first 64 KiB buffered across all requests (503 + Retry-After: 1 beyond; the
 # slowest large holder may be preempted with 408 instead — fix wave 9; bodies
 # <= 64 KiB never wait for it); 503 for every new

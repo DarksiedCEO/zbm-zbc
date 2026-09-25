@@ -47,7 +47,9 @@ The limits, all enforced before routing and auth:
                                  deadline. (Fix wave 9: the app also refuses,
                                  at the grace, a declared body that cannot
                                  arrive by the deadline at its observed rate —
-                                 api._BodyWontArrive; not applied here to
+                                 api._BodyWontArrive, judged on the same
+                                 waiting-on-the-client clock (fix wave 10,
+                                 N9-6); not applied here to
                                  unread bodies, which buffer nothing.)
   LIMIT_CONCURRENCY      128     uvicorn's limit: at or above this many open
                                  connections or in-flight requests, a new
