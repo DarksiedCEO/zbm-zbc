@@ -186,8 +186,26 @@ class _BodyTimeout(Exception):
     pass
 
 
+# Fix wave 7 (NEW-4 sweep): a refusal decided from the request head alone
+# (413 from Content-Length, 431, 400 bad Content-Length) costs the loop ~1 ms
+# — accept, parse the head, answer, close — and nothing else, so a client
+# that loops on it (the AEGIS probe with a 4.39 MB body: 3 944 attempts in
+# 10 s from 8 senders, each answered 413 before auth) got ~400 attempts/s
+# through and legit small requests went from 4 to 45 ms p50. The answer is
+# held for _HEAD_REFUSAL_DELAY_S first: it costs the refused connection a
+# slot (bounded by uvicorn's concurrency limit, the fix wave 5 trade-off)
+# and caps such a client at 4 attempts/s per connection. Same probe after:
+# legit p50 unchanged from baseline.
+_HEAD_REFUSAL_DELAY_S = 0.25
+
+
 def _refusal(code: int, detail: str) -> JSONResponse:
     return JSONResponse(status_code=code, content={"detail": detail}, headers={"Connection": "close"})
+
+
+async def _refuse_from_head(response: JSONResponse, scope: Scope, receive: Receive, send: Send) -> None:
+    await asyncio.sleep(_HEAD_REFUSAL_DELAY_S)
+    await response(scope, receive, send)
 
 
 def _too_large_response() -> JSONResponse:
@@ -220,17 +238,16 @@ class BodySizeLimitMiddleware:
         head = len(scope.get("raw_path") or b"") + len(scope.get("query_string") or b"")
         head += sum(len(k) + len(v) + 4 for k, v in scope["headers"])
         if head > _MAX_HEADER_BYTES:
-            await _refusal(431, f"request head exceeds {_MAX_HEADER_BYTES} bytes")(scope, receive, send)
+            await _refuse_from_head(_refusal(431, f"request head exceeds {_MAX_HEADER_BYTES} bytes"), scope, receive, send)
             return
         limit = _MAX_BODY_BYTES
         for name, value in scope["headers"]:
             if name == b"content-length":
                 if not value.isdigit():
-                    await JSONResponse(status_code=400, content={"detail": "invalid Content-Length"},
-                                       headers={"Connection": "close"})(scope, receive, send)
+                    await _refuse_from_head(_refusal(400, "invalid Content-Length"), scope, receive, send)
                     return
                 if int(value) > limit:
-                    await _too_large_response()(scope, receive, send)
+                    await _refuse_from_head(_too_large_response(), scope, receive, send)
                     return
         received = 0
         started = False
@@ -310,6 +327,12 @@ def _render(result: Any) -> Response:
 def _parse(model: type[_M], body: bytes | bytearray) -> _M | Response:
     # Parse + validate in a worker thread — and, on a validation failure,
     # render the bounded 422 right here (fix wave 6, N2), never on the loop.
+    # Fix wave 7, NEW-4: the cheap shape pre-scan comes first, so a
+    # structurally absurd body never reaches the full parse.
+    shape = _json_shape(body)
+    if shape.violation is not None:
+        error_type, msg = shape.violation
+        return _validation_error_response([{"loc": ("body",), "type": error_type, "msg": msg}], 1)
     try:
         return model.model_validate_json(body)
     except ValidationError as exc:
@@ -319,40 +342,319 @@ def _parse(model: type[_M], body: bytes | bytearray) -> _M | Response:
         )
 
 
-# Fix wave 6, N2: bodies are parsed ONE at a time. Parsing runs in Rust
-# (jiter / pydantic-core) holding the GIL for the whole body — the event loop
-# cannot answer /health until it ends — so a second concurrent parse adds no
-# throughput, only a second fully materialized body in memory (a 60k-key
-# object is ~10 MB as Python objects; a 4 MiB body of ~260k keys ~45 MB) and
-# a longer wait for the loop. Requests queue here on the loop holding only
-# their body bytes (<= 4 MiB each, at most LIMIT_CONCURRENCY of them — the
-# trade-off accepted in fix wave 5). The agent work itself is not behind this
-# slot. Measured (python3 -m api, 20 senders x 5 x 60k-key bodies): peak RSS
-# +112 MB with 4 parse threads and default arenas; +40 MB with one slot and
-# one malloc arena (main()).
-_parse_slots: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+# --- JSON shape pre-scan (fix wave 7, NEW-4, MED, CONFIRMED) ---------------------
+# The full parse (jiter / pydantic-core) materializes every key and item as a
+# Python object before any request model can refuse the body: a 3.4 MiB body
+# of 255 000 unknown keys cost ~140 ms (300k one-key objects ~230 ms) to be
+# told `too_many_fields`. Every route's largest legitimate body has ~19 000
+# members (object keys + array items) in ~2 000 objects/arrays, three levels
+# deep (tests/test_fix4_limits.py::MAX_BATCHES) — the caps below are sized
+# from the batch contract (_MAX_BATCH) with more than 1.5x headroom.
+#
+# The pre-scan is byte-level and runs in C passes (bytes.translate / replace /
+# count / split / join), never a per-token Python loop over the body:
+#   1. keep only the bytes that matter (`"` `\` the escape chars `/bfnrtu`,
+#      `{}[]:,`) — 4 MiB in ~3 ms, and the result is usually tiny;
+#   2. delete `\\` pairs, then `\"`: in valid JSON a backslash is always
+#      followed by one of the kept escape chars, so after this every `"` left
+#      is a real string boundary (a run of n backslashes before a quote leaves
+#      n mod 2, exactly as the escape grammar reads it);
+#   3. the even-numbered pieces of a split on `"` are the bytes outside
+#      strings (joined with a marker byte standing for each string); commas,
+#      braces and brackets are counted there in C;
+#   4. depth is walked in Python only over the brace/bracket bytes, and only
+#      once the container cap has passed and the brackets balance — at most
+#      2 x _MAX_JSON_CONTAINERS iterations.
+# Before step 3 the quote count is checked: strings <= 2 x members + 1 in any
+# JSON document, so more quotes than 2 x (2 x _MAX_JSON_MEMBERS + 1) is
+# already a violation and the split (one bytes object per piece) is never
+# made over more than that. Measured on every 4 MiB shape tried (all quotes,
+# all backslashes, all escapes, all commas, 1M empty strings, 1M nested
+# arrays, 4 MiB of closing brackets, the AEGIS bodies): 1-52 ms, the AEGIS
+# bodies 3-11 ms (a loaded 2-core box; every figure is C time over <= 4 MiB).
+#
+# Exactness: `members` is commas-outside-strings + non-empty containers,
+# equal to keys + items unless a container is empty (then an over-count of
+# one per empty container; harmless — it only rejects LATER). `containers`
+# and `depth` are exact for valid JSON. For invalid JSON the numbers mean
+# nothing and the full parse's own `json_invalid` 422 answers, unless the
+# pre-scan refuses first — either way a 422. A legitimate body is never
+# refused: its strings are removed exactly, so nothing inside them counts.
+_MAX_BATCH = 1000
+_MAX_JSON_MEMBERS = 32 * _MAX_BATCH      # object keys + array items, whole document
+_MAX_JSON_CONTAINERS = 4 * _MAX_BATCH    # objects + arrays, whole document
+_MAX_JSON_DEPTH = 32                     # nesting (the root is depth 1); same cap as creative-py
+_SHAPE_KEEP = b'"\\/bfnrtu{}[]:,'
+_SHAPE_DELETE = bytes(sorted(set(range(256)) - set(_SHAPE_KEEP)))
+_NOT_BRACKETS = bytes(sorted(set(range(256)) - set(b"{}[]")))
+_OPEN_BRACKETS = frozenset(b"{[")
 
 
-def _parse_slot() -> asyncio.Semaphore:
-    loop = asyncio.get_running_loop()  # one semaphore per loop: TestClient makes several
-    sem = _parse_slots.get(loop)
-    if sem is None:
-        sem = _parse_slots[loop] = asyncio.Semaphore(1)
-    return sem
+class _JsonShape:
+    __slots__ = ("members", "containers", "depth", "violation")
+
+    def __init__(self, members: int, containers: int, depth: int, violation: tuple[str, str] | None):
+        self.members, self.containers, self.depth, self.violation = members, containers, depth, violation
+
+    def __repr__(self) -> str:
+        return f"_JsonShape(members={self.members}, containers={self.containers}, depth={self.depth}, violation={self.violation})"
+
+
+def _json_shape(body: bytes | bytearray) -> _JsonShape:
+    reduced = body.translate(None, _SHAPE_DELETE)
+    if b"\\" in reduced:
+        reduced = reduced.replace(b"\\\\", b"").replace(b'\\"', b"")
+    quotes = reduced.count(b'"')
+    if quotes > 2 * (2 * _MAX_JSON_MEMBERS + 1):
+        return _JsonShape(0, 0, 0, _too_many_members())
+    # Every string becomes one `s` (not a kept byte, so unambiguous): `["x"]`
+    # must not read as the empty `[]`.
+    outside = b"s".join(reduced.split(b'"')[0::2])
+    containers = outside.count(b"{") + outside.count(b"[")
+    if containers > _MAX_JSON_CONTAINERS:
+        return _JsonShape(0, containers, 0, (
+            "json_too_many_containers",
+            f"JSON body has more than {_MAX_JSON_CONTAINERS} objects and arrays",
+        ))
+    members = outside.count(b",") + containers - outside.count(b"{}") - outside.count(b"[]")
+    if members > _MAX_JSON_MEMBERS:
+        return _JsonShape(members, containers, 0, _too_many_members())
+    depth = max_depth = 0
+    if outside.count(b"}") + outside.count(b"]") != containers:
+        return _JsonShape(members, containers, 0, None)  # unbalanced: not JSON; the parser says so at once
+    # Balanced, so at most 2 x _MAX_JSON_CONTAINERS bytes to walk here.
+    for byte in outside.translate(None, _NOT_BRACKETS):
+        if byte in _OPEN_BRACKETS:
+            depth += 1
+            if depth > max_depth:
+                max_depth = depth
+                if max_depth > _MAX_JSON_DEPTH:
+                    return _JsonShape(members, containers, max_depth, (
+                        "json_too_deep",
+                        f"JSON body nests deeper than {_MAX_JSON_DEPTH} levels",
+                    ))
+        else:
+            depth -= 1
+    return _JsonShape(members, containers, max_depth, None)
+
+
+def _too_many_members() -> tuple[str, str]:
+    return "json_too_many_members", f"JSON body has more than {_MAX_JSON_MEMBERS} members (object keys and array items)"
+
+
+# --- parse lanes (fix wave 6, N2; fix wave 7, NEW-4) -----------------------------
+# Parsing runs in Rust (jiter / pydantic-core) holding the GIL for the whole
+# body — the event loop cannot answer /health until it ends — so concurrent
+# parses add no throughput, only more fully materialized bodies in memory (a
+# 60k-key object is ~10 MB as Python objects; a 4 MiB body of ~260k keys
+# ~45 MB) and a longer wait for the loop. Fix wave 6 therefore parsed ONE body
+# at a time — and AEGIS (NEW-4) showed the cost: the slot was FIFO, so a
+# 1.7 KB legitimate `detect` queued behind every 3.4 MiB junk body ahead of
+# it (8 junk senders: p50 1.1 s; 32: 2.9-4.4 s; ~18 s at the concurrency
+# limit). Now, size-aware admission:
+#
+#   small lane  bodies <= _SMALL_BODY_BYTES (64 KiB; the largest legitimate
+#               single-record request is a few KB). Its own semaphore of
+#               _SMALL_LANE_SLOTS: a small body never queues behind a large
+#               one. A 64 KiB body parses in ~1-5 ms whatever it contains
+#               (at most 32k members fit), so the lane bounds memory (4 x
+#               64 KiB materialized) more than time. No byte budget: the
+#               cost per small body is bounded by its size and the pre-scan.
+#   large lane  bodies over 64 KiB. They draw on ONE byte budget, a token
+#               bucket of _LARGE_BYTES_PER_S (32 MiB/s, burst
+#               _LARGE_BURST_BYTES = 16 MiB): a request whose Content-Length
+#               says it is large takes its whole size from the bucket BEFORE
+#               its body is read, in arrival order (an asyncio.Lock is FIFO),
+#               waiting while the bucket refills; a chunked body of unknown
+#               length pays per 64 KiB as it streams. Admitted bodies then
+#               parse _LARGE_LANE_SLOTS (1) at a time, FIFO. A request that
+#               has not been admitted AND got the parse slot within
+#               _LARGE_WAIT_S (2 s) of arriving is answered 503 +
+#               Retry-After: 1 (its unread body is drained by uvicorn at the
+#               HTTP parser, ~2.5 ms of loop time per 3.4 MiB, and the
+#               connection stays usable); it must retry after Retry-After.
+#
+# Why a byte RATE and not only a slot: receiving a 3.4 MiB body costs the
+# event loop ~10-13 ms of its own time (h11 buffering, flow control, copies)
+# whatever the body contains, before any parse. Senders that loop on the
+# response (the AEGIS probe, or any client that retries at once) send as fast
+# as the service answers, so a cheaper refusal alone only raised the attempt
+# rate (measured: an immediate 503 for the 9th concurrent large body took 32
+# senders from 40 to 230 attempts/s and legit p50 from 36 to 344 ms). The
+# budget caps the loop time spent receiving large bodies at ~13% whatever the
+# number of senders (32 MiB/s x 13 ms per 3.4 MiB), leaving the loop free for
+# small requests and /health; refused attempts cost their drain. Sized for
+# legitimate use: 32 MiB/s is 9 maximum 1000-task batches per second, far
+# above what the outbound gate lets this service act on.
+#
+# The guarantee, exactly (ADR 0002, Decision 21): a small body waits for at
+# most _SMALL_LANE_SLOTS small parses ahead of it, never for a large one, and
+# the loop spends at most the budget's share of its time receiving large
+# bodies. What remains shared is the loop and the GIL: while a worker thread
+# is inside one C/Rust call the loop waits for it, so a small request can
+# still be delayed by one pre-scan or one bounded parse (tens of ms) and by
+# the reading of one large body in progress — not by the queue of them. What
+# is NOT solved: large bodies have no caller identity to rank on (one shared
+# service token), so a legitimate large batch competes FIFO with junk for the
+# budget and is 503'd like any other when more than ~2 s of large bodies (at
+# 32 MiB/s, ~19 maximum-size ones) are queued ahead of it; it succeeds on a
+# retry when its turn comes, and a client that keeps sending large bodies
+# keeps everyone's large batches waiting for as long as it does. A flood of
+# SMALL junk bodies competes fairly in the small lane (bounded per attempt,
+# no budget) and can still load the loop. Requests that are refused early
+# cost their body bytes on the wire but not in memory; admitted ones hold
+# their bytes (<= 4 MiB each) until parsed. The agent work itself is not
+# behind either lane.
+_SMALL_BODY_BYTES = 64 * 1024
+_SMALL_LANE_SLOTS = 4
+_LARGE_LANE_SLOTS = 1
+_LARGE_BYTES_PER_S = 32 * 1024 * 1024
+_LARGE_BURST_BYTES = 16 * 1024 * 1024
+_LARGE_WAIT_S = 2.0
+# Idle memory (fix wave 7): the README claimed RSS "settles at 93 MB" after a
+# burst of 3.9 MB bodies. Measured, it did not settle: 170 MB after 32 senders
+# x 10 s and still 170 MB 15 s later (50 MB before). glibc's mmap threshold is
+# dynamic — freeing an mmapped chunk raises it to that chunk's size — so after
+# the first large body every later body buffer comes from the brk heap, where
+# a freed block below the top is kept for reuse, not returned. That reuse is
+# worth keeping (a fixed 128 KiB threshold made every large body ~50% more
+# CPU in page faults: 19 vs 13 ms per 3.4 MiB); instead, _TRIM_IDLE_S after
+# the last large parse finished, with no large body in flight, malloc_trim(0)
+# hands the free pages back (a thread-pool call; ~15 ms for 130 MB, 0 ms when
+# there is nothing to trim). Under a sustained flood RSS stays at its bounded
+# peak (in-flight bodies + one parse); one idle second later it is back near
+# baseline (measured: 50 -> 56 MB).
+_TRIM_IDLE_S = 1.0
+
+
+class _ByteBudget:
+    """Token bucket of bytes, taken in arrival order; the wait for a refill
+    happens under the lock so nothing overtakes."""
+
+    def __init__(self, rate: float, burst: float) -> None:
+        self.rate, self.burst = float(rate), float(burst)
+        self.tokens = self.burst
+        self.updated: float | None = None
+        self.lock = asyncio.Lock()
+
+    def _refill(self, now: float) -> None:
+        if self.updated is not None:
+            self.tokens = min(self.burst, self.tokens + (now - self.updated) * self.rate)
+        self.updated = now
+
+    async def take(self, n: int) -> None:
+        loop = asyncio.get_running_loop()
+        async with self.lock:
+            self._refill(loop.time())
+            if self.tokens < n:
+                await asyncio.sleep((n - self.tokens) / self.rate)
+                self._refill(loop.time())
+            self.tokens -= n
+
+
+class _Lanes:
+    __slots__ = ("small", "large", "budget", "large_in_flight", "trim_timer")
+
+    def __init__(self) -> None:
+        self.small = asyncio.Semaphore(_SMALL_LANE_SLOTS)
+        self.large = asyncio.Semaphore(_LARGE_LANE_SLOTS)
+        self.budget = _ByteBudget(_LARGE_BYTES_PER_S, _LARGE_BURST_BYTES)
+        self.large_in_flight = 0
+        self.trim_timer: asyncio.TimerHandle | None = None
+
+
+_parse_lanes: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _Lanes]" = weakref.WeakKeyDictionary()
+
+
+def _lanes() -> _Lanes:
+    loop = asyncio.get_running_loop()  # one set per loop: TestClient makes several
+    lanes = _parse_lanes.get(loop)
+    if lanes is None:
+        lanes = _parse_lanes[loop] = _Lanes()
+    return lanes
+
+
+def _large_refused() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=f"large request bodies (over {_SMALL_BODY_BYTES} bytes) share a budget of {_LARGE_BYTES_PER_S} bytes/s "
+               f"and one parse slot; this one was not admitted within {_LARGE_WAIT_S:g}s — retry after Retry-After",
+        headers={"Retry-After": "1"},
+    )
+
+
+async def _within(deadline: float, awaitable: Any) -> None:
+    loop = asyncio.get_running_loop()
+    try:
+        await asyncio.wait_for(awaitable, max(0.0, deadline - loop.time()))
+    except TimeoutError:
+        raise _large_refused() from None
+
+
+def _schedule_trim(lanes: _Lanes) -> None:
+    loop = asyncio.get_running_loop()
+    if lanes.trim_timer is not None:
+        lanes.trim_timer.cancel()
+    lanes.trim_timer = loop.call_later(_TRIM_IDLE_S, _trim_if_idle, loop, lanes)
+
+
+def _trim_if_idle(loop: asyncio.AbstractEventLoop, lanes: _Lanes) -> None:
+    lanes.trim_timer = None
+    if lanes.large_in_flight == 0:
+        loop.run_in_executor(None, _malloc_trim)
+
+
+def _declared_length(request: Request) -> int | None:
+    value = request.headers.get("content-length")
+    return int(value) if value and value.isdigit() else None  # validated by BodySizeLimitMiddleware
 
 
 async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]) -> Response:
     if not _is_json_content_type(request.headers.get("content-type")):
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="expected application/json")
-    # One copy of the body, not two: Request.body() collects the chunks and
-    # then joins them (2x the body while in flight); pydantic parses a
-    # bytearray directly. Bounded by BodySizeLimitMiddleware.
-    body = bytearray()
-    async for chunk in request.stream():
-        body += chunk
-    async with _parse_slot():
-        parsed = await run_in_threadpool(_parse, model, body)
-    del body
+    lanes = _lanes()
+    deadline = asyncio.get_running_loop().time() + _LARGE_WAIT_S
+    declared = _declared_length(request)
+    large = declared is not None and declared > _SMALL_BODY_BYTES
+    if large:
+        await _within(deadline, lanes.budget.take(declared))  # before a byte of the body is read
+    lanes.large_in_flight += large
+    try:
+        # One copy of the body, not two: Request.body() collects the chunks
+        # and then joins them (2x the body while in flight); pydantic parses
+        # a bytearray directly. Sized up front from Content-Length so the
+        # chunks land in place instead of growing the buffer (fix wave 7:
+        # ~3 ms of realloc per 3.4 MiB). Bounded by BodySizeLimitMiddleware.
+        body = bytearray(declared or 0)
+        pos = charged = 0
+        async for chunk in request.stream():
+            end = pos + len(chunk)
+            if end > len(body):
+                body[pos:] = chunk  # undeclared (chunked) or understated length
+            else:
+                body[pos:end] = chunk
+            pos = end
+            if not large and pos > _SMALL_BODY_BYTES:
+                lanes.large_in_flight += 1
+                large = True
+            if large and declared is None and pos - charged >= _SMALL_BODY_BYTES:
+                await _within(deadline, lanes.budget.take(pos - charged))  # unknown length: pay as it streams
+                charged = pos
+        del body[pos:]
+        lane = lanes.large if large else lanes.small
+        if large:
+            await _within(deadline, lane.acquire())
+        else:
+            await lane.acquire()
+        try:
+            parsed = await run_in_threadpool(_parse, model, body)
+        finally:
+            lane.release()
+        del body
+    finally:
+        if large:
+            lanes.large_in_flight -= 1
+            _schedule_trim(lanes)
     if isinstance(parsed, Response):
         return parsed
     return await run_in_threadpool(lambda: _render(work(parsed)))
@@ -585,7 +887,7 @@ _dial_lock = threading.Lock()
 _exhausted_resolutions: BoundedExpiringMap[str, ResolutionRecord] = _new_dedupe()
 _exhausted_lock = threading.Lock()
 
-_MAX_BATCH = 1000
+# _MAX_BATCH (1000) is defined with the JSON shape caps above.
 TimezoneName = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 
 
@@ -965,16 +1267,34 @@ def _resolve_and_writeback(req: ResolveRequest) -> ResolveResponse:
 _MALLOC_ARENA_MAX = 1  # M_ARENA_MAX: every thread allocates from the main arena
 
 
+def _libc():
+    try:
+        import ctypes
+
+        return ctypes.CDLL("libc.so.6")
+    except OSError:
+        return None
+
+
+_LIBC = _libc()
+
+
 def _limit_malloc_arenas() -> bool:
     if os.environ.get("MALLOC_ARENA_MAX"):
         return True  # the operator chose; glibc read it at startup
     try:
-        import ctypes
-
-        libc = ctypes.CDLL("libc.so.6")
-        return bool(libc.mallopt(-8, _MALLOC_ARENA_MAX))  # M_ARENA_MAX == -8
-    except (OSError, AttributeError):
+        return bool(_LIBC.mallopt(-8, _MALLOC_ARENA_MAX))  # M_ARENA_MAX == -8
+    except AttributeError:
         return False
+
+
+def _malloc_trim() -> None:
+    # Fix wave 7 (see _TRIM_IDLE_S): return freed heap pages to the OS once
+    # no large body is being parsed. glibc only; a no-op elsewhere.
+    try:
+        _LIBC.malloc_trim(0)
+    except AttributeError:
+        pass
 
 
 def main() -> None:

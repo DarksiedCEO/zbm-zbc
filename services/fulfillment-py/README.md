@@ -370,7 +370,7 @@ process). ADR 0002 Decisions 19 and 20.
 
 | Finding | Before (evidence) | Now |
 |---|---|---|
-| N2 (MED, CONFIRMED): 422 amplification | The A8 handler stripped `input` but listed every error. A 868 KB body of 60 000 unknown keys against an `extra="forbid"` request model → 60 000 `extra_forbidden` errors, a **5 388 973-byte** 422, built on the event loop; a single 1 MiB unknown key echoed whole in its `loc` (1 048 743-byte 422); 1 000 empty events → 518 KB. Live (`ful_amp.py`, 20 senders × 5 × 60k-key bodies): peak RSS **821 MB**, `/health` p50 838 ms, max 2.58 s; with 3.9 MB bodies of 260k keys: 23.5 MB per 422, RSS 4.4 GB, `/health` up to 11.5 s, ten 408s. | **Bounded 422** (`src/api.py`, `_bounded_validation_body`): at most 20 errors listed (pydantic's order) plus the honest `error_count` and `truncated: true`; each `loc` ≤ 8 items of ≤ 40 chars; `type` ≤ 64, `msg` ≤ 200 chars; the serialized body is kept ≤ 8 KiB. **Not enumerated:** a request object with more than 20 unknown keys is refused with one `too_many_fields` error before any field is looked at (up to 20 unknown keys are still named — a stale client sending `now` still learns that); a map field over 1 000 entries is refused by size before its entries are validated (pydantic checked every entry of a dict first — 250 000 errors for a 4 MiB map — but a list's length first). **Off-loop, one at a time:** parsing + the 422 render happen in the worker thread; bodies are parsed one at a time (a parse holds the GIL in Rust for its whole duration — a second one adds memory and loop latency, not throughput; the agent work itself is not behind that slot) and the body is held once (bytearray), not twice. `python3 -m api` also limits glibc to one malloc arena: per-thread arenas kept tens of MB of freed parse memory. Live, same probe: 60k × 20: 422s of **139 bytes**, peak RSS 89 MB (49 MB idle), `/health` p50 56 ms, max 194 ms; 260k × 20: 140 bytes, peak 224 MB, `/health` p50 78 ms, max 424 ms, no 408; RSS settles at 93 MB. |
+| N2 (MED, CONFIRMED): 422 amplification | The A8 handler stripped `input` but listed every error. A 868 KB body of 60 000 unknown keys against an `extra="forbid"` request model → 60 000 `extra_forbidden` errors, a **5 388 973-byte** 422, built on the event loop; a single 1 MiB unknown key echoed whole in its `loc` (1 048 743-byte 422); 1 000 empty events → 518 KB. Live (`ful_amp.py`, 20 senders × 5 × 60k-key bodies): peak RSS **821 MB**, `/health` p50 838 ms, max 2.58 s; with 3.9 MB bodies of 260k keys: 23.5 MB per 422, RSS 4.4 GB, `/health` up to 11.5 s, ten 408s. | **Bounded 422** (`src/api.py`, `_bounded_validation_body`): at most 20 errors listed (pydantic's order) plus the honest `error_count` and `truncated: true`; each `loc` ≤ 8 items of ≤ 40 chars; `type` ≤ 64, `msg` ≤ 200 chars; the serialized body is kept ≤ 8 KiB. **Not enumerated:** a request object with more than 20 unknown keys is refused with one `too_many_fields` error before any field is looked at (up to 20 unknown keys are still named — a stale client sending `now` still learns that); a map field over 1 000 entries is refused by size before its entries are validated (pydantic checked every entry of a dict first — 250 000 errors for a 4 MiB map — but a list's length first). **Off-loop, one at a time:** parsing + the 422 render happen in the worker thread; bodies are parsed one at a time (a parse holds the GIL in Rust for its whole duration — a second one adds memory and loop latency, not throughput; the agent work itself is not behind that slot) and the body is held once (bytearray), not twice. `python3 -m api` also limits glibc to one malloc arena: per-thread arenas kept tens of MB of freed parse memory. Live, same probe: 60k × 20: 422s of **139 bytes**, peak RSS 89 MB (49 MB idle), `/health` p50 56 ms, max 194 ms; 260k × 20: 140 bytes, peak 224 MB, `/health` p50 78 ms, max 424 ms, no 408. (This row originally also claimed "RSS settles at 93 MB"; that was not verified — fix wave 7 measured that it did not settle, and fixed it. See below.) |
 | N7 (INFO): over-cap connections aborted | With 256 sockets held, a new connection was aborted with no response (curl exit 000, "connection reset"). Between 128 and 256 held sockets every new request, `/health` included, is 503. | A connection made while 256 are held is answered a minimal `503 Service Unavailable` (`Connection: close`, `Retry-After: 1`) and closed as soon as its request bytes arrive, or after 1 s if none do; it is never counted as held. The 128–256 behavior is unchanged and now stated exactly below ("Transport limits, exactly"). |
 
 **Transport limits, exactly** (values in `src/http_limits.py`):
@@ -408,6 +408,45 @@ uvicorn's own access log prints the request line (path ≤ 16 KiB head) —
 **Suite:** 901 passed before → 926 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20320-20339 python3 -m pytest`).
 
+## Fix wave 7, Sep 24 2026 — the parse slot starved small requests (NEW-4)
+
+Tests first, failing on the pre-fix tree, then passing:
+`tests/test_fix7_new4_parse_fairness.py` (43 tests: pre-scan, lanes, budget,
+head-refusal hold in-process; the AEGIS scenario against the real
+`python3 -m api` over TCP with 8 and 32 senders of each junk kind). ADR 0002
+Decision 21.
+
+| Finding | Before (evidence) | Now |
+|---|---|---|
+| NEW-4 (MED, CONFIRMED): the single parse slot is FIFO, so authenticated junk bodies starve legitimate requests linearly | Fix wave 6 parsed one body at a time, in arrival order, and every body reached the full parse: a 3.4 MiB body of 255 000 unknown keys cost ~140 ms (300k one-key objects ~230 ms) to be told `too_many_fields`. AEGIS `ful_slot6.py`: 8 senders looping such bodies → legit small `detect` p50 **1.08 s** (baseline 4 ms); 32 → 4.4 s. Pre-fix run of the new live test on the fix box: 8 senders p50 1 093 ms, 32 senders p50 2 851 ms / p99 6 375 ms; 12 and 6 legit requests completed in 6 s. Also: RSS after a flood did **not** settle (170 MB after 32 × 10 s, unchanged 15 s later; the "settles at 93 MB" claim above was unverified), and a 4.39 MB body 413'd from Content-Length cost ~1 ms each with nothing to slow the sender: 8 looping senders got ~400 attempts/s through and legit p50 went 4 → 45 ms. | **Shape pre-scan** (`src/api.py`, `_json_shape`): > 32 000 members, > 4 000 objects/arrays or > 32 levels is one bounded 422 (`json_too_many_members` / `json_too_many_containers` / `json_too_deep`) before the full parse — byte-level, C passes only, strings removed exactly (a legitimate body is never refused; every route's maximum batch uses < ⅔ of each cap), 1–52 ms on every 4 MiB shape tried, 3–11 ms for the AEGIS bodies. **Two lanes**: bodies ≤ 64 KiB parse in their own lane (4 slots), never behind a large one; bodies > 64 KiB take their Content-Length from a FIFO token bucket of **32 MiB/s** (burst 16 MiB) *before being read*, then parse one at a time; not admitted and parsed within 2 s → **503 + `Retry-After: 1`** (uvicorn drains the unread body at the parser, ~2.5 ms per 3.4 MiB; the connection stays usable). **Head-only refusals held 250 ms** (413 from Content-Length, 431, 400 bad Content-Length): a looping client gets 4 attempts/s per connection. **Idle memory**: 1 s after the last large parse with none in flight, `malloc_trim(0)` returns freed heap pages. Live (`ful_slot6.py`, 10 s each): 8 × keys — legit p50 **4 ms**, p90 9 ms, max 91 ms, `/health` p50 2 ms, RSS peak 67 MB, idle 51 MB 2 s later; 32 × keys — p50 4 ms, p90 11 ms, max 58 ms, `/health` p50 2 ms, max 143 ms, peak 111 MB, idle 52 MB; 32 × array / deep — p50 5 / 4 ms; 8 and 32 × 4.39 MB (413) — p50 4 ms; 120 × keys — every request 503 (uvicorn's 128-connection limit, fix wave 5, unchanged). New live test, 32 senders: legit p50 3 ms, p99 69 ms, `/health` p99 39 ms, a maximum 1000-task orchestrate batch posted mid-flood: 200 in 2–5 s (1–2 attempts, honoring `Retry-After`). |
+
+**The fairness guarantee and its limits** (ADR 0002, Decision 21): a small
+body waits for at most 4 small parses ahead of it and never for a large one;
+the loop spends at most the budget's share of its time receiving large
+bodies. Not solved: the loop and the GIL are still shared, so one pre-scan,
+one bounded parse or the reading of one large body in progress (tens of ms)
+can delay a small request — not the queue of them; there is no caller
+identity, so a legitimate large batch competes FIFO with junk for the budget
+and is 503'd like any other when more than ~2 s of large bodies (~19
+maximum-size ones) are queued ahead of it, succeeding on a retry when its
+turn comes — a client that keeps sending large bodies keeps everyone's large
+batches waiting for as long as it does; a flood of *small* junk (≤ 64 KiB,
+bounded per attempt) has no budget and can still load the loop; at ≥ 128
+held sockets everything is 503 before any of this.
+
+**Tests changed, and why:**
+`test_fix6_n2_422_amplification.py::test_60k_unknown_keys_is_one_small_422_not_60k_errors`
+asserted the error type `too_many_fields`; a 60 000-key object is now over
+the 32 000-member shape cap and is refused earlier by the pre-scan as
+`json_too_many_members` (one error, 139 bytes, faster). The 21-key case in
+the same file still asserts `too_many_fields`. Nothing was weakened.
+**API behavior changes:** the three `json_*` 422 types above; large bodies
+may get 503 + `Retry-After: 1` under load and must retry; 413/431/400
+(bad Content-Length) answers arrive 250 ms later.
+
+**Suite:** 926 passed before → 969 passed after
+(`FULFILLMENT_TEST_PORT_RANGE=20520-20539 python3 -m pytest`).
+
 ## Running it
 
 ```bash
@@ -441,7 +480,10 @@ PYTHONPATH=src python3 -m api
 # keep-alive 5 s; body complete within 30 s (408); 503 for every new
 # request (incl. /health) while >= 128 sockets are held; a connection made
 # while 256 are held gets a minimal 503 and is closed (fix wave 6; see
-# "Transport limits, exactly"). 422 bodies are <= 8 KiB (fix wave 6). Run it with
+# "Transport limits, exactly"). 422 bodies are <= 8 KiB (fix wave 6). A JSON
+# body over 32 000 members / 4 000 containers / 32 levels is a 422 before it
+# is parsed; bodies over 64 KiB share a 32 MiB/s budget and one parse slot
+# and get 503 + Retry-After: 1 when not admitted within 2 s (fix wave 7). Run it with
 # `python3 -m api` — a bare `uvicorn api:app` gets none of the parser cap or
 # deadlines (only the middleware's 431/408/413). Monitor GET /gate/status
 # (authenticated): alert on near_capacity, new_key_budget_exhausted or
