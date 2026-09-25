@@ -43,7 +43,14 @@ NS  no never-say phrase in the clip's text                  -> reject
     rn/m, cl/d, vv/w are read alike ("make rnoney") -> reject; within a
     small edit distance of the phrase on that skeleton ("Guaranteed
     retrns", "miracle kure", "get rlch", "make nnoney", words split or run
-    together) -> human_review; shared/text.visual_near_miss)
+    together) -> human_review; shared/text.visual_near_miss;
+    fix wave 6: the gate runs on the clip's LETTER STREAM (splits are
+    irrelevant: "ge t rl ch", "make r n oney"; stretched letters "geeet
+    riiich" read as the phrase -> reject; doubled letters "gget ricch" ->
+    human_review), the phrase's words in order within two other words
+    ("make big money") -> human_review, and an entry of <= 4 letters is
+    exact-only unless its rule says `fuzzy` (N3); one scan per clip for
+    all never-say rules, shared/text.visual_near_misses)
 MIX any word mixing letters with symbols/digits in caption /
     on-screen text / transcript (shared/text.mixed_symbol_words; ordinary
     punctuation, #hashtags, prices and "2nd"/"1990s"-style numbers excepted)
@@ -77,6 +84,7 @@ from shared.text import (
     non_latin_letters,
     obfuscation_signals,
     visual_lookalike_exact,
+    visual_near_misses,
 )
 from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
 from zbc.platform_rules import rows_usable
@@ -262,21 +270,25 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
             borderline.append(f"{r.rule_id}: must-say {r.params.get('phrase')!r} only found with split/obfuscated letters")
         elif m is PhraseMatch.NONE:
             fail(r.rule_id, f"missing must-say {r.params.get('phrase')!r}")
-    for r in rb.rules_of(RuleKind.NEVER_SAY):
+    never = [(r, r.params.get("phrase", ""), bool(r.params.get("fuzzy"))) for r in rb.rules_of(RuleKind.NEVER_SAY)]
+    # one scan of the clip's letter stream for every never-say phrase at once (fix wave 6, N1)
+    visual_near_misses(clip_text, tuple((p, fz) for _, p, fz in never))
+    for r, phrase, fz in never:
         checks.append(r.rule_id)
-        m = match_phrase(clip_text, r.params.get("phrase", ""))
-        lookalike = None if m is PhraseMatch.EXACT else visual_lookalike_exact(clip_text, r.params.get("phrase", ""))
+        m = match_phrase(clip_text, phrase)
+        lookalike = None if m is PhraseMatch.EXACT else visual_lookalike_exact(clip_text, phrase, fz)
         if m is PhraseMatch.EXACT:
-            fail(r.rule_id, f"says never-say {r.params.get('phrase')!r}")
+            fail(r.rule_id, f"says never-say {phrase!r}")
         elif lookalike is not None:
-            fail(r.rule_id, f"says never-say {r.params.get('phrase')!r} with lookalike letters ({lookalike[:60]!r} "
-                            "reads the same once rn/m, cl/d and vv/w are read alike)")
+            fail(r.rule_id, f"says never-say {phrase!r} with lookalike letters ({lookalike[:60]!r} "
+                            "reads the same once rn/m, cl/d and vv/w are read alike, stretched letters collapsed "
+                            "and spaces ignored)")
         elif m is PhraseMatch.LOOSE:
-            borderline.append(f"{r.rule_id}: possible never-say {r.params.get('phrase')!r} written with split/obfuscated letters")
+            borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with split/obfuscated letters")
         else:
-            how = near_miss(clip_text, r.params.get("phrase", ""))
+            how = near_miss(clip_text, phrase, fz)
             if how:
-                borderline.append(f"{r.rule_id}: possible never-say {r.params.get('phrase')!r} written with {how}")
+                borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with {how}")
 
     for field_name in ("caption", "on_screen_text", "transcript"):
         for sig in obfuscation_signals(getattr(sub, field_name)):

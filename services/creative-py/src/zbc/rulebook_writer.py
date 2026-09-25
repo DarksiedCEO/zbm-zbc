@@ -27,6 +27,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from shared.registry import PlatformRulesRegistry
+from shared.text import SHORT_ENTRY_LETTERS, canonical
 from shared.types import CampaignId, NonEmptyStr, SafeId
 from zbc.platform_rules import length_rows, originality_rows
 from zbc.rulebook import (
@@ -53,6 +54,18 @@ class AngleInput(BaseModel):
     hook_lines: list[NonEmptyStr] = []
 
 
+class NeverSayEntry(BaseModel):
+    """A never-say phrase with options (fix wave 6, N3). `fuzzy`: opt a short
+    entry (<= shared.text.SHORT_ENTRY_LETTERS letters, e.g. "cure", "scam")
+    into the similarity gate, which otherwise matches it exactly only —
+    one edit from a 4-letter word is a tenth of ordinary English."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    phrase: NonEmptyStr
+    fuzzy: bool = False
+
+
 class CampaignGoal(BaseModel):
     """What the client funds and supplies. The writer never invents any of it."""
 
@@ -66,7 +79,7 @@ class CampaignGoal(BaseModel):
     cleared_asset_ids: list[SafeId] = []
     angles: list[AngleInput] = Field(min_length=1, max_length=20)
     must_say: list[NonEmptyStr] = []
-    never_say: list[NonEmptyStr] = []
+    never_say: list[NonEmptyStr | NeverSayEntry] = []
     disclosure_any_of: list[NonEmptyStr] = Field(min_length=1)
     platforms: list[PlatformTarget] = Field(min_length=1)
     min_days_live: int = Field(ge=1, le=365)
@@ -81,6 +94,35 @@ class CampaignGoal(BaseModel):
 
 def _rule(kind: RuleKind, n: int, text: str, params: dict, rows: tuple[str, ...] = ()) -> Rule:
     return Rule(rule_id=f"{PREFIX[kind]}-{n:02d}", kind=kind, text=text, params=params, rationale_row_ids=rows)
+
+
+def never_say_entries(goal: CampaignGoal) -> list[NeverSayEntry]:
+    """The goal's never-say list as entries, de-duplicated by phrase (the
+    first spelling of a phrase wins; `fuzzy` if any spelling said so)."""
+    out: dict[str, NeverSayEntry] = {}
+    for e in goal.never_say:
+        e = e if isinstance(e, NeverSayEntry) else NeverSayEntry(phrase=e)
+        prev = out.get(e.phrase)
+        out[e.phrase] = e if prev is None else prev.model_copy(update={"fuzzy": prev.fuzzy or e.fuzzy})
+    return list(out.values())
+
+
+def short_entry_warnings(entries: list[NeverSayEntry], rule_ids: dict[str, str] | None = None) -> list[str]:
+    """N3: a never-say entry of <= SHORT_ENTRY_LETTERS letters is matched
+    exactly (on canonical text, lookalikes folded, split or run together)
+    but gets NO edit budget unless `fuzzy` — say so, either way."""
+    out: list[str] = []
+    for e in entries:
+        letters = len(canonical(e.phrase).replace(" ", ""))
+        if letters <= SHORT_ENTRY_LETTERS:
+            rid = f"{rule_ids[e.phrase]} " if rule_ids and e.phrase in rule_ids else ""
+            if e.fuzzy:
+                out.append(f"never-say {rid}{e.phrase!r} has {letters} letters and is opted into fuzzy matching: "
+                           "expect ordinary words one letter away from it to reach the human queue")
+            else:
+                out.append(f"never-say {rid}{e.phrase!r} has {letters} letters (<= {SHORT_ENTRY_LETTERS}): matched "
+                           "exactly only, misspellings are not caught; set \"fuzzy\": true on the entry to opt in")
+    return out
 
 
 def _build(goal: CampaignGoal, registry: PlatformRulesRegistry, today: date) -> tuple[list[Angle], list[Rule], list[str]]:
@@ -103,8 +145,9 @@ def _build(goal: CampaignGoal, registry: PlatformRulesRegistry, today: date) -> 
                        {"angle_ids": [a.angle_id for a in angles]}))
     for phrase in dict.fromkeys(goal.must_say):
         rules.append(_rule(RuleKind.MUST_SAY, nxt(RuleKind.MUST_SAY), f"The clip must say: \"{phrase}\".", {"phrase": phrase}))
-    for phrase in dict.fromkeys(goal.never_say):
-        rules.append(_rule(RuleKind.NEVER_SAY, nxt(RuleKind.NEVER_SAY), f"The clip must never say: \"{phrase}\".", {"phrase": phrase}))
+    for e in never_say_entries(goal):
+        params = {"phrase": e.phrase, **({"fuzzy": True} if e.fuzzy else {})}
+        rules.append(_rule(RuleKind.NEVER_SAY, nxt(RuleKind.NEVER_SAY), f"The clip must never say: \"{e.phrase}\".", params))
     rules.append(_rule(RuleKind.DISCLOSURE, nxt(RuleKind.DISCLOSURE),
                        "The caption carries a paid-partnership disclosure (one of: "
                        + ", ".join(goal.disclosure_any_of) + ") or the platform's paid-partnership label is on.",
@@ -164,7 +207,8 @@ def draft(goal: CampaignGoal, registry: PlatformRulesRegistry, today: date, vers
         campaign_id=goal.campaign_id, client_id=goal.client_id, vertical=goal.vertical, version=version,
         status=RulebookStatus.DRAFT, objective=goal.objective, source_asset_ids=tuple(goal.source_asset_ids),
         approved_angles=tuple(angles), platforms=tuple(goal.platforms), rules=tuple(rules),
-        blocking_issues=tuple(blocking), drafted_by=drafted_by, language=goal.language,
+        blocking_issues=tuple(blocking), warnings=tuple(short_entry_warnings(never_say_entries(goal))),
+        drafted_by=drafted_by, language=goal.language,
     )
 
 
@@ -198,6 +242,7 @@ def revise(previous: Rulebook, goal: CampaignGoal, registry: PlatformRulesRegist
         campaign_id=goal.campaign_id, client_id=goal.client_id, vertical=goal.vertical, version=version,
         status=RulebookStatus.DRAFT, objective=goal.objective, source_asset_ids=tuple(goal.source_asset_ids),
         approved_angles=tuple(angles), platforms=tuple(goal.platforms), rules=tuple(out),
-        retired_rule_ids=retired, blocking_issues=tuple(blocking), drafted_by=drafted_by,
+        retired_rule_ids=retired, blocking_issues=tuple(blocking),
+        warnings=tuple(short_entry_warnings(never_say_entries(goal))), drafted_by=drafted_by,
         supersedes_version=previous.version, language=goal.language,
     )

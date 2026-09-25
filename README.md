@@ -403,9 +403,14 @@ never-say is a similarity gate (visual skeleton + bounded edit distance;
 positives); `serve.py` caps request heads at 16 KiB with head/idle
 deadlines and bounded concurrency; ledger-rust's own load-shed 503 is "not
 recorded"; an uncertain human verdict can be withdrawn by its reviewer.
+Fix wave 6: never-say runs on the caption's letter stream (splits,
+stretched and doubled letters, fillers within two words; 4-letter entries
+exact-only unless opted in; 1.7% / 2.7% measured false positives on two
+corpora); 422 bodies are bounded and never echo the request, JSON bodies
+capped at 4,096 members; a certainly-unrecorded verdict holds nothing.
 
 ```bash
-cd services/creative-py && python3 -m pytest -q      # 469 tests
+cd services/creative-py && python3 -m pytest -q      # 515 tests
 export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
 export CREATIVE_ACTOR_TOKENS='{"<actor_id>": "<token>", ...}'   # per-actor credentials
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>

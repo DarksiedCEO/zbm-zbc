@@ -52,7 +52,7 @@ def sheet_for(moment: Moment, angle_id: str, rb: Rulebook) -> HookSheet:
         raise GuardrailViolation(f"H1 angle {angle_id!r} is not an approved angle in {rb.campaign_id} v{rb.version}")
     if angle_id not in moment.matched_angle_ids:
         raise GuardrailViolation(f"H1 moment {moment.moment_id} did not match angle {angle_id}")
-    never = [(r.rule_id, r.params.get("phrase", "")) for r in rb.rules_of(RuleKind.NEVER_SAY)]
+    never = [(r.rule_id, r.params.get("phrase", ""), bool(r.params.get("fuzzy"))) for r in rb.rules_of(RuleKind.NEVER_SAY)]
     candidates = list(angle.approved_hook_lines)
     quote = _opening_quote(moment.transcript)
     if quote:
@@ -69,7 +69,7 @@ def sheet_for(moment: Moment, angle_id: str, rb: Rulebook) -> HookSheet:
         if len(n.split()) > HOOK_MAX_WORDS:
             rejected.append({"hook": h, "reason": f"H3 more than {HOOK_MAX_WORDS} words; won't land in {HOOK_WINDOW_SECONDS}s"})
             continue
-        broken = [rid for rid, p in never if mentions_phrase(h, p)]
+        broken = [rid for rid, p, fz in never if mentions_phrase(h, p, fz)]
         if broken:
             rejected.append({"hook": h, "reason": f"H4 breaks never-say {', '.join(broken)}"})
             continue

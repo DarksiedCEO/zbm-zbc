@@ -128,10 +128,14 @@ class Rulebook(BaseModel):
     rules: tuple[Rule, ...]
     retired_rule_ids: tuple[str, ...] = ()
     blocking_issues: tuple[str, ...] = ()
+    # Non-blocking notes from the writer (fix wave 6, N3): e.g. a never-say
+    # entry of <= 4 letters, which is matched exactly only unless opted in.
+    warnings: tuple[str, ...] = ()
     drafted_by: str
     supersedes_version: int | None = None
     approved_by: str | None = None
     review_issues: tuple[str, ...] = ()
+    review_warnings: tuple[str, ...] = ()  # the approver's non-blocking notes (N3)
     signed_by: str | None = None
     signed_at: datetime | None = None
     live_at: datetime | None = None
