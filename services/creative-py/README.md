@@ -85,7 +85,9 @@ Andre's actions also need `X-Andre-Approval-Token: $CREATIVE_ANDRE_APPROVAL_TOKE
 guardrail/founder, 404 not found, 409 out of order / frozen / blocked, 422
 validation (including any id whose ledger subject couldn't fit: campaign
 ids are at most 100 characters; client ids are lowercase `[a-z0-9_]`),
-413 body over 1 MiB, 408 body not delivered within 30 s, 400/431 request
+413 body over 1 MiB, 422 `PayloadTooManyMembers` (a JSON body with more
+than 4,096 keys + items) / 400 `PayloadTooDeep` (nested deeper than 32),
+408 body not delivered within 30 s, 400/431 request
 head over 16 KiB, 503 `Service Unavailable` (plain, no `took_effect`) when
 more than `CREATIVE_MAX_CONCURRENCY` connections are open (fix wave 5),
 **503 `took_effect: false` = evidence ledger record
@@ -148,9 +150,31 @@ and kept idle / partial-head sockets open forever.
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 24, 2026 after fix wave 5: **469 passed, 0 failed**
-(Python 3.11.15, pytest 9.1.1; 428 after fix wave 4, 360 after fix wave 2,
-310 after fix wave 1, 205 before it). `test_fix_wave_5.py` reproduces AEGIS
+Result on Sep 24, 2026 after fix wave 6: **515 passed, 0 failed**
+(Python 3.11.15, pytest 9.1.1; 469 after fix wave 5, 428 after fix wave 4,
+360 after fix wave 2, 310 after fix wave 1, 205 before it).
+`test_fix_wave_6.py` reproduces AEGIS round-5 N1 (readable respellings of
+never-say phrases: the 21 AEGIS cases with their required outcomes, the
+probe's whole 79-candidate list, a 1,000+-case fuzz over the round-5
+generators — lookalike + split, stretched, doubled, filler, plain split —
+and the round-4 generators, the reject / human_review boundary, the
+adjacency policy, a 100 KB timing bound of 8 s (measured 0.75 s worst),
+and a randomised proof that the bit-parallel Damerau scan with
+restricted starts agrees with a plain DP), N3 (4-letter entries exact-only
+unless `fuzzy`; writer and reviewer warnings; the false-positive rate on
+BOTH corpora — implementer 4/239 = 1.7%, AEGIS 3/111 = 2.7%, verbatim
+copy of the review's `my_captions.py`, with "cure" on the list), N2 (a
+1 MiB junk body and a 60,000-key body → 422 under 8 KiB in < 100 ms;
+twenty concurrent of each on a real socket → `/health` < 500 ms, no 408
+for a legitimate client; other error paths bounded) and N5 (a certainly
+unrecorded verdict holds nothing; identical retry still reuses its
+time; accurate wording for the uncertain case). Three wave-5 tests were
+changed to assert the new policy (the budget tiers; "cure" opted in via
+`fuzzy` in the fuzz / exhaustive sweeps, since a 4-letter entry is now
+exact-only by design; the timing test uses the batch API that Clip
+Review uses) and one wave-2 test (`test_n1_human_review_time_bound_to_verdict`
+used to expect a different verdict to be refused for 15 minutes after a
+CERTAIN failure). `test_fix_wave_5.py` reproduces AEGIS
 round-4 NEW-1 (ASCII lookalike spellings of never-say phrases: the AEGIS
 captions, an exhaustive every-single-edit sweep of the 16 phrases (every
 substitution, insertion, deletion, adjacent transposition, word split /
@@ -340,6 +364,43 @@ ledger).
   `/ledger/verify`: 69 entries, valid. All processes stopped (only PIDs
   this run started).
 
+## Live run — fix wave 6, against the REAL ledger-rust (Sep 24, 2026)
+
+ledger-rust built from this tree into a private target dir, on :20310
+(fresh log); creative-py on :20300 (ledger direct). Only PIDs this run
+started; both stopped at the end.
+
+- `devtools/live_smoke.py` on :20300 → all 39 steps OK, 37 entries,
+  `/ledger/verify` valid.
+- AEGIS `cre_amp.py` (as written: N-field bodies, 20 concurrent × 3, RSS
+  from the pid file, `/health` polled): 60,000 fields (868 KB) → `{422:
+  60}` in 4.4 s, response 101 bytes, peak RSS 102 MB, `/health` p50 9 ms
+  max 143 ms; 90,000 fields (1,307 KB) → `{413: 60}`, 73 bytes; 3,000
+  fields → `{422: 60}`, 1,134 bytes, `/health` max 78 ms; the AEGIS
+  "1 MiB junk" shape (one 1,000,000-character string field) → `{422:
+  60}` in 1.6 s, 1,084 bytes, `/health` p50 32 ms max 32 ms. Pre-fix
+  (same probe, this tree before the fix, in the test suite's real-socket
+  run): 13.0–15.3 MB bodies, `/health` p50 30 s, six 408s and eleven
+  read errors among the junk clients.
+- Never-say on a fresh campaign with the round-5 ten-phrase list plus
+  "cure" (rulebook draft `warnings` and review `review_warnings` named
+  the 4-letter entry; review still `approved`): "geeet riiich", "rn ak
+  em on ey", "pas si ve inc orne", "make r n oney", "cu re it" →
+  `reject` (NS rule cited, "with lookalike letters"); "gget ricch", "ge
+  t rl ch", "riskk freeee" → `human_review` (lookalike / small
+  misspelling); "make big money", "guaranteed monthly returns" →
+  `human_review` ("its words in order with other words between them");
+  "a pure delight", "target rich environment" and an ordinary caption →
+  `pass`. Final `/ledger/verify`: 67 entries, valid.
+- Offline, the AEGIS probes against this tree: `ns_evade5.py` → 0
+  automatic passes among its 79 candidates other than the bare word
+  "cure", which is not on that probe's phrase list (36 reject, 40
+  human_review; pre-fix 16 passes); `ns_evade5b.py` → lookalike+split
+  0/84, stretched 0/100, two doublings 0/30 (pre-fix 47/84, 93/100,
+  30/30); `ns_fp5.py` with the implementer's phrase list → 3/111 = 2.7%
+  with "cure" on the list (pre-fix 13.5%; the three: "made money",
+  "from one" ~ free money, "risk. here's" ~ risk free).
+
 ## Known gaps
 
 See ADR 0005 "Honest gaps and open items" for the full list. The short
@@ -354,11 +415,17 @@ re-asked automatically; obfuscation handling is conservative (some honest
 mixed-script clips, and any word mixing letters with symbols or digits
 such as "mp4" or "Q4", go to the human queue); the pending-attempt and
 idempotency stores are bounded in memory (10,000 entries each).
-Fix wave 5: the never-say similarity gate sends ~2.5% of ordinary captions
-to a human (e.g. "make more" vs "make money", "core"/"care" vs "cure");
-phrases of 3 letters or fewer get no edit budget (one edit from "win" is
-"in", "wine", "won"), so a misspelt short phrase is caught only if it is a
-lookalike spelling or trips another backstop; inflections and paraphrases
+Fix wave 5 / 6: the never-say similarity gate sends 1.7% (implementer
+corpus) to 2.7% (AEGIS corpus) of ordinary captions to a human (e.g.
+"made money" vs "make money", "make videos about money" under the
+adjacency policy); phrases of 3 letters or fewer get no edit budget (one
+edit from "win" is "in", "wine", "won"), entries of 4 letters none unless
+the rulebook opts them in (`{"phrase": "scam", "fuzzy": true}`; the writer
+and the reviewer warn), so a misspelt short phrase is caught only if it is
+a lookalike spelling, a split, or trips another backstop; a doubled letter
+("gget ricch") is a human's call, never a reject; the phrase's words more
+than two words apart ("make a lot of money") are not caught; a JSON body
+may carry at most 4,096 members; inflections and paraphrases
 ("getting rich", "100 percent guaranteed") are not lookalikes and are not
 caught. `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
 that many idle sockets gets everyone else 503s until the 10 s head

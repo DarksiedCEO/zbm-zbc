@@ -161,9 +161,11 @@ def _mutate_unicode_plus_edit(rng: random.Random, phrase: str) -> str:
 
 
 def test_new1_fuzz_single_edits_and_multichar_lookalikes_never_auto_pass(registry):
+    """Fix wave 6 (N3): "cure" (4 letters) is opted in with `fuzzy`; a short
+    entry that is not opted in is exact-only by design."""
     from zbc import clip_review
 
-    rb = _rulebook(registry, FUZZ_PHRASES)
+    rb = _rulebook(registry, [{"phrase": p, "fuzzy": True} if len(p) <= 4 else p for p in FUZZ_PHRASES])
     rng = random.Random(20260924_5)
     for i in range(3000):
         phrase = rng.choice(FUZZ_PHRASES)
@@ -207,9 +209,10 @@ def test_new1_every_single_edit_of_every_phrase_is_caught():
 
     checked = 0
     for phrase in FUZZ_PHRASES:
+        fuzzy = len(phrase) <= 4  # fix wave 6 (N3): a 4-letter entry is opted in here, exact-only otherwise
         for variant in _every_single_edit(phrase):
             text = f"Honestly, {variant.title()} today. #ad"
-            assert match_phrase(text, phrase) is not PhraseMatch.NONE or near_miss(text, phrase), (phrase, variant)
+            assert match_phrase(text, phrase) is not PhraseMatch.NONE or near_miss(text, phrase, fuzzy), (phrase, variant)
             checked += 1
     assert checked > 5000
 
@@ -250,16 +253,27 @@ def test_new1_ordinary_captions_through_full_review_are_not_held_by_this_rule(re
 
 def test_new1_short_phrases_get_no_edit_budget():
     """<= 3 letters: skeleton-exact only (one edit from "win" is "in",
-    "wine", "won" ...). Documented limitation, see visual_budget()."""
+    "wine", "won" ...). Documented limitation, see visual_budget().
+    Fix wave 6 changed the tiers (N1: 1/2/3 edits for 4-6/7-10/11+
+    letters) and made 4-letter entries exact-only unless opted in (N3);
+    this test used to assert 1 for 4-8 letters and 2 for 9+."""
     from shared.text import visual_budget, visual_near_miss
 
-    assert visual_budget(3) == 0 and visual_budget(4) == 1 and visual_budget(8) == 1 and visual_budget(9) == 2
+    assert visual_budget(3) == 0 and visual_budget(4) == 0 and visual_budget(4, fuzzy=True) == 1
+    assert visual_budget(6) == 1 and visual_budget(7) == 2 and visual_budget(10) == 2 and visual_budget(11) == 3
     assert visual_near_miss("We're winning with wine", "win") is None
     assert visual_near_miss("vvin big", "win") is not None
 
 
 def test_new1_visual_gate_is_linear_time_on_100kb():
-    from shared.text import visual_near_miss
+    """Fix wave 6 (N1): the gate scans the text once for a whole set of
+    phrases (`visual_near_misses`, what Clip Review calls); this test used
+    to call the single-phrase `visual_near_miss` sixteen times, which is
+    now sixteen scans (~8 s here) and not the production path."""
+    from shared.text import visual_near_misses
+
+    def visual_near_miss(text, phrase):
+        return visual_near_misses(text, ((phrase, False),))[phrase]
 
     rng = random.Random(7)
     inputs = [
@@ -274,16 +288,15 @@ def test_new1_visual_gate_is_linear_time_on_100kb():
     # measured on the build machine: 0.05-3.0 s per 100 KB input for all 16
     # phrases (the worst is random words over the lookalike alphabet, where
     # most windows survive the filters); linear, so 200 KB takes ~2x.
+    phrases = tuple((p, False) for p in NEVER_SAY_FP_LIST)
     for s in inputs:
         t0 = time.perf_counter()
-        for p in NEVER_SAY_FP_LIST:
-            visual_near_miss(s, p)
+        visual_near_misses(s, phrases)
         dt = time.perf_counter() - t0
         assert dt < 6.0, (s[:20], dt)
     s2 = inputs[-1] + " " + inputs[-1]
     t0 = time.perf_counter()
-    for p in NEVER_SAY_FP_LIST:
-        visual_near_miss(s2, p)
+    visual_near_misses(s2, phrases)
     assert time.perf_counter() - t0 < 12.0
 
 

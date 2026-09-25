@@ -58,13 +58,20 @@ a human instead of being enumerated. Both are never an automatic pass.
 
 ASCII lookalike SPELLINGS (fix wave 5, NEW-1): "retums" (rn for m),
 "rnoney", "guaranteecl" (cl for d), "vv" for w, "kure". Instead of another
-enumeration, `visual_near_miss()` is a similarity gate: windows of words
-compared with the phrase on visual skeletons (UTS #39's m -> rn plus
+enumeration, `visual_near_miss()` is a similarity gate: the phrase is
+compared with the text on visual skeletons (UTS #39's m -> rn plus
 typographic pairs) under a bounded Damerau-Levenshtein distance; see the
-block comment above VISUAL_SKELETON. `near_miss()` includes it, so every
-caller of `near_miss()` / `mentions_phrase()` gets it;
-`visual_lookalike_exact()` names a window that READS AS the phrase
-(Clip Review rejects it).
+block comment above VISUAL_SKELETON. Fix wave 6 (N1) made it a LETTER
+STREAM gate: the text's tokens are concatenated (a split is irrelevant:
+"ge t rl ch", "make r n oney"), the skeleton is applied to the stream,
+runs of a repeated letter are collapsed ("geeet" -> "get"), and the
+budget is 1/2/3 edits for 4-6/7-10/11+ letters; windows start at a word
+start and end at a word end. `near_miss()` includes it, and the adjacency
+policy (`phrase_words_in_order()`: the phrase's words in order within 2
+other words, "make big money"), so every caller of `near_miss()` /
+`mentions_phrase()` gets both; `visual_lookalike_exact()` names a window
+that READS AS the phrase (Clip Review rejects it). N3: an entry of <= 4
+letters gets no edit budget unless the rulebook opts it in (`fuzzy`).
 
 `obfuscation_signals()` says whether text shows evasion patterns at all:
 any bidi control, Hangul/Mongolian filler or tag character ANYWHERE; any
@@ -82,6 +89,7 @@ from __future__ import annotations
 import functools
 import re
 import unicodedata
+from collections import OrderedDict
 from enum import Enum
 
 _NON_WORD = re.compile(r"[^\w#@]+", re.UNICODE)
@@ -316,10 +324,10 @@ def contains_phrase(haystack: str, phrase: str) -> bool:
     return match_phrase(haystack, phrase) is PhraseMatch.EXACT
 
 
-def mentions_phrase(haystack: str, phrase: str) -> bool:
+def mentions_phrase(haystack: str, phrase: str, fuzzy: bool = False) -> bool:
     """EXACT, LOOSE or a near miss — for refusals where a false positive only
     costs a rewrite."""
-    return match_phrase(haystack, phrase) is not PhraseMatch.NONE or near_miss(haystack, phrase) is not None
+    return match_phrase(haystack, phrase) is not PhraseMatch.NONE or near_miss(haystack, phrase, fuzzy) is not None
 
 
 @functools.lru_cache(maxsize=16)
@@ -397,10 +405,14 @@ def _word_cost(w: str, p: str, cap: int) -> int | None:
     return prev[m] if prev[m] <= cap else None
 
 
-def near_miss(haystack: str, phrase: str) -> str | None:
+def near_miss(haystack: str, phrase: str, fuzzy: bool = False) -> str | None:
     """How `phrase` shows up in `haystack` only once symbols/digits are read
-    as letters (see the module docstring), or None. A description, e.g.
-    "symbols/digits standing in for letters", for the human reviewer."""
+    as letters (see the module docstring), as a readable respelling
+    (`visual_near_miss`), or as its words in order with a filler between
+    them (`phrase_words_in_order`) — or None. A description, e.g.
+    "symbols/digits standing in for letters", for the human reviewer.
+    `fuzzy`: the rulebook author opted a short entry into the similarity
+    gate (N3)."""
     p = canonical(phrase)
     if not p:
         return None
@@ -429,11 +441,15 @@ def near_miss(haystack: str, phrase: str) -> str | None:
         for w in words:
             if fits(w, squashed, cap):
                 return "symbols, digits or unknown letters in place of letters (words run together)"
-    hit = visual_near_miss(haystack, phrase)
+    hit = visual_near_miss(haystack, phrase, fuzzy)
     if hit is not None:
         dist, _, window = hit
         return (f"lookalike letters or a small misspelling ({window[:60]!r} is {dist} edit(s) from it once "
-                "rn/m, cl/d, vv/w, nn/m, ri/n, ii/u and l/i are read alike)")
+                "rn/m, cl/d, vv/w, nn/m, ri/n, ii/u and l/i are read alike, stretched letters collapsed and "
+                "spaces ignored)")
+    span = phrase_words_in_order(haystack, phrase)
+    if span is not None:
+        return f"its words in order with other words between them ({span[:60]!r})"
     return None
 
 
@@ -443,8 +459,10 @@ def near_miss(haystack: str, phrase: str) -> str | None:
 # symbols, digits, the l/i pair); plain-ASCII respellings still passed:
 # "Guaranteed retums" (rn for m), "make rnoney", "guaranteecl returns" (cl
 # for d), "vv" for w, "miracle kure". Instead of a sixth enumeration, a
-# SIMILARITY gate: every window of caption words is compared with every
-# never-say phrase on a visual SKELETON with a bounded edit distance.
+# SIMILARITY gate: the caption's letter stream is compared with every
+# never-say phrase on a visual SKELETON with a bounded edit distance (fix
+# wave 6 moved it from windows of words to the stream; see the block
+# comment above _tracked_contract).
 #
 # The multi-character ASCII confusables. Unicode UTS #39 confusables.txt
 # (Unicode 18.0.0, 2026-08-06, read for this fix) has exactly ONE entry
@@ -470,13 +488,13 @@ def near_miss(haystack: str, phrase: str) -> str | None:
 # (B) EXTENDED — the "merely similar" pairs as well, contracted to the
 #     letter they imitate, taken in two orders (pairs overlap: "ciire" is
 #     ci+i or c+ii).
-# (A-, B-) The same views without the pairs the PHRASE itself contains
-#     ("returns" has rn, "miracle" has cl once i -> l): otherwise an edit
-#     that splits the phrase's own pair ("returens") plus a lookalike
-#     elsewhere ("guaranteecl") would cost more than it looks.
-# (A+) The expansion direction (m -> rn, d -> cl, w -> vv), see below.
-# Any other misspelling ("kure", "retrns") is caught by the edit budget
-# (visual_budget) in every view.
+# Fix wave 6 (N1) dropped the split-pair views of fix wave 5 (A-, B-, A+:
+# the views without the pairs the phrase itself contains, and the
+# expansion direction): the gate now runs on the letter stream with
+# budgets of 2-3 edits for phrases of 7+ letters, which absorb a pair
+# split by an edit ("returens"); VISUAL_EXPANDED is kept for reference
+# only. Any other misspelling ("kure", "retrns") is caught by the edit
+# budget (visual_budget) in every view.
 # Every view first maps i -> l (UTS #39: I -> l; text is casefolded), so a
 # dotless/undotted i costs nothing to DETECT; it still never REJECTS by
 # itself ("get rlch" is a human's call, as it was before this wave —
@@ -489,9 +507,8 @@ VISUAL_EXTENDED: tuple[tuple[str, str], ...] = (
 # pairs overlap ("ciire" = ci+i or c+ii), so B is taken in two orders.
 VISUAL_EXTENDED_2: tuple[tuple[str, str], ...] = (
     ("ll", "u"), ("rl", "n"), ("cl", "a"), ("uu", "w"), ("vv", "w"), ("nn", "m"), ("rn", "m"))
-# (A+) The expansion direction (m -> rn, d -> cl, w -> vv): the phrase's
-#     own letters are expanded too, so a split pair in the text
-#     ("financaial" next to "freeclorn") still lines up.
+# The expansion direction (m -> rn, d -> cl, w -> vv). Not a view since fix
+# wave 6 (kept for reference: `lookalikes_of`-style tooling and tests).
 VISUAL_EXPANDED: tuple[tuple[str, str], ...] = (("m", "rn"), ("d", "cl"), ("w", "vv"))
 
 
@@ -521,24 +538,46 @@ def _reads_as_phrase(tokens: tuple[str, ...], pwords: list[str]) -> bool:
 
 
 def _views_for(phrase_l: str) -> list[tuple[tuple[str, str], ...]]:
-    views: list[tuple[tuple[str, str], ...]] = [(), VISUAL_SKELETON, VISUAL_EXPANDED, VISUAL_EXTENDED,
-                                                 VISUAL_EXTENDED_2]
-    for rules in (VISUAL_SKELETON, VISUAL_EXTENDED, VISUAL_EXTENDED_2):
-        kept = tuple(r for r in rules if r[0] not in phrase_l)
-        if kept != rules and kept not in views:
-            views.append(kept)
-    return views
+    """The skeleton views a phrase is compared under (fix wave 6, N1): raw
+    (i -> l only), the near-identical pairs, and the merely-similar pairs in
+    both orders. The split-pair views of fix wave 5 (A-, B-, A+) are no
+    longer needed: the stream ignores word boundaries and the budgets
+    absorb a pair split by an edit."""
+    return [(), VISUAL_SKELETON, VISUAL_EXTENDED, VISUAL_EXTENDED_2]
 
 
-def visual_budget(letters: int) -> int:
+SHORT_ENTRY_LETTERS = 4  # N3: never-say entries this short are exact-only unless `fuzzy: true`
+
+
+def visual_budget(letters: int, fuzzy: bool = False, raw_letters: int | None = None) -> int:
     """Edit budget (Damerau-Levenshtein, optimal string alignment) for a
-    phrase of `letters` letters: 1 up to 8 letters, 2 above. Phrases of 3
-    letters or fewer get 0 (skeleton-identical only): one edit from "win" or
-    "fee" is half the ordinary words of English ("in", "wine", "won", "few",
-    "free", "see"), which would send almost every caption to a human."""
-    if letters <= 3:
+    phrase whose run-collapsed skeleton has `letters` letters (fix wave 6,
+    N1): 1 for 4-6, 2 for 7-10, 3 above; 0 for 3 or fewer (skeleton-
+    identical only: one edit from "win" or "fee" is half the ordinary
+    words of English). N3: an entry of at most SHORT_ENTRY_LETTERS letters
+    as written (`raw_letters`, default `letters`) gets 0 unless the
+    rulebook author opted it in (`fuzzy`): one edit from "cure" is
+    sure/pure/core/care/cute, 11% of ordinary captions."""
+    raw = letters if raw_letters is None else raw_letters
+    if letters <= 3 or (raw <= SHORT_ENTRY_LETTERS and not fuzzy):
         return 0
-    return 1 if letters <= 8 else 2
+    if letters <= 6:
+        return 1
+    return 2 if letters <= 10 else 3
+
+
+def collapse_runs(s: str, keep: int = 1) -> str:
+    """Every run of one repeated character cut to `keep` characters:
+    collapse_runs("geeet") == "get"; collapse_runs("geeet", 2) == "geet"."""
+    out: list[str] = []
+    run = 0
+    prev = ""
+    for ch in s:
+        run = run + 1 if ch == prev else 1
+        prev = ch
+        if run <= keep:
+            out.append(ch)
+    return "".join(out)
 
 
 def _osa_within(a: str, b: str, k: int) -> int | None:
@@ -582,81 +621,460 @@ def _canonical_tokens(text: str) -> tuple[str, ...]:
     return tuple(canonical(text).split())
 
 
+# --- the letter stream (fix wave 6, N1) -------------------------------------------------
+#
+# AEGIS round 5 still passed readable respellings: stretched letters
+# ("geeet riiich"), doubled letters in short phrases ("gget ricch"), one
+# lookalike plus a split into more tokens than the phrase has words ("ge t
+# rl ch", "pas si ve inc orne"), a pair split by a space ("make r n oney").
+# Root causes: a 1-edit budget for phrases up to 8 letters and windows of
+# at most one token more than the phrase. Now the phrase is compared with
+# the LETTER STREAM of the text — every token concatenated, so how the
+# evader splits it is irrelevant — in this order:
+#   (1) the view (i -> l, then the pair rules) is applied to the STREAM, so
+#       a pair split across tokens ("r n") still contracts;
+#   (2) runs of one repeated letter are collapsed to a single letter, on
+#       the stream and on the phrase alike ("geeet" -> "get"), but never
+#       across a word boundary ("sell lemons" keeps "lemons");
+#   (3) budget `visual_budget()` on the collapsed skeleton: any window of
+#       the stream that STARTS at a token start and ENDS at a token end and
+#       is within budget -> human_review; a window that READS AS the phrase
+#       (`_reads_as_phrase`) -> reject.
+# Word-boundary anchoring is what keeps "target rich" / "budget rich" out:
+# the phrase's letters straddling a real word boundary mid-word are not a
+# reading of it.
+#
+# Cost: a bit-parallel scan (Myers 1999 with Hyyrö's 2003 transposition
+# term, Damerau/OSA distance) — one pass over the stream per view for a
+# whole PACK of phrases at once, each phrase in its own bit field; a Python
+# loop of ~20 big-integer operations per character, so linear in the text
+# whatever its content (the word-window gate's cost depended on the
+# text's alphabet). Restricting the start of a match to token starts is
+# done through the top row of the matrix (0 at a token start, 1
+# elsewhere — a lower bound, so the scan reports a superset), and every
+# reported end is confirmed by the exact banded distance
+# (`_osa_within`) from the aligned starts within budget. A hit is only
+# ever checked at a token end.
+
+
+def _tracked_contract(s: str, st: bytearray, en: bytearray, tok: list[int], src: str, proto: str):
+    """`s.replace(src, proto)` (len(src) == 2, len(proto) == 1) carrying the
+    flags: st[p] / en[p] (len(s) + 1) say a window may start / end before
+    position p; tok[q] is the token index of character q. A start flag
+    inside the pair moves to the merged character, an end flag inside it
+    to just after."""
+    if src not in s:
+        return s, st, en, tok
+    out: list[str] = []
+    nst = bytearray()
+    nen = bytearray()
+    ntok: list[int] = []
+    i, n = 0, len(s)
+    pend = 0
+    while True:
+        k = s.find(src, i)
+        if k < 0:
+            break
+        out.append(s[i:k])
+        nst += st[i:k]
+        nen += en[i:k]
+        if k > i:
+            nen[len(nen) - (k - i)] |= pend
+            pend = 0
+        ntok += tok[i:k]
+        out.append(proto)
+        nst.append(st[k] | st[k + 1])
+        nen.append(en[k] | pend)
+        pend = en[k + 1]
+        ntok.append(tok[k])
+        i = k + 2
+    out.append(s[i:])
+    nst += st[i:n]
+    nen += en[i:n]
+    if n > i:
+        nen[len(nen) - (n - i)] |= pend
+        pend = 0
+    ntok += tok[i:]
+    nst.append(0)
+    nen.append(en[n] | pend)
+    return "".join(out), nst, nen, ntok
+
+
+def _tracked_collapse(s: str, st: bytearray, en: bytearray, tok: list[int]):
+    """Runs of one repeated character -> one character, carrying the flags
+    like _tracked_contract (a start inside the run moves to the survivor,
+    an end inside it to just after)."""
+    out: list[str] = []
+    nst = bytearray()
+    nen = bytearray()
+    ntok: list[int] = []
+    prev = ""
+    pend = 0
+    for i, ch in enumerate(s):
+        if ch == prev:
+            nst[-1] |= st[i]
+            pend |= en[i]
+            continue
+        out.append(ch)
+        nst.append(st[i])
+        nen.append(en[i] | pend)
+        pend = 0
+        ntok.append(tok[i])
+        prev = ch
+    nst.append(0)
+    nen.append(en[len(s)] | pend)
+    return "".join(out), nst, nen, ntok
+
+
 @functools.lru_cache(maxsize=64)
-def _view_windows(text: str, rules: tuple[tuple[str, str], ...], size: int) -> dict[int, dict[str, int]]:
-    """Every window of `size` consecutive tokens of `text` in one view,
-    spaces removed, grouped by length: {length: {window: first start}}.
-    Built once per (text, view, size) and shared by every phrase. Bounded
-    memory: one 65 KB text (the largest clip text) needs ~52 entries and
-    ~20 MB, so 64 entries hold one text's working set and little more."""
+def _stream(text: str, rules: tuple[tuple[str, str], ...], collapse: bool = True) -> tuple[str, bytes, bytes, tuple[int, ...]]:
+    """The letter stream of `text` in one view: (stream, start flags, end
+    flags, token index per character). start[p] == 1 if a window may start
+    at position p, end[p] == 1 if one may end there (a token started /
+    ended there). Built once per (text, view), shared by every phrase:
+    i -> l, then each pair rule over the whole stream in order (the same
+    sequence `visual_view` applies to a word), then the run collapse. A
+    boundary INSIDE a contracted pair or a collapsed run is kept: its start
+    flag moves to the surviving character, its end flag to just after it —
+    "sell lemons" -> "selemons" still has a window "lemons" and a window
+    "sel"; "pas si ve" -> "pasive" like the phrase."""
     toks = _canonical_tokens(text)
-    memo = {t: visual_view(t, rules) for t in set(toks)}
-    skels = [memo[t] for t in toks]
-    out: dict[int, dict[str, int]] = {}
-    for i in range(len(skels) - size + 1):
-        w = "".join(skels[i:i + size])
-        out.setdefault(len(w), {}).setdefault(w, i)
+    s = "".join(toks).replace("i", "l")
+    n = len(s)
+    st = bytearray(n + 1)
+    en = bytearray(n + 1)
+    tok: list[int] = []
+    pos = 0
+    for ti, t in enumerate(toks):
+        st[pos] = 1
+        pos += len(t)
+        en[pos] = 1
+        tok += [ti] * len(t)
+    st[n] = 0
+    for src, proto in rules:
+        s, st, en, tok = _tracked_contract(s, st, en, tok, src, proto)
+    if collapse:
+        s, st, en, tok = _tracked_collapse(s, st, en, tok)
+    return s, bytes(st), bytes(en), tuple(tok)
+
+
+class _Pack:
+    """Several patterns packed into one big integer, one W-bit field each
+    (pattern bits at the top of the field, the lowest bit a carry guard),
+    scanned together (see the block comment above)."""
+
+    __slots__ = ("W", "n", "PAT", "FIRST", "TOPS", "LSBS", "CK", "scores0", "pm")
+
+    def __init__(self, pats: list[tuple[str, int]]):
+        # A field holds the pattern's bits (top m bits), a carry guard (the
+        # lowest bit), and doubles as a W-bit distance counter that the
+        # "<= k" test adds 2^(W-1) - 1 - k to: so 2^(W-1) > max(m, k).
+        m_max = max(len(p) for p, _ in pats)
+        k_max = max(k for _, k in pats)
+        W = max(m_max + 1, max(m_max, k_max).bit_length() + 1)
+        self.W, self.n = W, len(pats)
+        PAT = FIRST = TOPS = LSBS = CK = scores0 = 0
+        pm: dict[str, int] = {}
+        for i, (p, k) in enumerate(pats):
+            base = i * W
+            m = len(p)
+            first = base + W - m
+            PAT |= ((1 << m) - 1) << first
+            FIRST |= 1 << first
+            TOPS |= 1 << (base + W - 1)
+            LSBS |= 1 << base
+            CK |= ((1 << (W - 1)) - 1 - k) << base
+            scores0 |= m << base
+            for q, ch in enumerate(p):
+                pm[ch] = pm.get(ch, 0) | (1 << (first + q))
+        self.PAT, self.FIRST, self.TOPS, self.LSBS, self.CK, self.scores0, self.pm = PAT, FIRST, TOPS, LSBS, CK, scores0, pm
+
+    def scan(self, S: str, ST: bytes, EN: bytes):
+        """Yields (end position j, pattern index) for every token end j
+        (EN[j]) at which some pattern is within its budget of a window
+        ending there (the relaxed-start superset — the top row is 0 at a
+        token start ST[j], 1 elsewhere; confirm with _osa_within)."""
+        W, PAT, FIRST, TOPS, LSBS, CK = self.W, self.PAT, self.FIRST, self.TOPS, self.LSBS, self.CK
+        get = self.pm.get
+        sh = W - 1
+        Pv, Mv, scores, D0p, Eqp = PAT, 0, self.scores0, 0, 0
+        top = 0 if ST[0] else 1
+        for j, c in enumerate(S, 1):
+            Eq = get(c, 0)
+            ntop = 0 if ST[j] else 1
+            # The top row steps 1 -> 0 at a token start: a -1 horizontal
+            # delta at row 0, which Myers' recurrence (row-0 deltas of 0 or
+            # +1 only) has no input for. It forces D[1][j] = D[0][j-1] —
+            # exactly what a match at row 1 does — so it enters as a
+            # pseudo-match in the first cell of every field (Eqm); the real
+            # Eq alone feeds the transposition term.
+            Eqm = Eq | FIRST if ntop < top else Eq
+            D0 = (((((Eqm & Pv) + Pv) & PAT) ^ Pv) | Eqm | Mv | (((~D0p & Eq) << 1) & Eqp)) & PAT
+            Ph = (Mv | ~(D0 | Pv)) & PAT
+            Mh = Pv & D0
+            scores += (Ph >> sh) & LSBS
+            scores -= (Mh >> sh) & LSBS
+            Ph = (Ph << 1) & PAT
+            Mh = (Mh << 1) & PAT
+            if ntop > top:
+                Ph |= FIRST
+            elif ntop < top:
+                Mh |= FIRST
+            top = ntop
+            Pv = (Mh | ~(D0 | Ph)) & PAT  # Hyyro's form: the vertical deltas follow D0 (which holds the transposition)
+            Mv = Ph & D0
+            D0p, Eqp = D0, Eq
+            if EN[j]:
+                h = ~(scores + CK) & TOPS
+                while h:
+                    low = h & -h
+                    h ^= low
+                    yield j, (low.bit_length() - W) // W
+
+
+PACK_BITS = 1024  # patterns are packed into integers of about this many bits
+
+
+def _packs(pats: list[tuple[str, int]]) -> list[tuple[list[int], _Pack]]:
+    """Group pattern indexes into packs of about PACK_BITS bits (a pack is
+    as wide as its longest pattern per field)."""
+    order = sorted(range(len(pats)), key=lambda i: len(pats[i][0]))
+    out: list[tuple[list[int], _Pack]] = []
+    group: list[int] = []
+    for i in order:
+        w = len(pats[i][0]) + 1
+        if group and (len(group) + 1) * w > PACK_BITS:
+            out.append((group, _Pack([pats[g] for g in group])))
+            group = []
+        group.append(i)
+    if group:
+        out.append((group, _Pack([pats[g] for g in group])))
     return out
 
 
-@functools.lru_cache(maxsize=64)
-def visual_near_miss(haystack: str, phrase: str) -> tuple[int, bool, str] | None:
-    """The closest window of `haystack` words to `phrase` over the skeleton
-    views, if within `visual_budget()`: (distance, reads_as_phrase, window
-    text). reads_as_phrase is True only for a window with the phrase's word
-    boundaries that is IDENTICAL to it once rn/m, cl/d, vv/w are read alike
-    (`_reads_as_phrase`; the i/l fold and the merely-similar pairs don't
-    count). None if no window is within budget. Windows have the
-    phrase's word count, one more, or one fewer (never zero) and are
-    compared with spaces removed. Linear in the text: per view (at most 8)
-    and window size, the distinct windows are built once and grouped by
-    length; a phrase looks only at windows within its budget in length,
-    then a pigeonhole substring filter (with budget k, one of 2k+1 pieces
-    of the phrase survives intact — each edit, a transposition included,
-    touches at most two pieces), then a banded distance."""
-    p = canonical(phrase)
-    if not p:
-        return None
-    pwords = p.split()
-    m = len(pwords)
-    k = visual_budget(len(p.replace(" ", "")))
-    toks = _canonical_tokens(haystack)
-    best: tuple[int, bool, str] | None = None
-    for rules in _views_for(p.replace("i", "l")):
-        pskel = "".join(visual_view(w, rules) for w in pwords)
-        npieces = 2 * k + 1
-        step = len(pskel) / npieces
-        pieces = [x for x in (pskel[round(i * step):round((i + 1) * step)] for i in range(npieces)) if x] or [pskel]
-        has_piece = re.compile("|".join(map(re.escape, pieces))).search
-        for size in (m, m - 1, m + 1):
-            if size < 1:
+def _word_share_budget(word_skel: str) -> int:
+    """How many of a window's edits one phrase word may absorb (fix wave 6,
+    N1/N3): its own tier (visual_budget of its collapsed skeleton), at
+    least 1. An evasion misspells each word a little; a DIFFERENT ordinary
+    word two edits from one short phrase word ("more"/"money", "for" or
+    "here"/"free") is what the false positives were made of."""
+    return max(1, visual_budget(len(word_skel), fuzzy=True))
+
+
+def _word_shares_ok(window: str, words: list[str], total: int) -> bool:
+    """Can `window` be cut into len(words) consecutive pieces so that piece
+    i is within _word_share_budget(words[i]) edits of words[i] and the
+    pieces' edits sum to at most `total`? Segmented banded DP over the
+    window (short: the phrase's length plus its budget)."""
+    n = len(window)
+    inf = total + 1
+    best = [0] + [inf] * n  # best[e]: least cost to match words so far with window[:e]
+    for w in words:
+        cap = _word_share_budget(w)
+        m = len(w)
+        nxt = [inf] * (n + 1)
+        for a in range(n + 1):
+            if best[a] >= inf:
                 continue
-            by_len = _view_windows(haystack, rules, size)
-            for length in range(len(pskel) - k, len(pskel) + k + 1):
-                for window, i in by_len.get(length, {}).items():
-                    if not has_piece(window):
+            for b in range(max(a, a + m - cap), min(n, a + m + cap) + 1):
+                d = _osa_within(window[a:b], w, cap)
+                if d is not None and best[a] + d < nxt[b]:
+                    nxt[b] = best[a] + d
+        best = nxt
+    return best[n] <= total
+
+
+def _reads_as_phrase(window_text: str, squashed: str) -> bool:
+    """`window_text` (the original tokens the window spans) READS AS the
+    phrase: identical once rn/m, cl/d, vv/w are read alike
+    (visual_skeleton, no i/l fold) and stretched runs of 3+ letters are
+    cut to one ("geeet" is not a spelling of anything). A doubled letter
+    is left alone: met/meet, of/off, to/too are different words, so a
+    double is an edit for the budget, never a reading. Decides REJECT."""
+    return _collapse_stretched(visual_skeleton(window_text.replace(" ", ""))) == _collapse_stretched(visual_skeleton(squashed))
+
+
+def _collapse_stretched(s: str) -> str:
+    """Runs of 3+ of one character -> one character; doubles stay."""
+    out: list[str] = []
+    i, n = 0, len(s)
+    while i < n:
+        j = i
+        while j < n and s[j] == s[i]:
+            j += 1
+        out.append(s[i] if j - i >= 3 else s[i:j])
+        i = j
+    return "".join(out)
+
+
+# Results per haystack, filled by any batch and read by every single-phrase
+# call, so Clip Review's one scan for all its phrases is not repeated per
+# rule. Bounded by DISTINCT haystacks (a key is a reference to the text).
+_VNM_MEMO: "OrderedDict[str, dict[tuple[str, bool], tuple[int, bool, str] | None]]" = OrderedDict()
+_VNM_MEMO_TEXTS = 16
+
+
+def visual_near_misses(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[str, tuple[int, bool, str] | None]:
+    """`visual_near_miss()` for several (phrase, fuzzy) at once — one scan
+    of the stream per view for the whole set. Returns {phrase: result}."""
+    memo = _VNM_MEMO.get(haystack)
+    if memo is None:
+        memo = _VNM_MEMO[haystack] = {}
+        while len(_VNM_MEMO) > _VNM_MEMO_TEXTS:
+            _VNM_MEMO.popitem(last=False)
+    _VNM_MEMO.move_to_end(haystack)
+    todo = [(p, bool(f)) for p, f in dict.fromkeys((p, bool(f)) for p, f in phrases) if (p, bool(f)) not in memo]
+    if todo:
+        for (p, f), res in _scan_phrases(haystack, tuple(todo)).items():
+            memo[(p, f)] = res
+    return {p: memo[(p, bool(f))] for p, f in phrases}
+
+
+def _scan_phrases(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[tuple[str, bool], tuple[int, bool, str] | None]:
+    toks = _canonical_tokens(haystack)
+    specs: list[tuple[tuple[str, bool], str, int, bool]] = []  # (key, squashed, raw letters, fuzzy)
+    result: dict[tuple[str, bool], tuple[int, bool, str] | None] = {}
+    for phrase, fuzzy in phrases:
+        p = canonical(phrase)
+        result[(phrase, fuzzy)] = None
+        if p:
+            sq = p.replace(" ", "")
+            specs.append(((phrase, fuzzy), sq, len(sq), fuzzy))
+    if not specs or not toks:
+        return result
+    for rules in _views_for(""):
+        S, ST, EN, tok = _stream(haystack, rules)
+        # Two skeletons per phrase against the collapsed text: the phrase
+        # collapsed ("geeet" ~ "get" at no cost) and as written (an
+        # insertion that splits the phrase's own double, "frete" for
+        # "free", is one edit against "free" but two against "fre"). The
+        # budget is the collapsed skeleton's tier either way.
+        pats: list[tuple[str, int]] = []
+        owner: list[int] = []
+        wskels: list[list[str]] = []
+        for i, (key, sq, raw, fz) in enumerate(specs):
+            pskel = _stream(key[0], rules)[0]  # the phrase through the same transform as the text
+            k = visual_budget(len(pskel), fz, raw)
+            pwords = canonical(key[0]).split()
+            for collapse in (True, False):
+                variant = _stream(key[0], rules, collapse)[0]
+                if not collapse and variant == pskel:
+                    continue
+                pats.append((variant, k))
+                owner.append(i)
+                wskels.append([_stream(w, rules, collapse)[0] for w in pwords])
+        dist_memo: dict[tuple[str, str], int | None] = {}  # (window, pattern) -> distance; repeated text repeats windows
+        share_memo: dict[tuple[str, int], bool] = {}
+        for group, pack in _packs(pats):
+            for j, gi in pack.scan(S, ST, EN):
+                pidx = group[gi]
+                idx = owner[pidx]
+                key, sq, _, _ = specs[idx]
+                best = result[key]
+                if best is not None and best[1]:
+                    continue
+                pskel, k = pats[pidx]
+                m = len(pskel)
+                exact_only = best is not None and best[0] == 0  # only a READING could still improve on it
+                for s in range(max(0, j - m - k), j - m + k + 1):
+                    if s >= j or not ST[s]:
                         continue
-                    d = _osa_within(window, pskel, k)
-                    if d is None:
-                        continue
-                    reads = d == 0 and size == m and _reads_as_phrase(toks[i:i + size], pwords)
-                    cand = (d, reads, " ".join(toks[i:i + size]))
+                    w = S[s:j]
+                    if exact_only:
+                        if w != pskel:
+                            continue
+                        d = 0
+                    else:
+                        mk = (w, pskel)
+                        d = dist_memo.get(mk, -1)
+                        if d == -1:
+                            d = dist_memo[mk] = _osa_within(w, pskel, k)
+                        if d is None:
+                            continue
+                        if d >= 2 and len(wskels[pidx]) > 1:
+                            sk = (w, pidx)
+                            okay = share_memo.get(sk)
+                            if okay is None:
+                                okay = share_memo[sk] = _word_shares_ok(w, wskels[pidx], k)
+                            if not okay:
+                                continue  # the edits are one whole short word swapped for another
+                    window = " ".join(toks[tok[s]:tok[j - 1] + 1])
+                    reads = d == 0 and _reads_as_phrase(window, sq)
+                    cand = (d, reads, window)
                     if best is None or (cand[0], not cand[1]) < (best[0], not best[1]):
                         best = cand
+                        exact_only = d == 0
                         if reads:
-                            return best
-    return best
+                            break
+                result[key] = best
+    return result
 
 
-def visual_lookalike_exact(haystack: str, phrase: str) -> str | None:
-    """The words of `haystack` that READ AS `phrase` once the near-identical
-    pairs rn/m (UTS #39), cl/d, vv/w are read alike — same words,
-    skeleton-identical: "make rnoney", "guaranteecl returns" — or None.
-    ("get rlch" is NOT one: l for i is a human's call, see near_miss.)"""
-    hit = visual_near_miss(haystack, phrase)
+def visual_near_miss(haystack: str, phrase: str, fuzzy: bool = False) -> tuple[int, bool, str] | None:
+    """The closest word-aligned window of `haystack`'s letter stream to
+    `phrase` over the skeleton views, if within `visual_budget()`:
+    (distance, reads_as_phrase, window text). reads_as_phrase is True only
+    for a window IDENTICAL to the phrase once rn/m, cl/d, vv/w are read
+    alike and stretched letters are collapsed (`_reads_as_phrase`; the i/l
+    fold, the merely-similar pairs and a doubled letter don't count). None
+    if no window is within budget. `fuzzy`: the rulebook author opted a
+    short entry in (N3)."""
+    return visual_near_misses(haystack, ((phrase, bool(fuzzy)),))[phrase]
+
+
+def visual_lookalike_exact(haystack: str, phrase: str, fuzzy: bool = False) -> str | None:
+    """The words of `haystack` that READ AS `phrase` — the letters of the
+    phrase, on word boundaries, however they are split, once rn/m (UTS
+    #39), cl/d, vv/w are read alike and stretched letters are collapsed:
+    "make rnoney", "make r n oney", "pas si ve inc orne", "geeet riiich" —
+    or None. ("get rlch" is NOT one: l for i is a human's call.)"""
+    hit = visual_near_miss(haystack, phrase, fuzzy)
     if hit is not None and hit[1]:
         return hit[2]
     return None
+
+
+# --- adjacency policy (fix wave 6, N1 (d); ADR 0005 decision 22) ---------------------------
+#
+# The spec never said how far apart the words of a never-say phrase may be
+# and still be "said". Policy: the phrase's words, in order, with at most
+# ADJACENCY_GAP other words between consecutive ones, is a human's call
+# ("make big money", "get so rich", "guaranteed monthly returns"); further
+# apart ("make a lot of money") is not caught by this rule (documented
+# limitation: paraphrase is out of scope).
+
+ADJACENCY_GAP = 2
+
+
+def _word_key(w: str) -> str:
+    return collapse_runs(visual_view(w, VISUAL_SKELETON))
+
+
+def phrase_words_in_order(haystack: str, phrase: str, max_gap: int = ADJACENCY_GAP) -> str | None:
+    """The shortest span of `haystack` words that contains the words of the
+    multi-word `phrase` in order with at most `max_gap` words between
+    consecutive ones (each word exact on canonical text, or the same once
+    rn/m, cl/d, vv/w, i/l are read alike and stretched letters collapsed),
+    or None. Single-word phrases: None (nothing to space out)."""
+    pwords = canonical(phrase).split()
+    if len(pwords) < 2:
+        return None
+    toks = _canonical_tokens(haystack)
+    pkeys = [_word_key(w) for w in pwords]
+    keys = [_word_key(t) for t in toks]
+    best: tuple[int, int] | None = None
+    for start in (i for i, k in enumerate(keys) if k == pkeys[0]):
+        pos = start
+        okay = True
+        for pk in pkeys[1:]:
+            nxt = next((j for j in range(pos + 1, min(len(keys), pos + max_gap + 2)) if keys[j] == pk), None)
+            if nxt is None:
+                okay = False
+                break
+            pos = nxt
+        if okay and (best is None or pos - start < best[1] - best[0]):
+            best = (start, pos)
+    return " ".join(toks[best[0]:best[1] + 1]) if best else None
 
 
 def mixed_symbol_words(text: str, limit: int = 5) -> list[str]:

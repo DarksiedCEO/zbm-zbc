@@ -150,7 +150,12 @@ def test_n1_event_id_includes_content_hash(api):
 
 
 def test_n1_human_review_time_bound_to_verdict():
-    """Sweep: the human-review retry cache had the same flaw (keyed by submission only)."""
+    """Sweep: the human-review retry cache had the same flaw (keyed by
+    submission only). A different verdict never inherits the failed
+    attempt's time. (Fix wave 6, N5: this test used to expect the
+    different verdict to be REFUSED for 15 minutes after a CERTAIN
+    failure; a certain failure holds nothing, so it is accepted at once,
+    with the clock's time.)"""
     clock = FixedClock(NOW)
     led = FakeLedgerClient()
     api = Api(ledger=led, clock=clock)
@@ -159,17 +164,13 @@ def test_n1_human_review_time_bound_to_verdict():
     assert d["outcome"] == "human_review"
     led.fail_next = True
     r = api.post("/zbc/clips/clip_hr/human-review", {"actor_id": "zbc_clip_human_reviewer", "outcome": "pass"})
-    assert r.status_code == 503
+    assert r.status_code == 503 and r.json()["took_effect"] is False
     clock.at = clock.at + timedelta(minutes=1)
-    r = api.post("/zbc/clips/clip_hr/human-review",
-                 {"actor_id": "zbc_clip_human_reviewer", "outcome": "reject",
-                  "broken_rules": [{"rule_id": "QF-01", "reason": "low"}]})
-    assert r.status_code == 409, r.text
-    clock.at = clock.at + timedelta(hours=1)
     d = ok(api.post("/zbc/clips/clip_hr/human-review",
                     {"actor_id": "zbc_clip_human_reviewer", "outcome": "reject",
                      "broken_rules": [{"rule_id": "QF-01", "reason": "low"}]}))
-    assert d["decided_at"].startswith(clock.now().isoformat()[:19])
+    assert d["decided_at"].startswith(clock.now().isoformat()[:19])  # the clock, not the failed attempt's time
+    assert len(led.of_type("clip_human_reviewed")) == 1
 
 
 # =====================================================================================

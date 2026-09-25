@@ -454,6 +454,117 @@ money. ZBC's unit of work is a campaign, not a clip.
     withdrawal before the verdict it names, which an audit can see — the
     ledger offers no conditional append to close this fully.
 
+22. **Never-say runs on the letter stream; short entries are exact-only;
+    adjacency is a policy (fix wave 6, N1 / N3).** AEGIS round 5 still
+    passed readable respellings through decision 19's word-window gate:
+    stretched letters ("geeet riiich", 93 of 100), doubled letters in a
+    short phrase ("gget ricch", 30 of 30), one lookalike plus a split into
+    more tokens than the phrase has words ("ge t rl ch", "pas si ve inc
+    orne", 47 of 84), a pair split by a space ("make r n oney"), and
+    fillers ("make big money"). Root causes: a 1-edit budget up to 8
+    letters and windows of at most one token more than the phrase. Now
+    (`shared/text.visual_near_misses`):
+    - the text's canonical tokens are concatenated into one LETTER
+      STREAM (a split is irrelevant); the view (i → l, then rn → m,
+      cl → d, vv → w; the merely-similar pairs in two orders; and raw)
+      is applied to the stream, so "r n" contracts; then runs of one
+      letter collapse to one ("geeet" → "get"). Word boundaries are
+      kept as flags: a window must START at a word start and END at a
+      word end (so "target rich" / "budget rich" are not readings), and
+      a boundary inside a contracted pair or a collapsed run moves to the
+      surviving letter ("sell lemons" still starts a window at "lemons").
+    - budget on the run-collapsed skeleton: 1 edit for 4–6 letters, 2
+      for 7–10, 3 above, 0 for ≤ 3. The phrase is compared both collapsed
+      and as written (an insertion that splits its own double, "frete"
+      for "free", is one edit against "free" but two against "fre").
+    - per-word share (this is what keeps the false-positive rate under
+      the 3% target while keeping the tiers): a window at distance ≥ 2
+      counts only if its edits can be apportioned so that no single
+      phrase word absorbs more than max(1, that word's own tier). An
+      evasion misspells each word a little; the false positives were a
+      DIFFERENT ordinary word two edits from one short phrase word
+      ("make more", "for money", "risk here"). Documented tension: the
+      wave-6 brief specified the tiers AND a ≤ 3% target on the AEGIS
+      corpus; the tiers alone gave 4.5%, tiers + per-word share 2.7%.
+    - a window that READS AS the phrase — identical once rn/m, cl/d,
+      vv/w are read alike and runs of 3+ letters are cut to one —
+      → **reject** ("geeet riiich", "make r n oney", "pas si ve inc
+      orne", "cu re"); a doubled letter is never a reading (met/meet,
+      of/off, to/too are different words: "gget ricch" is a human's
+      call), nor is the i/l fold ("ge t rl ch"), nor any edit.
+    - **N3, short entries**: an entry of ≤ 4 letters as written ("cure",
+      "scam") gets budget 0 — exact, split or lookalike reading only —
+      unless the rulebook author opts it in per entry (`never_say:
+      [{"phrase": "scam", "fuzzy": true}]`; rule params carry `fuzzy`).
+      The Rulebook Writer puts a warning on the draft (`warnings`) and the
+      Campaign Rulebook review repeats it (`review_warnings`, R7,
+      non-blocking). One edit from "cure" is sure/pure/core/care/cute:
+      11.4% of ordinary captions.
+    - **Adjacency policy** (the spec never defined how far apart the
+      words of a phrase may be): the phrase's words in order with at most
+      2 other words between consecutive ones → **human_review** ("make
+      big money", "get so rich", "guaranteed monthly returns"); further
+      apart ("make a lot of money") is paraphrase, out of scope.
+      `shared/text.phrase_words_in_order`, reached through `near_miss()`,
+      so hook lines and kit examples get it too.
+    - measured false positives, both corpora, 16-phrase list WITH "cure"
+      and the adjacency rule: implementer corpus 4/239 = 1.7% ("make
+      videos about money", "make your money last" — the adjacency rule;
+      "no risky", "investing involves risk. here's"); AEGIS corpus
+      (`probes/my_captions.py`, 117 captions, 111 after the 6 exact
+      hits the probe excludes) 3/111 = 2.7% ("made money", "from one"
+      ~ free money, "risk. here's" ~ risk free); none rejected. Before
+      this wave the AEGIS probe measured 13.5% with "cure", 1.8% without.
+    - cost: the scan is bit-parallel (Myers 1999 with Hyyrö's 2003
+      transposition term, so the distance is Damerau/OSA; restricted
+      starts via the matrix's top row, which enters a −1 step as a
+      pseudo-match), one pass over the stream per view for a whole pack
+      of phrases (each in its own bit field of one big integer), then an
+      exact banded confirmation at the reported ends. Linear in the text
+      whatever its content: measured ≤ 0.75 s per 100 KB for 16 phrases
+      on the build machine over ordinary and adversarial inputs
+      (documented bound in the test: 8 s). Clip Review scans the clip's
+      text once for all its never-say rules (`visual_near_misses`); the
+      per-phrase `visual_near_miss` shares the result through a
+      per-text memo.
+
+23. **Error bodies are bounded and never echo the request (fix wave 6,
+    N2).** FastAPI's default 422 echoes each error's `input` — for a
+    missing field, the whole body — so a 1 MiB junk body produced a
+    13.5 MiB answer and 60,000 unknown keys 60,000 errors; twenty at once
+    stalled `/health` for 36 s (RSS 308 MB) and two fast clients got a
+    408 (the body deadline is wall-clock while the loop rendered error
+    bodies). Now: a `RequestValidationError` handler answers with the
+    first 20 errors (loc ≤ 6 elements of ≤ 80 characters, msg capped, no
+    `input` / `ctx` / `url`), unknown keys counted with the first 20
+    names, the whole body kept under 8 KiB, built off the event loop
+    past 1,000 errors; `CreativeError` reasons and issues are capped
+    (1,000 characters, 20 issues); an unhandled exception is a fixed
+    JSON 500 without its message. And the root of the cost:
+    `BodyLimit` parses a JSON body in a worker thread BEFORE the
+    framework and refuses more than `MAX_JSON_MEMBERS` = 4,096 members
+    (keys + array items, counted with early exit) or nesting deeper than
+    `MAX_JSON_DEPTH` = 32 (422 `PayloadTooManyMembers` / 400
+    `PayloadTooDeep`, ~100 bytes) — the framework's per-error
+    bookkeeping (one record per unknown key, on the event loop) is what
+    stalled it. No legitimate request has more than a few hundred
+    members. Measured on the real socket: 1 MiB junk → 1,084-byte 422 in
+    7 ms; 60k keys → 101-byte 422 in 18 ms; twenty concurrent of either ×
+    3 → `/health` p50 9–72 ms, max ≤ 291 ms, peak RSS ≈ 100 MB, every
+    legitimate client answered (no 408).
+
+24. **A certain ledger failure holds nothing (fix wave 6, N5).** After
+    a human verdict whose ledger record CERTAINLY did not happen
+    (`took_effect: false`: connection refused, a 4xx, ledger-rust's shed
+    503), a different verdict used to be refused for the 15-minute
+    RETRY_WINDOW with a message saying the outcome "may be on the
+    ledger". Certain means certain: a different verdict is accepted at
+    once (with the clock's time; the RETRY_WINDOW reservation of
+    decision 8 / fix wave 2 only lets an IDENTICAL retry reuse the first
+    attempt's time). Only an UNCERTAIN outcome refuses different content,
+    and its message now says so accurately (re-send the same verdict, or
+    withdraw it).
+
 ## Shared vs separate
 
 Shared (reference data and plumbing, `src/shared/`): the Platform Rules
@@ -577,10 +688,15 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     lookalike the generated table doesn't cover (e.g. "turned" or
     "reversed" letters) is not matched but, since fix wave 4, is itself a
     signal (human queue). Multi-letter ASCII lookalikes are handled by the
-    similarity gate (decision 19), which trades a measured ~2.5% of
-    ordinary captions sent to a human; phrases of ≤ 3 letters get no edit
-    budget, and inflections / paraphrases ("getting rich") are not
-    lookalikes and are not caught. The symbol near-miss matcher is word-by-word (a phrase split across
+    similarity gate (decisions 19 and 22), which trades a measured 1.7%
+    (implementer corpus) / 2.7% (AEGIS corpus) of ordinary captions sent
+    to a human; phrases of ≤ 3 letters get no edit budget, entries of
+    ≤ 4 letters none unless opted in (`fuzzy`), a doubled letter is a
+    human's call rather than a reject, the phrase's words more than two
+    words apart ("make a lot of money") are not caught, and inflections
+    / paraphrases ("getting rich") are not lookalikes and are not caught.
+    A JSON body may carry at most 4,096 members and nest 32 deep
+    (decision 23): a legitimate request that needs more must be split. The symbol near-miss matcher is word-by-word (a phrase split across
     words AND written with symbols is caught by the mixed-word rule, not
     by the phrase). Script detection is
     by Unicode character name (Python has no Script property). RLO text

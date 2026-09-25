@@ -100,11 +100,11 @@ def build(kit_id: str, rb: Rulebook, moment_map: MomentMap, sheets: list[HookShe
     rc = rb.one(RuleKind.RIGHTS_CLEARED_ONLY)
     allowed = set(rc.params.get("allowed_asset_ids", [])) if rc else set()
     bad_assets = [a for a in req.brand_asset_ids if a not in allowed]
-    never = [(r.rule_id, r.params.get("phrase", "")) for r in rb.rules_of(RuleKind.NEVER_SAY)]
+    never = [(r.rule_id, r.params.get("phrase", ""), bool(r.params.get("fuzzy"))) for r in rb.rules_of(RuleKind.NEVER_SAY)]
     issues = [f"K5 brand asset {a} is not cleared in {rc.rule_id if rc else 'the rights rule'}" for a in bad_assets]
     for ex in req.do_examples:
-        for rid, p in never:
-            if mentions_phrase(ex, p):
+        for rid, p, fz in never:
+            if mentions_phrase(ex, p, fz):
                 issues.append(f"K6 'do' example {ex!r} breaks never-say {rid}")
     if issues:
         raise ValidationFailed("kit request breaks the rulebook", issues)
@@ -151,7 +151,7 @@ def build(kit_id: str, rb: Rulebook, moment_map: MomentMap, sheets: list[HookShe
     if md:
         do.append(f"Keep the clip live at least {md.params['days']} days ({md.rule_id})")
     do += list(req.do_examples)
-    dont = [f"Don't say \"{p}\" ({rid})" for rid, p in never]
+    dont = [f"Don't say \"{p}\" ({rid})" for rid, p, _ in never]
     if ortr:
         dont.append(f"Don't post a raw repost ({ortr.rule_id})")
     ow = rb.one(RuleKind.ORIGINALITY_WATERMARK)

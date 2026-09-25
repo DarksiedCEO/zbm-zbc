@@ -35,7 +35,9 @@ Retry receipt time (fix wave 2, N1): when an operation's ledger record
 fails, its time is kept ONLY so an identical retry rebuilds the identical
 event. That reservation is bound to the exact content (SHA-256 of the
 canonical submission / verdict) and expires after `RETRY_WINDOW` (15
-minutes). A retry with different content never inherits the old time.
+minutes). A retry with different content never inherits the old time (and, since
+fix wave 6 / N5, is not held back by a CERTAIN failure either: only an
+UNCERTAIN outcome refuses different content).
 A clip `submission_id` is bound to its content from its first attempt,
 permanently: different content under a used id is refused (409), never
 recorded as a new decision — and the clip's ledger event id is derived
@@ -197,18 +199,21 @@ class ZbcWorkflow:
         if held is not None and not held.uncertain:
             if held.sha == content_sha and timedelta(0) <= now - held.at <= RETRY_WINDOW:
                 return held.at
-            if now - held.at > RETRY_WINDOW or now < held.at:
-                self._attempts.pop(op, None)
+            # different content, or an expired reservation: the reservation is gone (N5)
+            self._attempts.pop(op, None)
         return now
 
     def _pending_other_content(self, op: str, content_sha: str) -> bool:
         """An earlier attempt of `op` with DIFFERENT content failed at the
-        ledger and its outcome may be on the ledger — uncertain (until
-        resolved) or certain but less than RETRY_WINDOW ago: a different
-        decision now is refused."""
+        ledger and its outcome is UNKNOWN (it may be on the ledger): a
+        different decision now is refused until it is resolved (replayed
+        or withdrawn). A CERTAIN failure (took_effect False: connection
+        refused, a 4xx, the ledger's shed 503) holds nothing — the ledger
+        has no record, so a different decision may follow at once (fix
+        wave 6, N5; the RETRY_WINDOW reservation of N1 only lets an
+        IDENTICAL retry reuse the first attempt's time)."""
         held = self._attempts.get(op)
-        return held is not None and held.sha != content_sha and (
-            held.uncertain or self.clock.now() - held.at <= RETRY_WINDOW)
+        return held is not None and held.sha != content_sha and held.uncertain
 
     def _replay_uncertain(self, op: str, content_sha: str):
         """LOST: an identical retry of an attempt whose outcome is unknown
@@ -323,10 +328,11 @@ class ZbcWorkflow:
         new = rb.model_copy(update={
             "status": RulebookStatus.APPROVED if approved else RulebookStatus.SENT_BACK,
             "approved_by": approver_id if approved else None, "review_issues": tuple(result.issues),
+            "review_warnings": tuple(result.warnings),
         })
         self.rulebooks.check_replace(new)
         self.recorder.record("rulebook_approved" if approved else "rulebook_sent_back", approver_id, subject,
-                             {"outcome": result.outcome, "issues": result.issues},
+                             {"outcome": result.outcome, "issues": result.issues, "warnings": result.warnings},
                              f"Rulebook {campaign_id} v{version} {result.outcome} by {approver_id}"
                              + ("" if approved else f" ({len(result.issues)} issue(s))"))
         self.rulebooks.commit(new)
@@ -578,10 +584,9 @@ class ZbcWorkflow:
         sha = _sha256({"reviewer": reviewer_id, "verdict": verdict.model_dump(mode="json")})
         if self._pending_other_content(op, sha):
             raise PreconditionFailed(
-                f"a different human verdict on {submission_id} was attempted and its ledger record failed with "
-                "an outcome that may be on the ledger; retry that same verdict to resolve it"
-                + ("" if self._attempts[op].uncertain else
-                   f", or wait {int(RETRY_WINDOW.total_seconds() // 60)} minutes"))
+                f"a different human verdict on {submission_id} was sent and the ledger's answer was lost, so its "
+                "outcome is unknown (it may already be on the ledger); re-send that same verdict to resolve it, "
+                "or withdraw it (POST .../human-review/withdraw) once the ledger confirms it holds no such event")
         replayed = self._replay_uncertain(op, sha)  # LOST
         if replayed is not None:
             self.decisions[submission_id] = replayed

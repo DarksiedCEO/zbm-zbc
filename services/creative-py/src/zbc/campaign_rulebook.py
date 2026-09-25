@@ -34,6 +34,7 @@ from shared.actors import ActorRegistry, Role, require_not_self
 from shared.errors import PreconditionFailed
 from shared.registry import PlatformRulesRegistry
 from shared.text import contains_phrase, mentions_phrase
+from zbc.rulebook_writer import NeverSayEntry, short_entry_warnings
 from zbc.platform_rules import rows_usable
 from zbc.rulebook import Rulebook, RuleKind, RulebookStatus
 
@@ -47,6 +48,7 @@ REQUIRED_SINGLE = (
 class RulebookReview:
     outcome: Literal["approved", "sent_back"]
     issues: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)  # non-blocking (N3: short never-say entries)
 
 
 def review(rb: Rulebook, approver_id: str, actors: ActorRegistry, registry: PlatformRulesRegistry,
@@ -75,11 +77,14 @@ def review(rb: Rulebook, approver_id: str, actors: ActorRegistry, registry: Plat
         for rid, n in never:
             if contains_phrase(m, n) or contains_phrase(n, m):
                 issues.append(f"R4 must-say {m!r} conflicts with never-say {rid} {n!r}")
+    fuzzy = {r.params.get("phrase", ""): bool(r.params.get("fuzzy")) for r in rb.rules_of(RuleKind.NEVER_SAY)}
     for a in rb.approved_angles:
         for line in a.approved_hook_lines:
             for rid, n in never:
-                if mentions_phrase(line, n):
+                if mentions_phrase(line, n, fuzzy.get(n, False)):
                     issues.append(f"R5 hook line {line!r} of {a.angle_id} breaks never-say {rid}")
         if not a.keywords:
             issues.append(f"R6 angle {a.angle_id} has no keywords")
-    return RulebookReview("sent_back" if issues else "approved", issues)
+    warnings = [f"R7 {w}" for w in short_entry_warnings(
+        [NeverSayEntry(phrase=n, fuzzy=fuzzy.get(n, False)) for _, n in never], {n: rid for rid, n in never})]
+    return RulebookReview("sent_back" if issues else "approved", issues, warnings)

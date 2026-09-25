@@ -66,6 +66,16 @@ serve.MAX_CONCURRENCY connections/requests at once (uvicorn
 limit_concurrency; beyond it, 503). BodyLimit re-checks the head size (431)
 for any other launcher and bounds body delivery to BODY_READ_TIMEOUT_S
 (408), so a slow-drip body can't hold a request open forever.
+
+Bounded error bodies (fix wave 6, N2): the framework's default 422 echoed
+each error's `input` (13.5 MiB for a 1 MiB junk body; 60,000 unknown keys
+= 60,000 errors), which stalled the event loop under concurrency. Now
+`bounded_validation_body` (first ERROR_MAX_ERRORS errors, capped `loc` /
+`msg`, no input, unknown keys counted, < 8 KiB, built off the loop past
+ERROR_OFFLOAD_ABOVE errors), capped CreativeError reasons / issues, a
+fixed JSON 500, and — the root — `json_shape_violation` in BodyLimit: a
+JSON body with more than MAX_JSON_MEMBERS members or nested deeper than
+MAX_JSON_DEPTH is refused in a worker thread before the framework sees it.
 """
 
 from __future__ import annotations
@@ -81,8 +91,10 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Callable, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from shared.actors import ActorRegistry
 from shared.clock import Clock, SystemClock
@@ -133,6 +145,22 @@ BODY_READ_TIMEOUT_S = 30.0
 _IDEM_KEY_RE = re.compile(r"[\x21-\x7e]{1,128}")
 ACTOR_HEADER = "X-Creative-Actor-Token"
 ACTOR_TOKEN_MIN_LEN = 16
+# Error bodies are bounded (fix wave 6, N2): never the request's content.
+ERROR_MAX_ERRORS = 20        # validation errors reported (the rest are counted)
+ERROR_MAX_LOC = 6            # `loc` elements kept
+ERROR_MAX_STR = 80           # characters of a loc element / message / issue kept
+ERROR_MAX_ISSUES = 20        # CreativeError `issues` reported
+ERROR_MAX_DETAIL = 1000      # characters of a CreativeError reason kept
+ERROR_BODY_MAX_BYTES = 8 * 1024
+ERROR_OFFLOAD_ABOVE = 1000   # validation errors: build the body off the event loop past this many
+# JSON shape limits (fix wave 6, N2), checked in BodyLimit off the event loop
+# BEFORE the framework parses and validates: a body of 60,000 unknown keys
+# cost ~250 ms of event-loop time in error bookkeeping (FastAPI builds one
+# error record per key) and ~15 MB of memory, 20 at once stalled /health
+# for seconds. No legitimate request here has more than a few hundred
+# members (keys + array items) or nests deeper than a handful of levels.
+MAX_JSON_MEMBERS = 4096
+MAX_JSON_DEPTH = 32
 
 # Path ids are validated BEFORE any work (integration defect 2): a campaign
 # id is at most 100 characters so every derived ledger subject
@@ -244,10 +272,47 @@ class IdempotencyStore:
         return len(self._d)
 
 
+def json_shape_violation(body: bytes) -> tuple[int, str, str] | None:
+    """(status, detail, error) if a JSON body has more than MAX_JSON_MEMBERS
+    members (object keys + array items, counted over the whole document)
+    or nests deeper than MAX_JSON_DEPTH; None if it is within bounds or is
+    not valid JSON at all (the framework then answers its own bounded 422).
+    Counting stops at the cap, so the Python work is O(cap) whatever the
+    body; parsing is C. Runs off the event loop."""
+    try:
+        obj = json.loads(body)
+    except RecursionError:
+        return 400, f"JSON body nests deeper than {MAX_JSON_DEPTH} levels", "PayloadTooDeep"
+    except ValueError:
+        return None
+    members = 0
+    stack: list[tuple[Any, int]] = [(obj, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > MAX_JSON_DEPTH:
+            return 400, f"JSON body nests deeper than {MAX_JSON_DEPTH} levels", "PayloadTooDeep"
+        if isinstance(node, dict):
+            members += len(node)
+            children = node.values()
+        elif isinstance(node, list):
+            members += len(node)
+            children = node
+        else:
+            continue
+        if members > MAX_JSON_MEMBERS:
+            return 422, f"JSON body has more than {MAX_JSON_MEMBERS} members (keys and items)", "PayloadTooManyMembers"
+        for child in children:
+            if isinstance(child, (dict, list)):
+                stack.append((child, depth + 1))
+    return None
+
+
 class BodyLimit:
     """ASGI middleware: refuse a request head over `max_head` bytes (431), a
     body over `limit` bytes (413) before any of it reaches the JSON parser,
-    and a body not delivered within `read_timeout` seconds in total (408)."""
+    a body not delivered within `read_timeout` seconds in total (408), and
+    a JSON body over the member / depth limits (`json_shape_violation`,
+    fix wave 6, N2 — checked in a worker thread)."""
 
     def __init__(self, app, limit: int = MAX_BODY_BYTES, max_head: int = MAX_HEADER_BYTES,
                  read_timeout: float = BODY_READ_TIMEOUT_S):
@@ -286,6 +351,11 @@ class BodyLimit:
             chunks.append(chunk)
             more = msg.get("more_body", False)
         body = b"".join(chunks)
+        if body and any(k == b"content-type" and v.split(b";", 1)[0].strip().lower() == b"application/json"
+                        for k, v in scope.get("headers") or []):
+            bad = await run_in_threadpool(json_shape_violation, body)
+            if bad is not None:
+                return await self._refuse(send, *bad)
         sent = False
 
         async def replay():
@@ -303,6 +373,48 @@ class BodyLimit:
                     "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(raw)).encode()),
                                 (b"connection", b"close")]})
         await send({"type": "http.response.body", "body": raw})
+
+
+def _clip(text: Any, n: int = ERROR_MAX_STR) -> str:
+    t = str(text)
+    return t if len(t) <= n else t[:n] + "..."
+
+
+def bounded_validation_body(errors: list[dict]) -> dict:
+    """The 422 body for a request that failed validation (fix wave 6, N2).
+    FastAPI's default echoes each error's `input` — the whole body for a
+    missing field — so a 1 MiB junk body became a 13.5 MiB answer, and
+    60,000 unknown keys 60,000 errors. This body never contains input:
+    the first ERROR_MAX_ERRORS errors (loc capped to ERROR_MAX_LOC elements
+    of ERROR_MAX_STR characters, msg capped, no `input`, no `ctx`, no
+    `url`); unknown keys (`extra_forbidden`) are counted, with the first
+    few names; and the whole thing is kept under ERROR_BODY_MAX_BYTES."""
+    total = len(errors)
+    unknown = 0
+    unknown_first: list[str] = []
+    kept: list[dict] = []
+    for e in errors:
+        if e.get("type") == "extra_forbidden":
+            unknown += 1
+            if len(unknown_first) < ERROR_MAX_ERRORS:
+                loc = e.get("loc") or ()
+                unknown_first.append(_clip(loc[-1]) if loc else "?")
+            continue
+        if len(kept) < ERROR_MAX_ERRORS:
+            loc = list(e.get("loc") or ())
+            kept.append({"type": _clip(e.get("type", "")), "msg": _clip(e.get("msg", "")),
+                         "loc": [_clip(x) for x in loc[:ERROR_MAX_LOC]] + (["..."] if len(loc) > ERROR_MAX_LOC else [])})
+    truncated = total > len(kept) + (1 if unknown else 0) and (total - unknown > len(kept) or unknown > len(unknown_first))
+    body = {"detail": "request failed validation", "error": "RequestValidationError", "error_count": total,
+            "errors": kept, "truncated": truncated}
+    if unknown:
+        body["unknown_fields"] = {"count": unknown, "first": unknown_first}
+    while len(json.dumps(body, separators=(",", ":")).encode()) > ERROR_BODY_MAX_BYTES and (body["errors"] or unknown_first):
+        body["errors"] = body["errors"][:-1] if len(body["errors"]) >= len(unknown_first) else body["errors"]
+        if len(body["errors"]) < len(unknown_first):
+            unknown_first.pop()
+        body["truncated"] = True
+    return body
 
 
 def ledger_from_env() -> LedgerClient:
@@ -508,13 +620,31 @@ def build_app(
     app.state.rights = rights
     app.state.recorder = recorder
 
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_: Request, exc: RequestValidationError):
+        errors = exc.errors()
+        if len(errors) > ERROR_OFFLOAD_ABOVE:  # keep the event loop free for everyone else (N2)
+            body = await run_in_threadpool(bounded_validation_body, errors)
+        else:
+            body = bounded_validation_body(errors)
+        return JSONResponse(status_code=422, content=body)
+
     @app.exception_handler(CreativeError)
     async def _creative_error(_: Request, exc: CreativeError):
         code = next((c for cls, c in _STATUS.items() if isinstance(exc, cls)), 400)
-        body = {"detail": exc.reason, "error": type(exc).__name__}
+        # reasons and issues may quote request content (a rule id, a phrase): bounded (N2)
+        body = {"detail": _clip(exc.reason, ERROR_MAX_DETAIL), "error": type(exc).__name__}
         if isinstance(exc, ValidationFailed):
-            body["issues"] = exc.issues
+            issues = list(exc.issues or [])
+            body["issues"] = [_clip(i, ERROR_MAX_DETAIL) for i in issues[:ERROR_MAX_ISSUES]]
+            if len(issues) > ERROR_MAX_ISSUES:
+                body["issues_truncated"] = len(issues) - ERROR_MAX_ISSUES
         return JSONResponse(status_code=code, content=body)
+
+    @app.exception_handler(Exception)
+    async def _unhandled(_: Request, exc: Exception):
+        # never the exception's message: it may quote the request (N2)
+        return JSONResponse(status_code=500, content={"detail": "internal error", "error": type(exc).__name__[:64]})
 
     @app.exception_handler(LedgerRecordError)
     async def _ledger_error(_: Request, exc: LedgerRecordError):
