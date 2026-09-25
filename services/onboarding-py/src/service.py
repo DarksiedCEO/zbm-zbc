@@ -545,7 +545,11 @@ class OnboardingService:
     def _flag_injection(self, subject_id: str, text: str, source: str) -> list[dict]:
         """Client content is DATA. Flags are logged and recorded, and
         returned for the operator — no decision function reads them."""
-        flags = scan_for_injection(text, source)
+        return self._record_injection(subject_id, source, scan_for_injection(text, source))
+
+    def _record_injection(self, subject_id: str, source: str, flags: list) -> list[dict]:
+        """The recording half of ``_flag_injection`` (fix wave 7): the scan
+        itself is pure and ``add_facts`` runs it before taking the lock."""
         if flags:
             payload = {"source": source, "rules": sorted({f.rule for f in flags})}
             self._record("injection_flagged", "guardrail_content_is_data", subject_id, payload,
@@ -1008,34 +1012,73 @@ class OnboardingService:
 
     # --- intake -------------------------------------------------------------------
 
+    def _facts_after(self, rec: ClientRecord, req: rq.FactsRequest) -> int:
+        """How many facts the client would hold after ``req``, once each
+        field is trimmed to its latest ``facts_history_per_field``."""
+        keep = self.config.facts_history_per_field
+        per_field: dict[str, int] = {}
+        for f in rec.facts:
+            per_field[f.field] = per_field.get(f.field, 0) + 1
+        for f in req.facts:
+            per_field[f.field] = per_field.get(f.field, 0) + 1
+        return sum(min(n, keep) for n in per_field.values())
+
+    def _facts_over_cap(self, rec: ClientRecord, req: rq.FactsRequest) -> None:
+        """Fix wave 6 (wave-5 leftover): the stored facts are bounded. A
+        request that would take the client past the cap is refused whole,
+        before anything is scanned, flagged, recorded or stored. The size
+        that counts is the one the client would hold AFTER the per-field
+        trimming (fix wave 7, NEW-6: it was stored + requested, so at the
+        cap a restatement of a field at its history limit — the correction
+        the message asks for — was refused)."""
+        cap, keep = self.config.max_facts_per_client, self.config.facts_history_per_field
+        after = self._facts_after(rec, req)
+        if after > cap:
+            raise Conflict(
+                f"this client holds {len(rec.facts)} intake facts and would hold {after} after this request's "
+                f"{len(req.facts)}; the cap is {cap} per client — nothing was stored. Each field keeps its latest "
+                f"{keep} observations: restating a field that already has {keep} replaces its oldest and adds "
+                "nothing, restating one with fewer adds one, a new field adds one. Correct facts within that, "
+                "or exit and re-onboard the client if the intake must start over",
+                {"facts_stored": len(rec.facts), "facts_in_request": len(req.facts), "facts_after_request": after,
+                 "max_facts_per_client": cap})
+
     def add_facts(self, client_id: str, req: rq.FactsRequest) -> dict:
+        # Fix wave 7 (NEW-5 class): the request's own work — the injection
+        # scan and the redaction of up to 200 x 2000 chars, ~1.5 s of CPU for
+        # a body of profile fields — used to run under the service lock, so
+        # every other operation waited behind it. It is pure, so it runs
+        # BEFORE the lock (and, through the API, inside the admission lane
+        # that serialized the body's scan); the lock then covers only the
+        # cheap commit. The cheap refusals (unknown or exited client, cap)
+        # come first, so a refused request never pays for the scan.
+        for f in req.facts:
+            self._not_in_future(f.observed_at, "fact observed_at")
+        with self._lock:
+            rec = self.clients.get(client_id)
+            if rec is None or rec.exited or self._facts_after(rec, req) > self.config.max_facts_per_client:
+                with self._op("add_facts"):  # the refusal, exactly as one operation made it before
+                    self._facts_over_cap(self._client(client_id), req)
+            allowed = i01.LANE_FIELDS[rec.lane]
+        scanned = []
+        for f in req.facts:
+            vals = f.value if isinstance(f.value, list) else [f.value]
+            for v in vals:
+                if isinstance(v, str):
+                    scanned.append((f"intake_fact:{f.field}", scan_for_injection(v, f"intake_fact:{f.field}")))
+        # Fix wave 3 (N5): only structured facts are kept — a field outside
+        # this lane's profile keeps its name (reported as dropped) but not
+        # its value — and every kept value/evidence is the redacted copy.
+        new = [i01.Fact(f.field, _redact_value(f.value) if f.field in allowed else None, f.provenance,
+                        redact_text(f.evidence), f.observed_at) for f in req.facts]
         with self._op("add_facts"):
             rec = self._client(client_id)
             for f in req.facts:
                 self._not_in_future(f.observed_at, "fact observed_at")
-            # Fix wave 6 (wave-5 leftover): the stored facts are bounded. A
-            # request that would take the client past the cap is refused
-            # whole, before anything is flagged, recorded or stored.
-            cap = self.config.max_facts_per_client
-            if len(rec.facts) + len(req.facts) > cap:
-                raise Conflict(
-                    f"this client already holds {len(rec.facts)} intake facts and this request adds {len(req.facts)}; "
-                    f"the cap is {cap} per client — nothing was stored. Correct a fact by restating the field "
-                    f"(each field keeps its latest {self.config.facts_history_per_field} observations) rather than "
-                    "adding new fields, or exit and re-onboard the client if the intake must start over",
-                    {"facts_stored": len(rec.facts), "facts_in_request": len(req.facts), "max_facts_per_client": cap})
+            self._facts_over_cap(rec, req)  # again, under the operation: the client may have changed meanwhile
             flags = []
-            for f in req.facts:
-                vals = f.value if isinstance(f.value, list) else [f.value]
-                for v in vals:
-                    if isinstance(v, str):
-                        flags += self._flag_injection(rec.client_id, v, f"intake_fact:{f.field}")
-            # Fix wave 3 (N5): only structured facts are kept — a field outside
-            # this lane's profile keeps its name (reported as dropped) but not
-            # its value — and every kept value/evidence is the redacted copy.
-            allowed = i01.LANE_FIELDS[rec.lane]
-            new = [i01.Fact(f.field, _redact_value(f.value) if f.field in allowed else None, f.provenance,
-                            redact_text(f.evidence), f.observed_at) for f in req.facts]
+            for source, found in scanned:
+                flags += self._record_injection(rec.client_id, source, found)
             rec.facts.extend(new)
             # Each field keeps only its latest N observations (arrival order),
             # so a field restated many times does not grow without bound and

@@ -69,7 +69,11 @@ The WIP commit was replaced; it doesn't remain in history.
        against the real binary: `LEDGER_MAX_CONNECTIONS=1` with a held socket gives
        `proceeded: false, ledger_write: not_recorded`, and an intermediary that
        forwards then answers 503 with its own body gives `proceeded: "unknown"`
-       while `GET /ledger/entries` shows the event was appended.
+       while `GET /ledger/entries` shows the event was appended. Those live tests
+       skipped silently when the binary was missing (AEGIS round 6); a session
+       fixture now builds it with cargo into the git-ignored target dir, so they run
+       by default, and a run without cargo skips them with a reason `-rs` prints
+       (fix wave 7).
      An unknown outcome returns 503 `{"proceeded": "unknown", "ledger_write":
      "unknown", "retry": "..."}` with `Retry-After`. It never says "did not
      proceed". The staged state stays uncommitted and the subject's sequence does not
@@ -315,9 +319,9 @@ The WIP commit was replaced; it doesn't remain in history.
          scan_min_cost_bytes)` (capped at the budget) out of `scan_inflight_bytes`
          while it is validated and scanned, so many medium bodies are throttled like
          one large one and no size class bypasses it. At most 16 wait, each up to
-         30 s, granted oldest-first among those that fit (a small body never queues
-         behind a large one, and each waiter is woken once). Beyond that the API
-         returns 503 with `Retry-After` and `proceeded: false`, never 422.
+         30 s, granted oldest-first among those that fit (each waiter is woken
+         once). Beyond that the API returns 503 with `Retry-After` and
+         `proceeded: false`, never 422.
        - The defaults are measured, not derived (real uvicorn, real ledger-rust, 40
          concurrent clients, `test_fix_wave6.py`). Under one GIL, N concurrent scans
          add no throughput, and every extra CPU-bound thread lengthens the event
@@ -331,6 +335,35 @@ The WIP commit was replaced; it doesn't remain in history.
          configurable — raising the budget above the minimum cost admits several small
          bodies at once — because it is the right shape on a runtime without a GIL; on
          CPython it measurably slows light requests, and the README says so.
+       - **Small bodies have their own lane** (fix wave 7, AEGIS round 6 NEW-5). Wave
+         6 wrote that "a small body never queues behind a large one"; with the
+         minimum cost equal to the budget that was false — every body waited its
+         turn. Measured: one client's 416 KB bodies back-to-back put other clients'
+         40-byte messages at p50 294 ms, 4 uploaders 1.6 s, 12 uploaders 6 s, and 16
+         queued large bodies answered a tiny message 503. `ScanLanes` now routes a
+         body of at most `scan_small_body_bytes` (16 KiB, ~1 ms of scan) to a small
+         lane with its own budget (`scan_small_inflight`, 1) and its own queue
+         (`scan_small_max_waiting`, 8, reserved so a flood of large bodies cannot fill
+         it); large bodies stay serialized in the large lane. Three more causes of the
+         same symptom were found and fixed with it, because the class is "a small
+         request waits behind a large request's CPU work", not the gate alone:
+         (a) `add_facts` redacted the body's text again UNDER THE SERVICE LOCK — ~1.5 s
+         of CPU for 416 KB of profile fields, during which every operation waited
+         (the AEGIS probe's `note_*` fields are dropped by the lane, so it did not
+         see this; a body of real fields would) — the scan and redaction are pure and
+         now run before the lock is taken, and the large lane is held through the
+         handler (a generator dependency) so that work stays one-at-a-time and is not
+         a second uncounted CPU-bound thread; (b) one verdict memo now spans the
+         whole request (set by the outermost middleware; the body check, the
+         service's redaction and the response scrub share it), so a clean string is
+         scanned once, not three times; (c) the launcher sets the interpreter's
+         thread switch interval to 1 ms (`ONBOARDING_SWITCH_INTERVAL_SECONDS`): a
+         light request takes several GIL turns beside a CPU-bound scan, each up to a
+         switch interval, so 5 ms slices were ~50-70 ms of the small message's time;
+         the scan pays +3-4% of CPU under contention. Measured after (real uvicorn,
+         real ledger-rust, `test_fix_wave7.py`, the `onb_serial6` shape): small
+         messages beside 1 / 4 / 12 uploaders p50 17 / 24 / 12 ms, none 503, `/health`
+         p50 5-7 ms; 4 concurrent 416 KB bodies finish 0.53 s apart (serialized).
        - Per-request cost dropped: 1.65 s to 0.50 s of CPU for the 416 KB body. A
          clean string is scanned once per request, not twice (the ingest check and
          the `scrub` layer share a per-request verdict memo). The format-character
@@ -372,10 +405,15 @@ The WIP commit was replaced; it doesn't remain in history.
      repeated large submissions grew memory and latency without bound. A client holds
      at most `max_facts_per_client` (2,000) facts; a request that would pass it is
      refused whole with 409 (the message names the counts and the cap) before
-     anything is flagged, recorded or stored. Each field keeps its latest
+     anything is scanned, flagged, recorded or stored. Each field keeps its latest
      `facts_history_per_field` (20) observations in arrival order, so restating a
-     field replaces its oldest observation rather than adding one, and a profile
-     rebuild is O(cap). Consequence, stated in the README: an observation that falls
+     field that already has 20 replaces its oldest observation rather than adding
+     one, and a profile rebuild is O(cap). The size the cap is checked against is
+     the one the client would hold after that trimming (fix wave 7, NEW-6: wave 6
+     checked stored + requested, before the trimming, so at the cap a correction to
+     a field at its history limit was refused by a message that asked for exactly
+     that; the 409 now reports `facts_after_request` and says what adds and what
+     does not). Consequence, stated in the README: an observation that falls
      out of a field's history no longer counts in the profile (a conflict can be
      aged out by 20 newer consistent values), so a value that must count should be
      confirmed (`client_confirmed` / `contract` provenance), not repeated.

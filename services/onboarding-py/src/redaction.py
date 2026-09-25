@@ -375,11 +375,28 @@ class ScanBudgetExceeded(RuntimeError):
 
 
 @contextmanager
+def scan_memo() -> Iterator[None]:
+    """Scope of one request's verdict memo (fix wave 7). The API's outermost
+    middleware enters it, so the body check, the service's redaction of the
+    same strings and the response scrub share one memo (a contextvar set
+    before the request is dispatched is seen by every threadpool call of
+    that request); before, only the body check had one and the other two
+    scanned every string again."""
+    token = _MEMO.set({})
+    try:
+        yield
+    finally:
+        _MEMO.reset(token)
+
+
+@contextmanager
 def scan_budget(cpu_seconds: float) -> Iterator[None]:
     """Scope of one request's credential checks: at most ``cpu_seconds`` of
-    this thread's CPU time, and a per-scope verdict memo."""
+    this thread's CPU time, and a verdict memo (the request's, if one is
+    open, else one for this scope)."""
     token = _DEADLINE.set((threading.get_ident(), time.thread_time() + cpu_seconds))
-    mtoken = _MEMO.set({})
+    existing = _MEMO.get()
+    mtoken = _MEMO.set(existing if existing is not None else {})
     try:
         yield
     finally:

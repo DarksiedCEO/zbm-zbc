@@ -21,8 +21,10 @@ T         the per-pattern timing tests were flaky under machine load: bounds
           linearity ratio is asserted (test_fix_wave4.py).
 
 The live tests (``real_stack``) run ``python3 -m api`` against the REAL
-ledger-rust binary named by ONBOARDING_LEDGER_RUST_BIN (default:
-services/ledger-rust/target/release/server); they skip if it is missing.
+ledger-rust binary: the ``ledger_bin`` session fixture (conftest.py, fix
+wave 7) uses ONBOARDING_LEDGER_RUST_BIN if set, else builds it with cargo
+into services/ledger-rust/target; only a missing cargo skips them, with a
+reason that ``-rs`` prints (they used to skip silently).
 """
 
 from __future__ import annotations
@@ -57,7 +59,6 @@ SRC = ROOT / "src"
 REPO = ROOT.parents[1]
 AUTH = {"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"}
 LEDGER_TOKEN = "wave6-ledger-test-token"
-LEDGER_BIN = Path(os.environ.get("ONBOARDING_LEDGER_RUST_BIN") or REPO / "services" / "ledger-rust" / "target" / "release" / "server")
 # Pinned here independently of src/ledger.py: what bin/server.rs ``shed`` writes.
 LEDGER_SHED_BODY = {"error": "ledger-rust is at its connection limit; retry shortly"}
 
@@ -370,12 +371,12 @@ def test_w5l_caps_are_configured_validated_and_documented():
 
 
 class RealStack:
-    def __init__(self, ledger_env: dict | None = None, ledger_url: str | None = None):
+    def __init__(self, ledger_bin: Path, ledger_env: dict | None = None, ledger_url: str | None = None):
         self.tmp = tempfile.TemporaryDirectory(prefix="onb-w6-")
         self.lport = free_test_port()
         lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN, LEDGER_PORT=str(self.lport),
                     LEDGER_LOG_PATH=str(Path(self.tmp.name) / "ledger.jsonl"), **(ledger_env or {}))
-        self.ledger = subprocess.Popen([str(LEDGER_BIN)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.ledger = subprocess.Popen([str(ledger_bin)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         _wait_health(self.lport, self.ledger, "ledger-rust")
         self.port = free_test_port()
         aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
@@ -398,10 +399,8 @@ class RealStack:
 
 
 @pytest.fixture(scope="module")
-def real_stack():
-    if not LEDGER_BIN.is_file():
-        pytest.skip(f"real ledger-rust binary not found at {LEDGER_BIN} (set ONBOARDING_LEDGER_RUST_BIN)")
-    s = RealStack()
+def real_stack(ledger_bin):
+    s = RealStack(ledger_bin)
     yield s
     s.close()
 
@@ -475,10 +474,8 @@ def _hold_ledger_connections(port: int, n: int) -> list[socket.socket]:
 
 
 @pytest.fixture(scope="module")
-def shed_stack():
-    if not LEDGER_BIN.is_file():
-        pytest.skip(f"real ledger-rust binary not found at {LEDGER_BIN} (set ONBOARDING_LEDGER_RUST_BIN)")
-    s = RealStack(ledger_env={"LEDGER_MAX_CONNECTIONS": "1"})
+def shed_stack(ledger_bin):
+    s = RealStack(ledger_bin, ledger_env={"LEDGER_MAX_CONNECTIONS": "1"})
     yield s
     s.close()
 
@@ -561,14 +558,12 @@ class _Proxy503(threading.Thread):
 
 
 @pytest.fixture(scope="module")
-def proxied_stack():
-    if not LEDGER_BIN.is_file():
-        pytest.skip(f"real ledger-rust binary not found at {LEDGER_BIN} (set ONBOARDING_LEDGER_RUST_BIN)")
+def proxied_stack(ledger_bin):
     lport = free_test_port()
     tmp = tempfile.TemporaryDirectory(prefix="onb-w6p-")
     lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN, LEDGER_PORT=str(lport),
                 LEDGER_LOG_PATH=str(Path(tmp.name) / "ledger.jsonl"))
-    ledger = subprocess.Popen([str(LEDGER_BIN)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ledger = subprocess.Popen([str(ledger_bin)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     _wait_health(lport, ledger, "ledger-rust")
     proxy = _Proxy503(lport)
     proxy.start()

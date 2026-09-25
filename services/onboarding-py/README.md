@@ -139,24 +139,54 @@ status says it is not certified.
     CPU-bound scan thread lengthens the event loop's wait for the GIL (40x16 KB
     bodies at 4 concurrent scans: `/health` p50 300 ms, light GET p50 790 ms;
     at 1: 16 ms / 70 ms), so the minimum cost equals the 64 KiB budget and
-    scans run one at a time; a tiny message body takes ~1 ms, so 40 of them
-    queue for ~40 ms. Up to 16 wait, each up to 30 s, oldest-first among
-    those that fit (a small body never queues behind a large one). Beyond
+    large scans run one at a time. Up to 16 wait, each up to 30 s. Beyond
     that the API returns 503 with `Retry-After` and `proceeded: false` (busy,
     nothing done), never 422. Measured with the defaults on a real uvicorn:
     40 concurrent 58 KB bodies, `/health` p50 20 ms / p95 42 ms, light GET
     p50 27 ms. A clean string is scanned once per request, not twice, and
     the format-character strip no longer does a Python step per character.
     The 416 KB body dropped from 1.6 s to 0.5 s of CPU.
+  - Small bodies have a lane of their own (`ScanLanes`, fix wave 7, NEW-5).
+    With one scan at a time, every body waited its turn: one client's 416 KB
+    bodies back-to-back put other clients' 40-byte messages at p50 294 ms (4
+    uploaders 1.6 s, 12 uploaders 6 s), and once 16 large bodies were queued
+    a tiny message was 503 — while the wave-6 doc claimed a small body never
+    queues behind a large one. A body of at most
+    `ONBOARDING_SCAN_SMALL_BODY_BYTES` (16 KiB; its scan is ~1 ms) now takes
+    the small lane: `ONBOARDING_SCAN_SMALL_INFLIGHT` (1) at a time, at most
+    `ONBOARDING_SCAN_SMALL_MAX_WAITING` (8) waiting in its own queue, the same
+    30 s wait. It never waits for the large lane, and a flood of large bodies
+    cannot fill its queue; large bodies stay serialized. Three things that
+    made the same small message slow were fixed with it: the service redacted
+    a large body's text again UNDER ITS LOCK (~1.5 s of CPU for 416 KB of
+    profile fields, every other operation waiting) — that work is pure and
+    now runs before the lock is taken, and the large lane is held through the
+    handler so it stays one-at-a-time; one verdict memo now spans the whole
+    request (body check, service redaction, response scrub), so a clean
+    string is scanned once, not three times; and the launcher sets the
+    interpreter's thread switch interval to 1 ms
+    (`ONBOARDING_SWITCH_INTERVAL_SECONDS`), so a light request's several GIL
+    turns beside a CPU-bound scan cost ~1 ms each, not ~5 ms (the scan pays
+    +3-4% of CPU for it under contention). Measured on a real uvicorn and a
+    real ledger-rust (`test_fix_wave7.py`, the AEGIS `onb_serial6` shape):
+    small messages beside 1 / 4 / 12 clients uploading 416 KB bodies
+    back-to-back are p50 17 / 24 / 12 ms, none 503, `/health` p50 5-7 ms, and
+    4 concurrent 416 KB bodies finish 0.53 s apart (one scan each).
   - Intake facts are bounded per client (fix wave 6): at most
     `ONBOARDING_MAX_FACTS_PER_CLIENT` (2,000) stored facts, and each field
     keeps its latest `ONBOARDING_FACTS_HISTORY_PER_FIELD` (20) observations.
     A facts request that would pass the cap is refused whole with 409 (the
-    message names the counts and the cap; nothing is flagged, recorded or
-    stored), so a profile rebuild is O(cap) and repeated large submissions
-    cannot grow memory. Restating a field replaces its oldest observation
-    rather than adding; older observations of a field fall out of the
-    profile, so a value that must count should be confirmed, not repeated.
+    message names the counts and the cap; nothing is scanned, flagged,
+    recorded or stored), so a profile rebuild is O(cap) and repeated large
+    submissions cannot grow memory. The size that counts is the one the
+    client would hold AFTER the per-field trimming (fix wave 7, NEW-6: it was
+    stored + requested, so at the cap a restatement of a field at its history
+    limit — the correction the message asked for — was refused): restating a
+    field that already has 20 observations replaces its oldest and adds
+    nothing, restating one with fewer adds one, a new field adds one, and the
+    409 body says so (`facts_after_request`). Older observations of a field
+    fall out of the profile, so a value that must count should be confirmed,
+    not repeated.
   - `tests/test_fix_wave4.py` runs every pattern against hostile shapes (runs
     of `a`, `a@`, `a/`, `a:`, alternating classes, and each pattern's own
     literals). It asserts under 50 ms of CPU per 100 KB. Fix wave 6 (an
@@ -254,7 +284,10 @@ half-sent connections. The launcher provides:
 - a request-head deadline counted from connect and after every response
   (`ONBOARDING_REQUEST_HEAD_TIMEOUT_SECONDS`, default 10);
 - a keep-alive idle timeout (`ONBOARDING_KEEP_ALIVE_TIMEOUT_SECONDS`, default 5);
-- `limit_concurrency` (`ONBOARDING_LIMIT_CONCURRENCY`, default 128).
+- `limit_concurrency` (`ONBOARDING_LIMIT_CONCURRENCY`, default 128);
+- a 1 ms interpreter thread switch interval
+  (`ONBOARDING_SWITCH_INTERVAL_SECONDS`, fix wave 7): light requests get
+  their GIL turns beside a CPU-bound body scan promptly.
 
 The body must arrive within `ONBOARDING_BODY_READ_TIMEOUT_SECONDS` (default
 30), or the API returns 408.
@@ -275,6 +308,7 @@ Optional configuration (all open items have fail-closed defaults; see `src/confi
 | `ONBOARDING_MAX_REQUEST_TARGET_BYTES` | Path plus query cap, default 8192; over it is a 414 |
 | `ONBOARDING_SCAN_BUDGET_SECONDS`, `ONBOARDING_SCAN_CPU_MS_PER_KB` | CPU budget for one body's credential checks: seconds plus ms per KB, defaults 1 and 10 |
 | `ONBOARDING_SCAN_INFLIGHT_BYTES`, `ONBOARDING_SCAN_MIN_COST_BYTES`, `ONBOARDING_SCAN_MAX_WAITING`, `ONBOARDING_SCAN_WAIT_SECONDS` | Scan admission budget: in-flight scanned bytes, per-body minimum cost, waiters, wait; defaults 65536, 65536 (one scan at a time; see above), 16, 30; busy is a 503 with Retry-After |
+| `ONBOARDING_SCAN_SMALL_BODY_BYTES`, `ONBOARDING_SCAN_SMALL_INFLIGHT`, `ONBOARDING_SCAN_SMALL_MAX_WAITING` | The small lane (fix wave 7): bodies up to this size (default 16384; 0 disables the lane) are admitted separately, this many at a time (1), with this many waiting (8) |
 | `ONBOARDING_MAX_FACTS_PER_CLIENT`, `ONBOARDING_FACTS_HISTORY_PER_FIELD` | Stored intake facts per client (default 2000; a request past it is a 409) and observations kept per field (default 20) |
 | `ONBOARDING_INSTANCE_ID` | Stable instance id in the event ids of `start_client` and `apply_creator`, default `onboarding-1`. Give each concurrently running instance its own. |
 
@@ -310,8 +344,18 @@ Every route except `/health` needs `Authorization: Bearer <token>`.
 ## Tests
 
 ```bash
-cd services/onboarding-py && python3 -m pytest -q     # 648 passed (fix wave 6, Sep 24 2026)
+cd services/onboarding-py && python3 -m pytest -q     # 663 passed (fix wave 7, Sep 24 2026)
 ```
+
+The live tests against the REAL ledger-rust (`test_fix_wave6.py`,
+`test_fix_wave7.py`) run by default: a session fixture (`ledger_bin`,
+`tests/conftest.py`) builds it with `cargo build --release --bin server`
+into `services/ledger-rust/target` (git-ignored; a warm build takes under a
+second), or uses the binary named by `ONBOARDING_LEDGER_RUST_BIN`. They skip
+only when cargo is not on PATH (or the named binary is missing), and then
+say so: `pytest.ini` sets `-rs`, so every skip's reason is in the summary
+(fix wave 7; before, they skipped silently). A failed build is a failure,
+not a skip. A run with cargo present shows 0 skipped.
 
 Tests are organised by certification type:
 
@@ -325,7 +369,8 @@ Tests are organised by certification type:
 | `test_fix_wave3.py` | Fix wave 3: stage then commit and retries that finish (N2), owed result records (N7), credential shapes, redacted storage and the state-inspecting spray (N5), the shared money vectors (F15), the real-server access log (D1), human-request dedupe and briefing retry on tick | 183 |
 | `test_fix_wave4.py` | Fix wave 4: linear-time scanning, input caps, off-loop validation, scan budget and a real-uvicorn `/health` test under attack (R1); owed audit rulings, no second detection call (A1); payments only after activation (P1); DOB plausibility (D1); restart-stable ids (I1). `redos_harness.py` builds the hostile inputs. | 115 |
 | `test_fix_wave5.py` | Fix wave 5 covers four findings. NEW-2: the CPU-time budget, one scan per clean string, busy as 503 not 422, and 12 concurrent max-size bodies on a real server. NEW-3: real-socket header, idle, partial-head, trickled-head and trickled-body probes against `python3 -m api`. NEW-4: `proceeded: "unknown"` on a lost reply, then a retry with no duplicate. LOW-E: a future DOB. | 47 |
-| `test_fix_wave6.py` | Fix wave 6 (AEGIS round 5). N6: only ledger-rust's exact shed body is "not recorded", any other 5xx is unknown, the rule matches creative-py and `server.rs`; live against the REAL ledger-rust (`LEDGER_MAX_CONNECTIONS=1` shed, and an intermediary's 503 that hid a real append). N4: the weighted `ScanAdmission` (cost floor and cap, waiters, no over-admission in-process) and the live 40x58 KB flood with `/health` and light-GET bounds. Facts caps: 409 past the cap with nothing stored, latest-N per field, bounded cost over 30 large submissions. The live tests need `ONBOARDING_LEDGER_RUST_BIN` (default `services/ledger-rust/target/release/server`) and skip without it. | 24 |
+| `test_fix_wave6.py` | Fix wave 6 (AEGIS round 5). N6: only ledger-rust's exact shed body is "not recorded", any other 5xx is unknown, the rule matches creative-py and `server.rs`; live against the REAL ledger-rust (`LEDGER_MAX_CONNECTIONS=1` shed, and an intermediary's 503 that hid a real append). N4: the weighted `ScanAdmission` (cost floor and cap, waiters, no over-admission in-process) and the live 40x58 KB flood with `/health` and light-GET bounds. Facts caps: 409 past the cap with nothing stored, latest-N per field, bounded cost over 30 large submissions. The live tests use the ledger-rust binary the `ledger_bin` fixture builds (see above). | 24 |
+| `test_fix_wave7.py` | Fix wave 7 (AEGIS round 6). NEW-5: the small lane (config, routing, a tiny message answered while the large lane is held and its queue full, no 503 for small bodies under a large flood, the large lane held through the handler and no redaction under the service lock, one scan per string per request, the launcher's switch interval) and, live against the real ledger-rust, the `onb_serial6` scenario with 1 / 4 / 12 uploaders (small p50 < 50 ms, none 503) and 4 concurrent 416 KB bodies still serialized. NEW-6: a correction to a field at its history limit accepted at the cap, the boundary of the post-trim count, refusals still cheap. Skips: the binary is built by the fixture and a skip's reason is printed. | 16 |
 | `test_unit_*.py` | Unit tests | 84 |
 | `test_auth_and_entrypoint.py` | Auth, docs, real-socket bind | 14 |
 

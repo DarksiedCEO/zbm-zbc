@@ -169,3 +169,50 @@ def free_test_port() -> int:
 @pytest.fixture
 def clock():
     return Clock()
+
+
+REPO = Path(__file__).resolve().parents[3]
+LEDGER_RUST_DIR = REPO / "services" / "ledger-rust"
+LEDGER_RUST_DEFAULT_BIN = LEDGER_RUST_DIR / "target" / "release" / "server"
+_ledger_bin_cache: list = []
+
+
+def ledger_rust_binary() -> Path:
+    """The REAL ledger-rust binary for the live tests (fix wave 7; they
+    skipped silently when ONBOARDING_LEDGER_RUST_BIN was unset).
+    ONBOARDING_LEDGER_RUST_BIN names it explicitly; otherwise it is built
+    here with ``cargo build --release`` into services/ledger-rust/target
+    (git-ignored; a warm build is under a second). Only a missing cargo
+    skips, with a reason ``-rs`` prints; a failed build is a failure."""
+    if _ledger_bin_cache:
+        return _ledger_bin_cache[0]
+    import shutil
+    import subprocess
+
+    named = os.environ.get("ONBOARDING_LEDGER_RUST_BIN")
+    if named:
+        p = Path(named)
+        if not p.is_file():
+            pytest.skip(f"ledger-rust binary named by ONBOARDING_LEDGER_RUST_BIN not found at {p}; "
+                        "unset it to build one with cargo")
+    elif shutil.which("cargo"):
+        if not (LEDGER_RUST_DIR / "Cargo.toml").is_file():
+            pytest.fail(f"no ledger-rust crate at {LEDGER_RUST_DIR}: run from the repo checkout, or set "
+                        "ONBOARDING_LEDGER_RUST_BIN", pytrace=False)
+        r = subprocess.run(["cargo", "build", "--release", "--bin", "server"], cwd=str(LEDGER_RUST_DIR),
+                           capture_output=True, text=True, timeout=1200)
+        if r.returncode != 0 or not LEDGER_RUST_DEFAULT_BIN.is_file():
+            pytest.fail(f"cargo build of ledger-rust failed (exit {r.returncode}):\n{r.stderr[-3000:]}", pytrace=False)
+        p = LEDGER_RUST_DEFAULT_BIN
+    elif LEDGER_RUST_DEFAULT_BIN.is_file():
+        p = LEDGER_RUST_DEFAULT_BIN  # a previous build; cargo is not on PATH to refresh it
+    else:
+        pytest.skip(f"cargo is not on PATH and no ledger-rust binary is at {LEDGER_RUST_DEFAULT_BIN}: install Rust "
+                    "(rustup) or set ONBOARDING_LEDGER_RUST_BIN to a built ledger-rust server")
+    _ledger_bin_cache.append(p)
+    return p
+
+
+@pytest.fixture(scope="session")
+def ledger_bin() -> Path:
+    return ledger_rust_binary()
