@@ -408,9 +408,16 @@ stretched and doubled letters, fillers within two words; 4-letter entries
 exact-only unless opted in; 1.7% / 2.7% measured false positives on two
 corpora); 422 bodies are bounded and never echo the request, JSON bodies
 capped at 4,096 members; a certainly-unrecorded verdict holds nothing.
+Fix wave 7: JSON member caps are per route, computed from the request
+model (a 2,000-segment Moment Map is accepted; the 4,096 cap refused it);
+vowel-drop ("mk mny") and phonetic ("phree money") respellings go to a
+human (consonant-skeleton and phonetic-key signals; 0.0% / 2.7% / 2.1%
+false positives on three corpora); the per-word share rule is a 60%
+letter share, never a hard cap; every text field, the bio included, is
+scanned by every prohibiting rule.
 
 ```bash
-cd services/creative-py && python3 -m pytest -q      # 515 tests
+cd services/creative-py && python3 -m pytest -q      # 557 tests
 export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
 export CREATIVE_ACTOR_TOKENS='{"<actor_id>": "<token>", ...}'   # per-actor credentials
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>

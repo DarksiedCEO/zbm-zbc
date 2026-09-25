@@ -74,8 +74,10 @@ each error's `input` (13.5 MiB for a 1 MiB junk body; 60,000 unknown keys
 `msg`, no input, unknown keys counted, < 8 KiB, built off the loop past
 ERROR_OFFLOAD_ABOVE errors), capped CreativeError reasons / issues, a
 fixed JSON 500, and — the root — `json_shape_violation` in BodyLimit: a
-JSON body with more than MAX_JSON_MEMBERS members or nested deeper than
-MAX_JSON_DEPTH is refused in a worker thread before the framework sees it.
+JSON body with more members than its route's model can legally hold
+(`route_member_limits`, fix wave 7 NEW-1; fix wave 6 had one 4,096 cap,
+which refused a legal Moment Map) or nested deeper than MAX_JSON_DEPTH is
+refused in a worker thread before the framework sees it.
 """
 
 from __future__ import annotations
@@ -157,9 +159,16 @@ ERROR_OFFLOAD_ABOVE = 1000   # validation errors: build the body off the event l
 # BEFORE the framework parses and validates: a body of 60,000 unknown keys
 # cost ~250 ms of event-loop time in error bookkeeping (FastAPI builds one
 # error record per key) and ~15 MB of memory, 20 at once stalled /health
-# for seconds. No legitimate request here has more than a few hundred
-# members (keys + array items) or nests deeper than a handful of levels.
-MAX_JSON_MEMBERS = 4096
+# for seconds. Fix wave 7 (AEGIS round 6, NEW-1): the single 4,096-member
+# cap of fix wave 6 refused a legal 820-segment Moment Map (the model
+# allows 2,000 segments = 10,003 members). Each route's cap is now computed
+# from its request model (`shared.request_limits.member_limit_for`: the
+# largest legal body plus 25% headroom, a multiple of 64; see
+# `route_member_limits`), so the cap can never be tighter than the model:
+# from 64 (a body of one key) to 20,672 (hook advice, 500 results of 20
+# metrics). A path with no request body, or none of ours, gets
+# DEFAULT_JSON_MEMBERS. The depth cap is unchanged.
+DEFAULT_JSON_MEMBERS = 64
 MAX_JSON_DEPTH = 32
 
 # Path ids are validated BEFORE any work (integration defect 2): a campaign
@@ -272,8 +281,8 @@ class IdempotencyStore:
         return len(self._d)
 
 
-def json_shape_violation(body: bytes) -> tuple[int, str, str] | None:
-    """(status, detail, error) if a JSON body has more than MAX_JSON_MEMBERS
+def json_shape_violation(body: bytes, max_members: int = DEFAULT_JSON_MEMBERS) -> tuple[int, str, str] | None:
+    """(status, detail, error) if a JSON body has more than `max_members`
     members (object keys + array items, counted over the whole document)
     or nests deeper than MAX_JSON_DEPTH; None if it is within bounds or is
     not valid JSON at all (the framework then answers its own bounded 422).
@@ -299,24 +308,53 @@ def json_shape_violation(body: bytes) -> tuple[int, str, str] | None:
             children = node
         else:
             continue
-        if members > MAX_JSON_MEMBERS:
-            return 422, f"JSON body has more than {MAX_JSON_MEMBERS} members (keys and items)", "PayloadTooManyMembers"
+        if members > max_members:
+            return 422, f"JSON body has more than {max_members} members (keys and items) for this route", "PayloadTooManyMembers"
         for child in children:
             if isinstance(child, (dict, list)):
                 stack.append((child, depth + 1))
     return None
 
 
+def route_member_limits(app: FastAPI) -> list[tuple[frozenset[str], "re.Pattern[str]", str, int]]:
+    """(methods, path regex, path template, member cap) for every route of
+    `app` that takes a JSON body, the cap computed from the body model
+    (`shared.request_limits.member_limit_for`). Derived from the routes,
+    so a new route or a changed model is sized automatically; a model
+    with an unbounded list or dict refuses to build the app."""
+    from fastapi.routing import APIRoute
+
+    from shared.request_limits import member_limit_for
+
+    out = []
+    for r in app.routes:
+        if isinstance(r, APIRoute) and r.body_field is not None:
+            model = r.body_field.field_info.annotation
+            out.append((frozenset(r.methods or ()), r.path_regex, r.path, member_limit_for(model)))
+    return out
+
+
 class BodyLimit:
     """ASGI middleware: refuse a request head over `max_head` bytes (431), a
     body over `limit` bytes (413) before any of it reaches the JSON parser,
     a body not delivered within `read_timeout` seconds in total (408), and
-    a JSON body over the member / depth limits (`json_shape_violation`,
-    fix wave 6, N2 — checked in a worker thread)."""
+    a JSON body over the route's member cap (`member_limits`, from
+    `route_member_limits`; DEFAULT_JSON_MEMBERS for any other path) or the
+    depth limit (`json_shape_violation`, fix wave 6, N2 / fix wave 7,
+    NEW-1 — checked in a worker thread)."""
 
     def __init__(self, app, limit: int = MAX_BODY_BYTES, max_head: int = MAX_HEADER_BYTES,
-                 read_timeout: float = BODY_READ_TIMEOUT_S):
+                 read_timeout: float = BODY_READ_TIMEOUT_S, member_limits=None,
+                 default_members: int = DEFAULT_JSON_MEMBERS):
         self.app, self.limit, self.max_head, self.read_timeout = app, limit, max_head, read_timeout
+        self.member_limits = list(member_limits or [])
+        self.default_members = default_members
+
+    def members_for(self, method: str, path: str) -> int:
+        for methods, regex, _, cap in self.member_limits:
+            if method in methods and regex.match(path):
+                return cap
+        return self.default_members
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -353,7 +391,8 @@ class BodyLimit:
         body = b"".join(chunks)
         if body and any(k == b"content-type" and v.split(b";", 1)[0].strip().lower() == b"application/json"
                         for k, v in scope.get("headers") or []):
-            bad = await run_in_threadpool(json_shape_violation, body)
+            cap = self.members_for(scope.get("method", ""), scope.get("path", ""))
+            bad = await run_in_threadpool(json_shape_violation, body, cap)
             if bad is not None:
                 return await self._refuse(send, *bad)
         sent = False
@@ -455,7 +494,7 @@ class DraftBriefIn(_In):
 
 class QualityIn(_In):
     actor_id: str | None = None
-    notes: list[str] = []
+    notes: list[str] = Field(default_factory=list, max_length=100)
 
 
 class EscalationIn(_In):
@@ -463,7 +502,7 @@ class EscalationIn(_In):
 
 
 class HookAdviceIn(_In):
-    results: list[PerformanceResult]
+    results: list[PerformanceResult] = Field(max_length=500)
     platform: str
     placement: str
     metric: str = hook_retention.DEFAULT_METRIC
@@ -480,14 +519,14 @@ class DraftRulebookIn(_In):
 
 
 class RightsCheckIn(_In):
-    assets: list[DeclaredAsset]
+    assets: list[DeclaredAsset] = Field(max_length=500)
     uses_ai_generative_fill: bool = False
 
 
 class HumanReviewIn(_In):
     actor_id: str | None = None
     outcome: Literal["pass", "reject"]
-    broken_rules: list[BrokenRule] = []
+    broken_rules: list[BrokenRule] = Field(default_factory=list, max_length=100)
     note: str = Field(default="", max_length=2000)
 
 
@@ -612,7 +651,6 @@ def build_app(
         version="0.1.0",
         docs_url=None, redoc_url=None, openapi_url=None,
     )
-    app.add_middleware(BodyLimit, limit=MAX_BODY_BYTES)
     app.state.idempotency = idem
     app.state.zbm = zbm
     app.state.zbc = zbc
@@ -917,6 +955,9 @@ def build_app(
     def zbc_winners(vertical: str, platform: str) -> dict:
         return {"winners": [w.model_dump(mode="json") for w in zbc.memory.winners(vertical, platform)]}
 
+    # after every route exists: the per-route member caps come from the routes' body models
+    app.state.member_limits = route_member_limits(app)
+    app.add_middleware(BodyLimit, limit=MAX_BODY_BYTES, member_limits=app.state.member_limits)
     return app
 
 

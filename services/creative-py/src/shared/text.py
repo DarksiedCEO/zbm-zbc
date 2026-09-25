@@ -73,6 +73,20 @@ other words, "make big money"), so every caller of `near_miss()` /
 that READS AS the phrase (Clip Review rejects it). N3: an entry of <= 4
 letters gets no edit budget unless the rulebook opts it in (`fuzzy`).
 
+Vowel-drop and phonetic respellings (fix wave 7, AEGIS round 6 NEW-2 /
+NEW-3): "mk mny", "grnteed rtrns", "phree money", "get ritch" are 2-4
+letter edits away and passed the visual gate. Two more signals, each a
+human's call on its own, both reached through `near_miss()`:
+`skeleton_near_miss()` compares CONSONANT SKELETONS (vowels dropped unless
+word-initial, runs collapsed) on the token stream under a 0/1/2 budget,
+and `phonetic_near_miss()` compares a simplified Metaphone-style
+`phonetic_key()` per word (in order within the adjacency policy) or over a
+run of tokens joined; see the block comment above VOWELS for the guards
+(function words, vowel-drop evidence) that keep ordinary text out. The
+per-word share rule of the visual gate is a 60% letter share
+(`letter_share`, WORD_SHARE), no longer a hard per-word cap that could
+reduce a match the budget allowed ("get rchi", "make munny").
+
 `obfuscation_signals()` says whether text shows evasion patterns at all:
 any bidi control, Hangul/Mongolian filler or tag character ANYWHERE; any
 other default-ignorable or format character touching a letter or digit;
@@ -89,7 +103,7 @@ from __future__ import annotations
 import functools
 import re
 import unicodedata
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from enum import Enum
 
 _NON_WORD = re.compile(r"[^\w#@]+", re.UNICODE)
@@ -450,6 +464,14 @@ def near_miss(haystack: str, phrase: str, fuzzy: bool = False) -> str | None:
     span = phrase_words_in_order(haystack, phrase)
     if span is not None:
         return f"its words in order with other words between them ({span[:60]!r})"
+    skel = skeleton_near_miss(haystack, phrase, fuzzy)
+    if skel is not None:
+        d, window = skel
+        return (f"its consonants with the vowels dropped or changed ({window[:60]!r} is {d} edit(s) from it "
+                "once vowels are ignored)")
+    sound = phonetic_near_miss(haystack, phrase, fuzzy)
+    if sound is not None:
+        return f"a phonetic respelling ({sound[:60]!r} sounds like it)"
     return None
 
 
@@ -852,34 +874,40 @@ def _packs(pats: list[tuple[str, int]]) -> list[tuple[list[int], _Pack]]:
     return out
 
 
-def _word_share_budget(word_skel: str) -> int:
-    """How many of a window's edits one phrase word may absorb (fix wave 6,
-    N1/N3): its own tier (visual_budget of its collapsed skeleton), at
-    least 1. An evasion misspells each word a little; a DIFFERENT ordinary
-    word two edits from one short phrase word ("more"/"money", "for" or
-    "here"/"free") is what the false positives were made of."""
-    return max(1, visual_budget(len(word_skel), fuzzy=True))
+def _word_shares_ok(window: str, words: list[tuple[str, str]], total: int) -> bool:
+    """Can `window` be cut into len(words) consecutive pieces so that the
+    pieces' edits from the words sum to at most `total` and every piece
+    that is not its word keeps at least WORD_SHARE of that word's letters
+    (`letter_share`)? `words`: (the word in the pattern's form, the word
+    as written in the same view — the share is measured against the
+    letters as written, so "for" keeps 2 of "free"'s 4, not 2 of the
+    collapsed "fre"'s 3). Segmented banded DP over the window (short: the
+    phrase's length plus its budget).
 
-
-def _word_shares_ok(window: str, words: list[str], total: int) -> bool:
-    """Can `window` be cut into len(words) consecutive pieces so that piece
-    i is within _word_share_budget(words[i]) edits of words[i] and the
-    pieces' edits sum to at most `total`? Segmented banded DP over the
-    window (short: the phrase's length plus its budget)."""
+    Fix wave 6 gave each word a hard cap of its own tier (1 edit for a
+    word of up to 6 letters), to stop a DIFFERENT ordinary word from
+    absorbing all the edits ("more" for "money"). AEGIS round 6 (NEW-3)
+    showed the cap REDUCED the match: two edits in one short word ("get
+    rchi", "make munny") passed although the phrase's budget allowed
+    them. A share rule never reduces a match the budget allows for a
+    piece that is still mostly the word; it only refuses a piece that has
+    lost the word's letters."""
     n = len(window)
     inf = total + 1
     best = [0] + [inf] * n  # best[e]: least cost to match words so far with window[:e]
-    for w in words:
-        cap = _word_share_budget(w)
+    for w, written in words:
         m = len(w)
         nxt = [inf] * (n + 1)
         for a in range(n + 1):
             if best[a] >= inf:
                 continue
-            for b in range(max(a, a + m - cap), min(n, a + m + cap) + 1):
-                d = _osa_within(window[a:b], w, cap)
-                if d is not None and best[a] + d < nxt[b]:
-                    nxt[b] = best[a] + d
+            for b in range(max(a, a + m - total), min(n, a + m + total) + 1):
+                d = _osa_within(window[a:b], w, total - best[a])
+                if d is None or best[a] + d >= nxt[b]:
+                    continue
+                if d and letter_share(window[a:b], written) < WORD_SHARE:
+                    continue
+                nxt[b] = best[a] + d
         best = nxt
     return best[n] <= total
 
@@ -951,7 +979,7 @@ def _scan_phrases(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[
         # budget is the collapsed skeleton's tier either way.
         pats: list[tuple[str, int]] = []
         owner: list[int] = []
-        wskels: list[list[str]] = []
+        wskels: list[list[tuple[str, str]]] = []
         for i, (key, sq, raw, fz) in enumerate(specs):
             pskel = _stream(key[0], rules)[0]  # the phrase through the same transform as the text
             k = visual_budget(len(pskel), fz, raw)
@@ -962,7 +990,7 @@ def _scan_phrases(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[
                     continue
                 pats.append((variant, k))
                 owner.append(i)
-                wskels.append([_stream(w, rules, collapse)[0] for w in pwords])
+                wskels.append([(_stream(w, rules, collapse)[0], _stream(w, rules, False)[0]) for w in pwords])
         dist_memo: dict[tuple[str, str], int | None] = {}  # (window, pattern) -> distance; repeated text repeats windows
         share_memo: dict[tuple[str, int], bool] = {}
         for group, pack in _packs(pats):
@@ -1046,7 +1074,10 @@ def visual_lookalike_exact(haystack: str, phrase: str, fuzzy: bool = False) -> s
 ADJACENCY_GAP = 2
 
 
-def _word_key(w: str) -> str:
+@functools.lru_cache(maxsize=4096)
+def word_key(w: str) -> str:
+    """A word as the adjacency policy compares it: i -> l, rn/m, cl/d, vv/w
+    read alike, stretched letters collapsed."""
     return collapse_runs(visual_view(w, VISUAL_SKELETON))
 
 
@@ -1060,8 +1091,8 @@ def phrase_words_in_order(haystack: str, phrase: str, max_gap: int = ADJACENCY_G
     if len(pwords) < 2:
         return None
     toks = _canonical_tokens(haystack)
-    pkeys = [_word_key(w) for w in pwords]
-    keys = [_word_key(t) for t in toks]
+    pkeys = [word_key(w) for w in pwords]
+    keys = [word_key(t) for t in toks]
     best: tuple[int, int] | None = None
     for start in (i for i, k in enumerate(keys) if k == pkeys[0]):
         pos = start
@@ -1074,6 +1105,409 @@ def phrase_words_in_order(haystack: str, phrase: str, max_gap: int = ADJACENCY_G
             pos = nxt
         if okay and (best is None or pos - start < best[1] - best[0]):
             best = (start, pos)
+    return " ".join(toks[best[0]:best[1] + 1]) if best else None
+
+
+# --- vowel-drop and phonetic respellings (fix wave 7; AEGIS round 6 NEW-2 / NEW-3) -----------
+#
+# The visual gate judges LETTERS: a respelling that drops vowels ("mk mny",
+# "grntd rtrns") or spells the sound another way ("phree money", "get
+# ritch", "make munny") is 2-4 letter edits away and passed. Instead of
+# chasing those classes, two more standard signals, each of which alone
+# sends the clip to a human (never a reject, never a pass):
+#
+# (a) CONSONANT SKELETON. `consonant_skeleton()`: the vowels a e i o u y
+#     are dropped unless word-initial, runs collapsed ("money" -> "mn",
+#     "munny" -> "mn", "income" -> "incm"). The phrase's skeleton is
+#     compared with the token-aligned windows of the text's skeleton
+#     stream (the same bit-parallel scan as the visual gate, so splits are
+#     irrelevant) under `skeleton_budget()`: 0 edits for a skeleton of up
+#     to 3 consonants, 1 for 4-6, 2 above. A skeleton is lossy ("for
+#     many" is the skeleton of "free money"), so two guards keep ordinary
+#     text out — both measured on the three caption corpora (fix wave 7
+#     tests): a window containing a FUNCTION WORD (`FUNCTION_WORDS`:
+#     determiners, pronouns, prepositions, conjunctions, auxiliaries,
+#     common adverbs — a bounded, documented list, no dictionary) that is
+#     not itself a word of the phrase is not a respelling ("for many",
+#     "make my", "risk for"); and a window at 1+ edits must be one token
+#     per phrase word, every edited token keeping WORD_SHARE of its word's
+#     skeleton letters, with at least one edited token that DROPPED a
+#     vowel (fewer vowels than its phrase word: "get rch", "gt rich") —
+#     a consonant difference in a fully vowelled word ("no rush", "form"
+#     for "free money") is the visual gate's business, not this one's.
+# (b) PHONETIC KEY. `phonetic_key()`: a simplified Metaphone-style key,
+#     in-repo (no dependency): initial kn/gn/pn -> n, wr -> r, wh -> w,
+#     ps -> s, x -> s; ph -> f; ck, q, hard c -> k; c before e/i/y -> s;
+#     ch, sh, tch, tsch, -cia-/-tia- -> X (sh); th -> 0; dg(e/i/y) -> j; gh
+#     silent after a vowel (weight / wait), else k; gn -> n; every vowel
+#     dropped except a word-initial one (one class, A) — so ee/ea/ie/y/i
+#     and ou/ew/u never differ, a silent e is gone, and doubled letters
+#     collapse; voiced/unvoiced pairs merge (b/p, d/t, v/f, z/s, g/k).
+#     A phrase matches when its words' keys appear in order in the text's
+#     token keys within the adjacency policy (ADJACENCY_GAP), on a window
+#     that is not the phrase itself and holds no function word that the
+#     phrase lacks: "phree money" -> F-R, M-N = the keys of "free money".
+# Both respect N3: an entry of at most SHORT_ENTRY_LETTERS letters is
+# exact-only unless the rulebook opts it in (`fuzzy`).
+
+VOWELS = frozenset("aeiouy")
+WORD_SHARE = 0.6  # an edited phrase word's piece must keep this share of the word's letters
+
+# The 150 or so function words of English (closed classes). A window of the
+# text that contains one of these, unless the phrase itself has that word,
+# is ordinary text, not a respelling: "for many", "make my", "risk for".
+FUNCTION_WORDS = frozenset("""
+a an the this that these those my your his her its our their mine yours ours theirs
+i me you he him she it we us they them who whom whose which what where when why how
+and or but nor so yet for if then than as because while although though unless until since
+of in on at to from by with about into onto over under up down out off through between among after before
+above below near around across along against during without within upon per via
+is am are was were be been being do does did done has have had having will would shall should can could may might must
+not no yes very too also just only even still again once ever never always often
+all any some each every both few more most much many such other another same own
+here there now then today
+""".split())
+
+
+def consonant_skeleton(word: str) -> str:
+    """`word` (canonical, a-z) without its vowels (a e i o u y) except a
+    word-initial one, runs collapsed: "money" -> "mn", "income" -> "incm",
+    "success" -> "scs"."""
+    if not word:
+        return ""
+    return collapse_runs(word[0] + "".join(c for c in word[1:] if c not in VOWELS))
+
+
+def skeleton_budget(consonants: int) -> int:
+    """Edit budget on consonant skeletons: 0 for up to 3, 1 for 4-6, 2 above."""
+    return 0 if consonants <= 3 else (1 if consonants <= 6 else 2)
+
+
+def letter_share(piece: str, word: str) -> float:
+    """The fraction of `word`'s letters (as a multiset) that `piece` also
+    has: letter_share("munny", "money") == 0.6 (m, n, y)."""
+    if not word:
+        return 0.0
+    have = Counter(piece)
+    return sum(min(have[c], k) for c, k in Counter(word).items()) / len(word)
+
+
+_PH_INITIAL = (("kn", "n"), ("gn", "n"), ("pn", "n"), ("wr", "r"), ("wh", "w"), ("ps", "s"), ("x", "s"))
+_SOFT = ("e", "i", "y")
+
+
+@functools.lru_cache(maxsize=4096)
+def phonetic_key(word: str) -> str:
+    """Simplified Metaphone-style key of a canonical word (see the block
+    comment above): phonetic_key("phree") == phonetic_key("free") == "FR",
+    phonetic_key("ritch") == phonetic_key("rich") == "RX"."""
+    w = "".join(c for c in word if "a" <= c <= "z")
+    if not w:
+        return ""
+    for src, dst in _PH_INITIAL:
+        if w.startswith(src):
+            w = dst + w[len(src):]
+            break
+    out: list[str] = []
+    i, n = 0, len(w)
+    while i < n:
+        c = w[i]
+        nxt = w[i + 1] if i + 1 < n else ""
+        nxt2 = w[i + 2] if i + 2 < n else ""
+        prev = w[i - 1] if i > 0 else ""
+        if c == prev and c != "c":  # a doubled letter (cc is judged by what follows it)
+            i += 1
+        elif c in VOWELS:
+            if i == 0:
+                out.append("A")
+            i += 1
+        elif c == "p" and nxt == "h":
+            out.append("F")
+            i += 2
+        elif c == "t":
+            if nxt == "c" and nxt2 == "h":
+                out.append("X")
+                i += 3
+            elif nxt == "s" and w[i + 2:i + 4] == "ch":
+                out.append("X")
+                i += 4
+            elif nxt == "i" and nxt2 in ("a", "o"):
+                out.append("X")
+                i += 1
+            elif nxt == "h":
+                out.append("0")
+                i += 2
+            else:
+                out.append("T")
+                i += 1
+        elif c == "c":
+            if nxt == "h":
+                out.append("X")
+                i += 2
+            elif nxt == "i" and nxt2 in ("a", "o"):
+                out.append("X")
+                i += 1
+            elif nxt == "k":
+                out.append("K")
+                i += 2
+            elif nxt in _SOFT:
+                out.append("S")
+                i += 1
+            else:
+                out.append("K")
+                i += 1
+        elif c == "s":
+            if nxt == "h":
+                out.append("X")
+                i += 2
+            elif nxt == "c" and nxt2 == "h":
+                out.append("SK")
+                i += 3
+            else:
+                out.append("S")
+                i += 1
+        elif c == "g":
+            if nxt == "h":
+                if prev not in VOWELS:
+                    out.append("K")
+                i += 2
+            elif nxt == "n":
+                i += 1
+            else:
+                out.append("K")
+                i += 1
+        elif c == "d":
+            if nxt == "g" and nxt2 in _SOFT:
+                out.append("J")
+                i += 2
+            else:
+                out.append("T")
+                i += 1
+        elif c in "qk":
+            out.append("K")
+            i += 1
+        elif c in "zs":
+            out.append("S")
+            i += 1
+        elif c in "vf":
+            out.append("F")
+            i += 1
+        elif c in "bp":
+            out.append("P")
+            i += 1
+        elif c == "x":
+            out.append("KS")
+            i += 1
+        elif c == "w":
+            if nxt in VOWELS or i == 0:
+                out.append("W")
+            i += 1
+        elif c == "h":
+            if not (prev in VOWELS and nxt not in VOWELS) and (nxt in VOWELS or i == 0):
+                out.append("H")
+            i += 1
+        else:
+            out.append(c.upper())
+            i += 1
+    return collapse_runs("".join(out))
+
+
+def _vowel_count(w: str) -> int:
+    return sum(1 for c in w if c in VOWELS)
+
+
+@functools.lru_cache(maxsize=16)
+def _skeleton_stream(text: str) -> tuple[str, bytes, bytes, tuple[int, ...], tuple[str, ...]]:
+    """The consonant skeleton of every token, concatenated, with token
+    start / end flags and the token index per character (like `_stream`),
+    plus the per-token skeletons."""
+    toks = _canonical_tokens(text)
+    skels = tuple(consonant_skeleton(t) for t in toks)
+    n = sum(map(len, skels))
+    st = bytearray(n + 1)
+    en = bytearray(n + 1)
+    tok: list[int] = []
+    pos = 0
+    for ti, s in enumerate(skels):
+        st[pos] = 1
+        pos += len(s)
+        en[pos] = 1
+        tok += [ti] * len(s)
+    st[n] = 0
+    return "".join(skels), bytes(st), bytes(en), tuple(tok), skels
+
+
+@functools.lru_cache(maxsize=16)
+def _token_keys(text: str) -> tuple[str, ...]:
+    return tuple(phonetic_key(t) for t in _canonical_tokens(text))
+
+
+@functools.lru_cache(maxsize=16)
+def _token_consonants(text: str) -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """Per token: its consonant count, and — for a token of 4+ letters — the
+    first letter of the key of any run of tokens it starts (every rule
+    that decides the first key letter looks at most 3 letters ahead:
+    "tsch"), else ''."""
+    toks = _canonical_tokens(text)
+    return (tuple(len(t) - _vowel_count(t) for t in toks),
+            tuple(phonetic_key(t[:4])[:1] if len(t) >= 4 else "" for t in toks))
+
+
+def _short_entry(phrase: str, fuzzy: bool) -> bool:
+    """N3: an entry of at most SHORT_ENTRY_LETTERS letters is exact-only
+    unless the rulebook opted it in."""
+    return len(canonical(phrase).replace(" ", "")) <= SHORT_ENTRY_LETTERS and not fuzzy
+
+
+def _no_function_word(window: list[str], pwords: list[str]) -> bool:
+    return not any(t in FUNCTION_WORDS and t not in pwords for t in window)
+
+
+_SNM_MEMO: "OrderedDict[str, dict[tuple[str, bool], tuple[int, str] | None]]" = OrderedDict()
+
+
+def skeleton_near_misses(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[str, tuple[int, str] | None]:
+    """`skeleton_near_miss()` for several (phrase, fuzzy) at once: one
+    bit-parallel scan of the text's skeleton stream for the whole set."""
+    memo = _SNM_MEMO.get(haystack)
+    if memo is None:
+        memo = _SNM_MEMO[haystack] = {}
+        while len(_SNM_MEMO) > _VNM_MEMO_TEXTS:
+            _SNM_MEMO.popitem(last=False)
+    _SNM_MEMO.move_to_end(haystack)
+    todo = [(p, bool(f)) for p, f in dict.fromkeys((p, bool(f)) for p, f in phrases) if (p, bool(f)) not in memo]
+    if todo:
+        for key, res in _scan_skeletons(haystack, tuple(todo)).items():
+            memo[key] = res
+    return {p: memo[(p, bool(f))] for p, f in phrases}
+
+
+def _scan_skeletons(haystack: str, phrases: tuple[tuple[str, bool], ...]) -> dict[tuple[str, bool], tuple[int, str] | None]:
+    S, ST, EN, tok, skels = _skeleton_stream(haystack)
+    toks = _canonical_tokens(haystack)
+    result: dict[tuple[str, bool], tuple[int, str] | None] = {key: None for key in phrases}
+    pats: list[tuple[str, int]] = []
+    owner: list[tuple[str, bool]] = []
+    pwords_of: dict[tuple[str, bool], list[str]] = {}
+    for phrase, fuzzy in phrases:
+        pwords = canonical(phrase).split()
+        if not pwords or _short_entry(phrase, fuzzy):
+            continue
+        pskel = "".join(consonant_skeleton(w) for w in pwords)
+        pats.append((pskel, skeleton_budget(len(pskel))))
+        owner.append((phrase, fuzzy))
+        pwords_of[(phrase, fuzzy)] = pwords
+    if not pats or not S:
+        return result
+    for group, pack in _packs(pats):
+        for j, gi in pack.scan(S, ST, EN):
+            key = owner[group[gi]]
+            best = result[key]
+            if best is not None and best[0] == 0:
+                continue
+            pskel, k = pats[group[gi]]
+            pwords = pwords_of[key]
+            m = len(pskel)
+            for s in range(max(0, j - m - k), j - m + k + 1):
+                if s >= j or not ST[s]:
+                    continue
+                d = _osa_within(S[s:j], pskel, k)
+                if d is None or (best is not None and d >= best[0]):
+                    continue
+                lo, hi = tok[s], tok[j - 1] + 1
+                window = list(toks[lo:hi])
+                if not _no_function_word(window, pwords):
+                    continue
+                if d >= 1:
+                    if hi - lo != len(pwords):
+                        continue
+                    okay, dropped = True, False
+                    for t, ts, w in zip(window, skels[lo:hi], pwords):
+                        ws = consonant_skeleton(w)
+                        if ts == ws:
+                            continue
+                        if letter_share(ts, ws) < WORD_SHARE:
+                            okay = False
+                            break
+                        if _vowel_count(t) < _vowel_count(w):
+                            dropped = True
+                    if not (okay and dropped):
+                        continue
+                best = (d, " ".join(window))
+                if d == 0:
+                    break
+            result[key] = best
+    return result
+
+
+def skeleton_near_miss(haystack: str, phrase: str, fuzzy: bool = False) -> tuple[int, str] | None:
+    """(edits, window text) if the consonant skeleton of a token-aligned
+    window of `haystack` is within `skeleton_budget()` of the phrase's —
+    "mk mny", "get rch", "grnteed rtrns", "make munny" — under the guards
+    described above; else None."""
+    return skeleton_near_misses(haystack, ((phrase, bool(fuzzy)),))[phrase]
+
+
+def phonetic_near_miss(haystack: str, phrase: str, fuzzy: bool = False, max_gap: int = ADJACENCY_GAP) -> str | None:
+    """The shortest window of `haystack` whose token keys are the phrase's
+    word keys in order within the adjacency policy ("phree money", "get
+    ritch", "kno risque", "luze wait fast"), else the first run of tokens
+    whose letters, joined, have the key of the phrase's letters joined
+    ("rizkphree", "phree m oney"), or None; the phrase written exactly is
+    not reported (it is an exact match, not a respelling)."""
+    pwords = canonical(phrase).split()
+    if not pwords or _short_entry(phrase, fuzzy):
+        return None
+    pkeys = [phonetic_key(w) for w in pwords]
+    if any(not k for k in pkeys):
+        return None
+    toks = _canonical_tokens(haystack)
+    keys = _token_keys(haystack)
+    best: tuple[int, int] | None = None
+    for start in (i for i, k in enumerate(keys) if k == pkeys[0]):
+        pos = start
+        hits = [start]
+        okay = True
+        for pk in pkeys[1:]:
+            nxt = next((j for j in range(pos + 1, min(len(keys), pos + max_gap + 2)) if keys[j] == pk), None)
+            if nxt is None:
+                okay = False
+                break
+            pos = nxt
+            hits.append(pos)
+        if not okay or (best is not None and pos - start >= best[1] - best[0]):
+            continue
+        matched = [toks[i] for i in hits]
+        if all(t == w for t, w in zip(matched, pwords)) or not _no_function_word(matched, pwords):
+            continue  # the phrase itself (an exact match, not a respelling); or a function word standing for a word
+        best = (start, pos)
+    if best is None:
+        # the phrase's letters run together or split otherwise ("rizkphree", "phree m oney", "risk ph
+        # rree"): the key of a run of up to len(pwords) + max_gap tokens, joined, equals the phrase's
+        squashed = "".join(pwords)
+        pkey = phonetic_key(squashed)
+        width = len(pwords) + max_gap
+        pcons = len(squashed) - _vowel_count(squashed)
+        cons, heads = _token_consonants(haystack)
+        for start in range(len(toks)):
+            if heads[start] and heads[start] != pkey[0]:
+                continue  # a token of 4+ letters fixes the first key letter of any run it starts
+            joined = ""
+            c = 0
+            for end in range(start, min(len(toks), start + width)):
+                joined += toks[end]
+                c += cons[end]
+                if len(joined) > len(squashed) + 4 or c > pcons + 3:
+                    break
+                # a key drops vowels and merges a few consonant pairs (ph, ck, tch, gh, kn, wr), so
+                # a run with fewer consonants than the phrase's key, or many more, cannot share its key
+                if c < len(pkey) - 2:
+                    continue
+                if phonetic_key(joined) == pkey:
+                    window = list(toks[start:end + 1])
+                    if joined == squashed or not _no_function_word(window, pwords):
+                        break
+                    return " ".join(window)
     return " ".join(toks[best[0]:best[1] + 1]) if best else None
 
 

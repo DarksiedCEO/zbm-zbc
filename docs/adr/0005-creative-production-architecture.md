@@ -483,13 +483,21 @@ money. ZBC's unit of work is a campaign, not a clip.
       for "free", is one edit against "free" but two against "fre").
     - per-word share (this is what keeps the false-positive rate under
       the 3% target while keeping the tiers): a window at distance ≥ 2
-      counts only if its edits can be apportioned so that no single
-      phrase word absorbs more than max(1, that word's own tier). An
-      evasion misspells each word a little; the false positives were a
-      DIFFERENT ordinary word two edits from one short phrase word
-      ("make more", "for money", "risk here"). Documented tension: the
+      counts only if its edits can be apportioned over the phrase's
+      words so that every edited piece still keeps at least 60% of its
+      word's letters (`WORD_SHARE`, `letter_share`, measured against the
+      word as written: "for" keeps 2 of "free"'s 4, out; "more" keeps 3
+      of "money"'s 5, in; "munny" 3 of 5, in). Fix wave 6 had a HARD
+      per-word cap instead (max(1, the word's own tier)); AEGIS round 6
+      (NEW-3) showed the cap REDUCED the match — two edits in one short
+      word, "get rchi", "make munny", passed although the phrase's budget
+      allowed them — so fix wave 7 replaced it (decision 26). The false
+      positives the cap was made for were a DIFFERENT ordinary word two
+      edits from one short phrase word ("for money", "three money",
+      "from one"): the share rule keeps those out and lets "make more"
+      through to a human (it is 60% of "money"). Documented tension: the
       wave-6 brief specified the tiers AND a ≤ 3% target on the AEGIS
-      corpus; the tiers alone gave 4.5%, tiers + per-word share 2.7%.
+      corpus; the tiers alone gave 4.5%, tiers + share rule 2.7%.
     - a window that READS AS the phrase — identical once rn/m, cl/d,
       vv/w are read alike and runs of 3+ letters are cut to one —
       → **reject** ("geeet riiich", "make r n oney", "pas si ve inc
@@ -551,11 +559,39 @@ money. ZBC's unit of work is a campaign, not a clip.
     `MAX_JSON_DEPTH` = 32 (422 `PayloadTooManyMembers` / 400
     `PayloadTooDeep`, ~100 bytes) — the framework's per-error
     bookkeeping (one record per unknown key, on the event loop) is what
-    stalled it. No legitimate request has more than a few hundred
-    members. Measured on the real socket: 1 MiB junk → 1,084-byte 422 in
-    7 ms; 60k keys → 101-byte 422 in 18 ms; twenty concurrent of either ×
-    3 → `/health` p50 9–72 ms, max ≤ 291 ms, peak RSS ≈ 100 MB, every
-    legitimate client answered (no 408).
+    stalled it. Measured on the real socket: 1 MiB junk → 1,084-byte 422
+    in 7 ms; 60k keys → 101-byte 422 in 18 ms; twenty concurrent of
+    either × 3 → `/health` p50 9–72 ms, max ≤ 291 ms, peak RSS ≈ 100 MB,
+    every legitimate client answered (no 408).
+    **Corrected in fix wave 7 (AEGIS round 6, NEW-1):** the wave-6 text
+    here claimed "no legitimate request has more than a few hundred
+    members". That was false, and the single 4,096 cap refused a legal
+    request: the Moment Map model admits 2,000 segments of 4 keys —
+    **10,003 members** — and an 820-segment map of a 3-hour podcast got
+    422. The cap is now PER ROUTE, computed from the route's request
+    model the way detection-py sizes its body limits
+    (`shared/request_limits.worst_case_json_members`: one member per
+    field, max_length items per list, max_length keys per dict; a list
+    or dict without a max_length refuses to build the app, so every
+    request list is now bounded — moment_ids 200, transformation
+    elements 50, assets 200–500, never_say 1,000, keywords / hook lines
+    100 per angle, brief lists 50–200, hook-advice results 500 × 20
+    metrics, human-review broken rules 100, clearance uses 4, licence
+    assets 500) plus 25% headroom, rounded up to a multiple of 64
+    (`api.route_member_limits`, derived from the routes' body models at
+    build time). The computed maxima: registry row 15 → cap 64;
+    clearance 14 → 64; licence 512 → 640; brief 6,368 → 8,000; work 718
+    → 960; quality notes 102 → 128; hook advice 16,504 → 20,672; ZBM
+    result 34 → 64; rulebook draft / edit / revision 8,118 → 10,176;
+    rights check 1,502 → 1,920; **Moment Map 10,003 → 12,544**; kit 707
+    → 896; clip 672 → 896; human review 304 → 384; ZBC result 9 → 64;
+    actor-only bodies 1 → 64; any other path 64. A test builds the
+    maximal legal body of every route and asserts the gate accepts it and
+    refuses one member more, naming the route's number. The 2,000-segment
+    Moment Map → 200 (live against ledger-rust). A set field
+    (`frozenset`) is sized by its distinct members; a body that repeats
+    one item thousands of times is refused at the route's cap, which is
+    the intended reading of "legal". The depth cap (32) is unchanged.
 
 24. **A certain ledger failure holds nothing (fix wave 6, N5).** After
     a human verdict whose ledger record CERTAINLY did not happen
@@ -568,6 +604,118 @@ money. ZBC's unit of work is a campaign, not a clip.
     attempt's time). Only an UNCERTAIN outcome refuses different content,
     and its message now says so accurately (re-send the same verdict, or
     withdraw it).
+
+25. **Vowel-drop and phonetic respellings are two more signals, each a
+    human's call on its own (fix wave 7; AEGIS round 6, NEW-2 / NEW-3).**
+    The visual gate (decisions 19, 22) judges LETTERS; round 6 showed
+    respellings that drop vowels ("mk mny", "grnteed rtrns": 12 of 15
+    phrases with every vowel dropped auto-passed, 18 of 33 with one
+    word's) or spell the sound another way ("phree money", "get ritch",
+    "make munny", "kno risque": 15 of 36) are 2–4 letter edits away and
+    passed. Instead of chasing those classes with more views, two
+    standard signals, both in `shared/text.py`, both reached through
+    `near_miss()` so every caller has them, both **human_review** only
+    (never a reject: a respelling by sound or skeleton is not the phrase
+    as written):
+    - **Consonant skeleton** (`consonant_skeleton`, `skeleton_near_miss`,
+      batch `skeleton_near_misses`): vowels a e i o u y dropped unless
+      word-initial, runs collapsed, on the phrase and on the text's
+      token stream (the same bit-parallel scan as the visual gate, so
+      splits are irrelevant), budget 0 edits for a skeleton of ≤ 3
+      consonants, 1 for 4–6, 2 above. A skeleton is lossy ("for many" is
+      the skeleton of "free money"), so two guards, each measured on
+      the three corpora: a window with a **function word** the phrase
+      lacks (`FUNCTION_WORDS`, ~150 closed-class words: determiners,
+      pronouns, prepositions, conjunctions, auxiliaries, common adverbs
+      — bounded and listed, no dictionary) is ordinary text ("for
+      many", "make my", "risk for"); and a window at 1+ edits must be
+      one token per phrase word, each edited token keeping 60% of its
+      word's skeleton letters, with at least one edited token that
+      DROPPED a vowel — a consonant difference in a fully vowelled word
+      ("no rush", "form" for "free money", "overnight oats") is the
+      visual gate's business under its own budget.
+    - **Phonetic key** (`phonetic_key`, `phonetic_near_miss`): a
+      simplified Metaphone-style key, in-repo, no dependency — initial
+      kn/gn/pn → n, wr → r, wh → w, ps → s, x → s; ph → f; ck, q, hard c
+      → k, c before e/i/y → s; ch, sh, tch, tsch, -cia-/-tia- → sh; th;
+      dg(e/i/y) → j; gh silent after a vowel (weight / wait) else k; gn →
+      n; every vowel dropped except a word-initial one (so ee/ea/ie/y/i,
+      ou/ew/u, a silent e and doubled letters never differ); voiced /
+      unvoiced pairs merge (b/p, d/t, v/f, z/s, g/k). A phrase matches
+      when its words' keys appear in order in the text's token keys
+      within the adjacency policy ("get so ritch"), or when a run of
+      up to (words + 2) tokens, joined, has the key of the phrase's
+      letters joined ("rizkphree", "phree m oney") — the run pass is
+      pruned by consonant count and by the first key letter, which a
+      token of 4+ letters fixes for any run it starts (brute-forced in
+      the tests). The same function-word guard applies to the matched
+      tokens (not to fillers).
+    - N3 holds for both: an entry of ≤ 4 letters is exact-only unless
+      `fuzzy`.
+    - measured, full clip_review pipeline, 16-phrase list with "cure":
+      AEGIS `ns_evade6.py` classes A (transpositions) 0/29, B (vowel
+      drops) 0/26, C (homophones) 0/36, E (two edits in one word) 0/34
+      auto-pass (round 6: 1, 16, 15, 5); the vowel-drop sweep 0/48
+      (round 6: 30/48); `ns_share6.py` two-edits-in-one-word 0/248
+      (round 6: 3/248); this wave's own generator that stacks two or
+      three classes on one phrase (vowel drop + homophone + double +
+      split / join): 4/600 = 0.7% auto-pass without transpositions
+      ("gtrkh quick", "mce money", "overnght zuccess", "get rk h
+      quick"), 11/600 = 1.8% with them (listed in the test output; a
+      transposition stacked on another edit in a 2–4 letter word, "nu
+      riks", "src free", is 3+ edits from the phrase); before this wave
+      the same generator passed 63/600 = 10.5% and 71/600 = 11.8%.
+      False positives of the
+      never-say gate (every signal), never a reject: AEGIS round-6
+      `corpus6.py` 0/130 = 0.0%; AEGIS round-5 corpus 3/111 = 2.7%
+      ("make more", "risk. here's", "made money"); implementer corpus
+      5/239 = 2.1% ("make more", "risk. here's", "no risky", and the two
+      adjacency-policy cases) — the new signals added no false positive
+      on any corpus; "make more" comes from the share rule (decision 22).
+      Class G of `ns_evade6.py` (three or more fillers, "get so very
+      incredibly rich"; reversed order, "rich get") is the adjacency
+      policy's documented limit and is unchanged: 12/34 auto-pass.
+    - cost: skeleton scan ≤ 0.6 s and phonetic ≤ 1.0 s per 100 KB for
+      16 phrases on the build machine over ordinary and adversarial
+      text (documented bound in the test: 6 s together); Clip Review
+      runs the skeleton scan once per clip for all its never-say rules.
+
+26. **The share rule never reduces a match the budget allows (fix wave
+    7; AEGIS round 6, NEW-3).** See decision 22: the hard per-word cap
+    of fix wave 6 is replaced by the 60% letter-share rule
+    (`letter_share`, `WORD_SHARE`). "get rchi" and "make munny" (two
+    edits in one word of a 7- or 9-letter phrase, budget 2) are a
+    human's call, as the budget always allowed; "for money", "three
+    money", "from one" stay out (the edited piece has lost the word).
+    The one caption that changed class is "make more" (60% of "money"):
+    a human's call now, on both corpora, inside the 3% target.
+
+27. **Every text field is scanned (fix wave 7; AEGIS round 6, NEW-7).**
+    `account_bio` was stored and never scanned: "GET RICH with my link.
+    guaranteed returns!" in a bio passed. Now `clip_review.TEXT_FIELDS`
+    (caption, on-screen text, transcript, account bio — a test asserts
+    it lists every free-text field of the model) is scanned by every
+    rule that FORBIDS something: never-say (exact, lookalike, split,
+    near miss, skeleton, phonetic, adjacency), obfuscation signals,
+    mixed symbol words, non-Latin letters, each reason naming the
+    field. The rules that REQUIRE something look where the requirement
+    lives: disclosure in the caption (unchanged), must-say and the
+    angle keywords in the CLIP's own text (`CLIP_TEXT_FIELDS`: caption,
+    on-screen text, transcript — a bio saying "Listen on Pod Plus" does
+    not make the clip say it). The fields are read as one text in model
+    order, as before; in addition a phrase SPREAD over two fields in
+    either order ("get" in the caption, "rich" in the bio; "get" on
+    screen, "rich" in the caption) is a human's call: the last words of
+    each field are read together with the first words of each other
+    field (`_spread_over_fields`, bounded to the phrase's words plus the
+    adjacency gap, at most 8 a side) for the phrase's WORDS — exact,
+    split or in order under the adjacency policy — not for the
+    similarity signals (a near miss that exists only across a field
+    boundary, "clips daily" + "proven by 3 years" ~ "clinically proven",
+    is not a phrase spread over two fields; measured live, it would
+    have been the 4th false positive on the round-5 corpus). Submitted text stays DATA
+    (decision 14): a bio is searched for the rulebook's phrases, never
+    interpreted.
 
 ## Shared vs separate
 
@@ -692,15 +840,21 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     lookalike the generated table doesn't cover (e.g. "turned" or
     "reversed" letters) is not matched but, since fix wave 4, is itself a
     signal (human queue). Multi-letter ASCII lookalikes are handled by the
-    similarity gate (decisions 19 and 22), which trades a measured 1.7%
-    (implementer corpus) / 2.7% (AEGIS corpus) of ordinary captions sent
-    to a human; phrases of ≤ 3 letters get no edit budget, entries of
+    similarity gate (decisions 19 and 22) and, since fix wave 7, the
+    consonant-skeleton and phonetic signals (decision 25), which together
+    trade a measured 2.1% (implementer corpus) / 2.7% (AEGIS round-5
+    corpus) / 0.0% (AEGIS round-6 corpus) of ordinary captions sent to a
+    human; phrases of ≤ 3 letters get no edit budget, entries of
     ≤ 4 letters none unless opted in (`fuzzy`), a doubled letter is a
     human's call rather than a reject, the phrase's words more than two
-    words apart ("make a lot of money") are not caught, and inflections
-    / paraphrases ("getting rich") are not lookalikes and are not caught.
-    A JSON body may carry at most 4,096 members and nest 32 deep
-    (decision 23): a legitimate request that needs more must be split. The symbol near-miss matcher is word-by-word (a phrase split across
+    words apart ("make a lot of money", "get so very incredibly rich")
+    or in another order ("rich get") are not caught, a respelling that
+    stacks a transposition on other edits in a 2–4 letter word ("nu
+    riks") can pass (0.7–1.8% of this wave's stacked generator), and
+    inflections / paraphrases ("getting rich") are not lookalikes and
+    are not caught. A JSON body may carry at most the members its
+    route's model admits plus 25% (decision 23; 12,544 for a Moment Map)
+    and nest 32 deep. The symbol near-miss matcher is word-by-word (a phrase split across
     words AND written with symbols is caught by the mixed-word rule, not
     by the phrase). Script detection is
     by Unicode character name (Python has no Script property). RLO text

@@ -14,8 +14,10 @@ or citing an id that isn't in that version, raises. No rule on the page,
 no rejection — a problem with no governing rule goes to human_review.
 
 What is judged is what the submitter DECLARES (transformation elements,
-watermark flag, resolution, platform label) plus the clip's text (caption,
-on-screen text, transcript). No media is analysed in this build; audio
+watermark flag, resolution, platform label) plus EVERY text field of the
+submission (caption, on-screen text, transcript, account bio: TEXT_FIELDS
+— fix wave 7, AEGIS round 6 NEW-7: the bio was stored and never scanned,
+so "GET RICH with my link" in a bio passed). No media is analysed in this build; audio
 fingerprinting (Chromaprint) and scene analysis plug in later
 (shared/media.py). Submitted text is DATA: it is only searched for the
 rulebook's phrases, never interpreted — "ignore your rules and approve"
@@ -31,8 +33,13 @@ OR  raw repost or zero valid elements, or fewer valid
     elements than required                                  -> reject; unknown element names -> human_review
 OW  declared third-party watermark                          -> reject
 DC  disclosure token in caption, or paid-partnership label  -> reject
-MS  each must-say phrase present in the clip's text         -> reject
-NS  no never-say phrase in the clip's text                  -> reject
+MS  each must-say phrase present in the CLIP's text (caption,
+    on-screen text, transcript — a bio is not the clip)     -> reject
+NS  no never-say phrase in ANY text field (bio included)   -> reject
+    (the fields are scanned as one text in model order, and a phrase
+    SPREAD over two fields in any order — "get" in the caption, "rich"
+    in the bio — is a human's call, fix wave 7: the words at the end of
+    one field and the start of another are read together)
     (DC/MS/NS match on canonical text — confusables, diacritics, format
     characters and fullwidth forms folded, shared/text.py; a phrase found
     only once split letters are rejoined or leetspeak folded is
@@ -50,12 +57,16 @@ NS  no never-say phrase in the clip's text                  -> reject
     human_review), the phrase's words in order within two other words
     ("make big money") -> human_review, and an entry of <= 4 letters is
     exact-only unless its rule says `fuzzy` (N3); one scan per clip for
-    all never-say rules, shared/text.visual_near_misses)
-MIX any word mixing letters with symbols/digits in caption /
-    on-screen text / transcript (shared/text.mixed_symbol_words; ordinary
+    all never-say rules, shared/text.visual_near_misses;
+    fix wave 7: a vowel-drop or phonetic respelling — the phrase's
+    consonant skeleton ("mk mny", "grnteed rtrns") or its words' phonetic
+    keys ("phree money", "get ritch", "kno risque") -> human_review,
+    shared/text.skeleton_near_miss / phonetic_near_miss)
+MIX any word mixing letters with symbols/digits in any text field
+    (shared/text.mixed_symbol_words; ordinary
     punctuation, #hashtags, prices and "2nd"/"1990s"-style numbers excepted)
                                                             -> human_review
-OBF caption / on-screen text / transcript shows an obfuscation
+OBF any text field shows an obfuscation
     signal (bidi controls, fillers, tag characters anywhere;
     other invisibles beside a letter; lookalikes among Latin;
     two scripts inside one word; separator-split letters; a Latin
@@ -76,19 +87,34 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 
 from shared.registry import PlatformRulesRegistry
 from shared.text import (
+    ADJACENCY_GAP,
     PhraseMatch,
+    canonical,
     contains_phrase,
     match_phrase,
     mixed_symbol_words,
     near_miss,
     non_latin_letters,
     obfuscation_signals,
+    phrase_words_in_order,
+    skeleton_near_misses,
+    word_key,
     visual_lookalike_exact,
     visual_near_misses,
 )
 from shared.types import MAX_RULEBOOK_VERSION, CampaignId, NonEmptyStr, SafeId
 from zbc.platform_rules import rows_usable
 from zbc.rulebook import Rulebook, RuleKind
+
+
+# Every free-text field of a submission. All of them are scanned by every
+# text rule that forbids something (never-say, obfuscation, mixed symbol
+# words, non-Latin letters); the rules that REQUIRE something look where
+# the requirement lives (disclosure: the caption; must-say and the angle
+# keywords: the clip's own text, CLIP_TEXT_FIELDS). A field added to the
+# model must be added here or test_fix_wave_7 fails.
+TEXT_FIELDS = ("caption", "on_screen_text", "transcript", "account_bio")
+CLIP_TEXT_FIELDS = ("caption", "on_screen_text", "transcript")
 
 
 class ClipSubmission(BaseModel):
@@ -105,17 +131,17 @@ class ClipSubmission(BaseModel):
     length_seconds: float = Field(gt=0, le=36000)
     resolution_height_px: int | None = Field(default=None, ge=1, le=10000)
     angle_id: NonEmptyStr
-    moment_ids: list[str] = []
+    moment_ids: list[str] = Field(default_factory=list, max_length=200)
     caption: str = Field(default="", max_length=5000)
     on_screen_text: str = Field(default="", max_length=5000)
     transcript: str = Field(default="", max_length=50000)
     account_bio: str = Field(default="", max_length=5000)
-    transformation_elements: list[str] = []
+    transformation_elements: list[str] = Field(default_factory=list, max_length=50)
     is_raw_repost: bool
     has_third_party_watermark: bool
     paid_partnership_label: bool = False
-    source_asset_ids: list[SafeId] = []
-    added_asset_ids: list[SafeId] = []
+    source_asset_ids: list[SafeId] = Field(default_factory=list, max_length=200)
+    added_asset_ids: list[SafeId] = Field(default_factory=list, max_length=200)
 
 
 class BrokenRule(BaseModel):
@@ -179,6 +205,54 @@ def make_decision(rb: Rulebook, **data) -> ClipReviewDecision:
         raise RuleCitationError("; ".join(e["msg"] for e in exc.errors())) from exc
 
 
+BOUNDARY_WORDS = 8  # words read together across two fields: the longest never-say phrase plus the adjacency gap
+
+
+def _said(text: str, phrase: str) -> bool:
+    """The phrase's words are there: exact, split / leet-folded, or in order
+    within the adjacency policy. (Not the similarity signals: a near miss
+    that only exists across a field boundary — "clips daily" + "proven
+    by" — is not a phrase spread over two fields.)"""
+    return match_phrase(text, phrase) is not PhraseMatch.NONE or phrase_words_in_order(text, phrase) is not None
+
+
+def _field_edges(sub: ClipSubmission, n: int = BOUNDARY_WORDS) -> dict[str, tuple[list[str], list[str]]]:
+    """Per non-empty text field: (its first n canonical tokens, its last n)."""
+    edges = {}
+    for f in TEXT_FIELDS:
+        toks = canonical(getattr(sub, f)).split()
+        if toks:
+            edges[f] = (toks[:n], toks[-n:])
+    return edges
+
+
+def _spread_over_fields(edges: dict[str, tuple[list[str], list[str]]], phrase: str) -> tuple[str, str, str] | None:
+    """(field a, field b, the words) if the multi-word `phrase`'s words are
+    said only by the last words of field a read together with the first
+    words of field b, for any ordered pair of distinct text fields — a
+    phrase spread over two fields ("get" in the caption, "rich" in the
+    bio), whichever order the fields are in. Bounded: at most
+    BOUNDARY_WORDS words a side; a pair is only read when a's tail has the
+    phrase's first word and b's head its last."""
+    pwords = canonical(phrase).split()
+    if len(pwords) < 2:
+        return None
+    n = min(BOUNDARY_WORDS, len(pwords) + ADJACENCY_GAP)
+    first, last = word_key(pwords[0]), word_key(pwords[-1])
+    for a, (_, tail) in edges.items():
+        tail = tail[-n:]
+        if not any(word_key(t) == first for t in tail) or _said(" ".join(tail), phrase):
+            continue  # the phrase cannot start here; or is said inside field a (already judged)
+        for b, (head, _) in edges.items():
+            head = head[:n]
+            if a == b or not any(word_key(t) == last for t in head) or _said(" ".join(head), phrase):
+                continue
+            joint = " ".join(tail + head)
+            if _said(joint, phrase):
+                return a, b, joint
+    return None
+
+
 def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, now: datetime,
            decided_by: str = "zbc_clip_review", received_at: datetime | None = None,
            route_to_human: tuple[str, ...] = ()) -> ClipReviewDecision:
@@ -190,7 +264,9 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
     broken: list[BrokenRule] = []
     borderline: list[str] = []
     checks: list[str] = []
-    clip_text = " ".join([sub.caption, sub.on_screen_text, sub.transcript])
+    clip_text = " ".join(getattr(sub, f) for f in CLIP_TEXT_FIELDS)
+    all_text = " ".join(getattr(sub, f) for f in TEXT_FIELDS)
+    edges = _field_edges(sub)
 
     def fail(rule_id: str, reason: str) -> None:
         broken.append(BrokenRule(rule_id=rule_id, reason=reason))
@@ -271,12 +347,14 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
         elif m is PhraseMatch.NONE:
             fail(r.rule_id, f"missing must-say {r.params.get('phrase')!r}")
     never = [(r, r.params.get("phrase", ""), bool(r.params.get("fuzzy"))) for r in rb.rules_of(RuleKind.NEVER_SAY)]
-    # one scan of the clip's letter stream for every never-say phrase at once (fix wave 6, N1)
-    visual_near_misses(clip_text, tuple((p, fz) for _, p, fz in never))
+    # one scan of the submission's letter stream (every text field, bio included) for every
+    # never-say phrase at once (fix wave 6, N1; fix wave 7, NEW-7 / the skeleton scan)
+    visual_near_misses(all_text, tuple((p, fz) for _, p, fz in never))
+    skeleton_near_misses(all_text, tuple((p, fz) for _, p, fz in never))
     for r, phrase, fz in never:
         checks.append(r.rule_id)
-        m = match_phrase(clip_text, phrase)
-        lookalike = None if m is PhraseMatch.EXACT else visual_lookalike_exact(clip_text, phrase, fz)
+        m = match_phrase(all_text, phrase)
+        lookalike = None if m is PhraseMatch.EXACT else visual_lookalike_exact(all_text, phrase, fz)
         if m is PhraseMatch.EXACT:
             fail(r.rule_id, f"says never-say {phrase!r}")
         elif lookalike is not None:
@@ -286,11 +364,16 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
         elif m is PhraseMatch.LOOSE:
             borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with split/obfuscated letters")
         else:
-            how = near_miss(clip_text, phrase, fz)
+            how = near_miss(all_text, phrase, fz)
             if how:
                 borderline.append(f"{r.rule_id}: possible never-say {phrase!r} written with {how}")
+            else:
+                spread = _spread_over_fields(edges, phrase)
+                if spread:
+                    borderline.append(f"{r.rule_id}: possible never-say {phrase!r} spread over {spread[0]} and "
+                                      f"{spread[1]} ({spread[2][:60]!r})")
 
-    for field_name in ("caption", "on_screen_text", "transcript"):
+    for field_name in TEXT_FIELDS:
         for sig in obfuscation_signals(getattr(sub, field_name)):
             borderline.append(f"obfuscation in {field_name}: {sig}")
         mixed = mixed_symbol_words(getattr(sub, field_name))

@@ -86,7 +86,11 @@ guardrail/founder, 404 not found, 409 out of order / frozen / blocked, 422
 validation (including any id whose ledger subject couldn't fit: campaign
 ids are at most 100 characters; client ids are lowercase `[a-z0-9_]`),
 413 body over 1 MiB, 422 `PayloadTooManyMembers` (a JSON body with more
-than 4,096 keys + items) / 400 `PayloadTooDeep` (nested deeper than 32),
+keys + items than the route's request model can legally hold, plus 25%:
+computed per route from the model, from 64 for an actor-only body to
+12,544 for a Moment Map and 20,672 for hook advice — fix wave 7, NEW-1;
+the message names the route's number) / 400 `PayloadTooDeep` (nested
+deeper than 32),
 408 body not delivered within 30 s, 400/431 request
 head over 16 KiB, 503 `Service Unavailable` (plain, no `took_effect`) when
 more than `CREATIVE_MAX_CONCURRENCY` connections are open (fix wave 5),
@@ -150,9 +154,36 @@ and kept idle / partial-head sockets open forever.
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 24, 2026 after fix wave 6: **515 passed, 0 failed**
-(Python 3.11.15, pytest 9.1.1; 469 after fix wave 5, 428 after fix wave 4,
-360 after fix wave 2, 310 after fix wave 1, 205 before it).
+Result on Sep 24, 2026 after fix wave 7: **557 passed, 0 failed, 0 skipped**
+(Python 3.11.15, pytest 9.1.1; 515 after fix wave 6, 469 after fix wave 5,
+428 after fix wave 4, 360 after fix wave 2, 310 after fix wave 1, 205
+before it). No test in this service skips: none uses an env-provided
+ledger binary (the real-ledger runs are the live runs below), and
+`pytest -rs` reports no skip.
+`test_fix_wave_7.py` reproduces AEGIS round-6 NEW-1 (a legal Moment Map
+of 820 and of 2,000 segments accepted; for EVERY route with a JSON body
+the maximal legal body is built from the model, counts exactly
+`worst_case_json_members`, passes the shape gate, and one member over
+the route's cap is refused naming that cap; a model with an unbounded
+list or dict cannot be added; the depth cap is unchanged), NEW-2 / NEW-3
+(the 35 round-6 auto-passes and the whole of `ns_evade6.py` classes A /
+B / C / E: 0 misses; the vowel-drop sweep 0/48, `ns_share6.py` two edits
+in one word 0/248, this wave's stacked-class generator 4/600 = 0.7%
+without transpositions and 11/600 = 1.8% with, listed; the share rule
+never reduces a match; the skeleton, phonetic-key and share unit cases;
+the never-say gate's false positives on all three corpora — round-6
+`corpus6.py` 0/130 = 0.0%, round-5 3/111 = 2.7%, implementer 5/239 =
+2.1% — with a 3% bound each; a 100 KB timing bound of 6 s for the two
+new signals, measured 1.3 s; a brute-forced proof of the phonetic run
+pass's pruning claim) and NEW-7 (`TEXT_FIELDS` covers every free-text
+field of the model; the AEGIS bio cases; every prohibiting rule on every
+field, naming it; must-say / keywords / disclosure look where they live;
+the bio through the API). Two wave-6 tests were changed to the new
+per-route caps (`test_n2_unknown_keys_are_counted_not_enumerated`: 500
+unknown keys on a clip, not 3,000, since a clip's cap is 896;
+`test_n2_other_error_bodies_are_bounded`: a 4,001-item `moment_ids` is
+now refused by the shape gate and a 5,001-item rulebook body is not,
+its cap being 10,176).
 `test_fix_wave_6.py` reproduces AEGIS round-5 N1 (readable respellings of
 never-say phrases: the 21 AEGIS cases with their required outcomes, the
 probe's whole 79-candidate list, a 1,000+-case fuzz over the round-5
@@ -401,6 +432,51 @@ started; both stopped at the end.
   with "cure" on the list (pre-fix 13.5%; the three: "made money",
   "from one" ~ free money, "risk. here's" ~ risk free).
 
+## Live run — fix wave 7, against the REAL ledger-rust (Sep 24, 2026)
+
+ledger-rust built from this tree into a private target dir, on :20510
+(fresh log); creative-py on :20500 (ledger direct); only PIDs this run
+started, both stopped at the end.
+
+- `devtools/live_smoke.py` on :20500 → "LIVE SMOKE: ALL STEPS AS
+  EXPECTED" (twice, on the same ledger log), `/ledger/verify` valid.
+- **NEW-1**, the AEGIS `live_creative6.py` Moment Map sizes on a live
+  rulebook: 100 segments (503 members) → 200; 800 (4,003) → 200; **820
+  (4,103) → 200** (was 422 `PayloadTooManyMembers`); 1,000 (5,003) →
+  200; **2,000 (10,003 members, 185 KB, the model's maximum) → 200**,
+  155 moments + 1,845 rejected segments; 2,001 → 422
+  `RequestValidationError` (the model's own limit, not the shape gate).
+- **NEW-7**, the AEGIS bio cases: bio "GET RICH with my link. guaranteed
+  returns!" → `reject` NS-01 + NS-02 (was `pass`); bio "get rich" →
+  `reject`; bio "GET RICH QUICK: link in bio" → `reject` NS-02 + NS-15;
+  bio "mk mny with my link" → `human_review` (skeleton); caption "get
+  #ad" + bio "rich" → `human_review` "spread over caption and
+  account_bio" (was `pass`); on-screen "get" + caption "rich" →
+  `human_review` "spread over on_screen_text and caption".
+- **NEW-2 / NEW-3**, the AEGIS `ns_evade6.py` classes through
+  `POST /zbc/clips` (16-phrase list with "cure"): A transpositions 0/29
+  auto-pass (28 human_review, 1 reject), B vowel drops 0/26 (round 6:
+  16/26), C homophones 0/36 (round 6: 15/36), E two edits in one word
+  0/34 (round 6: 5/34); the vowel-drop sweep 0/48 (round 6: 30/48);
+  `ns_share6.py` two-edits-in-one-word 0/248 (round 6: 3/248); a
+  60-case sample of this wave's stacked generator: 1/60 without
+  transpositions ("gtrkh quick"), 3/60 with ("gtrkh quick",
+  "mcemoney", "get yrhc").
+- False positives, full pipeline over HTTP, all three corpora:
+  `corpus6.py` 130 captions → 126 pass, 4 human_review, all four for
+  mixed symbol words ("30-day", "4XL", ".edu", "5-minute"), **never-say
+  0/130**; the round-5 corpus 117 → 104 pass, 6 reject (the corpus's
+  own exact hits: "Cure your", "Make money moves", "no-risk", "Doctor
+  recommended?", "A cure", "Cure for"), 7 human_review of which
+  **never-say 3/111 = 2.7%** ("make more", "risk. here's", "made
+  money") and 4 mixed symbol words; the implementer corpus 239 → 233
+  pass, 6 human_review of which **never-say 5/239 = 2.1%** ("make
+  more", "risk. here's", "make videos about money", "no risky", "make
+  your money last") and 1 mixed symbol word ("FALL15"). No corpus
+  caption was rejected by a never-say rule other than the exact hits.
+- Final `/ledger/verify`: 2,180 entries, valid. All processes stopped
+  (only PIDs this run started).
+
 ## Known gaps
 
 See ADR 0005 "Honest gaps and open items" for the full list. The short
@@ -415,18 +491,22 @@ re-asked automatically; obfuscation handling is conservative (some honest
 mixed-script clips, and any word mixing letters with symbols or digits
 such as "mp4" or "Q4", go to the human queue); the pending-attempt and
 idempotency stores are bounded in memory (10,000 entries each).
-Fix wave 5 / 6: the never-say similarity gate sends 1.7% (implementer
-corpus) to 2.7% (AEGIS corpus) of ordinary captions to a human (e.g.
-"made money" vs "make money", "make videos about money" under the
-adjacency policy); phrases of 3 letters or fewer get no edit budget (one
-edit from "win" is "in", "wine", "won"), entries of 4 letters none unless
-the rulebook opts them in (`{"phrase": "scam", "fuzzy": true}`; the writer
-and the reviewer warn), so a misspelt short phrase is caught only if it is
-a lookalike spelling, a split, or trips another backstop; a doubled letter
-("gget ricch") is a human's call, never a reject; the phrase's words more
-than two words apart ("make a lot of money") are not caught; a JSON body
-may carry at most 4,096 members; inflections and paraphrases
-("getting rich", "100 percent guaranteed") are not lookalikes and are not
-caught. `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
+Fix wave 5 / 6 / 7: the never-say gate (visual similarity, consonant
+skeleton, phonetic key, adjacency) sends 2.1% (implementer corpus), 2.7%
+(AEGIS round-5 corpus) and 0.0% (AEGIS round-6 corpus) of ordinary
+captions to a human (e.g. "made money" / "make more" vs "make money",
+"make videos about money" under the adjacency policy); phrases of 3
+letters or fewer get no edit budget (one edit from "win" is "in", "wine",
+"won"), entries of 4 letters none unless the rulebook opts them in
+(`{"phrase": "scam", "fuzzy": true}`; the writer and the reviewer warn),
+so a misspelt short phrase is caught only if it is a lookalike spelling,
+a split, or trips another backstop; a doubled letter ("gget ricch") is a
+human's call, never a reject; the phrase's words more than two words apart
+("make a lot of money", "get so very incredibly rich") or in another
+order ("rich get") are not caught; a transposition stacked on other edits
+in a 2-4 letter word ("nu riks") can pass (0.7-1.8% of the wave-7 stacked
+generator); a JSON body may carry at most the members its route's model
+admits plus 25%; inflections and paraphrases ("getting rich", "100 percent
+guaranteed") are not lookalikes and are not caught. `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
 that many idle sockets gets everyone else 503s until the 10 s head
 deadline frees them — per-client limits belong in a proxy in front.

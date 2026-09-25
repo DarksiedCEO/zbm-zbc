@@ -64,7 +64,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from math import gcd
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from shared.actors import ActorRegistry, Role
 from shared.clock import Clock
@@ -157,7 +157,7 @@ class WorkSubmission(BaseModel):
     deliverable_id: SafeId
     variant_index: int = 0
     declared: DeclaredExport
-    asset_ids: list[SafeId]
+    asset_ids: list[SafeId] = Field(max_length=500)
     uses_ai_generative_fill: bool = False
     quality: QualityDeclaration
 

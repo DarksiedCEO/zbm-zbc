@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from shared.errors import PreconditionFailed
 from shared.types import CampaignId, NonEmptyStr, SafeId
@@ -49,7 +49,7 @@ class ClearanceRecord(BaseModel):
     asset_id: SafeId
     asset_kind: AssetKind
     rights_holder: NonEmptyStr
-    permitted_uses: frozenset[Use]
+    permitted_uses: frozenset[Use] = Field(max_length=len(Use))
     valid_from: date
     valid_until: date
     contract_ref: NonEmptyStr
@@ -68,7 +68,7 @@ class CampaignLicense(BaseModel):
     campaign_id: CampaignId
     licensor: NonEmptyStr
     licensee: NonEmptyStr
-    covered_asset_ids: frozenset[SafeId]
+    covered_asset_ids: frozenset[SafeId] = Field(max_length=500)
     sublicense_to_clippers: bool
     ai_generative_fill_permitted: bool = False
     valid_from: date

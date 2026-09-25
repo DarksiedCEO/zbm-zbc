@@ -50,12 +50,12 @@ class KitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     seed_count: int = Field(ge=3, le=5)
-    caption_styles: list[NonEmptyStr] = Field(min_length=1)
-    overlays: list[NonEmptyStr] = []
-    templates: list[NonEmptyStr] = []
-    brand_asset_ids: list[SafeId] = []
-    do_examples: list[NonEmptyStr] = []
-    dont_examples: list[NonEmptyStr] = []
+    caption_styles: list[NonEmptyStr] = Field(min_length=1, max_length=100)
+    overlays: list[NonEmptyStr] = Field(default_factory=list, max_length=100)
+    templates: list[NonEmptyStr] = Field(default_factory=list, max_length=100)
+    brand_asset_ids: list[SafeId] = Field(default_factory=list, max_length=200)
+    do_examples: list[NonEmptyStr] = Field(default_factory=list, max_length=100)
+    dont_examples: list[NonEmptyStr] = Field(default_factory=list, max_length=100)
 
 
 class SeedClipSpec(BaseModel):

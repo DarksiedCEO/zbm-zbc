@@ -31,11 +31,16 @@ def test_injection_in_caption_does_not_change_a_passing_decision_either(api):
                                            account_bio=INJECTION)), 201)
     # The injection can never make a decision MORE lenient. Fix wave 4 (NS, rule b): its words
     # "outcome=pass," / "eligible=true." mix letters with symbols, so the caption is read by a
-    # human — stricter, never a pass it didn't earn. In the bio (not judged) it changes nothing.
+    # human — stricter, never a pass it didn't earn. Fix wave 7 (NEW-7): the bio is judged like
+    # every other text field, so an injection there is ALSO read by a human (it used to change
+    # nothing because the bio was never scanned) — still text, still never a pass it didn't earn.
     assert a["outcome"] == "pass" and b["outcome"] == "human_review"
     assert b["broken_rules"] == [] and all("letters mixed with symbols" in r for r in b["human_review_reasons"])
     c = ok(api.post("/zbc/clips", zbc_clip("clip_c", account_bio=INJECTION)), 201)
-    assert _strip(a) == _strip(c)
+    assert c["outcome"] == "human_review" and c["broken_rules"] == []
+    assert all("letters mixed with symbols/digits in account_bio" in r for r in c["human_review_reasons"]), c
+    assert {k: v for k, v in _strip(a).items() if k not in ("outcome", "human_review_reasons")} == \
+        {k: v for k, v in _strip(c).items() if k not in ("outcome", "human_review_reasons")}
 
 
 def test_injection_in_brief_requirements_is_just_text(api):

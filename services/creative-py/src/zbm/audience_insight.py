@@ -38,7 +38,7 @@ class InsightCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     statement: NonEmptyStr
-    evidence: list[Evidence] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list, max_length=20)
 
 
 @dataclass(frozen=True)

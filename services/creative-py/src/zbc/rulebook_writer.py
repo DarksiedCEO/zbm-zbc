@@ -50,8 +50,8 @@ class AngleInput(BaseModel):
 
     name: NonEmptyStr
     description: NonEmptyStr
-    keywords: list[NonEmptyStr] = Field(min_length=1)
-    hook_lines: list[NonEmptyStr] = []
+    keywords: list[NonEmptyStr] = Field(min_length=1, max_length=100)
+    hook_lines: list[NonEmptyStr] = Field(default_factory=list, max_length=100)
 
 
 class NeverSayEntry(BaseModel):
@@ -75,13 +75,13 @@ class CampaignGoal(BaseModel):
     client_id: SafeId
     vertical: NonEmptyStr
     objective: NonEmptyStr
-    source_asset_ids: list[SafeId] = Field(min_length=1)
-    cleared_asset_ids: list[SafeId] = []
+    source_asset_ids: list[SafeId] = Field(min_length=1, max_length=200)
+    cleared_asset_ids: list[SafeId] = Field(default_factory=list, max_length=500)
     angles: list[AngleInput] = Field(min_length=1, max_length=20)
-    must_say: list[NonEmptyStr] = []
-    never_say: list[NonEmptyStr | NeverSayEntry] = []
-    disclosure_any_of: list[NonEmptyStr] = Field(min_length=1)
-    platforms: list[PlatformTarget] = Field(min_length=1)
+    must_say: list[NonEmptyStr] = Field(default_factory=list, max_length=100)
+    never_say: list[NonEmptyStr | NeverSayEntry] = Field(default_factory=list, max_length=1000)
+    disclosure_any_of: list[NonEmptyStr] = Field(min_length=1, max_length=50)
+    platforms: list[PlatformTarget] = Field(min_length=1, max_length=50)
     min_days_live: int = Field(ge=1, le=365)
     min_transformation_elements: int = Field(default=2, ge=1, le=len(TRANSFORMATION_ELEMENTS))
     min_resolution_height_px: int = Field(default=720, ge=240, le=4320)
