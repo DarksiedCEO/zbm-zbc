@@ -16,6 +16,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -57,24 +58,42 @@ def _listening_addrs(port: int) -> set[str]:
     return out
 
 
+_LOGS: dict[int, "tempfile._TemporaryFileWrapper"] = {}  # pid -> the server's captured output
+
+
 def _start(env_extra: dict[str, str]) -> tuple[subprocess.Popen, str, int]:
     port = _free_port()
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
            "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port), **env_extra}
-    proc = subprocess.Popen([sys.executable, "-m", "api"], env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    # Fix wave 8: this piped stdout to PIPE and never drained it, so uvicorn's
+    # access log (one line per request) filled the 64 KiB pipe after a few
+    # hundred requests and blocked the server mid-test. A temp file is
+    # unbounded and still lets an early exit be reported with its output.
+    log = tempfile.TemporaryFile(mode="w+b")
+    proc = subprocess.Popen([sys.executable, "-m", "api"], env=env, stdout=log, stderr=subprocess.STDOUT)
+    _LOGS[proc.pid] = log
     host = env_extra.get("FULFILLMENT_BIND_ADDR", "127.0.0.1")
     deadline = time.time() + 15
     while time.time() < deadline:
         if proc.poll() is not None:
-            raise AssertionError(f"service exited early: {proc.stdout.read().decode(errors='replace')}")
+            log.seek(0)
+            output = log.read().decode(errors="replace")
+            _close_log(proc)
+            raise AssertionError(f"service exited early: {output}")
         try:
             with socket.create_connection((host, port), timeout=0.2):
                 return proc, host, port
         except OSError:
             time.sleep(0.1)
     proc.kill()
+    _close_log(proc)
     raise AssertionError("service did not start listening within 15s")
+
+
+def _close_log(proc: subprocess.Popen) -> None:
+    log = _LOGS.pop(proc.pid, None)
+    if log is not None:
+        log.close()
 
 
 def _stop(proc: subprocess.Popen) -> None:
@@ -84,6 +103,7 @@ def _stop(proc: subprocess.Popen) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+    _close_log(proc)
 
 
 def _get(host: str, port: int, path: str, auth: str | bytes | None = None) -> int:
@@ -143,3 +163,16 @@ def test_malformed_contact_window_refuses_to_start():
     r = subprocess.run([sys.executable, "-c", "import api"], env=env, capture_output=True, text=True, timeout=30)
     assert r.returncode != 0
     assert "FULFILLMENT_CONTACT_WINDOW" in r.stderr
+
+
+def test_a_server_started_here_survives_thousands_of_logged_requests(default_server):
+    """Fix wave 8 (harness): 1 500 requests write ~150 KB of access log; with
+    stdout on an undrained PIPE (64 KiB) the server blocked around the 500th."""
+    host, port = default_server
+    conn = http.client.HTTPConnection(host, port, timeout=5)
+    t0 = time.monotonic()
+    for _ in range(1500):
+        conn.request("GET", "/health")
+        assert conn.getresponse().read()
+        assert time.monotonic() - t0 < 60
+    conn.close()

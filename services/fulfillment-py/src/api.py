@@ -176,6 +176,17 @@ _MAX_BODY_BYTES = 4 * 1024 * 1024
 # see http_limits.py, which `python3 -m api` runs (main() below).
 _MAX_HEADER_BYTES = http_limits.MAX_HEADER_BYTES
 _BODY_READ_TIMEOUT_S = http_limits.load_body_read_timeout()  # refuses startup if invalid
+# Fix wave 8, N7-2: the deadline alone let one byte per 20 s hold a body (and
+# whatever was buffered for it) for the whole 30 s. Now a body is answered 408
+# when (a) a single wait for its next chunk reaches _BODY_MIN_RATE_GRACE_S
+# (a stall — front-loading 3.9 MB and then sending nothing earns no credit)
+# or (b) after _BODY_MIN_RATE_GRACE_S of waiting in total it has delivered
+# fewer than _BODY_MIN_BYTES_PER_S per second waited (a trickle). The clock
+# is the time spent WAITING for the client's bytes, not wall time: time the
+# service itself spends holding a request (the in-flight byte budget below)
+# is not charged to the client.
+_BODY_MIN_BYTES_PER_S = http_limits.BODY_MIN_BYTES_PER_S
+_BODY_MIN_RATE_GRACE_S = http_limits.BODY_MIN_RATE_GRACE_S
 
 
 class _BodyTooLarge(Exception):
@@ -183,6 +194,10 @@ class _BodyTooLarge(Exception):
 
 
 class _BodyTimeout(Exception):
+    pass
+
+
+class _BodyTooSlow(Exception):
     pass
 
 
@@ -250,22 +265,49 @@ class BodySizeLimitMiddleware:
                     await _refuse_from_head(_too_large_response(), scope, receive, send)
                     return
         received = 0
+        waited = 0.0  # time spent waiting for the client's bytes: the throughput rule's clock
+        gap = 0.0  # of which, since the last chunk arrived
+        pending: asyncio.Future | None = None  # one receive() in progress, kept across timeouts (never cancelled and re-issued)
         started = False
         body_done = False
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _BODY_READ_TIMEOUT_S
+        rate, grace = _BODY_MIN_BYTES_PER_S, _BODY_MIN_RATE_GRACE_S
+
+        def drop_pending() -> None:
+            nonlocal pending
+            if pending is not None:
+                pending.cancel()
+                pending = None
 
         async def limited_receive() -> Message:
-            nonlocal received, body_done
+            nonlocal received, body_done, waited, gap, pending
             if body_done:
                 return await receive()  # e.g. waiting for http.disconnect: no deadline
-            remaining = deadline - loop.time()
             try:
-                if remaining <= 0:
-                    raise TimeoutError
-                message = await asyncio.wait_for(receive(), remaining)
-            except TimeoutError:
-                raise _BodyTimeout() from None
+                while True:
+                    now = loop.time()
+                    if now >= deadline:
+                        raise _BodyTimeout()
+                    # (a) a stall: no chunk for `grace` of waiting; (b) a trickle: by the
+                    # time `waited` reaches `due` the client must have delivered
+                    # rate x due bytes (`due` moves out as bytes arrive).
+                    due = max(grace, received / rate)
+                    if gap >= grace or waited >= due:
+                        raise _BodyTooSlow()
+                    if pending is None:
+                        pending = asyncio.ensure_future(receive())
+                    done, _ = await asyncio.wait({pending}, timeout=min(deadline - now, grace - gap, due - waited))
+                    waited += loop.time() - now
+                    gap += loop.time() - now
+                    if done:
+                        break
+                message = pending.result()
+                pending = None
+                gap = 0.0
+            except BaseException:
+                drop_pending()
+                raise
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
                 if received > limit:
@@ -292,6 +334,10 @@ class BodySizeLimitMiddleware:
             if started:
                 raise
             await _refusal(408, f"request body not received within {_BODY_READ_TIMEOUT_S:g}s")(scope, receive, send)
+        except _BodyTooSlow:
+            if started:
+                raise
+            await _refusal(408, f"request body stalled for {grace:g}s or slower than {rate} bytes/s after {grace:g}s")(scope, receive, send)
 
 
 app.add_middleware(BodySizeLimitMiddleware)
@@ -525,6 +571,73 @@ _LARGE_WAIT_S = 2.0
 # peak (in-flight bodies + one parse); one idle second later it is back near
 # baseline (measured: 50 -> 56 MB).
 _TRIM_IDLE_S = 1.0
+# Fix wave 8, N7-2 (a fix wave 7 regression): the body buffer was sized from
+# Content-Length before a byte had arrived — bytearray(4 MiB), memset, per
+# connection — so 128 connections sending a head and ONE byte pinned 512 MiB
+# (AEGIS: RSS 55 -> 569 MB) for the 30 s body deadline at no bandwidth. Now
+# nothing is allocated ahead of the bytes received: the buffer grows with the
+# data (bytearray's own amortized growth, realloc/mremap — none of the grown
+# pages are touched until bytes land in them, so resident memory tracks the
+# bytes actually received; measured 0.13 ms per 3.4 MiB in 64 KiB chunks,
+# against 0.32 ms for the pre-sized-and-memset buffer: the "~3 ms of realloc"
+# fix wave 7 was avoiding was not what `+=` costs). And the bytes buffered by
+# ALL in-flight bodies share one
+# budget, _INFLIGHT_BODY_BYTES: a request that cannot buffer its next chunk
+# within _INFLIGHT_WAIT_S is answered 503 + Retry-After: 1 (uvicorn drains
+# the rest at the parser, as for the large lane). Sized to the large lane's
+# 2 s of budget at 32 MiB/s — 64 MiB — the most that can be admitted for
+# parsing within the wait anyway; below it 128 x 4 MiB = 512 MiB was the
+# only bound (http_limits.LIMIT_CONCURRENCY). A body that stalls after
+# sending its bytes is cut by the throughput rule (_BODY_MIN_BYTES_PER_S,
+# above) before the deadline, so a stalled sender holds its bytes ~5 s, not
+# 30. Bytes uvicorn itself buffers before the app reads them (<= 64 KiB per
+# connection, its flow-control high-water mark) are outside this budget.
+_INFLIGHT_BODY_BYTES = 64 * 1024 * 1024
+_INFLIGHT_WAIT_S = 2.0
+
+
+class _InFlightBytes:
+    """Bytes buffered by request bodies being read, whole process (per loop):
+    `reserve` waits (bounded) until `n` more fit; `release` gives them back."""
+
+    __slots__ = ("limit", "used", "waiters")
+
+    def __init__(self, limit: int) -> None:
+        self.limit, self.used = limit, 0
+        self.waiters: list[asyncio.Future] = []
+
+    async def reserve(self, n: int) -> None:
+        if n <= 0:
+            return
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _INFLIGHT_WAIT_S
+        while self.used + n > self.limit:
+            waiter = loop.create_future()
+            self.waiters.append(waiter)
+            try:
+                await asyncio.wait_for(waiter, max(0.0, deadline - loop.time()))
+            except TimeoutError:
+                raise _inflight_refused() from None
+            finally:
+                if waiter in self.waiters:
+                    self.waiters.remove(waiter)
+        self.used += n
+
+    def release(self, n: int) -> None:
+        self.used -= n
+        waiters, self.waiters = self.waiters, []
+        for waiter in waiters:
+            if not waiter.done():
+                waiter.set_result(None)
+
+
+def _inflight_refused() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=f"request bodies being received share an in-flight budget of {_INFLIGHT_BODY_BYTES} bytes; "
+               f"this one could not be buffered within {_INFLIGHT_WAIT_S:g}s — retry after Retry-After",
+        headers={"Retry-After": "1"},
+    )
 
 
 class _ByteBudget:
@@ -553,12 +666,13 @@ class _ByteBudget:
 
 
 class _Lanes:
-    __slots__ = ("small", "large", "budget", "large_in_flight", "trim_timer")
+    __slots__ = ("small", "large", "budget", "inflight", "large_in_flight", "trim_timer")
 
     def __init__(self) -> None:
         self.small = asyncio.Semaphore(_SMALL_LANE_SLOTS)
         self.large = asyncio.Semaphore(_LARGE_LANE_SLOTS)
         self.budget = _ByteBudget(_LARGE_BYTES_PER_S, _LARGE_BURST_BYTES)
+        self.inflight = _InFlightBytes(_INFLIGHT_BODY_BYTES)
         self.large_in_flight = 0
         self.trim_timer: asyncio.TimerHandle | None = None
 
@@ -619,28 +733,27 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
     if large:
         await _within(deadline, lanes.budget.take(declared))  # before a byte of the body is read
     lanes.large_in_flight += large
+    held = 0  # bytes of this body counted against lanes.inflight
     try:
         # One copy of the body, not two: Request.body() collects the chunks
         # and then joins them (2x the body while in flight); pydantic parses
-        # a bytearray directly. Sized up front from Content-Length so the
-        # chunks land in place instead of growing the buffer (fix wave 7:
-        # ~3 ms of realloc per 3.4 MiB). Bounded by BodySizeLimitMiddleware.
-        body = bytearray(declared or 0)
+        # a bytearray directly. Fix wave 8, N7-2: NEVER sized from
+        # Content-Length (see _INFLIGHT_BODY_BYTES) — it grows as the bytes
+        # arrive, each chunk reserved from the in-flight budget first.
+        # Bounded by BodySizeLimitMiddleware.
+        body = bytearray()
         pos = charged = 0
         async for chunk in request.stream():
-            end = pos + len(chunk)
-            if end > len(body):
-                body[pos:] = chunk  # undeclared (chunked) or understated length
-            else:
-                body[pos:end] = chunk
-            pos = end
+            await lanes.inflight.reserve(len(chunk))
+            held += len(chunk)
+            body += chunk
+            pos += len(chunk)
             if not large and pos > _SMALL_BODY_BYTES:
                 lanes.large_in_flight += 1
                 large = True
             if large and declared is None and pos - charged >= _SMALL_BODY_BYTES:
                 await _within(deadline, lanes.budget.take(pos - charged))  # unknown length: pay as it streams
                 charged = pos
-        del body[pos:]
         lane = lanes.large if large else lanes.small
         if large:
             await _within(deadline, lane.acquire())
@@ -652,6 +765,7 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
             lane.release()
         del body
     finally:
+        lanes.inflight.release(held)
         if large:
             lanes.large_in_flight -= 1
             _schedule_trim(lanes)

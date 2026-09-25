@@ -30,11 +30,28 @@ The limits, all enforced before routing and auth:
                                  the app reads (e.g. after an early 401).
                                  FULFILLMENT_BODY_READ_TIMEOUT_S may narrow it
                                  (0 < value <= 30); anything else refuses startup.
+  BODY_MIN_BYTES_PER_S   1 KiB/s minimum body throughput (fix wave 8, N7-2):
+  BODY_MIN_RATE_GRACE_S  5 s     a body that sends nothing for
+                                 BODY_MIN_RATE_GRACE_S (a stall), or that after
+                                 BODY_MIN_RATE_GRACE_S of waiting has delivered
+                                 fewer than BODY_MIN_BYTES_PER_S x seconds-waited
+                                 bytes (a trickle), is cut — 408 while the app
+                                 is reading it
+                                 (api.BodySizeLimitMiddleware, measured on the
+                                 time spent waiting for the client only); when
+                                 the app is not (after an early 401, say) this
+                                 protocol closes the connection on the same
+                                 rule judged BODY_DEADLINE_GRACE_S later (so the
+                                 app's 408 is written first). Before, one byte
+                                 per 20 s kept a body alive for the whole 30 s
+                                 deadline.
   LIMIT_CONCURRENCY      128     uvicorn's limit: at or above this many open
                                  connections or in-flight requests, a new
                                  request gets 503. Bounds concurrent request
-                                 bodies (each <= 4 MiB, api._MAX_BODY_BYTES):
-                                 worst case ~512 MiB of in-flight body bytes.
+                                 bodies (each <= 4 MiB, api._MAX_BODY_BYTES) to
+                                 128; the bytes actually buffered by them are
+                                 bounded further by api._INFLIGHT_BODY_BYTES
+                                 (64 MiB, fix wave 8).
   MAX_OPEN_CONNECTIONS   256     hard cap on held sockets: uvicorn's
                                  limit_concurrency still accepts and holds
                                  connections, so a connection made while this
@@ -76,6 +93,8 @@ REQUEST_HEAD_TIMEOUT_S = 10.0
 KEEP_ALIVE_TIMEOUT_S = 5
 BODY_READ_TIMEOUT_S = 30.0
 BODY_DEADLINE_GRACE_S = 5.0
+BODY_MIN_BYTES_PER_S = 1024
+BODY_MIN_RATE_GRACE_S = 5.0
 LIMIT_CONCURRENCY = 128
 MAX_OPEN_CONNECTIONS = 256
 OVER_CAP_CLOSE_S = 1.0
@@ -118,13 +137,23 @@ class DeadlineH11Protocol(H11Protocol):
       anything else         -> request fully received: no deadline (the
                                app's work and uvicorn's keep-alive govern)
     A deadline is (re)armed only when the state changes, so trickled bytes
-    never extend it."""
+    never extend it. While waiting for a body (fix wave 8, N7-2) the bytes
+    received are counted and, from BODY_MIN_RATE_GRACE_S + BODY_DEADLINE_GRACE_S
+    on, fewer than BODY_MIN_BYTES_PER_S per second closes the connection
+    before the deadline: the app is not necessarily reading (an early 401
+    answers without the body), and this is the only deadline such a body
+    has. The grace is the app's plus BODY_DEADLINE_GRACE_S so that a body the
+    app IS reading gets its 408 written before the socket is closed."""
 
     body_timeout_s: float = BODY_READ_TIMEOUT_S  # set by api.main()
 
     _deadline_timer = None
     _deadline_state = None
     _over_cap = False
+    _body_started = 0.0
+    _body_last = 0.0  # when the last body bytes arrived
+    _body_bytes = 0
+    _body_deadline = 0.0
 
     def connection_made(self, transport) -> None:  # type: ignore[override]
         super().connection_made(transport)
@@ -147,6 +176,9 @@ class DeadlineH11Protocol(H11Protocol):
             if not self.transport.is_closing():
                 self.transport.close()
             return
+        if self._deadline_state is h11.SEND_BODY:
+            self._body_bytes += len(data)
+            self._body_last = self.loop.time()
         super().data_received(data)
 
     def handle_events(self) -> None:
@@ -175,10 +207,32 @@ class DeadlineH11Protocol(H11Protocol):
         if state is h11.IDLE:
             timeout = REQUEST_HEAD_TIMEOUT_S
         elif state is h11.SEND_BODY:
-            timeout = self.body_timeout_s + BODY_DEADLINE_GRACE_S
+            self._body_started = self._body_last = self.loop.time()
+            self._body_bytes = 0
+            self._body_deadline = self._body_started + self.body_timeout_s + BODY_DEADLINE_GRACE_S
+            self._body_check()
+            return
         else:
             return
         self._deadline_timer = self.loop.call_later(timeout, self._deadline_passed)
+
+    def _body_check(self) -> None:
+        # Close at the hard deadline, when the body has stalled for the grace
+        # period, or when it has fallen below the minimum rate after the grace
+        # period; otherwise sleep until the earliest moment any could be true
+        # given the bytes so far.
+        self._deadline_timer = None
+        now = self.loop.time()
+        elapsed = now - self._body_started
+        grace = BODY_MIN_RATE_GRACE_S + BODY_DEADLINE_GRACE_S
+        if now >= self._body_deadline or now - self._body_last >= grace or (
+            elapsed >= grace and self._body_bytes < BODY_MIN_BYTES_PER_S * elapsed
+        ):
+            self._deadline_passed()
+            return
+        due = self._body_started + max(grace, self._body_bytes / BODY_MIN_BYTES_PER_S)
+        wake = min(due, self._body_last + grace, self._body_deadline)
+        self._deadline_timer = self.loop.call_later(max(0.05, wake - now), self._body_check)
 
     def _cancel_deadline(self) -> None:
         if self._deadline_timer is not None:

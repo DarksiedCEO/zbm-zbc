@@ -285,7 +285,8 @@ what changed architecturally, and why:
     the middleware when the app is reading; the protocol closes the
     connection 5 s later regardless, e.g. after an early 401 — each
     trickled byte used to reset uvicorn's keep-alive timer);
-    `limit_concurrency` 128 (bounds in-flight 4 MiB bodies to ~512 MiB) and
+    `limit_concurrency` 128 (bounds in-flight 4 MiB bodies to 128; their
+    buffered bytes are bounded to 64 MiB by Decision 22) and
     a hard cap of 256 open sockets. `FULFILLMENT_BODY_READ_TIMEOUT_S` may
     only narrow the body deadline. *Trade-off, accepted:* ≥ 128 held
     sockets make the service answer 503 (including `/health`) until they
@@ -446,6 +447,55 @@ what changed architecturally, and why:
     `malloc_trim(0)` returns the free pages (~15 ms for 130 MB, 0 ms when
     idle). Measured: idle 50 → 52–58 MB after every flood above, peak
     64–111 MB during them.
+
+## Fix wave 8, Sep 24 2026 — decision it adds
+
+22. **Request bodies are buffered only as they arrive, under one in-flight
+    byte budget and a minimum-throughput rule** (AEGIS N7-2, MED-HIGH,
+    CONFIRMED — a Decision 21 regression). Fix wave 7 pre-sized the body
+    buffer from Content-Length (`bytearray(declared)`, a 4 MiB memset per
+    request before any body byte), so 128 connections sending a head and
+    one byte pinned 512 MiB (RSS 55 → 569 MB) for the 30 s body deadline at
+    no bandwidth. Decided, three parts:
+    - *Nothing is allocated ahead of the bytes received.* The buffer grows
+      with the chunks (bytearray's amortized growth; grown pages are not
+      touched until bytes land in them, so resident memory tracks bytes
+      received). Measured 0.13 ms per 3.4 MiB in 64 KiB chunks against
+      0.32 ms for the pre-sized, memset buffer — the "realloc cost" fix
+      wave 7 avoided was not real. Rule, for every allocation in this
+      service: sized from bytes received, never from a client-declared
+      size (heads are capped by the parser before they are held; the
+      query string is part of the head; there is no multipart).
+    - *One in-flight byte budget* (`api._INFLIGHT_BODY_BYTES`, 64 MiB —
+      the large lane's 2 s of budget at 32 MiB/s, the most that can be
+      admitted for parsing within its wait anyway; before, the only bound
+      was 128 × 4 MiB). Every chunk is reserved before it is buffered; a
+      request that cannot buffer its next chunk within 2 s is answered 503
+      + `Retry-After: 1` (uvicorn drains the rest at the parser); the
+      reservation is released when the body has been parsed or the request
+      ends. What is outside it: uvicorn's own ≤ 64 KiB per-connection
+      buffer (≤ 256 connections).
+    - *Minimum throughput* (`http_limits.BODY_MIN_BYTES_PER_S` 1 KiB/s,
+      `BODY_MIN_RATE_GRACE_S` 5 s): a body that sends nothing for 5 s of
+      waiting (a stall — front-loading 3.9 MB earns no credit) or has
+      averaged under 1 KiB/s after 5 s of waiting (a trickle) is 408 by
+      the middleware. The clock is time spent *waiting for the client*, so
+      the service's own budget wait is never charged to the client. The
+      protocol (`DeadlineH11Protocol`) applies the same rule to a body the
+      app is not reading (after an early 401), judged
+      `BODY_DEADLINE_GRACE_S` (5 s) later so an app-side 408 is written
+      before the socket is closed; the 30 s + 5 s deadline remains the hard
+      bound.
+
+    *Measured after* (`ful_idle7b.py`, 40 s, 320 connections): RSS 50 →
+    peak 52 MB, `/health` 200 in 0.10 s during the hold. 128 senders of
+    3.9 MB then a stall: peak RSS 138–142 MB (base 54), 20 admitted bodies
+    408'd at ~5 s, 108 refused 503, RSS back near base by ~10 s. Decision
+    21's fairness re-checked (`ful_lanes7.py`): legit small p50 3–5 ms and
+    `/health` p50 2 ms under 8 and 32 junk senders; the legit large batch
+    under 32 continuous senders remains limit (b) of Decision 21 (15/33
+    attempts over ten runs, 16/27 on the pre-fix tree; every refusal the
+    large lane's budget, none the new one).
 
 Still open after the audit (not decided here): an approval gate for a
 future real dialer/CRM adapter; idempotency keys for
