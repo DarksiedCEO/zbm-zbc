@@ -438,7 +438,11 @@ money. ZBC's unit of work is a campaign, not a clip.
     LOW-D).** ledger-rust's load-shed path (`serve` → `shed`, its only
     503) answers with a fixed JSON body before reading the request, so
     exactly that answer is "not recorded" (`took_effect: false`); any
-    other 503 stays "unknown". An uncertain human verdict can be withdrawn
+    other 503 stays "unknown". This exact-body rule is shared with
+    onboarding-py since fix wave 6 (ADR 0004, decision 3, "the shed rule
+    is shared"; `LEDGER_SHED_BODY` in both clients, checked against each
+    other and against `bin/server.rs` by
+    `services/onboarding-py/tests/test_fix_wave6.py`). An uncertain human verdict can be withdrawn
     (`POST /zbc/clips/{id}/human-review/withdraw`) only by the reviewer
     who sent it (their own credential), only 2 minutes after it was last
     sent (ledger-rust drops a connection after 15 s but an append already

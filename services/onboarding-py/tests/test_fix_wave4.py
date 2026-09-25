@@ -48,11 +48,34 @@ from onboarding_schema import requests as rq
 SRC = Path(__file__).resolve().parents[1] / "src"
 PATTERNS = H.collect_patterns()
 
-# The per-pattern bound from the finding: 50 ms per 100 KB of hostile input.
+# The per-pattern bound from the finding: 50 ms per 100 KB of hostile input,
+# on an unloaded dev box (the worst pattern measures ~25 ms there: 2x margin).
 PER_100KB_S = 0.050
 # Early-out at 10 KB (the same rate) so a quadratic pattern fails in
 # milliseconds instead of running for minutes at 100 KB.
 PER_10KB_S = 0.005
+
+# Fix wave 6: an AEGIS run under a concurrent cargo build measured
+# _NEGATED_OK at 5.4 ms/10 KB against the 5 ms bound (2.3 ms unloaded). Two
+# changes. (1) The harness times the thread's own CPU (``time.thread_time``),
+# so pre-emption by other processes no longer counts. (2) The absolute bounds
+# are scaled by how much slower THIS machine is than the dev box they were
+# derived on: a known LINEAR reference regex is timed right before each
+# pattern on the same 100 KB shape (~8 ms of CPU on the dev box); the factor
+# never tightens the bounds (min 1) and never relaxes them past 8x. A
+# machine-independent linearity check (10x the input may cost at most 20x
+# the CPU, never ~100x) is asserted in addition, so a quadratic pattern can
+# never hide behind a slow machine.
+_REF = re.compile(r"(?i)\bcan(?:no|')?t\s+(?:\w+\s+){0,3}?zzz\b")
+_REF_INPUT = "cannot " * (100_000 // 7) + "!"
+REF_NOMINAL_S = 0.008
+SLOWDOWN_CAP = 8.0
+LINEAR_RATIO = 20.0  # 10 KB -> 100 KB
+
+
+def slowdown() -> float:
+    t = H.best_time(lambda s: [m.span() for m in _REF.finditer(s)], _REF_INPUT, runs=5)
+    return min(SLOWDOWN_CAP, max(1.0, t / REF_NOMINAL_S))
 
 
 class FailOn(FakeLedgerClient):
@@ -111,23 +134,28 @@ def test_r1_anchored_only_patterns_are_never_searched():
 def test_r1_every_pattern_linear_on_adversarial_input(name):
     p = PATTERNS[name]
     fn = H.use_of(name, p)
+    slow = slowdown()
     # 1. every hostile shape at 4 KB (a quadratic pattern already fails here), ranked
     ranked = []
     for u, tail, s in H.inputs(p, 4_000):
         t = H.best_time(fn, s, 1)
-        if t > 10 * PER_10KB_S:
+        if t > 10 * PER_10KB_S * slow:
             t = H.best_time(fn, s, 2)  # not a scheduling hiccup?
-            assert t <= 10 * PER_10KB_S, f"{name}: {u!r}+{tail!r} took {t * 1000:.1f} ms on 4 KB"
+            assert t <= 10 * PER_10KB_S * slow, f"{name}: {u!r}+{tail!r} took {t * 1000:.1f} ms on 4 KB (slowdown {slow:.1f}x)"
         ranked.append((t, u, tail))
     ranked.sort(reverse=True)
-    # 2. the three worst shapes: 10 KB (fail fast), then 100 KB against the bound
+    # 2. the three worst shapes: 10 KB (fail fast), then 100 KB against the
+    #    bound, and 10 KB -> 100 KB must scale linearly whatever the machine
     for _, unit, tail in ranked[:3]:
         s10 = unit * (10_000 // len(unit)) + tail
         t10 = H.best_time(fn, s10)
-        assert t10 < PER_10KB_S, f"{name}: {unit!r}+{tail!r} took {t10 * 1000:.1f} ms on 10 KB"
+        assert t10 < PER_10KB_S * slow, f"{name}: {unit!r}+{tail!r} took {t10 * 1000:.1f} ms on 10 KB (slowdown {slow:.1f}x)"
         s100 = unit * (100_000 // len(unit)) + tail
         t100 = H.best_time(fn, s100, runs=5)
-        assert t100 < PER_100KB_S, f"{name}: {unit!r}+{tail!r} took {t100 * 1000:.1f} ms on 100 KB"
+        assert t100 < PER_100KB_S * slow, f"{name}: {unit!r}+{tail!r} took {t100 * 1000:.1f} ms on 100 KB (slowdown {slow:.1f}x)"
+        # timer floor of 0.2 ms so a microsecond t10 does not make the ratio noise
+        assert t100 < LINEAR_RATIO * max(t10, 0.0002), \
+            f"{name}: {unit!r}+{tail!r} not linear: {t10 * 1000:.2f} ms on 10 KB, {t100 * 1000:.1f} ms on 100 KB"
 
 
 # The whole scanners, on the hostile shapes of the finding, up to 1 MB.

@@ -52,9 +52,14 @@ status says it is not certified.
     `{"proceeded": "unknown", "ledger_write": "unknown", "retry": "..."}` with
     `Retry-After`. Staged state stays uncommitted. Retrying the identical
     request is safe: the ids are deterministic, so the ledger answers 200 for
-    what it already holds, and the retry finishes the operation. A 503 from
-    ledger-rust is its load-shed, sent before the request is read, so it
-    counts as not recorded.
+    what it already holds, and the retry finishes the operation. Only
+    ledger-rust's own load-shed answer counts as not recorded (fix wave 6):
+    status 503 with exactly its body `{"error": "ledger-rust is at its
+    connection limit; retry shortly"}`, which `shed()` writes before reading
+    the request. Any other 503 (a proxy or gateway in between may have
+    forwarded the request first) is unknown, like every other 5xx. This is
+    the same rule as creative-py (`services/creative-py/src/shared/ledger.py`,
+    ADR 0005); `test_fix_wave6.py` checks both against `bin/server.rs`.
   - If a result record fails after an effect, nothing further happens. The API
     returns 503 `{"proceeded": true, "completed": false, "outside_effects_done": [...]}`,
     with `ledger_write` set to `not_recorded` or `unknown`.
@@ -125,16 +130,44 @@ status says it is not certified.
     cost measured (~1.8 ms/KB). A body that can't be checked within it is
     refused (422 `scan_budget_exceeded`). The old 5 s wall-clock budget refused
     5 of 5 concurrent benign 416 KB bodies.
-  - Heavy scans (bodies over 64 KiB) are capped: 2 run at once, up to 16
-    wait, each for up to 30 s. Beyond that the API returns 503 with
-    `Retry-After` and `proceeded: false` (busy, nothing done), never 422. A
-    clean string is scanned once per request, not twice, and the format-character
-    strip no longer does a Python step per character. The 416 KB body dropped
-    from 1.6 s to 0.5 s of CPU.
+  - Scanning concurrency is a weighted budget (`ScanAdmission`, fix wave 6;
+    fix wave 5's step gate at 64 KiB let 40 concurrent 58 KB bodies bypass it:
+    light GET p50 3.1 s, `/health` 2.4 s). Every body takes
+    `max(size, ONBOARDING_SCAN_MIN_COST_BYTES)` of `ONBOARDING_SCAN_INFLIGHT_BYTES`
+    while it is checked, so many medium bodies are throttled like one large
+    one. The defaults are measured, not derived: under one GIL each extra
+    CPU-bound scan thread lengthens the event loop's wait for the GIL (40x16 KB
+    bodies at 4 concurrent scans: `/health` p50 300 ms, light GET p50 790 ms;
+    at 1: 16 ms / 70 ms), so the minimum cost equals the 64 KiB budget and
+    scans run one at a time; a tiny message body takes ~1 ms, so 40 of them
+    queue for ~40 ms. Up to 16 wait, each up to 30 s, oldest-first among
+    those that fit (a small body never queues behind a large one). Beyond
+    that the API returns 503 with `Retry-After` and `proceeded: false` (busy,
+    nothing done), never 422. Measured with the defaults on a real uvicorn:
+    40 concurrent 58 KB bodies, `/health` p50 20 ms / p95 42 ms, light GET
+    p50 27 ms. A clean string is scanned once per request, not twice, and
+    the format-character strip no longer does a Python step per character.
+    The 416 KB body dropped from 1.6 s to 0.5 s of CPU.
+  - Intake facts are bounded per client (fix wave 6): at most
+    `ONBOARDING_MAX_FACTS_PER_CLIENT` (2,000) stored facts, and each field
+    keeps its latest `ONBOARDING_FACTS_HISTORY_PER_FIELD` (20) observations.
+    A facts request that would pass the cap is refused whole with 409 (the
+    message names the counts and the cap; nothing is flagged, recorded or
+    stored), so a profile rebuild is O(cap) and repeated large submissions
+    cannot grow memory. Restating a field replaces its oldest observation
+    rather than adding; older observations of a field fall out of the
+    profile, so a value that must count should be confirmed, not repeated.
   - `tests/test_fix_wave4.py` runs every pattern against hostile shapes (runs
     of `a`, `a@`, `a/`, `a:`, alternating classes, and each pattern's own
-    literals). It asserts under 50 ms per 100 KB, and linear scaling to 1 MB
-    for the whole scanners. A real-uvicorn test sends max-size hostile URLs
+    literals). It asserts under 50 ms of CPU per 100 KB. Fix wave 6 (an
+    AEGIS run under a cargo build measured 5.4 ms against the 5 ms/10 KB
+    bound): the harness times the thread's own CPU, not wall-clock time, the
+    bounds are scaled by a slowdown factor measured on a known linear regex
+    right before each pattern (never below 1x, never above 8x), and a
+    machine-independent linearity ratio is asserted too (10x the input may
+    cost at most 20x the CPU). Under three CPU-burning processes on a 2-vCPU
+    box the old test failed six patterns; the new one passes all 78. It also
+    asserts linear scaling to 1 MB for the whole scanners. A real-uvicorn test sends max-size hostile URLs
     and bodies while polling `/health`, which must answer within 1 s.
 - **Only Andre can make Andre's decisions.**
   - Acknowledging or resolving an escalation needs his approval token
@@ -241,7 +274,8 @@ Optional configuration (all open items have fail-closed defaults; see `src/confi
 | `ONBOARDING_MAX_BODY_BYTES` | Request body cap, default 1048576 (1 MiB); over it is a 413 |
 | `ONBOARDING_MAX_REQUEST_TARGET_BYTES` | Path plus query cap, default 8192; over it is a 414 |
 | `ONBOARDING_SCAN_BUDGET_SECONDS`, `ONBOARDING_SCAN_CPU_MS_PER_KB` | CPU budget for one body's credential checks: seconds plus ms per KB, defaults 1 and 10 |
-| `ONBOARDING_HEAVY_BODY_BYTES`, `ONBOARDING_HEAVY_SCAN_SLOTS`, `ONBOARDING_HEAVY_SCAN_MAX_WAITING`, `ONBOARDING_HEAVY_SCAN_WAIT_SECONDS` | Heavy-scan gate, defaults 65536, 2, 16, 30; busy is a 503 with Retry-After |
+| `ONBOARDING_SCAN_INFLIGHT_BYTES`, `ONBOARDING_SCAN_MIN_COST_BYTES`, `ONBOARDING_SCAN_MAX_WAITING`, `ONBOARDING_SCAN_WAIT_SECONDS` | Scan admission budget: in-flight scanned bytes, per-body minimum cost, waiters, wait; defaults 65536, 65536 (one scan at a time; see above), 16, 30; busy is a 503 with Retry-After |
+| `ONBOARDING_MAX_FACTS_PER_CLIENT`, `ONBOARDING_FACTS_HISTORY_PER_FIELD` | Stored intake facts per client (default 2000; a request past it is a 409) and observations kept per field (default 20) |
 | `ONBOARDING_INSTANCE_ID` | Stable instance id in the event ids of `start_client` and `apply_creator`, default `onboarding-1`. Give each concurrently running instance its own. |
 
 Live runs should use the real ledger-rust (`cargo build --release` in
@@ -276,7 +310,7 @@ Every route except `/health` needs `Authorization: Bearer <token>`.
 ## Tests
 
 ```bash
-cd services/onboarding-py && python3 -m pytest -q     # 624 passed (fix wave 5, Sep 24 2026)
+cd services/onboarding-py && python3 -m pytest -q     # 648 passed (fix wave 6, Sep 24 2026)
 ```
 
 Tests are organised by certification type:
@@ -291,6 +325,7 @@ Tests are organised by certification type:
 | `test_fix_wave3.py` | Fix wave 3: stage then commit and retries that finish (N2), owed result records (N7), credential shapes, redacted storage and the state-inspecting spray (N5), the shared money vectors (F15), the real-server access log (D1), human-request dedupe and briefing retry on tick | 183 |
 | `test_fix_wave4.py` | Fix wave 4: linear-time scanning, input caps, off-loop validation, scan budget and a real-uvicorn `/health` test under attack (R1); owed audit rulings, no second detection call (A1); payments only after activation (P1); DOB plausibility (D1); restart-stable ids (I1). `redos_harness.py` builds the hostile inputs. | 115 |
 | `test_fix_wave5.py` | Fix wave 5 covers four findings. NEW-2: the CPU-time budget, one scan per clean string, busy as 503 not 422, and 12 concurrent max-size bodies on a real server. NEW-3: real-socket header, idle, partial-head, trickled-head and trickled-body probes against `python3 -m api`. NEW-4: `proceeded: "unknown"` on a lost reply, then a retry with no duplicate. LOW-E: a future DOB. | 47 |
+| `test_fix_wave6.py` | Fix wave 6 (AEGIS round 5). N6: only ledger-rust's exact shed body is "not recorded", any other 5xx is unknown, the rule matches creative-py and `server.rs`; live against the REAL ledger-rust (`LEDGER_MAX_CONNECTIONS=1` shed, and an intermediary's 503 that hid a real append). N4: the weighted `ScanAdmission` (cost floor and cap, waiters, no over-admission in-process) and the live 40x58 KB flood with `/health` and light-GET bounds. Facts caps: 409 past the cap with nothing stored, latest-N per field, bounded cost over 30 large submissions. The live tests need `ONBOARDING_LEDGER_RUST_BIN` (default `services/ledger-rust/target/release/server`) and skip without it. | 24 |
 | `test_unit_*.py` | Unit tests | 84 |
 | `test_auth_and_entrypoint.py` | Auth, docs, real-socket bind | 14 |
 

@@ -278,6 +278,20 @@ def _redact_value(v: Any) -> Any:
     return v
 
 
+def _latest_per_field(facts: list, keep: int) -> list:
+    """The facts with only the latest ``keep`` observations of each field
+    (by arrival order; the input order is preserved). Fix wave 6."""
+    seen: dict[str, int] = {}
+    kept = []
+    for f in reversed(facts):
+        n = seen.get(f.field, 0)
+        if n < keep:
+            seen[f.field] = n + 1
+            kept.append(f)
+    kept.reverse()
+    return kept
+
+
 class OnboardingService:
     def __init__(
         self,
@@ -999,6 +1013,17 @@ class OnboardingService:
             rec = self._client(client_id)
             for f in req.facts:
                 self._not_in_future(f.observed_at, "fact observed_at")
+            # Fix wave 6 (wave-5 leftover): the stored facts are bounded. A
+            # request that would take the client past the cap is refused
+            # whole, before anything is flagged, recorded or stored.
+            cap = self.config.max_facts_per_client
+            if len(rec.facts) + len(req.facts) > cap:
+                raise Conflict(
+                    f"this client already holds {len(rec.facts)} intake facts and this request adds {len(req.facts)}; "
+                    f"the cap is {cap} per client — nothing was stored. Correct a fact by restating the field "
+                    f"(each field keeps its latest {self.config.facts_history_per_field} observations) rather than "
+                    "adding new fields, or exit and re-onboard the client if the intake must start over",
+                    {"facts_stored": len(rec.facts), "facts_in_request": len(req.facts), "max_facts_per_client": cap})
             flags = []
             for f in req.facts:
                 vals = f.value if isinstance(f.value, list) else [f.value]
@@ -1012,6 +1037,10 @@ class OnboardingService:
             new = [i01.Fact(f.field, _redact_value(f.value) if f.field in allowed else None, f.provenance,
                             redact_text(f.evidence), f.observed_at) for f in req.facts]
             rec.facts.extend(new)
+            # Each field keeps only its latest N observations (arrival order),
+            # so a field restated many times does not grow without bound and
+            # the profile rebuild below is O(cap).
+            rec.facts = _latest_per_field(rec.facts, self.config.facts_history_per_field)
             if req.vertical:
                 rec.vertical = req.vertical
             for f in new:
