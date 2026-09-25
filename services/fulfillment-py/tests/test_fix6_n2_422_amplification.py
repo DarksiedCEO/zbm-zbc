@@ -72,9 +72,13 @@ def test_60k_unknown_keys_is_one_small_422_not_60k_errors():
     assert len(r.content) < BODY_BUDGET, f"422 body is {len(r.content)} bytes"
     assert took < TIME_BUDGET_S, f"took {took * 1000:.0f} ms"
     body = r.json()
-    # not enumerated: one error names the problem, the count is honest
+    # not enumerated: one error names the problem, the count is honest.
+    # Fix wave 7 (NEW-4): 60 000 keys is over the JSON shape cap (32 000
+    # members), so the byte-level pre-scan refuses it before the full parse
+    # — `json_too_many_members`, not pydantic's `too_many_fields` (which
+    # still answers an object of 21..32 000 keys: see the 21-key case below).
     assert len(body["detail"]) == 1, body["detail"][:3]
-    assert body["detail"][0]["type"] == "too_many_fields"
+    assert body["detail"][0]["type"] == "json_too_many_members"
     assert body["error_count"] == 1
     assert "k59999" not in r.text
 

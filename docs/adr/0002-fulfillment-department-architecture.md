@@ -350,9 +350,10 @@ what changed architecturally, and why:
     after: 139-byte 422s, peak RSS 89 MB (idle 49), `/health` max 194 ms;
     with 3.9 MB bodies peak 224 MB, `/health` p50 78 ms, max 424 ms.
     *Cost, accepted:* a caller with more than 20 errors sees only the first
-    20 and a count, and must fix and resend to see the rest; the worst-case
-    junk body (4 MiB of unknown keys) still costs ~0.2–0.4 s of CPU per
-    request, bounded by the body limit, and queues other bodies behind it.
+    20 and a count, and must fix and resend to see the rest. *Superseded in
+    part by Decision 21:* the worst-case junk body no longer costs a full
+    parse (the shape pre-scan refuses it in ~4 ms) and no longer queues
+    small bodies behind it.
 20. **Over-cap connections are answered, not aborted** (AEGIS N7, INFO).
     Decision 17's hard cap aborted the 257th connection with no response
     (curl 000). Decided: it is written a minimal `503 Service Unavailable`
@@ -366,6 +367,85 @@ what changed architecturally, and why:
     requests on 128 sockets; with 256 held, a new connection gets the
     minimal 503 and is closed. *Not addressed:* the 128–255 window itself,
     which needs per-client identity or a reserved health listener.
+
+## Fix wave 7, Sep 24 2026 — decision it adds
+
+21. **Request parsing is admitted by size, and large bodies by a byte
+    budget** (AEGIS NEW-4, MED, CONFIRMED). Decision 19's single parse slot
+    was FIFO: a 1.7 KB legitimate `detect` queued behind every 3.4 MiB junk
+    body ahead of it, and each junk body cost ~140 ms of full parse (jiter
+    materializes 255 000 keys as Python objects) before pydantic could refuse
+    it — 8 junk senders took legit p50 from 4 ms to 1.1 s (2.4 s on the fix
+    box), 32 to 2.9–4.4 s. Decided, three parts:
+    - *Shape pre-scan before the parse* (`api._json_shape`): a JSON body
+      with more than 32 000 members (object keys + array items), more than
+      4 000 objects/arrays, or nested deeper than 32 levels is refused with
+      one bounded 422 (`json_too_many_members` / `json_too_many_containers`
+      / `json_too_deep`) before the full parse. The scan is byte-level and
+      runs in C passes (translate, replace, count, split, join), never a
+      per-token Python loop over the body: strings are removed exactly
+      (escapes handled by deleting `\\` pairs and then `\"`), so nothing
+      inside a string counts, and a legitimate body is never refused — the
+      caps are 32× / 4× the batch contract and every route's maximum batch
+      uses well under two thirds of each. Measured: 1–52 ms on every 4 MiB
+      shape tried, 3–11 ms for the AEGIS bodies; what passes the pre-scan
+      parses in ≤ 32 ms (bounded by the caps and the 4 MiB limit).
+    - *Two lanes*: bodies ≤ 64 KiB parse in their own lane (4 slots) and
+      never wait behind a large body; bodies over 64 KiB draw, in arrival
+      order (an `asyncio.Lock` is FIFO), on one token bucket of 32 MiB/s
+      (burst 16 MiB) — a request whose Content-Length says it is large
+      takes its whole size *before its body is read*; a chunked body pays
+      per 64 KiB as it streams — and then parse one at a time. A large
+      request not admitted and parsed within 2 s of arriving is answered
+      503 + `Retry-After: 1`; uvicorn drains its unread body at the HTTP
+      parser (~2.5 ms of loop time per 3.4 MiB, versus ~10–13 ms to receive
+      one through the app) and the connection stays usable.
+    - *Head-only refusals are held 250 ms* (413 from Content-Length, 431,
+      400 bad Content-Length): they cost ~1 ms each and nothing else, so a
+      client that loops on them got ~400 attempts/s through (AEGIS `objs`,
+      4.39 MB, 8 senders: legit p50 4 → 45 ms). The hold caps such a client
+      at 4 attempts/s per connection.
+
+    *Why a byte rate and not only a slot:* receiving a large body costs the
+    event loop ~10–13 ms of its own time whatever the body contains, and a
+    sender that loops on the response sends as fast as the service answers
+    — a cheaper refusal alone only raised the attempt rate (an immediate 503
+    for the 9th concurrent large body took 32 senders from 40 to 230
+    attempts/s and legit p50 from 36 to 344 ms). The budget caps the loop
+    time spent receiving large bodies at ~13% whatever the number of
+    senders; 32 MiB/s is 9 maximum 1000-task batches per second, far above
+    what the outbound gate lets the service act on.
+
+    **The fairness guarantee, exactly:** a small body waits for at most 4
+    small parses ahead of it and never for a large one; the loop spends at
+    most the budget's share of its time receiving large bodies. **Its
+    limits:** (a) the loop and the GIL are still shared — one pre-scan or
+    one bounded parse (tens of ms) or the reading of one large body in
+    progress can delay a small request, not the queue of them; (b) there
+    is no caller identity (one shared service token), so a legitimate large
+    batch competes FIFO with junk for the budget and is 503'd like any
+    other when more than ~2 s of large bodies (~19 maximum-size ones at
+    32 MiB/s) are queued ahead of it — it succeeds on a retry when its turn
+    comes (live: 1–2 attempts under 32 senders), and a client that keeps
+    sending large bodies keeps everyone's large batches waiting for as long
+    as it does; (c) a flood of *small* junk (≤ 64 KiB each) competes fairly
+    in the small lane, bounded per attempt by size and the pre-scan, but
+    has no budget and can still load the loop; (d) at ≥ 128 held sockets
+    uvicorn's concurrency limit answers everything 503 (Decision 17), before
+    any of this. Live after (`ful_slot6.py`, 10 s): 8 senders — legit p50
+    4 ms, p90 9 ms; 32 — p50 4 ms, max 58 ms, `/health` p50 2 ms; 120 —
+    every request 503 (the Decision 17 limit).
+
+    *Idle memory, measured:* the README's "RSS settles at 93 MB" was never
+    verified; after 32 senders × 10 s RSS stayed at 170 MB for 15 s (50 MB
+    before). glibc's dynamic mmap threshold moves every body buffer after
+    the first into the brk heap, where freed blocks are kept for reuse. A
+    fixed 128 KiB threshold would return them but made every large body
+    ~50% more CPU in page faults (19 vs 13 ms per 3.4 MiB); decided
+    instead: one second after the last large parse, with none in flight,
+    `malloc_trim(0)` returns the free pages (~15 ms for 130 MB, 0 ms when
+    idle). Measured: idle 50 → 52–58 MB after every flood above, peak
+    64–111 MB during them.
 
 Still open after the audit (not decided here): an approval gate for a
 future real dialer/CRM adapter; idempotency keys for
