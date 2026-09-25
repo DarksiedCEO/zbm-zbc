@@ -46,6 +46,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 from pydantic_core import PydanticCustomError
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agents import (
@@ -196,6 +197,11 @@ _BODY_MIN_RATE_GRACE_S = http_limits.BODY_MIN_RATE_GRACE_S
 # for every slow sender to hold memory. So a body needs >= size / 30 s: a
 # maximum 4 MiB batch needs >= 136.5 KiB/s; at 64 KiB/s (poor mobile) it
 # cannot arrive (64 s) and must be split into requests of <= ~1.9 MB.
+# Fix wave 10, N9-6: the projection is on ONE clock, the time spent waiting
+# for the client's bytes — refused iff that waiting plus the waiting the rest
+# needs at the observed rate exceeds _BODY_READ_TIMEOUT_S (i.e. the observed
+# rate x 30 s < the declared size). It used to take the rate on that clock and
+# the remaining time on the wall clock (see BodySizeLimitMiddleware).
 
 
 class _BodyTooLarge(Exception):
@@ -330,8 +336,11 @@ class BodySizeLimitMiddleware:
         started = False
         body_done = False
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + _BODY_READ_TIMEOUT_S
+        budget = _BODY_READ_TIMEOUT_S
+        entered = loop.time()
+        deadline = entered + budget
         rate, grace = _BODY_MIN_BYTES_PER_S, _BODY_MIN_RATE_GRACE_S
+        disconnected = False  # the client's http.disconnect reached the app (fix wave 10, N9-8)
         account = _BodyAccount(loop)
         scope[_ACCOUNT_SCOPE_KEY] = account
 
@@ -342,9 +351,11 @@ class BodySizeLimitMiddleware:
                 pending = None
 
         async def limited_receive() -> Message:
-            nonlocal received, body_done, waited, gap, pending
+            nonlocal received, body_done, waited, gap, pending, disconnected
             if body_done:
-                return await receive()  # e.g. waiting for http.disconnect: no deadline
+                message = await receive()  # e.g. waiting for http.disconnect: no deadline
+                disconnected = disconnected or message["type"] == "http.disconnect"
+                return message
             try:
                 while True:
                     now = loop.time()
@@ -359,10 +370,23 @@ class BodySizeLimitMiddleware:
                     if gap >= grace or waited >= due:
                         raise _BodyTooSlow()
                     # (c) fix wave 9: the rest of a declared body cannot arrive by
-                    # the deadline at the rate seen so far.
+                    # the deadline at the rate seen so far. Fix wave 10, N9-6: ONE
+                    # clock, `waited` (time spent waiting on the client), for the
+                    # rate AND the time: `waited` + the waiting the rest needs at
+                    # that rate, against _BODY_READ_TIMEOUT_S — the most waiting
+                    # any body can get, since waiting only happens before the
+                    # deadline. It used to compare `now + rest / seen` with the
+                    # wall-clock `deadline`: time the SERVICE held the body
+                    # (admission, in-flight bytes) left the wall budget but not the
+                    # rate's denominator, while the client's bytes sent meanwhile
+                    # sat unread — a client fast enough was refused 408 "send
+                    # faster" at the end of every service hold. Not wall time for
+                    # both: the rule judges the client, and every other rule that
+                    # judges the client ((a), (b), the preemption charge) is on
+                    # this clock. The wall-clock deadline above stays the hard bound.
                     if declared is not None and waited >= grace and received < declared:
                         seen = received / waited
-                        if seen <= 0 or now + (declared - received) / seen > deadline:
+                        if seen <= 0 or waited + (declared - received) / seen > budget:
                             raise _BodyWontArrive(declared, received, seen)
                     if pending is None:
                         pending = asyncio.ensure_future(receive())
@@ -390,6 +414,7 @@ class BodySizeLimitMiddleware:
                     body_done = True
             else:
                 body_done = True
+                disconnected = disconnected or message["type"] == "http.disconnect"
             return message
 
         async def tracking_send(message: Message) -> None:
@@ -400,6 +425,17 @@ class BodySizeLimitMiddleware:
 
         try:
             await self.app(scope, limited_receive, tracking_send)
+        except ClientDisconnect:
+            # Fix wave 10, N9-8: a client that goes away mid-body is routine, not
+            # a server error — it used to escape as "Exception in ASGI
+            # application" with a ~60-line traceback per disconnect. One line,
+            # no traceback; nothing to answer. Only when the disconnect really
+            # reached the app: any other ClientDisconnect is a bug and propagates.
+            if not disconnected:
+                raise
+            _log.warning("client disconnected mid-body: route=%s bytes_received=%d declared=%s elapsed_s=%.3f",
+                         _log_safe(scope.get("path", "")), received,
+                         "none" if declared is None else declared, loop.time() - entered)
         except _BodyTooLarge:
             if started:
                 raise
@@ -420,6 +456,11 @@ class BodySizeLimitMiddleware:
             if started:
                 raise
             await _refusal(408, _preempted_detail(exc))(scope, receive, send)
+
+
+def _log_safe(text: str, limit: int = 200) -> str:
+    # The path is the client's (percent-decoded: it can hold a newline).
+    return text[:limit].encode("unicode_escape").decode("ascii")
 
 
 def _wont_arrive_detail(exc: _BodyWontArrive) -> str:
