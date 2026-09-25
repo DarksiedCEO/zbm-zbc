@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 import os
 import threading
+import weakref
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Callable, Literal, TypeVar
 
@@ -41,7 +43,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic_core import PydanticCustomError
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -298,40 +301,158 @@ def _is_json_content_type(value: str | None) -> bool:
     return main == "application/json" or (main.startswith("application/") and main.endswith("+json"))
 
 
-def _parse(model: type[_M], body: bytes) -> _M:
-    try:
-        return model.model_validate_json(body)
-    except ValidationError as exc:
-        raise RequestValidationError(
-            [{"loc": ("body", *e["loc"]), "type": e["type"], "msg": e["msg"]} for e in exc.errors(include_url=False)]
-        ) from None
-
-
 def _render(result: Any) -> Response:
     # The same encoder FastAPI applied to these return values, run here so the
     # json.dumps happens in the worker thread, not on the event loop.
     return JSONResponse(content=jsonable_encoder(result))
 
 
+def _parse(model: type[_M], body: bytes | bytearray) -> _M | Response:
+    # Parse + validate in a worker thread — and, on a validation failure,
+    # render the bounded 422 right here (fix wave 6, N2), never on the loop.
+    try:
+        return model.model_validate_json(body)
+    except ValidationError as exc:
+        return _validation_error_response(
+            ({"loc": ("body", *e["loc"]), "type": e["type"], "msg": e["msg"]} for e in _first_errors(exc)),
+            exc.error_count(),
+        )
+
+
+# Fix wave 6, N2: bodies are parsed ONE at a time. Parsing runs in Rust
+# (jiter / pydantic-core) holding the GIL for the whole body — the event loop
+# cannot answer /health until it ends — so a second concurrent parse adds no
+# throughput, only a second fully materialized body in memory (a 60k-key
+# object is ~10 MB as Python objects; a 4 MiB body of ~260k keys ~45 MB) and
+# a longer wait for the loop. Requests queue here on the loop holding only
+# their body bytes (<= 4 MiB each, at most LIMIT_CONCURRENCY of them — the
+# trade-off accepted in fix wave 5). The agent work itself is not behind this
+# slot. Measured (python3 -m api, 20 senders x 5 x 60k-key bodies): peak RSS
+# +112 MB with 4 parse threads and default arenas; +40 MB with one slot and
+# one malloc arena (main()).
+_parse_slots: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+
+
+def _parse_slot() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()  # one semaphore per loop: TestClient makes several
+    sem = _parse_slots.get(loop)
+    if sem is None:
+        sem = _parse_slots[loop] = asyncio.Semaphore(1)
+    return sem
+
+
 async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]) -> Response:
     if not _is_json_content_type(request.headers.get("content-type")):
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="expected application/json")
-    body = await request.body()  # bounded by BodySizeLimitMiddleware
-    return await run_in_threadpool(lambda: _render(work(_parse(model, body))))
+    # One copy of the body, not two: Request.body() collects the chunks and
+    # then joins them (2x the body while in flight); pydantic parses a
+    # bytearray directly. Bounded by BodySizeLimitMiddleware.
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+    async with _parse_slot():
+        parsed = await run_in_threadpool(_parse, model, body)
+    del body
+    if isinstance(parsed, Response):
+        return parsed
+    return await run_in_threadpool(lambda: _render(work(parsed)))
+
+
+# --- bounded 422 (fix wave 6, N2, MED, CONFIRMED) -----------------------------
+# Sep 24 2026 audit (A8) stopped the 422 body echoing each error's `input`,
+# but it still listed EVERY error in full. Against an `extra="forbid"` request
+# model, a 600 KB body of 60 000 unknown keys produced 60 000
+# `extra_forbidden` errors — a 5.4 MB response, built and serialized on the
+# event loop; 20 concurrent senders took RSS from 52 to 547 MB and /health
+# to 0.9 s. A single 1 MiB unknown key was echoed whole inside its `loc`.
+#
+# Now the 422 body is bounded whatever the request was: at most
+# _MAX_REPORTED_ERRORS errors are listed (first ones, in pydantic's order)
+# plus the honest total `error_count` (and `truncated: true` when they
+# differ); each `loc` is cut to _MAX_LOC_DEPTH items of at most
+# _MAX_LOC_ITEM_CHARS characters; `type` and `msg` are bounded; and the
+# serialized body is kept under _MAX_422_BODY_BYTES by dropping trailing
+# errors if the caps alone were not enough. The request models refuse a body
+# with more unknown top-level keys than can be named with ONE error (see
+# _Req) so pydantic never enumerates them. Anything FastAPI itself raises
+# (RequestValidationError) renders through the same builder, in a sync
+# handler, i.e. in the thread pool.
+_MAX_REPORTED_ERRORS = 20
+_MAX_LOC_DEPTH = 8
+_MAX_LOC_ITEM_CHARS = 40
+_MAX_TYPE_CHARS = 64
+_MAX_MSG_CHARS = 200
+_MAX_422_BODY_BYTES = 8 * 1024
+_ELLIPSIS = "..."
+
+
+def _clip(value: Any, limit: int) -> str:
+    text = value if isinstance(value, str) else str(value)
+    if len(text) <= limit:
+        return text
+    return text[: limit - len(_ELLIPSIS)] + _ELLIPSIS
+
+
+def _bounded_loc(loc: Any) -> list[Any]:
+    items = list(loc) if isinstance(loc, (list, tuple)) else [loc]
+    out: list[Any] = [item if isinstance(item, int) and not isinstance(item, bool) else _clip(item, _MAX_LOC_ITEM_CHARS)
+                      for item in items[:_MAX_LOC_DEPTH]]
+    if len(items) > _MAX_LOC_DEPTH:
+        out.append(_ELLIPSIS)
+    return out
+
+
+def _first_errors(exc: ValidationError) -> list[dict]:
+    # `errors()` materializes every error (with `input`, a copy of the
+    # offending value, unless told not to). The count is bounded upstream
+    # (_Req caps unknown keys; every list/map is <= _MAX_BATCH), so this is
+    # at most ~10k small dicts; only the first _MAX_REPORTED_ERRORS go on.
+    return exc.errors(include_url=False, include_context=False, include_input=False)[:_MAX_REPORTED_ERRORS]
+
+
+def _bounded_validation_body(errors: Any, total: int) -> bytes:
+    detail = []
+    for e in errors:
+        if len(detail) >= _MAX_REPORTED_ERRORS:
+            break
+        detail.append({
+            "loc": _bounded_loc(e.get("loc") or ()),
+            "type": _clip(e.get("type") or "", _MAX_TYPE_CHARS),
+            "msg": _clip(e.get("msg") or "", _MAX_MSG_CHARS),
+        })
+    total = max(int(total), len(detail))
+    while True:
+        content: dict[str, Any] = {"detail": detail, "error_count": total}
+        if total > len(detail):
+            content["truncated"] = True
+        body = json.dumps(content, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(body) <= _MAX_422_BODY_BYTES or len(detail) <= 1:
+            return body
+        detail.pop()
+
+
+def _validation_error_response(errors: Any, total: int) -> Response:
+    return Response(
+        content=_bounded_validation_body(errors, total),
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        media_type="application/json",
+    )
 
 
 @app.exception_handler(RequestValidationError)
-async def _validation_error_without_input(request: Request, exc: RequestValidationError) -> JSONResponse:
+def _validation_error_without_input(request: Request, exc: RequestValidationError) -> Response:
     # Sep 24 2026 audit: FastAPI's default 422 body echoes each error's
     # `input` (and `ctx`). For a missing field, `input` is the whole
     # submitted object — so a malformed call event echoed the caller's
     # phone number and voicemail transcript back in the error, and into
     # any proxy or client log that records error bodies. Keep only
     # location, type and message: enough to fix the request, no payload.
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        content={"detail": [{"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")} for e in exc.errors()]},
-    )
+    # Fix wave 6: bounded (above), and a sync handler so Starlette runs it
+    # in the thread pool. Bodies of the POST routes no longer come through
+    # here (_parse answers them directly); this covers anything
+    # FastAPI itself raises.
+    errors = exc.errors()
+    return _validation_error_response(errors, len(errors))
 
 
 def _build_dialer() -> SipDialerPort:
@@ -474,6 +595,41 @@ class _Req(BaseModel):
     # believing its clock override worked.
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_unnameable_unknown_keys(cls, data: Any) -> Any:
+        # Fix wave 6, N2: `extra="forbid"` reports one error PER unknown key,
+        # so a body of 60 000 unknown keys made pydantic build 60 000
+        # errors. Up to _MAX_REPORTED_ERRORS unknown keys are still named
+        # (the 422 lists that many); beyond that the object is refused with
+        # one error before any field is looked at.
+        if isinstance(data, dict) and len(data) > len(cls.model_fields) + _MAX_REPORTED_ERRORS:
+            raise PydanticCustomError(
+                "too_many_fields",
+                "object has {actual} keys; this request accepts at most {allowed} fields",
+                {"actual": len(data), "allowed": len(cls.model_fields)},
+            )
+        return data
+
+
+def _refuse_oversized_map(value: Any) -> Any:
+    # Fix wave 6, N2: pydantic checks a LIST's max_length before validating
+    # its items (one error), but validates every entry of a dict first — a
+    # 4 MiB map of ~250 000 bad phone numbers produced 250 000 errors before
+    # `too_long`. Refuse the size first, with pydantic's own error type.
+    if isinstance(value, dict) and len(value) > _MAX_BATCH:
+        raise PydanticCustomError(
+            "too_long",
+            "Dictionary should have at most {max_length} items after validation, not {actual_length}",
+            {"field_type": "Dictionary", "max_length": _MAX_BATCH, "actual_length": len(value)},
+        )
+    return value
+
+
+_K = TypeVar("_K")
+_V = TypeVar("_V")
+BoundedMap = Annotated[dict[_K, _V], BeforeValidator(_refuse_oversized_map)]
+
 
 class CallEventsRequest(_Req):
     call_events: list[CallEvent] = Field(max_length=_MAX_BATCH)
@@ -502,13 +658,13 @@ class EscalateRequest(_Req):
 
 class OrchestrateRequest(_Req):
     tasks: list[FollowUpTask] = Field(max_length=_MAX_BATCH)
-    phone_by_call_id: dict[EntityId, PhoneE164] = Field(max_length=_MAX_BATCH)
-    line_by_call_id: dict[EntityId, EntityId] = Field(default_factory=dict, max_length=_MAX_BATCH)
+    phone_by_call_id: BoundedMap[EntityId, PhoneE164] = Field(max_length=_MAX_BATCH)
+    line_by_call_id: BoundedMap[EntityId, EntityId] = Field(default_factory=dict, max_length=_MAX_BATCH)
     # Recipient IANA time zone per call (e.g. "America/Chicago"). A call
     # with no entry here is not dialed — fail closed. Fix wave 1, F3: this
     # is a CLAIM, checked against the number by the gate (recipient_zones.py);
     # it can narrow the window, never widen it.
-    timezone_by_call_id: dict[EntityId, TimezoneName] = Field(default_factory=dict, max_length=_MAX_BATCH)
+    timezone_by_call_id: BoundedMap[EntityId, TimezoneName] = Field(default_factory=dict, max_length=_MAX_BATCH)
 
 
 class TerminalEventIn(_Req):
@@ -797,9 +953,35 @@ def _resolve_and_writeback(req: ResolveRequest) -> ResolveResponse:
 # deadlines, and bounded connections — values and trade-offs in
 # http_limits.py and the README ("Transport limits").
 
+# Fix wave 6, N2: glibc gives each thread that allocates its own malloc arena,
+# and a non-main arena keeps freed memory that is not at the top of its heap.
+# Every thread that parses a body (jiter/pydantic-core allocate through the
+# system allocator; so do dict tables and long strings) therefore kept tens of
+# MB after its request was done: 20 concurrent 60k-key bodies left RSS at
+# +102 MB with default arenas and +24 MB with one arena, same work. With the
+# GIL serializing Python anyway, arena contention costs nothing here. Best
+# effort and glibc only (`python3 -m api`); an operator-set MALLOC_ARENA_MAX
+# wins; anything else keeps its allocator's defaults and logs a warning.
+_MALLOC_ARENA_MAX = 1  # M_ARENA_MAX: every thread allocates from the main arena
+
+
+def _limit_malloc_arenas() -> bool:
+    if os.environ.get("MALLOC_ARENA_MAX"):
+        return True  # the operator chose; glibc read it at startup
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6")
+        return bool(libc.mallopt(-8, _MALLOC_ARENA_MAX))  # M_ARENA_MAX == -8
+    except (OSError, AttributeError):
+        return False
+
+
 def main() -> None:
     import uvicorn
 
+    if not _limit_malloc_arenas():
+        _log.warning("could not limit malloc arenas (not glibc?); RSS after bursts of bad bodies may stay higher")
     host = os.environ.get("FULFILLMENT_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("FULFILLMENT_PORT", "8091"))
     http_limits.DeadlineH11Protocol.body_timeout_s = _BODY_READ_TIMEOUT_S
