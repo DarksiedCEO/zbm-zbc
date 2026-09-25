@@ -187,6 +187,15 @@ _BODY_READ_TIMEOUT_S = http_limits.load_body_read_timeout()  # refuses startup i
 # is not charged to the client.
 _BODY_MIN_BYTES_PER_S = http_limits.BODY_MIN_BYTES_PER_S
 _BODY_MIN_RATE_GRACE_S = http_limits.BODY_MIN_RATE_GRACE_S
+# Fix wave 9 (AEGIS round 8, Q2): a body must be able to arrive by the
+# deadline. From the grace on, a body with a declared size whose remaining
+# bytes cannot arrive by the deadline at the rate observed so far (bytes over
+# time spent waiting for the client) is answered 408 at once, telling the
+# client how far to split — not cut at 30 s after uploading most of it. The
+# 30 s deadline is NOT raised for large bodies: a longer deadline is longer
+# for every slow sender to hold memory. So a body needs >= size / 30 s: a
+# maximum 4 MiB batch needs >= 136.5 KiB/s; at 64 KiB/s (poor mobile) it
+# cannot arrive (64 s) and must be split into requests of <= ~1.9 MB.
 
 
 class _BodyTooLarge(Exception):
@@ -199,6 +208,54 @@ class _BodyTimeout(Exception):
 
 class _BodyTooSlow(Exception):
     pass
+
+
+class _BodyWontArrive(Exception):
+    """Fix wave 9: the declared body cannot arrive by the deadline at its rate."""
+
+    def __init__(self, declared: int, received: int, rate: float) -> None:
+        self.declared, self.received, self.rate = declared, received, rate
+
+
+class _BodyPreempted(Exception):
+    """Fix wave 9: cut to give its shared in-flight bytes to a waiting body."""
+
+    def __init__(self, byte_seconds: float) -> None:
+        self.byte_seconds = byte_seconds
+
+
+# Fix wave 9: per-request accounting of the shared in-flight bytes a body
+# holds, shared between BodySizeLimitMiddleware (which knows when the service
+# is waiting on the client) and _off_loop (which reserves the bytes).
+_ACCOUNT_SCOPE_KEY = "fulfillment.body_account"
+
+
+class _BodyAccount:
+    """`held`: shared in-flight bytes this body holds. `byte_seconds`: held x
+    seconds, accrued ONLY while the service waits on the client (the service's
+    own waits are not charged). `evicted` resolves when the body is
+    preempted; `receiving` is False once the body is complete."""
+
+    __slots__ = ("held", "byte_seconds", "waiting_since", "receiving", "evicted")
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.held = 0
+        self.byte_seconds = 0.0
+        self.waiting_since: float | None = None
+        self.receiving = True
+        self.evicted: asyncio.Future = loop.create_future()
+
+    def charge(self, now: float) -> float:
+        if self.waiting_since is None:
+            return self.byte_seconds
+        return self.byte_seconds + self.held * (now - self.waiting_since)
+
+    def client_wait_started(self, now: float) -> None:
+        self.waiting_since = now
+
+    def client_wait_ended(self, now: float) -> None:
+        self.byte_seconds = self.charge(now)
+        self.waiting_since = None
 
 
 # Fix wave 7 (NEW-4 sweep): a refusal decided from the request head alone
@@ -256,6 +313,7 @@ class BodySizeLimitMiddleware:
             await _refuse_from_head(_refusal(431, f"request head exceeds {_MAX_HEADER_BYTES} bytes"), scope, receive, send)
             return
         limit = _MAX_BODY_BYTES
+        declared: int | None = None
         for name, value in scope["headers"]:
             if name == b"content-length":
                 if not value.isdigit():
@@ -264,6 +322,7 @@ class BodySizeLimitMiddleware:
                 if int(value) > limit:
                     await _refuse_from_head(_too_large_response(), scope, receive, send)
                     return
+                declared = int(value)
         received = 0
         waited = 0.0  # time spent waiting for the client's bytes: the throughput rule's clock
         gap = 0.0  # of which, since the last chunk arrived
@@ -273,6 +332,8 @@ class BodySizeLimitMiddleware:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _BODY_READ_TIMEOUT_S
         rate, grace = _BODY_MIN_BYTES_PER_S, _BODY_MIN_RATE_GRACE_S
+        account = _BodyAccount(loop)
+        scope[_ACCOUNT_SCOPE_KEY] = account
 
         def drop_pending() -> None:
             nonlocal pending
@@ -287,6 +348,8 @@ class BodySizeLimitMiddleware:
             try:
                 while True:
                     now = loop.time()
+                    if account.evicted.done():
+                        raise _BodyPreempted(account.byte_seconds)
                     if now >= deadline:
                         raise _BodyTimeout()
                     # (a) a stall: no chunk for `grace` of waiting; (b) a trickle: by the
@@ -295,12 +358,23 @@ class BodySizeLimitMiddleware:
                     due = max(grace, received / rate)
                     if gap >= grace or waited >= due:
                         raise _BodyTooSlow()
+                    # (c) fix wave 9: the rest of a declared body cannot arrive by
+                    # the deadline at the rate seen so far.
+                    if declared is not None and waited >= grace and received < declared:
+                        seen = received / waited
+                        if seen <= 0 or now + (declared - received) / seen > deadline:
+                            raise _BodyWontArrive(declared, received, seen)
                     if pending is None:
                         pending = asyncio.ensure_future(receive())
-                    done, _ = await asyncio.wait({pending}, timeout=min(deadline - now, grace - gap, due - waited))
+                    account.client_wait_started(now)
+                    try:
+                        done, _ = await asyncio.wait({pending, account.evicted}, return_when=asyncio.FIRST_COMPLETED,
+                                                     timeout=min(deadline - now, grace - gap, due - waited))
+                    finally:
+                        account.client_wait_ended(loop.time())
                     waited += loop.time() - now
                     gap += loop.time() - now
-                    if done:
+                    if pending in done:
                         break
                 message = pending.result()
                 pending = None
@@ -338,6 +412,28 @@ class BodySizeLimitMiddleware:
             if started:
                 raise
             await _refusal(408, f"request body stalled for {grace:g}s or slower than {rate} bytes/s after {grace:g}s")(scope, receive, send)
+        except _BodyWontArrive as exc:
+            if started:
+                raise
+            await _refusal(408, _wont_arrive_detail(exc))(scope, receive, send)
+        except _BodyPreempted as exc:
+            if started:
+                raise
+            await _refusal(408, _preempted_detail(exc))(scope, receive, send)
+
+
+def _wont_arrive_detail(exc: _BodyWontArrive) -> str:
+    fits = min(_MAX_BODY_BYTES, int(exc.rate * _BODY_READ_TIMEOUT_S * 0.8))
+    return (f"request body of {exc.declared} bytes is arriving at ~{exc.rate:.0f} bytes/s and cannot complete "
+            f"within the {_BODY_READ_TIMEOUT_S:g}s body deadline (this size needs >= "
+            f"{exc.declared / _BODY_READ_TIMEOUT_S:.0f} bytes/s); split the batch into requests of at most "
+            f"~{fits} bytes at this rate, or send faster")
+
+
+def _preempted_detail(exc: _BodyPreempted) -> str:
+    return (f"request body preempted: request bodies share an in-flight budget of {_INFLIGHT_BODY_BYTES} bytes; "
+            f"it was contended and this body had held the most of it for longest ({exc.byte_seconds:.0f} "
+            f"byte-seconds, over {_PREEMPT_BYTE_SECONDS:.0f}); send faster or split the batch, then retry")
 
 
 app.add_middleware(BodySizeLimitMiddleware)
@@ -514,11 +610,15 @@ def _too_many_members() -> tuple[str, str]:
 #               waiting while the bucket refills; a chunked body of unknown
 #               length pays per 64 KiB as it streams. Admitted bodies then
 #               parse _LARGE_LANE_SLOTS (1) at a time, FIFO. A request that
-#               has not been admitted AND got the parse slot within
-#               _LARGE_WAIT_S (2 s) of arriving is answered 503 +
-#               Retry-After: 1 (its unread body is drained by uvicorn at the
-#               HTTP parser, ~2.5 ms of loop time per 3.4 MiB, and the
-#               connection stays usable); it must retry after Retry-After.
+#               is not admitted within _LARGE_WAIT_S (2 s) of arriving, or
+#               does not get the parse slot within _LARGE_WAIT_S of its body
+#               being complete (fix wave 9: this window used to run from
+#               arrival too, so any large body that took > 2 s to upload
+#               was 503'd whole), is answered 503 + Retry-After: 1 (its
+#               unread body is drained by uvicorn at the HTTP parser, ~2.5 ms
+#               of loop time per 3.4 MiB, and the connection stays usable);
+#               it must retry after Retry-After. Declared bytes that never
+#               arrive are refunded to the budget (fix wave 9).
 #
 # Why a byte RATE and not only a slot: receiving a 3.4 MiB body costs the
 # event loop ~10-13 ms of its own time (h11 buffering, flow control, copies)
@@ -594,37 +694,111 @@ _TRIM_IDLE_S = 1.0
 # connection, its flow-control high-water mark) are outside this budget.
 _INFLIGHT_BODY_BYTES = 64 * 1024 * 1024
 _INFLIGHT_WAIT_S = 2.0
+# Fix wave 9 (AEGIS round 8, Q1). Measured on the real launcher before: 64
+# authenticated senders that declared 4 MiB, sent 1 MiB at once and then
+# 2 KiB/s — above the 1 KiB/s floor, which credits the front-load for ~1000 s
+# — held the whole budget until the 30 s deadline; legit 200-byte `detect`
+# p99 1.99 s (waiting on the budget, at the 2 s refusal edge) and legit large
+# batches 3 of 7 refused. Plain 2 KiB/s senders (N = 16, 64) starved nobody:
+# a body at 2 KiB/s holds <= 60 KiB by the deadline. Three changes:
+#
+#   small reserve   the first _SMALL_BODY_BYTES of EVERY body are reserved
+#                   from their own pool, _SMALL_RESERVE_BYTES =
+#                   LIMIT_CONCURRENCY x 64 KiB (8 MiB): under `python3 -m api`
+#                   at most LIMIT_CONCURRENCY requests are in flight, so the
+#                   pool cannot be exhausted and a small body never waits for
+#                   bytes. Only bytes past 64 KiB draw on the shared budget.
+#                   (Other launchers have no such limit; there the reserve
+#                   can refuse like the shared budget: 503 after the wait.)
+#   time-weighted   every body is charged the shared bytes it holds x the
+#   charge          seconds the service spent waiting on ITS CLIENT
+#                   (_BodyAccount; the service's own waits are not charged).
+#                   When a body cannot reserve its next chunk, the body still
+#                   being received with the largest charge — if that is at
+#                   least _PREEMPT_BYTE_SECONDS and more than the waiter's own
+#                   — is cut with 408 and its bytes go to the waiter. 4 MiB·s:
+#                   a maximum 4 MiB body arriving at >= 2 MiB/s never reaches
+#                   it; nothing is preempted unless someone is waiting.
+#   arrival         see _BodyWontArrive (BodySizeLimitMiddleware): a declared
+#   projection      body that cannot arrive by the deadline at its observed
+#                   rate is refused at the grace, not held to the deadline.
+#
+# The guarantee, exactly (ADR 0002, Decision 23): a small body (<= 64 KiB)
+# never waits for in-flight bytes under the real launcher. A large body is
+# refused 503 for in-flight bytes only when every body holding them has
+# accrued < 4 MiB·s since it started — so to keep the budget full against
+# newcomers, bodies must turn over: N holders of 64 MiB / N each must each
+# complete (or be cut) within 4 MiB·s / (64 MiB / N), i.e. an attacker needs
+# a sustained 64 MiB x 64 MiB / (N x 4 MiB·s) = 1024 / N MiB/s of real
+# upload bandwidth (8 MiB/s at N = 128, 16 MiB/s at N = 64) — the budget is
+# bounded by bandwidth spent, not by time held. Limits: (a) a legitimate slow
+# large body (a mobile client at a few hundred KiB/s) accrues byte-seconds as
+# fast as an attacker's and IS preempted under contention (408, retry or
+# split); (b) there is no caller identity (one service token), so this is
+# not per-client fairness; (c) connection slots are a separate limit —
+# LIMIT_CONCURRENCY (128) held connections, even at 1 KiB/s, still make
+# uvicorn answer 503 to everyone (http_limits, fix wave 5 trade-off).
+_SMALL_RESERVE_BYTES = http_limits.LIMIT_CONCURRENCY * _SMALL_BODY_BYTES
+_PREEMPT_BYTE_SECONDS = 4 * 1024 * 1024 * 1.0  # bytes x seconds
 
 
 class _InFlightBytes:
     """Bytes buffered by request bodies being read, whole process (per loop):
-    `reserve` waits (bounded) until `n` more fit; `release` gives them back."""
+    `reserve` waits (bounded) until `n` more fit — preempting, when an
+    account is given, the heaviest preemptible holder (fix wave 9);
+    `release` gives them back."""
 
-    __slots__ = ("limit", "used", "waiters")
+    __slots__ = ("limit", "used", "waiters", "accounts")
 
     def __init__(self, limit: int) -> None:
         self.limit, self.used = limit, 0
         self.waiters: list[asyncio.Future] = []
+        self.accounts: set[_BodyAccount] = set()
 
-    async def reserve(self, n: int) -> None:
+    async def reserve(self, n: int, account: _BodyAccount | None = None) -> None:
         if n <= 0:
             return
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _INFLIGHT_WAIT_S
         while self.used + n > self.limit:
+            if account is not None:
+                self._preempt_for(account, loop.time())
             waiter = loop.create_future()
             self.waiters.append(waiter)
+            wait_on = {waiter} if account is None else {waiter, account.evicted}
             try:
-                await asyncio.wait_for(waiter, max(0.0, deadline - loop.time()))
-            except TimeoutError:
-                raise _inflight_refused() from None
+                done, _ = await asyncio.wait(wait_on, timeout=max(0.0, deadline - loop.time()),
+                                             return_when=asyncio.FIRST_COMPLETED)
             finally:
                 if waiter in self.waiters:
                     self.waiters.remove(waiter)
+            if account is not None and account.evicted.done():
+                raise _BodyPreempted(account.charge(loop.time()))
+            if not done:
+                raise _inflight_refused()
         self.used += n
+        if account is not None:
+            account.held += n
 
-    def release(self, n: int) -> None:
+    def _preempt_for(self, waiter: _BodyAccount, now: float) -> None:
+        victim, heaviest = None, 0.0
+        for acc in self.accounts:
+            if acc is waiter or not acc.receiving or acc.held <= 0:
+                continue
+            if acc.evicted.done():
+                return  # one preemption at a time: its bytes are on their way back
+            charge = acc.charge(now)
+            if charge > heaviest:
+                victim, heaviest = acc, charge
+        if victim is not None and heaviest >= _PREEMPT_BYTE_SECONDS and heaviest > waiter.charge(now):
+            victim.evicted.set_result(None)
+            _log.warning("in-flight budget contended: preempted a body holding %d bytes (%.0f byte-seconds)",
+                         victim.held, heaviest)
+
+    def release(self, n: int, account: _BodyAccount | None = None) -> None:
         self.used -= n
+        if account is not None:
+            account.held -= n
         waiters, self.waiters = self.waiters, []
         for waiter in waiters:
             if not waiter.done():
@@ -664,15 +838,23 @@ class _ByteBudget:
                 self._refill(loop.time())
             self.tokens -= n
 
+    def refund(self, n: int) -> None:
+        # Fix wave 9: bytes taken for a declared size that never arrived cost
+        # the loop nothing; without the refund, senders cut early (the
+        # arrival projection) would drain the budget for the declared size.
+        if n > 0:
+            self.tokens = min(self.burst, self.tokens + n)
+
 
 class _Lanes:
-    __slots__ = ("small", "large", "budget", "inflight", "large_in_flight", "trim_timer")
+    __slots__ = ("small", "large", "budget", "inflight", "small_reserve", "large_in_flight", "trim_timer")
 
     def __init__(self) -> None:
         self.small = asyncio.Semaphore(_SMALL_LANE_SLOTS)
         self.large = asyncio.Semaphore(_LARGE_LANE_SLOTS)
         self.budget = _ByteBudget(_LARGE_BYTES_PER_S, _LARGE_BURST_BYTES)
         self.inflight = _InFlightBytes(_INFLIGHT_BODY_BYTES)
+        self.small_reserve = _InFlightBytes(_SMALL_RESERVE_BYTES)
         self.large_in_flight = 0
         self.trim_timer: asyncio.TimerHandle | None = None
 
@@ -727,36 +909,57 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
     if not _is_json_content_type(request.headers.get("content-type")):
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="expected application/json")
     lanes = _lanes()
-    deadline = asyncio.get_running_loop().time() + _LARGE_WAIT_S
+    loop = asyncio.get_running_loop()
     declared = _declared_length(request)
     large = declared is not None and declared > _SMALL_BODY_BYTES
     if large:
-        await _within(deadline, lanes.budget.take(declared))  # before a byte of the body is read
+        # before a byte of the body is read
+        await _within(loop.time() + _LARGE_WAIT_S, lanes.budget.take(declared))
     lanes.large_in_flight += large
-    held = 0  # bytes of this body counted against lanes.inflight
+    account: _BodyAccount | None = request.scope.get(_ACCOUNT_SCOPE_KEY)
+    if account is not None:
+        lanes.inflight.accounts.add(account)
+    held = 0  # bytes of this body counted against lanes.inflight (the shared budget)
+    small_held = 0  # ... and against lanes.small_reserve (its first _SMALL_BODY_BYTES)
+    pos = 0
     try:
         # One copy of the body, not two: Request.body() collects the chunks
         # and then joins them (2x the body while in flight); pydantic parses
         # a bytearray directly. Fix wave 8, N7-2: NEVER sized from
         # Content-Length (see _INFLIGHT_BODY_BYTES) — it grows as the bytes
-        # arrive, each chunk reserved from the in-flight budget first.
-        # Bounded by BodySizeLimitMiddleware.
+        # arrive, each chunk reserved first: its part within the first
+        # _SMALL_BODY_BYTES from the small reserve, the rest from the shared
+        # budget (fix wave 9). Bounded by BodySizeLimitMiddleware.
         body = bytearray()
-        pos = charged = 0
+        charged = 0
         async for chunk in request.stream():
-            await lanes.inflight.reserve(len(chunk))
-            held += len(chunk)
+            small_part = max(0, min(len(chunk), _SMALL_BODY_BYTES - pos))
+            await lanes.small_reserve.reserve(small_part)
+            small_held += small_part
+            await lanes.inflight.reserve(len(chunk) - small_part, account)
+            held += len(chunk) - small_part
             body += chunk
             pos += len(chunk)
             if not large and pos > _SMALL_BODY_BYTES:
                 lanes.large_in_flight += 1
                 large = True
             if large and declared is None and pos - charged >= _SMALL_BODY_BYTES:
-                await _within(deadline, lanes.budget.take(pos - charged))  # unknown length: pay as it streams
+                # unknown length: pay as it streams. Fix wave 9: each payment
+                # gets its own admission window — the window used to run from
+                # the request's arrival, so any chunked large body still
+                # streaming 2 s after it arrived was refused 503.
+                await _within(loop.time() + _LARGE_WAIT_S, lanes.budget.take(pos - charged))
                 charged = pos
+        if account is not None:
+            account.receiving = False  # complete: never preempted from here on
         lane = lanes.large if large else lanes.small
         if large:
-            await _within(deadline, lane.acquire())
+            # Fix wave 9: the wait for the parse slot is measured from now,
+            # when the body is complete — it used to be measured from the
+            # request's arrival, so every large body that took more than
+            # _LARGE_WAIT_S (2 s) to upload was refused 503 after arriving
+            # whole (live: a 4 MiB body at 160 KiB/s, 503 at 26 s).
+            await _within(loop.time() + _LARGE_WAIT_S, lane.acquire())
         else:
             await lane.acquire()
         try:
@@ -765,7 +968,13 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
             lane.release()
         del body
     finally:
-        lanes.inflight.release(held)
+        lanes.inflight.release(held, account)
+        lanes.small_reserve.release(small_held)
+        if account is not None:
+            account.receiving = False
+            lanes.inflight.accounts.discard(account)
+        if large and declared is not None and declared > _SMALL_BODY_BYTES:
+            lanes.budget.refund(declared - pos)  # declared but never received (fix wave 9)
         if large:
             lanes.large_in_flight -= 1
             _schedule_trim(lanes)
