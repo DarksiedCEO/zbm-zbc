@@ -1327,6 +1327,113 @@ money. ZBC's unit of work is a campaign, not a clip.
     48: a second pass over the text) and most of the rest is fixed per
     text, so the margin under 2 s is thin and a longer list needs a
     faster gate, not a higher cap.
+50. **Rule A also reads runs of single symbols (fix wave 12; AEGIS round
+    11 N11-1 (a), N11-4).** Rule A judged each whitespace word alone and
+    skipped a lone symbol, so a phrase spaced out one symbol per word
+    ("⩋ ⍺ ⋊ ⋿  ⩋ ○ ⋂ ⋿ y", "₥ ₳ ₭ €  ₥ ○ ₦ € ¥"), or split by Rule B
+    dividers ("⩋━━━⍺━━━⋊"), thin / zero-width spaces, punctuation, digits
+    or emoji, passed; so did "₥1 ₳1 ₭1 €1 ₥1 01 ₦1 €1 ¥1" (every word a
+    "price"). Rule A now also reads RUNS (`_unreadable_runs`): a unit is a
+    maximal stretch of letters and unreadable symbols; UNREADABLE_RUN (3)
+    or more units in a row made only of unreadable symbols, with at least
+    UNREADABLE_RUN_DISTINCT (3) different symbols, are one unreadable word.
+    Only a unit holding a letter ends a run — whitespace, dividers,
+    punctuation, digits, marks, invisible characters and ordinary symbols
+    do not. A price is therefore exempt at most two in a row ("₹499
+    ₩12,000"); a third makes a run. Three different symbols, not two: two
+    cost "Price drop: €25 → €19 this week only" (round-9 decor) and "•˚｡ ✦
+    ｡˚• new drop" (fix11 decoration set); the price is that a phrase of
+    fewer than three different letters ("fee") is not caught spaced out
+    this way. A letter ends
+    a run so that "∅ ⊂ A ⊆ B" and "p ∧ q ⇒ p ∨ q" stay ordinary; the price
+    is that symbols ALTERNATING with single letters ("⋂ o  ℞ i ∫ ⋊") are
+    not a run — caught only when four or more single letters trip the
+    single-letter signal (gap 15). Measured (fix12 re-runs of the round-11
+    probes, unmodified copies): `ns_ruleA11.py` MISS 66 → 0 of 480 (the
+    spaced, thin-spaced and divider-spaced families 20 → 0 each, prices
+    5 → 0, the N11-3 word 1 → 0); `ns_divider11.py` attacks 5 → 0 of 7.
+    False positives, every newly flagged caption: round-9 decor 10/30 →
+    11/30 ("✿ spring florals ✿ ❀ ❁ ❃": four different Dingbats flowers in
+    a row, the cost of decision 46's not-ordinary Dingbats); round-8 3/170,
+    the other round-9 strata, the round-10 FP probe (prices 0/13, math
+    8/13, ...), the fix11 decoration set 16/53 and the round-11 divider /
+    price set 9/29 unchanged.
+51. **The currency / math reading is matched in its token form (fix wave
+    12; AEGIS round 11 N11-1 (b)).** Decision 46 rejected a phrase read
+    EXACTLY (whole words) through the table, so "₥ ₳ ₭ €  ₥ ⊙ ₦ € ¥" —
+    the same letters that reject as spaced ASCII — passed. The reading now
+    goes through the main gate's rejection reading in its token form
+    (`reads_exactly_in_tokens`): exact words, or the phrase's letters as
+    the concatenation of consecutive whole tokens however they are split
+    (spaces, dividers and invisible characters, which canonical() drops),
+    as written or with every token read as `_reads_as_phrase` reads it
+    (rn/m, cl/d, vv/w alike, runs of 3+ cut). Not the windowed visual scan
+    itself: measured, one scan of each of the two readings costs 0.53-0.68
+    s at the never-say caps (65 KB of text), which would have put the
+    worst review over 2 s. Not found by the token form: a stretched letter
+    spread over several tokens ("₥ ₥ ₥ ₳ ₭ €") and an rn / cl / vv pair
+    split by a space — Rule A still sends those to a human. The token form
+    rejects where spaced ASCII only goes to a human in one measured case:
+    the main gate's visual scan picks the window "d e b t f r e" for "d e
+    b t  f r e e" (the doubled "e e" collapses across tokens) and so does
+    not reject spaced ASCII "debt free"; the table reading does.
+52. **A phrase over three or four fields; a short field inside another
+    field's edge (fix wave 12; AEGIS round 11 N11-2).** Fields were read
+    two at a time (decision 32), so "Daily vlogs work" (bio) + "from"
+    (on-screen) + "home tonight" (caption) passed, and so did "make ..."
+    opening the caption with "money" as the on-screen text (the regional
+    reading already caught its version, decision 48). A SHORT field (all
+    of it inside its edges, at most BOUNDARY_WORDS tokens) can lie wholly
+    inside a phrase, so `_field_joints` adds (1) every ordering of three
+    or four fields whose middle fields are all short, read as one text
+    (last words of the first, the whole middle ones, first words of the
+    last) — every order, so the declared order and its reverse included;
+    (2) a short field read on the INNER side of another field's edge:
+    after its first k words and before its last k (k <= INNER_EDGE_WORDS
+    = 3). Each is a joint like the pairs (flagged only when no piece alone
+    says the phrase; every never-say signal). The regional reading gets
+    them too. Measured (`ns_3fields11.py`, 96 orderings): passes 92 → 69;
+    the 16 orderings that put the three words side by side at field edges
+    14 → 0; the 69 left have the first or middle word followed or preceded
+    by more text in its own field (the caption's or transcript's tail
+    sentence), so no reading of the fields puts the words within the
+    adjacency gap (decision 22). Cost: nothing added when no field is
+    short (the at-the-caps shapes); all four fields short and full of the
+    phrases' words 46-56 → 240-312 ms, with a regional indicator in every
+    field 98-110 → 400-494 ms; three short fields beside the costliest
+    at-the-caps transcript 1.10-1.35 → 1.11-1.38 s (noise).
+53. **Stand-ins inside a Latin word (fix wave 12; AEGIS round 11 N11-3,
+    no table expanded).** "♏e︱✝ be︱︱y fa✝" (melt belly fat) used emoji the
+    ruling makes ORDINARY (♏ ✝) and vertical-bar punctuation (︱), neither
+    unreadable. A word holding a Latin letter with MIXED_STAND_INS (2) or
+    more stand-ins BETWEEN its first and last letter counts toward Rule A;
+    a stand-in is a letter-shaped emoji (the ruling's explicit list of
+    emoji in the otherwise not-ordinary blocks, So only), a vertical-bar
+    character (`_BAR_LIKE`, generated from Unicode names: VERTICAL LINE /
+    BAR / EM DASH / EN DASH / LOW LINE, DANDA, PASEQ, DIVIDES; 54 code
+    points, none below U+0100) or an unreadable symbol. At a word's ends
+    they are decoration ("✨glow✨", "♏ season"); one inside is "I❤️NY".
+    Measured cost on every FP corpus (round 8, round 9 all strata, round
+    10, the fix11 decoration set, the round-11 divider set): 0 captions
+    newly flagged by this rule.
+54. **The never-say caps count what the gate scans (fix wave 12; AEGIS
+    round 11 N11-5).** Decision 49's caps counted raw characters, and NFKC
+    expands many: "㎉" is "kcal", "ⅷ" is "viii"; 290 raw characters read
+    as ~700-1,100 and cost up to 2.10 s CPU a review. Characters are now
+    `scanned_length`: the NFKC-normalised, casefolded length (or the raw
+    length if longer), per phrase and over the list; words were already
+    canonical words. Every earlier over-cap expanding shape of round 11
+    (`ns_cost11.py --extra`, and `nfkc10x30c` / `nfkc3w10x30c` /
+    squared-katakana `cjk10x30c` of the main set) is now refused at
+    approval; the expanding shapes at the new caps (fix12 `ns_cost11.py
+    --scanned`: 30 x 2 words, 15 x 3, 10 x 3, ㎉ⅷⅧ only) cost 0.25-1.52 s
+    CPU alone (two seeds, six text modes, regional reading forced,
+    routed); the ASCII shapes 0.19-1.43 s (1.93 s on the unmodified tree,
+    from the now-refused `nfkc3w10x30c`). The cost test at the caps adds
+    two expanding shapes (in-suite 1.16-1.59 s); its costliest shape is
+    still decision 49's 21 x 3 words (<= 14 characters): 1.67-1.79 s alone
+    on both the unmodified and the fixed tree, 1.76-1.91 s inside the full
+    test run (two runs) — under 2 s, the same thin margin as before.
 
 ## Shared vs separate
 
@@ -1480,7 +1587,11 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     letter (a Spanish-only "ñ" is Latin and fine; a Russian word, a
     Japanese title, a Greek µ in "µs") goes to the human queue, as do
     emoji keycaps ("1️⃣"), soft hyphens inside words and four or more
-    single letters in a row.
+    single letters in a row. Fix wave 12: unreadable symbols alternating
+    with single letters ("⋂ o  ℞ i ∫ ⋊", fewer than four single letters)
+    are not a Rule A run and pass (decision 50); a phrase whose words sit
+    in three fields with more text between them in a field is not a spread
+    (decision 52).
 16. **Review cost with a long never-say list (fix wave 8; fix wave 9;
     CORRECTED and capped in fix wave 10, decision 44).** The figure this
     gap gave for 1,000 phrases ("2.0 / 5.0 / 3.8 s per review") was about
@@ -1500,6 +1611,8 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     review occupies a worker thread and, under one GIL, CPU for that long;
     the margin under 2 s is thin; a campaign that needs a longer list needs
     a faster gate, not a higher cap (most of the cost is fixed per text).
+    Fix wave 12 (decision 54): the caps count scanned (NFKC, casefolded)
+    characters; worst measured at the caps 1.52 s alone.
 17. **Memory of a churned campaign (fix wave 9, open).** Retired ids are
     no longer copied into every version (decision 37), but every version
     keeps its own rules so a clip made under it can be judged: 60

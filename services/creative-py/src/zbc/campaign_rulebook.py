@@ -28,7 +28,9 @@ more than MAX_NEVER_SAY never-say phrases — Clip Review's cost per clip
 grows with the list (rulebook_writer.MAX_NEVER_SAY says how it was chosen);
 since fix wave 11 (N10-4) also one with a phrase over MAX_NEVER_SAY_WORDS
 words or MAX_NEVER_SAY_PHRASE_CHARS characters, or a list over
-MAX_NEVER_SAY_CHARS characters in total (`never_say_over_caps`). Every
+MAX_NEVER_SAY_CHARS characters in total (`never_say_over_caps`; since fix
+wave 12, N11-5, characters as the gate scans them: NFKC-normalised and
+casefolded, so "㎉" counts four). Every
 draft — first draft, revision or edit — is approved only here, so no path
 skips the check. The draft is left as it is: nothing is truncated.
 """

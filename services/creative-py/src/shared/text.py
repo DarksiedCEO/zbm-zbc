@@ -317,6 +317,31 @@ def currency_math_readings(text: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(text.translate(t) for t in _CURRENCY_MATH_READINGS))
 
 
+def reads_exactly_in_tokens(haystack: str, phrase: str) -> bool:
+    """Fix wave 12 (AEGIS round 11 N11-1 (b)): `phrase` is in `haystack` as the main gate's REJECT reading
+    finds it, in its token form — exactly (whole words), or its letters are the concatenation of consecutive
+    whole tokens however they are split ("m a k e  m o n e y", "m━━━a━━━k━━━e": canonical() drops the
+    dividers, zero-width and other invisible characters, so they split nothing), as written or with every
+    token and phrase word read the way `_reads_as_phrase` reads them (rn/m, cl/d, vv/w alike, runs of 3+
+    letters cut to one). Used on the currency / math READING of a clip, where the main gate's windowed
+    visual scan (`visual_lookalike_exact`) would cost a second and third scan of up to ~65 KB (measured
+    0.5-0.7 s at the never-say caps); not found by this form: a stretched letter spread over several tokens
+    ("m m m a k e") and an rn / cl / vv pair split by a space — those stay Rule A's human_review."""
+    p = canonical(phrase)
+    if not p:
+        return False
+    h = canonical(haystack)
+    if f" {p} " in _padded(h) or _span_in(_span_index(h), p.replace(" ", "")):
+        return True
+    return _span_in(_span_index(_skeleton_token_view(h)), "".join(_collapse_stretched(visual_skeleton(w)) for w in p.split()))
+
+
+@functools.lru_cache(maxsize=16)
+def _skeleton_token_view(canonical_text: str) -> str:
+    """Every token of `canonical_text` read as `_reads_as_phrase` reads it (visual_skeleton, 3+ runs cut)."""
+    return " ".join(_collapse_stretched(visual_skeleton(t)) for t in canonical_text.split())
+
+
 # ASCII letters that pass for each other in most fonts (near-miss only).
 _HOMOGLYPH_PAIRS = frozenset({("l", "i"), ("i", "l")})
 # Word-internal punctuation that ordinary English uses between letters.
@@ -3278,17 +3303,75 @@ def _price(word: str) -> bool:
     return bool(_NUMBER_WORD.fullmatch(w))
 
 
+# Fix wave 12 (AEGIS round 11 N11-1 (a), N11-4): a word is not the only unit a styled phrase is written
+# in. Spaced out one symbol per word ("⩋ ⍺ ⋊ ⋿  ⩋ ○ ⋂ ⋿ y", "₥ ₳ ₭ €  ₥ ○ ₦ € ¥"), split by dividers
+# ("⩋━━━⍺━━━⋊", Rule B blanks the divider), by thin / zero-width spaces, by punctuation, by digits
+# ("₥1 ₳1 ₭1 €1": each one a "price") or by emoji, every word held one symbol and was skipped. Rule A also
+# reads a RUN: the units of text made only of unreadable symbols (a unit: a maximal stretch of letters and
+# unreadable symbols; whitespace, dividers, punctuation, digits, marks, invisible characters and ordinary
+# symbols between two units do not end a run — only a unit holding a letter does), UNREADABLE_RUN or more
+# in a row with at least UNREADABLE_RUN_DISTINCT different symbols, is one unreadable word. So a price is
+# exempt at most two in a row ("₹499 ₩12,000" is two prices; "₥1 ₳1 ₭1" is a word). Not a run: one or two
+# symbols repeated ("Swipe → → →", "€ / €€ / €€€", "Price drop: €25 → €19", "•˚｡ ✦ ｡˚•": measured on the FP
+# corpora, two different symbols cost the last two; the price is that a phrase of fewer than three different
+# letters, "fee", is not caught spaced out this way) and symbols between words ("Mix ⇒ bake ⇒ eat",
+# "∅ ⊂ A ⊆ B": a letter ends the run).
+UNREADABLE_RUN = 3
+UNREADABLE_RUN_DISTINCT = 3
+# Fix wave 12 (AEGIS round 11 N11-3, a ruling gap, no table expanded): "♏e︱✝ be︱︱y fa✝" (melt belly fat)
+# spells letters with emoji the ruling lists as ORDINARY (♏ ✝) and with vertical-bar punctuation (︱),
+# neither unreadable. A word holding a Latin letter with STAND-INS — letter-shaped emoji (the ruling's list
+# of emoji in the otherwise not-ordinary symbol blocks, _RULING_EMOJI: ♏ ✝ Ⓜ ✖ ⭕ ...), vertical-bar-like
+# punctuation or symbols (_BAR_LIKE, generated from Unicode names: VERTICAL LINE / BAR / EM DASH / EN DASH /
+# LOW LINE, DANDA, PASEQ, DIVIDES; below U+0100 nothing is counted: ASCII "|" is read by SKELETON as l / i)
+# or unreadable symbols — MIXED_STAND_INS or more of them INSIDE the word, between its first
+# and last letter, counts toward Rule A. At the ends of a word they are decoration ("✨glow✨", "♏ season");
+# one inside is "I❤️NY".
+MIXED_STAND_INS = 2
+_BAR_NAME = re.compile(r"VERTICAL (?:LINE|BAR|EM DASH|EN DASH|LOW LINE|WAVY LOW LINE)$|DANDA$|PASEQ$|^DIVIDES$")
+_BAR_LIKE = frozenset(chr(cp) for cp in range(0x100, 0x30000)
+                      if unicodedata.category(chr(cp))[0] in "PS" and _BAR_NAME.search(unicodedata.name(chr(cp), "")))
+_LETTER_EMOJI = frozenset(ch for ch in _expand(_RULING_EMOJI) if unicodedata.category(ch) == "So")
+
+
+def _stand_in(ch: str) -> bool:
+    return ch in _BAR_LIKE or ch in _LETTER_EMOJI or _unreadable(ch)
+
+
+def _mixed_stand_ins(word: str) -> bool:
+    """N11-3: `word` holds a Latin letter and MIXED_STAND_INS or more stand-ins between its first and last letter."""
+    letters = [i for i, c in enumerate(word) if c.isalpha()]
+    if len(letters) < 2 or not any(_script(word[i]) == "LATIN" for i in letters):
+        return False
+    return sum(1 for c in word[letters[0] + 1:letters[-1]] if _stand_in(c)) >= MIXED_STAND_INS
+
+
 def unreadable_words(text: str, limit: int = 5) -> list[str]:
     """Rule A (fix wave 11, N10-1): the words of `text` made mostly of symbols the gate cannot read
-    (`_unreadable`, after the letter-like map, dividers blanked) — see the comment above. Empty if none."""
+    (`_unreadable`, after the letter-like map, dividers blanked) — see the comment above; since fix wave 12
+    also every RUN of UNREADABLE_RUN+ units of unreadable symbols (N11-1, N11-4) and every Latin word with
+    MIXED_STAND_INS+ stand-ins inside it (N11-3). Empty if none."""
     if not text or text.isascii():
         return []
     t = _map_letterlike(text)
-    if not any(_unreadable(c) for c in set(t)):
+    chars = set(t)
+    bad = {c for c in chars if _unreadable(c)}
+    stand = {c for c in chars if c in _BAR_LIKE or c in _LETTER_EMOJI} | bad
+    if not stand:
         return []
     t = _DIVIDER.sub(" ", t)
+    stand_re = re.compile(_char_class(stand))
     out: list[str] = []
     for word in t.split():
+        if stand_re.search(word) is None:
+            continue
+        if _mixed_stand_ins(word):
+            out.append(word[:40])
+            if len(out) >= limit:
+                return out
+            continue
+        if not bad:
+            continue
         seq = [_unreadable(c) for c in word if c.isalpha() or _unreadable(c)]
         n = sum(seq)
         if not n:
@@ -3300,7 +3383,34 @@ def unreadable_words(text: str, limit: int = 5) -> list[str]:
         if 2 * n >= len(seq) or any(sum(seq[i:i + UNREADABLE_WINDOW]) >= 2 for i in range(len(seq) - 1)):
             out.append(word[:40])
             if len(out) >= limit:
-                break
+                return out
+    if bad:
+        for run in _unreadable_runs(t, bad):
+            if run not in out:
+                out.append(run)
+                if len(out) >= limit:
+                    break
+    return out
+
+
+def _unreadable_runs(t: str, bad: set[str]) -> list[str]:
+    """N11-1 (a) / N11-4: the runs of UNREADABLE_RUN+ consecutive units of unreadable symbols in `t`
+    (letter-like map applied, dividers blanked), with UNREADABLE_RUN_DISTINCT+ different symbols — see above."""
+    unit = re.compile("(?:[^\\W\\d_]|" + _char_class(bad) + ")+")
+    out: list[str] = []
+    run: list[re.Match] = []
+
+    def flush() -> None:
+        if len(run) >= UNREADABLE_RUN and len({c for m in run for c in m.group()}) >= UNREADABLE_RUN_DISTINCT:
+            out.append(" ".join(t[run[0].start():run[-1].end()].split())[:40])
+        run.clear()
+
+    for m in unit.finditer(t):
+        if any(c.isalpha() for c in m.group()):
+            flush()
+        else:
+            run.append(m)
+    flush()
     return out
 
 
