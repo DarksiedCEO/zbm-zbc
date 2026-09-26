@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from shared.compliance38 import HttpCompliance38, compliance_from_env
+from shared.compliance38 import HttpCompliance38, compliance_from_env, facts_sha256
 from shared.departments import NotBuiltCompliance38
 
 # The real service names the subject back (ruling_view); AEGIS N14-10 made the client require it.
@@ -19,14 +19,22 @@ def _client(handler):
     return HttpCompliance38("http://compliance.test", "svc-token", "caller-token", transport=httpx.MockTransport(handler))
 
 
+def _echo(ans, seen=None, **over):
+    """A server that answers ``ans`` for THIS request: it echoes request_id and the facts' SHA-256 and says the
+    seed is pinned, as the real service does (AEGIS N15-8)."""
+    def h(req):
+        b = json.loads(req.content)
+        if seen is not None:
+            seen.append(req)
+        return httpx.Response(200, json={**ans, "request_id": b["request_id"], "facts_sha256": facts_sha256(b["facts"]),
+                                         "seed_pinned": True, **over})
+    return h
+
+
 def test_payout_review_posts_the_protocol_body():
     seen = []
-
-    def h(req):
-        seen.append(req)
-        return httpx.Response(200, json=BLOCKED)
     facts = {"campaign_id": "c1", "clip_review": "pass"}
-    g = _client(h).review("zbc_clip", "sub-1", facts)
+    g = _client(_echo(BLOCKED, seen)).review("zbc_clip", "sub-1", facts)
     body = json.loads(seen[0].content)
     assert seen[0].url.path == "/compliance/v1/review"
     assert seen[0].headers["Authorization"] == "Bearer svc-token"
@@ -50,8 +58,8 @@ def test_publish_review_moves_export_and_rights_into_caller_context():
 
 
 def test_allowed():
-    g = _client(lambda r: httpx.Response(200, json={**BLOCKED, "allowed": True, "reason": "allowed under register v2",
-                                                    "unmet": [], "unmet_lines": []})).review("zbc_clip", "sub-1", {})
+    g = _client(_echo({**BLOCKED, "allowed": True, "reason": "allowed under register v2",
+                       "unmet": [], "unmet_lines": []})).review("zbc_clip", "sub-1", {})
     assert g.allowed is True and g.reference == "cmp-rul-xyz"
 
 
@@ -151,10 +159,48 @@ def test_n14_10_reply_must_name_the_same_subject_and_kind(change):
         ans.pop(change["_drop"])
     else:
         ans.update(change)
-    g = _client(lambda r: httpx.Response(200, json=ans)).review("zbc_clip", "sub-1", {})
+    g = _client(_echo(ans)).review("zbc_clip", "sub-1", {})   # echo right (N15-8): only the subject is wrong
     assert g.allowed is False and "inconsistent" in g.reason
 
 
 def test_n14_10_matching_reply_is_still_allowed():
-    g = _client(lambda r: httpx.Response(200, json=ALLOWED_SUB1)).review("zbc_clip", "sub-1", {})
+    g = _client(_echo(ALLOWED_SUB1)).review("zbc_clip", "sub-1", {})
     assert g.allowed is True
+
+
+# --- AEGIS round 15: N15-8 request_id / facts_sha256 echo, unpinned seed refused by default -----------------
+
+FACTS = {"campaign_id": "c1", "clip_review": "pass", "disclosure": {"in_video_label_text": "#ad Pubblicità ＃ＡＤ",
+                                                                  "in_video_label_start_s": 1.5}}
+
+
+@pytest.mark.parametrize("over", [{"request_id": "cre-someone-else"}, {"request_id": None},
+                                  {"facts_sha256": "0" * 64}, {"facts_sha256": None},
+                                  {"facts_sha256": facts_sha256({"campaign_id": "c1"})}, {"seed_pinned": None},
+                                  {"seed_pinned": "true"}])
+def test_n15_8_answer_must_echo_request_id_and_facts_sha256(over):
+    g = _client(_echo(ALLOWED_SUB1, **over)).review("zbc_clip", "sub-1", FACTS)
+    assert g.allowed is False and "inconsistent" in g.reason, over
+
+
+def test_n15_8_facts_sha256_is_over_the_facts_actually_sent():
+    """Creative moves export/rights into caller_context; the digest covers the facts Compliance evaluated."""
+    seen = []
+    g = _client(_echo({**ALLOWED_SUB1, "gate": "publish", "subject_kind": "zbm_work"}, seen)).review(
+        "zbm_work", "sub-1", {"brief_id": "b1", "export": {"format": "mp4"}})
+    assert g.allowed is True
+    assert json.loads(seen[0].content)["facts"] == {"brief_id": "b1"}
+    assert facts_sha256({"brief_id": "b1"}) == __import__("hashlib").sha256(b'{"brief_id":"b1"}').hexdigest()
+
+
+def test_n15_8_unpinned_seed_refused_unless_explicitly_accepted():
+    h = _echo(ALLOWED_SUB1, seed_pinned=False)
+    g = _client(h).review("zbc_clip", "sub-1", FACTS)
+    assert g.allowed is False and "unpinned" in g.reason
+    ok = HttpCompliance38("http://compliance.test", "svc-token", "caller-token", transport=httpx.MockTransport(h),
+                          accept_unpinned=True).review("zbc_clip", "sub-1", FACTS)
+    assert ok.allowed is True
+    env = {"COMPLIANCE_SERVICE_URL": "http://x", "COMPLIANCE_SERVICE_TOKEN": "t", "COMPLIANCE_CALLER_TOKEN": "c"}
+    assert compliance_from_env(env)._accept_unpinned is False
+    assert compliance_from_env({**env, "COMPLIANCE_ACCEPT_UNPINNED": "yes"})._accept_unpinned is False
+    assert compliance_from_env({**env, "COMPLIANCE_ACCEPT_UNPINNED": "1"})._accept_unpinned is True

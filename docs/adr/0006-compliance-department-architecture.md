@@ -384,6 +384,122 @@ and the two thin clients' `test_compliance38_client.py`.
   forces a 503). Gate idempotency entries are rebuilt from the log at start,
   so a reused `request_id` with a different body is 409 after a restart too.
 
+## Amendment — AEGIS round 15 (fix wave, Sep 26, 2026)
+
+Findings N15-1 … N15-8 on `5bb820b`; tests in `tests/test_aegis15.py` and the
+two thin clients' `test_compliance38_client.py`. This amendment supersedes
+the N14-4 text above wherever they differ (the `local_commit_failed` marker
+is gone).
+
+- **N15-1 No anchor is ever withdrawn by a ledger event alone.** The
+  `local_commit_failed` marker is no longer written and no longer read (any
+  ledger-token holder could post one and hide a truncation or a register
+  rollback). `i11_evidence_audit.assess` sorts every mismatch between the
+  local log and `GET /ledger/entries`:
+  - FATAL — refuses start-up, even in reconcile mode, and C-11 red: a
+    register version published on the ledger above the local version (a
+    ROLLBACK: refused reconcile or not), a local line the ledger does not
+    anchor, a cited event the ledger does not hold, another log's anchors, an
+    empty log where the ledger anchors one, a reconcile record the ledger
+    does not match.
+  - VOIDABLE — refuses start-up and C-11 red until Andre reconciles: an
+    anchor of this log that is not a local line (a commit that failed after
+    its anchor, a truncated tail, a second instance's line), a ruling on the
+    ledger the log lacks, a newer lease from another instance (N15-2).
+  A commit failure is reconciled only by Andre: `GET /compliance/v1/reconcile`
+  shows the plan; `POST /compliance/v1/reconcile` (Andre token; body
+  `request_id`, `head_sha256`, `void_lines`, `void_event_ids` — exactly the
+  plan, else 409) records a `reconcile` event (actor `andre`, id
+  `cmp-rec-<epoch>-<head seq>-<payload hash>`) whose payload binds the epoch,
+  the register version, the log head (seq and line SHA-256) and the voided
+  line numbers and event ids, then commits a `reconcile` line holding that
+  payload. Start-up and C-11 honour its voids only if the ledger holds that
+  event with `payload_sha256` equal to the hash of the local payload AND the
+  payload's head is the local line before it. A disk log that only has
+  voidable problems starts with `COMPLIANCE_RECONCILE_MODE=1` in a mode that
+  answers reads and the reconcile route only (every other write: 503), and
+  writes nothing else (no seed proposal, no lease); after the reconcile it is
+  restarted without the flag. Decisions now record the register-version
+  event AFTER the decision line's anchor (a ledger failure there leaves a
+  voidable stray anchor, not a published version); a decision line whose
+  version reached the ledger but whose local write failed is kept beside the
+  log as `compliance_log.jsonl.unwritten-<seq>` (best effort) — appending that
+  exact line (its hash is the ledger's anchor) is the only recovery, because
+  the rollback rule forbids voiding a published version.
+  Residual (stated): an attacker holding BOTH the ledger token and write
+  access to the data directory can still forge a consistent reconcile (as
+  they could already forge anchors for a rewritten log); either one alone
+  cannot. Any ledger-token holder can still make start-up refuse by posting
+  a stray anchor (a DoS, now lifted only by Andre's reconcile).
+- **N15-2 Instance lease.** Every start of a disk log records an
+  `instance_lease` event (id `cmp-lse-<epoch>-<instance id>-<head seq>-<head
+  hash16>`, random per process) and a `lease` line. A lease on the ledger for
+  this log that is newer than the log's own latest lease and from another
+  instance (a copied data directory started elsewhere) makes C-11 red on the
+  original and refuses the next start of any other copy. C-11 is also red when
+  rulings of this department appear on the ledger after this log's first
+  anchor that the local log does not hold (count and first id in the detail).
+  Both are voidable by Andre's reconcile (he decides which instance is the
+  real one). Anchors of a second instance are detected directly too: an
+  anchor may no longer carry a second line hash for the same seq (N14-4
+  tolerated that for failed commits, which is how the split brain passed).
+  Limitation: a copy started while the original is idle is only detected
+  once one of them writes (leases are checked at start and by C-11, not per
+  request).
+- **N15-3 Weakening recomputed at approval.** `i01_register.apply` recomputes
+  each approval's weakening against the row or control it replaces NOW; a
+  field changed since drafting that the proposal does not touch (it would be
+  silently reverted) adds `reverts_changes_made_since_drafted`. Approval needs
+  `acknowledge_weakening: true` when the proposal was flagged, is weakening
+  now, or its reasons changed since drafting; the 422 carries `recheck` with
+  the current diff. A field the proposal touches that changed since drafting
+  is still 409 stale (controls included — the same revert hole existed there).
+- **N15-4 Label rule, sentence level.** Clauses split on `. ! ? ;`, newline,
+  U+2028/2029 and parentheses. An accepted label (hashtag form counts the
+  same: `#ad`, `#ADV`, `#publicidad`, `#anzeige`, `#pubblicità`) counts only
+  outside parentheses, in a clause that is not a question, with no negation
+  before it in its clause and none after it in its comma/dash segment, not
+  followed by `free`. Retractions anywhere (`just kidding`, `jk`, `lol`,
+  `not really`), a segment made only of negations, or any negated/questioned
+  occurrence make the whole label fail (ambiguous), and the unmet message
+  says which. Negations include `n0t`, `nope`, and IT/DE/NL/ES words.
+  **Interpretation:** a negation AFTER the label and separated by a comma or
+  dash does not negate it ("Sponsored, not affiliated with YouTube" is a
+  disclosure — a round-15 R4 "allowed" case); a negation BEFORE it in the
+  same clause always does ("Not affiliated, sponsored" fails; fail closed).
+  `(#ad)` alone no longer counts (N14-6 test changed); `#publi` is not in the
+  seed's ES list, so it does not count until Andre adds it.
+- **N15-5 No vacuous passes over empty lists.** `target_jurisdictions` and
+  `platforms` (client, brand, publish) and creator `accounts` with zero items
+  are a 422 at validation. Sweep: the engine blocks when the context has no
+  platform or no resolved jurisdiction (`fact_missing:platforms` /
+  `jurisdictions`), payout blocks on a stored campaign activation with no
+  targets or platforms, and a control whose obligation wildcard matches no
+  row is red.
+- **N15-6** Payout: the clip's platform must also be one of the clipper's
+  declared accounts (`fact_missing:clipper_account_scope`).
+- **N15-7 More weakening classes.** `unverified_to_verified` (amend is now
+  refused for it; only a reverify whose evidence and row keep the row's own
+  `source_url` may do it, and it is flagged; the spec §E counsel-memo
+  supersede stays the other path and is not flagged); every reverify keeps
+  the row's `source_url`; a supersede of a non-counsel unverified row by a
+  verified one is refused. Controls: `control_owner_intelligence_changed`,
+  `control_evidence_changed`.
+- **N15-8 Rulings bind the request.** Every ruling view carries `request_id`,
+  `facts_sha256` (SHA-256 of the facts' canonical JSON: sorted keys,
+  separators `,` `:`, ASCII escapes) and `seed_pinned`. Both thin clients
+  refuse an answer whose `request_id` or `facts_sha256` differs from what
+  they sent, or whose `seed_pinned` is not a boolean, and refuse
+  `seed_pinned: false` unless the caller sets `COMPLIANCE_ACCEPT_UNPINNED=1`.
+
+Tests changed because they enshrined the old behaviour:
+`test_aegis14.py::test_n14_4_failed_append_after_anchor_does_not_brick_restart`
+(restart now refuses until Andre reconciles), `test_n14_6_standalone_labels_still_pass`
+(`(#ad)` replaced by `Sponsored (#ad)`), `test_register_controls.py` (unverified
+→ verified by reverify, acknowledged), the exact `/health` dictionaries in
+`test_cert_guardrail.py` / `test_cert_scenario.py` (two new keys), and the
+thin-client mocks (they now echo `request_id` / `facts_sha256`).
+
 ## Testing
 
 Certification tests §H 1–31 are in `tests/test_cert_scenario.py`,

@@ -15,6 +15,12 @@ with the SAME request_id on a transport error or 5xx while budget remains.
 The answer is capped at 1 MiB before it is parsed, and any parse failure is
 "not allowed", never an exception (N14-8). The answer must name the same
 subject_id, subject_kind and gate as the request, else "not allowed" (N14-10).
+AEGIS N15-8: the answer must also echo this call's request_id and the
+SHA-256 of the canonical JSON of the facts sent (``facts_sha256``: sorted
+keys, separators ``,`` and ``:``, ASCII escapes — ``json.dumps(facts,
+sort_keys=True, separators=(",", ":"))``), and a ruling with ``seed_pinned``
+not true is refused unless the caller's environment sets
+COMPLIANCE_ACCEPT_UNPINNED=1 (default off).
 
 Creative's ZBM gate passes its opaque ``export`` and ``rights`` objects in
 ``facts``; Compliance's schema is strict, so this client carries them in
@@ -23,6 +29,7 @@ Creative's ZBM gate passes its opaque ``export`` and ``rights`` objects in
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
@@ -46,13 +53,15 @@ def _refused(status: str) -> GateResult:
 
 class HttpCompliance38:
     def __init__(self, base_url: str, service_token: str, caller_token: str,
-                 transport: Optional[httpx.BaseTransport] = None, timeout: float = TIMEOUT_S):
+                 transport: Optional[httpx.BaseTransport] = None, timeout: float = TIMEOUT_S,
+                 accept_unpinned: bool = False):
         if not (base_url and service_token and caller_token):
             raise ValueError("HttpCompliance38 needs a URL, the service token and the caller token")
         self._url = base_url.rstrip("/") + _ROUTE
         self._headers = {"Authorization": f"Bearer {service_token}", "X-Compliance-Caller-Token": caller_token}
         self._transport = transport
         self._timeout = timeout
+        self._accept_unpinned = bool(accept_unpinned)
 
     def review(self, subject_kind: str, subject_id: str, facts: dict) -> GateResult:
         facts = dict(facts)
@@ -82,17 +91,27 @@ class HttpCompliance38:
                 continue
             if code != 200:
                 return _refused(str(code))
-            return _parse(content, subject_kind, subject_id)
+            return _parse(content, subject_kind, subject_id, body["request_id"], facts_sha256(facts),
+                          self._accept_unpinned)
         return _refused(status)
 
 
-def _parse(content: bytes, subject_kind: str, subject_id: str) -> GateResult:
+def facts_sha256(facts: dict) -> str:
+    """The digest Compliance computes over the facts it evaluated (its ``canonical``): sorted keys, compact
+    separators, ASCII escapes (AEGIS N15-8)."""
+    return hashlib.sha256(json.dumps(facts, sort_keys=True, separators=(",", ":"), default=str)
+                          .encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _parse(content: bytes, subject_kind: str, subject_id: str, request_id: str = "", facts_sha: str = "",
+           accept_unpinned: bool = False) -> GateResult:
     try:
         data = json.loads(content)
         if not isinstance(data, dict):
             return _refused("unparseable answer")
         allowed, reason, ref = data["allowed"], data["reason"], data["reference"]
         gate, sid, kind, lines = data.get("gate"), data.get("subject_id"), data.get("subject_kind"), data.get("unmet_lines")
+        echo_rid, echo_facts, pinned = data.get("request_id"), data.get("facts_sha256"), data.get("seed_pinned")
     except MemoryError:
         raise
     except Exception:  # noqa: BLE001 - ValueError, KeyError, TypeError, RecursionError...: never raises, never allowed
@@ -100,8 +119,11 @@ def _parse(content: bytes, subject_kind: str, subject_id: str) -> GateResult:
     if (not isinstance(allowed, bool) or not isinstance(reason, str) or not isinstance(ref, str)
             or gate != _GATE.get(subject_kind) or sid != subject_id or kind != subject_kind
             or not isinstance(lines, list) or (allowed and lines) or (not allowed and not lines)
-            or (allowed and not reason.startswith("allowed under register v"))):
+            or (allowed and not reason.startswith("allowed under register v"))
+            or echo_rid != request_id or echo_facts != facts_sha or not isinstance(pinned, bool)):
         return _refused("inconsistent answer")
+    if pinned is not True and not accept_unpinned:
+        return _refused("ruling from an unpinned, non-production seed; set COMPLIANCE_ACCEPT_UNPINNED=1 to accept")
     return GateResult("compliance_38", allowed, reason[:1000], ref)
 
 
@@ -156,5 +178,6 @@ def _exchange(url: str, body: dict, headers: dict, transport, remaining: float, 
 def compliance_from_env(env: dict):
     url, tok, caller = env.get("COMPLIANCE_SERVICE_URL"), env.get("COMPLIANCE_SERVICE_TOKEN"), env.get("COMPLIANCE_CALLER_TOKEN")
     if url and tok and caller:
-        return HttpCompliance38(url, tok, caller)
+        return HttpCompliance38(url, tok, caller,
+                                accept_unpinned=(env.get("COMPLIANCE_ACCEPT_UNPINNED") or "").strip() == "1")
     return NotBuiltCompliance38()

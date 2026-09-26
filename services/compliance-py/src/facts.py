@@ -61,6 +61,7 @@ class F:
     max_len: int = MAX_TEXT
     max_items: int = MAX_LIST
     complete: bool = False          # obj: every field must be present (list items, documents)
+    min_items: int = 0              # list: fewer items is a 422 (AEGIS N15-5: no vacuous "all of nothing")
 
 
 def B() -> F:
@@ -75,8 +76,8 @@ def E(*values, nullable=False) -> F:
     return F("enum", values=values, nullable=nullable)
 
 
-def L(item: F, max_items: int = MAX_LIST) -> F:
-    return F("list", item=item, max_items=max_items)
+def L(item: F, max_items: int = MAX_LIST, min_items: int = 0) -> F:
+    return F("list", item=item, max_items=max_items, min_items=min_items)
 
 
 def O(**fields) -> F:
@@ -136,6 +137,10 @@ def _bounded(v: Any, spec: F, path: str) -> None:
             raise Invalid(f"facts.{path}: control characters are not accepted")
     if isinstance(v, list) and spec.kind == "list" and len(v) > spec.max_items:
         raise Invalid(f"facts.{path}: more than {spec.max_items} items")
+    if isinstance(v, list) and spec.kind == "list" and len(v) < spec.min_items:
+        # AEGIS N15-5: an empty target/platform/account list would make every rule scoped to it not apply
+        raise Invalid(f"facts.{path}: must list at least {spec.min_items} item(s); an empty list is refused "
+                      "(every rule scoped to it would silently not apply)")
 
 
 def _walk(spec: F, v: Any, path: str, wrong: list[str]) -> tuple[bool, Any]:
@@ -218,7 +223,7 @@ CLAIMS = O(claims_present=B(), health_or_earnings_claim=B(), claim_file_id=ID(nu
 
 _COMMON = dict(jurisdiction=JURISDICTION, network_country_signal=F("iso2", nullable=True),
                flags=O(**{f: B() for f in ACTIVATION_FLAGS}))
-_CLIENT = dict(_COMMON, target_jurisdictions=L(F("code")), platforms=L(E(*PLATFORMS), 10),
+_CLIENT = dict(_COMMON, target_jurisdictions=L(F("code"), min_items=1), platforms=L(E(*PLATFORMS), 10, min_items=1),
                client_category=E(*CATEGORIES), claims=CLAIMS, services_include_review_suppression=B(),
                outbound_cold_contact_countries=L(F("iso2")), hbnr_clause_signed=B(),
                eu_kit_version_acknowledged=F("int", lo=0, hi=10_000), msa_eu_clause=B())
@@ -231,7 +236,7 @@ _CREATOR = dict(_COMMON,
                 tax_form_kind=E("w9", "w8ben", "w8bene"),
                 rail_kyc=O(status=E("verified", "pending", "restricted", "unverified"), rail=F("slug")),
                 creator_agreement_version=ID(), disclosure_training_attested=B(),
-                accounts=L(OC(platform=E(*PLATFORMS), handle_sha256=F("sha256")), 20),
+                accounts=L(OC(platform=E(*PLATFORMS), handle_sha256=F("sha256")), 20, min_items=1),
                 accounts_complete_attested=B(), es_special_relevance=B(),
                 eu_kit_version_acknowledged=F("int", lo=0, hi=10_000))
 
@@ -255,7 +260,8 @@ PUBLISH_FLAGS = ("paid_or_endorsement", "synthetic_performer", "ai_manipulated_m
 DOC = OC(doc_id=ID(), version=ID())
 PUBLISH_SCHEMA = O(
     brief_id=ID(), asset_type=E(*ASSET_TYPES), asset_content_sha256=F("sha256"), client_id=ID(),
-    target_jurisdictions=L(F("code")), platforms=L(E(*PLATFORMS), 10), flags=O(**{f: B() for f in PUBLISH_FLAGS}),
+    target_jurisdictions=L(F("code"), min_items=1), platforms=L(E(*PLATFORMS), 10, min_items=1),
+    flags=O(**{f: B() for f in PUBLISH_FLAGS}),
     claim_file_id=ID(nullable=True), claim_file_approved=B(), disclosure=DISCLOSURE, music=MUSIC,
     consent_document_id=ID(nullable=True), personal_use_attested=B(),
     docs=O(privacy_policy=DOC, terms=DOC, forms=L(DOC, 20)),

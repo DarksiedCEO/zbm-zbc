@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import secrets
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -170,10 +171,14 @@ class GateEnv:
 class ComplianceService:
     def __init__(self, config: Config, recorder: Recorder, log: RecordLog, seed_bytes: bytes,
                  expected_seed_sha256: str = SPEC_SEED_SHA256, ports: Optional[Ports] = None,
-                 clock: Optional[Clock] = None, sources: Optional[list[Source]] = None):
+                 clock: Optional[Clock] = None, sources: Optional[list[Source]] = None, reconcile_mode: bool = False):
         """``expected_seed_sha256`` other than the spec's pinned hash marks the service NON-PRODUCTION
         (``seed_pinned: false`` in /health and in every ruling; AEGIS N14-13). config.py allows that only
-        with COMPLIANCE_ALLOW_UNPINNED_SEED=1."""
+        with COMPLIANCE_ALLOW_UNPINNED_SEED=1.
+
+        ``reconcile_mode`` (COMPLIANCE_RECONCILE_MODE=1, AEGIS N15-1): a disk log whose only problems against
+        the ledger are VOIDABLE (see i11_evidence_audit.assess) starts, but answers nothing except reads and
+        Andre's ``POST /compliance/v1/reconcile``; FATAL problems (a register rollback among them) still refuse."""
         self.config = config
         self.recorder = recorder
         self.log = log
@@ -209,22 +214,38 @@ class ComplianceService:
         self.idem: "OrderedDict[tuple[str, str], dict]" = OrderedDict()
         self._wbudget: Optional[dict] = None   # Change Watcher drafting budget, set per cycle (N14-11)
         self._ledger_conflict = False          # the last _record failure was a 409 (a different record, same id)
+        self.instance_id = secrets.token_hex(8)  # AEGIS N15-2: this process; its lease names it on the ledger
+        self.reconcile_mode = bool(reconcile_mode)
+        self.reconcile_required: list[str] = []  # voidable problems pending Andre (at start; after a reconcile)
+        self._reconciling = False
         for rec in self.log.iter_records():
             self._apply(rec["kind"], rec["data"]["record"])
         if not self.log.in_memory:
-            # AEGIS N14-4: the local log must match what the ledger anchors (no truncated tail, no rewritten
-            # line, no register version behind the ledger's). Unverifiable = refuse (fail closed).
+            # AEGIS N14-4 / N15-1 / N15-2: the local log must match what the ledger anchors (no truncated tail,
+            # no rewritten line, no register version behind the ledger's, no stray ruling, no newer lease from
+            # another instance). Unverifiable = refuse (fail closed).
             try:
-                problems = self.anchor_problems()
+                a = self.assess_log()
             except LedgerQueryFailed as exc:
                 raise RuntimeError(f"refusing to start: the local log cannot be verified against the evidence "
                                    f"ledger ({exc})") from None
-            if problems:
-                raise RuntimeError("refusing to start: " + "; ".join(problems))
+            if a.fatal or (a.voidable and not self.reconcile_mode):
+                hint = ("" if a.fatal or not a.voidable else
+                        " -- only Andre can void these: start with COMPLIANCE_RECONCILE_MODE=1 and POST "
+                        "/compliance/v1/reconcile (README, 'Reconciling the local log with the ledger')")
+                raise RuntimeError("refusing to start: " + "; ".join(a.problems) + hint)
+            self.reconcile_required = list(a.voidable)
+        if self.reconcile_mode:
+            return  # nothing is written (no seed proposal, no lease) until Andre reconciles and the service restarts
         try:
             self.ensure_seed_proposal()
         except Unavailable:
             pass  # ledger down at start: retried on the next inbox / decision call
+        if not self.log.in_memory and len(self.log):
+            try:
+                self._write_lease()
+            except Unavailable as exc:
+                raise RuntimeError(f"refusing to start: the instance lease could not be recorded ({exc.reason})") from None
 
     # ------------------------------------------------------------------ plumbing
 
@@ -235,6 +256,9 @@ class ComplianceService:
 
     def _record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str) -> str:
         self._ledger_conflict = False
+        if self.reconcile_mode and not self._reconciling:
+            raise Unavailable("reconcile mode (COMPLIANCE_RECONCILE_MODE=1): only Andre's POST /compliance/v1/reconcile "
+                              "is answered; restart without it once the log is reconciled", ledger_write="not_recorded")
         try:
             return self.recorder.record(event_id, event_type, actor, subject, payload, summary)
         except LedgerRecordError as exc:
@@ -242,53 +266,126 @@ class ComplianceService:
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing was issued",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
 
-    def _commit(self, kind: str, record: dict, event_ids: list[str]) -> dict:
+    def _commit(self, kind: str, record: dict, event_ids: list[str], after_anchor=None) -> dict:
         """Anchor the exact next local-log line on the ledger, append it (fsynced), then apply it.
-        A failure after the anchor records a best-effort ``local_commit_failed`` marker (AEGIS N14-4)."""
+
+        ``after_anchor`` (decisions): records the register version event AFTER the anchor and before the
+        append, so a ledger failure there leaves only a voidable stray anchor, never a published version
+        without its line (AEGIS N15-1: a version on the ledger above the local one is a rollback, fatal).
+        A failure after the anchor leaves the anchor on the ledger: nothing on the ledger alone withdraws it;
+        the next start (and C-11) reports it until Andre reconciles (N15-1). A decision line that could not be
+        written is kept beside the log (``<log>.unwritten-<seq>``, best effort) so the operator can restore it."""
         data = {"record": record, "ledger_event_ids": list(event_ids), "register_version": self.version_number,
                 "anchored": True}
         rec, line = self.log.prepare(kind, iso(self._now()), data)
         line_sha = hashlib.sha256(line).hexdigest()
         epoch = self.log.epoch or line_sha[:16]
-        try:
-            self._record(i11_evidence_audit.anchor_id(epoch, rec["seq"], line_sha), i11_evidence_audit.ANCHOR_TYPE,
-                         EVIDENCE_ACTOR, i11_evidence_audit.LOG_SUBJECT,
-                         {"epoch": epoch, "seq": rec["seq"], "line_sha256": line_sha, "kind": kind},
-                         f"Local log line {rec['seq']} ({kind}) anchored")
-        except Unavailable:
-            self._commit_failed(epoch, rec["seq"], line_sha, kind, record)
-            raise
+        self._record(i11_evidence_audit.anchor_id(epoch, rec["seq"], line_sha), i11_evidence_audit.ANCHOR_TYPE,
+                     EVIDENCE_ACTOR, i11_evidence_audit.LOG_SUBJECT,
+                     {"epoch": epoch, "seq": rec["seq"], "line_sha256": line_sha, "kind": kind},
+                     f"Local log line {rec['seq']} ({kind}) anchored")
+        if after_anchor is not None:
+            after_anchor()
         try:
             self.log.append_prepared(rec, line)
         except StoreWriteError as exc:
-            self._commit_failed(epoch, rec["seq"], line_sha, kind, record)
+            if kind == "decision" and self.log.path:
+                try:
+                    with open(f"{self.log.path}.unwritten-{rec['seq']}", "wb") as fh:
+                        fh.write(line + b"\n")
+                except OSError:
+                    pass
             raise Unavailable(f"local store write failed ({exc}); nothing was issued") from None
         self._apply(kind, record)
         return record
 
-    def _commit_failed(self, epoch: str, seq: int, line_sha: str, kind: str, record: dict) -> None:
-        """Best effort: tell the ledger this anchored line (and any register version it published) never
-        took effect, so a restart does not read it as a truncated log. If even this cannot be recorded,
-        the next start refuses until an operator reconciles the log with the ledger (fail closed)."""
-        version = (record.get("version") or {}).get("version") if kind == "decision" else None
-        subject = f"register:v{version}" if version else i11_evidence_audit.LOG_SUBJECT
-        self.recorder.try_record(i11_evidence_audit.failed_id(epoch, seq, line_sha), i11_evidence_audit.FAILED_TYPE,
-                                 EVIDENCE_ACTOR, subject, {"epoch": epoch, "seq": seq, "line_sha256": line_sha,
-                                                           "kind": kind}, f"Local log line {seq} ({kind}) not committed")
-
-    def anchor_problems(self) -> list[str]:
-        """Compare the local log with the ledger's anchors (raises LedgerQueryFailed when unreadable)."""
+    def assess_log(self) -> "i11_evidence_audit.Assessment":
+        """Compare the local log with the ledger (raises LedgerQueryFailed when unreadable)."""
         client = self.recorder.client
         if not hasattr(client, "entries"):
             raise LedgerQueryFailed("this ledger client cannot read entries")
         entries = client.entries()
         shas = self.log.line_shas()
-        lines, referenced = [], set()
+        lines, referenced, rulings, leases, reconciles = [], set(), set(), [], []
         for rec, sha in zip(self.log.iter_records(), shas):
-            lines.append((rec["seq"], sha, bool(rec["data"].get("anchored"))))
-            referenced.update(rec["data"].get("ledger_event_ids") or [])
-        return i11_evidence_audit.anchor_problems(entries, self.log.epoch, lines, referenced,
-                                                  self.version_number or 0, strict=not self.log.in_memory)
+            d = rec["data"]
+            lines.append((rec["seq"], sha, bool(d.get("anchored"))))
+            referenced.update(d.get("ledger_event_ids") or [])
+            r = d.get("record") or {}
+            if rec["kind"] == "ruling":
+                rulings.add(r.get("ruling_id"))
+            elif rec["kind"] == "lease":
+                leases.append((rec["seq"], r.get("instance_id"), r.get("lease_event_id")))
+            elif rec["kind"] == "reconcile":
+                reconciles.append((rec["seq"], r.get("payload"), r.get("reconcile_event_id"), d.get("register_version")))
+        return i11_evidence_audit.assess(entries, self.log.epoch, lines, referenced, self.version_number or 0,
+                                         strict=not self.log.in_memory, local_rulings=rulings, local_leases=leases,
+                                         reconciles=reconciles)
+
+    def anchor_problems(self) -> list[str]:
+        return self.assess_log().problems
+
+    def _write_lease(self) -> None:
+        """AEGIS N15-2: every start of a disk log records an instance lease (instance id + log head) on the
+        ledger and in the log. A later lease from another instance (a copy of this data directory started
+        elsewhere) makes this instance's C-11 red and refuses its next start."""
+        with self.lock:
+            n = len(self.log)
+            head = self.log.line_shas()[-1]
+            eid = i11_evidence_audit.lease_id(self.log.epoch, self.instance_id, n, head)
+            self._record(eid, i11_evidence_audit.LEASE_TYPE, EVIDENCE_ACTOR, i11_evidence_audit.LOG_SUBJECT,
+                         {"instance_id": self.instance_id, "epoch": self.log.epoch, "head_seq": n, "head_sha256": head},
+                         f"Compliance instance lease at log line {n}")
+            self._commit("lease", {"instance_id": self.instance_id, "lease_event_id": eid, "head_seq": n,
+                                   "head_sha256": head}, [eid])
+
+    def reconcile_plan(self) -> dict:
+        """What Andre would void now (GET /compliance/v1/reconcile): the voidable problems and their exact items."""
+        with self.lock:
+            a = self.assess_log()
+            shas = self.log.line_shas()
+            return {"epoch": self.log.epoch, "head_seq": len(shas), "head_sha256": shas[-1] if shas else None,
+                    "register_version": self.version_number, "fatal": a.fatal, "problems": a.voidable,
+                    "voidable": {"lines": sorted(a.void_lines), "event_ids": sorted(a.void_event_ids)},
+                    "reconcile_mode": self.reconcile_mode}
+
+    def reconcile(self, request_id: str, head_sha256: str, void_lines: list[int], void_event_ids: list[str]) -> dict:
+        """AEGIS N15-1: Andre's explicit operator action (the API verified his token). Voids exactly the stray
+        anchors, rulings and leases the ledger shows now, bound to this log's head and register version; a
+        rollback (fatal) is never reconciled."""
+        with self.lock:
+            key, h, cached = self._idem_check("andre", request_id, "reconcile",
+                                              {"head": head_sha256, "lines": void_lines, "ids": void_event_ids})
+            if cached:
+                return cached
+            plan = self.reconcile_plan()
+            if plan["fatal"]:
+                raise Conflict("cannot reconcile: " + "; ".join(plan["fatal"]))
+            if head_sha256 != plan["head_sha256"]:
+                raise Conflict("the local log head moved since you read the plan; read GET /compliance/v1/reconcile again")
+            if not plan["voidable"]["event_ids"]:
+                raise Conflict("nothing to reconcile: the local log matches the ledger")
+            if sorted(set(void_lines)) != plan["voidable"]["lines"] or \
+                    sorted(set(void_event_ids)) != plan["voidable"]["event_ids"]:
+                raise Conflict("the void list is not exactly what the ledger shows now; nothing was voided",
+                               expected=plan["voidable"])
+            payload = i11_evidence_audit.reconcile_payload(plan["epoch"], self.version_number, plan["head_seq"],
+                                                           plan["head_sha256"], void_lines, void_event_ids)
+            eid = i11_evidence_audit.reconcile_id(plan["epoch"], plan["head_seq"], payload)
+            self._reconciling = True
+            try:
+                self._record(eid, i11_evidence_audit.RECONCILE_TYPE, "andre", i11_evidence_audit.LOG_SUBJECT, payload,
+                             f"Andre reconciled the local log at line {plan['head_seq']}: "
+                             f"{len(payload['void_event_ids'])} ledger event(s) declared void")
+                self._commit("reconcile", {"payload": payload, "reconcile_event_id": eid, "request_id": request_id}, [eid])
+            finally:
+                self._reconciling = False
+            left = self.assess_log()
+            self.reconcile_required = list(left.voidable)
+            resp = {"reconcile_event_id": eid, "voided": payload["void_event_ids"], "void_lines": payload["void_lines"],
+                    "remaining_problems": left.problems, "restart_required": self.reconcile_mode,
+                    "ledger_event_ids": [eid]}
+            return self._idem_store(key, h, resp)
 
     def _apply(self, kind: str, r: dict) -> None:
         if kind in ("proposal", "proposal_redraft"):
@@ -501,18 +598,27 @@ class ComplianceService:
             approvals = [p for d, p in chosen if d["decision"] == "approve"]
             if any(p.get("evidence") is None and p["kind"] == "reverify" for p in approvals):
                 raise Conflict("a reverify proposal without evidence cannot be approved")
-            for d, p in chosen:
-                # AEGIS N14-9: a proposal flagged as weakening a rule is approved only with an explicit acknowledgment
-                if d["decision"] == "approve" and p.get("weakening") and d.get("acknowledge_weakening") is not True:
-                    raise Invalid(f"proposal {p['proposal_id']} weakens the register "
-                                  f"({', '.join(p.get('weakening_reasons') or [])}); approving it needs "
-                                  "acknowledge_weakening: true. Nothing was applied")
             now = self._now()
             base = list(self.current.rows) if self.current else None
             new_rows, new_controls = (base, self.control_defs)
             version_meta = None
+            recheck: dict[str, dict] = {}
             if approvals:
-                new_rows, new_controls = i01_register.apply(base, self.control_defs, approvals, now.date())
+                new_rows, new_controls = i01_register.apply(base, self.control_defs, approvals, now.date(), recheck)
+            # AEGIS N14-9 / N15-3: weakening is recomputed at APPROVAL time against the row or control as it is
+            # NOW (not the proposal-time base); a flagged, now-weakening or changed-since-drafted proposal is
+            # approved only with an explicit acknowledgment, and the refusal shows the current diff.
+            unacked = [recheck.get(p["proposal_id"]) or {"proposal_id": p["proposal_id"],
+                                                          "weakening_reasons": p.get("weakening_reasons") or []}
+                       for d, p in chosen if d["decision"] == "approve"
+                       and i01_register.needs_acknowledgment(p, recheck.get(p["proposal_id"]))
+                       and d.get("acknowledge_weakening") is not True]
+            if unacked:
+                why = "; ".join(f"{u['proposal_id']}: {', '.join(u['weakening_reasons']) or 'weakening changed since drafted'}"
+                                for u in unacked)
+                raise Invalid(f"approval weakens the register as it stands now ({why}); approving needs "
+                              "acknowledge_weakening: true after reviewing the diff. Nothing was applied",
+                              recheck=unacked[:20])
             row_change = approvals and any(p["kind"] not in ("control", *i01_register.INFO_KINDS) for p in approvals)
             events: list[str] = []
             for d, p in chosen:
@@ -521,7 +627,8 @@ class ComplianceService:
                                            f"proposal:{p['proposal_id']}",
                                            {"proposal_id": p["proposal_id"], "content_sha256": p["content_sha256"],
                                             "decision": d["decision"], "note_sha256": _sha(d.get("note")),
-                                            "weakening": bool(p.get("weakening")),
+                                            "weakening": bool(p.get("weakening")) or bool(
+                                                (recheck.get(p["proposal_id"]) or {}).get("weakening_reasons")),
                                             "acknowledged_weakening": d.get("acknowledge_weakening") is True},
                                            f"Andre {d['decision']}d proposal {p['proposal_id']} ({p['kind']})"))
             if row_change:
@@ -532,19 +639,22 @@ class ComplianceService:
                                          if p["kind"] not in ("control", *i01_register.INFO_KINDS)],
                         "rows_sha256": rows_sha256(new_rows), "prev_version_sha256": prev}
                 epoch = self.log.epoch or "0" * 16  # the seed proposal line always exists before a decision
-                events.append(self._record(i11_evidence_audit.version_event_id(epoch, n, meta["rows_sha256"], prev),
-                                           "register_version_published",
-                                           i01_register.ACTOR, f"register:v{n}",
-                                           {k: meta[k] for k in ("version", "rows_sha256", "prev_version_sha256", "proposal_ids")},
-                                           f"Register version {n} published ({len(new_rows)} rows)"))
+                vid = i11_evidence_audit.version_event_id(epoch, n, meta["rows_sha256"], prev)
+                vargs = (vid, "register_version_published", i01_register.ACTOR, f"register:v{n}",
+                         {k: meta[k] for k in ("version", "rows_sha256", "prev_version_sha256", "proposal_ids")},
+                         f"Register version {n} published ({len(new_rows)} rows)")
+                publish_version = lambda: self._record(*vargs)  # noqa: E731 - after the line's anchor (N15-1)
+                events.append(vid)
                 version_meta = {**meta, "rows": new_rows}
+            if not row_change:
+                publish_version = None
             record = {"request_id": request_id, "decided_at": iso(now),
                       "decisions": [{"proposal_id": d["proposal_id"], "decision": d["decision"], "note": d.get("note"),
                                      "acknowledged_weakening": d.get("acknowledge_weakening") is True}
                                     for d, _ in chosen],
                       "version": version_meta,
                       "controls": new_controls if any(p["kind"] == "control" for p in approvals) else None}
-            self._commit("decision", record, events)
+            self._commit("decision", record, events, after_anchor=publish_version)
             resp = {"decided": len(chosen), "approved": len(approvals), "register_version": self.version_number,
                     "rows_sha256": self.current.rows_sha256 if self.current else None, "ledger_event_ids": events}
             return self._idem_store(key, h, resp)
@@ -747,7 +857,9 @@ class ComplianceService:
         base = {"ruling_id": r["ruling_id"], "gate": r["gate"], "subject_id": r["subject_id"], "allowed": r["allowed"],
                 "unmet": r["unmet"], "unmet_lines": r["unmet_lines"], "register_version": r["register_version"],
                 "evaluated_at": r["evaluated_at"], "ledger_event_id": r["ledger_event_id"],
-                "seed_pinned": self.seed_pinned}
+                "seed_pinned": self.seed_pinned,
+                # AEGIS N15-8: what the ruling answers and was computed on; the thin clients check both
+                "request_id": r.get("request_id"), "facts_sha256": r.get("facts_sha256")}
         if r["gate"] == "activation":
             base.update(lane=r["lane"], detail=r["ruling_id"])
         else:
@@ -1298,7 +1410,8 @@ class ComplianceService:
 
     def health(self) -> dict:
         return {"status": "ok", "service": "compliance-py", "register_version_in_force": self.version_number,
-                "in_memory": self.log.in_memory, "seed_pinned": self.seed_pinned, "production": self.seed_pinned}
+                "in_memory": self.log.in_memory, "seed_pinned": self.seed_pinned, "production": self.seed_pinned,
+                "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required)}
 
 
 def review_reason(r: dict) -> str:

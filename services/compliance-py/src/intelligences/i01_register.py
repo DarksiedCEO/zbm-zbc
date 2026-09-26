@@ -163,13 +163,16 @@ def applies_when_narrowed(old: dict, new: dict) -> bool:
 
 def row_weakening(kind: str, old: Optional[dict], new: Optional[dict]) -> list[str]:
     """Why a row change may WEAKEN the register (flag, never block: Andre decides with an explicit
-    acknowledgment). A new row adds a rule; making a row unverified is stricter."""
+    acknowledgment). A new row adds a rule; making a row unverified is stricter; making an unverified
+    (blocking) row verified is a weakening (AEGIS N15-7) except on the counsel-memo path (spec E)."""
     if kind == "retire":
         return ["rule_retired"]
     if old is None or new is None:
         return []
     memo = kind == "supersede" and old["source_kind"] == "counsel-question"
     out = []
+    if old["status"] == "unverified" and new["status"] == "verified" and not memo:
+        out.append("unverified_to_verified")
     if set(old["gates"]) - set(new["gates"]):
         out.append("gates_removed")
     if applies_when_narrowed(old.get("applies_when"), new.get("applies_when")):
@@ -202,7 +205,25 @@ def control_weakening(old: Optional[dict], new: dict) -> list[str]:
         out.append("control_owner_changed")
     if new.get("test") != old.get("test"):
         out.append("control_test_changed")
+    if new.get("owner_intelligence") != old.get("owner_intelligence"):   # AEGIS N15-7
+        out.append("control_owner_intelligence_changed")
+    if new.get("evidence") != old.get("evidence"):                        # AEGIS N15-7: evidence requirements
+        out.append("control_evidence_changed")
     return out
+
+
+def check_verification_path(kind: str, old: dict, new: dict) -> None:
+    """AEGIS N15-7: an unverified (blocking) row becomes verified only through a reverify whose evidence is
+    the row's OWN source_url (or, for counsel questions, the counsel-memo supersede of spec E). A reverify
+    never moves a row to another source (amend the source first, then reverify it)."""
+    if _counsel_row(old):
+        return  # check_counsel_path governs counsel questions
+    if kind == "reverify" and new["source_url"] != old["source_url"]:
+        raise Invalid("a reverify keeps the row's own source_url (its evidence must come from that source); "
+                      "amend the source first, then reverify")
+    if old["status"] == "unverified" and new["status"] == "verified" and kind in ("amend", "supersede"):
+        raise Invalid(f"an unverified row becomes verified only by a reverify with evidence from its own "
+                      f"source_url, not by {kind}")
 
 
 def _counsel_row(row: dict) -> bool:
@@ -280,6 +301,7 @@ def build_proposal(kind: str, target_id: Optional[str], proposed_row: Optional[d
                 if kind == "reverify" and new["status"] != "verified":
                     raise Invalid("a reverify proposal proposes status verified")
                 check_counsel_path(kind, rows[target_id], new)
+                check_verification_path(kind, rows[target_id], new)
                 diff = compute_diff(rows[target_id], new)
                 weakening = row_weakening(kind, rows[target_id], new)
             else:  # supersede
@@ -288,6 +310,7 @@ def build_proposal(kind: str, target_id: Optional[str], proposed_row: Optional[d
                 if new["id"] in ever_ids:
                     raise Invalid("the replacement row needs a new id (ids are never reused)")
                 check_counsel_path(kind, rows[target_id], new)
+                check_verification_path(kind, rows[target_id], new)
                 weakening = row_weakening(kind, rows[target_id], new)
                 diff = {"target_status": {"old": rows[target_id]["status"], "new": "superseded"},
                         **{f"new.{k}": v for k, v in compute_diff(None, new).items() if k == "id"}}
@@ -322,13 +345,38 @@ def seed_proposal(rows: list[dict], seed_sha: str, now: datetime) -> dict:
     return p
 
 
-def apply(base: Optional[list[dict]], controls: dict[str, dict], approvals: list[dict], today: date
-          ) -> tuple[Optional[list[dict]], dict[str, dict]]:
+def _recheck(p: dict, reasons: list[str], old: Optional[dict], new: Optional[dict]) -> dict:
+    """AEGIS N15-3: the weakening of ``p`` recomputed against the state it is applied to NOW (not the
+    proposal-time base). A field changed since the proposal was drafted that the proposal does not touch
+    would be silently reverted by it: that is flagged too, and the whole current diff is shown."""
+    now_diff = compute_diff(old, new) if (old is not None and new is not None) else dict(p.get("diff") or {})
+    reverts = sorted(k for k in now_diff if k not in (p.get("diff") or {}))
+    if reverts:
+        reasons = [*reasons, "reverts_changes_made_since_drafted"]
+    return {"proposal_id": p["proposal_id"], "weakening_reasons": sorted(set(reasons)),
+            "drafted_weakening_reasons": sorted(set(p.get("weakening_reasons") or [])), "reverts": reverts,
+            "diff": now_diff}
+
+
+def needs_acknowledgment(p: dict, recheck: Optional[dict]) -> bool:
+    """Approval needs acknowledge_weakening when the proposal was flagged, is weakening NOW, or its
+    weakening changed since it was drafted (AEGIS N14-9, N15-3)."""
+    if recheck is None:
+        return bool(p.get("weakening"))
+    return (bool(p.get("weakening")) or bool(recheck["weakening_reasons"])
+            or recheck["weakening_reasons"] != recheck["drafted_weakening_reasons"])
+
+
+def apply(base: Optional[list[dict]], controls: dict[str, dict], approvals: list[dict], today: date,
+          recheck: Optional[dict[str, dict]] = None) -> tuple[Optional[list[dict]], dict[str, dict]]:
     """All-or-nothing: the rows and control catalog after applying ``approvals`` in order.
-    Raises Conflict (409) when a proposal no longer fits (stale, duplicate id, seed twice)."""
+    Raises Conflict (409) when a proposal no longer fits (stale: a field it touches changed since it was
+    drafted; duplicate id; seed twice). ``recheck`` (filled when given): per proposal id, its weakening
+    recomputed against the row or control it replaces at this point of the application (AEGIS N15-3)."""
     rows = None if base is None else {r["id"]: copy.deepcopy(r) for r in base}
     ctl = {k: dict(v) for k, v in controls.items()}
     ever = set(rows or {})
+    recheck = {} if recheck is None else recheck
     for p in approvals:
         kind = p["kind"]
         if kind == "seed":
@@ -345,6 +393,7 @@ def apply(base: Optional[list[dict]], controls: dict[str, dict], approvals: list
             for k, d in p["diff"].items():
                 if (old or {}).get(k) != d["old"]:
                     raise Conflict(f"{p['proposal_id']}: control {cid} changed since the proposal was drafted")
+            recheck[p["proposal_id"]] = _recheck(p, control_weakening(old, p["proposed_row"]), old, p["proposed_row"])
             ctl[cid] = dict(p["proposed_row"])
             continue
         if rows is None:
@@ -363,6 +412,7 @@ def apply(base: Optional[list[dict]], controls: dict[str, dict], approvals: list
             for k, d in p["diff"].items():
                 if cur.get(k) != d["old"]:
                     raise Conflict(f"{p['proposal_id']}: row {tid} changed since the proposal was drafted (stale)")
+            recheck[p["proposal_id"]] = _recheck(p, row_weakening(kind, cur, p["proposed_row"]), cur, p["proposed_row"])
             rows[tid] = copy.deepcopy(p["proposed_row"])
         elif kind in ("supersede", "retire"):
             cur = rows.get(tid)
@@ -370,6 +420,7 @@ def apply(base: Optional[list[dict]], controls: dict[str, dict], approvals: list
                 raise Conflict(f"{p['proposal_id']}: target row {tid} is gone or already superseded")
             if cur["status"] != p["diff"].get("target_status", p["diff"].get("status", {})).get("old"):
                 raise Conflict(f"{p['proposal_id']}: row {tid} changed since the proposal was drafted (stale)")
+            recheck[p["proposal_id"]] = _recheck(p, row_weakening(kind, cur, p.get("proposed_row")), None, None)
             rows[tid] = {**cur, "status": "superseded"}
             if kind == "supersede":
                 nid = p["proposed_row"]["id"]

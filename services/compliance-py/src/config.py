@@ -37,6 +37,7 @@ class Settings:
     allow_unpinned_seed: bool = False
     watcher_max_proposals_per_cycle: int = 50
     watcher_max_proposals_per_source: int = 20
+    reconcile_mode: bool = False
 
 
 def _int(env, name, default, lo, hi) -> int:
@@ -119,6 +120,10 @@ def load(env: Optional[dict] = None) -> Settings:
     if seed_sha is not None and seed_sha != PINNED_SEED_SHA256 and unpinned != "1":
         raise RuntimeError("COMPLIANCE_SEED_SHA256 differs from the pinned seed hash; refusing to start "
                            "(set COMPLIANCE_ALLOW_UNPINNED_SEED=1 for a NON-PRODUCTION run)")
+    # AEGIS N15-1: start a log with only voidable problems against the ledger, to let Andre reconcile it
+    reconcile = (env.get("COMPLIANCE_RECONCILE_MODE") or "").strip()
+    if reconcile not in ("", "0", "1"):
+        raise RuntimeError("COMPLIANCE_RECONCILE_MODE must be 0 or 1")
     if unpinned == "1" and seed_sha is None:
         raise RuntimeError("COMPLIANCE_ALLOW_UNPINNED_SEED=1 needs COMPLIANCE_SEED_SHA256 (the unpinned seed's own "
                            "hash, stated explicitly)")
@@ -135,4 +140,5 @@ def load(env: Optional[dict] = None) -> Settings:
         allow_unpinned_seed=unpinned == "1",
         watcher_max_proposals_per_cycle=_int(env, "COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_CYCLE", 50, 1, 10_000),
         watcher_max_proposals_per_source=_int(env, "COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_SOURCE", 20, 1, 10_000),
+        reconcile_mode=reconcile == "1",
     )

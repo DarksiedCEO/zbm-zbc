@@ -94,7 +94,7 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 
 | Route | Who | Purpose |
 |---|---|---|
-| `GET /health` | none | `{status, service, register_version_in_force, in_memory, seed_pinned, production}` |
+| `GET /health` | none | `{status, service, register_version_in_force, in_memory, seed_pinned, production, reconcile_mode, reconcile_required}` |
 | `POST /compliance/v1/rule` | onboarding | activation (onboarding protocol) |
 | `POST /compliance/v1/review` | creative_production | payout (`zbc_clip`) / publish (`zbm_work`) (creative protocol) |
 | `POST /compliance/v1/gates/{activation,payout,publish}` | same | native form, same bodies |
@@ -107,7 +107,8 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 | `GET /compliance/v1/register/{id}` | any caller | one row + its history |
 | `POST /compliance/v1/register/proposals` | legal_37 or Andre | create a proposal (never changes the register) |
 | `GET /compliance/v1/inbox` | any caller | undecided proposals, oldest effective date first, with `content_sha256` |
-| `POST /compliance/v1/register/decisions` | Andre only | ≤ 200 approve/reject decisions, atomic; approving a `weakening: true` proposal needs `acknowledge_weakening: true` |
+| `POST /compliance/v1/register/decisions` | Andre only | ≤ 200 approve/reject decisions, atomic; approving a proposal that is weakening (flagged, or weakening NOW against the current row, or changed since drafted) needs `acknowledge_weakening: true` (the 422 shows the current diff in `recheck`) |
+| `GET /compliance/v1/reconcile`, `POST /compliance/v1/reconcile` | Andre only | show / void the voidable mismatches between the local log and the ledger (see below) |
 | `GET /compliance/v1/controls`, `/controls/{id}` | any caller | control status |
 | `POST /compliance/v1/controls/{id}/results` | the control's owner | push a result |
 | `POST /compliance/v1/controls/internal/run` | scheduler | compute Compliance-owned controls; draft re-verification proposals |
@@ -130,6 +131,7 @@ export COMPLIANCE_CALLER_TOKENS='{"onboarding":"<>=32 chars>","creative_producti
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>   # unset = nothing can be recorded
 export COMPLIANCE_DATA_DIR=/var/lib/compliance              # unset = in memory; nothing in force after restart
 # with a data dir, start-up reads GET /ledger/entries and refuses if the log does not match the ledger
+# (COMPLIANCE_RECONCILE_MODE=1 starts a log with only voidable mismatches for Andre to reconcile; see below)
 python3 -m api      # COMPLIANCE_BIND_ADDR (127.0.0.1), COMPLIANCE_PORT (8380)
 ```
 
@@ -153,9 +155,48 @@ in every ruling — never use that in production. `COMPLIANCE_SANCTIONS_PROVIDER
 `COMPLIANCE_WAYBACK_CAPTURE` must stay unset: no adapter is built, and the
 service refuses to start rather than pretend.
 
+## Reconciling the local log with the ledger (operator procedure)
+
+Every local-log line is anchored on the ledger before it is written. If a
+commit fails after its anchor (disk error, crash, a ledger answer lost), or
+another instance ran on a copy of the data directory, the ledger holds
+anchors, rulings or an instance lease the local log does not. Nothing on the
+ledger alone can withdraw them. The service then refuses to start (and C-11
+is red, which blocks every gate) until Andre reconciles:
+
+1. Stop the service. Make sure no other instance runs on a copy of this data
+   directory (the refusal names a newer lease when one did).
+2. Start it with `COMPLIANCE_RECONCILE_MODE=1`. It starts only if every
+   problem is voidable; it answers reads and the reconcile route only.
+   A register version on the ledger above the local one (a rollback), a
+   local line the ledger does not anchor, a missing cited event or another
+   log's anchors are FATAL: it refuses even in this mode.
+3. `GET /compliance/v1/reconcile` with Andre's token: `problems`, `fatal`,
+   `head_seq`, `head_sha256`, `register_version` and `voidable` (`lines`,
+   `event_ids`). Review them.
+4. `POST /compliance/v1/reconcile` with Andre's token and
+   `{"request_id", "head_sha256", "void_lines", "void_event_ids"}` — exactly
+   the plan (anything else is 409, nothing voided). It records a `reconcile`
+   event on the ledger (payload hash binds the register version, the log head
+   and the voided lines and ids) and a `reconcile` line in the local log.
+5. Restart without `COMPLIANCE_RECONCILE_MODE`, run the internal controls:
+   C-11 passes. Start-up and C-11 honour the voids only while the ledger's
+   `reconcile` event matches the local line's payload hash.
+
+A running service can be reconciled the same way (steps 3–4) when C-11 goes
+red after a failed commit. A decision whose register version reached the
+ledger but whose line never reached the disk cannot be voided (that is a
+rollback): the unwritten line is kept as `compliance_log.jsonl.unwritten-<seq>`
+— append that exact line to the log (its hash is the ledger's anchor) and
+restart; if more lines were written after it, have Andre make another
+decision before the process stops (it republishes that version number).
+
 The callers opt in with `COMPLIANCE_SERVICE_URL`, `COMPLIANCE_SERVICE_TOKEN`
 and `COMPLIANCE_CALLER_TOKEN` in onboarding-py / creative-py; without all
-three they keep their "not allowed yet" stand-ins.
+three they keep their "not allowed yet" stand-ins. The clients refuse any
+answer that does not echo their `request_id` and the SHA-256 of the facts
+they sent (`facts_sha256`), and any ruling with `seed_pinned: false` unless
+the caller sets `COMPLIANCE_ACCEPT_UNPINNED=1` (default off; AEGIS N15-8).
 
 ## Tests
 

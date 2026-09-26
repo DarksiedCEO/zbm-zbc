@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from integrations.compliance38 import HttpComplianceDepartment, compliance_from_env
+from integrations.compliance38 import HttpComplianceDepartment, compliance_from_env, facts_sha256
 from integrations.departments import NotBuiltComplianceDepartment
 
 OK_BLOCKED = {"ruling_id": "cmp-rul-abc", "gate": "activation", "subject_id": "client_1", "lane": "client", "allowed": False,
@@ -18,13 +18,21 @@ def _client(handler):
                                     transport=httpx.MockTransport(handler))
 
 
+def _echo(ans, seen=None, **over):
+    """A server that answers ``ans`` for THIS request: it echoes request_id and the facts' SHA-256 and says the
+    seed is pinned, as the real service does (AEGIS N15-8)."""
+    def h(req):
+        b = json.loads(req.content)
+        if seen is not None:
+            seen.append(req)
+        return httpx.Response(200, json={**ans, "request_id": b["request_id"], "facts_sha256": facts_sha256(b["facts"]),
+                                         "seed_pinned": True, **over})
+    return h
+
+
 def test_posts_the_protocol_body_with_both_tokens():
     seen = []
-
-    def h(req):
-        seen.append(req)
-        return httpx.Response(200, json=OK_BLOCKED)
-    r = _client(h).rule("client_1", "client", {"flags": {}})
+    r = _client(_echo(OK_BLOCKED, seen)).rule("client_1", "client", {"flags": {}})
     body = json.loads(seen[0].content)
     assert seen[0].url.path == "/compliance/v1/rule"
     assert seen[0].headers["Authorization"] == "Bearer svc-token"
@@ -36,8 +44,7 @@ def test_posts_the_protocol_body_with_both_tokens():
 
 def test_allowed_ruling():
     # the answer must name the requested subject (AEGIS N14-10): request "client_1", as OK_BLOCKED names
-    r = _client(lambda req: httpx.Response(200, json={**OK_BLOCKED, "allowed": True, "unmet": [], "unmet_lines": []})).rule(
-        "client_1", "client", {})
+    r = _client(_echo({**OK_BLOCKED, "allowed": True, "unmet": [], "unmet_lines": []})).rule("client_1", "client", {})
     assert r.allowed is True and r.unmet == () and r.detail == "cmp-rul-abc"
 
 
@@ -68,10 +75,11 @@ def test_5xx_and_timeouts_retry_once_with_the_same_request_id_then_fail_closed()
 
 def test_retry_can_succeed():
     n = []
+    ok = _echo(OK_BLOCKED)
 
     def h(req):
         n.append(1)
-        return httpx.Response(503) if len(n) == 1 else httpx.Response(200, json=OK_BLOCKED)
+        return httpx.Response(503) if len(n) == 1 else ok(req)
     assert _client(h).rule("client_1", "client", {}).detail == "cmp-rul-abc"   # same subject as the answer (N14-10)
 
 
@@ -163,10 +171,42 @@ def test_n14_10_reply_must_name_the_same_subject_and_lane(change):
         ans.pop(change["_drop"])
     else:
         ans.update(change)
-    r = _client(lambda req: httpx.Response(200, json=ans)).rule("client_1", "client", {})
+    r = _client(_echo(ans)).rule("client_1", "client", {})   # echo right (N15-8): only the subject is wrong
     assert r.allowed is False and "inconsistent" in r.unmet[0]
 
 
 def test_n14_10_matching_reply_is_still_allowed():
-    r = _client(lambda req: httpx.Response(200, json=ALLOWED_C1)).rule("client_1", "client", {})
+    r = _client(_echo(ALLOWED_C1)).rule("client_1", "client", {})
     assert r.allowed is True
+
+
+# --- AEGIS round 15: N15-8 request_id / facts_sha256 echo, unpinned seed refused by default -----------------
+
+FACTS = {"jurisdiction": {"declared_country": "IT", "declared_region": None, "attested": True, "attestation_ref": "a"},
+         "note": "Pubblicità ＃ＡＤ", "n": 1.5}
+
+
+@pytest.mark.parametrize("over", [{"request_id": "onb-someone-else"}, {"request_id": None},
+                                  {"facts_sha256": "0" * 64}, {"facts_sha256": None},
+                                  {"facts_sha256": facts_sha256({"n": 1.5})}, {"seed_pinned": None},
+                                  {"seed_pinned": "true"}])
+def test_n15_8_answer_must_echo_request_id_and_facts_sha256(over):
+    r = _client(_echo(ALLOWED_C1, **over)).rule("client_1", "client", FACTS)
+    assert r.allowed is False and "inconsistent" in r.unmet[0], over
+
+
+def test_n15_8_facts_sha256_formula():
+    assert facts_sha256({"b": 1, "a": "é"}) == __import__("hashlib").sha256(b'{"a":"\\u00e9","b":1}').hexdigest()
+
+
+def test_n15_8_unpinned_seed_refused_unless_explicitly_accepted():
+    h = _echo(ALLOWED_C1, seed_pinned=False)
+    r = _client(h).rule("client_1", "client", FACTS)
+    assert r.allowed is False and "unpinned" in r.unmet[0]
+    ok = HttpComplianceDepartment("http://compliance.test", "svc-token", "caller-token",
+                                  transport=httpx.MockTransport(h), accept_unpinned=True).rule("client_1", "client", FACTS)
+    assert ok.allowed is True
+    env = {"COMPLIANCE_SERVICE_URL": "http://x", "COMPLIANCE_SERVICE_TOKEN": "t", "COMPLIANCE_CALLER_TOKEN": "c"}
+    assert compliance_from_env(env)._accept_unpinned is False
+    assert compliance_from_env({**env, "COMPLIANCE_ACCEPT_UNPINNED": "true"})._accept_unpinned is False
+    assert compliance_from_env({**env, "COMPLIANCE_ACCEPT_UNPINNED": "1"})._accept_unpinned is True
