@@ -25,8 +25,12 @@ R6  every approved angle has at least one keyword (so on-brief can be judged).
 
 Refused outright (422, fix wave 10, AEGIS round 9 N9-3): a rulebook with
 more than MAX_NEVER_SAY never-say phrases — Clip Review's cost per clip
-grows with the list (rulebook_writer.MAX_NEVER_SAY says how it was chosen).
-The draft is left as it is: nothing is truncated.
+grows with the list (rulebook_writer.MAX_NEVER_SAY says how it was chosen);
+since fix wave 11 (N10-4) also one with a phrase over MAX_NEVER_SAY_WORDS
+words or MAX_NEVER_SAY_PHRASE_CHARS characters, or a list over
+MAX_NEVER_SAY_CHARS characters in total (`never_say_over_caps`). Every
+draft — first draft, revision or edit — is approved only here, so no path
+skips the check. The draft is left as it is: nothing is truncated.
 """
 
 from __future__ import annotations
@@ -39,7 +43,7 @@ from shared.actors import ActorRegistry, Role, require_not_self
 from shared.errors import PreconditionFailed, ValidationFailed
 from shared.registry import PlatformRulesRegistry
 from shared.text import contains_phrase, mentions_phrase
-from zbc.rulebook_writer import MAX_NEVER_SAY, NeverSayEntry, short_entry_warnings
+from zbc.rulebook_writer import NeverSayEntry, never_say_over_caps, short_entry_warnings
 from zbc.platform_rules import rows_usable
 from zbc.rulebook import Rulebook, RuleKind, RulebookStatus
 
@@ -62,12 +66,13 @@ def review(rb: Rulebook, approver_id: str, actors: ActorRegistry, registry: Plat
     actors.require_role(approver_id, Role.ZBC_CAMPAIGN_RULEBOOK)
     if rb.status is not RulebookStatus.DRAFT:
         raise PreconditionFailed(f"rulebook {rb.campaign_id} v{rb.version} is {rb.status.value}; only a draft can be reviewed")
-    n_never = len(rb.rules_of(RuleKind.NEVER_SAY))
-    if n_never > MAX_NEVER_SAY:
+    over = never_say_over_caps([r.params.get("phrase", "") for r in rb.rules_of(RuleKind.NEVER_SAY)])
+    if over:
+        # fix wave 10 (N9-3): the count; fix wave 11 (N10-4): each phrase's length and the list's total
         raise ValidationFailed(
-            f"rulebook {rb.campaign_id} v{rb.version} has {n_never} never-say phrases; at most {MAX_NEVER_SAY} "
-            "can be approved (Clip Review's cost per clip grows with the list). Nothing was dropped: shorten the "
-            "list and submit a new draft", ["never_say"])
+            f"rulebook {rb.campaign_id} v{rb.version} cannot be approved: " + "; ".join(over)
+            + " (Clip Review's cost per clip grows with the list). Nothing was dropped: shorten the list and "
+            "submit a new draft", ["never_say"])
 
     issues: list[str] = [f"R1 blocking: {b}" for b in rb.blocking_issues]
     for kind in REQUIRED_SINGLE:

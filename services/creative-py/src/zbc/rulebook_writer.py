@@ -123,14 +123,52 @@ def never_say_entries(goal: CampaignGoal) -> list[NeverSayEntry]:
 # Campaign Rulebook refuses to approve it (422) until the list is at most this long. See
 # docs/adr/0005 (decision 44, gap 16).
 MAX_NEVER_SAY = 30
+# Fix wave 11 (AEGIS round 10 N10-4): the count cap alone did not bound the cost — 30 phrases of 60 words
+# cost 37.9 s CPU per review, 30 phrases of eight two-letter words 6.9 s. A phrase is also capped in
+# words and characters, and the whole list in characters. Chosen from measurement on the reference host
+# (fix11 probes/cost11.py: every field at its maximum, the phrases' own words mutated — 1 in 8 spelled
+# in regional indicators, 1 in 8 in currency / math symbols — a regional indicator in every field so the
+# regional-indicator reading runs, routed to a human, one fresh process per measurement, thread CPU, two
+# seeds, two text modes):
+#   within the caps  15 x 3 words (<= 20 c) 1.34-1.49 s; 16 x 3 (<= 18 c) 0.86-1.37 s; 20-21 x 3 (<= 14-15 c)
+#                    0.91-1.70 s; 10 x 3 long words (<= 30 c) 0.74-1.25 s; 15 x 3 English words 0.83-1.39 s;
+#                    30 x 3 two-letter words 0.41-0.62 s; 30 x 2 words 0.46-0.64 s  -> worst 1.70 s alone;
+#                    1.94-1.98 s CPU inside the full test run (a large heap; tests/test_fix_wave_11.py)
+#   over a cap       4 words a phrase: 16 x 4 (382 c) 1.47-1.93 s, 12 x 4 (<= 25 c, 290 c) 1.62-1.72 s,
+#                    11 x 4 English words 1.74-1.77 s; 400 c of 3 words (22 x 3) 1.45-1.74 s; 30 x 3
+#                    (588 c) 1.76-1.93 s; 20 x 6 two-letter words 1.56-2.20 s; 30 x 8 two-letter words
+#                    5.6-7.2 s; 30 x 60 words 37.9 s (AEGIS round 10)
+# Four-word phrases were measured and left out: 1.6-1.9 s alone is 1.9-2.1 s inside a long-running
+# process, no margin; a 240-character budget measured 1.65 s worst, barely below 300's (the cost
+# saturates). About half of the cost is the regional-indicator reading (a second pass over
+# the text); most of the rest is fixed per text, so a longer list needs a faster gate, not a higher cap.
+# See docs/adr/0005 (decision 49, gap 16).
+MAX_NEVER_SAY_WORDS = 3  # words per phrase (canonical words)
+MAX_NEVER_SAY_PHRASE_CHARS = 30  # characters per phrase
+MAX_NEVER_SAY_CHARS = 300  # characters over the whole never-say list
+
+
+def never_say_over_caps(phrases: list[str]) -> list[str]:
+    """Every way `phrases` (a never-say list) breaks the review-cost caps, one line each; [] if none."""
+    out: list[str] = []
+    if len(phrases) > MAX_NEVER_SAY:
+        out.append(f"{len(phrases)} never-say phrases: at most {MAX_NEVER_SAY} per rulebook")
+    for p in phrases:
+        words = len(canonical(p).split())
+        if words > MAX_NEVER_SAY_WORDS or len(p) > MAX_NEVER_SAY_PHRASE_CHARS:
+            out.append(f"never-say {p[:40] + ('...' if len(p) > 40 else '')!r} is too long ({words} words, {len(p)} "
+                       f"characters): at most {MAX_NEVER_SAY_WORDS} words and {MAX_NEVER_SAY_PHRASE_CHARS} "
+                       "characters per phrase")
+    total = sum(len(p) for p in phrases)
+    if total > MAX_NEVER_SAY_CHARS:
+        out.append(f"never-say phrases total {total} characters: at most {MAX_NEVER_SAY_CHARS} per rulebook")
+    return out
 
 
 def never_say_cap_warnings(entries: list[NeverSayEntry]) -> list[str]:
-    """N9-3: a draft with more never-say phrases than MAX_NEVER_SAY cannot be approved — say so."""
-    if len(entries) <= MAX_NEVER_SAY:
-        return []
-    return [f"{len(entries)} never-say phrases: at most {MAX_NEVER_SAY} per rulebook can be approved "
-            "(review cost); nothing was dropped — shorten the list before review"]
+    """N9-3 / N10-4: a draft whose never-say list is over a review-cost cap cannot be approved — say so."""
+    return [f"{w} can be approved (review cost); nothing was dropped — shorten the list before review"
+            for w in never_say_over_caps([e.phrase for e in entries])]
 
 
 def short_entry_warnings(entries: list[NeverSayEntry], rule_ids: dict[str, str] | None = None) -> list[str]:

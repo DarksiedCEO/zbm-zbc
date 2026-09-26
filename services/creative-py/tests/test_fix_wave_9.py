@@ -409,7 +409,15 @@ def _aegis8_cost_cases():
     return phrases, cases
 
 
-REVIEW_CPU_BOUND_S = 1.5  # at 100 never-say phrases, every field at its maximum (M1)
+# M1 bounds (fix wave 11 follow-up: the old 1.5 s bound failed at 1.503 s on the unmodified 978bcaa tree
+# inside the full run — a flaky test). Measured inside the full test run on the reference host (2 vCPU
+# Intel Xeon @ 2.80 GHz, Python 3.11.15, Sep 24-25, 2026, six full runs, one on 978bcaa and one from fix wave
+# 10): worst reviewed case 1.19-1.51 s CPU, routed-to-a-human variant 1.46-1.91 s. The bounds are 1.5x the worst measured value: outside the
+# run-to-run noise (about 25% in-suite), still failing on any 2x regression of the review (the class
+# these tests exist for: the fix-wave-10 memo-eviction cliff was ~20x). The measured figures are the
+# documented budget (ADR 0005 gap 16).
+REVIEW_CPU_BOUND_S = 2.25  # at 100 never-say phrases, every field at its maximum (M1): 1.5 x 1.51 s
+FORCED_CPU_BOUND_S = 2.9  # the same, routed to a human: 1.5 x 1.91 s
 CPU_CALIBRATION_S = 0.120  # `_cpu_workload`, best of 3, on the reference 2-vCPU host, idle (fix wave 9)
 
 
@@ -485,7 +493,7 @@ def test_m1_review_cost_at_100_phrases_on_the_aegis_generator(registry):
     slow = max(slow, _cpu_slowdown())  # measured again after the reviews: load that came meanwhile counts
     print(f"M1 machine slowdown (before / after the reviews, larger kept): {slow:.2f}x")
     assert worst <= REVIEW_CPU_BOUND_S * slow, (worst, slow)
-    assert forced <= 2.0 * slow, (forced, slow)
+    assert forced <= FORCED_CPU_BOUND_S * slow, (forced, slow)
 
 
 def test_m1_clip_review_runs_off_the_workflow_lock(api, monkeypatch):
