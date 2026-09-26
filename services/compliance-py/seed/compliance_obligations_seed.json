@@ -1,0 +1,3698 @@
+{
+  "register": "ZBM/ZBC Compliance (38) obligation register — seed",
+  "seed_version": 1,
+  "generated_on": "2026-09-26",
+  "source_report": "World class compliance department map (verified 2026-09-26) plus its research notes",
+  "shelf_life_days": {
+    "statute": 180,
+    "reg": 180,
+    "guidance": 90,
+    "case-law": 90,
+    "platform-policy": 30,
+    "house-rule": null,
+    "counsel-question": null
+  },
+  "status_rule": "verified = the report cites a primary source (government, regulator, official platform or vendor page) for the row and does not label it UNVERIFIED or secondary; house rules are founder-locked. Everything else is unverified. Unverified or expired rows block every gate they feed when they apply.",
+  "in_force": false,
+  "in_force_note": "The seed takes force only when Andre approves its SHA-256 (proposal kind 'seed'). Until then every gate is blocked.",
+  "counts": {
+    "rows": 118,
+    "verified": 59,
+    "unverified": 59,
+    "house_rules": 13,
+    "counsel": 14
+  },
+  "rows": [
+    {
+      "id": "HR-01",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Security standard 110% and Vanta-class control program",
+      "obligation": "Security is held to Andre's '110%' standard. Compliance runs a Vanta-class program: continuous control checks with SLA, audit evidence, policies, people on/off-boarding, vendor risk and a trust center. A control with no passing result inside its SLA is red.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Locked by Andre, Sep 23-26, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "control_sla",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "HR-02",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Clippers must be 18 or older (hard rule, no guardian path)",
+      "obligation": "No clipper under 18 is activated or paid. Age is established by a neutral date-of-birth field plus one highly effective age check attested by Verification and Integrity; self-declaration alone never passes.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Locked by Andre Sep 24, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation",
+        "payout"
+      ],
+      "applies_when": {
+        "lanes": [
+          "zbc_creator"
+        ],
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "age_18_plus",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "HR-03",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Gate doctrine: fail closed, cite a written rule, stale or unverified rules block",
+      "obligation": "Compliance is the hard gate before activation, payout and publish. Every block names an obligation id from the register. Missing facts, unreachable dependencies, and any applicable row that is expired or unverified block the gate that depends on it.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Locked by Andre, Sep 23-26, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i11_evidence_audit",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {},
+      "check": "engine_invariant",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "HR-04",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Only Andre approves a rule into force",
+      "obligation": "No register row, version, or change takes effect without Andre's approval token. Intelligences draft; they never approve.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Locked by Andre, Sep 23-26, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "engine_invariant",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "HR-05",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Jurisdictions: operate",
+      "obligation": "Operate in the United States (US), the United Kingdom (GB) and Canada outside Quebec (CA except CA-QC). Canadian targets must be given at province level; bare 'CA' counts as including CA-QC.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Jurisdiction ruling, Sep 26, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i07_jurisdiction",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {},
+      "check": "jurisdiction_class",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {
+        "operate": [
+          "US",
+          "GB",
+          "CA"
+        ],
+        "operate_excludes": [
+          "CA-QC"
+        ],
+        "region_required": [
+          "US",
+          "CA",
+          "UA"
+        ]
+      }
+    },
+    {
+      "id": "HR-06",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Jurisdictions: conditional (EU kit required)",
+      "obligation": "Germany, the Netherlands, Ireland, Spain and Italy are allowed only with the EU kit: current EU-kit version acknowledged; local ad label per country (its register row must be verified); AI-manipulation disclosure when synthetic or manipulated media is used; no EU behavioural tracking on ZBM-operated pages; for client campaigns, the MSA assigns EAA, cookie and GDPR duties for the client's own store to the client.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Jurisdiction ruling, Sep 26, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i07_jurisdiction",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "DE",
+          "NL",
+          "IE",
+          "ES",
+          "IT"
+        ]
+      },
+      "check": "eu_kit",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {
+        "conditional": [
+          "DE",
+          "NL",
+          "IE",
+          "ES",
+          "IT"
+        ],
+        "eu_kit_version": 1,
+        "local_labels": {
+          "IT": [
+            "Pubblicità",
+            "ADV",
+            "Sponsorizzato"
+          ],
+          "DE": [
+            "Werbung",
+            "Anzeige"
+          ],
+          "NL": [
+            "Reclame",
+            "Advertentie"
+          ],
+          "ES": [
+            "Publicidad"
+          ],
+          "IE": []
+        }
+      }
+    },
+    {
+      "id": "HR-07",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Jurisdictions: refuse",
+      "obligation": "Refuse France (including French-language campaigns aimed at France), Quebec (CA-QC), and OFAC comprehensively sanctioned jurisdictions (Cuba, Iran, North Korea, Crimea incl. Sevastopol, and the so-called DNR/LNR regions). Any jurisdiction not on the operate or conditional list is refused by default.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Jurisdiction ruling, Sep 26, 2026; default-deny for unlisted jurisdictions is a spec choice",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i07_jurisdiction",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {},
+      "check": "jurisdiction_class",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {
+        "refuse": [
+          "FR",
+          "CA-QC",
+          "CU",
+          "IR",
+          "KP",
+          "UA-43",
+          "UA-40",
+          "UA-14",
+          "UA-09",
+          "UA-23",
+          "UA-65"
+        ],
+        "unlisted": "refuse"
+      }
+    },
+    {
+      "id": "HR-08",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "No cold outbound to Canada",
+      "obligation": "No unsolicited email, DM, SMS or call to any person or business in Canada. Canadian creators are recruited inbound only.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Locked by Andre, Sep 23-26, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i07_jurisdiction",
+      "gates": [
+        "activation",
+        "publish"
+      ],
+      "applies_when": {},
+      "check": "no_cold_outbound_ca",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "HR-09",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Accessibility: WCAG 2.1 AA before publish",
+      "obligation": "Every site, landing page, form, client portal and video ZBM/ZBC publishes passes an automated WCAG 2.1 AA check on the exact content being published (video: captions). Overlay widgets are not a remediation. Result is kept as evidence.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Locked by Andre Sep 23, 2026 (ADA protection)",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i10_accessibility",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "asset_types": [
+          "site",
+          "landing_page",
+          "form",
+          "portal",
+          "ad_video"
+        ]
+      },
+      "check": "accessibility_pass",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "HR-10",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Tracking disclosure, consent banner and opt-out",
+      "obligation": "Any site or page that uses cookies or tracking discloses the tracking, shows a consent banner and offers an opt-out before non-essential tracking runs.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Locked by Andre Sep 23, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "asset_types": [
+          "site",
+          "landing_page",
+          "form",
+          "portal"
+        ],
+        "flags_any": [
+          "uses_tracking"
+        ]
+      },
+      "check": "consent_banner",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "HR-11",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Required documents present and current",
+      "obligation": "Privacy policy, terms of service and required forms are present on every site, page, form and portal, at the version Legal (37) marks current. Legal drafts; Compliance enforces presence and currency.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Locked by Andre Sep 23, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "asset_types": [
+          "site",
+          "landing_page",
+          "form",
+          "portal"
+        ]
+      },
+      "check": "required_docs_current",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "HR-12",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Money never touches Compliance",
+      "obligation": "Compliance rules allowed/blocked only. It holds no amounts, rates or balances and never moves money; Finance (31) pays.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Locked by Andre, Sep 23-26, 2026",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {},
+      "check": "engine_invariant",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "HR-13",
+      "jurisdiction": "ALL",
+      "domain": "house_rule",
+      "title": "Verified view definition",
+      "obligation": "A payable view is a platform-reported view on the clip at a settlement date at least the configured settlement lag after posting (report: 7-14 days; default 14), after the platform's own filtering, with the anomaly screen passed, no purchased-engagement indicators, the clip still live at the end of the minimum live period, and a clawback clause for views the platform later removes. Verification and Integrity attests; Compliance checks the attestation.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "house-rule",
+      "source_quality": "founder",
+      "effective_date": "2026-09-26",
+      "effective_note": "Definition taken from the report; takes force only when Andre approves the seed",
+      "verified_at": "2026-09-26",
+      "expires_at": null,
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "verified_views_attested",
+      "penalty_note": "House rule (founder-locked); no external penalty.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {
+        "settlement_lag_days": 14,
+        "settlement_lag_days_allowed_range": [
+          7,
+          14
+        ],
+        "clawback_clause_required": true,
+        "minimum_live_period": "per campaign rulebook"
+      }
+    },
+    {
+      "id": "US-FTC-255-01",
+      "jurisdiction": "US",
+      "domain": "advertising_disclosure",
+      "title": "Endorsement Guides: disclose material connections",
+      "obligation": "Every paid clip or paid endorsement discloses the material connection clearly and conspicuously (unavoidable in social media). Payment per view is a material connection. Advertiser, endorser and agency (16 CFR 255.1(d)-(f)) are each liable.",
+      "source_url": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-255",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": "2023-07-26",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "paid_or_endorsement"
+        ],
+        "subject_kinds": [
+          "zbc_clip",
+          "zbm_work"
+        ]
+      },
+      "check": "disclosure_present",
+      "penalty_note": "Via FTC Act s.5; $53,088/violation only after an order or penalty-offense notice.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-D101-01",
+      "jurisdiction": "US",
+      "domain": "advertising_disclosure",
+      "title": "Disclosure inside the video, early, audio and visual",
+      "obligation": "In video, the disclosure is in the video itself, not only the description; not at the end, not behind MORE, not in a hashtag cluster; audio and visual when there is voice; repeated periodically in live streams.",
+      "source_url": "https://www.ftc.gov/business-guidance/resources/disclosures-101-social-media-influencers",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Nov 2019; page updated 2024-12-03",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "paid_or_endorsement"
+        ],
+        "subject_kinds": [
+          "zbc_clip",
+          "zbm_work"
+        ]
+      },
+      "check": "in_video_label",
+      "penalty_note": "Enforced through s.5 and 16 CFR 255.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-D101-02",
+      "jurisdiction": "US",
+      "domain": "advertising_disclosure",
+      "title": "Approved disclosure words",
+      "obligation": "Acceptable: 'advertisement', 'ad', 'sponsored', '#ad', '#sponsored'. Not acceptable: 'sp', 'spon', 'collab', standalone 'thanks'.",
+      "source_url": "https://www.ftc.gov/business-guidance/resources/disclosures-101-social-media-influencers",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Nov 2019; page updated 2024-12-03",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "paid_or_endorsement"
+        ],
+        "subject_kinds": [
+          "zbc_clip",
+          "zbm_work"
+        ]
+      },
+      "check": "label_vocabulary",
+      "penalty_note": "Enforced through s.5 and 16 CFR 255.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {
+        "accepted": [
+          "advertisement",
+          "ad",
+          "sponsored",
+          "#ad",
+          "#sponsored"
+        ],
+        "rejected": [
+          "sp",
+          "spon",
+          "collab",
+          "thanks"
+        ]
+      }
+    },
+    {
+      "id": "US-FTC-FAQ-01",
+      "jurisdiction": "US",
+      "domain": "advertising_disclosure",
+      "title": "Train and monitor the network; delegation does not relieve",
+      "obligation": "Advertisers need reasonable programs to train and monitor network members; delegating to an outside company does not relieve responsibility; pre-approval recommended. Gate: disclosure-training attestation before clipper activation; monitoring log per payout.",
+      "source_url": "https://www.ftc.gov/business-guidance/resources/ftcs-endorsement-guides-what-people-are-asking",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "FAQ updated 2025-07-15",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "activation",
+        "control"
+      ],
+      "applies_when": {
+        "lanes": [
+          "zbc_creator"
+        ]
+      },
+      "check": "disclosure_training_attested",
+      "penalty_note": "Via s.5.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-465-08",
+      "jurisdiction": "US",
+      "domain": "reviews_metrics",
+      "title": "No buying, selling or distributing fake views",
+      "obligation": "Unlawful to sell or distribute, or purchase or procure, fake indicators of social media influence ('views, plays', likes, followers) known or that should be known to be fake. Payout only on verified views (HR-13).",
+      "source_url": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-D/part-465",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": "2024-10-21",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "verified_views_attested",
+      "penalty_note": "$53,088 per violation (16 CFR 1.98, 2025 level frozen through 2026)",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-465-04",
+      "jurisdiction": "US",
+      "domain": "reviews_metrics",
+      "title": "No pay conditioned on sentiment",
+      "obligation": "No compensation conditioned on expressing a particular sentiment. Campaign pay basis must be reach of disclosed ads (verified views), never positive framing.",
+      "source_url": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-D/part-465",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": "2024-10-21",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation",
+        "payout"
+      ],
+      "applies_when": {
+        "lanes": [
+          "zbc_brand"
+        ],
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "no_sentiment_pay",
+      "penalty_note": "$53,088 per violation (16 CFR 1.98, 2025 level frozen through 2026)",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-465-02",
+      "jurisdiction": "US",
+      "domain": "reviews_metrics",
+      "title": "No fake testimonials or misrepresented experience",
+      "obligation": "No testimonial that misrepresents the reviewer's existence or experience; a creator never claims personal use they do not have.",
+      "source_url": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-D/part-465",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": "2024-10-21",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "personal_use_claim"
+        ]
+      },
+      "check": "personal_use_attested",
+      "penalty_note": "$53,088 per violation (16 CFR 1.98, 2025 level frozen through 2026)",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-465-07",
+      "jurisdiction": "US",
+      "domain": "reviews_metrics",
+      "title": "No review suppression services",
+      "obligation": "ZBM/ZBC does not suppress reviews (threats, false accusations, sentiment-based suppression) for any client.",
+      "source_url": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-D/part-465",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": "2024-10-21",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation"
+      ],
+      "applies_when": {
+        "lanes": [
+          "client",
+          "zbc_brand"
+        ]
+      },
+      "check": "no_review_suppression",
+      "penalty_note": "$53,088 per violation (16 CFR 1.98, 2025 level frozen through 2026)",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-5-01",
+      "jurisdiction": "US",
+      "domain": "claims",
+      "title": "Substantiate claims before they air; escalate health and earnings claims",
+      "obligation": "Every objective claim has a reasonable basis before it airs; health claims need competent and reliable scientific evidence; earnings or income claims (including ZBC recruiting copy such as 'earn $Y per 1,000 views') need typical-results substantiation. A claim file is approved per campaign before scripting.",
+      "source_url": "https://www.ftc.gov/news-events/news/press-releases/2024/09/ftc-announces-crackdown-deceptive-ai-claims-schemes",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Ongoing; Operation AI Comply announced 2024-09-25",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "activation",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "claims_present",
+          "health_or_earnings_claim"
+        ]
+      },
+      "check": "claims_substantiated",
+      "penalty_note": "Injunction and redress under s.5; $53,088/violation if under order. Operation AI Comply cases ran $15.9M-$25M+.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-437-01",
+      "jurisdiction": "US",
+      "domain": "claims",
+      "title": "Business Opportunity / Earnings Claim Rule: proposals only",
+      "obligation": "January 2025 NPRMs are proposals, not in force. Business-opportunity or MLM clients are held for counsel review.",
+      "source_url": "https://www.ftc.gov/news-events/news/press-releases/2025/01/ftc-proposes-rule-changes-new-rule-deter-deceptive-earnings-claims-multilevel-marketers-money-making",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "NPRMs 2025-01-13; no final rule found",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "biz_opp_client"
+        ]
+      },
+      "check": "flag_blocks",
+      "penalty_note": "16 CFR 437 existing rule: $53,088/violation; proposals not in force.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-461-01",
+      "jurisdiction": "US",
+      "domain": "impersonation_ai",
+      "title": "Impersonation Rule: no false affiliation; release for real likeness",
+      "obligation": "Do not pose as, or imply affiliation with, endorsement by or sponsorship from, a business or government. Any real person's likeness or voice needs a signed release on file.",
+      "source_url": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-D/part-461",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": "2024-03-01",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "real_person_likeness",
+          "implied_affiliation"
+        ]
+      },
+      "check": "likeness_consent",
+      "penalty_note": "$53,088 per violation (16 CFR 1.98, 2025 level frozen through 2026)",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-CANSPAM",
+      "jurisdiction": "US",
+      "domain": "email_sms",
+      "title": "CAN-SPAM for every commercial email",
+      "obligation": "Commercial email identifies itself as an ad, has a valid postal address and a working opt-out honored within 10 business days; sender and promoted company are both liable; vendors must be monitored.",
+      "source_url": "https://www.ftc.gov/business-guidance/resources/can-spam-act-compliance-guide-business",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "asset_types": [
+          "email_campaign"
+        ]
+      },
+      "check": "canspam_elements",
+      "penalty_note": "Up to $53,088 per email.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FCC-TCPA-01",
+      "jurisdiction": "US",
+      "domain": "email_sms",
+      "title": "TCPA: prior express written consent; revocation honored",
+      "obligation": "Autodialed or prerecorded marketing calls and texts need prior express written consent (signed, timestamped artifact per number); the one-to-one consent rule was vacated 2025-01-24; revocation by any reasonable means honored within 10 business days (from 2025-04-11).",
+      "source_url": "https://www.mofo.com/resources/insights/250130-eleventh-circuit-vacates-fcc-s-tcpa-one-to-one-consent-rule",
+      "additional_sources": [
+        "https://www.wiley.law/alert-UPDATE-11th-Circuit-Vacates-FCCs-One-to-One-TCPA-Consent-Rule",
+        "https://www.hunton.com/privacy-and-cybersecurity-law-blog/fccs-tcpa-global-revocation-rules-now-effective-january-2027"
+      ],
+      "source_kind": "reg",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Vacatur 2025-01-24; revocation rules 2025-04-11 (secondary)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "asset_types": [
+          "sms_campaign",
+          "autodialed_call"
+        ]
+      },
+      "check": "sms_consent_artifact",
+      "penalty_note": "Private action; per-message amount UNVERIFIED.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FCC-TCPA-02",
+      "jurisdiction": "US",
+      "domain": "email_sms",
+      "title": "TCPA cross-channel revoke-all from 2027-01-31",
+      "obligation": "A revocation in response to one message type applies to all future robocalls/robotexts from the caller; build cross-channel revoke logic before 2027-01-31.",
+      "source_url": "https://www.fcc.gov/document/cgb-extends-effective-date-tcpas-consent-revocation-rule",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": "2027-01-31",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "effective_date_reminder",
+      "penalty_note": "Private action (amount UNVERIFIED).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-COPPA",
+      "jurisdiction": "US",
+      "domain": "children_age",
+      "title": "COPPA: child-directed clients and channels held",
+      "obligation": "Amended COPPA Rule in force (effective 2025-06-23; compliance 2026-04-22). Child-directed clients, products or creator channels are blocked pending counsel; age screens are neutral.",
+      "source_url": "https://www.federalregister.gov/documents/2025/04/22/2025-05904/childrens-online-privacy-protection-rule",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": "2025-06-23",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "child_directed"
+        ]
+      },
+      "check": "flag_blocks",
+      "penalty_note": "$53,088 per violation (16 CFR 1.98, 2025 level frozen through 2026)",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-ROSCA",
+      "jurisdiction": "US",
+      "domain": "consumer_contracts",
+      "title": "Subscriptions: ROSCA governs (Click-to-Cancel vacated)",
+      "obligation": "Subscription checkouts disclose material terms before consent, capture affirmative (unchecked) consent with timestamp, and offer an online cancel path as simple as sign-up. Click-to-Cancel Rule vacated July 2025; FTC ANPRM comments closed 2026-04-13.",
+      "source_url": "https://www.gibsondunn.com/ftc-restarts-negative-option-rulemaking-after-eighth-circuit-vacatur-enforcement-under-rosca-continues/",
+      "additional_sources": [
+        "https://www.federalregister.gov/documents/2026/03/13/2026-04952/rule-concerning-the-use-of-prenotification-negative-option-plans"
+      ],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "asset_types": [
+          "subscription_checkout"
+        ]
+      },
+      "check": "subscription_terms",
+      "penalty_note": "$53,088/violation (ROSCA cross-reference UNVERIFIED).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FTC-HBNR",
+      "jurisdiction": "US",
+      "domain": "privacy",
+      "title": "Health Breach Notification Rule if a health-app client shares data",
+      "obligation": "If a client shares consumer health data with ZBM, activation requires an HBNR service-provider clause and no pixel-based health-data sharing; otherwise not applicable.",
+      "source_url": "https://www.ftc.gov/business-guidance/resources/health-breach-notification-rule-basics-business",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": "2024-07-29",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "health_data_shared"
+        ]
+      },
+      "check": "hbnr_clause",
+      "penalty_note": "$53,088 per violation (16 CFR 1.98, 2025 level frozen through 2026)",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-OFAC-01",
+      "jurisdiction": "US",
+      "domain": "sanctions",
+      "title": "All US persons must comply; strict liability",
+      "obligation": "Every US person, including a one-person California company, complies with OFAC sanctions on a strict-liability basis; any entity 50%+ owned by blocked persons is blocked. Screen before onboarding and before every payout.",
+      "source_url": "https://ofac.treasury.gov/faqs/topic/1501",
+      "additional_sources": [
+        "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-V/part-501/appendix-Appendix%20A%20to%20Part%20501",
+        "https://www.federalregister.gov/documents/2025/01/15/2025-00786/inflation-adjustment-of-civil-monetary-penalties"
+      ],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i08_sanctions",
+      "gates": [
+        "activation",
+        "payout"
+      ],
+      "applies_when": {
+        "lanes": [
+          "zbc_creator"
+        ],
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "sanctions_clear_fresh",
+      "penalty_note": "IEEPA max $377,700 or 2x transaction, whichever greater (2025 level, operative for 2026).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-OFAC-02",
+      "jurisdiction": "US",
+      "domain": "sanctions",
+      "title": "Screening control: SDN + Consolidated, list version, re-screen every payout",
+      "obligation": "Screen name, aliases, DOB and country against the SDN and Consolidated lists with fuzzy matching; store result, timestamp and list version; any potential match opens a hold for manual review; re-screen on every payout run; keep screening lists current (OFAC names failure to update screening software as a root cause).",
+      "source_url": "https://ofac.treasury.gov/media/16331/download?inline",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Framework May 2019",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i08_sanctions",
+      "gates": [
+        "activation",
+        "payout",
+        "control"
+      ],
+      "applies_when": {
+        "lanes": [
+          "zbc_creator"
+        ],
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "sanctions_clear_fresh",
+      "penalty_note": "Program adequacy is a mitigating factor under 31 CFR 501 App. A.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-OFAC-03",
+      "jurisdiction": "US",
+      "domain": "sanctions",
+      "title": "Entity payees: screen owners of 25% or more",
+      "obligation": "For a payee that is a company, collect and screen every owner of 25% or more (50 Percent Rule).",
+      "source_url": "https://ofac.treasury.gov/faqs/topic/1501",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i08_sanctions",
+      "gates": [
+        "activation",
+        "payout"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "entity_payee"
+        ]
+      },
+      "check": "sanctions_owners",
+      "penalty_note": "IEEPA max $377,700 or 2x transaction.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-OFAC-04",
+      "jurisdiction": "US",
+      "domain": "sanctions",
+      "title": "Hard block comprehensively sanctioned jurisdictions",
+      "obligation": "Hard-block payees, creators, clients and campaign targets in Cuba, Iran, North Korea, and Crimea/DNR/LNR and other occupied regions. Syria's comprehensive program ended 2025-07-01 (now list-based, high risk).",
+      "source_url": "https://ofac.treasury.gov/sanctions-programs-and-country-information",
+      "additional_sources": [
+        "https://ofac.treasury.gov/sanctions-programs-and-country-information/paarss"
+      ],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i07_jurisdiction",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {},
+      "check": "jurisdiction_class",
+      "penalty_note": "IEEPA max $377,700 or 2x transaction; strict liability.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-FINCEN-01",
+      "jurisdiction": "US",
+      "domain": "payments_msb",
+      "title": "Model A only: pay creators from own funds for services to ZBC",
+      "obligation": "A person that accepts and transmits funds only integral to its own provision of services is not a money transmitter (31 CFR 1010.100(ff)(5)(ii)). Payout requires the Model A structure (no pooled client funds).",
+      "source_url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1010/subpart-A/section-1010.100",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "pooled_funds_false",
+      "penalty_note": "Unlicensed money transmission (federal/state).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-CA-FIN-2010L",
+      "jurisdiction": "US-CA",
+      "domain": "payments_msb",
+      "title": "Pooled client funds need a 2010(l) agent-of-payee structure",
+      "obligation": "If client funds are pooled and forwarded to creators (Model B), a preexisting written contract must make delivery to ZBC satisfy the client's obligation to the creator; counsel item.",
+      "source_url": "https://law.justia.com/codes/california/code-fin/division-1-2/chapter-2/section-2010/",
+      "additional_sources": [
+        "https://www.law.cornell.edu/regulations/california/10-CCR-80.126.10",
+        "https://www.fincen.gov/sites/default/files/administrative_ruling/FIN-2014-R009.pdf"
+      ],
+      "source_kind": "statute",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "pooled_client_funds"
+        ]
+      },
+      "check": "flag_blocks",
+      "penalty_note": "California money-transmitter licensing exposure.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-STRIPE-KYC",
+      "jurisdiction": "US",
+      "domain": "payments_msb",
+      "title": "Payout rail verification does not replace ZBC's own KYC",
+      "obligation": "The rail must report the payee account verified and payouts enabled, and ZBC keeps its own legal name, address and country record; Stripe: 'Don't rely on Stripe's verification to meet any independent legal KYC or verification requirements.'",
+      "source_url": "https://docs.stripe.com/connect/identity-verification",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "vendor",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "activation",
+        "payout"
+      ],
+      "applies_when": {
+        "lanes": [
+          "zbc_creator"
+        ],
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "rail_kyc_verified",
+      "penalty_note": "No direct penalty; supports OFAC/tax obligations.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-IRS-BWH",
+      "jurisdiction": "US",
+      "domain": "tax",
+      "title": "No payout without W-9 (TIN-matched) or W-8BEN; 24% backup withholding",
+      "obligation": "Backup withholding is 24% when no correct TIN; begin within 30 business days of a CP2100; first B notice within 15 business days. Rule: no payout until a TIN-matched W-9 or a W-8BEN/W-8BEN-E is on file (Finance 31 attests).",
+      "source_url": "https://www.irs.gov/businesses/small-businesses-self-employed/backup-withholding",
+      "additional_sources": [
+        "https://www.irs.gov/pub/irs-pdf/p1281.pdf"
+      ],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "activation",
+        "payout"
+      ],
+      "applies_when": {
+        "lanes": [
+          "zbc_creator"
+        ],
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "tax_form_on_file",
+      "penalty_note": "Withholding liability plus information-return penalties (amounts not verified).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-IRS-TIN",
+      "jurisdiction": "US",
+      "domain": "tax",
+      "title": "TIN Matching before first reportable payout",
+      "obligation": "Validate name/TIN through IRS TIN Matching (e-Services) and store the result for US payees.",
+      "source_url": "https://www.irs.gov/tax-professionals/taxpayer-identification-number-tin-matching",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "subject_kinds": [
+          "zbc_clip"
+        ],
+        "flags_none": [
+          "foreign_payee"
+        ]
+      },
+      "check": "tin_match",
+      "penalty_note": "24% backup withholding on mismatch.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-IRS-1099NEC",
+      "jurisdiction": "US",
+      "domain": "tax",
+      "title": "1099-NEC threshold $2,000 for 2026 payments (indexed from 2027)",
+      "obligation": "Finance tracks YTD payments per payee and files 1099-NEC at $2,000 for payments made in 2026. Not a payout precondition: the W-9/W-8 rule (US-IRS-BWH) applies from the first dollar.",
+      "source_url": "https://www.littler.com/news-analysis/asap/tax-bill-changes-1099-reporting-thresholds",
+      "additional_sources": [
+        "https://www.avalara.com/blog/en/north-america/2025/07/one-big-beautiful-bill-act-1099-reporting-threshold.html",
+        "https://docs.stripe.com/connect/tax-reporting"
+      ],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": "2026-01-01",
+      "effective_note": "Payments after 2025-12-31; Pub. L. 119-21 section numbers UNVERIFIED on primary",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "control_sla",
+      "penalty_note": "IRS information-return penalties (not verified).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-IRS-1099K",
+      "jurisdiction": "US",
+      "domain": "tax",
+      "title": "1099-K threshold $20,000 and 200 transactions",
+      "obligation": "Form 1099-K reporting only when gross payments exceed $20,000 and transactions exceed 200; Finance tracks rail configuration.",
+      "source_url": "https://irs.gov/newsroom/irs-issues-faqs-on-form-1099-k-threshold-under-the-one-big-beautiful-bill-dollar-limit-reverts-to-20000",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "control_sla",
+      "penalty_note": "IRS information-return penalties.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-IRS-FOREIGN",
+      "jurisdiction": "US",
+      "domain": "tax",
+      "title": "Foreign creators: W-8BEN plus services-outside-US attestation",
+      "obligation": "Personal-service income is sourced where services are performed; a creator working abroad needs a W-8BEN and an attestation that services are performed outside the US; any US-performed portion is 30% or treaty rate.",
+      "source_url": "https://www.irs.gov/individuals/international-taxpayers/source-of-income-personal-service-income",
+      "additional_sources": [
+        "https://www.irs.gov/publications/p515"
+      ],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "foreign_payee"
+        ]
+      },
+      "check": "foreign_services_attestation",
+      "penalty_note": "Withholding-agent liability.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-IRS-W8-VALID",
+      "jurisdiction": "US",
+      "domain": "tax",
+      "title": "W-8BEN validity period",
+      "obligation": "W-8BEN is valid through the third calendar year after signing (standard rule, not verified); expired forms block payout.",
+      "source_url": "https://www.irs.gov/forms-pubs/about-form-w-8-ben",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "foreign_payee"
+        ]
+      },
+      "check": "w8_current",
+      "penalty_note": "Presumption rules and withholding liability.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-DMCA-512",
+      "jurisdiction": "US",
+      "domain": "rights_ip",
+      "title": "Rights cleared; no copyright strike on the posting account",
+      "obligation": "Platforms terminate repeat infringers (17 U.S.C. 512(i)(1)(A)); a paid clip needs footage covered by a written sublicense (client -> ZBC -> clipper) and no copyright strike or removal on the account at settlement.",
+      "source_url": "https://www.law.cornell.edu/uscode/text/17/512",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "rights_cleared_no_strike",
+      "penalty_note": "Account termination; infringement liability.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-YT-01",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "YouTube: paid promotion checkbox",
+      "obligation": "Paid promotions are declared with YouTube's paid promotion setting in video details; creator and partners are responsible for legal compliance.",
+      "source_url": "https://support.google.com/youtube/answer/154235",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "platforms": [
+          "youtube"
+        ]
+      },
+      "check": "platform_toggle",
+      "penalty_note": "Platform enforcement; FTC exposure if undisclosed.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-YT-02",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "YouTube: fake engagement policy",
+      "obligation": "No third-party services that artificially inflate views; artificial views are removed; warning -> strikes -> termination (3 strikes in 90 days).",
+      "source_url": "https://support.google.com/youtube/answer/3399767",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "platforms": [
+          "youtube"
+        ],
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "verified_views_attested",
+      "penalty_note": "Strikes and channel termination.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-TT-01",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "TikTok: commercial content disclosure toggle",
+      "obligation": "Branded content (promotion for payment or any other incentive) must enable the commercial content disclosure toggle; the promoted product must be clear without visiting the profile.",
+      "source_url": "https://www.tiktok.com/legal/page/global/bc-policy/en",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Policy last updated November 2023",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "platforms": [
+          "tiktok"
+        ]
+      },
+      "check": "platform_toggle",
+      "penalty_note": "Content removal; FTC exposure if undisclosed.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-TT-02",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "TikTok: branded-content prohibited industries",
+      "obligation": "No branded content for adult, alcohol, tobacco, drugs, gambling and financial schemes, pharmaceuticals and weight loss, political, weapons, counterfeit categories.",
+      "source_url": "https://www.tiktok.com/legal/page/global/bc-policy/en",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Policy last updated November 2023",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "platforms": [
+          "tiktok"
+        ]
+      },
+      "check": "prohibited_category",
+      "penalty_note": "Content removal and account action.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-TT-03",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "TikTok: no artificial engagement, no bulk accounts",
+      "obligation": "No trade in artificial engagement; no accounts operated in bulk, by unauthorized automation, or to distribute high-volume commercial content. Clippers disclose every account used.",
+      "source_url": "https://www.tiktok.com/community-guidelines/en/integrity-authenticity",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Guidelines page dated March 2023",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "activation",
+        "payout"
+      ],
+      "applies_when": {
+        "platforms": [
+          "tiktok"
+        ]
+      },
+      "check": "creator_accounts_disclosed",
+      "penalty_note": "Account bans; loss of paid clips.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-TT-04",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "TikTok: Commercial Music Library for commercial content",
+      "obligation": "Paid clips on TikTok use the Commercial Music Library, a licensed track, or no music; businesses cannot use the general library commercially. Track id declared.",
+      "source_url": "https://ads.tiktok.com/help/article/commercial-music-library",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Page last updated July 2025",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i03_payout_gate",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "platforms": [
+          "tiktok"
+        ],
+        "flags_any": [
+          "music_present"
+        ]
+      },
+      "check": "music_source_declared",
+      "penalty_note": "Muting, removal, infringement claims.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-X-01",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "X: Paid Partnership disclosure on",
+      "obligation": "Posts that are part of a paid partnership published as organic posts must have the 'Paid Partnership' disclosure on.",
+      "source_url": "https://help.x.com/en/rules-and-policies/paid-partnerships-policy",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "platforms": [
+          "x"
+        ]
+      },
+      "check": "platform_toggle",
+      "penalty_note": "Platform enforcement; FTC exposure.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-X-02",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "X: paid-partnership prohibited categories",
+      "obligation": "No paid partnerships for adult, alcohol, contraceptives, dating, drugs, political/social issues for commercial purposes, supplements, pharmaceuticals, tobacco/vaping, weapons, weight loss; AU/EU/UK limits on financial products, crypto, gambling.",
+      "source_url": "https://help.x.com/en/rules-and-policies/paid-partnerships-policy",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "platforms": [
+          "x"
+        ]
+      },
+      "check": "prohibited_category",
+      "penalty_note": "Platform enforcement.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-SNAP-01",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "Snapchat: paid partnership tool",
+      "obligation": "Content you were incentivized to post (money or free gifts) is labelled with Snap's paid partnership tool; disclosures visible and appropriate.",
+      "source_url": "https://www.snap.com/terms/commercial-content",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "primary",
+      "effective_date": "2026-07-02",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-10-26",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "platforms": [
+          "snapchat"
+        ]
+      },
+      "check": "platform_toggle",
+      "penalty_note": "Platform enforcement.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-META-01",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "Meta (Instagram/Facebook): branded content label and inauthentic behavior",
+      "obligation": "Meta's branded content policy (paid partnership label) and inauthentic-behavior policy could not be read from primary sources. Do not quote. Blocks Meta clips until verified.",
+      "source_url": "https://www.facebook.com/business/help/788022387934546",
+      "additional_sources": [
+        "https://help.instagram.com/116947042301556",
+        "https://transparency.meta.com/policies/community-standards/inauthentic-behavior/"
+      ],
+      "source_kind": "platform-policy",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "platforms": [
+          "instagram",
+          "facebook"
+        ]
+      },
+      "check": "platform_toggle",
+      "penalty_note": "Unknown (unread).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PLT-TWITCH-01",
+      "jurisdiction": "ALL",
+      "domain": "platform_policy",
+      "title": "Twitch: sponsorship disclosure",
+      "obligation": "Whether Twitch imposes a mandatory disclosure label is UNVERIFIED (safety-center page 404). Blocks Twitch until verified.",
+      "source_url": "https://www.twitch.tv/sponsorships/learn",
+      "additional_sources": [],
+      "source_kind": "platform-policy",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "platforms": [
+          "twitch"
+        ]
+      },
+      "check": "platform_toggle",
+      "penalty_note": "Unknown (unread).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "AGE-01",
+      "jurisdiction": "ALL",
+      "domain": "children_age",
+      "title": "Age assurance: neutral DOB plus one highly effective method",
+      "obligation": "Self-declaration is not highly effective. Accepted methods: open banking, photo-ID matching, facial age estimation, mobile-operator check, credit-card check, digital identity service, email-based estimation. The DOB field is neutral (no default, no pre-checked 18+ box). Result stored as pass/fail with vendor, method, timestamp; no ID number stored.",
+      "source_url": "https://www.ofcom.org.uk/online-safety/protecting-children/age-checks-to-protect-children-online",
+      "additional_sources": [
+        "https://www.federalregister.gov/documents/2025/04/22/2025-05904/childrens-online-privacy-protection-rule"
+      ],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation"
+      ],
+      "applies_when": {
+        "lanes": [
+          "zbc_creator"
+        ]
+      },
+      "check": "age_method_highly_effective",
+      "penalty_note": "Supports HR-02; COPPA $53,088/violation if a child is onboarded.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-NY-396B",
+      "jurisdiction": "US-NY",
+      "domain": "impersonation_ai",
+      "title": "New York GBL 396-b: disclose synthetic performers in ads",
+      "obligation": "Anyone who produces or creates an ad conspicuously discloses a synthetic performer when it has actual knowledge. Applies to any ad seen in New York.",
+      "source_url": "https://www.nysenate.gov/legislation/bills/2025/S8420/amendment/A",
+      "additional_sources": [
+        "https://www.cooley.com/news/insight/2026/2026-01-29-new-york-enacts-synthetic-performer-disclosure-law-for-advertisements-including-those-using-generative-ai"
+      ],
+      "source_kind": "statute",
+      "source_quality": "primary",
+      "effective_date": "2026-06-09",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "synthetic_performer"
+        ],
+        "jurisdictions": [
+          "US"
+        ]
+      },
+      "check": "ai_disclosure_synthetic",
+      "penalty_note": "$1,000 first violation; $5,000 each subsequent.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-TN-ELVIS",
+      "jurisdiction": "US-TN",
+      "domain": "impersonation_ai",
+      "title": "Tennessee ELVIS Act: consent for real voice or likeness",
+      "obligation": "No commercial use of an identifiable person's voice or AI voice replica without written consent.",
+      "source_url": "https://www.dwt.com/blogs/artificial-intelligence-law-advisor/2024/04/tennessee-elvis-act-ai-voice-replica",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": "2024-07-01",
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "real_person_likeness"
+        ],
+        "jurisdictions": [
+          "US"
+        ]
+      },
+      "check": "likeness_consent",
+      "penalty_note": "Civil and criminal; treble damages for knowing use.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-UT-AIPA",
+      "jurisdiction": "US-UT",
+      "domain": "impersonation_ai",
+      "title": "Utah AI Policy Act: GenAI disclosure for consumer chatbots",
+      "obligation": "Disclose GenAI use on request and proactively in high-risk conversational interactions; sunsets July 2027.",
+      "source_url": "https://www.davispolk.com/insights/client-update/utah-scales-back-reach-generative-ai-consumer-protection-law",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": "2025-05-07",
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "asset_types": [
+          "chatbot"
+        ],
+        "jurisdictions": [
+          "US"
+        ]
+      },
+      "check": "chatbot_disclosure",
+      "penalty_note": "$2,500 per violation.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-POLITICAL",
+      "jurisdiction": "US",
+      "domain": "political",
+      "title": "Political-deepfake laws (28 states): no political or candidate ads without counsel",
+      "obligation": "28 states regulate deepfakes in political communications; no political or candidate advertising without counsel review.",
+      "source_url": "https://ballotpedia.org/AI_deepfake_policy_in_California",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Count as of 2025-09-12",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "political_content"
+        ]
+      },
+      "check": "flag_blocks",
+      "penalty_note": "Varies by state.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-STATE-AI-ACTS",
+      "jurisdiction": "US",
+      "domain": "impersonation_ai",
+      "title": "Colorado SB 26-189 and Texas TRAIGA: monitor",
+      "obligation": "Colorado SB 26-189 (effective 2027-01-01) targets consequential decisions; Texas TRAIGA (effective 2026-01-01) has intent-based prohibitions and no private-sector disclosure duty. Monitor; no ad-creative gate.",
+      "source_url": "https://www.mcdermottlaw.com/insights/colorado-ai-law-in-flux-comprehensive-replacement-bill-signed-after-federal-court-blocks-predecessors-enforcement/",
+      "additional_sources": [
+        "https://www.klgates.com/Pared-Back-Version-of-the-Texas-Responsible-Artificial-Intelligence-Governance-Act-Signed-Into-Law-6-24-2025"
+      ],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "CO 2027-01-01; TX 2026-01-01",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "effective_date_reminder",
+      "penalty_note": "TX $10,000-$200,000 (AG only).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-CA-CALOPPA",
+      "jurisdiction": "US-CA",
+      "domain": "privacy",
+      "title": "CalOPPA: conspicuous privacy policy",
+      "obligation": "Any commercial site collecting PII from Californians posts a conspicuous privacy policy (details UNVERIFIED; statute not fetched).",
+      "source_url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=BPC&sectionNum=22575",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "asset_types": [
+          "site",
+          "landing_page",
+          "form",
+          "portal"
+        ],
+        "flags_any": [
+          "collects_pii"
+        ]
+      },
+      "check": "required_docs_current",
+      "penalty_note": "UCL enforcement (UNVERIFIED).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-CA-DELETE-ACT",
+      "jurisdiction": "US-CA",
+      "domain": "privacy",
+      "title": "Delete Act: no audience-data sale without data-broker analysis",
+      "obligation": "A business selling data about consumers it has no direct relationship with registers as a data broker and processes DROP deletions (live 2026-08-01, 45-day login cadence).",
+      "source_url": "https://technologylaw.fkks.com/post/102lp8c/new-law-and-regulations-expand-californias-data-broker-oversight",
+      "additional_sources": [
+        "https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202520260SB361"
+      ],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": "2026-08-01",
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "audience_data_sale"
+        ]
+      },
+      "check": "flag_blocks",
+      "penalty_note": "$200/day unregistered; $200 per unprocessed deletion request.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-CA-AI-TRANSPARENCY",
+      "jurisdiction": "US-CA",
+      "domain": "impersonation_ai",
+      "title": "California AB 2013 / SB 942 applicability",
+      "obligation": "AB 2013 (2026-01-01) reaches ZBM only if it publishes or substantially modifies a GenAI model; SB 942 (operative 2026-08-02) only providers with over 1M monthly users. Annual applicability check.",
+      "source_url": "https://www.joneswalker.com/en/insights/blogs/ai-law-blog/when-courts-become-the-regulator-the-xai-decision-and-what-californias-ai-trans.html?id=102mnuj",
+      "additional_sources": [
+        "https://www.aoshearman.com/en/insights/ao-shearman-on-tech/zooming-in-on-ai-california-evolving-ai-legal-landscape-entering-2026"
+      ],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "control_sla",
+      "penalty_note": "UCL; SB 942 $5,000/violation/day.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-CA-AADC",
+      "jurisdiction": "US-CA",
+      "domain": "children_age",
+      "title": "Age-Appropriate Design Code: partially revived",
+      "obligation": "Ninth Circuit (2026-03-12) revived age estimation and default-high-privacy provisions; readings conflict on dark patterns. Consumer client sites likely accessed by children are held until the opinion is read.",
+      "source_url": "https://law.justia.com/cases/federal/appellate-courts/ca9/25-2366/25-2366-2026-03-12.html",
+      "additional_sources": [
+        "https://www.cooley.com/news/insight/2026/2026-03-30-netchoice-v-bonta-ninth-circuit-narrows-injunction-against-californias-ageappropriate-design-code-act"
+      ],
+      "source_kind": "case-law",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "child_access_likely"
+        ]
+      },
+      "check": "flag_blocks",
+      "penalty_note": "CA AG enforcement (amounts not verified).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-MINI-TCPA",
+      "jurisdiction": "US",
+      "domain": "email_sms",
+      "title": "State mini-TCPA laws (FL, OK, MD, WA, TX, AZ): universal SMS profile",
+      "obligation": "Marketing texts/calls: signed timestamped written consent; recipient-local 8am-8pm (FL allows to 9pm); at most 3 messages per 24 hours on one subject (OK, MD); immediate opt-out; Texas registration unless consent-based.",
+      "source_url": "https://www.bytebacklaw.com/2026/07/looking-back-on-the-last-year-of-state-level-tcpa-updates/",
+      "additional_sources": [
+        "https://www.insideprivacy.com/advertising-marketing/tcpa/state-telemarketing-updates-arizona-washington-and-maryland/",
+        "https://www.kelleydrye.com/viewpoints/blogs/ad-law-access/marylands-new-telemarketing-law-now-in-effect"
+      ],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "asset_types": [
+          "sms_campaign",
+          "autodialed_call"
+        ]
+      },
+      "check": "sms_consent_artifact",
+      "penalty_note": "FL/OK $500-$1,500 per message; WA greater of actual or $1,000; private actions.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-CA",
+      "jurisdiction": "US-CA",
+      "domain": "privacy",
+      "title": "CCPA/CPRA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: $25M revenue OR 100k consumers OR 50%+ revenue from selling/sharing. Universal opt-out (GPC) required: Yes. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 2020 (CPRA Jan 2023) (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,988 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-VA",
+      "jurisdiction": "US-VA",
+      "domain": "privacy",
+      "title": "VCDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 100k, or 25k + 50%. Universal opt-out (GPC) required: No. Cure period: 30 days. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 2023 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-CO",
+      "jurisdiction": "US-CO",
+      "domain": "privacy",
+      "title": "CPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 100k, or 25k + revenue from sales. Universal opt-out (GPC) required: Yes. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jul 2023 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $20,000 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-CT",
+      "jurisdiction": "US-CT",
+      "domain": "privacy",
+      "title": "CTDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 35k (lowered 2026-07-01), or 25k + 25%; notice must disclose LLM-training use. Universal opt-out (GPC) required: Yes. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [
+        "https://www.morganlewis.com/pubs/2026/07/us-state-consumer-privacy-law-update-notable-changes-across-existing-frameworks"
+      ],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jul 2023 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $5,000 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-UT",
+      "jurisdiction": "US-UT",
+      "domain": "privacy",
+      "title": "UCPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: $25M revenue AND (100k or 25k + 50%). Universal opt-out (GPC) required: No. Cure period: 30 days. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Dec 2023 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-TX",
+      "jurisdiction": "US-TX",
+      "domain": "privacy",
+      "title": "TDPSA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: No numeric threshold; SBA small-business exemption except sensitive-data consent (nuance UNVERIFIED). Universal opt-out (GPC) required: Yes. Cure period: 30 days. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jul 2024 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-OR",
+      "jurisdiction": "US-OR",
+      "domain": "privacy",
+      "title": "OCPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 100k, or 25k + 25%. Universal opt-out (GPC) required: Yes. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jul 2024 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-MT",
+      "jurisdiction": "US-MT",
+      "domain": "privacy",
+      "title": "MCDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 25k, or 15k + 25%. Universal opt-out (GPC) required: Yes. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Oct 2024 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-FL",
+      "jurisdiction": "US-FL",
+      "domain": "privacy",
+      "title": "FDBR comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: $1B global revenue AND platform/ad conditions. Universal opt-out (GPC) required: No. Cure period: 45 days. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jul 2024 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $50,000 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-DE",
+      "jurisdiction": "US-DE",
+      "domain": "privacy",
+      "title": "DPDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 35k, or 10k + 20%. Universal opt-out (GPC) required: Yes. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 2025 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $10,000 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-IA",
+      "jurisdiction": "US-IA",
+      "domain": "privacy",
+      "title": "ICDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 100k, or 25k + 50%. Universal opt-out (GPC) required: No. Cure period: 90 days. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 2025 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-NE",
+      "jurisdiction": "US-NE",
+      "domain": "privacy",
+      "title": "NDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: No numeric threshold; SBA small-business exemption. Universal opt-out (GPC) required: Yes. Cure period: 30 days. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 2025 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-NH",
+      "jurisdiction": "US-NH",
+      "domain": "privacy",
+      "title": "NHPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 35k, or 10k + 25%. Universal opt-out (GPC) required: Yes. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 2025 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $10,000 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-NJ",
+      "jurisdiction": "US-NJ",
+      "domain": "privacy",
+      "title": "NJDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 100k, or 25k + 50%. Universal opt-out (GPC) required: Yes. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 2025 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $10,000 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-TN",
+      "jurisdiction": "US-TN",
+      "domain": "privacy",
+      "title": "TIPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: $25M revenue AND (175k or 25k + 50%). Universal opt-out (GPC) required: No. Cure period: 60 days. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jul 2025 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-MN",
+      "jurisdiction": "US-MN",
+      "domain": "privacy",
+      "title": "MCDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 100k, or 25k + 25%. Universal opt-out (GPC) required: Yes. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jul 2025 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-MD",
+      "jurisdiction": "US-MD",
+      "domain": "privacy",
+      "title": "MODPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 35k, or 10k + 20%. Universal opt-out (GPC) required: Yes. Cure period: 60 days. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Oct 2025 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $10,000 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-IN",
+      "jurisdiction": "US-IN",
+      "domain": "privacy",
+      "title": "INCDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 100k, or 25k + 50%. Universal opt-out (GPC) required: No. Cure period: 30 days per tracker; another source says removed (CQ-09). Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 1 2026 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-KY",
+      "jurisdiction": "US-KY",
+      "domain": "privacy",
+      "title": "KCDPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 100k, or 25k + 50%. Universal opt-out (GPC) required: No. Cure period: 30 days per tracker; another source says removed (CQ-09). Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 1 2026 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $7,500 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-RI",
+      "jurisdiction": "US-RI",
+      "domain": "privacy",
+      "title": "RIDTPPA comprehensive privacy law: threshold counter",
+      "obligation": "Applies once ZBM crosses: 35k, or 10k + 20%. Universal opt-out (GPC) required: No. Cure period: None. Keep a per-state consumer counter; below threshold, no gate.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": "Jan 1 2026 (tracker)",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "threshold_counter",
+      "penalty_note": "Max $10,000 per violation (tracker figure).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-PENDING",
+      "jurisdiction": "US",
+      "domain": "privacy",
+      "title": "Enacted, not yet effective: LA, OK, AL, VT",
+      "obligation": "Louisiana and Oklahoma 2027-01-01; Alabama 2027-05-01; Vermont 2028-01-01. Add counters before each date.",
+      "source_url": "https://www.venable.com/insights/publications/2026/07/2026-mid-year-state-privacy-law-update",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": "2027-01-01",
+      "effective_note": "Earliest of the four",
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "effective_date_reminder",
+      "penalty_note": "Per statute (not extracted).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-PRIV-GPC",
+      "jurisdiction": "US",
+      "domain": "privacy",
+      "title": "Honor Global Privacy Control on agency-run sites",
+      "obligation": "Twelve states require recognition of universal opt-out signals (CA, CO, CT, DE, MD, MN, MT, NE, NH, NJ, OR, TX). Report: honor GPC on every agency-operated site now.",
+      "source_url": "https://privacylawmap.com/compare",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "control_sla",
+      "penalty_note": "CA $7,988/violation; Healthline paid $1.55M for ignoring GPC.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "US-CPPA-2025",
+      "jurisdiction": "US-CA",
+      "domain": "privacy",
+      "title": "CPPA 2025 regulations (risk assessments, cyber audits, ADMT)",
+      "obligation": "Risk assessments from 2026-01-01; ADMT 2027-01-01; attestations and certifications 2028-2030. Applies only to CCPA businesses; clients may flow expectations down.",
+      "source_url": "https://cppa.ca.gov/announcements/2025/20250923.html",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": "2026-01-01",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "ccpa_business"
+        ]
+      },
+      "check": "threshold_counter",
+      "penalty_note": "CCPA penalties.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "EU-GDPR-27",
+      "jurisdiction": "EU",
+      "domain": "privacy",
+      "title": "GDPR reach and Art. 27 representative",
+      "obligation": "GDPR applies to a non-EU company offering services to or monitoring people in the EU; an Art. 27 representative is required unless processing is occasional and low risk (counsel item CQ-05). Keep EU creator data minimal; no EU behavioural tracking on ZBM pages.",
+      "source_url": "https://www.edpb.europa.eu/sites/default/files/files/file1/edpb_guidelines_3_2018_territorial_scope_after_public_consultation_en_1.pdf",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i05_control_monitor",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "control_sla",
+      "penalty_note": "Art. 27 breaches: EUR 10M / 2% tier.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "EU-AIACT-50",
+      "jurisdiction": "EU",
+      "domain": "impersonation_ai",
+      "title": "EU AI Act Art. 50(4): disclose AI-generated or manipulated media",
+      "obligation": "Deployers who generate or manipulate a real person's image, audio or video disclose it; reaches third-country deployers whose output is used in the EU; applicable 2026-08-02, not postponed by the Digital Omnibus.",
+      "source_url": "https://www.gibsondunn.com/eu-ai-act-omnibus-agreement-postponed-high-risk-deadlines-and-other-key-changes/",
+      "additional_sources": [
+        "https://www.cyberlawwatch.com/2026/07/31/eu-digital-omnibus-on-ai-enters-into-force/"
+      ],
+      "source_kind": "reg",
+      "source_quality": "secondary",
+      "effective_date": "2026-08-02",
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "synthetic_performer",
+          "ai_manipulated_media"
+        ],
+        "jurisdictions": [
+          "DE",
+          "NL",
+          "IE",
+          "ES",
+          "IT"
+        ]
+      },
+      "check": "ai_disclosure_synthetic",
+      "penalty_note": "Up to EUR 15M or 3% of turnover.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "EU-EAA",
+      "jurisdiction": "EU",
+      "domain": "accessibility",
+      "title": "European Accessibility Act for consumer e-commerce",
+      "obligation": "Applies from 2025-06-28 to any provider offering e-commerce services to EU consumers; microenterprise exemption wording UNVERIFIED. Client storefronts targeting EU need it.",
+      "source_url": "https://www.twobirds.com/en/insights/2025/a-guide-to-navigating-the-european-accessibility-act-for-online-retailers-service-providers-and-plat",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "secondary",
+      "effective_date": "2025-06-28",
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i10_accessibility",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "consumer_ecommerce"
+        ],
+        "jurisdictions": [
+          "DE",
+          "NL",
+          "IE",
+          "ES",
+          "IT"
+        ]
+      },
+      "check": "accessibility_pass",
+      "penalty_note": "National penalties.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "FR-LOI-2023-451",
+      "jurisdiction": "FR",
+      "domain": "advertising_disclosure",
+      "title": "France influencer law: refuse until counsel",
+      "obligation": "Non-EU influencers targeting France need an EU legal representative and civil-liability insurance; written contracts; labels 'publicité' or 'collaboration commerciale' for the whole promotion; active DGCCRF unit. France is refused (HR-07).",
+      "source_url": "https://www.economie.gouv.fr/influenceur-createur-contenu-mesures-encadrement",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Loi of 9 June 2023",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i07_jurisdiction",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "FR"
+        ]
+      },
+      "check": "jurisdiction_class",
+      "penalty_note": "Criminal referral; EUR 300,000 / 2 years (UNVERIFIED on primary).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "IT-AGCOM",
+      "jurisdiction": "IT",
+      "domain": "advertising_disclosure",
+      "title": "Italy AGCOM: immediately visible ad label",
+      "obligation": "Commercial content intended for users in Italy carries an immediately visible label ('Pubblicità', 'ADV', 'Sponsorizzato'); hashtags or brand tags alone are insufficient. Registration only at 500k followers or 1M average monthly views.",
+      "source_url": "https://www.agcom.it/influencer-linee-guida-codice-di-condotta-e-faq",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Delibera 197/25/CONS published 2025-08-05",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "IT"
+        ]
+      },
+      "check": "local_label",
+      "penalty_note": "Warnings and proportionate fines (amounts not stated).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "ES-RD444",
+      "jurisdiction": "ES",
+      "domain": "advertising_disclosure",
+      "title": "Spain RD 444/2024: special-relevance creator registration",
+      "obligation": "Creators with 300,000 EUR+ platform income and 1M followers on one platform (or 2M aggregate) and 24+ videos a year must register. Spanish creators attest they are below the threshold or are held.",
+      "source_url": "https://www.boe.es/buscar/act.php?id=BOE-A-2024-8716",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "primary",
+      "effective_date": "2024-05-02",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2027-03-25",
+      "status": "verified",
+      "owner_intelligence": "i02_activation_gate",
+      "gates": [
+        "activation"
+      ],
+      "applies_when": {
+        "lanes": [
+          "zbc_creator"
+        ],
+        "jurisdictions": [
+          "ES"
+        ],
+        "flags_any": [
+          "es_special_relevance"
+        ]
+      },
+      "check": "flag_blocks",
+      "penalty_note": "Ley 13/2022 sanctions.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "ES-LABEL",
+      "jurisdiction": "ES",
+      "domain": "advertising_disclosure",
+      "title": "Spain: local ad label ('Publicidad')",
+      "obligation": "Label text 'Publicidad' comes from the report's EU kit; no Spanish primary source was cited.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "ES"
+        ]
+      },
+      "check": "local_label",
+      "penalty_note": "Unknown.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "DE-UWG-5A",
+      "jurisdiction": "DE",
+      "domain": "advertising_disclosure",
+      "title": "Germany UWG 5a: label commercial purpose ('Werbung'/'Anzeige')",
+      "obligation": "Failing to identify a commercial purpose is misleading; enforced privately (competitor cease-and-desist). Statute not fetched.",
+      "source_url": "https://www.gesetze-im-internet.de/uwg_2004/__5a.html",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "DE"
+        ]
+      },
+      "check": "local_label",
+      "penalty_note": "Private enforcement (characterization UNVERIFIED).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "NL-CVDM",
+      "jurisdiction": "NL",
+      "domain": "advertising_disclosure",
+      "title": "Netherlands: CvdM supervision and label ('Reclame'/'Advertentie')",
+      "obligation": "CvdM supervises all video uploaders since 2025-06-16 (registration only at 100k followers); ad labelling required; label text source (Reclame Code) not fetched.",
+      "source_url": "https://mediareport.nl/mediaregulering/03062025/commissariaat-voor-de-media-breidt-actief-toezicht-op-influencers-uit/",
+      "additional_sources": [],
+      "source_kind": "reg",
+      "source_quality": "secondary",
+      "effective_date": "2025-06-16",
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "NL"
+        ]
+      },
+      "check": "local_label",
+      "penalty_note": "One fine of EUR 6,075 by mid-2025.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "IE-LABEL",
+      "jurisdiction": "IE",
+      "domain": "advertising_disclosure",
+      "title": "Ireland: ad label rule",
+      "obligation": "The report names Ireland as conditional but cites no Irish rule or label. Unverified until sourced.",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "IE"
+        ]
+      },
+      "check": "local_label",
+      "penalty_note": "Unknown.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "UK-HIDDEN-ADS",
+      "jurisdiction": "GB",
+      "domain": "advertising_disclosure",
+      "title": "UK hidden advertising: rules apply across the supply chain",
+      "obligation": "Ads must be obviously identifiable (CAP Code); undisclosed paid editorial (DMCC Banned Practice 12) and fake or concealed incentivised reviews (BP13) are banned; liability runs to creators, brands, platforms and agencies. Paid clips that look like organic fan content are BP12.",
+      "source_url": "https://assets.publishing.service.gov.uk/media/68b81754536d629f9c82aa16/Who_regulates_hidden_advertising.pdf",
+      "additional_sources": [
+        "https://www.ashurstperkinscoie.com/en/insights/lessons-from-the-first-year-of-the-new-consumer-enforcement-regime/"
+      ],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": "2025-04-06",
+      "effective_note": null,
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "GB"
+        ]
+      },
+      "check": "disclosure_present",
+      "penalty_note": "CMA fines up to 10% of global turnover since 2025-04-06 (secondary).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "CA-CASL",
+      "jurisdiction": "CA",
+      "domain": "email_sms",
+      "title": "CASL: consent for any commercial message accessed in Canada",
+      "obligation": "A commercial electronic message accessed from a computer in Canada needs consent, identification and an unsubscribe, wherever the sender is. Statute not fetched.",
+      "source_url": "https://laws-lois.justice.gc.ca/eng/acts/E-1.6/",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i04_publish_gate",
+      "gates": [
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "CA"
+        ],
+        "asset_types": [
+          "email_campaign",
+          "sms_campaign",
+          "dm_campaign"
+        ]
+      },
+      "check": "no_cold_outbound_ca",
+      "penalty_note": "AMPs up to CAD 10M per violation (organizations).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "CA-COMPBUREAU",
+      "jurisdiction": "CA",
+      "domain": "advertising_disclosure",
+      "title": "Competition Bureau: disclose all material connections",
+      "obligation": "Influencers disclose all material connections prominently, on each platform, without clicking to expand; the Act applies to anyone promoting a product or business interest.",
+      "source_url": "https://competition-bureau.canada.ca/en/deceptive-marketing-practices/types-deceptive-marketing-practices/influencer-marketing-and-competition-act",
+      "additional_sources": [],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "Page dated 2022-01-19",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i09_disclosure",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "CA"
+        ]
+      },
+      "check": "disclosure_present",
+      "penalty_note": "Competition Act AMPs (statute not fetched).",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "CA-QC-LAW25",
+      "jurisdiction": "CA-QC",
+      "domain": "privacy",
+      "title": "Quebec Law 25: refuse until counsel",
+      "obligation": "Applies with no threshold to anyone carrying on an enterprise in Quebec; opt-in consent before identifying trackers; private right of action. Quebec is refused (HR-07).",
+      "source_url": "https://www.bclplaw.com/en-US/events-insights-news/quebec-law-no-25-a-little-known-privacy-law-with-a-big-reach.html",
+      "additional_sources": [],
+      "source_kind": "statute",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i07_jurisdiction",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "CA-QC"
+        ]
+      },
+      "check": "jurisdiction_class",
+      "penalty_note": "Penal fines to CAD 25M or 4% of worldwide turnover.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "PRG-ECCP",
+      "jurisdiction": "US",
+      "domain": "program",
+      "title": "Program design: DOJ ECCP, ISO 37301 4.5/4.6, NIST GV.OC-03",
+      "obligation": "Maintain an obligation register with dated reviews and evidence; identify new and changed obligations; data access to test controls; human baseline over AI decisions and fast correction of AI errors.",
+      "source_url": "https://www.justice.gov/criminal/criminal-fraud/page/file/937501/dl?inline=",
+      "additional_sources": [
+        "https://cdn.standards.iteh.ai/samples/75080/98db41625e0445a193a12f005dd5f30b/ISO-37301-2021.pdf",
+        "https://nvlpubs.nist.gov/nistpubs/CSWP/NIST.CSWP.29.pdf"
+      ],
+      "source_kind": "guidance",
+      "source_quality": "primary",
+      "effective_date": null,
+      "effective_note": "ECCP updated September 2024",
+      "verified_at": "2026-09-26",
+      "expires_at": "2026-12-25",
+      "status": "verified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "control_sla",
+      "penalty_note": "Program adequacy affects charging and penalties.",
+      "counsel_flag": false,
+      "report_ref": null,
+      "parameters": {}
+    },
+    {
+      "id": "CQ-01",
+      "jurisdiction": "US-CA",
+      "domain": "counsel",
+      "title": "Are ZBC's clippers independent contractors under California AB 5's ABC test, and does any AB 2257 creative exemption fit?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: If ZBC's business *is* producing and posting clips, the \"B\" prong fits poorly; misclassification liability is state-level and retroactive",
+      "source_url": "https://ogletree.com/insights-resources/blog-posts/ab-2257-enacts-significant-changes-to-ab-5-on-classification-of-workers-as-independent-contractors/",
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-02",
+      "jurisdiction": "US",
+      "domain": "counsel",
+      "title": "If ZBC ever pools client funds and forwards them to creators (Model B), do the FinCEN payment-processor conditions and Cal. Fin. Code §2010(l) \"agent of the payee\" exemption cover it, and what contract language is required?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: Money-transmitter licensing is a strict regulatory line",
+      "source_url": "https://www.fincen.gov/sites/default/files/administrative_ruling/FIN-2014-R009.pdf",
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "pooled_client_funds"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-03",
+      "jurisdiction": "US",
+      "domain": "counsel",
+      "title": "Can a disclosed pay-per-view ad clip be a \"testimonial\" under 16 CFR Part 465, and does paying only for verified views of disclosed ads keep ZBC outside §465.4?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: No FTC guidance found on point; $53,088 per violation",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-04",
+      "jurisdiction": "US",
+      "domain": "counsel",
+      "title": "For foreign clippers, how is income sourced when editing happens abroad but views come from US audiences, and how are \"days in US\" allocated?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: Pub 515 rule is clear on services location but the pay-per-view fact pattern is untested",
+      "source_url": "https://www.irs.gov/publications/p515",
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "foreign_payee"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-05",
+      "jurisdiction": "EU",
+      "domain": "counsel",
+      "title": "Does a handful of EU/UK creators' onboarding data qualify for the GDPR / UK GDPR Art. 27(2) \"occasional processing\" exemption, or must ZBM appoint EU and UK representatives?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: No regulator guidance found on the fact pattern; Art. 27 breaches sit in the €10M/2% tier",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-06",
+      "jurisdiction": "FR",
+      "domain": "counsel",
+      "title": "Does France's Loi 2023-451 Art. 9 (representative + insurance) bind a non-EU *agency* managing influencers who target France, not just the influencers?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: Légifrance was inaccessible; secondary sources only",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "FR"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-07",
+      "jurisdiction": "EU",
+      "domain": "counsel",
+      "title": "Does a self-serve marketplace where clients book creators make ZBC a DAC7 / UK / Canada \"platform operator\" with annual reporting duties?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: Directive text not fetched; reporting regimes carry their own penalties",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "activation"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "marketplace"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-08",
+      "jurisdiction": "US-NY",
+      "domain": "counsel",
+      "title": "Which NY-visible clips need a GBL §396-b \"synthetic performer\" disclosure, and what counts as \"conspicuous\" given the statute does not define it?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: New law (June 9, 2026), no rulings yet",
+      "source_url": "https://www.cooley.com/news/insight/2026/2026-01-29-new-york-enacts-synthetic-performer-disclosure-law-for-advertisements-including-those-using-generative-ai",
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "synthetic_performer"
+        ],
+        "jurisdictions": [
+          "US"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-09",
+      "jurisdiction": "US",
+      "domain": "counsel",
+      "title": "Does the Texas TDPSA sensitive-data consent rule reach an SBA small business, and do Indiana and Kentucky retain a cure period?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: Secondary sources conflict on both",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-10",
+      "jurisdiction": "US-CA",
+      "domain": "counsel",
+      "title": "Is ZBM a \"data broker\" under the Delete Act for any audience data it holds, and what is the annual registration window and fee?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: Direct-relationship test is fact-specific; $200/day penalties",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "activation",
+        "publish"
+      ],
+      "applies_when": {
+        "flags_any": [
+          "audience_data_sale"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-11",
+      "jurisdiction": "US",
+      "domain": "counsel",
+      "title": "What creator-agreement venue, arbitration and governing-law terms hold across states, and does the minimum-live-period forfeiture survive state wage-type challenges?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: Enforceability is jurisdictional",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "payout"
+      ],
+      "applies_when": {
+        "subject_kinds": [
+          "zbc_clip"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-12",
+      "jurisdiction": "US",
+      "domain": "counsel",
+      "title": "Do paying out-of-state creators create foreign-qualification or income-tax nexus in any state, and is ZBM's client-portal subscription taxable SaaS anywhere?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: No fetched source addressed it; CPA/SALT item",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-13",
+      "jurisdiction": "ALL",
+      "domain": "counsel",
+      "title": "May ZBM crawl X's and Meta's policy pages for change detection, or must it rely on a third-party service or written consent?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: X's terms prohibit crawling \"in any form, for any purpose\"",
+      "source_url": "https://techcrunch.com/2023/09/08/x-updates-its-terms-to-ban-crawling-and-scraping",
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "secondary",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "control"
+      ],
+      "applies_when": {},
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    },
+    {
+      "id": "CQ-14",
+      "jurisdiction": "CA-QC",
+      "domain": "counsel",
+      "title": "Do clients selling into Quebec trigger Charter of the French Language obligations that ZBM's creative must meet?",
+      "obligation": "Counsel-only question; stays red until counsel or a CPA signs a memo. Why counsel-only: Not researched",
+      "source_url": null,
+      "additional_sources": [],
+      "source_kind": "counsel-question",
+      "source_quality": "none",
+      "effective_date": null,
+      "effective_note": null,
+      "verified_at": null,
+      "expires_at": null,
+      "status": "unverified",
+      "owner_intelligence": "i01_register",
+      "gates": [
+        "activation",
+        "payout",
+        "publish"
+      ],
+      "applies_when": {
+        "jurisdictions": [
+          "CA-QC"
+        ]
+      },
+      "check": "counsel_memo",
+      "penalty_note": "See question.",
+      "counsel_flag": true,
+      "report_ref": "Counsel-only questions",
+      "parameters": {}
+    }
+  ]
+}

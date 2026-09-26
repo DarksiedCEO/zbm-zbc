@@ -1,0 +1,46 @@
+"""Typed errors. The API maps each class to exactly one HTTP status."""
+
+from __future__ import annotations
+
+
+class ComplianceError(Exception):
+    status_code = 500
+
+    def __init__(self, reason: str, **body):
+        super().__init__(reason)
+        self.reason = reason[:1000]
+        self.body = body
+
+
+class NotFound(ComplianceError):
+    status_code = 404
+
+
+class Forbidden(ComplianceError):
+    """403 — caller not authorized for this route."""
+
+    status_code = 403
+
+
+class FounderRefused(ComplianceError):
+    """403 — Andre's approval token missing, wrong, non-ASCII or not configured."""
+
+    status_code = 403
+
+
+class Conflict(ComplianceError):
+    """409 — hash mismatch, stale proposal, request_id reused, decided proposal."""
+
+    status_code = 409
+
+
+class Invalid(ComplianceError):
+    """422 — structurally valid JSON that breaks a domain rule."""
+
+    status_code = 422
+
+
+class Unavailable(ComplianceError):
+    """503 — the ledger or the local store could not record; nothing was issued."""
+
+    status_code = 503
