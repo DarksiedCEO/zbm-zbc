@@ -128,7 +128,8 @@ keyed by their own id and other creations by actor + canonical request
 - Never-say length caps (fix wave 11, N10-4): the review also answers 422 for a phrase over
   `MAX_NEVER_SAY_WORDS` = 3 words or `MAX_NEVER_SAY_PHRASE_CHARS` = 30 characters, or a list over
   `MAX_NEVER_SAY_CHARS` = 300 characters in total, whichever path made the draft (first draft, revision,
-  edit); the draft keeps every phrase and warns (ADR 0005 decision 49)
+  edit); the draft keeps every phrase and warns (ADR 0005 decision 49). Since fix wave 12 (N11-5) a
+  character is counted as the gate scans it — NFKC-normalised and casefolded ("㎉" counts four; decision 54)
 
 Default actor ids (one per intelligence; add humans with
 `CREATIVE_EXTRA_ACTORS='{"jo": ["zbm_creative_lead"]}'`): `zbm_brief_writer`,
@@ -168,8 +169,8 @@ and kept idle / partial-head sockets open forever.
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 25, 2026 after fix wave 11: **703 passed, 0 failed, 0 skipped**
-(`CREATIVE_TEST_PORTS=18650-18699`; 684 after fix wave 10 (`CREATIVE_TEST_PORTS=18500-18549`); 664 after fix wave 9, three consecutive
+Result on Sep 25, 2026 after fix wave 12: **729 passed, 0 failed, 0 skipped**, two consecutive runs
+(`CREATIVE_TEST_PORTS=18750-18799`; 703 after fix wave 11 (`CREATIVE_TEST_PORTS=18650-18699`); 684 after fix wave 10 (`CREATIVE_TEST_PORTS=18500-18549`); 664 after fix wave 9, three consecutive
 runs; Python 3.11.15, pytest 9.1.1; 641 after fix wave 8, 557 after fix wave 7, 515 after fix wave 6, 469 after fix wave 5,
 428 after fix wave 4, 360 after fix wave 2, 310 after fix wave 1, 205
 before it). No test in this service skips: none uses an env-provided
@@ -178,6 +179,17 @@ ledger binary (the real-ledger runs are the live runs below), and
 Real-socket tests bind ports from `CREATIVE_TEST_PORTS` ("lo-hi") when it
 is set (fix wave 9; defaults: 20110-20119 and 20300-20319, OS-assigned for
 the lossy-proxy tests); the fix-wave-9 runs used `CREATIVE_TEST_PORTS=20900-20919`.
+`test_fix_wave_12.py` reproduces the AEGIS round-11 findings (fix wave 12, ADR 0005 decisions 50-54):
+N11-1 (the round-11 spaced-symbol cases, and every phrase spaced one symbol a letter with spaces, thin /
+hair / ideographic spaces, zero-width spaces, dividers, digits, punctuation and emoji between, → never a
+pass; the currency / math reading rejects wherever spaced ASCII rejects, 15 spacings of three phrases; a
+16-caption single-symbol guard passes), N11-4 (rows of currency-sign "prices" spelling a phrase → never a
+pass; one or two prices pass), N11-2 (the 16 three-field orderings that put the words side by side at field
+edges, 0 passes; a short field read inside another field's opening / closing words, five layouts →
+human_review), N11-3 ("♏e︱✝ be︱︱y fa✝" and variants → never a pass; ordinary emoji and bars pass) and
+N11-5 (expanding phrases over the caps as scanned; refused with a 422 on the draft, revision and edit
+paths). Test changed: `test_fix_wave_11.py` `test_n104_review_cost_at_the_caps` adds two NFKC-expanding
+shapes at the scanned caps (`_cost_case` fills phrases by `scanned_length`; the ASCII shapes are unchanged).
 `test_fix_wave_11.py` reproduces the AEGIS round-10 findings under the
 wave-11 design ruling (fail closed on what the gate cannot read): N10-1
 (every distinct round-10 symbol-alphabet MISS, 136 spellings in three
@@ -795,6 +807,14 @@ words / 30 characters a phrase and 300 characters in all (a four-word
 phrase such as "make money from home" cannot be approved), and a review at
 the caps still costs up to 1.70 s CPU on the reference host, 1.94-1.98 s inside
 a long-running process with a large heap (ADR 0005
-decision 49). `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
+decision 49). Fix wave 12: three or more unreadable symbols in a row, whatever
+separates them (spaces, dividers, digits, punctuation), with three different
+symbols, go to a human — so do three different currency "prices" in a row
+("₹499 ₩12,000 €5") and "✿ ❀ ❁ ❃"; symbols alternating with single letters
+("⋂ o  ℞ i ∫ ⋊") are not caught unless four single letters are; a phrase
+spread over three fields is caught only when its words are at the fields'
+edges; the never-say caps count NFKC-expanded characters, so a list of
+squared-katakana or unit symbols ("㎉") is refused sooner (ADR 0005
+decisions 50-54). `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
 that many idle sockets gets everyone else 503s until the 10 s head
 deadline frees them — per-client limits belong in a proxy in front.

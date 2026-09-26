@@ -21,6 +21,7 @@ retired and never reused in this campaign.
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import date
 from typing import Literal
 
@@ -148,18 +149,27 @@ MAX_NEVER_SAY_PHRASE_CHARS = 30  # characters per phrase
 MAX_NEVER_SAY_CHARS = 300  # characters over the whole never-say list
 
 
+def scanned_length(phrase: str) -> int:
+    """The characters of `phrase` the gate scans (fix wave 12, AEGIS round 11 N11-5): its NFKC-normalised,
+    casefolded form ("㎉" is "kcal", "ⅷ" is "viii", "ß" is "ss") — or the raw length if that is longer."""
+    return max(len(phrase), len(unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", phrase).casefold())))
+
+
 def never_say_over_caps(phrases: list[str]) -> list[str]:
-    """Every way `phrases` (a never-say list) breaks the review-cost caps, one line each; [] if none."""
+    """Every way `phrases` (a never-say list) breaks the review-cost caps, one line each; [] if none. Words
+    are canonical words and characters are `scanned_length` (fix wave 12, N11-5: the caps counted raw
+    characters, so 290 characters of "㎉ⅷⅧ" read as ~1,100 and cost 2.10 s CPU a review)."""
     out: list[str] = []
     if len(phrases) > MAX_NEVER_SAY:
         out.append(f"{len(phrases)} never-say phrases: at most {MAX_NEVER_SAY} per rulebook")
     for p in phrases:
         words = len(canonical(p).split())
-        if words > MAX_NEVER_SAY_WORDS or len(p) > MAX_NEVER_SAY_PHRASE_CHARS:
-            out.append(f"never-say {p[:40] + ('...' if len(p) > 40 else '')!r} is too long ({words} words, {len(p)} "
-                       f"characters): at most {MAX_NEVER_SAY_WORDS} words and {MAX_NEVER_SAY_PHRASE_CHARS} "
-                       "characters per phrase")
-    total = sum(len(p) for p in phrases)
+        chars = scanned_length(p)
+        if words > MAX_NEVER_SAY_WORDS or chars > MAX_NEVER_SAY_PHRASE_CHARS:
+            out.append(f"never-say {p[:40] + ('...' if len(p) > 40 else '')!r} is too long ({words} words, {chars} "
+                       f"characters as the gate reads it): at most {MAX_NEVER_SAY_WORDS} words and "
+                       f"{MAX_NEVER_SAY_PHRASE_CHARS} characters per phrase")
+    total = sum(scanned_length(p) for p in phrases)
     if total > MAX_NEVER_SAY_CHARS:
         out.append(f"never-say phrases total {total} characters: at most {MAX_NEVER_SAY_CHARS} per rulebook")
     return out

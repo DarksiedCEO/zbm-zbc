@@ -513,6 +513,7 @@ def test_n104_at_the_caps_approval_is_allowed(api):
 # indicators and 1 in 8 into currency / math symbols (and the ns_cost8b mutations), every field at its
 # maximum, a regional indicator opening every field (the regional reading forced), routed to a human.
 _SYLL = ["ka", "ro", "mi", "ne", "tu", "sa", "lo", "vi", "de", "pa", "ri", "go", "fe", "zu", "ba", "no"]
+_EXPANDERS = "℡℻ⅢⅦⅧⅫⅲⅶⅷⅻ㉐㋍㋏㍱㍴㎈㎉㎑㎒㎓㎔㎪㎫㎬㎭㏒㏕㏖㏙㏿ﬃﬄ"
 _CM = {"m": "₥", "a": "₳", "k": "₭", "e": "€", "o": "⊙", "n": "₦", "y": "¥", "d": "₫", "b": "฿", "t": "₮", "f": "₣",
        "r": "®", "i": "¡", "s": "$", "g": "₲", "p": "₱", "u": "∪", "v": "√", "z": "≥", "l": "£"}
 
@@ -520,11 +521,15 @@ _CM = {"m": "₥", "a": "₳", "k": "₭", "e": "€", "o": "⊙", "n": "₦", "
 def _cost_case(seed: int, nphr: int, nwords: int, shape: str, maxc: int):
     import random
 
+    from zbc.rulebook_writer import scanned_length
+
     rng = random.Random(seed)
 
     def word():
         if shape == "short":
             return rng.choice(_SYLL)
+        if shape == "nfkc":  # fix wave 12 (N11-5): characters NFKC expands ("㎉" is "kcal"), within the scanned caps
+            return "".join(rng.choice(_EXPANDERS) for _ in range(rng.randint(1, 3)))
         lo, hi = (4, 5) if shape == "long" else (2, 4)
         return "".join(rng.choice(_SYLL) for _ in range(rng.randint(lo, hi)))
 
@@ -551,7 +556,7 @@ def _cost_case(seed: int, nphr: int, nwords: int, shape: str, maxc: int):
         if len(phrases) >= nphr:
             break
         p = " ".join(word() for _ in range(nwords))
-        if len(p) <= maxc and p not in phrases:
+        if scanned_length(p) <= maxc and p not in phrases:
             phrases.append(p)
     pw = [w for p in phrases for w in p.split()]
 
@@ -580,7 +585,11 @@ def test_n104_review_cost_at_the_caps(registry):
     shapes = [(MAX_NEVER_SAY, MAX_NEVER_SAY_WORDS, "short", MAX_NEVER_SAY_CHARS // MAX_NEVER_SAY),
               (MAX_NEVER_SAY_CHARS // 20, MAX_NEVER_SAY_WORDS, "gen", 20),
               (MAX_NEVER_SAY_CHARS // 14, MAX_NEVER_SAY_WORDS, "gen", 14),
-              (MAX_NEVER_SAY_CHARS // MAX_NEVER_SAY_PHRASE_CHARS, MAX_NEVER_SAY_WORDS, "long", MAX_NEVER_SAY_PHRASE_CHARS)]
+              (MAX_NEVER_SAY_CHARS // MAX_NEVER_SAY_PHRASE_CHARS, MAX_NEVER_SAY_WORDS, "long", MAX_NEVER_SAY_PHRASE_CHARS),
+              # fix wave 12 (N11-5): NFKC-expanding characters at the caps as the gate scans them (round 11: 290 raw
+              # characters of them read as ~1,100 and cost 2.10 s)
+              (MAX_NEVER_SAY_CHARS // 20, MAX_NEVER_SAY_WORDS, "nfkc", 20),
+              (MAX_NEVER_SAY_CHARS // MAX_NEVER_SAY_PHRASE_CHARS, MAX_NEVER_SAY_WORDS, "nfkc", MAX_NEVER_SAY_PHRASE_CHARS)]
     slow = _cpu_slowdown()
     worst = 0.0
     for nphr, nw, shape, maxc in shapes:

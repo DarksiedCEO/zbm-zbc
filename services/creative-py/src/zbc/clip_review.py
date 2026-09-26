@@ -124,6 +124,7 @@ from __future__ import annotations
 
 import bisect
 import functools
+import itertools
 import re
 from datetime import datetime
 from typing import Literal
@@ -152,6 +153,7 @@ from shared.text import (
     phonetic_signal,
     phrase_stream,
     phrase_words_in_order,
+    reads_exactly_in_tokens,
     regional_reading,
     regional_streams,
     relaxed_skeleton_spans,
@@ -271,6 +273,7 @@ def make_decision(rb: Rulebook, **data) -> ClipReviewDecision:
 
 
 BOUNDARY_WORDS = 8  # words read together across two fields: the longest never-say phrase plus the adjacency gap
+INNER_EDGE_WORDS = 3  # a short field read after a field's first k words / before its last k (fix wave 12, N11-2)
 
 
 def _mentions(text: str, phrase: str, fuzzy: bool) -> bool:
@@ -311,12 +314,40 @@ def _field_joints(edges: dict[str, tuple[list[str], list[str]]]) -> list[tuple[s
     model order (caption, on-screen text, transcript, bio), so "gt" in the
     caption + "ritch" in the bio passed while the same halves in the
     caption + on-screen text went to a human. Bounded: BOUNDARY_WORDS a
-    side, at most 12 pairs."""
+    side, at most 12 pairs; since fix wave 12 also the short-field joints
+    below (at most 72 + 48 more small texts, none when no field is short)."""
     out = []
     for a, (_, tail) in edges.items():
         for b, (head, _) in edges.items():
             if a != b:
                 out.append((a, b, " ".join(tail), " ".join(head), " ".join(tail + head)))
+    # Fix wave 12 (AEGIS round 11 N11-2): fields were read two at a time, so a phrase one word per field over
+    # three fields ("Daily vlogs work" + "from" + "home tonight") passed in 92 of 96 orderings. A SHORT field
+    # (all of it inside its edges: at most BOUNDARY_WORDS tokens) can sit wholly inside a phrase, so
+    # (1) every ordering of three or four fields whose middle fields are all short is read as one text —
+    # the last words of the first, the whole middle ones, the first words of the last: every order, which
+    # includes the declared order and its reverse (fields have no reading order; at most 48 texts, only
+    # when that many fields are short); (2) a short field is also read on the INNER side of another
+    # field's edge — after its first k words, before its last k (k <= INNER_EDGE_WORDS): "make ..." opening
+    # the caption with "money" as the on-screen text (the regional reading's `_regional_split` rule, for
+    # every signal). Each such text is a joint like the pairs: flagged only when no piece alone says it.
+    short = {f: head for f, (head, tail) in edges.items() if head == tail}
+    for s, stoks in short.items():
+        for x, (head, tail) in edges.items():
+            if x == s:
+                continue
+            for k in range(1, min(INNER_EDGE_WORDS, len(head) - 1) + 1):
+                out.append((f"{x} (its first {k} word{'s' * (k > 1)})", s, " ".join(head[:k]), " ".join(stoks),
+                            " ".join(head[:k] + stoks)))
+            for k in range(1, min(INNER_EDGE_WORDS, len(tail) - 1) + 1):
+                out.append((s, f"{x} (its last {k} word{'s' * (k > 1)})", " ".join(stoks), " ".join(tail[-k:]),
+                            " ".join(stoks + tail[-k:])))
+    for size in (3, 4):
+        for order in itertools.permutations(edges, size):
+            if all(m in short for m in order[1:-1]):
+                tail, head = edges[order[0]][1], edges[order[-1]][0]
+                mid = [t for m in order[1:-1] for t in short[m]]
+                out.append((", ".join(order[:-1]), order[-1], " ".join(tail), " ".join(head), " ".join(tail + mid + head)))
     return out
 
 
@@ -771,7 +802,9 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
             fail(r.rule_id, f"says never-say {phrase!r} with lookalike letters ({lookalike[:60]!r} "
                             "reads the same once rn/m, cl/d and vv/w are read alike, stretched letters collapsed "
                             "and spaces ignored)")
-        elif any(match_phrase(t, phrase) is PhraseMatch.EXACT for t in symbol_reads):
+        elif any(reads_exactly_in_tokens(t, phrase) for t in symbol_reads):
+            # fix wave 12 (N11-1 b): read through the table, the phrase is there as the main gate's rejection
+            # reads it — whole words, or its letters spread over whole tokens ("₥ ₳ ₭ €  ₥ ⊙ ₦ € ¥")
             fail(r.rule_id, f"says never-say {phrase!r} in currency / math symbols read as the letters they "
                             "are drawn as (shared/text.CURRENCY_MATH_LOOKALIKES)")
         else:
