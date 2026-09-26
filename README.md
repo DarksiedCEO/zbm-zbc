@@ -494,3 +494,44 @@ export COMPLIANCE_CALLER_TOKENS='{"onboarding": "<>=32 chars>", "creative_produc
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> COMPLIANCE_DATA_DIR=<dir>
 cd src && python3 -m api   # COMPLIANCE_BIND_ADDR (default 127.0.0.1), COMPLIANCE_PORT (default 8380)
 ```
+
+## Verification and Integrity (`services/verification-py`) — Sep 26, 2026
+
+The "bean counter making sure clippers play fairly": certifies **view counts** per clip at settlement
+from the platform's official API, through the clipper's own OAuth connection. It also answers Compliance's
+HR-13 and age ports, Creative's `attest_clip` / `attest_result` and Onboarding's `age_verified_18_plus`.
+It checks clip integrity (same clip, caption unchanged, live through the minimum live period) and clipper
+integrity (strikes, bought engagement, stolen clips, duplicate identities, 18+). Anomaly holds go to a human.
+It is built from the locked V&I spec (rev 1) with 10 deterministic single-task intelligences and no model
+calls. Money never touches it: no amount, rate or currency anywhere. Architecture and the 35 numbered choices
+made where the spec was silent are in `docs/adr/0007-verification-integrity-architecture.md`. Routes and
+settings are in `services/verification-py/README.md`.
+
+- **Status:** built and tested (245 tests, `python3 -m pytest -q`; no network). **Not certified for any
+  real clipper, clip or payout.** The token vault, platform adapters, perceptual hasher, media intake,
+  age provider, Finance (31), Legal (37), People (43) and Clipper Network are fail-closed stand-ins, so on
+  day one no connection completes and nothing certifies. Even with every stand-in replaced, the spec's own
+  rule table makes certification wait for a counsel memo on Compliance row CQ-11 (VI-05/VI-06 cite it). The
+  full unlock list is in ADR 0007.
+- **Fails closed.** Nothing is in force until Andre approves the 28-rule seed (pinned SHA-256). Every
+  rejection, hold or strike cites a rule id and a reason code from the closed catalog. Bans take effect only
+  with Clipper Network's call **and** Andre's token. Every ruling is recorded on the ledger
+  (`department: verification_integrity`) and in a hash-chained, ledger-anchored local log before it is
+  answered; otherwise 503 and nothing is issued. Raw platform ids live only in a purgeable side store under
+  the platforms' retention rules. The log keeps hashes and HMACs only; no token, code or DOB is ever stored.
+- **Other services unchanged:** the spec's "changes other services must make" (thin clients in
+  creative-py, compliance-py and onboarding-py) are reported, not made. Until they are, no service calls V&I.
+- **Live run** (`devtools/live_run.py`, real ledger-rust binaries). Leg A runs compliance-py and V&I through
+  their production entrypoints: V&I reads HR-13 live from compliance-py, and nothing connects or certifies.
+  Leg B uses test fakes and a settable clock over 32 simulated days. It exercises every ruling type, a
+  revision down (clawback −300 views), holds released and upheld, S1/S2/S3 strikes, an Andre-approved ban
+  and a restart with the anchors verified. It ends with `GET /ledger/verify` → `{"entries":57,"valid":true}`
+  and `{"entries":6802,"valid":true}`. 28/28 checks passed.
+
+```bash
+cd services/verification-py && python3 -m pytest -q      # 245 tests
+export VI_SERVICE_TOKEN=<secret> VI_ANDRE_APPROVAL_TOKEN=<Andre's secret>
+export VI_CALLER_TOKENS='{"compliance_38": "<>=32 chars>", "creative_production": "...", "scheduler": "..."}'
+export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> VI_DATA_DIR=<dir>
+cd src && python3 -m api   # VI_BIND_ADDR (default 127.0.0.1), VI_PORT (default 8390)
+```
