@@ -1,0 +1,353 @@
+{
+ "generated_by": "devtools/gen_rules_seed.py",
+ "rows": [
+  {
+   "basis_obligation_ids": [],
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "VI-00",
+   "source_urls": [],
+   "statement": "Until Andre approves a V&I rule version, every ruling is negative with RULES_NOT_IN_FORCE.",
+   "status": "verified",
+   "title": "No ruling without an Andre-approved rule version"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "VI-01",
+   "source_urls": [
+    "https://b4e0vdqv6zgqeqj4pfgm.apps.whop.com/terms",
+    "https://vyro.com/clipper-terms"
+   ],
+   "statement": "Counts come only from official platform APIs through an account the clipper connected with OAuth; no other count source is accepted.",
+   "status": "verified",
+   "title": "Official-API counts through the clipper's own OAuth connection only"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "VI-02",
+   "source_urls": [],
+   "statement": "V&I never scrapes platform pages and never downloads posted media.",
+   "status": "verified",
+   "title": "No scraping, no download of posted media"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-03",
+   "source_urls": [
+    "https://developers.google.com/youtube/terms/developer-policies"
+   ],
+   "statement": "The certified count is the platform-returned value fetched in the settlement window, never substituted, smoothed, interpolated or computed.",
+   "status": "verified",
+   "title": "Certified count is the platform-returned value at settlement"
+  },
+  {
+   "basis_obligation_ids": [
+    "HR-13"
+   ],
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "VI-04",
+   "source_urls": [
+    "https://b4e0vdqv6zgqeqj4pfgm.apps.whop.com/terms",
+    "https://support.google.com/youtube/answer/2991785"
+   ],
+   "statement": "A clip settles at the platform create time plus the larger of Compliance HR-13 settlement_lag_days and the rulebook's minimum live days; the lag is read from Compliance.",
+   "status": "verified",
+   "title": "Settle at create_time + max(HR-13 lag, rulebook minimum live days)"
+  },
+  {
+   "basis_obligation_ids": [
+    "HR-13",
+    "CQ-11"
+   ],
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "VI-05",
+   "source_urls": [
+    "https://support.google.com/youtube/answer/2991785",
+    "https://www.tiktok.com/community-guidelines/en/integrity-authenticity",
+    "https://www.snap.com/terms/spotlight-terms"
+   ],
+   "statement": "Any downward platform revision of a certified count before revision_watch_end records a revision and a clawback record (counts only); Finance decides recovery.",
+   "status": "verified",
+   "title": "Downward platform revision before revision_watch_end: revision and clawback record"
+  },
+  {
+   "basis_obligation_ids": [
+    "HR-13",
+    "CQ-11"
+   ],
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "VI-06",
+   "source_urls": [],
+   "statement": "The clip must be evidenced live on every day from posting through the rulebook minimum live period.",
+   "status": "verified",
+   "title": "Live every day through the rulebook's minimum live period"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-07",
+   "source_urls": [
+    "https://github.com/facebook/ThreatExchange/blob/main/README.md"
+   ],
+   "statement": "Same video id, same author and the per-platform fingerprint taken at approval.",
+   "status": "verified",
+   "title": "Posted clip is the approved clip"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "spec_choice",
+   "parameters": {},
+   "rule_id": "VI-08",
+   "source_urls": [
+    "https://whop.com/content-rewards-terms-of-service/"
+   ],
+   "statement": "The caption/description hash must equal the one taken at approval (disclosure lives in the caption).",
+   "status": "verified",
+   "title": "Caption unchanged since approval"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-09",
+   "source_urls": [
+    "https://mediaratingcouncil.org/sites/default/files/Standards/IVT%20Addendum%20Update%20062520.pdf"
+   ],
+   "statement": "The engagement anomaly screen may open a hold for a human; it never decides payment and never releases its own hold.",
+   "status": "verified",
+   "title": "Anomaly screen may hold; never decides pay"
+  },
+  {
+   "basis_obligation_ids": [
+    "US-FTC-465-08"
+   ],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-10",
+   "source_urls": [
+    "https://b4e0vdqv6zgqeqj4pfgm.apps.whop.com/terms",
+    "https://vyro.com/clipper-terms"
+   ],
+   "statement": "Upheld bought/botted engagement or platform stripping at or above the threshold is an S3 strike and voids the clip.",
+   "status": "verified",
+   "title": "Bought or botted engagement: S3 strike, clip voided"
+  },
+  {
+   "basis_obligation_ids": [
+    "HR-02",
+    "AGE-01"
+   ],
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "VI-11",
+   "source_urls": [
+    "https://www.ofcom.org.uk/siteassets/resources/documents/consultations/category-1-10-weeks/statement-age-assurance-and-childrens-access/part-3-guidance-on-highly-effective-age-assurance.pdf?v=395680",
+    "https://www.federalregister.gov/documents/2025/04/22/2025-05904/childrens-online-privacy-protection-rule"
+   ],
+   "statement": "Clippers are 18+: neutral DOB field plus one highly effective age-assurance method; self-declaration never passes; there is no guardian path.",
+   "status": "verified",
+   "title": "18+ via neutral DOB plus one highly effective method; no guardian path"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "VI-12",
+   "source_urls": [
+    "https://vyro.com/clipper-terms"
+   ],
+   "statement": "A clipper has exactly one identity: one email and one payout identity.",
+   "status": "verified",
+   "title": "One identity: one email, one payout identity"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "VI-13",
+   "source_urls": [
+    "https://vyro.com/clipper-terms",
+    "https://b4e0vdqv6zgqeqj4pfgm.apps.whop.com/terms"
+   ],
+   "statement": "A connected social account belongs to exactly one clipper identity; sharing or renting is forbidden.",
+   "status": "verified",
+   "title": "A social account belongs to exactly one identity"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-14",
+   "source_urls": [
+    "https://vyro.com/content-requirements"
+   ],
+   "statement": "A submitted clip matching another clipper's clip or a campaign seed clip is held for a human decision.",
+   "status": "verified",
+   "title": "Match to another clipper's clip or a campaign seed: hold to a human"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-15",
+   "source_urls": [
+    "https://developers.google.com/youtube/terms/developer-policies"
+   ],
+   "statement": "Platform data is kept only as \u00a7B.5 allows (VI-15a..e); YouTube derived signals and cross-clipper aggregation stay off pending counsel question VI-CQ-01.",
+   "status": "verified",
+   "title": "Platform-data retention per platform; YouTube derived and aggregated use off"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-15a",
+   "source_urls": [
+    "https://developers.google.com/youtube/terms/developer-policies"
+   ],
+   "statement": "YouTube statistics and YouTube Analytics API data may be stored as long as the certification record is kept (VI_EVIDENCE_RETENTION_DAYS).",
+   "status": "verified",
+   "title": "YouTube statistics and Analytics data: kept with the certification record"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-15b",
+   "source_urls": [
+    "https://developers.google.com/youtube/terms/developer-policies",
+    "https://vyro.com/clipper-terms"
+   ],
+   "statement": "Other YouTube Authorized Data is refreshed or deleted within 30 calendar days of fetch, kept only as SHA-256 after revision_watch_end, and deleted within 24 hours of a revoked connection.",
+   "status": "verified",
+   "title": "YouTube other Authorized Data: 30-day refresh-or-delete; revoked connection purged in 24 h"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-15c",
+   "source_urls": [
+    "https://developers.tiktok.com/doc/tiktok-api-v2-video-object"
+   ],
+   "statement": "TikTok counts kept as YouTube statistics; id, create_time, share_url, duration and description 30-day refresh-or-delete; cover_image_url never stored. Retention terms UNVERIFIED (VI-CQ-02).",
+   "status": "unverified",
+   "title": "TikTok: counts kept; ids 30-day refresh-or-delete; cover image never stored"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-15d",
+   "source_urls": [
+    "https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights/"
+   ],
+   "statement": "Instagram media insights kept as YouTube statistics; media id, permalink and caption 30-day refresh-or-delete. Retention terms UNVERIFIED (VI-CQ-02).",
+   "status": "unverified",
+   "title": "Instagram: insights kept; media id, permalink and caption 30-day refresh-or-delete"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-15e",
+   "source_urls": [
+    "https://docs.x.com/x-api/fundamentals/data-dictionary"
+   ],
+   "statement": "X public/non-public metric values kept as YouTube statistics. Retention terms UNVERIFIED (VI-CQ-02).",
+   "status": "unverified",
+   "title": "X: metric values kept as statistics"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "VI-16",
+   "source_urls": [],
+   "statement": "OAuth tokens, refresh tokens, authorization codes, client secrets and PKCE verifiers exist only inside the vault port and never appear in any output.",
+   "status": "verified",
+   "title": "Tokens only in the vault; never output"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "VI-17",
+   "source_urls": [
+    "https://vyro.com/clipper-terms"
+   ],
+   "statement": "A clipper who has not connected the posting account through OAuth cannot be certified.",
+   "status": "verified",
+   "title": "Not connected: not payable"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "VI-18",
+   "source_urls": [
+    "https://developers.snap.com/snap-kit/creative-kit/overview",
+    "https://dev.twitch.tv/docs/api/videos/",
+    "https://developers.facebook.com/docs/instagram-platform/insights/"
+   ],
+   "statement": "Snapchat and Twitch are not payable; X is payable only when VI_PLATFORM_X_ENABLED=1; Instagram requires a professional account with at least 100 followers.",
+   "status": "verified",
+   "title": "Snapchat and Twitch not payable; X only when enabled"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "VI-19",
+   "source_urls": [
+    "https://b4e0vdqv6zgqeqj4pfgm.apps.whop.com/terms"
+   ],
+   "statement": "An Instagram Collab co-post (or a post whose collab status is unknown) is not certifiable unless the campaign permits collabs.",
+   "status": "verified",
+   "title": "Instagram Collab co-posts not certifiable unless the campaign permits"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "spec_choice",
+   "parameters": {},
+   "rule_id": "VI-20",
+   "source_urls": [],
+   "statement": "V&I attests only submissions registered by Creative whose post_ref, platform, posted_at and ids match the registration.",
+   "status": "verified",
+   "title": "Only registered submissions whose facts match are attested"
+  },
+  {
+   "basis_obligation_ids": [
+    "HR-03"
+   ],
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "VI-21",
+   "source_urls": [],
+   "statement": "When a Compliance row a V&I rule cites is not verified/in force, or a dependency is unavailable or a stand-in, the ruling is negative.",
+   "status": "verified",
+   "title": "A cited Compliance row or a dependency not in force or unavailable: negative"
+  },
+  {
+   "basis_obligation_ids": [],
+   "kind": "spec_choice",
+   "parameters": {},
+   "rule_id": "VI-22",
+   "source_urls": [],
+   "statement": "copyright_strike is false only when the clip was live every day to min_live_end, Legal 37's takedown intake answered with none, and no rights restriction came back; Andre must rule whether this basis suffices (until then this rule is unverified and the answer is true).",
+   "status": "unverified",
+   "title": "copyright_strike answered false only on the \u00a7C.4.3 basis"
+  }
+ ],
+ "spec": "Verification and Integrity locked build spec rev 1 (Sep 26, 2026) section B.6"
+}
