@@ -84,9 +84,11 @@ class Harness:
     def decide(self, decisions, andre=ANDRE_TOKEN):
         return self.post("/compliance/v1/register/decisions", {"request_id": rid("dec"), "decisions": decisions}, andre=andre)
 
-    def approve(self, *proposals, andre=ANDRE_TOKEN):
-        r = self.decide([{"proposal_id": p["proposal_id"], "content_sha256": p["content_sha256"], "decision": "approve"}
-                         for p in proposals], andre=andre)
+    def approve(self, *proposals, andre=ANDRE_TOKEN, acknowledge_weakening=False):
+        """``acknowledge_weakening`` (AEGIS N14-9): Andre's explicit acknowledgment, needed for a weakening proposal."""
+        ack = {"acknowledge_weakening": True} if acknowledge_weakening else {}
+        r = self.decide([{"proposal_id": p["proposal_id"], "content_sha256": p["content_sha256"], "decision": "approve",
+                          **ack} for p in proposals], andre=andre)
         assert r.status_code == 200, r.text
         return r.json()
 
@@ -133,6 +135,12 @@ class Harness:
         r = self.rule(campaign, "zbc_brand", brand_facts(**kw))
         assert r.status_code == 200, r.text
         return r.json()
+
+    def activate_client_for_publish(self, client="client-1", targets=("US", "CA-ON"),
+                                    platforms=("web", "youtube", "email", "sms")):
+        """AEGIS N14-2: every publish needs the client's current, allowed activation covering its targets
+        and platforms (publish_facts defaults: US, web)."""
+        return self.activate_client(client, targets=targets, platforms=platforms)
 
     def activate_client(self, client="client-1", **kw):
         r = self.rule(client, "client", client_facts(**kw))

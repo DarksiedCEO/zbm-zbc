@@ -45,6 +45,10 @@ class LedgerRecordError(Exception):
     took_effect: bool | str = "unknown"
 
 
+class LedgerQueryFailed(Exception):
+    """The ledger could not be READ (GET /ledger/entries): nothing can be verified against it."""
+
+
 class LedgerNotRecorded(LedgerRecordError):
     took_effect = False
 
@@ -84,6 +88,7 @@ def clean_summary(summary: str) -> str:
     return cleaned[:SUMMARY_MAX]
 
 
+LEDGER_ENTRIES_MAX_BYTES = 256 * 1024 * 1024
 LEDGER_SHED_BODY = {"error": "ledger-rust is at its connection limit; retry shortly"}
 
 
@@ -93,6 +98,10 @@ class LedgerClient(Protocol):
 
     def verify(self) -> bool:
         """True only when GET /ledger/verify answered 200 {"valid": true}."""
+        ...
+
+    def entries(self) -> list[dict]:
+        """Every ledger entry in ledger order (GET /ledger/entries); raises LedgerQueryFailed."""
         ...
 
 
@@ -143,6 +152,30 @@ class HttpLedgerClient:
         except (httpx.HTTPError, ValueError, AttributeError):
             return False
 
+    def entries(self) -> list[dict]:
+        """GET /ledger/entries (ledger-rust has no filtered read), size-capped. Used to verify the local
+        log against the ledger at start-up and by control C-11 (AEGIS N14-4)."""
+        try:
+            with httpx.Client(timeout=max(self._timeout, 30.0), transport=self._transport) as client:
+                with client.stream("GET", f"{self._base_url}/ledger/entries",
+                                   headers={"Authorization": f"Bearer {self._token}"}) as resp:
+                    if resp.status_code != 200:
+                        raise LedgerQueryFailed(f"ledger could not be read: HTTP {resp.status_code}")
+                    chunks, size = [], 0
+                    for chunk in resp.iter_bytes():
+                        size += len(chunk)
+                        if size > LEDGER_ENTRIES_MAX_BYTES:
+                            raise LedgerQueryFailed("ledger entries larger than the read cap")
+                        chunks.append(chunk)
+            data = json.loads(b"".join(chunks))
+        except LedgerQueryFailed:
+            raise
+        except (httpx.HTTPError, ValueError, RecursionError) as exc:
+            raise LedgerQueryFailed(f"ledger could not be read: {type(exc).__name__}") from None
+        if not isinstance(data, list) or not all(isinstance(e, dict) for e in data):
+            raise LedgerQueryFailed("ledger entries were not a list of objects")
+        return data
+
 
 class UnconfiguredLedgerClient:
     """Default when the ledger isn't configured: every record fails (fail closed)."""
@@ -153,6 +186,9 @@ class UnconfiguredLedgerClient:
 
     def verify(self) -> bool:
         return False
+
+    def entries(self) -> list[dict]:
+        raise LedgerQueryFailed("evidence ledger not configured; it can't be read")
 
 
 def ledger_from_env(env: dict) -> LedgerClient:
@@ -197,5 +233,6 @@ def env_flag(env: dict, name: str) -> bool:
     return (env.get(name) or "").strip() == "1"
 
 
-__all__ = ["DEPARTMENT", "HttpLedgerClient", "LedgerClient", "LedgerConflict", "LedgerNotRecorded", "LedgerRecordError",
+__all__ = ["DEPARTMENT", "HttpLedgerClient", "LedgerClient", "LedgerConflict", "LedgerNotRecorded", "LedgerQueryFailed",
+           "LedgerRecordError",
            "Recorder", "UnconfiguredLedgerClient", "canonical", "derived_id", "ledger_from_env", "payload_sha256"]

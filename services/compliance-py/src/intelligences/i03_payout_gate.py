@@ -4,7 +4,7 @@ Intelligence 3 — Payout Gate (spec A.2, C.1).
 allowed/blocked + unmet for ONE clip (``subject_kind: zbc_clip``). Consulted
 by Creative's payout eligibility after Clip Review passed, and re-checks
 ``clip_review == "pass"`` itself. The context inherits the campaign's
-latest ALLOWED ``zbc_brand`` activation (targets = audience, category,
+latest ``zbc_brand`` activation (only when that latest ruling is ALLOWED; a later refusal voids it) (targets = audience, category,
 pay basis, flags) and the clipper's latest ALLOWED ``zbc_creator``
 activation (jurisdiction, payee type, accounts, age attestation id), both
 supplied by Compliance from its own records; the clipper and campaign
@@ -52,14 +52,23 @@ def build(submission_id: str, raw_facts: dict, rows: dict, fallback: dict, env, 
     if "clip_review" in f and f["clip_review"] != "pass":
         ctx.pre.append(ctx.u("HR-03", "clip_review_pass", f"Clip Review outcome is '{f['clip_review']}', not 'pass'"))
 
-    clipper = env.latest_allowed_activation("zbc_creator", f["clipper_id"]) if "clipper_id" in f else None
-    campaign = env.latest_allowed_activation("zbc_brand", f["campaign_id"]) if "campaign_id" in f else None
+    # AEGIS N14-1: the LATEST activation ruling counts, refused or not; a later refusal voids an earlier allowance
+    c_state, clipper, c_rid = env.activation("zbc_creator", f["clipper_id"]) if "clipper_id" in f else ("none", None, None)
+    k_state, campaign, k_rid = env.activation("zbc_brand", f["campaign_id"]) if "campaign_id" in f else ("none", None, None)
     ctx.clipper, ctx.campaign = clipper, campaign
     if clipper is None:
+        why = (f"the clipper's latest activation ruling ({c_rid}) is not allowed; an earlier allowed ruling no longer counts"
+               if c_state == "blocked" else "no allowed activation ruling for this clipper")
         for oid in ("HR-03", "HR-02"):
-            ctx.pre.append(ctx.missing(oid, "clipper_activation", "no allowed activation ruling for this clipper"))
+            ctx.pre.append(ctx.missing(oid, "clipper_activation", why))
     if campaign is None:
-        ctx.pre.append(ctx.missing("HR-03", "campaign_activation", "no allowed activation ruling for this campaign"))
+        why = (f"the campaign's latest activation ruling ({k_rid}) is not allowed; an earlier allowed ruling no longer counts"
+               if k_state == "blocked" else "no allowed activation ruling for this campaign")
+        ctx.pre.append(ctx.missing("HR-03", "campaign_activation", why))
+    elif "platform" in f and f["platform"] not in set(campaign.get("platforms") or []):
+        # AEGIS N14-2 sweep: the clip's platform must be one the campaign was activated (and category-checked) for
+        ctx.pre.append(ctx.missing("HR-03", "campaign_activation_scope",
+                                   f"platform '{f['platform']}' is not covered by the campaign's current activation"))
 
     resolutions = []
     if clipper is not None:

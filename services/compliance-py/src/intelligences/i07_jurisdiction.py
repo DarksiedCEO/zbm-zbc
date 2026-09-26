@@ -10,6 +10,10 @@ region + attestation, never IP alone) or a campaign target. Rules, in order:
   4. in HR-05 ``operate`` and not in ``operate_excludes`` -> operate;
   5. in HR-06 ``conditional`` -> conditional;
   6. otherwise refuse (HR-07 ``unlisted: refuse``, default deny).
+Before any of that, a code that is not on the shipped ISO 3166-1 / 3166-2
+list (``jurisdictions.py``) is REFUSED as unknown (AEGIS N14-3): an alias
+such as ``CA-PQ`` / ``CA-QUE`` for Quebec, or a made-up ``US-XX``, never
+reaches the operate list by its country prefix.
 Targets: CA must be province-level; bare CA counts as including CA-QC.
 Each answer names the rows responsible (``cites``), so the
 ``jurisdiction_class`` check can cite exactly HR-05/06/07 and, when they
@@ -21,6 +25,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional
+
+from jurisdictions import is_known
 
 NUMBER, NAME, ACTOR = 7, "Jurisdiction Resolver", "intel_07_jurisdiction"
 
@@ -73,6 +79,14 @@ def _country(code: str) -> str:
 def classify(code: str, p: Params, who: str) -> Resolution:
     country = _country(code)
     cites: list[str] = []
+    if not is_known(code) or not is_known(country):
+        # unknown ISO code (alias, typo, reserved or made up): refused, never guessed
+        if country == "FR":
+            cites.append("FR-LOI-2023-451")
+        if country == "CA":
+            cites.append("CA-QC-LAW25")  # an unknown Canadian code may be Quebec (e.g. CA-PQ, CA-QUE)
+        return Resolution(who, code, "refuse", "unknown ISO 3166 code (not on the shipped list): refused",
+                          tuple(["HR-07", *cites]))
     if code in p.ofac_codes or country in p.ofac_codes:
         cites.append("US-OFAC-04")
     if country == "FR":

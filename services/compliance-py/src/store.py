@@ -6,9 +6,11 @@ Local append-only record log (spec §B.7). Stdlib only.
 ``prev_line_sha256`` is the SHA-256 of the previous line's exact bytes (the
 first line carries 64 zeros) and ``record_sha256`` is the line's own hash
 (without that field), so an edit of the LAST line is caught too. The chain
-detects edits, deletions, reordering and torn writes; it does not stop
-someone who rewrites the whole file and recomputes every hash — the ledger
-(which holds every event id) is the external anchor for that. Every append is flushed and fsynced before the
+detects edits, deletions, reordering and torn writes; a whole-file rewrite
+with recomputed hashes, a truncated tail or a deleted log is caught against
+the ledger instead: the service anchors every line (``prepare`` gives the
+exact line before it is written) on the ledger first (AEGIS N14-4,
+``intelligences/i11_evidence_audit.anchor_problems``). Every append is flushed and fsynced before the
 caller lets the record take effect. At start the whole chain is verified;
 any mismatch (edited, deleted, reordered or torn line) refuses start-up.
 
@@ -99,15 +101,36 @@ class RecordLog:
         for ln in lines:
             yield json.loads(ln)
 
+    @property
+    def epoch(self) -> Optional[str]:
+        """Identity of THIS log: the first 16 hex of its first line's SHA-256 (None while empty).
+        Ledger anchors carry it, so another log's anchors are never mistaken for ours."""
+        with self.lock:
+            return _line_sha(self._lines[0])[:16] if self._lines else None
+
+    def line_shas(self) -> list[str]:
+        with self.lock:
+            return [_line_sha(ln) for ln in self._lines]
+
+    def prepare(self, kind: str, at: str, data: dict) -> tuple[dict, bytes]:
+        """The exact next line, without writing it (so it can be anchored on the ledger first)."""
+        with self.lock:
+            prev = _line_sha(self._lines[-1]) if self._lines else GENESIS
+            rec = {"seq": len(self._lines) + 1, "kind": kind, "at": at, "data": data, "prev_line_sha256": prev}
+            rec["record_sha256"] = hashlib.sha256(encode(rec)).hexdigest()
+            return rec, encode(rec)
+
     def append(self, kind: str, at: str, data: dict) -> dict:
+        rec, line = self.prepare(kind, at, data)
+        return self.append_prepared(rec, line)
+
+    def append_prepared(self, rec: dict, line: bytes) -> dict:
         with self.lock:
             if self.fail_next_append:
                 self.fail_next_append = False
                 raise StoreWriteError("simulated local store failure")
-            prev = _line_sha(self._lines[-1]) if self._lines else GENESIS
-            rec = {"seq": len(self._lines) + 1, "kind": kind, "at": at, "data": data, "prev_line_sha256": prev}
-            rec["record_sha256"] = hashlib.sha256(encode(rec)).hexdigest()
-            line = encode(rec)
+            if rec["seq"] != len(self._lines) + 1:
+                raise StoreWriteError("log moved on since the line was prepared")
             if self.path:
                 try:
                     fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)

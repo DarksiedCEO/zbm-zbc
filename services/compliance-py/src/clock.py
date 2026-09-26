@@ -18,7 +18,7 @@ class SystemClock:
         return datetime.now(timezone.utc)
 
     def today(self) -> date:
-        return self.now().date()
+        return self.now().astimezone(timezone.utc).date()
 
 
 @dataclass
@@ -31,7 +31,7 @@ class FixedClock:
         return self.at
 
     def today(self) -> date:
-        return self.at.date()
+        return self.at.astimezone(timezone.utc).date()  # a UTC date whatever tz ``at`` carries (AEGIS N14-14)
 
     def advance(self, **kw) -> None:
         self.at = self.at + timedelta(**kw)

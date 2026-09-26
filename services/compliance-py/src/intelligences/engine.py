@@ -15,7 +15,7 @@ verified and its check met.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 from clock import parse_iso
@@ -73,7 +73,7 @@ class Ctx:
 
     @property
     def today(self) -> date:
-        return self.now.date()
+        return self.now.astimezone(timezone.utc).date()  # UTC date whatever the clock's tz (AEGIS N14-14)
 
     def row(self, oid: str) -> Optional[dict]:
         return self.rows.get(oid) or self.fallback_rows.get(oid)

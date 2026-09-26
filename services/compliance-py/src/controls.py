@@ -12,7 +12,7 @@ The catalog changes only through an Andre-approved proposal of kind
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -127,7 +127,7 @@ def control_status(defn: dict, state: dict, rows_by_id: Optional[dict[str, dict]
     {status, reason, not_in_force}."""
     if rows_by_id is None:
         return {"status": "red", "reason": "register_not_in_force", "not_in_force": []}
-    today = now.date()
+    today = now.astimezone(timezone.utc).date()
     feeding = expand_obligations(defn["obligation_ids"], rows_by_id)
     missing_or_bad = []
     for oid in feeding:

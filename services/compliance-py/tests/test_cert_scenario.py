@@ -36,7 +36,8 @@ def test_h02_seed_approved_with_andre_token_is_version_1(h):
     out = h.approve(seed)
     assert out["register_version"] == 1
     body = h.get("/health").json()
-    assert body == {"status": "ok", "service": "compliance-py", "register_version_in_force": 1, "in_memory": True}
+    assert body == {"status": "ok", "service": "compliance-py", "register_version_in_force": 1, "in_memory": True,
+                    "seed_pinned": True, "production": True}   # AEGIS N14-13
     assert len(h.ledger.of_type("register_version_published")) == 1
     assert len(h.ledger.of_type("seed_loaded")) == 1
 
@@ -70,7 +71,7 @@ def test_h04_clean_clip_blocked_by_exactly_the_three_counsel_rows_then_allowed_a
 
 def test_h05_expired_platform_row_blocks_tiktok_payout(hs):
     hs.activate_creator()
-    hs.activate_brand()
+    hs.activate_brand(platforms=("youtube", "tiktok"))  # AEGIS N14-2 sweep: the clip's platform must be activated
     hs.approve(*[hs.memo_supersede(c) for c in ("CQ-01", "CQ-03", "CQ-11")])
     ok = hs.review("zbc_clip", rid("sub"), clip_facts(platform="tiktok")).json()
     assert ok["allowed"] is True, ok["unmet_lines"]
@@ -284,6 +285,7 @@ def test_h13_site_publish_accessibility_tracking_and_legal(hs):
 
 
 def test_h13_site_publish_allowed_with_passing_providers(hs):
+    hs.activate_client_for_publish()  # AEGIS N14-2: publish needs the client's current activation
     a = hs.post("/compliance/v1/accessibility/checks", {"request_id": rid("a"), "asset_ref": "site-1", "asset_type": "site",
                                                         "content_sha256": "d" * 64, "owner_id": "client-1"},
                 caller="creative_production")

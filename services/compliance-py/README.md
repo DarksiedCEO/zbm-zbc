@@ -33,6 +33,33 @@ Every ruling is recorded on the evidence ledger **before** it is answered;
 if the ledger is down the answer is 503 `{"issued": false}` and nothing is
 stored.
 
+Behaviour fixed in AEGIS round 14 (details: ADR 0006, "Amendment — AEGIS
+round 14"):
+- payout and publish use the subject's **latest** activation ruling — a
+  refused re-activation voids an earlier allowed one; **every** publish needs
+  the client's current allowed activation covering each target and
+  platform; a clip's platform must be one its campaign was activated for;
+- jurisdiction codes are checked against shipped ISO 3166 lists
+  (`src/data/iso3166.json`, `src/jurisdictions.py`); unknown codes such as
+  `CA-PQ` / `CA-QUE` / `US-XX` are refused;
+- every local log line is anchored on the ledger before it is written; a
+  truncated, rewritten, emptied or foreign log, or a register version behind
+  the ledger's, refuses start-up and turns C-11 red (one disk-backed
+  instance per ledger);
+- evidence dates (`verified_at`, `evidence.fetched_at`) more than 1 day in
+  the future → 422 for everyone;
+- negated or compound disclosure labels (`not sponsored`, `NOT an ad`,
+  `no #ad`, `ad-free`) fail;
+- proposals that may weaken a rule are flagged `weakening: true` (with
+  reasons) and Andre's approval must carry `acknowledge_weakening: true`;
+  counsel questions resolve only through a counsel-memo supersede;
+- the Change Watcher drafts at most 50 proposals per cycle / 20 per source,
+  then files one `watch_notice` ("source flooded") for Andre;
+- the seed hash is pinned (see Run);
+- all dates are UTC dates whatever the clock's timezone;
+- a replayed `request_id` returns the stored ruling only if re-evaluation
+  gives the same outcome; otherwise a new ruling is issued.
+
 ## Module map (`src/`)
 
 | Module | Role |
@@ -67,7 +94,7 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 
 | Route | Who | Purpose |
 |---|---|---|
-| `GET /health` | none | `{status, service, register_version_in_force, in_memory}` |
+| `GET /health` | none | `{status, service, register_version_in_force, in_memory, seed_pinned, production}` |
 | `POST /compliance/v1/rule` | onboarding | activation (onboarding protocol) |
 | `POST /compliance/v1/review` | creative_production | payout (`zbc_clip`) / publish (`zbm_work`) (creative protocol) |
 | `POST /compliance/v1/gates/{activation,payout,publish}` | same | native form, same bodies |
@@ -80,7 +107,7 @@ Every POST body carries a `request_id` (idempotency: identical retry within
 | `GET /compliance/v1/register/{id}` | any caller | one row + its history |
 | `POST /compliance/v1/register/proposals` | legal_37 or Andre | create a proposal (never changes the register) |
 | `GET /compliance/v1/inbox` | any caller | undecided proposals, oldest effective date first, with `content_sha256` |
-| `POST /compliance/v1/register/decisions` | Andre only | ≤ 200 approve/reject decisions, atomic |
+| `POST /compliance/v1/register/decisions` | Andre only | ≤ 200 approve/reject decisions, atomic; approving a `weakening: true` proposal needs `acknowledge_weakening: true` |
 | `GET /compliance/v1/controls`, `/controls/{id}` | any caller | control status |
 | `POST /compliance/v1/controls/{id}/results` | the control's owner | push a result |
 | `POST /compliance/v1/controls/internal/run` | scheduler | compute Compliance-owned controls; draft re-verification proposals |
@@ -102,6 +129,7 @@ export COMPLIANCE_ANDRE_APPROVAL_TOKEN=<Andre's own secret>  # unset = no approv
 export COMPLIANCE_CALLER_TOKENS='{"onboarding":"<>=32 chars>","creative_production":"...","legal_37":"...","scheduler":"...", ...}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>   # unset = nothing can be recorded
 export COMPLIANCE_DATA_DIR=/var/lib/compliance              # unset = in memory; nothing in force after restart
+# with a data dir, start-up reads GET /ledger/entries and refuses if the log does not match the ledger
 python3 -m api      # COMPLIANCE_BIND_ADDR (127.0.0.1), COMPLIANCE_PORT (8380)
 ```
 
@@ -114,8 +142,13 @@ activation until a sanctions provider exists).
 Other settings (all fail closed by default): `COMPLIANCE_SANCTIONS_FRESHNESS_DAYS`
 (1), `COMPLIANCE_DISCLOSURE_MAX_OFFSET_S` (3), `COMPLIANCE_A11Y_MAX_AGE_DAYS`
 (30), `COMPLIANCE_WATCHER_ENABLED` (0), `COMPLIANCE_SITE_OWNER_CALLER`
-(creative_production), `COMPLIANCE_SEED_SHA256` (the spec's hash),
-`COMPLIANCE_SEED_PATH`. `COMPLIANCE_SANCTIONS_PROVIDER`,
+(creative_production), `COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_CYCLE` (50),
+`COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_SOURCE` (20). The seed is pinned to the
+spec's hash: `COMPLIANCE_SEED_PATH` / `COMPLIANCE_SEED_SHA256` may name
+another seed ONLY together with `COMPLIANCE_ALLOW_UNPINNED_SEED=1` (and an
+explicit `COMPLIANCE_SEED_SHA256`); the service then reports
+`seed_pinned: false, production: false` in `/health` and `seed_pinned: false`
+in every ruling — never use that in production. `COMPLIANCE_SANCTIONS_PROVIDER`,
 `COMPLIANCE_A11Y_PROVIDER`, `COMPLIANCE_AUTO_REVERIFY_UNCHANGED` and
 `COMPLIANCE_WAYBACK_CAPTURE` must stay unset: no adapter is built, and the
 service refuses to start rather than pretend.
@@ -135,11 +168,13 @@ idempotency and record-first tests; no network (a socket guard fails any
 test that tries). Live run with the real ledger binary:
 
 ```bash
-cd services/compliance-py && LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py --ports 18950,18951,18952
+cd services/compliance-py && LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py --ports 18950,18951,18952,18953
 ```
 
-It starts the ledger, compliance-py through its production entrypoint, and a
-second compliance-py through `devtools/live_server.py` (a fixture fetcher for
+It starts the ledger, compliance-py through its production entrypoint, a
+restart of that compliance-py against the same ledger (anchors verified),
+and a second compliance-py through `devtools/live_server.py` on its OWN
+ledger (the fourth port; one disk-backed instance per ledger) (a fixture fetcher for
 the Change Watcher leg, no network); drives all gates, a register approval,
 the onboarding and creative thin clients, a watcher proposal → Andre
 approval, and ends with `GET /ledger/verify`. It stops only the processes it
