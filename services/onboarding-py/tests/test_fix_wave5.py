@@ -203,14 +203,17 @@ def test_new2_a_clean_string_is_scanned_once_per_request(monkeypatch):
 
 def test_new2_max_size_benign_body_is_cheap_enough():
     # The measured cost of the AEGIS body was 1.56 s; the redundant pass and
-    # the per-character format strip are gone. Bound: 0.8 s of CPU.
+    # the per-character format strip are gone. Measured after the fix:
+    # 0.73-0.74 s alone, 0.81 s inside the full suite (AEGIS round 12, N12-3,
+    # 2 vCPU Xeon 2.80 GHz). Bound: 1.2 s of CPU (1.5x the in-suite worst),
+    # which still fails on the 1.56 s it exists to catch.
     from onboarding_schema import requests as rq
 
     for body in (MAX_FACTS, MAX_FACTS_NON_ASCII):
         t = time.thread_time()
         with redaction.scan_budget(30):
             rq.FactsRequest.model_validate(body)
-        assert time.thread_time() - t < 0.8, time.thread_time() - t
+        assert time.thread_time() - t < 1.2, time.thread_time() - t
 
 
 def test_new2_scan_config_is_validated_and_loaded():
