@@ -306,12 +306,14 @@ class ComplianceService:
             raise LedgerQueryFailed("this ledger client cannot read entries")
         entries = client.entries()
         shas = self.log.line_shas()
-        lines, referenced, rulings, leases, reconciles = [], set(), set(), [], []
+        lines, referenced, rulings, leases, reconciles, metas = [], set(), set(), [], [], []
         for rec, sha in zip(self.log.iter_records(), shas):
             d = rec["data"]
             lines.append((rec["seq"], sha, bool(d.get("anchored"))))
             referenced.update(d.get("ledger_event_ids") or [])
             r = d.get("record") or {}
+            if rec["kind"] == "decision" and r.get("version"):
+                metas.append(r["version"])
             if rec["kind"] == "ruling":
                 rulings.add(r.get("ruling_id"))
             elif rec["kind"] == "lease":
@@ -320,7 +322,8 @@ class ComplianceService:
                 reconciles.append((rec["seq"], r.get("payload"), r.get("reconcile_event_id"), d.get("register_version")))
         return i11_evidence_audit.assess(entries, self.log.epoch, lines, referenced, self.version_number or 0,
                                          strict=not self.log.in_memory, local_rulings=rulings, local_leases=leases,
-                                         reconciles=reconciles)
+                                         reconciles=reconciles,
+                                         local_versions=i11_evidence_audit.local_version_events(self.log.epoch, metas))
 
     def anchor_problems(self) -> list[str]:
         return self.assess_log().problems

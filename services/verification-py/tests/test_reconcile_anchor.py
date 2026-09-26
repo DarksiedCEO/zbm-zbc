@@ -75,7 +75,10 @@ def test_empty_log_against_a_ledger_that_anchors_one_refuses(tmp_path):
         _restart(x, tmp_path)
 
 
-def test_rules_rollback_refuses_even_in_reconcile_mode(tmp_path):
+def test_rules_rollback_refuses_start_and_only_andre_can_void_the_version(tmp_path):
+    """AEGIS N16-7 changed this rule: a version event the local log no longer holds (a rollback, or a forgery) is
+    VOIDABLE, not fatal. Start-up still refuses; reconcile mode starts and lists the version event; only Andre's
+    recorded reconcile voids it (a deliberate rules rollback)."""
     x = _durable(tmp_path)
     row = dict(x.svc.current.by_id()["VI-15c"], statement="Tightened TikTok retention statement.")
     p = x.ok(x.post("/vi/v1/rules/proposals", {"request_id": rid(), "kind": "amend", "target_id": "VI-15c",
@@ -88,8 +91,14 @@ def test_rules_rollback_refuses_even_in_reconcile_mode(tmp_path):
     lines = path.read_bytes().splitlines()
     i = max(k for k, ln in enumerate(lines) if b'"decision"' in ln[:80] or b'"kind":"decision"' in ln)
     path.write_bytes(b"\n".join(lines[:i]) + b"\n")
-    with pytest.raises(RuntimeError, match="rollback"):
-        _restart(x, tmp_path, VI_RECONCILE_MODE="1")
+    with pytest.raises(RuntimeError, match="match no decision in the local log"):
+        _restart(x, tmp_path)
+    y = _restart(x, tmp_path, VI_RECONCILE_MODE="1")
+    plan = _plan(y)
+    assert any(e.startswith("vi-ver-") for e in plan["voidable"]["event_ids"]) and not plan["fatal"]
+    assert _reconcile(y, plan).status_code == 200
+    z = _restart(x, tmp_path)
+    assert z.ok(z.get("/health"))["rules_version"] == 1
 
 
 def test_failed_commit_after_anchor_only_andre_reconciles(tmp_path):
@@ -188,8 +197,8 @@ def test_decision_whose_version_reached_the_ledger_is_restored_from_the_unwritte
     assert r.status_code == 503
     side = list((tmp_path / "d").glob("vi_log.jsonl.unwritten-*"))
     assert len(side) == 1
-    with pytest.raises(RuntimeError, match="rollback"):
-        _restart(x, tmp_path, VI_RECONCILE_MODE="1")
+    with pytest.raises(RuntimeError, match="match no decision in the local log"):
+        _restart(x, tmp_path)                     # the published version is not honoured without its decision line
     logf = tmp_path / "d" / "vi_log.jsonl"
     logf.write_bytes(logf.read_bytes() + side[0].read_bytes())
     y = _restart(x, tmp_path)

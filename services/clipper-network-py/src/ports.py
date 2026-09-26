@@ -175,7 +175,11 @@ class VerificationIntegrityPort(Protocol):
 
     def certifications(self, clipper_id: str) -> CertificationsAnswer: ...
 
-    def ban(self, request_id: str, clipper_id: str, cn_decision_id: str, approved_at: str) -> Ack: ...
+    def ban(self, request_id: str, clipper_id: str, cn_decision_id: str, approved_at: str,
+            andre_token: Optional[str]) -> Ack:
+        """V&I's ban route needs Andre's own approval token (AEGIS N16-2): CN passes through the exact token it
+        received on Andre's ban-decision request, in memory only; without one the ban is never sent."""
+        ...
 
 
 class NotBuiltVerificationIntegrity:
@@ -214,7 +218,7 @@ class NotBuiltVerificationIntegrity:
     def certifications(self, clipper_id):
         return CertificationsAnswer(False, reason=self.REASON)
 
-    def ban(self, request_id, clipper_id, cn_decision_id, approved_at):
+    def ban(self, request_id, clipper_id, cn_decision_id, approved_at, andre_token):
         return Ack(False, reason=self.REASON)
 
 

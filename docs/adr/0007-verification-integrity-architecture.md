@@ -192,6 +192,62 @@ Numbered so code comments can cite them ("ADR 0007 choice N").
 35. **The Compliance thin client** caches rows ≤ 1 h and drops the cache when a newer `register_version` is
     seen; Compliance's register-row answer carries no `seed_pinned`, so it is not checked.
 
+## Amendments — AEGIS round 16 (fix wave 17, Sep 26, 2026)
+
+- **N16-1 — no Compliance call under the service lock; a true wall-clock budget.** The thin client
+  (`compliance_client.py`) now runs each exchange in a daemon thread and waits at most the remaining 10 s TOTAL
+  budget (both attempts), so a server dripping one byte every few seconds cannot stretch a call (the old code
+  checked the deadline only after a chunk arrived: 19.6 s against a 9.8 s drip); encoded answers are refused. The
+  service never calls Compliance while holding its lock: `_compliance_snapshot` reads every row a ruling needs
+  BEFORE the lock (the `certify` job once per run — HR-13 plus every basis row of the rules it relies on — the
+  HR-13 attestation when no window exists yet, and each age read), recording each crossing on the ledger first and
+  fetching the rows in parallel within one bounded budget; inside the lock `_compliance_row` only reads that
+  snapshot (a row it lacks is unavailable) and re-judges a cached `verified` row against its `expires_at`
+  (`RegisterRow` now carries `verified_at`/`expires_at`). Proof: `tests/test_aegis16.py` (drip, lock, once-per-run,
+  expiry) and the live drip probe (an unrelated GET answers in < 1 s while Compliance drips).
+- **N16-3 — age attestations per caller namespace.** `POST /vi/v1/age/checks` files under (caller, subject id);
+  `GET /vi/v1/age/subjects/{id}` reads the caller's own namespace; V&I's own rulings about a clipper
+  (certification, integrity, retention, identity) read Clipper Network's. The minor lock holds per (namespace,
+  subject) and, for Clipper Network subjects, follows the identity: a subject whose e-mail or payout-identity HMAC
+  belongs to a clipper with a `minor` attestation is `minor` too (at the age check and at every read). Only a
+  Clipper Network minor revokes connections and purges platform data (the only subjects V&I holds data for).
+  Attestations recorded before namespacing carry none and are read by no caller (fail closed: a re-check).
+  **Every other route keyed by a caller-supplied subject id — cross-caller design note:** `connections/start`,
+  `/complete`, `/revoke`, `identity/checks` and `bans` have ONE writer (clipper_network), so the id space is Clipper
+  Network's; `GET /connections`, `GET /clippers/{id}/integrity`, `GET /certifications?clipper_id=` and
+  `GET /findings/{id}` are reads of that same space by the departments the spec names (compliance_38,
+  finance_31); `POST /submissions`, `/approval`, `clips/attest` and `results/attest` have ONE writer
+  (creative_production) and `clips/hr13` is Compliance reading Creative's submission by design (spec D.1: the
+  facts must equal the registration, else FACTS_MISMATCH); `GET /age/attestations/{id}` takes a V&I-issued id.
+  Only the age routes had two writers; they are the ones namespaced.
+- **N16-6 — wire contract with Clipper Network.** Every POST answer echoes `request_id`; every answer another
+  department's thin client reads carries `rules_pinned`. `/age/checks` answers `status` (adult / minor /
+  unknown) and a `facts_sha256` over what was sent WITHOUT the DOB (a DOB's hash is guessable, so it is never
+  echoed); `/age/subjects/{id}` adds `status` and `attestation_id`. `GET /connections` answers
+  `{clipper_id, items, rules_pinned}` (was a bare list); the strike feed adds each strike's findings'
+  `evidence_ids` and clip `subject_refs`; identity findings carry the id of the check or connection that found
+  them as evidence. New reads: `GET /vi/v1/findings/{id}` (clipper_network, compliance_38) and
+  `GET /vi/v1/certifications?clipper_id=` (clipper_network, compliance_38, finance_31; with
+  `revision_watch_end`). clipper-network-py `tests/test_contract_vi.py` runs CN's real client against this app.
+- **N16-7 — a version event alone never bricks start-up** (identical in compliance-py and clipper-network-py). A
+  `rules_version_published` event is honoured only when its id and payload hash match a decision record in the
+  local log; any other one in this log's epoch is VOIDABLE (not fatal): normal start refuses, reconcile mode
+  starts, and only Andre's recorded reconcile voids it (README "Reconciling …"). An empty log no longer treats a
+  version event alone as proof of a deleted log (every real version follows its decision line's anchor). This
+  replaces ADR 0006 N15-1's "no reconcile can void a published version": a genuine rollback now also reaches
+  Andre as a voidable item — voiding it is his deliberate, recorded rules rollback; restoring the unwritten line
+  keeps the version.
+- **N16-8 — latent certification and age gaps closed.** A fetch answer whose `source_endpoint` is not one of the
+  platform's documented endpoints (`platforms.FETCH_ENDPOINTS`; the test-only `fake` name is gone from
+  `src/`) or that carries no 64-hex `source_response_sha256` is not evidence (no snapshot, no liveness, never a
+  certification). Age: only an explicit `dob_consistent: true` passes; a provider result checked more than
+  `VI_AGE_ATTESTATION_VALIDITY_DAYS` (365) ago, in the future or unreadable is `inconclusive`; an adult
+  attestation is valid that long from the provider's check time and then reads `unknown` ("expired … a re-check
+  is required") everywhere (spec C.5 said "No expiry for adult": amended by the lead's instruction).
+- **N16-12 — e-mail normalisation** is NFKC + case-fold + trailing dots of the domain removed. Plus-tags and dots
+  in the local part are kept as-is (spec C.7 choice: they are different mailboxes at many providers; the payout
+  identity catches the same person).
+
 ## Spec items not built, and why
 
 - **"Changes other services must make" (1-7)** — reported, not made (brief: do not modify other services).
@@ -213,6 +269,11 @@ Numbered so code comments can cite them ("ADR 0007 choice N").
 
 - Single process, one lock around every operation; state is rebuilt from the log at start. The certify job
   reads the whole ledger once per run (ledger-rust has no filtered read).
+- Remote calls still made under that lock (the N16-1 class, not reachable in production today): the ledger itself
+  (record-first needs its order), and the vault, platform adapters, TikTok oEmbed, hasher, media intake, age
+  provider, Finance, Legal, People and Clipper Network ports — all fail-closed in-process stand-ins in this build
+  (oEmbed is only reached with a `share_url`, which only a wired adapter supplies). Wiring any of them must first
+  move its call out of the lock the way the Compliance reads were (prefetch, or an I/O phase before the lock).
 - Ledger volume: every operation records its crossings plus one anchor; the 32-day live run with 9 clips
   wrote ~6.8k events.
 - Pending OAuth starts, TikTok/Instagram per-minute/second quota windows and 429 back-off live in memory.

@@ -17,7 +17,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from ledger import LedgerConflict, LedgerNotRecorded, LedgerQueryFailed, event_field_problems, payload_sha256  # noqa: E402
-from platforms import SCOPES  # noqa: E402
+from platforms import FETCH_ENDPOINTS, SCOPES  # noqa: E402
+
+FAKE_ENDPOINT = {p: eps[0] for p, eps in FETCH_ENDPOINTS.items()}   # a fake answers as the real endpoint would
 from ports import (AccountAnswer, AdapterAnswer, AgeProviderAnswer, PayoutIdentity, RegisterRow, TakedownAnswer,  # noqa: E402
                    VaultStore, VaultUnavailable, VideoFacts, ViewCap)
 
@@ -146,14 +148,14 @@ class FakeAdapter:
                 return AdapterAnswer(False, cost_units=1)
             v = self.videos.get(video_ref)
             if v is None or v.get("gone"):
-                return AdapterAnswer(True, live_state="gone", source_endpoint="fake",
+                return AdapterAnswer(True, live_state="gone", source_endpoint=FAKE_ENDPOINT[self.platform],
                                      source_response_sha256="0" * 64, cost_units=1, http_status=200)
             values = {k: n for k, n in v["values"].items() if k in metrics or k == "views"}
             vf = VideoFacts(v["video_id"], v.get("author_id", account_id), v["create_time"], v.get("duration_ms", 30000),
                             v.get("caption", "a caption #ad"), v.get("cover", b"cover-bytes"), v.get("share_url"),
                             v.get("is_collab", False), v.get("rights_restricted", False))
             body = repr((v["video_id"], sorted(values.items()))).encode()
-            return AdapterAnswer(True, values, dict(v.get("country", {})), vf, v.get("state", "live"), "fake",
+            return AdapterAnswer(True, values, dict(v.get("country", {})), vf, v.get("state", "live"), FAKE_ENDPOINT[self.platform],
                                  hashlib.sha256(body).hexdigest(), 1, 200)
         return vault.with_token(vault_ref, "fetch", run)
 

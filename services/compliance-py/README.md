@@ -168,8 +168,7 @@ is red, which blocks every gate) until Andre reconciles:
    directory (the refusal names a newer lease when one did).
 2. Start it with `COMPLIANCE_RECONCILE_MODE=1`. It starts only if every
    problem is voidable; it answers reads and the reconcile route only.
-   A register version on the ledger above the local one (a rollback), a
-   local line the ledger does not anchor, a missing cited event or another
+   A local line the ledger does not anchor, a missing cited event or another
    log's anchors are FATAL: it refuses even in this mode.
 3. `GET /compliance/v1/reconcile` with Andre's token: `problems`, `fatal`,
    `head_seq`, `head_sha256`, `register_version` and `voidable` (`lines`,
@@ -184,12 +183,30 @@ is red, which blocks every gate) until Andre reconciles:
    `reconcile` event matches the local line's payload hash.
 
 A running service can be reconciled the same way (steps 3–4) when C-11 goes
-red after a failed commit. A decision whose register version reached the
-ledger but whose line never reached the disk cannot be voided (that is a
-rollback): the unwritten line is kept as `compliance_log.jsonl.unwritten-<seq>`
-— append that exact line to the log (its hash is the ledger's anchor) and
-restart; if more lines were written after it, have Andre make another
-decision before the process stops (it republishes that version number).
+red after a failed commit.
+
+Register-version events (AEGIS N16-7, shared with verification-py and
+clipper-network-py). A `register_version_published` event is honoured only
+when its id and payload hash match a decision record in the local log. Any
+other one in this log's epoch — posted by anyone holding the ledger token, or
+left by a decision the local log no longer holds (a rollback) — is VOIDABLE,
+never fatal: a normal start refuses and names it ("… register version
+event(s) on the ledger match no decision in the local log (version N; local
+version M) …"); `COMPLIANCE_RECONCILE_MODE=1` starts and the plan lists it
+under `voidable.event_ids` (`cmp-ver-<epoch>-<n>-…`). Before voiding, Andre
+checks which it is:
+
+- he made that decision and only its line never reached the disk: do NOT
+  void it. The unwritten line is kept as
+  `compliance_log.jsonl.unwritten-<seq>` — append that exact line to the log
+  (its hash is the ledger's anchor) and restart; if more lines were written
+  after it, have Andre make another decision before the process stops (it
+  republishes that version number);
+- he made no such decision (a forgery): POST the plan (step 4). The
+  `reconcile` event is recorded on the ledger with actor `andre` and binds the
+  voided ids; the next start is normal at the local version and C-11 passes.
+
+Voiding a genuine version is a deliberate, recorded rollback of the register.
 
 The callers opt in with `COMPLIANCE_SERVICE_URL`, `COMPLIANCE_SERVICE_TOKEN`
 and `COMPLIANCE_CALLER_TOKEN` in onboarding-py / creative-py; without all

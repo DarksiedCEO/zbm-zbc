@@ -9,6 +9,12 @@ Order of every state change (spec §A, §E; ADR 0006 decisions 4-5 pattern), wit
   4. only then is it applied to memory (and the purgeable platform-data side store) and answered.
 A failure at 1-3 raises ``Unavailable`` (HTTP 503): nothing was issued. State is event-sourced from the log.
 One lock serializes every operation.
+
+AEGIS N16-1: no call to Compliance (38) is made while that lock is held. Every register row a ruling needs is
+read BEFORE the lock is taken (``_compliance_snapshot``: crossings recorded first, rows fetched in parallel within
+the thin client's 10 s wall-clock budget, once per job run / request); inside the lock ``_compliance_row`` only
+reads that snapshot and re-judges each row against its ``expires_at``. An unrelated request therefore never
+waits on a remote Compliance answer.
 """
 
 from __future__ import annotations
@@ -16,10 +22,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import secrets
 import threading
+import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
@@ -56,6 +65,15 @@ JOBS = ("liveness", "metrics", "revisions", "anomaly", "certify", "retention")  
 CERTIFY_RULES = ("VI-01", "VI-03", "VI-04", "VI-06", "VI-07", "VI-08", "VI-09", "VI-10", "VI-11", "VI-12", "VI-13",
                  "VI-14", "VI-17", "VI-18", "VI-19", "VI-20", "VI-21")
 AGE_RULES = ("VI-11", "VI-21")
+# N16-1: the whole Compliance prefetch of one job run / request is bounded (the client's 10 s budget + margin)
+COMPLIANCE_PREFETCH_BUDGET_S = 12.0
+# N16-3: age attestations are kept per caller namespace; clipper ids (certification, integrity, identity) are
+# Clipper Network's, so V&I's own rulings read that namespace. Records written before namespacing existed carry
+# none and land in "legacy", which no caller reads (fail closed: a re-check is needed).
+CN_NAMESPACE = "clipper_network"
+LEGACY_NAMESPACE = "legacy"
+IDENTITY_LOCK_KINDS = ("email", "payout")     # the identity HMACs a minor lock follows (spec C.5, VI-CQ-03)
+_SHA64 = re.compile(r"[0-9a-f]{64}")
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 HOLD_CODES_FROM_FINDING = {"bought_engagement": "BOUGHT_ENGAGEMENT", "platform_stripped": "PLATFORM_STRIPPED",
                            "duplicate_identity": "DUPLICATE_IDENTITY", "account_shared": "ACCOUNT_SHARED",
@@ -165,6 +183,8 @@ class VIService:
         self.ports = ports or Ports()
         self.clock = clock or SystemClock()
         self.lock = threading.RLock()
+        self._tls = threading.local()          # N16-1: the Compliance snapshot of the current request / job run
+        self._xlock = threading.Lock()         # serializes crossings recorded outside the service lock
         seed_sha = hashlib.sha256(seed_bytes).hexdigest()
         if seed_sha != expected_seed_sha256:
             raise RuntimeError(f"rules seed SHA-256 {seed_sha} does not match the expected {expected_seed_sha256}; "
@@ -194,7 +214,7 @@ class VIService:
         self.bans: dict[str, dict] = {}
         self.banned: set[tuple[str, str]] = set()
         self.ages: dict[str, dict] = {}
-        self.latest_age: dict[str, str] = {}
+        self.latest_age: dict[tuple[str, str], str] = {}     # (caller namespace, subject id) -> attestation id
         self.identities: dict[str, dict] = {}
         self.hmac_owner: dict[tuple[str, str], str] = {}
         self.clipper_hmacs: dict[str, set] = {}
@@ -338,7 +358,7 @@ class VIService:
                 self.banned.add(tuple(k))
         elif kind == "age":
             self.ages[r["attestation_id"]] = r
-            self.latest_age[r["subject_id"]] = r["attestation_id"]
+            self.latest_age[(r.get("namespace") or LEGACY_NAMESPACE, r["subject_id"])] = r["attestation_id"]
         elif kind == "identity":
             self.identities[r["clipper_id"]] = r
             for k, h in r["hmacs"].items():
@@ -395,7 +415,7 @@ class VIService:
             raise LedgerQueryFailed("this ledger client cannot read entries")
         entries = client.entries()
         shas = self.log.line_shas()
-        lines, referenced, leases, reconciles = [], set(), [], []
+        lines, referenced, leases, reconciles, metas = [], set(), [], [], []
         for rec, s in zip(self.log.iter_records(), shas):
             d = rec["data"]
             lines.append((rec["seq"], s, bool(d.get("anchored"))))
@@ -405,8 +425,11 @@ class VIService:
                     leases.append((rec["seq"], r.get("instance_id"), r.get("lease_event_id")))
                 elif kind == "reconcile":
                     reconciles.append((rec["seq"], r.get("payload"), r.get("reconcile_event_id"), d.get("rules_version")))
+                elif kind == "decision" and r.get("version"):
+                    metas.append(r["version"])
         return i10.assess(entries, self.log.epoch, lines, referenced, self.rules_version or 0,
-                          strict=not self.log.in_memory, local_rulings=set(), local_leases=leases, reconciles=reconciles)
+                          strict=not self.log.in_memory, local_rulings=set(), local_leases=leases, reconciles=reconciles,
+                          local_versions=i10.local_version_events(self.log.epoch, metas))
 
     def snapshot_evidence_problems(self, entries: Optional[list] = None) -> list[str]:
         """A1: every snapshot's ledger event must carry the SHA-256 of the snapshot record the log holds."""
@@ -659,9 +682,86 @@ class VIService:
         return out
 
     def _compliance_row(self, oid: str, op: Op) -> RegisterRow:
+        """A register row from the snapshot read BEFORE the service lock was taken (N16-1). Never a remote call
+        here: a row the snapshot lacks is unavailable (→ DEPENDENCY_UNAVAILABLE). The crossing that fetched it is
+        cited by the operation. A cached ``verified`` row is re-judged against its ``expires_at`` now."""
+        hit = (getattr(self._tls, "compliance", None) or {}).get(oid)
+        if hit is None:
+            return RegisterRow(False, oid)
+        ans, eid = hit
+        if eid and eid not in op.events:
+            op.events.append(eid)
+        if not isinstance(ans, RegisterRow) or not ans.available or ans.obligation_id != oid:
+            return RegisterRow(False, oid)
+        if ans.effective_status == "verified" and ans.expires_at is not None:
+            try:
+                expires = date.fromisoformat(ans.expires_at)
+            except (TypeError, ValueError):
+                return RegisterRow(False, oid)
+            if self._now().date() >= expires:
+                return replace(ans, effective_status="expired")
+        return ans
+
+    def _basis_oids(self, rule_ids: tuple) -> set[str]:
+        with self.lock:
+            rules = self.rules()
+            out: set[str] = set()
+            for r_id in rule_ids:
+                row = rules.get(r_id)
+                if row is not None:
+                    out.update(row["basis_obligation_ids"])
+            return out
+
+    @contextmanager
+    def _compliance_snapshot(self, oids):
+        """Read every register row in ``oids`` OUTSIDE the service lock and make them the current thread's
+        snapshot for the ruling that follows (N16-1). Must be entered before ``self.lock`` is taken."""
+        snap = self._prefetch_compliance(sorted(set(oids)))
+        prev = getattr(self._tls, "compliance", None)
+        self._tls.compliance = snap
+        try:
+            yield snap
+        finally:
+            self._tls.compliance = prev
+
+    def _prefetch_compliance(self, oids: list[str]) -> dict[str, tuple[RegisterRow, Optional[str]]]:
+        out: dict[str, tuple[RegisterRow, Optional[str]]] = {}
+        if not oids or self.reconcile_mode:
+            return out
         c = self.ports.compliance
-        ans = op.call("compliance_38", "register_row", (oid,), lambda: c.row(oid), RegisterRow(False, oid))
-        return ans if isinstance(ans, RegisterRow) else RegisterRow(False, oid)
+        nonce = secrets.token_hex(8)
+        eids: dict[str, str] = {}
+        for oid in oids:
+            eid = derived_id("x", "compliance_prefetch", nonce, oid)
+            try:
+                with self._xlock:           # record-first: the crossing is on the ledger before the call is made
+                    self.recorder.record(eid, "crossing_compliance_38_requested", EVIDENCE, "compliance_38",
+                                         {"port": "compliance_38", "action": "register_row",
+                                          "args_sha256": sha([oid]), "op": f"prefetch|{nonce}"},
+                                         "Request to compliance_38: register_row")
+            except LedgerRecordError:
+                out[oid] = (RegisterRow(False, oid), None)      # not recorded: not asked, unavailable
+                continue
+            eids[oid] = eid
+        answers: dict[str, Any] = {}
+
+        def ask(oid: str) -> None:
+            try:
+                answers[oid] = c.row(oid)
+            except Exception:  # noqa: BLE001 - a port that raises is unavailable, never a pass
+                answers[oid] = RegisterRow(False, oid)
+
+        threads = [threading.Thread(target=ask, args=(oid,), name="vi-compliance-prefetch", daemon=True)
+                   for oid in eids]
+        deadline = time.monotonic() + COMPLIANCE_PREFETCH_BUDGET_S
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(max(0.0, deadline - time.monotonic()))
+        for oid, eid in eids.items():
+            ans = answers.get(oid)
+            out[oid] = (ans if isinstance(ans, RegisterRow) else RegisterRow(False, oid), eid)
+        return out
 
     def _lag(self, op: Op) -> tuple[int, str, Optional[int], list[dict]]:
         """HR-13 settlement_lag_days (§C.2 step 1). Stand-in/unavailable → 14 days, ``settlement_source:
@@ -720,10 +820,43 @@ class VIService:
                        and ((f["subject_kind"] == "clip" and f["subject_id"] == sub_id)
                             or f.get("clipper_id") == clipper_id)), key=lambda f: f["finding_id"])
 
-    def _age_status(self, subject_id: str, op: Op, with_rules: bool = True) -> tuple[str, list[dict], Optional[str]]:
-        """(adult | minor | unknown, reasons, attestation id). ``inconclusive``/none → unknown."""
+    def _minor_identities(self, exclude: Optional[str] = None) -> dict[tuple, str]:
+        """(kind, hmac) -> minor attestation id, over the e-mail / payout identity HMACs of every Clipper Network
+        subject whose latest attestation is ``minor`` (N16-3: the minor lock follows the identity)."""
+        out: dict[tuple, str] = {}
+        for (ns, subj), aid in self.latest_age.items():
+            if ns != CN_NAMESPACE or subj == exclude or self.ages[aid]["result"] != "minor":
+                continue
+            for k in self.clipper_hmacs.get(subj, set()):
+                if k[0] in IDENTITY_LOCK_KINDS:
+                    out.setdefault(k, aid)
+        return out
+
+    def _identity_minor(self, subject_id: str) -> Optional[str]:
+        mine = {k for k in self.clipper_hmacs.get(subject_id, set()) if k[0] in IDENTITY_LOCK_KINDS}
+        if not mine:
+            return None
+        locked = self._minor_identities(exclude=subject_id)
+        hits = sorted(locked[k] for k in mine if k in locked)
+        return hits[0] if hits else None
+
+    def _age_valid_until(self, a: dict) -> datetime:
+        """N16-8: an attestation is valid for VI_AGE_ATTESTATION_VALIDITY_DAYS from the provider's check time."""
+        v = a.get("valid_until")
+        if isinstance(v, str):
+            return parse_iso(v)
+        return parse_iso(a["checked_at"]) + timedelta(days=self.cfg.age_attestation_validity_days)
+
+    def _age_status(self, subject_id: str, op: Op, ns: str = CN_NAMESPACE) -> tuple[str, list[dict], Optional[str]]:
+        """(adult | minor | unknown, reasons, attestation id) in caller namespace ``ns`` (N16-3; V&I's own rulings
+        about a clipper read Clipper Network's). ``inconclusive``/none/expired → unknown."""
         rules = self.rules()
-        aid = self.latest_age.get(subject_id)
+        aid = self.latest_age.get((ns, subject_id))
+        if ns == CN_NAMESPACE:
+            locked = self._identity_minor(subject_id)
+            if locked and (aid is None or self.ages[aid]["result"] != "minor"):
+                return "minor", [R.item("AGE_MINOR", "an attestation of this identity (same e-mail or payout identity, "
+                                        "another clipper id) was under 18", (locked,), rules)], aid
         if aid is None:
             return "unknown", [R.item("AGE_NOT_ASSURED", "no age attestation on file", (), rules)], None
         a = self.ages[aid]
@@ -732,7 +865,11 @@ class VIService:
         if a["result"] != "adult":
             return "unknown", [R.item(a.get("code") or "AGE_NOT_ASSURED", f"age attestation {a['result']}", (aid,),
                                       rules)], aid
-        dup = self._findings_on(None, subject_id, ("duplicate_identity", "account_shared"))
+        until = self._age_valid_until(a)
+        if self._now() >= until:
+            return "unknown", [R.item("AGE_NOT_ASSURED", f"adult attestation expired on {iso(until)[:10]}: a re-check "
+                                      "is required", (aid,), rules)], aid
+        dup = self._findings_on(None, subject_id, ("duplicate_identity", "account_shared")) if ns == CN_NAMESPACE else []
         if dup:
             return "unknown", [R.item("DUPLICATE_IDENTITY", "adult attestation invalidated by a duplicate-identity "
                                       "finding", [f["finding_id"] for f in dup], rules)], aid
@@ -804,10 +941,12 @@ class VIService:
             if url:
                 self.pending_oauth[state_sha] = {"connection_id": cid, "verifier": verifier,
                                                  "redirect_uri": redirect_uri, "expires": now + OAUTH_STATE_TTL}
-                resp = {"started": True, "connection_id": cid, "authorization_url": url, "state_expires_at": expires,
+                resp = {"request_id": request_id, "rules_pinned": self.rules_pinned, "clipper_id": clipper_id,
+                        "started": True, "connection_id": cid, "authorization_url": url, "state_expires_at": expires,
                         "ledger_event_ids": op.events}
             else:
-                resp = {"started": False, "connection_id": cid, "reasons": reasons, "reason_lines": R.lines(reasons),
+                resp = {"request_id": request_id, "rules_pinned": self.rules_pinned, "clipper_id": clipper_id,
+                        "started": False, "connection_id": cid, "reasons": reasons, "reason_lines": R.lines(reasons),
                         "ledger_event_ids": op.events}
             return self._idem_store(key, h, resp)
 
@@ -873,7 +1012,7 @@ class VIService:
                             other = self.hmac_owner.get((kind, acct_hmac))
                             if (kind, acct_hmac) in self.banned or (other is not None and other != clipper_id):
                                 finding, held = self._identity_finding(op, "account_shared", "ACCOUNT_SHARED", clipper_id,
-                                                                       other, kind, now)
+                                                                       other, kind, now, (cid,))
                                 reasons.append(R.item("ACCOUNT_SHARED", "this social account is already held by another "
                                                       "clipper identity (or is banned)",
                                                       [finding["finding_id"]] if finding else (), rules))
@@ -904,19 +1043,21 @@ class VIService:
                     except Exception:  # noqa: BLE001 - best effort; the grant must not outlive a refused op
                         pass
                 raise
-            resp = {"connection": self._connection_view(rec), "ledger_event_ids": op.events}
+            resp = {"request_id": request_id, "rules_pinned": self.rules_pinned,
+                    "connection": self._connection_view(rec), "ledger_event_ids": op.events}
             return self._idem_store(key, h, resp)
 
     def _identity_finding(self, op: Op, kind: str, code: str, newer: str, older: Optional[str], hmac_kind: str,
-                          now: datetime) -> tuple[dict, list[dict]]:
-        """Open a duplicate_identity / account_shared finding and hold the NEWER identity (§C.7)."""
+                          now: datetime, evidence: tuple = ()) -> tuple[dict, list[dict]]:
+        """Open a duplicate_identity / account_shared finding and hold the NEWER identity (§C.7). ``evidence``: the
+        id of the check or connection that found the match (a finding Clipper Network can resolve, N16-6)."""
         rules = self.rules()
         fid = rid("fnd", kind, newer, older, hmac_kind)
         existing = self.findings.get(fid)
         if existing and existing["status"] == "open":
             return existing, []
         f = {"finding_id": fid, "kind": kind, "code": code, "subject_kind": "clipper", "subject_id": newer,
-             "clipper_id": newer, "other_clipper_id": older, "status": "open", "evidence_ids": [],
+             "clipper_id": newer, "other_clipper_id": older, "status": "open", "evidence_ids": list(evidence),
              "rule_id": R.CATALOG[code], "opened_at": iso(now), "decided_by": None, "decided_at": None,
              "decision_note_sha256": None, "matched_kind": hmac_kind.split(":")[0]}
         op.record(derived_id("fnd", fid, "open"), "finding_opened", i07.ACTOR, newer,
@@ -954,7 +1095,8 @@ class VIService:
             op = Op(self, f"{connection_id}|revoke|{request_id}", i01.ACTOR, c["clipper_id"])
             self._revoke(op, c, reason, self._now())
             self._commit(op)
-            return self._idem_store(key, h, {"connection": self._connection_view(self.connections[connection_id]),
+            return self._idem_store(key, h, {"request_id": request_id, "rules_pinned": self.rules_pinned,
+                                             "connection": self._connection_view(self.connections[connection_id]),
                                              "ledger_event_ids": op.events})
 
     def _revoke(self, op: Op, c: dict, why: str, now: datetime) -> None:
@@ -991,10 +1133,13 @@ class VIService:
                              "fields": sorted({f"{e['platform']}:{e['field']}" for _, e in doomed})})
         op.side.append(lambda: self.side.delete([k for k, _ in doomed]))
 
-    def list_connections(self, clipper_id: str) -> list[dict]:
+    def list_connections(self, clipper_id: str) -> dict:
+        """``{clipper_id, items, rules_pinned}`` (N16-6: the subject is echoed and the pin is stated, as on every
+        answer another department's thin client checks)."""
         with self.lock:
-            return [self._connection_view(c) for c in sorted(self.connections.values(), key=lambda c: c["seq"])
-                    if c["clipper_id"] == clipper_id]
+            return {"clipper_id": clipper_id, "rules_pinned": self.rules_pinned,
+                    "items": [self._connection_view(c) for c in sorted(self.connections.values(), key=lambda c: c["seq"])
+                              if c["clipper_id"] == clipper_id]}
 
     # ================================================================== submissions (§D.2, §C.8)
 
@@ -1174,6 +1319,16 @@ class VIService:
             op.record(derived_id("fch", fid), "platform_fetch_failed", i01.ACTOR, sid,
                       {"fetch_id": fid, "purpose": purpose, "cause": rec["cause"]}, f"{platform} fetch unavailable")
             return op.add("fetch", rec)
+        sha_ok = isinstance(ans.source_response_sha256, str) and bool(_SHA64.fullmatch(ans.source_response_sha256))
+        if ans.source_endpoint not in P.FETCH_ENDPOINTS.get(platform, ()) or not sha_ok:
+            # N16-8: an answer that names no known endpoint of this platform or carries no response hash is not
+            # evidence: no snapshot, no liveness, never a certification
+            rec.update(cause="unverifiable_answer", reasons=[R.item(
+                "ADAPTER_UNAVAILABLE", f"{platform} answer names no known endpoint or carries no response hash", (),
+                rules)])
+            op.record(derived_id("fch", fid), "platform_fetch_failed", i01.ACTOR, sid,
+                      {"fetch_id": fid, "purpose": purpose, "cause": rec["cause"]}, f"{platform} fetch unusable")
+            return op.add("fetch", rec)
         rec.update(available=True, live_state=ans.live_state if ans.live_state in ("live", "gone", "private") else "unknown")
         side_puts = []
         if ans.video is not None:
@@ -1212,7 +1367,7 @@ class VIService:
                 continue
             snp = rid("snp", fid, metric, dim)
             s = i01.snapshot(snp, conn["connection_id"], sid, platform, vid_sha, metric, val, dim, iso(now),
-                             ans.source_endpoint if ans.source_endpoint in P.SOURCE_ENDPOINTS else "fake",
+                             ans.source_endpoint,
                              ans.source_response_sha256, ADAPTER_VERSION, until, stats_rule)
             s["fetch_id"] = fid
             eid = derived_id("snp", snp)
@@ -1631,7 +1786,10 @@ class VIService:
     def run_job(self, principal: str, request_id: str, job: str) -> dict:
         if job not in JOBS:
             raise NotFound("no such job")
-        with self.lock:
+        oids: set[str] = set()
+        if job == "certify" and (job, self._now().date().isoformat()) not in self.job_runs:
+            oids = self._basis_oids(CERTIFY_RULES) | {"HR-13"}      # once per job run, outside the lock (N16-1)
+        with self._compliance_snapshot(oids), self.lock:
             key, h, ent = self._idem(principal, request_id, f"jobs/{job}", {})
             if ent:
                 return ent["response"]
@@ -1875,8 +2033,8 @@ class VIService:
                 if c is None or c["status"] != "active":
                     doomed[k] = "connection_not_active"
         # minors: everything V&I holds about a minor subject goes (the attestation and identity HMACs stay, VI-CQ-03)
-        for subj, aid in self.latest_age.items():
-            if self.ages[aid]["result"] == "minor":
+        for (ns, subj), aid in self.latest_age.items():
+            if ns == CN_NAMESPACE and self.ages[aid]["result"] == "minor":
                 owners = [c["connection_id"] for c in self.connections.values() if c["clipper_id"] == subj]
                 owners += [s["submission_id"] for s in self.submissions.values() if s["clipper_id"] == subj]
                 for k in self.side.keys_for(owners):
@@ -2052,7 +2210,11 @@ class VIService:
             ans["reason"] = ans["reason"][:1000]
             return ans, reasons
 
-        return self._attest(principal, request_id, "clips/hr13", sent, sid, "hr13_attested", build)
+        with self.lock:
+            cid = self.cert_by_sub.get(sid)
+            need_lag = cid is not None and not (self.certs[cid].get("window") or {}).get("lag_days")
+        with self._compliance_snapshot({"HR-13"} if need_lag else set()):      # outside the lock (N16-1)
+            return self._attest(principal, request_id, "clips/hr13", sent, sid, "hr13_attested", build)
 
     def attest_creative_clip(self, principal: str, request_id: str, sid: str, facts: dict) -> dict:
         fsha = facts_sha256(facts)
@@ -2150,6 +2312,10 @@ class VIService:
     # ================================================================== age (i05)
 
     def age_check(self, principal: str, request_id: str, body: dict) -> dict:
+        """N16-3: the attestation is filed in the CALLER's namespace; a caller can neither read nor decide another
+        caller's subject. The minor lock holds per (namespace, subject) and, for Clipper Network subjects, follows
+        the identity (e-mail / payout HMACs) rather than a bare id. Only a Clipper Network subject is a clipper
+        whose V&I connections and data a minor result revokes and purges."""
         with self.lock:
             safe_body = {k: v for k, v in body.items() if k != "dob"}
             safe_body["dob_sha256"] = sha_text(body["dob"])
@@ -2158,6 +2324,7 @@ class VIService:
                 return ent["response"]
             now = self._now()
             rules = self.rules()
+            ns = principal
             subject = body["subject_id"]
             aid = rid("age", principal, request_id)
             op = Op(self, aid, i05.ACTOR, subject)
@@ -2167,13 +2334,19 @@ class VIService:
                 raise Invalid("dob must be a real calendar date (YYYY-MM-DD)") from None
             if dob > now.date() or dob.year < 1900:
                 raise Invalid("dob out of range")
-            prior = self.latest_age.get(subject)
+            prior = self.latest_age.get((ns, subject))
+            locked = self._identity_minor(subject) if ns == CN_NAMESPACE else None
             provider = provider_ref = None
+            provider_checked_at = None
             buffer_applied = False
             needs_human = False
             if prior and self.ages[prior]["result"] == "minor":
                 result, reasons = "minor", [R.item("AGE_MINOR", "an earlier attestation for this subject was under 18 "
                                                    "(no re-attempt under another DOB)", (prior,), rules)]
+            elif locked:
+                result, reasons = "minor", [R.item("AGE_MINOR", "an earlier attestation of this identity (same e-mail "
+                                                   "or payout identity, another clipper id) was under 18 (no "
+                                                   "re-attempt under another id or DOB)", (locked,), rules)]
             else:
                 pre = i05.pre_check(dob, body["dob_field_neutral"], body["method"], now.date(), rules)
                 if pre is not None:
@@ -2184,24 +2357,30 @@ class VIService:
                     ans = op.call("age_provider", "check", (aid, method), lambda: prov.check(method, sess, dob_s),
                                   AgeProviderAnswer("unavailable"))
                     ans = ans if isinstance(ans, AgeProviderAnswer) else AgeProviderAnswer("unavailable")
-                    result, reasons, buffer_applied, needs_human = i05.judge(method, ans, self.cfg.fae_buffer_age, rules)
+                    result, reasons, buffer_applied, needs_human = i05.judge(
+                        method, ans, self.cfg.fae_buffer_age, rules, now=now,
+                        validity_days=self.cfg.age_attestation_validity_days)
                     provider = ans.provider if isinstance(ans.provider, str) else None
                     provider_ref = ans.provider_ref if isinstance(ans.provider_ref, str) else None
-            rec = {"attestation_id": aid, "subject_id": subject, "result": result, "method": body["method"],
-                   "provider": (provider or "")[:64] or None,
+                    provider_checked_at = i05.provider_time(ans.checked_at, now)
+            checked = provider_checked_at or now
+            rec = {"attestation_id": aid, "namespace": ns, "subject_id": subject, "result": result,
+                   "method": body["method"], "provider": (provider or "")[:64] or None,
                    "provider_ref_sha256": sha_text(provider_ref) if provider_ref else None,
-                   "checked_at": iso(now), "dob_field_neutral": body["dob_field_neutral"],
+                   "checked_at": iso(now), "provider_checked_at": iso(checked),
+                   "valid_until": iso(checked + timedelta(days=self.cfg.age_attestation_validity_days)),
+                   "dob_field_neutral": body["dob_field_neutral"],
                    "buffer_applied": buffer_applied, "code": reasons[0]["code"] if reasons else None,
                    "reasons": reasons, "reason_lines": R.lines(reasons), "rules_version": self.rules_version}
             op.record(derived_id("age", aid), "age_attested", i05.ACTOR, subject,
-                      {"attestation_id": aid, "result": result, "method": body["method"],
+                      {"attestation_id": aid, "namespace": ns, "result": result, "method": body["method"],
                        "provider_ref_sha256": rec["provider_ref_sha256"], "buffer_applied": buffer_applied,
                        "codes": R.codes(reasons)}, f"Age attestation: {result}")
             op.add("age", rec)
-            if needs_human:
+            if needs_human and ns == CN_NAMESPACE:
                 self._open_hold(op, "clipper", subject, "age_review", reasons, now, key=aid)
-            if result == "minor":
-                # hard block: connections revoked and everything V&I holds about the subject purged now
+            if result == "minor" and ns == CN_NAMESPACE:
+                # hard block: connections revoked and everything V&I holds about the clipper purged now
                 for c in [c for c in self.connections.values() if c["clipper_id"] == subject]:
                     self._revoke(op, c, "minor", now)
                 owners = [c["connection_id"] for c in self.connections.values() if c["clipper_id"] == subject]
@@ -2214,17 +2393,24 @@ class VIService:
             self._commit(op)
             shown = reasons + ([R.item("RULES_NOT_IN_FORCE", "no V&I rule version is in force: no answer built on "
                                        "this attestation is positive", (), rules)] if self.current is None else [])
-            resp = {"attestation_id": aid, "subject_id": subject, "result": result, "method": body["method"],
-                    "buffer_applied": buffer_applied, "rules_in_force": self.current is not None, "reasons": shown,
+            status = "minor" if result == "minor" else ("adult" if result == "adult" and self.current is not None
+                                                        else "unknown")
+            sent = {k: body[k] for k in ("subject_id", "dob_field_neutral", "method", "provider_session_ref")}
+            resp = {"request_id": request_id, "facts_sha256": facts_sha256(sent), "rules_pinned": self.rules_pinned,
+                    "attestation_id": aid, "subject_id": subject, "status": status, "result": result,
+                    "method": body["method"], "buffer_applied": buffer_applied,
+                    "rules_in_force": self.current is not None, "reasons": shown,
                     "reason_lines": R.lines(shown), "ledger_event_ids": op.events}
             return self._idem_store(key, h, resp)
 
-    def _age_answer(self, op: Op, a: dict) -> tuple[str, list[dict]]:
+    def _age_answer(self, op: Op, ns: str, subject_id: str, attestation_id: Optional[str]) -> tuple[str, list[dict]]:
+        """Status of ``subject_id`` in namespace ``ns``; with ``attestation_id``, that attestation must be the
+        subject's latest (a superseded one is unknown unless the subject is a minor)."""
         rules = self.rules()
         if self.current is None:
             return "unknown", [R.item("RULES_NOT_IN_FORCE", "no V&I rule version is in force", (), rules)]
-        status, reasons, _ = self._age_status(a["subject_id"], op)
-        if self.latest_age.get(a["subject_id"]) != a["attestation_id"] and status != "minor":
+        status, reasons, _ = self._age_status(subject_id, op, ns)
+        if attestation_id is not None and self.latest_age.get((ns, subject_id)) != attestation_id and status != "minor":
             status, reasons = "unknown", [R.item("AGE_NOT_ASSURED", "a later attestation supersedes this one", (), rules)]
         if status == "adult":
             reasons = self._rule_status_reasons(AGE_RULES, op)
@@ -2233,12 +2419,13 @@ class VIService:
         return status, reasons
 
     def age_attestation(self, attestation_id: str) -> dict:
-        with self.lock:
+        with self._compliance_snapshot(self._basis_oids(AGE_RULES)), self.lock:   # rows read outside the lock
             a = self.ages.get(attestation_id)
             if a is None:
                 raise NotFound("no such attestation")
             op = Op(self, f"aga|{attestation_id}", i05.ACTOR, a["subject_id"])
-            status, reasons = self._age_answer(op, a)
+            status, reasons = self._age_answer(op, a.get("namespace") or LEGACY_NAMESPACE, a["subject_id"],
+                                               attestation_id)
             ans = {"attestation_id": attestation_id, "status": status, "rules_pinned": self.rules_pinned,
                    "reasons": reasons, "reason_lines": R.lines(reasons),
                    "reason": (f"adult under V&I rules v{self.rules_version}" if status == "adult" else
@@ -2250,21 +2437,20 @@ class VIService:
             self._commit(op)
             return ans
 
-    def age_subject(self, subject_id: str) -> dict:
-        with self.lock:
-            aid = self.latest_age.get(subject_id)
-            op = Op(self, f"ags|{subject_id}", i05.ACTOR, subject_id)
-            if aid is None:
-                reasons = [R.item("AGE_NOT_ASSURED", "no age attestation on file", (), self.rules())]
-                status = "unknown"
-            else:
-                status, reasons = self._age_answer(op, self.ages[aid])
-            ans = {"allowed": status == "adult", "unmet": R.lines(reasons), "detail": aid or "no attestation",
-                   "subject_id": subject_id, "rules_pinned": self.rules_pinned}
-            op.record(derived_id("ags", subject_id, sha(ans)), "age_answer_issued", i05.ACTOR, subject_id,
-                      {"attestation_id": aid, "status": status, "codes": R.codes(reasons),
+    def age_subject(self, principal: str, subject_id: str) -> dict:
+        """Onboarding protocol ``age_verified_18_plus`` (+ ``status`` and ``attestation_id`` for Clipper Network):
+        the caller reads its OWN namespace only (N16-3)."""
+        with self._compliance_snapshot(self._basis_oids(AGE_RULES)), self.lock:   # rows read outside the lock
+            ns = principal
+            aid = self.latest_age.get((ns, subject_id))
+            op = Op(self, f"ags|{ns}|{subject_id}", i05.ACTOR, subject_id)
+            status, reasons = self._age_answer(op, ns, subject_id, None)
+            ans = {"allowed": status == "adult", "status": status, "attestation_id": aid, "unmet": R.lines(reasons),
+                   "detail": aid or "no attestation", "subject_id": subject_id, "rules_pinned": self.rules_pinned}
+            op.record(derived_id("ags", ns, subject_id, sha(ans)), "age_answer_issued", i05.ACTOR, subject_id,
+                      {"attestation_id": aid, "namespace": ns, "status": status, "codes": R.codes(reasons),
                        "rules_version": self.rules_version}, f"Age status answered: {status}")
-            op.add("age_answer", {"attestation_id": aid, "status": status, "at": iso(self._now())})
+            op.add("age_answer", {"attestation_id": aid, "namespace": ns, "status": status, "at": iso(self._now())})
             self._commit(op)
             return ans
 
@@ -2296,12 +2482,13 @@ class VIService:
                 why.append("Finance 31 payout identity unavailable")
             found = []
             for kind, hv, other in i07.matches(hm, self.hmac_owner, clipper_id):
-                f, _ = self._identity_finding(op, "duplicate_identity", "DUPLICATE_IDENTITY", clipper_id, other, kind, now)
+                f, _ = self._identity_finding(op, "duplicate_identity", "DUPLICATE_IDENTITY", clipper_id, other, kind, now,
+                                              (chk,))
                 found.append(f["finding_id"])
             for kind, hv in hm.items():
                 if hv and (kind, hv) in self.banned and not found:
                     f, _ = self._identity_finding(op, "duplicate_identity", "DUPLICATE_IDENTITY", clipper_id, None,
-                                                  kind, now)
+                                                  kind, now, (chk,))
                     found.append(f["finding_id"])
             status = "finding" if found else ("incomplete" if why else "clear")
             rec = {"check_id": chk, "clipper_id": clipper_id, "status": status, "why": "; ".join(why),
@@ -2311,7 +2498,8 @@ class VIService:
                       f"Identity check: {status}")
             op.add("identity", rec)
             self._commit(op)
-            return self._idem_store(key, h, {"check_id": chk, "clipper_id": clipper_id, "status": status,
+            return self._idem_store(key, h, {"request_id": request_id, "rules_pinned": self.rules_pinned,
+                                             "check_id": chk, "clipper_id": clipper_id, "status": status,
                                              "clear": status == "clear", "why": rec["why"], "findings": found,
                                              "ledger_event_ids": op.events})
 
@@ -2447,7 +2635,9 @@ class VIService:
                        "recommended_by_vi": recommended}, f"Ban propagated: {len(blocked)} identity/account HMAC(s) blocked")
             op.add("ban", rec)
             self._commit(op)
-            return self._idem_store(key, h, {"ban": rec, "ledger_event_ids": op.events})
+            return self._idem_store(key, h, {"request_id": request_id, "clipper_id": clipper_id,
+                                             "rules_pinned": self.rules_pinned, "ban": rec,
+                                             "ledger_event_ids": op.events})
 
     # ================================================================== reads
 
@@ -2499,9 +2689,37 @@ class VIService:
         with self.lock:
             return self._feed(cursor, lambda k, r: dict(r) if k == "clawback" else None)
 
+    def _strike_item(self, r: dict) -> dict:
+        """A strike as Clipper Network reads it (N16-6): its findings' evidence ids and the clips they are about."""
+        fs = [self.findings[f] for f in r["finding_ids"] if f in self.findings]
+        return {**r, "evidence_ids": sorted({e for f in fs for e in f.get("evidence_ids") or []})[:50],
+                "subject_refs": sorted({f["subject_id"] for f in fs if f["subject_kind"] == "clip"})[:50]}
+
     def feed_strikes(self, cursor: int) -> dict:
         with self.lock:
-            return self._feed(cursor, lambda k, r: dict(r) if k == "strike" else None)
+            page = self._feed(cursor, lambda k, r: self._strike_item(r) if k == "strike" else None)
+            return {**page, "rules_pinned": self.rules_pinned}
+
+    def finding_view(self, finding_id: str) -> dict:
+        with self.lock:
+            f = self.findings.get(finding_id)
+            if f is None:
+                raise NotFound("no such finding")
+            return {**{k: f.get(k) for k in ("finding_id", "kind", "code", "subject_kind", "subject_id", "clipper_id",
+                                             "status", "evidence_ids", "rule_id", "opened_at", "decided_by",
+                                             "decided_at")},
+                    "subject_ref": f["subject_id"] if f["subject_kind"] == "clip" else None,
+                    "rules_pinned": self.rules_pinned}
+
+    def certifications_of(self, clipper_id: str) -> dict:
+        with self.lock:
+            out = []
+            for c in sorted((c for c in self.certs.values() if c["clipper_id"] == clipper_id),
+                            key=lambda c: c["certification_id"]):
+                v = self.cert_view(c)
+                v["revision_watch_end"] = (c.get("window") or {}).get("revision_watch_end")
+                out.append(v)
+            return {"clipper_id": clipper_id, "certifications": out, "rules_pinned": self.rules_pinned}
 
     def list_holds(self) -> list[dict]:
         with self.lock:
@@ -2518,8 +2736,8 @@ class VIService:
             strikes = [s for s in self.strikes.values() if s["clipper_id"] == clipper_id]
             active = [s for s in strikes if i09.is_active(s, now, parse_iso)]
             fnd = [f for f in self.findings.values() if f.get("clipper_id") == clipper_id]
-            aid = self.latest_age.get(clipper_id)
-            return {"clipper_id": clipper_id,
+            aid = self.latest_age.get((CN_NAMESPACE, clipper_id))
+            return {"clipper_id": clipper_id, "rules_pinned": self.rules_pinned,
                     "strikes_active": {c: len([s for s in active if s["class"] == c]) for c in ("S1", "S2", "S3")},
                     "strikes": strikes, "ban_recommended": any(s["ban_recommended"] for s in active),
                     "banned": clipper_id in self.bans,

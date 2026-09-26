@@ -9,14 +9,17 @@ that could not be recorded. Before a line is appended to the local log, its (log
 is recorded on the ledger as ``local_log_appended`` (id ``vi-log-<epoch>-<seq>-<sha40>``). ``assess``
 compares the local log with ``GET /ledger/entries``:
 
-- FATAL (start-up refuses, even with VI_RECONCILE_MODE=1): a rule version published on the ledger above
-  the local version (a rollback), a local line the ledger does not anchor (a rewrite or an injected line —
+- FATAL (start-up refuses, even with VI_RECONCILE_MODE=1): a local line the ledger does not anchor (a rewrite
+  or an injected line —
   spec A1 "a snapshot line injected into the data dir without a ledger anchor → refuse to start"), an event
   the log cites that the ledger does not hold, another log's anchors, an empty log where the ledger anchors
   one, a reconcile record the ledger does not match.
 - VOIDABLE (start-up refuses; only Andre's explicit reconcile lifts it): an anchor of this log that is not
   a local line (a commit that failed after its anchor, a truncated tail, another instance's line), a ruling
-  of this department on the ledger the local log does not cite, a newer instance lease from another instance.
+  of this department on the ledger the local log does not cite, a newer instance lease from another instance,
+  and a ``rules_version_published`` event that matches no decision record of the local log by id and payload
+  hash — forged by a ledger-token holder, or a rollback of the log (AEGIS N16-7: a version event alone no longer
+  bricks start-up; Andre voids it through the recorded reconcile, or the log is restored).
 
 The audit export shapes records in log order with their ledger event ids and the rule version; identity
 values appear only as HMACs, and free text (decision notes, reasons) only as SHA-256.
@@ -87,16 +90,18 @@ class Assessment:
 
 def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int, str, bool]],
            referenced_ids: set[str], local_version: int, strict: bool, *, local_rulings: set[str] = frozenset(),
-           local_leases: list[tuple[int, str, str]] = (), reconciles: list[tuple[int, dict, str, Optional[int]]] = ()
-           ) -> Assessment:
+           local_leases: list[tuple[int, str, str]] = (), reconciles: list[tuple[int, dict, str, Optional[int]]] = (),
+           local_versions: Optional[dict[str, str]] = None) -> Assessment:
     """``lines``: (seq, line_sha256, anchored) per local line (``anchored`` False only for lines written before
     anchoring existed). ``local_leases``: (seq, instance_id, event_id) of the local lease lines.
     ``reconciles``: (seq, payload, event_id, rules_version of that line) of the local reconcile lines.
     ``strict`` (a disk log): another log's anchors on this ledger, or an empty local log while the ledger
-    anchors one, are fatal too."""
+    anchors one, are fatal too. ``local_versions``: version event id -> payload SHA-256 of every version the
+    LOCAL log's decision records published (``local_version_events``); a version event on the ledger that matches
+    none of them is voidable, never honoured on its own (AEGIS N16-7)."""
     out = Assessment()
     anchors: dict[str, dict[tuple[int, str], str]] = {}
-    versions: dict[str, set[int]] = {}
+    versions: dict[str, list[tuple[str, int, str]]] = {}   # epoch -> [(event id, version, payload_sha256)]
     leases: list[tuple[int, str, str]] = []          # (ledger index, event id, instance) for this epoch
     rulings: list[tuple[int, str]] = []
     recs: dict[str, str] = {}                        # reconcile event id -> payload_sha256
@@ -116,7 +121,7 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
             if m.group(1) == epoch and first_anchor is None:
                 first_anchor = i
         elif et == VERSION_TYPE and (m := _VERSION_RE.fullmatch(eid)):
-            versions.setdefault(m.group(1), set()).add(int(m.group(2)))
+            versions.setdefault(m.group(1), []).append((eid, int(m.group(2)), str(e.get("payload_sha256"))))
         elif et == LEASE_TYPE and (m := _LEASE_RE.fullmatch(eid)):
             if m.group(1) == epoch:
                 leases.append((i, eid, m.group(2)))
@@ -125,7 +130,7 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
         elif et == RECONCILE_TYPE:
             recs[eid] = str(e.get("payload_sha256"))
     if epoch is None:
-        if strict and (anchors or versions):
+        if strict and anchors:
             out.fatal.append("the local log is empty but the ledger anchors a V&I log (log deleted or "
                              "truncated to nothing, or a second V&I instance on this ledger)")
         return out
@@ -157,11 +162,18 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
     missing = referenced_ids - held
     if missing:
         out.fatal.append(f"the local log cites {len(missing)} ledger event(s) the ledger does not hold")
-    top = max(versions.get(epoch, set()), default=None)
-    if top is not None and top > local_version:
-        # never voidable: a rollback refuses to start, reconcile or not (N15-1)
-        out.fatal.append(f"rule version {local_version} is behind the ledger's latest approved rule version {top} "
-                         "(a rollback; no reconcile can void a published version)")
+    # AEGIS N16-7: a version event is honoured only when its id and payload hash match a decision record of the
+    # LOCAL log. Any other one in this log's epoch (forged by a ledger-token holder, or published by a decision the
+    # local log no longer holds: a rollback) is VOIDABLE: start-up refuses until Andre voids it through the
+    # recorded reconcile (voiding a genuine version is a deliberate rollback of the rules, recorded as such).
+    known = local_versions or {}
+    foreign = sorted((n, eid) for eid, n, psha in versions.get(epoch, [])
+                     if eid not in voided and known.get(eid) != psha)
+    if foreign:
+        out.voidable.append(f"{len(foreign)} rules version event(s) on the ledger match no decision in the local log "
+                            f"(version {', '.join(str(n) for n, _ in foreign[:5])}; local version {local_version}): a "
+                            "forged event, or a local log rolled back past a published version")
+        out.void_event_ids.update(eid for _, eid in foreign)
     stray = sorted((seq, sha, eid) for (seq, sha), eid in mine.items()
                    if (seq, sha) not in local_pairs and eid not in voided)
     beyond = [s for s in stray if s[0] > n]
@@ -191,6 +203,20 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
                             f"({newer[-1][2]}): this data "
                             "directory was copied and another instance runs (or ran) on it")
         out.void_event_ids.update(eid for _, eid, _ in newer)
+    return out
+
+
+def local_version_events(epoch: Optional[str], metas: Iterable[dict]) -> dict[str, str]:
+    """version event id -> payload SHA-256 for every version a local decision record published (its meta holds
+    version, rows_sha256, prev_version_sha256, proposal_ids) — exactly what the service recorded."""
+    out: dict[str, str] = {}
+    for meta in metas:
+        try:
+            eid = version_event_id(epoch or "0" * 16, meta["version"], meta["rows_sha256"], meta["prev_version_sha256"])
+            out[eid] = payload_sha256({k: meta[k] for k in ("version", "rows_sha256", "prev_version_sha256",
+                                                            "proposal_ids")})
+        except (KeyError, TypeError):
+            continue
     return out
 
 

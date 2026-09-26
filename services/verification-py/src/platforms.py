@@ -42,8 +42,13 @@ AVAILABLE_METRICS: dict[str, tuple[str, ...]] = {
 
 SOURCE_ENDPOINTS = (
     "youtube_data_v3_videos_list", "youtube_analytics_reports_query", "tiktok_display_v2_video_list",
-    "instagram_graph_media_insights", "x_v2_tweets_lookup", "tiktok_oembed", "fake",
+    "instagram_graph_media_insights", "x_v2_tweets_lookup", "tiktok_oembed",
 )
+# The endpoint a platform's metric fetch must name (N16-8: an answer naming another or no endpoint, or carrying
+# no 64-hex response hash, is not evidence and never becomes a snapshot).
+FETCH_ENDPOINTS = {"youtube": ("youtube_data_v3_videos_list", "youtube_analytics_reports_query"),
+                   "tiktok": ("tiktok_display_v2_video_list",), "instagram": ("instagram_graph_media_insights",),
+                   "x": ("x_v2_tweets_lookup",)}
 
 # Same-clip evidence per platform (§C.3): only TikTok can have a perceptual (cover PDQ) check.
 PERCEPTUAL_CAPABLE = ("tiktok",)

@@ -36,7 +36,7 @@ from typing import Any, Callable, Optional
 
 from clock import Clock, SystemClock, iso, parse_iso
 from contacts import ContactStore, ContactStoreError
-from errors import Conflict, Invalid, NotFound, Unavailable
+from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from intelligences import (i01_recruiting, i02_admission, i03_tiering, i04_enrolment, i05_kit_delivery, i06_comms,
                            i07_disputes, i08_discipline, i09_offboarding, i10_evidence_audit)
 from intelligences.common import Citer, finalize, item, rules_not_in_force, unavailable, unmet_line
@@ -332,12 +332,14 @@ class CNService:
             raise LedgerQueryFailed("this ledger client cannot read entries")
         entries = client.entries()
         shas = self.log.line_shas()
-        lines, referenced, rulings, leases, reconciles = [], set(), set(), [], []
+        lines, referenced, rulings, leases, reconciles, metas = [], set(), set(), [], [], []
         for rec, sha in zip(self.log.iter_records(), shas):
             d = rec["data"]
             lines.append((rec["seq"], sha, bool(d.get("anchored"))))
             referenced.update(d.get("ledger_event_ids") or [])
             r = d.get("record") or {}
+            if rec["kind"] == "decision" and r.get("version"):
+                metas.append(r["version"])
             if rec["kind"] == "batch":
                 for p in r.get("puts") or []:
                     if p["coll"] in ("admissions", "enrolment_rulings"):
@@ -348,7 +350,8 @@ class CNService:
                 reconciles.append((rec["seq"], r.get("payload"), r.get("reconcile_event_id"), d.get("register_version")))
         return i10_evidence_audit.assess(entries, self.log.epoch, lines, referenced, self.version_number or 0,
                                          strict=not self.log.in_memory, local_rulings=rulings, local_leases=leases,
-                                         reconciles=reconciles)
+                                         reconciles=reconciles,
+                                         local_versions=i10_evidence_audit.local_version_events(self.log.epoch, metas))
 
     def _write_lease(self) -> None:
         with self.lock:
@@ -726,7 +729,7 @@ class CNService:
             reason = "recipient contact unavailable"
         else:
             try:
-                body = T.render(tpl, m["variables"], filled)
+                body = T.render(tpl, m["variables"], filled, m["channel"])
             except Invalid as exc:
                 reason = f"render refused: {exc.reason}"[:200]
         events: list[str] = []
@@ -1826,8 +1829,11 @@ class CNService:
                 if now > parse_iso(m["queued_at"]) + timedelta(days=window):
                     unmet.append(item("APPEAL_WINDOW_CLOSED", "CN-18", f"the {window}-day appeal window from the notice "
                                       "has closed"))
+            keys = self._appeal_keys(c["clipper_id"], kind, ref, m)
             dup = [d for d in self.st["disputes"].values() if d["clipper_id"] == c["clipper_id"]
-                   and d["subject_kind"] == kind and d["subject_ref"] == ref and d["status"] != "refused"]
+                   and d["status"] != "refused"
+                   and set(d.get("appeal_keys") or self._appeal_keys(d["clipper_id"], d["subject_kind"],
+                                                                     d["subject_ref"], None)) & set(keys)]
             if dup:
                 unmet.append(item("DISPUTE_ALREADY_FILED", "CN-18", f"one appeal per {kind.replace('_', ' ')}: "
                                   f"{dup[0]['dispute_id']} was already filed", "clipper_network", dup[0]["dispute_id"]))
@@ -1839,7 +1845,7 @@ class CNService:
                    "evidence_ref_sha256": [R.sha_text(e) for e in body["evidence_refs"]],
                    "route": i07_disputes.ROUTE[kind], "status": "refused" if unmet else "open", "decision_items": unmet,
                    "sla_due": None, "pushed": None, "outcome": None, "decided_by": None, "decided_at": None,
-                   "vi_status_at_filing": None}
+                   "vi_status_at_filing": None, "appeal_keys": keys}
             puts: list[tuple] = []
             msg = None
             if unmet:
@@ -1866,6 +1872,25 @@ class CNService:
                 self._deliver([msg["message_id"]])
             return self._idem_store(key, h, {**self._dispute_view(rec), "unmet_lines": [unmet_line(u) for u in unmet],
                                              "ledger_event_ids": events})
+
+    def _appeal_keys(self, clipper_id: str, kind: str, ref: str, notice: Optional[dict]) -> list[str]:
+        """What one appeal consumes (CN-18 "one appeal per flagged clip", AEGIS N16-5). A V&I-routed appeal (clip
+        flag, V&I finding, strike) is about ONE underlying flag whichever kind the clipper picks: its keys are the
+        V&I evidence ids and clip ids linked to the ref — every mirrored strike of this clipper whose strike id,
+        finding ids or clip ids include it, and the notice's own subject refs. A CN-routed appeal keeps its
+        (kind, ref) key."""
+        if i07_disputes.ROUTE.get(kind) != "verification_integrity":
+            return [f"{kind}:{ref}"]
+        keys = {ref}
+        for s in self.st["strikes"].values():
+            if s["clipper_id"] != clipper_id:
+                continue
+            linked = {s["strike_id"], *(s.get("finding_ids") or []), *(s.get("subject_refs") or [])}
+            if ref in linked:
+                keys |= linked
+        if notice is not None and ref in (notice.get("subject_refs") or []):
+            keys |= set(notice.get("subject_refs") or [])
+        return sorted(keys)
 
     def _vi_subject_status(self, kind: str, ref: str, op: str, events: list[str]) -> Optional[str]:
         """For V&I-routed disputes about a finding: the finding's status when filed (the outcome is read later)."""
@@ -2157,9 +2182,19 @@ class CNService:
                                      "rule_id": "CN-10", "inputs_sha256": _sha(inputs), "inputs": inputs,
                                      "certification_ids_counted": list(cert_ids)})
 
-    def ban_decision(self, request_id: str, clipper_id: str, proposal_id: str, decision: str, note: str) -> dict:
+    def ban_decision(self, request_id: str, clipper_id: str, proposal_id: str, decision: str, note: str,
+                     andre_token: Optional[str] = None) -> dict:
         """Andre only (CN-20): the ban takes effect on his approval; V&I is then asked to block every account and
-        identity HMAC (POST /vi/v1/bans) and offboarding starts (trigger ban)."""
+        identity HMAC (POST /vi/v1/bans) and offboarding starts (trigger ban).
+
+        AEGIS N16-2: V&I's ban route needs Andre's own approval token, so CN passes through the EXACT token Andre
+        sent on this request (``andre_token``, already verified by the FounderGate). It lives only in this call:
+        never in a record, the idempotency store, a ledger payload, a log line or an export. A request without it
+        is refused before anything happens. When the propagation could not be made (V&I down), Andre re-sends
+        ``approve`` on the approved proposal and CN propagates again with that new request's token (the scheduler
+        has no token and never propagates)."""
+        if not isinstance(andre_token, str) or not andre_token:
+            raise Forbidden("a ban is propagated to V&I with Andre's approval token, which this request lacks")
         with self.lock:
             key, h, cached = self._idem_check("andre", request_id, f"ban/{clipper_id}",
                                               {"proposal_id": proposal_id, "decision": decision, "note": note})
@@ -2169,6 +2204,13 @@ class CNService:
             bp = self.st["ban_proposals"].get(proposal_id)
             if bp is None or bp["clipper_id"] != clipper_id:
                 raise NotFound("no such ban proposal for this clipper")
+            if bp["status"] == "approved" and decision == "approve" and bp.get("propagation") != "done":
+                prop = self._propagate_ban(clipper_id, proposal_id, bp["decision_id"], bp["decided_at"], andre_token)
+                return self._idem_store(key, h, {"proposal_id": proposal_id, "status": "approved",
+                                                 "decision_id": bp["decision_id"],
+                                                 "clipper_status": self.st["clippers"][clipper_id]["status"],
+                                                 "vi_ban_propagation": prop, "offboarding_id": None,
+                                                 "ledger_event_ids": []})
             if bp["status"] != "pending_andre":
                 raise Conflict(f"ban proposal is {bp['status']}")
             if self.current is None:
@@ -2206,7 +2248,7 @@ class CNService:
                 puts.append(("messages", m["message_id"], m))
                 events += mev
             self._batch(puts, events, "ban approved")
-            prop = self._propagate_ban(clipper_id, proposal_id, decision_id, iso(now))
+            prop = self._propagate_ban(clipper_id, proposal_id, decision_id, iso(now), andre_token)
             if m is not None:
                 self._deliver([m["message_id"]])
             off = self._try_start_offboarding(clipper_id, "ban", op)
@@ -2215,17 +2257,21 @@ class CNService:
                                              "vi_ban_propagation": prop, "offboarding_id": off,
                                              "ledger_event_ids": events})
 
-    def _propagate_ban(self, clipper_id: str, proposal_id: str, decision_id: str, approved_at: str) -> str:
+    def _propagate_ban(self, clipper_id: str, proposal_id: str, decision_id: str, approved_at: str,
+                       andre_token: Optional[str]) -> str:
         bp = self.st["ban_proposals"][proposal_id]
         if bp.get("propagation") == "done":
             return "done"
+        if not andre_token:
+            return "needs_andre"          # only Andre's own token opens V&I's ban route (N16-2); nothing is sent
         events: list[str] = []
         op = f"ban|{decision_id}|{len(self.log)}"
         try:
             ports = PortCalls(self, op, i08_discipline.ACTOR, clipper_id, events)
             vi = self.ports.vi
             a = ports.call("verification_integrity", "ban", (clipper_id, decision_id),
-                           lambda: vi.ban(derived_id("rq", decision_id), clipper_id, decision_id, approved_at), Ack(False))
+                           lambda: vi.ban(derived_id("rq", decision_id), clipper_id, decision_id, approved_at,
+                                          andre_token), Ack(False))
             state = "done" if a.available and a.ok else "pending"
             events.append(self._record(derived_id("bpr", op), "ban_propagation_requested", i08_discipline.ACTOR, clipper_id,
                                        {"decision_id": decision_id, "result": state},
@@ -2316,6 +2362,21 @@ class CNService:
                 and x.status in ("pending", "certified", "revised") and parse_iso(x.revision_watch_end) > now]
         return bool(ends), max(ends) if ends else None, True
 
+    def _exit_deadline(self, trigger: str, start: datetime) -> Optional[datetime]:
+        """CN-21: contact data and handles go ``post_exit_retention_days`` after the exit starts (0 for a minor)."""
+        if self.current is None:
+            return None
+        return start + timedelta(days=0 if trigger == "minor" else self.p("CN-21", "post_exit_retention_days"))
+
+    @staticmethod
+    def _revoke_by(last_end: Optional[str], deadline: Optional[datetime]) -> Optional[str]:
+        """Connections kept until the last settlement end at the retention deadline at the latest (N16-4)."""
+        if deadline is None:
+            return last_end
+        if last_end is None:
+            return iso(deadline)
+        return iso(min(parse_iso(last_end), deadline))
+
     def _start_offboarding(self, clipper_id: str, trigger: str, op: str, keep: Optional[bool]) -> str:
         c = self._clipper(clipper_id)
         if c["status"] in ("offboarding", "offboarded"):
@@ -2352,7 +2413,9 @@ class CNService:
         immediate = trigger in i09_offboarding.IMMEDIATE_REVOKE
         unsettled, last_end, vi_ok = (False, None, True) if immediate else self._unsettled(clipper_id, oid, events)
         keep_conn = (not immediate) and unsettled and keep is not False
-        revoke_after = last_end if keep_conn else None
+        # (5) the retention deadline (CN-21) is fixed now; everything kept is bounded by it (AEGIS N16-4)
+        deadline = self._exit_deadline(trigger, now)
+        revoke_after = self._revoke_by(last_end, deadline) if keep_conn else None
         conn_results = []
         if not keep_conn:
             vi = self.ports.vi
@@ -2380,6 +2443,8 @@ class CNService:
             notified = bool(n.available and n.ok)
         step("finance_open_items", "done" if fstate == "none" else "pending_finance",
              {"state": fstate, "finance_notified": notified})
+        finance_question = {"status": "resolved" if fstate == "none" else "unresolved", "state": fstate,
+                            "flagged_to_andre": False, "flagged_at": None, "push_delivered": None}
         # (4) export
         export = self._export(clipper_id)
         esha = _sha(export)
@@ -2388,11 +2453,12 @@ class CNService:
                                    {"offboarding_id": oid, "export_ref": eref, "export_sha256": esha},
                                    "Clipper data export prepared"))
         step("export", "done", {"export_ref": eref, "export_sha256": esha})
-        # (5) deletion scheduled
-        if self.current is not None:
-            days = 0 if trigger == "minor" else self.p("CN-21", "post_exit_retention_days")
-            delete_after = iso(now + timedelta(days=days))
-            step("deletion", "scheduled", {"delete_after": delete_after, "retention_days": days})
+        # (5) deletion scheduled: at the deadline whatever Finance answers (an unresolved Finance question is
+        # flagged to Andre then, N16-4); only an open dispute delays it (spec C.9)
+        if deadline is not None:
+            delete_after = iso(deadline)
+            step("deletion", "scheduled", {"delete_after": delete_after,
+                                           "retention_days": (deadline - now).days})
         else:
             delete_after = None
             step("deletion", "waiting_for_rules", "no rule version in force: retention (CN-21) unknown")
@@ -2400,7 +2466,8 @@ class CNService:
         rec = {"offboarding_id": oid, "clipper_id": clipper_id, "trigger": trigger, "started_at": iso(now),
                "steps": steps, "finance_open_items": fstate, "finance_notified": notified, "export_ref": eref,
                "export_sha256": esha, "status": status, "delete_after": delete_after, "revoke_after": revoke_after,
-               "keep_connections": keep_conn, "closed_at": None, "contact_deleted_at": None}
+               "keep_connections": keep_conn, "closed_at": None, "contact_deleted_at": None,
+               "finance_question": finance_question, "settlement_known": vi_ok}
         for s_ in steps:
             events.append(self._record(derived_id("ofs", oid, s_["step"]), "offboarding_step", i09_offboarding.ACTOR,
                                        clipper_id, {"offboarding_id": oid, "step": s_["step"], "status": s_["status"],
@@ -2450,7 +2517,9 @@ class CNService:
             out = {"started": [], "advanced": [], "closed": [], "deleted": [], "blocked": [], "ban_propagation": []}
             for bp in sorted(self.st["ban_proposals"].values(), key=lambda x: x["proposal_id"]):
                 if bp["status"] == "approved" and bp.get("propagation") != "done":
-                    st = self._propagate_ban(bp["clipper_id"], bp["proposal_id"], bp["decision_id"], bp["decided_at"])
+                    # the scheduler holds no Andre token: it reports; Andre re-sends approve to propagate (N16-2)
+                    st = self._propagate_ban(bp["clipper_id"], bp["proposal_id"], bp["decision_id"], bp["decided_at"],
+                                             None)
                     out["ban_propagation"].append({"proposal_id": bp["proposal_id"], "result": st})
             for c in sorted(self.st["clippers"].values(), key=lambda x: x["clipper_id"]):
                 if (c.get("minor") and c["status"] == "refused") or c["status"] == "banned":
@@ -2479,11 +2548,22 @@ class CNService:
                                           "at": iso(now), "evidence": {"state": st}})
                     if st == "none" and no["status"] == "pending_finance":
                         no["status"] = "in_progress"
-                if no.get("keep_connections") and not no.get("revoke_after"):
-                    # V&I could not say when the last settlement ends: ask again (kept until it answers)
+                    if st == "none":
+                        no["finance_question"] = {**(no.get("finance_question") or {}), "status": "resolved",
+                                                  "state": "none"}
+                if no.get("delete_after") is None and self.current is not None:
+                    no["delete_after"] = iso(self._exit_deadline(no["trigger"], parse_iso(no["started_at"])))
+                deadline = parse_iso(no["delete_after"]) if no.get("delete_after") else None
+                if no.get("keep_connections") and (not no.get("revoke_after") or no.get("settlement_known") is False):
+                    # V&I could not say when the last settlement ends: ask again; kept no later than the deadline
                     unsettled, last_end, vi_ok = self._unsettled(cid, op, events)
                     if vi_ok:
-                        no["revoke_after"] = last_end or iso(now)
+                        no["revoke_after"] = self._revoke_by(last_end or iso(now), deadline)
+                        no["settlement_known"] = True
+                    elif deadline is not None:
+                        no["revoke_after"] = iso(deadline)
+                elif no.get("keep_connections") and deadline is not None and parse_iso(no["revoke_after"]) > deadline:
+                    no["revoke_after"] = iso(deadline)          # an exit recorded before N16-4: bounded now
                 if no.get("keep_connections") and no.get("revoke_after") and parse_iso(no["revoke_after"]) <= now:
                     vi = self.ports.vi
                     res = []
@@ -2501,17 +2581,24 @@ class CNService:
                                       else "pending_dependency", "at": iso(now), "evidence": res})
                 open_disputes = [d["dispute_id"] for d in self.st["disputes"].values()
                                  if d["clipper_id"] == cid and d["status"] == "open"]
-                due = no.get("delete_after") and parse_iso(no["delete_after"]) <= now
-                if no.get("delete_after") is None and self.current is not None:
-                    days = 0 if no["trigger"] == "minor" else self.p("CN-21", "post_exit_retention_days")
-                    no["delete_after"] = iso(parse_iso(no["started_at"]) + timedelta(days=days))
-                    due = parse_iso(no["delete_after"]) <= now
+                due = deadline is not None and deadline <= now
                 if due and not no.get("contact_deleted_at"):
-                    if no["finance_open_items"] != "none" or open_disputes or no.get("keep_connections"):
-                        out["blocked"].append({"offboarding_id": no["offboarding_id"],
-                                               "why": "finance open items" if no["finance_open_items"] != "none" else
-                                               "open dispute" if open_disputes else "connections kept until settlement"})
+                    if open_disputes:
+                        out["blocked"].append({"offboarding_id": no["offboarding_id"], "why": "open dispute"})
                     else:
+                        if no["finance_open_items"] != "none" and not (no.get("finance_question") or {}).get("flagged_to_andre"):
+                            # CN-21 holds whatever Finance answers (N16-4): the unanswered question goes to Andre
+                            push = self.ports.push
+                            briefing = {"offboarding_id": no["offboarding_id"], "clipper_id": cid,
+                                        "finance_open_items": no["finance_open_items"], "rule_id": "CN-21"}
+                            pa = ports.call("push", "push", ("offboarding_finance_question", no["offboarding_id"]),
+                                            lambda b=briefing: push.push("offboarding_finance_question", b), Ack(False))
+                            no["finance_question"] = {"status": "unresolved", "state": no["finance_open_items"],
+                                                      "flagged_to_andre": True, "flagged_at": iso(now),
+                                                      "push_delivered": bool(pa.available and pa.ok)}
+                            steps_new.append({"step": "finance_question", "status": "unresolved_flagged_to_andre",
+                                              "at": iso(now), "evidence": {"state": no["finance_open_items"],
+                                                                           "push_delivered": bool(pa.available and pa.ok)}})
                         keys = [f"clipper:{cid}"] + [f"handle:{cid}:{a['vi_connection_id']}" for a in c["connected_accounts"]
                                                      if a.get("handle_contact_sha256")]
                         events.append(self._record(derived_id("dd", no["offboarding_id"]), "data_deleted",
