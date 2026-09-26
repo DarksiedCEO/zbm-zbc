@@ -35,8 +35,9 @@ def test_posts_the_protocol_body_with_both_tokens():
 
 
 def test_allowed_ruling():
+    # the answer must name the requested subject (AEGIS N14-10): request "client_1", as OK_BLOCKED names
     r = _client(lambda req: httpx.Response(200, json={**OK_BLOCKED, "allowed": True, "unmet": [], "unmet_lines": []})).rule(
-        "c", "client", {})
+        "client_1", "client", {})
     assert r.allowed is True and r.unmet == () and r.detail == "cmp-rul-abc"
 
 
@@ -71,7 +72,7 @@ def test_retry_can_succeed():
     def h(req):
         n.append(1)
         return httpx.Response(503) if len(n) == 1 else httpx.Response(200, json=OK_BLOCKED)
-    assert _client(h).rule("c", "client", {}).detail == "cmp-rul-abc"
+    assert _client(h).rule("client_1", "client", {}).detail == "cmp-rul-abc"   # same subject as the answer (N14-10)
 
 
 @pytest.mark.parametrize("payload", [
@@ -107,3 +108,65 @@ def test_build_service_from_env_wires_it(monkeypatch):
                                       "COMPLIANCE_CALLER_TOKEN": "c"})
     assert isinstance(svc.depts.compliance, HttpComplianceDepartment)
     assert isinstance(api.build_service_from_env({}).depts.compliance, NotBuiltComplianceDepartment)
+
+
+# --- AEGIS round 14: N14-7 total deadline, N14-8 parse never raises + size cap, N14-10 subject echo ---------
+
+import time  # noqa: E402
+
+ALLOWED_C1 = {**OK_BLOCKED, "allowed": True, "unmet": [], "unmet_lines": []}
+
+
+class _Drip(httpx.SyncByteStream):
+    """A server that keeps making progress (one byte every ``gap`` seconds) but never finishes in time."""
+
+    def __init__(self, body: bytes, gap: float):
+        self.body, self.gap = body, gap
+
+    def __iter__(self):
+        for b in self.body:
+            time.sleep(self.gap)
+            yield bytes([b])
+
+
+def test_n14_7_total_deadline_is_wall_clock_not_per_byte():
+    body = json.dumps(ALLOWED_C1).encode()
+    c = HttpComplianceDepartment("http://compliance.test", "svc-token", "caller-token", timeout=1.0,
+                                 transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=_Drip(body, 0.05))))
+    t0 = time.monotonic()
+    r = c.rule("client_1", "client", {})
+    dt = time.monotonic() - t0
+    assert r.allowed is False, r
+    assert dt < 2.5, f"call took {dt:.1f}s with a 1.0s deadline"
+
+
+@pytest.mark.parametrize("payload", [
+    b'{"allowed": ' + b"[" * 200_000 + b"]" * 200_000 + b"}",
+    b'{"allowed": true, "x": ' + b"1" * 5000 + b"e999999}",
+])
+def test_n14_8_parse_errors_never_raise(payload):
+    r = _client(lambda req: httpx.Response(200, content=payload)).rule("client_1", "client", {})
+    assert r.allowed is False and r.detail == "not allowed yet"
+
+
+def test_n14_8_response_size_is_capped_before_parsing():
+    huge = json.dumps({**ALLOWED_C1, "pad": "A" * (2 * 1024 * 1024)}).encode()
+    r = _client(lambda req: httpx.Response(200, content=huge)).rule("client_1", "client", {})
+    assert r.allowed is False and "too large" in r.unmet[0]
+
+
+@pytest.mark.parametrize("change", [{"subject_id": "other"}, {"lane": "zbc_creator"}, {"subject_id": None},
+                                    {"_drop": "subject_id"}, {"_drop": "lane"}])
+def test_n14_10_reply_must_name_the_same_subject_and_lane(change):
+    ans = dict(ALLOWED_C1)
+    if "_drop" in change:
+        ans.pop(change["_drop"])
+    else:
+        ans.update(change)
+    r = _client(lambda req: httpx.Response(200, json=ans)).rule("client_1", "client", {})
+    assert r.allowed is False and "inconsistent" in r.unmet[0]
+
+
+def test_n14_10_matching_reply_is_still_allowed():
+    r = _client(lambda req: httpx.Response(200, json=ALLOWED_C1)).rule("client_1", "client", {})
+    assert r.allowed is True

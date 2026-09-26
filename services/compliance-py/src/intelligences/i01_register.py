@@ -28,11 +28,17 @@ from register import SHELF_LIFE_DAYS, effective_status, expected_expiry, seed_ch
 
 NUMBER, NAME, ACTOR = 1, "Obligation Register Keeper", "intel_01_register"
 
-KINDS = ("seed", "new", "amend", "reverify", "supersede", "retire", "control")
+KINDS = ("seed", "new", "amend", "reverify", "supersede", "retire", "control", "watch_notice")
+# watch_notice: an informational inbox item drafted by the Change Watcher when a
+# source floods (AEGIS N14-11). Deciding it never changes the register.
+INFO_KINDS = ("watch_notice",)
 REVERIFY_WINDOW_DAYS = 7
 REVERIFY_SNAPSHOT_MAX_AGE = timedelta(days=2)
+# AEGIS N14-5: evidence dates (verified_at, evidence.fetched_at) may be at most
+# this far in the future (clock skew between a source and us); beyond -> 422.
+FUTURE_TOLERANCE = timedelta(days=1)
 PROPOSAL_FIELDS = ("proposal_id", "kind", "target_id", "proposed_row", "proposed_rows", "diff", "evidence",
-                   "proposed_by", "created_at", "watch")
+                   "proposed_by", "created_at", "watch", "weakening", "weakening_reasons")
 
 
 class Evidence(BaseModel):
@@ -64,7 +70,7 @@ def finalize_row(row: dict) -> dict:
     return row
 
 
-def validate_proposed_row(row: Any, evidence: Optional[dict], proposer: str) -> dict:
+def validate_proposed_row(row: Any, evidence: Optional[dict], proposer: str, now: Optional[datetime] = None) -> dict:
     """B.5 validation. Raises Invalid (422)."""
     if not isinstance(row, dict):
         raise Invalid("proposed_row must be an object")
@@ -75,6 +81,9 @@ def validate_proposed_row(row: Any, evidence: Optional[dict], proposer: str) -> 
         raise Invalid(f"proposed_row is not a valid register row: {errs}") from None
     if row["status"] not in ("verified", "unverified"):
         raise Invalid("a proposal may set status only to verified or unverified")
+    if now is not None and row["verified_at"] is not None and \
+            date.fromisoformat(row["verified_at"]) > (now + FUTURE_TOLERANCE).date():
+        raise Invalid("verified_at is in the future (more than 1 day ahead): refused")
     if row["status"] == "unverified":
         if row["verified_at"] is not None:
             raise Invalid("an unverified row carries no verified_at")
@@ -106,7 +115,7 @@ def validate_proposed_row(row: Any, evidence: Optional[dict], proposer: str) -> 
     return finalize_row(row)
 
 
-def validate_evidence(ev: Any) -> Optional[dict]:
+def validate_evidence(ev: Any, now: Optional[datetime] = None) -> Optional[dict]:
     if ev is None:
         return None
     try:
@@ -114,7 +123,108 @@ def validate_evidence(ev: Any) -> Optional[dict]:
     except ValidationError as exc:
         errs = "; ".join(f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}"[:160] for e in exc.errors()[:5])
         raise Invalid(f"evidence invalid: {errs}") from None
+    if now is not None:
+        try:
+            fetched = parse_iso(ev["fetched_at"])
+        except ValueError:
+            raise Invalid("evidence.fetched_at must be an RFC 3339 timestamp") from None
+        if fetched > now + FUTURE_TOLERANCE:
+            raise Invalid("evidence.fetched_at is in the future (more than 1 day ahead): refused")
     return dict(ev)
+
+
+# --- weakening (AEGIS N14-9) -----------------------------------------------------------
+
+def _shelf(kind: str) -> float:
+    life = SHELF_LIFE_DAYS.get(kind)
+    return float("inf") if life is None else float(life)
+
+
+def _covered(entry: str, entries: list[str]) -> bool:
+    return any(entry == e or entry.startswith(e + "-") for e in entries)
+
+
+def applies_when_narrowed(old: dict, new: dict) -> bool:
+    """True when ``new`` applies in fewer situations than ``old`` on any key (spec B.2)."""
+    old, new = old or {}, new or {}
+    for key in ("lanes", "subject_kinds", "asset_types", "platforms"):
+        o, n = old.get(key), new.get(key)
+        if n is not None and (o is None or not set(o) <= set(n)):
+            return True
+    o, n = old.get("jurisdictions"), new.get("jurisdictions")
+    if n is not None and (o is None or not all(_covered(e, n) for e in o)):
+        return True
+    o, n = old.get("flags_any"), new.get("flags_any")
+    if n is not None and (o is None or not set(o) <= set(n)):
+        return True
+    o, n = set(old.get("flags_none") or []), set(new.get("flags_none") or [])
+    return bool(n - o)
+
+
+def row_weakening(kind: str, old: Optional[dict], new: Optional[dict]) -> list[str]:
+    """Why a row change may WEAKEN the register (flag, never block: Andre decides with an explicit
+    acknowledgment). A new row adds a rule; making a row unverified is stricter."""
+    if kind == "retire":
+        return ["rule_retired"]
+    if old is None or new is None:
+        return []
+    memo = kind == "supersede" and old["source_kind"] == "counsel-question"
+    out = []
+    if set(old["gates"]) - set(new["gates"]):
+        out.append("gates_removed")
+    if applies_when_narrowed(old.get("applies_when"), new.get("applies_when")):
+        out.append("applies_when_narrowed")
+    if new["check"] != old["check"] and not (memo and old["check"] == "counsel_memo"):
+        out.append("check_changed")
+    if _shelf(new["source_kind"]) > _shelf(old["source_kind"]):
+        out.append("source_kind_longer_shelf_life")
+    if new.get("parameters") != old.get("parameters"):
+        out.append("parameters_changed")
+    oe, ne = old.get("effective_date"), new.get("effective_date")
+    if ne is not None and (oe is None or ne > oe):
+        out.append("effective_date_later")
+    if old.get("counsel_flag") and not new.get("counsel_flag") and not memo:
+        out.append("counsel_flag_cleared")
+    return out
+
+
+def control_weakening(old: Optional[dict], new: dict) -> list[str]:
+    if old is None:
+        return []
+    out = []
+    if set(old.get("blocks_gates") or []) - set(new.get("blocks_gates") or []):
+        out.append("control_blocks_fewer_gates")
+    if new.get("sla_hours", 0) > old.get("sla_hours", 0):
+        out.append("control_sla_longer")
+    if set(old.get("obligation_ids") or []) - set(new.get("obligation_ids") or []):
+        out.append("control_obligations_removed")
+    if new.get("owner_department") != old.get("owner_department"):
+        out.append("control_owner_changed")
+    if new.get("test") != old.get("test"):
+        out.append("control_test_changed")
+    return out
+
+
+def _counsel_row(row: dict) -> bool:
+    return row.get("source_kind") == "counsel-question" or bool(row.get("counsel_flag"))
+
+
+def check_counsel_path(kind: str, old: dict, new: dict) -> None:
+    """Spec §E: a counsel question becomes answered ONLY by a supersede whose
+    replacement is a counsel-memo row (guidance, primary, verified with the memo
+    as evidence). Amend/reverify may never verify it, re-label it or change its check."""
+    if not _counsel_row(old):
+        return
+    if kind == "reverify":
+        raise Invalid("a counsel question is never re-verified; supersede it with an approved counsel memo row (spec E)")
+    if kind == "amend" and (new["status"] == "verified" or new["source_kind"] != old["source_kind"]
+                            or new["counsel_flag"] != old["counsel_flag"] or new["check"] != old["check"]):
+        raise Invalid("a counsel question cannot be verified, re-labelled or given another check by amend; "
+                      "supersede it with an approved counsel memo row (spec E)")
+    if kind == "supersede" and not (new["source_kind"] == "guidance" and new["source_quality"] == "primary"
+                                    and new["status"] == "verified"):
+        raise Invalid("a counsel question is superseded only by a counsel memo row: source_kind guidance, "
+                      "source_quality primary, status verified, the memo as evidence (spec E)")
 
 
 def build_proposal(kind: str, target_id: Optional[str], proposed_row: Optional[dict], evidence: Optional[dict],
@@ -122,9 +232,10 @@ def build_proposal(kind: str, target_id: Optional[str], proposed_row: Optional[d
                    control_defs: dict[str, dict], proposal_id: str, watch: Optional[dict] = None) -> dict:
     """Validate a new/amend/reverify/supersede/retire/control proposal against the
     register version in force. Raises Invalid (422) or Conflict (409)."""
-    if kind not in KINDS or kind == "seed":
+    if kind not in KINDS or kind == "seed" or kind in INFO_KINDS:
         raise Invalid("kind must be one of new, amend, reverify, supersede, retire, control")
-    ev = validate_evidence(evidence)
+    ev = validate_evidence(evidence, now)
+    weakening: list[str] = []
     rows = current or {}
     diff: dict
     if kind == "control":
@@ -143,6 +254,7 @@ def build_proposal(kind: str, target_id: Optional[str], proposed_row: Optional[d
             raise Invalid("target control does not exist")
         new = dict(proposed_row)
         diff = compute_diff(old, new)
+        weakening = control_weakening(old, new)
     else:
         if current is None:
             raise Conflict("no register version is in force yet: only the seed can be decided")
@@ -153,8 +265,9 @@ def build_proposal(kind: str, target_id: Optional[str], proposed_row: Optional[d
                 raise Invalid("target_id is not a row of the version in force")
             new = None
             diff = {"status": {"old": rows[target_id]["status"], "new": "superseded"}}
+            weakening = row_weakening("retire", rows[target_id], None)
         else:
-            new = validate_proposed_row(proposed_row, ev, proposer)
+            new = validate_proposed_row(proposed_row, ev, proposer, now)
             if kind == "new":
                 if target_id is not None:
                     raise Invalid("a new proposal has no target_id")
@@ -166,17 +279,31 @@ def build_proposal(kind: str, target_id: Optional[str], proposed_row: Optional[d
                     raise Invalid("amend/reverify: target_id must be a row of the version in force and equal proposed_row.id")
                 if kind == "reverify" and new["status"] != "verified":
                     raise Invalid("a reverify proposal proposes status verified")
+                check_counsel_path(kind, rows[target_id], new)
                 diff = compute_diff(rows[target_id], new)
+                weakening = row_weakening(kind, rows[target_id], new)
             else:  # supersede
                 if target_id not in rows:
                     raise Invalid("target_id is not a row of the version in force")
                 if new["id"] in ever_ids:
                     raise Invalid("the replacement row needs a new id (ids are never reused)")
+                check_counsel_path(kind, rows[target_id], new)
+                weakening = row_weakening(kind, rows[target_id], new)
                 diff = {"target_status": {"old": rows[target_id]["status"], "new": "superseded"},
                         **{f"new.{k}": v for k, v in compute_diff(None, new).items() if k == "id"}}
     p = {"proposal_id": proposal_id, "kind": kind, "target_id": target_id,
          "proposed_row": new if kind != "retire" else None, "proposed_rows": None, "diff": diff, "evidence": ev,
-         "proposed_by": proposer, "created_at": iso(now), "watch": watch}
+         "proposed_by": proposer, "created_at": iso(now), "watch": watch,
+         "weakening": bool(weakening), "weakening_reasons": sorted(set(weakening))}
+    p["content_sha256"] = content_sha256(p)
+    return p
+
+
+def watch_notice_proposal(proposal_id: str, now: datetime, watch: dict) -> dict:
+    """AEGIS N14-11: one inbox item telling Andre a source flooded (its excess items were not drafted)."""
+    p = {"proposal_id": proposal_id, "kind": "watch_notice", "target_id": None, "proposed_row": None,
+         "proposed_rows": None, "diff": {}, "evidence": None, "proposed_by": "i06_change_watcher",
+         "created_at": iso(now), "watch": watch, "weakening": False, "weakening_reasons": []}
     p["content_sha256"] = content_sha256(p)
     return p
 
@@ -189,7 +316,8 @@ def seed_proposal(rows: list[dict], seed_sha: str, now: datetime) -> dict:
          "proposed_rows": rows, "diff": {"rows_added": len(rows)},
          "evidence": {"source_url": None, "fetched_at": iso(now), "snapshot_sha256": seed_sha,
                       "normalized_text_sha256": seed_sha, "quoted_excerpt": "", "doc_number": None},
-         "proposed_by": "i01_register", "created_at": iso(now), "watch": None}
+         "proposed_by": "i01_register", "created_at": iso(now), "watch": None, "weakening": False,
+         "weakening_reasons": []}
     p["content_sha256"] = content_sha256(p)
     return p
 
@@ -209,6 +337,8 @@ def apply(base: Optional[list[dict]], controls: dict[str, dict], approvals: list
             rows = {r["id"]: copy.deepcopy(r) for r in p["proposed_rows"]}
             ever |= set(rows)
             continue
+        if kind in INFO_KINDS:
+            continue  # informational: deciding it changes nothing
         if kind == "control":
             cid = p["proposed_row"]["control_id"]
             old = ctl.get(cid)

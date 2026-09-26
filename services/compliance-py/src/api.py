@@ -503,9 +503,12 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
     cfg = Config(sanctions_freshness_days=settings.sanctions_freshness_days,
                  disclosure_max_offset_s=settings.disclosure_max_offset_s,
                  a11y_max_age_days=settings.a11y_max_age_days, watcher_enabled=settings.watcher_enabled,
-                 site_owner_caller=settings.site_owner_caller)
-    return ComplianceService(cfg, Recorder(ledger), RecordLog(settings.data_dir), seed_bytes,
-                             settings.seed_sha256 or SPEC_SEED_SHA256, ports, clock)
+                 site_owner_caller=settings.site_owner_caller,
+                 watcher_max_proposals_per_cycle=settings.watcher_max_proposals_per_cycle,
+                 watcher_max_proposals_per_source=settings.watcher_max_proposals_per_source)
+    # AEGIS N14-13: the pinned hash, unless the operator explicitly opted into an unpinned (non-production) seed
+    expected = settings.seed_sha256 if (settings.allow_unpinned_seed and settings.seed_sha256) else SPEC_SEED_SHA256
+    return ComplianceService(cfg, Recorder(ledger), RecordLog(settings.data_dir), seed_bytes, expected, ports, clock)
 
 
 def _app_from_env() -> FastAPI:

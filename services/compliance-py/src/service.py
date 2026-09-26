@@ -22,7 +22,7 @@ import json
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from clock import Clock, SystemClock, iso, parse_iso
@@ -33,7 +33,7 @@ from fetcher import FeedFetcher, FetchFailed, FetchRefused, NotWiredFetcher, Sou
 from intelligences import (i01_register, i02_activation_gate, i03_payout_gate, i04_publish_gate, i05_control_monitor,
                            i06_change_watcher, i07_jurisdiction, i08_sanctions, i10_accessibility, i11_evidence_audit)
 from intelligences.engine import Ctx, evaluate, finalize, unmet_line
-from ledger import LedgerRecordError, Recorder, canonical, derived_id
+from ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
 from ports import (A11yAnswer, AccessibilityChecker, AgeAttestation, ClipAttestation, DocVersion, Finance31Port,
                    Legal37Port, NotBuiltFinance31, NotBuiltLegal37, NotBuiltVerificationIntegrity,
                    NotWiredAccessibilityChecker, NotWiredSanctionsProvider, RailStatus, SanctionsScreeningProvider,
@@ -62,6 +62,8 @@ class Config:
     a11y_max_age_days: int = 30
     watcher_enabled: bool = False
     site_owner_caller: str = "creative_production"
+    watcher_max_proposals_per_cycle: int = 50     # AEGIS N14-11
+    watcher_max_proposals_per_source: int = 20
 
 
 @dataclass
@@ -151,15 +153,27 @@ class GateEnv:
     def a11y_results(self, content_sha: Optional[str]) -> list[dict]:
         return list(self.svc.a11y.get(content_sha or "", []))
 
+    def activation(self, lane: str, subject_id: str) -> tuple[str, Optional[dict], Optional[str]]:
+        """The subject's LATEST activation ruling in this lane, refused or not (AEGIS N14-1):
+        ("none" | "blocked" | "allowed", profile when allowed, ruling id). A refused or blocked
+        re-activation makes an earlier allowed one stale: it no longer counts."""
+        rid = self.svc.latest_activation.get((lane, subject_id))
+        if rid is None:
+            return "none", None, None
+        r = self.svc.rulings[rid]
+        return ("allowed", r.get("profile"), rid) if r["allowed"] else ("blocked", None, rid)
+
     def latest_allowed_activation(self, lane: str, subject_id: str) -> Optional[dict]:
-        rid = self.svc.allowed_activation.get((lane, subject_id))
-        return self.svc.rulings[rid].get("profile") if rid else None
+        return self.activation(lane, subject_id)[1]
 
 
 class ComplianceService:
     def __init__(self, config: Config, recorder: Recorder, log: RecordLog, seed_bytes: bytes,
                  expected_seed_sha256: str = SPEC_SEED_SHA256, ports: Optional[Ports] = None,
                  clock: Optional[Clock] = None, sources: Optional[list[Source]] = None):
+        """``expected_seed_sha256`` other than the spec's pinned hash marks the service NON-PRODUCTION
+        (``seed_pinned: false`` in /health and in every ruling; AEGIS N14-13). config.py allows that only
+        with COMPLIANCE_ALLOW_UNPINNED_SEED=1."""
         self.config = config
         self.recorder = recorder
         self.log = log
@@ -172,6 +186,7 @@ class ComplianceService:
             raise RuntimeError(f"seed file SHA-256 {seed_sha} does not match the expected {expected_seed_sha256}; "
                                "refusing to start (the seed must be copied unchanged)")
         self.seed_sha = seed_sha
+        self.seed_pinned = seed_sha == SPEC_SEED_SHA256
         seed = json.loads(seed_bytes)
         self.seed_rows: list[dict] = seed["rows"]
         self.seed_by_id = {r["id"]: r for r in self.seed_rows}
@@ -179,7 +194,7 @@ class ComplianceService:
         self.versions: list[Version] = []
         self.proposals: dict[str, dict] = {}
         self.rulings: dict[str, dict] = {}
-        self.allowed_activation: dict[tuple[str, str], str] = {}
+        self.latest_activation: dict[tuple[str, str], str] = {}   # (lane, subject) -> latest activation ruling id
         self.screens: dict[str, dict] = {}
         self.a11y: dict[str, list[dict]] = {}
         self.control_defs: dict[str, dict] = {c["control_id"]: dict(c) for c in SEED_CONTROLS}
@@ -192,8 +207,20 @@ class ComplianceService:
         self.sanctions_list: Optional[dict] = None
         self.expired_announced: set[tuple[str, str]] = set()
         self.idem: "OrderedDict[tuple[str, str], dict]" = OrderedDict()
+        self._wbudget: Optional[dict] = None   # Change Watcher drafting budget, set per cycle (N14-11)
+        self._ledger_conflict = False          # the last _record failure was a 409 (a different record, same id)
         for rec in self.log.iter_records():
             self._apply(rec["kind"], rec["data"]["record"])
+        if not self.log.in_memory:
+            # AEGIS N14-4: the local log must match what the ledger anchors (no truncated tail, no rewritten
+            # line, no register version behind the ledger's). Unverifiable = refuse (fail closed).
+            try:
+                problems = self.anchor_problems()
+            except LedgerQueryFailed as exc:
+                raise RuntimeError(f"refusing to start: the local log cannot be verified against the evidence "
+                                   f"ledger ({exc})") from None
+            if problems:
+                raise RuntimeError("refusing to start: " + "; ".join(problems))
         try:
             self.ensure_seed_proposal()
         except Unavailable:
@@ -201,21 +228,67 @@ class ComplianceService:
 
     # ------------------------------------------------------------------ plumbing
 
+    def _now(self) -> datetime:
+        """The clock's instant in UTC (AEGIS N14-14): every date the service computes
+        (expiry, effective dates, SLA, freshness) is a UTC date whatever tz the clock uses."""
+        return self.clock.now().astimezone(timezone.utc)
+
     def _record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str) -> str:
+        self._ledger_conflict = False
         try:
             return self.recorder.record(event_id, event_type, actor, subject, payload, summary)
         except LedgerRecordError as exc:
+            self._ledger_conflict = isinstance(exc, LedgerConflict)
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing was issued",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
 
     def _commit(self, kind: str, record: dict, event_ids: list[str]) -> dict:
-        data = {"record": record, "ledger_event_ids": list(event_ids), "register_version": self.version_number}
+        """Anchor the exact next local-log line on the ledger, append it (fsynced), then apply it.
+        A failure after the anchor records a best-effort ``local_commit_failed`` marker (AEGIS N14-4)."""
+        data = {"record": record, "ledger_event_ids": list(event_ids), "register_version": self.version_number,
+                "anchored": True}
+        rec, line = self.log.prepare(kind, iso(self._now()), data)
+        line_sha = hashlib.sha256(line).hexdigest()
+        epoch = self.log.epoch or line_sha[:16]
         try:
-            self.log.append(kind, iso(self.clock.now()), data)
+            self._record(i11_evidence_audit.anchor_id(epoch, rec["seq"], line_sha), i11_evidence_audit.ANCHOR_TYPE,
+                         EVIDENCE_ACTOR, i11_evidence_audit.LOG_SUBJECT,
+                         {"epoch": epoch, "seq": rec["seq"], "line_sha256": line_sha, "kind": kind},
+                         f"Local log line {rec['seq']} ({kind}) anchored")
+        except Unavailable:
+            self._commit_failed(epoch, rec["seq"], line_sha, kind, record)
+            raise
+        try:
+            self.log.append_prepared(rec, line)
         except StoreWriteError as exc:
+            self._commit_failed(epoch, rec["seq"], line_sha, kind, record)
             raise Unavailable(f"local store write failed ({exc}); nothing was issued") from None
         self._apply(kind, record)
         return record
+
+    def _commit_failed(self, epoch: str, seq: int, line_sha: str, kind: str, record: dict) -> None:
+        """Best effort: tell the ledger this anchored line (and any register version it published) never
+        took effect, so a restart does not read it as a truncated log. If even this cannot be recorded,
+        the next start refuses until an operator reconciles the log with the ledger (fail closed)."""
+        version = (record.get("version") or {}).get("version") if kind == "decision" else None
+        subject = f"register:v{version}" if version else i11_evidence_audit.LOG_SUBJECT
+        self.recorder.try_record(i11_evidence_audit.failed_id(epoch, seq, line_sha), i11_evidence_audit.FAILED_TYPE,
+                                 EVIDENCE_ACTOR, subject, {"epoch": epoch, "seq": seq, "line_sha256": line_sha,
+                                                           "kind": kind}, f"Local log line {seq} ({kind}) not committed")
+
+    def anchor_problems(self) -> list[str]:
+        """Compare the local log with the ledger's anchors (raises LedgerQueryFailed when unreadable)."""
+        client = self.recorder.client
+        if not hasattr(client, "entries"):
+            raise LedgerQueryFailed("this ledger client cannot read entries")
+        entries = client.entries()
+        shas = self.log.line_shas()
+        lines, referenced = [], set()
+        for rec, sha in zip(self.log.iter_records(), shas):
+            lines.append((rec["seq"], sha, bool(rec["data"].get("anchored"))))
+            referenced.update(rec["data"].get("ledger_event_ids") or [])
+        return i11_evidence_audit.anchor_problems(entries, self.log.epoch, lines, referenced,
+                                                  self.version_number or 0, strict=not self.log.in_memory)
 
     def _apply(self, kind: str, r: dict) -> None:
         if kind in ("proposal", "proposal_redraft"):
@@ -233,8 +306,17 @@ class ComplianceService:
                 self.control_defs = {k: dict(c) for k, c in r["controls"].items()}
         elif kind == "ruling":
             self.rulings[r["ruling_id"]] = r
-            if r["gate"] == "activation" and r["allowed"]:
-                self.allowed_activation[(r["lane"], r["subject_id"])] = r["ruling_id"]
+            if r["gate"] == "activation":
+                self.latest_activation[(r["lane"], r["subject_id"])] = r["ruling_id"]
+            if r.get("request_sha256") and r.get("first_used_at"):
+                # idempotency survives a restart (AEGIS N14-15b): the store is rebuilt from the log
+                key = (r["principal"], r["request_id"])
+                self.idem[key] = {"h": r["request_sha256"], "at": parse_iso(r["first_used_at"]),
+                                  "response": self.ruling_view(r), "outcome_sha256": r.get("outcome_sha256"),
+                                  "ruling_id": r["ruling_id"]}
+                self.idem.move_to_end(key)
+                while len(self.idem) > IDEMPOTENCY_MAX:
+                    self.idem.popitem(last=False)
         elif kind == "screen":
             self.screens[r["screen_id"]] = r
         elif kind == "a11y":
@@ -272,13 +354,13 @@ class ComplianceService:
         if ent is not None:
             if ent["h"] != h:
                 raise Conflict("request_id already used with a different body")
-            if self.clock.now() - ent["at"] > IDEMPOTENCY_WINDOW:
+            if self._now() - ent["at"] > IDEMPOTENCY_WINDOW:
                 raise Conflict("request_id reused (first used more than 15 minutes ago)")
             return key, h, ent["response"]
         return key, h, None
 
     def _idem_store(self, key: tuple, h: str, response: dict) -> dict:
-        self.idem[key] = {"h": h, "at": self.clock.now(), "response": response}
+        self.idem[key] = {"h": h, "at": self._now(), "response": response}
         while len(self.idem) > IDEMPOTENCY_MAX:
             self.idem.popitem(last=False)
         return response
@@ -306,7 +388,7 @@ class ComplianceService:
         with self.lock:
             if any(p["kind"] == "seed" for p in self.proposals.values()):
                 return
-            now = self.clock.now()
+            now = self._now()
             p = i01_register.seed_proposal(self.seed_rows, self.seed_sha, now)
             e1 = self._record(derived_id("seed", self.seed_sha), "seed_loaded", i01_register.ACTOR, f"proposal:{p['proposal_id']}",
                               {"seed_sha256": self.seed_sha, "rows": len(self.seed_rows), "proposal_id": p["proposal_id"]},
@@ -322,7 +404,7 @@ class ComplianceService:
             v = self.current
             if v is None:
                 return {"register_version": None, "rows": [], "page": page, "total": 0}
-            today = self.clock.today()
+            today = self._now().date()
             rows = []
             for r in v.rows:
                 st = effective_status(r, today)
@@ -351,7 +433,7 @@ class ComplianceService:
             row = v.by_id().get(oid) if v else None
             if row is None:
                 raise NotFound("no such obligation in the version in force")
-            return {"register_version": v.version, "row": {**row, "effective_status": effective_status(row, self.clock.today())},
+            return {"register_version": v.version, "row": {**row, "effective_status": effective_status(row, self._now().date())},
                     "history": history}
 
     def version_list(self) -> list[dict]:
@@ -373,7 +455,7 @@ class ComplianceService:
             key, h, cached = self._idem_check(principal, request_id, "proposals", body)
             if cached:
                 return cached
-            now = self.clock.now()
+            now = self._now()
             pid = "prop-" + _b32(f"{principal}|{request_id}", 20)
             cur = self.rows_by_id()
             p = i01_register.build_proposal(body["kind"], body.get("target_id"), body.get("proposed_row"),
@@ -419,34 +501,46 @@ class ComplianceService:
             approvals = [p for d, p in chosen if d["decision"] == "approve"]
             if any(p.get("evidence") is None and p["kind"] == "reverify" for p in approvals):
                 raise Conflict("a reverify proposal without evidence cannot be approved")
-            now = self.clock.now()
+            for d, p in chosen:
+                # AEGIS N14-9: a proposal flagged as weakening a rule is approved only with an explicit acknowledgment
+                if d["decision"] == "approve" and p.get("weakening") and d.get("acknowledge_weakening") is not True:
+                    raise Invalid(f"proposal {p['proposal_id']} weakens the register "
+                                  f"({', '.join(p.get('weakening_reasons') or [])}); approving it needs "
+                                  "acknowledge_weakening: true. Nothing was applied")
+            now = self._now()
             base = list(self.current.rows) if self.current else None
             new_rows, new_controls = (base, self.control_defs)
             version_meta = None
             if approvals:
                 new_rows, new_controls = i01_register.apply(base, self.control_defs, approvals, now.date())
-            row_change = approvals and any(p["kind"] != "control" for p in approvals)
+            row_change = approvals and any(p["kind"] not in ("control", *i01_register.INFO_KINDS) for p in approvals)
             events: list[str] = []
             for d, p in chosen:
                 t = "register_proposal_approved" if d["decision"] == "approve" else "register_proposal_rejected"
                 events.append(self._record(derived_id("pd", p["proposal_id"], p["content_sha256"], d["decision"]), t, "andre",
                                            f"proposal:{p['proposal_id']}",
                                            {"proposal_id": p["proposal_id"], "content_sha256": p["content_sha256"],
-                                            "decision": d["decision"], "note_sha256": _sha(d.get("note"))},
+                                            "decision": d["decision"], "note_sha256": _sha(d.get("note")),
+                                            "weakening": bool(p.get("weakening")),
+                                            "acknowledged_weakening": d.get("acknowledge_weakening") is True},
                                            f"Andre {d['decision']}d proposal {p['proposal_id']} ({p['kind']})"))
             if row_change:
                 n = (self.version_number or 0) + 1
                 prev = self.current.version_sha256 if self.current else None
                 meta = {"version": n, "created_at": iso(now), "approved_by": "andre",
-                        "proposal_ids": [p["proposal_id"] for p in approvals if p["kind"] != "control"],
+                        "proposal_ids": [p["proposal_id"] for p in approvals
+                                         if p["kind"] not in ("control", *i01_register.INFO_KINDS)],
                         "rows_sha256": rows_sha256(new_rows), "prev_version_sha256": prev}
-                events.append(self._record(derived_id("ver", n, meta["rows_sha256"], prev), "register_version_published",
+                epoch = self.log.epoch or "0" * 16  # the seed proposal line always exists before a decision
+                events.append(self._record(i11_evidence_audit.version_event_id(epoch, n, meta["rows_sha256"], prev),
+                                           "register_version_published",
                                            i01_register.ACTOR, f"register:v{n}",
                                            {k: meta[k] for k in ("version", "rows_sha256", "prev_version_sha256", "proposal_ids")},
                                            f"Register version {n} published ({len(new_rows)} rows)"))
                 version_meta = {**meta, "rows": new_rows}
             record = {"request_id": request_id, "decided_at": iso(now),
-                      "decisions": [{"proposal_id": d["proposal_id"], "decision": d["decision"], "note": d.get("note")}
+                      "decisions": [{"proposal_id": d["proposal_id"], "decision": d["decision"], "note": d.get("note"),
+                                     "acknowledged_weakening": d.get("acknowledge_weakening") is True}
                                     for d, _ in chosen],
                       "version": version_meta,
                       "controls": new_controls if any(p["kind"] == "control" for p in approvals) else None}
@@ -477,19 +571,24 @@ class ComplianceService:
     def gate(self, principal: str, gate: str, request_id: str, subject_id: str, facts: Any, *,
              lane: Optional[str] = None, subject_kind: Optional[str] = None, caller_context: Any = None,
              route: str = "") -> dict:
+        """Evaluate, record on the ledger, commit, answer (spec C.2).
+
+        Idempotent replay (AEGIS N14-15b): a retry with the same request_id and body is RE-EVALUATED;
+        the stored ruling is returned only when the new evaluation has the same outcome (allowed, unmet,
+        register version, facts). If an input changed since (a hold opened, the register moved, a
+        control went red, a row expired...), a new ruling is issued under a new id derived from the new
+        outcome, so the ledger never sees two different rulings under one event id."""
         with self.lock:
             body = {"gate": gate, "subject_id": subject_id, "lane": lane, "subject_kind": subject_kind, "facts": facts,
                     "caller_context": caller_context}
-            key, h, cached = self._idem_check(principal, request_id, route or gate, body)
-            if cached:
-                return cached
+            key, h, ent = self._idem_entry(principal, request_id, route or gate, body)
             if not isinstance(subject_id, str) or not ID_RE.fullmatch(subject_id):
                 raise Invalid("subject_id must be 1-128 characters of [A-Za-z0-9._:-]")
-            now = self.clock.now()
-            ruling_id = "cmp-rul-" + _b32(f"{principal}|{request_id}")
+            now = self._now()
+            base_id = "cmp-rul-" + _b32(f"{principal}|{request_id}")
             actor = GATE_ACTOR[gate]
             events: list[str] = []
-            ports = PortCalls(self, ruling_id, actor, subject_id, events)
+            ports = PortCalls(self, base_id, actor, subject_id, events)   # crossings: same ids on every retry
             env = GateEnv(self, ports)
             v = self.current
             rows = v.by_id() if v else {}
@@ -501,7 +600,7 @@ class ComplianceService:
                 ctx, hints = i04_publish_gate.build(subject_id, facts, rows, self.seed_by_id, env, now), {}
 
             deferred: list = []
-            events += self._injection_check(ruling_id, {"facts": facts, "caller_context": caller_context}, subject_id,
+            events += self._injection_check(base_id, {"facts": facts, "caller_context": caller_context}, subject_id,
                                             EVIDENCE_ACTOR, deferred)
             new_holds: list[dict] = []
             if v is None:
@@ -523,6 +622,21 @@ class ComplianceService:
                                        f"hold open: {hold['kind']} (released only by Andre)"))
                 items += self._hold_items(ctx, self._hold_subjects(gate, subject_id, ctx.facts))
             unmet = finalize(items)
+            allowed = not unmet
+            facts_sha = _sha(facts)
+            outcome = {"gate": gate, "allowed": allowed, "lane": lane, "subject_kind": subject_kind,
+                       "unmet": [[u["obligation_id"], u["code"]] for u in unmet], "register_version": self.version_number,
+                       "facts_sha256": facts_sha}
+            outcome_sha = _sha(outcome)
+            if ent is not None and ent.get("outcome_sha256") == outcome_sha:
+                return ent["response"]                  # inputs still current: the stored answer
+            ruling_id = base_id if ent is None else "cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}")
+            if ruling_id in self.rulings:
+                if self.rulings[ruling_id].get("outcome_sha256") == outcome_sha:
+                    return self._idem_store_ruling(key, h, self.rulings[ruling_id], ent)
+                ruling_id = "cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}")
+                if ruling_id in self.rulings:
+                    return self._idem_store_ruling(key, h, self.rulings[ruling_id], ent)
             hold_events = []
             for hold in new_holds:
                 hold_events.append(self._record(derived_id("hold", hold["hold_id"]), "hold_opened", i07_jurisdiction.ACTOR,
@@ -538,14 +652,20 @@ class ComplianceService:
                                                f"obligation:{oid}", {"obligation_id": oid, "expires_at": exp},
                                                f"Obligation {oid} expired on {exp}; it blocks every gate it feeds"))
                     expired_new.append({"obligation_id": oid, "expires_at": exp})
-            allowed = not unmet
-            facts_sha = _sha(facts)
-            payload = {"ruling_id": ruling_id, "gate": gate, "allowed": allowed, "lane": lane, "subject_kind": subject_kind,
-                       "unmet": [[u["obligation_id"], u["code"]] for u in unmet], "register_version": self.version_number,
-                       "facts_sha256": facts_sha}
             summary = (f"{gate.capitalize()} {'allowed' if allowed else 'blocked'}: "
                        f"{len(unmet)} unmet under register v{self.version_number or 0}")
-            events.append(self._record(ruling_id, GATE_EVENT[gate], actor, subject_id, payload, summary))
+            try:
+                events.append(self._record(ruling_id, GATE_EVENT[gate], actor, subject_id,
+                                           {"ruling_id": ruling_id, **outcome}, summary))
+            except Unavailable:
+                if ruling_id != base_id or not self._ledger_conflict:
+                    raise
+                # the ledger already holds a DIFFERENT ruling under the request's first id (an earlier attempt
+                # was recorded but never committed here, and the state has moved since): issue under the
+                # outcome-derived id instead of refusing forever (AEGIS N14-15b)
+                ruling_id = "cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}")
+                events.append(self._record(ruling_id, GATE_EVENT[gate], actor, subject_id,
+                                           {"ruling_id": ruling_id, **outcome}, summary))
             for kind, rec, eids in deferred:
                 self._commit(kind, rec, eids)
             for hold, hev in zip(new_holds, hold_events):
@@ -558,7 +678,10 @@ class ComplianceService:
                       "register_version": self.version_number, "evaluated_at": iso(now), "facts_sha256": facts_sha,
                       "caller_context_sha256": _sha(caller_context) if caller_context is not None else None,
                       "row_ids_evaluated": sorted(set(ctx.evaluated)), "ledger_event_id": ruling_id,
-                      "ledger_event_ids": list(events), "principal": principal, "request_id": request_id}
+                      "ledger_event_ids": list(events), "principal": principal, "request_id": request_id,
+                      "request_sha256": h, "outcome_sha256": outcome_sha,
+                      "first_used_at": iso(ent["at"]) if ent is not None else iso(now),
+                      "replaces_ruling_id": ent.get("ruling_id") if ent is not None else None}
             if gate == "activation" and allowed:
                 owners = [self.screens[s]["subject_id"] for s in ctx.facts.get("owner_screen_ids") or [] if s in self.screens]
                 record["profile"] = i02_activation_gate.profile(lane, ctx.facts, owners)
@@ -566,8 +689,28 @@ class ComplianceService:
                 record["disclosure_evidence_ref"] = (ctx.facts.get("disclosure") or {}).get("platform_toggle_evidence_ref")
                 record["clipper_id"] = ctx.facts.get("clipper_id")
                 record["campaign_id"] = ctx.facts.get("campaign_id")
-            self._commit("ruling", record, events)
-            return self._idem_store(key, h, self.ruling_view(record))
+            self._commit("ruling", record, events)   # _apply also refreshes the idempotency entry
+            return self.idem[key]["response"]
+
+    def _idem_entry(self, principal: str, request_id: str, route: str, body: Any) -> tuple[tuple, str, Optional[dict]]:
+        """Like ``_idem_check`` but returns the stored ENTRY (gates re-evaluate before answering from it)."""
+        if not isinstance(request_id, str) or not ID_RE.fullmatch(request_id):
+            raise Invalid("request_id must be 1-128 characters of [A-Za-z0-9._:-]")
+        key = (principal, request_id)
+        h = _sha({"route": route, "body": body})
+        ent = self.idem.get(key)
+        if ent is not None:
+            if ent["h"] != h:
+                raise Conflict("request_id already used with a different body")
+            if self._now() - ent["at"] > IDEMPOTENCY_WINDOW:
+                raise Conflict("request_id reused (first used more than 15 minutes ago)")
+        return key, h, ent
+
+    def _idem_store_ruling(self, key: tuple, h: str, r: dict, ent: Optional[dict]) -> dict:
+        view = self.ruling_view(r)
+        self.idem[key] = {"h": h, "at": ent["at"] if ent is not None else self._now(), "response": view,
+                          "outcome_sha256": r.get("outcome_sha256"), "ruling_id": r["ruling_id"]}
+        return view
 
     def _hold_subjects(self, gate: str, subject_id: str, f: dict) -> list[str]:
         subs = [subject_id]
@@ -588,7 +731,7 @@ class ComplianceService:
     def _control_items(self, ctx: Ctx, lane: Optional[str]) -> list[dict]:
         out = []
         rows = self.rows_by_id()
-        now = self.clock.now()
+        now = self._now()
         for cid, d in sorted(self.control_defs.items()):
             if ctx.gate not in d["blocks_gates"]:
                 continue
@@ -603,7 +746,8 @@ class ComplianceService:
     def ruling_view(self, r: dict) -> dict:
         base = {"ruling_id": r["ruling_id"], "gate": r["gate"], "subject_id": r["subject_id"], "allowed": r["allowed"],
                 "unmet": r["unmet"], "unmet_lines": r["unmet_lines"], "register_version": r["register_version"],
-                "evaluated_at": r["evaluated_at"], "ledger_event_id": r["ledger_event_id"]}
+                "evaluated_at": r["evaluated_at"], "ledger_event_id": r["ledger_event_id"],
+                "seed_pinned": self.seed_pinned}
         if r["gate"] == "activation":
             base.update(lane=r["lane"], detail=r["ruling_id"])
         else:
@@ -624,7 +768,7 @@ class ComplianceService:
             key, h, cached = self._idem_check(principal, request_id, "screen", body)
             if cached:
                 return cached
-            now = self.clock.now()
+            now = self._now()
             sid = "scr-" + _b32(f"{principal}|{request_id}", 20)
             subject = body["subject_id"]
             if body["role"] == "owner" and not body.get("owner_of"):
@@ -676,7 +820,7 @@ class ComplianceService:
             key, h, cached = self._idem_check(principal, request_id, "a11y", body)
             if cached:
                 return cached
-            now = self.clock.now()
+            now = self._now()
             cid = "a11y-" + _b32(f"{principal}|{request_id}", 20)
             events: list[str] = []
             ports = PortCalls(self, cid, i10_accessibility.ACTOR, f"a11y:{cid}", events)
@@ -718,7 +862,7 @@ class ComplianceService:
                 raise Conflict("hold is not open")
             if not hold["releasable"]:
                 raise Conflict("a sanctions match is a permanent block: no release through the API (counsel)")
-            now = self.clock.now()
+            now = self._now()
             eid = self._record(derived_id("rel", hold_id), "hold_released_by_andre", "andre", hold["subject_id"],
                                {"hold_id": hold_id, "reason_sha256": sha256_text(reason)}, f"Hold released by Andre: {hold['kind']}")
             self._commit("hold_release", {"hold_id": hold_id, "released_at": iso(now), "reason": reason}, [eid])
@@ -758,7 +902,7 @@ class ComplianceService:
     def controls_view(self) -> list[dict]:
         with self.lock:
             rows = self.rows_by_id()
-            now = self.clock.now()
+            now = self._now()
             out = []
             for cid, d in sorted(self.control_defs.items()):
                 st = self.control_state.get(cid, {})
@@ -777,7 +921,7 @@ class ComplianceService:
     def trust_center(self) -> list[dict]:
         with self.lock:
             rows = self.rows_by_id()
-            now = self.clock.now()
+            now = self._now()
             return [public_view(d, control_status(d, self.control_state.get(cid, {}), rows, now),
                                 self.control_state.get(cid, {})) for cid, d in sorted(self.control_defs.items())]
 
@@ -792,7 +936,7 @@ class ComplianceService:
                         detail: Optional[str] = None) -> list[str]:
         d = self.control_defs[cid]
         rows = self.rows_by_id()
-        now = self.clock.now()
+        now = self._now()
         before = control_status(d, self.control_state.get(cid, {}), rows, now)["status"]
         prev = self.control_state.get(cid, {})
         sim = {"last_result": result, "last_passed_at": tested_at if result == "pass" else prev.get("last_passed_at")}
@@ -820,7 +964,7 @@ class ComplianceService:
             if cached:
                 return cached
             tested = parse_iso(body["tested_at"])
-            if tested > self.clock.now() + timedelta(minutes=5):
+            if tested > self._now() + timedelta(minutes=5):
                 raise Invalid("tested_at is in the future")
             events = self._control_result(cid, body["result"], iso(tested), body["evidence"], principal,
                                           f"{principal}|{request_id}")
@@ -831,7 +975,7 @@ class ComplianceService:
             key, h, cached = self._idem_check("scheduler", request_id, "controls/internal/run", {})
             if cached:
                 return cached
-            now = self.clock.now()
+            now = self._now()
             today = now.date()
             op = f"scheduler|{request_id}"
             events: list[str] = []
@@ -860,8 +1004,14 @@ class ComplianceService:
             except Exception:  # noqa: BLE001
                 ledger_ok = False
             log_ok = self.log.verify()
-            results["C-11"] = (ledger_ok and log_ok,
-                               f"ledger verify {'passed' if ledger_ok else 'FAILED'}; local log chain {'verified' if log_ok else 'BROKEN'}")
+            try:
+                anchor = self.anchor_problems()   # AEGIS N14-4: the local log head against the ledger
+            except LedgerQueryFailed as exc:
+                anchor = [f"ledger entries unreadable ({exc})"]
+            results["C-11"] = (ledger_ok and log_ok and not anchor,
+                               (f"ledger verify {'passed' if ledger_ok else 'FAILED'}; local log chain "
+                                f"{'verified' if log_ok else 'BROKEN'}; ledger anchors "
+                                + ("match the local log" if not anchor else "MISMATCH: " + "; ".join(anchor)))[:600])
             results["C-12"] = i05_control_monitor.test_c12()
             results["C-15"] = i05_control_monitor.test_c15(rows, today)
             results["C-17"] = i05_control_monitor.test_c17()
@@ -891,7 +1041,7 @@ class ComplianceService:
     def _draft_reverify(self, op: str, events: list[str]) -> list[str]:
         if not self.current:
             return []
-        now = self.clock.now()
+        now = self._now()
         drafted = []
         open_targets = {p["target_id"] for p in self.proposals.values() if p["status"] == "open" and p["kind"] == "reverify"}
         for row in i01_register.reverify_candidates(list(self.current.rows), now.date()):
@@ -939,11 +1089,15 @@ class ComplianceService:
             if not self.config.watcher_enabled:
                 return self._idem_store(key, h, {"ran": False, "reason": "COMPLIANCE_WATCHER_ENABLED is not 1; "
                                                  "control C-02 stays red", "proposals": []})
-            now = self.clock.now()
+            now = self._now()
             op = f"scheduler|{request_id}"
             events: list[str] = []
             ok, failed, skipped, proposals, dropped, cosmetic = [], [], [], [], 0, 0
+            notices: list[str] = []
             rows = list(self.current.rows) if self.current else []
+            # AEGIS N14-11: at most N drafted proposals per cycle and per source; the excess is summarised
+            # in ONE "source flooded" inbox item per source (kind watch_notice) for Andre
+            self._wbudget = {"cycle_left": self.config.watcher_max_proposals_per_cycle}
             for src in self.watcher_sources():
                 day = iso(now)[:10]
                 if src.method == "page" and self.page_fetches.get((src.url, day), 0) >= PAGE_FETCHES_PER_DAY:
@@ -966,6 +1120,7 @@ class ComplianceService:
                 except Exception:  # noqa: BLE001 - a fetcher bug is a failed source, never a crash
                     failed.append(src.source_id)
                     continue
+                self._wbudget.update(source_left=self.config.watcher_max_proposals_per_source, undrafted=0)
                 try:
                     made, d, c = self._process_source(src, raw, res.fetched_at, rows, op, events)
                 except (i06_change_watcher.FeedParseError, Invalid, Conflict):
@@ -979,18 +1134,22 @@ class ComplianceService:
                 proposals += made
                 dropped += d
                 cosmetic += c
+                if self._wbudget["undrafted"]:
+                    notices += self._flood_notice(src, self._wbudget["undrafted"], len(made), op, events)
+            self._wbudget = None
             cyc = {"at": iso(now), "ok": ok, "failed": failed, "skipped_rate_limit": skipped,
-                   "proposals": proposals, "dropped_unmatched": dropped, "cosmetic_discarded": cosmetic}
+                   "proposals": proposals, "dropped_unmatched": dropped, "cosmetic_discarded": cosmetic,
+                   "flood_notices": notices}
             events.append(self._record(derived_id("wcc", op), "watcher_cycle_completed", i06_change_watcher.ACTOR,
                                        "watcher", {"ok": len(ok), "failed": len(failed), "proposals": len(proposals),
-                                                   "dropped": dropped, "cosmetic": cosmetic},
+                                                   "dropped": dropped, "cosmetic": cosmetic, "flood_notices": len(notices)},
                                        f"Watcher cycle: {len(ok)} ok, {len(failed)} failed, {len(proposals)} proposals"))
             self._commit("watcher_cycle", cyc, events[-1:])
             return self._idem_store(key, h, {"ran": True, **cyc, "ledger_event_ids": events})
 
     def _process_source(self, src: Source, raw: bytes, fetched_at: str, rows: list[dict], op: str,
                         events: list[str]) -> tuple[list[str], int, int]:
-        now = self.clock.now()
+        now = self._now()
         snap = i06_change_watcher.snapshot(raw)
         prev = self.snapshots.get(src.url)
         made: list[str] = []
@@ -1032,9 +1191,26 @@ class ComplianceService:
         self._commit("snapshot", rec, events[-1:] if events else [])
         return made, dropped, cosmetic
 
+    def _flood_notice(self, src: Source, undrafted: int, drafted: int, op: str, events: list[str]) -> list[str]:
+        now = self._now()
+        pid = "prop-" + _b32(f"i06|flood|{op}|{src.source_id}", 20)
+        if pid in self.proposals:
+            return []
+        watch = {"source_id": src.source_id, "url_sha256": sha256_text(src.url), "drafted": drafted,
+                 "undrafted": undrafted, "cap_per_source": self.config.watcher_max_proposals_per_source,
+                 "cap_per_cycle": self.config.watcher_max_proposals_per_cycle,
+                 "note": "source flooded: changes beyond the cap were NOT drafted; review the source by hand"}
+        p = i01_register.watch_notice_proposal(pid, now, watch)
+        events.append(self._record(derived_id("prop", pid, p["content_sha256"]), "register_proposal_created",
+                                   i06_change_watcher.ACTOR, f"proposal:{pid}",
+                                   {"proposal_id": pid, "kind": "watch_notice", "content_sha256": p["content_sha256"],
+                                    "undrafted": undrafted}, f"Watcher: source flooded, {undrafted} change(s) not drafted"))
+        self._commit("proposal", p, events[-1:])
+        return [pid]
+
     def _draft_change(self, src: Source, row: dict, link: str, doc_number, feed_effective, published, raw: bytes,
                       snap: dict, excerpt: str, fetched_at: str, item_key: str, events: list[str]) -> list[str]:
-        now = self.clock.now()
+        now = self._now()
         note = (f"Change detected by i06 on {fetched_at[:10]} ({doc_number or 'no document number'}); "
                 f"effective {feed_effective or 'not given by the source (Andre to confirm)'}; re-verification required")
         new_row = i06_change_watcher.changed_row(row, link, note)
@@ -1063,6 +1239,13 @@ class ComplianceService:
                 if existing.get("evidence", {}) and existing["evidence"].get("normalized_text_sha256") == ev["normalized_text_sha256"]:
                     return []
                 kind = "proposal_redraft"
+        budget = getattr(self, "_wbudget", None)
+        if budget is not None:
+            if budget["cycle_left"] <= 0 or budget["source_left"] <= 0:
+                budget["undrafted"] += 1
+                return []
+            budget["cycle_left"] -= 1
+            budget["source_left"] -= 1
         p = i01_register.build_proposal("amend", row["id"], new_row, ev, "i06_change_watcher", now, self.rows_by_id(),
                                         self.ever_ids(), self.control_defs, pid, watch=watch)
         events.append(self._record(derived_id("prop", pid, p["content_sha256"]), "register_proposal_created",
@@ -1082,7 +1265,7 @@ class ComplianceService:
     def founder_refused(self, route: str, reason: str) -> None:
         """Best effort: a refusal stands whether or not it could be recorded."""
         with self.lock:
-            now = self.clock.now()
+            now = self._now()
             op = f"{route}|{iso(now)}|{len(self.log)}"
             eid = self.recorder.try_record(derived_id("far", op), "founder_approval_refused", EVIDENCE_ACTOR, "founder_gate",
                                            {"route": route[:64], "reason_sha256": sha256_text(reason)},
@@ -1115,7 +1298,7 @@ class ComplianceService:
 
     def health(self) -> dict:
         return {"status": "ok", "service": "compliance-py", "register_version_in_force": self.version_number,
-                "in_memory": self.log.in_memory}
+                "in_memory": self.log.in_memory, "seed_pinned": self.seed_pinned, "production": self.seed_pinned}
 
 
 def review_reason(r: dict) -> str:

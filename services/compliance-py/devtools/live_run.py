@@ -5,8 +5,9 @@ Live HTTP run: real ledger-rust binary + compliance-py (production entrypoint
 real bearer/caller/Andre tokens. Also drives the onboarding-py and creative-py
 thin clients (HttpComplianceDepartment, HttpCompliance38) against the live server.
 
-usage: LEDGER_BIN=/path/to/server python3 devtools/live_run.py [--ports 18950,18951,18952]
-Kills only the PIDs it started.
+usage: LEDGER_BIN=/path/to/server python3 devtools/live_run.py [--ports 18950,18951,18952,18953]
+(ledger A, compliance A, compliance B, ledger B: one disk-backed Compliance instance per ledger,
+AEGIS N14-4). Kills only the PIDs it started.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ HERE = Path(__file__).resolve()
 SVC = HERE.parents[1]
 SERVICES = HERE.parents[2]
 PORTS = [int(p) for p in (sys.argv[sys.argv.index("--ports") + 1].split(",") if "--ports" in sys.argv else
-                          ["18950", "18951", "18952"])]
+                          ["18950", "18951", "18952", "18953"])]
 LEDGER_TOKEN = "live-ledger-token-" + "l" * 24
 SVC_TOKEN = "live-compliance-service-token-" + "s" * 12
 ANDRE = "live-andre-approval-token-" + "a" * 16
@@ -67,8 +68,9 @@ def main() -> int:
     ledger_bin = os.environ["LEDGER_BIN"]
     work = Path(tempfile.mkdtemp(prefix="cmp-live-", dir=os.environ.get("LIVE_WORK_DIR")))
     (work / "fixtures").mkdir()
-    pl, pa, pb = PORTS
+    pl, pa, pb, plb = PORTS
     L, A, B = f"http://127.0.0.1:{pl}", f"http://127.0.0.1:{pa}", f"http://127.0.0.1:{pb}"
+    LB = f"http://127.0.0.1:{plb}"
     try:
         start([ledger_bin], {"LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEDGER_PORT": str(pl),
                              "LEDGER_LOG_PATH": str(work / "ledger.jsonl")}, str(work), "ledger", work)
@@ -199,14 +201,32 @@ def main() -> int:
         r = c.post(A + "/compliance/v1/register/decisions", headers=h(andre=ANDRE), json={"request_id": rid(), "decisions": [
             {"proposal_id": p["proposal_id"], "content_sha256": p["content_sha256"], "decision": "approve", "note": "memo signed"}]})
         say(f"Andre approves memo -> {r.status_code} register_version={r.json()['register_version']}")
+        # restart A on the same data dir and ledger: the local log is verified against the ledger's anchors
+        pa_proc = PROCS[1]
+        pa_proc.terminate()
+        pa_proc.wait(timeout=10)
+        say(f"stopped compliance_a pid={pa_proc.pid} (restart check)")
+        start([sys.executable, "-m", "api"], {**common, "COMPLIANCE_PORT": str(pa), "COMPLIANCE_DATA_DIR": str(work / "a")},
+              str(SVC / "src"), "compliance_a2", work)
+        say(f"compliance A restarted, health: {wait_health(A + '/health')}")
+        r = c.post(A + "/compliance/v1/controls/internal/run", headers=h("scheduler"), json={"request_id": rid()}).json()
+        say(f"after restart C-11: {r['results']['C-11']['result']} ({r['results']['C-11']['detail'][:160]})")
+        g = HttpCompliance38(A, SVC_TOKEN, CALLERS["creative_production"]).review(
+            "zbm_work", "work-live-2", {**pub, "client_id": "client-live-2"})
+        say(f"GATE publish via creative thin client (full site facts, client-live-2 activated for youtube only): "
+            f"allowed={g.allowed} reason={g.reason[:200]}")
         # Change Watcher leg (process B, fixture fetcher)
         fx = work / "fixtures"
         page = "https://cppa.ca.gov/regulations/ccpa_updates.html"
         fpath = fx / (hashlib.sha256(page.encode()).hexdigest() + ".bin")
         fpath.write_bytes(b"<html><body><h1>CCPA Updates</h1><p>Proposed regulations under review.</p></body></html>")
+        (work / "lb").mkdir()
+        start([ledger_bin], {"LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEDGER_PORT": str(plb),
+                             "LEDGER_LOG_PATH": str(work / "lb" / "ledger.jsonl")}, str(work / "lb"), "ledger_b", work)
+        say(f"ledger B health: {wait_health(LB + '/health')}")
         start([sys.executable, str(SVC / "devtools" / "live_server.py")],
-              {**common, "COMPLIANCE_PORT": str(pb), "COMPLIANCE_DATA_DIR": str(work / "b"), "COMPLIANCE_FIXTURE_DIR": str(fx),
-               "COMPLIANCE_WATCHER_ENABLED": "1"}, str(SVC), "compliance_b", work)
+              {**common, "LEDGER_SERVICE_URL": LB, "COMPLIANCE_PORT": str(pb), "COMPLIANCE_DATA_DIR": str(work / "b"),
+               "COMPLIANCE_FIXTURE_DIR": str(fx), "COMPLIANCE_WATCHER_ENABLED": "1"}, str(SVC), "compliance_b", work)
         say(f"compliance B (fixture fetcher) health: {wait_health(B + '/health')}")
         seedb = [x for x in c.get(B + "/compliance/v1/inbox", headers=h("scheduler")).json() if x["kind"] == "seed"][0]
         c.post(B + "/compliance/v1/register/decisions", headers=h(andre=ANDRE), json={"request_id": rid(), "decisions": [
@@ -234,7 +254,10 @@ def main() -> int:
         say(f"ledger entries: {len(ents)} total, {len(cmp)} from compliance; event types: {kinds}")
         v = c.get(L + "/ledger/verify", headers={"Authorization": f"Bearer {LEDGER_TOKEN}"})
         say(f"GET /ledger/verify -> {v.status_code} {v.text}")
-        return 0 if v.status_code == 200 and v.json().get("valid") is True else 1
+        vb = c.get(LB + "/ledger/verify", headers={"Authorization": f"Bearer {LEDGER_TOKEN}"})
+        say(f"GET /ledger/verify (ledger B) -> {vb.status_code} {vb.text}")
+        ok = all(x.status_code == 200 and x.json().get("valid") is True for x in (v, vb))
+        return 0 if ok else 1
     finally:
         for p in PROCS:
             if p.poll() is None:

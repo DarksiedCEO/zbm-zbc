@@ -74,6 +74,9 @@ id and that row's source URL. Only Andre approves anything into force.
    results, control results, holds, watcher snapshots) is rebuilt by
    replaying the log. Without a data dir the log is in memory, `/health`
    says `in_memory: true`, and after a restart nothing is in force.
+   **Amended (AEGIS round 14, N14-4):** every line is anchored on the ledger
+   BEFORE it is written (see "Amendment — AEGIS round 14" below); a disk log
+   that does not match the ledger's anchors refuses to start, and C-11 is red.
 
 6. **Ports with fail-closed stand-ins; no passing fake in `src/`.**
    `ports.py` holds only `NotBuilt*`/`NotWired*` classes; the passing fakes
@@ -83,8 +86,10 @@ id and that row's source URL. Only Andre approves anything into force.
    `dependency_unavailable:<port>`.
 
 7. **Seed load and approval.** At start the seed file's SHA-256 must equal
-   `COMPLIANCE_SEED_SHA256` (default: the spec's hash) or the service refuses
-   to start; one `seed` proposal is created (`seed_loaded`,
+   the spec's pinned hash or the service refuses to start (amended, N14-13:
+   `COMPLIANCE_SEED_PATH`/`COMPLIANCE_SEED_SHA256` can name another seed only
+   with `COMPLIANCE_ALLOW_UNPINNED_SEED=1`, and the service then reports
+   itself non-production); one `seed` proposal is created (`seed_loaded`,
    `register_proposal_created`). Until Andre approves it, every gate answers
    blocked with exactly one item, `register_not_in_force` citing HR-04.
 
@@ -121,7 +126,12 @@ id and that row's source URL. Only Andre approves anything into force.
     `COMPLIANCE_CALLER_TOKEN` are all set; otherwise the fail-closed stand-in
     stays. 10 s timeout, one retry with the same `request_id` on a transport
     error or 5xx, and any non-200, parse error or inconsistent answer maps to
-    "not allowed". Nothing else in those services changed.
+    "not allowed". Nothing else in those services changed. **Amended (N14-7,
+    N14-8, N14-10):** the 10 s is a total wall-clock budget per call (both
+    attempts, however slowly bytes arrive); answers over 1 MiB are refused
+    unparsed; any parse exception is "not allowed" (MemoryError excepted);
+    the answer must name the same subject id and gate kind (lane /
+    subject_kind) as the request.
 
 12. **Client text is data.** Strict schemas (unknown key → 422), bounded
     strings, control characters → 422, no evaluation or templating of client
@@ -205,16 +215,20 @@ Numbered so code comments can cite them ("ADR 0006 choice N").
     has no field that evidences such a disclosure, so the check always blocks
     when it applies (consistent with the day-one effect in §D).
 20. **Publish needs the client's activation** (a `client`-lane ruling whose
-    subject is `client_id`) when a target is EU5 or a platform is TikTok/X
-    (category and EU kit come from it). `dm_campaign` requires
+    subject is `client_id`) for EVERY asset, and it must be the client's
+    LATEST activation ruling and allowed, covering every target and platform
+    of the asset (amended, N14-1/N14-2; was: only for EU5 targets or
+    TikTok/X). `dm_campaign` requires
     `recipient_countries` and `recipients_cold`.
 21. **Fact typing:** a wrong-typed or wrongly formatted value is
     `fact_missing:<key>` (C.1); an over-long string, too many list items or a
     control character is 422 (malformed input); an incomplete list item or
     document object makes its container `fact_missing`.
 22. **Idempotency** is keyed by (caller, `request_id`) across routes; only
-    2xx answers are stored; the store is in memory (bounded to 200k ids) and
-    is not replayed after a restart.
+    2xx answers are stored; the store is in memory (bounded to 200k ids).
+    Amended (N14-15b): gate rulings are re-evaluated on replay and the stored
+    answer is returned only if the outcome is unchanged; the gate part of the
+    store is rebuilt from the log at start (other routes' is not).
 23. **Request limits:** gate routes 256 KiB, proposals 128 KiB, decisions
     64 KiB, everything else 16 KiB (1 MiB service cap); JSON depth ≤ 32 and
     ≤ 20,000 members; bodies must be `application/json` or `+json` (415).
@@ -269,14 +283,106 @@ Numbered so code comments can cite them ("ADR 0006 choice N").
 - Single process, one lock around every operation; in-memory state rebuilt
   from the log (fine for this department's volume; not horizontally scalable).
 - The log's hash chain detects edits, deletions, reordering and torn writes;
-  it does not stop someone who rewrites the whole file and recomputes every
-  hash — the ledger (holding every event id) is the external anchor.
+  since round 14 the ledger anchors every line, so a whole-file rewrite,
+  a truncated tail or a deleted log is caught at start and by C-11 (lines
+  written before anchoring existed carry no `anchored` flag and are only
+  checked through the event ids they cite).
 - If the ledger records an event and the local log write then fails, the
   ledger holds a record of something that did not take effect here; the
-  identical retry (deterministic ids) completes it.
+  service records a best-effort `local_commit_failed` marker. A crash
+  between the anchor and the write (no marker) leaves the ledger one line
+  ahead: the next start refuses until an operator reconciles (fail closed).
+- One disk-backed Compliance instance per ledger: a second instance's log
+  on the same ledger reads as a foreign log and refuses to start.
 - The watcher runs every source sequentially inside one scheduler request.
 - The live run's Change Watcher leg uses a devtools fixture fetcher
   (`devtools/live_server.py`), not the network.
+
+## Amendment — AEGIS round 14 (fix wave, Sep 26, 2026)
+
+Findings N14-1 … N14-15(b) on `bc38d0a`; tests in `tests/test_aegis14.py`
+and the two thin clients' `test_compliance38_client.py`.
+
+- **N14-1 Latest activation ruling wins.** The service keeps the LATEST
+  activation ruling per (lane, subject), refused or not. Payout uses the
+  clipper's and the campaign's, publish the client's, only when that latest
+  ruling is allowed; a later refused re-activation voids an earlier allowed
+  one (`fact_missing:clipper_activation` / `campaign_activation` /
+  `client_activation`, with the refused ruling id in the message).
+- **N14-2 Publish always needs the client's current activation**, covering
+  every target (prefix: `US` covers `US-CA`) and platform
+  (`fact_missing:client_activation_scope`). Swept to payout: the clip's
+  platform must be one the campaign was activated for
+  (`campaign_activation_scope`).
+- **N14-3 ISO 3166 lists shipped as data** (`src/data/iso3166.json`, codes
+  only, from Debian iso-codes 4.16.0 — 249 countries, 5,046 subdivisions,
+  the same set as pycountry 26.2.16; source file hashes recorded in the
+  file). An unknown code is refused as unknown by the resolver (never mapped
+  by its country prefix): `CA-PQ`, `CA-QUE`, `US-XX`, `GB-ZZZ`, `FX`.
+  Register rows (`jurisdiction`, `applies_when.jurisdictions`, the HR-05/06/07
+  lists) and sanctions-screen `country`/`region` are validated against the
+  same lists (422). No field accepts country NAMES, so no name
+  normalisation exists to fix (a name fails the ISO format: `fact_missing`).
+- **N14-4 Local log anchored on the ledger.** Before a line is appended,
+  `local_log_appended` is recorded with id `cmp-log-<epoch>-<seq>-<sha40>`
+  (epoch = first 16 hex of the log's first line hash); a commit that fails
+  after it records `local_commit_failed` (same coordinates; subject
+  `register:v<n>` when it carried a version). Register versions are now
+  recorded as `cmp-ver-<epoch>-<n>-<hash32>`. At start (disk logs) and in
+  C-11, the log is compared with `GET /ledger/entries`: an anchored line
+  beyond the local head (truncation), an anchored line whose content differs,
+  a local line the ledger does not anchor, a cited event id the ledger does
+  not hold, an empty log while the ledger anchors one, another log's anchors,
+  or a register version below the ledger's latest approved version (not
+  withdrawn by a failure marker) → refuse to start / C-11 red. An unreadable
+  ledger at start → refuse. New event types: `local_log_appended`,
+  `local_commit_failed` (ids, hashes, seq and kind only). Cost: one extra
+  ledger write per local line.
+- **N14-5 Future evidence dates.** `verified_at` or `evidence.fetched_at`
+  more than 1 day in the future → 422 for every proposer, Andre included.
+  **Deviation:** a future `effective_date` is NOT refused — it is a legal
+  fact, not an evidence date (the seed itself has US-FCC-TCPA-02 effective
+  2027-01-31); moving it later is flagged as weakening (N14-9) instead.
+  Swept: an accessibility result dated more than 5 minutes ahead never counts
+  (sanctions screens already had this rule).
+- **N14-6 Disclosure labels.** An accepted word counts only as a standalone
+  whitespace token/hashtag (edge punctuation stripped: `(#ad)` counts,
+  `ad-free` does not) with no negation in the 3 tokens before it (`not`,
+  `no`, `never`, `without`, `isn't`…, plus IT/DE/NL/ES negations) and not
+  followed by `free`; if any occurrence is negated the label fails. The same
+  rule applies to HR-06 local labels. The toggle evidence is an id, not
+  text, so there is nothing to sweep there.
+- **N14-9 Weakening proposals.** Every proposal carries `weakening` and
+  `weakening_reasons` (hashed into `content_sha256`): gates removed,
+  applicability narrowed, check changed, a source_kind with a longer shelf
+  life, parameters changed, effective date later, counsel flag cleared, a
+  retire; for controls, fewer blocked gates, a longer SLA, fewer obligations,
+  a new owner or test. Approving one needs `acknowledge_weakening: true` in
+  that decision (else 422, nothing applied); the ledger decision payload
+  records the acknowledgment. A counsel question can no longer be verified,
+  re-labelled or given another check by amend or reverify; a supersede of it
+  must be a counsel-memo row (guidance, primary, verified, memo evidence) —
+  spec §E; that memo path is not flagged as weakening.
+- **N14-11 Watcher flood cap.** At most `COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_CYCLE`
+  (default 50) drafted proposals per cycle and
+  `COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_SOURCE` (default 20, a spec choice)
+  per source; the excess is not drafted and ONE `watch_notice` inbox item per
+  flooded source tells Andre (counts, caps). Deciding a `watch_notice`
+  changes nothing in the register.
+- **N14-13 Pinned seed.** See decision 7. With
+  `COMPLIANCE_ALLOW_UNPINNED_SEED=1` and an explicit `COMPLIANCE_SEED_SHA256`,
+  `/health` says `seed_pinned: false, production: false` and every ruling
+  carries `seed_pinned: false` (callers should treat it as non-production;
+  the thin clients do not yet refuse on it).
+- **N14-14 UTC dates.** The service converts the clock's instant to UTC
+  before taking any date (expiry, effective date, SLA, freshness);
+  `FixedClock.today()` and the engine's `Ctx.today` do the same.
+- **N14-15(b) Replay.** A replayed `request_id` re-evaluates; the stored
+  ruling is returned only when the outcome is unchanged, otherwise a new
+  ruling is issued under `cmp-rul-` + hash(caller, request id, outcome) (so a
+  ledger that already holds a different ruling under the first id no longer
+  forces a 503). Gate idempotency entries are rebuilt from the log at start,
+  so a reused `request_id` with a different body is 409 after a restart too.
 
 ## Testing
 

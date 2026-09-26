@@ -75,6 +75,7 @@ def _baselines():
     w = Harness()
     w.approve_seed()
     w.run_controls()
+    w.activate_client_for_publish()  # AEGIS N14-2: publish needs the client's current activation
     w.post("/compliance/v1/accessibility/checks", {"request_id": rid(), "asset_ref": "v", "asset_type": "ad_video",
                                                    "content_sha256": "d" * 64, "owner_id": "client-1"},
            caller="creative_production")

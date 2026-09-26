@@ -28,6 +28,7 @@ class FakeLedgerClient:
     fail_all: bool = False
     fail_on_type: Optional[str] = None
     verify_ok: bool = True
+    readable: bool = True
     calls: int = 0
 
     def record_event(self, event_id, department, event_type, actor, subject_id, payload, summary) -> None:
@@ -48,6 +49,13 @@ class FakeLedgerClient:
 
     def verify(self) -> bool:
         return self.verify_ok and not self.fail_all
+
+    def entries(self) -> list[dict]:
+        """GET /ledger/entries as ledger-rust answers it (no payloads, ledger order)."""
+        if self.fail_all or not self.readable:
+            from ledger import LedgerQueryFailed
+            raise LedgerQueryFailed("simulated ledger outage (test double)")
+        return [{k: v for k, v in e.items() if k != "payload"} for e in self.events]
 
     def of_type(self, t: str) -> list[dict]:
         return [e for e in self.events if e["event_type"] == t]

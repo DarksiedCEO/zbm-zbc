@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Optional
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from facts import ASSET_TYPES
+from jurisdictions import is_known_country, is_known_subdivision
 from textguard import has_control_chars
 
 
@@ -65,6 +66,15 @@ class ScreenRequest(Strict):
     country: Annotated[str, Field(pattern=r"^[A-Z]{2}$")]
     region: Optional[Annotated[str, Field(pattern=r"^[A-Z]{2}-[A-Z0-9]{1,3}$")]] = None
 
+    @model_validator(mode="after")
+    def _known_codes(self):
+        # AEGIS N14-3: codes are checked against the shipped ISO 3166 lists (no aliases such as CA-PQ)
+        if not is_known_country(self.country):
+            raise ValueError("country is not a known ISO 3166-1 alpha-2 code")
+        if self.region is not None and (not is_known_subdivision(self.region) or not self.region.startswith(self.country + "-")):
+            raise ValueError("region is not a known ISO 3166-2 code of that country")
+        return self
+
 
 class A11yRequest(Strict):
     request_id: Id
@@ -87,6 +97,7 @@ class Decision(Strict):
     content_sha256: Sha
     decision: Literal["approve", "reject"]
     note: Optional[Text] = None
+    acknowledge_weakening: StrictBool = False   # AEGIS N14-9: required (true) to approve a weakening proposal
 
 
 class DecisionsRequest(Strict):

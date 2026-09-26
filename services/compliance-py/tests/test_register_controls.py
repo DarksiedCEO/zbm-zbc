@@ -72,7 +72,8 @@ def test_house_rules_only_from_andre_and_jurisdiction_lists_change_through_appro
     assert hs.rule("c-au", "client", client_facts(country="AU", region=None, targets=("AU",))).json()["allowed"] is False
     p = hs.propose({"kind": "amend", "target_id": "HR-05", "proposed_row": new})
     assert p.status_code == 201, p.text
-    hs.approve(p.json()["proposal"])
+    assert p.json()["proposal"]["weakening"] is True   # a parameter change is flagged (AEGIS N14-9)
+    hs.approve(p.json()["proposal"], acknowledge_weakening=True)
     r = hs.rule("c-au", "client", client_facts(country="AU", region=None, targets=("AU",))).json()
     assert r["allowed"] is True, r["unmet_lines"]
 
@@ -93,7 +94,8 @@ def test_decisions_are_atomic_stale_proposal_aborts_the_whole_call(hs):
                                                                               "title": "B"}}).json()["proposal"]
     hs.approve(a)
     other = hs.propose({"kind": "retire", "target_id": "US-FTC-5-01"}).json()["proposal"]
-    r = hs.decide([{"proposal_id": other["proposal_id"], "content_sha256": other["content_sha256"], "decision": "approve"},
+    r = hs.decide([{"proposal_id": other["proposal_id"], "content_sha256": other["content_sha256"], "decision": "approve",
+                    "acknowledge_weakening": True},  # a retire is a weakening proposal (AEGIS N14-9)
                    {"proposal_id": b["proposal_id"], "content_sha256": b["content_sha256"], "decision": "approve"}])
     assert r.status_code == 409 and "stale" in r.json()["detail"]
     assert hs.svc.version_number == 2 and hs.svc.current.by_id()["US-FTC-5-01"]["status"] == "verified"
@@ -265,6 +267,7 @@ def test_resolve_route_records_and_notes_signal_mismatch(hs):
 def test_email_campaign_canspam_and_canada(hs):
     good = {"ad_identified": True, "postal_address_present": True, "opt_out_mechanism_present": True,
             "opt_out_honor_business_days": 10, "sender_vendor_monitored": True}
+    hs.activate_client_for_publish()  # AEGIS N14-2: publish needs the client's current activation
     ok = hs.review("zbm_work", "e1", publish_facts("email_campaign", canspam=good, recipient_countries=["US"],
                                                    recipients_cold=False, platforms=("email",))).json()
     assert ok["allowed"] is True, ok["unmet_lines"]
@@ -311,6 +314,7 @@ def test_video_needs_captions_coverage_and_overlay_free_scan(hs):
 
 
 def test_a11y_result_is_for_the_exact_content_hash_and_expires(hs):
+    hs.activate_client_for_publish()  # AEGIS N14-2: publish needs the client's current activation
     hs.post("/compliance/v1/accessibility/checks", {"request_id": rid(), "asset_ref": "s", "asset_type": "site",
                                                     "content_sha256": "d" * 64, "owner_id": "o"}, caller="creative_production")
     assert hs.review("zbm_work", "s1", publish_facts()).json()["allowed"] is True

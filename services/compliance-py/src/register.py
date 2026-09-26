@@ -17,6 +17,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from jurisdictions import is_known_register_code
 from ledger import canonical
 from textguard import has_control_chars
 
@@ -44,6 +45,8 @@ CHECKS = (
     "subscription_terms", "chatbot_disclosure", "flag_blocks", "counsel_memo", "control_sla", "threshold_counter",
     "effective_date_reminder",
 )
+# Row parameters that hold jurisdiction lists (HR-05/06/07); their entries must be known codes (AEGIS N14-3).
+JURISDICTION_PARAMS = ("operate", "operate_excludes", "region_required", "conditional", "refuse")
 APPLIES_KEYS = ("lanes", "subject_kinds", "asset_types", "platforms", "jurisdictions", "flags_any", "flags_none")
 
 # Shelf life by source_kind (spec B.1). statute/guidance/platform are the
@@ -98,8 +101,8 @@ class AppliesWhen(BaseModel):
     def _codes(cls, v):
         if v is not None:
             for s in v:
-                if not JURISDICTION_RE.fullmatch(s):
-                    raise ValueError("jurisdiction entries must be ISO 3166 codes, EU or ALL")
+                if not JURISDICTION_RE.fullmatch(s) or not is_known_register_code(s):
+                    raise ValueError("jurisdiction entries must be known ISO 3166 codes, EU or ALL")
         return v
 
 
@@ -134,8 +137,13 @@ class ObligationRow(BaseModel):
     def _rules(self):
         if not ROW_ID_RE.fullmatch(self.id):
             raise ValueError("id must match ^[A-Z0-9][A-Z0-9-]{1,39}$")
-        if not JURISDICTION_RE.fullmatch(self.jurisdiction):
-            raise ValueError("jurisdiction must be ISO 3166-1/-2, EU or ALL")
+        if not JURISDICTION_RE.fullmatch(self.jurisdiction) or not is_known_register_code(self.jurisdiction):
+            raise ValueError("jurisdiction must be a known ISO 3166-1/-2 code, EU or ALL")
+        for key in JURISDICTION_PARAMS:
+            vals = self.parameters.get(key)
+            if vals is not None and (not isinstance(vals, list)
+                                     or not all(isinstance(c, str) and is_known_register_code(c) for c in vals)):
+                raise ValueError(f"parameters.{key} must list known ISO 3166 codes")
         for name in ("title", "obligation", "penalty_note", "effective_note", "report_ref"):
             v = getattr(self, name)
             if isinstance(v, str) and has_control_chars(v):
