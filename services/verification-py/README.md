@@ -60,13 +60,14 @@ Every route except `/health` needs `Authorization: Bearer $VI_SERVICE_TOKEN`. "C
 `request_id` (idempotency: identical retry within 15 min → the stored answer; attestations re-evaluate and
 return the stored answer only if the outcome is unchanged; different body → 409; later → 409). Any body key
 named or containing `views`, `count`, `metric`, `amount`, `rate`, or starting with `guardian` → 422 (the one
-exception: `facts.reported_views` on `/vi/v1/results/attest`, hashed and never read).
+exception: `facts.reported_views` on `/vi/v1/results/attest`, hashed and never read). Every POST answer echoes
+the `request_id` and every answer another department's thin client reads states `rules_pinned` (AEGIS N16-6).
 
 | Route | Who | Purpose |
 |---|---|---|
 | `GET /health` | none | `{status, rules_version, in_memory, rules_pinned, production, reconcile_mode, reconcile_required, platform_data_store_degraded}` |
 | `POST /vi/v1/connections/start` · `/complete` · `/{id}/revoke` | clipper_network | OAuth connection through the vault (the code never stored or logged); revoke purges platform data at once |
-| `GET /vi/v1/connections?clipper_id=` | clipper_network, compliance_38 | connection views (no token, no raw account id) |
+| `GET /vi/v1/connections?clipper_id=` | clipper_network, compliance_38 | `{clipper_id, items: [connection views], rules_pinned}` (no token, no raw account id) |
 | `POST /vi/v1/submissions` | creative_production | register a clip (+ stolen-content check) |
 | `POST /vi/v1/submissions/{id}/approval` | creative_production | Clip Review passed → approval fingerprint |
 | `POST /vi/v1/clips/attest` | creative_production | Creative `attest_clip` |
@@ -74,16 +75,18 @@ exception: `facts.reported_views` on `/vi/v1/results/attest`, hashed and never r
 | `POST /vi/v1/results/attest` | creative_production | Creative `attest_result` (Creative Memory gate) |
 | `GET /vi/v1/feed/verified-results?cursor=` | creative_production | certified / revised / voided events (YouTube excluded pending VI-CQ-01) |
 | `GET /vi/v1/certifications/{id}`, `GET /vi/v1/submissions/{id}/certification` | compliance_38, creative_production, finance_31, clipper_network | §B.3 record |
+| `GET /vi/v1/certifications?clipper_id=` | clipper_network, compliance_38, finance_31 | a clipper's certifications with `revision_watch_end` (tiering, offboarding) |
 | `GET /vi/v1/clawbacks?cursor=` | finance_31 | clawback records (counts only) |
-| `POST /vi/v1/age/checks` | clipper_network, onboarding | neutral DOB + one highly effective method (DOB never stored) |
+| `POST /vi/v1/age/checks` | clipper_network, onboarding | neutral DOB + one highly effective method (DOB never stored); filed in the CALLER's namespace |
 | `GET /vi/v1/age/attestations/{id}` | compliance_38 | Compliance `age_attestation` |
-| `GET /vi/v1/age/subjects/{subject_id}` | onboarding, clipper_network | Onboarding `age_verified_18_plus` |
+| `GET /vi/v1/age/subjects/{subject_id}` | onboarding, clipper_network | Onboarding `age_verified_18_plus` + `status`, `attestation_id`; the caller's own namespace only |
 | `POST /vi/v1/identity/checks` | clipper_network | email / payout identity HMAC match |
 | `GET /vi/v1/clippers/{id}/integrity` | clipper_network, compliance_38 | §A.3 |
-| `GET /vi/v1/strikes?cursor=` | clipper_network | strike feed |
+| `GET /vi/v1/strikes?cursor=` | clipper_network | strike feed; each strike carries its findings' `evidence_ids` and clip `subject_refs` |
 | `GET /vi/v1/holds`, `GET /vi/v1/findings` | any caller | queues |
+| `GET /vi/v1/findings/{id}` | clipper_network, compliance_38 | one finding (Clipper Network resolves strike evidence with it) |
 | `POST /vi/v1/holds/{id}/decision`, `POST /vi/v1/findings/{id}/decision` | Andre or confirmed reviewer | release / uphold / overturn |
-| `POST /vi/v1/bans` | clipper_network **and** Andre | propagate an Andre-approved ban (V&I never bans by itself) |
+| `POST /vi/v1/bans` | clipper_network **and** Andre | propagate an Andre-approved ban (V&I never bans by itself). Clipper Network passes through the token Andre sent on its ban-decision request, so `VI_ANDRE_APPROVAL_TOKEN` must be Andre's same token as `CN_ANDRE_APPROVAL_TOKEN` |
 | `GET /vi/v1/rules`; `POST /vi/v1/rules/proposals`; `POST /vi/v1/rules/decisions` | any; Andre; Andre | rule register |
 | `POST /vi/v1/jobs/{liveness,metrics,revisions,anomaly,certify,retention}/run` | scheduler | one cycle, idempotent per (job, UTC date) |
 | `GET /vi/v1/reconcile`, `POST /vi/v1/reconcile` | Andre | show / void the voidable log-vs-ledger mismatches |
@@ -108,6 +111,15 @@ export VI_COMPLIANCE_URL=http://127.0.0.1:8380 VI_COMPLIANCE_TOKEN=<compliance s
 python3 -m api      # VI_BIND_ADDR (127.0.0.1), VI_PORT (8390)
 ```
 
+No request waits on Compliance behind another (AEGIS N16-1): the register rows a ruling needs are read BEFORE the
+service lock is taken (once per `certify` run, per HR-13 attestation, per age read), in parallel, each within the
+thin client's 10 s wall-clock budget, and a cached `verified` row is re-judged against its `expires_at`.
+
+Age attestations live in the caller's namespace (AEGIS N16-3): what onboarding files under a subject id never
+decides Clipper Network's subject with the same id, and a Clipper Network minor lock follows the identity (the
+e-mail / payout identity HMACs of that clipper), not the bare id. Attestations recorded before this change carry
+no namespace and are read by no caller (a re-check is needed).
+
 Then Andre approves the rules seed (`GET /vi/v1/rules` → `open_proposals`, then `POST /vi/v1/rules/decisions`
 with his token), and the scheduler calls the six jobs daily in the order liveness, metrics, revisions,
 anomaly, certify, retention.
@@ -115,8 +127,9 @@ anomaly, certify, retention.
 Settings (all fail closed; see spec §G and ADR 0007 choice 30): `VI_PLATFORMS_ENABLED`
 (youtube,tiktok,instagram), `VI_PLATFORM_X_ENABLED` (0), `VI_SETTLE_FETCH_GRACE_H` (48),
 `VI_REVISION_WATCH_DAYS` (30), `VI_POSTED_AT_TOLERANCE_MIN` (60), `VI_REQUIRE_PERCEPTUAL_MATCH` (1),
-`VI_PDQ_MAX_HAMMING` (31, UNVERIFIED), `VI_TT_COVER_PDQ` (0), `VI_FAE_BUFFER_AGE` (25), `VI_MINOR_PURGE_HOURS`
-(24), `VI_ANOM_*` and `VI_STRIP_SHARE` (§C.6), `VI_ANOM_MIN_HISTORY` (5), `VI_YT_DERIVED_SIGNALS` (0),
+`VI_PDQ_MAX_HAMMING` (31, UNVERIFIED), `VI_TT_COVER_PDQ` (0), `VI_FAE_BUFFER_AGE` (25),
+`VI_AGE_ATTESTATION_VALIDITY_DAYS` (365: an adult attestation — and a provider result — is valid this long from the
+provider's check time; then a re-check is required, AEGIS N16-8), `VI_MINOR_PURGE_HOURS` (24), `VI_ANOM_*` and `VI_STRIP_SHARE` (§C.6), `VI_ANOM_MIN_HISTORY` (5), `VI_YT_DERIVED_SIGNALS` (0),
 `VI_FEED_YOUTUBE_ENABLED` (0), `VI_EVIDENCE_RETENTION_DAYS` (2557), `VI_LIVENESS_MAX_GAP_DAYS` (0),
 `VI_OEMBED_ENABLED` (0), `VI_OEMBED_MAX_CONSECUTIVE_DAYS` (2), `VI_YT_DAILY_UNITS` (10000),
 `VI_YT_RESERVE_UNITS` (1000), `VI_TT_MAX_PER_MIN` (500), `VI_IG_MAX_RPS` (1), `VI_X_MONTHLY_RESOURCE_BUDGET`
@@ -130,8 +143,18 @@ The seed is pinned: `VI_SEED_PATH` / `VI_SEED_SHA256` may name another seed only
 Identical to compliance-py (its README, "Reconciling the local log with the ledger"), with `VI_RECONCILE_MODE=1`
 and `GET/POST /vi/v1/reconcile`: stop the service, start it in reconcile mode, read the plan with Andre's token,
 POST exactly the plan (`request_id`, `head_sha256`, `void_lines`, `void_event_ids`; anything else is 409),
-restart without the flag and check `GET /vi/v1/integrity` is green. A rule version on the ledger above the
-local one is a rollback and can never be voided: restore the kept `vi_log.jsonl.unwritten-<seq>` line instead.
+restart without the flag and check `GET /vi/v1/integrity` is green.
+
+Rule-version events (AEGIS N16-7). A `rules_version_published` event is honoured only when its id and payload
+hash match a decision record in the local log. Any other one in this log's epoch — posted by anyone holding the
+ledger token, or left by a decision the local log no longer holds (a rollback) — is VOIDABLE, never fatal: a
+normal start refuses and names it ("… rules version event(s) on the ledger match no decision in the local log
+(version N; local version M) …"); `VI_RECONCILE_MODE=1` starts and the plan lists it under `voidable.event_ids`
+(`vi-ver-<epoch>-<n>-…`). Before voiding, Andre checks which it is. If he made that decision and only its log line
+is missing, do NOT void it: append the kept `vi_log.jsonl.unwritten-<seq>` line (or restore the log) and restart —
+that keeps the version. If he made no such decision (a forgery), POST the plan: the `reconcile` event is recorded
+on the ledger with actor `andre` and binds the voided ids; the next start is normal and the rules stay at the
+local version. Voiding a genuine version is a deliberate, recorded rollback of the rules.
 
 ## Tests
 
@@ -143,6 +166,9 @@ Spec §F certification (S1-S16), attack (A1-A14) and guardrail (G1-G7) tests, pr
 input removed alone and in random combinations → never certified), auth on every route, limits, idempotency,
 ledger/store failure = no effect on every write route, reconcile/anchor/lease, the rule register, retention
 purges and a secret-leak fuzz. No network: a socket guard fails any test that tries.
+
+`tests/test_aegis16.py` holds the AEGIS round-16 regressions (N16-1, -3, -6, -7, -8, -12); clipper-network-py's
+`tests/test_contract_vi.py` runs Clipper Network's real V&I client against this app in-process.
 
 Live run with the real ledger binary (ports 19300-19304; kills only the processes it started):
 

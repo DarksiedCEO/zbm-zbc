@@ -497,9 +497,11 @@ def create_app(service: CNService, settings: config_mod.Settings) -> FastAPI:
         return svc.discipline_sync(req.request_id)
 
     @app.post("/cn/v1/clippers/{clipper_id}/ban-decision", dependencies=auth)
-    def ban_decision(clipper_id: str, req: m.BanDecisionRequest = Depends(body(m.BanDecisionRequest)),
+    def ban_decision(clipper_id: str, request: Request, req: m.BanDecisionRequest = Depends(body(m.BanDecisionRequest)),
                      _: str = Depends(andre("ban-decision"))) -> dict:
-        return svc.ban_decision(req.request_id, cid(clipper_id), req.proposal_id, req.decision, req.note)
+        # N16-2: the exact token Andre sent (verified by the dependency above) is passed through to V&I, never kept
+        return svc.ban_decision(req.request_id, cid(clipper_id), req.proposal_id, req.decision, req.note,
+                                request.headers.get(FOUNDER_HEADER))
 
     @app.post("/cn/v1/tiers/run", dependencies=auth)
     def tiers(req: m.RunRequest = Depends(body(m.RunRequest)), _: str = Depends(caller("scheduler"))) -> dict:

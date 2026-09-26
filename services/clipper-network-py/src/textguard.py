@@ -19,6 +19,7 @@ Nothing here evaluates, formats or templates client text.
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from typing import Any, Iterator
@@ -146,6 +147,45 @@ def money_or_earnings(text: str) -> list[str]:
         return []
     t = unicodedata.normalize("NFKC", text[:SCAN_MAX_CHARS])
     return [name for name, rx in _MONEY if rx.search(t)]
+
+
+# --- display names (AEGIS N16-11) -------------------------------------------------------------------------------
+DISPLAY_NAME_MAX = 80
+_NAME_PUNCT = " .'-"
+_DOMAINISH = re.compile(r"[^\W_]\.[^\W\d_]{2,}")          # "evil.example", "www.x.com" (not "J.R. Smith")
+
+
+def display_name_problem(value: str) -> str | None:
+    """Why ``value`` is not an acceptable clipper display name, or None. A display name is rendered into ZBC's own
+    messages, so it may hold only letters (any script, with their combining marks), digits, the space and
+    ``. ' -``; at least one letter; at most 80 characters; no format/bidi controls (Unicode Cf), no line or
+    paragraph separators, no URL- or domain-like text, no money or earnings words (CN-26)."""
+    if not isinstance(value, str) or not value or len(value) > DISPLAY_NAME_MAX:
+        return f"1..{DISPLAY_NAME_MAX} characters"
+    if value != value.strip() or "  " in value:
+        return "no leading, trailing or doubled spaces"
+    for ch in value:
+        cat = unicodedata.category(ch)
+        if cat[0] in "LM" or cat == "Nd" or ch in _NAME_PUNCT:
+            continue
+        return f"character U+{ord(ch):04X} ({cat}) is not a letter, digit, space or . ' -"
+    if not any(unicodedata.category(ch)[0] == "L" for ch in value):
+        return "a name needs at least one letter"
+    if _DOMAINISH.search(value) or re.search(r"(?i)\b(?:https?|www)\b", value):
+        return "no web addresses in a display name"
+    if money_or_earnings(value):
+        return "no money or earnings words (CN-26)"
+    return None
+
+
+def escape_for_channel(value: str, channel: str) -> str:
+    """Clipper-supplied text placed into a message body, escaped for the channel's format: email and in-app
+    bodies are HTML (a messaging provider must send them as such), Discord posts are Markdown."""
+    if channel in ("email", "in_app"):
+        return html.escape(value, quote=True)
+    if channel == "discord_server_post":
+        return re.sub(r"([\\*_~`|>\[\]()#])", r"\\\1", value)
+    raise ValueError("unknown channel")
 
 
 _PHONE = re.compile(r"^\s*(?:\+|00)?[\d\s().\-]{7,24}\s*$")

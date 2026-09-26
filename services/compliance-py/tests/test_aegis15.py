@@ -117,9 +117,12 @@ def test_n15_1_forged_markers_do_not_hide_a_register_rollback(tmp_path):
     logf.write_bytes(b"\n".join(lines[:n]) + b"\n")
     with pytest.raises(RuntimeError, match="refusing to start"):
         _restart(x, tmp_path)
-    # a rollback refuses to start even in reconcile mode
-    with pytest.raises(RuntimeError, match="behind the ledger"):
-        _restart(x, tmp_path, COMPLIANCE_RECONCILE_MODE="1")
+    # AEGIS N16-7 (changed): the rolled-back version event is VOIDABLE, never honoured by forged markers; reconcile
+    # mode starts and lists it, and only Andre's recorded reconcile can void it (a deliberate rollback)
+    y = _restart(x, tmp_path, COMPLIANCE_RECONCILE_MODE="1")
+    plan = _reconcile_plan(y)
+    assert any(e.startswith("cmp-ver-") for e in plan["voidable"]["event_ids"]) and not plan["fatal"]
+    assert not any(e.startswith("cmp-lcf-") for e in plan["voidable"]["event_ids"])
 
 
 def test_n15_1_operator_reconcile_after_a_failed_commit(tmp_path):
@@ -193,7 +196,8 @@ def test_n15_1_forged_anchor_beyond_head_needs_andre_reconcile(tmp_path):
 
 
 def test_n15_1_decision_whose_version_reached_the_ledger_is_restored_from_the_unwritten_line(tmp_path):
-    """The rollback rule forbids voiding a published version; the exact unwritten line is the recovery."""
+    """A published version whose decision line never reached the log is not honoured (N16-7: voidable only by
+    Andre); the exact unwritten line is the recovery that keeps it."""
     x = _durable(tmp_path)
     v = x.get("/health").json()["register_version_in_force"]
     p = x.memo_supersede("CQ-02")
@@ -202,8 +206,8 @@ def test_n15_1_decision_whose_version_reached_the_ledger_is_restored_from_the_un
     assert r.status_code == 503
     side = list((tmp_path / "d").glob("compliance_log.jsonl.unwritten-*"))
     assert len(side) == 1
-    with pytest.raises(RuntimeError, match="behind the ledger"):
-        _restart(x, tmp_path, COMPLIANCE_RECONCILE_MODE="1")
+    with pytest.raises(RuntimeError, match="match no decision in the local log"):
+        _restart(x, tmp_path)
     logf = tmp_path / "d" / "compliance_log.jsonl"
     logf.write_bytes(logf.read_bytes() + side[0].read_bytes())
     y = _restart(x, tmp_path)

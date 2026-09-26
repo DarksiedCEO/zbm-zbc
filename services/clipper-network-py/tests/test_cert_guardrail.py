@@ -71,7 +71,7 @@ def test_g3_no_passing_fake_in_src_and_every_stand_in_says_not_allowed():
     for ans in (vi.age_subject("c"), vi.age_check("r", "c", "2000-01-01", True, "photo_id_match", "p"),
                 vi.identity_check("r", "c", "a@b.co"), vi.connections("c"), vi.connection_start("r", "c", "youtube", "https://x"),
                 vi.connection_complete("r", "s", "code"), vi.connection_revoke("r", "k"), vi.integrity("c"),
-                vi.strikes(None), vi.finding("f"), vi.certifications("c"), vi.ban("r", "c", "d", "t"),
+                vi.strikes(None), vi.finding("f"), vi.certifications("c"), vi.ban("r", "c", "d", "t", "andre-token"),
                 p.compliance.resolve_person("r", "US", "US-CA", True, "a"), p.compliance.creator_activation("r", "c", {}),
                 p.compliance.latest_activation("zbc_creator", "c"), p.compliance.review_email_campaign("r", "s", {}),
                 p.creative.live_rulebook("c"), p.creative.kit("c"), p.finance.tax_status("c"), p.finance.rate_card("d", "v"),

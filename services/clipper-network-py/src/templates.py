@@ -18,7 +18,7 @@ from datetime import date
 from typing import Any
 
 from errors import Invalid
-from textguard import has_control_chars, money_or_earnings, scan_injection
+from textguard import display_name_problem, escape_for_channel, has_control_chars, money_or_earnings, scan_injection
 
 TEMPLATE_IDS = ("application_received", "admission_decision", "agreement_new_version", "rate_card_published",
                 "rate_card_changed", "rulebook_announced", "kit_delivered", "clip_flagged", "certification_result",
@@ -162,16 +162,23 @@ def check_variables(template: dict, variables: dict) -> dict:
     return {n: variables[n] for n in sorted(want)}
 
 
-def render(template: dict, variables: dict, filled: dict[str, str]) -> str:
+def render(template: dict, variables: dict, filled: dict[str, str], channel: str) -> str:
     """Render the body: record variables are re-checked against their types; service-filled values (display
-    name from the contact store, the CN-16 disclosure, the postal address, the opt-out link) are passed in."""
+    name from the contact store, the CN-16 disclosure, the postal address, the opt-out link) are passed in.
+    The display name is the only clipper-supplied text: it is re-checked (a name stored before AEGIS N16-11 is
+    refused here) and escaped for ``channel``."""
     values: dict[str, str] = {}
     for name, typ in template["variables"].items():
         if typ in SERVICE_FILLED:
             v = filled.get(typ)
             if not isinstance(v, str) or not v:
                 raise Invalid(f"{typ} is not available for this message")
-            if typ != "display_name" and money_or_earnings(v):
+            if typ == "display_name":
+                why = display_name_problem(v)
+                if why:
+                    raise Invalid(f"stored display name is not renderable ({why})")
+                v = escape_for_channel(v, channel)
+            elif money_or_earnings(v):
                 raise Invalid(f"{typ} looks like money or an earnings claim: refused (CN-26)")
             values[name] = v
         else:

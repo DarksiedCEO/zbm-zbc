@@ -48,6 +48,7 @@ class Settings:
     require_perceptual_match: bool = True
     tt_cover_pdq: bool = False
     fae_buffer_age: int = 25
+    age_attestation_validity_days: int = 365   # N16-8: an adult attestation (and a provider result) expires
     minor_purge_hours: int = 24
     anom_velocity_multiple: int = 20
     anom_min_like_rate: Fraction = Fraction(2, 1000)
@@ -199,6 +200,7 @@ def load(env: Optional[dict] = None) -> Settings:
         require_perceptual_match=_flag(env, "VI_REQUIRE_PERCEPTUAL_MATCH", True),
         tt_cover_pdq=_flag(env, "VI_TT_COVER_PDQ", False),
         fae_buffer_age=_int(env, "VI_FAE_BUFFER_AGE", 25, 18, 40),
+        age_attestation_validity_days=_int(env, "VI_AGE_ATTESTATION_VALIDITY_DAYS", 365, 1, 3650),
         minor_purge_hours=_int(env, "VI_MINOR_PURGE_HOURS", 24, 1, 24),
         anom_velocity_multiple=_int(env, "VI_ANOM_VELOCITY_MULTIPLE", 20, 1, 1000),
         anom_min_like_rate=_frac(env, "VI_ANOM_MIN_LIKE_RATE", Fraction(2, 1000), Fraction(0), Fraction(1)),

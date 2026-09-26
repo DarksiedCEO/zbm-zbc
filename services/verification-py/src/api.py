@@ -243,6 +243,11 @@ SUB_ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 VI_ID = re.compile(r"vi-[a-z]{2,5}-[0-9A-Z]{26}")
 
 
+def _echo(request_id: str, resp: dict) -> dict:
+    """Every write answer names the request it answers (AEGIS N16-6: a thin client checks the echo)."""
+    return {**resp, "request_id": request_id}
+
+
 def _id(value: str, rx=SUB_ID) -> str:
     if not rx.fullmatch(value or ""):
         raise Invalid("id format")
@@ -369,7 +374,7 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get("/vi/v1/connections", dependencies=auth)
     def conn_list(clipper_id: str = Query(max_length=128),
-                  _: str = Depends(caller("clipper_network", "compliance_38"))) -> list[dict]:
+                  _: str = Depends(caller("clipper_network", "compliance_38"))) -> dict:
         return svc.list_connections(_id(clipper_id))
 
     # --- submissions and attestations ----------------------------------------------------------
@@ -377,12 +382,12 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
     @app.post("/vi/v1/submissions", dependencies=auth, status_code=201)
     def submit(who: str = Depends(caller("creative_production")),
                req: m.SubmissionRequest = Depends(body(m.SubmissionRequest))) -> dict:
-        return svc.register_submission(who, req.request_id, req.model_dump())
+        return _echo(req.request_id, svc.register_submission(who, req.request_id, req.model_dump()))
 
     @app.post("/vi/v1/submissions/{submission_id}/approval", dependencies=auth)
     def approval(submission_id: str, who: str = Depends(caller("creative_production")),
                  req: m.ApprovalRequest = Depends(body(m.ApprovalRequest))) -> dict:
-        return svc.approve_submission(who, req.request_id, _id(submission_id), req.review_ref)
+        return _echo(req.request_id, svc.approve_submission(who, req.request_id, _id(submission_id), req.review_ref))
 
     @app.post("/vi/v1/clips/attest", dependencies=auth)
     def clip_attest(who: str = Depends(caller("creative_production")),
@@ -413,6 +418,11 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
     def sub_certification(submission_id: str, _: str = Depends(caller(*readers))) -> dict:
         return svc.certification_for(_id(submission_id))
 
+    @app.get("/vi/v1/certifications", dependencies=auth)
+    def certifications_of(clipper_id: str = Query(max_length=128),
+                          _: str = Depends(caller("clipper_network", "compliance_38", "finance_31"))) -> dict:
+        return svc.certifications_of(_id(clipper_id))
+
     @app.get("/vi/v1/clawbacks", dependencies=auth)
     def clawbacks(cursor: int = Query(default=0, ge=0, le=10**12), _: str = Depends(caller("finance_31"))) -> dict:
         return svc.feed_clawbacks(cursor)
@@ -428,8 +438,8 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
         return svc.age_attestation(_id(attestation_id, VI_ID))
 
     @app.get("/vi/v1/age/subjects/{subject_id}", dependencies=auth)
-    def age_subject(subject_id: str, _: str = Depends(caller("onboarding", "clipper_network"))) -> dict:
-        return svc.age_subject(_id(subject_id))
+    def age_subject(subject_id: str, who: str = Depends(caller("onboarding", "clipper_network"))) -> dict:
+        return svc.age_subject(who, _id(subject_id))       # the caller's own namespace only (N16-3)
 
     @app.post("/vi/v1/identity/checks", dependencies=auth)
     def identity(who: str = Depends(caller("clipper_network")), req: m.IdentityCheck = Depends(body(m.IdentityCheck))) -> dict:
@@ -453,15 +463,20 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
     def findings(_: str = Depends(caller())) -> list[dict]:
         return svc.list_findings()
 
+    @app.get("/vi/v1/findings/{finding_id}", dependencies=auth)
+    def finding(finding_id: str, _: str = Depends(caller("clipper_network", "compliance_38"))) -> dict:
+        return svc.finding_view(_id(finding_id, VI_ID))
+
     @app.post("/vi/v1/holds/{hold_id}/decision", dependencies=auth)
     def hold_decision(hold_id: str, who: str = Depends(decider("holds/decision")),
                       req: m.DecisionRequest = Depends(body(m.DecisionRequest))) -> dict:
-        return svc.decide_hold(who, req.request_id, _id(hold_id, VI_ID), req.decision, req.reason)
+        return _echo(req.request_id, svc.decide_hold(who, req.request_id, _id(hold_id, VI_ID), req.decision, req.reason))
 
     @app.post("/vi/v1/findings/{finding_id}/decision", dependencies=auth)
     def finding_decision(finding_id: str, who: str = Depends(decider("findings/decision")),
                          req: m.DecisionRequest = Depends(body(m.DecisionRequest))) -> dict:
-        return svc.decide_finding_route(who, req.request_id, _id(finding_id, VI_ID), req.decision, req.reason)
+        return _echo(req.request_id, svc.decide_finding_route(who, req.request_id, _id(finding_id, VI_ID), req.decision,
+                                                              req.reason))
 
     @app.post("/vi/v1/bans", dependencies=auth)
     def bans(_c: str = Depends(caller("clipper_network")),
@@ -477,11 +492,11 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
     @app.post("/vi/v1/rules/proposals", dependencies=auth, status_code=201)
     def propose(_: str = Depends(andre("rules/proposals")),
                 req: m.RuleProposalRequest = Depends(body(m.RuleProposalRequest))) -> dict:
-        return svc.create_rule_proposal(req.request_id, req.model_dump(exclude={"request_id"}))
+        return _echo(req.request_id, svc.create_rule_proposal(req.request_id, req.model_dump(exclude={"request_id"})))
 
     @app.post("/vi/v1/rules/decisions", dependencies=auth)
     def decide(_: str = Depends(andre("rules/decisions")), req: m.RuleDecisions = Depends(body(m.RuleDecisions))) -> dict:
-        return svc.decide_rules(req.request_id, [d.model_dump() for d in req.decisions])
+        return _echo(req.request_id, svc.decide_rules(req.request_id, [d.model_dump() for d in req.decisions]))
 
     # --- jobs, reconcile, audit ---------------------------------------------------------------------------
 
@@ -489,7 +504,7 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
     def job(job: str, who: str = Depends(caller("scheduler")), req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
         if job not in JOBS:
             raise Invalid("unknown job")
-        return svc.run_job(who, req.request_id, job)
+        return _echo(req.request_id, svc.run_job(who, req.request_id, job))
 
     @app.get("/vi/v1/reconcile", dependencies=auth)
     def reconcile_plan(_: str = Depends(andre("reconcile"))) -> dict:
@@ -497,7 +512,8 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
 
     @app.post("/vi/v1/reconcile", dependencies=auth)
     def reconcile(_: str = Depends(andre("reconcile")), req: m.ReconcileRequest = Depends(body(m.ReconcileRequest))) -> dict:
-        return svc.reconcile(req.request_id, req.head_sha256, list(req.void_lines), list(req.void_event_ids))
+        return _echo(req.request_id, svc.reconcile(req.request_id, req.head_sha256, list(req.void_lines),
+                                                   list(req.void_event_ids)))
 
     @app.get("/vi/v1/audit/export", dependencies=auth)
     def audit(who: str = Depends(caller()), since: Optional[str] = Query(default=None, max_length=40),

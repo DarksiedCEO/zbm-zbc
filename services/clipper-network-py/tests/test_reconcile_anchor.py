@@ -95,17 +95,25 @@ def test_deleted_log_while_the_ledger_anchors_one_is_fatal(tmp_path):
         restart(h, tmp_path)
 
 
-def test_rule_version_rollback_is_fatal(tmp_path):
+def test_rule_version_rollback_refuses_start_and_only_andre_can_void_it(tmp_path):
+    """AEGIS N16-7 changed this rule: a version event the local log no longer holds (a rollback, or a forgery) is
+    VOIDABLE, not fatal. Start-up still refuses; reconcile mode starts; only Andre's recorded reconcile voids it."""
     h = Harness(data_dir=str(tmp_path / "d"))
     h.approve_seed()
     log = tmp_path / "d" / "cn_log.jsonl"
     keep = lines(log)
     h.clear_counsel("CN-CQ-01")                     # publishes rule version 2
     log.write_bytes(b"\n".join(keep) + b"\n")       # back to version 1
-    with pytest.raises(RuntimeError, match="rollback"):
+    with pytest.raises(RuntimeError, match="match no decision in the local log"):
         restart(h, tmp_path)
-    with pytest.raises(RuntimeError, match="rollback"):
-        restart(h, tmp_path, CN_RECONCILE_MODE="1")
+    y = restart(h, tmp_path, CN_RECONCILE_MODE="1")
+    plan = y.client.get("/cn/v1/reconcile", headers=y.headers(andre=ANDRE_TOKEN)).json()
+    assert any(e.startswith("cn-ver-") for e in plan["voidable"]["event_ids"]) and not plan["fatal"]
+    r = y.post("/cn/v1/reconcile", {"request_id": rid("rec"), "head_sha256": plan["head_sha256"],
+                                    "void_lines": plan["voidable"]["lines"],
+                                    "void_event_ids": plan["voidable"]["event_ids"]}, andre=ANDRE_TOKEN)
+    assert r.status_code == 200, r.text
+    assert restart(h, tmp_path).client.get("/health").json()["rules_version"] == 1
 
 
 def test_copied_data_directory_is_caught_by_the_lease(tmp_path):

@@ -287,6 +287,50 @@ Numbered so code comments can cite them ("ADR 0008 choice N").
     reconcile 1 MiB, everything else 16 KiB; JSON depth ≤ 32, members
     ≤ 20,000; JSON bodies only.
 
+## Amendments — AEGIS round 16 (fix wave 17, Sep 26, 2026)
+
+- **N16-2 — ban propagation carries Andre's own token.** V&I's `POST /vi/v1/bans` needs the clipper_network
+  caller token AND Andre's approval token. `ban-decision` passes the exact `X-Andre-Approval-Token` Andre sent
+  (already verified by the FounderGate) to the V&I client for that one call; it is never stored (not in a record,
+  the idempotency store, a crossing payload, a log line or an export — byte-scanned in the test and the live run). A
+  request without it is refused (403) before any effect. The scheduler holds no token, so `offboarding/run` no
+  longer propagates (`needs_andre`); Andre re-sends `approve` on the approved proposal and CN propagates with that
+  request's token (V&I's request-id idempotency makes the retry safe). Deployment: `VI_ANDRE_APPROVAL_TOKEN` must
+  be Andre's same token as `CN_ANDRE_APPROVAL_TOKEN`.
+- **N16-4 — CN-21 holds on day one.** The exit deadline (`post_exit_retention_days`, 0 for a minor) is fixed when
+  the exit starts. Contact data and handles are deleted at the deadline WHATEVER Finance answers (spec C.9 said
+  "unless … an open Finance item"; amended by the lead): an unresolved Finance question (open, unknown, or the
+  stand-in) is recorded (`finance_question`) and pushed to Andre then; the record still cannot close until Finance
+  answers `none`. Connections "kept until my last settlement" get a hard end: `revoke_after` = the last
+  `revision_watch_end` or the deadline, whichever is first (the deadline when V&I cannot answer). An open dispute
+  still delays deletion (spec C.9, unchanged). A 365-day property test covers Finance stand-in / open / late-none
+  and kept / not-kept connections.
+- **N16-5 — one appeal per underlying flag.** A V&I-routed appeal (clip flag, V&I finding, strike) records
+  `appeal_keys`: the ref plus every strike id, finding id and clip id linked to it in the strike mirror and in the
+  notice's subject refs; any earlier non-refused appeal of the clipper sharing a key refuses the new one
+  (`DISPUTE_ALREADY_FILED`), whichever kind is chosen. CN-routed appeals keep their (kind, ref) key.
+- **N16-6 — the V&I client reads V&I's real wire shapes** (see ADR 0007 N16-6 for the V&I side):
+  `/age/subjects` `{allowed, status, attestation_id, …}`, `/age/checks` `{request_id, facts_sha256 (no DOB),
+  status, …}`, `/identity/checks` `{request_id, status: clear|finding|incomplete, clear, findings}` (V&I's
+  `finding` is CN's `duplicate`), `/connections` `{clipper_id, items}`, `/connections/complete` and `/revoke`
+  `{request_id, connection: {…}}`, `/clippers/{id}/integrity` as V&I's facts (clear = not banned, no active S3,
+  no open clipper hold), `/strikes` `{items, next_cursor: int}` (an `active` strike past `expires_at` is read as
+  `expired`), `/findings/{id}`, `/certifications?clipper_id=`, `/bans` `{request_id, clipper_id}`.
+  `tests/test_contract_vi.py` runs this client against V&I's real app in-process (TestClient transport; 27 checks,
+  every port method exercised), so a drift on either side fails a test.
+- **N16-7** — as ADR 0007 N16-7 (shared evidence-audit code): a forged `rules_version_published` event makes
+  start-up refuse until Andre voids it through the recorded reconcile; it no longer bricks the service. This
+  changes the "Known limitations" residual below: a ledger-token holder can still make start-up refuse, and
+  Andre's reconcile now lifts it for version events too.
+- **N16-9 — `allowed` is the authority on an age answer**: adult only when V&I says `allowed: true` AND
+  `status: adult`; any contradiction is not adult (unavailable).
+- **N16-10 — the live run asserts** every narrated behaviour and exits 1 on any mismatch.
+- **N16-11 — display names are names.** Letters (any script, with their marks), digits, space and `. ' -`; ≤ 80;
+  at least one letter; no leading/trailing/doubled spaces; no URL- or domain-like text; no format/bidi controls
+  (Unicode Cf) or line separators; no money words — else 422 at intake. At render the stored name is re-checked
+  and escaped for the channel: HTML for email and in-app (the messaging provider must send those bodies as
+  HTML), Markdown for Discord.
+
 ## Spec items not built, and why
 
 - **Message triggers with no source yet:** `certification_result`,
@@ -306,7 +350,8 @@ Numbered so code comments can cite them ("ADR 0008 choice N").
 - **Discord recruiting posts** — refused (choice 16).
 - **Outcomes of V&I-routed clip-flag and strike appeals** — V&I has no
   route that returns an appeal's outcome; CN reads only a finding's status
-  change (for `vi_finding` appeals). The others stay open until V&I has one.
+  change (for `vi_finding` appeals). The others stay open until V&I has one
+  (an open dispute also delays CN-21 deletion — see Known limitations).
 - **Reinstatement after a granted ban appeal** — recorded; the clipper
   re-applies (the exit already revoked access).
 - **SLA breach escalation beyond the day-8 push.**
@@ -322,12 +367,13 @@ for `zbc_creator`, `/jurisdictions/resolve`, `/review` for
 onboarding-py's creator lane handing off to `POST /cn/v1/applications` and
 `/admission`; Finance, Legal and People when built), plus what this build
 found:
-- **V&I:** age answers (`/age/subjects/{id}`, `/age/checks`) must carry
-  `status` (adult/minor/unknown) and `attestation_id` (the spec's shape
-  `{allowed, unmet, detail}` cannot tell a minor from an unknown);
-  `GET /vi/v1/findings/{id}`, `GET /vi/v1/certifications?clipper_id=`
-  (with `revision_watch_end`), integrity as `{clipper_id, clear, reasons}`,
-  every answer with `rules_pinned`; an appeal-outcome read.
+- **V&I:** DONE in fix wave 17 (AEGIS N16-6, both services in one branch):
+  age answers carry `status` and `attestation_id`; `GET /vi/v1/findings/{id}`
+  and `GET /vi/v1/certifications?clipper_id=` (with `revision_watch_end`)
+  exist; every write answer echoes `request_id`; every answer CN reads
+  carries `rules_pinned`; the strike feed carries evidence ids and clip refs.
+  Integrity stays V&I's facts (CN derives "clear"). STILL NEEDED: an
+  appeal-outcome read (clip-flag and strike appeals).
 - **Compliance:** a publish-gate asset type for a Discord server post.
 
 ## Known limitations
@@ -344,7 +390,16 @@ found:
 - Residuals stated in ADR 0006 N15-1 apply: a holder of BOTH the ledger
   token and write access to the data directory can forge a consistent
   reconcile; any ledger-token holder can make start-up refuse (DoS lifted
-  only by Andre's reconcile).
+  only by Andre's reconcile — for forged version events too since N16-7).
+- Remote calls are made while the service lock is held (the AEGIS N16-1
+  class, fixed in V&I, NOT here): admission (up to eight V&I / Compliance /
+  Legal / Finance calls), the connection and age relays, enrolment,
+  discipline sync, tiers, disputes and offboarding each call their ports
+  inside the lock, so a slow V&I or Compliance (each call bounded to 10 s
+  wall clock) stalls every other CN route for that long. Fixing it needs an
+  I/O phase before the lock per operation (as V&I's Compliance prefetch).
+- An undecided dispute delays CN-21 deletion without a bound (spec C.9);
+  the SLA push (day 8) is the only pressure.
 - The contact store is integrity-checked against the log's hashes but not
   encrypted at rest (file mode 0600 only).
 - Quiet hours use the time zone the clipper declared; the business-day SLA

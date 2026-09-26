@@ -32,11 +32,31 @@ address, payment detail or money value.
   people, only inside the recipient-local quiet window (08:00–20:00).
 - **Discipline** (`POST /cn/v1/discipline/sync`): V&I strikes whose
   evidence resolves at V&I → warning / suspension / ban proposal; a ban only
-  on Andre's approval (`POST /cn/v1/clippers/{id}/ban-decision`).
+  on Andre's approval (`POST /cn/v1/clippers/{id}/ban-decision`). CN passes
+  the exact `X-Andre-Approval-Token` Andre sent on that request through to
+  V&I's `POST /vi/v1/bans` (in memory only: never in a record, a log, the
+  ledger or an export; a request without it is refused), so V&I's
+  `VI_ANDRE_APPROVAL_TOKEN` must be Andre's same token. If V&I is down, the
+  scheduler cannot propagate (it holds no token; `offboarding/run` reports
+  `needs_andre`): Andre re-sends `approve` on the approved proposal (AEGIS
+  N16-2).
 - **Disputes**: admissibility, routing and SLA; the outcome is a person's.
+  One appeal per underlying V&I flag whichever kind is chosen (clip flag,
+  V&I finding or strike): an appeal's keys are the strike id, finding ids
+  and clip ids linked to its subject (AEGIS N16-5).
 - **Offboarding**: the P4 clean exit — access revoked, open payouts flagged
-  to Finance (it cannot close while Finance has open items), export,
-  deletion of contact data after the retention period.
+  to Finance (the record cannot close while Finance has open items or is the
+  stand-in), export, and deletion of contact data and handles at the CN-21
+  deadline (`CN_POST_EXIT_RETENTION_DAYS`, 30) WHATEVER Finance answers: an
+  unresolved Finance question is recorded (`finance_question`) and pushed to
+  Andre then; connections "kept until my last settlement" are revoked at the
+  last `revision_watch_end` or the deadline, whichever is first. Only an open
+  dispute delays deletion (spec C.9) (AEGIS N16-4).
+- **Display names** hold only letters (any script, with their marks),
+  digits, space and `. ' -` (≤ 80, at least one letter, no URLs or domains, no
+  format/bidi controls): anything else is a 422 at intake; the name is
+  HTML-escaped in email / in-app bodies (a messaging provider must send them
+  as HTML) and Markdown-escaped in Discord posts (AEGIS N16-11).
 
 Every answer that refuses something lists `unmet` items
 `{code, rule_id, message, source, evidence_ref}` and `unmet_lines`
@@ -130,7 +150,8 @@ Then Andre approves the seed (`GET /cn/v1/inbox`, then
 `POST /cn/v1/rules/decisions` with his token). Optional: thin clients
 (`CN_VI_URL` + `CN_VI_SERVICE_TOKEN` + `CN_VI_CALLER_TOKEN`,
 `CN_COMPLIANCE_*` likewise, `CN_CREATIVE_URL` + `CN_CREATIVE_SERVICE_TOKEN`;
-all or none), `CN_POSTAL_ADDRESS` and `CN_OPT_OUT_URL` (recruiting),
+all or none; the V&I client reads V&I's real wire shapes, pinned by
+`tests/test_contract_vi.py`, which runs it against V&I's app in-process), `CN_POSTAL_ADDRESS` and `CN_OPT_OUT_URL` (recruiting),
 `CN_CHANNELS` (may only narrow), `CN_DELEGATE_TOKENS`. Must stay unset (no
 adapter built; the service refuses to start): `CN_MESSAGE_PROVIDER`,
 `CN_FINANCE_URL`, `CN_LEGAL_URL`, `CN_PEOPLE_URL`, `CN_HUB_URL`,
@@ -150,9 +171,23 @@ N15-1): stop the service; start with `CN_RECONCILE_MODE=1` (starts only if
 every problem is voidable; answers reads and the reconcile route only);
 `GET /cn/v1/reconcile` with Andre's token; `POST /cn/v1/reconcile` with
 `{request_id, head_sha256, void_lines, void_event_ids}` — exactly the plan;
-restart without the flag. A rule version on the ledger above the local one
-(a rollback), a rewritten line, a missing cited event or another log's
-anchors are fatal. A contact store whose values differ from the hashes the
+restart without the flag. A rewritten line, a missing cited event or
+another log's anchors are fatal.
+
+Rule-version events (AEGIS N16-7). A `rules_version_published` event is
+honoured only when its id and payload hash match a decision record in the
+local log. Any other one in this log's epoch — posted by anyone holding the
+ledger token, or left by a decision the local log no longer holds (a
+rollback) — is VOIDABLE, never fatal: a normal start refuses and names it
+("… rules version event(s) on the ledger match no decision in the local log
+(version N; local version M) …"); `CN_RECONCILE_MODE=1` starts and the plan
+lists it under `voidable.event_ids` (`cn-ver-<epoch>-<n>-…`). Before voiding,
+Andre checks which it is: if he made that decision and only its line is
+missing, restore the kept `cn_log.jsonl.unwritten-<seq>` line (or the log)
+instead — that keeps the version; if he made no such decision (a forgery),
+POST the plan — the `reconcile` event is recorded on the ledger with actor
+`andre`, and the next start is normal at the local version. Voiding a
+genuine version is a deliberate, recorded rollback of the rules. A contact store whose values differ from the hashes the
 log recorded refuses start-up too (restore the file from backup); values the
 log never referenced are purged at start.
 
@@ -165,6 +200,9 @@ cd services/clipper-network-py && python3 -m pytest -q
 Spec §G (S1–S10, A1–A12, G1–G6), property, fuzz, auth, limits, idempotency,
 record-first (ledger / log / contact-store failure = no effect) and
 reconcile tests; no network (a socket guard fails any test that tries).
+`tests/test_aegis16.py` holds the AEGIS round-16 regressions (N16-2, -4
+with a 365-day property test, -5, -7, -9, -11); `tests/test_contract_vi.py`
+is the V&I wire contract (N16-6).
 Live run with the real ledger binary:
 
 ```bash
@@ -177,8 +215,9 @@ admission blocked, restart with anchor check), and ledger B + CN through
 `devtools/live_server.py` (the test fakes behind a fixture file): admitted,
 tiered, enrolled, kit delivered and acknowledged, S3 strike mirrored,
 suspension, Andre's ban approval, offboarding, restart, exit closed; ends
-with `GET /ledger/verify` on both ledgers. It stops only the processes it
-started.
+with `GET /ledger/verify` on both ledgers. Every narrated behaviour is
+asserted; any mismatch prints `MISMATCH: …` and the run exits 1 (AEGIS
+N16-10). It stops only the processes it started.
 
 ## Gaps
 

@@ -19,7 +19,12 @@ NUMBER, NAME, ACTOR = 7, "Duplicate Identity", "intel_07_duplicate_identity"
 
 
 def normalize_email(email: str) -> str:
-    return unicodedata.normalize("NFKC", email).strip().lower()
+    """NFKC, case-folded, trailing dots of the domain removed (``example.com.`` is ``example.com``, AEGIS N16-12).
+    Spec §C.7 choice kept: no dot or plus-tag folding of the local part (``a.b+x@`` stays distinct from ``ab@``) —
+    those are different mailboxes at many providers; a same-person match on them is left to the payout identity."""
+    e = unicodedata.normalize("NFKC", email).strip().casefold()
+    local, at, domain = e.rpartition("@")
+    return f"{local}{at}{domain.rstrip('.')}" if at else e
 
 
 def hmac_hex(key: bytes, kind: str, value: str) -> str:

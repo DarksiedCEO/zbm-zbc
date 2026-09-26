@@ -84,6 +84,7 @@ class PassingVI:
         self.findings: dict[str, Finding] = {}
         self.certs: dict[str, list[Certification]] = {}
         self.bans: list[tuple] = []
+        self.ban_tokens: list[str] = []              # what CN passed through (tests assert it is Andre's own)
         self.revoked: list[str] = []
         self.received_dobs: list[str] = []
         self.received_codes: list[str] = []
@@ -162,8 +163,11 @@ class PassingVI:
         self.calls.append("certifications")
         return CertificationsAnswer(True, tuple(self.certs.get(clipper_id, [])))
 
-    def ban(self, request_id, clipper_id, cn_decision_id, approved_at):
+    def ban(self, request_id, clipper_id, cn_decision_id, approved_at, andre_token):
         self.calls.append("ban")
+        if not andre_token:                          # V&I's /vi/v1/bans needs Andre's token (403 without it)
+            return Ack(True, False, None, "403: Andre approval token missing")
+        self.ban_tokens.append(andre_token)
         self.bans.append((clipper_id, cn_decision_id))
         return Ack(True, True, cn_decision_id)
 

@@ -209,6 +209,8 @@ class RegisterRow:
     effective_status: str = "unknown"          # verified | unverified | expired | superseded | unknown
     parameters: dict = field(default_factory=dict)
     seed_pinned: Optional[bool] = None
+    verified_at: Optional[str] = None          # YYYY-MM-DD (Compliance B.3), kept so a cached row is re-judged
+    expires_at: Optional[str] = None           # YYYY-MM-DD: a cached "verified" row is "expired" from this day (N16-1)
 
 
 class ComplianceRegister(Protocol):

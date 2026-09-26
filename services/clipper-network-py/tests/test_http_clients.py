@@ -26,18 +26,17 @@ def cmp_(handler, **kw):
 def test_vi_age_subject_maps_and_refuses_inconsistent():
     def ok(req):
         assert req.headers["X-VI-Caller-Token"] == "caller" and req.headers["Authorization"] == "Bearer svc"
-        return httpx.Response(200, json={"subject_id": "cn-clp-1", "status": "adult", "attestation_id": "vi-age-1",
-                                         "rules_pinned": True})
+        return httpx.Response(200, json={"subject_id": "cn-clp-1", "allowed": True, "status": "adult",
+                                         "attestation_id": "vi-age-1", "rules_pinned": True})
     a = vi(ok).age_subject("cn-clp-1")
     assert a.available and a.status == "adult" and a.attestation_id == "vi-age-1"
-    for body in ({"subject_id": "other", "status": "adult", "attestation_id": "x", "rules_pinned": True},
-                 {"subject_id": "cn-clp-1", "status": "ADULT", "attestation_id": "x", "rules_pinned": True},
-                 {"subject_id": "cn-clp-1", "status": "adult", "attestation_id": None, "rules_pinned": True},
-                 {"subject_id": "cn-clp-1", "status": "adult", "attestation_id": "x", "rules_pinned": False},
-                 {"subject_id": "cn-clp-1", "status": "adult", "attestation_id": "x"}, ["not", "a", "dict"]):
+    # V&I's real answer carries ``allowed`` (the authority, N16-9) and ``status`` (N16-6); each must agree
+    base = {"subject_id": "cn-clp-1", "allowed": True, "status": "adult", "attestation_id": "x", "rules_pinned": True}
+    for body in ({**base, "subject_id": "other"}, {**base, "status": "ADULT"}, {**base, "attestation_id": None},
+                 {**base, "rules_pinned": False}, {k: v for k, v in base.items() if k != "rules_pinned"},
+                 {**base, "allowed": False}, {k: v for k, v in base.items() if k != "allowed"}, ["not", "a", "dict"]):
         assert vi(lambda r, b=body: httpx.Response(200, json=b)).age_subject("cn-clp-1").available is False, body
-    unp = vi(lambda r: httpx.Response(200, json={"subject_id": "cn-clp-1", "status": "adult", "attestation_id": "x",
-                                                 "rules_pinned": False}), accept_unpinned=True)
+    unp = vi(lambda r: httpx.Response(200, json={**base, "rules_pinned": False}), accept_unpinned=True)
     assert unp.age_subject("cn-clp-1").available is True
 
 
@@ -47,7 +46,7 @@ def test_vi_age_check_must_echo_request_and_facts():
     def h(req):
         body = json.loads(req.content)
         seen.update(body)
-        facts = {k: v for k, v in body.items() if k != "request_id"}
+        facts = {k: v for k, v in body.items() if k not in ("request_id", "dob")}    # V&I never echoes a DOB hash
         return httpx.Response(200, json={"request_id": body["request_id"], "facts_sha256": facts_sha256(facts),
                                          "subject_id": body["subject_id"], "status": "minor", "attestation_id": "vi-a",
                                          "rules_pinned": True})
@@ -80,8 +79,8 @@ def test_one_retry_on_5xx_with_the_same_request():
         calls.append(json.loads(req.content)["request_id"])
         if len(calls) == 1:
             return httpx.Response(502)
-        return httpx.Response(200, json={"request_id": calls[-1], "clipper_id": "c", "status": "clear",
-                                         "finding_ids": [], "rules_pinned": True})
+        return httpx.Response(200, json={"request_id": calls[-1], "clipper_id": "c", "status": "clear", "clear": True,
+                                         "findings": [], "rules_pinned": True})
     a = vi(h).identity_check("rq-9", "c", "a@b.co")
     assert a.available and a.status == "clear" and calls == ["rq-9", "rq-9"]
 
@@ -92,13 +91,14 @@ def test_vi_finding_404_means_unknown_not_unavailable():
 
 
 def test_vi_strike_feed_validation():
-    good = {"strikes": [{"strike_id": "s1", "clipper_id": "c", "class": "S3", "status": "active", "rule_id": "VI-10",
-                         "finding_ids": ["f"], "evidence_ids": ["e"], "issued_at": "2026-09-27T10:00:00Z"}],
-            "next_cursor": None, "rules_pinned": True}
+    good = {"items": [{"strike_id": "s1", "clipper_id": "c", "class": "S3", "status": "active", "rule_id": "VI-10",
+                       "finding_ids": ["f"], "evidence_ids": ["e"], "issued_at": "2026-09-27T10:00:00Z",
+                       "expires_at": None, "seq": 7}],
+            "next_cursor": 7, "rules_pinned": True}
     f = vi(lambda r: httpx.Response(200, json=good)).strikes(None)
-    assert f.available and f.strikes[0].strike_class == "S3"
+    assert f.available and f.strikes[0].strike_class == "S3" and f.next_cursor == "7"
     bad = json.loads(json.dumps(good))
-    bad["strikes"][0]["class"] = "S9"
+    bad["items"][0]["class"] = "S9"
     assert vi(lambda r: httpx.Response(200, json=bad)).strikes(None).available is False
 
 

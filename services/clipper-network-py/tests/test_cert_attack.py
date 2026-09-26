@@ -226,7 +226,10 @@ def test_a5_no_route_lets_a_caller_create_a_strike():
 # ---------------------------------------------------------------- A6 offboarding with Finance open
 
 @pytest.mark.parametrize("finance", ["open", "stand_in"])
-def test_a6_offboarding_with_open_finance_cannot_close_or_delete(finance):
+def test_a6_offboarding_with_open_finance_cannot_close_but_contact_goes_at_the_deadline(finance):
+    """Spec A6, amended by AEGIS N16-4: with Finance open or the stand-in the record stays pending_finance and
+    cannot close, and contact data stays until the CN-21 deadline — then it is deleted whatever Finance says,
+    with the unresolved Finance question flagged to Andre."""
     h = Harness().ready()
     cid = h.admitted_clipper()
     h.config()
@@ -247,12 +250,17 @@ def test_a6_offboarding_with_open_finance_cannot_close_or_delete(finance):
         assert [e for e in h.ledger.of_type("crossing_finance_31_requested") if e["payload"]["action"] == "notify_offboarding"]
     assert all(e["status"] == "withdrawn" for e in h.svc.st["enrolments"].values())
     assert h.enrol(cid).json()["eligible"] is False                  # no new enrolments
-    h.clock.advance(days=60)
+    h.clock.advance(days=29)
     out = h.run("/cn/v1/offboarding/run").json()
     assert out["closed"] == [] and out["deleted"] == []
-    assert out["blocked"][0]["why"] == "finance open items"
-    assert h.svc.contacts.get(f"clipper:{cid}") is not None          # contact data not deleted
-    assert h.get(f"/cn/v1/clippers/{cid}/offboarding", caller="hub").json()["status"] == "pending_finance"
+    assert h.svc.contacts.get(f"clipper:{cid}") is not None          # kept until the deadline
+    h.clock.advance(days=2)
+    out = h.run("/cn/v1/offboarding/run").json()
+    assert out["closed"] == [] and out["deleted"] == [o["offboarding_id"]]
+    assert h.svc.contacts.get(f"clipper:{cid}") is None              # CN-21 holds on day one (N16-4)
+    off = h.get(f"/cn/v1/clippers/{cid}/offboarding", caller="hub").json()
+    assert off["status"] == "pending_finance" and off["finance_question"]["flagged_to_andre"] is True
+    assert h.ports.push.pushed and h.ports.push.pushed[-1][0] == "offboarding_finance_question"
 
 
 def test_a6_finance_none_later_then_deleted_and_closed():

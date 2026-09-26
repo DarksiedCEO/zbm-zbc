@@ -16,7 +16,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool, S
 
 from clock import parse_iso
 from jurisdictions import is_known, is_known_country, is_known_subdivision
-from textguard import has_control_chars, is_email, money_or_earnings
+from textguard import display_name_problem, has_control_chars, is_email, money_or_earnings
 
 AGE_METHODS = ("open_banking", "photo_id_match", "facial_age_estimation", "mobile_operator", "credit_card",
                "digital_identity", "email_age_estimation")   # Compliance C.1 AGE_METHODS
@@ -47,6 +47,13 @@ def _ts(v: str) -> str:
         parse_iso(v)
     except ValueError:
         raise ValueError("must be an RFC 3339 timestamp with a UTC offset") from None
+    return v
+
+
+def _display_name(v: str) -> str:
+    why = display_name_problem(v)
+    if why:
+        raise ValueError(f"display_name: {why}")
     return v
 
 
@@ -123,7 +130,8 @@ class RecruitingCampaignRequest(Strict):
 
 class ApplicationRequest(Strict):
     request_id: Id
-    display_name: Annotated[str, Field(min_length=1, max_length=80), AfterValidator(_no_control), AfterValidator(_no_money)]
+    display_name: Annotated[str, Field(min_length=1, max_length=80), AfterValidator(_no_control),
+                            AfterValidator(_display_name)]          # AEGIS N16-11
     email: Email
     declared_country: Iso2
     declared_region: Optional[Region] = None
