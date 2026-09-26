@@ -38,6 +38,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from _procinfo import rss_kib
+
 import redaction
 from config import OnboardingConfig, load_config
 from conftest import TEST_SERVICE_TOKEN, client_for, free_test_port, make_service, start_body
@@ -112,11 +114,10 @@ class Stack:
         return self.api.pid
 
 
-def _rss_kb(pid: int) -> int:
-    for line in Path(f"/proc/{pid}/status").read_text().splitlines():
-        if line.startswith("VmRSS"):
-            return int(line.split()[1])
-    return 0
+# Fix wave 16: portable (Linux /proc, macOS/BSD ps), server pid only; and it
+# raises instead of returning 0 when the process is gone (0 made a vanished
+# server look like "memory stayed flat").
+_rss_kb = rss_kib
 
 
 def _fact(i: int, value: str) -> dict:

@@ -15,11 +15,19 @@
 //!       here: auth is never bypassed, process stays up.
 //!   Cosmetic: the startup log names the real bind address.
 //!
-//! The F5 tests use RLIMIT_FSIZE (`ulimit -f`) on the real process to make
-//! the kernel genuinely fail the write — not a simulated failure.
+//! The F5 write-failure test sets RLIMIT_FSIZE on the real process (in
+//! bytes, via setrlimit(2) between fork and exec) so the kernel genuinely
+//! fails the write — not a simulated failure. Fix wave 16 (portability): it
+//! used `sh -c 'ulimit -f N'`, whose unit is 512 bytes in dash (Linux
+//! /bin/sh) but 1024 bytes in bash 3.2 (macOS /bin/sh), so on macOS the
+//! "too big" append fit and got 201. And XNU refuses an over-limit write
+//! whole (EFBIG, no bytes written) where Linux writes a partial line first,
+//! so the torn-tail fixture is now written directly (identical on every OS);
+//! the real SIGXFSZ-kill reproduction is kept as an extra Linux-only test.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -84,19 +92,55 @@ fn free_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
-/// Spawns the server, optionally through `sh -c '<prelude>; exec server'`
-/// so a shell prelude (ulimit / trap) applies to the real process.
-fn spawn(log: &Scratch, prelude: Option<&str>) -> (Child, u16) {
+/// A file-size limit (RLIMIT_FSIZE) for the spawned server, in BYTES.
+#[derive(Clone, Copy)]
+struct Fsize {
+    bytes: u64,
+    /// SIGXFSZ ignored: the over-limit write fails with EFBIG and the process
+    /// lives. Otherwise the default action applies: the kernel kills it.
+    ignore_sigxfsz: bool,
+}
+
+/// setrlimit(2) / signal(2), declared here so the tests need no extra crate.
+/// RLIMIT_FSIZE is 1, SIGXFSZ is 25 and SIG_IGN is 1 on both Linux
+/// (x86_64, aarch64) and macOS/BSD; rlim_t is a u64 on all of them.
+mod sys {
+    #[repr(C)]
+    pub struct RLimit {
+        pub cur: u64,
+        pub max: u64,
+    }
+    extern "C" {
+        pub fn setrlimit(resource: i32, rlim: *const RLimit) -> i32;
+        pub fn signal(sig: i32, handler: usize) -> usize;
+    }
+    pub const RLIMIT_FSIZE: i32 = 1;
+    pub const SIGXFSZ: i32 = 25;
+    pub const SIG_IGN: usize = 1;
+    pub const SIG_ERR: usize = usize::MAX;
+}
+
+/// Spawns the server binary directly (no shell), optionally under a
+/// file-size limit applied in the child between fork and exec.
+fn spawn(log: &Scratch, fsize: Option<Fsize>) -> (Child, u16) {
     let port = free_port();
     let bin = env!("CARGO_BIN_EXE_server");
-    let mut cmd = match prelude {
-        None => Command::new(bin),
-        Some(p) => {
-            let mut c = Command::new("sh");
-            c.arg("-c").arg(format!("{p}; exec \"$0\"")).arg(bin);
-            c
+    let mut cmd = Command::new(bin);
+    if let Some(Fsize { bytes, ignore_sigxfsz }) = fsize {
+        // SAFETY: only async-signal-safe syscalls run in the forked child.
+        unsafe {
+            cmd.pre_exec(move || {
+                if ignore_sigxfsz && sys::signal(sys::SIGXFSZ, sys::SIG_IGN) == sys::SIG_ERR {
+                    return Err(std::io::Error::last_os_error());
+                }
+                let lim = sys::RLimit { cur: bytes, max: bytes };
+                if sys::setrlimit(sys::RLIMIT_FSIZE, &lim) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
         }
-    };
+    }
     let stderr = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -130,8 +174,8 @@ fn wait_up(child: &mut Child, port: u16) -> Result<(), String> {
     }
 }
 
-fn start(log: &Scratch, prelude: Option<&str>) -> ServerHandle {
-    let (mut child, port) = spawn(log, prelude);
+fn start(log: &Scratch, fsize: Option<Fsize>) -> ServerHandle {
+    let (mut child, port) = spawn(log, fsize);
     if let Err(e) = wait_up(&mut child, port) {
         let _ = child.kill();
         let _ = child.wait();
@@ -213,16 +257,48 @@ fn file_len(p: &Path) -> u64 {
 
 // --- F5: torn final line after a crash mid-write ---------------------------------
 
-/// AEGIS reproduction: the server runs under `ulimit -f 2` (1024 bytes) with
-/// the default SIGXFSZ action, so the kernel KILLS it in the middle of the
-/// write that crosses the limit, leaving a partial, unterminated final line.
+/// AEGIS F5: a crash mid-write leaves a partial, unterminated final line.
 /// Before the fix, the restart refused to start ("EOF while parsing").
+///
+/// Fix wave 16: the torn tail is written directly — four real entries from
+/// the real server, then the fourth line cut in half with no newline, which
+/// is exactly what a process killed mid-`write` leaves behind. This is
+/// deterministic and identical on every OS. (The old fixture relied on the
+/// kernel killing the process part-way through a write under RLIMIT_FSIZE;
+/// XNU refuses an over-limit write whole, so on macOS no torn line ever
+/// appeared. That kernel-kill reproduction is kept, Linux-only, in
+/// `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers`.)
 #[test]
 fn f5_crash_mid_write_torn_tail_is_truncated_preserved_and_restart_succeeds() {
     let log = scratch("torn");
+    {
+        let s = start(&log, None);
+        for i in 0..4 {
+            assert_eq!(authed(s.port, "POST", "/ledger/events", Some(&event(&format!("e{i}")))).0, 201);
+        }
+    }
+    let full = std::fs::read(&log.0).unwrap();
+    let lines: Vec<&[u8]> = full.split_inclusive(|&b| b == b'\n').collect();
+    assert_eq!(lines.len(), 4);
+    assert!(lines.iter().all(|l| l.ends_with(b"\n")));
+    let complete: usize = lines[..3].iter().map(|l| l.len()).sum();
+    std::fs::write(&log.0, &full[..complete + lines[3].len() / 2]).unwrap();
+    assert_torn_tail_recovers(&log, 3);
+}
+
+/// The real-crash reproduction (Linux only): the server runs with
+/// RLIMIT_FSIZE = 1024 bytes and the default SIGXFSZ action, so the Linux
+/// kernel writes the part of the line that fits and then KILLS the process,
+/// leaving a genuine torn final line. XNU (macOS) rejects the whole
+/// over-limit write before writing any byte, so it cannot produce this
+/// shape; the deterministic test above covers macOS.
+#[cfg(target_os = "linux")]
+#[test]
+fn f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers() {
+    let log = scratch("torn_kill");
     let mut acked = 0usize;
     {
-        let s = start(&log, Some("ulimit -f 2"));
+        let s = start(&log, Some(Fsize { bytes: 1024, ignore_sigxfsz: false }));
         for i in 0..10 {
             match request(s.port, "POST", "/ledger/events", Some(&format!("Bearer {TOKEN}")), Some(&event(&format!("e{i}")))) {
                 Ok((201, _)) => acked += 1,
@@ -231,14 +307,22 @@ fn f5_crash_mid_write_torn_tail_is_truncated_preserved_and_restart_succeeds() {
         }
     }
     assert!(acked >= 1, "at least one event must be acknowledged before the limit");
+    assert_torn_tail_recovers(&log, acked);
+}
+
+/// Given a log whose first `acked` lines are complete entries followed by a
+/// torn, unterminated tail: restart truncates the tail, preserves it byte for
+/// byte in exactly one side file, logs loudly, and the chain keeps growing.
+fn assert_torn_tail_recovers(log: &Scratch, acked: usize) {
     let before = std::fs::read(&log.0).unwrap();
     assert!(!before.ends_with(b"\n"), "precondition: the crash left a torn, unterminated final line");
     let last_nl = before.iter().rposition(|&b| b == b'\n').map(|p| p + 1).unwrap_or(0);
     let torn = before[last_nl..].to_vec();
+    assert!(!torn.is_empty());
     assert_eq!(before[..last_nl].iter().filter(|&&b| b == b'\n').count(), acked, "every acked entry is a complete line");
 
     // Restart with no limit: must come up with exactly the acknowledged entries.
-    let s = start(&log, None);
+    let s = start(log, None);
     let (st, v) = authed(s.port, "GET", "/ledger/verify", None);
     assert_eq!(st, 200);
     assert_eq!(v, json!({"valid": true, "entries": acked}));
@@ -256,22 +340,24 @@ fn f5_crash_mid_write_torn_tail_is_truncated_preserved_and_restart_succeeds() {
     assert_eq!(st, 201);
     assert_eq!(e["seq"], acked);
     drop(s);
-    let s = start(&log, None);
+    let s = start(log, None);
     let (_, v) = authed(s.port, "GET", "/ledger/verify", None);
     assert_eq!(v, json!({"valid": true, "entries": acked + 1}));
 }
 
 // --- F5 (related): a failed write is rolled back ------------------------------------
 
-/// SIGXFSZ ignored + `ulimit -f 1` (512 bytes): the kernel writes a PARTIAL
-/// line and then fails the write with EFBIG — a genuine write failure in the
-/// real process. The append must return 500, the file must be truncated back
-/// to its pre-append length, and memory must not advance. Before the fix the
-/// partial bytes stayed on disk and the next restart refused to start.
+/// SIGXFSZ ignored + RLIMIT_FSIZE = 512 bytes: a genuine write failure
+/// (EFBIG) in the real process. On Linux the kernel first writes the PARTIAL
+/// line that fits; on macOS XNU refuses the whole write. Either way the
+/// append must return 500, the file must be back at its pre-append bytes,
+/// and memory must not advance. Before the fix the partial bytes stayed on
+/// disk and the next restart refused to start. A second phase forces the
+/// zero-bytes-written shape on every OS (limit = current file length).
 #[test]
 fn f5_failed_write_is_rolled_back_on_disk_and_in_memory() {
     let log = scratch("writefail");
-    let s = start(&log, Some("trap '' XFSZ; ulimit -f 1"));
+    let s = start(&log, Some(Fsize { bytes: 512, ignore_sigxfsz: true }));
 
     let (st, _) = authed(s.port, "POST", "/ledger/events", Some(&event("fits")));
     assert_eq!(st, 201, "first event fits under 512 bytes");
@@ -301,6 +387,21 @@ fn f5_failed_write_is_rolled_back_on_disk_and_in_memory() {
     let (_, v) = authed(s.port, "GET", "/ledger/verify", None);
     assert_eq!(v, json!({"valid": true, "entries": 1}));
     assert!(side_files(&log.0).is_empty(), "nothing torn was left behind");
+    drop(s);
+
+    // Zero bytes can be written (limit == current length): the shape XNU
+    // produces for every over-limit write, forced here on every OS.
+    let s = start(&log, Some(Fsize { bytes: good.len() as u64, ignore_sigxfsz: true }));
+    let (st, v) = authed(s.port, "POST", "/ledger/events", Some(&event("too-big-1")));
+    assert_eq!(st, 500, "a write that writes nothing must be a 500: {v}");
+    assert_eq!(std::fs::read(&log.0).unwrap(), good, "file untouched");
+    let (_, entries) = authed(s.port, "GET", "/ledger/entries", None);
+    assert_eq!(entries.as_array().unwrap().len(), 1, "memory did not advance");
+    drop(s);
+
+    let s = start(&log, None);
+    let (_, v) = authed(s.port, "GET", "/ledger/verify", None);
+    assert_eq!(v, json!({"valid": true, "entries": 1}));
     let (st, e) = authed(s.port, "POST", "/ledger/events", Some(&event("too-big-1")));
     assert_eq!(st, 201, "the failed event was never recorded, so it is new now");
     assert_eq!(e["seq"], 1);
@@ -519,27 +620,49 @@ fn startup_log_names_the_real_bind_address() {
 /// `eprintln!` panics when stderr cannot be written (full disk under a
 /// redirected log, closed pipe, RLIMIT_FSIZE). The server is single-threaded,
 /// so one failed log line killed the evidence ledger (exit 101). With stderr
-/// pointed at /dev/full (every write fails with ENOSPC) the server must still
-/// start, serve, record and verify.
+/// pointed somewhere every write fails, the server must still start, serve,
+/// record and verify.
+///
+/// Fix wave 16: this opened /dev/full, which macOS does not have (the test
+/// panicked with NotFound before starting the server). Now every target is
+/// tried that exists on the OS: a socket whose peer is closed (EPIPE; SIGPIPE
+/// is ignored by the Rust runtime) and a read-only descriptor (EBADF) on
+/// every Unix, plus /dev/full (ENOSPC) where it exists (Linux).
 #[test]
 fn unwritable_stderr_does_not_kill_the_server() {
-    let log = scratch("devfull");
-    let port = free_port();
-    let devfull = std::fs::OpenOptions::new().write(true).open("/dev/full").unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_server"))
-        .env("LEDGER_SERVICE_TOKEN", TOKEN)
-        .env("LEDGER_PORT", port.to_string())
-        .env("LEDGER_LOG_PATH", log.0.to_str().unwrap())
-        .stdout(Stdio::null())
-        .stderr(Stdio::from(devfull))
-        .spawn()
-        .unwrap();
-    let up = wait_up(&mut child, port);
-    let s = ServerHandle { child, port };
-    up.expect("server must come up even though every stderr write fails");
-    assert_eq!(authed(s.port, "POST", "/ledger/events", Some(&event("e1"))).0, 201);
-    let (_, v) = authed(s.port, "GET", "/ledger/verify", None);
-    assert_eq!(v, json!({"valid": true, "entries": 1}));
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+
+    let mut targets: Vec<(&str, Stdio)> = Vec::new();
+    let (w, r) = UnixStream::pair().unwrap();
+    drop(r);
+    targets.push(("socket with closed peer (EPIPE)", Stdio::from(OwnedFd::from(w))));
+    let ro = scratch("stderr_ro");
+    std::fs::write(&ro.0, b"").unwrap();
+    targets.push(("read-only descriptor (EBADF)", Stdio::from(std::fs::File::open(&ro.0).unwrap())));
+    if Path::new("/dev/full").exists() {
+        targets.push(("/dev/full (ENOSPC)", Stdio::from(std::fs::OpenOptions::new().write(true).open("/dev/full").unwrap())));
+    }
+
+    for (name, stderr) in targets {
+        let log = scratch("devfull");
+        let port = free_port();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_server"))
+            .env("LEDGER_SERVICE_TOKEN", TOKEN)
+            .env("LEDGER_PORT", port.to_string())
+            .env("LEDGER_LOG_PATH", log.0.to_str().unwrap())
+            .stdout(Stdio::null())
+            .stderr(stderr)
+            .spawn()
+            .unwrap();
+        let up = wait_up(&mut child, port);
+        let mut s = ServerHandle { child, port };
+        up.unwrap_or_else(|e| panic!("{name}: server must come up even though every stderr write fails: {e}"));
+        assert_eq!(authed(s.port, "POST", "/ledger/events", Some(&event("e1"))).0, 201, "{name}");
+        let (_, v) = authed(s.port, "GET", "/ledger/verify", None);
+        assert_eq!(v, json!({"valid": true, "entries": 1}), "{name}");
+        assert!(s.child.try_wait().unwrap().is_none(), "{name}: process must stay up");
+    }
 }
 
 // --- ADR 0003 section 1a: money magnitude bound on NEW appends (fix wave 2) ----------------

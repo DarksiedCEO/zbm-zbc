@@ -76,9 +76,39 @@ def crate_copy(tmp_path_factory) -> tuple[Path, Path]:
     return crate, ctd
 
 
-def _is_ledger_server(p: Path) -> bool:
-    return p.is_file() and os.access(p, os.X_OK) and p.read_bytes()[:4] == b"\x7fELF"
+# Native executable magic (fix wave 16: macOS builds Mach-O, not ELF). A
+# shell script ("#!/b...") or any other file is still rejected.
+_NATIVE_EXEC_MAGIC = (
+    b"\x7fELF",  # ELF (Linux, BSD)
+    b"\xcf\xfa\xed\xfe",  # Mach-O 64-bit, little-endian (MH_MAGIC_64 0xFEEDFACF): arm64 / x86_64 macOS
+    b"\xce\xfa\xed\xfe",  # Mach-O 32-bit, little-endian (MH_MAGIC 0xFEEDFACE)
+    b"\xca\xfe\xba\xbe",  # Mach-O universal / fat (FAT_MAGIC 0xCAFEBABE)
+    b"\xca\xfe\xba\xbf",  # Mach-O universal / fat, 64-bit offsets (FAT_MAGIC_64)
+)
 
+
+def _is_ledger_server(p: Path) -> bool:
+    return p.is_file() and os.access(p, os.X_OK) and p.read_bytes()[:4] in _NATIVE_EXEC_MAGIC
+
+
+
+def test_is_ledger_server_accepts_elf_and_mach_o_and_rejects_scripts(tmp_path):
+    """Fix wave 16: the artifact check ran on macOS against a Mach-O binary
+    and rejected it (it only knew ELF). Native magics pass; a shell script,
+    unknown bytes, or a non-executable file do not."""
+    def planted(name: str, head: bytes, mode: int = 0o755) -> Path:
+        f = tmp_path / name
+        f.write_bytes(head + b"\0" * 60)
+        f.chmod(mode)
+        return f
+
+    for name, head in [("elf", b"\x7fELF\x02\x01"), ("macho64", b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01"),
+                       ("fat", b"\xca\xfe\xba\xbe\x00\x00\x00\x02")]:
+        assert _is_ledger_server(planted(name, head)), name
+    assert not _is_ledger_server(planted("script", b"#!/bin/sh\necho STALE\n"))
+    assert not _is_ledger_server(planted("junk", b"MZ\x90\x00"))
+    assert not _is_ledger_server(planted("noexec", b"\x7fELF\x02\x01", mode=0o644))
+    assert not _is_ledger_server(tmp_path / "missing")
 
 # --- CARGO_TARGET_DIR set, no binary at the crate's default path -------------
 

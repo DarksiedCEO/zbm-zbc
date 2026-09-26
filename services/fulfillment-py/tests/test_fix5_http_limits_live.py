@@ -38,6 +38,7 @@ from pathlib import Path
 
 import pytest
 
+from _procinfo import rss_kib
 from test_live_server import SRC, TOKEN, _free_port
 
 import http_limits
@@ -84,12 +85,8 @@ def server():
     _stop(proc)
 
 
-def _rss_kib(pid: int) -> int:
-    with open(f"/proc/{pid}/status") as f:
-        for line in f:
-            if line.startswith("VmRSS:"):
-                return int(line.split()[1])
-    raise AssertionError("no VmRSS")
+# Fix wave 16: portable (Linux /proc, macOS/BSD ps); measures only the server pid.
+_rss_kib = rss_kib
 
 
 def _read_status(s: socket.socket) -> int | None:

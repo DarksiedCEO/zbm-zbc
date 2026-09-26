@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import app
+from _procinfo import NO_OVERRIDE_ADDR_REASON, listening_addrs, override_bind_addr, url_host
 from conftest import TEST_SERVICE_TOKEN
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -64,14 +65,10 @@ def _free_port():
     return free_test_port()  # fix wave 4: the assigned test port range only
 
 
-def _listening(port):
-    addrs = set()
-    for line in Path("/proc/net/tcp").read_text().splitlines()[1:]:
-        parts = line.split()
-        ip, p = parts[1].split(":")
-        if int(p, 16) == port and parts[3] == "0A":
-            addrs.add(ip)
-    return addrs
+# Fix wave 16: the kernel's socket table, read portably (Linux /proc/net/tcp
+# and tcp6; macOS/BSD lsof), as text addresses. This test used to be skipped
+# on macOS ("needs Linux /proc") and now runs there.
+_listening = listening_addrs
 
 
 def _start(extra):
@@ -82,7 +79,7 @@ def _start(extra):
     deadline = time.time() + 20
     while time.time() < deadline:
         try:
-            if httpx.get(f"http://{host}:{port}/health", timeout=0.5).status_code == 200:
+            if httpx.get(f"http://{url_host(host)}:{port}/health", timeout=0.5).status_code == 200:
                 return proc, host, port
         except httpx.HTTPError:
             time.sleep(0.1)
@@ -90,19 +87,23 @@ def _start(extra):
     raise AssertionError("server did not start")
 
 
-@pytest.mark.skipif(not Path("/proc/net/tcp").exists(), reason="needs Linux /proc")
 def test_entrypoint_binds_loopback_by_default_and_honours_override():
     proc, host, port = _start({})
     try:
-        assert _listening(port) == {"0100007F"}  # 127.0.0.1, not 00000000 (0.0.0.0)
+        assert _listening(port) == {"127.0.0.1"}  # not 0.0.0.0 / :: (all interfaces)
         assert httpx.get(f"http://{host}:{port}/intelligences").status_code == 401
         assert httpx.get(f"http://{host}:{port}/docs").status_code == 404
     finally:
         proc.terminate()
         proc.wait(10)
-    proc, host, port = _start({"ONBOARDING_BIND_ADDR": "127.0.0.2"})
+    # 127.0.0.2 exists on Linux only; macOS proves the override with ::1.
+    addr = override_bind_addr()
+    if addr is None:
+        pytest.skip(NO_OVERRIDE_ADDR_REASON + " (the default-bind half above passed)")
+    proc, host, port = _start({"ONBOARDING_BIND_ADDR": addr})
     try:
-        assert _listening(port) == {"0200007F"}
+        assert host == addr
+        assert _listening(port) == {addr}
     finally:
         proc.terminate()
         proc.wait(10)
