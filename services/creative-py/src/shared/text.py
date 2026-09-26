@@ -3314,10 +3314,23 @@ def _price(word: str) -> bool:
 # exempt at most two in a row ("₹499 ₩12,000" is two prices; "₥1 ₳1 ₭1" is a word). Not a run: one or two
 # symbols repeated ("Swipe → → →", "€ / €€ / €€€", "Price drop: €25 → €19", "•˚｡ ✦ ｡˚•": measured on the FP
 # corpora, two different symbols cost the last two; the price is that a phrase of fewer than three different
-# letters, "fee", is not caught spaced out this way) and symbols between words ("Mix ⇒ bake ⇒ eat",
-# "∅ ⊂ A ⊆ B": a letter ends the run).
+# letters, "fee", is not caught spaced out this way) and symbols between words ("Mix ⇒ bake ⇒ eat": a word
+# ends the run; since fix wave 13 single LETTERS no longer do, see GLYPH_RUN below: "∅ ⊂ A ⊆ B" is flagged).
 UNREADABLE_RUN = 3
 UNREADABLE_RUN_DISTINCT = 3
+# Fix wave 13 (AEGIS round 12 N12-1, N12-2): the run above ended at every unit holding a letter, so keeping one
+# plain letter every two or three glyphs ("⩋ ⍺ k ⋿  ⩋ o ⋂ ⋿ y", "℞ ⍳ s ⋊  f ℞ ⋿ ⋿", "n ○  r ⍳ s ⋊") split every
+# run below three: 240 of 1,972 masked short phrases passed. A SINGLE-GLYPH unit is one letter (letter-like
+# symbols are read as their letters first), or one unreadable symbol — written once or repeated ("₩ ₩ ₩ i ₦",
+# "₩₩₩ i ₦": N12-2, a repeat is still one glyph of the spelling). GLYPH_RUN or more consecutive single-glyph
+# units (separators as above; any unit of two or more different glyphs ends the sequence) that hold a letter
+# and GLYPH_RUN_UNREADABLE or more unreadable symbols are an unreadable word. A sequence with no letter is
+# left to the run rule above ("Swipe → → →", "€ / €€ / €€€" stay clean). The cost the ruling accepts: single
+# letters between unreadable operators or arrows go to a human ("∅ ⊂ A ⊆ B", "A → B → C", "A ★ B ☆ C").
+# The single-letter safety net in `obfuscation_signals` also counts these sequences BEFORE canonicalisation
+# (`single_glyph_run`): SINGLE_LETTER_RUN units with one unreadable symbol among them ("⋂ o r i").
+GLYPH_RUN = 3
+GLYPH_RUN_UNREADABLE = 2
 # Fix wave 12 (AEGIS round 11 N11-3, a ruling gap, no table expanded): "♏e︱✝ be︱︱y fa✝" (melt belly fat)
 # spells letters with emoji the ruling lists as ORDINARY (♏ ✝) and with vertical-bar punctuation (︱),
 # neither unreadable. A word holding a Latin letter with STAND-INS — letter-shaped emoji (the ruling's list
@@ -3393,10 +3406,46 @@ def unreadable_words(text: str, limit: int = 5) -> list[str]:
     return out
 
 
+def _units(t: str, bad: set[str]) -> list[re.Match]:
+    """The units of `t` (letter-like map applied, dividers blanked): maximal stretches of letters and unreadable
+    symbols; whatever lies between two units is a separator (see the fix wave 12 comment above)."""
+    return list(re.finditer("(?:[^\\W\\d_]|" + _char_class(bad) + ")+", t))
+
+
+def _single_glyph(u: str, bad: set[str]) -> bool:
+    """N12-1 / N12-2: a unit of ONE glyph — one letter, or one unreadable symbol written once or repeated
+    ("₩", "₩₩₩"; a repeated letter "aa" is a word, not a glyph)."""
+    return len(u) == 1 or (u[0] in bad and u == u[0] * len(u))
+
+
+def _glyph_sequences(t: str, bad: set[str]) -> list[tuple[str, int, int]]:
+    """N12-1: every maximal sequence of consecutive single-glyph units of `t` that holds a letter and an
+    unreadable symbol, as (text, units, unreadable units) — see the fix wave 13 comment above."""
+    out: list[tuple[str, int, int]] = []
+    seq: list[re.Match] = []
+
+    def flush() -> None:
+        if seq:
+            n_bad = sum(1 for m in seq if m.group()[0] in bad)
+            if 0 < n_bad < len(seq):
+                out.append((" ".join(t[seq[0].start():seq[-1].end()].split())[:40], len(seq), n_bad))
+        seq.clear()
+
+    for m in _units(t, bad):
+        if _single_glyph(m.group(), bad):
+            seq.append(m)
+        else:
+            flush()
+    flush()
+    return out
+
+
 def _unreadable_runs(t: str, bad: set[str]) -> list[str]:
     """N11-1 (a) / N11-4: the runs of UNREADABLE_RUN+ consecutive units of unreadable symbols in `t`
-    (letter-like map applied, dividers blanked), with UNREADABLE_RUN_DISTINCT+ different symbols — see above."""
-    unit = re.compile("(?:[^\\W\\d_]|" + _char_class(bad) + ")+")
+    (letter-like map applied, dividers blanked), with UNREADABLE_RUN_DISTINCT+ different symbols — see above.
+    N12-1 / N12-2 (fix wave 13): also every sequence of GLYPH_RUN+ single-glyph units holding a letter and
+    GLYPH_RUN_UNREADABLE+ unreadable symbols (`_glyph_sequences`)."""
+    units = _units(t, bad)
     out: list[str] = []
     run: list[re.Match] = []
 
@@ -3405,13 +3454,30 @@ def _unreadable_runs(t: str, bad: set[str]) -> list[str]:
             out.append(" ".join(t[run[0].start():run[-1].end()].split())[:40])
         run.clear()
 
-    for m in unit.finditer(t):
+    for m in units:
         if any(c.isalpha() for c in m.group()):
             flush()
         else:
             run.append(m)
     flush()
+    for text, n, n_bad in _glyph_sequences(t, bad):
+        if n >= GLYPH_RUN and n_bad >= GLYPH_RUN_UNREADABLE and text not in out:
+            out.append(text)
     return out
+
+
+def single_glyph_run(text: str) -> int:
+    """N12-1 (fix wave 13): the longest sequence of consecutive single-glyph units in `text` that holds a letter
+    and an unreadable symbol, counted BEFORE canonicalisation strips the symbols (letter-like map applied,
+    dividers blanked; separators as in Rule A). 0 if none. The canonical count in `obfuscation_signals` is
+    unchanged; this one sees the letters canonicalisation had pulled apart ("⋂ o ℞ i ∫ ⋊" reads "o i")."""
+    if not text or text.isascii():
+        return 0
+    t = _map_letterlike(text)
+    bad = {c for c in set(t) if _unreadable(c)}
+    if not bad:
+        return 0
+    return max((n for _, n, _ in _glyph_sequences(_DIVIDER.sub(" ", t), bad)), default=0)
 
 
 # Ordinary emoji that the signals below would otherwise read as evasion (fix wave 10, AEGIS round 9 N9-5):
@@ -3522,8 +3588,10 @@ def obfuscation_signals(text: str) -> list[str]:
     for tok in canonical(text).split():
         run = run + 1 if len(tok) == 1 and tok.isalpha() else 0
         if run >= SINGLE_LETTER_RUN:
-            signals.append(f"{SINGLE_LETTER_RUN}+ single letters split by separators (e.g. 'g u a r')")
             break
+    if run >= SINGLE_LETTER_RUN or single_glyph_run(text) >= SINGLE_LETTER_RUN:
+        # fix wave 13 (N12-1): also counted before canonicalisation, symbols included (`single_glyph_run`)
+        signals.append(f"{SINGLE_LETTER_RUN}+ single letters split by separators (e.g. 'g u a r')")
     return signals
 
 

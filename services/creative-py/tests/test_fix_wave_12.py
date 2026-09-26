@@ -119,7 +119,8 @@ def test_n111_single_symbols_in_ordinary_text_stay_clean(registry):
     """A repeated arrow, one symbol between words, two symbols in a row: not a run."""
     rb = _rulebook(registry)
     for t in ["Swipe → → → for more", "Mix ⇒ bake ⇒ eat", "Link → in bio", "Friends ∞ forever", "Ages ≥18 only",
-              "Vegan ✓ Gluten ✓", "☆ New video ☆", "✿ spring collection ✿", "Set theory night: ∅ ⊂ A ⊆ B",
+              # fix wave 13 (N12-1): "Set theory night: ∅ ⊂ A ⊆ B" is now an accepted cost (test_fix_wave_13)
+              "Vegan ✓ Gluten ✓", "☆ New video ☆", "✿ spring collection ✿",
               "√2 ≈ 1.414 and √3 ≈ 1.732", "✦ • ✦ • ✦ gallery night", "Rent in ₴ vs € — a comparison thread",
               "Price drop: $49.99 → $39.99", "Score: 3 ≥ 2 ≥ 1 wins", "►► skip to 2:10", "Cost tiers € / €€ / €€€ explained"]:
         d = _review(registry, rb, caption=t + TAIL)
