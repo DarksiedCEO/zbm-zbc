@@ -10,16 +10,32 @@ register version in force, with personal data removed (screen names and
 aliases, hold-release reasons, page text are exported only as hashes).
 Never issues a ruling it could not record.
 
-Local log anchoring (AEGIS N14-4). Before a line is appended to the local
-log, its (log epoch, seq, line SHA-256) is recorded on the ledger as a
-``local_log_appended`` event (id ``cmp-log-<epoch>-<seq>-<sha40>``); a
-commit that then fails records a best-effort ``local_commit_failed`` marker
-with the same coordinates. ``anchor_problems`` compares the local log with
-the ledger: a line the ledger anchors beyond the local head (truncation), a
-local line the ledger does not anchor (rewrite, or another ledger), an event
-id the log cites that the ledger does not hold, or a register version the
-ledger published (and no failure marker withdrew) above the local version.
-Start-up refuses on any problem (disk logs); control C-11 goes red.
+Local log anchoring (AEGIS N14-4, hardened in round 15). Before a line is
+appended to the local log, its (log epoch, seq, line SHA-256) is recorded on
+the ledger as a ``local_log_appended`` event (id
+``cmp-log-<epoch>-<seq>-<sha40>``). ``assess`` compares the local log with the
+ledger and sorts every mismatch into one of two classes:
+
+- FATAL (start-up refuses, even with COMPLIANCE_RECONCILE_MODE=1): a register
+  version the ledger published above the local version (a rollback), a local
+  line the ledger does not anchor (a rewrite), an event the log cites that the
+  ledger does not hold, another log's anchors on this ledger, an empty local
+  log where the ledger anchors one, a reconcile record the ledger does not
+  match.
+- VOIDABLE (start-up refuses; only Andre's explicit reconcile lifts it,
+  N15-1): an anchor of this log that is not a local line (a commit that failed
+  after its anchor, a truncated tail, another instance's line), a ruling of
+  this department on the ledger that the local log does not hold (N15-2), and
+  an instance lease on the ledger newer than the local log's own latest lease
+  from a different instance (a copied data directory, N15-2).
+
+Nothing on the ledger alone withdraws an anchor (round 15 N15-1: the old
+``local_commit_failed`` marker is no longer written or honoured). A void is
+honoured only through a ``reconcile`` line in the LOCAL log whose payload
+(epoch, register version, head seq and head line SHA-256, the voided line
+numbers and event ids) hashes to the ``payload_sha256`` of the matching
+``reconcile`` event on the ledger, and whose head matches the local line
+before it. Control C-11 reports the same problems.
 """
 
 from __future__ import annotations
@@ -28,96 +44,170 @@ import copy
 import re
 from typing import Iterable, Optional
 
+from ledger import payload_sha256
 from register import sha256_text
 
 NUMBER, NAME, ACTOR = 11, "Evidence and Audit", "intel_11_evidence_audit"
 PAGE = 500
 
 ANCHOR_TYPE = "local_log_appended"
-FAILED_TYPE = "local_commit_failed"
 VERSION_TYPE = "register_version_published"
+RECONCILE_TYPE = "reconcile"
+LEASE_TYPE = "instance_lease"
+RULING_TYPES = ("activation_ruling", "payout_ruling", "publish_ruling")
 LOG_SUBJECT = "compliance-log"
 _ANCHOR_RE = re.compile(r"cmp-log-([0-9a-f]{16})-([0-9]{1,12})-([0-9a-f]{40})")
-_FAILED_RE = re.compile(r"cmp-lcf-([0-9a-f]{16})-([0-9]{1,12})-([0-9a-f]{40})")
 _VERSION_RE = re.compile(r"cmp-ver-([0-9a-f]{16})-([0-9]{1,9})-[0-9a-f]{32}")
-_VERSION_SUBJECT_RE = re.compile(r"register:v([0-9]{1,9})")
+_LEASE_RE = re.compile(r"cmp-lse-([0-9a-f]{16})-([0-9a-f]{16})-([0-9]{1,12})-[0-9a-f]{16}")
 
 
 def anchor_id(epoch: str, seq: int, line_sha: str) -> str:
     return f"cmp-log-{epoch}-{seq}-{line_sha[:40]}"
 
 
-def failed_id(epoch: str, seq: int, line_sha: str) -> str:
-    return f"cmp-lcf-{epoch}-{seq}-{line_sha[:40]}"
-
-
 def version_event_id(epoch: str, n: int, rows_sha: str, prev: Optional[str]) -> str:
     return f"cmp-ver-{epoch}-{n}-{sha256_text(f'{n}|{rows_sha}|{prev}')[:32]}"
 
 
-def anchor_problems(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int, str, bool]],
-                    referenced_ids: set[str], local_version: int, strict: bool) -> list[str]:
-    """``lines``: (seq, line_sha256, anchored) per local line (``anchored`` False only for lines written
-    before anchoring existed). ``strict`` (a disk log): another log's live anchors on this ledger, or an
-    empty local log while the ledger anchors one, are problems too."""
-    anchors: dict[str, set[tuple[int, str]]] = {}
-    failed: set[tuple[str, int, str]] = set()
+def lease_id(epoch: str, instance_id: str, head_seq: int, head_sha: str) -> str:
+    return f"cmp-lse-{epoch}-{instance_id}-{head_seq}-{head_sha[:16]}"
+
+
+def reconcile_id(epoch: str, head_seq: int, payload: dict) -> str:
+    return f"cmp-rec-{epoch}-{head_seq}-{payload_sha256(payload)[:40]}"
+
+
+def reconcile_payload(epoch: str, register_version: Optional[int], head_seq: int, head_sha: str,
+                      void_lines: list[int], void_event_ids: list[str]) -> dict:
+    """What a reconcile binds (its SHA-256 is what the ledger holds)."""
+    return {"epoch": epoch, "register_version": register_version, "head_seq": head_seq, "head_sha256": head_sha,
+            "void_lines": sorted(set(void_lines)), "void_event_ids": sorted(set(void_event_ids))}
+
+
+class Assessment:
+    def __init__(self):
+        self.fatal: list[str] = []
+        self.voidable: list[str] = []
+        self.void_lines: set[int] = set()
+        self.void_event_ids: set[str] = set()
+
+    @property
+    def problems(self) -> list[str]:
+        return self.fatal + self.voidable
+
+
+def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int, str, bool]],
+           referenced_ids: set[str], local_version: int, strict: bool, *, local_rulings: set[str] = frozenset(),
+           local_leases: list[tuple[int, str, str]] = (), reconciles: list[tuple[int, dict, str, Optional[int]]] = ()
+           ) -> Assessment:
+    """``lines``: (seq, line_sha256, anchored) per local line (``anchored`` False only for lines written before
+    anchoring existed). ``local_leases``: (seq, instance_id, event_id) of the local lease lines.
+    ``reconciles``: (seq, payload, event_id, register_version of that line) of the local reconcile lines.
+    ``strict`` (a disk log): another log's anchors on this ledger, or an empty local log while the ledger
+    anchors one, are fatal too."""
+    out = Assessment()
+    anchors: dict[str, dict[tuple[int, str], str]] = {}
     versions: dict[str, set[int]] = {}
-    withdrawn: set[tuple[str, int]] = set()
+    leases: list[tuple[int, str, str]] = []          # (ledger index, event id, instance) for this epoch
+    rulings: list[tuple[int, str]] = []
+    recs: dict[str, str] = {}                        # reconcile event id -> payload_sha256
     held: set[str] = set()
-    for e in entries:
+    first_anchor: Optional[int] = None
+    index: dict[str, int] = {}
+    for i, e in enumerate(entries):
         if not isinstance(e, dict) or e.get("department") != "compliance":
             continue
         eid, et = e.get("event_id"), e.get("event_type")
         if not isinstance(eid, str):
             continue
         held.add(eid)
+        index.setdefault(eid, i)
         if et == ANCHOR_TYPE and (m := _ANCHOR_RE.fullmatch(eid)):
-            anchors.setdefault(m.group(1), set()).add((int(m.group(2)), m.group(3)))
-        elif et == FAILED_TYPE and (m := _FAILED_RE.fullmatch(eid)):
-            failed.add((m.group(1), int(m.group(2)), m.group(3)))
-            if (vm := _VERSION_SUBJECT_RE.fullmatch(str(e.get("subject_id")))):
-                withdrawn.add((m.group(1), int(vm.group(1))))
+            anchors.setdefault(m.group(1), {})[(int(m.group(2)), m.group(3))] = eid
+            if m.group(1) == epoch and first_anchor is None:
+                first_anchor = i
         elif et == VERSION_TYPE and (m := _VERSION_RE.fullmatch(eid)):
             versions.setdefault(m.group(1), set()).add(int(m.group(2)))
-    live = {ep: {a for a in s if (ep, a[0], a[1]) not in failed} for ep, s in anchors.items()}
-    live = {ep: s for ep, s in live.items() if s}
-    problems: list[str] = []
+        elif et == LEASE_TYPE and (m := _LEASE_RE.fullmatch(eid)):
+            if m.group(1) == epoch:
+                leases.append((i, eid, m.group(2)))
+        elif et in RULING_TYPES:
+            rulings.append((i, eid))
+        elif et == RECONCILE_TYPE:
+            recs[eid] = str(e.get("payload_sha256"))
     if epoch is None:
-        if strict and (live or versions):
-            problems.append("the local log is empty but the ledger anchors a Compliance log (log deleted or "
-                            "truncated to nothing, or a second Compliance instance on this ledger)")
-        return problems
+        if strict and (anchors or versions):
+            out.fatal.append("the local log is empty but the ledger anchors a Compliance log (log deleted or "
+                             "truncated to nothing, or a second Compliance instance on this ledger)")
+        return out
+    local_sha = {seq: sha for seq, sha, _ in lines}
+    # reconciles: honoured only when the local record, the local line before it and the ledger event all agree
+    voided: set[str] = set()
+    for seq, payload, eid, line_version in reconciles:
+        ok = (isinstance(payload, dict) and payload.get("epoch") == epoch and payload.get("head_seq") == seq - 1
+              and seq >= 2 and payload.get("head_sha256") == local_sha.get(seq - 1)
+              and payload.get("register_version") == line_version
+              and eid == reconcile_id(epoch, seq - 1, payload) and recs.get(eid) == payload_sha256(payload))
+        if not ok:
+            out.fatal.append(f"the reconcile recorded at local log line {seq} does not match the ledger's reconcile "
+                             "event (missing, or its payload hash differs): its voids are not honoured")
+            continue
+        voided.update(payload.get("void_event_ids") or [])
     if strict:
-        foreign = sorted(ep for ep in live if ep != epoch)
+        foreign = sorted(ep for ep in anchors if ep != epoch)
         if foreign:
-            problems.append(f"the ledger anchors {len(foreign)} other Compliance log(s) (a replaced or recreated "
-                            "log, or a second Compliance instance on this ledger)")
-    mine = live.get(epoch, set())
+            out.fatal.append(f"the ledger anchors {len(foreign)} other Compliance log(s) (a replaced or recreated "
+                             "log, or a second Compliance instance on this ledger)")
+    mine = anchors.get(epoch, {})
+    local_pairs = {(seq, sha[:40]) for seq, sha, _ in lines}
     n = len(lines)
-    beyond = [seq for seq, _ in mine if seq > n]
-    if beyond:
-        problems.append(f"local log truncated: the ledger anchors line {max(beyond)} but the local log has {n} lines")
-    local_sha = {seq: sha[:40] for seq, sha, _ in lines}
-    anchored_by_seq: dict[int, set[str]] = {}
-    for seq, sha in mine:
-        anchored_by_seq.setdefault(seq, set()).add(sha)
-    differs = sorted(seq for seq, shas in anchored_by_seq.items() if seq <= n and local_sha.get(seq) not in shas)
-    if differs:
-        problems.append(f"{len(differs)} local log line(s) differ from what the ledger anchored (first: line "
-                        f"{differs[0]}): the log was edited or rewritten")
     unanchored = [seq for seq, sha, anchored in lines if anchored and (seq, sha[:40]) not in mine]
     if unanchored:
-        problems.append(f"{len(unanchored)} local log line(s) have no ledger anchor (first: line {unanchored[0]}): "
-                        "the log was rewritten or this is not its ledger")
+        out.fatal.append(f"{len(unanchored)} local log line(s) have no ledger anchor (first: line {unanchored[0]}): "
+                         "the log was rewritten or this is not its ledger")
     missing = referenced_ids - held
     if missing:
-        problems.append(f"the local log cites {len(missing)} ledger event(s) the ledger does not hold")
-    committed = {v for v in versions.get(epoch, set()) if (epoch, v) not in withdrawn}
-    if committed and max(committed) > local_version:
-        problems.append(f"register version {local_version} is behind the ledger's latest approved version "
-                        f"{max(committed)}")
-    return problems
+        out.fatal.append(f"the local log cites {len(missing)} ledger event(s) the ledger does not hold")
+    top = max(versions.get(epoch, set()), default=None)
+    if top is not None and top > local_version:
+        # never voidable: a rollback refuses to start, reconcile or not (N15-1)
+        out.fatal.append(f"register version {local_version} is behind the ledger's latest approved version {top} "
+                         "(a rollback; no reconcile can void a published version)")
+    stray = sorted((seq, sha, eid) for (seq, sha), eid in mine.items()
+                   if (seq, sha) not in local_pairs and eid not in voided)
+    beyond = [s for s in stray if s[0] > n]
+    within = [s for s in stray if s[0] <= n]
+    if beyond:
+        out.voidable.append(f"local log truncated: the ledger anchors line {max(s[0] for s in beyond)} but the local "
+                            f"log has {n} lines")
+    if within:
+        out.voidable.append(f"{len(within)} ledger anchor(s) of this log are not local lines (first: line "
+                            f"{within[0][0]}): a failed commit, an edited line or another instance's writes")
+    for seq, _, eid in stray:
+        out.void_lines.add(seq)
+        out.void_event_ids.add(eid)
+    # N15-2: rulings of this department on the ledger (since this log's first anchor) that the local log lacks
+    ghost = [eid for i, eid in rulings if first_anchor is not None and i > first_anchor
+             and eid not in local_rulings and eid not in voided]
+    if ghost:
+        out.voidable.append(f"{len(ghost)} ruling(s) on the ledger since this log's first anchor are not in the "
+                            f"local log (first: {ghost[0]}): a second instance, or a ruling whose commit failed")
+        out.void_event_ids.update(ghost)
+    # N15-2: an instance lease newer than this log's own latest lease, from another instance
+    mine_leases = {eid for _, _, eid in local_leases}
+    latest = max((index[eid] for eid in mine_leases if eid in index), default=-1)
+    newer = [(i, eid, inst) for i, eid, inst in leases if i > latest and eid not in mine_leases and eid not in voided]
+    if newer:
+        out.voidable.append(f"the ledger shows a newer instance lease for this log from another instance "
+                            f"({newer[-1][2]}): this data "
+                            "directory was copied and another instance runs (or ran) on it")
+        out.void_event_ids.update(eid for _, eid, _ in newer)
+    return out
+
+
+def anchor_problems(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int, str, bool]],
+                    referenced_ids: set[str], local_version: int, strict: bool, **kw) -> list[str]:
+    return assess(entries, epoch, lines, referenced_ids, local_version, strict, **kw).problems
 
 
 def redact(kind: str, record: dict) -> dict:

@@ -65,10 +65,21 @@ def build(submission_id: str, raw_facts: dict, rows: dict, fallback: dict, env, 
         why = (f"the campaign's latest activation ruling ({k_rid}) is not allowed; an earlier allowed ruling no longer counts"
                if k_state == "blocked" else "no allowed activation ruling for this campaign")
         ctx.pre.append(ctx.missing("HR-03", "campaign_activation", why))
+    elif not (campaign.get("target_jurisdictions") or []) or not (campaign.get("platforms") or []):
+        # AEGIS N15-5 sweep: an activation stored before empty lists were refused covers nothing
+        ctx.pre.append(ctx.missing("HR-03", "campaign_activation_scope",
+                                   "the campaign's current activation names no target jurisdictions or no platforms"))
     elif "platform" in f and f["platform"] not in set(campaign.get("platforms") or []):
         # AEGIS N14-2 sweep: the clip's platform must be one the campaign was activated (and category-checked) for
         ctx.pre.append(ctx.missing("HR-03", "campaign_activation_scope",
                                    f"platform '{f['platform']}' is not covered by the campaign's current activation"))
+
+    # AEGIS N15-6: the clip's platform must also be one the clipper declared a posting account on
+    if clipper is not None and "platform" in f:
+        declared = {a.get("platform") for a in (clipper.get("accounts") or []) if isinstance(a, dict)}
+        if f["platform"] not in declared:
+            ctx.pre.append(ctx.missing("HR-03", "clipper_account_scope",
+                                       f"platform '{f['platform']}' is not one of the clipper's declared accounts"))
 
     resolutions = []
     if clipper is not None:

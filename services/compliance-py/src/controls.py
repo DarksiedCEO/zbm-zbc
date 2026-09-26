@@ -129,7 +129,9 @@ def control_status(defn: dict, state: dict, rows_by_id: Optional[dict[str, dict]
         return {"status": "red", "reason": "register_not_in_force", "not_in_force": []}
     today = now.astimezone(timezone.utc).date()
     feeding = expand_obligations(defn["obligation_ids"], rows_by_id)
-    missing_or_bad = []
+    # AEGIS N15-5 sweep: a wildcard that matches no row feeds nothing; "every feeding row in force" would be
+    # vacuously true. It is red instead.
+    missing_or_bad = [i for i in defn["obligation_ids"] if i.endswith("*") and not expand_obligations([i], rows_by_id)]
     for oid in feeding:
         row = rows_by_id.get(oid)
         if row is None or effective_status(row, today) != "verified":

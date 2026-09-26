@@ -706,6 +706,14 @@ def base_match(aw: dict, ctx: Ctx) -> bool:
 def evaluate(ctx: Ctx) -> list[Unmet]:
     """Spec C.2 steps 4-6 (required facts are in ``ctx.pre``). Controls and holds are added by the caller."""
     out: list[Unmet] = list(ctx.pre)
+    # AEGIS N15-5 (defence in depth behind the 422 on empty lists): a rule scoped to platforms or jurisdictions
+    # "does not apply" to an EMPTY set only vacuously. No platform or no resolved jurisdiction blocks.
+    if ctx.platforms is not None and not ctx.platforms:
+        key = "platform" if ctx.gate == "payout" else ("accounts" if ctx.lane == "zbc_creator" else "platforms")
+        out.append(ctx.missing("HR-03", key, "no platform to evaluate: rules scoped to platforms cannot be skipped"))
+    if not ctx.jurisdictions:
+        out.append(ctx.missing("HR-03", "jurisdictions",
+                               "no jurisdiction resolved: rules scoped to jurisdictions cannot be skipped"))
     for oid in sorted(ctx.rows):
         row = ctx.rows[oid]
         if ctx.gate not in row["gates"] or row["status"] == "superseded" or not is_effective(row, ctx.today):

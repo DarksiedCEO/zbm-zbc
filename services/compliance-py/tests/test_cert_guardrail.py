@@ -208,7 +208,8 @@ def test_persistence_replays_versions_rulings_and_holds(tmp_path):
     a = x.activate_client()
     y = Harness(data_dir=str(tmp_path), clock=x.clock, ledger=x.ledger)
     assert y.get("/health").json() == {"status": "ok", "service": "compliance-py", "register_version_in_force": 1,
-                                       "in_memory": False, "seed_pinned": True, "production": True}
+                                       "in_memory": False, "seed_pinned": True, "production": True,
+                                       "reconcile_mode": False, "reconcile_required": False}   # AEGIS N15-1
     assert y.get(f"/compliance/v1/rulings/{a['ruling_id']}").json()["allowed"] is True
     assert y.svc.control_state["C-11"]["last_result"] == "pass"
 

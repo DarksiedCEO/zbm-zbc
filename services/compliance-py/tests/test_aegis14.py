@@ -15,7 +15,7 @@ import pytest
 
 from clock import FixedClock, iso
 from fakes import FakeA11y
-from helpers import (NOW, SEED_PATH, SEED_ROWS, Harness, brand_facts, client_facts, clip_facts, creator_facts, deep,
+from helpers import (ANDRE_TOKEN, NOW, SEED_PATH, SEED_ROWS, Harness, brand_facts, client_facts, clip_facts, creator_facts, deep,
                      publish_facts, rid, unmet_codes, unmet_ids)
 from ports import A11yAnswer
 
@@ -233,13 +233,24 @@ def test_n14_4_clean_restart_still_starts(tmp_path):
 
 
 def test_n14_4_failed_append_after_anchor_does_not_brick_restart(tmp_path):
+    """Changed in round 15 (N15-1): the service no longer withdraws the anchor with a ledger marker (anyone with
+    the ledger token could forge one). The restart refuses until Andre reconciles; then it starts."""
     x = _durable(tmp_path)
     x.svc.log.fail_next_append = True
     r = x.rule("client-z", "client", client_facts())
     assert r.status_code == 503
-    assert x.ledger.of_type("local_commit_failed")      # the anchored line was withdrawn on the ledger
-    y = Harness(data_dir=str(tmp_path / "d"), ledger=x.ledger, clock=x.clock, ports=x.ports)
-    assert y.get("/health").json()["register_version_in_force"] is not None
+    assert not x.ledger.of_type("local_commit_failed")
+    with pytest.raises(RuntimeError, match="COMPLIANCE_RECONCILE_MODE"):
+        Harness(data_dir=str(tmp_path / "d"), ledger=x.ledger, clock=x.clock, ports=x.ports)
+    y = Harness(data_dir=str(tmp_path / "d"), ledger=x.ledger, clock=x.clock, ports=x.ports,
+                env={"COMPLIANCE_RECONCILE_MODE": "1"})
+    plan = y.client.get("/compliance/v1/reconcile", headers=y.headers(andre=ANDRE_TOKEN)).json()
+    assert y.post("/compliance/v1/reconcile", {"request_id": rid("rec"), "head_sha256": plan["head_sha256"],
+                                               "void_lines": plan["voidable"]["lines"],
+                                               "void_event_ids": plan["voidable"]["event_ids"]},
+                  andre=ANDRE_TOKEN).status_code == 200
+    z = Harness(data_dir=str(tmp_path / "d"), ledger=x.ledger, clock=x.clock, ports=x.ports)
+    assert z.get("/health").json()["register_version_in_force"] is not None
 
 
 def test_n14_4_c11_red_when_the_ledger_does_not_anchor_the_local_log(tmp_path):
@@ -305,8 +316,10 @@ def test_n14_6_negated_or_compound_labels_fail(text):
     assert j["allowed"] is False and ("US-FTC-D101-02", "label_vocabulary") in unmet_codes(j), text
 
 
-@pytest.mark.parametrize("text", ["#ad", "#ad Sponsored", "Sponsored: great product", "(#ad)", "Advertisement", "＃ＡＤ",
-                                  "#ad — not affiliated with the brand"])
+@pytest.mark.parametrize("text", ["#ad", "#ad Sponsored", "Sponsored: great product", "Sponsored (#ad)", "Advertisement",
+                                  "＃ＡＤ", "#ad — not affiliated with the brand"])
+# round 15 (N15-4): "(#ad)" alone no longer counts (a label inside parentheses is not a disclosure); it is asserted
+# blocked in test_aegis15.py. "Sponsored (#ad)" still passes on "Sponsored".
 def test_n14_6_standalone_labels_still_pass(text):
     h = ready()
     h.activate_creator()

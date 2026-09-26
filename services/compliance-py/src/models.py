@@ -134,5 +134,13 @@ class RunRequest(Strict):
     request_id: Id
 
 
+class ReconcileRequest(Strict):
+    """AEGIS N15-1: Andre voids exactly what GET /compliance/v1/reconcile shows, bound to the log head he read."""
+    request_id: Id
+    head_sha256: Sha
+    void_lines: list[Annotated[int, Field(ge=1, le=10**12)]] = Field(max_length=10_000)
+    void_event_ids: list[Id] = Field(max_length=10_000)
+
+
 REQUEST_MODELS = (RuleRequest, ReviewRequest, ScreenRequest, A11yRequest, ProposalRequest, DecisionsRequest,
-                  ControlResultRequest, HoldReleaseRequest, ResolveRequest, RunRequest)
+                  ControlResultRequest, HoldReleaseRequest, ResolveRequest, RunRequest, ReconcileRequest)

@@ -36,10 +36,14 @@ def test_verified_requires_matching_primary_evidence_and_dates(hs):
     for body, msg in cases:
         r = hs.propose({"kind": "amend", "target_id": "PLT-META-01", **body})
         assert r.status_code == 422 and msg in r.json()["detail"], (msg, r.text)
-    ok = hs.propose({"kind": "amend", "target_id": "PLT-META-01", "proposed_row": {**row, "expires_at": "2099-01-01"},
+    # round 15 (N15-7): unverified -> verified only by a reverify from the row's own source (and it is flagged)
+    assert hs.propose({"kind": "amend", "target_id": "PLT-META-01", "proposed_row": row,
+                       "evidence": _ev(url)}).status_code == 422
+    ok = hs.propose({"kind": "reverify", "target_id": "PLT-META-01", "proposed_row": {**row, "expires_at": "2099-01-01"},
                      "evidence": _ev(url)})
     assert ok.status_code == 201, ok.text
     p = ok.json()["proposal"]
+    assert "unverified_to_verified" in p["weakening_reasons"]
     assert p["proposed_row"]["expires_at"] == "2026-10-26"  # recomputed: platform policy, 30 days
     assert p["diff"]["status"] == {"old": "unverified", "new": "verified"}
 
@@ -50,8 +54,8 @@ def test_andre_verifying_the_meta_row_unblocks_instagram(hs):
     hs.activate_brand(platforms=("instagram",))
     assert ("PLT-META-01", "rule_not_in_force") in unmet_codes(hs.review("zbc_clip", rid(), clip_facts(platform="instagram")).json())
     row = {**_row(hs, "PLT-META-01"), "source_quality": "primary", "status": "verified", "verified_at": "2026-09-26"}
-    p = hs.propose({"kind": "amend", "target_id": "PLT-META-01", "proposed_row": row, "evidence": _ev(row["source_url"])})
-    hs.approve(p.json()["proposal"])
+    p = hs.propose({"kind": "reverify", "target_id": "PLT-META-01", "proposed_row": row, "evidence": _ev(row["source_url"])})
+    hs.approve(p.json()["proposal"], acknowledge_weakening=True)   # round 15 (N15-7): reverify, flagged
     r = hs.review("zbc_clip", rid(), clip_facts(platform="instagram")).json()
     assert r["allowed"] is True, r["unmet_lines"]
 

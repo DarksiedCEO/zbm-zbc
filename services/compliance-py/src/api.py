@@ -68,6 +68,7 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/compliance/v1/(rule|review|gates/(activation|payout|publish))$"), 256 * 1024),
     (re.compile(r"^/compliance/v1/register/proposals$"), 128 * 1024),
     (re.compile(r"^/compliance/v1/register/decisions$"), 64 * 1024),
+    (re.compile(r"^/compliance/v1/reconcile$"), 1024 * 1024),   # up to 10,000 voided ids (AEGIS N15-1)
 ]
 DEFAULT_ROUTE_LIMIT = 16 * 1024
 
@@ -461,6 +462,17 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
             raise Invalid("hold id format")
         return svc.release_hold(req.request_id, hold_id, req.reason)
 
+    # --- reconcile (AEGIS N15-1) -------------------------------------------------------------------
+
+    @app.get("/compliance/v1/reconcile", dependencies=auth)
+    def reconcile_plan(_: str = Depends(andre("reconcile"))) -> dict:
+        return svc.reconcile_plan()
+
+    @app.post("/compliance/v1/reconcile", dependencies=auth)
+    def reconcile(req: m.ReconcileRequest = Depends(body(m.ReconcileRequest)),
+                  _: str = Depends(andre("reconcile"))) -> dict:
+        return svc.reconcile(req.request_id, req.head_sha256, list(req.void_lines), list(req.void_event_ids))
+
     # --- watcher and audit -----------------------------------------------------------------------
 
     @app.post("/compliance/v1/watcher/run", dependencies=auth)
@@ -508,7 +520,8 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
                  watcher_max_proposals_per_source=settings.watcher_max_proposals_per_source)
     # AEGIS N14-13: the pinned hash, unless the operator explicitly opted into an unpinned (non-production) seed
     expected = settings.seed_sha256 if (settings.allow_unpinned_seed and settings.seed_sha256) else SPEC_SEED_SHA256
-    return ComplianceService(cfg, Recorder(ledger), RecordLog(settings.data_dir), seed_bytes, expected, ports, clock)
+    return ComplianceService(cfg, Recorder(ledger), RecordLog(settings.data_dir), seed_bytes, expected, ports, clock,
+                             reconcile_mode=settings.reconcile_mode)
 
 
 def _app_from_env() -> FastAPI:
