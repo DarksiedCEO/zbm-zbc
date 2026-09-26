@@ -1085,6 +1085,8 @@ money. ZBC's unit of work is a campaign, not a clip.
     multi-letter ligature signs ₠ ₧ ₯ ₰ ₶ ₷ and ₻ ₼ ₾ ⃀ (no clear
     letter); the fail-safe covers them. A phrase read through the table
     is a human's call, never a reject: a currency sign is also money.
+    (Fix wave 11, decision 46: an EXACT reading through the table is now
+    a reject; (b) below is replaced by Rule A.)
     (b) the fail-safe counts a SYMBOL-LETTERED word (`_symbol_word_count`):
     a run of at least 3 symbols that can be letters (the table, or any
     Sc / Sm / Sk outside the pictograph blocks), at least two different
@@ -1185,6 +1187,141 @@ money. ZBC's unit of work is a campaign, not a clip.
     for the first and replay its body; if the first failed and recorded
     nothing, the waiter runs the review itself. Tested with a slow fake
     review and two threads (1 review, not 2; both 201, one replayed).
+46. **Fail closed on what the gate cannot read; reading tables only
+    upgrade (fix wave 11; AEGIS round 10 N10-1, design ruling).** Waves 9
+    and 10 tried to READ every symbol alphabet (letter-like symbols,
+    Braille, currency / math, flags). AEGIS round 10 spelled never-say
+    phrases in arrows, math operators, APL and other technical symbols
+    ("♏⍺⋊⋿ ♏○⋂⋿¥") and 270 of 540 probe cases passed clean; 549 more
+    single-letter lookalikes are read as nothing. Reading tables cannot
+    win, so the gate now fails closed. **Rule A** (`unreadable_words`, an
+    obfuscation signal "unreadable symbols", so human_review): after the
+    letter-like map, a whitespace-delimited word whose sequence of letters
+    and unreadable symbols is at least half unreadable symbols, or holds 2
+    unreadable among any 3 consecutive (a styled run glued to a long word),
+    goes to a human. Digits, punctuation, marks, invisible characters and
+    ordinary symbols are left out of that sequence, so none of them can
+    dilute a word ("♏..⍺..⋊..⋿", "♏11⍺11⋊", "♏🔥🔥⍺🔥🔥⋊"). Not a word:
+    one unreadable symbol alone or repeated with no letter ("→", "∞", "≥",
+    "€€€": one letter's worth at most, and no never-say word is one
+    repeated letter) and a price ("₹499", "€1.5m"). "Unreadable" = a code
+    point of category So / Sm / Sc / Sk / Co / Cn that is not ORDINARY:
+    below U+0100, NFKC-read as letters / digits / Latin-1 (™, ㎏, №), or
+    emoji. The emoji part is a BLOCK APPROXIMATION of Emoji_Presentation /
+    Extended_Pictographic (Python has neither; emoji-data.txt could not be
+    fetched): whole blocks U+1F300-1F5FF, 1F600-1F64F, 1F680-1F6FF,
+    1F900-1F9FF, 1FA70-1FAFF (unassigned code points included, so an emoji
+    newer than Python's database is ordinary), plus an explicit list of
+    the emoji inside the otherwise not-ordinary blocks — the design
+    ruling's list (↔…↪ ⌚⌛⌨⏏⏩-⏳⏸⏹⏺ Ⓜ ▪▫▶◀◻◼◽◾ ☀-☄ ☎ ☑ … ♈-♓ … ✅ ✈ … ❤
+    ➕➖➗➡➰➿ ⤴⤵ ⬅⬆⬇⬛⬜⭐⭕ 〰〽㊗㊙) — and in the SMP symbol blocks (🀄 🃏
+    🅰🅱🅾🅿 🆎 🆑-🆚 regional indicators 🈁 🈂 🈚 🈯 🈲-🈺 🉐 🉑 🟠-🟫 🟰).
+    Arrows, Mathematical Operators, Misc Technical (APL), Letterlike
+    Symbols, Enclosed Alphanumerics, Box Drawing / Block Elements,
+    Geometric Shapes, Miscellaneous Symbols and Dingbats (their emoji
+    excepted), Misc Math Symbols, Supplemental Arrows, non-letter Braille,
+    private use and unassigned code points are NOT ordinary. The ruling
+    can be read as making the whole Miscellaneous Symbols and Dingbats
+    blocks ordinary; that reading was measured and rejected: it let "no
+    cost" written "n❍ ☾❍∫✝" and "top tip" written "✝❍♇ ✝❘♇" pass every
+    rule (❍ ☾ ♇ ❘ ✕ ⚬ ☉ are letter-shaped non-emoji in those blocks),
+    and saved only the decoration captions listed below. The rule does not depend on any table (tested with the
+    currency / math table emptied). **Rule B** (`_DIVIDER`): a run of ONE
+    Box Drawing / Block Elements / Geometric Shapes character repeated 3+
+    times ("━━━━━━", "▬▬▬", "■■■") is a divider, blanked before Rule A,
+    the stripped-share fail-safe and the mixed-word rule; a run mixing
+    different such characters ("╔══") still counts. The wave-10
+    special case for currency words in the stripped share
+    (`_symbol_word_count`) is gone: Rule A covers it. **Tables only
+    upgrade**: a never-say phrase read EXACTLY through
+    CURRENCY_MATH_LOOKALIKES plus the non-ASCII SKELETON symbols (first
+    and second readings, `currency_math_readings`) is a rejection ("₥₳₭€
+    ₥⊙₦€¥" was human_review in wave 10); anything less stays human_review.
+    Measured (fix11 re-runs of the round-10 probes, unmodified copies):
+    `ns_symbols10.py` MISS 270 → 0 of 540 (540 human_review; no exact
+    table reading exists in those styles, so no reject); `ns_evade9.py`
+    MISS 5 → 5 of 463 (the same five, see below). False positives (every
+    newly flagged caption listed): round-8 corpus 3/170 → 3/170, round-9
+    corpus plain 0/30, emoji 0/40, hashtag 0/20, non-Latin 10/20
+    unchanged, decor 8/30 → 10/30 (newly flagged: "⋆｡°✩ studio diaries
+    ✩°｡⋆", "♪♫ live set tonight ♫♪", "✧˖° new zine out now °˖✧";
+    cleared: "━━━━━━ SALE ENDS SUNDAY ━━━━━━"); round-10 FP probe prices
+    0/13, math 8/13, astro 1/8, flags 0/9, Braille 3/4, VS16 / hashtag
+    0/12 unchanged, dividers / kaomoji 11/12 → 8/12 (cleared the three
+    single-character dividers, none newly flagged); the 24-caption price /
+    percent / math guard 0 flagged. A fresh 53-caption decoration set
+    (fix11 `fp11_decor.py`) 10 → 16 flagged: newly "★★★★☆ 4/5 would read
+    again", "✿❀ spring menu ❀✿", "⋆˙⟡♡ cozy vlog", "◆◇◆ limited run ◆◇◆",
+    "₊˚⊹♡ soft launch", "⁺‧₊˚ ☁️⋅♡ cloudy" — a word of two or more
+    different non-emoji symbols, the cost Rule A necessarily carries
+    (with the whole-block reading above: 3 fewer in the round-9 decor
+    stratum and 3 fewer in this set).
+47. **Regional indicators are a letter stream (fix wave 11; AEGIS round
+    10 N10-2).** Decision 41 matched the regional reading as words, so a
+    phrase glued between real flags ("🇺🇸🇲🇦🇰🇪 🇲🇴🇳🇪🇾🇬🇧", read
+    "usmake moneygb") passed. Each run of regional indicators (spaces and
+    invisible joiners / selectors between them ignored) is now also a
+    letter stream (`regional_streams`), and a never-say phrase's letters
+    (spaces dropped, runs collapsed) anywhere inside a collapsed stream —
+    within a field, or a run ending one field read on into a run starting
+    another — is human_review ("written in regional-indicator letters
+    inside a run of them"); still never a reject (flags). Measured:
+    `ns_regional10.py` MISS 27 → 2 of 559 (RI-realflags-around 13 → 0,
+    RI-split-fields 12 → 0; the two left are "cure" written "cur" — a
+    4-letter entry is exact-only by design, decision 22 — in regional
+    indicators and in squared letters with VS16; the ASCII "cur" passes
+    too). Real flag rows (9 + 9 captions) still pass.
+48. **The regional reading gets the field joints (fix wave 11; AEGIS
+    round 10 N10-3).** Wave 10 passed the regional reading to the
+    never-say signals with no field edges and no submission, so a phrase
+    split over two fields in regional indicators passed. The reading now
+    gets the main reading's field joints and symbol-across-fields check
+    (the submission read field by field), and a field written ONLY in
+    regional indicators is one side of a phrase whose other side is at
+    either edge of another field (`_regional_split`; fields have no
+    reading order, as for a symbol-only field, decision 35). To keep the
+    cost bounded the reading is taken over the neighbourhood of each run
+    (16 chunks a side, `_regional_context`), not over the whole text again:
+    a phrase no regional indicator takes part in reads the same in both
+    and the main reading has judged it. Measured: `ns_ri_joint10.py` 6
+    passes → 0 of 36.
+49. **Never-say length caps (fix wave 11; AEGIS round 10 N10-4).** The
+    30-phrase cap (decision 44) limited count, not length: 30 phrases of
+    60 words cost 37.9 s CPU per review, 30 of eight two-letter words
+    6.9 s. Caps now: `MAX_NEVER_SAY` 30 phrases, `MAX_NEVER_SAY_WORDS` 3
+    words and `MAX_NEVER_SAY_PHRASE_CHARS` 30 characters per phrase,
+    `MAX_NEVER_SAY_CHARS` 300 characters over the list
+    (`never_say_over_caps`). Every draft path (first draft, revision,
+    edit) is approved only by the Campaign Rulebook, which answers 422
+    naming every cap broken; the draft keeps every phrase and carries a
+    warning (tested on all three paths for a 60-word phrase and for a list
+    over the total). Chosen from measurement (2 vCPU Intel Xeon @ 2.80 GHz,
+    Python 3.11.15; fix11 `cost11.py`: every field at its maximum, the
+    phrases' own words mutated — including 1 in 8 into regional indicators
+    and 1 in 8 into currency / math symbols — a regional indicator opening
+    every field so the regional reading runs, routed to a human, cold, one
+    process per measurement, thread CPU, two or three seeds): within the
+    caps 15 x 3 words (<= 20 characters) 1.34-1.49 s, 16 x 3 (<= 18)
+    0.86-1.37 s, 20-21 x 3 (<= 14-15) 0.91-1.70 s, 10 x 3 long words (<=
+    30) 0.74-1.25 s, 15 x 3 English words 0.83-1.39 s, 30 x 3 two-letter
+    words 0.41-0.62 s — worst 1.70 s alone; inside the full test run (a
+    long-lived process with a large heap) the same shapes measured up to
+    1.94-1.98 s CPU (two full runs at these caps; the test takes the best
+    of two cold runs and passed with 0.02-0.06 s to spare — the in-process
+    margin is thin; at the first caps tried, 4 words / 40 / 400
+    characters, it measured 2.08 s and failed, which is why they were
+    lowered).
+    Over a cap: four-word phrases 16 x 4 1.47-1.93 s, 12 x 4 (290
+    characters) 1.62-1.72 s, 11 x 4 English words 1.74-1.77 s; 3-word
+    lists of 400 characters 1.45-1.74 s, of 588 characters 1.76-1.93 s;
+    20 x 6 two-letter words 1.56-2.20 s; 30 x 8 two-letter words 5.6-7.2
+    s. Four-word phrases were measured and left out (no margin inside a
+    long-running process); a 240-character budget measured 1.65 s worst,
+    barely below 300's 1.70 s, because the cost saturates. About half of a
+    worst-case review is the regional-indicator reading (decisions 41, 47,
+    48: a second pass over the text) and most of the rest is fixed per
+    text, so the margin under 2 s is thin and a longer list needs a
+    faster gate, not a higher cap.
 
 ## Shared vs separate
 
@@ -1350,12 +1487,14 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     the list, so a rulebook may carry at most 30 never-say phrases
     (`MAX_NEVER_SAY`; approval refuses more with a 422): the worst case
     measured at 30 is 1.47-1.56 s per review alone, 1.77 s CPU inside the
-    full test run (a long-running process with a large heap). Still open: the review
-    occupies a worker thread and, under one GIL, CPU for that long; a
-    long phrase (up to 4,000 characters) costs more than a short one and
-    is not capped separately; a campaign that needs more than 50 phrases
-    needs a faster gate, not a higher cap (most of the cost is fixed per
-    text: 10 phrases already cost 1.23 s in the same worst case).
+    full test run (a long-running process with a large heap). Fix wave 11
+    (decision 49): the count cap did not bound LENGTH (30 phrases of 60
+    words: 37.9 s); a phrase is now capped at 3 words / 30 characters and
+    the list at 300 characters, worst measured 1.70 s alone (regional
+    reading forced), 1.94-1.98 s CPU inside the full test run. Still open: the
+    review occupies a worker thread and, under one GIL, CPU for that long;
+    the margin under 2 s is thin; a campaign that needs a longer list needs
+    a faster gate, not a higher cap (most of the cost is fixed per text).
 17. **Memory of a churned campaign (fix wave 9, open).** Retired ids are
     no longer copied into every version (decision 37), but every version
     keeps its own rules so a clip made under it can be judged: 60

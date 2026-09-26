@@ -93,6 +93,12 @@ NS  no never-say phrase in ANY text field (bio included)   -> reject
     never a reject (it may be flags), whatever the run lengths
     (`_regional_never_say`, N9-2); grade-1 Braille letters are letter-like
     (N9-7)
+    fix wave 11 (AEGIS round 10): a phrase read EXACTLY through the
+    currency / math table (shared/text.currency_math_readings) -> reject
+    (reading tables only upgrade); each run of regional indicators is also
+    a letter STREAM matched anywhere inside, and the regional reading gets
+    the field joints and a regional-only field as one side of a split
+    phrase -> human_review (N10-2, N10-3)
 MIX any word mixing letters with symbols/digits in any text field
     (shared/text.mixed_symbol_words; ordinary
     punctuation, #hashtags, prices and "2nd"/"1990s"-style numbers excepted)
@@ -100,8 +106,9 @@ MIX any word mixing letters with symbols/digits in any text field
 OBF any text field shows an obfuscation
     signal (letter-like symbols, fix wave 9; more than 30% of a field or
     of a run of its words stripped by canonicalisation, the fail-safe —
-    since fix wave 10 also any run of 3 stripped characters, and a word
-    made mostly of currency / math symbols;
+    since fix wave 10 also any run of 3 stripped characters; since fix
+    wave 11 a word made mostly of symbols the gate cannot read, Rule A
+    "unreadable symbols", a repeated divider excepted, Rule B;
     bidi controls, fillers, tag characters anywhere;
     other invisibles beside a letter; lookalikes among Latin;
     two scripts inside one word; separator-split letters; a Latin
@@ -115,7 +122,9 @@ MD  min days live is NOT judged here (Verification and Integrity).
 
 from __future__ import annotations
 
+import bisect
 import functools
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -128,8 +137,10 @@ from shared.text import (
     _osa_within,
     _vis,
     canonical,
+    collapse_runs,
     consonant_skeleton,
     contains_phrase,
+    currency_math_readings,
     match_phrase,
     mixed_symbol_words,
     near_miss,
@@ -139,8 +150,10 @@ from shared.text import (
     _is_symbol_char,
     phonetic_key,
     phonetic_signal,
+    phrase_stream,
     phrase_words_in_order,
     regional_reading,
+    regional_streams,
     relaxed_skeleton_spans,
     relaxed_visual_spans,
     skeleton_near_misses,
@@ -429,12 +442,14 @@ def _rejected_later(sub: ClipSubmission, rb: Rulebook) -> bool:
     return False
 
 
-def _borderline_never_say(sub: ClipSubmission | None, all_text: str, edges, open_rules: list[tuple],
+def _borderline_never_say(sub: ClipSubmission, all_text: str, edges, open_rules: list[tuple],
                           borderline: list[str]) -> set[str]:
     """The never-say signals that make a clip a human's call, for the
     rules no exact or lookalike reading broke (in rule order); the ids of
-    the rules it flagged. `sub` None: no symbol-across-fields check (a
-    second reading of the same fields, fix wave 10)."""
+    the rules it flagged. The regional-indicator reading passes the
+    submission as read, with its own field edges (fix wave 11, N10-3: in
+    wave 10 it passed none, so a phrase split over two fields was not
+    looked for in that reading)."""
     flagged: set[str] = set()
     # near_miss() in stages (fix wave 9, M1): each batched scan runs only for the phrases every earlier
     # signal left, so a phrase gets the same first signal as before, in the same rule order
@@ -493,7 +508,7 @@ def _borderline_never_say(sub: ClipSubmission | None, all_text: str, edges, open
                 continue
             left.append((r, phrase, fz))
         # a symbol standing for a word across a field boundary (fix wave 9, M2)
-        sym = _symbol_spreads(sub, [(p, fz) for _, p, fz in left]) if left and sub is not None else {}
+        sym = _symbol_spreads(sub, [(p, fz) for _, p, fz in left]) if left else {}
         for r, phrase, fz in left:
             hit = sym.get((phrase, fz))
             if hit:
@@ -506,29 +521,139 @@ def _borderline_never_say(sub: ClipSubmission | None, all_text: str, edges, open
 REGIONAL_NOTE = "read with its regional-indicator symbols as letters (they may be flags, so a human decides)"
 
 
-def _regional_never_say(all_text: str, open_rules: list[tuple], already: set[str], borderline: list[str]) -> None:
+def _regional_split(sub: ClipSubmission, read: dict[str, str], phrases: list[tuple[str, bool]]) -> dict[tuple[str, bool], str]:
+    """Fix wave 11 (N10-3): {(phrase, fuzzy): how} for a multi-word phrase whose one side is a field
+    written ONLY in regional indicators ("🇲🇴🇳🇪🇾" as the on-screen text) and whose other side is the
+    first or last words of another field, read with its regional indicators as letters. Fields have no
+    reading order (as the symbol-only check of the main reading, `_symbol_spreads`), so either side may
+    be either field and either edge."""
+    out: dict[tuple[str, bool], str] = {}
+    only = [f for f in TEXT_FIELDS if read[f] != getattr(sub, f) and symbol_only(getattr(sub, f))]
+    if not only:
+        return out
+    words = {f: canonical(read[f]).split() for f in TEXT_FIELDS if read[f].strip()}
+    for key in phrases:
+        pw = canonical(key[0]).split()
+        if len(pw) < 2:
+            continue
+        for s in only:
+            squashed = collapse_runs("".join(words.get(s, [])))
+            for i in range(1, len(pw)):
+                for mine, other in ((pw[:i], pw[i:]), (pw[i:], pw[:i])):
+                    if collapse_runs("".join(mine)) != squashed:
+                        continue
+                    k = len(other)
+                    for x, toks in words.items():
+                        if x != s and (toks[:k] == other or toks[-k:] == other):
+                            out[key] = f"{' '.join(mine)!r} in {s} and {' '.join(other)!r} at an edge of {x}"
+                            break
+                    if key in out:
+                        break
+                if key in out:
+                    break
+            if key in out:
+                break
+    return out
+
+
+REGIONAL_CONTEXT = 2 * BOUNDARY_WORDS  # whitespace-separated chunks read on each side of a run of regional indicators
+
+
+def _regional_context(sub: ClipSubmission) -> str:
+    """Every field's runs of regional indicators with REGIONAL_CONTEXT chunks on each side (overlapping
+    neighbourhoods merged), one line per neighbourhood."""
+    parts: list[str] = []
+    for f in TEXT_FIELDS:
+        text = getattr(sub, f)
+        runs = regional_streams(text)
+        if not runs:
+            continue
+        chunks = [(m.start(), m.end()) for m in _CHUNK.finditer(text)]
+        starts = [c[0] for c in chunks]
+        spans: list[list[int]] = []
+        for st, en, _ in runs:
+            i = max(0, bisect.bisect_right(starts, st) - 1 - REGIONAL_CONTEXT)
+            j = min(len(chunks) - 1, bisect.bisect_left(starts, en) - 1 + REGIONAL_CONTEXT)
+            lo, hi = chunks[i][0], chunks[max(i, j)][1]
+            if spans and lo <= spans[-1][1]:
+                spans[-1][1] = max(spans[-1][1], hi)
+            else:
+                spans.append([lo, hi])
+        parts.extend(text[lo:hi] for lo, hi in spans)
+    return "\n".join(parts)
+
+
+_CHUNK = re.compile(r"\S+")
+
+
+def _regional_never_say(sub: ClipSubmission, all_text: str, open_rules: list[tuple], already: set[str],
+                        borderline: list[str]) -> None:
     """Fix wave 10 (AEGIS round 9 N9-2): regional indicators are a candidate READING, never a signal on
     their own. The never-say rules no other signal flagged are looked for once more in the fields read
     with every regional indicator as its letter (glued "🇲🇦🇰🇪" or pair-spaced "🇲🇦 🇰🇪" alike): any
     hit — exact, split, lookalike or any similarity signal — is a human's call, never a rejection (a
-    run of regional indicators is also a row of flags); no hit adds nothing, whatever the run lengths."""
-    reading = regional_reading(all_text)
-    if reading is None:
+    run of regional indicators is also a row of flags); no hit adds nothing, whatever the run lengths.
+    Fix wave 11 (AEGIS round 10): (N10-2) each run of regional indicators is also a letter STREAM
+    matched anywhere inside ("🇺🇸🇲🇦🇰🇪 🇲🇴🇳🇪🇾🇬🇧" is "usmakemoneygb": flags carry no word
+    boundaries), within a field and across the end of one field and the start of another; (N10-3) the
+    reading gets the main reading's field joints, symbol-across-fields check and a field written only
+    in regional indicators is one side of a phrase split over two fields."""
+    if regional_reading(all_text) is None:
         return
     todo = [(r, phrase, fz) for r, phrase, fz, _ in open_rules if r.rule_id not in already]
     if not todo:
         return
+    # Only the words around a run of regional indicators can read differently (fix wave 11, N10-4 cost):
+    # the reading is taken over those neighbourhoods (REGIONAL_CONTEXT chunks a side, per field, joined
+    # by line breaks like the fields), not over the whole ~65 KB again. A phrase no regional indicator
+    # takes part in reads the same in both, and the main reading has already judged it.
+    reading = regional_reading(_regional_context(sub))
     visual_near_misses(reading, tuple((p, fz) for _, p, fz in todo))  # one scan of the reading for them all
     pending: list[tuple] = []
     hits: list[str] = []
+    # the letter streams: every run in every field, and a run ending one field read on into a run
+    # starting another (fields have no reading order: every ordered pair)
+    streams: list[tuple[str, str]] = []
+    ends: dict[str, tuple[str, str]] = {}
+    for f in TEXT_FIELDS:
+        text = getattr(sub, f)
+        runs = regional_streams(text)
+        streams.extend((f, st) for _, _, st in runs)
+        if runs:
+            head = runs[0][2] if not text[:runs[0][0]].strip() else ""
+            tail = runs[-1][2] if not text[runs[-1][1]:].strip() else ""
+            ends[f] = (head, tail)
+    for a, (_, tail) in ends.items():
+        for b, (head, _) in ends.items():
+            if a != b and tail and head:
+                streams.append((f"{a} and {b}", tail + head))
+    streams = [(w, collapse_runs(st)) for w, st in streams]
     for r, phrase, fz in todo:
         m = match_phrase(reading, phrase)
         if m is PhraseMatch.EXACT or (m is PhraseMatch.NONE and visual_lookalike_exact(reading, phrase, fz)):
             hits.append(f"{r.rule_id}: possible never-say {phrase!r} written in regional-indicator letters")
+            continue
+        want = phrase_stream(phrase)
+        where = next((w for w, st in streams if want and want in st), None)
+        if where is not None:
+            hits.append(f"{r.rule_id}: possible never-say {phrase!r} written in regional-indicator letters inside "
+                        f"a run of them in {where}")
         else:
             pending.append((r, phrase, fz, m))
     if pending:
-        _borderline_never_say(None, reading, {}, pending, hits)
+        read = {f: regional_reading(getattr(sub, f)) or getattr(sub, f) for f in TEXT_FIELDS}
+        split = _regional_split(sub, read, [(p, fz) for _, p, fz, _ in pending])
+        rest = []
+        for r, phrase, fz, m in pending:
+            how = split.get((phrase, fz))
+            if how:
+                hits.append(f"{r.rule_id}: possible never-say {phrase!r} split over two fields in regional-indicator "
+                            f"letters ({how})")
+            else:
+                rest.append((r, phrase, fz, m))
+        if rest:
+            read_sub = sub.model_copy(update=read)
+            _borderline_never_say(read_sub, reading, _field_edges(read_sub), rest, hits)
     borderline.extend(f"{h} — {REGIONAL_NOTE}" for h in hits)
 
 
@@ -632,6 +757,9 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
     # one scan of the submission's letter stream (every text field, bio included) for every
     # never-say phrase at once (fix wave 6, N1; fix wave 7, NEW-7 / the skeleton scan)
     visual_near_misses(all_text, batch)
+    # the currency / math lookalike table as a reading (fix wave 11, design ruling: a table only UPGRADES
+    # a human's call to a rejection — the phrase read exactly through it; the fail-safe is Rule A's)
+    symbol_reads = currency_math_readings(all_text)
     open_rules: list[tuple] = []
     for r, phrase, fz in never:
         checks.append(r.rule_id)
@@ -643,6 +771,9 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
             fail(r.rule_id, f"says never-say {phrase!r} with lookalike letters ({lookalike[:60]!r} "
                             "reads the same once rn/m, cl/d and vv/w are read alike, stretched letters collapsed "
                             "and spaces ignored)")
+        elif any(match_phrase(t, phrase) is PhraseMatch.EXACT for t in symbol_reads):
+            fail(r.rule_id, f"says never-say {phrase!r} in currency / math symbols read as the letters they "
+                            "are drawn as (shared/text.CURRENCY_MATH_LOOKALIKES)")
         else:
             open_rules.append((r, phrase, fz, m))
     # Fix wave 9 (AEGIS round 8 M1): the similarity signals below only ever add a human_review REASON,
@@ -652,7 +783,7 @@ def review(sub: ClipSubmission, rb: Rulebook, registry: PlatformRulesRegistry, n
     rejecting = not route_to_human and (bool(broken) or _rejected_later(sub, rb))
     if not rejecting:
         flagged = _borderline_never_say(sub, all_text, edges, open_rules, borderline)
-        _regional_never_say(all_text, open_rules, flagged, borderline)
+        _regional_never_say(sub, all_text, open_rules, flagged, borderline)
         for field_name in TEXT_FIELDS:
             for sig in obfuscation_signals(getattr(sub, field_name)):
                 borderline.append(f"obfuscation in {field_name}: {sig}")

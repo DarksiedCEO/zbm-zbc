@@ -125,6 +125,10 @@ keyed by their own id and other creations by actor + canonical request
 - Never-say cap (fix wave 10, N9-3): a goal may list up to 1,000 never-say entries and the draft keeps
   them all (with a warning above 30), but `POST …/rulebooks/{v}/review` answers 422 for a rulebook with
   more than `MAX_NEVER_SAY` = 30 (Clip Review's cost per clip grows with the list; ADR 0005 decision 44)
+- Never-say length caps (fix wave 11, N10-4): the review also answers 422 for a phrase over
+  `MAX_NEVER_SAY_WORDS` = 3 words or `MAX_NEVER_SAY_PHRASE_CHARS` = 30 characters, or a list over
+  `MAX_NEVER_SAY_CHARS` = 300 characters in total, whichever path made the draft (first draft, revision,
+  edit); the draft keeps every phrase and warns (ADR 0005 decision 49)
 
 Default actor ids (one per intelligence; add humans with
 `CREATIVE_EXTRA_ACTORS='{"jo": ["zbm_creative_lead"]}'`): `zbm_brief_writer`,
@@ -164,8 +168,8 @@ and kept idle / partial-head sockets open forever.
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 25, 2026 after fix wave 10: **684 passed, 0 failed, 0 skipped**
-(`CREATIVE_TEST_PORTS=18500-18549`; 664 after fix wave 9, three consecutive
+Result on Sep 25, 2026 after fix wave 11: **703 passed, 0 failed, 0 skipped**
+(`CREATIVE_TEST_PORTS=18650-18699`; 684 after fix wave 10 (`CREATIVE_TEST_PORTS=18500-18549`); 664 after fix wave 9, three consecutive
 runs; Python 3.11.15, pytest 9.1.1; 641 after fix wave 8, 557 after fix wave 7, 515 after fix wave 6, 469 after fix wave 5,
 428 after fix wave 4, 360 after fix wave 2, 310 after fix wave 1, 205
 before it). No test in this service skips: none uses an env-provided
@@ -174,6 +178,31 @@ ledger binary (the real-ledger runs are the live runs below), and
 Real-socket tests bind ports from `CREATIVE_TEST_PORTS` ("lo-hi") when it
 is set (fix wave 9; defaults: 20110-20119 and 20300-20319, OS-assigned for
 the lossy-proxy tests); the fix-wave-9 runs used `CREATIVE_TEST_PORTS=20900-20919`.
+`test_fix_wave_11.py` reproduces the AEGIS round-10 findings under the
+wave-11 design ruling (fail closed on what the gate cannot read): N10-1
+(every distinct round-10 symbol-alphabet MISS, 136 spellings in three
+contexts, 0 automatic passes; both hand-picked alphabets, every phrase,
+every field, 0 passes; Rule A names "unreadable symbols" and is not
+diluted by punctuation, digits, emoji or invisibles, and does not depend
+on the currency / math table; the ordinary set — the emoji blocks, the
+ruling's explicit emoji list, Latin-1, NFKC-readable symbols — against
+the not-ordinary blocks; Rule B dividers pass, a mixed run does not; an
+exact reading through the currency / math table is a reject; a 39-caption
+ordinary guard, 0 flagged), N10-2 (a regional-indicator phrase between,
+inside or beside real flags → human_review; rows of real flags pass),
+N10-3 (a regional phrase split over two fields, four layouts → human_review)
+and N10-4 (a 60-word phrase, and a list over the total budget, refused with
+a 422 on the draft, revision and edit paths; approval at the caps succeeds;
+the costliest shapes within the caps, regional reading forced, cold,
+routed: ≤ 2 s CPU scaled by a measured slowdown). Tests changed because they
+enshrined the old behaviour: `test_fix_wave_10.py`
+`test_n91_round9_currency_cases_go_to_a_human` (the round-9 currency
+phrases read exactly through the table: now a reject, was human_review),
+`test_n91_b_a_symbol_word_counts_toward_the_failsafe_a_price_does_not`
+(the currency word is now Rule A's "unreadable symbols", no longer a
+stripped share) and `test_n93_approval_at_the_cap_is_allowed` (its 30
+phrases of 17 characters are over the new 300-character budget; now 30 of
+10).
 `test_fix_wave_10.py` reproduces the AEGIS round-9 findings: N9-1 (the
 nine round-9 currency / math-symbol cases → human_review with a never-say
 reason; every table symbol is a SKELETON reading of its letter; the
@@ -680,6 +709,27 @@ started, both stopped at the end.
   `ns_cost8b.py` at 1,000 phrases 1.5 / 142.7 / 6.1 s → 1.5 / 8.2 /
   6.2 s (the cliff was a memo eviction, ADR 0005 decision 44).
 
+## Live run — fix wave 11 (Sep 25, 2026)
+
+ledger-rust release binary built for AEGIS round 10 (its `src/` is
+identical to this branch's), on :18651 with a fresh log; creative-py from
+this branch on :18650 (ledger direct). Only PIDs this run started, both
+stopped at the end; no traceback in either log.
+
+- `devtools/live_smoke.py` → "LIVE SMOKE: ALL STEPS AS EXPECTED" (37
+  entries, valid).
+- `live11.py` (scratch probe, over HTTP): a rulebook with a 60-word
+  never-say phrase drafted (201, with the length warning), its approval
+  refused (422); edited to 30 phrases / 411 characters, refused (422: over
+  the 300-character budget, and its eight added phrases have 4 words);
+  edited to 22 phrases / 243 characters,
+  approved, signed, live, kit signed; then clips: the first 40 round-10
+  symbol MISSes → 40 human_review; a hand-picked symbol alphabet, 20
+  phrases → 20 human_review; exact currency / math readings 3 → 3 reject;
+  a phrase between real flags 12 → 12 human_review; a regional phrase
+  across two fields 12 → 12 human_review; dividers and a 39-caption
+  ordinary guard 43 → 43 pass; ledger verify valid (183 entries).
+
 ## Known gaps
 
 See ADR 0005 "Honest gaps and open items" for the full list. The short
@@ -727,9 +777,20 @@ measured, 1.77 s CPU inside the full test run) — the "2-5 s at 1,000 phrases" 
 wave 9 was wrong, 142.7 s measured (ADR 0005 gap 16). Fix wave 10: a
 never-say phrase written in regional indicators is only ever a human's
 call (a run of them can be flags); a phrase read through the currency /
-math-symbol table is a human's call, never a reject; a lone circled
+math-symbol table is a human's call (fix wave 11: an EXACT reading is a
+reject); a lone circled
 letter without VS16 ("Warranty ⓘ") is still a styled-letter signal, and
 a styled word made only of enclosed-letter emoji with VS16 that spells
-no never-say phrase passes. `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
+no never-say phrase passes. Fix wave 11: a word made mostly of symbols the
+gate cannot read (outside Latin-1, punctuation and the emoji blocks — a
+block approximation of the emoji properties) goes to a human whatever it
+spells, so decorations such as "★★★★☆", "♪♫", "✧˖°", "◆◇◆" or "₊˚⊹♡" and
+math such as "x→∞" or "A→B→C" do too (a lone or repeated symbol — "→",
+"€€€", "★★★★★" — and a repeated divider "━━━━" do not); a never-say list is capped at 3
+words / 30 characters a phrase and 300 characters in all (a four-word
+phrase such as "make money from home" cannot be approved), and a review at
+the caps still costs up to 1.70 s CPU on the reference host, 1.94-1.98 s inside
+a long-running process with a large heap (ADR 0005
+decision 49). `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
 that many idle sockets gets everyone else 503s until the 10 s head
 deadline frees them — per-client limits belong in a proxy in front.

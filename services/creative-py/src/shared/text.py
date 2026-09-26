@@ -127,8 +127,8 @@ Fix wave 10 (AEGIS round 9). (1) N9-1: currency / math-symbol "fancy text"
 ("₥₳₭€ ₥⊙₦€¥": no letter at all) — `CURRENCY_MATH_LOOKALIKES`, a curated,
 glyph-checked table, is part of the SKELETON reading (a hit is a human's
 call: a currency sign is also money), and a word made mostly of symbols
-that can be letters counts toward the fail-safe (`_symbol_word_count`;
-prices, percentages and math do not). (2) N9-2: regional indicators are
+that can be letters counted toward the fail-safe (replaced in fix wave 11
+by Rule A). (2) N9-2: regional indicators are
 never a signal and never folded; `regional_reading()` is a candidate
 reading whose never-say hits Clip Review sends to a human. (3) N9-7: the 26
 grade-1 Braille letters are letter-like (read and a signal), U+2800 is a
@@ -136,6 +136,16 @@ space, and a run of STRIPPED_MIN consecutive stripped characters is a
 fail-safe window of its own. (4) N9-5: the England / Scotland / Wales flag
 tag sequences and a standalone enclosed-letter emoji with VS16 are not
 signals (`_signal_view`); a #hashtag may hold ASCII digits.
+
+Fix wave 11 (AEGIS round 10). Design ruling: FAIL CLOSED on what the gate
+cannot read, instead of adding reading tables. (1) N10-1, Rule A
+(`unreadable_words`): a word made mostly of symbols outside the ordinary
+set (punctuation, Latin-1, emoji — a block approximation) is a human's
+call, whatever alphabet it borrows; Rule B: a divider ("━━━━") is not a
+word. A never-say phrase read EXACTLY through `CURRENCY_MATH_LOOKALIKES`
+(`currency_math_readings`) is now a rejection: tables only upgrade. (2)
+N10-2 / N10-3: the regional reading is matched as a letter stream
+(`regional_streams`) and across field joints (Clip Review).
 
 `obfuscation_signals()` says whether text shows evasion patterns at all:
 any bidi control, Hangul/Mongolian filler or tag character ANYWHERE; any
@@ -270,11 +280,12 @@ SKELETON: dict[str, str] = {
 # saw it, and it passed. Each entry below was checked against its Unicode name and glyph: the symbol
 # IS a Latin letter with strokes / bars / an enclosing circle, or the letter's Greek / math twin used
 # for it by fancy-text generators. Read like the rest of SKELETON (a stand-in, never a fold), so a
-# never-say phrase read through them is a human's call, never a reject: "€", "₹", "₿" are also money.
+# never-say phrase NEAR a reading through them is a human's call. Fix wave 11 (design ruling: tables
+# only upgrade): the phrase read EXACTLY through them (`currency_math_readings`) is a rejection.
 # Left out on purpose (no single Latin letter in the glyph, or NFKC already reads it): ₪ NEW SHEQEL
 # (two interlocked hooks), ₨ RUPEE (NFKC "Rs"), ₠ ₧ ₯ ₰ ₶ ₷ (multi-letter ligatures), ₻ ₼ ₾ ⃀
-# (no clear letter). A word made mostly of such symbols is also the fail-safe's business
-# (`stripped_share`), whether or not it is in this table.
+# (no clear letter). A word made mostly of such symbols is the fail-safe's business (Rule A,
+# `unreadable_words`, fix wave 11), whether or not it is in this table.
 CURRENCY_MATH_LOOKALIKES: dict[str, str] = {
     # Sc: currency signs drawn as a stroked / barred Latin letter
     "₥": "m", "₳": "a", "₭": "k", "₦": "n", "₩": "w", "₣": "f", "₫": "d", "฿": "b", "₮": "t", "₤": "le",
@@ -289,6 +300,23 @@ CURRENCY_MATH_LOOKALIKES: dict[str, str] = {
     "♄": "h", "℮": "e", "℗": "p",
 }
 SKELETON.update({k: v for k, v in CURRENCY_MATH_LOOKALIKES.items() if k not in SKELETON})
+# The table as a READING (fix wave 11): every table symbol, and every non-ASCII symbol stand-in of
+# SKELETON (€ £ ¥ ¢ © ® § † ° × ¡ ¿), read as its letter — first reading, then second reading ("⊕" is
+# o, then q) — the way SKELETON's two tables are. Clip Review rejects a never-say phrase found EXACTLY in
+# one of them; nothing else uses it (a near miss through the table stays SKELETON's human_review).
+_CM_SOURCE = {**{k: v for k, v in SKELETON.items() if not k.isascii() and not k.isalpha()}, **CURRENCY_MATH_LOOKALIKES}
+_CURRENCY_MATH_READINGS = tuple(str.maketrans({k: v[min(alt, len(v) - 1)] for k, v in _CM_SOURCE.items()}) for alt in (0, 1))
+_CURRENCY_MATH_RE = re.compile("[" + re.escape("".join(_CM_SOURCE)) + "]")
+
+
+def currency_math_readings(text: str) -> tuple[str, ...]:
+    """`text` with each currency / math lookalike read as its letter ("₥₳₭€ ₥⊙₦€¥" -> "make money"),
+    first and second readings (one if they agree); () when it has none."""
+    if not text or text.isascii() or not _CURRENCY_MATH_RE.search(text):
+        return ()
+    return tuple(dict.fromkeys(text.translate(t) for t in _CURRENCY_MATH_READINGS))
+
+
 # ASCII letters that pass for each other in most fonts (near-miss only).
 _HOMOGLYPH_PAIRS = frozenset({("l", "i"), ("i", "l")})
 # Word-internal punctuation that ordinary English uses between letters.
@@ -438,6 +466,29 @@ def regional_reading(text: str) -> str | None:
     if not text or text.isascii() or not _REGIONAL_RUN.search(text):
         return None
     return text.translate(_REGIONAL_TABLE)
+
+
+# A run of regional indicators with nothing but spaces / invisible characters between them (fix wave 11,
+# AEGIS round 10 N10-2): "🇺🇸🇲🇦🇰🇪 🇲🇴🇳🇪🇾🇬🇧" is ONE letter stream, "usmakemoneygb".
+_REGIONAL_STREAM = re.compile("[\U0001F1E6-\U0001F1FF](?:[\\s\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufe00-\ufe0f\u20e3\ufeff]*"
+                              "[\U0001F1E6-\U0001F1FF])*")
+
+
+def regional_streams(text: str) -> list[tuple[int, int, str]]:
+    """Every run of regional indicators in `text` — whitespace and invisible joiners / selectors between
+    them ignored — as (start, end, the letters it reads as), in order (fix wave 11, N10-2): flags carry
+    no word boundaries, so Clip Review matches a never-say phrase ANYWHERE inside a stream, the way the
+    main gate's letter streams match across spaces ("🇺🇸🇲🇦🇰🇪 🇲🇴🇳🇪🇾🇬🇧" -> "usmakemoneygb")."""
+    if not text or text.isascii() or not _REGIONAL_RUN.search(text):
+        return []
+    return [(m.start(), m.end(), "".join(REGIONAL_LETTERS[c] for c in m.group() if c in REGIONAL_LETTERS))
+            for m in _REGIONAL_STREAM.finditer(text)]
+
+
+def phrase_stream(phrase: str) -> str:
+    """`phrase`'s letters as a stream: canonical, spaces dropped, runs collapsed (`collapse_runs`) — found
+    inside a collapsed regional-indicator stream (`regional_streams`), it is there across any flags."""
+    return collapse_runs(canonical(phrase).replace(" ", ""))
 
 
 def _map_letterlike(text: str) -> str:
@@ -2966,7 +3017,8 @@ def mixed_symbol_words(text: str, limit: int = 5) -> list[str]:
     letters-only #hashtags / @mentions; numbers, prices and numbers with a
     unit suffix ("$20", "1,200", "2nd", "1990s", "9am", "$40k", "1080p")."""
     out: list[str] = []
-    for raw in _WORD_SPLIT.split(_drop_format(_nfkc_words(text))):
+    # a divider (Rule B, fix wave 11: one box-drawing / block / geometric character repeated) is a space
+    for raw in _WORD_SPLIT.split(_DIVIDER.sub(" ", _drop_format(_nfkc_words(text)))):
         w = raw.lstrip(_LEAD_STRIP).rstrip(_TRAIL_STRIP)
         # emoji / pictographs next to a word are decoration, not a letter
         # (a never-say phrase written with one is still a near_miss()).
@@ -3057,14 +3109,16 @@ def non_latin_letters(text: str) -> list[str]:
 # (N9-7) also over any run of STRIPPED_MIN consecutive stripped characters
 # on its own, so one long word glued to them cannot dilute the window. Not
 # counted as stripped (ordinary text, measured on the round-8 corpus and the
-# emoji captions): punctuation, currency / math / modifier symbols (except
-# in a word made mostly of them, fix wave 10 N9-1: `_symbol_word_count`), format and
+# emoji captions): punctuation, currency / math / modifier symbols (a word
+# made mostly of them, or of any symbol it cannot read, is Rule A's business
+# since fix wave 11: `unreadable_words`, below), format and
 # default-ignorable characters (their own signals cover them), the emoji
 # keycap, anything in Latin-1, and the emoji / pictograph blocks (arrows,
 # technical, geometric shapes, miscellaneous symbols, dingbats,
 # supplemental arrows and symbols, U+1F000-U+1FAFF). Box drawing and block
 # elements ARE counted (decorative separators such as "━━━━" go to a
-# human: the documented cost of the fail-safe). 30%: a caption of
+# human: the documented cost of the fail-safe; since fix wave 11 a run of ONE
+# repeated such character is a divider, Rule B, and not counted). 30%: a caption of
 # pictographs strips 0%; a phrase in an unmapped style strips ~100%.
 STRIPPED_SHARE_LIMIT = 0.30
 STRIPPED_WINDOW = 4  # words
@@ -3086,66 +3140,27 @@ def _stripped(ch: str) -> bool:
     return not any(lo <= cp <= hi for lo, hi in _PICTOGRAPH_RANGES)
 
 
-@functools.lru_cache(maxsize=65536)
-def _symbol_letter(ch: str) -> bool:
-    """A symbol that can be drawn as a letter: one of CURRENCY_MATH_LOOKALIKES, or any other currency,
-    math or modifier symbol (Sc / Sm / Sk) outside the pictograph blocks (fix wave 10, N9-1)."""
-    if ch in CURRENCY_MATH_LOOKALIKES:
-        return True
-    if unicodedata.category(ch) not in ("Sc", "Sm", "Sk"):
-        return False
-    cp = ord(ch)
-    return not any(lo <= cp <= hi for lo, hi in _PICTOGRAPH_RANGES)
-
-
-SYMBOL_WORD_RUN = 3  # consecutive symbols that can be letters, in one word, before the word is a styled word
-
-
-def _symbol_word_count(word: str) -> int:
-    """How many characters of `word` count toward the fail-safe as a SYMBOL-LETTERED word (fix wave 10,
-    N9-1 (b)): "₥₳₭€", "¢®€₫¡₮" — a word whose symbols-that-can-be-letters (`_symbol_letter`) come in a
-    run of at least SYMBOL_WORD_RUN, at least two different ones, not all ASCII, and make up at least
-    half of it. Else 0: a price ("€5", "$10", "$49.99"), a percentage, "$$$", "$/€/£", "3 × $12" and
-    "x² + y²" are not styled words. Canonicalisation strips these symbols (they become spaces), so
-    counting them is what the fail-safe exists for; they were exempt only because ONE of them is an
-    ordinary price sign."""
-    n = run = best = 0
-    distinct: set[str] = set()
-    for ch in word:
-        if _symbol_letter(ch):
-            n += 1
-            run += 1
-            best = max(best, run)
-            distinct.add(ch)
-        else:
-            run = 0
-    if best < SYMBOL_WORD_RUN or len(distinct) < 2 or 2 * n < len(word) or all(c.isascii() for c in distinct):
-        return 0
-    return n
-
-
 def stripped_share(text: str) -> float:
     """The largest share of stripped characters (`_stripped`) over the
     whole of `text` and over every window of 1..STRIPPED_WINDOW
     consecutive words with at least STRIPPED_MIN stripped characters;
-    letter-like symbols count as the letters they are. A symbol-lettered
-    word's symbols (`_symbol_word_count`) count as stripped (fix wave 10,
-    N9-1). 0.0 if nothing is stripped."""
+    letter-like symbols count as the letters they are, and a divider
+    (Rule B, `_DIVIDER`) is not text. 0.0 if nothing is stripped. (Fix wave
+    11: the wave-10 count of currency / math "symbol-lettered" words moved
+    to Rule A, `unreadable_words`, which does not depend on any table.)"""
     if not text or text.isascii():
         return 0.0
-    t = _map_letterlike(text)
+    t = _DIVIDER.sub(" ", _map_letterlike(text))
     chars = set(t)
     bad = {ch for ch in chars if _stripped(ch)}
-    symbolic = any(_symbol_letter(ch) and not ch.isascii() for ch in chars)
-    if not bad and not symbolic:
+    if not bad:
         return 0.0
     words = t.split()
     sizes = [len(w) for w in words]
-    counts = [(sum(w.count(c) for c in bad) + (_symbol_word_count(w) if symbolic else 0)) if not w.isascii() else 0
-              for w in words]
+    counts = [sum(w.count(c) for c in bad) if not w.isascii() else 0 for w in words]
     total = sum(sizes)
     best = sum(counts) / total if total else 0.0
-    if bad and re.search(_char_class(bad) + "{%d}" % STRIPPED_MIN, t):
+    if re.search(_char_class(bad) + "{%d}" % STRIPPED_MIN, t):
         # a run of STRIPPED_MIN consecutive stripped characters is a window of its own (fix wave 10,
         # N9-7): a styled phrase glued to a long ordinary word ("𝌀𝌁𝌂Supercalifragilistic...") no
         # longer dilutes a word window below the limit
@@ -3158,6 +3173,135 @@ def stripped_share(text: str) -> float:
             if s >= STRIPPED_MIN and s / n > best:
                 best = s / n
     return best
+
+
+# --- Rule A: fail closed on unreadable symbols (fix wave 11, AEGIS round 10 N10-1) ----------------
+#
+# Design ruling (binding): the gate does not try to READ every symbol alphabet — round 10 spelled
+# never-say phrases in arrows, math operators and technical symbols ("♏⍺⋊⋿ ♏○⋂⋿¥") that no table
+# listed, and 549 more single-letter lookalikes are read as nothing. What it cannot read, it sends to
+# a human. Reading tables (CURRENCY_MATH_LOOKALIKES, the regional reading) only ever UPGRADE that to
+# a rejection; the fail-safe itself never depends on them.
+#
+# "Cannot read" (`_unreadable`): a code point of category So / Sm / Sc / Sk / Co / Cn (after the
+# letter-like map) that is not ORDINARY. Ordinary:
+#   * anything below U+0100 (Latin-1: $ £ ¥ © ® ° ± × ...), punctuation (P*: not a symbol category);
+#     the keycap U+20E3 and VS15 / VS16 are marks, not symbols, so never counted either;
+#   * a symbol NFKC turns into letters / digits or into Latin-1 (™ -> TM, ㎏ -> kg, № -> No, ﹩ -> $):
+#     every reading of the gate reads it;
+#   * emoji. Python has no Emoji_Presentation / Extended_Pictographic property and emoji-data.txt may not
+#     be downloaded here, so this is a BLOCK APPROXIMATION, not the property: every code point of the
+#     emoji blocks EMOJI_BLOCKS (Misc Symbols and Pictographs, Emoticons, Transport and Map, Supplemental
+#     Symbols and Pictographs, Symbols and Pictographs Extended-A — unassigned code points included, so
+#     an emoji newer than this Python's Unicode database is not "unreadable"), plus EMOJI_ELSEWHERE: the
+#     code points emoji-data gives an emoji property in blocks that are otherwise NOT ordinary (Arrows,
+#     Misc Technical, Enclosed Alphanumerics, Geometric Shapes, Miscellaneous Symbols, Dingbats,
+#     Supplemental Arrows-B, Misc Symbols and Arrows, CJK) — the design ruling's list, written out
+#     below. Miscellaneous Symbols and Dingbats are NOT ordinary as whole blocks (fail closed): they hold
+#     letter-shaped symbols (☾ ❍ ♇ ❘ ✕ ⚬ ☉) that spelled "no cost" as "n❍ ☾❍∫✝" past every other rule;
+#     the cost is decoration of two different non-emoji stars / notes / sparkles in one word ("★★★★☆",
+#     "♪♫", "✧˖°" go to a human; "★★★★★" and "♪ song ♪" do not) — and the
+#     emoji of the Mahjong / Playing Cards / Enclosed Alphanumeric and Ideographic Supplement / Geometric
+#     Shapes Extended blocks (🀄 🃏 🆎 🆑-🆚 🈁 🈯 🟠-🟫 🟰) and the regional indicators (flags: read by
+#     `regional_reading`).
+# NOT ordinary (so a word made of them is unreadable): Arrows, Mathematical Operators, Miscellaneous
+# Technical (APL), Letterlike Symbols, Enclosed Alphanumerics, Box Drawing / Block Elements, Geometric
+# Shapes, Miscellaneous Symbols, Dingbats (their emoji excepted), Misc Math Symbols, Supplemental Arrows,
+# Braille cells that are no letter, private use and unassigned code points, and every other symbol.
+#
+# Rule A (`unreadable_words`): a word (whitespace-delimited) whose letters-and-unreadable-symbols
+# sequence is at least half unreadable symbols, or has 2 unreadable among any 3 consecutive, is
+# "unreadable symbols" — a human's call. Digits, punctuation, marks, invisible characters and ordinary
+# symbols are left out of that sequence, so they cannot dilute a word ("♏..⍺..⋊..⋿", "♏11⍺11⋊",
+# "♏🔥🔥⍺🔥🔥⋊"), and the 3-window judges a styled run glued to a long word on its own
+# ("♏⍺⋊⋿Supercalifragilistic"). Not a word: one unreadable symbol, alone or repeated, with no letter
+# ("→", "∞", "≥", "€€€", "₹₹₹": at most one letter's worth, and no never-say word is one repeated
+# letter), and a price ("₹499", "€1.5m").
+# Rule B (`_DIVIDER`): a run of ONE Box Drawing / Block Elements / Geometric Shapes character repeated
+# 3+ times ("━━━━━━", "▬▬▬", "■■■") is a divider: blanked before Rule A and the stripped-share fail-safe.
+# A run mixing different such characters ("╔══") still counts.
+EMOJI_BLOCKS = ((0x1F300, 0x1F5FF), (0x1F600, 0x1F64F), (0x1F680, 0x1F6FF), (0x1F900, 0x1F9FF), (0x1FA70, 0x1FAFF))
+# The design ruling's explicit list (emoji per Unicode emoji-data in the otherwise not-ordinary blocks):
+_RULING_EMOJI = ("↔↕↖↗↘↙↩↪ ⌚⌛⌨ ⏏ ⏩-⏳ ⏸⏹⏺ Ⓜ ▪▫▶◀◻◼◽◾ ☀-☄ ☎☑☔☕☘☝☠☢☣☦☪☮☯☸☹☺♀♂♈-♓♟♠♣♥♦♨♻♾♿ "
+                 "⚒-⚗⚙⚛⚜⚠⚡⚧⚪⚫⚰⚱⚽⚾⛄⛅⛈⛎⛏⛑⛓⛔⛩⛪⛰-⛵⛷-⛺⛽ ✂✅✈✉✊✋✌✍✏✒✔✖✝✡✨✳✴❄❇❌❎❓❔❕❗❣❤➕➖➗➡➰➿ "
+                 "⤴⤵ ⬅⬆⬇⬛⬜⭐⭕ 〰〽㊗㊙")
+# Emoji in the other symbol blocks of the Supplementary Multilingual Plane (emoji-data, same property):
+_SMP_EMOJI = ((0x1F004, 0x1F004), (0x1F0CF, 0x1F0CF), (0x1F170, 0x1F171), (0x1F17E, 0x1F17F), (0x1F18E, 0x1F18E),
+              (0x1F191, 0x1F19A), (0x1F1E6, 0x1F1FF), (0x1F201, 0x1F202), (0x1F21A, 0x1F21A), (0x1F22F, 0x1F22F),
+              (0x1F232, 0x1F23A), (0x1F250, 0x1F251), (0x1F7E0, 0x1F7EB), (0x1F7F0, 0x1F7F0))
+
+
+def _expand(spec: str) -> frozenset[str]:
+    out: set[str] = set()
+    parts = spec.replace(" ", "")
+    i = 0
+    while i < len(parts):
+        if i + 2 < len(parts) and parts[i + 1] == "-":
+            out.update(chr(cp) for cp in range(ord(parts[i]), ord(parts[i + 2]) + 1))
+            i += 3
+        else:
+            out.add(parts[i])
+            i += 1
+    return frozenset(out)
+
+
+EMOJI_ELSEWHERE = _expand(_RULING_EMOJI) | frozenset(chr(cp) for lo, hi in _SMP_EMOJI for cp in range(lo, hi + 1))
+_UNREADABLE_CATEGORIES = frozenset(("So", "Sm", "Sc", "Sk", "Co", "Cn"))
+
+
+@functools.lru_cache(maxsize=65536)
+def _unreadable(ch: str) -> bool:
+    """A symbol the gate cannot read (Rule A): So / Sm / Sc / Sk / Co / Cn, not ordinary (see above)."""
+    cp = ord(ch)
+    if cp < 0x100 or unicodedata.category(ch) not in _UNREADABLE_CATEGORIES:
+        return False
+    if any(lo <= cp <= hi for lo, hi in EMOJI_BLOCKS) or ch in EMOJI_ELSEWHERE:
+        return False
+    n = unicodedata.normalize("NFKC", ch)
+    if n != ch and (any(c.isalnum() for c in n) or all(ord(c) < 0x100 for c in n)):
+        return False
+    return True
+
+
+_DIVIDER = re.compile(r"([\u2500-\u25FF])\1{2,}")
+UNREADABLE_WINDOW = 3  # consecutive letters / unreadable symbols of a word: 2 unreadable among them is a styled run
+
+
+def _price(word: str) -> bool:
+    """A number with at most one currency sign before or after it and an optional unit ("₹499",
+    "€1.5m", "12,50€"): not a word of letters."""
+    w = word.strip(_LEAD_STRIP + _TRAIL_STRIP)
+    if w[:1] and unicodedata.category(w[0]) == "Sc":
+        w = w[1:]
+    elif w[-1:] and unicodedata.category(w[-1]) == "Sc":
+        w = w[:-1]
+    return bool(_NUMBER_WORD.fullmatch(w))
+
+
+def unreadable_words(text: str, limit: int = 5) -> list[str]:
+    """Rule A (fix wave 11, N10-1): the words of `text` made mostly of symbols the gate cannot read
+    (`_unreadable`, after the letter-like map, dividers blanked) — see the comment above. Empty if none."""
+    if not text or text.isascii():
+        return []
+    t = _map_letterlike(text)
+    if not any(_unreadable(c) for c in set(t)):
+        return []
+    t = _DIVIDER.sub(" ", t)
+    out: list[str] = []
+    for word in t.split():
+        seq = [_unreadable(c) for c in word if c.isalpha() or _unreadable(c)]
+        n = sum(seq)
+        if not n:
+            continue
+        if n == len(seq) and len({c for c in word if _unreadable(c)}) == 1:
+            continue  # one symbol, alone or repeated, no letter: "→", "∞", "€€€"
+        if _price(word):
+            continue
+        if 2 * n >= len(seq) or any(sum(seq[i:i + UNREADABLE_WINDOW]) >= 2 for i in range(len(seq) - 1)):
+            out.append(word[:40])
+            if len(out) >= limit:
+                break
+    return out
 
 
 # Ordinary emoji that the signals below would otherwise read as evasion (fix wave 10, AEGIS round 9 N9-5):
@@ -3202,6 +3346,10 @@ def obfuscation_signals(text: str) -> list[str]:
     if share > STRIPPED_SHARE_LIMIT:
         signals.append(f"{share:.0%} of the text is stripped by canonicalisation (symbols it cannot read as letters, "
                        f"over the {STRIPPED_SHARE_LIMIT:.0%} fail-safe): possibly an unmapped letter style")
+    unreadable = unreadable_words(text)
+    if unreadable:
+        signals.append("unreadable symbols: word(s) made mostly of symbols the gate cannot read as letters "
+                       "(fail-closed, fix wave 11 Rule A): " + ", ".join(repr(w) for w in unreadable))
     raw = _nfkc(text)
     bidi = sorted({f"U+{ord(c):04X}" for c in raw if c in _BIDI_CONTROLS})
     if bidi:

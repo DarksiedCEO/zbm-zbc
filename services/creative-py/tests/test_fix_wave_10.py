@@ -6,9 +6,10 @@ N9-1 (blocker) Exact never-say phrases written in currency / math-symbol
      letter map, and the stripped-share fail-safe ignored Sc/Sm/Sk.
      Now (a) a curated, glyph-checked table of currency / math lookalikes
      is part of the SKELETON symbol reading (a never-say phrase read through
-     it -> human_review: a currency sign is also money, so never a reject),
+     it -> human_review; since fix wave 11 an EXACT reading is a reject),
      and (b) a word made mostly of Sc/Sm/Sk (+ the table) symbols counts
-     toward the fail-safe; prices, percentages and math stay clean.
+     toward the fail-safe (since fix wave 11: Rule A, "unreadable symbols");
+     prices, percentages and math stay clean.
 N9-2 (blocker, wave-9 regression) Regional indicators were read as letters
      only when some run was not exactly two long, so pair-spaced phrases
      (🇲🇦 🇰🇪 🇨🇦 🇸🇭) passed and a genuine row of flags went to a human.
@@ -103,15 +104,17 @@ PRICES = [
 
 
 def test_n91_round9_currency_cases_go_to_a_human(registry):
-    """(a)+(b): the round-9 MISSes are a human's call — never a pass, never an automatic reject
-    (a currency sign is also money: the reading is ambiguous)."""
+    """(a)+(b): the round-9 MISSes are never a pass. Fix wave 11 (design ruling: a reading table only
+    UPGRADES a human's call to a rejection): each of these reads EXACTLY as its phrase through the table,
+    so it is now a rejection citing the currency / math reading (wave 10 asserted human_review here)."""
     rb = _rulebook(registry)
     out = []
     for text, phrase in N91_CASES:
         d = _run(registry, rb, {"caption": text})
-        out.append((text, d.outcome, _ns_reason(d, phrase), d.human_review_reasons[:2]))
-    bad = [o for o in out if o[1] != "human_review" or not o[2]]
-    print(f"\nN9-1 round-9 currency cases: {len(out)}, not human_review with a never-say reason: {len(bad)}")
+        out.append((text, d.outcome, any("currency / math" in b.reason and repr(phrase) in b.reason
+                                         for b in d.broken_rules), d.human_review_reasons[:2]))
+    bad = [o for o in out if o[1] != "reject" or not o[2]]
+    print(f"\nN9-1 round-9 currency cases: {len(out)}, not rejected through the currency / math reading: {len(bad)}")
     for o in bad:
         print("   ", o)
     assert not bad
@@ -135,13 +138,17 @@ def test_n91_a_every_table_symbol_is_read_as_its_letter():
 
 
 def test_n91_b_a_symbol_word_counts_toward_the_failsafe_a_price_does_not():
-    from shared.text import STRIPPED_SHARE_LIMIT, obfuscation_signals, stripped_share
+    """Fix wave 11: the fail-safe for a symbol-lettered word is Rule A ("unreadable symbols",
+    `unreadable_words`), which replaced wave 10's count of such words in `stripped_share` (this test
+    asserted stripped_share > limit for them)."""
+    from shared.text import STRIPPED_SHARE_LIMIT, obfuscation_signals, stripped_share, unreadable_words
 
     for t in ["₥₳₭€", "₥₳₭€ money", "Big news ₫€฿₮ ₣®€€ today", PAD + " ₥₳₭€ ₥⊙₦€¥", "₦⊙ ¢®€₫¡₮ ¢♄€¢₭"]:
-        assert stripped_share(t) > STRIPPED_SHARE_LIMIT, (t, stripped_share(t))
-        assert any("stripped" in s for s in obfuscation_signals(t)), t
+        assert unreadable_words(t), t
+        assert any(s.startswith("unreadable symbols") for s in obfuscation_signals(t)), t
     for t in PRICES:
         assert stripped_share(t) <= STRIPPED_SHARE_LIMIT, (t, stripped_share(t))
+        assert not unreadable_words(t), (t, unreadable_words(t))
 
 
 def test_n91_sweep_every_phrase_in_currency_style_is_never_a_pass(registry):
@@ -369,7 +376,9 @@ def test_n93_approval_at_the_cap_is_allowed(api):
     from zbc.rulebook_writer import MAX_NEVER_SAY
 
     zbc_rights_on_file(api)
-    phrases = [f"never phrase {i:04d}" for i in range(MAX_NEVER_SAY)]
+    # fix wave 11 (N10-4): the list must also fit MAX_NEVER_SAY_CHARS in total (wave 10 used 30 phrases of
+    # 17 characters, 510 in all, which is now over that budget)
+    phrases = [f"never {i:04d}" for i in range(MAX_NEVER_SAY)]
     rb = api.post(f"{C}/rulebooks", {"actor_id": "zbc_rulebook_writer", "goal": zbc_goal(never_say=phrases)})
     assert rb.status_code == 201, rb.text
     r = api.post(f"{C}/rulebooks/{rb.json()['version']}/review", {"actor_id": "zbc_campaign_rulebook"})
