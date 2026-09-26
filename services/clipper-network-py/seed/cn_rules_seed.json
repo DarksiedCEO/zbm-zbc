@@ -1,0 +1,885 @@
+{
+ "rules": [
+  {
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "CN-00",
+   "sources": [
+    {
+     "text": "spec \u00a70.1.5",
+     "url": null
+    }
+   ],
+   "statement": "Every Clipper Network decision is negative (RULES_NOT_IN_FORCE) until Andre has approved a rule version.",
+   "status": "in_force",
+   "title": "No decision without an Andre-approved rule version"
+  },
+  {
+   "kind": "founder",
+   "parameters": {
+    "guardian_path": false
+   },
+   "rule_id": "CN-01",
+   "sources": [
+    {
+     "text": "HR-02",
+     "url": null
+    },
+    {
+     "text": "Whop: eighteen (18) years of age or older",
+     "url": "https://whop.com/content-rewards-terms-of-service/"
+    }
+   ],
+   "statement": "Admission requires Verification and Integrity's latest age attestation for the clipper to be adult. A tick box never counts. There is no guardian path.",
+   "status": "in_force",
+   "title": "Admission only with a V&I adult attestation"
+  },
+  {
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "CN-02",
+   "sources": [
+    {
+     "text": "HR-03",
+     "url": null
+    }
+   ],
+   "statement": "Admission requires Compliance's latest zbc_creator activation ruling for the clipper to be allowed, and a jurisdiction class of operate or conditional.",
+   "status": "in_force",
+   "title": "Latest Compliance activation allowed"
+  },
+  {
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "CN-03",
+   "sources": [
+    {
+     "text": "D2",
+     "url": null
+    },
+    {
+     "text": "Vyro: Limit one (1) Account per person/email address",
+     "url": "https://vyro.com/clipper-terms"
+    }
+   ],
+   "statement": "Duplicate-identity check clear at V&I; one email and one payout identity per clipper; account sharing or renting forbidden.",
+   "status": "in_force",
+   "title": "One identity per person"
+  },
+  {
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "CN-04",
+   "sources": [
+    {
+     "text": "compliance report creator agreement clause set",
+     "url": null
+    }
+   ],
+   "statement": "The clipper has accepted the Clipper Agreement version that Legal (37) names as current (clickwrap, versioned record, never the text).",
+   "status": "in_force",
+   "title": "Current Clipper Agreement accepted"
+  },
+  {
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "CN-05",
+   "sources": [
+    {
+     "text": "Kiip: before first payout (secondary)",
+     "url": null
+    }
+   ],
+   "statement": "Finance (31) confirms a W-9 or W-8 is on file; Clipper Network stores the status only.",
+   "status": "in_force",
+   "title": "Tax form on file at Finance"
+  },
+  {
+   "kind": "lead_default",
+   "parameters": {
+    "enabled_platforms": [
+     "instagram",
+     "tiktok",
+     "youtube"
+    ],
+    "required": true
+   },
+   "rule_id": "CN-06",
+   "sources": [
+    {
+     "text": "D1",
+     "url": null
+    },
+    {
+     "text": "Vyro connect requirement",
+     "url": "https://vyro.com/clipper-terms"
+    }
+   ],
+   "statement": "Admission needs at least one active V&I connection on an enabled platform.",
+   "status": "in_force",
+   "title": "At least one active V&I connection"
+  },
+  {
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "CN-07",
+   "sources": [
+    {
+     "text": "16 CFR 255.1(d): Provide guidance to their endorsers",
+     "url": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-255"
+    }
+   ],
+   "statement": "The clipper has attested the disclosure training.",
+   "status": "in_force",
+   "title": "Disclosure training attested"
+  },
+  {
+   "kind": "lead_default",
+   "parameters": {
+    "refuse_recipient_countries": [
+     "CA"
+    ]
+   },
+   "rule_id": "CN-08",
+   "sources": [
+    {
+     "text": "CAN-SPAM guide",
+     "url": "https://www.ftc.gov/business-guidance/resources/can-spam-act-compliance-guide-business"
+    },
+    {
+     "text": "HR-08",
+     "url": null
+    },
+    {
+     "text": "Vyro: income claims forbidden",
+     "url": "https://vyro.com/content-requirements"
+    }
+   ],
+   "statement": "Recruiting outbound goes only to people with an opt-in record; no cold outbound to Canada; never targets minors; no income claims; every recruiting email passes Compliance's publish gate first.",
+   "status": "in_force",
+   "title": "Recruiting only to opted-in people"
+  },
+  {
+   "kind": "research",
+   "parameters": {
+    "channels": [
+     "discord_server_post",
+     "email_opt_in",
+     "inbound_form",
+     "referral"
+    ]
+   },
+   "rule_id": "CN-09",
+   "sources": [
+    {
+     "text": "Discord Guideline 13",
+     "url": "https://discord.com/guidelines"
+    },
+    {
+     "text": "TCPA/CASL/Reddit/X UNVERIFIED",
+     "url": null
+    }
+   ],
+   "statement": "No bulk DMs; SMS off; Reddit and X off.",
+   "status": "in_force",
+   "title": "Channels"
+  },
+  {
+   "kind": "spec_choice",
+   "parameters": {
+    "max_active_enrolments": {
+     "T0": 2,
+     "T1": 5,
+     "T2": 8,
+     "T3": 12
+    },
+    "platform_anchors": false,
+    "t1": {
+     "max_active_s1": 1,
+     "min_certified_clips": 3,
+     "min_days_since_admission": 30
+    },
+    "t2": {
+     "median_exclude_platforms": [
+      "youtube"
+     ],
+     "min_campaigns": 3,
+     "min_certified_clips": 15,
+     "min_days_since_admission": 90,
+     "min_median_certified_views": 10000,
+     "no_upheld_strike_days": 180
+    },
+    "t3": {
+     "requires_andre_nomination": true
+    }
+   },
+   "rule_id": "CN-10",
+   "sources": [
+    {
+     "text": "no published thresholds (research)",
+     "url": null
+    }
+   ],
+   "statement": "Tier from verified outcomes only: V&I certifications (certified or revised) and the strike mirror.",
+   "status": "in_force",
+   "title": "Tier table"
+  },
+  {
+   "kind": "lead_default",
+   "parameters": {},
+   "rule_id": "CN-11",
+   "sources": [],
+   "statement": "A tier changes campaign access and rate-card visibility only; never a certified count or a payout rule.",
+   "status": "in_force",
+   "title": "Tier never touches counts or pay"
+  },
+  {
+   "kind": "spec_choice",
+   "parameters": {
+    "jurisdiction_freshness_hours": 24
+   },
+   "rule_id": "CN-12",
+   "sources": [],
+   "statement": "Enrolment only when every \u00a7C.4 condition holds.",
+   "status": "in_force",
+   "title": "Enrolment eligibility"
+  },
+  {
+   "kind": "research",
+   "parameters": {},
+   "rule_id": "CN-13",
+   "sources": [
+    {
+     "text": "Whop: Maximum Payout per creator per video",
+     "url": "https://whop.com/content-rewards-terms-of-service/"
+    },
+    {
+     "text": "Kiip caps limit exposure to view botting (secondary)",
+     "url": null
+    }
+   ],
+   "statement": "Caps per clipper (active enrolments by tier) and per campaign (max_clippers).",
+   "status": "in_force",
+   "title": "Caps"
+  },
+  {
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "CN-14",
+   "sources": [
+    {
+     "text": "Creative spec",
+     "url": null
+    }
+   ],
+   "statement": "Deliver only Creative's Andre-signed kit of the live rulebook version; never an edited copy.",
+   "status": "in_force",
+   "title": "Signed kit of the live rulebook only"
+  },
+  {
+   "kind": "founder",
+   "parameters": {
+    "no_time_zone_channel": "in_app",
+    "quiet_window": "08:00-20:00"
+   },
+   "rule_id": "CN-15",
+   "sources": [
+    {
+     "text": "Onboarding P7",
+     "url": null
+    }
+   ],
+   "statement": "Every message comes from an Andre-approved template version; outside the recipient-local quiet window it waits; no time zone means in-app only.",
+   "status": "in_force",
+   "title": "Approved templates; quiet hours"
+  },
+  {
+   "kind": "founder",
+   "parameters": {
+    "disclosure_text": "This message comes from an automated system run by Z Best Clips. You can reach a person (Andre) at any time: reply HUMAN.",
+    "required_in": [
+     "admission_decision",
+     "application_received"
+    ]
+   },
+   "rule_id": "CN-16",
+   "sources": [
+    {
+     "text": "Onboarding P1; Cal. B&P 17941 (wording by counsel, CN-CQ-08)",
+     "url": null
+    }
+   ],
+   "statement": "The first message and the admission decision disclose automation and offer a human.",
+   "status": "in_force",
+   "title": "Automation disclosure"
+  },
+  {
+   "kind": "spec_choice",
+   "parameters": {
+    "rate_notice_days": 7
+   },
+   "rule_id": "CN-17",
+   "sources": [
+    {
+     "text": "analogue only: Cal. Lab. Code 1700.24 7-day fee-change notice",
+     "url": "https://www.dir.ca.gov/dlse/talent/talent_laws_relating_to_talent_agencies.pdf"
+    }
+   ],
+   "statement": "The rate card is Finance's document, rendered by reference only; a change is announced at least rate_notice_days ahead and applies to clips posted after its effective date.",
+   "status": "in_force",
+   "title": "Rate card from Finance, with notice"
+  },
+  {
+   "kind": "research",
+   "parameters": {
+    "appeal_window_days": 14,
+    "sla_business_days": 10,
+    "sla_push_business_day": 8
+   },
+   "rule_id": "CN-18",
+   "sources": [
+    {
+     "text": "CR: one appeal per flagged Submission; aims to respond within 10 business days; ban may be appealed once",
+     "url": "https://b4e0vdqv6zgqeqj4pfgm.apps.whop.com/terms"
+    }
+   ],
+   "statement": "One appeal per flagged clip; answer within the SLA; an org-wide ban appealable once.",
+   "status": "in_force",
+   "title": "Appeals"
+  },
+  {
+   "kind": "founder",
+   "parameters": {
+    "table": {
+     "S1": {
+      "action": "warning"
+     },
+     "S2": {
+      "action": "enrolment_suspension",
+      "days": 30,
+      "tier_cap": "T0"
+     },
+     "S3": {
+      "action": "suspension",
+      "ban_proposal": true
+     }
+    }
+   },
+   "rule_id": "CN-19",
+   "sources": [],
+   "statement": "Discipline follows only V&I strikes whose evidence ids resolve at V&I, per the discipline table.",
+   "status": "in_force",
+   "title": "Discipline only from V&I strikes"
+  },
+  {
+   "kind": "spec_choice",
+   "parameters": {},
+   "rule_id": "CN-20",
+   "sources": [
+    {
+     "text": "CR: final decision is always made by a person",
+     "url": "https://b4e0vdqv6zgqeqj4pfgm.apps.whop.com/terms"
+    }
+   ],
+   "statement": "A ban takes effect only on Andre's approval.",
+   "status": "in_force",
+   "title": "A ban needs Andre"
+  },
+  {
+   "kind": "founder",
+   "parameters": {
+    "agreement_retention_days": 2557,
+    "post_exit_retention_days": 30
+   },
+   "rule_id": "CN-21",
+   "sources": [
+    {
+     "text": "Onboarding P4",
+     "url": null
+    }
+   ],
+   "statement": "Offboarding: access revoked, Finance open items flagged, export, deletion after the retention period; nothing Finance or an open dispute needs is deleted.",
+   "status": "in_force",
+   "title": "Clean exit"
+  },
+  {
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "CN-22",
+   "sources": [
+    {
+     "text": "Creative spec",
+     "url": null
+    }
+   ],
+   "statement": "Every rulebook version is announced to every active enrolment.",
+   "status": "in_force",
+   "title": "Rulebook versions announced"
+  },
+  {
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "CN-23",
+   "sources": [
+    {
+     "text": "HR-03 pattern",
+     "url": null
+    }
+   ],
+   "statement": "An open counsel question (CN-CQ-*) blocks what it names until Andre approves a counsel memo.",
+   "status": "in_force",
+   "title": "Counsel holds block what they name"
+  },
+  {
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "CN-24",
+   "sources": [
+    {
+     "text": "Onboarding guardrail",
+     "url": null
+    }
+   ],
+   "statement": "No DOB, ID data, tax data, legal name, IP address or payment details are stored here.",
+   "status": "in_force",
+   "title": "Minimum data"
+  },
+  {
+   "kind": "spec_choice",
+   "parameters": {},
+   "rule_id": "CN-25",
+   "sources": [
+    {
+     "text": "AB 5 prong A inference",
+     "url": "https://www.labor.ca.gov/employmentstatus/faq/"
+    }
+   ],
+   "statement": "No quotas, required hours, exclusivity or posting schedules; the clipper chooses whether and when to post.",
+   "status": "in_force",
+   "title": "No quotas"
+  },
+  {
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "CN-26",
+   "sources": [
+    {
+     "text": "Vyro income-claims ban",
+     "url": "https://vyro.com/content-requirements"
+    }
+   ],
+   "statement": "No promised earnings, views or results and no money value in any message.",
+   "status": "in_force",
+   "title": "No guarantees, no money"
+  },
+  {
+   "kind": "counsel",
+   "parameters": {
+    "blocks": [
+     "enrolment"
+    ],
+    "check": "counsel_memo"
+   },
+   "rule_id": "CN-CQ-01",
+   "sources": [
+    {
+     "text": "DLSE",
+     "url": "https://www.dir.ca.gov/dlse/talent/talent_laws_relating_to_talent_agencies.pdf"
+    }
+   ],
+   "statement": "Does recruiting clippers and placing them on brand campaigns make ZBC a talent agency, and are short-form clippers artists?",
+   "status": "open",
+   "title": "Talent agency (Cal. Lab. Code 1700.4)?"
+  },
+  {
+   "kind": "counsel",
+   "parameters": {
+    "blocks": [],
+    "check": "counsel_memo"
+   },
+   "rule_id": "CN-CQ-02",
+   "sources": [
+    {
+     "text": "LWDA FAQ",
+     "url": "https://www.labor.ca.gov/employmentstatus/faq/"
+    }
+   ],
+   "statement": "Are clippers independent contractors under the ABC test; does a Borello exemption fit? (Same as Compliance CQ-01.)",
+   "status": "open",
+   "title": "AB 5 classification"
+  },
+  {
+   "kind": "counsel",
+   "parameters": {
+    "blocks": [
+     "enrolment_sag_aftra"
+    ],
+    "check": "counsel_memo"
+   },
+   "rule_id": "CN-CQ-03",
+   "sources": [
+    {
+     "text": "SAG-AFTRA waiver",
+     "url": "https://www.sagaftra.org/sites/default/files/2025%20Influencer-Produced%20Sponsored%20Content%20Waiver.pdf"
+    }
+   ],
+   "statement": "May SAG-AFTRA members be admitted to campaigns, and does the 2025 Influencer Waiver apply to clipping?",
+   "status": "open",
+   "title": "SAG-AFTRA members"
+  },
+  {
+   "kind": "counsel",
+   "parameters": {
+    "blocks": [],
+    "check": "counsel_memo"
+   },
+   "rule_id": "CN-CQ-04",
+   "sources": [],
+   "statement": "Do the minimum-live-period forfeiture and post-settlement clawback survive state wage-type challenges? (Same as Compliance CQ-11.)",
+   "status": "open",
+   "title": "Forfeiture and clawback"
+  },
+  {
+   "kind": "counsel",
+   "parameters": {
+    "blocks": [
+     "channel_reddit",
+     "channel_x"
+    ],
+    "check": "counsel_memo"
+   },
+   "rule_id": "CN-CQ-05",
+   "sources": [],
+   "statement": "Reddit and X rules on paid-opportunity and recruiting posts (not fetched).",
+   "status": "open",
+   "title": "Reddit and X recruiting rules"
+  },
+  {
+   "kind": "counsel",
+   "parameters": {
+    "blocks": [
+     "email_ca_clippers"
+    ],
+    "check": "counsel_memo"
+   },
+   "rule_id": "CN-CQ-06",
+   "sources": [
+    {
+     "text": "fightspam.gc.ca",
+     "url": "https://www.fightspam.gc.ca/eic/site/030.nsf/eng/home"
+    }
+   ],
+   "statement": "CASL for member (non-recruiting) messages to Canadian clippers.",
+   "status": "open",
+   "title": "CASL for member messages"
+  },
+  {
+   "kind": "counsel",
+   "parameters": {
+    "blocks": [
+     "sms"
+    ],
+    "check": "counsel_memo"
+   },
+   "rule_id": "CN-CQ-07",
+   "sources": [
+    {
+     "text": "FCC guide",
+     "url": "https://www.fcc.gov/consumers/guides/stop-unwanted-robocalls-and-texts"
+    }
+   ],
+   "statement": "TCPA consent standard for recruiting or member texts.",
+   "status": "open",
+   "title": "TCPA consent"
+  },
+  {
+   "kind": "counsel",
+   "parameters": {
+    "blocks": [],
+    "check": "counsel_memo"
+   },
+   "rule_id": "CN-CQ-08",
+   "sources": [],
+   "statement": "Automated-system disclosure wording (Onboarding P1, Cal. B&P 17941).",
+   "status": "open",
+   "title": "Automation disclosure wording"
+  }
+ ],
+ "seed_id": "cn_rules_seed",
+ "spec": "CLIPPER_NETWORK_SPEC rev 1 (Sep 26, 2026) \u00a7B.9 and \u00a7C.6",
+ "templates": [
+  {
+   "body": "Hi {display_name}, we received your application {application_id} to the Z Best Clips network (18+ only). Your next steps are shown in your hub. {automation_disclosure}",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "application_received",
+   "variables": {
+    "application_id": "id",
+    "automation_disclosure": "automation_disclosure",
+    "display_name": "display_name"
+   },
+   "version": 1
+  },
+  {
+   "body": "Hi {display_name}, admission decision {admission_id}: {decision}. Rules applied: {rule_ids}. Items still open: {open_count}. {automation_disclosure}",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "admission_decision",
+   "variables": {
+    "admission_id": "id",
+    "automation_disclosure": "automation_disclosure",
+    "decision": "word",
+    "display_name": "display_name",
+    "open_count": "int",
+    "rule_ids": "rule_ids"
+   },
+   "version": 1
+  },
+  {
+   "body": "Clipper Agreement {doc_id} version {doc_version} is now current. Accept it in your hub before your next campaign enrolment (rule {rule_ids}).",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "agreement_new_version",
+   "variables": {
+    "doc_id": "id",
+    "doc_version": "id",
+    "rule_ids": "rule_ids"
+   },
+   "version": 1
+  },
+  {
+   "body": "Finance published rate card {rate_card_doc_id} version {rate_card_version} (SHA-256 {rate_card_sha256}) for campaign {campaign_id}. Read it in your hub. It applies to clips posted on or after {effective_date} (rule {rule_ids}).",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "rate_card_published",
+   "variables": {
+    "campaign_id": "id",
+    "effective_date": "date",
+    "rate_card_doc_id": "id",
+    "rate_card_sha256": "sha256",
+    "rate_card_version": "id",
+    "rule_ids": "rule_ids"
+   },
+   "version": 1
+  },
+  {
+   "body": "Finance changed the rate card for campaign {campaign_id} to {rate_card_doc_id} version {rate_card_version} (SHA-256 {rate_card_sha256}). The change takes effect on {effective_date} and applies only to clips posted after that date (rule {rule_ids}).",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "rate_card_changed",
+   "variables": {
+    "campaign_id": "id",
+    "effective_date": "date",
+    "rate_card_doc_id": "id",
+    "rate_card_sha256": "sha256",
+    "rate_card_version": "id",
+    "rule_ids": "rule_ids"
+   },
+   "version": 1
+  },
+  {
+   "body": "Campaign {campaign_id} now has rulebook version {rulebook_version}. Clips are judged by the version they were made under. The kit for the new version is in your hub when Creative has signed it (rule {rule_ids}).",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "rulebook_announced",
+   "variables": {
+    "campaign_id": "id",
+    "rule_ids": "rule_ids",
+    "rulebook_version": "int"
+   },
+   "version": 1
+  },
+  {
+   "body": "Your kit {kit_id} for campaign {campaign_id} (rulebook version {rulebook_version}, SHA-256 {kit_sha256}) is in your hub. Please confirm you received the rulebook, the disclosure section and rate card version {rate_card_version} (rule {rule_ids}).",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "kit_delivered",
+   "variables": {
+    "campaign_id": "id",
+    "kit_id": "id",
+    "kit_sha256": "sha256",
+    "rate_card_version": "id",
+    "rule_ids": "rule_ids",
+    "rulebook_version": "int"
+   },
+   "version": 1
+  },
+  {
+   "body": "Clip {submission_id} was flagged under rule {rule_ids} (evidence {evidence_ids}). You may appeal once until {appeal_deadline}.",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "clip_flagged",
+   "variables": {
+    "appeal_deadline": "date",
+    "evidence_ids": "ids",
+    "rule_ids": "rule_ids",
+    "submission_id": "id"
+   },
+   "version": 1
+  },
+  {
+   "body": "Clip {submission_id}: verification status {cert_status}, certified views {certified_views}. Questions about settlement go to Finance.",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "certification_result",
+   "variables": {
+    "cert_status": "word",
+    "certified_views": "int",
+    "submission_id": "id"
+   },
+   "version": 1
+  },
+  {
+   "body": "Verification and Integrity recorded a {strike_class} strike ({strike_id}) under rule {rule_ids}. Evidence: {evidence_ids}. Consequence: {consequence}. You may appeal once until {appeal_deadline}.",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "strike_notice",
+   "variables": {
+    "appeal_deadline": "date",
+    "consequence": "word",
+    "evidence_ids": "ids",
+    "rule_ids": "rule_ids",
+    "strike_class": "word",
+    "strike_id": "id"
+   },
+   "version": 1
+  },
+  {
+   "body": "You are suspended ({suspension_kind}) until {until} under rule {rule_ids} (strike {strike_id}). You may appeal once until {appeal_deadline}.",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "suspension_notice",
+   "variables": {
+    "appeal_deadline": "date",
+    "rule_ids": "rule_ids",
+    "strike_id": "id",
+    "suspension_kind": "word",
+    "until": "until"
+   },
+   "version": 1
+  },
+  {
+   "body": "Andre approved a permanent ban ({decision_id}) under rule {rule_ids}. Your access has ended and your exit has started. You may appeal the ban once until {appeal_deadline}.",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "ban_notice",
+   "variables": {
+    "appeal_deadline": "date",
+    "decision_id": "id",
+    "rule_ids": "rule_ids"
+   },
+   "version": 1
+  },
+  {
+   "body": "We received your appeal {dispute_id}. A person will answer by {sla_date} (rule {rule_ids}).",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "appeal_received",
+   "variables": {
+    "dispute_id": "id",
+    "rule_ids": "rule_ids",
+    "sla_date": "date"
+   },
+   "version": 1
+  },
+  {
+   "body": "Appeal {dispute_id}: {outcome} (rule {rule_ids}).",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "appeal_outcome",
+   "variables": {
+    "dispute_id": "id",
+    "outcome": "word",
+    "rule_ids": "rule_ids"
+   },
+   "version": 1
+  },
+  {
+   "body": "Your exit {offboarding_id} has started and campaign access has ended. Connected accounts: {connections}. Exit status: {offboarding_status}. Contact details are deleted {retention_days} days after exit unless an open item still needs them (rule {rule_ids}).",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "offboarding_confirmation",
+   "variables": {
+    "connections": "word",
+    "offboarding_id": "id",
+    "offboarding_status": "word",
+    "retention_days": "int",
+    "rule_ids": "rule_ids"
+   },
+   "version": 1
+  },
+  {
+   "body": "Your data export {export_ref} (SHA-256 {export_sha256}) is ready in your hub.",
+   "channels": [
+    "email",
+    "in_app"
+   ],
+   "purpose": "transactional",
+   "template_id": "data_export_ready",
+   "variables": {
+    "export_ref": "id",
+    "export_sha256": "sha256"
+   },
+   "version": 1
+  },
+  {
+   "body": "Advertisement. Z Best Clips is looking for video clippers, 18+ only. You post from your own accounts and choose whether and when to post. All terms are explained in full before you join. Apply through the Z Best Clips hub. To stop these emails: {opt_out_link} {postal_address}",
+   "channels": [
+    "discord_server_post",
+    "email"
+   ],
+   "purpose": "commercial",
+   "template_id": "recruiting_invite",
+   "variables": {
+    "opt_out_link": "opt_out_link",
+    "postal_address": "postal_address"
+   },
+   "version": 1
+  }
+ ]
+}

@@ -535,3 +535,53 @@ export VI_CALLER_TOKENS='{"compliance_38": "<>=32 chars>", "creative_production"
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> VI_DATA_DIR=<dir>
 cd src && python3 -m api   # VI_BIND_ADDR (default 127.0.0.1), VI_PORT (default 8390)
 ```
+
+## Clipper Network (`services/clipper-network-py`) — Sep 26, 2026
+
+The system of record for a ZBC clipper from application to exit: recruiting
+(opt-in only), admission, tiers (T0–T3 from V&I-verified outcomes only),
+campaign enrolment and delivery of Creative's signed kit, versioned-template
+messaging inside the recipient's quiet hours, disputes, discipline from V&I
+strikes (a ban only on Andre's approval) and the P4 clean exit. Built from
+the locked Clipper Network spec (rev 1): 10 deterministic single-task
+intelligences, no model calls, no money handled or stored. Architecture and
+every choice made where the spec was silent:
+`docs/adr/0008-clipper-network-architecture.md`. Routes and settings:
+`services/clipper-network-py/README.md`.
+
+- **Status:** built and tested (303 tests, `python3 -m pytest -q`; no
+  network — a socket guard fails any test that tries). **Not certified for
+  any real clipper.** V&I, Compliance (38), Creative, Finance (31), Legal
+  (37), People (43), the messaging provider, the hub and push are stand-ins
+  that answer "not allowed yet", so on day one admission is blocked with one
+  `DEPENDENCY_UNAVAILABLE:<port>` per stand-in, nothing is enrolled and no
+  message is delivered. ADR 0008 ends with the unlock list.
+- **Fails closed.** Nothing is in force until Andre approves the pinned
+  rules seed (27 rules, 8 counsel holds, 17 templates); only Andre changes a
+  rule or template, weakening changes need his explicit acknowledgment, and
+  the §H numbers are rule parameters the environment cannot change. CN never
+  trusts a caller's boolean (`age_verified` is a 422; a tick box never
+  counts); it asks V&I, Compliance, Finance, Legal and Creative. Every
+  adverse item cites a rule id in force. Every decision is written to the
+  ledger (`department: clipper_network`) and to a hash-chained, ledger-anchored
+  local log before it takes effect, otherwise 503 and nothing changed; the
+  compliance-py reconcile procedure and instance lease apply. Contact data
+  lives only in a separate contact store so exit deletion is real; DOBs and
+  OAuth codes are relayed to V&I and stored nowhere.
+- **Callers:** the thin clients to V&I, Compliance and Creative are wired only
+  when fully configured; the changes those services (and Onboarding) must make
+  are listed in ADR 0008, not made here.
+- **Live run** (real ledger-rust binary, production entrypoint on stand-ins +
+  `devtools/live_server.py` with the test fakes): admission blocked on
+  stand-ins → admitted → T0→T1 → enrolled → kit delivered and acknowledged →
+  S3 mirrored → suspended + ban proposal → Andre's ban → offboarding →
+  restart (anchors verified) → exit closed; `GET /ledger/verify` →
+  `{"entries":30,"valid":true}` and `{"entries":134,"valid":true}`.
+
+```bash
+cd services/clipper-network-py && python3 -m pytest -q      # 303 tests
+export CN_SERVICE_TOKEN=<secret> CN_IDENTITY_HMAC_KEY=<secret> CN_ANDRE_APPROVAL_TOKEN=<Andre's secret>
+export CN_CALLER_TOKENS='{"hub": "<>=32 chars>", "onboarding": "...", "creative_production": "...", "scheduler": "..."}'
+export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> CN_DATA_DIR=<dir>
+cd src && python3 -m api   # CN_BIND_ADDR (default 127.0.0.1), CN_PORT (default 8400)
+```
