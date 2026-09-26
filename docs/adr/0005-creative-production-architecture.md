@@ -1310,7 +1310,12 @@ money. ZBC's unit of work is a campaign, not a clip.
     of two cold runs and passed with 0.02-0.06 s to spare — the in-process
     margin is thin; at the first caps tried, 4 words / 40 / 400
     characters, it measured 2.08 s and failed, which is why they were
-    lowered).
+    lowered). The test itself asserts 1.5x the worst in-suite figure
+    (3.0 s, scaled by the measured slowdown) so that it is not flaky and
+    still fails on a 2x regression; the < 2 s above is the budget. The
+    same for the fix-wave-9 M1 test: measured 1.19-1.51 s (routed:
+    1.46-1.91 s) in six full runs, its 1.5 s bound failed at 1.503 s on
+    the unmodified tree; it now asserts 2.25 s / 2.9 s.
     Over a cap: four-word phrases 16 x 4 1.47-1.93 s, 12 x 4 (290
     characters) 1.62-1.72 s, 11 x 4 English words 1.74-1.77 s; 3-word
     lists of 400 characters 1.45-1.74 s, of 588 characters 1.76-1.93 s;

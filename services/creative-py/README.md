@@ -194,7 +194,9 @@ N10-3 (a regional phrase split over two fields, four layouts → human_review)
 and N10-4 (a 60-word phrase, and a list over the total budget, refused with
 a 422 on the draft, revision and edit paths; approval at the caps succeeds;
 the costliest shapes within the caps, regional reading forced, cold,
-routed: ≤ 2 s CPU scaled by a measured slowdown). Tests changed because they
+routed: budget < 2 s CPU, measured 1.70 s alone / 1.94-1.98 s in-suite; the
+test asserts 1.5x the worst measured, 3.0 s scaled by a measured slowdown, so
+it is not flaky). Tests changed because they
 enshrined the old behaviour: `test_fix_wave_10.py`
 `test_n91_round9_currency_cases_go_to_a_human` (the round-9 currency
 phrases read exactly through the table: now a reject, was human_review),
@@ -202,7 +204,9 @@ phrases read exactly through the table: now a reject, was human_review),
 (the currency word is now Rule A's "unreadable symbols", no longer a
 stripped share) and `test_n93_approval_at_the_cap_is_allowed` (its 30
 phrases of 17 characters are over the new 300-character budget; now 30 of
-10).
+10). Follow-up: `test_fix_wave_9.py` M1 cost bounds 1.5 s / 2.0 s → 2.25 s /
+2.9 s (1.5x the worst of six in-suite runs; 1.5 s failed at 1.503 s on the
+unmodified 978bcaa tree).
 `test_fix_wave_10.py` reproduces the AEGIS round-9 findings: N9-1 (the
 nine round-9 currency / math-symbol cases → human_review with a never-say
 reason; every table symbol is a SKELETON reading of its letter; the
