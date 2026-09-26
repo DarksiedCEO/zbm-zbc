@@ -1345,7 +1345,8 @@ money. ZBC's unit of work is a campaign, not a clip.
     ｡˚• new drop" (fix11 decoration set); the price is that a phrase of
     fewer than three different letters ("fee") is not caught spaced out
     this way. A letter ends
-    a run so that "∅ ⊂ A ⊆ B" and "p ∧ q ⇒ p ∨ q" stay ordinary; the price
+    a run so that "∅ ⊂ A ⊆ B" and "p ∧ q ⇒ p ∨ q" stay ordinary (fix wave
+    13: no longer for single letters, decision 55); the price
     is that symbols ALTERNATING with single letters ("⋂ o  ℞ i ∫ ⋊") are
     not a run — caught only when four or more single letters trip the
     single-letter signal (gap 15). Measured (fix12 re-runs of the round-11
@@ -1434,6 +1435,54 @@ money. ZBC's unit of work is a campaign, not a clip.
     still decision 49's 21 x 3 words (<= 14 characters): 1.67-1.79 s alone
     on both the unmodified and the fixed tree, 1.76-1.91 s inside the full
     test run (two runs) — under 2 s, the same thin margin as before.
+55. **Single-glyph sequences; the single-letter net counts before
+    canonicalisation (fix wave 13; AEGIS round 12 N12-1, N12-2).**
+    Decision 50 ended a run at every unit holding a letter, so keeping one
+    plain letter every two or three glyphs defeated it: "⩋ ⍺ k ⋿  ⩋ o ⋂ ⋿
+    y" (make money), "℞ ⍳ s ⋊  f ℞ ⋿ ⋿" (risk free), "n ○  r ⍳ s ⋊", "⍵ ⍳ n
+    b ⍳ g", "◗ ⋿ b ⟙  f ℞ ⋿ ⋿", "␢ u ℞ n  ∱ a ⟙" passed automatically, live
+    over HTTP — 240 of the 1,972 masked forms of twelve short phrases
+    (`ns_short12.py`). The single-letter signal did not catch them either:
+    it counted letters AFTER canonicalisation had stripped the symbols
+    between them ("⋂ o ℞ i ∫ ⋊" reads "o i"). Now (`_glyph_sequences`): a
+    SINGLE-GLYPH unit (units and separators as in decision 50) is one
+    letter (letter-like symbols read as their letters first) or one
+    unreadable symbol, written once or repeated ("₩ ₩ ₩ i ₦" and "₩₩₩ i ₦",
+    N12-2: a repeat is one glyph of the spelling; a repeated LETTER "aa" is
+    a word). GLYPH_RUN (3) or more consecutive single-glyph units holding a
+    letter and GLYPH_RUN_UNREADABLE (2) or more unreadable symbols are an
+    unreadable word (Rule A, `obfuscation:unreadable symbols`, a human's
+    call; the tables still upgrade an exact reading to a rejection). A
+    sequence with no letter stays with decision 50's rule (three different
+    symbols), so "Swipe → → →", "€ / €€ / €€€", "Score: 3 ≥ 2 ≥ 1" and
+    "Price drop: €25 → €19" stay ordinary. The single-letter signal
+    (SINGLE_LETTER_RUN, 4) also counts these sequences before
+    canonicalisation (`single_glyph_run`: letters and unreadable symbols,
+    at least one of each), so "⋂ o r i" (one symbol among four glyphs)
+    goes to a human too. No reading table was added. The cost the ruling
+    accepts: single letters between two or more unreadable operators or
+    arrows go to a human — "Set theory night: ∅ ⊂ A ⊆ B", "A ∪ B ∩ C is
+    not associative with ∖", "Route: A → B → C", "Grade: A ★ B ☆ C", "x →
+    ∞". Measured (fix13 re-runs of unmodified copies of the round-12
+    probes): `ns_short12.py` automatic passes 240 → 0 of 1,972 (reject 4,
+    human_review 1,968); `ns_wave12.py` MISS 6 → 0 of 560 (N12-2's
+    "₩ ₩ ₩ i ₦  ฿ ฿ ฿ i ₲" included); `ns_ruleA11` 0/480,
+    `ns_divider11` attacks 0/7, `ns_symbols10` 0/540, `ns_regional10` 2/559,
+    `ns_evade9` 5/463, `ns_3fields11` 69/96, `ns_ri_joint10` 0/36,
+    `ns_ordinary11`, `ns_fields12`, `ns_ri_controls10`, `ns_onechar10`,
+    `ns_regional11` and `lookalike_scan11` unchanged. False positives,
+    every newly flagged caption: round-10 math 8/13 → 10/13 ("A ∪ B ∩ C is
+    not associative with ∖", "Set theory night: ∅ ⊂ A ⊆ B"); round-8
+    3/170, round-9 (plain 0/30, emoji 0/40, hashtag 0/20, non-Latin 10/20,
+    decor 11/30), the other round-10 strata, the fix11 decoration set
+    16/53, the round-11 divider / price set 9/29 and the round-12 FP probe
+    (`ns_fp12.py`, 12 of 22 pass) unchanged. Cost: the cost tests at the
+    caps unchanged within noise, same bounds — run alone, base / fixed:
+    N10-4 worst 1.66 / 1.59 s (single samples up to 1.70 / 1.69 s), N9-3
+    1.00 / 1.04 s, M1 routed 1.49 / 1.52 s CPU; inside the full test run
+    N10-4 worst 1.73 s (one sample of the 21 x 3 shape 1.93 s), N9-3
+    1.09 s, M1 1.60 s — the same thin margin under 2 s; `obfuscation_signals` on a 50,000-character caption of single
+    glyphs 69 → 91-98 ms CPU (one more linear pass).
 
 ## Shared vs separate
 
@@ -1587,9 +1636,13 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     letter (a Spanish-only "ñ" is Latin and fine; a Russian word, a
     Japanese title, a Greek µ in "µs") goes to the human queue, as do
     emoji keycaps ("1️⃣"), soft hyphens inside words and four or more
-    single letters in a row. Fix wave 12: unreadable symbols alternating
-    with single letters ("⋂ o  ℞ i ∫ ⋊", fewer than four single letters)
-    are not a Rule A run and pass (decision 50); a phrase whose words sit
+    single letters in a row, and (fix wave 13, decision 55) three or more
+    single letters / unreadable symbols in a row holding a letter and two
+    or more unreadable symbols ("∅ ⊂ A ⊆ B", "A → B → C"). Fix wave 12:
+    unreadable symbols alternating with single letters were not a Rule A
+    run and passed (decision 50) — closed in fix wave 13 (decision 55);
+    still open: a sequence of only two different unreadable symbols and
+    no letter ("∱ ⋿ ⋿", "fee") is not a run; a phrase whose words sit
     in three fields with more text between them in a field is not a spread
     (decision 52).
 16. **Review cost with a long never-say list (fix wave 8; fix wave 9;

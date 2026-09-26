@@ -337,7 +337,9 @@ ORDINARY = [
     "±5% tolerance on every cut", "Scores ≥ 90 get a sticker", "∞ possibilities", "€€€ saved with this one trick",
     "A ∪ B homework help", "Price drop: $49.99 → $39.99", "Up 12% ↑ since June", "Cost tiers € / €€ / €€€ explained",
     "₹₹₹ budget level: high", "Menu: ₩₩ for mains, ₩ for sides", "Raised €1.5m in seed", "Bundle: 3 × $12 = $36",
-    "Set theory night: ∅ ⊂ A ⊆ B", "√2 ≈ 1.414", "™ and © 2026 BrandCo", "25℃ and sunny", "№1 bestseller",
+    # fix wave 13 (N12-1): "Set theory night: ∅ ⊂ A ⊆ B" moved to test_fix_wave_13's accepted-cost test (single
+    # letters between two or more unreadable operators now go to a human)
+    "√2 ≈ 1.414", "™ and © 2026 BrandCo", "25℃ and sunny", "№1 bestseller",
     # emoji and single symbols
     "🎉🎉🎉 🔥🔥", "Thank you 🙏🏽 for 10k 👨‍👩‍👧", "Five ⭐⭐⭐⭐⭐", "Link in bio ⬇️⬇️", "✅ done ❌ not done",
     "♏ season starts today", "☾ moon journaling prompt", "℞ pharmacy hours changed", "✝ Sunday mass at 10",

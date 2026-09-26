@@ -169,8 +169,8 @@ and kept idle / partial-head sockets open forever.
 cd services/creative-py && python3 -m pytest -q
 ```
 
-Result on Sep 25, 2026 after fix wave 12: **729 passed, 0 failed, 0 skipped**, two consecutive runs
-(`CREATIVE_TEST_PORTS=18750-18799`; 703 after fix wave 11 (`CREATIVE_TEST_PORTS=18650-18699`); 684 after fix wave 10 (`CREATIVE_TEST_PORTS=18500-18549`); 664 after fix wave 9, three consecutive
+Result on Sep 25, 2026 after fix wave 13: **736 passed, 0 failed, 0 skipped**, two consecutive runs
+(`CREATIVE_TEST_PORTS=18850-18899`; 729 after fix wave 12 (`CREATIVE_TEST_PORTS=18750-18799`); 703 after fix wave 11 (`CREATIVE_TEST_PORTS=18650-18699`); 684 after fix wave 10 (`CREATIVE_TEST_PORTS=18500-18549`); 664 after fix wave 9, three consecutive
 runs; Python 3.11.15, pytest 9.1.1; 641 after fix wave 8, 557 after fix wave 7, 515 after fix wave 6, 469 after fix wave 5,
 428 after fix wave 4, 360 after fix wave 2, 310 after fix wave 1, 205
 before it). No test in this service skips: none uses an env-provided
@@ -179,6 +179,15 @@ ledger binary (the real-ledger runs are the live runs below), and
 Real-socket tests bind ports from `CREATIVE_TEST_PORTS` ("lo-hi") when it
 is set (fix wave 9; defaults: 20110-20119 and 20300-20319, OS-assigned for
 the lossy-proxy tests); the fix-wave-9 runs used `CREATIVE_TEST_PORTS=20900-20919`.
+`test_fix_wave_13.py` reproduces the AEGIS round-12 findings (fix wave 13, ADR 0005 decision 55): N12-1
+(the round-12 cases with a plain letter kept every two or three glyphs → human_review with "unreadable
+symbols"; all 1,972 masked forms of twelve short phrases raise a signal, and every mask with two or more
+unreadable symbols is Rule A itself; the single-letter net counts before canonicalisation, "⋂ o ℞ i ∫ ⋊";
+a 21-caption ordinary guard passes; the accepted cost, "∅ ⊂ A ⊆ B", "A → B → C", "A ★ B ☆ C", "x → ∞" →
+human_review) and N12-2 (one unreadable symbol repeated counts as one glyph: "₩ ₩ ₩ i ₦  ฿ ฿ ฿ i ₲",
+"₩₩₩ i ₦" → never a pass). Tests changed: "Set theory night: ∅ ⊂ A ⊆ B" moved out of the ordinary guards
+of `test_fix_wave_11.py` (`ORDINARY`) and `test_fix_wave_12.py`
+(`test_n111_single_symbols_in_ordinary_text_stay_clean`) into the wave-13 accepted-cost test.
 `test_fix_wave_12.py` reproduces the AEGIS round-11 findings (fix wave 12, ADR 0005 decisions 50-54):
 N11-1 (the round-11 spaced-symbol cases, and every phrase spaced one symbol a letter with spaces, thin /
 hair / ideographic spaces, zero-width spaces, dividers, digits, punctuation and emoji between, → never a
@@ -811,10 +820,14 @@ decision 49). Fix wave 12: three or more unreadable symbols in a row, whatever
 separates them (spaces, dividers, digits, punctuation), with three different
 symbols, go to a human — so do three different currency "prices" in a row
 ("₹499 ₩12,000 €5") and "✿ ❀ ❁ ❃"; symbols alternating with single letters
-("⋂ o  ℞ i ∫ ⋊") are not caught unless four single letters are; a phrase
+("⋂ o  ℞ i ∫ ⋊") are not caught unless four single letters are (closed in fix wave 13, below); a phrase
 spread over three fields is caught only when its words are at the fields'
 edges; the never-say caps count NFKC-expanded characters, so a list of
 squared-katakana or unit symbols ("㎉") is refused sooner (ADR 0005
-decisions 50-54). `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
+decisions 50-54). Fix wave 13: three or more single letters / single unreadable symbols in a row
+(separators as above, a repeated symbol counting once) holding a letter and two or more unreadable symbols
+go to a human, so single-letter math and arrows do too ("∅ ⊂ A ⊆ B", "A → B → C", "x → ∞"; "Swipe → → →"
+and "€25 → €19" do not); the four-single-letters signal also counts before canonicalisation, symbols
+included (ADR 0005 decision 55). `CREATIVE_MAX_CONCURRENCY` bounds memory, but a client holding
 that many idle sockets gets everyone else 503s until the 10 s head
 deadline frees them — per-client limits belong in a proxy in front.
