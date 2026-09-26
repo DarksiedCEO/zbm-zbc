@@ -37,6 +37,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from _procinfo import rss_mib
 from conftest import TEST_SERVICE_TOKEN
 from test_fix4_limits import MAX_BATCHES
 from test_fix5_http_limits_live import _start as _start_quiet, _stop  # DEVNULL: a PIPE fills and blocks the server
@@ -397,12 +398,8 @@ def server():
     _stop(proc)
 
 
-def _rss_mib(pid: int) -> int:
-    with open(f"/proc/{pid}/status") as f:
-        for line in f:
-            if line.startswith("VmRSS:"):
-                return int(line.split()[1]) // 1024
-    raise AssertionError("no VmRSS")
+# Fix wave 16: portable (Linux /proc, macOS/BSD ps); measures only the server pid.
+_rss_mib = rss_mib
 
 
 def _pct(values: list[float], p: float) -> float:

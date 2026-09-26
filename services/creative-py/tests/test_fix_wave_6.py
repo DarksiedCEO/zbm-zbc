@@ -50,6 +50,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from _procinfo import rss_kib
+
 from conftest import NOW, TEST_SERVICE_TOKEN, Api, port_range
 from flows import ok, zbc_open
 from ordinary_captions import CAPTIONS, NEVER_SAY_FP_LIST
@@ -646,11 +648,8 @@ def server():
         _stop(proc)
 
 
-def _rss_kb(pid: int) -> int:
-    for line in open(f"/proc/{pid}/status"):
-        if line.startswith("VmRSS"):
-            return int(line.split()[1])
-    raise RuntimeError("no VmRSS")
+# Fix wave 16: portable (Linux /proc, macOS/BSD ps); measures only the server pid.
+_rss_kb = rss_kib
 
 
 @pytest.mark.parametrize("name,body", [("1 MiB junk", JUNK_1MIB), ("60k unknown keys", JUNK_60K_KEYS)], ids=["1mib", "60k"])

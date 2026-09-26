@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from _procinfo import NO_OVERRIDE_ADDR_REASON, can_bind, listening_addrs, override_bind_addr
+
 SRC = Path(__file__).resolve().parents[1] / "src"
 TOKEN = "live-test-token-not-a-secret"
 
@@ -29,33 +31,24 @@ TOKEN = "live-test-token-not-a-secret"
 def _free_port() -> int:
     """An OS-assigned free port, or — when FULFILLMENT_TEST_PORT_RANGE="LO-HI"
     is set (fix wave 1: engineers run in assigned port ranges) — the first
-    free port in that range, checked on both loopback addresses used here."""
+    free port in that range, checked on every loopback address used here
+    (127.0.0.1 plus the override address this OS supports, fix wave 16)."""
     rng = os.environ.get("FULFILLMENT_TEST_PORT_RANGE")
     if not rng:
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             return s.getsockname()[1]
     lo, hi = (int(x) for x in rng.split("-"))
+    hosts = ["127.0.0.1"] + [h for h in (override_bind_addr(),) if h]
     for port in range(lo, hi + 1):
-        try:
-            for host in ("127.0.0.1", "127.0.0.2"):
-                with socket.socket() as s:
-                    s.bind((host, port))
+        if all(can_bind(host, port) for host in hosts):
             return port
-        except OSError:
-            continue
     raise AssertionError(f"no free port in FULFILLMENT_TEST_PORT_RANGE={rng}")
 
 
-def _listening_addrs(port: int) -> set[str]:
-    """Hex local addresses in LISTEN state (st=0A) for `port`, from /proc/net/tcp."""
-    out = set()
-    for line in Path("/proc/net/tcp").read_text().splitlines()[1:]:
-        fields = line.split()
-        addr, port_hex = fields[1].split(":")
-        if int(port_hex, 16) == port and fields[3] == "0A":
-            out.add(addr)
-    return out
+# Fix wave 16: the kernel's socket table, read portably (Linux /proc/net/tcp
+# and tcp6; macOS/BSD lsof). Returns text addresses, IPv4 and IPv6.
+_listening_addrs = listening_addrs
 
 
 _LOGS: dict[int, "tempfile._TemporaryFileWrapper"] = {}  # pid -> the server's captured output
@@ -126,13 +119,19 @@ def default_server():
 
 def test_entrypoint_binds_loopback_by_default(default_server):
     _, port = default_server
-    assert _listening_addrs(port) == {"0100007F"}  # 127.0.0.1, not 00000000 (0.0.0.0)
+    assert _listening_addrs(port) == {"127.0.0.1"}  # not 0.0.0.0 / :: (all interfaces)
 
 
 def test_bind_addr_env_override_is_honored():
-    proc, host, port = _start({"FULFILLMENT_BIND_ADDR": "127.0.0.2"})
+    # Fix wave 16: 127.0.0.2 exists on Linux only; macOS gets ::1 instead.
+    # Either way the socket table must show exactly the requested address.
+    addr = override_bind_addr()
+    if addr is None:
+        pytest.skip(NO_OVERRIDE_ADDR_REASON)
+    proc, host, port = _start({"FULFILLMENT_BIND_ADDR": addr})
     try:
-        assert _listening_addrs(port) == {"0200007F"}
+        assert host == addr
+        assert _listening_addrs(port) == {addr}
         assert _get(host, port, "/health") == 200
     finally:
         _stop(proc)
