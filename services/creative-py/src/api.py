@@ -115,6 +115,7 @@ from starlette.concurrency import run_in_threadpool
 
 from shared.actors import ActorRegistry
 from shared.clock import Clock, SystemClock
+from shared.compliance38 import compliance_from_env
 from shared.departments import Departments
 from shared.errors import (
     CreativeError,
@@ -1168,9 +1169,12 @@ def build_app(
 
 def _app_from_env() -> FastAPI:
     token = _load_required_token()
+    # Compliance (38): the HTTP client only when COMPLIANCE_SERVICE_URL, _TOKEN and
+    # COMPLIANCE_CALLER_TOKEN are all set; otherwise the fail-closed stand-in.
     return build_app(
         service_token=token,
         ledger=ledger_from_env(),
+        departments=Departments(compliance=compliance_from_env(dict(os.environ))),
         founder_token=os.environ.get("CREATIVE_ANDRE_APPROVAL_TOKEN"),
         actors=ActorRegistry.from_env(),
         superseded_grace_hours=grace_hours_from_env(),

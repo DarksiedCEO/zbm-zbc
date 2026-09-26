@@ -14,7 +14,10 @@ Honest defaults — every missing dependency is the fail-closed stand-in:
   record is refused with 503 ``proceeded: false``.
 - Revenue Recovery: HttpRevenueRecoveryClient only if DETECTION_SERVICE_URL
   and DETECTION_SERVICE_TOKEN are set; otherwise the audit answers 502.
-- Compliance (38), Verification and Integrity, Billing, ZBC payouts,
+- Compliance (38): ``integrations.compliance38.HttpComplianceDepartment`` only
+  when COMPLIANCE_SERVICE_URL, COMPLIANCE_SERVICE_TOKEN and
+  COMPLIANCE_CALLER_TOKEN are all set (any failure = not allowed).
+- Compliance (38) otherwise, Verification and Integrity, Billing, ZBC payouts,
   handoff targets, Andre's push channel, live platform checks, the vault:
   all stand-ins that answer "not allowed yet" / "not wired".
 - Contract storage: stand-in holding nothing, unless an operator opts in to
@@ -71,6 +74,7 @@ from pydantic import BaseModel, ValidationError
 
 from config import load_config
 from guardrails import OutboundBlocked
+from integrations.compliance38 import compliance_from_env
 from integrations.departments import Departments, InMemoryContractStorage
 from integrations.revenue_recovery import HttpRevenueRecoveryClient, NotConfiguredRevenueRecovery
 from intelligences import registry
@@ -148,6 +152,9 @@ def build_service_from_env(env: dict | None = None) -> OnboardingService:
     else:
         rr = NotConfiguredRevenueRecovery()
     depts = Departments()
+    # Compliance (38): the HTTP client only when COMPLIANCE_SERVICE_URL, _TOKEN and
+    # COMPLIANCE_CALLER_TOKEN are all set; otherwise the fail-closed stand-in.
+    depts.compliance = compliance_from_env(env)
     if env.get("ONBOARDING_CONTRACT_STORAGE") == "in_memory":
         depts.contracts = InMemoryContractStorage()
     return OnboardingService(config, ledger, rr, departments=depts, andre_approval_key=env.get("ONBOARDING_ANDRE_APPROVAL_KEY") or None)

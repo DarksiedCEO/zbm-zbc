@@ -446,3 +446,51 @@ cd src && python3 serve.py   # CREATIVE_BIND_ADDR (default 127.0.0.1), CREATIVE_
 
 Details, live-run evidence and gaps: `services/creative-py/README.md`;
 decisions: `docs/adr/0005-creative-production-architecture.md`.
+
+## Compliance (38) (`services/compliance-py`) — Sep 26, 2026
+
+The hard gate before **activation** (Onboarding), **payout** (Creative's
+payout eligibility) and **publish** (Creative's ZBM gate), plus Vanta-style
+**control monitoring** (17 controls, trust-center view), over an
+**obligation register** of 118 rows seeded from the verified compliance
+research (59 verified, 59 unverified; the seed file is checked against its
+SHA-256 at every start). Built from the locked Compliance spec (rev 1), with
+11 deterministic single-task intelligences and no model calls. Architecture
+and every choice made where the spec was silent:
+`docs/adr/0006-compliance-department-architecture.md`. Routes and settings:
+`services/compliance-py/README.md`.
+
+- **Status:** built and tested (445 tests, `python3 -m pytest -q`; no network —
+  a socket guard fails any test that tries). **Not certified for any real
+  client, clipper, payout or publish.** Verification and Integrity, Finance
+  (31), Legal (37), the OFAC screening provider and the accessibility checker
+  are stand-ins that answer "not allowed yet", so on day one every payout is
+  blocked (counsel rows CQ-01/03/11 stay red until memos are approved), Meta
+  and Twitch clips are blocked, and every site/video waits for an
+  accessibility provider and Legal (37) — the spec's stated day-one effect.
+- **Fails closed.** Nothing is in force until Andre approves the seed with
+  his own token (`COMPLIANCE_ANDRE_APPROVAL_TOKEN`; the service or a caller
+  token never counts as his). Expired or unverified rows block every gate
+  they feed; an unknown jurisdiction is refused; a missing fact is named.
+  Every block cites an obligation id and its source URL. Every ruling,
+  decision, screen, check, control result and hold is written to the ledger
+  (`department: compliance`) and to a hash-chained local log **before** it
+  takes effect; otherwise 503 and nothing issued.
+- **Callers:** onboarding-py and creative-py gained thin HTTP clients
+  (`HttpComplianceDepartment`, `HttpCompliance38`) used only when
+  `COMPLIANCE_SERVICE_URL`, `COMPLIANCE_SERVICE_TOKEN` and
+  `COMPLIANCE_CALLER_TOKEN` are set; any failure means "not allowed". Those
+  callers still send today's facts (spec §F.2 changes not made in this
+  build), so Compliance answers blocked with every missing fact named.
+- **Live run** (real ledger-rust binary + compliance-py over real HTTP):
+  `devtools/live_run.py` — all gates, two register approvals, a Change
+  Watcher proposal approved by Andre, both thin clients, and
+  `GET /ledger/verify` → `{"entries":148,"valid":true}`.
+
+```bash
+cd services/compliance-py && python3 -m pytest -q      # 445 tests
+export COMPLIANCE_SERVICE_TOKEN=<secret> COMPLIANCE_ANDRE_APPROVAL_TOKEN=<Andre's secret>
+export COMPLIANCE_CALLER_TOKENS='{"onboarding": "<>=32 chars>", "creative_production": "...", "scheduler": "..."}'
+export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> COMPLIANCE_DATA_DIR=<dir>
+cd src && python3 -m api   # COMPLIANCE_BIND_ADDR (default 127.0.0.1), COMPLIANCE_PORT (default 8380)
+```
