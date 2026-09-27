@@ -1,0 +1,392 @@
+"""
+Outbound ports (Finance spec §D.2). Protocols and their fail-closed stand-ins ONLY: every ``NotBuilt*`` /
+``NotWired*`` class answers unavailable / not allowed, never "fine" (BUILD_CONTRACTS §0, spec G3). The passing fakes
+live in ``tests/fakes.py`` and are never importable from ``src/``. A port that raises is treated as unavailable by
+the service and its exception text is dropped.
+
+What no port offers, by design: a debit, pull or reversal of a creator's external account (FIN-16, test A7), a
+place to put a bank account number, card number, TIN, SSN or date of birth (FIN-28), a way for a caller to supply a
+view count or an amount (FIN-04).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional, Protocol
+
+NOT_BUILT = "not built yet: not allowed yet"
+
+
+# --- Verification and Integrity ---------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Certification:
+    available: bool
+    submission_id: Optional[str] = None
+    certification_id: Optional[str] = None
+    status: Optional[str] = None              # certified | revised | voided | pending | not_certified | ...
+    certified_views: Optional[int] = None
+    campaign_id: Optional[str] = None
+    clipper_id: Optional[str] = None
+    platform: Optional[str] = None
+    create_time: Optional[str] = None         # window.create_time (RFC 3339)
+    certified_at: Optional[str] = None
+    open_finding: bool = False
+    rules_version: Optional[int] = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class ClawbackPage:
+    available: bool
+    items: tuple = ()                          # dicts: clawback_id, certification_id, views_delta, cause, rule_id
+    next_cursor: Optional[int] = None
+    reason: str = ""
+
+
+class VerificationPort(Protocol):
+    def certification(self, submission_id: str) -> Certification: ...
+
+    def clawbacks(self, cursor: int) -> ClawbackPage: ...
+
+
+class NotWiredVerification:
+    REASON = f"Verification and Integrity is not wired to Finance: {NOT_BUILT}"
+
+    def certification(self, submission_id):
+        return Certification(False, reason=self.REASON)
+
+    def clawbacks(self, cursor):
+        return ClawbackPage(False, reason=self.REASON)
+
+
+# --- Compliance (38) --------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ComplianceRuling:
+    available: bool
+    ruling_id: Optional[str] = None
+    gate: Optional[str] = None
+    subject_id: Optional[str] = None
+    allowed: bool = False
+    evaluated_at: Optional[str] = None
+    register_version: Optional[int] = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class HoldsAnswer:
+    available: bool
+    open_hold_ids: tuple = ()
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class SanctionsAnswer:
+    available: bool
+    screen_id: Optional[str] = None
+    result: Optional[str] = None              # clear | potential_match | match
+    list_version: Optional[str] = None
+    list_current: bool = False
+    screened_at: Optional[str] = None
+    fresh: bool = False
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class RegisterRow:
+    available: bool
+    obligation_id: str = ""
+    effective_status: str = "unknown"         # verified | unverified | expired | superseded
+    expires_at: Optional[str] = None
+    register_version: Optional[int] = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class JurisdictionAnswer:
+    available: bool
+    status: str = "unknown"                   # operate | conditional | blocked | unknown
+    reason: str = ""
+
+
+class CompliancePort(Protocol):
+    def ruling(self, ruling_id: str) -> ComplianceRuling: ...
+
+    def holds(self, subjects: tuple) -> HoldsAnswer: ...
+
+    def sanctions_status(self, subject_id: str, role: str) -> SanctionsAnswer: ...
+
+    def row(self, obligation_id: str) -> RegisterRow: ...
+
+    def jurisdiction(self, country: str, region: Optional[str]) -> JurisdictionAnswer: ...
+
+
+class NotWiredCompliance:
+    REASON = f"Compliance (38) is not wired to Finance: {NOT_BUILT}"
+
+    def ruling(self, ruling_id):
+        return ComplianceRuling(False, reason=self.REASON)
+
+    def holds(self, subjects):
+        return HoldsAnswer(False, reason=self.REASON)
+
+    def sanctions_status(self, subject_id, role):
+        return SanctionsAnswer(False, reason=self.REASON)
+
+    def row(self, obligation_id):
+        return RegisterRow(False, obligation_id, reason=self.REASON)
+
+    def jurisdiction(self, country, region):
+        return JurisdictionAnswer(False, reason=self.REASON)
+
+
+# --- Clipper Network, Legal 37 ------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class TierAnswer:
+    available: bool
+    tier: Optional[str] = None                # T0..T3
+    reason: str = ""
+
+
+class ClipperNetworkPort(Protocol):
+    def tier(self, campaign_id: str, clipper_id: str) -> TierAnswer: ...
+
+    def notify(self, template: str, clipper_id: str, ref: str) -> bool: ...
+
+
+class NotBuiltClipperNetwork:
+    REASON = f"Clipper Network has no Finance client: {NOT_BUILT}"
+
+    def tier(self, campaign_id, clipper_id):
+        return TierAnswer(False, reason=self.REASON)
+
+    def notify(self, template, clipper_id, ref):
+        return False
+
+
+@dataclass(frozen=True)
+class LegalAnswer:
+    available: bool
+    current: bool = False
+    acceptance_matches: bool = False
+    reason: str = ""
+
+
+class LegalPort(Protocol):
+    def document_status(self, doc_id: str, version: int, doc_sha256: str, acceptance_id: str) -> LegalAnswer: ...
+
+
+class NotBuiltLegal37:
+    REASON = f"Legal (37) is {NOT_BUILT}"
+
+    def document_status(self, doc_id, version, doc_sha256, acceptance_id):
+        return LegalAnswer(False, reason=self.REASON)
+
+
+# --- Rails (Stripe Connect, Trolley) -----------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class RailAccount:
+    available: bool
+    account_ref: Optional[str] = None          # opaque id at the rail (never account data)
+    status: str = "unknown"                    # verified | pending | restricted | unknown
+    payouts_enabled: bool = False
+    destination_fingerprint: Optional[str] = None   # rail-supplied fingerprint; hashed before it is kept
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class RailSubmit:
+    outcome: str                                # accepted | rejected | transport_error | unavailable
+    rail_ref: Optional[str] = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class RailLookup:
+    available: bool
+    found: bool = False
+    rail_ref: Optional[str] = None
+    status: Optional[str] = None                # submitted | paid | failed | returned
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class RailBalance:
+    available: bool
+    balance: Optional[str] = None               # money string
+    as_of: Optional[str] = None
+    source_sha256: Optional[str] = None
+    reason: str = ""
+
+
+class RailPort(Protocol):
+    """No debit, pull or reversal method exists (FIN-16)."""
+
+    def create_account(self, payee_id: str, country: str) -> RailAccount: ...
+
+    def account_status(self, account_ref: str) -> RailAccount: ...
+
+    def submit(self, idempotency_key: str, account_ref: str, amount: str, item_id: str) -> RailSubmit: ...
+
+    def lookup(self, idempotency_key: str, item_id: str) -> RailLookup: ...
+
+    def balance(self) -> RailBalance: ...
+
+    def verify_event(self, body: dict, signature: Optional[str]) -> bool: ...
+
+
+class NotWiredRail:
+    def __init__(self, name: str):
+        self.name = name
+        self.REASON = f"rail {name} is not wired: {NOT_BUILT} (nothing is payable)"
+
+    def create_account(self, payee_id, country):
+        return RailAccount(False, reason=self.REASON)
+
+    def account_status(self, account_ref):
+        return RailAccount(False, reason=self.REASON)
+
+    def submit(self, idempotency_key, account_ref, amount, item_id):
+        return RailSubmit("unavailable", reason=self.REASON)
+
+    def lookup(self, idempotency_key, item_id):
+        return RailLookup(False, reason=self.REASON)
+
+    def balance(self):
+        return RailBalance(False, reason=self.REASON)
+
+    def verify_event(self, body, signature):
+        return False
+
+
+# --- Bank (feed + transfers) ---------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class BankBalance:
+    available: bool
+    balance: Optional[str] = None
+    as_of: Optional[str] = None
+    source_sha256: Optional[str] = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class BankTransfer:
+    outcome: str                                # accepted | refused | unavailable
+    ref: Optional[str] = None
+    reason: str = ""
+
+
+class BankPort(Protocol):
+    def balance(self, entity: str, account: str) -> BankBalance: ...
+
+    def transfer(self, entity: str, from_account: str, to_account: str, amount: str, key: str) -> BankTransfer: ...
+
+
+class NotWiredBank:
+    REASON = f"bank feed / bank transfers are not wired (bank not chosen): {NOT_BUILT}"
+
+    def balance(self, entity, account):
+        return BankBalance(False, reason=self.REASON)
+
+    def transfer(self, entity, from_account, to_account, amount, key):
+        return BankTransfer("unavailable", reason=self.REASON)
+
+
+# --- Tax agent, GL, vault, People 43, push ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class TaxAgentAnswer:
+    available: bool
+    form_kind: Optional[str] = None             # w9 | w8ben | w8bene
+    form_on_file: bool = False
+    form_received_at: Optional[str] = None
+    tin_match: str = "unavailable"              # matched | mismatched | pending | not_applicable | unavailable
+    tin_match_at: Optional[str] = None
+    w8_current: Optional[bool] = None
+    services_outside_us_attested: Optional[bool] = None
+    agent_ref: Optional[str] = None
+    reason: str = ""
+
+
+class TaxAgentPort(Protocol):
+    def status(self, payee_id: str) -> TaxAgentAnswer: ...
+
+
+class NotWiredTaxAgent:
+    REASON = f"tax agent (TIN matching) is not wired: {NOT_BUILT}"
+
+    def status(self, payee_id):
+        return TaxAgentAnswer(False, reason=self.REASON)
+
+
+@dataclass(frozen=True)
+class GLAnswer:
+    available: bool
+    trial_balance_sha256: Optional[str] = None
+    reason: str = ""
+
+
+class GLPort(Protocol):
+    def trial_balance(self, entity: str, period: str) -> GLAnswer: ...
+
+
+class NotWiredGL:
+    REASON = f"GL adapter (QBO) is not wired: {NOT_BUILT}"
+
+    def trial_balance(self, entity, period):
+        return GLAnswer(False, reason=self.REASON)
+
+
+class VaultPort(Protocol):
+    def identity_hmac_key(self) -> Optional[bytes]: ...
+
+    def contact_ref_valid(self, ref: str) -> Optional[bool]: ...
+
+
+class NotWiredVault:
+    def identity_hmac_key(self):
+        return None
+
+    def contact_ref_valid(self, ref):
+        return None
+
+
+class People43Port(Protocol):
+    def second_approver_active(self) -> Optional[bool]: ...
+
+
+class NotBuiltPeople43:
+    def second_approver_active(self):
+        return None
+
+
+class PushPort(Protocol):
+    def push(self, kind: str, briefing: dict) -> bool: ...
+
+
+class NotBuiltPush:
+    def push(self, kind, briefing):
+        return False
+
+
+@dataclass
+class Ports:
+    vi: VerificationPort = field(default_factory=NotWiredVerification)
+    compliance: CompliancePort = field(default_factory=NotWiredCompliance)
+    cn: ClipperNetworkPort = field(default_factory=NotBuiltClipperNetwork)
+    legal: LegalPort = field(default_factory=NotBuiltLegal37)
+    rails: dict = field(default_factory=lambda: {"stripe": NotWiredRail("stripe"), "trolley": NotWiredRail("trolley")})
+    bank: BankPort = field(default_factory=NotWiredBank)
+    tax: TaxAgentPort = field(default_factory=NotWiredTaxAgent)
+    gl: GLPort = field(default_factory=NotWiredGL)
+    vault: VaultPort = field(default_factory=NotWiredVault)
+    people: People43Port = field(default_factory=NotBuiltPeople43)
+    push: PushPort = field(default_factory=NotBuiltPush)
+
+
+STAND_INS = (NotWiredVerification, NotWiredCompliance, NotBuiltClipperNetwork, NotBuiltLegal37, NotWiredRail,
+             NotWiredBank, NotWiredTaxAgent, NotWiredGL, NotWiredVault, NotBuiltPeople43, NotBuiltPush)
