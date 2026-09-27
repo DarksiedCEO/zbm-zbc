@@ -7,7 +7,8 @@ Round 18 R2: for pytest the summary line is a CROSS-CHECK only. The verdict is `
 the engine asked for (``--junitxml`` to an engine-chosen path, read back by the engine) against the collect-only
 count, the summary line and the exit code. Any disagreement, a missing or unparseable junit, exit 5 (nothing
 collected), exit 124 / a timeout or a truncated capture is ``status == "unknown"``; ``unknown`` never satisfies
-green, a failed RED, or ``fixed``.
+green, a failed RED, or ``fixed``. The go / cargo / node verdicts live in ``engine/toolchains.py`` and use the
+same rule; ``parse_junit_node`` here reads Node's junit reporter (no file attribute, suites nest).
 """
 
 from __future__ import annotations
@@ -91,20 +92,24 @@ class Counts:
     def ok(self) -> bool:
         return self.status == "ok"
 
-    def verdict_for(self, target: str) -> str:
-        """pass | fail | unknown for one node id: an ``unknown`` count set answers unknown; a target absent from the
-        junit report answers unknown (it did not run); skipped answers unknown (nothing was proven)."""
+    def verdict_for(self, target: str, under=None) -> str:
+        """pass | fail | unknown for one case key: an ``unknown`` count set answers unknown; a target absent from the
+        report answers unknown (it did not run); skipped answers unknown (nothing was proven). ``under(key,
+        target)`` names the cases that belong to the target when it has no case of its own (default: pytest's
+        parametrised ``target[...]`` and class-scoped ``target::...`` ids); every one of them must agree."""
         if not self.ok:
             return "unknown"
         out = self.cases.get(target)
         if out is None:
-            # a parametrised or class-scoped target: every case under the target must agree
-            under = [v for k, v in self.cases.items() if k.startswith(target + "[") or k.startswith(target + "::")]
-            if not under:
+            if under is None:
+                def under(k, t):
+                    return k.startswith(t + "[") or k.startswith(t + "::")
+            outs = [v for k, v in self.cases.items() if under(k, target)]
+            if not outs:
                 return "unknown"
-            if all(v == "pass" for v in under):
+            if all(v == "pass" for v in outs):
                 return "pass"
-            return "fail" if any(v in ("fail", "error") for v in under) else "unknown"
+            return "fail" if any(v in ("fail", "error") for v in outs) else "unknown"
         return {"pass": "pass", "fail": "fail", "error": "fail"}.get(out, "unknown")
 
     def as_dict(self) -> dict:
@@ -206,6 +211,8 @@ PARSERS = {"pytest": parse_pytest, "cargo": parse_cargo, "go": parse_go, "npm": 
 
 
 def parse_counts(framework: str, output: str) -> Counts:
+    """Summary-only counts for a framework whose seed says ``verified: false`` (none in the shipped seed): never
+    ``ok`` — a summary line alone is exactly what R2 forbids trusting."""
     c = PARSERS[framework](output)
     c.source = "summary" if c.parsed else "none"
     c.status, c.why = "unknown", "summary line only (no engine-owned report for this framework)"
@@ -334,3 +341,53 @@ def verified_counts(*, junit_xml: Optional[str], output: str, collected: Optiona
         return unknown(f"unexpected exit code {exit_code}")
     junit.status, junit.why, junit.collected = "ok", "junit == collected == summary == exit", collected
     return junit
+
+
+def parse_junit_node(xml_text: Optional[str]) -> Optional[Counts]:
+    """Counts and per-case outcomes from Node's ``--test-reporter=junit`` file. Node writes no ``file`` attribute
+    and nests ``describe`` blocks as ``testsuite`` elements, so a case is keyed ``suite > … > name`` (a top-level
+    test is just ``name``); a name used twice keeps both cases (they are counted twice, as the TAP stream does).
+    None when unparseable."""
+    if not xml_text:
+        return None
+    try:
+        root = ET.fromstring(xml_text)
+    except (ET.ParseError, ValueError, TypeError):
+        return None
+    if root.tag not in ("testsuites", "testsuite"):
+        return None
+    c = Counts()
+    seen: dict[str, int] = {}
+
+    def walk(node, prefix: list[str]) -> None:
+        for child in node:
+            if child.tag == "testsuite":
+                walk(child, prefix + [child.get("name") or ""])
+            elif child.tag == "testcase":
+                name = child.get("name") or ""
+                key = " > ".join(prefix + [name]) if prefix else name
+                outcome = "pass"
+                for g in child:
+                    if g.tag == "failure":
+                        outcome = "fail"
+                    elif g.tag == "error":
+                        outcome = "error"
+                    elif g.tag.startswith("skip"):
+                        outcome = "skip" if outcome == "pass" else outcome
+                n = seen.get(key, 0)
+                seen[key] = n + 1
+                c.cases[key if n == 0 else f"{key} #{n + 1}"] = outcome
+                if outcome == "pass":
+                    c.passed += 1
+                elif outcome == "fail":
+                    c.failed += 1
+                elif outcome == "error":
+                    c.errors += 1
+                else:
+                    c.skipped += 1
+
+    walk(root, [])
+    c.failed_names = sorted(k for k, v in c.cases.items() if v in ("fail", "error"))
+    c.parsed = True
+    c.source = "junit"
+    return c

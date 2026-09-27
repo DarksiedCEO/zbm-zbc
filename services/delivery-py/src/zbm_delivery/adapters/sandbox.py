@@ -69,7 +69,9 @@ FORBIDDEN_RUN_RE = re.compile(r"(?:^|\s)--network(?:=|\s)+(?:host|bridge|contain
 RUN_LABEL = "zbm.dlv.run"
 ENGINE_DIR = f"{WORKSPACE}/.dlv-engine"        # engine-owned files inside the volume, outside services/<service>
 STAGE_DIR = f"{WORKSPACE}/.dlv-stage"
-EXTRA_ENV_ALLOWLIST = ("PYTHONDONTWRITEBYTECODE", "CI", "PYTHONHASHSEED", "TZ", "LANG")
+# the seed's service_env may set only these: determinism switches of the toolchains, never a path, a token or a loader
+EXTRA_ENV_ALLOWLIST = ("PYTHONDONTWRITEBYTECODE", "CI", "PYTHONHASHSEED", "TZ", "LANG", "NO_COLOR", "FORCE_COLOR",
+                       "CARGO_TERM_COLOR", "CARGO_NET_OFFLINE", "GOPROXY", "GOTOOLCHAIN")
 CONTAINER_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": WORKSPACE, "LANG": "C.UTF-8", "TZ": "UTC",
                  "PYTHONDONTWRITEBYTECODE": "1", "CI": "1"}
 
@@ -199,7 +201,7 @@ def reap(cli: DockerCli, record, *, where: str) -> list[dict]:
 def tar_of_dir(root: str, *, exclude_dirs: tuple = (".git",), uid: int = 65532) -> bytes:
     """A tar stream of ``root``'s contents (top-level entries relative to root), every entry owned by ``uid``."""
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w") as tar:
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.PAX_FORMAT) as tar:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = sorted(d for d in dirnames if d not in exclude_dirs and not os.path.islink(os.path.join(dirpath, d)))
             rel = os.path.relpath(dirpath, root)
@@ -209,7 +211,7 @@ def tar_of_dir(root: str, *, exclude_dirs: tuple = (".git",), uid: int = 65532) 
                 info.type = tarfile.DIRTYPE
                 info.mode = 0o755
                 info.uid = info.gid = uid
-                info.mtime = int(time.time())
+                info.mtime = time.time()
                 tar.addfile(info)
             for name in sorted(filenames):
                 full = os.path.join(dirpath, name)
@@ -226,13 +228,13 @@ def tar_of_dir(root: str, *, exclude_dirs: tuple = (".git",), uid: int = 65532) 
 
 def tar_of_file(name: str, content: bytes, uid: int = 65532, mode: int = 0o644) -> bytes:
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w") as tar:
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.PAX_FORMAT) as tar:
         info = tarfile.TarInfo(name)
         info.size = len(content)
         info.mode = mode
         info.uid = info.gid = uid
-        info.mtime = int(time.time())
-        tar.addfile(info, io.BytesIO(content))
+        info.mtime = time.time()          # PAX keeps the fraction: a file written in the same second as a build must
+        tar.addfile(info, io.BytesIO(content))    # still be NEWER than that build's fingerprint (cargo compares mtimes)
     return buf.getvalue()
 
 

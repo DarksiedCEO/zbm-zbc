@@ -14,9 +14,15 @@ finding — has the embedded deer-flow engineer write a failing test (RED, run b
 (GREEN, run by the engine), classifies every changed path (`src` / `test` / `test_infra` — a test-infra change or a
 deleted test fails the round), re-runs the RED test in a fresh verification checkout (base + the source changes +
 the RED test file only: must pass) and in a reverted checkout (base + the RED test only: must fail), runs the
-whole suite, and commits. Every pytest run uses the engine's own configuration (`-c <engine ini>`, `--rootdir`,
-`-p no:cacheprovider`, `--junitxml` to an engine path) and its verdict is the junit report cross-checked against
-`--collect-only`, the summary line and the exit code; anything that disagrees, times out or is truncated is
+whole suite, and commits. Every test run is the engine's own invocation with a per-ecosystem verdict
+(`src/zbm_delivery/engine/toolchains.py`): pytest — `-c <engine ini>`, `--rootdir`, `-p no:cacheprovider`,
+`--junitxml` to an engine path, cross-checked against `--collect-only`, the summary line and the exit code; Go —
+`go test -json -count=1 -race` events cross-checked against `go test -json -list` (per package), the package
+results and the exit code; Rust (stable, no nightly, no nextest) — `cargo test --locked --offline --no-fail-fast`
+per-test lines cross-checked against `-- --list`, every binary's `running`/`test result` lines and the exit code,
+into an engine-owned `--target-dir` per checkout with the tree touched before every run; Node 22 — `node --test
+--test-reporter=junit` to an engine path cross-checked against the TAP stream and the exit code (Node has no
+collect-only mechanism; stated). Anything that disagrees, times out, is truncated or collects nothing is
 `unknown` and never counts as green. A `DISPROOF:` is honoured only when the finding's own reproduction (a test
 node id named in the findings document) passes on the untouched base tree. The report is written from the
 engine's records; the run ends `awaiting_review` for AEGIS (`POST …/review`), which can reopen findings into a new
@@ -30,7 +36,8 @@ Nothing is ever marked fixed on the agent's word; nothing the agent's process pr
 ```bash
 cd services/delivery-py
 uv sync --frozen                     # python 3.12 or 3.13 (pytest is in the dev group); the harness comes from the pinned deer-flow git source (uv.lock)
-.venv/bin/python -m pytest -q        # 425 tests, no network, no Docker needed (the Docker live module skips with its reason)
+.venv/bin/python -m pytest -q        # 449 tests, no network, no Docker needed (the Docker live module skips with its reason);
+                                     # cargo, go and node must be on PATH (the toolchain module runs the toy fixtures for real)
 ruff check src tests devtools
 
 # a clean environment: the gate refuses ANY name outside the allowlist (DLV_*, LEDGER_SERVICE_*, PATH, HOME, LANG,

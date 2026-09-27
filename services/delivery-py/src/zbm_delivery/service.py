@@ -36,6 +36,7 @@ from zbm_delivery.errors import Conflict, DlvError, Invalid, NotFound, Refused, 
 from zbm_delivery.ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
 from zbm_delivery.models import ID_RE
 from zbm_delivery.ports import NoChatBackend
+from zbm_delivery.runner import node_id_in_text, same_test
 from zbm_delivery.store import RecordLog, StoreWriteError
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
@@ -616,8 +617,10 @@ class DeliveryService:
                 if fid == finding_id or recs.get(fid, {}).get("state") in ("fixed", "disproved"):
                     continue
                 rel = doc["file"][len(f"services/{service}/"):]
+                repro = doc.get("reproduction", "")
+                repro_target = node_id_in_text(repro)
                 for name in baseline_failures:
-                    if name.split("::", 1)[0] == rel or name in doc.get("reproduction", ""):
+                    if name.split("::", 1)[0] == rel or name in repro or (repro_target and same_test(name, repro_target)):
                         out.add(name)
         return out
 
