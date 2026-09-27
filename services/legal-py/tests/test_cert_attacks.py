@@ -30,7 +30,7 @@ def test_a1_advice_text_in_a_template_variable_is_blocked(he, phrase):
     _msa_template(he)
     before = len(he.svc.doc_versions)
     r = he.post("/legal/v1/documents/client_msa/versions",
-                {"request_id": rid(), "version": "1.1", "entity": "zbm",
+                {"request_id": rid(), "entity": "zbm", "party_ref": "client:acme",
                  "variables": {"client_name": phrase, "end_date": "2027-01-01"}}, caller="scheduler")
     assert r.status_code == 422 and r.json()["detail"] == "ADVICE_TEXT_BLOCKED", r.text
     assert r.json()["reasons"][0]["rule_id"] == "LG-01"
@@ -165,7 +165,7 @@ def test_a2_doc_blocked_by_a_counsel_question_and_engagement_ai_clause(he):
 
 def test_a2_entity_must_be_named_and_belong_to_the_document(hr):
     r = hr.apost("/legal/v1/documents/clipper_agreement/versions",
-                 {"request_id": rid(), "version": "1.0", "entity": "zbm", "text": "x"})
+                 {"request_id": rid(), "entity": "zbm", "text": "x"})
     assert r.status_code == 422                                          # the clipper agreement is ZBC's
 
 
@@ -229,17 +229,17 @@ def test_a4_memo_cannot_flip_a_row_it_does_not_cite(he):
                                      "content_b64": b64(b"memo on music"), "cites": {"cq_ids": ["CQ-21"]},
                                      "answers": [{"cq_id": "CQ-19", "resolution": "verified_rule"}]})
     assert r.status_code == 409 and r.json()["detail"] == "MEMO_DOES_NOT_CITE"
-    r = he.apost("/legal/v1/memos", {"request_id": rid(), "counsel_ref": COUNSEL_REF, "memo_date": "2026-10-01",
-                                     "content_b64": b64(b"memo on music 2"), "cites": {"cq_ids": ["CQ-21"]},
-                                     "answers": [{"cq_id": "CQ-21", "resolution": "verified_rule"}],
-                                     "compliance_rows": [{"obligation_id": "US-IRS-W8-VALID", "kind": "reverify",
-                                                          "proposed_row": {"id": "US-IRS-W8-VALID"},
-                                                          "quoted_excerpt": "excerpt"}]})
+    assert he.ledger.of_type("memo_refused_uncited") and he.svc.memos == {}
+    # fix 18 (AEGIS N17-8): Compliance rows are proposed in step 2, after the memo is filed; a row the memo does
+    # not cite is still refused (before: the same check ran on a one-step memo body with compliance_rows)
+    m = he.memo(content=b"memo on music 2", cites={"cq_ids": ["CQ-21"]},
+                answers=[{"cq_id": "CQ-21", "resolution": "verified_rule"}])
+    r = he.apost(f"/legal/v1/memos/{m['memo_id']}/compliance-proposals", {"request_id": rid(), "proposals": [
+        {"kind": "reverify", "target_id": "US-IRS-W8-VALID", "quoted_excerpt": "excerpt",
+         "proposed_row": {"id": "US-IRS-W8-VALID", "source_url": f"urn:legal37:memos:{m['memo_id']}"}}]})
     assert r.status_code == 409 and r.json()["detail"] == "MEMO_DOES_NOT_CITE"
     assert he.compliance.n == n and he.compliance.proposals == []            # no Compliance call
     assert he.ok(he.get("/legal/v1/register/CQ-19"))["status"] == "unverified"
-    assert he.ok(he.get("/legal/v1/register/CQ-21"))["status"] == "unverified"
-    assert he.ledger.of_type("memo_refused_uncited") and he.svc.memos == {}
 
 
 def test_a4_memo_from_an_unengaged_counsel_or_citing_an_alias_is_refused(he):
@@ -531,10 +531,15 @@ def test_a10_ledger_down_nothing_happens_and_thin_clients_map_negative(he):
 
 def test_a11_compliance_down_memo_filed_proposal_pending_row_unverified(he):
     he.compliance.down = True
-    row = {"id": "CQ-11-M1", "status": "verified"}
+    # fix 18 (AEGIS N17-8): two steps -- file the memo (its id now exists), then propose the row whose source_url
+    # carries that id as an urn: (before: one step, legal37://memos/<id>, which the real compliance-py refused)
     m = he.memo(cites={"cq_ids": ["CQ-11"]}, answers=[{"cq_id": "CQ-11", "resolution": "verified_rule",
-                                                        "proposed_row": row, "quoted_excerpt": "Counsel answers CQ-11."}])
-    assert m["proposals"][0]["status"] == "pending_delivery" and m["effects"][0]["effect"] == "pending_compliance"
+                                                        "quoted_excerpt": "Counsel answers CQ-11."}])
+    assert m["effects"][0]["effect"] == "awaiting_proposal" and m["proposals"] == []
+    row = {"id": "CQ-11-M1", "status": "verified", "source_url": f"urn:legal37:memos:{m['memo_id']}"}
+    mp = he.memo_proposals(m["memo_id"], [{"kind": "supersede", "target_id": "CQ-11", "proposed_row": row,
+                                            "quoted_excerpt": "Counsel answers CQ-11."}])
+    assert mp["proposals"][0]["status"] == "pending_delivery"
     assert he.ok(he.get("/legal/v1/register/CQ-11"))["status"] == "unverified"
     assert he.ok(he.get("/legal/v1/register/CN-CQ-04"))["status"] == "unverified"   # alias follows the canonical row
     assert he.compliance.proposals == []
@@ -544,7 +549,7 @@ def test_a11_compliance_down_memo_filed_proposal_pending_row_unverified(he):
     (req_id, body), = he.compliance.proposals
     assert body["kind"] == "supersede" and body["target_id"] == "CQ-11" and body["proposed_row"] == row
     ev = body["evidence"]
-    assert ev["source_url"] == f"legal37://memos/{m['memo_id']}" and ev["snapshot_sha256"] == m["memo_sha256"]
+    assert ev["source_url"] == f"urn:legal37:memos:{m['memo_id']}" and ev["snapshot_sha256"] == m["memo_sha256"]
     assert ev["doc_number"] == m["memo_id"] and ev["quoted_excerpt"] == "Counsel answers CQ-11."
     assert he.ok(he.get("/legal/v1/register/CQ-11"))["status"] == "unverified"       # until Andre approves at Compliance
     he.compliance.verified.add("CQ-11-M1")

@@ -14,11 +14,17 @@ evasions:
      in one view and turned into spaces in another;
   3. a small confusables table folds Cyrillic/Greek look-alikes to Latin letters; case-fold;
   4. apostrophe variants unified and contractions expanded ("you're" -> "you are", "don't" -> "don t");
-  5. everything that is not a letter, digit or apostrophe becomes a space; whitespace collapsed.
+  5. everything that is not a letter (of any script), digit or apostrophe becomes a space; whitespace collapsed.
 The patterns run on these views (for both format-character treatments): the normalized text; a leetspeak-folded copy (0->o, 1->i, 3->e, 4->a, 5->s,
 7->t, @->a, $->s); and each run of >= 3 single-character tokens re-joined ("y o u  m u s t", "y-o-u m-u-s-t")
 against the space-free form of every pattern. False positives are preferred to false negatives (a blocked
 variable goes back to Andre; a leaked answer is a B&P §6126 problem).
+
+The guard is DEFENSE IN DEPTH, not the control (AEGIS N17-7). The control is structural: no route answers a
+non-Andre caller with caller-supplied free text (only ids, enums, dates, amounts, hashes and Legal's own reason
+lines), document text leaves only through the blob store by hash, and every document version -- template fills
+and SOWs included -- becomes current only after counsel signs off on its exact hash. A phrase list can always be
+evaded; the structure cannot.
 """
 
 from __future__ import annotations
@@ -55,7 +61,8 @@ _CONTRACTIONS = [
 ]
 _CONTRACTIONS_RX = [(re.compile(p), r) for p, r in _CONTRACTIONS]
 _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "|": "l"})
-_NON_WORD = re.compile(r"[^a-z0-9']+")
+# letters of every script survive (AEGIS N17-7: non-English advice -- "Sie müssen", "你应该" -- is not erased)
+_NON_WORD = re.compile(r"(?:[^\w']|_)+")
 
 
 def _fold(text: str, cf: str = "") -> str:

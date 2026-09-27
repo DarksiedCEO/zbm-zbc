@@ -34,7 +34,7 @@ def world():
 
 
 OPS = {
-    "upload": lambda x, c: x.apost("/legal/v1/documents/sow/versions", {"request_id": "w1", "version": "1.0",
+    "upload": lambda x, c: x.apost("/legal/v1/documents/sow/versions", {"request_id": "w1",
                                                                          "entity": "zbm", "text": "sow"}),
     "counsel_review": lambda x, c: x.apost("/legal/v1/documents/client_msa/versions/1.0/counsel-review",
                                            {"request_id": "w2", "question_text": "question"}),

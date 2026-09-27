@@ -601,8 +601,9 @@ every choice made where the spec was silent, and the unlock list:
 `docs/adr/0009-finance-department-architecture.md`. Routes and settings:
 `services/finance-py/README.md`.
 
-- **Status:** built and tested (264 tests, `python3 -m pytest -q`; no
-  network). **Not certified for any real dollar.** Rails (Stripe/Trolley),
+- **Status:** built and tested (323 tests, `python3 -m pytest -q`; no
+  network; AEGIS round 17 fixed Sep 27 -- payable identity, record-first
+  sweeps, strict adapter answers, deposit returns (F1r); ADR 0009 amendment). **Not certified for any real dollar.** Rails (Stripe/Trolley),
   bank feed and transfers, tax agent, GL, vault, Clipper Network, Legal,
   People and push are fail-closed stand-ins (no rail or bank adapter code
   exists yet — only the ports); the V&I and Compliance thin clients exist
@@ -629,7 +630,7 @@ every choice made where the spec was silent, and the unlock list:
   `{"entries":232,"valid":true}`.
 
 ```bash
-cd services/finance-py && python3 -m pytest -q      # 264 tests
+cd services/finance-py && python3 -m pytest -q      # 323 tests
 export FIN_SERVICE_TOKEN=<secret> FIN_ANDRE_APPROVAL_TOKEN=<Andre's secret>
 export FIN_CALLER_TOKENS='{"scheduler": "<>=32 chars>", "creative_production": "...", "onboarding": "...", "clipper_network": "..."}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> FIN_DATA_DIR=<dir>
@@ -648,7 +649,9 @@ refuses and records any rendered text or template variable that reads as advice.
 the spec was silent: `docs/adr/0010-legal-department-architecture.md`. Routes and settings:
 `services/legal-py/README.md`.
 
-- **Status:** built and tested (212 tests, `python3 -m pytest -q`; no network). **Not in force for any real
+- **Status:** built and tested (276 tests, `python3 -m pytest -q`; no network; AEGIS round 17 fixed Sep 27 --
+  party-bound acceptances, server-assigned versions, IP scan, SOW counsel gate, urn memo proposals; ADR 0010
+  amendment). **Not in force for any real
   document.** No counsel is engaged and the counsel channel, e-sign provider, Cybersecurity 22 and People 43 are
   fail-closed stand-ins, so on day one no document is current, no acceptance is evidence-sufficient, every
   music-bearing clip is blocked, every Creative sign-off is refused and Legal deletes nothing. ADR 0010 ends with
@@ -662,8 +665,8 @@ the spec was silent: `docs/adr/0010-legal-department-architecture.md`. Routes an
   hash-chained, ledger-anchored local log before it takes effect, otherwise 503 and nothing changed; document,
   memo and paper texts live only in a content-addressed blob store, never in the log or on the ledger.
 - **Other services unchanged.** The spec's "changes other services must make" are reported in ADR 0010, not made.
-  Found while building: today's compliance-py refuses the spec's `legal37://memos/<id>` evidence URL, so a real
-  memo proposal would end `refused_by_compliance` until Compliance (or the spec) changes.
+  Memo evidence is `urn:legal37:memos:<id>` (compliance-py refused the spec's `legal37://` form); the path is
+  proven against the real compliance-py app (`tests/contract_compliance_real.py`).
 - **Live run** (`devtools/live_run.py`, real ledger-rust binary, production entrypoint, a Compliance stub behind the
   real thin client): rules approved → engagement letter countersigned → memo → playbook → MSA draft → approval
   refused without a counsel record → sign-off → approval → template fill → clickwrap acceptance → obligations
@@ -672,7 +675,7 @@ the spec was silent: `docs/adr/0010-legal-department-architecture.md`. Routes an
   passed.
 
 ```bash
-cd services/legal-py && python3 -m pytest -q      # 212 tests
+cd services/legal-py && python3 -m pytest -q      # 276 tests
 export LEGAL_SERVICE_TOKEN=<secret> LEGAL_ANDRE_APPROVAL_TOKEN=<Andre's secret>
 export LEGAL_CALLER_TOKENS='{"compliance_38": "<>=32 chars>", "hub": "...", "scheduler": "..."}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> LEGAL_DATA_DIR=<dir>

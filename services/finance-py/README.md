@@ -35,11 +35,24 @@ reversals, direct ACH, any rail/bank/tax/vault/GL/CN/Legal wiring) refuse to sta
 ## The payout week (scheduler + Andre)
 
 `POST /fin/v1/reconciliations/run` (daily) → `POST /fin/v1/payout-runs` (maker; a batch `proposed` with a
-`content_sha256`) → Andre `POST /fin/v1/payout-batches/{id}/decision` (checker) → scheduler
+`content_sha256`) → Andre `POST /fin/v1/payout-batches/{id}/decision` (checker; above `FIN_DUAL_HUMAN_THRESHOLD` the
+second approver sends its OWN request, `POST /fin/v1/payout-batches/{id}/second-approval` with only its token) → scheduler
 `POST /fin/v1/treasury/funding` + Andre's funding decision (F4a) → after `FIN_RELEASE_DELAY_H` (12 h) the scheduler
 `POST /fin/v1/payout-batches/{id}/release` (every gate re-runs per item) → rail webhooks via `rail_gateway`
 (`paid` / `failed` / `returned` / `destination_changed`). Andre's token on the release route is refused (403); no
 caller token can approve.
+
+## Money that comes back, and sweeps (AEGIS round 17, ADR 0009 amendment)
+
+- A client deposit the bank returns (ACH return): `POST /fin/v1/receipts/{receipt_id}/return` (bank_feed or Andre)
+  posts F1r. If creators were already accrued against it, a deposit shortfall opens and blocks runs, releases,
+  sweeps and refunds until Andre's `POST /fin/v1/treasury/top-ups` names its `shortfall_id`.
+- A margin sweep (and funding, top-ups, refund payments) is posted and anchored BEFORE the bank is asked; a bank
+  refusal is undone by a recorded reversal; an unknown bank outcome keeps the posting, opens a break and retries with
+  the same key. `sweepable` already subtracts sweeps that are proposed, approved or in flight.
+- Treasury liabilities are absolute per sub-ledger; reconciliation L4 compares every sub-ledger, not only totals.
+- New settings: `FIN_MAX_RATE_PER_1000` (`"1000.00"`), `FIN_MAX_CERTIFIED_VIEWS` (10^12), `FIN_WITHHOLDING_BASIS`
+  (`gross`; `gross_minus_netting` only with CPA row FIN-CQ-16 verified).
 
 ## Reconciling the local log with the ledger
 
@@ -56,6 +69,9 @@ anchors, an empty log against a ledger that anchors one) cannot be reconciled: r
 cd services/finance-py && python3 -m pytest -q          # no network (a socket guard fails any attempt)
 LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py --ports 19450,19451,19452,19453
 ```
+
+Fix 18 (Sep 27, 2026): 323 tests (264 before + 59 in `tests/test_aegis_r17.py`); live run 33/33 on ports
+19550-19553 with the review-10 ledger binary.
 
 `devtools/live_server.py` runs the service with the test fakes and a settable clock (devtools only, never
 production). `devtools/gen_rules_seed.py` regenerates the seed (its SHA-256 is pinned).

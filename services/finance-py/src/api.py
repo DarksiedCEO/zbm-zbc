@@ -39,6 +39,8 @@ from starlette.concurrency import run_in_threadpool
 
 import config as config_mod
 import models as m
+import money as M
+import reasons as R
 from clock import Clock, SystemClock
 from errors import FinError, Forbidden, FounderRefused, Invalid, Unavailable
 from founder import FounderGate
@@ -339,6 +341,12 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
             return JSONResponse(status_code=503, headers={"Retry-After": "1"}, content=content)
         return JSONResponse(status_code=exc.status_code, content=content)
 
+    @app.exception_handler(M.MoneyError)
+    def _money(_: Request, exc: M.MoneyError):
+        # AEGIS N17-11: an amount out of range is the caller's input (a rate card, a count), never a 500
+        return JSONResponse(status_code=422, content={"detail": "AMOUNT_OUT_OF_RANGE", "reasons": [
+            R.item("AMOUNT_OUT_OF_RANGE", str(exc)[:120])]})
+
     @app.middleware("http")
     async def _unhandled(request: Request, call_next):
         try:
@@ -470,6 +478,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                       req: m.ApplyReceipt = Depends(body(m.ApplyReceipt))) -> dict:
         return svc.apply_receipt(req.request_id, _id(receipt_id), req.invoice_id)
 
+    @app.post("/fin/v1/receipts/{receipt_id}/return", dependencies=auth)
+    def receipt_return(receipt_id: str, who: str = Depends(andre_or_caller("receipts/return", "bank_feed")),
+                       req: m.DepositReturn = Depends(body(m.DepositReturn))) -> dict:
+        return svc.deposit_return(who, req.request_id, _id(receipt_id), dump(req))
+
     @app.post("/fin/v1/rails/{rail}/events", dependencies=auth)
     def rail_events(rail: str, who: str = Depends(caller("rail_gateway")),
                     req: m.RailEvents = Depends(body(m.RailEvents))) -> dict:
@@ -517,16 +530,24 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     @app.post("/fin/v1/payout-batches/{batch_id}/decision", dependencies=auth)
     def batch_decide(batch_id: str, request: Request, _: str = Depends(andre("payout-batches/decision")),
                      req: m.Decision = Depends(body(m.Decision))) -> dict:
-        s = request.headers.get(SECOND_HEADER)
-        second_ok = False
-        if s is not None:
-            try:
-                second.verify(s)
-                second_ok = True
-            except FounderRefused as exc:
-                svc.founder_refused("payout-batches/decision:second", exc.reason)
-                raise
-        return svc.decide_batch(req.request_id, _id(batch_id), dump(req), second_ok)
+        if request.headers.get(SECOND_HEADER) is not None:
+            # AEGIS N17-13: two tokens on one request are one actor; the second approver sends its own request
+            svc.founder_refused("payout-batches/decision:second", "a second-approver token on Andre's request")
+            raise Forbidden("the second approver approves on its own request (POST .../second-approval), never "
+                            "alongside Andre's token")
+        return svc.decide_batch(req.request_id, _id(batch_id), dump(req))
+
+    @app.post("/fin/v1/payout-batches/{batch_id}/second-approval", dependencies=auth)
+    def batch_second(batch_id: str, request: Request, req: m.Decision = Depends(body(m.Decision))) -> dict:
+        if request.headers.get(FOUNDER_HEADER) is not None or request.headers.get(CALLER_HEADER) is not None:
+            svc.founder_refused("payout-batches/second-approval", "another identity's token on the second approval")
+            raise Forbidden("the second approval carries the second approver's token only (one identity per request)")
+        try:
+            second.verify(request.headers.get(SECOND_HEADER))
+        except FounderRefused as exc:
+            svc.founder_refused("payout-batches/second-approval", exc.reason)
+            raise
+        return svc.second_approve_batch(req.request_id, _id(batch_id), dump(req))
 
     @app.post("/fin/v1/payout-batches/{batch_id}/release", dependencies=auth)
     def batch_release(batch_id: str, request: Request, who: str = Depends(caller("scheduler")),

@@ -37,6 +37,36 @@ class BooksMixin:
                    k not in self.db["rate_cards"]]
         return sorted(vs, key=lambda v: v["version"])
 
+    def _amount_caps(self, rates: dict, views_cap: Optional[int]) -> None:
+        """AEGIS N17-11: rates above FIN_MAX_RATE_PER_1000 and a paid-view cap above FIN_MAX_CERTIFIED_VIEWS are
+        refused (422 with a reason), so views x rate / 1000 always fits the money bound -- never a 500 later."""
+        bad = [R.item("AMOUNT_OUT_OF_RANGE", f"{k} {M.fmt(v)} is above FIN_MAX_RATE_PER_1000 "
+                                             f"{M.fmt(self.cfg.max_rate_per_1000)}")
+               for k, v in rates.items() if v > self.cfg.max_rate_per_1000]
+        if views_cap is not None and views_cap > self.cfg.max_certified_views:
+            bad.append(R.item("AMOUNT_OUT_OF_RANGE", f"max_paid_views_per_clip is above FIN_MAX_CERTIFIED_VIEWS "
+                                                     f"{self.cfg.max_certified_views}"))
+        if bad:
+            raise InvalidReasons("amount out of range", bad)
+
+    @staticmethod
+    def _rc_weakening(card: dict, versions: list[dict], now) -> list[str]:
+        """Why publishing ``card`` raises exposure against the version PUBLISHED NOW (not the one in force when the
+        proposal was drafted -- fix 18, stale-base sweep)."""
+        prev = max((v for v in versions if v["status"] == "published"), key=lambda v: v["version"], default=None)
+        weak = []
+        if prev:
+            if any(M.D(card["creator_rate_per_1000"][t]) > M.D(prev["creator_rate_per_1000"][t])
+                   for t in card["creator_rate_per_1000"]):
+                weak.append("creator_rate_raised")
+            if card["max_paid_views_per_clip"] > prev["max_paid_views_per_clip"]:
+                weak.append("paid_view_cap_raised")
+            if parse_iso(card["effective_at"]) < parse_iso(prev["effective_at"]):
+                weak.append("effective_earlier_than_previous_version")
+        if parse_iso(card["effective_at"]) < now:
+            weak.append("backdated_effective_at")
+        return weak
+
     def _rc_for_campaign(self, campaign_id: str) -> list[dict]:
         return [v for v in self.db["rate_cards"].values() if v["campaign_id"] == campaign_id]
 
@@ -56,21 +86,13 @@ class BooksMixin:
             open_same = [p for p in self.db["rc_proposals"].values() if p["doc_id"] == doc_id and p["status"] == "open"]
             version = (existing[-1]["version"] if existing else 0) + 1 + len(open_same)
             rates = {t: M.fmt(body["creator_rate_per_1000"][t]) for t in ("T0", "T1", "T2", "T3")}
+            self._amount_caps({f"creator_rate_per_1000.{t}": M.D(v) for t, v in rates.items()},
+                              body["max_paid_views_per_clip"])
             card = {"doc_id": doc_id, "version": version, "campaign_id": body["campaign_id"],
                     "creator_rate_per_1000": rates, "max_paid_views_per_clip": body["max_paid_views_per_clip"],
                     "effective_at": iso(parse_iso(body["effective_at"]))}
             card_sha = sha(card)
-            prev = max((v for v in existing if v["status"] == "published"), key=lambda v: v["version"], default=None)
-            weak = []
-            if prev:
-                if any(M.D(rates[t]) > M.D(prev["creator_rate_per_1000"][t]) for t in rates):
-                    weak.append("creator_rate_raised")
-                if card["max_paid_views_per_clip"] > prev["max_paid_views_per_clip"]:
-                    weak.append("paid_view_cap_raised")
-                if parse_iso(card["effective_at"]) < parse_iso(prev["effective_at"]):
-                    weak.append("effective_earlier_than_previous_version")
-            if parse_iso(card["effective_at"]) < now:
-                weak.append("backdated_effective_at")
+            weak = self._rc_weakening(card, existing, now)
             pid = rid("rcp", "andre", request_id)
             p = {"proposal_id": pid, **card, "sha256": card_sha, "status": "open", "created_at": iso(now),
                  "weakening": bool(weak), "weakening_reasons": weak}
@@ -102,8 +124,15 @@ class BooksMixin:
                     raise Conflict(f"proposal {d['proposal_id']} is already {p['status']}")
                 if d["content_sha256"] != p["content_sha256"]:
                     raise Conflict(f"proposal {d['proposal_id']} changed since you read it; nothing was applied")
-                if d["decision"] == "approve" and p["weakening"] and d.get("acknowledge_weakening") is not True:
-                    raise Invalid(f"approval raises exposure ({', '.join(p['weakening_reasons'])}); approving needs "
+                # stale-base sweep (fix 18): re-judge against the version published NOW, including versions this
+                # same call publishes before it
+                published_now = [v for v in self._rc_versions(p["doc_id"]) if v["status"] == "published"] + \
+                    [q for dd, q in chosen if dd["decision"] == "approve" and q["doc_id"] == p["doc_id"]]
+                now_weak = sorted(set(p["weakening_reasons"]) |
+                                  set(self._rc_weakening(p, [{**q, "status": "published"} for q in published_now],
+                                                         self._now())))
+                if d["decision"] == "approve" and now_weak and d.get("acknowledge_weakening") is not True:
+                    raise Invalid(f"approval raises exposure ({', '.join(now_weak)}); approving needs "
                                   "acknowledge_weakening: true. Nothing was applied")
                 chosen.append((d, p))
             now = iso(self._now())
@@ -158,6 +187,7 @@ class BooksMixin:
             if body.get("account_title") and banned_words_in(body["account_title"]):
                 raise InvalidReasons("account title refused", [R.item("BANNED_WORD", "custody wording in an account "
                                                                                       "title (escrow/trust/FBO)")])
+            self._amount_caps({"client_rate_per_1000": M.D(body["client_rate_per_1000"])}, None)
             cards = [v for v in self._rc_versions(body["rate_card_doc_id"]) if v["status"] == "published"]
             if not cards or cards[0]["campaign_id"] != campaign_id:
                 raise Refused("no published rate card of this campaign", [R.item("RATE_CARD_MISSING",
@@ -495,6 +525,97 @@ class BooksMixin:
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
             return resp
+
+    # ================================================================== deposit returns (F1r, AEGIS N17-9)
+
+    def deposit_return(self, principal: str, request_id: str, receipt_id: str, body: dict) -> dict:
+        """The bank returned a client deposit that Finance had matched (an ACH return). A FACT flow (spec
+        amendment, ADR 0009 "Amendment — AEGIS round 17"):
+
+            F1r   Dr 2010 Client deposits[campaign]   the part still unearned (never below zero)
+                  Dr 1100 Accounts receivable[client]  the part creators were already accrued against (shortfall)
+                  Cr 1020 Restricted cash              the returned amount
+
+        The client's unearned balance drops by what is left of it; the part already earned by creators becomes a
+        receivable from the client AND an open shortfall record that blocks payout runs, releases, sweeps and refunds
+        until Andre tops up restricted cash for it (``POST /fin/v1/treasury/top-ups`` with ``shortfall_id``). The
+        campaign stops accruing (profile back to ``approved``, or ``shortfall`` while one is open)."""
+        with self.lock:
+            key, h, ent = self._idem(principal, request_id, f"receipt-return/{receipt_id}",
+                                     {k: str(v) for k, v in body.items()})
+            if ent:
+                return ent["response"]
+            self.require_rules()
+            rc = self.db["receipts"].get(receipt_id)
+            if rc is None:
+                raise NotFound("no such receipt")
+            inv = self.db["invoices"].get(rc.get("invoice_id") or "")
+            if rc["status"] != "matched" or inv is None or inv["kind"] != "campaign_deposit" or \
+                    rc["entity"] != "zbc" or rc["into_account"] != "1020":
+                raise Conflict("only a matched campaign deposit in the deposits account can be returned")
+            amt = M.D(rc["amount"])
+            camp = inv["campaign_id"]
+            unearned = max(M.ZERO, self.bal("2010", f"campaign:{camp}"))
+            to_2010 = min(amt, unearned)
+            shortfall = M.q(amt - to_2010)
+            lines = []
+            if to_2010 > 0:
+                lines.append(J.dr("2010", to_2010, f"campaign:{camp}"))
+            if shortfall > 0:
+                lines.append(J.dr("1100", shortfall, f"client:{inv['client_id']}"))
+            lines.append(J.cr("1020", amt))
+            op = Op(self, f"f1r|{receipt_id}|{request_id}", "intel_02_receivables", receipt_id)
+            try:
+                e = self._post(op, "zbc", lines, "F1r", {"kind": "receipt_return", "id": receipt_id},
+                               f"F1r|{receipt_id}", approval_ref=request_id, actor="intel_02_receivables")
+            except PostingRefused as exc:
+                raise InvalidReasons("deposit return could not be posted", exc.reasons) from None
+            ret = {"to_2010": M.fmt(to_2010), "shortfall": M.fmt(shortfall), "entry_id": e["entry_id"],
+                   "return_ref_sha256": body["return_ref_sha256"], "return_code": body["return_code"],
+                   "value_date": str(body["value_date"]), "recorded_by": principal, "at": iso(self._now())}
+            op.put("receipts", receipt_id, {**rc, "status": "returned", "return": ret})
+            op.put("invoices", inv["invoice_id"], {**inv, "status": "returned", "returned_at": iso(self._now())})
+            sf_id = None
+            prof = self.db["profiles"].get(camp)
+            if shortfall > 0:
+                sf_id = rid("sft", receipt_id)
+                op.put("shortfalls", sf_id, {"shortfall_id": sf_id, "receipt_id": receipt_id, "campaign_id": camp,
+                                             "client_id": inv["client_id"], "amount": M.fmt(shortfall),
+                                             "entry_id": e["entry_id"], "status": "open",
+                                             "opened_at": iso(self._now()), "closed_by": None})
+                op.record(derived_id("sft", sf_id), "deposit_shortfall_opened", "intel_08_treasury", sf_id,
+                          {"shortfall_id": sf_id, "receipt_id": receipt_id, "campaign_id": camp,
+                           "amount": M.fmt(shortfall)},
+                          f"Deposit returned after creators were accrued against it: shortfall {M.fmt(shortfall)} "
+                          "blocks runs until Andre tops up")
+            if prof and prof["status"] in ("funded", "paused"):
+                op.put("profiles", camp, {**prof, "status": "shortfall" if shortfall > 0 else "approved"})
+            op.record(derived_id("f1r", receipt_id), "deposit_returned", "intel_02_receivables", receipt_id,
+                      {"receipt_id": receipt_id, "amount": M.fmt(amt), "to_2010": M.fmt(to_2010),
+                       "shortfall": M.fmt(shortfall), "entry_id": e["entry_id"], "return_code": body["return_code"]},
+                      f"Client deposit returned by the bank: {M.fmt(amt)} (shortfall {M.fmt(shortfall)})")
+            resp = self._idem_add(op, key, h, {"receipt_id": receipt_id, "entry_id": e["entry_id"],
+                                               "to_2010": M.fmt(to_2010), "shortfall": M.fmt(shortfall),
+                                               "shortfall_id": sf_id, "ledger_event_ids": op.events,
+                                               "request_id": request_id})
+            self._commit(op)
+            return resp
+
+    def _open_shortfalls(self) -> list[dict]:
+        return [x for x in self.db["shortfalls"].values() if x["status"] == "open"]
+
+    def _close_shortfall(self, op: Op, sf_id: str, tid: str) -> None:
+        sf = op.get("shortfalls", sf_id)
+        if sf is None or sf["status"] != "open":
+            return
+        op.put("shortfalls", sf_id, {**sf, "status": "closed", "closed_by": tid, "closed_at": iso(self._now())})
+        prof = op.get("profiles", sf["campaign_id"])
+        if prof and prof["status"] == "shortfall" and not [x for x in self._open_shortfalls()
+                                                           if x["campaign_id"] == sf["campaign_id"]
+                                                           and x["shortfall_id"] != sf_id]:
+            op.put("profiles", sf["campaign_id"], {**prof, "status": "approved"})
+        op.record(derived_id("sftc", sf_id, tid), "deposit_shortfall_closed", "andre", sf_id,
+                  {"shortfall_id": sf_id, "top_up_op_id": tid}, "Andre's top-up covered a deposit shortfall")
 
     # ================================================================== disputes (§B.9, FIN-23)
 

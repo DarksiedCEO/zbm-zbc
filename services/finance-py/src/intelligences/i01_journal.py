@@ -24,11 +24,12 @@ import money as M
 import reasons as R
 
 NUMBER, NAME, ACTOR = 1, "Journal Keeper", "intel_01_journal"
-FLOWS = ("F1", "F1a", "F2", "F3", "F4a", "F4b", "F4c", "F4d", "F4e", "F4f", "F4g", "F5", "F5a", "F5b", "F5c", "F6",
-         "F6p", "F7", "F7a", "F8", "F9", "F10", "F11", "F11a", "correction")
+FLOWS = ("F1", "F1a", "F1r", "F2", "F3", "F4a", "F4b", "F4c", "F4d", "F4e", "F4f", "F4g", "F5", "F5a", "F5b", "F5c",
+         "F6", "F6p", "F7", "F7a", "F8", "F9", "F10", "F11", "F11a", "correction")
 # a credit to restricted cash is only ever one of these flows (FIN-01): rail funding, rail paid, refund paid, chargeback,
-# sweep of earned margin, Form 945 deposit, rail fees, and an exact reversal
-RESTRICTED_CREDIT_FLOWS = ("F4a", "F4e", "F6p", "F7", "F8", "F9", "F10")
+# sweep of earned margin, Form 945 deposit, rail fees, a client deposit the bank returned (F1r, AEGIS N17-9), and an
+# exact reversal
+RESTRICTED_CREDIT_FLOWS = ("F1r", "F4a", "F4e", "F6p", "F7", "F8", "F9", "F10")
 CERT_ONLY = ("4010", "5010")
 CERT_FLOWS = ("F2", "F3", "F5", "F5a", "F5b")
 MANUAL_FORBIDDEN = set(C.RESTRICTED_POOL) | {"1200", "1210", "2010", "2020", "2030", "2040", "2050", "2070", "4010",

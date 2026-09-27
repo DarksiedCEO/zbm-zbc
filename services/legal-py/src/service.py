@@ -40,13 +40,14 @@ from advice import AdviceGuard
 from bizdays import BusinessCalendar, HolidaysUnknown
 from clock import Clock, SystemClock, iso, parse_iso
 from config import Settings
-from errors import Conflict, Invalid, NotFound, Unavailable
+from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from intelligences import (i01_documents as i01, i02_playbooks as i02, i03_acceptance as i03,
                            i04_obligations as i04, i05_memo_intake as i05, i06_matters as i06, i07_takedowns as i07,
                            i08_filings as i08, i09_music_policy as i09, i10_evidence_audit as i10)
 from ledger import LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
 from models import ID_RE
-from ports import Delivery, ProposalAnswer, Ports
+import answers as A
+from ports import ComplianceRow, Delivery, EnvelopeAnswer, ProposalAnswer, Ports
 from store import BlobStore, RecordLog, StoreWriteError
 from textguard import injection_rules_in
 
@@ -154,19 +155,49 @@ class Op:
             h = self.svc.blobs.put(data)
         except StoreWriteError as exc:
             raise Unavailable(f"blob store write failed ({exc}); nothing took effect") from None
-        if h not in self.svc.blob_meta or self.svc.blob_meta[h].get("deleted"):
-            self.add("blob", {"sha256": h, "class": BLOB_CLASS[klass], "subject_refs": sorted(set(subject_refs))[:200],
-                              "size": len(data), "stored_at": iso(self.svc._now()), "deleted": False})
+        # AEGIS N17-14: a blob's subject refs (and retention classes) are a SET that grows with every writer --
+        # the same bytes stored for a second document, acceptance or memo carry that subject too, so a hold on any
+        # of them blocks retention. Nothing is ever dropped (no cap that could cut a held subject off).
+        refs, klass_name = set(subject_refs), BLOB_CLASS[klass]
+        for k, r in self.ops:                   # the same blob earlier in this operation
+            if k == "blob" and r["sha256"] == h:
+                r["subject_refs"] = sorted(set(r["subject_refs"]) | refs)
+                r["classes"] = sorted(set(r.get("classes") or [r["class"]]) | {klass_name})
+                return h
+            if k == "update" and r["coll"] == "blobs" and r["key"] == h:
+                r["fields"]["subject_refs"] = sorted(set(r["fields"]["subject_refs"]) | refs)
+                r["fields"]["classes"] = sorted(set(r["fields"]["classes"]) | {klass_name})
+                return h
+        meta = self.svc.blob_meta.get(h)
+        if meta is None or meta.get("deleted"):
+            self.add("blob", {"sha256": h, "class": klass_name, "classes": [klass_name],
+                              "subject_refs": sorted(refs), "size": len(data), "stored_at": iso(self.svc._now()),
+                              "deleted": False})
+        else:
+            have_refs, have_cls = set(meta.get("subject_refs") or []), set(meta.get("classes") or [meta["class"]])
+            if not refs <= have_refs or klass_name not in have_cls:
+                self.update("blobs", h, {"subject_refs": sorted(have_refs | refs),
+                                         "classes": sorted(have_cls | {klass_name}),
+                                         "last_ref_at": iso(self.svc._now())})
         return h
 
     def call(self, port: str, action: str, args: tuple, fn: Callable, fallback: Any) -> Any:
-        """A port call, recorded on the ledger first (ids and hashes only); an exception is the fallback."""
+        """A port call, recorded on the ledger first (ids and hashes only); an exception is the fallback; the
+        answer is strictly type-checked before anything uses it (AEGIS N17-3)."""
         self.ev("x", f"crossing_{port}_requested", self.subject,
                 {"port": port, "action": action, "args_sha256": sha(list(args)), "op": self.op_id},
                 f"Request to {port}: {action}")
         try:
-            return fn()
+            ans = fn()
         except Exception:  # noqa: BLE001 - a port that raises is unavailable, never a pass; its text is dropped
+            return fallback
+        typ = EnvelopeAnswer if action == "create_envelope" else type(fallback)
+        try:
+            return A.check(ans, typ, fallback)
+        except A.Malformed as exc:
+            self.ev("xbad", "adapter_answer_refused", self.subject,
+                    {"port": port, "action": action, "args_sha256": sha(list(args)), "problem": exc.kind},
+                    f"Malformed answer from {port} ({action}) refused; the fail-closed answer is used")
             return fallback
 
 
@@ -860,13 +891,19 @@ class LegalService:
                            "entities": [body["entity"]], "counsel_required": False, "approval_blocked_by": [],
                            "required_clause_ids": [], "esign_allowed": False}
                 d = new_doc
+            if principal != "andre" and (body.get("text") is not None or body.get("template_variables")
+                                         or body.get("bump") != "minor"):
+                # AEGIS N17-5: only Andre (counsel's draft) uploads a document; every other caller may only FILL
+                raise Forbidden("only Andre's token uploads a document version; a caller may only fill the current "
+                                "counsel-approved template (variables + party_ref)")
             if body["entity"] not in d["entities"]:
                 raise Invalid(f"entity {body['entity']} is not an entity of {doc_id} (ZBC and ZBM are separate)")
             existing = self._versions_of(doc_id)
-            if any(v["version"] == body["version"] for v in existing):
-                raise Conflict(f"{doc_id} version {body['version']} exists (versions are immutable)")
-            if existing and i01.vkey(body["version"]) <= max(i01.vkey(v["version"]) for v in existing):
-                raise Conflict("a new version must be higher than every existing version")
+            # AEGIS N17-5: the number is Legal's, monotonic per document; no caller can choose or burn it
+            version = i01.next_version([v["version"] for v in existing], body.get("bump") or "minor")
+            if version is None:
+                raise Conflict(f"{doc_id} has no version number left (9999.9999 reached)")
+            body = {**body, "version": version}
             op = Op(self, f"ver|{principal}|{request_id}", i01.ACTOR if principal != "andre" else "andre", f"doc:{doc_id}")
             date_vars: dict[str, str] = {}
             template_ref = None
@@ -879,7 +916,7 @@ class LegalService:
                     schema = i01.validate_schema(body.get("template_variables") or {})
                 except ValueError as exc:
                     raise Invalid(str(exc)) from None
-                if i01.placeholders(text) != set(schema):
+                if i01.placeholders(text) != set(schema) or (i01.has_unresolved(text) and not schema):
                     raise Invalid("every {{placeholder}} in the text needs a template_variables entry and vice versa")
                 clause_ids = [dict(c) for c in body.get("clause_ids") or []]
                 self._injection(op, {"text": text})
@@ -892,6 +929,8 @@ class LegalService:
                                   "in-force counsel-approved template version to fill")], recorded=False)
                 if body["entity"] != tpl["entity"]:
                     raise Invalid("a fill keeps the template's entity")
+                if not body.get("party_ref"):
+                    raise Invalid("a fill names the party it is for (party_ref): only that party can accept it")
                 schema = tpl["template_variables"] or {}
                 try:
                     values = i01.check_variables(schema, body["variables"])
@@ -905,14 +944,20 @@ class LegalService:
                     raise Unavailable("the template's text blob is not readable")
                 text = i01.render(tdata.decode("utf-8"), values)
                 date_vars = {n: v for n, v in values.items() if schema[n]["type"] == "date"}
-                variables_sha = op.blob(canonical(body["variables"]).encode("utf-8"), "variables", [f"doc:{doc_id}"])
+                variables_sha = op.blob(canonical(body["variables"]).encode("utf-8"), "variables",
+                                        [f"doc:{doc_id}", f"doc:{doc_id}@{version}", body["party_ref"]])
                 template_ref = {"version": tpl["version"], "sha256": tpl["sha256"]}
                 clause_ids = [dict(c) for c in tpl["clause_ids"]]
                 schema = {}
             raw = text.encode("utf-8", "surrogatepass")
             if len(raw) > BlobStore.MAX_BYTES:
                 raise Invalid("document text larger than 5 MiB")
-            h_text = op.blob(raw, "document", [f"doc:{doc_id}"])
+            unresolved = i01.has_unresolved(text)
+            if template_ref is not None and unresolved:
+                raise Invalid("the filled text still carries an unresolved {{field}}")
+            party_ref = body.get("party_ref")
+            h_text = op.blob(raw, "document", [f"doc:{doc_id}", f"doc:{doc_id}@{version}"]
+                             + ([party_ref] if party_ref else []))
             if new_doc is not None:
                 op.add("document", new_doc)
             v = {"key": f"{doc_id}@{body['version']}", "doc_id": doc_id, "version": body["version"],
@@ -920,10 +965,12 @@ class LegalService:
                  "status": "draft", "counsel_signoff": None, "approved_by": None, "approved_at": None,
                  "effective_at": None, "review_by": None, "supersedes": body.get("supersedes"),
                  "template_ref": template_ref, "variables_sha256": variables_sha, "date_variables": date_vars,
+                 "party_ref": party_ref, "unresolved_fields": unresolved,
                  "created_at": iso(now), "created_by": principal}
             op.ev("doc", "document_version_drafted", f"doc:{doc_id}",
                   {"doc_id": doc_id, "version": body["version"], "sha256": h_text, "entity": body["entity"],
-                   "template_ref": template_ref, "clause_ids": sorted(c["clause_id"] for c in clause_ids)},
+                   "template_ref": template_ref, "clause_ids": sorted(c["clause_id"] for c in clause_ids),
+                   "party_ref_sha256": sha(party_ref) if party_ref else None, "unresolved_fields": unresolved},
                   f"{doc_id} version {body['version']} drafted ({'fill' if template_ref else 'upload'})")
             op.add("doc_version", v)
             return self._answer(op, key, h, {"doc_id": doc_id, "version": body["version"], "sha256": h_text,
@@ -1090,6 +1137,7 @@ class LegalService:
                 if not self._in_force(v):
                     reasons.append(R.item("VERSION_NOT_IN_FORCE", f"{body['doc_id']} {body['version']} is not "
                                           "approved and in force at accepted_at"))
+                reasons += self._instance_reasons(v, body["party_ref"])
             if body["presented_sha256"] != body["doc_sha256"]:
                 reasons.append(R.item("PRESENTED_TEXT_MISMATCH", "the text shown is not the document exactly"))
             if body["affirmative_act"] is not True:
@@ -1116,7 +1164,8 @@ class LegalService:
                    "evidence_ref": {"kind": ev["kind"], "sha256": ev["sha256"], "blob": blob} if ev else None,
                    "entry_by": principal}
             rec["evidence_sufficient"] = i03.clickwrap_sufficient(rec, self.cq_verified("CQ-19"),
-                                                                  self.cfg.esign_consent_required)
+                                                                  self.cfg.esign_consent_required,
+                                                                  not self._instance_reasons(v, rec["party_ref"]))
             op.ev("acc", "acceptance_recorded", subject,
                   {"acceptance_id": aid, "doc_id": rec["doc_id"], "version": rec["version"], "doc_sha256": rec["doc_sha256"],
                    "method": rec["method"], "evidence_sufficient": rec["evidence_sufficient"],
@@ -1129,6 +1178,28 @@ class LegalService:
                        cq_id="CQ-19")]
             return self._answer(op, key, h, {**self.acceptance_view(rec), "obligation_ids": obligations,
                                              "reasons": reasons, "reason_lines": R.lines(reasons)})
+
+    def _instance_reasons(self, v: dict, party_ref: str) -> list[dict]:
+        """AEGIS N17-4: a party accepts only a document INSTANCE bound to it. A template (declared variables, or any
+        ``{{...}}`` left in the text) is never acceptable; a per-party fill (or a version Andre uploaded for one
+        party) is acceptable only by that party. A version bound to no party and carrying no placeholder is a
+        standard form (the same text for everyone, e.g. the clipper agreement) and any party may accept it."""
+        out = []
+        if v.get("template_variables") or v.get("unresolved_fields"):
+            out.append(R.item("TEMPLATE_NOT_ACCEPTABLE", f"{v['doc_id']} {v['version']} is a template with unfilled "
+                              "fields: only a filled instance bound to the party can be accepted"))
+        elif v.get("unresolved_fields") is None and v.get("sha256"):
+            data = self.blobs.get(v["sha256"])          # versions recorded before fix 18 carry no flag: read the text
+            if data is None or i01.has_unresolved(data.decode("utf-8", "replace")):
+                out.append(R.item("TEMPLATE_NOT_ACCEPTABLE", f"{v['doc_id']} {v['version']} has unfilled fields (or "
+                                  "its text is not held): not acceptable"))
+        bound = v.get("party_ref")
+        if v.get("template_ref") and not bound:
+            out.append(R.item("INSTANCE_NOT_BOUND", f"{v['doc_id']} {v['version']} is a fill bound to no party "
+                              "(recorded before fix 18): not acceptable"))
+        elif bound and bound != party_ref:
+            out.append(R.item("INSTANCE_NOT_BOUND", f"{v['doc_id']} {v['version']} is bound to another party"))
+        return out
 
     def _playbook_for(self, doc_type: str) -> Optional[dict]:
         pbs = [p for p in self.playbooks.values() if p["doc_type"] == doc_type and p["status"] == "approved"]
@@ -1182,6 +1253,9 @@ class LegalService:
             if not self._in_force(v):
                 raise Refused("VERSION_NOT_IN_FORCE", reasons=[R.item("VERSION_NOT_IN_FORCE", "only an approved, "
                               "in-force version goes out for signature")], recorded=False)
+            inst = self._instance_reasons(v, body["party_ref"])
+            if inst:
+                raise Refused(inst[0]["code"], reasons=inst, recorded=False)
             op = Op(self, f"env|{request_id}", i03.ACTOR, body["party_ref"])
             esign = self.ports.esign
             ans = op.call("esign_provider", "create_envelope", (body["doc_id"], body["version"], v["sha256"]),
@@ -1585,10 +1659,6 @@ class LegalService:
             for k in c["signoff_topics"]:
                 if k not in self.topics:
                     raise Invalid(f"{k} is not a sign-off topic")
-            for a in body["answers"]:
-                if a.get("proposed_row") is not None and (not isinstance(a["proposed_row"].get("id"), str)
-                                                         or len(canonical(a["proposed_row"])) > 16_384):
-                    raise Invalid("proposed_row: a Compliance register row object (with its id), at most 16 KiB")
             for k, scope in body["signoff_scopes"].items():
                 sk = self.topics.get(k, {}).get("scope_key")
                 if not isinstance(scope, dict) or not (scope == {"any": True} or (
@@ -1620,8 +1690,7 @@ class LegalService:
             for a in body["answers"]:
                 ex = op.blob(a["quoted_excerpt"].encode("utf-8"), "excerpt", [f"memo:{memo_id}"]) \
                     if a.get("quoted_excerpt") else None
-                answers.append({"cq_id": a["cq_id"], "resolution": a["resolution"], "proposed_row": a.get("proposed_row"),
-                                "excerpt_sha256": ex})
+                answers.append({"cq_id": a["cq_id"], "resolution": a["resolution"], "excerpt_sha256": ex})
             memo = {"memo_id": memo_id, "counsel_ref": body["counsel_ref"], "memo_sha256": msha,
                     "memo_date": body["memo_date"], "received_at": received, "entered_by": "andre",
                     "answers": answers, "cites": dict(c), "injection_flags": {"rules": inj, "count": len(inj)}}
@@ -1638,22 +1707,16 @@ class LegalService:
                     effects.append({"cq_id": a["cq_id"], "effect": "no_change", "resolution": a["resolution"]})
                     op.update("register", a["cq_id"], {"memo_ids": row["memo_ids"] + [memo_id]})
                     continue
-                cp_id = None
-                if a["proposed_row"] is not None:
-                    cp_id = self._new_cproposal(op, memo, "supersede", a["cq_id"], a["proposed_row"],
-                                                a["excerpt_sha256"])
-                    new_props.append(cp_id)
                 if row["origin"] == "compliance":
-                    # the row is Compliance's: it turns verified only when Andre approves the proposal there
+                    # the row is Compliance's: it turns verified only when Andre approves, at Compliance, the
+                    # proposal he files in step 2 (POST /legal/v1/memos/{memo_id}/compliance-proposals, N17-8)
                     op.update("register", a["cq_id"], {"memo_ids": row["memo_ids"] + [memo_id],
-                                                        "compliance": {"cproposal_id": cp_id, "status": "pending" if cp_id
-                                                                       else "no_proposal"}})
-                    effects.append({"cq_id": a["cq_id"], "effect": "pending_compliance" if cp_id else "no_proposal"})
+                                                        "compliance": {"cproposal_id": None,
+                                                                       "status": "awaiting_proposal"}})
+                    effects.append({"cq_id": a["cq_id"], "effect": "awaiting_proposal"})
                     continue
                 op.update("register", a["cq_id"], {"status": "verified", "memo_ids": row["memo_ids"] + [memo_id],
-                                                    "review_by": review_by,
-                                                    "compliance": {"cproposal_id": cp_id, "status": "pending"} if cp_id
-                                                    else row.get("compliance")})
+                                                    "review_by": review_by, "compliance": row.get("compliance")})
                 op.ev("rrv", "register_row_verified", a["cq_id"], {"cq_id": a["cq_id"], "memo_id": memo_id,
                                                                     "review_by": review_by},
                       f"{a['cq_id']} verified via counsel memo", actor=i05.ACTOR)
@@ -1665,9 +1728,6 @@ class LegalService:
                             lambda t=target, q=a["cq_id"]: t.notify("register_row_verified", q,
                                                                      {"memo_id": memo_id, "review_by": review_by}),
                             Delivery(False))
-            for r in body["compliance_rows"]:
-                ex = op.blob(r["quoted_excerpt"].encode("utf-8"), "excerpt", [f"memo:{memo_id}"])
-                new_props.append(self._new_cproposal(op, memo, r["kind"], r["obligation_id"], r["proposed_row"], ex))
             for k, period in body["retention_periods"].items():
                 op.update("retention", k, {"period": period})
             for k in c["retention_classes"]:
@@ -1687,6 +1747,59 @@ class LegalService:
                                                           "compliance_proposal_id")} for p in new_props]
         resp = {**resp_core, "proposals": props, "delivery_attempts": delivered, "ledger_event_ids": op.events}
         return resp
+
+    def memo_proposals(self, request_id: str, memo_id: str, body: dict) -> dict:
+        """Step 2 of a memo-backed Compliance proposal (AEGIS N17-8). The memo is already filed, so its id exists
+        and Andre types each row with ``source_url: urn:legal37:memos:<memo_id>`` (compliance-py accepts urn:
+        URLs; the old ``legal37://`` form was refused there). Every target must be one the memo cites: a counsel
+        question it answered ``verified_rule`` (supersede) or an obligation row in ``cites.obligation_ids``
+        (amend / reverify). Delivery happens after the commit, outside the lock (N16-1)."""
+        with self.lock:
+            self._require_rules()
+            key, h, ent = self._idem("andre", request_id, f"memos/{memo_id}/proposals", body)
+            if ent:
+                return ent["response"]
+            memo = self.memos.get(memo_id)
+            if memo is None:
+                raise NotFound("no such memo")
+            urn = i05.memo_urn(memo_id)
+            verified_cqs = {a["cq_id"] for a in memo["answers"] if a["resolution"] == "verified_rule"}
+            reasons = []
+            for p in body["proposals"]:
+                row = p["proposed_row"]
+                if not isinstance(row.get("id"), str) or len(canonical(row)) > 16_384:
+                    raise Invalid("proposed_row: a Compliance register row object (with its id), at most 16 KiB")
+                if row.get("source_url") != urn:
+                    raise Invalid(f"proposed_row.source_url must be exactly {urn} (the filed memo)")
+                if p["kind"] == "supersede":
+                    if p["target_id"] not in verified_cqs:
+                        reasons.append(R.item("MEMO_DOES_NOT_CITE", f"the memo does not answer {p['target_id']} "
+                                              "verified_rule", cq_id=p["target_id"] if p["target_id"] in self.register
+                                              else None))
+                elif p["target_id"] not in memo["cites"]["obligation_ids"]:
+                    reasons.append(R.item("MEMO_DOES_NOT_CITE", f"Compliance row {p['target_id']} is not cited by the "
+                                          "memo"))
+                if rid("cpr", memo_id, p["kind"], p["target_id"]) in self.cproposals:
+                    raise Conflict(f"a {p['kind']} proposal for {p['target_id']} from this memo already exists")
+            if reasons:
+                self._refuse("memo_refused_uncited", f"memo:{memo_id}", reasons, op_id=request_id)
+            op = Op(self, f"mpr|{memo_id}|{request_id}", i05.ACTOR, f"memo:{memo_id}")
+            new_props = []
+            for p in body["proposals"]:
+                ex = op.blob(p["quoted_excerpt"].encode("utf-8"), "excerpt", [f"memo:{memo_id}"])
+                cp_id = self._new_cproposal(op, memo, p["kind"], p["target_id"], p["proposed_row"], ex)
+                new_props.append(cp_id)
+                reg = self.register.get(p["target_id"])
+                if p["kind"] == "supersede" and reg is not None:
+                    op.update("register", p["target_id"], {"compliance": {"cproposal_id": cp_id, "status": "pending"}})
+            self._injection(op, {"rows": [p["proposed_row"] for p in body["proposals"]]})
+            resp_core = {"memo_id": memo_id, "cproposal_ids": new_props}
+            self._commit_with_idem(op, key, h, resp_core)
+        delivered = self.deliver_proposals(new_props)
+        with self.lock:
+            props = [{k: self.cproposals[p][k] for k in ("cproposal_id", "kind", "target_id", "status",
+                                                          "compliance_proposal_id")} for p in new_props]
+        return {**resp_core, "proposals": props, "delivery_attempts": delivered, "ledger_event_ids": op.events}
 
     def _commit_with_idem(self, op: Op, key: tuple, h: str, response: dict) -> None:
         op.idem = {"principal": key[0], "request_id": key[1], "h": h,
@@ -1734,15 +1847,23 @@ class LegalService:
                 except Unavailable:
                     continue
             n += 1
+            bad = None
             try:
                 ans = self.ports.compliance.create_proposal(p["request_id"], body)
             except Exception:  # noqa: BLE001
                 ans = ProposalAnswer("unavailable")
-            if not isinstance(ans, ProposalAnswer):
-                ans = ProposalAnswer("unavailable")
+            else:
+                try:
+                    ans = A.check(ans, ProposalAnswer, ProposalAnswer("unavailable"))
+                except A.Malformed as exc:              # AEGIS N17-3: never "created" on a malformed answer
+                    ans, bad = ProposalAnswer("unavailable"), exc.kind
             with self.lock:
                 op = Op(self, f"cpd|{cp_id}|{p['attempts']}", i05.ACTOR, f"memo:{p['memo_id']}")
                 op.events.append(xid)
+                if bad:
+                    op.ev("xbad", "adapter_answer_refused", f"memo:{p['memo_id']}",
+                          {"port": "compliance_38", "action": "create_proposal", "cproposal_id": cp_id, "problem": bad},
+                          "Malformed answer from compliance_38 (create_proposal) refused")
                 status = {"created": "delivered", "refused": "refused_by_compliance"}.get(ans.status, "pending_delivery")
                 etype = {"delivered": "compliance_proposal_delivered", "refused_by_compliance":
                          "compliance_proposal_refused", "pending_delivery": "compliance_proposal_pending_delivery"}[status]
@@ -1769,10 +1890,10 @@ class LegalService:
         n = 0
         for cp_id, cq, repl, memo_id in todo:
             try:
-                row = self.ports.compliance.row(repl)
-            except Exception:  # noqa: BLE001
+                row = A.check(self.ports.compliance.row(repl), ComplianceRow, ComplianceRow(False, repl))
+            except Exception:  # noqa: BLE001 - raised or malformed (AEGIS N17-3): not proof of approval
                 continue
-            if not getattr(row, "available", False) or row.effective_status != "verified":
+            if not row.available or row.obligation_id != repl or row.effective_status != "verified":
                 continue
             with self.lock:
                 memo = self.memos[memo_id]
@@ -2493,10 +2614,19 @@ class LegalService:
         for h_, meta in sorted(self.blob_meta.items()):
             if meta.get("deleted"):
                 continue
+            # AEGIS N17-14: every class the blob was ever stored under must be verified and past its period,
+            # counted from the LAST writer (a later subject's copy restarts the clock)
+            since = max(parse_iso(meta["stored_at"]), parse_iso(meta.get("last_ref_at") or meta["stored_at"]))
+            ends, verified = [], True
+            for cname in meta.get("classes") or [meta["class"]]:
+                cls = self.retention.get(cname)
+                ok = cls is not None and cls["status"] == "verified" and cls.get("review_by") and \
+                    self._today() < date.fromisoformat(cls["review_by"])
+                e_ = self._period_end(since, cls["period"]) if cls else None
+                verified = verified and bool(ok) and e_ is not None
+                ends.append(e_)
+            end = max(ends) if verified and ends else None
             cls = self.retention.get(meta["class"])
-            verified = cls is not None and cls["status"] == "verified" and cls.get("review_by") and \
-                self._today() < date.fromisoformat(cls["review_by"])
-            end = self._period_end(parse_iso(meta["stored_at"]), cls["period"]) if cls else None
             if not verified or end is None:
                 out["blocked_unverified"] += 1
                 continue

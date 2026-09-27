@@ -109,12 +109,31 @@ class Harness:
             {"proposal_id": seed["proposal_id"], "content_sha256": seed["content_sha256"], "decision": "approve"}]}))
 
     # --- documents -----------------------------------------------------------------------------------------------
-    def upload(self, doc_id, text, version="1.0", entity="zbc", clause_ids=(), template_variables=None, code=201):
-        body = {"request_id": rid("up"), "version": version, "entity": entity, "text": text,
+    def upload(self, doc_id, text, version="1.0", entity="zbc", clause_ids=(), template_variables=None, code=201,
+               party_ref=None):
+        """Andre's upload. Legal assigns the number (AEGIS N17-5): ``version`` is what the test EXPECTS; a new
+        major number is asked for with ``bump: major``; the assigned number is asserted."""
+        body = {"request_id": rid("up"), "entity": entity, "text": text,
                 "clause_ids": [{"clause_id": c, "position": p} for c, p in clause_ids]}
+        if version.endswith(".0") and version != "1.0":
+            body["bump"] = "major"
         if template_variables is not None:
             body["template_variables"] = template_variables
-        return self.ok(self.apost(f"/legal/v1/documents/{doc_id}/versions", body), code)
+        if party_ref is not None:
+            body["party_ref"] = party_ref
+        out = self.ok(self.apost(f"/legal/v1/documents/{doc_id}/versions", body), code)
+        if code == 201:
+            assert out["version"] == version, (out["version"], version)
+        return out
+
+    def fill(self, doc_id, variables, party_ref, entity="zbm", expect=None, code=201, caller="scheduler"):
+        """A scheduler fill of the current template, bound to ``party_ref`` (AEGIS N17-4)."""
+        out = self.ok(self.post(f"/legal/v1/documents/{doc_id}/versions",
+                                {"request_id": rid("fill"), "entity": entity, "variables": variables,
+                                 "party_ref": party_ref}, caller=caller), code)
+        if expect is not None and code == 201:
+            assert out["version"] == expect, (out["version"], expect)
+        return out
 
     def engage(self, counsel_ref=COUNSEL_REF, version="1.0"):
         """Engagement letter with the AI clause: countersigned by counsel, approved by Andre (LG-17)."""
@@ -132,7 +151,7 @@ class Harness:
         cites.update(parts.pop("cites", {}))
         body = {"request_id": rid("memo"), "counsel_ref": counsel_ref, "memo_date": memo_date,
                 "content_b64": b64(content or f"memo {next(_ids)}".encode()), "cites": cites,
-                "answers": parts.pop("answers", []), "compliance_rows": parts.pop("compliance_rows", []),
+                "answers": parts.pop("answers", []),
                 "retention_periods": parts.pop("retention_periods", {}), "signoff_scopes": parts.pop("signoff_scopes", {})}
         assert not parts, parts
         return self.ok(self.apost("/legal/v1/memos", body), code)
@@ -141,9 +160,14 @@ class Harness:
         return self.memo(cites={"cq_ids": list(cq_ids)},
                          answers=[{"cq_id": c, "resolution": "verified_rule"} for c in cq_ids])
 
+    def memo_proposals(self, memo_id, proposals, code=201):
+        """Step 2 (AEGIS N17-8): Compliance proposals backed by an already-filed memo."""
+        return self.ok(self.apost(f"/legal/v1/memos/{memo_id}/compliance-proposals",
+                                  {"request_id": rid("mpr"), "proposals": proposals}), code)
+
     def approve_doc(self, doc_id, text, version="1.0", entity="zbc", clause_ids=(), template_variables=None,
-                    effective_at=None):
-        v = self.upload(doc_id, text, version, entity, clause_ids, template_variables)
+                    effective_at=None, party_ref=None):
+        v = self.upload(doc_id, text, version, entity, clause_ids, template_variables, party_ref=party_ref)
         d = self.ok(self.get(f"/legal/v1/documents/{doc_id}"))
         if d["counsel_required"]:
             memo = self.memo(cites={"doc_versions": [f"{doc_id}@{version}"],

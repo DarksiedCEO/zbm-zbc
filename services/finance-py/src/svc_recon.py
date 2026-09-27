@@ -12,6 +12,7 @@ only when the bank accepts; the bank adapter is a stand-in, so none moves on day
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Optional
 
 import chart as C
@@ -26,45 +27,61 @@ from intelligences import i08_treasury as T
 from intelligences import i09_controls as I9
 from ledger import derived_id
 from ports import BankBalance, BankTransfer, RailBalance, RailLookup
-from service import Gather, Op, PostingRefused, Refused, rid, sha
+from service import RUNNABLE, Gather, Op, PostingRefused, Refused, rid, sha
 
 JOBS = ("accrual", "clawback-sync", "tax-sync", "rail-sync")
+PENDING_SWEEP = ("proposed", "approved", "executing", "bank_unknown")      # reserved when a sweep is proposed
+LIVE_SWEEP = ("approved", "executing", "bank_unknown")                     # reserved at approval and execution
+OPEN_OPS = ("proposed", "approved", "executing", "bank_unknown")
 TRANSFER_FLOWS = {"sweep": ("F8", "1010", "1020"), "top_up": ("F5c", "1020", "1010")}
 
 
 class ReconMixin:
     # ================================================================== reconciliation
 
-    def _expected_l4(self) -> dict:
+    def _expected_l4_sub(self) -> dict[str, dict[str, Decimal]]:
+        """The operational records' view of each control account, PER SUB-LEDGER (payee, item, campaign) -- AEGIS
+        N17-1: a payable moved to another payee or campaign nets to zero in a total and is caught only here."""
+        out: dict[str, dict[str, Decimal]] = {"2020": {}, "2030": {}, "1200": {}, "2010": {}}
+
+        def add(acct: str, sub: str, amt: Decimal) -> None:
+            out[acct][sub] = M.q(out[acct].get(sub, M.ZERO) + amt)
+
         items = self.db["items"]
-        e2020 = M.ZERO
-        for p in self.db["payables"].values():
-            if p["status"] == "accrued":
-                e2020 += M.D(p["current_amount"])
+        pays = self.db["payables"]
+        for p in pays.values():
+            if p["status"] in RUNNABLE:
+                add("2020", f"payee:{p['payee_id']}", M.D(p["current_amount"]))
         for it in items.values():
             if it["status"] in ("proposed", "approved"):
-                e2020 += M.total(self.db["payables"][x]["current_amount"] for x in it["payable_ids"])
+                add("2020", f"payee:{it['payee_id']}", M.total(pays[x]["current_amount"] for x in it["payable_ids"]))
             elif it["status"] == "submitting":
-                e2020 += M.D(it["net"])
-        e2030 = M.total(it["net"] for it in items.values() if it["status"] == "submitted")
-        e1200 = M.ZERO
+                add("2020", f"payee:{it['payee_id']}", M.D(it["net"]))
+            elif it["status"] == "submitted":
+                add("2030", f"item:{it['item_id']}", M.D(it["net"]))
+            if it["status"] in ("submitting", "submitted", "paid", "netted"):
+                add("1200", f"payee:{it['payee_id']}", -M.D(it["netted"]))
         for c in self.db["clawbacks"].values():
-            if c.get("status") in ("receivable", "written_off"):
-                e1200 += M.D(c.get("receivable") or "0.00")
+            if c.get("status") in ("receivable", "written_off") and c.get("payee_id"):
+                add("1200", f"payee:{c['payee_id']}", M.D(c.get("receivable") or "0.00"))
             if c.get("status") == "write_off":
-                e1200 -= M.D(c["amount"])
-        e1200 -= M.total(it["netted"] for it in items.values() if it["status"] in ("submitting", "submitted", "paid",
-                                                                                     "netted"))
-        e2010 = M.ZERO
+                add("1200", f"payee:{c['payee_id']}", -M.D(c["amount"]))
         for r in self.db["receipts"].values():
             inv = self.db["invoices"].get(r.get("invoice_id") or "")
-            if r["status"] == "matched" and inv and inv["kind"] == "campaign_deposit":
-                e2010 += M.D(r["amount"])
-        for p in self.db["payables"].values():
+            if r["status"] in ("matched", "returned") and inv and inv["kind"] == "campaign_deposit":
+                add("2010", f"campaign:{inv['campaign_id']}", M.D(r["amount"]))
+                if r["status"] == "returned":
+                    add("2010", f"campaign:{inv['campaign_id']}", -M.D((r.get("return") or {}).get("to_2010") or "0.00"))
+        for p in pays.values():
             if p["status"] not in ("pending_checks", "over_budget_hold"):
-                e2010 -= M.D(p["current_revenue"])
-        e2010 -= M.total(r["amount"] for r in self.db["refunds"].values() if r["status"] in ("approved", "paid"))
-        return {"2020": M.q(e2020), "2030": M.q(e2030), "1200": M.q(e1200), "2010": M.q(e2010)}
+                add("2010", f"campaign:{p['campaign_id']}", -M.D(p["current_revenue"]))
+        for r in self.db["refunds"].values():
+            if r["status"] in ("approved", "paid"):
+                add("2010", f"campaign:{r['campaign_id']}", -M.D(r["amount"]))
+        return out
+
+    def _expected_l4(self) -> dict:
+        return {acct: M.total(v.values()) for acct, v in self._expected_l4_sub().items()}
 
     def run_recon(self, principal: str, request_id: str) -> dict:
         key, h, ent = self._idem(principal, request_id, "reconciliations/run", None)
@@ -118,10 +135,18 @@ class ReconMixin:
                              "observed": str(len(lookups) - len(bad_items)), "observed_source_sha256": sha(sorted(lookups)),
                              "difference": str(len(bad_items)), "status": "matched" if not bad_items else "break",
                              "note": f"{len(bad_items)} open item(s) not confirmed by the rail"[:200]})
-            exp = self._expected_l4()
+            sub = self._expected_l4_sub()
             for acct in ("2010", "2020", "2030", "1200"):
-                legs.append(I7.leg("L4", f"zbc:{acct}", self.bal(acct), exp[acct], sha({"records": acct}),
-                                   "control balance vs the operational records"))
+                legs.append(I7.leg("L4", f"zbc:{acct}", self.bal(acct), M.total(sub[acct].values()),
+                                   sha({"records": acct}), "control balance vs the operational records"))
+                # AEGIS N17-1: per sub-ledger too (payee / item / campaign), never totals only
+                journal = J.subledgers(self.balances, "zbc", acct)
+                for s in sorted(set(journal) | set(sub[acct])):
+                    j, e = journal.get(s, M.ZERO), sub[acct].get(s, M.ZERO)
+                    if j == 0 and e == 0:
+                        continue
+                    legs.append(I7.leg("L4", f"zbc:{acct}:{s}"[:160], j, e, sha({"records": acct, "sub": s}),
+                                       "sub-ledger vs the operational records"))
             ind = T.independent(M.D(obs[("zbc", "1020")].balance) if legs[0]["status"] != "source_unavailable" else None,
                                 {r: M.D(rail_obs[r].balance) for r in self.cfg.rails
                                  if isinstance(rail_obs[r], RailBalance) and rail_obs[r].available}, self.balances)
@@ -234,6 +259,9 @@ class ReconMixin:
             out.append(R.item("RECON_BREAK", f"FC-01 red: no fresh, fully matched reconciliation ({action} refused)"))
         if self._open_breaks():
             out.append(R.item("RECON_BREAK", f"FC-02 red: reconciliation break(s) open ({action} refused)"))
+        for sf in self._open_shortfalls():
+            out.append(R.item("DEPOSIT_SHORTFALL", f"deposit shortfall {sf['shortfall_id']} ({sf['amount']}) open: Andre "
+                                                   f"tops up first ({action} refused)", [sf["shortfall_id"]]))
         pos = T.position(self.balances)
         ind = (last or {}).get("treasury", {}).get("independent", {})
         if pos["gap"] < 0 or not ind.get("known") or not ind.get("ok"):
@@ -317,11 +345,27 @@ class ReconMixin:
         with self.lock:
             last = self._latest_recon()
             return {"journal": T.view(T.position(self.balances)),
-                    "sweepable": M.fmt(T.sweepable(self.balances, self.cfg.restricted_buffer)),
+                    "sweepable": M.fmt(T.sweepable(self.balances, self.cfg.restricted_buffer,
+                                                   self._reserved_sweeps(PENDING_SWEEP))),
                     "independent": (last or {}).get("treasury", {}).get("independent"),
                     "account_title": C.DEPOSITS_ACCOUNT_TITLE, "custody_model": "own_deposit",
-                    "open_operations": [o for o in self.db["treasury_ops"].values() if o["status"] in
-                                        ("proposed", "approved")]}
+                    "open_operations": [o for o in self.db["treasury_ops"].values() if o["status"] in OPEN_OPS],
+                    "shortfalls": [x for x in self.db["shortfalls"].values() if x["status"] == "open"]}
+
+    def _reserved_sweeps(self, statuses: tuple, exclude: Optional[str] = None) -> Decimal:
+        """AEGIS N17-2: sweeps already proposed/approved/in flight are spoken for; ``sweepable`` subtracts them."""
+        return M.total(o["amount"] for o in self.db["treasury_ops"].values()
+                       if o["kind"] == "sweep" and o["status"] in statuses and o["op_id"] != exclude)
+
+    def _sweep_reasons(self, t: dict, when: str) -> list[dict]:
+        """FIN-18 for a sweep, checked at approval AND at execution: controls green, and the amount within what is
+        sweepable after every other sweep already approved or in flight."""
+        reasons = self._control_block_reasons("sweep")
+        sw = T.sweepable(self.balances, self.cfg.restricted_buffer, self._reserved_sweeps(LIVE_SWEEP, t["op_id"]))
+        if M.D(t["amount"]) > sw:
+            reasons.append(R.item("TREASURY_BREACH", f"sweep {t['amount']} exceeds the sweepable amount {M.fmt(sw)} at "
+                                                     f"{when} (other approved sweeps included)"))
+        return reasons
 
     def _new_treasury_op(self, op: Op, kind: str, amount, ref_id: Optional[str], by: str, request_id: str) -> dict:
         tid = rid("trx", kind, by, request_id)
@@ -338,9 +382,10 @@ class ReconMixin:
                 return ent["response"]
             self.require_rules()
             reasons = self._control_block_reasons("sweep")
-            sw = T.sweepable(self.balances, self.cfg.restricted_buffer)
+            sw = T.sweepable(self.balances, self.cfg.restricted_buffer, self._reserved_sweeps(PENDING_SWEEP))
             if amount > sw:
-                reasons.append(R.item("TREASURY_BREACH", f"sweep {M.fmt(amount)} exceeds sweepable {M.fmt(sw)}"))
+                reasons.append(R.item("TREASURY_BREACH", f"sweep {M.fmt(amount)} exceeds sweepable {M.fmt(sw)} (sweeps "
+                                                         "already proposed or approved are subtracted)"))
             if reasons:
                 raise Refused("sweep refused", R.dedupe(reasons))
             op = Op(self, f"sweep|{request_id}", "intel_08_treasury", "treasury")
@@ -384,10 +429,19 @@ class ReconMixin:
             if ent:
                 return ent["response"]
             self.require_rules()
+            sf_id = body.get("shortfall_id")
+            if sf_id is not None:
+                sf = self.db["shortfalls"].get(sf_id)
+                if sf is None or sf["status"] != "open":
+                    raise Conflict("no open deposit shortfall with that id")
+                if M.D(body["amount"]) < M.D(sf["amount"]):
+                    raise Refused("top-up below the shortfall", [R.item("DEPOSIT_SHORTFALL", f"a top-up for shortfall "
+                                                                        f"{sf_id} must be at least {sf['amount']}")])
             op = Op(self, f"topup|{request_id}", "andre", "treasury")
             self._injection(op, {"notes": body.get("notes")})
             t = self._new_treasury_op(op, "top_up", body["amount"], body.get("reason_code"), "andre", request_id)
-            t = {**t, "status": "approved", "approved_at": iso(self._now()), "approved_by": "andre"}
+            t = {**t, "status": "approved", "approved_at": iso(self._now()), "approved_by": "andre",
+                 "shortfall_id": sf_id}
             op.put("treasury_ops", t["op_id"], t)
             op.record(derived_id("tup", t["op_id"]), "top_up_approved", "andre", t["op_id"],
                       {"op_id": t["op_id"], "amount": t["amount"], "reason_code": body.get("reason_code")},
@@ -422,9 +476,7 @@ class ReconMixin:
                 return resp
             reasons = []
             if kind == "sweep":
-                reasons += self._control_block_reasons("sweep")
-                if M.D(t["amount"]) > T.sweepable(self.balances, self.cfg.restricted_buffer):
-                    reasons.append(R.item("TREASURY_BREACH", "sweep exceeds the sweepable amount now"))
+                reasons += self._sweep_reasons(t, "approval")
             else:
                 b = self.db["batches"].get(t["ref_id"])
                 if not b or b["status"] not in ("approved", "releasing"):
@@ -458,56 +510,119 @@ class ReconMixin:
             return "F6p", [J.dr("2050", amt, f"client:{r['client_id']}"), J.cr("1020", amt)], ("1020", t["to"])
         raise Invalid("unknown treasury operation")
 
+    def _execution_reasons(self, t: dict) -> list[dict]:
+        """Re-checked at EXECUTION, not only at approval (AEGIS N17-2)."""
+        if t["kind"] == "sweep":
+            return self._sweep_reasons(t, "execution")
+        if t["kind"] == "funding":
+            b = self.db["batches"].get(t["ref_id"])
+            if not b or b["status"] not in ("approved", "releasing") or M.D(t["amount"]) > M.D(b["totals"]["net"]):
+                return [R.item("NOT_APPROVED", "funding only for an Andre-approved batch, up to its net total")]
+        return []
+
     def _execute_transfer(self, tid: str) -> dict:
-        """Ask the bank adapter to move an Andre-approved amount (idempotency key = the operation id); post only on
-        acceptance. The stand-in answers unavailable: the operation stays approved and nothing posts."""
-        t = self.db["treasury_ops"][tid]
-        if t["status"] != "approved":
-            return {"op_id": tid, "status": t["status"]}
-        memo, lines, (src, dst) = self._transfer_lines(t)
+        """Record first, the bank too (AEGIS N17-2): (1) under the lock the Andre-approved operation is re-checked
+        and its journal posting is validated, staged and COMMITTED (ledger events, local-log anchor, fsync) with
+        the operation marked ``executing``; (2) only then is the bank adapter asked to move the money, with the
+        operation id as the idempotency key, outside the lock; (3) the outcome is recorded: accepted -> ``done``;
+        refused or unavailable -> the posting is REVERSED by a recorded reversal entry and the operation goes back
+        to ``approved`` (retried by the rail-sync job); an unknown outcome (the adapter raised, or answered
+        malformed) -> ``bank_unknown`` with a break for Andre, the posting kept, and the retry asks the bank again
+        with the SAME key (never a second posting). A posting is never left dangling and the bank never moves money
+        the journal has not recorded."""
+        with self.lock:
+            t = self.db["treasury_ops"].get(tid)
+            if t is None or t["status"] not in ("approved", "bank_unknown"):
+                return {"op_id": tid, "status": t["status"] if t else "unknown"}
+            memo, lines, (src, dst) = self._transfer_lines(t)
+            if t["status"] == "approved":
+                n = t.get("attempts", 0) + 1
+                op = Op(self, f"xfer|{tid}|{n}", "intel_08_treasury", tid)
+                reasons = self._execution_reasons(t)
+                if reasons:
+                    op.put("treasury_ops", tid, {**t, "status": "refused_at_execution", "reasons": R.dedupe(reasons),
+                                                 "refused_at": iso(self._now())})
+                    op.record(derived_id("trxr", tid, n), "treasury_execution_refused", "intel_08_treasury", tid,
+                              {"op_id": tid, "codes": R.codes(reasons)},
+                              f"Approved {t['kind']} refused at execution (FIN-18 re-checked): nothing posted or sent")
+                    self._commit(op)
+                    return {"op_id": tid, "status": "refused_at_execution", "reasons": R.dedupe(reasons)}
+                try:
+                    e = self._post(op, "zbc", lines, memo, {"kind": t["kind"], "id": tid}, f"{memo}|{tid}|{n}",
+                                   approval_ref=tid, actor="intel_08_treasury")
+                except PostingRefused as exc:
+                    op.put("treasury_ops", tid, {**t, "status": "posting_refused", "reasons": exc.reasons})
+                    bid = rid("brk", "xfer", tid)
+                    op.put("breaks", bid, {"break_id": bid, "leg": "L1", "subject": f"transfer:{tid}",
+                                           "difference": t["amount"], "opened_at": iso(self._now()),
+                                           "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                           "explanation_code": "unknown", "status": "open", "resolution": None})
+                    self._commit(op)
+                    return {"op_id": tid, "status": "posting_refused", "reasons": exc.reasons}
+                t = {**t, "status": "executing", "attempts": n, "entry_id": e["entry_id"],
+                     "posted_at": iso(self._now())}
+                op.put("treasury_ops", tid, t)
+                op.record(derived_id("trxp", tid, n), "treasury_posting_committed", "intel_08_treasury", tid,
+                          {"op_id": tid, "entry_id": e["entry_id"], "attempt": n},
+                          f"{t['kind']} posted and anchored before the bank instruction (attempt {n})")
+                self._commit(op)
+            n = t["attempts"]
         bank = self.ports.bank
-        g = Gather(self, f"xfer|{tid}|{t.get('attempts', 0) + 1}", "intel_08_treasury", tid)
+        g = Gather(self, f"xfer|{tid}|{n}|{t.get('asks', 0) + 1}", "intel_08_treasury", tid)
         ans = g.call("bank_feed", "transfer", ("zbc", src, dst, t["amount"], tid),
-                     lambda: bank.transfer("zbc", src, dst, t["amount"], tid), BankTransfer("unavailable"))
-        ans = ans if isinstance(ans, BankTransfer) else BankTransfer("unavailable")
+                     lambda: bank.transfer("zbc", src, dst, t["amount"], tid), BankTransfer("unknown"))
+        outcome = ans.outcome if isinstance(ans, BankTransfer) else "unknown"
         with self.lock:
             t = self.db["treasury_ops"][tid]
-            if t["status"] != "approved":
+            if t["status"] not in ("executing", "bank_unknown"):
                 return {"op_id": tid, "status": t["status"]}
-            op = Op(self, f"xfer|{tid}|{t.get('attempts', 0) + 1}", "intel_08_treasury", tid, g)
-            if ans.outcome != "accepted":
-                op.put("treasury_ops", tid, {**t, "attempts": t.get("attempts", 0) + 1, "last_outcome": ans.outcome})
+            op = Op(self, f"xfer|{tid}|{n}|{t.get('asks', 0) + 1}|{outcome}", "intel_08_treasury", tid, g)
+            e = self.entries_by_id[t["entry_id"]]
+            asks = t.get("asks", 0) + 1
+            if outcome == "accepted":
+                op.put("treasury_ops", tid, {**t, "status": "done", "bank_ref": ans.ref, "asks": asks,
+                                             "done_at": iso(self._now())})
+                if t["kind"] == "refund_payment":
+                    r = self.db["refunds"][t["ref_id"]]
+                    op.put("refunds", r["refund_id"], {**r, "status": "paid", "paid_at": iso(self._now())})
+                    prof = self.db["profiles"].get(r["campaign_id"])
+                    if prof:
+                        op.put("profiles", r["campaign_id"], {**prof, "status": "closed"})
+                    op.record(derived_id("rfdpd", r["refund_id"]), "refund_paid", "intel_08_treasury", r["refund_id"],
+                              {"refund_id": r["refund_id"], "amount": r["amount"]}, f"Refund paid: {r['amount']}")
+                if t["kind"] == "top_up" and t.get("shortfall_id"):
+                    self._close_shortfall(op, t["shortfall_id"], tid)
                 self._commit(op)
-                return {"op_id": tid, "status": "approved", "transfer": ans.outcome}
-            try:
-                e = self._post(op, "zbc", lines, memo, {"kind": t["kind"], "id": tid}, f"{memo}|{tid}",
-                               approval_ref=tid, actor="intel_08_treasury")
-            except PostingRefused as exc:
-                op.put("treasury_ops", tid, {**t, "status": "posting_refused", "reasons": exc.reasons})
-                bid = rid("brk", "xfer", tid)
+                return {"op_id": tid, "status": "done", "entry_id": e["entry_id"]}
+            if outcome in ("refused", "unavailable"):
+                rev = self._post(op, "zbc", J.reversal_lines(e), memo, {"kind": t["kind"], "id": tid},
+                                 f"{memo}rev|{tid}|{n}", approval_ref=tid, reverses=e["entry_id"],
+                                 actor="intel_08_treasury", fact=True)
+                op.put("treasury_ops", tid, {**t, "status": "approved", "asks": asks, "last_outcome": outcome,
+                                             "entry_id": None, "reversed_entry_ids": (t.get("reversed_entry_ids") or [])
+                                             + [e["entry_id"], rev["entry_id"]]})
+                op.record(derived_id("trxv", tid, n), "treasury_posting_reversed", "intel_08_treasury", tid,
+                          {"op_id": tid, "entry_id": e["entry_id"], "reversal_entry_id": rev["entry_id"],
+                           "outcome": outcome}, f"Bank {outcome} the {t['kind']}: posting reversed (recorded)")
+                self._commit(op)
+                return {"op_id": tid, "status": "approved", "transfer": outcome, "reversal_entry_id": rev["entry_id"]}
+            bid = rid("brk", "xfer-unknown", tid)
+            op.put("treasury_ops", tid, {**t, "status": "bank_unknown", "asks": asks, "last_outcome": "unknown"})
+            if bid not in self.db["breaks"]:
                 op.put("breaks", bid, {"break_id": bid, "leg": "L1", "subject": f"transfer:{tid}", "difference": t["amount"],
                                        "opened_at": iso(self._now()), "opened_on": self._today_la().isoformat(),
                                        "owner": "andre", "explanation_code": "unknown", "status": "open",
-                                       "resolution": None})
-                self._commit(op)
-                return {"op_id": tid, "status": "posting_refused", "reasons": exc.reasons}
-            op.put("treasury_ops", tid, {**t, "status": "done", "bank_ref": ans.ref, "entry_id": e["entry_id"],
-                                         "done_at": iso(self._now())})
-            if t["kind"] == "refund_payment":
-                r = self.db["refunds"][t["ref_id"]]
-                op.put("refunds", r["refund_id"], {**r, "status": "paid", "paid_at": iso(self._now())})
-                prof = self.db["profiles"].get(r["campaign_id"])
-                if prof:
-                    op.put("profiles", r["campaign_id"], {**prof, "status": "closed"})
-                op.record(derived_id("rfdpd", r["refund_id"]), "refund_paid", "intel_08_treasury", r["refund_id"],
-                          {"refund_id": r["refund_id"], "amount": r["amount"]}, f"Refund paid: {r['amount']}")
+                                       "resolution": None, "kind": "bank_state_unknown"})
+                op.record(derived_id("brk", bid), "break_opened", I7.ACTOR, bid,
+                          {"break_id": bid, "leg": "L1", "subject": f"transfer:{tid}", "difference": t["amount"],
+                           "kind": "bank_state_unknown"}, "Break opened: bank outcome of a posted transfer unknown")
             self._commit(op)
-            return {"op_id": tid, "status": "done", "entry_id": e["entry_id"]}
+            return {"op_id": tid, "status": "bank_unknown", "break_id": bid}
 
     def retry_transfers(self) -> int:
         n = 0
         for tid, t in list(self.db["treasury_ops"].items()):
-            if t["status"] == "approved":
+            if t["status"] in ("approved", "bank_unknown"):
                 self._execute_transfer(tid)
                 n += 1
         return n

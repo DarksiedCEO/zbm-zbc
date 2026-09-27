@@ -127,6 +127,88 @@
    ],
    "id": "AP-14",
    "regex": "\\b(i|we) (think|believe) (you|the (clause|contract|term|claim|notice))\\b"
+  },
+  {
+   "examples": [
+    "Usted debe firmar este contrato",
+    "tu deberias aceptar",
+    "usted tiene que responder"
+   ],
+   "id": "AP-15",
+   "regex": "\\b(usted|tu|t\u00fa|ustedes) (debe|debes|deben|deberia|deber\u00eda|deberias|deber\u00edas|tiene que|tienes que|necesita|necesitas)\\b"
+  },
+  {
+   "examples": [
+    "Sie m\u00fcssen den Vertrag unterschreiben",
+    "Vous devez signer",
+    "voc\u00ea deve assinar"
+   ],
+   "id": "AP-16",
+   "regex": "\\b((sie|du|ihr) (m\u00fcssen|musst|muss|sollten|solltest|sollen|m\u00fcssten)|(vous|tu) (devez|devriez|dois|devrais|\u00eates tenu)|(voc\u00ea|voce|voc\u00eas) (deve|deveria|precisa|tem que))\\b"
+  },
+  {
+   "examples": [
+    "\u4f60\u5e94\u8be5\u7b7e\u7f72\u8fd9\u4efd\u5408\u540c",
+    "\u60a8\u5fc5\u987b\u56de\u590d"
+   ],
+   "id": "AP-17",
+   "regex": "(\u4f60|\u60a8|\u4f60\u4eec)(\u5e94\u8be5|\u61c9\u8a72|\u5fc5\u987b|\u5fc5\u9808|\u9700\u8981|\u6700\u597d|\u5f97)"
+  },
+  {
+   "examples": [
+    "If I were you I would file a counter-notice",
+    "It would be wise to file a counter-notice",
+    "Best to sign right away",
+    "You'd be smart to sign",
+    "It is advisable that the clipper responds",
+    "You will want to sign before Friday",
+    "you might want to sign",
+    "it's in your interest to sign"
+   ],
+   "id": "AP-18",
+   "regex": "\\b(if i were you|in your (position|shoes)|i would (sign|file|accept|respond|reply|refuse|agree|ignore|wait|settle|not sign)|it would be (wise|smart|best|prudent|advisable|better) to|you (would|d) be (smart|wise|better off) to|you will want to|you might want to|you may want to|you would want to|best to (sign|file|accept|respond|reply|refuse|agree|ignore|wait|settle)|it (is|s) (advisable|in your interest|in your best interest|wise|prudent|best) (that|to))\\b"
+  },
+  {
+   "examples": [
+    "Recommendation: sign the agreement",
+    "Counter-notice recommended",
+    "Your best option is to file a counter-notice",
+    "A counter-notice is the right call",
+    "we'd suggest you sign",
+    "I'd recommend filing",
+    "Consider filing a counter-notice"
+   ],
+   "id": "AP-19",
+   "regex": "\\b(recommendation|recommended|suggestion|your best (option|bet|course|move|choice)|the right (call|move|choice)|(we|i) (d|would) (suggest|recommend|advise)|consider (filing|signing|accepting|responding|replying|refusing|ignoring|sending|suing|settling))\\b"
+  },
+  {
+   "examples": [
+    "Sign it now.",
+    "File a counter-notice within 10 days.",
+    "Ignore the takedown"
+   ],
+   "id": "AP-20",
+   "regex": "^(sign|file|ignore|accept|reject|refuse|respond|reply|send|submit|settle|sue|withdraw|delete|remove) (it|this|that|the|a|an|your|now|them|immediately|right|before|within|by|no|nothing)\\b"
+  },
+  {
+   "examples": [
+    "One should sign this",
+    "Clients should sign this",
+    "The creator should file a counter-notice"
+   ],
+   "id": "AP-21",
+   "regex": "\\b(one|clients?|the client|creators?|the creator|clippers?|the clipper|the party|everyone|people|the recipient) (should|must|ought to|needs to|has to|had better)\\b"
+  },
+  {
+   "examples": [
+    "There is no legal risk in signing",
+    "This clause is perfectly fine to accept",
+    "Accepting these terms is safe",
+    "The clause will not hold up in court",
+    "You are within your rights to refuse"
+   ],
+   "id": "AP-22",
+   "regex": "\\b(no legal risk|(is|are) (perfectly )?(fine|safe|ok|okay) to (accept|sign|agree|file|ignore)|(accepting|signing|agreeing to) (these|the|this) (terms|clause|contract|agreement) is (safe|fine|ok|okay)|(will|would) not hold up|within your rights)\\b"
   }
  ],
  "source": "LEGAL_SPEC.md rev 1 \u00a7A.3",

@@ -131,7 +131,9 @@ def doc(doc_id, title, doc_type, entities, counsel_required, blocked_by=(), requ
 
 DOCUMENTS = [
     doc("client_msa", "Client MSA", "client_msa", ("zbm", "zbc"), True),
-    doc("sow", "SOW / campaign brief", "sow", ("zbm", "zbc"), False),
+    # AEGIS N17-7: no SOW exception -- a SOW (fills included) needs counsel's sign-off on its exact hash like
+    # every other document (ADR 0010 amendment)
+    doc("sow", "SOW / campaign brief", "sow", ("zbm", "zbc"), True),
     doc("zbc_order_form", "ZBC campaign order form", "zbc_order_form", ("zbc",), True),
     doc("clipper_agreement", "Clipper / creator agreement", "clipper_agreement", ("zbc",), True),
     doc("ic_agreement", "Independent-contractor agreement", "ic_agreement", ("zbm", "zbc"), True, ("CQ-17",)),
@@ -353,6 +355,31 @@ ADVICE_PATTERNS = [
      "examples": ["Don't sign that", "do not file a counter-notice", "never accept those terms"]},
     {"id": "AP-14", "regex": r"\b(i|we) (think|believe) (you|the (clause|contract|term|claim|notice))\b",
      "examples": ["I think you will win", "we believe the clause is weak"]},
+    # --- AEGIS round 17 (N17-7): non-English, conditional, imperative, third-person and assurance phrasings. The
+    # guard is DEFENSE IN DEPTH: the control is structural (no route returns caller free text; every document,
+    # fills included, needs counsel's sign-off on its exact hash before it is current). ADR 0010 amendment.
+    {"id": "AP-15", "regex": r"\b(usted|tu|tú|ustedes) (debe|debes|deben|deberia|debería|deberias|deberías|tiene que|tienes que|necesita|necesitas)\b",
+     "examples": ["Usted debe firmar este contrato", "tu deberias aceptar", "usted tiene que responder"]},
+    {"id": "AP-16", "regex": r"\b((sie|du|ihr) (müssen|musst|muss|sollten|solltest|sollen|müssten)|(vous|tu) (devez|devriez|dois|devrais|êtes tenu)|(você|voce|vocês) (deve|deveria|precisa|tem que))\b",
+     "examples": ["Sie müssen den Vertrag unterschreiben", "Vous devez signer", "você deve assinar"]},
+    {"id": "AP-17", "regex": r"(你|您|你们)(应该|應該|必须|必須|需要|最好|得)",
+     "examples": ["你应该签署这份合同", "您必须回复"]},
+    {"id": "AP-18", "regex": r"\b(if i were you|in your (position|shoes)|i would (sign|file|accept|respond|reply|refuse|agree|ignore|wait|settle|not sign)|it would be (wise|smart|best|prudent|advisable|better) to|you (would|d) be (smart|wise|better off) to|you will want to|you might want to|you may want to|you would want to|best to (sign|file|accept|respond|reply|refuse|agree|ignore|wait|settle)|it (is|s) (advisable|in your interest|in your best interest|wise|prudent|best) (that|to))\b",
+     "examples": ["If I were you I would file a counter-notice", "It would be wise to file a counter-notice",
+                  "Best to sign right away", "You'd be smart to sign", "It is advisable that the clipper responds",
+                  "You will want to sign before Friday", "you might want to sign", "it's in your interest to sign"]},
+    {"id": "AP-19", "regex": r"\b(recommendation|recommended|suggestion|your best (option|bet|course|move|choice)|the right (call|move|choice)|(we|i) (d|would) (suggest|recommend|advise)|consider (filing|signing|accepting|responding|replying|refusing|ignoring|sending|suing|settling))\b",
+     "examples": ["Recommendation: sign the agreement", "Counter-notice recommended",
+                  "Your best option is to file a counter-notice", "A counter-notice is the right call",
+                  "we'd suggest you sign", "I'd recommend filing", "Consider filing a counter-notice"]},
+    {"id": "AP-20", "regex": r"^(sign|file|ignore|accept|reject|refuse|respond|reply|send|submit|settle|sue|withdraw|delete|remove) (it|this|that|the|a|an|your|now|them|immediately|right|before|within|by|no|nothing)\b",
+     "examples": ["Sign it now.", "File a counter-notice within 10 days.", "Ignore the takedown"]},
+    {"id": "AP-21", "regex": r"\b(one|clients?|the client|creators?|the creator|clippers?|the clipper|the party|everyone|people|the recipient) (should|must|ought to|needs to|has to|had better)\b",
+     "examples": ["One should sign this", "Clients should sign this", "The creator should file a counter-notice"]},
+    {"id": "AP-22", "regex": r"\b(no legal risk|(is|are) (perfectly )?(fine|safe|ok|okay) to (accept|sign|agree|file|ignore)|(accepting|signing|agreeing to) (these|the|this) (terms|clause|contract|agreement) is (safe|fine|ok|okay)|(will|would) not hold up|within your rights)\b",
+     "examples": ["There is no legal risk in signing", "This clause is perfectly fine to accept",
+                  "Accepting these terms is safe", "The clause will not hold up in court",
+                  "You are within your rights to refuse"]},
 ]
 
 

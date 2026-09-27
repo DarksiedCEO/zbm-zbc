@@ -86,13 +86,17 @@ class ClauseUse(Strict):
 
 
 class DocVersionCreate(Strict):
+    """No ``version`` field (AEGIS N17-5): Legal assigns the number, monotonic per document. Andre may ask for the
+    next MAJOR number (``bump``); every other version is the next minor. A fill names the party it is for
+    (``party_ref``, AEGIS N17-4): only that party can ever accept it."""
     request_id: Id
-    version: Version
     entity: Entity
     text: Optional[DocText] = None                       # Andre's upload (counsel's draft)
     template_variables: Optional[dict] = None            # typed schema for {{placeholders}} in text
     clause_ids: list[ClauseUse] = Field(default_factory=list, max_length=200)
     variables: Optional[dict] = None                     # scheduler: fill the current version's placeholders
+    party_ref: Optional[PartyRef] = None                 # required on a fill; optional on Andre's upload
+    bump: Literal["major", "minor"] = "minor"            # Andre's upload only
     supersedes: Optional[Version] = None
 
 
@@ -280,15 +284,22 @@ class Cites(Strict):
 class Answer(Strict):
     cq_id: CqId
     resolution: Literal["verified_rule", "blocks_stay", "needs_more_facts"]
-    proposed_row: Optional[dict] = None
     quoted_excerpt: Optional[Text] = None
 
 
-class ComplianceRowChange(Strict):
-    obligation_id: ObligationId
-    kind: Literal["amend", "reverify"]
+class MemoProposal(Strict):
+    """One Compliance register proposal backed by a FILED memo (AEGIS N17-8, step 2): ``supersede`` a counsel
+    question the memo answered, or ``amend`` / ``reverify`` an obligation row it cites. The row's ``source_url``
+    must be ``urn:legal37:memos:<memo_id>`` -- the memo id exists before the row is typed."""
+    kind: Literal["supersede", "amend", "reverify"]
+    target_id: Annotated[str, StringConstraints(pattern=r"^[A-Z0-9][A-Z0-9-]{1,39}$")]
     proposed_row: dict
     quoted_excerpt: Text
+
+
+class MemoProposals(Strict):
+    request_id: Id
+    proposals: list[MemoProposal] = Field(min_length=1, max_length=100)
 
 
 class MemoIntake(Strict):
@@ -298,7 +309,6 @@ class MemoIntake(Strict):
     content_b64: B64
     cites: Cites
     answers: list[Answer] = Field(default_factory=list, max_length=100)
-    compliance_rows: list[ComplianceRowChange] = Field(default_factory=list, max_length=100)
     retention_periods: dict[Code, Annotated[str, StringConstraints(pattern=r"^P[0-9]{1,3}[YMD]$")]] = \
         Field(default_factory=dict, max_length=20)
     signoff_scopes: dict[Code, dict] = Field(default_factory=dict, max_length=20)
@@ -422,7 +432,7 @@ class FilingFiled(Strict):
 
 class SignoffRequest(Strict):
     request_id: Id
-    topic: Annotated[str, StringConstraints(min_length=1, max_length=64), AfterValidator(_printable)]
+    topic: Code                                          # an id, never free text (AEGIS N17-7 structural rule)
     subject_id: Id
     facts: dict = Field(default_factory=dict)
 

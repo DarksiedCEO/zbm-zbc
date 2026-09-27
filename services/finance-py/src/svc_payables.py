@@ -96,8 +96,12 @@ class PayablesMixin:
             if payee is None or payee["status"] not in ("active", "hold", "offboarding"):
                 reasons.append(R.item("PAYEE_UNKNOWN", "no active payee record at Finance for this clipper"))
             if card is not None and prof is not None and not [r for r in reasons if r["code"] == "RATE_CARD_MISSING"]:
-                amounts = I3.compute(cert.certified_views, card, tier, prof["client_rate_per_1000"])
-                computed = {"card": card, "tier": tier, **amounts, "prof": prof}
+                try:
+                    amounts = I3.compute(cert.certified_views, card, tier, prof["client_rate_per_1000"])
+                    computed = {"card": card, "tier": tier, **amounts, "prof": prof}
+                except M.MoneyError:             # AEGIS N17-11: a refusal with a reason, never a 500
+                    reasons.append(R.item("AMOUNT_OUT_OF_RANGE", "the payable is outside the money bound "
+                                                                 "(rate card x certified views)"))
         return R.dedupe(reasons), computed
 
     def _new_payable(self, sid: str, ruling_id: str, got: dict, c: dict, status: str) -> dict:
@@ -136,8 +140,47 @@ class PayablesMixin:
         op.put("payables", p["payable_id"], new)
         return new
 
+    def _identity_conflict(self, op: Op, sid: str, cert: Certification,
+                           existing: Optional[dict]) -> Optional[list[dict]]:
+        """AEGIS N17-1: a payable is keyed by its certification id AND bound at creation to (submission, payee,
+        campaign, clip posting time). An answer that names an existing payable's certification with other bindings
+        -- or a different certification for a submission that already has a payable -- is refused and recorded as
+        an integrity finding. Nothing is ever rewritten."""
+        if not cert.available or not cert.certification_id:
+            return None
+        clashes = []
+        by_cert = self._payable_by_cert(cert.certification_id) or self.db["payables"].get(rid("pay", cert.certification_id))
+        if by_cert is not None:
+            want = {"submission_id": sid, "payee_id": cert.clipper_id, "campaign_id": cert.campaign_id,
+                    "posting_time": cert.create_time}
+            diff = sorted(k for k, v in want.items() if by_cert.get(k) != v)
+            if diff:
+                clashes.append((by_cert["payable_id"], "certification_rebound", diff))
+        if existing is not None and existing["certification_id"] != cert.certification_id:
+            clashes.append((existing["payable_id"], "submission_recertified_under_new_id", ["certification_id"]))
+        if not clashes:
+            return None
+        reasons = []
+        for pid, kind, fields in clashes:
+            fid = rid("int", "payable_identity", pid, kind, sid, cert.certification_id)
+            op.record(derived_id("pic", pid, kind, sid, cert.certification_id), "payable_identity_conflict",
+                      "intel_03_payables", pid, {"payable_id": pid, "kind": kind, "fields": fields,
+                                                 "submission_id": sid, "finding_id": fid,
+                                                 "certification_id": cert.certification_id},
+                      f"Integrity finding: V&I answer would rebind payable ({kind}); refused, nothing rewritten")
+            op.add("integrity_finding", {"finding_id": fid, "payable_id": pid, "kind": kind, "fields": fields,
+                                         "submission_id": sid, "certification_id": cert.certification_id,
+                                         "at": iso(self._now())})
+            reasons.append(R.item("PAYABLE_IDENTITY_CONFLICT", f"certification {cert.certification_id[:60]} is already "
+                                  f"bound to payable {pid} ({', '.join(fields)} differ{'s' if len(fields) == 1 else ''}):"
+                                  " refused and recorded as an integrity finding", [pid], rule="FIN-04"))
+        return reasons
+
     def _try_accrue(self, op: Op, sid: str, ruling_id: Optional[str], got: dict) -> tuple[Optional[dict], list[dict]]:
         existing = self._payable_by_submission(sid)
+        conflict = self._identity_conflict(op, sid, got["cert"], existing)
+        if conflict:
+            return None, conflict
         if existing is not None and existing["status"] not in ("over_budget_hold",):
             return existing, []
         reasons, c = self._evaluate_accrual(sid, ruling_id, got)
@@ -185,8 +228,11 @@ class PayablesMixin:
                 p, reasons = None, self._rules_reasons()
             else:
                 p, reasons = self._try_accrue(op, submission_id, ruling_id, got)
-            allowed = p is not None and p["status"] in ("accrued", "batched", "released", "settled")
+            allowed = p is not None and p["status"] in ("accrued", "batched", "released", "settled", "netted",
+                                                        "returned")
             status = "accrued" if allowed else ("over_budget_hold" if p is not None else "pending_checks")
+            if "PAYABLE_IDENTITY_CONFLICT" in R.codes(reasons):
+                status = "identity_conflict"        # never retried by the accrual job; Andre reads the finding
             op.put("handoffs", hid, {"handoff_id": hid, "submission_id": submission_id, "ruling_id": ruling_id,
                                      "facts_sha256": fsha, "principal": principal, "status": status,
                                      "received_at": iso(self._now()), "payable_id": p["payable_id"] if p else None,
@@ -225,7 +271,9 @@ class PayablesMixin:
                 p, reasons = self._try_accrue(op, hnd["submission_id"], hnd["ruling_id"], got)
                 ok = p is not None and p["status"] == "accrued"
                 op.put("handoffs", hnd["handoff_id"], {**hnd, "status": "accrued" if ok else
-                                                       ("over_budget_hold" if p else "pending_checks"),
+                                                       ("over_budget_hold" if p else
+                                                        "identity_conflict" if "PAYABLE_IDENTITY_CONFLICT" in
+                                                        R.codes(reasons) else "pending_checks"),
                                                        "payable_id": p["payable_id"] if p else None, "reasons": reasons,
                                                        "retried_at": iso(self._now())})
                 self._commit(op)

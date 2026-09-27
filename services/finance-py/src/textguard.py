@@ -153,3 +153,78 @@ _FEE_RX = re.compile(r"\b(surcharges?|card\s*fees?|convenience\s*fees?|processin
 
 def fee_words_in(text: str) -> list[str]:
     return sorted(set(_FEE_RX.findall(normalize(text).replace("-", " "))))
+
+
+# --- IP addresses (AEGIS N17-6): no IP address is ever accepted in any string field of a write route ---------------
+# IPv4 dotted (leading zeros, a port appended, embedded in a ref such as "client:192.168.1.1"), the "ip-10-0-0-1"
+# host form, IPv6 in full, compressed ("fe80::1", "::1"), IPv4-mapped and zone-id forms, each also after URL
+# percent-decoding. Every candidate is confirmed with the ``ipaddress`` module, so a timestamp ("17:00:00") or a
+# two-part version ("1.2") is never a hit. Integer ("3232235777") and hex ("0a000001") encodings are NOT detected
+# (they are indistinguishable from ordinary numbers and hashes; ADR amendment, AEGIS round 17).
+_IPV4 = re.compile(r"(?<![0-9.])([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})(?![0-9]|\.[0-9])")
+_IPV4_DASHED = re.compile(r"(?i)(?<![0-9a-z])ip-([0-9]{1,3})-([0-9]{1,3})-([0-9]{1,3})-([0-9]{1,3})(?![0-9])")
+_V6_RUN = re.compile(r"[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%[0-9A-Za-z._-]{1,32})?")
+IP_SCAN_MAX_CHARS = 65_536
+
+
+def _octets_ok(groups) -> bool:
+    return all(int(g) <= 255 for g in groups)
+
+
+def ip_in(value: str) -> bool:
+    """True when ``value`` (or its percent-decoded form) contains an IPv4 or IPv6 address."""
+    if not isinstance(value, str) or not value:
+        return False
+    import ipaddress
+    from urllib.parse import unquote
+    head = value[:IP_SCAN_MAX_CHARS]
+    views = [head]
+    if "%" in head:
+        dec = unquote(head)
+        views += [dec, unquote(dec)]
+    for v in views:
+        for m in _IPV4.finditer(v):
+            if _octets_ok(m.groups()):
+                return True
+        for m in _IPV4_DASHED.finditer(v):
+            if _octets_ok(m.groups()):
+                return True
+        for m in _V6_RUN.finditer(v):
+            run = m.group(0)
+            base, _, zone = run.partition("%")
+            tries = {base, base.strip("."), base.rstrip(":."), base.lstrip(":")}
+            if base.startswith("::"):
+                tries.add(base.rstrip("."))
+            for t in list(tries):
+                if t.startswith(":") and not t.startswith("::"):
+                    tries.add(t[1:])
+                if t.endswith(":") and not t.endswith("::"):
+                    tries.add(t[:-1])
+            for t in tries:
+                if t.count(":") < 2:
+                    continue
+                try:
+                    ipaddress.IPv6Address(t)
+                    return True
+                except ValueError:
+                    continue
+    return False
+
+
+def ip_fields(obj: Any, path: str = "body", depth: int = 0) -> list[str]:
+    """Paths (keys included) of every string that carries an IP address, anywhere in ``obj``."""
+    out: list[str] = []
+    if depth > 40:
+        return out
+    if isinstance(obj, str):
+        if ip_in(obj):
+            out.append(path)
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(k, str) and ip_in(k):
+                out.append(f"{path}.<key>")
+            out += ip_fields(v, f"{path}.{str(k)[:40]}", depth + 1)
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj[:10_000]):
+            out += ip_fields(v, f"{path}[{i}]", depth + 1)
+    return out[:20]

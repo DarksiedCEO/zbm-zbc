@@ -144,9 +144,9 @@ def test_limits(hr):
 
 def test_blob_route_accepts_5_mib_and_refuses_more(he):
     big = "x" * (5 * 1024 * 1024)
-    r = he.apost("/legal/v1/documents/sow/versions", {"request_id": rid(), "version": "1.0", "entity": "zbm", "text": big})
+    r = he.apost("/legal/v1/documents/sow/versions", {"request_id": rid(), "entity": "zbm", "text": big})
     assert r.status_code == 201
-    r = he.apost("/legal/v1/documents/sow/versions", {"request_id": rid(), "version": "1.1", "entity": "zbm",
+    r = he.apost("/legal/v1/documents/sow/versions", {"request_id": rid(), "entity": "zbm",
                                                       "text": big + "y"})
     assert r.status_code == 422 and big not in r.text
 
