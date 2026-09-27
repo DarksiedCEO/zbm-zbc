@@ -18,6 +18,15 @@ ledger and the report count — never as a classified read/exec. Every write-cap
 normalised against the cwd (after ``cd``), must resolve inside ``services/<service>/`` or ``docs/adr/``, and anything
 unresolvable here (a glob, a brace, ``$``, ``~``) is refused; the guardrail then resolves the same operands INSIDE the
 container (``readlink -f`` on the longest existing prefix) and denies when that fails or lands outside.
+
+Round 19 (R6, R7, R9): a command carrying any line separator bash knows (``\n``, ``\r``, NUL, ``\f``, ``\v``,
+U+2028/2029, U+0085) is refused ``multiline_command`` BEFORE tokenising — the classifier reads one line, bash would
+run several. Every other free-text argument the guardrail classifies (tool ``path``/``pattern``) is refused on a
+control character too. Destinations named by ``-t DIR`` / ``--target-directory`` are the write target of
+``cp``/``mv``/``ln``/``install``; ``chmod``/``chown``/``sed -i``/``--in-place`` operands are targets whatever the
+flag spelling; a ``find -exec`` command is classified like any simple command; a bash write under ``docs/adr/`` must
+be a ``00NN-*.md`` file, as for the write tool; ``mypy``/``pylint``/``black``/``isort``/``pre-commit``/``ruff``/
+``gofmt`` are opaque.
 """
 
 from __future__ import annotations
@@ -38,8 +47,28 @@ _RM_RECURSIVE = re.compile(r"^-[a-zA-Z]*[rR][a-zA-Z]*$")
 _UNRESOLVABLE = re.compile(r"[*?\[\]{}$~`]")
 # R5: argv0s whose effect the classifier cannot see (they interpret files, programs or Makefiles)
 OPAQUE_ARGV0 = ("python", "python3", "pytest", "sh", "bash", "zsh", "dash", "node", "awk", "gawk", "mawk", "sed", "make",
-                "cargo", "go", "npm", "npx", "rustc", "perl", "ruby")
-WRITE_ARGV0 = ("cp", "mv", "tee", "touch", "mkdir", "sed", "chmod", "ln", "rm", "find", "rmdir", "install", "truncate", "dd")
+                "cargo", "go", "npm", "npx", "rustc", "perl", "ruby",
+                # R9: linters/formatters load plugins or configuration from the tree they are pointed at
+                "mypy", "pylint", "black", "isort", "pre-commit", "ruff", "gofmt")
+WRITE_ARGV0 = ("cp", "mv", "tee", "touch", "mkdir", "sed", "chmod", "chown", "chgrp", "ln", "rm", "find", "rmdir", "install",
+               "truncate", "dd")
+# R8: the resolver's caps, enforced here too (the classifier is the record and the first refusal)
+MAX_WRITE_OPERANDS = 16
+MAX_PATH_DEPTH = 64
+# R6: every separator bash treats as a line/command boundary that shlex would fold into whitespace or a word
+LINE_SEPARATORS = ("\n", "\r", "\x00", "\x0c", "\x0b", "\u2028", "\u2029", "\x85")
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\x85\u2028\u2029]")
+_CHMOD_MODE = re.compile(r"^(?:[0-7]{3,4}|[ugoa]*[-+=][rwxXstugo]*(?:,[ugoa]*[-+=][rwxXstugo]*)*)$")
+_SHORT_CLUSTER = re.compile(r"^-[A-Za-z]+")
+# options of cp/mv/ln/install/sed/chmod/chown that consume the NEXT token (so it is never an operand)
+_OPT_WITH_ARG = {"cp": ("-t", "-S", "--target-directory", "--suffix", "--backup", "--context"),
+                 "mv": ("-t", "-S", "--target-directory", "--suffix", "--backup"),
+                 "ln": ("-t", "-S", "--target-directory", "--suffix", "--backup"),
+                 "install": ("-t", "-S", "-m", "-o", "-g", "-D", "--target-directory", "--suffix", "--backup", "--mode",
+                             "--owner", "--group", "--context", "--strip-program"),
+                 "sed": ("-e", "-f", "-l", "--expression", "--file", "--line-length"),
+                 "chmod": ("--reference",), "chown": ("--reference", "--from"), "chgrp": ("--reference",),
+                 "touch": ("-d", "-t", "-r", "--date", "--reference")}
 
 
 @dataclass(frozen=True)
@@ -123,7 +152,26 @@ def exec_write_ok(target: str, ctx: Context, cwd: str, *, allow_root: bool = Fal
     roots = write_roots(ctx)
     if (p in roots and not allow_root) or not any(inside(p, r) for r in roots):
         return "operand outside services/<service>/ and docs/adr/"
+    if inside(p, roots[1]) and p != roots[1] and not adr_name_ok(p, ctx):
+        return "a write under docs/adr/ must be docs/adr/00NN-<name>.md (R7)"
     return None
+
+
+def adr_name_ok(p: str, ctx: Context) -> bool:
+    """``<workspace>/docs/adr/00NN-<name>.md`` exactly (no subdirectory, no other name) — the write tool's rule,
+    applied to bash operands too (N19-A-8)."""
+    adr_dir = posixpath.join(ctx.workspace, "docs", "adr")
+    name = posixpath.basename(p)
+    return posixpath.dirname(p) == adr_dir and re.fullmatch(r"00[0-9][0-9]-[a-z0-9\-]+\.md", name) is not None
+
+
+def has_line_separator(text: str) -> bool:
+    """R6: any separator bash treats as the end of a command that the tokeniser would not (or would fold)."""
+    return any(sep in text for sep in LINE_SEPARATORS)
+
+
+def has_control(text: str) -> bool:
+    return bool(_CONTROL.search(text))
 
 
 def read_allowed(path: str, ctx: Context, cwd: Optional[str] = None) -> bool:
@@ -259,26 +307,111 @@ def _find_delete_outside(argv: list[str], ctx: Context, cwd: str) -> Optional[st
     return exec_write_ok(start, ctx, cwd, allow_root=True)
 
 
-def _write_operands(name: str, argv: list[str]) -> list[str]:
-    positional = [a for a in argv[1:] if not a.startswith("-")]
+def _split_options(name: str, argv: list[str]) -> tuple[list[str], list[str], dict]:
+    """(positionals, option tokens, {option: value}) with ``--`` honoured and the options that consume the next
+    token (``-t DIR``, ``-e SCRIPT``, ``--target-directory DIR``) taken out of the positionals."""
+    takes = _OPT_WITH_ARG.get(name, ())
+    positional: list[str] = []
+    options: list[str] = []
+    values: dict = {}
+    i = 1
+    after_dd = False
+    while i < len(argv):
+        a = argv[i]
+        if after_dd or a == "-":
+            positional.append(a)
+        elif a == "--":
+            after_dd = True
+        elif a.startswith("--") and "=" in a:
+            k, v = a.split("=", 1)
+            options.append(k)
+            values[k] = v
+        elif a.startswith("-") and a in takes:
+            options.append(a)
+            if i + 1 < len(argv):
+                values[a] = argv[i + 1]
+                i += 1
+        elif a.startswith("-") and len(a) > 2 and not a.startswith("--") and a[:2] in takes:
+            options.append(a[:2])                       # -tDIR / -eSCRIPT
+            values[a[:2]] = a[2:]
+        elif a.startswith("-"):
+            options.append(a)
+        else:
+            positional.append(a)
+        i += 1
+    return positional, options, values
+
+
+def _target_directory(values: dict) -> Optional[str]:
+    return values.get("-t") if "-t" in values else values.get("--target-directory")
+
+
+def _write_operands(name: str, argv: list[str], cwd: str) -> Optional[list[str]]:
+    """The write-capable operands of one simple command (cwd-relative as written), or None when the command's
+    destination cannot be determined (fail closed: the caller refuses)."""
+    positional, options, values = _split_options(name, argv)
     if name in ("cp", "mv", "ln", "install"):
+        if name == "install" and ("-d" in options or "--directory" in options):
+            return positional
+        tdir = _target_directory(values)
+        if tdir is not None:
+            return [tdir]
+        if name == "ln" and len(positional) == 1:
+            return [posixpath.basename(positional[0]) or "."]        # ln -s TARGET → link named TARGET in cwd
+        if len(positional) < 2:
+            return None
         return positional[-1:]
     if name == "sed":
-        if not any(a.startswith("-i") for a in argv[1:] if a.startswith("-")):
+        in_place = any(o in ("--in-place",) or (not o.startswith("--") and "i" in o[1:]) for o in options)
+        if not in_place:
             return []
-        return positional[1:] if positional else []
+        scripted = any(o in ("-e", "-f", "--expression", "--file") for o in options)
+        return positional if scripted else positional[1:]
     if name == "find":
         return []
-    if name == "chmod":
-        return positional[1:]                 # the first positional is the mode
+    if name in ("chmod", "chown", "chgrp"):
+        if "--reference" in values:
+            return positional
+        if name == "chmod":
+            modes = [i for i, a in enumerate(positional) if _CHMOD_MODE.match(a)]
+            if not modes and not any(_CHMOD_MODE.match(o) for o in options):
+                return None                                          # no mode at all: not a chmod we understand
+            if modes:
+                return positional[:modes[0]] + positional[modes[0] + 1:]
+            return positional                                        # the mode was a dash form (-x, -w): every positional is a target
+        return positional[1:] if positional else None
     if name == "dd":
         return [a[3:] for a in argv[1:] if a.startswith("of=")]
     return positional
 
 
+def _find_subcommands(argv: list[str]) -> list[list[str]]:
+    """The commands ``find -exec/-execdir/-ok/-okdir … ;|+`` would run, with ``{}`` standing for the start
+    directory (a path under it resolves inside the same root)."""
+    out: list[list[str]] = []
+    start = next((a for a in argv[1:] if not a.startswith("-")), ".")
+    i = 1
+    while i < len(argv):
+        if argv[i] in ("-exec", "-execdir", "-ok", "-okdir"):
+            j = i + 1
+            sub: list[str] = []
+            while j < len(argv) and argv[j] not in (";", "+"):
+                sub.append(start if argv[j] == "{}" else argv[j])
+                j += 1
+            if sub:
+                out.append(sub)
+            i = j
+        i += 1
+    return out
+
+
 def _classify_bash(seed: dict, raw: str, ctx: Context) -> tuple[str, str, bool, list[str]]:
     """(class, why, opaque, write targets normalised against the cwd)."""
     classes = seed["classes"]
+    if has_line_separator(raw):
+        return "unknown", "multiline_command: a command must be a single line (a line separator would run a second command the classifier never saw)", False, []
+    if has_control(raw.replace("\t", "")):
+        return "unknown", "control character in the command", False, []
     hit = _raw_rule_hit(seed, raw)
     if hit is not None:
         return "unknown", f"raw string contains {hit!r} (indirect execution is refused)", False, []
@@ -290,7 +423,9 @@ def _classify_bash(seed: dict, raw: str, ctx: Context) -> tuple[str, str, bool, 
     worst, why, cwd = "read", "read-only command", ctx.workspace
     opaque = False
     targets: list[str] = []
-    for argv, redirects in cmds:
+    pending = [(argv, redirects) for argv, redirects in cmds]
+    while pending:
+        argv, redirects = pending.pop(0)
         raw_piece = raw
         argv = _strip_env_assignments(argv)
         for target in redirects:
@@ -339,6 +474,7 @@ def _classify_bash(seed: dict, raw: str, ctx: Context) -> tuple[str, str, bool, 
                 return "destructive_outside_workspace", f"find -delete/-exec refused: {bad}", False, []
             klass, w, opaque = "exec", "find -delete/-exec inside the service directory (opaque)", True
             targets.append(_norm(next((a for a in argv[1:] if not a.startswith("-")), "."), cwd))
+            pending = [(sub, []) for sub in _find_subcommands(argv)] + pending    # R9: the -exec'd command is classified too
         else:
             code = _python_c_words(argv)
             if code:
@@ -367,7 +503,10 @@ def _classify_bash(seed: dict, raw: str, ctx: Context) -> tuple[str, str, bool, 
             worst, why = klass, w
         # every write-capable operand must normalise inside the write roots (relative operands too, after cd)
         if klass == "exec" and name in WRITE_ARGV0:
-            for a in _write_operands(name, argv):
+            operands = _write_operands(name, argv, cwd)
+            if operands is None:
+                return "destructive_outside_workspace", f"{name} refused: destination operand missing or unrecognised", False, []
+            for a in operands:
                 bad = exec_write_ok(a, ctx, cwd)
                 if bad:
                     return "destructive_outside_workspace", f"{name} refused: {bad}", False, []
@@ -387,6 +526,10 @@ def classify(seed: dict, tool_name: str, tool_input: Any, ctx: Context) -> Verdi
             deny = classes[klass]["decision"] != "allow_with_token"
             return Verdict(klass, not deny, deny, "TOOL_DENIED" if deny else "ALLOW",
                            f"{tool_name} is class {klass}")
+    for key in ("path", "pattern", "glob", "old_str", "new_str", "content"):
+        val = inp.get(key)
+        if key in ("path", "pattern", "glob") and isinstance(val, str) and (has_control(val) or has_line_separator(val)):
+            return Verdict("unknown", False, True, "TOOL_DENIED", f"{key} carries a control character or line separator (R6)")
     if tool_name in classes["read"].get("tools", []):
         path = inp.get("path")
         if path is not None and not read_allowed(path, ctx):
@@ -398,7 +541,8 @@ def classify(seed: dict, tool_name: str, tool_input: Any, ctx: Context) -> Verdi
         if not write_allowed(path if isinstance(path, str) else "", ctx):
             return Verdict("destructive_outside_workspace", False, True, "TOOL_DENIED",
                            "write path outside services/<service>/ (or the service ADR)")
-        return Verdict("write", True, False, "ALLOW", "write inside the service directory")
+        # R7: the guardrail resolves the path inside the container too (a symlink under the service directory)
+        return Verdict("write", True, False, "ALLOW", "write inside the service directory", write_targets=(_norm(path, ctx.workspace),))
     if tool_name == "bash":
         cmd = inp.get("command")
         if not isinstance(cmd, str) or not cmd.strip():
@@ -406,6 +550,10 @@ def classify(seed: dict, tool_name: str, tool_input: Any, ctx: Context) -> Verdi
         if len(cmd) > 16_384:
             return Verdict("unknown", False, True, "TOOL_DENIED", "bash command longer than 16 KiB")
         klass, why, opaque, targets = _classify_bash(seed, cmd, ctx)
+        if len(targets) > MAX_WRITE_OPERANDS:
+            return Verdict("unknown", False, True, "TOOL_DENIED", f"more than {MAX_WRITE_OPERANDS} write operands in one call (R8)")
+        if any(len([c for c in t.split("/") if c]) > MAX_PATH_DEPTH for t in targets):
+            return Verdict("unknown", False, True, "TOOL_DENIED", f"a write operand deeper than {MAX_PATH_DEPTH} path components (R8)")
         decision = classes[klass]["decision"]
         if decision in ("deny", "deny_unconditionally"):
             return Verdict(klass, False, True, "TOOL_DENIED", why)

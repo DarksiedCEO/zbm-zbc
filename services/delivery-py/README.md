@@ -8,27 +8,43 @@ pinned hash, the 28 choices made where the spec was silent, and what is not prov
 
 `POST /dlv/v1/fix-runs` takes an AEGIS findings document. The engine (never the agent) verifies the base commit,
 opens a worktree on `fix<N>-<service>` (the repository must have no remotes), starts one Docker container per run
-(non-root, no capabilities, read-only root, `--network none`, no `.git`, no `curl`/`wget`, digest-pinned image,
-labelled `zbm.dlv.run=<run_id>` for the reaper), copies the worktree in, runs the suite baseline, and then — per
-finding — has the embedded deer-flow engineer write a failing test (RED, run by the engine), fix the root cause
-(GREEN, run by the engine), classifies every changed path (`src` / `test` / `test_infra` — a test-infra change or a
-deleted test fails the round), re-runs the RED test in a fresh verification checkout (base + the source changes +
-the RED test file only: must pass) and in a reverted checkout (base + the RED test only: must fail), runs the
-whole suite, and commits. Every test run is the engine's own invocation with a per-ecosystem verdict
-(`src/zbm_delivery/engine/toolchains.py`): pytest — `-c <engine ini>`, `--rootdir`, `-p no:cacheprovider`,
-`--junitxml` to an engine path, cross-checked against `--collect-only`, the summary line and the exit code; Go —
-`go test -json -count=1 -race` events cross-checked against `go test -json -list` (per package), the package
-results and the exit code; Rust (stable, no nightly, no nextest) — `cargo test --locked --offline --no-fail-fast`
-per-test lines cross-checked against `-- --list`, every binary's `running`/`test result` lines and the exit code,
-into an engine-owned `--target-dir` per checkout with the tree touched before every run; Node 22 — `node --test
---test-reporter=junit` to an engine path cross-checked against the TAP stream and the exit code (Node has no
-collect-only mechanism; stated). Anything that disagrees, times out, is truncated or collects nothing is
-`unknown` and never counts as green. A `DISPROOF:` is honoured only when the finding's own reproduction (a test
-node id named in the findings document) passes on the untouched base tree. The report is written from the
-engine's records; the run ends `awaiting_review` for AEGIS (`POST …/review`), which can reopen findings into a new
-run on the same branch. Every tool call is decided by our guardrail and recorded on the ledger BEFORE it runs
-(an interpreter/shell/make call is recorded `allow_opaque`); `git push`/`merge`/remote operations, network,
-deletion outside the service directory, ACP/MCP, subagents and self-modification are denied unconditionally.
+for the AGENT (non-root, no capabilities, read-only root, `--network none`, no `.git`, no `curl`/`wget`,
+digest-pinned image, labelled `zbm.dlv.run=<run_id>` for the reaper), copies the worktree in, and then — per
+finding — has the embedded deer-flow engineer write a failing test and fix the root cause. **Every verdict runs in
+a FRESH container the agent never had a process in** (fix wave 20, R1): the engine builds the tree on the host
+(`git archive` of the base + exactly the worktree paths that run may see), ships it by `docker cp` into a new
+container on a new volume, runs, reads its result files back and destroys the container. The checks per finding:
+RED (the test fails on the unfixed tree), GREEN (passes with everything the agent changed), the verification
+checkout (base + the SOURCE changes + the RED test file only: must pass), the reverted checkout (base + the RED
+test only: must fail), the **single-file revert** (the whole fix EXCEPT the finding's file: the RED test must
+fail — the test is tied to the finding's file, and that file must carry a hunk of the fix), the **finding's own
+reproduction** when the document names a test node id (must pass in the verification checkout and fail in the
+reverted one, run alone in its own container), the **src-only check** (every baseline failure the fix claims must
+pass on base + the source changes alone), the whole suite on the exact tree that is then committed (its content
+digest is recorded and re-derived from the commit; **outcome deltas are verdicts**: a test that was passed/failed at
+baseline and is skipped or missing afterwards fails the round, and no `CHANGED_TEST:` excuses it or may touch an
+open finding's reproduction), then the commit. Every changed path is classified (`src` / `test` / `test_infra` —
+a test-infra change, a deleted test or a test/source file matching the content rules fails the round). Every test
+run is the engine's own invocation with a per-ecosystem verdict (`src/zbm_delivery/engine/toolchains.py`): pytest —
+`-c <engine ini>`, `--rootdir`, `-p no:cacheprovider`, `--disable-plugin-autoload`, `-p zbm_engine_plugin` (the
+engine's own pinned plugin, first on `pythonpath`; its per-test four-position record must agree with junit, and
+any plugin registered from inside the test session is a violation), `--junitxml` to an engine path, cross-checked
+against `--collect-only`, the summary line and the exit code; Go — `go test -json -count=1 -race` events
+cross-checked against `go test -json -list` (per package), the package results and the exit code; Rust (stable,
+no nightly, no nextest) — `cargo test --locked --offline --no-fail-fast` per-test lines cross-checked against
+`-- --list`, every binary's `running`/`test result` lines and the exit code, into an engine-owned `--target-dir`
+with the tree touched before every run; Node 22 — `node --test --test-reporter=junit` to an engine path
+cross-checked against the TAP stream and the exit code (Node has no collect-only mechanism; stated). Anything that
+disagrees, times out, is truncated or collects nothing is `unknown` and never counts as green. A `DISPROOF:` is
+honoured only when the finding's own reproduction (a test node id named in the findings document) passes on the
+untouched base tree. The report is written from the engine's records; the run ends `awaiting_review` for AEGIS
+(`POST …/review`), which can reopen findings into a new run on the same branch. Every tool call is decided by our
+guardrail and recorded on the ledger BEFORE it runs (a bash command must be a single line; an interpreter/shell/
+make/linter call is recorded `allow_opaque`; write operands are resolved inside the container by a pinned
+read-only helper in ONE exec, after the decision is recorded, capped at 16 operands and 64 components; file-tool
+writes are contained to `services/<service>/` and `docs/adr/00NN-*.md`); `git push`/`merge`/remote operations,
+network, deletion outside the service directory, ACP/MCP, subagents and self-modification are denied
+unconditionally. A cancel or the deadline kills the run's containers and nothing is recorded on the run afterwards.
 Nothing is ever marked fixed on the agent's word; nothing the agent's process prints is ever a count.
 
 ## Running it
@@ -36,8 +52,9 @@ Nothing is ever marked fixed on the agent's word; nothing the agent's process pr
 ```bash
 cd services/delivery-py
 uv sync --frozen                     # python 3.12 or 3.13 (pytest is in the dev group); the harness comes from the pinned deer-flow git source (uv.lock)
-.venv/bin/python -m pytest -q        # 449 tests, no network, no Docker needed (the Docker live module skips with its reason);
-                                     # cargo, go and node must be on PATH (the toolchain module runs the toy fixtures for real)
+.venv/bin/python -m pytest -q        # 489 tests, no network, no Docker needed (the Docker live module skips with its reason);
+                                     # cargo, go and node must be on PATH (the toolchain module runs the toy fixtures for real);
+                                     # tests/test_live_round19.py needs a free port in 18800-18849 (a local TLS server)
 ruff check src tests devtools
 
 # a clean environment: the gate refuses ANY name outside the allowlist (DLV_*, LEDGER_SERVICE_*, PATH, HOME, LANG,
@@ -78,7 +95,9 @@ Headers: `Authorization: Bearer <DLV_SERVICE_TOKEN>`, `X-DLV-Caller-Token`, `X-A
 `src/zbm_delivery/` (see ADR 0011's module map) · `config/deerflow.engine.yaml` (pinned) · `seed/` (pinned) ·
 `prompts/` (the Superpowers forks, `CHANGES.md`) · `skills/` (empty, manifested) · `docker/` · `devtools/` ·
 `tests/` (scenarios S1-S12, attacks A1-A13, the 255-subset property, guardrails G1-G14, live L1/L2, the round-18
-findings N18-S-1..9 / N18-E-1..7 in `test_round18.py`) ·
+findings N18-S-1..9 / N18-E-1..7 in `test_round18.py`, the round-19 findings N19-E-1..6 / N19-A-1..13 in
+`test_round19.py` and `test_live_round19.py`) · `src/zbm_delivery/adapters/tools/` (the pinned resolver and pytest
+plugin shipped into every container) ·
 `docs/evidence/` (licence report, pip-audit result, `dept28/` evidence pack and the live launcher log).
 
 Regenerating a manifest or a pin (an ADR amendment): `.venv/bin/python devtools/gen_manifests.py --write --pin`.

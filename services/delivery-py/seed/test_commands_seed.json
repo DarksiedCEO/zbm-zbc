@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Test-command allowlist per framework (DEPT28_SPEC D7, SP-03). argv only, no shell; the engine runs these (RED, GREEN, revert check, suite), never the agent's own command. {target} is the single test target <path>::<name> relative to the service directory, expanded per ecosystem by engine/toolchains.py (pytest: the node id; go: -run '^Name$' ./dir; cargo: --test <bin>|--lib|--bin <name> -- <name> --exact; node: --test-name-pattern='^name$' <file>); the suite form has no target. Framework detection is by marker file inside services/<service>/. Round 18 R2 for EVERY framework: the engine appends its OWN options (pytest: -c <engine ini> with addopts empty, --rootdir, -o overrides from 'ini', --junitxml to an engine path; cargo: --target-dir under the engine directory; node: --test-reporter=junit to an engine path plus the TAP reporter on stdout; go: the seeded -json stream) and reads the verdict from the engine-owned artefact cross-checked against 'collect' (pytest --collect-only, go test -json -list, cargo test -- --list; node has none, stated), the transcript and the exit code. The repository's own test configuration is never read. 'test_infra_globs' name the files an agent may not change in an engine run (R1: any change fails the round with test_infra_changed); 'test_content_deny' are regexes a changed or new TEST file may not match (the cheap forgery routes of that ecosystem's transcript; a hit fails the round test_content_denied). 'target_example' is the example target shown in the brief. Hash pinned in config.py.",
+  "description": "Test-command allowlist per framework (DEPT28_SPEC D7, SP-03). argv only, no shell; the engine runs these (RED, GREEN, revert check, suite), never the agent's own command. {target} is the single test target <path>::<name> relative to the service directory, expanded per ecosystem by engine/toolchains.py (pytest: the node id; go: -run '^Name$' ./dir; cargo: --test <bin>|--lib|--bin <name> -- <name> --exact; node: --test-name-pattern='^name$' <file>); the suite form has no target. Framework detection is by marker file inside services/<service>/. Round 18 R2 for EVERY framework: the engine appends its OWN options (pytest: -c <engine ini> with addopts empty, --rootdir, -o overrides from 'ini', --junitxml to an engine path; cargo: --target-dir under the engine directory; node: --test-reporter=junit to an engine path plus the TAP reporter on stdout; go: the seeded -json stream) and reads the verdict from the engine-owned artefact cross-checked against 'collect' (pytest --collect-only, go test -json -list, cargo test -- --list; node has none, stated), the transcript and the exit code. The repository's own test configuration is never read. 'test_infra_globs' name the files an agent may not change in an engine run (R1: any change fails the round with test_infra_changed); 'test_content_deny' are regexes a changed or new TEST file may not match (the cheap forgery routes of that ecosystem's transcript; a hit fails the round test_content_denied). 'target_example' is the example target shown in the brief. Hash pinned in config.py. Round 19 R1: every engine run happens in a FRESH container from an engine-built tree; 'src_content_deny' are regexes a changed SOURCE file may not match (a hit fails the round src_content_denied).",
   "frameworks": {
     "pytest": {
       "markers": [
@@ -63,12 +63,41 @@
         "*.pth",
         "**/*.pth",
         "setup.py",
-        ".coveragerc"
+        ".coveragerc",
+        "zbm_engine_plugin*",
+        "**/zbm_engine_plugin*"
       ],
       "verified": true,
       "target_example": "tests/test_<file>.py::test_<name>",
-      "test_content_deny": [],
-      "note": "detected by a Python project file, never by a bare tests/ directory (every ecosystem has one)"
+      "test_content_deny": [
+        {
+          "name": "plugin_manager",
+          "pattern": "pluginmanager|PluginManager|get_plugin_manager"
+        },
+        {
+          "name": "plugin_register",
+          "pattern": "\\.register\\s*\\(|hookimpl|hookwrapper|HookImpl|pluggy"
+        },
+        {
+          "name": "runtest_hook",
+          "pattern": "pytest_runtest_|pytest_collection|pytest_sessionstart|pytest_sessionfinish|pytest_configure|pytest_plugin"
+        },
+        {
+          "name": "conftest_ref",
+          "pattern": "conftest"
+        },
+        {
+          "name": "pytest_internals",
+          "pattern": "_pytest\\b|gc\\.get_objects|gc\\.get_referrers|sys\\.settrace|sys\\.setprofile"
+        }
+      ],
+      "note": "detected by a Python project file, never by a bare tests/ directory (every ecosystem has one). Round 19 R4: pytest runs with --disable-plugin-autoload and -p zbm_engine_plugin (the engine's own plugin, first on pythonpath; a tree entry named zbm_engine_plugin* is test infra); test_content_deny refuses the cheap re-plugging spellings in a test file and src_content_deny the same in a changed source file (stated as cheap layers).",
+      "src_content_deny": [
+        {
+          "name": "pytest_internals",
+          "pattern": "_pytest\\b|\\bpluggy\\b|pluginmanager|gc\\.get_objects|gc\\.get_referrers"
+        }
+      ]
     },
     "cargo": {
       "markers": [

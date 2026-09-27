@@ -160,13 +160,16 @@ jobs:
   # delivery-py is uv-managed: `uv sync --frozen` (the dev group holds pytest; the READMEs' `--no-dev` leaves no
   # pytest in the venv), then `.venv/bin/python -m pytest -q` and `ruff check src tests devtools`. The Docker
   # live module skips here with its printed reason; the delivery-docker-live job below is where it must run.
+  # tests/test_toolchains.py drives the REAL go, cargo and node toolchains on the toy fixtures (ADR 0011 toolchain
+  # amendment): Rust stable, Go (version from fixtures/dlv/toy-go/go.mod) and Node 22 are installed first, so those
+  # tests run instead of failing on a missing binary.
   # ---------------------------------------------------------------------------------------------------------------
   delivery-py:
     name: delivery-py (${{ matrix.python }})
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -179,6 +182,18 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"   # the toy-ts fixture runs .ts files under `node --test`; needs Node 22.18+ type stripping
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: fixtures/dlv/toy-go/go.mod
+          cache: false   # the fixture has no go.sum (no module dependencies); nothing to key a cache on
+      - name: Rust stable (the toy-rs fixture is built with cargo test --locked --offline)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo --version && go version && node --version
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: "0.8.17"   # the version uv.lock was produced with (services/delivery-py/docker/Dockerfile)

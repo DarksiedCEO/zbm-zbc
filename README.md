@@ -682,25 +682,31 @@ export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger sec
 cd src && python3 -m api   # LEGAL_BIND_ADDR (default 127.0.0.1), LEGAL_PORT (default 8420)
 ```
 
-## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026 (fix wave 19 + toolchain amendment applied)
+## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026 (fix wave 20 applied)
 
 The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;
 Superpowers `8ca22dba` prompt texts forked as ours). A findings document goes in; the ENGINE opens a
 `fix<N>-<service>` worktree, runs one agent engineer per finding inside our Docker sandbox (`--network none`, no
-`.git`, no `curl`) under our guardrail, runs the failing test, the passing test, a split-diff verification (base +
-the agent's source changes + its RED test file alone must pass; base + the RED test alone must fail) and the whole
-suite itself with its own configuration and an engine-owned result it cross-checks per ecosystem (pytest junit +
-collect-only; `go test -json` + `-list`; `cargo test` lines + `-- --list`; `node --test` junit + TAP), commits, writes the report from
-its records and hands the run to AEGIS re-review — nothing is fixed on the agent's word, nothing the agent's
-process prints is ever a count, and `git push`, merges, network, deletion outside the service directory, ACP/MCP
-and self-modification are denied unconditionally. Architecture, pins, the 28 choices, the round-18 amendments
-(R1-R11) and the spec defects: `docs/adr/0011-delivery-department-architecture.md`. Routes and settings:
-`services/delivery-py/README.md`.
+`.git`, no `curl`) under our guardrail, and computes every verdict in a FRESH container the agent never had a
+process in (fix wave 20): the failing test, the passing test, a split-diff verification (base + the agent's
+source changes + its RED test file alone must pass; base + the RED test alone must fail; the whole fix minus the
+finding's file must fail; the finding's own reproduction must pass with the fix and fail without it) and the whole
+suite on the exact tree it commits, with its own configuration, an engine-owned pytest plugin and a per-ecosystem
+result it cross-checks (pytest junit + collect-only + the plugin record; `go test -json` + `-list`; `cargo test`
+lines + `-- --list`; `node --test` junit + TAP); a test that was passed/failed at baseline and is skipped or
+missing afterwards fails the run. It commits, writes the report from its records and hands the run to AEGIS
+re-review — nothing is fixed on the agent's word, nothing the agent's process prints is ever a count, and `git
+push`, merges, network, deletion outside the service directory, ACP/MCP and self-modification are denied
+unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 amendments and the spec defects:
+`docs/adr/0011-delivery-department-architecture.md`. Routes and settings: `services/delivery-py/README.md`.
 
-- **Status:** built and tested (449 tests: 446 passed, 3 skipped with the printed reason; `ruff` clean). The loop is
+- **Status:** built and tested (489 tests: 486 passed, 3 skipped with the printed reason; `ruff` clean). The loop is
   proven end to end with a deterministic model against the `fixtures/dlv/toy-py`, `toy-rs`, `toy-go` and `toy-ts`
   fixtures (the real `cargo`, `go` and `node`) through the REAL harness and guardrail; every round-18 attack (conftest monkeypatch, forged summary, neutered `pytest.ini`, deleted test,
-  trivial `DISPROOF:`, hung or flooded suite) now ends the run `failed`. **Docker live: not provable here** (no
+  trivial `DISPROOF:`, hung or flooded suite) and every round-19 route (a fix in a new module the test imports, a
+  pytest plugin registered from inside the test, a reproduction skipped under `CHANGED_TEST:`, a cancel after the
+  FIXED turn, multi-line bash, file-tool writes through symlinks) now ends the run `failed` with the defect intact
+  and uncommitted. **Docker live: not provable here** (no
   daemon on the build box; `tests/test_live_docker.py` lists the properties only a daemon can prove). **Not
   certified for a fix run against `main`.** pip-audit not run (tool absent); image digests are required build
   arguments. Go, Rust (stable, no nightly/nextest) and Node 22 services now have engine-owned verdicts (Node has no
@@ -714,5 +720,5 @@ and self-modification are denied unconditionally. Architecture, pins, the 28 cho
   ledger-anchored local log line before it takes effect; an unverifiable test result is `unknown`, never green.
 
 ```bash
-cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 449 tests (cargo, go, node on PATH)
+cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 489 tests (cargo, go, node on PATH)
 ```

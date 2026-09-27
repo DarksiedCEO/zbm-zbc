@@ -86,7 +86,7 @@ def test_a1_git_remote_denied_unconditionally_and_recorded(denies):
     # every decision carries the token id, policy version and the args hash; nothing else
     for x in d:
         assert set(x) == {"run_id", "tool", "class", "decision", "opaque", "code", "args_sha256", "token_id", "policy_version",
-                          "is_subagent", "tool_call_id", "seq"}                       # opaque: round 18 R5
+                          "is_subagent", "tool_call_id", "seq", "message", "write_operands"}   # opaque: round 18 R5; message/operands: wave 20 R8
         assert x["policy_version"] == 1 and len(x["args_sha256"]) == 64
 
 
@@ -107,11 +107,11 @@ def test_a2_destructive_outside_workspace_denied(denies):
 
 def test_a3_host_escape_flags_never_reach_docker(denies):
     h, run_id = denies
-    from zbm_delivery.adapters.sandbox import FORBIDDEN_RUN_TOKENS, ZbmDockerSandboxProvider
+    from zbm_delivery.adapters.sandbox import ZbmDockerSandboxProvider, forbidden_run_token
     for call in h.docker.calls:
-        for tok in call:
-            for bad in FORBIDDEN_RUN_TOKENS:
-                assert bad not in tok, (bad, call)
+        if call[0] == "run":
+            assert forbidden_run_token(call) is None, call      # wave 20 R14: the check knows the two allowed values
+        assert "docker.sock" not in " ".join(call) and "--privileged" not in call and "seccomp" not in " ".join(call)
     # a tag-only image / another registry / allow_host_bash is refused by the config gate and by the adapter
     from zbm_delivery import config as C
     with pytest.raises(RuntimeError, match="tag-only"):
@@ -162,7 +162,9 @@ def test_a5_self_report_never_beats_the_runner():
         f = h.findings(run_id)[0]
         assert f["state"] == "blocked" and f["red"]["exit"] == 1
         greens = [e for e in h.events("test_run") if e["payload"]["phase"] == "green"]
-        assert greens and all(e["payload"]["exit"] != 0 for e in greens)
+        assert all(e["payload"]["exit"] != 0 for e in greens)
+        # wave 20 (R2a): a FIXED with no change to the finding's file is refused before GREEN even runs
+        assert greens or any(e["payload"].get("why") == "finding_file_unchanged" for e in h.events("round_failed"))
         # a FIXED before any RED: the first reply carried no TEST line for the queued state → round failed
         assert any(e["payload"].get("why") == "no_test_line" for e in h.events("round_failed"))
         # the model's string never enters a report or a payload; the runner's counts do
@@ -317,18 +319,23 @@ def test_a8_egress_allowlist_before_dns_redirects_timeouts_and_no_key_leak(monke
     from zbm_delivery.adapters.model import AnthropicMessagesBackend
     from zbm_delivery.ports import ChatTurn
     be = AnthropicMessagesBackend(eg, lambda: FAKE_KEY, "claude-test", "https://api.anthropic.com")
-    ans = be.complete(ChatTurn(messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}], tools=[]))
-    assert ans.text == "hi"
-    blob = json.dumps(records, default=str)
-    assert FAKE_KEY not in blob
+    turn = ChatTurn(messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}], tools=[])
+    with pytest.raises(EgressRefused, match="LLM call refused"):         # wave 20 R14: no bound live run → no call leaves the box
+        be.complete(turn)
+    from helpers import llm_scope
+    with llm_scope("dlv-run-A8", egress=eg):
+        ans = be.complete(turn)
+        assert ans.text == "hi"
+        blob = json.dumps(records, default=str)
+        assert FAKE_KEY not in blob
 
-    def boom(request):
-        raise httpx.ConnectError("boom " + FAKE_KEY[:5], request=request)
-    eg2 = EgressClient(("api.anthropic.com",), record=record, transport=httpx.MockTransport(boom), env={})
-    be2 = AnthropicMessagesBackend(eg2, lambda: FAKE_KEY, "claude-test", "https://api.anthropic.com")
-    with pytest.raises(EgressFailed) as exc:
-        be2.complete(ChatTurn(messages=[{"role": "user", "content": "u"}], tools=[]))
-    assert FAKE_KEY not in str(exc.value)
+        def boom(request):
+            raise httpx.ConnectError("boom " + FAKE_KEY[:5], request=request)
+        eg2 = EgressClient(("api.anthropic.com",), record=record, transport=httpx.MockTransport(boom), env={})
+        be2 = AnthropicMessagesBackend(eg2, lambda: FAKE_KEY, "claude-test", "https://api.anthropic.com")
+        with pytest.raises(EgressFailed) as exc:
+            be2.complete(ChatTurn(messages=[{"role": "user", "content": "u"}], tools=[]))
+        assert FAKE_KEY not in str(exc.value)
 
 
 def test_a8b_llm_timeout_fails_the_run_without_hanging():
@@ -412,7 +419,8 @@ def test_a10_ledger_down_every_write_route_and_transition_has_no_effect():
                 h.svc.run_transition(run_id, "reviewed_pass", "fix_run_reviewed", {}, "x")
             with pytest.raises(Unavailable):
                 h.svc.evidence_put(run_id, "brief", b"tamper")
-            with pytest.raises(Unavailable):
+            from zbm_delivery.errors import Conflict
+            with pytest.raises((Unavailable, Conflict)):                 # wave 20 R5: not live (awaiting_review) is refused first
                 h.svc.finding_update(run_id, "N1-1", "test_run", {}, "x", {"rounds": 99})
         finally:
             h.ledger.fail_all = False

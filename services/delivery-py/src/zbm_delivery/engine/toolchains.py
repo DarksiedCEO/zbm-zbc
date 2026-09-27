@@ -84,6 +84,7 @@ class Listing:
 class Toolchain:
     name = "none"
     report_ext: Optional[str] = None       # the engine-read report file's extension, None when the ecosystem has none
+    record_suffix: Optional[str] = None    # a second engine-read file next to the report (pytest: the plugin record)
     has_listing = True
 
     def __init__(self, fw: dict, service_dir: str):
@@ -126,7 +127,7 @@ class Toolchain:
     # --- verdict ------------------------------------------------------------------------------------------------------
 
     def verify(self, *, report: Optional[str], output: str, listing: Optional[Listing], exit_code: int, timed_out: bool,
-               truncated: bool) -> Counts:
+               truncated: bool, record: Optional[str] = None, engine: Optional[str] = None) -> Counts:
         raise NotImplementedError
 
     @staticmethod
@@ -143,6 +144,7 @@ class Toolchain:
 class PytestToolchain(Toolchain):
     name = "pytest"
     report_ext = "xml"
+    record_suffix = ".zbm.json"            # written by the engine-owned plugin next to the junit file (R4)
 
     def __init__(self, fw: dict, service_dir: str, ini_path_for, ini_values_for):
         super().__init__(fw, service_dir)
@@ -157,6 +159,9 @@ class PytestToolchain(Toolchain):
                 opts += ["-o", f"{k}={ini[k]}"]
         if report:
             opts.append(f"--junitxml={report}")
+        # R4: nothing plugs in from a distribution entry point; the engine's own plugin is loaded by name and
+        # resolves to the engine directory (first on pythonpath) — nothing in the tree can shadow it
+        opts += ["--disable-plugin-autoload", "-p", "zbm_engine_plugin"]
         return opts
 
     def run_argv(self, base_argv, cwd, report, target):
@@ -174,9 +179,15 @@ class PytestToolchain(Toolchain):
         n = parsers.parse_collected(output)
         return None if n is None else Listing(total=n)
 
-    def verify(self, *, report, output, listing, exit_code, timed_out, truncated):
-        return parsers.verified_counts(junit_xml=report, output=output, collected=listing.total if listing else None,
-                                       exit_code=exit_code, timed_out=timed_out, truncated=truncated)
+    def verify(self, *, report, output, listing, exit_code, timed_out, truncated, record=None, engine=None):
+        c = parsers.verified_counts(junit_xml=report, output=output, collected=listing.total if listing else None,
+                                    exit_code=exit_code, timed_out=timed_out, truncated=truncated)
+        if not c.ok:
+            return c
+        problem = parsers.plugin_record_problem(record, c, engine_dir=engine or "")
+        if problem:
+            c.status, c.why = "unknown", f"engine plugin record: {problem}"
+        return c
 
 
 # ====================================================================== go
@@ -277,7 +288,7 @@ class GoToolchain(Toolchain):
             return None                                    # the same function listed twice: not a Go package
         return Listing(total=len(names), names=names, by_package=by_pkg)
 
-    def verify(self, *, report, output, listing, exit_code, timed_out, truncated):
+    def verify(self, *, report, output, listing, exit_code, timed_out, truncated, record=None, engine=None):
         if timed_out or exit_code == 124:
             return self._unknown("timed out (exit 124)")
         if truncated:
@@ -436,7 +447,7 @@ class CargoToolchain(Toolchain):
             return None
         return Listing(total=len(names), names=sorted(names), binaries=len(summaries))
 
-    def verify(self, *, report, output, listing, exit_code, timed_out, truncated):
+    def verify(self, *, report, output, listing, exit_code, timed_out, truncated, record=None, engine=None):
         if timed_out or exit_code == 124:
             return self._unknown("timed out (exit 124)")
         if truncated:
@@ -521,7 +532,7 @@ class NodeToolchain(Toolchain):
         i = argv.index("--test") + 1 if "--test" in argv else len(argv)
         return argv[:i] + self.engine_options(cwd, report) + argv[i:]
 
-    def verify(self, *, report, output, listing, exit_code, timed_out, truncated):
+    def verify(self, *, report, output, listing, exit_code, timed_out, truncated, record=None, engine=None):
         if timed_out or exit_code == 124:
             return self._unknown("timed out (exit 124)")
         if truncated:

@@ -129,7 +129,7 @@ def test_detection_is_by_project_file_never_by_a_bare_tests_dir(tmp_path):
 def _runner(svc: str) -> TestRunner:
     tmp = tempfile.mkdtemp(prefix="dlv-tc-")
     shutil.copytree(FIXTURES / svc, os.path.join(tmp, "services", svc), ignore=shutil.ignore_patterns("target", "node_modules"))
-    return TestRunner(SEED, svc, None, tmp, 60)
+    return TestRunner(SEED, svc, tmp, 60)
 
 
 def test_every_seeded_framework_is_verified_and_the_seed_pin_matches():

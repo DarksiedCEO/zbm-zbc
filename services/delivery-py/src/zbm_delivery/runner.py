@@ -17,10 +17,17 @@ pytest detail: every invocation carries ``-c <engine ini>`` (written by the engi
 (the daemon, not a process in the box). cargo builds into an engine-owned ``--target-dir`` under the engine directory,
 never the service's ``target/``.
 
-Residual (accepted, ADR 0011): a test process runs as the same uid in the same container as the engine's files; the
-cross-checks make forging expensive (a second process's listing, per-line multiplicities, package/binary results and
-the exit code must all be forged together; per-ecosystem content rules in the seed refuse the cheap routes), and the
-verification checkout (R1) runs the RED test file alone on base + src, where no other agent file exists.
+Round 19 (R1, R4): a ``TestRunner`` holds no sandbox — every run takes the FRESH engine container it runs in
+(``run_test(box, …)`` / ``run_suite(box, …)``): the engine directory, the ini and the engine-owned pytest plugin
+(``adapters/tools/zbm_engine_plugin.py``, hash pinned here) are written into that container by the engine before the run,
+and nothing the agent's process could have left behind exists there. pytest runs with ``--disable-plugin-autoload``
+and ``-p zbm_engine_plugin`` (the engine directory first on ``pythonpath`` so nothing in the tree shadows it); the
+plugin's record (``<junitxml>.zbm.json``) must agree with the junit file case by case or the result is ``unknown``.
+
+Residual (accepted, ADR 0011): a test process runs as the same uid as the engine's files in the (engine-owned)
+container; the cross-checks make forging expensive (a second process's listing, per-line multiplicities,
+package/binary results, the exit code and — for pytest — the plugin's four-position record must all be forged
+together; per-ecosystem content rules in the seed refuse the cheap routes).
 """
 
 from __future__ import annotations
@@ -43,7 +50,9 @@ _EXTS = r"(?:py|rs|go|ts|mts|cts|js|mjs|cjs)"
 _NODE_IN_TEXT = re.compile(r"(?<![A-Za-z0-9_./\-])((?:tests?/)?[A-Za-z0-9_./\-]+\." + _EXTS +
                            r"::[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*(?:\[[^\]\n]{1,120}\])?)")
 ENGINE_DIR = f"{WORKSPACE}/.dlv-engine"
-VERIFY_DIR = f"{WORKSPACE}/.dlv-verify"
+PLUGIN_NAME = "zbm_engine_plugin"
+PLUGIN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adapters", "tools", f"{PLUGIN_NAME}.py")
+PLUGIN_SHA256 = "05ab874b93ce2a69b543c580bce4efd8ffdc22622552d43ac938f5e67040d845"
 
 
 class RunnerRefused(RuntimeError):
@@ -64,6 +73,7 @@ class TestRun:
     collected: Optional[int] = None
     cwd: str = ""
     extra: dict = field(default_factory=dict)
+    verdicts: dict = field(default_factory=dict)   # per target, for a multi-target run
 
 
 def node_id_in_text(text: str) -> Optional[str]:
@@ -97,18 +107,16 @@ def same_test(failed_name: str, target: str) -> bool:
 class TestRunner:  # noqa: N801
     __test__ = False  # not a pytest collection target
 
-    def __init__(self, test_seed: dict, service: str, sandbox, worktree_path: str, cmd_timeout_s: int):
+    def __init__(self, test_seed: dict, service: str, worktree_path: str, cmd_timeout_s: int):
         self.seed = test_seed
         self.service = service
-        self.sandbox = sandbox
         self.worktree = worktree_path
         self.cmd_timeout_s = cmd_timeout_s
         service_dir = os.path.join(worktree_path, "services", service)
         self.framework = self.detect(test_seed, service_dir)
         self.cwd = f"{WORKSPACE}/services/{service}"
         self.engine_dir = f"{ENGINE_DIR}/{secrets.token_hex(8)}"
-        self._ini_written: set[str] = set()
-        self._engine_dir_made = False
+        self._prepared: set[str] = set()          # container names whose engine directory is in place
         self.toolchain = self._toolchain(service_dir)
 
     @staticmethod
@@ -174,11 +182,13 @@ class TestRunner:  # noqa: N801
 
     def _ini_values(self, cwd: str) -> dict:
         """The seed's ini values with every path made ABSOLUTE under ``cwd`` (pytest resolves ``paths``-typed ini
-        values against the ini file's directory, which is the engine directory, never the service)."""
+        values against the ini file's directory, which is the engine directory, never the service); the engine
+        directory comes FIRST on ``pythonpath`` so ``-p zbm_engine_plugin`` can only resolve to the engine's copy (R4)."""
         ini = dict(self.fw.get("ini") or {})
         for k in ("pythonpath", "testpaths"):
             if k in ini:
                 ini[k] = " ".join(posixpath.normpath(posixpath.join(cwd, part)) for part in str(ini[k]).split())
+        ini["pythonpath"] = (self.engine_dir + " " + ini["pythonpath"]).strip() if ini.get("pythonpath") else self.engine_dir
         return ini
 
     def ini_text(self, cwd: str) -> str:
@@ -188,94 +198,137 @@ class TestRunner:  # noqa: N801
             lines.append(f"{k} = {ini[k]}")
         return "\n".join(lines) + "\n"
 
-    def _ensure_engine_dir(self) -> None:
-        if self._engine_dir_made or not self.verified:
-            return
-        mk = self.sandbox.exec_argv(["mkdir", "-p", "--", self.engine_dir], cwd=WORKSPACE, timeout=30)
-        if mk.exit_code != 0:
-            raise RunnerRefused("could not create the engine directory in the sandbox")
-        self._engine_dir_made = True
+    @staticmethod
+    def plugin_bytes() -> bytes:
+        """The engine-owned pytest plugin, verified against its pin (R4: a modified plugin never ships)."""
+        with open(PLUGIN_PATH, "rb") as fh:
+            data = fh.read()
+        if hashlib.sha256(data).hexdigest() != PLUGIN_SHA256:
+            raise RunnerRefused("engine/zbm_engine_plugin.py does not match its pinned hash (R4)")
+        return data
 
-    def _ensure_ini(self, cwd: str) -> None:
-        self._ensure_engine_dir()
-        if cwd in self._ini_written or self.framework != "pytest" or not self.verified:
+    def prepare_box(self, box, cwd: str) -> None:
+        """Put the engine directory, the ini and the pytest plugin into a FRESH engine container (once per box)."""
+        if not self.verified or box.container in self._prepared:
             return
-        self.sandbox.put_bytes(self._ini_path(cwd), self.ini_text(cwd).encode("utf-8"))
-        self._ini_written.add(cwd)
+        mk = box.exec_argv(["mkdir", "-p", "--", self.engine_dir], cwd=WORKSPACE, timeout=30)
+        if mk.exit_code != 0:
+            raise RunnerRefused("could not create the engine directory in the engine container")
+        if self.framework == "pytest":
+            box.put_bytes(self._ini_path(cwd), self.ini_text(cwd).encode("utf-8"), contained=False)
+            box.put_bytes(f"{self.engine_dir}/{PLUGIN_NAME}.py", self.plugin_bytes(), contained=False)
+        self._prepared.add(box.container)
 
     # --- execution ----------------------------------------------------------------------------------------------------
 
-    def _exec(self, argv: list[str], cwd: Optional[str] = None) -> TestRun:
+    def _exec(self, box, argv: list[str], cwd: Optional[str] = None) -> TestRun:
         env = dict(self.seed.get("service_env") or {})
         cwd = cwd or self.cwd
-        r: ExecResult = self.sandbox.exec_argv(argv, cwd=cwd, env=env, timeout=self.cmd_timeout_s)
+        r: ExecResult = box.exec_argv(argv, cwd=cwd, env=env, timeout=self.cmd_timeout_s)
         text = r.stdout.decode("utf-8", "replace") + (toolchains.STDERR_MARK + r.stderr.decode("utf-8", "replace") if r.stderr else "")
         return TestRun(argv=list(argv), exit=r.exit_code, output=text,
                        output_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
                        timed_out=r.timed_out, truncated=r.truncated, cwd=cwd)
 
-    def _collect(self, cwd: str, target: Optional[str]) -> tuple[Optional[toolchains.Listing], Optional[TestRun]]:
+    def _collect(self, box, cwd: str, targets: list[str]) -> tuple[Optional[toolchains.Listing], Optional[TestRun]]:
         """The ecosystem's collect-only equivalent, run separately (None for an ecosystem without one)."""
-        argv = self.toolchain.collect_argv(cwd, target)
+        argv = self.toolchain.collect_argv(cwd, targets[0] if len(targets) == 1 else None)
         if argv is None:
             return None, None
-        t = self._exec(argv, cwd)
+        if len(targets) > 1:
+            argv = argv + list(targets)
+        t = self._exec(box, argv, cwd)
         return self.toolchain.parse_listing(t.output, t.exit, t.timed_out, t.truncated), t
 
-    def _verified_run(self, base_argv: list[str], cwd: str, target: Optional[str]) -> TestRun:
-        """One run with the engine's configuration; the verdict from the report + listing + transcript + exit."""
+    def _verified_run(self, box, base_argv: list[str], cwd: str, targets: list[str]) -> TestRun:
+        """One run with the engine's configuration in ``box``; the verdict from the report + listing + transcript
+        + exit (+ the plugin record for pytest). ``targets``: none for the suite, one for RED/GREEN/checkouts, several
+        for the src-only check (every one gets its own verdict in ``TestRun.verdicts``)."""
         tc = self.toolchain
-        self._ensure_ini(cwd)
+        self.prepare_box(box, cwd)
         report = f"{self.engine_dir}/run-{secrets.token_hex(6)}.{tc.report_ext}" if tc.report_ext else None
-        argv = tc.run_argv(base_argv, cwd, report, target)
-        tc.prepare(self.sandbox, cwd)
-        t = self._exec(argv, cwd)
+        argv = tc.run_argv(base_argv, cwd, report, targets[0] if len(targets) == 1 else None)
+        if len(targets) > 1:
+            argv = argv + list(targets)
+        tc.prepare(box, cwd)
+        t = self._exec(box, argv, cwd)
         report_text = None
+        extra_text = None
         if report is not None:
-            data = self.sandbox.get_bytes(report) if not t.timed_out else None
+            data = box.get_bytes(report) if not t.timed_out else None
             if data is not None:
                 report_text = data.decode("utf-8", "replace")
                 t.junit_sha256 = hashlib.sha256(data).hexdigest()
-        listing, ct = self._collect(cwd, target)
+            if tc.record_suffix and not t.timed_out:
+                rec = box.get_bytes(report + tc.record_suffix)
+                if rec is not None:
+                    extra_text = rec.decode("utf-8", "replace")
+                    t.extra["plugin_record_sha256"] = hashlib.sha256(rec).hexdigest()
+        listing, ct = self._collect(box, cwd, targets)
         if ct is not None:
             t.extra["collect_exit"] = ct.exit
             t.extra["collect_output_sha256"] = ct.output_sha256
         t.counts = tc.verify(report=report_text, output=t.output, listing=listing, exit_code=t.exit,
-                             timed_out=t.timed_out, truncated=t.truncated)
+                             timed_out=t.timed_out, truncated=t.truncated, record=extra_text,
+                             engine=self.engine_dir)
         t.collected = t.counts.collected if t.counts.collected is not None else (listing.total if listing else None)
-        if target:
-            t.verdict = t.counts.verdict_for(tc.case_key(target), tc.case_under)
+        if targets:
+            for tg in targets:
+                t.verdicts[tg] = t.counts.verdict_for(tc.case_key(tg), tc.case_under)
+            t.verdict = t.verdicts[targets[0]] if len(targets) == 1 else (
+                "pass" if all(v == "pass" for v in t.verdicts.values()) else
+                ("fail" if any(v == "fail" for v in t.verdicts.values()) and not any(v == "unknown" for v in t.verdicts.values()) else "unknown"))
         else:
             t.verdict = "pass" if t.counts.ok and not t.counts.failed_names else ("fail" if t.counts.ok else "unknown")
-        if report is not None:
-            self.sandbox.exec_argv(["rm", "-f", "--", report], cwd=WORKSPACE, timeout=20)
         return t
 
-    def run_test(self, target: str, cwd: Optional[str] = None) -> TestRun:
+    def run_test(self, box, target: str, cwd: Optional[str] = None) -> TestRun:
         argv = self.test_argv(target)
         if self.verified:
-            return self._verified_run(argv, cwd or self.cwd, target)
-        t = self._exec(argv, cwd)
+            return self._verified_run(box, argv, cwd or self.cwd, [target])
+        t = self._exec(box, argv, cwd)
         t.counts = parsers.parse_counts(self.fw["parser"], t.output)
         t.verdict = "unknown"
         return t
 
-    def run_suite(self, cwd: Optional[str] = None) -> TestRun:
+    def run_tests(self, box, targets: list[str], cwd: Optional[str] = None) -> TestRun:
+        """Several targets in ONE run (the src-only check): the seeded targeted argv with every target appended."""
+        for tg in targets:
+            self.check_target(tg)
+        if not targets:
+            raise RunnerRefused("no targets")
+        if len(targets) == 1:
+            return self.run_test(box, targets[0], cwd)
+        if not self.verified or self.framework != "pytest":
+            raise RunnerRefused("multi-target runs are built for pytest only")
+        argv = self.test_argv(targets[0])
+        return self._verified_run(box, argv[:-1], cwd or self.cwd, targets)
+
+    def run_suite(self, box, cwd: Optional[str] = None) -> TestRun:
         if self.verified:
-            return self._verified_run(self.suite_argv(), cwd or self.cwd, None)
-        t = self._exec(self.suite_argv(), cwd)
+            return self._verified_run(box, self.suite_argv(), cwd or self.cwd, [])
+        t = self._exec(box, self.suite_argv(), cwd)
         t.counts = parsers.parse_counts(self.fw["parser"], t.output)
         t.verdict = "unknown"
         return t
+
+    def target_for_case(self, case_key: str) -> Optional[str]:
+        """The ``<path>::<name>`` target that re-runs one verified case key, or None when the ecosystem's key does
+        not name a file the seeded argv can select (pytest: the node id itself; go: ``<dir>::<Test>`` → a file in
+        that package directory; cargo/node: the bare name cannot be mapped back to a file — None, stated)."""
+        if self.framework == "pytest":
+            path = case_key.split("::", 1)[0]
+            return case_key if "::" in case_key and _TARGET_RE.fullmatch(case_key.split("[", 1)[0]) and not path.startswith("/") else None
+        if self.framework == "go" and "::" in case_key:
+            d, name = case_key.split("::", 1)
+            if "/" in name:
+                return None                                  # a sub-test: its parent is the listed test
+            return f"{d}/{name}_test.go::{name}" if d != "." else f"{name}_test.go::{name}"
+        return None
 
     def reproduction_target(self, finding: dict) -> Optional[str]:
         """R3: the finding's own reproduction as a seeded argv target, or None (not machine-runnable)."""
         return node_id_in_text(finding.get("reproduction") or "")
-
-    # --- verification checkouts (R1) ----------------------------------------------------------------------------------
-
-    def checkout_dir(self, tag: str) -> str:
-        return f"{VERIFY_DIR}/{tag}-{secrets.token_hex(6)}/services/{self.service}"
 
     # --- path classes -------------------------------------------------------------------------------------------------
 
@@ -315,6 +368,14 @@ class TestRunner:  # noqa: N801
             else:
                 out["src"].append(p)
         return out
+
+    def denied_src_content(self, text: str) -> Optional[str]:
+        """The first seeded ``src_content_deny`` rule a changed SOURCE file matches (R4, cheap layer: a source
+        module that reaches for pytest's plugin manager or walks the heap for it)."""
+        for rule in self.fw.get("src_content_deny", []):
+            if re.search(rule["pattern"], text):
+                return rule["name"]
+        return None
 
     def denied_test_content(self, text: str) -> Optional[str]:
         """The first seeded ``test_content_deny`` rule (regex, per ecosystem) a test file's text matches, or None:

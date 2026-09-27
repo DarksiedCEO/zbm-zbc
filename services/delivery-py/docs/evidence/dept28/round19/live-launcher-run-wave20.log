@@ -1,0 +1,33 @@
+# wave 20 live launcher run — pid 2872 port 18800 — python 3.13.13 — branch fix20-delivery
+
+GET /health -> 200 {"status":"ok","service":"delivery-py","in_memory":false,"ledger":"unconfigured","sandbox":"unavailable","llm":"unconfigured","non_production":true,"config_sha256":"e4d51379594e0f7dc2265a0fee0ff25aa7134b1e6aecabe91b291a1d18064f0e","prompts_manifest_sha256":"a55a2a0f6ef5979a4ff4df702b126bb3d43d05c208cbae6d10e0da8bc420ee1e","policy_version":1,"deerflow_commit":"345f08be00c8a9495079b732a39b46aa9af1584e","reconcile_mode":false,"reconcile_required":false,"runs_live":0}
+GET /dlv/v1/policy -> 200 {"policy_version":1,"classes":{"read":{"decision":"allow","tools":["read_file","ls","glob","grep"]},"write":{"decision":"allow_with_token","tools":["write_file","str_replace","update_file"]},"exec":{"decision":"allow_with_token","tools":[]},"subagent":{"decision":"allow_with_token","tools":["task","task_status"]},"network":{"decision":"deny","tools":["web_fetch","web_search","image_search","browser_navigate","browser_click","browser_type"]},"git_remote":{"decision":"deny_unconditionally","tools":[]},"destructive_outside_workspace":{"decision":"deny_unconditionally","tools":[]},"acp":{"decision":"deny_unconditionally","tools":["invoke_acp_agent"]},"mcp":{"decision":"deny_unconditionally","too
+GET /dlv/v1/audit/export -> 503 {"detail":"evidence ledger write failed (LedgerNotRecorded); nothing took effect","ledger_write":"not_recorded","took_effect":false}
+GET /dlv/v1/reconcile -> 403 {"detail":"andre approval token missing"}
+GET /docs -> 404 {"detail":"Not Found"}
+POST /dlv/v1/fix-runs -> 503 {"detail":"docker daemon not reachable","reasons":[{"code":"SANDBOX_UNAVAILABLE","rule_id":"DLV-02","message":"docker daemon not reachable","evidence_ids":[]}],"reason_lines":["dlv/DLV-02/SANDBOX_UNAVAILABLE: docker daemon not reachable"],"request_id":"req-live20-1","facts_sha256":"2bd9e607b4be3efa56ad01f82aabc995ddbe08a1bdd8baf31d0f4437e6a45033","took_effect":false}
+POST /dlv/v1/fix-runs (finding without file) -> 422 {"detail":[{"loc":["body","findings",0,"file"],"msg":"Field required","type":"missing"}],"errors_total":1}
+docker run argv (real process): run -d --name dlv-dlv-run-LIVE20 --label zbm.dlv.run=dlv-run-LIVE20 --user 65532:65532 --cap-drop=ALL --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,size=512m --pids-limit 512 --memory 4g --cpus 2 --network none --mount type=volume,src=dlv-ws-dlv-run-LIVE20,dst=/mnt/user-data/workspace,volume-label=zbm.dlv.run=dlv-run-LIVE20 --mount type=bind,src=/home/claude/wt/fix20/services/delivery-py/skills,dst=/mnt/skills,ro --mount type=bind,src=/home/claude/wt/fix20/services/delivery-py/src/zbm_delivery/adapters/tools,dst=/mnt/dlv,ro --env-file /tmp/e.env registry.test/zbm/dlv-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000 sleep infinity | forbidden: None
+config.load with DLV_SANDBOX_NETWORK=host -> exit 1: RuntimeError: DLV_SANDBOX_NETWORK='host': only none is built (round 18 R4: the sandbox has no network at all; the LLM is reached by the engine process on the host, never from the box)
+config.load with DLV_MAX_SUBAGENTS_PER_RUN=8 -> exit 1: RuntimeError: DLV_MAX_SUBAGENTS_PER_RUN: subagents are off in this build (round 18 R8: deer-flow's subagent chain carries neither our receipt middleware nor our prompt); only 0 or unset is accepted
+config.load with DLV_ALLOW_UNPINNED_CONFIG=1 -> exit 1: RuntimeError: DLV_ALLOW_UNPINNED_CONFIG: no such switch exists; nothing unlocks the unconditional denies or the config pin (spec C.3.2; round 18 R11: the yaml pin is mandatory in every mode)
+
+listening: 127.0.0.1
+server stdout/stderr tail:
+INFO:     Started server process [2872]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:18800 (Press CTRL+C to quit)
+INFO:     127.0.0.1:35978 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35978 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35978 - "GET /dlv/v1/policy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35978 - "GET /dlv/v1/audit/export HTTP/1.1" 503 Service Unavailable
+INFO:     127.0.0.1:35978 - "GET /dlv/v1/reconcile HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:35978 - "GET /docs HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:35978 - "POST /dlv/v1/fix-runs HTTP/1.1" 503 Service Unavailable
+INFO:     127.0.0.1:35978 - "POST /dlv/v1/fix-runs HTTP/1.1" 422 Unprocessable Content
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2872]
+

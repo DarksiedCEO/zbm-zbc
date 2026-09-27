@@ -184,6 +184,40 @@ def scenario_s1() -> list[dict]:
     ])
 
 
+# --- a bound run for a direct model-backend call (wave 20 R14: no LLM call leaves the box without a live run) -----------
+
+class llm_scope:
+    """``with llm_scope():`` installs a minimal runtime when none is installed, binds a live run and sets its
+    principal as the effective user, so ``backend.complete()`` passes ``_run_scope`` in a unit test."""
+
+    def __init__(self, run_id: str = "dlv-run-UNIT", egress=None):
+        self.run_id, self.egress = run_id, egress
+
+    def __enter__(self):
+        from datetime import timedelta
+
+        from deerflow.runtime.user_context import set_current_user
+        if registry.runtime_or_none() is None:
+            registry.install(registry.Runtime(settings=None, recorder=None, docker=None, chat_backend=None, egress=self.egress,
+                                              policy_seed={}, test_seed={}, clock=FixedClock(datetime(2026, 9, 27, tzinfo=timezone.utc)),
+                                              on_ledger_failure=lambda r, w: None, record=lambda *a, **k: a[0] if a else "",
+                                              resolve_sandbox_path=lambda r, p: None))
+        rt = registry.runtime()
+        now = rt.clock.now().astimezone(timezone.utc)
+        self.binding = registry.RunBinding(run_id=self.run_id, thread_id=f"t-{self.run_id}", service="toy-py",
+                                           principal_user_id=f"zbm--{self.run_id}", workspace="/mnt/user-data/workspace",
+                                           deadline_at=now + timedelta(hours=1))
+        registry.bind(self.binding)
+        self._tok = set_current_user(type("U", (), {"id": self.binding.principal_user_id})())
+        return self.binding
+
+    def __exit__(self, *exc):
+        from deerflow.runtime.user_context import reset_current_user
+        reset_current_user(self._tok)
+        registry.unbind(self.binding.thread_id)
+        return False
+
+
 # --- the harness ------------------------------------------------------------------------------------------------------
 
 class Harness:

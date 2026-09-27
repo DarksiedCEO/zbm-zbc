@@ -75,10 +75,10 @@ ledger-anchored local log with the instance lease and Andre's reconcile).
 | `config/extensions_config.json` | `4875b2992e9062d6f8084ac64d543f50a29624bd0e7eb82586e31b3056563807` |
 | `seed/skills_manifest.json` | `26f51402a23232a6b3f6a5764829800c3570403e2694ee1a9f331fe23e040320` |
 | `seed/prompts_manifest.json` | `a55a2a0f6ef5979a4ff4df702b126bb3d43d05c208cbae6d10e0da8bc420ee1e` (wave 19: `engine.system.md` rules 2 and 5 restated for R1/R3) |
-| `seed/tool_policy_seed.json` | `5c8ac4620ab2ebdc961fb8e0bd00567fab0a25a500d8d9e8880786f7299b47d1` |
-| `seed/test_commands_seed.json` | `18b4cdc0e913c8e7a71492d22499ddd30a47a4a8a0455f958a8411112a8f6cd5` (toolchain amendment: go/cargo/npm `verified: true` with their engine argv, `collect`, `target_example`, `test_content_deny`, per-ecosystem `test_infra_globs`; pytest markers no longer include a bare `tests/`; `service_env` gains the toolchain determinism switches) |
+| `seed/tool_policy_seed.json` | `078560a463fd04a11fb3a358e8ebc5a1a782dcedfbd635192bc9a77738787f4d` (wave 20: `pylint`/`isort`/`pre-commit` in the exec allowlist, R6/R9 notes) |
+| `seed/test_commands_seed.json` | `6c3a39edc981c969d1b1d538049ec097c59dd36dd51b27bc2407440568de5a30` (wave 20: pytest `test_content_deny` for re-plugging spellings, `src_content_deny`, `zbm_engine_plugin*` as test infra; toolchain amendment: go/cargo/npm `verified: true` with their engine argv, `collect`, `target_example`, `test_content_deny`, per-ecosystem `test_infra_globs`; pytest markers no longer include a bare `tests/`; `service_env` gains the toolchain determinism switches) |
 | `seed/licence_allowlist.json` | `c02f367f3e6cd02949e18dbc2eaa2ceabcb917ac4aa5fc58ad73bec4ac6dfb6e` (wave 19: `unrecorded_allow`) |
-| `seed/licence_exceptions.json` | `10695daf388308309d5b32057e9d0b764817b80979e8459db68ad5b48ac0ef62` (wave 19: `dotenv`, `tiktoken`) |
+| `seed/licence_exceptions.json` | `7ae1f460a312a01cf56fc8701e869629f55bca64fccaff51d0226ed47e6fa92f` (wave 20: `speechrecognition` bundled GPL-2 FLAC binaries stated as a `bundled_licence_file` exception pending the lead's ruling; wave 19: `dotenv`, `tiktoken`) |
 | `docs/evidence/licences-2026-09-27.json` (the licence report) | `f154e1b56befac3a939d69cfeece434516d172fa0c6aedbfbaeab464d1ee0e8d` (wave 19: dotenv + tiktoken via file exceptions) |
 | `uv.lock` | `f01aa750572f5b6662b8cb1b52d370574474d83379b137bee44e9e183264457b` |
 | deer-flow commit (`DLV_DEERFLOW_COMMIT`, G9) | `345f08be00c8a9495079b732a39b46aa9af1584e` |
@@ -309,8 +309,9 @@ impossible the state is `unknown`, never green.
   `unrecorded_allow` (`_virtualenv.py`, `_virtualenv.pth`); the METADATA `Name` must equal the directory's name
   (PEP 503 normalised) and the forbidden check keys on both; a metadata licence of UNKNOWN (or a pasted licence
   text) passes only through a `file` exception naming the proof file and its first line, both re-read
-  (`dotenv` 0.9.9 and `tiktoken` 0.14.0 added with reasons). Residual: the classifier step of the spec's chain
-  still accepts a distribution whose classifier says MIT while its bundled file says otherwise.
+  (`dotenv` 0.9.9 and `tiktoken` 0.14.0 added with reasons). Residual (closed by wave 20 R13 below): the
+  classifier step of the spec's chain accepted a distribution whose classifier says MIT while its bundled file
+  says otherwise.
 - **R10 — report integrity** (`engine/report.py`, `engine/loop.py`). Captured output is fenced with a backtick
   run one longer than the longest run in the content; `SWEEP:` sites are kept only when the file is in the diff
   and the line is inside a changed hunk (any line of a new untracked file) — the rest are dropped with the reason
@@ -411,26 +412,210 @@ reproductions, `node_id_in_text` now accepts `.rs`/`.go`/`.ts`/`.js` families).
   no-op comment for node), test-infra edit (`test_infra_changed`), deleted existing test (`test_deleted`),
   content rule (`test_content_denied`), hung suite (`suite_unknown`, "timed out"), then `fixed` once clean.
 
+## Round 19 amendments (fix wave 20, Sep 27, 2026; lead rulings R1-R15, binding)
+
+Round 19 re-confirmed the five wave-19 closures and reproduced three more routes to `awaiting_review` with the
+defect intact: a RED test never tied to the finding (a "fix" in a brand-new module the test imports), a pytest
+plugin registered from inside the RED test that flips `failed` to `passed` with every wave-19 cross-check agreeing,
+and the finding's own reproduction turned into a `skip` under `CHANGED_TEST:`; cancel/deadline did not stop the
+verdict pipeline once the FIXED turn had returned. The principle of wave 19 stands and is extended: **the engine
+never trusts anything the agent's process can emit, and now also never shares a process space or a writable
+directory with it when computing a verdict.**
+
+- **R1 — verdicts run in a fresh container** (`adapters/sandbox.py::start_engine_box/ship_tree/destroy_box`,
+  `engine/loop.py::_verdict_box/_tree`, `runner.py`). Every engine run — `suite.before`, RED, GREEN, the
+  verification checkout, the reverted checkout, the single-file revert, the two reproduction runs, the src-only
+  check, the per-finding suite, the disproof re-run and `suite.after` — happens in a NEW container
+  (`dlv-<run_id>-<tag>-<nonce>` on its own volume, the same `docker run` argv and run label as the agent's,
+  reaper-covered) populated by `docker cp` from a tree the engine builds on the host: `git archive <sha> --
+  services/<svc>` plus an overlay of exactly the worktree paths that run may see (RED/GREEN: everything the agent
+  changed; verification: `src` + the RED test file; reverted: the RED test file; single-file revert: the fix minus
+  the finding's file + the RED test; src-only: `src` alone; suites: the commit tree / the commit itself). The
+  engine directory, the pytest ini and the engine plugin are written into that container by the engine; result
+  files are read back from it with `docker cp`; the container and volume are destroyed right after the run and
+  the elapsed time is recorded (`engine_box_started` / `engine_box_released`, `elapsed_ms`). `.dlv-engine` and
+  `.dlv-verify` no longer exist in the agent's volume (`test_n19_a13_*`); the DF file tools' atomic write still
+  stages under a transient random `.dlv-write-<nonce>` in the agent's volume for the `mv` — the resolve→mv
+  window residual of R7 is unchanged and restated below. The agent's container and every engine box in flight are
+  `docker kill`ed on cancel/deadline (`kill_run`, `sandbox_kill_requested`). **Cost, measured on the argv double
+  (a directory plus a tar copy per container, pytest as a subprocess):** 0.54-0.70 s per verdict run
+  (`engine_box_released.elapsed_ms`, almost all of it the pytest subprocess), 9 engine containers for a clean
+  one-finding run (3 suites, RED, GREEN, verify, reverted, 2 reproduction runs, src-only), 18 for the S1
+  two-finding scenario, which the reviewers' `probe_baseline.py` times at 14.6 s on this branch against 23.1 s at
+  c353391 (both measured while the full suite ran concurrently; the double's container churn is cheap and the
+  old per-operand `readlink` resolution is gone). No daemon on this box: the live per-container cost (`docker run`
+  + `docker cp` + `docker rm` per verdict, roughly a second each on a warm daemon) is not measured.
+- **R2 — the RED test is tied to the finding** (`engine/loop.py::_green_phase`, `states.py`). Ingestion already
+  refuses a finding without `file` (422, schema); a file alone is accepted. For `fixed`: (a) the finding's file
+  must carry a hunk of the fix diff (a source change or a `CHANGED_TEST` change; a NEW module the RED test imports
+  is not a fix of the finding) — `finding_file_unchanged`; (b) **single-file revert**: a checkout with the whole
+  fix EXCEPT the finding's file (+ the RED test) must make the RED test FAIL — `test_not_tied_to_file` (when the
+  fix touches only that file the checkout is the reverted checkout itself, recorded `identical_to_reverted`);
+  (c) when the finding's `reproduction` names a test node id, that reproduction is run ALONE, in its own container,
+  in the verification checkout (must pass) and in the reverted checkout (must fail) — `reproduction_not_fixed` /
+  `reproduction_passes_without_fix`. Each is its own ledger event (`single_file_revert_checked`,
+  `reproduction_checked`) and finding record (`finding_file_hunk`, `single_file_revert`, `repro_check`); the
+  `fixed` invariant requires all of them and refuses on any `unknown`. Added beyond the ruling, because the round's
+  in-process route made it necessary: the **src-only check** — every baseline failure the fix claims (failing at
+  the last verified suite, passing now, not attributable to another open finding) is re-run on base + the SOURCE
+  changes alone, no test file of the agent's present (one container, one pytest run of all of them; go per target;
+  cargo/node bare case names cannot be mapped back to a file — stated) — `fix_not_in_source_suite`. Without it a
+  RED test module that monkeypatches the module under test at import time flips the baseline failure in the
+  full suite while every other check passes.
+- **R3 — outcome deltas are verdicts** (`engine/loop.py::_outcome_regressions`). Baseline = `suite.before`'s
+  per-case outcome map. Any test that was `pass`/`fail` at baseline and is `skip` (skipped or xfailed) or missing
+  after the per-finding suite or `suite.after` is `outcome_regressed`: the round fails (finding back to `red`,
+  `outcome_regressions` on the record) or the run fails (`OUTCOME_REGRESSED`); no `CHANGED_TEST:` excuses it. A
+  `CHANGED_TEST:` on the file holding ANY open finding's reproduction node id is `changed_test_denied`. The
+  `CHANGED_TEST` reason text is kept verbatim on the finding (`changed_tests[].why`, ≤ 400 chars) and printed in
+  the report inside the untrusted fence, next to its sha.
+- **R4 — pytest cannot be re-plugged from inside** (`adapters/tools/zbm_engine_plugin.py`, `runner.py`,
+  `engine/parsers.py::plugin_record_problem`, `engine/toolchains.py`). Every pytest run carries
+  `--disable-plugin-autoload` (no distribution entry point loads; a service whose tests need such a plugin cannot
+  run under the engine — stated) and `-p zbm_engine_plugin`, the engine-owned plugin (hash pinned in `runner.py`,
+  shipped into the fresh container's engine directory, which is FIRST on `pythonpath` — pytest inserts
+  `pythonpath` before it imports `-p` plugins, so nothing in the tree can shadow it; a tree entry named
+  `zbm_engine_plugin*` is test infra). The plugin writes `<junitxml>.zbm.json`: every `pytest_plugin_registered`
+  after session start must be a `conftest.py` module or a pytest builtin, after `pytest_collection_finish` any
+  registration is a violation; the plugin set and every hook's implementation list are snapshotted after
+  collection and compared before every test and at session end; a set of `_pytest`/`pluggy` module and class
+  attributes is snapshotted at plugin load and compared at the same points; per test phase it records
+  `call.excinfo is None` (tryfirst non-wrapper `pytest_runtest_makereport`), the raw report (innermost wrapper),
+  the final report (outermost wrapper) and the logged report (tryfirst `pytest_runtest_logreport`), and every
+  logged report must have been built by a makereport it saw. The engine refuses (`unknown`) a missing or
+  unparseable record, a plugin hash or path other than its own, a session that did not start/collect/finish
+  with autoload disabled, any violation, and any case whose four positions disagree (raw vs excinfo; final vs raw
+  except through pytest's xfail machinery; logged vs final) or disagree with junit. Proven with the reviewer's
+  flip plugin spelled past the content rules: pytest prints `1 passed`, junit == collected == summary == exit,
+  the record says `plugin registered after collection` → GREEN `unknown` (`test_n19_e2_*`). The cheap layer:
+  `test_content_deny` for pytest names `pluginmanager`, `.register(`, `hookimpl`/`hookwrapper`/`pluggy`,
+  `pytest_runtest_`/`pytest_collection`/`pytest_configure`/`pytest_plugin`, `conftest`, `_pytest`,
+  `gc.get_objects`/`gc.get_referrers`, `sys.settrace`; a new `src_content_deny` names `_pytest`, `pluggy`,
+  `pluginmanager`, `gc.get_objects` in a changed SOURCE file (`src_content_denied`). Both are stated as cheap.
+- **R5 — liveness gates every phase** (`engine/loop.py`, `service.py::_require_live`). `_check_live` runs before
+  every fresh container starts, before GREEN, the verification runs, the suites, the commit and the report; the
+  service refuses (`Conflict`) `run_update` / `finding_update` / `finding_transition` on a run that is failed,
+  reviewed, awaiting review or marked `unrecorded_failure` — the only run events accepted afterwards are the
+  post-mortem `run_interrupted`, `sandbox_released`, `agent_usage`, `agent_usage_linked`. The reviewer's probe e4
+  (cancel after the GREEN run) now ends with no commit, no `fixed`, no engine event after `fix_run_cancelled`
+  except those and the container teardown, and the agent's container killed (`test_n19_e4_*`).
+- **R6 — bash commands are single-line or refused** (`policy.py::has_line_separator`). A command containing
+  `\n`, `\r`, NUL, `\f`, `\v`, U+2028, U+2029 or U+0085 is denied `multiline_command` BEFORE tokenising (the
+  here-doc form included); a tab stays a word separator for bash and shlex alike. The other free-text arguments
+  the guardrail classifies (`path`, `pattern`, `glob`) are denied on a control character or a line separator too.
+  The tokeniser tests now cover every separator bash knows (`; && || | & |& ;; ( ) { } $( ) \` <( ) >( )`).
+- **R7 — file tools contain to the write roots** (`adapters/sandbox.py::_contain/put_bytes`,
+  `policy.py::exec_write_ok/adr_name_ok`). `write_file` / `str_replace` / `update_file` must land inside
+  `services/<service>/` or exactly `docs/adr/00NN-*.md` — before AND after in-container symlink resolution — and the
+  destination parent is re-checked against the same roots at write time; the reviewer's `ln -s <engine dir>
+  services/svc/eng` + `write_file services/svc/eng/engine.ini` is refused (`test_n19_a2_*`). A bash write under
+  `docs/adr/` must be a `00NN-*.md` file too (no subdirectory, no other name), for the classifier's operand check
+  and the guardrail's resolved path alike (N19-A-8).
+- **R8 — resolution is bounded and after the record** (`adapters/tools/resolve.py`, `adapters/sandbox.py::
+  realpath_many`, `adapters/guardrail.py`). A call is capped at 16 write operands and 64 path components per
+  operand (a breach is a deny with NO exec); the operands are resolved in ONE exec — `python3 -I
+  /mnt/dlv/resolve.py -- <operands>`, a hash-pinned helper bind-mounted read-only from the engine's own package
+  (`--mount type=bind,src=<pkg>/adapters/tools,dst=/mnt/dlv,ro`; verified against its pin before every `docker run`)
+  that answers the real path of the longest existing prefix plus the remainder, and nothing for a dangling or
+  looping link, a non-absolute or `..` path or a remainder hanging off a file — never a file the agent could
+  rewrite. The guardrail records `tool_call_decided` with `decision: pending` BEFORE resolving and
+  `tool_call_resolved` with the final decision after; a call that needs no resolution is decided directly. The
+  reviewer's `mkdir -p` 500 deep cost 500 execs and 1001 records before any record of the decision; it is now a
+  deny with none (`test_n19_a3_*`).
+- **R9 — classifier gaps** (`policy.py::_split_options/_write_operands/_find_subcommands`). `-t DIR`,
+  `-tDIR`, `--target-directory=DIR` and `--target-directory DIR` are the destination of `cp`/`mv`/`ln`/`install`
+  (the sources are never the target); `chmod`/`chown`/`chgrp` operands are targets whatever the mode's spelling
+  (`-x`, `-R -w`, `+x`, `644`, `--reference`); `sed` in-place is any short cluster containing `i`, `-i.bak`,
+  `--in-place[=suffix]`, with `-e`/`-f` scripts taken out of the operands; a `cp`/`mv` with no destination is
+  refused; the command a `find -exec/-execdir/-ok` would run is classified like any simple command (with `{}`
+  standing for the start directory); `mypy`, `pylint`, `black`, `isort`, `pre-commit`, `ruff`, `gofmt` are
+  `allow_opaque` (they load plugins or configuration from the tree; `pylint`/`isort`/`pre-commit` added to the
+  exec allowlist so their record is honest). `touch -d/-t/-r` option arguments are no longer taken as operands.
+- **R10 — reaper and record-first** (`adapters/sandbox.py::reap/_cp_in/_cp_out/destroy`). `docker ps` and
+  `docker volume ls` use `--format` (tab-separated name and run label) WITHOUT `-q` (the CLI ignores the format
+  under `-q` and printed ids only, so every reap recorded `run_id: ""`); a failing listing or removal is recorded
+  `sandbox_reap_failed` and nothing is called reaped that was not; every `docker cp` in or out (copy-in, copy-out,
+  the tree shipped to an engine container, the report read-back) is recorded `sandbox_exec_requested/completed`
+  with `op: cp_in|cp_out`, `kind: sandbox_cp` BEFORE the daemon call, and a dead ledger stops it; `destroy` with a
+  failing removal AND a failing ledger marks the run `unrecorded_failure` through `on_ledger_failure` instead of
+  being swallowed.
+- **R11 — git isolation** (`gitport.py`). Every git command runs with a private empty `HOME` (a per-process temp
+  directory), `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `XDG_CONFIG_HOME` under that HOME, and
+  `-c core.hooksPath=<empty engine dir> -c core.fsmonitor=false` first on the argv (`git archive` included). The
+  reviewer's gitchk repository (a tracked `.gitconfig` with `core.hooksPath=.hooks` and a `pre-commit` hook that
+  prints `HOOK-RAN`) runs the hook under the wave-19 environment and does not under the engine's
+  (`test_n19_a7_*`).
+- **R12 — egress abort** (`adapters/egress.py::abort/_shutdown_socket`). `abort()` shuts the response's network
+  socket down (`SHUT_RDWR`, via httpcore's `network_stream` extension) before closing it, so a reader blocked in
+  `recv` with nothing arriving returns at once. Proven live on the assigned ports with the reviewer's
+  headers-then-silence TLS server (`tests/test_live_round19.py`): 18.1 s after the abort before, < 2 s now.
+- **R13 — licence gate** (`licences.py`). A `.pth` path line naming a directory outside the virtual environment
+  is a problem (the gate never scans it); one inside the venv is scanned as a further site directory; a top-level
+  entry is covered by a distribution only when every RECORD line under it that names a present file carries a
+  sha256 that verifies (files over 4 MiB by recorded size; a bare `path,,` line covers nothing); a METADATA with
+  two `License-Expression` or `License` fields is a problem; a metadata licence contradicted by every bundled
+  `LICENSE*`/`COPYING*` file whose heading is recognised (MIT, Apache, BSD, ISC, MPL, the GPL/LGPL/AGPL families,
+  EPL, Unlicense, SSPL, BUSL, Elastic) is a problem — the wave-19 residual is closed. Running it on the venv
+  surfaced two facts: `nest-asyncio` declares `BSD` and ships a 2-clause file (the same permissive family; the
+  gate treats BSD-2/3 as one family), and **`speechrecognition` 3.17.0 (a deer-flow transitive dependency)
+  declares `BSD-3-Clause` and ships prebuilt FLAC encoder binaries under GPL-2.0 (`licenses/LICENSE-FLAC.txt`)**.
+  The second is entered in `seed/licence_exceptions.json` as a new exception kind `bundled_licence_file` (the
+  component, the file's licence and the reason: the engine never executes those binaries; the sandbox image
+  installs the finance-py requirement set, not this venv) so the gate states the fact instead of passing it
+  silently — the lead rules on removing the distribution (a `uv.lock` override). The gate's start-up cost is now
+  ~3 s warm / ~7 s cold on this venv (903 MiB, 48k files).
+- **R14 — small.** A pure-deletion hunk (`+N,0`) covers no new line (`_hunk_lines`; N19-E-5); `fixed` requires a
+  `verification` record (no `if v and …`; N19-E-6); the "suite after commit" flag is gone — the per-finding suite
+  runs on the engine-built commit tree, its content digest (`_tree_digest`: sorted path + sha256 + exec bit) is
+  recorded with the suite and again from `git archive <commit>` after the commit, and `fixed` requires
+  `suite_tree_sha256 == commit_tree_sha256` (`commit_tree_mismatch` otherwise); `forbidden_run_token` now
+  covers the reviewer's list (`--pid/--userns/--ipc/--cgroupns/--uts` in every spelling, `--security-opt` with
+  anything but `no-new-privileges`, `-v/--volume/--mount` other than our volume and the two read-only binds,
+  `--add-host`, `--gpus`, `--dns*`, `--sysctl`, `--device`, `--cap-add`, `--privileged`, `docker.sock`) and any
+  unicode dash; the two bind sources are validated (absolute existing directory, no `,`, `=`, `:` or control
+  character) before they are spliced into the CSV `--mount` option; `_run_scope` fails CLOSED (`EgressRefused`
+  when no runtime, no effective user, no bound run or a run that is not live — no LLM call leaves the box without
+  a run id and a deadline cap; N19-A-12). `assert_effective` remains the same-thread contextvar check the
+  reviewer called tautological; `bound_user` sets it and the guardrail/sandbox check it independently.
+- **R15 — CI.** The `delivery-py` job installs Node 22 (`actions/setup-node`, SHA-pinned like the others), Go
+  (`actions/setup-go`, version from `fixtures/dlv/toy-go/go.mod`) and Rust stable before `uv sync`, so
+  `tests/test_toolchains.py` runs the real toolchains instead of failing on a missing binary; `docs/ci.md` says so
+  (`actionlint` clean).
+
+Changed existing tests (they enshrined the disproved behaviour): `test_n18_e2_fix_that_lives_in_a_test_helper`
+(the refusal is now `finding_file_unchanged`, before GREEN runs), the docker-run argv token test (the `/mnt/dlv`
+read-only bind), `test_file_operations_contain_paths` (writes are contained to the write roots, not the
+workspace), G14's engine exec heads (`python3 -I /mnt/dlv/resolve.py --` is the only `python3` the engine runs;
+`readlink` is gone), the `TestRunner` constructor (no sandbox argument: a runner holds no container).
+
+Pins after this wave: `seed/tool_policy_seed.json` `078560a463fd04a11fb3a358e8ebc5a1a782dcedfbd635192bc9a77738787f4d`,
+`seed/test_commands_seed.json` `6c3a39edc981c969d1b1d538049ec097c59dd36dd51b27bc2407440568de5a30`,
+`seed/licence_exceptions.json` `7ae1f460a312a01cf56fc8701e869629f55bca64fccaff51d0226ed47e6fa92f`; the resolver
+`adapters/tools/resolve.py` and the plugin `adapters/tools/zbm_engine_plugin.py` are pinned in
+`adapters/sandbox.py` / `runner.py` (`RESOLVE_HELPER_SHA256`, `PLUGIN_SHA256`).
+
 ## Known limitations
 
 - The tool-call classifier is a denylist over an unbounded language (df-exec F-03): it is the record and the
   first refusal; an interpreter/shell/make invocation is recorded as `allow_opaque` (R5) and the BOUNDARY is the
   sandbox (non-root, `--cap-drop=ALL`, default seccomp, `--read-only`, `--network none`, no socket mount, no
   `.git`, no `curl`/`wget`) — and those properties are unproven on this box.
-- What a lazy or hostile agent can still do to reach `awaiting_review` with the defect intact (after wave 19 and
-  the toolchain amendment): write a RED test whose body inspects the source text (or otherwise decides pass/fail
-  without exercising the defect) and a source change that satisfies it — the engine proves RED→GREEN, the
-  split-diff verification and a green suite, not that the test exercises the finding; or have agent code that runs
-  inside the RED test process forge the ecosystem's whole transcript at once and end the process early (pytest:
-  rewrite the junit file AND print a matching summary, exit code and collect-only count; Go: emit a `\x16`-framed
-  test2json line for every listed test and `os.Exit(0)` before `testing` reports — `TestMain`, `os.Exit` and the
-  `\x16` byte in a test file are refused by the content rules, so the route needs an obfuscated byte; Rust: write
-  libtest's per-test and `test result:` lines for every listed test of every binary to fd 1 and `process::exit`
-  — refused by the content rules for the plain spellings; Node: reproduce the runner's internal v8-serialized
-  child→parent frame on stdout). All leave the finding's own reproduction (if one is named) and AEGIS re-review as
-  the checks that catch them. The residual that no ecosystem closes: a test process that exits 0 after a complete
-  forged transcript is indistinguishable from a passing one; `cargo nextest` would not close it either (a test
-  process that exits 0 early is a pass there too), which is one of the two reasons it is not a dependency.
+- What a lazy or hostile agent can still do to reach `awaiting_review` with the defect intact (after wave 20):
+  for a finding whose `reproduction` names NO test node id, write a RED test that is a tautology tied to the
+  finding's file (it asserts a marker the "fix" adds to that file) — the file hunk, the single-file revert, the
+  verification/reverted checkouts, the src-only check and a green suite all hold, because nothing machine-readable
+  says what the defect is; the engine proves the test is tied to the FILE, not to the DEFECT, and only the
+  finding's own reproduction (when named) or AEGIS re-review reads semantics. With a reproduction node id, the
+  reproduction must pass on base + source alone in its own process, which closes that route for the tests that
+  exist at baseline. Inside the verification container the agent's test code still runs as the same uid as the
+  engine's files: a source module (the fix is allowed to change source) that monkeypatches a pytest/pluggy
+  internal the plugin does not snapshot, or that spells its way past the cheap content rules and forges the whole
+  transcript at once (junit + plugin record + summary + collect-only count + exit code, all consistent), is not
+  detected — the plugin record raises that bar (four positions per test, a self-hash, a session shape) but is not
+  a proof. Go/Rust/Node keep their wave-19 residual (a process that exits 0 after a complete forged transcript;
+  the plain spellings are refused by the content rules) and have no plugin-record equivalent; cargo and node have
+  no src-only check (their case keys do not map back to a file). A `bash script &` daemon in the AGENT's container
+  can still race the file tools' resolve→mv window there (R7 residual), but it can no longer touch any verdict.
 - Services outside `services/<name>/` (the dashboard lives in `apps/dashboard-ts/`) are outside the findings
   document's path grammar (§B.1: `file` under `services/<service>/`), so a run against `apps/dashboard-ts` cannot
   be submitted; the Node adapter is proven on `fixtures/dlv/toy-ts` and applies to any `services/<svc>` with a
@@ -479,5 +664,8 @@ guardrail, the argv-level Docker double, a scripted model, a temporary git repos
 two verification checkouts per fix); the toolchain amendment brings it to 449 tests (446 passed, 3 skipped, +2 min:
 `tests/test_toolchains.py` runs the real `cargo`, `go` and `node` on the toy fixtures through the whole loop).
 `ruff check src tests devtools` clean. Round-18 findings: `tests/test_round18.py` (one failing-first test per
-finding). Evidence: `services/delivery-py/docs/evidence/dept28/` (incl. the wave-19 live
-log and the re-run of the reviewers' probes) and `docs/evidence/licences-2026-09-27.json`.
+finding). Fix wave 20 brings it to 489 tests (486 passed, 3 skipped, ~20 min wall: every verdict now starts a
+fresh container on the double, `tests/test_round19.py` adds 39 failing-first tests for N19-E-1..6 / N19-A-1..13
+and `tests/test_live_round19.py` one live egress-abort test on the assigned ports). Evidence:
+`services/delivery-py/docs/evidence/dept28/` (incl. the wave-19 and wave-20 live logs, `round18/` and `round19/`
+with the re-runs of the reviewers' probes) and `docs/evidence/licences-2026-09-27.json`.

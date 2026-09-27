@@ -89,6 +89,9 @@ class FakeDockerCli:
         self.containers: dict[str, str] = {}      # name -> local volume dir
         self.labels: dict[str, str] = {}          # container name -> run label value
         self.volumes: dict[str, str] = {}         # volume name -> run label value
+        self.binds: dict[str, dict[str, str]] = {}   # container name -> {dst: host src} for the read-only bind mounts
+        self.killed: set[str] = set()             # containers a `docker kill` stopped (every later exec fails)
+        self.procs: dict[str, list] = {}          # container name -> running Popen objects (kill terminates them)
         self.exec_fail_next: Optional[int] = None
         os.makedirs(self.root, exist_ok=True)
 
@@ -97,8 +100,11 @@ class FakeDockerCli:
     def _vol(self, name: str) -> str:
         return os.path.join(self.root, "vol", name)
 
-    def _map_in(self, s: str, vol: str) -> str:
-        return s.replace(WORKSPACE, vol)
+    def _map_in(self, s: str, vol: str, binds: Optional[dict] = None) -> str:
+        s = s.replace(WORKSPACE, vol)
+        for dst, src in (binds or {}).items():
+            s = s.replace(dst, src)
+        return s
 
     def _map_out(self, b: bytes, vol: str) -> bytes:
         return b.replace(vol.encode(), WORKSPACE.encode())
@@ -115,6 +121,7 @@ class FakeDockerCli:
             vol = self._vol(name)
             os.makedirs(vol, exist_ok=True)
             self.containers[name] = vol
+            self.killed.discard(name)
             if "--label" in argv:
                 self.labels[name] = argv[argv.index("--label") + 1].split("=", 1)[1]
             for a in argv:
@@ -122,20 +129,45 @@ class FakeDockerCli:
                     opts = dict(kv.split("=", 1) for kv in a.split(",") if "=" in kv)
                     vname = opts.get("src", "")
                     self.volumes[vname] = opts.get("volume-label", "=").split("=", 1)[1]
+                elif a.startswith("type=bind,"):
+                    opts = dict(kv.split("=", 1) for kv in a.split(",") if "=" in kv)
+                    if opts.get("dst") and opts.get("src"):
+                        self.binds.setdefault(name, {})[opts["dst"]] = opts["src"]
             cid = hashlib.sha256(name.encode()).hexdigest()
             return ExecResult(0, (cid + "\n").encode(), b"")
         if argv[0] == "ps":
+            if "-q" in argv and "--format" in argv:
+                # the real CLI (>= 23) ignores --format when -q is set and prints IDs only (N19-A-5)
+                ids = [hashlib.sha256(n.encode()).hexdigest()[:12] for n in self.containers]
+                return ExecResult(0, ("\n".join(ids) + ("\n" if ids else "")).encode(),
+                                  b"WARNING: Ignoring custom format, because both --format and --quiet are set.\n")
             label = [a for a in argv if a.startswith("label=")]
             key = label[0][len("label="):] if label else None
-            lines = [f"{n} {self.labels.get(n, '')}" for n in self.containers if key is None or n in self.labels]
+            sep = "\t" if "--format" in argv and "\t" in argv[argv.index("--format") + 1] else " "
+            lines = [f"{n}{sep}{self.labels.get(n, '')}" for n in self.containers if key is None or n in self.labels]
             return ExecResult(0, ("\n".join(lines) + ("\n" if lines else "")).encode(), b"")
+        if argv[0] == "kill":
+            name = argv[-1]
+            if name not in self.containers:
+                return ExecResult(1, b"", b"Error response from daemon: No such container\n")
+            self.killed.add(name)
+            for proc in self.procs.pop(name, []):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+            return ExecResult(0, (name + "\n").encode(), b"")
         if argv[0] == "rm":
             name = argv[-1]
             self.containers.pop(name, None)
             self.labels.pop(name, None)
+            self.binds.pop(name, None)
             return ExecResult(0, b"", b"")
         if argv[0] == "volume" and argv[1] == "ls":
-            lines = [n for n in self.volumes]
+            if "--format" in argv and "\t" in argv[argv.index("--format") + 1]:
+                lines = [f"{n}\t{lbl}" for n, lbl in self.volumes.items()]
+            else:
+                lines = [n for n in self.volumes]
             return ExecResult(0, ("\n".join(lines) + ("\n" if lines else "")).encode(), b"")
         if argv[0] == "volume":
             self.volumes.pop(argv[-1], None)
@@ -195,13 +227,18 @@ class FakeDockerCli:
         vol = self.containers.get(name)
         if vol is None:
             return ExecResult(1, b"", b"no such container\n")
+        if name in self.killed:
+            return ExecResult(1, b"", f"Error response from daemon: container {name} is not running\n".encode())
         secs = timeout_s
         if cmd[:3] == ["timeout", "-k", "5"]:
             secs = float(cmd[3])
             cmd = cmd[4:]
-        cmd = [self._map_in(a, vol) for a in cmd]
+        binds = self.binds.get(name)
+        cmd = [self._map_in(a, vol, binds) for a in cmd]
         if cmd[0] in ("pytest",):
-            cmd = [sys.executable, "-m", "pytest", *cmd[1:]]
+            # the image's `pytest` script has the script's bin dir as sys.path[0], never the cwd: -P makes the
+            # double's `python -m pytest` behave the same (nothing in the service directory shadows a module)
+            cmd = [sys.executable, "-P", "-m", "pytest", *cmd[1:]]
         elif cmd[0] in ("python", "python3"):
             cmd = [sys.executable, *cmd[1:]]
         local_cwd = self._map_in(cwd, vol)
@@ -213,14 +250,26 @@ class FakeDockerCli:
         full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": vol, "LANG": "C.UTF-8",
                     "PYTHONDONTWRITEBYTECODE": "1", **self.toolchain_env(), **env}
         try:
-            r = subprocess.run(cmd, cwd=local_cwd, capture_output=True, timeout=secs, env=full_env)
-        except subprocess.TimeoutExpired as exc:
-            return ExecResult(124, self._map_out(exc.stdout or b"", vol), self._map_out(exc.stderr or b"", vol), True)
+            proc = subprocess.Popen(cmd, cwd=local_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=full_env)
         except OSError as exc:
             return ExecResult(127, b"", f"{type(exc).__name__}\n".encode())
-        out, err = self._map_out(r.stdout, vol), self._map_out(r.stderr, vol)
+        self.procs.setdefault(name, []).append(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=secs)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            return ExecResult(124, self._map_out(stdout or b"", vol), self._map_out(stderr or b"", vol), True)
+        finally:
+            try:
+                self.procs.get(name, []).remove(proc)
+            except ValueError:
+                pass
+        if name in self.killed:
+            return ExecResult(137, self._map_out(stdout, vol), self._map_out(stderr, vol) + b"\n[killed]\n")
+        out, err = self._map_out(stdout, vol), self._map_out(stderr, vol)
         truncated = len(out) > output_cap
-        return ExecResult(r.returncode, out[:output_cap], err[:output_cap], False, truncated)
+        return ExecResult(proc.returncode, out[:output_cap], err[:output_cap], False, truncated)
 
     @staticmethod
     def toolchain_env() -> dict:

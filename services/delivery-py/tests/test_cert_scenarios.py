@@ -327,7 +327,9 @@ def test_s12_changing_an_existing_test_without_changed_test_line_fails_the_round
     ]
     h = Harness(scenario=scenario)
     try:
-        run_id = h.submit(findings_doc(h.base_sha, [finding("N1-1")])).json()["run_id"]
+        # wave 20 (R3): tests/test_calc.py holds the finding's reproduction when the document names it, and a CHANGED_TEST
+        # there is denied whatever the reason; this scenario is about the missing line, so the reproduction is prose
+        run_id = h.submit(findings_doc(h.base_sha, [finding("N1-1", reproduction="add(2, 3) answers -1 (a - b); no test named")])).json()["run_id"]
         run = h.run(run_id)
         assert run["status"] == "awaiting_review", run["reasons"]
         f = h.findings(run_id)[0]

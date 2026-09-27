@@ -20,8 +20,14 @@ and of every subagent (``agents/middlewares/tool_error_handling_middleware.py:26
 
 Round 18 R5/R7: an opaque exec (interpreter, shell, make, find -delete, git -c) is recorded ``decision:
 allow_opaque, class: exec, opaque: true`` and counted on the binding; every write-capable operand of a bash call is
-resolved INSIDE the container (``readlink -f`` on its longest existing prefix) and the call is denied when the
-resolver answers None or the path lands outside ``services/<service>/`` and ``docs/adr/`` (fail closed).
+resolved INSIDE the container (its longest existing prefix) and the call is denied when the resolver answers None
+or the path lands outside ``services/<service>/`` and ``docs/adr/`` (fail closed).
+
+Round 19 R8: resolution is bounded (16 operands, 64 path components per operand; a breach is a deny) and happens
+in ONE exec through the engine's pinned helper, AFTER the decision is on the ledger: a call that needs resolution
+is recorded ``tool_call_decided`` with ``decision: pending`` first, resolved, then recorded ``tool_call_resolved``
+with the final decision — an exec/ledger amplification through the resolver is no longer possible before the
+record exists.
 """
 
 from __future__ import annotations
@@ -87,8 +93,13 @@ class ZbmGuardrailProvider:
             elif verdict.klass == "subagent":
                 if binding.subagents >= rt.settings.max_subagents_per_run:
                     decision, code, message = "deny", "TOOL_DENIED", "subagents are off in this build (R8)"
-            elif verdict.klass in ("exec", "read") and request.tool_name == "bash":
-                decision, code, message = self._resolve_check(rt, binding, verdict, decision, code, message)
+        pending = (not verdict.deny and decision != "deny" and bool(verdict.write_targets)
+                   and (verdict.klass in ("exec", "read") and request.tool_name == "bash" or verdict.klass == "write"))
+        if pending:
+            if len(verdict.write_targets) > policy_cap_operands():
+                pending, decision, code, message = False, "deny", "TOOL_DENIED", f"more than {policy_cap_operands()} write operands in one call (R8)"
+            elif any(policy_path_depth(t) > policy_cap_depth() for t in verdict.write_targets):
+                pending, decision, code, message = False, "deny", "TOOL_DENIED", f"a write operand deeper than {policy_cap_depth()} components (R8)"
         binding.tool_calls += 1
         if decision == "deny":
             binding.denies += 1
@@ -97,18 +108,34 @@ class ZbmGuardrailProvider:
         elif decision == "allow_opaque":
             binding.opaque_execs += 1
         payload = {"run_id": binding.run_id, "tool": str(request.tool_name)[:64], "class": verdict.klass,
-                   "decision": decision, "opaque": decision == "allow_opaque", "code": code,
+                   "decision": "pending" if pending else decision, "opaque": decision == "allow_opaque", "code": code,
+                   "message": str(message)[:160],
                    "args_sha256": args_sha256(request.tool_input),
                    "token_id": _token_id(binding), "policy_version": rt.policy_seed.get("policy_version", 0),
                    "is_subagent": bool(request.is_subagent), "tool_call_id": str(request.tool_call_id or "")[:64],
-                   "seq": binding.tool_calls}
+                   "seq": binding.tool_calls, "write_operands": len(verdict.write_targets)}
         try:
             rt.record(derived_id("tc", binding.run_id, binding.tool_calls, payload["args_sha256"], payload["tool_call_id"]),
                       "tool_call_decided", ACTOR, binding.run_id, payload,
-                      f"Tool call {binding.tool_calls} {decision} ({verdict.klass}) on {binding.run_id}")
+                      f"Tool call {binding.tool_calls} {payload['decision']} ({verdict.klass}) on {binding.run_id}")
         except Exception as exc:  # noqa: BLE001 - any failure to record is a deny and a failed run
             rt.on_ledger_failure(binding.run_id, f"tool_call_decided record failed: {type(exc).__name__}")
             return _deny("LEDGER_UNAVAILABLE", "the decision could not be recorded; nothing runs unrecorded")
+        if pending:
+            # R8: resolution AFTER the record, ONE exec, then the final decision is its own event
+            decision, code, message = self._resolve_check(rt, binding, verdict, decision, code, message)
+            if decision == "deny":
+                binding.denies += 1
+                if verdict.opaque:
+                    binding.opaque_execs -= 1
+            payload2 = {**payload, "decision": decision, "code": code, "message": str(message)[:160]}
+            try:
+                rt.record(derived_id("tcr", binding.run_id, binding.tool_calls, payload["args_sha256"], payload["tool_call_id"]),
+                          "tool_call_resolved", ACTOR, binding.run_id, payload2,
+                          f"Tool call {binding.tool_calls} resolved: {decision} ({verdict.klass}) on {binding.run_id}")
+            except Exception as exc:  # noqa: BLE001
+                rt.on_ledger_failure(binding.run_id, f"tool_call_resolved record failed: {type(exc).__name__}")
+                return _deny("LEDGER_UNAVAILABLE", "the resolved decision could not be recorded; nothing runs unrecorded")
         if decision == "deny":
             return _deny(code, message, verdict.klass)
         return GuardrailDecision(allow=True, reasons=[GuardrailReason(code="ALLOW", message=verdict.klass)],
@@ -134,18 +161,40 @@ class ZbmGuardrailProvider:
 
     @staticmethod
     def _resolve_check(rt, binding, verdict, decision, code, message):
-        """Every write-capable operand of the call is resolved INSIDE the sandbox (``readlink -f`` on the longest
-        existing prefix; the classifier cannot see the container's filesystem, A2). None → deny (R7: fail closed);
-        a path that lands outside ``services/<service>/`` or ``docs/adr/`` → deny."""
+        """Every write-capable operand of the call is resolved INSIDE the sandbox in one exec (its longest existing
+        prefix; the classifier cannot see the container's filesystem, A2). None → deny (R7: fail closed); a path
+        that lands outside ``services/<service>/`` or ``docs/adr/00NN-*.md`` → deny."""
         ctx = policy.Context(service=binding.service, workspace=binding.workspace, evidence_root=rt.evidence_root)
         roots = policy.write_roots(ctx)
-        for target in verdict.write_targets:
-            real = rt.resolve_sandbox_path(binding.run_id, target)
+        targets = list(verdict.write_targets)
+        many = getattr(rt, "resolve_sandbox_paths", None)
+        if many is not None:
+            reals = many(binding.run_id, targets)
+        else:
+            reals = [rt.resolve_sandbox_path(binding.run_id, t) for t in targets]
+        for real in reals:
             if real is None:
                 return "deny", "TOOL_DENIED", "a write operand could not be resolved inside the sandbox (fail closed)"
             if real in roots or not any(policy.inside(real, r) for r in roots):
                 return "deny", "TOOL_DENIED", "a write operand resolves outside the service directory (symlink)"
+            if policy.inside(real, roots[1]) and not policy.adr_name_ok(real, ctx):
+                return "deny", "TOOL_DENIED", "a write operand resolves to a docs/adr/ path that is not 00NN-*.md (R7)"
         return decision, code, message
+
+
+def policy_cap_operands() -> int:
+    from zbm_delivery.adapters.sandbox import MAX_RESOLVE_OPERANDS
+    return MAX_RESOLVE_OPERANDS
+
+
+def policy_cap_depth() -> int:
+    from zbm_delivery.adapters.sandbox import MAX_PATH_DEPTH
+    return MAX_PATH_DEPTH
+
+
+def policy_path_depth(path: str) -> int:
+    from zbm_delivery.adapters.sandbox import path_depth
+    return path_depth(path)
 
 
 def _token_covers(binding: registry.RunBinding, request: GuardrailRequest) -> bool:

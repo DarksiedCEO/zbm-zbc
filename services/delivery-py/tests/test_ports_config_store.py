@@ -140,10 +140,12 @@ def test_backend_from_settings_is_unconfigured_without_key_and_openai_wire_shape
     eg = EgressClient(("llm.internal",), record=lambda *a, **k: None, transport=httpx.MockTransport(handler), env={})
     be = backend_from_settings(s2, eg, NotWiredVault(), env2)
     assert isinstance(be, OpenAICompatBackend)
-    ans = be.complete(ChatTurn(messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"},
-                                         {"role": "assistant", "content": "", "tool_calls": [{"id": "p", "name": "ls", "args": {}}]},
-                                         {"role": "tool", "content": "ok", "tool_call_id": "p", "name": "ls"}],
-                               tools=[{"type": "function", "function": {"name": "bash", "parameters": {"type": "object"}}}]))
+    from helpers import llm_scope
+    with llm_scope(egress=eg):                            # wave 20 R14: a backend call needs a bound live run
+        ans = be.complete(ChatTurn(messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"},
+                                             {"role": "assistant", "content": "", "tool_calls": [{"id": "p", "name": "ls", "args": {}}]},
+                                             {"role": "tool", "content": "ok", "tool_call_id": "p", "name": "ls"}],
+                                   tools=[{"type": "function", "function": {"name": "bash", "parameters": {"type": "object"}}}]))
     assert seen["auth"] == f"Bearer {FAKE_KEY}" and seen["body"]["model"] == "m" and seen["body"]["tools"]
     assert [m["role"] for m in seen["body"]["messages"]] == ["system", "user", "assistant", "tool"]
     assert ans.tool_calls == [{"id": "c1", "name": "bash", "args": {"command": "ls"}}] and ans.input_tokens == 7
@@ -200,14 +202,14 @@ def test_runner_detects_only_seeded_frameworks(tmp_path):
     seed = json.load(open(SERVICE_ROOT / "seed" / "test_commands_seed.json"))
     os.makedirs(tmp_path / "services" / "svc")
     with pytest.raises(RunnerRefused):
-        TestRunner(seed, "svc", None, str(tmp_path), 60)
+        TestRunner(seed, "svc", str(tmp_path), 60)
     (tmp_path / "services" / "svc" / "package.json").write_text("{}")
     with pytest.raises(RunnerRefused):                       # npm needs the lockfile (D7)
-        TestRunner(seed, "svc", None, str(tmp_path), 60)
+        TestRunner(seed, "svc", str(tmp_path), 60)
     (tmp_path / "services" / "svc" / "package-lock.json").write_text("{}")
-    assert TestRunner(seed, "svc", None, str(tmp_path), 60).framework == "npm"
+    assert TestRunner(seed, "svc", str(tmp_path), 60).framework == "npm"
     (tmp_path / "services" / "svc" / "pytest.ini").write_text("")
-    r = TestRunner(seed, "svc", None, str(tmp_path), 60)
+    r = TestRunner(seed, "svc", str(tmp_path), 60)
     assert r.framework == "pytest" and r.test_argv("tests/t.py::x") == ["pytest", "-q", "-p", "no:cacheprovider", "-rfE", "tests/t.py::x"]
     for bad in ("../t.py::x", "/abs/t.py::x", "t.py", "t.py::x; rm -rf /"):
         with pytest.raises(RunnerRefused):
