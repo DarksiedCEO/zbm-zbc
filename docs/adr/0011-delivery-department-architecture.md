@@ -1,6 +1,7 @@
 # ADR 0011 — Client Delivery & Operations (28): agent runtime adapters and the fix engine (`services/delivery-py`)
 
-- **Status:** accepted for build (Sep 27, 2026). Built, tested (391 tests: 388 passed, 3 skipped with the printed
+- **Status:** accepted for build (Sep 27, 2026); amended the same day by fix wave 19 (AEGIS round 18, rulings
+  R1-R11 — see "Round 18 amendments" below). Built, tested (425 tests: 422 passed, 3 skipped with the printed
   reason) and live-run on this box; **not certified for a fix run against `main`** and not certified for any run
   at all until the Docker properties of §C.2 are proven on a machine with a daemon (see "Known limitations") and a
   provider key exists.
@@ -68,15 +69,15 @@ ledger-anchored local log with the instance lease and Andre's reconcile).
 
 | What | SHA-256 |
 |---|---|
-| `config/deerflow.engine.yaml` | `798529f704cb03fbbc9d30f38a4efb844593ac193fec7e94059bb43878c90c51` |
+| `config/deerflow.engine.yaml` | `e4d51379594e0f7dc2265a0fee0ff25aa7134b1e6aecabe91b291a1d18064f0e` (wave 19: `subagents.max_total_per_run: 1`, deer-flow's floor, with subagents disabled in code) |
 | `config/extensions_config.json` | `4875b2992e9062d6f8084ac64d543f50a29624bd0e7eb82586e31b3056563807` |
 | `seed/skills_manifest.json` | `26f51402a23232a6b3f6a5764829800c3570403e2694ee1a9f331fe23e040320` |
-| `seed/prompts_manifest.json` | `064a5e3e3b3ea696cce1a586eef792a9a73e26ed8b45dabe9dfa20fa2d295440` |
+| `seed/prompts_manifest.json` | `a55a2a0f6ef5979a4ff4df702b126bb3d43d05c208cbae6d10e0da8bc420ee1e` (wave 19: `engine.system.md` rules 2 and 5 restated for R1/R3) |
 | `seed/tool_policy_seed.json` | `5c8ac4620ab2ebdc961fb8e0bd00567fab0a25a500d8d9e8880786f7299b47d1` |
-| `seed/test_commands_seed.json` | `019cfba7c9bdb11130f0bae0f7b884c2de0b9e551a254550e189f2e7d3c2a112` |
-| `seed/licence_allowlist.json` | `010eef6c7bfc084426303513372debf845e003df85e54220dc43a355fe31bc0b` |
-| `seed/licence_exceptions.json` | `53b6f62c221517143db32c4f6a27b40cb3efbfa68de7b073cf0981f138d4104d` |
-| `docs/evidence/licences-2026-09-27.json` (the licence report) | `12f02de71571aef82b7293a6e432552a72ffb1f0ca692e951d9a9178e462e51f` |
+| `seed/test_commands_seed.json` | `89cf7fee7e295e6becfdd29dae30ce86d2fae737e63394f8d7646d6e2e036705` (wave 19: engine ini values, `collect`, `-rfE`, `test_infra_globs`, `verified`, cargo globs) |
+| `seed/licence_allowlist.json` | `c02f367f3e6cd02949e18dbc2eaa2ceabcb917ac4aa5fc58ad73bec4ac6dfb6e` (wave 19: `unrecorded_allow`) |
+| `seed/licence_exceptions.json` | `10695daf388308309d5b32057e9d0b764817b80979e8459db68ad5b48ac0ef62` (wave 19: `dotenv`, `tiktoken`) |
+| `docs/evidence/licences-2026-09-27.json` (the licence report) | `f154e1b56befac3a939d69cfeece434516d172fa0c6aedbfbaeab464d1ee0e8d` (wave 19: dotenv + tiktoken via file exceptions) |
 | `uv.lock` | `f01aa750572f5b6662b8cb1b52d370574474d83379b137bee44e9e183264457b` |
 | deer-flow commit (`DLV_DEERFLOW_COMMIT`, G9) | `345f08be00c8a9495079b732a39b46aa9af1584e` |
 | service image digest | **not resolvable here** (Docker Hub is refused by this box's proxy; no daemon): the digest is a required `--build-arg BASE_DIGEST` and is recorded here at first build |
@@ -209,11 +210,134 @@ gate).
 - **A real memory adapter (§C.6)** — the `MemoryPort` seam with `MemoryOff` and the tested contract only.
 - **OpenBot / ECC (R28-4)** — not audited, not built.
 
+## Round 18 amendments (fix wave 19, Sep 27, 2026; lead rulings R1-R11, binding)
+
+The round proved the perimeter and disproved the fix semantics: a lazy agent reached `awaiting_review` with the
+defect intact through a `conftest.py` monkeypatch, a forged pytest summary, a neutered `pytest.ini`, a deleted test,
+a trivial `DISPROOF:` and a suite that timed out. The principle now in force: **the engine never trusts anything
+the agent's own process can emit** — test output, summary lines, exit codes of agent-chosen commands or the test
+tree's configuration. Every verdict is computed by the engine from artefacts it controls, and where that is
+impossible the state is `unknown`, never green.
+
+- **R1 — split-diff verification** (`engine/loop.py::_green_phase`, `runner.py::classify_paths`). After `FIXED`
+  every changed path is classified `src` / `test` (the seeded test globs) / `test_infra` (`conftest.py` at any
+  depth, `pytest.ini`, `pyproject.toml` when its `[tool.pytest*]` sections changed, `setup.cfg`, `tox.ini`,
+  `.pytest_cache`, `sitecustomize.py`, `usercustomize.py`, `*.pth`, `setup.py`, `.coveragerc`; cargo: `Cargo.toml`,
+  `Cargo.lock`, `build.rs`, `.cargo/`, `rust-toolchain*`; go: `go.mod`, `go.sum`, `go.work*`, `testdata/`; npm:
+  `package.json`, the lockfile, `.npmrc`, jest/vitest/babel/mocha configs, `tsconfig*.json`). Any test-infra change
+  fails the round `test_infra_changed`; a deleted existing test file fails it `test_deleted` (a test may be changed
+  under `CHANGED_TEST:`, never removed); no source change fails it `no_source_change`. The engine then builds two
+  fresh checkouts from `git archive HEAD -- services/<svc>` on the host and ships them into the sandbox under
+  `/mnt/user-data/workspace/.dlv-verify/`: the **verification checkout** (HEAD tree + the `src` changes + the RED
+  test file only) must PASS and the **reverted checkout** (HEAD tree + the RED test file only) must FAIL. GREEN in
+  the agent's tree but RED in the verification checkout is `fix_not_in_source`. The stash-based revert check is
+  replaced by the reverted checkout (the `stash` form stays in `GitPort`, unused by the engine). The classification
+  and both outcomes are recorded `verification_run` and kept on the finding (`verification`, `revert_check`);
+  `states.py` refuses `fixed` unless the checkout passed and the reverted one failed.
+- **R2 — engine-owned invocation and counts** (`runner.py`, `engine/parsers.py::verified_counts`). Every pytest
+  run (suite, RED, GREEN, both checkouts, disproof) carries `-c <engine ini>` (written by the engine under
+  `.dlv-engine/<nonce>/`, `addopts` empty, absolute `pythonpath`/`testpaths` — pytest resolves `paths`-typed ini
+  values against the ini file's directory), `--rootdir=<cwd>`, `-o addopts= -o python_files= -o testpaths= -o
+  pythonpath=` from the seed, `-p no:cacheprovider`, `-rfE`, `--junitxml=<engine path>` (xunit1 family). The
+  repository's own pytest configuration is never read. The junit file is read back with `docker cp` (the daemon,
+  not a process in the box) and must agree with a separate `--collect-only -q` run (testcase count == collected),
+  with the summary line (counts and `FAILED` names) and with the exit code (0 ⇔ no failure/error). Any
+  disagreement, a missing/unparseable junit, exit 5, exit 124 / timeout or a truncated capture is `status:
+  unknown` — never a valid RED, never GREEN, never a green suite; `suite.after` must be `ok` with no failure or the
+  run ends `failed` (`SUITE_UNKNOWN` / `SUITE_NOT_GREEN`; a pre-existing failure nobody fixed can no longer ride
+  a disproved finding to `awaiting_review`). cargo/go/npm have no engine-owned report in this build: their counts
+  are `unknown` by construction (seed `verified: false`), so a finding on such a service cannot reach `fixed`
+  until one is built — stated, not hidden. **Accepted residual:** a test module runs as the same uid in the same
+  container as the engine's junit file; agent code inside pytest can read `sys.argv`, find the path and rewrite
+  it. It must then also forge the collect-only count (a second process), the summary line and the exit code, and
+  R1 rejects the only places (`conftest.py`, `pytest.ini`) where that code could live outside the RED test file
+  — whose semantics AEGIS re-review reads.
+- **R3 — a disproof is the finding's own reproduction** (`engine/loop.py::_disproof`,
+  `runner.py::node_id_in_text`). `DISPROOF:` is honoured only when the findings document names a test node id in
+  the finding's `reproduction` text; the engine runs the SEEDED argv with that target in a fresh checkout of the
+  run's `base_sha` (the agent's argv is recorded `agent_argv_ignored`, never run) and the finding is `disproved`
+  only when that reproduction PASSES there (the declared failure does not occur) with a statement ≥ 40 characters.
+  A finding with no machine-runnable reproduction cannot be disproved by the engine (`disproof_not_machine_runnable`)
+  and stays open for AEGIS. The report lists disproved findings in their own section with the argv, the base sha
+  and the evidence id.
+- **R4 — the sandbox network is `none`, full stop** (`config.py`, `adapters/sandbox.py`, `gitport.py`,
+  `docker/sandbox.Dockerfile`). `DLV_SANDBOX_NETWORK` accepts only `none` (default); the argv is `--network none`;
+  `forbidden_run_token` matches the joined argv against `--network(=|\s)+(host|bridge|container:…)` and any `--net`.
+  The sandbox image purges `curl`/`wget` after the toolchain install (the live test asserts `command -v` fails and
+  `docker inspect` says `NetworkMode: none`). The copy-in stream excludes `.git` (a linked worktree's `.git` is a
+  FILE and was shipped before) and the engine verifies `test ! -e /mnt/user-data/workspace/.git` after copy-in.
+  `GitPort.worktree_add` refuses when the repository or the new worktree lists any remote (`git remote`) — a
+  linked worktree shares the repository's config, so **`DLV_REPO_PATH` must be a remote-less local repository**;
+  the (empty) listing is recorded in `worktree_created`.
+- **R5 — opaque exec is opaque** (`policy.py`, `adapters/guardrail.py`). An interpreter / shell / `make` /
+  `find -delete` / `git -c|--git-dir|--work-tree` / `pytest` / `cargo|go|npm` invocation is `decision:
+  allow_opaque`, class `exec`, `opaque: true` in `tool_call_decided` — a distinct decision value, never a
+  classified `allow` or `read`; the binding counts them and the report prints the count per finding. Every
+  write-capable operand (`rm`, `cp`/`mv`/`ln`/`install` destinations, `tee`, `touch`, `mkdir`, `chmod` paths,
+  `sed -i` files, `dd of=`, `find -delete` start, redirections) is normalised against the cwd after `cd` (relative
+  operands too), must land inside `services/<service>/` or `docs/adr/` (no longer anywhere in the workspace or
+  `/tmp`), and anything unresolvable before execution (`* ? [ { } $ ~` and backticks) is refused
+  `destructive_outside_workspace`. The guardrail then resolves the same operands INSIDE the container and denies
+  when the resolver answers None or the path lands outside. The direct-form denies are unchanged (p1 re-run: 18 of
+  38 forms allowed, every one of them an honestly recorded opaque exec, an in-service `ln`/`chmod` or a
+  background `bash script &`, which is opaque too).
+- **R6 — deadlines and reaping** (`adapters/egress.py`, `engine/loop.py`, `service.py`, `adapters/sandbox.py`).
+  The egress client streams every response against a TOTAL wall-clock deadline (`default_timeout_s`;
+  `llm_read_timeout_s` for LLM calls; never more than the run's remaining wall clock, which the model backend
+  passes as `deadline_s`) and against the byte cap chunk by chunk; `abort(run_id)` closes every response in
+  flight. A watchdog thread per run fails the run on the wall clock while a turn is in flight (`fix_run_deadline`),
+  aborts its egress and flags the loop (`run_interrupted`); `POST …/cancel` does the same. `destroy` checks both
+  exit codes and records `sandbox_release_failed` (raising) on failure; the container and the volume carry the
+  label `zbm.dlv.run=<run_id>`; `sandbox.reap` removes everything with that label at service start and on
+  `stop()`, one `sandbox_reaped` event (recorded first) per removal — never by name pattern.
+- **R7 — fail closed on containment** (`adapters/sandbox.py`). `realpath` resolves the longest existing prefix
+  with `readlink -f` inside the container; a path that cannot be resolved at all is refused (reads and writes).
+  A write lands in `.dlv-stage/<nonce>/` first and is `mv`ed into place after the destination parent is
+  re-resolved (twice: before and after `mkdir -p`). **Residual:** the window between the last `readlink` and the
+  `mv` is milliseconds and needs a concurrent process inside the box (a `bash script &` is an opaque exec the
+  agent can run); closing it needs `openat2(RESOLVE_BENEATH)` semantics no shell utility offers — documented, not
+  closed.
+- **R8 — subagents off** (`config.py`, `harness.py`, `gate.py`, the yaml). `DLV_MAX_SUBAGENTS_PER_RUN` accepts only
+  `0`/unset; `DeerFlowClient(subagent_enabled=False)`; the guardrail denies the `subagent` class; the yaml keeps
+  `max_total_per_run: 1` because deer-flow's schema refuses `0` (the task tool is never offered). Turning them on
+  needs deer-flow's subagent executor to carry our `ZbmToolReceiptMiddleware` and `ZbmSystemPromptMiddleware`
+  (`subagents/executor.py` builds its chain without `custom_middlewares`) — a proven middleware path on the
+  subagent side, plus scenario coverage of `task`, before the switch exists again.
+- **R9 — licence gate** (`licences.py`, the two seeds). `*.egg-info` (dir or file) is scanned; every importable
+  top-level entry without a `RECORD`/`SOURCES.txt`/`top_level.txt` owner is a problem unless named in
+  `unrecorded_allow` (`_virtualenv.py`, `_virtualenv.pth`); the METADATA `Name` must equal the directory's name
+  (PEP 503 normalised) and the forbidden check keys on both; a metadata licence of UNKNOWN (or a pasted licence
+  text) passes only through a `file` exception naming the proof file and its first line, both re-read
+  (`dotenv` 0.9.9 and `tiktoken` 0.14.0 added with reasons). Residual: the classifier step of the spec's chain
+  still accepts a distribution whose classifier says MIT while its bundled file says otherwise.
+- **R10 — report integrity** (`engine/report.py`, `engine/loop.py`). Captured output is fenced with a backtick
+  run one longer than the longest run in the content; `SWEEP:` sites are kept only when the file is in the diff
+  and the line is inside a changed hunk (any line of a new untracked file) — the rest are dropped with the reason
+  and counted; agent turn/tool-call/token/opaque-exec/deny counts are recorded as `agent_usage` and the report's
+  agent line cites that event id; the "Captured output tail" fed back to the model sits between
+  `--- BEGIN CAPTURED OUTPUT (untrusted) ---` / `--- END CAPTURED OUTPUT ---`.
+- **R11 — small.** `identity.assert_effective` runs before every turn inside `bound_user`; the yaml pin is
+  mandatory in every mode (`DLV_ALLOW_UNPINNED_CONFIG` and `DLV_DEERFLOW_CONFIG_SHA256` are refused as switches
+  that do not exist).
+
+Changed existing tests (they enshrined the disproved behaviour): S4 (the agent's `DISPROOF:` argv was run; now the
+finding's reproduction is, and N1-1 is fixed first so `suite.after` is green), the docker-run argv token test
+(labels, `--network none`), A3/A4 (`none`), A1 (`opaque` in the decision payload), G14 (the seeded `collect` argv,
+the `remote`/`archive`/`show` git reads, `mv`/`test` execs), the runner argv test (`-rfE`).
+
 ## Known limitations
 
 - The tool-call classifier is a denylist over an unbounded language (df-exec F-03): it is the record and the
-  first refusal; the BOUNDARY is the sandbox (non-root, `--cap-drop=ALL`, default seccomp, `--read-only`,
-  `--network <internal>`, no socket mount) — and those properties are unproven on this box.
+  first refusal; an interpreter/shell/make invocation is recorded as `allow_opaque` (R5) and the BOUNDARY is the
+  sandbox (non-root, `--cap-drop=ALL`, default seccomp, `--read-only`, `--network none`, no socket mount, no
+  `.git`, no `curl`/`wget`) — and those properties are unproven on this box.
+- What a lazy or hostile agent can still do to reach `awaiting_review` with the defect intact (after wave 19):
+  write a RED test whose body inspects the source text (or otherwise decides pass/fail without exercising the
+  defect) and a source change that satisfies it — the engine proves RED→GREEN, the split-diff verification and a
+  green suite, not that the test exercises the finding; or have agent code that runs inside the RED test module
+  rewrite the engine's junit file AND print a matching summary, exit code and collect-only count (all four in the
+  same container, same uid). Both leave the finding's own reproduction (if one is named) and AEGIS re-review as
+  the checks that catch them.
 - No retention job; one run in flight per process; a harness crash is a run failure (worker-thread exception
   boundary), never a service crash; a ledger failure mid-run leaves the run failed in memory and unrecorded until
   the next start.
@@ -247,6 +371,8 @@ gate).
 ## Testing
 
 `cd services/delivery-py && .venv/bin/python -m pytest -q` (no network; the real deer-flow harness, the real
-guardrail, the argv-level Docker double, a scripted model, a temporary git repository). 391 tests: 388 passed,
-3 skipped (the Docker live module, reason printed), 201 s wall. `ruff check src tests devtools` clean.
-Evidence: `services/delivery-py/docs/evidence/dept28/` and `docs/evidence/licences-2026-09-27.json`.
+guardrail, the argv-level Docker double, a scripted model, a temporary git repository). 425 tests: 422 passed,
+3 skipped (the Docker live module, reason printed), ~14 min wall (wave 19 added the collect-only cross-check and
+two verification checkouts per fix). `ruff check src tests devtools` clean. Round-18 findings: `tests/test_round18.py`
+(one failing-first test per finding). Evidence: `services/delivery-py/docs/evidence/dept28/` (incl. the wave-19 live
+log and the re-run of the reviewers' probes) and `docs/evidence/licences-2026-09-27.json`.

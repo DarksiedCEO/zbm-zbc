@@ -135,20 +135,28 @@ def test_s3_suite_failure_the_engineer_did_not_cause_blocks_fixed_and_fails_the_
 
 
 def test_s4_disproof_with_a_reproduction_the_engine_ran():
-    statement = ("The finding claims percent(1, 4) answers 20.0. The reproduction runs the existing test that asserts "
+    """Round 18 R3 changed this scenario: the engine runs the FINDING's own reproduction (the node id named in the
+    findings document, seeded argv) on the untouched base tree; the engineer's `DISPROOF:` argv is never run. The
+    fixture's pre-existing failure belongs to N1-1, which is fixed first so suite.after is green."""
+    statement = ("The finding claims percent(1, 4) answers 20.0. The reproduction it names is the existing test that asserts "
                  "percent(1, 4) == 25.0 and it passes on the untouched tree, so the observed value is 25.0.")
-    scenario = [{"text": "DISPROOF: pytest -q -p no:cacheprovider tests/test_calc.py::test_percent_basic\n" + statement}]
+    scenario = [write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
+                FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"},
+                {"text": "DISPROOF: pytest -q -p no:cacheprovider tests/test_calc.py::test_clamp\n" + statement}]
     h = Harness(scenario=scenario)
     try:
-        doc = findings_doc(h.base_sha, [finding("N1-2", line=11, reproduction="percent(1, 4) answers 20.0", expected="25.0",
-                                                 observed="20.0", class_hint="wrong_result")])
+        doc = findings_doc(h.base_sha, [finding("N1-1"),
+                                        finding("N1-2", line=11, reproduction="run tests/test_calc.py::test_percent_basic: percent(1, 4) answers 20.0",
+                                                expected="25.0", observed="20.0", class_hint="wrong_result")])
         run_id = h.submit(doc).json()["run_id"]
         run = h.run(run_id)
         assert run["status"] == "awaiting_review", run["reasons"]
-        f = h.findings(run_id)[0]
+        f = {x["finding_id"]: x for x in h.findings(run_id)}["N1-2"]
         assert f["state"] == "disproved"
         assert f["disproof"]["exit"] == 0 and f["disproof"]["reproduction_argv"][0] == "pytest"
-        assert f["disproof"]["statement_sha256"] and f["disproof"]["evidence_id"]
+        assert "tests/test_calc.py::test_percent_basic" in f["disproof"]["reproduction_argv"]        # the finding's, not the agent's
+        assert "tests/test_calc.py::test_clamp" not in f["disproof"]["reproduction_argv"]
+        assert f["disproof"]["statement_sha256"] and f["disproof"]["evidence_id"] and f["disproof"]["verdict"] == "pass"
         assert any("disproof — verify" in r["message"] for r in f["reasons"])
         assert "DISPROOF — VERIFY" in h.report(run_id)
         assert any(e["payload"]["phase"] == "disproof" for e in h.events("test_run"))

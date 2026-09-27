@@ -1,0 +1,14 @@
+network=host                       CONFIG REFUSED: DLV_SANDBOX_NETWORK='host': only none is built (round 18 R4: the sandbox has no network at
+network=bridge                     CONFIG REFUSED: DLV_SANDBOX_NETWORK='bridge': only none is built (round 18 R4: the sandbox has no network 
+network=none                       ACCEPTED -> --network none
+network=container:x                CONFIG REFUSED: DLV_SANDBOX_NETWORK='container:x': only none is built (round 18 R4: the sandbox has no net
+network=dlv-internal (default)     ACCEPTED -> --network none
+mem=1m                             ACCEPTED -> --network none
+cpus=99.9                          ACCEPTED -> --network none
+image on registry with port        ACCEPTED -> --network none
+image tag only                     CONFIG REFUSED: DLV_SANDBOX_IMAGE must be <registry-host>/<path>@sha256:<64 hex> (a tag-only reference is 
+image tag+digest                   CONFIG REFUSED: DLV_SANDBOX_IMAGE must be <registry-host>/<path>@sha256:<64 hex> (a tag-only reference is 
+
+adapter verifies the network is internal (docker network inspect / .Internal): False
+service/api verifies the network: False
+FORBIDDEN_RUN_TOKENS: ('--privileged', 'seccomp=unconfined', 'docker.sock', '--pid=host', '--network=host', '--cap-add', '--device', '--userns=host', '--security-opt=apparmor=unconfined')

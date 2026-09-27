@@ -111,6 +111,8 @@ task-reviewer :55-62 (no subagents), :96-113 (Spec Compliance), :117-138 (Code Q
 
 ## Ours (not forks)
 
-- `engine.system.md` — the engineer's system contract (the reply lines the engine parses).
+- `engine.system.md` — the engineer's system contract (the reply lines the engine parses). Fix wave 19 (round 18
+  R1/R3/R10): rule 2 states the test-infra/deleted-test rejection and the verification checkout; rule 5 states that
+  a `DISPROOF:` is verified by re-running the finding's own reproduction, never the engineer's command.
 - `brief.template.md` — the brief compiler's template (§C.8.3): the header is the runner's, the finding's free
   text sits only inside `--- BEGIN FINDING DATA (untrusted) --- … --- END FINDING DATA ---`.

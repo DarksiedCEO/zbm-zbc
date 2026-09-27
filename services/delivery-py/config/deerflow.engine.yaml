@@ -100,10 +100,13 @@ verification:
   receipts_enabled: true
 
 # D3: per-subagent limits (the gate refuses values above DLV_SUBAGENT_TIMEOUT_S / DLV_SUBAGENT_MAX_TURNS).
+# Round 18 R8: subagents are OFF — the client is built with subagent_enabled=False (no task tool is offered) and the
+# guardrail denies the subagent class outright; deer-flow's subagent executor builds its own middleware chain without
+# our receipt middleware and our system prompt. max_total_per_run is deer-flow's floor (its schema refuses 0).
 subagents:
   timeout_seconds: 900
   max_turns: 50
-  max_total_per_run: 8
+  max_total_per_run: 1
 
 # Nothing else: no acp_agents, no plugins, no extensions.mcp_servers (the gate refuses them when present).
 acp_agents: {}

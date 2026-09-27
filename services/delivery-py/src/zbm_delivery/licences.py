@@ -1,9 +1,13 @@
 """
-Installed-package licence gate (spec §C.7.2, D13, ST-01/02; test G12). For every distribution in a site-packages
-directory: read ``License-Expression``, else ``License``, else the licence classifiers, else the bundled ``LICENSE*``
-file's first line; normalise to an SPDX id; refuse anything outside ``seed/licence_allowlist.json``; an empty/UNKNOWN
-id is accepted only for a distribution named in ``seed/licence_exceptions.json`` whose proof file's first line
-matches; any of the forbidden distributions present at all is a refusal. Run at start (``gate.py``) and by
+Installed-package licence gate (spec §C.7.2, D13, ST-01/02; test G12; round 18 R9). For every distribution in a
+site-packages directory (``*.dist-info`` AND ``*.egg-info``, directory or file): read ``License-Expression``, else
+``License``, else the licence classifiers; normalise to an SPDX id; refuse anything outside
+``seed/licence_allowlist.json``. A distribution whose METADATA yields no usable id (UNKNOWN / a pasted licence text)
+passes ONLY through an explicit entry in ``seed/licence_exceptions.json`` naming the proof file and its first line
+(the bundled ``LICENSE*`` file is never trusted on its own). The METADATA ``Name`` must match the distribution
+directory's name (a spoofed name is a problem, and the forbidden-distribution check keys on both). Every importable
+top-level entry of site-packages must be covered by some distribution's ``RECORD`` (a vendored package with no
+metadata is a problem) unless the allowlist names it under ``unrecorded_allow``. Run at start (``gate.py``) and by
 ``devtools/licence_gate.py`` (which writes the JSON report under ``docs/evidence/``).
 """
 
@@ -127,16 +131,45 @@ def _first_line_licence(dist_info: str) -> tuple[str, str]:
     return "", ""
 
 
+def dir_name(entry: str) -> str:
+    """The distribution name a ``*.dist-info`` / ``*.egg-info`` entry carries in its own name (normalised)."""
+    base = os.path.basename(entry)
+    for suffix in (".dist-info", ".egg-info"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+    return _pep503(base.split("-")[0])
+
+
+def _pep503(name: str) -> str:
+    """PEP 503 normalisation: runs of ``-``, ``_`` and ``.`` become one ``-``; lower-case."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _metadata_path(dist_info: str) -> Optional[str]:
+    if os.path.isfile(dist_info):                         # a single-file egg-info IS the metadata
+        return dist_info
+    for name in ("METADATA", "PKG-INFO"):
+        p = os.path.join(dist_info, name)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def licence_of(dist_info: str) -> Dist:
-    meta_path = os.path.join(dist_info, "METADATA")
-    name = os.path.basename(dist_info).split("-")[0].replace("_", "-").lower()
+    meta_path = _metadata_path(dist_info)
+    name = dir_name(dist_info)
     version = ""
     try:
+        if meta_path is None:
+            raise OSError("no metadata")
         with open(meta_path, "r", encoding="utf-8", errors="replace") as fh:
             meta = HeaderParser().parse(fh)
     except OSError:
         return Dist(name, version, "UNKNOWN", "none", dist_info, "METADATA unreadable")
-    name = (meta.get("Name") or name).replace("_", "-").lower()
+    stated = _pep503(meta.get("Name") or "")
+    if stated and stated != name:
+        return Dist(name, meta.get("Version") or "", "UNKNOWN", "none", dist_info,
+                    f"METADATA Name {stated!r} does not match the distribution directory {name!r}")
     version = meta.get("Version") or ""
     expr = meta.get("License-Expression")
     if expr:
@@ -198,11 +231,51 @@ def _expression_ids(expr: str) -> list[str]:
     return [normalise(tok) for tok in re.split(r"\s+(?:AND|OR|and|or)\s+|[()]", expr) if tok.strip()]
 
 
+_DIST_SUFFIXES = (".dist-info", ".egg-info")
+
+
 def _find_dist(site_packages: str, name: str) -> Optional[Dist]:
-    want = name.replace("_", "-").lower()
+    want = _pep503(name)
     for entry in os.listdir(site_packages):
-        if entry.endswith(".dist-info") and entry.split("-")[0].replace("_", "-").lower() == want:
+        if entry.endswith(_DIST_SUFFIXES) and dir_name(entry) == want:
             return licence_of(os.path.join(site_packages, entry))
+    return None
+
+
+def _recorded_top_levels(site_packages: str) -> set[str]:
+    """Top-level names every distribution's RECORD (or SOURCES.txt / top_level.txt for egg-info) accounts for."""
+    out: set[str] = set()
+    for entry in os.listdir(site_packages):
+        if not entry.endswith(_DIST_SUFFIXES):
+            continue
+        d = os.path.join(site_packages, entry)
+        if not os.path.isdir(d):
+            continue
+        for fname in ("RECORD", "SOURCES.txt", "top_level.txt", "installed-files.txt"):
+            p = os.path.join(d, fname)
+            if not os.path.isfile(p):
+                continue
+            try:
+                with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                    for ln in fh:
+                        path = ln.split(",")[0].strip()
+                        if not path or path.startswith(".."):
+                            continue
+                        out.add(path.split("/")[0])
+            except OSError:
+                continue
+    return out
+
+
+def _stated_first_line(dist_info: str, proof: str) -> Optional[str]:
+    p = os.path.join(dist_info, proof)
+    try:
+        with open(p, "r", encoding="utf-8", errors="replace") as fh:
+            for ln in fh:
+                if ln.strip():
+                    return " ".join(ln.strip().split())
+    except OSError:
+        return None
     return None
 
 
@@ -210,17 +283,18 @@ def check(site_packages: str, allowlist: dict, exceptions: dict) -> Report:
     rep = Report(site_packages=site_packages)
     allowed = set(allowlist["allowed"])
     forbidden = {n.lower() for n in allowlist.get("forbidden_distributions", [])}
+    unrecorded_allow = set(allowlist.get("unrecorded_allow") or [])
     exc = {k.lower(): v for k, v in (exceptions.get("exceptions") or {}).items()}
     if not os.path.isdir(site_packages):
         rep.problems.append(f"site-packages not found: {site_packages}")
         return rep
     for entry in sorted(os.listdir(site_packages)):
-        if not entry.endswith(".dist-info"):
+        if not entry.endswith(_DIST_SUFFIXES):
             continue
         d = licence_of(os.path.join(site_packages, entry))
-        if d.name in forbidden:
+        if d.name in forbidden or dir_name(entry) in forbidden:
             d.problem = "forbidden distribution present (spec 0.3: dropped by the overlay)"
-        else:
+        elif d.problem is None:
             ids = _expression_ids(d.licence) if (" AND " in d.licence or " OR " in d.licence) else [d.licence]
             if d.name in exc and (d.licence in ("", "UNKNOWN") or d.source in ("file", "none", "license")):
                 e = exc[d.name]
@@ -228,7 +302,9 @@ def check(site_packages: str, allowlist: dict, exceptions: dict) -> Report:
                 ok = False
                 if kind == "file":
                     first, proof = _first_line_licence(d.dist_info)
-                    ok = bool(proof) and os.path.normpath(proof) == os.path.normpath(e["proof"]) and first == e["licence"]
+                    stated = _stated_first_line(d.dist_info, e.get("proof", "")) or ""
+                    ok = (bool(proof) and os.path.normpath(proof) == os.path.normpath(e["proof"]) and first == e["licence"]
+                          and bool(e.get("first_line")) and stated.lower().startswith(e["first_line"].lower()))
                 elif kind == "sibling":
                     sib = _find_dist(site_packages, e["sibling"])
                     ok = sib is not None and sib.source == "expression" and sib.licence == e["licence"]
@@ -242,7 +318,10 @@ def check(site_packages: str, allowlist: dict, exceptions: dict) -> Report:
                 else:
                     d.problem = "exception entry does not match the installed proof"
             if d.problem is None:
-                if any(i in ("", "UNKNOWN") for i in ids):
+                if d.source == "file":
+                    d.problem = ("licence unknown in metadata (the bundled licence file reads %s): needs an explicit "
+                                 "exception naming the proof file and its first line" % d.licence)
+                elif any(i in ("", "UNKNOWN") for i in ids):
                     d.problem = "licence unknown (no expression, License field, classifier or licence file)"
                 elif " OR " in d.licence or " or " in d.licence:
                     if not any(i in allowed for i in ids):
@@ -254,4 +333,13 @@ def check(site_packages: str, allowlist: dict, exceptions: dict) -> Report:
         rep.dists.append(d)
         if d.problem:
             rep.problems.append(f"{d.name} {d.version}: {d.problem}")
+    recorded = _recorded_top_levels(site_packages)
+    for entry in sorted(os.listdir(site_packages)):
+        if entry.endswith(_DIST_SUFFIXES) or entry == "__pycache__" or entry in unrecorded_allow or entry in recorded:
+            continue
+        full = os.path.join(site_packages, entry)
+        importable = os.path.isdir(full) or entry.endswith((".py", ".pth", ".so", ".pyd", ".egg", ".zip"))
+        if importable:
+            rep.problems.append(f"{entry}: importable top-level entry with no distribution record (vendored package "
+                                "without metadata; spec C.7.2)")
     return rep

@@ -86,6 +86,8 @@ class FakeDockerCli:
         self.daemon = daemon
         self.calls: list[list[str]] = []
         self.containers: dict[str, str] = {}      # name -> local volume dir
+        self.labels: dict[str, str] = {}          # container name -> run label value
+        self.volumes: dict[str, str] = {}         # volume name -> run label value
         self.exec_fail_next: Optional[int] = None
         os.makedirs(self.root, exist_ok=True)
 
@@ -112,13 +114,30 @@ class FakeDockerCli:
             vol = self._vol(name)
             os.makedirs(vol, exist_ok=True)
             self.containers[name] = vol
+            if "--label" in argv:
+                self.labels[name] = argv[argv.index("--label") + 1].split("=", 1)[1]
+            for a in argv:
+                if a.startswith("type=volume,"):
+                    opts = dict(kv.split("=", 1) for kv in a.split(",") if "=" in kv)
+                    vname = opts.get("src", "")
+                    self.volumes[vname] = opts.get("volume-label", "=").split("=", 1)[1]
             cid = hashlib.sha256(name.encode()).hexdigest()
             return ExecResult(0, (cid + "\n").encode(), b"")
+        if argv[0] == "ps":
+            label = [a for a in argv if a.startswith("label=")]
+            key = label[0][len("label="):] if label else None
+            lines = [f"{n} {self.labels.get(n, '')}" for n in self.containers if key is None or n in self.labels]
+            return ExecResult(0, ("\n".join(lines) + ("\n" if lines else "")).encode(), b"")
         if argv[0] == "rm":
             name = argv[-1]
             self.containers.pop(name, None)
+            self.labels.pop(name, None)
             return ExecResult(0, b"", b"")
+        if argv[0] == "volume" and argv[1] == "ls":
+            lines = [n for n in self.volumes]
+            return ExecResult(0, ("\n".join(lines) + ("\n" if lines else "")).encode(), b"")
         if argv[0] == "volume":
+            self.volumes.pop(argv[-1], None)
             name = argv[-1].replace("dlv-ws-", "dlv-")
             vol = self._vol(name)
             if os.path.isdir(vol):

@@ -51,6 +51,7 @@ class RunBinding:
     tool_calls: int = 0
     subagents: int = 0
     denies: int = 0
+    opaque_execs: int = 0
     container_name: Optional[str] = None
     finished: bool = False
     exec_seq: int = 0

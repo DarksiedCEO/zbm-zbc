@@ -2,11 +2,18 @@
 Parsers (spec §C.8.4 steps 1, 3, 7, 8; §C.8.5): the engineer's reply lines (strict regexes — anything else fails
 the round) and the per-framework suite output parsers (pytest summary line, ``cargo test`` result lines, ``go test``
 ok/FAIL per package, npm/jest summary). Counts come from the RUNNER's captured output, never from agent text.
+
+Round 18 R2: for pytest the summary line is a CROSS-CHECK only. The verdict is ``verified_counts`` — the junit file
+the engine asked for (``--junitxml`` to an engine-chosen path, read back by the engine) against the collect-only
+count, the summary line and the exit code. Any disagreement, a missing or unparseable junit, exit 5 (nothing
+collected), exit 124 / a timeout or a truncated capture is ``status == "unknown"``; ``unknown`` never satisfies
+green, a failed RED, or ``fixed``.
 """
 
 from __future__ import annotations
 
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -74,10 +81,36 @@ class Counts:
     skipped: int = 0
     failed_names: list[str] = field(default_factory=list)
     parsed: bool = False
+    status: str = "unknown"                  # "ok" only when every cross-check agreed (R2)
+    why: str = "not verified"
+    source: str = "none"                     # junit | summary | none
+    collected: Optional[int] = None
+    cases: dict = field(default_factory=dict)   # node id -> pass | fail | error | skip (junit only)
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+    def verdict_for(self, target: str) -> str:
+        """pass | fail | unknown for one node id: an ``unknown`` count set answers unknown; a target absent from the
+        junit report answers unknown (it did not run); skipped answers unknown (nothing was proven)."""
+        if not self.ok:
+            return "unknown"
+        out = self.cases.get(target)
+        if out is None:
+            # a parametrised or class-scoped target: every case under the target must agree
+            under = [v for k, v in self.cases.items() if k.startswith(target + "[") or k.startswith(target + "::")]
+            if not under:
+                return "unknown"
+            if all(v == "pass" for v in under):
+                return "pass"
+            return "fail" if any(v in ("fail", "error") for v in under) else "unknown"
+        return {"pass": "pass", "fail": "fail", "error": "fail"}.get(out, "unknown")
 
     def as_dict(self) -> dict:
         return {"passed": self.passed, "failed": self.failed, "errors": self.errors, "skips": self.skipped,
-                "failed_names": sorted(self.failed_names)[:200], "parsed": self.parsed}
+                "failed_names": sorted(self.failed_names)[:200], "parsed": self.parsed, "status": self.status,
+                "why": self.why, "source": self.source, "collected": self.collected}
 
 
 # verbose: "===== 1 failed, 2 passed in 0.03s =====" · quiet (-q): "1 failed, 2 passed in 0.03s"
@@ -173,4 +206,131 @@ PARSERS = {"pytest": parse_pytest, "cargo": parse_cargo, "go": parse_go, "npm": 
 
 
 def parse_counts(framework: str, output: str) -> Counts:
-    return PARSERS[framework](output)
+    c = PARSERS[framework](output)
+    c.source = "summary" if c.parsed else "none"
+    c.status, c.why = "unknown", "summary line only (no engine-owned report for this framework)"
+    return c
+
+
+# --- junit (R2) --------------------------------------------------------------------------------------------------------
+
+def _node_id(tc) -> str:
+    """xunit1: ``file`` + ``classname`` + ``name`` → pytest node id ``file::Class::name[param]``."""
+    file = tc.get("file") or ""
+    classname = tc.get("classname") or ""
+    name = tc.get("name") or ""
+    if not file:
+        parts = classname.split(".")
+        file = "/".join(parts[:-1] + [parts[-1] + ".py"]) if parts else ""
+        return f"{file}::{name}"
+    module = file[:-3].replace("/", ".") if file.endswith(".py") else file.replace("/", ".")
+    classes = classname[len(module) + 1:] if classname.startswith(module + ".") else ""
+    mid = "::".join(x for x in classes.split(".") if x) if classes else ""
+    return f"{file}::{mid}::{name}" if mid else f"{file}::{name}"
+
+
+def parse_junit(xml_text: str) -> Optional[Counts]:
+    """Counts and per-case outcomes from a pytest junit file (xunit1 family); None when unparseable."""
+    try:
+        root = ET.fromstring(xml_text)
+    except (ET.ParseError, ValueError, TypeError):
+        return None
+    c = Counts()
+    cases = root.iter("testcase")
+    n = 0
+    for tc in cases:
+        n += 1
+        node = _node_id(tc)
+        outcome = "pass"
+        for child in tc:
+            if child.tag == "failure":
+                outcome = "fail"
+            elif child.tag == "error":
+                outcome = "error"
+            elif child.tag.startswith("skip"):
+                outcome = "skip" if outcome == "pass" else outcome
+        prev = c.cases.get(node)
+        # a node id seen twice (setup error + failure) keeps the worst outcome
+        rank = {"pass": 0, "skip": 1, "fail": 2, "error": 3}
+        if prev is None or rank[outcome] > rank[prev]:
+            c.cases[node] = outcome
+        if outcome == "pass":
+            c.passed += 1
+        elif outcome == "fail":
+            c.failed += 1
+        elif outcome == "error":
+            c.errors += 1
+        else:
+            c.skipped += 1
+    if n == 0 and root.tag not in ("testsuites", "testsuite"):
+        return None
+    c.failed_names = sorted(k for k, v in c.cases.items() if v in ("fail", "error"))
+    c.parsed = True
+    c.source = "junit"
+    return c
+
+
+_COLLECT_NODE = re.compile(r"^[^\s:]+::\S.*$", re.M)          # a parametrised id may contain spaces
+_COLLECT_SUMMARY = re.compile(r"^(?P<n>[0-9]+) tests? collected", re.M)
+_COLLECT_NONE = re.compile(r"^no tests collected|^no tests ran", re.M)
+
+
+def parse_collected(output: str) -> Optional[int]:
+    """The number of node ids ``--collect-only -q`` printed, cross-checked against its own ``N tests collected``
+    line when present; None when the two disagree or nothing is recognisable."""
+    ids = len(_COLLECT_NODE.findall(output))
+    matches = list(_COLLECT_SUMMARY.finditer(output))
+    m = matches[-1] if matches else None
+    if m is not None:
+        stated = int(m.group("n"))
+        return ids if stated == ids else None
+    if _COLLECT_NONE.search(output):
+        return 0 if ids == 0 else None
+    return ids if ids else None
+
+
+def verified_counts(*, junit_xml: Optional[str], output: str, collected: Optional[int], exit_code: int,
+                    timed_out: bool, truncated: bool) -> Counts:
+    """The engine's verdict for one pytest run (R2). Every cross-check must agree or the result is ``unknown``."""
+    summary = parse_pytest(output)
+    junit = parse_junit(junit_xml) if junit_xml else None
+
+    def unknown(why: str) -> Counts:
+        c = junit if junit is not None else Counts()
+        c.status, c.why = "unknown", why
+        c.source = "junit" if junit is not None else ("summary" if summary.parsed else "none")
+        c.collected = collected
+        if junit is None and summary.parsed:
+            c.passed, c.failed, c.errors, c.skipped = summary.passed, summary.failed, summary.errors, summary.skipped
+            c.failed_names = list(summary.failed_names)
+            c.parsed = True
+        return c
+
+    if timed_out or exit_code == 124:
+        return unknown("timed out (exit 124)")
+    if truncated:
+        return unknown("captured output truncated")
+    if junit is None:
+        return unknown("junit report missing or unparseable")
+    if exit_code == 5:
+        return unknown("nothing collected (exit 5)")
+    if collected is None:
+        return unknown("collect-only count unavailable")
+    total = junit.passed + junit.failed + junit.errors + junit.skipped
+    if total != collected:
+        return unknown(f"junit testcase count {total} != collected {collected}")
+    if not summary.parsed:
+        return unknown("no summary line to cross-check")
+    if (summary.passed, summary.failed, summary.errors, summary.skipped) != (junit.passed, junit.failed, junit.errors, junit.skipped):
+        return unknown("summary line disagrees with junit")
+    if sorted(summary.failed_names) != sorted(n.split(" ")[0] for n in junit.failed_names):
+        return unknown("summary FAILED lines disagree with junit")           # the summary cuts an id at its first space
+    red = junit.failed + junit.errors > 0
+    if exit_code == 0 and red:
+        return unknown("exit 0 with failures in junit")
+    if exit_code != 0 and not red and exit_code in (1,):
+        return unknown("exit 1 with no failure in junit")
+    if exit_code not in (0, 1):
+        return unknown(f"unexpected exit code {exit_code}")
+    junit.status, junit.why, junit.collected = "ok", "junit == collected == summary == exit", collected
+    return junit

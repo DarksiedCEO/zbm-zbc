@@ -159,8 +159,9 @@ def config_problems(doc: dict, settings: C.Settings) -> list[str]:
     if not isinstance(mt, int) or mt > settings.subagent_max_turns:
         p.append("subagents.max_turns must be an integer <= DLV_SUBAGENT_MAX_TURNS")
     mtp = _get(doc, "subagents", "max_total_per_run")
-    if not isinstance(mtp, int) or mtp > settings.max_subagents_per_run:
-        p.append("subagents.max_total_per_run must be an integer <= DLV_MAX_SUBAGENTS_PER_RUN")
+    if not isinstance(mtp, int) or mtp != 1 or settings.max_subagents_per_run != 0:
+        p.append("subagents.max_total_per_run must be 1 (deer-flow's floor) with DLV_MAX_SUBAGENTS_PER_RUN unset: subagents "
+                 "are off in this build (round 18 R8)")
     if _get(doc, "token_budget", "enabled") is not True:
         p.append("token_budget.enabled must be true")
     for key in ("tracing", "langfuse", "channel_connections", "agents_api", "authorization", "checkpointer", "stream_bridge"):
@@ -315,10 +316,9 @@ def run(settings: C.Settings, env: dict, *, site_packages: Optional[str] = None,
     except (OSError, yaml.YAMLError) as exc:
         raise RuntimeError(f"deer-flow config unreadable: {type(exc).__name__}") from None
     rep.config_sha256 = sha
-    expected = settings.deerflow_config_sha256 if settings.allow_unpinned_config else C.PINNED_DEERFLOW_CONFIG_SHA256
-    if sha != expected:
-        problems.append("deer-flow config sha256 does not match the pin (spec C.1.3; DLV_ALLOW_UNPINNED_CONFIG=1 + "
-                        "DLV_DEERFLOW_CONFIG_SHA256 for a non-production run)")
+    if sha != C.PINNED_DEERFLOW_CONFIG_SHA256:
+        problems.append("deer-flow config sha256 does not match the pin (spec C.1.3; round 18 R11: the pin is mandatory "
+                        "in every mode, there is no override)")
     problems += [f"deer-flow config: {x}" for x in config_problems(doc, settings)]
     # seeds
     try:

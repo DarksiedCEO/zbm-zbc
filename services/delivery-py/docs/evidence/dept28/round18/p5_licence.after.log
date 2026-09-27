@@ -1,0 +1,33 @@
+== 1. dropped / forbidden distributions and modules in the real venv
+  langchain_openviking       site-packages entries: none
+  openviking_sdk             site-packages entries: none
+  langgraph_api              site-packages entries: none
+  langgraph_runtime_inmem    site-packages entries: none
+  langgraph_cli              site-packages entries: none
+  telegram                   site-packages entries: none
+  python_telegram_bot        site-packages entries: none
+  forbiddenfruit             site-packages entries: none
+  app                        site-packages entries: none
+  gate.import_problems(): []
+  real venv: 186 dists, ok=True, problems=[]
+  sources: {'classifier': 18, 'exception:file': 3, 'exception:license_field': 1, 'exception:sibling': 1, 'exception:stated': 2, 'expression': 81, 'license': 80}
+  dists accepted by LICENSE-file first line only: []
+  dists accepted via exception: ['agent-client-protocol=Apache-2.0(exception:file)', 'deerflow-extension-api=MIT(exception:stated)', 'deerflow-harness=MIT(exception:stated)', 'dotenv=MIT(exception:file)', 'protobuf-py-ext=Apache-2.0(exception:sibling)', 'sqlite-vec=MIT(exception:license_field)', 'tiktoken=MIT(exception:file)']
+  forbidden_distributions in seed: ['langchain-openviking', 'openviking-sdk', 'langgraph-api', 'langgraph-runtime-inmem', 'langgraph-cli', 'forbiddenfruit', 'python-telegram-bot']
+
+== 2. lazy import sites of dropped packages inside deer-flow (grep)
+   <sp>/deerflow/agents/memory/backends/openviking/openviking_manager.py:565:        from langchain_openviking import (
+   <sp>/deerflow/agents/memory/backends/openviking/openviking_manager.py:572:        from langchain_openviking.actor_peer import use_actor_peer
+
+== 3. a planted site-packages: what slips past?
+  classifier-lie     licence=MIT                    source=classifier problem=None
+  dual               licence=MIT OR AGPL-3.0        source=expression problem=None
+  egg-agpl           licence=AGPL-3.0               source=license    problem=licence AGPL-3.0 is not on the allowlist
+  forbiddenfruit     licence=UNKNOWN                source=none       problem=forbidden distribution present (spec 0.3: dropped by the overlay)
+  good               licence=MIT                    source=expression problem=None
+  licref             licence=LicenseRef-Proprietary source=expression problem=licence LicenseRef-Proprietary is not on the allowlist
+  unknown-gplbody    licence=Apache-2.0             source=file       problem=licence unknown in metadata (the bundled licence file reads Apache-2.0): needs an explicit exception naming the proof file and its first line
+  unknown-mitfile    licence=MIT                    source=file       problem=licence unknown in metadata (the bundled licence file reads MIT): needs an explicit exception naming the proof file and its first line
+  problems: ['egg-agpl 1.0: licence AGPL-3.0 is not on the allowlist', 'forbiddenfruit 0.1.4: forbidden distribution present (spec 0.3: dropped by the overlay)', 'licref 1.0: licence LicenseRef-Proprietary is not on the allowlist', 'unknown-gplbody 1.0: licence unknown in metadata (the bundled licence file reads Apache-2.0): needs an explicit exception naming the proof file and its first line', 'unknown-mitfile 1.0: licence unknown in metadata (the bundled licence file reads MIT): needs an explicit exception naming the proof file and its first line', 'vendored_agpl_pkg: importable top-level entry with no distribution record (vendored package without metadata; spec C.7.2)']
+  egg-info seen at all: True
+  vendored package dir (no metadata) seen at all: False

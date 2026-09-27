@@ -1,5 +1,5 @@
 # ZBM fix-engine SANDBOX image (DEPT28_SPEC C.2, C.7.5): the per-service toolchains the engineer's tests need,
-# installed from lockfiles at build time, run as uid 65532 with no network at run time (--network <internal>).
+# installed from lockfiles at build time, run as uid 65532 with NO network at run time (--network none, R4).
 # The base digest is a REQUIRED build argument (see docker/Dockerfile for why). Record the resulting image digest
 # in ADR 0011 and set DLV_SANDBOX_IMAGE=<registry>/zbm/dlv-sandbox@sha256:<digest>.
 #   docker build -f docker/sandbox.Dockerfile --build-arg BASE_DIGEST=<64 hex> -t registry.zbm.internal/zbm/dlv-sandbox ../..
@@ -20,6 +20,10 @@ RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-too
 ARG GO_VERSION=1.23.1
 RUN curl -sSfL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /usr/local -xz \
     && ln -s /usr/local/go/bin/go /usr/local/bin/go && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+# Round 18 R4: the box has no network (--network none) AND no egress client — curl/wget are purged once the
+# toolchains are installed (tests/test_live_docker.py asserts `command -v curl wget` fails inside the container).
+RUN apt-get purge -y curl wget && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
+    && ! command -v curl && ! command -v wget
 # the engineer runs as 65532; the root filesystem is mounted read-only at run time; /tmp is a tmpfs
 USER 65532:65532
 WORKDIR /mnt/user-data/workspace

@@ -38,10 +38,11 @@ def _bind(h: Harness, run_id: str = "dlv-run-" + "A" * 26, deadline_s: int = 600
 def test_docker_run_argv_token_by_token(h):
     argv = S.ZbmDockerSandboxProvider.run_argv(h.settings, "dlv-run-" + "A" * 26, "/data/sandbox-env/x.env")
     skills = os.path.realpath(str(SERVICE_ROOT / "skills"))
-    assert argv == ["run", "-d", "--name", "dlv-dlv-run-" + "A" * 26, "--user", "65532:65532", "--cap-drop=ALL",
+    run_id = "dlv-run-" + "A" * 26
+    assert argv == ["run", "-d", "--name", f"dlv-{run_id}", "--label", f"zbm.dlv.run={run_id}", "--user", "65532:65532", "--cap-drop=ALL",
                     "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,nosuid,size=512m",
-                    "--pids-limit", "512", "--memory", "4g", "--cpus", "2", "--network", "dlv-internal",
-                    "--mount", f"type=volume,src=dlv-ws-dlv-run-{'A' * 26},dst={WORKSPACE}",
+                    "--pids-limit", "512", "--memory", "4g", "--cpus", "2", "--network", "none",
+                    "--mount", f"type=volume,src=dlv-ws-{run_id},dst={WORKSPACE},volume-label=zbm.dlv.run={run_id}",
                     "--mount", f"type=bind,src={skills},dst=/mnt/skills,ro",
                     "--env-file", "/data/sandbox-env/x.env", IMAGE, "sleep", "infinity"]
     for tok in argv:

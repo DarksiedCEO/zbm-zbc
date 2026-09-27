@@ -6,10 +6,13 @@ Sandbox adapter — Docker only, ours (spec §C.2, D2; F-01, F-02, ST-03).
 ``DockerCli`` port; never a mounted ``docker.sock``, never ``--privileged``, never ``seccomp=unconfined``, never a
 tag-only image, never ``LocalSandboxProvider``. No daemon → ``DockerUnavailable`` → no run starts (C.1.11).
 
-Container per run: ``docker run -d --name dlv-<run_id> --user 65532:65532 --cap-drop=ALL --security-opt
-no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,size=512m --pids-limit 512 --memory <mem> --cpus <cpus>
---network <internal net> --mount type=volume,src=dlv-ws-<run_id>,dst=/mnt/user-data/workspace --mount
-type=bind,src=<skills root>,dst=/mnt/skills,ro --env-file <allowlisted env file> <image>@sha256:<digest> sleep infinity``.
+Container per run: ``docker run -d --name dlv-<run_id> --label zbm.dlv.run=<run_id> --user 65532:65532
+--cap-drop=ALL --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,size=512m --pids-limit 512
+--memory <mem> --cpus <cpus> --network none --mount type=volume,src=dlv-ws-<run_id>,dst=/mnt/user-data/workspace,
+volume-label=zbm.dlv.run=<run_id> --mount type=bind,src=<skills root>,dst=/mnt/skills,ro --env-file <allowlisted env
+file> <image>@sha256:<digest> sleep infinity``. Round 18 R4: the network is ``none`` and nothing else (the LLM is
+reached by the engine process on the host through the egress adapter; the sandbox image ships no curl/wget); the
+copied workspace holds no ``.git`` (verified after copy-in), so a ``git push`` inside the box has no repository.
 The workspace is deer-flow's virtual prefix ``/mnt/user-data/workspace`` (config/paths.py VIRTUAL_PATH_PREFIX; the
 bash tool prepends ``cd`` to it and the file tools address it) — the spec's ``/workspace`` would leave every DF
 tool pointing at a path that does not exist (ADR 0011, spec defect). The volume is populated by ``docker cp`` of a
@@ -20,7 +23,14 @@ remaining wall clock)`` with the host-side subprocess timeout as the backstop.
 
 deer-flow calls ``provider.release(sandbox_id)`` after EVERY agent turn (sandbox/middleware.py after_agent); that is
 a lease return here — the container lives for the run and is torn down by ``destroy`` (``docker rm -f`` + ``docker
-volume rm``) only after the runner copied the diff and the evidence out (ADR 0011 choice).
+volume rm``) only after the runner copied the diff and the evidence out (ADR 0011 choice). Round 18 R6: ``destroy``
+checks both exit codes and records ``sandbox_release_failed`` (raising) when either fails; ``reap`` removes every
+container and volume carrying our run label (at service start and on ``stop()``), one ``sandbox_reaped`` event each.
+
+Path containment (R7): every path is resolved INSIDE the container with ``readlink -f`` on its longest existing
+prefix; an unresolvable path is refused (never passed through). A write lands in a staging directory first and is
+moved into place by an in-container ``mv`` after the destination is re-resolved — the readlink→mv window is
+milliseconds and needs a concurrent process inside the box (documented residual, ADR 0011).
 """
 
 from __future__ import annotations
@@ -29,6 +39,8 @@ import hashlib
 import io
 import os
 import posixpath
+import re
+import secrets
 import subprocess
 import tarfile
 import tempfile
@@ -52,6 +64,11 @@ COPY_CAP = 512 * 1024 * 1024
 ACTOR = "intel_02_sandbox"
 FORBIDDEN_RUN_TOKENS = ("--privileged", "seccomp=unconfined", "docker.sock", "--pid=host", "--network=host",
                         "--cap-add", "--device", "--userns=host", "--security-opt=apparmor=unconfined")
+# R4: the joined argv is matched too — the two-token ``--network host`` form and every ``--net`` spelling
+FORBIDDEN_RUN_RE = re.compile(r"(?:^|\s)--network(?:=|\s)+(?:host|bridge|container:\S*)(?:\s|$)|(?:^|\s)--net(?:=|\s)")
+RUN_LABEL = "zbm.dlv.run"
+ENGINE_DIR = f"{WORKSPACE}/.dlv-engine"        # engine-owned files inside the volume, outside services/<service>
+STAGE_DIR = f"{WORKSPACE}/.dlv-stage"
 EXTRA_ENV_ALLOWLIST = ("PYTHONDONTWRITEBYTECODE", "CI", "PYTHONHASHSEED", "TZ", "LANG")
 CONTAINER_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": WORKSPACE, "LANG": "C.UTF-8", "TZ": "UTC",
                  "PYTHONDONTWRITEBYTECODE": "1", "CI": "1"}
@@ -128,6 +145,57 @@ def daemon_available(cli: DockerCli) -> bool:
     return r.exit_code == 0 and bool(r.stdout.strip())
 
 
+def forbidden_run_token(argv: Sequence[str]) -> Optional[str]:
+    """The forbidden flag found in a ``docker run`` argv (token by token AND on the joined string), else None."""
+    for tok in argv:
+        for bad in FORBIDDEN_RUN_TOKENS:
+            if bad in tok:
+                return bad
+    m = FORBIDDEN_RUN_RE.search(" ".join(argv))
+    return m.group(0).strip() if m else None
+
+
+def _tar_names(data: bytes) -> list[str]:
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r") as tar:
+        return [m.name for m in tar.getmembers()]
+
+
+def reap(cli: DockerCli, record, *, where: str) -> list[dict]:
+    """Remove every container and volume carrying our run label (R6). Each removal is recorded ``sandbox_reaped``
+    BEFORE the ``docker rm``; the returned list describes what was reaped (kind, name, run_id, exit)."""
+    out: list[dict] = []
+    if not daemon_available(cli):
+        return out
+    ps = cli.run(["ps", "-a", "-q", "--filter", f"label={RUN_LABEL}", "--format", "{{.Names}} {{.Label \"" + RUN_LABEL + "\"}}"],
+                 timeout_s=30)
+    vols = cli.run(["volume", "ls", "-q", "--filter", f"label={RUN_LABEL}"], timeout_s=30)
+    items: list[tuple[str, str, str]] = []
+    if ps.exit_code == 0:
+        for ln in ps.stdout.decode("utf-8", "replace").splitlines():
+            parts = ln.split()
+            if parts:
+                items.append(("container", parts[0], parts[1] if len(parts) > 1 else ""))
+    if vols.exit_code == 0:
+        for ln in vols.stdout.decode("utf-8", "replace").splitlines():
+            name = ln.strip()
+            if name:
+                items.append(("volume", name, name[len("dlv-ws-"):] if name.startswith("dlv-ws-") else ""))
+    for kind, name, run_id in items:
+        if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,128}", name):
+            continue
+        subject = run_id or "reaper"
+        try:
+            record(derived_id("rp", where, kind, name), "sandbox_reaped", ACTOR, subject,
+                   {"run_id": run_id, "kind": kind, "name_sha256": _sha(name.encode()), "where": where},
+                   f"Sandbox {kind} reaped at {where}")
+        except Exception:  # noqa: BLE001 - unrecorded → not removed (record-first)
+            continue
+        argv = ["rm", "-f", name] if kind == "container" else ["volume", "rm", "-f", name]
+        r = cli.run(argv, timeout_s=60)
+        out.append({"kind": kind, "name": name, "run_id": run_id, "exit": r.exit_code})
+    return out
+
+
 def tar_of_dir(root: str, *, exclude_dirs: tuple = (".git",), uid: int = 65532) -> bytes:
     """A tar stream of ``root``'s contents (top-level entries relative to root), every entry owned by ``uid``."""
     buf = io.BytesIO()
@@ -145,8 +213,8 @@ def tar_of_dir(root: str, *, exclude_dirs: tuple = (".git",), uid: int = 65532) 
                 tar.addfile(info)
             for name in sorted(filenames):
                 full = os.path.join(dirpath, name)
-                if os.path.islink(full) or not os.path.isfile(full):
-                    continue
+                if os.path.islink(full) or not os.path.isfile(full) or name in exclude_dirs:
+                    continue                        # a linked worktree's .git is a FILE (gitdir pointer): excluded too
                 arc = name if rel == "." else posixpath.join(rel, name)
                 info = tar.gettarinfo(full, arcname=arc)
                 info.uid = info.gid = uid
@@ -279,17 +347,32 @@ class ZbmDockerSandbox(Sandbox):
         if not any(inside(p, r) for r in roots):
             raise PermissionError("path outside the sandbox workspace")
         real = self.realpath(p)
-        if real is not None and not any(inside(real, r) for r in roots):
+        if real is None:
+            raise PermissionError("path could not be resolved inside the sandbox (fail closed)")
+        if not any(inside(real, r) for r in roots):
             raise PermissionError("symlink escape refused")
         return p
 
     def realpath(self, path: str) -> Optional[str]:
-        """``readlink -f`` inside the container (None when the path does not resolve)."""
-        r = self.exec_argv(["readlink", "-f", "--", path], timeout=20)
-        if r.exit_code != 0:
+        """``readlink -f`` inside the container on the LONGEST EXISTING PREFIX of ``path`` (R7): the resolved prefix
+        plus the not-yet-existing remainder, or None when nothing resolves or the exec fails."""
+        p = posixpath.normpath(path)
+        if ".." in p.split("/") or not p.startswith("/"):
             return None
-        return r.stdout.decode("utf-8", "replace").strip() or None
-
+        rest: list[str] = []
+        cur = p
+        while True:
+            r = self.exec_argv(["readlink", "-f", "--", cur], timeout=20)
+            if r.exit_code == 0:
+                base = r.stdout.decode("utf-8", "replace").strip()
+                if not base:
+                    return None
+                return posixpath.normpath(posixpath.join(base, *rest)) if rest else base
+            parent, name = posixpath.split(cur)
+            if not name or parent == cur:
+                return None
+            rest.insert(0, name)
+            cur = parent
     def read_file(self, path: str, start_line: int | None = None, end_line: int | None = None) -> str:
         p = self._contain(path)
         r = self.exec_argv(["cat", "--", p], timeout=60)
@@ -327,18 +410,50 @@ class ZbmDockerSandbox(Sandbox):
         self.put_bytes(p, data)
 
     def put_bytes(self, p: str, data: bytes) -> None:
+        """Write ``data`` at ``p`` (already contained): stage under an engine directory, re-resolve the destination
+        parent inside the container, then ``mv`` (R7). ``mkdir -p`` of the parent happens only after the re-check."""
         parent, name = posixpath.split(p)
-        mk = self.exec_argv(["mkdir", "-p", "--", parent], timeout=30)
+        stage = f"{STAGE_DIR}/{secrets.token_hex(8)}"
+        mk = self.exec_argv(["mkdir", "-p", "--", stage], timeout=30)
         if mk.exit_code != 0:
             raise OSError("mkdir failed")
         self.binding.exec_seq += 1
         seq = self.binding.exec_seq
         self._record_exec("requested", _sha(data), parent, [], {"op": "cp_in", "bytes": len(data)}, seq)
-        r = self._rt().docker.run(["cp", "-", f"{self.container}:{parent}"], timeout_s=120,
-                                  stdin=tar_of_file(name, data))
+        r = self._rt().docker.run(["cp", "-", f"{self.container}:{stage}"], timeout_s=120, stdin=tar_of_file(name, data))
         self._record_exec("completed", _sha(data), parent, [], {"op": "cp_in", "exit": r.exit_code}, seq)
         if r.exit_code != 0:
             raise OSError("write failed")
+        try:
+            real_parent = self.realpath(parent)
+            if real_parent is None or not inside(real_parent, WORKSPACE):
+                raise PermissionError("destination resolved outside the workspace at write time (symlink swap refused)")
+            mk = self.exec_argv(["mkdir", "-p", "--", parent], timeout=30)
+            if mk.exit_code != 0:
+                raise OSError("mkdir failed")
+            real_parent = self.realpath(parent)
+            if real_parent is None or not inside(real_parent, WORKSPACE):
+                raise PermissionError("destination resolved outside the workspace at write time (symlink swap refused)")
+            mv = self.exec_argv(["mv", "-f", "-T", "--", f"{stage}/{name}", p], timeout=30)
+            if mv.exit_code != 0:
+                raise OSError("write failed (mv)")
+        finally:
+            self.exec_argv(["rm", "-rf", "--", stage], timeout=30)
+
+    def get_bytes(self, p: str) -> Optional[bytes]:
+        """The bytes of one file read out with ``docker cp`` (the daemon reads it, not a process in the box); None
+        when the path is missing. Used by the runner for its junit report (R2)."""
+        if not inside(posixpath.normpath(p), WORKSPACE) or ".." in p.split("/"):
+            raise PermissionError("path outside the workspace")
+        r = self._rt().docker.run(["cp", f"{self.container}:{p}", "-"], timeout_s=120, output_cap=COPY_CAP)
+        if r.exit_code != 0 or r.truncated:
+            return None
+        with tarfile.open(fileobj=io.BytesIO(r.stdout), mode="r") as tar:
+            for m in tar.getmembers():
+                if m.isfile():
+                    fh = tar.extractfile(m)
+                    return fh.read() if fh else None
+        return None
 
     def update_file(self, path: str, content: bytes) -> None:
         p = self._contain(path, write=True)
@@ -437,7 +552,7 @@ class ZbmDockerSandboxProvider(SandboxProvider):
         return None
 
     def sandbox_network_mode(self) -> str:
-        return "none"
+        return "none"                          # R4: literally none
 
     # --- ours -----------------------------------------------------------------------------------------------------
 
@@ -447,17 +562,18 @@ class ZbmDockerSandboxProvider(SandboxProvider):
         image = settings.sandbox_image
         if not image or "@sha256:" not in image:
             raise PermissionError("tag-only image refused; the image must be pinned by digest (ST-03)")
-        argv = ["run", "-d", "--name", f"dlv-{run_id}", "--user", UID, "--cap-drop=ALL",
+        if settings.sandbox_network != "none":
+            raise PermissionError("sandbox network must be none (R4)")
+        argv = ["run", "-d", "--name", f"dlv-{run_id}", "--label", f"{RUN_LABEL}={run_id}", "--user", UID, "--cap-drop=ALL",
                 "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,nosuid,size=512m",
                 "--pids-limit", "512", "--memory", settings.sandbox_mem, "--cpus", settings.sandbox_cpus,
-                "--network", settings.sandbox_network,
-                "--mount", f"type=volume,src=dlv-ws-{run_id},dst={WORKSPACE}",
+                "--network", "none",
+                "--mount", f"type=volume,src=dlv-ws-{run_id},dst={WORKSPACE},volume-label={RUN_LABEL}={run_id}",
                 "--mount", f"type=bind,src={os.path.realpath(settings.skills_root)},dst={SKILLS_MOUNT},ro",
                 "--env-file", env_file, image, "sleep", "infinity"]
-        for tok in argv:
-            for bad in FORBIDDEN_RUN_TOKENS:
-                if bad in tok:
-                    raise PermissionError(f"forbidden docker flag {bad!r}")
+        bad = forbidden_run_token(argv)
+        if bad is not None:
+            raise PermissionError(f"forbidden docker flag {bad!r}")
         return argv
 
     @staticmethod
@@ -493,12 +609,18 @@ class ZbmDockerSandboxProvider(SandboxProvider):
         return box
 
     def copy_in(self, sandbox_id: str, host_dir: str) -> int:
-        """Populate the volume from ``host_dir`` (a tar stream, owner 65532; never a bind mount). Returns bytes."""
+        """Populate the volume from ``host_dir`` (a tar stream, owner 65532, ``.git`` excluded; never a bind mount).
+        Verifies afterwards that no ``.git`` exists in the box (R4). Returns bytes."""
         box = self._require(sandbox_id)
         data = tar_of_dir(host_dir)
+        if any(n == ".git" or n.startswith(".git/") for n in _tar_names(data)):
+            raise PermissionError("the copy-in stream carries a .git (refused)")
         r = registry.runtime().docker.run(["cp", "-", f"{box.container}:{WORKSPACE}"], timeout_s=600, stdin=data)
         if r.exit_code != 0:
             raise DockerUnavailable("docker cp into the volume failed")
+        chk = box.exec_argv(["test", "!", "-e", f"{WORKSPACE}/.git"], timeout=20)
+        if chk.exit_code != 0:
+            raise PermissionError("a .git exists inside the sandbox workspace (refused)")
         return len(data)
 
     def copy_out(self, sandbox_id: str, container_path: str) -> bytes:
@@ -513,15 +635,28 @@ class ZbmDockerSandboxProvider(SandboxProvider):
         return r.stdout
 
     def destroy(self, sandbox_id: str, run_id: str) -> None:
-        """``docker rm -f`` + ``docker volume rm`` — only the runner calls this, after copying evidence out."""
+        """``docker rm -f`` + ``docker volume rm`` — only the runner calls this, after copying evidence out. R6: both
+        exit codes are checked; a failure is recorded ``sandbox_release_failed`` and raised (the reaper at the next
+        start or ``stop()`` removes what is left by label)."""
         rt = registry.runtime()
         with self._lock:
             box = self._boxes.pop(sandbox_id, None)
         if box is None:
             return
-        rt.docker.run(["rm", "-f", box.container], timeout_s=60)
-        rt.docker.run(["volume", "rm", "-f", f"dlv-ws-{run_id}"], timeout_s=60)
         box.binding.finished = True
+        r1 = rt.docker.run(["rm", "-f", box.container], timeout_s=60)
+        r2 = rt.docker.run(["volume", "rm", "-f", f"dlv-ws-{run_id}"], timeout_s=60) if r1.exit_code == 0 else None
+        failed = [("container", r1.exit_code)] if r1.exit_code != 0 else []
+        if r2 is not None and r2.exit_code != 0:
+            failed.append(("volume", r2.exit_code))
+        if failed:
+            try:
+                rt.record(derived_id("srf", run_id, sandbox_id), "sandbox_release_failed", ACTOR, run_id,
+                          {"run_id": run_id, "sandbox_id": sandbox_id, "failed": [{"kind": k, "exit": e} for k, e in failed]},
+                          f"Sandbox release failed ({run_id}): " + ", ".join(k for k, _ in failed))
+            finally:
+                pass
+            raise DockerUnavailable("sandbox release failed: " + ", ".join(f"{k} exit {e}" for k, e in failed))
 
     def _require(self, sandbox_id: str) -> ZbmDockerSandbox:
         with self._lock:

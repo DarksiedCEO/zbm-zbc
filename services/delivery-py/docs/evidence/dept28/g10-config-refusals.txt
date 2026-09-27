@@ -93,7 +93,7 @@ subagents.timeout_seconds = 1800
 subagents.max_turns = 200
     refused: subagents.max_turns must be an integer <= DLV_SUBAGENT_MAX_TURNS
 subagents.max_total_per_run = 50
-    refused: subagents.max_total_per_run must be an integer <= DLV_MAX_SUBAGENTS_PER_RUN
+    refused: subagents.max_total_per_run must be 1 (deer-flow's floor) with DLV_MAX_SUBAGENTS_PER_RUN unset: subagents are off in this build (round 18 R8)
 token_budget.enabled = false
     refused: token_budget.enabled must be true
 tracing = {"langfuse": {"enabled": true}}

@@ -17,6 +17,11 @@ and of every subagent (``agents/middlewares/tool_error_handling_middleware.py:26
 "With run token" (§C.3.1) = the run is ``running``/``suite``, its deadline has not passed and the token's scope
 (service, workspace) covers the call. The unconditional classes (``git_remote``, ``destructive_outside_workspace``,
 ``acp``, ``mcp``, ``self_modify``, ``network``) are denied whatever the token, header or environment says (A1).
+
+Round 18 R5/R7: an opaque exec (interpreter, shell, make, find -delete, git -c) is recorded ``decision:
+allow_opaque, class: exec, opaque: true`` and counted on the binding; every write-capable operand of a bash call is
+resolved INSIDE the container (``readlink -f`` on its longest existing prefix) and the call is denied when the
+resolver answers None or the path lands outside ``services/<service>/`` and ``docs/adr/`` (fail closed).
 """
 
 from __future__ import annotations
@@ -69,7 +74,7 @@ class ZbmGuardrailProvider:
             return _deny("IDENTITY_MISMATCH", "tool call user id is not the run's principal")
         ctx = policy.Context(service=binding.service, workspace=binding.workspace, evidence_root=rt.evidence_root)
         verdict = policy.classify(rt.policy_seed, request.tool_name, request.tool_input, ctx)
-        decision = "deny" if verdict.deny else "allow"
+        decision = verdict.decision
         # a policy deny is reported under its CLASS (git_remote, network, destructive_outside_workspace, acp, mcp,
         # self_modify, unknown): the class is the reason the model and the ledger see (A1)
         code, message = (verdict.klass if verdict.deny else verdict.code), verdict.message
@@ -81,16 +86,19 @@ class ZbmGuardrailProvider:
                 decision, code, message = "deny", "TOOL_DENIED", "run token does not cover this call"
             elif verdict.klass == "subagent":
                 if binding.subagents >= rt.settings.max_subagents_per_run:
-                    decision, code, message = "deny", "TOOL_DENIED", "subagent limit for this run reached"
+                    decision, code, message = "deny", "TOOL_DENIED", "subagents are off in this build (R8)"
             elif verdict.klass in ("exec", "read") and request.tool_name == "bash":
-                decision, code, message = self._symlink_check(rt, binding, request, decision, code, message)
+                decision, code, message = self._resolve_check(rt, binding, verdict, decision, code, message)
         binding.tool_calls += 1
         if decision == "deny":
             binding.denies += 1
         elif verdict.klass == "subagent":
             binding.subagents += 1
+        elif decision == "allow_opaque":
+            binding.opaque_execs += 1
         payload = {"run_id": binding.run_id, "tool": str(request.tool_name)[:64], "class": verdict.klass,
-                   "decision": decision, "code": code, "args_sha256": args_sha256(request.tool_input),
+                   "decision": decision, "opaque": decision == "allow_opaque", "code": code,
+                   "args_sha256": args_sha256(request.tool_input),
                    "token_id": _token_id(binding), "policy_version": rt.policy_seed.get("policy_version", 0),
                    "is_subagent": bool(request.is_subagent), "tool_call_id": str(request.tool_call_id or "")[:64],
                    "seq": binding.tool_calls}
@@ -105,7 +113,7 @@ class ZbmGuardrailProvider:
             return _deny(code, message, verdict.klass)
         return GuardrailDecision(allow=True, reasons=[GuardrailReason(code="ALLOW", message=verdict.klass)],
                                  policy_id=f"dlv-policy-v{rt.policy_seed.get('policy_version', 0)}",
-                                 metadata={"class": verdict.klass})
+                                 metadata={"class": verdict.klass, "decision": decision})
 
     async def aevaluate(self, request: GuardrailRequest) -> GuardrailDecision:
         return await asyncio.to_thread(self.evaluate, request)
@@ -125,16 +133,18 @@ class ZbmGuardrailProvider:
             pass
 
     @staticmethod
-    def _symlink_check(rt, binding, request, decision, code, message):
-        """A recursive rm whose target is a symlink pointing out of the workspace is resolved INSIDE the sandbox
-        (``readlink -f``) — the classifier cannot see the container's filesystem (A2)."""
-        cmd = (request.tool_input or {}).get("command", "") if isinstance(request.tool_input, dict) else ""
-        for target in policy.rm_recursive_targets(cmd):
+    def _resolve_check(rt, binding, verdict, decision, code, message):
+        """Every write-capable operand of the call is resolved INSIDE the sandbox (``readlink -f`` on the longest
+        existing prefix; the classifier cannot see the container's filesystem, A2). None → deny (R7: fail closed);
+        a path that lands outside ``services/<service>/`` or ``docs/adr/`` → deny."""
+        ctx = policy.Context(service=binding.service, workspace=binding.workspace, evidence_root=rt.evidence_root)
+        roots = policy.write_roots(ctx)
+        for target in verdict.write_targets:
             real = rt.resolve_sandbox_path(binding.run_id, target)
             if real is None:
-                continue
-            if not policy.inside(real, binding.workspace) or real == binding.workspace:
-                return "deny", "TOOL_DENIED", "rm target resolves outside the workspace (symlink)"
+                return "deny", "TOOL_DENIED", "a write operand could not be resolved inside the sandbox (fail closed)"
+            if real in roots or not any(policy.inside(real, r) for r in roots):
+                return "deny", "TOOL_DENIED", "a write operand resolves outside the service directory (symlink)"
         return decision, code, message
 
 

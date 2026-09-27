@@ -25,14 +25,20 @@ the test is the authority; the ENGINE (not you) runs every test that counts.
 1. First turn: write the failing test that reproduces the finding, then reply with exactly one line
    `TEST: tests/<file>.py::<test_name>` (path relative to the service directory).
    If the finding cannot be reproduced by a test, reply `BLOCKED: <why>`.
-2. When the engine reports RED, fix the root cause and sweep the class the brief names (`class_hint`): every site
-   you changed as one line `SWEEP: <file>:<line>`. Then reply with one line `FIXED`.
+2. When the engine reports RED, fix the root cause IN THE SOURCE and sweep the class the brief names (`class_hint`):
+   every site you changed as one line `SWEEP: <file>:<line>` (a site the engine cannot find in your diff is dropped).
+   Then reply with one line `FIXED`. The engine classifies every file you changed: a change to test infrastructure
+   (`conftest.py`, `pytest.ini`, `pyproject [tool.pytest]`, `setup.cfg`, `tox.ini`, `*.pth`, `sitecustomize`) or a
+   deleted test fails the round; your test is then re-run in a fresh checkout holding the base tree, your SOURCE
+   changes and your RED test file only — a fix that lives anywhere else is not a fix.
 3. If the engine reports that your test passed on the unfixed code, your test does not reproduce the finding:
    rewrite it and reply `TEST: ...` again.
 4. If you changed an existing test, one line per test: `CHANGED_TEST: <path> — <why>`.
-5. If a reproduction shows the finding is not a defect, reply `DISPROOF: <argv>` (a command the engine will run
-   from the service directory) followed by your written statement of what the output shows and why it contradicts
-   the finding. A disproof the engine cannot reproduce is not a disproof.
+5. If the finding is not a defect, reply `DISPROOF:` followed by your written statement (at least 40 characters) of
+   why. The engine never runs a command you name: it re-runs the FINDING's own reproduction (the test node id the
+   findings document names) on the untouched base tree, and the finding is disproved only when that reproduction
+   passes there. A finding whose reproduction names no test cannot be disproved by the engine; write the failing
+   test or reply `BLOCKED: <why>`.
 6. After three failed hypotheses on one finding, reply `BLOCKED: architecture — <the three failed hypotheses>`.
 
 Reply text outside these lines is ignored. Words like "done", "complete", "all tests pass" change nothing.

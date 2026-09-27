@@ -19,7 +19,9 @@ from zbm_delivery.policy import WORKSPACE
 PROPERTIES = [
     "the container runs as uid 65532 (id -u inside)",
     "seccomp filtering is on (/proc/self/status Seccomp: 2, the default profile; never unconfined)",
-    "no external route: curl / python socket connect to any external host fails inside the container (--network internal)",
+    "no route at all: python socket connect to any host fails inside the container (--network none, R4)",
+    "no egress client in the image: command -v curl / wget fails inside the container (R4)",
+    "no .git in the copied workspace (R4) and the container/volume carry the zbm.dlv.run label (R6 reaper)",
     "/var/run/docker.sock is absent inside the container",
     "a write outside /mnt/user-data/workspace and /tmp fails (--read-only root)",
     "a process past the deadline is killed (timeout -k 5 <secs> + the host-side backstop)",
@@ -82,6 +84,15 @@ def test_l1_no_external_route(live):
     p, box, sid, b = live
     r = box.exec_argv(["python3", "-c", "import socket; socket.create_connection(('1.1.1.1', 443), timeout=3)"])
     assert r.exit_code != 0
+    # R4: --network none has no interface but loopback; the image ships no curl/wget
+    ifaces = box.exec_argv(["cat", "/proc/net/dev"]).stdout.decode()
+    assert "eth0" not in ifaces
+    assert box.exec_argv(["sh", "-c", "command -v curl"]).exit_code != 0
+    assert box.exec_argv(["sh", "-c", "command -v wget"]).exit_code != 0
+    assert box.exec_argv(["test", "!", "-e", f"{WORKSPACE}/.git"]).exit_code == 0
+    inspect = subprocess.run(["docker", "inspect", "--format", "{{.HostConfig.NetworkMode}} {{index .Config.Labels \"zbm.dlv.run\"}}",
+                              box.container], capture_output=True, text=True, timeout=30).stdout.split()
+    assert inspect == ["none", b.run_id]
 
 
 def test_l1_deadline_kills_and_volume_is_gone(live):

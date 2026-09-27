@@ -7,6 +7,11 @@ one revert-check form of ``stash`` (``push --include-untracked -- <paths>`` / ``
 
 ``for-each-ref`` is the read-only listing D8 needs to compute ``N`` (the highest existing ``fix<N>-`` branch); the
 spec's list omits it (ADR 0011). Commit messages end with the FIX_WAVE_1 attribution lines and the run id.
+
+Round 18: ``remote`` (no arguments: the listing) is a read — a run worktree must have NO remotes (R4: ``git push``
+has nowhere to go even if the classifier is wrong; a linked worktree shares the repository's config, so the
+repository itself must be remote-less); ``archive`` (``git archive --format=tar <sha> -- <path>``) is the read the
+engine's split-diff verification checkout is built from (R1).
 """
 
 from __future__ import annotations
@@ -161,6 +166,47 @@ class GitPort:
                 out.append(p.strip('"'))
         return out
 
+    def show_file(self, ref: str, path: str, cwd: str, run_id: str = "-") -> Optional[str]:
+        """``git show <ref>:<path>`` (a read); None when the path is not in that commit."""
+        if not _REF_RE.fullmatch(ref) or ref.startswith("-"):
+            raise GitRefused("bad ref")
+        _check_path(path)
+        r = self._git("show", ["show", f"{ref}:{path}"], cwd, run_id)
+        return r.stdout if r.exit_code == 0 else None
+
+    def remotes(self, cwd: str, run_id: str = "-") -> list[str]:
+        """``git remote`` (the listing only; never add/remove/set-url)."""
+        out = self._ok(self._git("remote", ["remote"], cwd, run_id), "remote")
+        return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+    def archive(self, sha: str, path: str, run_id: str = "-") -> bytes:
+        """A tar stream of ``path`` at commit ``sha`` (read-only; the verification checkout's base tree, R1)."""
+        if not _SHA_RE.fullmatch(sha):
+            raise GitRefused("bad sha")
+        _check_path(path)
+        argv = ["git", "-C", self.repo, "archive", "--format=tar", sha, "--", path]
+        self._seq += 1
+        self.record(derived_id("gt", run_id, self._seq, "archive", hashlib.sha256("\0".join(argv).encode()).hexdigest()),
+                    "crossing_git_requested", ACTOR, run_id if run_id != "-" else "git",
+                    {"op": "archive", "argv_sha256": hashlib.sha256("\0".join(argv).encode()).hexdigest(), "seq": self._seq,
+                     "run_id": run_id}, "git archive requested")
+        self.calls.append(argv)
+        r = self._run_bytes(argv, self.repo)
+        if r[0] != 0:
+            raise GitRefused(f"git archive failed (exit {r[0]})")
+        return r[1]
+
+    @staticmethod
+    def _run_bytes(argv: Sequence[str], cwd: str) -> tuple[int, bytes]:
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": cwd, "LANG": "C.UTF-8", "GIT_TERMINAL_PROMPT": "0",
+               "GIT_CONFIG_NOSYSTEM": "1"}
+        try:
+            r = subprocess.run(list(argv), cwd=cwd, capture_output=True, timeout=TIMEOUT_S, shell=False, env=env,
+                               stdin=subprocess.DEVNULL)
+        except (subprocess.TimeoutExpired, OSError):
+            return 124, b""
+        return r.returncode, r.stdout
+
     def log(self, worktree: str, n: int = 20, run_id: str = "-") -> list[str]:
         out = self._ok(self._git("log", ["log", f"--max-count={max(1, min(int(n), 200))}", "--format=%H"], worktree, run_id), "log")
         return [ln.strip() for ln in out.splitlines() if ln.strip()]
@@ -172,8 +218,13 @@ class GitPort:
             raise GitRefused("bad branch/sha")
         if not os.path.isabs(path) or os.path.exists(path):
             raise GitRefused("worktree path must be absolute and absent")
+        if self.remotes(self.repo, run_id):
+            raise GitRefused("the engine's repository has remotes; a run worktree must have none (R4: strip them from "
+                             "DLV_REPO_PATH — the engine only ever works on a remote-less local repository)")
         self._ok(self._git("worktree add", ["worktree", "add", "-b", branch, "--", path, base_sha], self.repo, run_id),
                  "worktree add")
+        if self.remotes(path, run_id):
+            raise GitRefused("the new worktree has remotes (R4); refusing to run in it")
 
     def worktree_add_existing(self, path: str, branch: str, run_id: str = "-") -> None:
         """Re-open an existing fix branch in a fresh worktree (a review-fail rerun, §C.8.7)."""

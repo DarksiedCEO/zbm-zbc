@@ -1,7 +1,9 @@
 """
 The embedded deer-flow harness (spec D1, §0.4(a)): ``DeerFlowClient`` built from our pinned config with our
-middlewares, an in-memory checkpointer per run (multi-turn state lives for the run and never on disk), no
-subagents unless configured, and the prompt-level skill filter set to the manifest's names (empty). The DF gateway
+middlewares, an in-memory checkpointer per run (multi-turn state lives for the run and never on disk), subagents
+OFF (round 18 R8: deer-flow's ``subagents/executor.py`` builds the subagent middleware chain without the custom
+middlewares, so a subagent would run without our receipts and our prompt), and the prompt-level skill filter set
+to the manifest's names (empty). The DF gateway
 (``backend/app/``), nginx, the frontend and the IM channels are never installed or exposed.
 
 deer-flow reads a few things from the process environment (``DEER_FLOW_EXTENSIONS_CONFIG_PATH``, ``DEER_FLOW_HOME``
@@ -31,7 +33,7 @@ def make_client(settings, thread_id: str, middlewares: Sequence, *, manifest_ski
 
     return DeerFlowClient(config_path=os.path.abspath(settings.deerflow_config), checkpointer=InMemorySaver(),
                           model_name="engine", thinking_enabled=False,
-                          subagent_enabled=settings.max_subagents_per_run > 0, plan_mode=False,
+                          subagent_enabled=False, plan_mode=False,          # R8: off in this build (see ADR 0011)
                           available_skills=set(manifest_skill_names), middlewares=list(middlewares),
                           environment="engine")
 

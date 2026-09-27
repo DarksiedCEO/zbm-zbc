@@ -7,7 +7,8 @@ checks that need files, hashes, the installed packages, git or Docker live in ``
 
 Pinned hashes (spec §C.1.3-6, §C.9, §I): the shipped deer-flow config, the extensions config, the skills and prompts
 manifests and the three seeds. Any of them differing from its pin refuses start-up unless the operator states the
-non-production override (``DLV_ALLOW_UNPINNED_CONFIG=1`` + the stated hash, N14-13) — never silently.
+pin — there is no override in any mode (round 18 R11: the yaml pin is mandatory everywhere; the former
+``DLV_ALLOW_UNPINNED_CONFIG`` switch no longer exists).
 """
 
 from __future__ import annotations
@@ -31,14 +32,14 @@ DEFAULT_PROMPTS_DIR = os.path.join(SERVICE_ROOT, "prompts")
 DEFAULT_SEED_DIR = os.path.join(SERVICE_ROOT, "seed")
 
 # --- pins (spec §I: every pinned hash is recorded in ADR 0011; devtools/gen_manifests.py prints them) ---------------
-PINNED_DEERFLOW_CONFIG_SHA256 = "798529f704cb03fbbc9d30f38a4efb844593ac193fec7e94059bb43878c90c51"
+PINNED_DEERFLOW_CONFIG_SHA256 = "e4d51379594e0f7dc2265a0fee0ff25aa7134b1e6aecabe91b291a1d18064f0e"
 PINNED_EXTENSIONS_CONFIG_SHA256 = "4875b2992e9062d6f8084ac64d543f50a29624bd0e7eb82586e31b3056563807"
 PINNED_SKILLS_MANIFEST_SHA256 = "26f51402a23232a6b3f6a5764829800c3570403e2694ee1a9f331fe23e040320"
-PINNED_PROMPTS_MANIFEST_SHA256 = "064a5e3e3b3ea696cce1a586eef792a9a73e26ed8b45dabe9dfa20fa2d295440"
+PINNED_PROMPTS_MANIFEST_SHA256 = "a55a2a0f6ef5979a4ff4df702b126bb3d43d05c208cbae6d10e0da8bc420ee1e"
 PINNED_TOOL_POLICY_SHA256 = "5c8ac4620ab2ebdc961fb8e0bd00567fab0a25a500d8d9e8880786f7299b47d1"
-PINNED_TEST_COMMANDS_SHA256 = "019cfba7c9bdb11130f0bae0f7b884c2de0b9e551a254550e189f2e7d3c2a112"
-PINNED_LICENCE_ALLOWLIST_SHA256 = "010eef6c7bfc084426303513372debf845e003df85e54220dc43a355fe31bc0b"
-PINNED_LICENCE_EXCEPTIONS_SHA256 = "53b6f62c221517143db32c4f6a27b40cb3efbfa68de7b073cf0981f138d4104d"
+PINNED_TEST_COMMANDS_SHA256 = "89cf7fee7e295e6becfdd29dae30ce86d2fae737e63394f8d7646d6e2e036705"
+PINNED_LICENCE_ALLOWLIST_SHA256 = "c02f367f3e6cd02949e18dbc2eaa2ceabcb917ac4aa5fc58ad73bec4ac6dfb6e"
+PINNED_LICENCE_EXCEPTIONS_SHA256 = "10695daf388308309d5b32057e9d0b764817b80979e8459db68ad5b48ac0ef62"
 POLICY_VERSION = 1
 
 SANDBOX_CLASS = "zbm_delivery.adapters.sandbox:ZbmDockerSandboxProvider"
@@ -81,8 +82,6 @@ class Settings:
     memory: str = "off"
     # deer-flow files and pins
     deerflow_config: str = DEFAULT_DEERFLOW_CONFIG
-    deerflow_config_sha256: Optional[str] = None
-    allow_unpinned_config: bool = False
     extensions_config: str = DEFAULT_EXTENSIONS_CONFIG
     skills_root: str = DEFAULT_SKILLS_ROOT
     prompts_dir: str = DEFAULT_PROMPTS_DIR
@@ -92,7 +91,7 @@ class Settings:
     # sandbox (D2, §C.2)
     sandbox_image: Optional[str] = None
     image_registry: Optional[str] = None
-    sandbox_network: str = "dlv-internal"
+    sandbox_network: str = "none"            # R4: the only value; the LLM is reached by the engine process, never the box
     sandbox_mem: str = "4g"
     sandbox_cpus: str = "2"
     # clocks and limits (D3, D12)
@@ -103,7 +102,7 @@ class Settings:
     recursion_limit: int = 200
     max_findings: int = 200
     max_rounds_per_finding: int = 5
-    max_subagents_per_run: int = 8
+    max_subagents_per_run: int = 0           # R8: subagents are off in this build; the gate refuses any other value
     # egress + LLM (D4, D5)
     egress_allow_hosts: tuple = ()
     egress_extra_hosts: tuple = ()
@@ -204,13 +203,6 @@ def _hosts(env, name) -> tuple:
     return tuple(out)
 
 
-def _sha(env, name) -> Optional[str]:
-    raw = (env.get(name) or "").strip().lower() or None
-    if raw is not None and not re.fullmatch(r"[0-9a-f]{64}", raw):
-        raise RuntimeError(f"{name} must be 64 hex characters")
-    return raw
-
-
 def env_problems(env: dict) -> list[str]:
     """Names in ``env`` the allowlist does not cover, and forbidden names (spec §C.1.7, §0.5)."""
     bad = []
@@ -265,9 +257,10 @@ def load(env: Optional[dict] = None) -> Settings:
     memory = _only(env, "DLV_MEMORY", ("off",), "off", "D11: MemoryOff is the only implementation")
     _off(env, "DLV_VAULT", "the Cybersecurity 22 vault")
     for name in ("DLV_ALLOW_HOST_BASH", "DLV_ALLOW_LOCAL_SANDBOX", "DLV_ALLOW_GIT_REMOTE", "DLV_ALLOW_NETWORK",
-                 "DLV_ALLOW_PUSH", "DLV_ALLOW_UNSAFE"):
+                 "DLV_ALLOW_PUSH", "DLV_ALLOW_UNSAFE", "DLV_ALLOW_UNPINNED_CONFIG", "DLV_DEERFLOW_CONFIG_SHA256"):
         if env.get(name) not in (None, ""):
-            raise RuntimeError(f"{name}: no such switch exists; nothing unlocks the unconditional denies (spec C.3.2)")
+            raise RuntimeError(f"{name}: no such switch exists; nothing unlocks the unconditional denies or the config "
+                               "pin (spec C.3.2; round 18 R11: the yaml pin is mandatory in every mode)")
     provider = (env.get("DLV_LLM_PROVIDER") or "").strip().lower() or None
     if provider is not None and provider not in LLM_PROVIDERS:
         raise RuntimeError(f"DLV_LLM_PROVIDER={provider[:20]!r}: only {', '.join(LLM_PROVIDERS)} is built")
@@ -310,14 +303,6 @@ def load(env: Optional[dict] = None) -> Settings:
     if stray:
         raise RuntimeError("DLV_EGRESS_ALLOW_HOSTS lists a host outside {provider host} ∪ DLV_EGRESS_EXTRA_HOSTS: "
                            + ", ".join(h[:60] for h in stray[:5]) + " (spec C.4: nothing else leaves the box)")
-    unpinned = _flag(env, "DLV_ALLOW_UNPINNED_CONFIG", False)
-    cfg_sha = _sha(env, "DLV_DEERFLOW_CONFIG_SHA256")
-    if cfg_sha is not None and cfg_sha != PINNED_DEERFLOW_CONFIG_SHA256 and not unpinned:
-        raise RuntimeError("DLV_DEERFLOW_CONFIG_SHA256 differs from the pinned config hash; refusing to start "
-                           "(set DLV_ALLOW_UNPINNED_CONFIG=1 for a NON-PRODUCTION run)")
-    if unpinned and (cfg_sha is None or not non_production):
-        raise RuntimeError("DLV_ALLOW_UNPINNED_CONFIG=1 needs DLV_DEERFLOW_CONFIG_SHA256 (the unpinned config's own hash, "
-                           "stated) and DLV_NON_PRODUCTION=1")
     allow_path = _flag(env, "DLV_ALLOW_PATH_SOURCE", False)
     if allow_path and not non_production:
         raise RuntimeError("DLV_ALLOW_PATH_SOURCE=1 needs DLV_NON_PRODUCTION=1 (spec C.1.10)")
@@ -330,9 +315,14 @@ def load(env: Optional[dict] = None) -> Settings:
     problem = image_problem(image, registry)
     if problem:
         raise RuntimeError(problem)
-    network = (env.get("DLV_SANDBOX_NETWORK") or "dlv-internal").strip()
-    if not re.fullmatch(r"[a-z][a-z0-9_.\-]{0,63}", network):
-        raise RuntimeError("DLV_SANDBOX_NETWORK must be a Docker network name (lower-case)")
+    network = (env.get("DLV_SANDBOX_NETWORK") or "none").strip().lower()
+    if network != "none":
+        raise RuntimeError(f"DLV_SANDBOX_NETWORK={network[:40]!r}: only none is built (round 18 R4: the sandbox has no "
+                           "network at all; the LLM is reached by the engine process on the host, never from the box)")
+    sub_n_raw = (env.get("DLV_MAX_SUBAGENTS_PER_RUN") or "").strip()
+    if sub_n_raw not in ("", "0"):
+        raise RuntimeError("DLV_MAX_SUBAGENTS_PER_RUN: subagents are off in this build (round 18 R8: deer-flow's subagent "
+                           "chain carries neither our receipt middleware nor our prompt); only 0 or unset is accepted")
     mem = (env.get("DLV_SANDBOX_MEM") or "4g").strip()
     cpus = (env.get("DLV_SANDBOX_CPUS") or "2").strip()
     if not re.fullmatch(r"[1-9][0-9]{0,3}[mg]", mem):
@@ -373,8 +363,7 @@ def load(env: Optional[dict] = None) -> Settings:
         ledger_url=env.get("LEDGER_SERVICE_URL") or None, ledger_token=env.get("LEDGER_SERVICE_TOKEN") or None,
         reconcile_mode=_flag(env, "DLV_RECONCILE_MODE", False), non_production=non_production,
         runtime=runtime, sandbox=sandbox, memory=memory,
-        deerflow_config=env.get("DLV_DEERFLOW_CONFIG") or DEFAULT_DEERFLOW_CONFIG, deerflow_config_sha256=cfg_sha,
-        allow_unpinned_config=unpinned,
+        deerflow_config=env.get("DLV_DEERFLOW_CONFIG") or DEFAULT_DEERFLOW_CONFIG,
         extensions_config=env.get("DLV_EXTENSIONS_CONFIG") or DEFAULT_EXTENSIONS_CONFIG,
         skills_root=skills_root, prompts_dir=env.get("DLV_PROMPTS_DIR") or DEFAULT_PROMPTS_DIR,
         seed_dir=env.get("DLV_SEED_DIR") or DEFAULT_SEED_DIR,
@@ -384,7 +373,7 @@ def load(env: Optional[dict] = None) -> Settings:
         recursion_limit=rec,
         max_findings=_int(env, "DLV_MAX_FINDINGS", 200, 1, 200),
         max_rounds_per_finding=_int(env, "DLV_MAX_ROUNDS_PER_FINDING", 5, 1, 5),
-        max_subagents_per_run=_int(env, "DLV_MAX_SUBAGENTS_PER_RUN", 8, 0, 8),
+        max_subagents_per_run=0,
         egress_allow_hosts=allow_hosts, egress_extra_hosts=extra_hosts,
         egress_default_timeout_s=_int(env, "DLV_EGRESS_DEFAULT_TIMEOUT_S", 10, 1, 10),
         egress_llm_read_timeout_s=_int(env, "DLV_EGRESS_LLM_READ_TIMEOUT_S", 60, 1, 60),

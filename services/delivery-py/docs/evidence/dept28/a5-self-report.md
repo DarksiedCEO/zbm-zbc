@@ -1,11 +1,11 @@
-# A5 self-report — run dlv-run-002QH4Z5WX57T3PW15MS383GBB: status failed, finding state blocked, rounds 4
+# A5 self-report — run dlv-run-CVDE1ZNZATJRV75B7F5C3P4XPT: status failed, finding state blocked, rounds 4
 
 The model replied 'FIXED / SUITE: 100/100 passed' three times. The runner's captured runs:
 
-  test_run phase=red exit=1 evidence=dlv-ev-03ea96dded697f4fb14e07415e
-  test_run phase=green exit=1 evidence=dlv-ev-34c448f5ae84195509a2f9de3c
-  test_run phase=green exit=1 evidence=dlv-ev-77290c62e0b9c95c1351aca7e4
-  test_run phase=green exit=1 evidence=dlv-ev-068f7eac46aea1c8e2358ed1e0
+  test_run phase=red exit=1 evidence=dlv-ev-ce5bac02c6ec7b79116ef7ed54
+  test_run phase=green exit=1 evidence=dlv-ev-aaf2a5ea979bfc9c35f7c22180
+  test_run phase=green exit=1 evidence=dlv-ev-145b561f00f1930687b6fac130
+  test_run phase=green exit=1 evidence=dlv-ev-40dfa99ef3c346c945b9946485
   suite_run phase=before passed=2 failed=1
   suite_run phase=after passed=2 failed=2
 

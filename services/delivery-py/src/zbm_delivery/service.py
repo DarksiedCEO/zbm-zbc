@@ -177,6 +177,7 @@ class DeliveryService:
             except Unavailable as exc:
                 raise RuntimeError(f"refusing to start: the instance lease could not be recorded ({exc.reason})") from None
         self._fail_live_runs_at_start()
+        self._reap("start")
         if harness_factory is not None and provider_factory is not None:
             from zbm_delivery.engine.loop import FixEngine
             self._engine = FixEngine(self, settings, git, harness_factory, provider_factory, prompts, test_seed, policy_seed)
@@ -369,6 +370,18 @@ class DeliveryService:
 
     def stop(self) -> None:
         self._stop.set()
+        self._reap("stop")
+
+    def _reap(self, where: str) -> None:
+        """R6: remove every container/volume carrying our run label (a crash, a failed destroy); each is recorded
+        ``sandbox_reaped`` first. Never by name pattern — by the exact label the engine set."""
+        if self.reconcile_mode or self.docker is None:
+            return
+        from zbm_delivery.adapters.sandbox import reap
+        try:
+            reap(self.docker, self._record_plain, where=where)
+        except Exception:  # noqa: BLE001 - the reaper is best effort; a daemon that is gone has nothing to reap
+            pass
 
     # ================================================================== health / policy
 
@@ -831,6 +844,8 @@ class DeliveryService:
             op = Op(self, f"cancel-idem|{run_id}|{request_id}", caller, run_id)
             self._idem_add(op, key, h, resp)
             self._commit(op)
+            if self._engine is not None and hasattr(self._engine, "interrupt"):
+                self._engine.interrupt(run_id, "cancel")           # R6: the in-flight turn is stopped, not just flagged
             return resp
 
     # ================================================================== audit, reconcile, founder refusals

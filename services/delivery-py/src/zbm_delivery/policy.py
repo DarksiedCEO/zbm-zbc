@@ -8,8 +8,16 @@ classified, and the whole call takes the most restrictive class. The raw string 
 ``subprocess``/``os.system`` are refused, so ``g''it push`` (shlex → ``git push``) and ``$(echo git) push`` (raw
 rule) are both denied ``git_remote``/``unknown``.
 
-This is a denylist over an unbounded language (df-exec F-03). The BOUNDARY is the sandbox (§C.2: no network, no
-docker socket, non-root, read-only root); this classifier is the record and the first refusal.
+This is a denylist over an unbounded language (df-exec F-03). The BOUNDARY is the sandbox (§C.2: ``--network none``,
+no docker socket, non-root, read-only root, no ``.git``); this classifier is the record and the first refusal.
+
+Round 18 R5: the classifier cannot parse shells, so an interpreter / shell / ``make`` / ``find -delete`` / ``git -c``
+invocation is recorded honestly as ``allow_opaque`` (class ``exec``, ``opaque=True``) — a distinct decision value the
+ledger and the report count — never as a classified read/exec. Every write-capable operand (``rm``, ``cp``/``mv``/
+``ln`` destinations, ``tee``, ``touch``, ``mkdir``, ``chmod``, ``sed -i``, ``find -delete`` start, redirections) is
+normalised against the cwd (after ``cd``), must resolve inside ``services/<service>/`` or ``docs/adr/``, and anything
+unresolvable here (a glob, a brace, ``$``, ``~``) is refused; the guardrail then resolves the same operands INSIDE the
+container (``readlink -f`` on the longest existing prefix) and denies when that fails or lands outside.
 """
 
 from __future__ import annotations
@@ -27,6 +35,11 @@ ORDER = ("read", "write", "exec", "subagent", "network", "git_remote", "destruct
 DENY_UNCONDITIONAL = ("git_remote", "destructive_outside_workspace", "acp", "mcp", "self_modify", "network")
 _SPLIT = re.compile(r"\|\||&&|;|\|")
 _RM_RECURSIVE = re.compile(r"^-[a-zA-Z]*[rR][a-zA-Z]*$")
+_UNRESOLVABLE = re.compile(r"[*?\[\]{}$~`]")
+# R5: argv0s whose effect the classifier cannot see (they interpret files, programs or Makefiles)
+OPAQUE_ARGV0 = ("python", "python3", "pytest", "sh", "bash", "zsh", "dash", "node", "awk", "gawk", "mawk", "sed", "make",
+                "cargo", "go", "npm", "npx", "rustc", "perl", "ruby")
+WRITE_ARGV0 = ("cp", "mv", "tee", "touch", "mkdir", "sed", "chmod", "ln", "rm", "find", "rmdir", "install", "truncate", "dd")
 
 
 @dataclass(frozen=True)
@@ -36,10 +49,18 @@ class Verdict:
     deny: bool
     code: str
     message: str
+    opaque: bool = False                      # R5: an allowed exec whose effect the classifier cannot see
+    write_targets: tuple = ()                 # cwd-normalised paths the guardrail re-resolves inside the container
 
     @property
     def unconditional(self) -> bool:
         return self.klass in DENY_UNCONDITIONAL or self.klass == "unknown"
+
+    @property
+    def decision(self) -> str:
+        if self.deny:
+            return "deny"
+        return "allow_opaque" if self.opaque else "allow"
 
 
 @dataclass(frozen=True)
@@ -79,6 +100,30 @@ def write_allowed(path: str, ctx: Context, cwd: Optional[str] = None) -> bool:
     adr_dir = posixpath.join(ctx.workspace, "docs", "adr")
     name = posixpath.basename(p)
     return posixpath.dirname(p) == adr_dir and re.fullmatch(r"00[0-9][0-9]-[a-z0-9\-]+\.md", name) is not None
+
+
+def write_roots(ctx: Context) -> tuple[str, str]:
+    return posixpath.join(ctx.workspace, "services", ctx.service), posixpath.join(ctx.workspace, "docs", "adr")
+
+
+def exec_write_ok(target: str, ctx: Context, cwd: str, *, allow_root: bool = False) -> Optional[str]:
+    """None when ``target`` (an operand of a write-capable exec command) is a plain path that normalises inside the
+    write roots; else the reason it is refused (R5: fail closed on anything unresolvable)."""
+    if not target or "\x00" in target:
+        return "empty operand"
+    if _UNRESOLVABLE.search(target):
+        return "operand with glob/brace/variable/tilde (unresolvable before execution)"
+    if ".." in target.split("/"):
+        return "operand with .."
+    p = _norm(target, cwd)
+    if p in ("/", ctx.workspace) or posixpath.basename(p) == ".git" or inside(p, posixpath.join(ctx.workspace, ".git")):
+        return "operand is the workspace, / or a .git"
+    if ctx.evidence_root and inside(p, ctx.evidence_root):
+        return "operand inside the evidence root"
+    roots = write_roots(ctx)
+    if (p in roots and not allow_root) or not any(inside(p, r) for r in roots):
+        return "operand outside services/<service>/ and docs/adr/"
+    return None
 
 
 def read_allowed(path: str, ctx: Context, cwd: Optional[str] = None) -> bool:
@@ -197,125 +242,137 @@ def _python_c_words(argv: list[str]) -> str:
     return ""
 
 
-def _rm_outside(argv: list[str], ctx: Context, cwd: str) -> bool:
-    """rm with a recursive flag (or any rm of .git / the evidence root / '/') whose target escapes the workspace."""
-    flags = [a for a in argv[1:] if a.startswith("-")]
-    targets = [a for a in argv[1:] if not a.startswith("-")]
-    recursive = any(_RM_RECURSIVE.fullmatch(f) for f in flags) or "--recursive" in flags
-    for t in targets:
-        if ".." in t.split("/"):
-            return True
-        p = _norm(t, cwd)
-        if p in ("/", ctx.workspace) or (ctx.evidence_root and inside(p, ctx.evidence_root)):
-            return True
-        if posixpath.basename(p) == ".git" or inside(p, posixpath.join(ctx.workspace, ".git")):
-            return True
-        if t.startswith("~") or "$" in t:
-            return True
-        if not inside(p, ctx.workspace):
-            return True
-        if recursive and p == ctx.workspace:
-            return True
-    return False
+def _rm_outside(argv: list[str], ctx: Context, cwd: str) -> Optional[str]:
+    """Any rm operand that does not resolve inside the write roots (recursive or not; R5 fails closed on expansion)."""
+    for t in (a for a in argv[1:] if not a.startswith("-")):
+        why = exec_write_ok(t, ctx, cwd)
+        if why:
+            return why
+    return None
 
 
-def _find_delete_outside(argv: list[str], ctx: Context, cwd: str) -> bool:
-    if "-delete" not in argv and "-exec" not in argv:
-        return False
+def _find_delete_outside(argv: list[str], ctx: Context, cwd: str) -> Optional[str]:
+    if "-delete" not in argv and "-exec" not in argv and "-execdir" not in argv and "-ok" not in argv:
+        return None
     targets = [a for a in argv[1:] if not a.startswith("-")]
     start = targets[0] if targets else "."
-    if "-exec" in argv:
-        i = argv.index("-exec")
-        if i + 1 < len(argv) and _basename(argv[i + 1]) != "rm":
-            return False
-    return not inside(_norm(start, cwd), ctx.workspace) or ".." in start.split("/")
+    return exec_write_ok(start, ctx, cwd, allow_root=True)
 
 
-def _classify_bash(seed: dict, raw: str, ctx: Context) -> tuple[str, str]:
+def _write_operands(name: str, argv: list[str]) -> list[str]:
+    positional = [a for a in argv[1:] if not a.startswith("-")]
+    if name in ("cp", "mv", "ln", "install"):
+        return positional[-1:]
+    if name == "sed":
+        if not any(a.startswith("-i") for a in argv[1:] if a.startswith("-")):
+            return []
+        return positional[1:] if positional else []
+    if name == "find":
+        return []
+    if name == "chmod":
+        return positional[1:]                 # the first positional is the mode
+    if name == "dd":
+        return [a[3:] for a in argv[1:] if a.startswith("of=")]
+    return positional
+
+
+def _classify_bash(seed: dict, raw: str, ctx: Context) -> tuple[str, str, bool, list[str]]:
+    """(class, why, opaque, write targets normalised against the cwd)."""
     classes = seed["classes"]
     hit = _raw_rule_hit(seed, raw)
     if hit is not None:
-        return "unknown", f"raw string contains {hit!r} (indirect execution is refused)"
+        return "unknown", f"raw string contains {hit!r} (indirect execution is refused)", False, []
     cmds = _tokenise(raw)
     if cmds is None:
-        return "unknown", "command could not be tokenised"
+        return "unknown", "command could not be tokenised", False, []
     if not cmds:
-        return "unknown", "empty command"
+        return "unknown", "empty command", False, []
     worst, why, cwd = "read", "read-only command", ctx.workspace
+    opaque = False
+    targets: list[str] = []
     for argv, redirects in cmds:
         raw_piece = raw
         argv = _strip_env_assignments(argv)
         for target in redirects:
             if target.startswith("/dev/"):
                 continue
-            if ".." in target.split("/") or "$" in target or target.startswith("~") or \
-                    not inside(_norm(target, cwd), ctx.workspace):
-                return "destructive_outside_workspace", "output redirected outside the workspace"
+            bad = exec_write_ok(target, ctx, cwd)
+            if bad:
+                return "destructive_outside_workspace", f"output redirected outside the service directory ({bad})", False, []
+            targets.append(_norm(target, cwd))
             if _rank("exec") > _rank(worst):
-                worst, why = "exec", "output redirection writes inside the workspace"
+                worst, why = "exec", "output redirection writes inside the service directory"
         if not argv:
             continue
         name = _basename(argv[0])
         if name == "cd":
             target = argv[1] if len(argv) > 1 else ctx.workspace
-            if ".." in target.split("/") or not inside(_norm(target, cwd), ctx.workspace):
-                return "destructive_outside_workspace", "cd outside the workspace"
+            if _UNRESOLVABLE.search(target) or ".." in target.split("/") or not inside(_norm(target, cwd), ctx.workspace):
+                return "destructive_outside_workspace", "cd outside the workspace (or unresolvable)", False, []
             cwd = _norm(target, cwd)
             continue
         if name in ("sh", "bash", "zsh", "dash") and any(a == "-c" for a in argv[1:]):
-            return "unknown", "sh -c / bash -c is refused"
+            return "unknown", "sh -c / bash -c is refused", False, []
         if name in ("eval", "exec", "xargs", "env", "nohup", "sudo", "su", "doas", "chroot", "nsenter", "unshare"):
             if name == "env" and len(argv) == 1:
                 klass, w = "read", "env listing"
             else:
-                return "unknown", f"{name} is refused (indirect execution)"
+                return "unknown", f"{name} is refused (indirect execution)", False, []
         elif name == "git":
             klass = _git_class(seed, argv)
             w = "git write/remote subcommand (the engine adds, commits and stashes; engineers never do)" if klass == "git_remote" else "git read"
+            if klass == "read" and any(a in ("-c", "--git-dir", "--work-tree", "--exec-path") or a.startswith(("-c", "--git-dir=", "--work-tree=", "--exec-path="))
+                                       for a in argv[1:]):
+                klass, w, opaque = "exec", "git with -c/--git-dir/--work-tree (opaque: a config value can run a command)", True
         elif name in classes["git_remote"].get("bash_argv0", []):
             klass, w = "git_remote", f"{name} reaches a remote"
         elif _network_hit(seed, raw_piece, argv):
             klass, w = "network", f"{name} reaches the network / installs a dependency"
         elif name == "rm":
-            if _rm_outside(argv, ctx, cwd):
-                return "destructive_outside_workspace", "rm target outside the workspace, the workspace .git, the evidence root or /"
-            klass, w = "exec", "rm inside the workspace"
-        elif name == "find" and _find_delete_outside(argv, ctx, cwd):
-            return "destructive_outside_workspace", "find -delete/-exec rm outside the workspace"
-        elif name == "find" and ("-delete" in argv or "-exec" in argv):
-            klass, w = "exec", "find -delete/-exec inside the workspace"
+            bad = _rm_outside(argv, ctx, cwd)
+            if bad:
+                return "destructive_outside_workspace", f"rm refused: {bad}", False, []
+            klass, w = "exec", "rm inside the service directory"
+        elif name == "find" and ("-delete" in argv or "-exec" in argv or "-execdir" in argv or "-ok" in argv):
+            bad = _find_delete_outside(argv, ctx, cwd)
+            if bad:
+                return "destructive_outside_workspace", f"find -delete/-exec refused: {bad}", False, []
+            klass, w, opaque = "exec", "find -delete/-exec inside the service directory (opaque)", True
+            targets.append(_norm(next((a for a in argv[1:] if not a.startswith("-")), "."), cwd))
         else:
             code = _python_c_words(argv)
             if code:
                 for word in seed.get("python_c_deny_words", []):
                     if word in code:
                         if word in ("shutil.rmtree", "os.remove", "os.unlink", "os.rmdir"):
-                            return "destructive_outside_workspace", f"python -c mentions {word}"
-                        return "unknown", f"python -c mentions {word}"
+                            return "destructive_outside_workspace", f"python -c mentions {word}", False, []
+                        return "unknown", f"python -c mentions {word}", False, []
                 for word in classes["network"].get("python_c_words", []):
                     if word in code:
-                        return "network", f"python -c mentions {word}"
+                        return "network", f"python -c mentions {word}", False, []
             if name in classes["read"].get("bash_argv0", []):
                 klass, w = "read", "read-only command"
                 if name == "pytest" or (name in ("python", "python3") and "-m" in argv and "pytest" in argv):
-                    klass, w = "exec", "test command"
+                    klass, w, opaque = "exec", "test command (opaque)", True
             elif name in classes["exec"].get("bash_argv0", []):
                 klass, w = "exec", f"{name} inside the workspace"
                 if name == "pytest" and any(a in classes["read"].get("pytest_flags_read", []) for a in argv[1:]):
-                    klass, w = "read", "pytest collection only"
+                    klass, w = "exec", "pytest collection only (opaque: conftest and test modules are imported)"
+                if name in OPAQUE_ARGV0:
+                    opaque = True
+                    w = f"{name} (opaque: an interpreter/shell/build tool whose effect the classifier cannot see)"
             else:
                 klass, w = "unknown", f"{name!r} is not in the tool policy seed"
         if _rank(klass) > _rank(worst):
             worst, why = klass, w
-        # any path argument escaping the workspace on a write-capable command
-        if klass == "exec" and name in ("cp", "mv", "tee", "touch", "mkdir", "sed", "chmod", "ln"):
-            positional = [a for a in argv[1:] if not a.startswith("-")]
-            # cp/mv/ln write only their LAST operand (the destination / link name); the others are read
-            targets = positional[-1:] if name in ("cp", "mv", "ln") else positional
-            for a in targets:
-                if a.startswith("/") and not inside(_norm(a, cwd), ctx.workspace) and not inside(_norm(a, cwd), "/tmp"):
-                    return "destructive_outside_workspace", f"{name} targets a path outside the workspace"
-    return worst, why
+        # every write-capable operand must normalise inside the write roots (relative operands too, after cd)
+        if klass == "exec" and name in WRITE_ARGV0:
+            for a in _write_operands(name, argv):
+                bad = exec_write_ok(a, ctx, cwd)
+                if bad:
+                    return "destructive_outside_workspace", f"{name} refused: {bad}", False, []
+                targets.append(_norm(a, cwd))
+    return worst, why, opaque, targets
 
 
 def classify(seed: dict, tool_name: str, tool_input: Any, ctx: Context) -> Verdict:
@@ -348,11 +405,11 @@ def classify(seed: dict, tool_name: str, tool_input: Any, ctx: Context) -> Verdi
             return Verdict("unknown", False, True, "TOOL_DENIED", "bash without a command")
         if len(cmd) > 16_384:
             return Verdict("unknown", False, True, "TOOL_DENIED", "bash command longer than 16 KiB")
-        klass, why = _classify_bash(seed, cmd, ctx)
+        klass, why, opaque, targets = _classify_bash(seed, cmd, ctx)
         decision = classes[klass]["decision"]
         if decision in ("deny", "deny_unconditionally"):
             return Verdict(klass, False, True, "TOOL_DENIED", why)
-        return Verdict(klass, decision == "allow_with_token", False, "ALLOW", why)
+        return Verdict(klass, decision == "allow_with_token", False, "ALLOW", why, opaque=opaque, write_targets=tuple(targets))
     return Verdict("unknown", False, True, "TOOL_DENIED", f"{tool_name!r} is not in the tool policy seed")
 
 
@@ -363,20 +420,3 @@ def is_test_command(seed_tc: dict, argv: list[str]) -> Optional[str]:
         if argv[:len(base)] == base:
             return name
     return None
-
-
-def rm_recursive_targets(raw: str) -> list[str]:
-    """Targets of every recursive ``rm`` in a bash string (for the guardrail's in-sandbox symlink resolution)."""
-    cmds = _tokenise(raw) if isinstance(raw, str) else None
-    out: list[str] = []
-    if not cmds:
-        return out
-    for argv, _ in cmds:
-        argv = _strip_env_assignments(argv)
-        if not argv or _basename(argv[0]) != "rm":
-            continue
-        flags = [a for a in argv[1:] if a.startswith("-")]
-        if not (any(_RM_RECURSIVE.fullmatch(f) for f in flags) or "--recursive" in flags):
-            continue
-        out += [a for a in argv[1:] if not a.startswith("-")]
-    return out

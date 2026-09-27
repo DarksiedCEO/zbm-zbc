@@ -1,0 +1,43 @@
+guardrail(ls) allow = True
+--- guardrail order (ok ledger)
+   sequence: [('record', 'tool_call_decided')]
+   docker calls: []
+--- exec_argv order (ok ledger)
+   sequence: [('record', 'sandbox_exec_requested'), ('record', 'sandbox_exec_completed')]
+   docker calls: [['exec', '--user', '65532:65532', '-w']]
+--- put_bytes order (ok ledger)
+   sequence: [('record', 'sandbox_exec_requested'), ('record', 'sandbox_exec_completed'), ('record', 'sandbox_exec_requested'), ('record', 'sandbox_exec_completed'), ('record', 'sandbox_exec_requested'), ('record', 'sandbox_exec_completed'), ('record', 'sandbox_exec_requested'), ('record', 'sandbox_exec_completed'), ('record', 'sandbox_exec_requested'), ('record', 'sandbox_exec_completed'), ('record', 'sandbox_exec_requested'), ('record', 'sandbox_exec_completed'), ('record', 'sandbox_exec_requested'), ('record', 'sandbox_exec_completed')]
+   docker calls: [['exec', '--user', '65532:65532', '-w'], ['cp', '-', 'dlv-dlv-run-P3:/mnt/user-data/workspace/.dlv-stage/6d26fc9ce94121fd'], ['exec', '--user', '65532:65532', '-w'], ['exec', '--user', '65532:65532', '-w'], ['exec', '--user', '65532:65532', '-w'], ['exec', '--user', '65532:65532', '-w'], ['exec', '--user', '65532:65532', '-w']]
+   transport hits: ['https://api.anthropic.com/v1/messages']
+--- egress order (ok ledger)
+   sequence: [('record', 'crossing_egress_requested')]
+   docker calls: []
+--- acquire order (ok ledger)
+   sequence: [('record', 'crossing_docker_requested')]
+   docker calls: [['info', '--format', '{{.ServerVersion}}'], ['run', '-d', '--name', 'dlv-dlv-run-P3']]
+guardrail(ls) with ledger down -> allow = False reason = LEDGER_UNAVAILABLE ; on_ledger_failure: [('dlv-run-P3', 'tool_call_decided record failed: RuntimeError')]
+--- guardrail (ledger down)
+   sequence: [('record', 'tool_call_decided')]
+   docker calls: []
+exec_argv refused: sandbox exec refused: the ledger record failed (record-first)
+--- exec_argv (ledger down)
+   sequence: [('record', 'sandbox_exec_requested')]
+   docker calls: []
+put_bytes refused: sandbox exec refused: the ledger record failed (record-first)
+--- put_bytes (ledger down)
+   sequence: [('record', 'sandbox_exec_requested')]
+   docker calls: []
+egress refused: egress not recorded (RuntimeError); refused
+   transport hits: []
+--- egress (ledger down)
+   sequence: [('record', 'crossing_egress_requested')]
+   docker calls: []
+receipt refused: tool result could not be recorded; the turn stops (record-first)
+--- receipts (ledger down)
+   sequence: [('record', 'tool_result_recorded')]
+   docker calls: []
+acquire refused: RuntimeError ledger down (probe)
+--- acquire (ledger down)
+   sequence: [('record', 'crossing_docker_requested')]
+   docker calls: [['info', '--format', '{{.ServerVersion}}']]
+failures recorded via on_ledger_failure: 4

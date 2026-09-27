@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "SPDX licence identifiers a runtime distribution may carry (DEPT28_SPEC D13, ST-01/02). devtools/licence_gate.py normalises each installed distribution's licence to an SPDX id and refuses anything outside this list; a LicenseRef-/UNKNOWN entry is accepted only when licence_exceptions.json names the distribution with the file that proves its licence. Hash pinned in config.py. The five ids under additions_beyond_spec_d13 were needed by the resolved runtime set (uv.lock) and are recorded in ADR 0011 as a deviation from the lead's D13 list.",
+  "description": "SPDX licence identifiers a runtime distribution may carry (DEPT28_SPEC D13, ST-01/02). devtools/licence_gate.py normalises each installed distribution's licence to an SPDX id and refuses anything outside this list; a LicenseRef-/UNKNOWN entry is accepted only when licence_exceptions.json names the distribution with the file that proves its licence. Hash pinned in config.py. The five ids under additions_beyond_spec_d13 were needed by the resolved runtime set (uv.lock) and are recorded in ADR 0011 as a deviation from the lead's D13 list. Round 18 R9: '*.egg-info' and vendored top-level entries without a RECORD are scanned too; a metadata licence of UNKNOWN passes only through an explicit exception.",
   "allowed": [
     "MIT",
     "Apache-2.0",
@@ -45,5 +45,10 @@
     "Zlib": "numpy 2.5.3 bundles zlib-licensed components (BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0); permissive",
     "CC0-1.0": "numpy 2.5.3 bundles CC0 (public-domain dedication) components; permissive",
     "CNRI-Python": "regex 2026.9.10 (Apache-2.0 AND CNRI-Python: the historic CNRI Python licence, permissive, OSI-approved)"
-  }
+  },
+  "unrecorded_allow": [
+    "_virtualenv.py",
+    "_virtualenv.pth"
+  ],
+  "unrecorded_allow_reason": "virtualenv/uv scaffolding written into every venv it creates (no distribution record by design); round 18 R9 flags every other top-level entry without a RECORD"
 }

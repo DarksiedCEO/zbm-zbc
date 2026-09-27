@@ -1,65 +1,169 @@
 info --format {{.ServerVersion}}
-run -d --name dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D --user 65532:65532 --cap-drop=ALL --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,size=512m --pids-limit 512 --memory 4g --cpus 2 --network dlv-internal --mount type=volume,src=dlv-ws-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D,dst=/mnt/user-data/workspace --mount type=bind,src=/home/claude/wt/delivery/services/delivery-py/skills,dst= …
-cp - dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/services/toy-py/tests
-cp - dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services/toy-py/tests
-cp dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services/toy-py -
-cp dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/docs/adr -
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider tests/test_fix_n1_1.py::test_add_sum
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/services/toy-py/src/toy
-cp - dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services/toy-py/src/toy
-cp dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services/toy-py -
-cp dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/docs/adr -
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider tests/test_fix_n1_1.py::test_add_sum
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 rm -rf -- /mnt/user-data/workspace/services/toy-py
-cp - dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider tests/test_fix_n1_1.py::test_add_sum
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 rm -rf -- /mnt/user-data/workspace/services/toy-py
-cp - dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider tests/test_fix_n1_1.py::test_add_sum
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/services/toy-py/tests
-cp - dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services/toy-py/tests
-cp dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services/toy-py -
-cp dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/docs/adr -
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider tests/test_fix_n1_2.py::test_percent_zero_whole
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/services/toy-py/src/toy
-cp - dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services/toy-py/src/toy
-cp dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services/toy-py -
-cp dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/docs/adr -
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider tests/test_fix_n1_2.py::test_percent_zero_whole
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 rm -rf -- /mnt/user-data/workspace/services/toy-py
-cp - dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider tests/test_fix_n1_2.py::test_percent_zero_whole
-exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 60 rm -rf -- /mnt/user-data/workspace/services/toy-py
-cp - dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D:/mnt/user-data/workspace/services
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider tests/test_fix_n1_2.py::test_percent_zero_whole
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider
-exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D timeout -k 5 600 pytest -q -p no:cacheprovider
-rm -f dlv-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D
-volume rm -f dlv-ws-dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D
+ps -a -q --filter label=zbm.dlv.run --format {{.Names}} {{.Label "zbm.dlv.run"}}
+volume ls -q --filter label=zbm.dlv.run
+info --format {{.ServerVersion}}
+run -d --name dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q --label zbm.dlv.run=dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q --user 65532:65532 --cap-drop=ALL --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,size=512m --pids-limit 512 --memory 4g --cpus 2 --network none --mount type=volume,src=dlv-ws-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q,dst=/mnt/user-data/workspace,volume-label=zbm.dlv.run=dlv-run …
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 test ! -e /mnt/user-data/workspace/.git
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-stage/880443a7c13b7117
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-stage/880443a7c13b7117
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mv -f -T -- /mnt/user-data/workspace/.dlv-stage/880443a7c13b7117/engine-c99366e1411b.ini /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 rm -rf -- /mnt/user-data/workspace/.dlv-stage/880443a7c13b7117
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_tes …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-c07d4ede7e75.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_ …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-c07d4ede7e75.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-stage/eed19246c9e26fe9
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-stage/eed19246c9e26fe9
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/services/toy-py/tests
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mv -f -T -- /mnt/user-data/workspace/.dlv-stage/eed19246c9e26fe9/test_fix_n1_1.py /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 rm -rf -- /mnt/user-data/workspace/.dlv-stage/eed19246c9e26fe9
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/services/toy-py -
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/docs/adr -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_tes …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-a8cd2c6953fc.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_ …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-a8cd2c6953fc.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-stage/8112b4b623170593
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-stage/8112b4b623170593
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/services/toy-py/src/toy
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mv -f -T -- /mnt/user-data/workspace/.dlv-stage/8112b4b623170593/calc.py /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 rm -rf -- /mnt/user-data/workspace/.dlv-stage/8112b4b623170593
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/services/toy-py -
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/docs/adr -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_tes …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-b2b646ea6020.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_ …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-b2b646ea6020.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-verify/verify-d23d7fdbbffe/services
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-verify/verify-d23d7fdbbffe/services
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-stage/885f1ce6373911a0
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-stage/885f1ce6373911a0
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mv -f -T -- /mnt/user-data/workspace/.dlv-stage/885f1ce6373911a0/engine-69d62b9a0578.ini /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-69d62b9a0578.ini
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 rm -rf -- /mnt/user-data/workspace/.dlv-stage/885f1ce6373911a0
+exec --user 65532:65532 -w /mnt/user-data/workspace/.dlv-verify/verify-d23d7fdbbffe/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-69d62b9a0578.ini --rootdir=/mnt/user-data/workspace/.dlv-verify/verify-d23d7fdb …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-e40c318e5e61.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/.dlv-verify/verify-d23d7fdbbffe/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-69d62b9a0578.ini --rootdir=/mnt/user-data/workspace/.dlv-verify/verif …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-e40c318e5e61.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-stage/07fa374c288d3ead
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-stage/07fa374c288d3ead
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mv -f -T -- /mnt/user-data/workspace/.dlv-stage/07fa374c288d3ead/engine-cfaa665a5121.ini /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-cfaa665a5121.ini
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 rm -rf -- /mnt/user-data/workspace/.dlv-stage/07fa374c288d3ead
+exec --user 65532:65532 -w /mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-cfaa665a5121.ini --rootdir=/mnt/user-data/workspace/.dlv-verify/reverted-0dff …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-4040ef9068ae.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-cfaa665a5121.ini --rootdir=/mnt/user-data/workspace/.dlv-verify/rev …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-4040ef9068ae.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 rm -rf -- /mnt/user-data/workspace/.dlv-verify/verify-d23d7fdbbffe/services
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 rm -rf -- /mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_tes …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-d24dc008481d.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_ …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-d24dc008481d.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-stage/73270febdaf1f0cf
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-stage/73270febdaf1f0cf
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/services/toy-py/tests
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/tests
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mv -f -T -- /mnt/user-data/workspace/.dlv-stage/73270febdaf1f0cf/test_fix_n1_2.py /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 rm -rf -- /mnt/user-data/workspace/.dlv-stage/73270febdaf1f0cf
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/services/toy-py -
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/docs/adr -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_tes …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-8d62e54e8171.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_ …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-8d62e54e8171.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 cat -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-stage/3c8b7404b20f30ed
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-stage/3c8b7404b20f30ed
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/services/toy-py/src/toy
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/services/toy-py/src/toy
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mv -f -T -- /mnt/user-data/workspace/.dlv-stage/3c8b7404b20f30ed/calc.py /mnt/user-data/workspace/services/toy-py/src/toy/calc.py
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 rm -rf -- /mnt/user-data/workspace/.dlv-stage/3c8b7404b20f30ed
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/services/toy-py -
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/docs/adr -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_tes …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-91343cf344a9.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_ …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-91343cf344a9.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-verify/verify-857063310144/services
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-verify/verify-857063310144/services
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-stage/a716d52323f3d814
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-stage/a716d52323f3d814
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mv -f -T -- /mnt/user-data/workspace/.dlv-stage/a716d52323f3d814/engine-f0a11b5bdd97.ini /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-f0a11b5bdd97.ini
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 rm -rf -- /mnt/user-data/workspace/.dlv-stage/a716d52323f3d814
+exec --user 65532:65532 -w /mnt/user-data/workspace/.dlv-verify/verify-857063310144/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-f0a11b5bdd97.ini --rootdir=/mnt/user-data/workspace/.dlv-verify/verify-85706331 …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-79b0e6076e3f.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/.dlv-verify/verify-857063310144/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-f0a11b5bdd97.ini --rootdir=/mnt/user-data/workspace/.dlv-verify/verif …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-79b0e6076e3f.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-stage/99273ccd96800177
+cp - dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-stage/99273ccd96800177
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mkdir -p -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 readlink -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 mv -f -T -- /mnt/user-data/workspace/.dlv-stage/99273ccd96800177/engine-90adb23c0560.ini /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-90adb23c0560.ini
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 30 rm -rf -- /mnt/user-data/workspace/.dlv-stage/99273ccd96800177
+exec --user 65532:65532 -w /mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-90adb23c0560.ini --rootdir=/mnt/user-data/workspace/.dlv-verify/reverted-bd3f …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-c4cf990fa625.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-90adb23c0560.ini --rootdir=/mnt/user-data/workspace/.dlv-verify/rev …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-c4cf990fa625.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 rm -rf -- /mnt/user-data/workspace/.dlv-verify/verify-857063310144/services
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 60 rm -rf -- /mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_tes …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-df1d12092a93.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_ …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-df1d12092a93.xml
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_tes …
+cp dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q:/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-2204d668f540.xml -
+exec --user 65532:65532 -w /mnt/user-data/workspace/services/toy-py --env CI=1 --env PYTHONDONTWRITEBYTECODE=1 --env PYTHONHASHSEED=0 dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 600 pytest -q -p no:cacheprovider --collect-only -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_ …
+exec --user 65532:65532 -w /mnt/user-data/workspace dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q timeout -k 5 20 rm -f -- /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-2204d668f540.xml
+rm -f dlv-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q
+volume rm -f dlv-ws-dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q

@@ -9,8 +9,12 @@ when set, ``timeout=httpx.Timeout(10.0)`` default, ``follow_redirects=False``, `
 - is recorded ``crossing_egress_requested {host, purpose, body_sha256}`` first — a failed record refuses the call;
 - ``timeout`` may only be shortened, except ``purpose="llm"`` which uses ``DLV_EGRESS_LLM_READ_TIMEOUT_S`` for the
   read phase and 10 s for connect;
+- round 18 R6: a TOTAL per-call deadline (connect + every read, wall clock) enforced by this client while the body is
+  streamed — ``default_timeout_s`` for ordinary calls, ``llm_read_timeout_s`` for LLM calls, and never more than the
+  ``deadline_s`` the caller passes (the run's remaining wall clock); the body is read in chunks against the cap
+  (never buffered past it); ``abort(run_id)`` closes every response in flight for that run from another thread;
 - one retry on transport error / 5xx with the same idempotency header for non-LLM calls, none for LLM calls;
-- the response body is capped (8 MiB for LLM answers, 1 MiB otherwise) — larger → ``EgressRefused``.
+- the response body is capped (8 MiB for LLM answers, 1 MiB otherwise) — larger → ``EgressFailed``.
 
 The proxy: when ``HTTPS_PROXY`` is set the client is built with it explicitly (still ``trust_env=False``); the
 allowlist is enforced on the TARGET host regardless. No other module constructs an ``httpx.Client`` (G13) except
@@ -22,6 +26,8 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import threading
+import time
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
@@ -84,9 +90,26 @@ class EgressClient:
             kwargs["proxy"] = proxy
         self._client = httpx.Client(**kwargs)
         self.requests: int = 0
+        self._inflight: dict[int, tuple[str, Any]] = {}      # id -> (run_id, response) for abort()
+        self._lock = threading.Lock()
+        self._aborted: set[int] = set()
 
     def close(self) -> None:
         self._client.close()
+
+    def abort(self, run_id: str) -> int:
+        """Close every in-flight response of ``run_id`` (R6: a cancel or the watchdog interrupts the LLM call). Returns
+        how many were closed."""
+        with self._lock:
+            victims = [(k, r) for k, (rid, r) in self._inflight.items() if rid == run_id]
+            for k, _ in victims:
+                self._aborted.add(k)
+        for _, resp in victims:
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001
+                pass
+        return len(victims)
 
     def allowed(self, url: str) -> tuple[str, int]:
         host, port = parse_target(url)
@@ -95,7 +118,8 @@ class EgressClient:
         return host, port
 
     def request(self, method: str, url: str, *, purpose: str, headers: Optional[dict] = None,
-                body: Optional[bytes] = None, timeout: Optional[float] = None, run_id: str = "-") -> httpx.Response:
+                body: Optional[bytes] = None, timeout: Optional[float] = None, run_id: str = "-",
+                deadline_s: Optional[float] = None) -> httpx.Response:
         if method not in ("GET", "POST"):
             raise EgressRefused("method not allowed")
         host, port = self.allowed(url)                                  # before any DNS lookup
@@ -111,27 +135,76 @@ class EgressClient:
         except Exception as exc:  # noqa: BLE001 - unrecorded = refused
             raise EgressRefused(f"egress not recorded ({type(exc).__name__}); refused") from None
         if purpose == "llm":
-            t = httpx.Timeout(connect=CONNECT_S, read=self.llm_read_timeout_s, write=CONNECT_S, pool=CONNECT_S)
+            total = self.llm_read_timeout_s
             attempts = 1
             cap = LLM_CAP
         else:
-            t_s = min(float(timeout), self.default_timeout_s) if timeout else self.default_timeout_s
-            t = httpx.Timeout(t_s)
+            total = min(float(timeout), self.default_timeout_s) if timeout else self.default_timeout_s
             attempts = 2
             cap = OTHER_CAP
+        if deadline_s is not None:
+            total = max(0.0, min(total, float(deadline_s)))
         hdrs = dict(headers or {})
         hdrs.setdefault("Idempotency-Key", idem)
         last: Optional[Exception] = None
+        started = time.monotonic()
         for attempt in range(attempts):
+            remaining = total - (time.monotonic() - started)
+            if remaining <= 0:
+                raise EgressFailed("egress total deadline exceeded before the request")
+            read_s = min(remaining, self.llm_read_timeout_s if purpose == "llm" else total)
+            t = httpx.Timeout(connect=min(CONNECT_S, remaining), read=read_s, write=min(CONNECT_S, remaining), pool=min(CONNECT_S, remaining))
             try:
-                resp = self._client.request(method, url, headers=hdrs, content=body, timeout=t)
+                resp = self._stream(method, url, hdrs, body, t, cap, started, total, run_id)
             except httpx.TransportError as exc:
                 last = EgressFailed(f"transport error: {type(exc).__name__}")
                 continue
             if resp.status_code >= 500 and attempt + 1 < attempts:
                 last = EgressFailed(f"HTTP {resp.status_code}")
                 continue
-            if len(resp.content) > cap:
-                raise EgressFailed("response larger than the cap")
             return resp
         raise last or EgressFailed("egress failed")
+
+    def _stream(self, method, url, hdrs, body, t, cap, started, total, run_id) -> httpx.Response:
+        """Send, then read the body chunk by chunk against the cap and the total deadline (R6)."""
+        req = self._client.build_request(method, url, headers=hdrs, content=body, timeout=t)
+        resp = self._client.send(req, stream=True)
+        key = id(resp)
+        with self._lock:
+            self._inflight[key] = (run_id, resp)
+        chunks: list[bytes] = []
+        size = 0
+        try:
+            for chunk in resp.iter_bytes():
+                size += len(chunk)
+                if size > cap:
+                    raise EgressFailed("response larger than the cap")
+                if time.monotonic() - started > total:
+                    raise EgressFailed("egress total deadline exceeded while reading the response")
+                with self._lock:
+                    if key in self._aborted:
+                        raise EgressFailed("egress aborted (run interrupted)")
+                chunks.append(chunk)
+        except httpx.TransportError as exc:
+            with self._lock:
+                aborted = key in self._aborted
+            raise EgressFailed("egress aborted (run interrupted)" if aborted else f"transport error: {type(exc).__name__}") from None
+        except (httpx.StreamError, RuntimeError) as exc:
+            with self._lock:
+                aborted = key in self._aborted
+            if aborted:
+                raise EgressFailed("egress aborted (run interrupted)") from None
+            if isinstance(exc, EgressFailed):
+                raise
+            raise EgressFailed(f"stream error: {type(exc).__name__}") from None
+        finally:
+            with self._lock:
+                self._inflight.pop(key, None)
+                self._aborted.discard(key)
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001
+                pass
+        # rebuild a fully-read response the callers use as before (.status_code, .content, .json())
+        out = httpx.Response(resp.status_code, headers=resp.headers, content=b"".join(chunks), request=req)
+        return out

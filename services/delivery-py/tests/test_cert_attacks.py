@@ -85,8 +85,8 @@ def test_a1_git_remote_denied_unconditionally_and_recorded(denies):
     assert any("Guardrail denied" in r and "git_remote" in r for r in results)
     # every decision carries the token id, policy version and the args hash; nothing else
     for x in d:
-        assert set(x) == {"run_id", "tool", "class", "decision", "code", "args_sha256", "token_id", "policy_version",
-                          "is_subagent", "tool_call_id", "seq"}
+        assert set(x) == {"run_id", "tool", "class", "decision", "opaque", "code", "args_sha256", "token_id", "policy_version",
+                          "is_subagent", "tool_call_id", "seq"}                       # opaque: round 18 R5
         assert x["policy_version"] == 1 and len(x["args_sha256"]) == 64
 
 
@@ -123,7 +123,7 @@ def test_a3_host_escape_flags_never_reach_docker(denies):
 
     class S:
         sandbox_image = "registry.test/zbm/dlv-sandbox:latest"
-        sandbox_mem, sandbox_cpus, sandbox_network, skills_root = "4g", "2", "dlv-internal", str(SERVICE_ROOT / "skills")
+        sandbox_mem, sandbox_cpus, sandbox_network, skills_root = "4g", "2", "none", str(SERVICE_ROOT / "skills")
     with pytest.raises(PermissionError, match="digest"):
         ZbmDockerSandboxProvider.run_argv(S(), "x", "/tmp/e")
 
@@ -137,7 +137,7 @@ def test_a4_network_denied_and_sandbox_network_is_internal(denies):
     for cmd in h.docker.exec_commands():
         assert not any(b in cmd for b in ("curl ", "wget ", "pip install", "npm install", "uv add"))
     run_argv = h.docker.argv_of("run")[0]
-    assert run_argv[run_argv.index("--network") + 1] == "dlv-internal"
+    assert run_argv[run_argv.index("--network") + 1] == "none"                # R4: no network at all
 
 
 def test_a4b_acp_mcp_self_modify_denied(denies):

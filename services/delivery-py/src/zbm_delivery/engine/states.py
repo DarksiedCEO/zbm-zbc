@@ -75,15 +75,22 @@ def finding_transition_problem(rec: dict, to: str, *, red_test_name: Optional[st
         return f"finding cannot move from {frm} to {to}"
     if to == "green":
         red = rec.get("red")
-        if not red or red.get("exit") == 0:
-            return "green requires a prior red with exit != 0"
+        if not red or red.get("exit") == 0 or red.get("verdict", "fail") != "fail":
+            return "green requires a prior red with exit != 0 and a verified failing verdict"
         if red_test_name is not None and red.get("test_name") != red_test_name:
             return "green requires the same test_name as the red"
+        green = rec.get("green") or {}
+        if green.get("verdict", "pass") != "pass":
+            return "green requires a verified passing verdict (R2: unknown is never green)"
     if to == "fixed":
-        if not rec.get("green") or rec["green"].get("exit") != 0:
+        if not rec.get("green") or rec["green"].get("exit") != 0 or rec["green"].get("verdict", "pass") != "pass":
             return "fixed requires green"
-        if not rec.get("revert_check") or rec["revert_check"].get("exit") == 0:
+        rc = rec.get("revert_check") or {}
+        if not rc or rc.get("exit") == 0 or rc.get("verdict", "fail") != "fail":
             return "fixed requires a revert check that failed with the fix reverted"
+        v = rec.get("verification") or {}
+        if v and (v.get("verification_checkout", {}).get("verdict") != "pass" or v.get("reverted_checkout", {}).get("verdict") != "fail"):
+            return "fixed requires the verification checkout to pass and the reverted checkout to fail (R1)"
         if not rec.get("sweep"):
             return "fixed requires a sweep record"
         if not suite_after_commit:
@@ -94,6 +101,8 @@ def finding_transition_problem(rec: dict, to: str, *, red_test_name: Optional[st
         d = rec.get("disproof")
         if not d or not d.get("reproduction_argv") or d.get("output_sha256") is None or not d.get("statement_sha256"):
             return "disproved requires a reproduction the engine ran and a written statement"
+        if d.get("verdict", "pass") != "pass":
+            return "disproved requires the finding's reproduction to pass on the base tree (R3)"
     if to == "blocked" and not rec.get("reasons"):
         return "blocked requires a reason"
     return None

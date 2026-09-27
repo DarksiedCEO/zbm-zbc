@@ -331,14 +331,16 @@ def test_g14_every_runner_argv_is_seeded_and_every_git_call_is_allowlisted():
         assert h.run(run_id)["status"] == "awaiting_review"
         seed = json.load(open(SERVICE_ROOT / "seed" / "test_commands_seed.json"))
         allowed_prefixes = [tuple(fw["suite"]) for fw in seed["frameworks"].values()]
+        allowed_prefixes += [tuple(fw["collect"]) for fw in seed["frameworks"].values() if fw.get("collect")]   # R2 cross-check
         engine_execs = [c for c in h.docker.argv_of("exec") if "-lc" not in c]
         for c in engine_execs:
             body = c[c.index("timeout") + 4:]
             head = body[0]
-            assert head in ("pytest", "cat", "readlink", "find", "grep", "mkdir", "rm") or head.startswith("/bin/"), c
+            assert head in ("pytest", "cat", "readlink", "find", "grep", "mkdir", "rm", "mv", "test") or head.startswith("/bin/"), c
             if head == "pytest":
                 assert any(tuple(body[:len(p)]) == p for p in allowed_prefixes), c
-        git_ok = {"rev-parse", "merge-base", "for-each-ref", "worktree", "status", "diff", "log", "add", "commit", "stash"}
+        git_ok = {"rev-parse", "merge-base", "for-each-ref", "worktree", "status", "diff", "log", "add", "commit", "stash",
+                  "remote", "archive", "show"}                # remote (R4 listing), archive/show (R1 verification checkouts)
         for argv in h.git.calls:
             assert argv[:2] == ["git", "-C"] and argv[3] in git_ok, argv
             if argv[3] == "stash":

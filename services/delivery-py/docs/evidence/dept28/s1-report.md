@@ -1,14 +1,14 @@
-# Fix run report — dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D
+# Fix run report — dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q
 
-- Service: `toy-py` · Branch: `fix1-toy-py` · Base: `b1e36f9765197529940346f361f307bb479d4002` (integration-2026-09-24)
-- Request: `req-f00251ec545142929b9a` · facts_sha256 `4ffd0148c921349f9ffd5bd63d45a3eb0d57b7c8bfe0250112692556f7e798b0`
+- Service: `toy-py` · Branch: `fix1-toy-py` · Base: `051a6f231eaa129d5be664e881a0a837afcdadb9` (integration-2026-09-24)
+- Request: `req-56b1e023122e4c11a6ed` · facts_sha256 `a965f739152ba91a11eea1cf21e31d1e8dab35e2dfaf1993837654bffc732fc5`
 - Model: fake / fake-engineer (FAKE, non-production)
-- Policy version 1 · prompts manifest `064a5e3e3b3ea696cce1a586eef792a9a73e26ed8b45dabe9dfa20fa2d295440`
+- Policy version 1 · prompts manifest `a55a2a0f6ef5979a4ff4df702b126bb3d43d05c208cbae6d10e0da8bc420ee1e`
 
 ## Suite
 
-- before (untouched worktree): 2 passed / 1 failed / 0 errors / 0 skips · evidence `dlv-ev-471edebf08719283a6d5649c76` · exit 1
-- after (last commit): 5 passed / 0 failed / 0 errors / 0 skips · evidence `dlv-ev-9310d484212a1fe2c33b4b8acc` · exit 0
+- before (untouched worktree): 2 passed / 1 failed / 0 errors / 0 skips · status ok (junit == collected == summary == exit) · evidence `dlv-ev-400758ec4d20daa09f815a0e9c` · exit 1
+- after (last commit): 5 passed / 0 failed / 0 errors / 0 skips · status ok (junit == collected == summary == exit) · evidence `dlv-ev-acaf913e7375befd9747baeeb8` · exit 0
 - failing before: tests/test_calc.py::test_add_returns_sum
 
 ## Findings
@@ -16,44 +16,45 @@
 ### N1-1 — high — state `fixed` (rounds 1)
 
 - Location: `services/toy-py/src/toy/calc.py:6` · class hint `wrong_operator`
-- RED: exit 1 · evidence `dlv-ev-cd869f49e72e4aa2470ace2129` · argv `pytest -q -p no:cacheprovider tests/test_fix_n1_1.py::test_add_sum`
+- RED: exit 1 · verdict fail · evidence `dlv-ev-2c1a836395410f3d8fb8a600ef` · argv `pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_test.py -o testpaths=/mnt/user-data/workspace/services/toy-py/tests -o pythonpath=/mnt/user-data/workspace/services/toy-py/src --junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-a8cd2c6953fc.xml tests/test_fix_n1_1.py::test_add_sum`
 
 ```text
-F                                                                        [100%]
+F
 =================================== FAILURES ===================================
 _________________________________ test_add_sum _________________________________
 
     def test_add_sum():
 >       assert calc.add(2, 3) == 5
 E       assert -1 == 5
-E        +  where -1 = <function add at 0x7f7c452d93a0>(2, 3)
-E        +    where <function add at 0x7f7c452d93a0> = calc.add
+E        +  where -1 = <function add at 0x7f3c4ffd16c0>(2, 3)
+E        +    where <function add at 0x7f3c4ffd16c0> = calc.add
 
 tests/test_fix_n1_1.py:5: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_fix_n1_1.py::test_add_sum - assert -1 == 5
- +  where -1 = <function add at 0x7f7c452d93a0>(2, 3)
- +    where <function add at 0x7f7c452d93a0> = calc.add
-1 failed in 0.03s
+ +  where -1 = <function add at 0x7f3c4ffd16c0>(2, 3)
+ +    where <function add at 0x7f3c4ffd16c0> = calc.add
+1 failed in 0.04s
 ```
-- GREEN: exit 0 · evidence `dlv-ev-4bcefcc9f6c645923b9993ccf7` · argv `pytest -q -p no:cacheprovider tests/test_fix_n1_1.py::test_add_sum`
+- GREEN: exit 0 · verdict pass · evidence `dlv-ev-0e226e633ae5b5f4bb1cc054e1` · argv `pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_test.py -o testpaths=/mnt/user-data/workspace/services/toy-py/tests -o pythonpath=/mnt/user-data/workspace/services/toy-py/src --junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-b2b646ea6020.xml tests/test_fix_n1_1.py::test_add_sum`
 
 ```text
-.                                                                        [100%]
-1 passed in 0.01s
+.
+1 passed in 0.02s
 ```
-- revert check: exit 1 with the fix reverted (must be != 0) · restored exit 0 · evidence `dlv-ev-b6df622a9a45aa1c0a8215a676`
-- fix commit `546af22f4a98150eb652ead40671762ae5b4580c` · files: `services/toy-py/src/toy/calc.py`, `services/toy-py/tests/test_fix_n1_1.py`
+- revert check: exit 1 with the fix reverted (must be != 0; verdict fail) · restored exit 0 (verdict pass) · evidence `dlv-ev-a7eaa4778de83b68d28b736227`
+- split-diff verification (base `051a6f231eaa129d5be664e881a0a837afcdadb9`): src `services/toy-py/src/toy/calc.py` · test `services/toy-py/tests/test_fix_n1_1.py` · test-infra none · agent tree pass · verification checkout pass · reverted checkout fail
+- fix commit `d1b2d26054399a2ee8f1eb01fecc4eed8916858f` · files: `services/toy-py/src/toy/calc.py`, `services/toy-py/tests/test_fix_n1_1.py`
 - sweep (wrong_operator): `src/toy/calc.py:6` · evidence `dlv-ev-a4f8e77e87a03ab9ea0537cdcd`
-- agent: turns 2 · tool calls 4 · tokens in/out 70/35
+- agent: turns 2 · tool calls 4 · opaque exec 0 · denies 0 · tokens in/out 70/35 · ledger event `dlv-fnd-7e1d9241b376e596cc38b650da746bdbed8aaf28`
 
 ### N1-2 — high — state `fixed` (rounds 1)
 
 - Location: `services/toy-py/src/toy/calc.py:11` · class hint `division_by_zero`
-- RED: exit 1 · evidence `dlv-ev-96cea0496bf7a7c7ef483b0d98` · argv `pytest -q -p no:cacheprovider tests/test_fix_n1_2.py::test_percent_zero_whole`
+- RED: exit 1 · verdict fail · evidence `dlv-ev-b3662df89d2df425ade2765e74` · argv `pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_test.py -o testpaths=/mnt/user-data/workspace/services/toy-py/tests -o pythonpath=/mnt/user-data/workspace/services/toy-py/src --junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-8d62e54e8171.xml tests/test_fix_n1_2.py::test_percent_zero_whole`
 
 ```text
-F                                                                        [100%]
+F
 =================================== FAILURES ===================================
 ___________________________ test_percent_zero_whole ____________________________
 
@@ -75,20 +76,25 @@ E       ZeroDivisionError: division by zero
 src/toy/calc.py:11: ZeroDivisionError
 =========================== short test summary info ============================
 FAILED tests/test_fix_n1_2.py::test_percent_zero_whole - ZeroDivisionError: division by zero
-1 failed in 0.03s
+1 failed in 0.06s
 ```
-- GREEN: exit 0 · evidence `dlv-ev-4bcefcc9f6c645923b9993ccf7` · argv `pytest -q -p no:cacheprovider tests/test_fix_n1_2.py::test_percent_zero_whole`
+- GREEN: exit 0 · verdict pass · evidence `dlv-ev-ecdce3f42b4cbd8c8ddc0d8f3c` · argv `pytest -q -p no:cacheprovider -rfE -c /mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini --rootdir=/mnt/user-data/workspace/services/toy-py -o addopts= -o python_files=test_*.py *_test.py -o testpaths=/mnt/user-data/workspace/services/toy-py/tests -o pythonpath=/mnt/user-data/workspace/services/toy-py/src --junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-91343cf344a9.xml tests/test_fix_n1_2.py::test_percent_zero_whole`
 
 ```text
-.                                                                        [100%]
+.
 1 passed in 0.01s
 ```
-- revert check: exit 1 with the fix reverted (must be != 0) · restored exit 0 · evidence `dlv-ev-aacfd7d7ef86b0eb4101b068f7`
-- fix commit `31729adbdecf02a7da06dfcd083bb973af6a8886` · files: `services/toy-py/src/toy/calc.py`, `services/toy-py/tests/test_fix_n1_2.py`
+- revert check: exit 1 with the fix reverted (must be != 0; verdict fail) · restored exit 0 (verdict pass) · evidence `dlv-ev-42bb319ec867fd13868b9fe390`
+- split-diff verification (base `d1b2d26054399a2ee8f1eb01fecc4eed8916858f`): src `services/toy-py/src/toy/calc.py` · test `services/toy-py/tests/test_fix_n1_2.py` · test-infra none · agent tree pass · verification checkout pass · reverted checkout fail
+- fix commit `a16c816b19aea79f6c930e83fafc5240deb220d1` · files: `services/toy-py/src/toy/calc.py`, `services/toy-py/tests/test_fix_n1_2.py`
 - sweep (division_by_zero): `src/toy/calc.py:11` · evidence `dlv-ev-02df61509ebf9d861bd3787839`
-- agent: turns 2 · tool calls 4 · tokens in/out 70/35
+- agent: turns 2 · tool calls 4 · opaque exec 0 · denies 0 · tokens in/out 70/35 · ledger event `dlv-fnd-875969bb36c3bc77ada7ef3567adde0ea905fcf1`
 
-## Blocked / disproved
+## Blocked
+
+- none
+
+## Disproved (reviewer: re-run the reproduction argv on the base sha)
 
 - none
 
@@ -98,23 +104,24 @@ FAILED tests/test_fix_n1_2.py::test_percent_zero_whole - ZeroDivisionError: divi
 
 ## Commits
 
-- `546af22f4a98150eb652ead40671762ae5b4580c` message sha256 `944dcf2eb51d14ff57b8ecb3677eda06c275b4e43e8c4d4da74ec371f5f970c6` · files: `services/toy-py/src/toy/calc.py`, `services/toy-py/tests/test_fix_n1_1.py`
-- `31729adbdecf02a7da06dfcd083bb973af6a8886` message sha256 `595e9ba47eeae88744012f8edc64aa7f83121ab9b84f58a6a9b7528e9c316362` · files: `services/toy-py/src/toy/calc.py`, `services/toy-py/tests/test_fix_n1_2.py`
+- `d1b2d26054399a2ee8f1eb01fecc4eed8916858f` message sha256 `944dcf2eb51d14ff57b8ecb3677eda06c275b4e43e8c4d4da74ec371f5f970c6` · files: `services/toy-py/src/toy/calc.py`, `services/toy-py/tests/test_fix_n1_1.py`
+- `a16c816b19aea79f6c930e83fafc5240deb220d1` message sha256 `595e9ba47eeae88744012f8edc64aa7f83121ab9b84f58a6a9b7528e9c316362` · files: `services/toy-py/src/toy/calc.py`, `services/toy-py/tests/test_fix_n1_2.py`
 
 ## Evidence
 
-- `dlv-ev-471edebf08719283a6d5649c76` suite_output sha256 `471edebf08719283a6d5649c765fe5070b22ac015f1e0219991c3e5b573e47df` (782 bytes)
-- `dlv-ev-b89f789b8a68bcd67a4a0a443e` prompt_manifest sha256 `b89f789b8a68bcd67a4a0a443ec1870ec2bbf0aca1cf19d73ea0fa8c0995f4c4` (41851 bytes)
-- `dlv-ev-992212ffa51ca2d35360ef03bb` brief sha256 `992212ffa51ca2d35360ef03bbe59e249c072517b4a00f3b4dc23f3db33bb3bc` (1708 bytes)
-- `dlv-ev-cd869f49e72e4aa2470ace2129` test_output sha256 `cd869f49e72e4aa2470ace2129dfffbee3ea4dd3e623dbeeb29586f7e8a9d9e4` (763 bytes)
-- `dlv-ev-4bcefcc9f6c645923b9993ccf7` test_output sha256 `4bcefcc9f6c645923b9993ccf73ad92e6b400ca25458ea14e095857fc2131342` (98 bytes)
-- `dlv-ev-b6df622a9a45aa1c0a8215a676` test_output sha256 `b6df622a9a45aa1c0a8215a676ae516e306aa63c82046a1741ffa56963f2a159` (879 bytes)
+- `dlv-ev-400758ec4d20daa09f815a0e9c` suite_output sha256 `400758ec4d20daa09f815a0e9c3920a8bd99e33654fa5d414dfde5769bbc32a7` (706 bytes)
+- `dlv-ev-b86e5bd6fa5635f0d0719a44a6` prompt_manifest sha256 `b86e5bd6fa5635f0d0719a44a61a69d439f7efd7bfb80d2a12453db99b7045c8` (42509 bytes)
+- `dlv-ev-3472dd1ef159df3690fc27f017` brief sha256 `3472dd1ef159df3690fc27f017aaa7a0fb265f90dc184988624017bcb249f697` (1718 bytes)
+- `dlv-ev-2c1a836395410f3d8fb8a600ef` test_output sha256 `2c1a836395410f3d8fb8a600ef1b6a1519ae7d681703086e7f2d85a3276692a6` (685 bytes)
+- `dlv-ev-0e226e633ae5b5f4bb1cc054e1` test_output sha256 `0e226e633ae5b5f4bb1cc054e16669d44f9686fa57a0de94f53d9ad680293f91` (20 bytes)
+- `dlv-ev-a7eaa4778de83b68d28b736227` test_output sha256 `a7eaa4778de83b68d28b73622700578dab7b686bd7e608eca0cb9e0e4902ff45` (772 bytes)
 - `dlv-ev-a4f8e77e87a03ab9ea0537cdcd` diff sha256 `a4f8e77e87a03ab9ea0537cdcd9072bfbd76d8677c0ed704523c7d6a3b7eada8` (358 bytes)
-- `dlv-ev-4250d1f2029068ddc50a143f43` suite_output sha256 `4250d1f2029068ddc50a143f438d48c0e151e05c734fe713ffea94436ecf9381` (98 bytes)
+- `dlv-ev-9ad6b6f52a0d8b54edc079b525` suite_output sha256 `9ad6b6f52a0d8b54edc079b525b6151ef8f49d72a5b8206af5a44c55d2869279` (23 bytes)
 - `dlv-ev-8eaa85cd02ead57517c464ee6c` diff sha256 `8eaa85cd02ead57517c464ee6c0a88c07248bde56553f126c084b7d793be6bb6` (649 bytes)
-- `dlv-ev-8ba69cc6bffc07bb0aaaed4253` brief sha256 `8ba69cc6bffc07bb0aaaed42534a420224be585bf319f46f23ea4b5ee0821c0e` (1699 bytes)
-- `dlv-ev-96cea0496bf7a7c7ef483b0d98` test_output sha256 `96cea0496bf7a7c7ef483b0d98ebfac4fdb69af3a2fff16df84e7de453ebb4b4` (980 bytes)
-- `dlv-ev-aacfd7d7ef86b0eb4101b068f7` test_output sha256 `aacfd7d7ef86b0eb4101b068f717c2928bbf780aa3a37ee39aa6d949ae2b21f5` (1096 bytes)
+- `dlv-ev-ae445f33ecc0dabc7d871961a5` brief sha256 `ae445f33ecc0dabc7d871961a58ee1dff5e54751f8096f604645513e3748a2fd` (1709 bytes)
+- `dlv-ev-b3662df89d2df425ade2765e74` test_output sha256 `b3662df89d2df425ade2765e742df1f44b43b0300e278babc38888fa913ae9c3` (902 bytes)
+- `dlv-ev-ecdce3f42b4cbd8c8ddc0d8f3c` test_output sha256 `ecdce3f42b4cbd8c8ddc0d8f3cdf59b57ec43301ac109b9b6f654e301a4556b7` (20 bytes)
+- `dlv-ev-42bb319ec867fd13868b9fe390` test_output sha256 `42bb319ec867fd13868b9fe390b08e11583c5644538456523440514e43e0d2c8` (989 bytes)
 - `dlv-ev-02df61509ebf9d861bd3787839` diff sha256 `02df61509ebf9d861bd378783914d5407b190a48c51c0853d91476b4ad684f48` (463 bytes)
-- `dlv-ev-9310d484212a1fe2c33b4b8acc` suite_output sha256 `9310d484212a1fe2c33b4b8accdf50a2639f09ba039354f8448f8aa8d173e1ff` (98 bytes)
+- `dlv-ev-acaf913e7375befd9747baeeb8` suite_output sha256 `acaf913e7375befd9747baeeb88404e7bd323689d970b3bbc0c95de4aa5abfb2` (24 bytes)
 - `dlv-ev-c3247a508276a0e2579fcd46be` diff sha256 `c3247a508276a0e2579fcd46bedcbd8e1d808bfe039b091b94dfe88202ee0925` (771 bytes)

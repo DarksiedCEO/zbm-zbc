@@ -132,10 +132,33 @@ class _WireBackend:
         self.model = model
         self.base_url = base_url.rstrip("/")
 
+    @staticmethod
+    def _run_scope() -> tuple[str, Optional[float]]:
+        """(run_id, remaining wall clock seconds) of the run whose turn is in flight — the binding whose principal is
+        the effective user id (R6: the egress total deadline never exceeds the run's remaining wall clock)."""
+        try:
+            from datetime import timezone
+
+            from deerflow.runtime.user_context import get_effective_user_id
+            uid = get_effective_user_id()
+            rt = registry.runtime_or_none()
+            for b in registry.all_bindings():
+                if b.principal_user_id == uid:
+                    remaining = None
+                    if rt is not None:
+                        now = rt.clock.now().astimezone(timezone.utc)
+                        remaining = max(0.0, (b.deadline_at - now).total_seconds())
+                    return b.run_id, remaining
+        except Exception:  # noqa: BLE001
+            pass
+        return "-", None
+
     def _post(self, url: str, headers: dict, payload: dict) -> dict:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        run_id, remaining = self._run_scope()
         try:
-            resp = self.egress.request("POST", url, purpose="llm", headers=headers, body=body)
+            resp = self.egress.request("POST", url, purpose="llm", headers=headers, body=body, run_id=run_id,
+                                       deadline_s=remaining)
         except EgressRefused as exc:
             raise EgressRefused(f"LLM call refused: {exc}") from None
         except EgressFailed as exc:

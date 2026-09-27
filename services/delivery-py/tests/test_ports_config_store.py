@@ -208,7 +208,7 @@ def test_runner_detects_only_seeded_frameworks(tmp_path):
     assert TestRunner(seed, "svc", None, str(tmp_path), 60).framework == "npm"
     (tmp_path / "services" / "svc" / "pytest.ini").write_text("")
     r = TestRunner(seed, "svc", None, str(tmp_path), 60)
-    assert r.framework == "pytest" and r.test_argv("tests/t.py::x") == ["pytest", "-q", "-p", "no:cacheprovider", "tests/t.py::x"]
+    assert r.framework == "pytest" and r.test_argv("tests/t.py::x") == ["pytest", "-q", "-p", "no:cacheprovider", "-rfE", "tests/t.py::x"]
     for bad in ("../t.py::x", "/abs/t.py::x", "t.py", "t.py::x; rm -rf /"):
         with pytest.raises(RunnerRefused):
             r.test_argv(bad)

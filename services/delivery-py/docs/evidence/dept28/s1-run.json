@@ -1,6 +1,6 @@
 {
   "base_ref": "integration-2026-09-24",
-  "base_sha": "b1e36f9765197529940346f361f307bb479d4002",
+  "base_sha": "051a6f231eaa129d5be664e881a0a837afcdadb9",
   "branch": "fix1-toy-py",
   "caller": "aegis",
   "commits": [
@@ -12,7 +12,7 @@
       ],
       "finding_id": "N1-1",
       "message_sha256": "944dcf2eb51d14ff57b8ecb3677eda06c275b4e43e8c4d4da74ec371f5f970c6",
-      "sha": "546af22f4a98150eb652ead40671762ae5b4580c"
+      "sha": "d1b2d26054399a2ee8f1eb01fecc4eed8916858f"
     },
     {
       "diff_evidence_id": "dlv-ev-c3247a508276a0e2579fcd46be",
@@ -22,47 +22,47 @@
       ],
       "finding_id": "N1-2",
       "message_sha256": "595e9ba47eeae88744012f8edc64aa7f83121ab9b84f58a6a9b7528e9c316362",
-      "sha": "31729adbdecf02a7da06dfcd083bb973af6a8886"
+      "sha": "a16c816b19aea79f6c930e83fafc5240deb220d1"
     }
   ],
   "created_at": "2026-09-27T12:00:00Z",
   "deadline_at": "2026-09-27T12:45:00Z",
   "evidence": [
     {
-      "bytes": 782,
-      "evidence_id": "dlv-ev-471edebf08719283a6d5649c76",
+      "bytes": 706,
+      "evidence_id": "dlv-ev-400758ec4d20daa09f815a0e9c",
       "kind": "suite_output",
-      "sha256": "471edebf08719283a6d5649c765fe5070b22ac015f1e0219991c3e5b573e47df"
+      "sha256": "400758ec4d20daa09f815a0e9c3920a8bd99e33654fa5d414dfde5769bbc32a7"
     },
     {
-      "bytes": 41851,
-      "evidence_id": "dlv-ev-b89f789b8a68bcd67a4a0a443e",
+      "bytes": 42509,
+      "evidence_id": "dlv-ev-b86e5bd6fa5635f0d0719a44a6",
       "kind": "prompt_manifest",
-      "sha256": "b89f789b8a68bcd67a4a0a443ec1870ec2bbf0aca1cf19d73ea0fa8c0995f4c4"
+      "sha256": "b86e5bd6fa5635f0d0719a44a61a69d439f7efd7bfb80d2a12453db99b7045c8"
     },
     {
-      "bytes": 1708,
-      "evidence_id": "dlv-ev-992212ffa51ca2d35360ef03bb",
+      "bytes": 1718,
+      "evidence_id": "dlv-ev-3472dd1ef159df3690fc27f017",
       "kind": "brief",
-      "sha256": "992212ffa51ca2d35360ef03bbe59e249c072517b4a00f3b4dc23f3db33bb3bc"
+      "sha256": "3472dd1ef159df3690fc27f017aaa7a0fb265f90dc184988624017bcb249f697"
     },
     {
-      "bytes": 763,
-      "evidence_id": "dlv-ev-cd869f49e72e4aa2470ace2129",
+      "bytes": 685,
+      "evidence_id": "dlv-ev-2c1a836395410f3d8fb8a600ef",
       "kind": "test_output",
-      "sha256": "cd869f49e72e4aa2470ace2129dfffbee3ea4dd3e623dbeeb29586f7e8a9d9e4"
+      "sha256": "2c1a836395410f3d8fb8a600ef1b6a1519ae7d681703086e7f2d85a3276692a6"
     },
     {
-      "bytes": 98,
-      "evidence_id": "dlv-ev-4bcefcc9f6c645923b9993ccf7",
+      "bytes": 20,
+      "evidence_id": "dlv-ev-0e226e633ae5b5f4bb1cc054e1",
       "kind": "test_output",
-      "sha256": "4bcefcc9f6c645923b9993ccf73ad92e6b400ca25458ea14e095857fc2131342"
+      "sha256": "0e226e633ae5b5f4bb1cc054e16669d44f9686fa57a0de94f53d9ad680293f91"
     },
     {
-      "bytes": 879,
-      "evidence_id": "dlv-ev-b6df622a9a45aa1c0a8215a676",
+      "bytes": 772,
+      "evidence_id": "dlv-ev-a7eaa4778de83b68d28b736227",
       "kind": "test_output",
-      "sha256": "b6df622a9a45aa1c0a8215a676ae516e306aa63c82046a1741ffa56963f2a159"
+      "sha256": "a7eaa4778de83b68d28b73622700578dab7b686bd7e608eca0cb9e0e4902ff45"
     },
     {
       "bytes": 358,
@@ -71,10 +71,10 @@
       "sha256": "a4f8e77e87a03ab9ea0537cdcd9072bfbd76d8677c0ed704523c7d6a3b7eada8"
     },
     {
-      "bytes": 98,
-      "evidence_id": "dlv-ev-4250d1f2029068ddc50a143f43",
+      "bytes": 23,
+      "evidence_id": "dlv-ev-9ad6b6f52a0d8b54edc079b525",
       "kind": "suite_output",
-      "sha256": "4250d1f2029068ddc50a143f438d48c0e151e05c734fe713ffea94436ecf9381"
+      "sha256": "9ad6b6f52a0d8b54edc079b525b6151ef8f49d72a5b8206af5a44c55d2869279"
     },
     {
       "bytes": 649,
@@ -83,22 +83,28 @@
       "sha256": "8eaa85cd02ead57517c464ee6c0a88c07248bde56553f126c084b7d793be6bb6"
     },
     {
-      "bytes": 1699,
-      "evidence_id": "dlv-ev-8ba69cc6bffc07bb0aaaed4253",
+      "bytes": 1709,
+      "evidence_id": "dlv-ev-ae445f33ecc0dabc7d871961a5",
       "kind": "brief",
-      "sha256": "8ba69cc6bffc07bb0aaaed42534a420224be585bf319f46f23ea4b5ee0821c0e"
+      "sha256": "ae445f33ecc0dabc7d871961a58ee1dff5e54751f8096f604645513e3748a2fd"
     },
     {
-      "bytes": 980,
-      "evidence_id": "dlv-ev-96cea0496bf7a7c7ef483b0d98",
+      "bytes": 902,
+      "evidence_id": "dlv-ev-b3662df89d2df425ade2765e74",
       "kind": "test_output",
-      "sha256": "96cea0496bf7a7c7ef483b0d98ebfac4fdb69af3a2fff16df84e7de453ebb4b4"
+      "sha256": "b3662df89d2df425ade2765e742df1f44b43b0300e278babc38888fa913ae9c3"
     },
     {
-      "bytes": 1096,
-      "evidence_id": "dlv-ev-aacfd7d7ef86b0eb4101b068f7",
+      "bytes": 20,
+      "evidence_id": "dlv-ev-ecdce3f42b4cbd8c8ddc0d8f3c",
       "kind": "test_output",
-      "sha256": "aacfd7d7ef86b0eb4101b068f717c2928bbf780aa3a37ee39aa6d949ae2b21f5"
+      "sha256": "ecdce3f42b4cbd8c8ddc0d8f3cdf59b57ec43301ac109b9b6f654e301a4556b7"
+    },
+    {
+      "bytes": 989,
+      "evidence_id": "dlv-ev-42bb319ec867fd13868b9fe390",
+      "kind": "test_output",
+      "sha256": "42bb319ec867fd13868b9fe390b08e11583c5644538456523440514e43e0d2c8"
     },
     {
       "bytes": 463,
@@ -107,10 +113,10 @@
       "sha256": "02df61509ebf9d861bd378783914d5407b190a48c51c0853d91476b4ad684f48"
     },
     {
-      "bytes": 98,
-      "evidence_id": "dlv-ev-9310d484212a1fe2c33b4b8acc",
+      "bytes": 24,
+      "evidence_id": "dlv-ev-acaf913e7375befd9747baeeb8",
       "kind": "suite_output",
-      "sha256": "9310d484212a1fe2c33b4b8accdf50a2639f09ba039354f8448f8aa8d173e1ff"
+      "sha256": "acaf913e7375befd9747baeeb88404e7bd323689d970b3bbc0c95de4aa5abfb2"
     },
     {
       "bytes": 771,
@@ -119,13 +125,13 @@
       "sha256": "c3247a508276a0e2579fcd46bedcbd8e1d808bfe039b091b94dfe88202ee0925"
     },
     {
-      "bytes": 7035,
-      "evidence_id": "dlv-ev-bb2daabead39e3e6c9ad594bb1",
+      "bytes": 9420,
+      "evidence_id": "dlv-ev-bd053b94af545597c354f9b368",
       "kind": "report",
-      "sha256": "bb2daabead39e3e6c9ad594bb15ecc55484972ec1b29de92b210aaa76a3a9b87"
+      "sha256": "bd053b94af545597c354f9b368b1f9c8f90100a69d9b89c90b510bb9e247d731"
     }
   ],
-  "facts_sha256": "4ffd0148c921349f9ffd5bd63d45a3eb0d57b7c8bfe0250112692556f7e798b0",
+  "facts_sha256": "a965f739152ba91a11eea1cf21e31d1e8dab35e2dfaf1993837654bffc732fc5",
   "finding_ids": [
     "N1-1",
     "N1-2"
@@ -133,42 +139,46 @@
   "finished_at": "2026-09-27T12:00:00Z",
   "injection_rules": [],
   "ledger_event_ids": [
-    "dlv-rcv-a61001b69a273751aeda6bf3842ba4e98b0bbca9",
-    "dlv-run-767760a48d45a4417fbd5006f8923fa858a9e489",
-    "dlv-run-a03f19da1d647eebcb3202e6813dca638365f202",
-    "dlv-run-9ba2b801594f6bbb44ce794a30117076ac0f3a4a",
-    "dlv-run-ea7fa3b52ff9ed702324a275698ac31acd626da3",
-    "dlv-run-c8b425be7ab6db815f45e81c8b2e074197115474",
-    "dlv-run-39640ebe021cc71456a189f20086b953d2945409",
-    "dlv-fnd-223549c253bc218661992c98e8bf07a64ab608b6",
-    "dlv-fnd-7268211184db4aea4e6da474c23733f6b13f77a6",
-    "dlv-fnd-1d3d0a08a294cc2c3ce03217c948448cf2890672",
-    "dlv-fns-4b661ae59c6e36ddbacc5f76c12e1778b808bcea",
-    "dlv-fnd-ed7f445faf71d5dc8db10ad4b2763bae850d0f6d",
-    "dlv-fns-7be6944b52e4b8a8f876c16bbb7a6e1a1a91000f",
-    "dlv-fnd-c93fc689a02e8b8a7166d73e7671fcca78938a0d",
-    "dlv-fns-18e5761edd24b934cddcf482218c2ada332e34cd",
-    "dlv-run-af974d590e120b88f77e2942481e3165234d9693",
-    "dlv-fnd-5a25fe95c69ddd73a7ecf5ef3676c7fb3d6e140f",
-    "dlv-fnd-2548cfdeaa7c1f3306f4ce6ab44e0325af1e8d77",
-    "dlv-fns-5cf5fcf5c0ef657c3ef95e73d92d68de8fbbd33b",
-    "dlv-fnd-0c96244107408dd94d3582353c885dcb84fe3881",
-    "dlv-fnd-c4b901eb371cc09eaa69fe432f216b5b778eec1d",
-    "dlv-fnd-c6bf8ab90ae06bb979c74f14d6e61c3e72bd3d72",
-    "dlv-fns-712fbbdae44f8aae331fb6572db7b887392777f8",
-    "dlv-fnd-d4044642426f89d55418c4cab08a44c0b6bb9750",
-    "dlv-fns-166526c24dfb769d24eb127984e6e6e8e61e8d37",
-    "dlv-fnd-5e01de942a186ca0160cea358e9748228b3278ec",
-    "dlv-fns-5ab9444074f847804ebb6574113a519e8d08e72e",
-    "dlv-run-4f882a75a64c4b3249c5e057f49bdde22fa4ca3d",
-    "dlv-fnd-9ce1871ddca31b840184e4936846fb828c1be9ca",
-    "dlv-fnd-b3644f1ea36bd3e480bf17e75c414c7b8099c294",
-    "dlv-fns-fa86d2e90a64656a07a017c7bdd1508987574187",
-    "dlv-run-32a50c57a72157e1c9394c6d4cf8b77809e83302",
-    "dlv-run-e09961a339a6979109ada280a01f3d77ba4a6fda",
-    "dlv-run-6e339a2dbd81c95b7ff853e245d633ecfc2be48d",
-    "dlv-run-b65ccf6b462fc170c0dad0f0c2829e25a33370ff",
-    "dlv-run-0b0611c7842f552aaab59cdad058c2874d2ae59c"
+    "dlv-rcv-0f6260fd8fffbb552f0304047884f95d2cdb2481",
+    "dlv-run-a513d6937e8bbcc0167bc8631d4ead1df64463d7",
+    "dlv-run-5f50aa551e1c8fb1bbfcaa4bb1976e2b466ef410",
+    "dlv-run-784fb1c428cb52e7d644ebb63a50a7c5dcf539d3",
+    "dlv-run-b373bb79c08af948dbee0a6921ff37d2938f3d08",
+    "dlv-run-bcce564f29870017db1615b57cde4a5b3ed56de8",
+    "dlv-run-f49830b7581ff3ec14b89c03ab15d29ebd7733e4",
+    "dlv-fnd-dcbc53318dcffc4b97baf024a30e28eb143ec328",
+    "dlv-fnd-4c0d89d7e8be983455ab153a34bdcdc375eb591b",
+    "dlv-fnd-2976bb99da684f3d08e168aeffd42462c1784f27",
+    "dlv-fns-6c96c4c6f89ad1d0b6e08af93d49b4e4c211187d",
+    "dlv-fnd-49a90fd167861c5b56407b44527f9e6657374262",
+    "dlv-fnd-6377b9efbde2b3379fb72ae993b722d94ea3de63",
+    "dlv-fns-3a992f29d222c0f1fba25974887b9307c75bb041",
+    "dlv-fns-40ce9d4cca37f0046f581af0b904675c8313c645",
+    "dlv-run-4bf4141f078e65cec41d16c2f01f56f0f0819786",
+    "dlv-fnd-b430b3456027f20cb0b087e829d65c5941998483",
+    "dlv-fnd-bd1cf5178879e854cd1bc8a383cfa2bb19ff19a9",
+    "dlv-fns-2691d8972d9fd1d202c1aa10c0b18bfed0bee5c0",
+    "dlv-fnd-7e1d9241b376e596cc38b650da746bdbed8aaf28",
+    "dlv-fnd-e9328ede8aa217cf5edda6550cbd35b92d89df8e",
+    "dlv-fnd-3a636b31f0b2fac58f01e2e60ee91ea5fabeaf39",
+    "dlv-fnd-4b14574f5af2588a0c50958f8fe991dedc90db3f",
+    "dlv-fnd-adfbc4710ff47ee44299d8720750530d99d14e31",
+    "dlv-fns-1ef2b014adf5d38b971387f8a6cf9114f0b0b2f7",
+    "dlv-fnd-e8098c30defd5ef4e0ecc929bea06fd09fdc1ed4",
+    "dlv-fnd-1d039d6dd6293d83645319d34000f952e9b00293",
+    "dlv-fns-25a2ead41d8544b5f356b737247ae3dd386b128d",
+    "dlv-fns-501d6b53e5c7e45aafe8b2a10fdb0e8a970b3e19",
+    "dlv-run-4dd3bd024d192426baf27e43fdaa5880a9a8eb69",
+    "dlv-fnd-e5f99a5f8e25131642751785a6221be6c3332e6d",
+    "dlv-fnd-203d4460da40793ce8e67ca5b98daf812714cf6f",
+    "dlv-fns-c582e730b0aecb3ab386678f1d2422db190a7f08",
+    "dlv-fnd-875969bb36c3bc77ada7ef3567adde0ea905fcf1",
+    "dlv-fnd-0785dab1002b5c6efb8518a3e163387cf0023300",
+    "dlv-run-fd769e0b2b8377d2cf96fa4303b91ad6976c597e",
+    "dlv-run-fa717f72109bf9c3c64849f94c323a3b4a152d4e",
+    "dlv-run-c6cb7dfa9cfce54b0ce67d3e0ba964ab70c4ec7e",
+    "dlv-run-7e88276b5fbc9456391c0683e28299612e48e149",
+    "dlv-run-ae5c81e1f406d2c2322f6117c1f2e6e02dcc1d2f"
   ],
   "llm": {
     "fake": true,
@@ -183,16 +193,16 @@
     "kind": "service",
     "tenant": "zbm"
   },
-  "principal_user_id": "zbm--dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D",
-  "prompts_manifest_sha256": "064a5e3e3b3ea696cce1a586eef792a9a73e26ed8b45dabe9dfa20fa2d295440",
+  "principal_user_id": "zbm--dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q",
+  "prompts_manifest_sha256": "a55a2a0f6ef5979a4ff4df702b126bb3d43d05c208cbae6d10e0da8bc420ee1e",
   "reasons": [],
-  "report_evidence_id": "dlv-ev-bb2daabead39e3e6c9ad594bb1",
-  "report_sha256": "bb2daabead39e3e6c9ad594bb15ecc55484972ec1b29de92b210aaa76a3a9b87",
-  "request_id": "req-f00251ec545142929b9a",
+  "report_evidence_id": "dlv-ev-bd053b94af545597c354f9b368",
+  "report_sha256": "bd053b94af545597c354f9b368b1f9c8f90100a69d9b89c90b510bb9e247d731",
+  "request_id": "req-56b1e023122e4c11a6ed",
   "review": null,
-  "run_id": "dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D",
+  "run_id": "dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q",
   "sandbox": {
-    "container_id_sha256": "2803aa64780ccfc0354fe3d4e92edce67e6c11d797c0fa61085a229a1d1968ab",
+    "container_id_sha256": "aec27e5e450aaf7430cad32a8028ec37f14d49b5af99d68e1b62670a274b4981",
     "image_digest": "0000000000000000000000000000000000000000000000000000000000000000"
   },
   "service": "toy-py",
@@ -208,30 +218,66 @@
         "pytest",
         "-q",
         "-p",
-        "no:cacheprovider"
+        "no:cacheprovider",
+        "-rfE",
+        "-c",
+        "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini",
+        "--rootdir=/mnt/user-data/workspace/services/toy-py",
+        "-o",
+        "addopts=",
+        "-o",
+        "python_files=test_*.py *_test.py",
+        "-o",
+        "testpaths=/mnt/user-data/workspace/services/toy-py/tests",
+        "-o",
+        "pythonpath=/mnt/user-data/workspace/services/toy-py/src",
+        "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-2204d668f540.xml"
       ],
+      "collected": 5,
       "counts": {
+        "collected": 5,
         "errors": 0,
         "failed": 0,
         "failed_names": [],
         "parsed": true,
         "passed": 5,
-        "skips": 0
+        "skips": 0,
+        "source": "junit",
+        "status": "ok",
+        "why": "junit == collected == summary == exit"
       },
-      "evidence_id": "dlv-ev-9310d484212a1fe2c33b4b8acc",
+      "cwd": "/mnt/user-data/workspace/services/toy-py",
+      "evidence_id": "dlv-ev-acaf913e7375befd9747baeeb8",
       "exit": 0,
-      "output_sha256": "9310d484212a1fe2c33b4b8accdf50a2639f09ba039354f8448f8aa8d173e1ff",
+      "junit_sha256": "69482a7976edd57f2c7b54cd8b5596a0e3c32dc4f12e726315e5a552f8180309",
+      "output_sha256": "acaf913e7375befd9747baeeb88404e7bd323689d970b3bbc0c95de4aa5abfb2",
       "timed_out": false,
-      "truncated": false
+      "truncated": false,
+      "verdict": "pass"
     },
     "before": {
       "argv": [
         "pytest",
         "-q",
         "-p",
-        "no:cacheprovider"
+        "no:cacheprovider",
+        "-rfE",
+        "-c",
+        "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini",
+        "--rootdir=/mnt/user-data/workspace/services/toy-py",
+        "-o",
+        "addopts=",
+        "-o",
+        "python_files=test_*.py *_test.py",
+        "-o",
+        "testpaths=/mnt/user-data/workspace/services/toy-py/tests",
+        "-o",
+        "pythonpath=/mnt/user-data/workspace/services/toy-py/src",
+        "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-c07d4ede7e75.xml"
       ],
+      "collected": 3,
       "counts": {
+        "collected": 3,
         "errors": 0,
         "failed": 1,
         "failed_names": [
@@ -239,15 +285,21 @@
         ],
         "parsed": true,
         "passed": 2,
-        "skips": 0
+        "skips": 0,
+        "source": "junit",
+        "status": "ok",
+        "why": "junit == collected == summary == exit"
       },
-      "evidence_id": "dlv-ev-471edebf08719283a6d5649c76",
+      "cwd": "/mnt/user-data/workspace/services/toy-py",
+      "evidence_id": "dlv-ev-400758ec4d20daa09f815a0e9c",
       "exit": 1,
-      "output_sha256": "471edebf08719283a6d5649c765fe5070b22ac015f1e0219991c3e5b573e47df",
+      "junit_sha256": "479fc60180a7f81d518909198ee6883372d1a9817462615f68b7c5b53150663c",
+      "output_sha256": "400758ec4d20daa09f815a0e9c3920a8bd99e33654fa5d414dfde5769bbc32a7",
       "timed_out": false,
-      "truncated": false
+      "truncated": false,
+      "verdict": "fail"
     }
   },
-  "thread_id": "dlv-CT9N5DC5KYVQWQKKDJP2NGCE0D",
-  "worktree_path": "/tmp/dlv-test-a1twx0gm/worktrees/fix1-toy-py"
+  "thread_id": "dlv-Q9RAD31PDCEQ1WTSF01CAM859Q",
+  "worktree_path": "/tmp/dlv-test-pfx2m7e4/worktrees/fix1-toy-py"
 }

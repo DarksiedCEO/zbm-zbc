@@ -1,8 +1,8 @@
 # prompts/ sha256 (ours) beside the Superpowers originals' sha256 prefix (obra/superpowers@8ca22dba)
 
-a968882101ed62a21945132ba6b97a419ac5c4c82e18c6d5958a4b43cc1f6625  CHANGES.md                               original: (ours)
+97d59ff0a4f07fff9bde0b57d2577c3d034ebc8927a80ee0cb838b1be23c78aa  CHANGES.md                               original: (ours)
 d0f55f3ed9c3b8a4b0de406f1405070462329c4d95d8a7302596ec09462ff793  brief.template.md                        original: (ours)
-ef02f85c30499dd9f79aef5fba78c51ac4c39b22f45b1a784745a0cd235e97e1  engine.system.md                         original: (ours)
+36d2f7a326aaeb1fdc1b70b3f61b15325fb0f65f39dcd2b42bf6e22d30defa91  engine.system.md                         original: (ours)
 08cee54c9eb85b1817a279c38461d5674bfa9f5f4333deb6acfcbf95a905a94a  executing-plans.md                       original: f38e8f2d
 cdb3dc9d5a09df808cc45b30d052d8c2dc81be62bc348e647fd181575af971a5  reviewer.md                              original: bfed55c8 / 0828a5e9 / 82e370be
 572a6425d31247b849968e11cd68e41a9e78110a46fda23fb933510458a7660f  systematic-debugging.md                  original: 808fc571

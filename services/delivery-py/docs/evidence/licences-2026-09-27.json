@@ -242,7 +242,7 @@
       "licence": "MIT",
       "name": "dotenv",
       "problem": null,
-      "source": "file",
+      "source": "exception:file",
       "version": "0.9.9"
     },
     {
@@ -821,7 +821,7 @@
     },
     {
       "licence": "MIT",
-      "name": "pdfminer.six",
+      "name": "pdfminer-six",
       "problem": null,
       "source": "expression",
       "version": "20260107"
@@ -1145,7 +1145,7 @@
       "licence": "MIT",
       "name": "tiktoken",
       "problem": null,
-      "source": "file",
+      "source": "exception:file",
       "version": "0.14.0"
     },
     {
@@ -1303,7 +1303,7 @@
       "version": "0.25.0"
     }
   ],
-  "generated_at": "2026-09-27T13:22:26+00:00",
+  "generated_at": "2026-09-27T15:07:32+00:00",
   "ok": true,
   "problems": [],
   "python": "3.12.3",
