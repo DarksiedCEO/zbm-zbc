@@ -1050,15 +1050,14 @@ def test_n19_a9_pth_outside_record_cover_duplicate_fields_and_file_mismatch():
     assert any(p.startswith("vendored_agpl:") for p in rep.problems), rep.problems
     assert not any(p.startswith("cover2_helper") for p in rep.problems)
     assert by["good"].problem is None and by["dual"].problem is None and by["cover"].problem is None and by["cover2"].problem is None
-    # the real venv passes, and the two facts R13 surfaced there are stated, not silent: nest-asyncio's "BSD" vs its
-    # 2-clause file is the same family; speechrecognition's bundled GPL-2 FLAC binaries need the explicit entry
+    # the real venv passes with no bundled-licence exception: speechrecognition (BSD-3 metadata, GPL-2 FLAC
+    # binaries; surfaced by R13) was removed from the lock by the lead (pyproject override), so the gate must
+    # pass without an entry for it and the distribution must be absent
     import sysconfig
     real = licences.check(sysconfig.get_paths()["purelib"], allow, exc)
     assert real.ok, real.problems
-    without = json.loads(json.dumps(exc))
-    del without["exceptions"]["speechrecognition"]
-    real2 = licences.check(sysconfig.get_paths()["purelib"], allow, without)
-    assert any(p.startswith("speechrecognition") and "GPL" in p for p in real2.problems), real2.problems[:3]
+    assert "speechrecognition" not in exc["exceptions"]
+    assert not any(d.name == "speechrecognition" for d in real.dists)
 
 
 # ====================================================================== R14 / N19-A-11, N19-A-12

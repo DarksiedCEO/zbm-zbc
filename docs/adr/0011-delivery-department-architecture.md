@@ -78,7 +78,7 @@ ledger-anchored local log with the instance lease and Andre's reconcile).
 | `seed/tool_policy_seed.json` | `078560a463fd04a11fb3a358e8ebc5a1a782dcedfbd635192bc9a77738787f4d` (wave 20: `pylint`/`isort`/`pre-commit` in the exec allowlist, R6/R9 notes) |
 | `seed/test_commands_seed.json` | `6c3a39edc981c969d1b1d538049ec097c59dd36dd51b27bc2407440568de5a30` (wave 20: pytest `test_content_deny` for re-plugging spellings, `src_content_deny`, `zbm_engine_plugin*` as test infra; toolchain amendment: go/cargo/npm `verified: true` with their engine argv, `collect`, `target_example`, `test_content_deny`, per-ecosystem `test_infra_globs`; pytest markers no longer include a bare `tests/`; `service_env` gains the toolchain determinism switches) |
 | `seed/licence_allowlist.json` | `c02f367f3e6cd02949e18dbc2eaa2ceabcb917ac4aa5fc58ad73bec4ac6dfb6e` (wave 19: `unrecorded_allow`) |
-| `seed/licence_exceptions.json` | `7ae1f460a312a01cf56fc8701e869629f55bca64fccaff51d0226ed47e6fa92f` (wave 20: `speechrecognition` bundled GPL-2 FLAC binaries stated as a `bundled_licence_file` exception pending the lead's ruling; wave 19: `dotenv`, `tiktoken`) |
+| `seed/licence_exceptions.json` | `e93abd348a10f89838e11a19c7f52994e18a20f4d52a6809b49a0a6fafe53606` (wave 20 close-out: `speechrecognition` removed from the lock instead of excepted; wave 19: `dotenv`, `tiktoken`) |
 | `docs/evidence/licences-2026-09-27.json` (the licence report) | `f154e1b56befac3a939d69cfeece434516d172fa0c6aedbfbaeab464d1ee0e8d` (wave 19: dotenv + tiktoken via file exceptions) |
 | `uv.lock` | `f01aa750572f5b6662b8cb1b52d370574474d83379b137bee44e9e183264457b` |
 | deer-flow commit (`DLV_DEERFLOW_COMMIT`, G9) | `345f08be00c8a9495079b732a39b46aa9af1584e` |
@@ -559,10 +559,11 @@ directory with it when computing a verdict.**
   surfaced two facts: `nest-asyncio` declares `BSD` and ships a 2-clause file (the same permissive family; the
   gate treats BSD-2/3 as one family), and **`speechrecognition` 3.17.0 (a deer-flow transitive dependency)
   declares `BSD-3-Clause` and ships prebuilt FLAC encoder binaries under GPL-2.0 (`licenses/LICENSE-FLAC.txt`)**.
-  The second is entered in `seed/licence_exceptions.json` as a new exception kind `bundled_licence_file` (the
-  component, the file's licence and the reason: the engine never executes those binaries; the sandbox image
-  installs the finance-py requirement set, not this venv) so the gate states the fact instead of passing it
-  silently — the lead rules on removing the distribution (a `uv.lock` override). The gate's start-up cost is now
+  Lead's ruling (wave 20 close-out): the distribution is removed, not excepted — `speechrecognition` is only
+  reached through `markitdown[all]`'s audio path, which the engine never uses, so it joins the
+  `override-dependencies` list (`sys_platform == 'never'`) and no longer resolves into `uv.lock`; the
+  `bundled_licence_file` exception kind stays in the gate for future use but the seed carries no entry for it.
+  The gate passes the resolved venv with no bundled-licence exception. The gate's start-up cost is now
   ~3 s warm / ~7 s cold on this venv (903 MiB, 48k files).
 - **R14 — small.** A pure-deletion hunk (`+N,0`) covers no new line (`_hunk_lines`; N19-E-5); `fixed` requires a
   `verification` record (no `if v and …`; N19-E-6); the "suite after commit" flag is gone — the per-finding suite
