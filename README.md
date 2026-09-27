@@ -635,3 +635,46 @@ export FIN_CALLER_TOKENS='{"scheduler": "<>=32 chars>", "creative_production": "
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> FIN_DATA_DIR=<dir>
 cd src && python3 -m api   # FIN_BIND_ADDR (default 127.0.0.1), FIN_PORT (default 8410)
 ```
+
+## Legal (37) (`services/legal-py`) — Sep 26, 2026
+
+Keeps the document register and acceptance evidence, runs contract playbooks, tracks obligations and filings,
+triages matters and litigation holds, runs the DMCA takedown desk, applies the music policy and records counsel
+answers. **It never gives legal advice**: to a third party it emits only counsel-approved documents (pinned by
+SHA-256), a routing notice, or dates and statuses of that party's own records; to Andre and other departments,
+codes labelled `unreviewed` until a counsel memo or template id is attached. A deterministic advice-text guard
+refuses and records any rendered text or template variable that reads as advice. Built from the locked Legal spec
+(rev 1): 10 deterministic single-task intelligences, no model calls. Architecture and the 40 choices made where
+the spec was silent: `docs/adr/0010-legal-department-architecture.md`. Routes and settings:
+`services/legal-py/README.md`.
+
+- **Status:** built and tested (212 tests, `python3 -m pytest -q`; no network). **Not in force for any real
+  document.** No counsel is engaged and the counsel channel, e-sign provider, Cybersecurity 22 and People 43 are
+  fail-closed stand-ins, so on day one no document is current, no acceptance is evidence-sufficient, every
+  music-bearing clip is blocked, every Creative sign-off is refused and Legal deletes nothing. ADR 0010 ends with
+  the unlock list.
+- **The counsel gate.** Only Andre approves (rules, playbooks, documents), and a `counsel_required` document only
+  after a sign-off record whose memo cites that exact version and hash. A filed counsel memo is the only path to
+  "verified", and only for what the memo cites; Compliance may only tighten. Acceptance records carry doc id,
+  version, SHA-256, Legal's timestamp, method and a signer identity ref — never an IP address, never the text.
+- **Fails closed.** Nothing is in force until Andre approves the pinned 20-rule seed; every seed file is SHA-256
+  pinned. Every refusal cites a rule id. Every decision is recorded on the ledger (`department: legal`) and in a
+  hash-chained, ledger-anchored local log before it takes effect, otherwise 503 and nothing changed; document,
+  memo and paper texts live only in a content-addressed blob store, never in the log or on the ledger.
+- **Other services unchanged.** The spec's "changes other services must make" are reported in ADR 0010, not made.
+  Found while building: today's compliance-py refuses the spec's `legal37://memos/<id>` evidence URL, so a real
+  memo proposal would end `refused_by_compliance` until Compliance (or the spec) changes.
+- **Live run** (`devtools/live_run.py`, real ledger-rust binary, production entrypoint, a Compliance stub behind the
+  real thin client): rules approved → engagement letter countersigned → memo → playbook → MSA draft → approval
+  refused without a counsel record → sign-off → approval → template fill → clickwrap acceptance → obligations
+  bound → memo → Compliance proposal delivered → takedown → counter-notice window → hold → restart (anchors
+  verified, a tampered copy refuses to start) → `GET /ledger/verify` → `{"entries":87,"valid":true}`. 34/34 checks
+  passed.
+
+```bash
+cd services/legal-py && python3 -m pytest -q      # 212 tests
+export LEGAL_SERVICE_TOKEN=<secret> LEGAL_ANDRE_APPROVAL_TOKEN=<Andre's secret>
+export LEGAL_CALLER_TOKENS='{"compliance_38": "<>=32 chars>", "hub": "...", "scheduler": "..."}'
+export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> LEGAL_DATA_DIR=<dir>
+cd src && python3 -m api   # LEGAL_BIND_ADDR (default 127.0.0.1), LEGAL_PORT (default 8420)
+```

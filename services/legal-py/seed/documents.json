@@ -1,0 +1,258 @@
+{
+ "data_sheet_prefixes": [
+  "soi_",
+  "fbn_"
+ ],
+ "documents": [
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "client_msa",
+   "doc_type": "client_msa",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": true,
+   "required_clause_ids": [],
+   "title": "Client MSA"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": false,
+   "doc_id": "sow",
+   "doc_type": "sow",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": true,
+   "required_clause_ids": [],
+   "title": "SOW / campaign brief"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "zbc_order_form",
+   "doc_type": "zbc_order_form",
+   "entities": [
+    "zbc"
+   ],
+   "esign_allowed": true,
+   "required_clause_ids": [],
+   "title": "ZBC campaign order form"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "clipper_agreement",
+   "doc_type": "clipper_agreement",
+   "entities": [
+    "zbc"
+   ],
+   "esign_allowed": true,
+   "required_clause_ids": [],
+   "title": "Clipper / creator agreement"
+  },
+  {
+   "approval_blocked_by": [
+    "CQ-17"
+   ],
+   "counsel_required": true,
+   "doc_id": "ic_agreement",
+   "doc_type": "ic_agreement",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": true,
+   "required_clause_ids": [],
+   "title": "Independent-contractor agreement"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "nda_mutual",
+   "doc_type": "nda",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": true,
+   "required_clause_ids": [],
+   "title": "Mutual NDA"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "nda_oneway",
+   "doc_type": "nda",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": true,
+   "required_clause_ids": [],
+   "title": "One-way NDA"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "privacy_policy",
+   "doc_type": "privacy_policy",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "Privacy policy"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "terms",
+   "doc_type": "terms_of_service",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "Website / portal terms of service"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "cookie_notice",
+   "doc_type": "cookie_notice",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "Cookie / consent notice"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "dmca_procedure",
+   "doc_type": "dmca_procedure",
+   "entities": [
+    "zbc"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "DMCA agent designation and takedown procedure"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "tm_zbm",
+   "doc_type": "data_sheet",
+   "entities": [
+    "zbm"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "Trademark application: Z Best Media"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "tm_zbc",
+   "doc_type": "data_sheet",
+   "entities": [
+    "zbc"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "Trademark application: Z Best Clips"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "engagement_letter",
+   "doc_type": "engagement_letter",
+   "entities": [
+    "zbm"
+   ],
+   "esign_allowed": true,
+   "required_clause_ids": [
+    "ENG-AI-01"
+   ],
+   "title": "Outside-counsel engagement letter and billing guidelines"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "dpa",
+   "doc_type": "dpa",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": true,
+   "required_clause_ids": [],
+   "title": "Data processing addendum (EU/UK)"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "lit_hold_notice",
+   "doc_type": "lit_hold_notice",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "Litigation hold notice template"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "subpoena_response",
+   "doc_type": "subpoena_response",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "Subpoena response template"
+  },
+  {
+   "approval_blocked_by": [],
+   "counsel_required": true,
+   "doc_id": "dsar_response",
+   "doc_type": "dsar_response",
+   "entities": [
+    "zbm",
+    "zbc"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "DSAR response template"
+  },
+  {
+   "approval_blocked_by": [
+    "CQ-15"
+   ],
+   "counsel_required": true,
+   "doc_id": "not_legal_advice_v1",
+   "doc_type": "routing_notice",
+   "entities": [
+    "zbm",
+    "zbc",
+    "silverback"
+   ],
+   "esign_allowed": false,
+   "required_clause_ids": [],
+   "title": "Routing notice (not legal advice)"
+  }
+ ],
+ "source": "LEGAL_SPEC.md rev 1 \u00a7D",
+ "version": 1
+}

@@ -1,0 +1,824 @@
+{
+ "rows": [
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "every payout"
+    }
+   ],
+   "cq_id": "CQ-01",
+   "origin": "compliance",
+   "question": "Are clippers independent contractors under AB 5's ABC test; does an AB 2257 exemption fit?",
+   "related": [
+    "CQ-17"
+   ],
+   "source_url": "https://ogletree.com/insights-resources/blog-posts/ab-2257-enacts-significant-changes-to-ab-5-on-classification-of-workers-as-independent-contractors/",
+   "why_counsel_only": "prong B fits poorly; retroactive state liability"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "payout when pooled"
+    }
+   ],
+   "cq_id": "CQ-02",
+   "origin": "compliance",
+   "question": "If ZBC pools client funds (Model B), do FinCEN processor conditions and section 2010(l) cover it; what contract language?",
+   "related": [
+    "FIN-CQ-01"
+   ],
+   "source_url": "https://www.fincen.gov/sites/default/files/administrative_ruling/FIN-2014-R009.pdf",
+   "why_counsel_only": "money-transmitter licensing"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "every payout"
+    }
+   ],
+   "cq_id": "CQ-03",
+   "origin": "compliance",
+   "question": "Can a disclosed pay-per-view clip be a Part 465 testimonial; does paying only for verified views keep ZBC outside 465.4?",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "no FTC guidance on point"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "foreign payouts"
+    }
+   ],
+   "cq_id": "CQ-04",
+   "origin": "compliance",
+   "question": "Income sourcing for foreign clippers; days-in-US allocation",
+   "related": [],
+   "source_url": "https://www.irs.gov/publications/p515",
+   "why_counsel_only": "pay-per-view pattern untested"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "control only"
+    }
+   ],
+   "cq_id": "CQ-05",
+   "origin": "compliance",
+   "question": "GDPR/UK Art. 27(2) occasional-processing exemption or appoint representatives?",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "no regulator guidance"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "all gates for FR"
+    }
+   ],
+   "cq_id": "CQ-06",
+   "origin": "compliance",
+   "question": "Does Loi 2023-451 Art. 9 bind a non-EU agency targeting France?",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "secondary sources only"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "activation for a marketplace"
+    }
+   ],
+   "cq_id": "CQ-07",
+   "origin": "compliance",
+   "question": "Does a self-serve marketplace make ZBC a DAC7/UK/Canada platform operator?",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "directive text not fetched"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "payout/publish, synthetic + US"
+    }
+   ],
+   "cq_id": "CQ-08",
+   "origin": "compliance",
+   "question": "Which NY-visible clips need a GBL 396-b synthetic-performer disclosure; what is conspicuous?",
+   "related": [],
+   "source_url": "https://www.cooley.com/news/insight/2026/2026-01-29-new-york-enacts-synthetic-performer-disclosure-law-for-advertisements-including-those-using-generative-ai",
+   "why_counsel_only": "new law, no rulings"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "control only"
+    }
+   ],
+   "cq_id": "CQ-09",
+   "origin": "compliance",
+   "question": "Texas TDPSA sensitive-data consent vs SBA small business; IN/KY cure periods",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "secondary sources conflict"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "activation/publish with audience-data sale"
+    }
+   ],
+   "cq_id": "CQ-10",
+   "origin": "compliance",
+   "question": "Is ZBM a Delete Act data broker; registration window and fee",
+   "related": [
+    "CQ-20"
+   ],
+   "source_url": null,
+   "why_counsel_only": "fact-specific; daily penalties"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "every payout"
+    }
+   ],
+   "cq_id": "CQ-11",
+   "origin": "compliance",
+   "question": "Creator-agreement venue/arbitration/governing law across states; does minimum-live forfeiture survive wage challenges?",
+   "related": [
+    "CQ-18"
+   ],
+   "source_url": null,
+   "why_counsel_only": "jurisdictional"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "control only"
+    }
+   ],
+   "cq_id": "CQ-12",
+   "origin": "compliance",
+   "question": "Foreign-qualification or income-tax nexus from paying out-of-state creators; is portal SaaS taxable?",
+   "related": [
+    "FIN-CQ-11"
+   ],
+   "source_url": null,
+   "why_counsel_only": "CPA/SALT item"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "X/Meta change detection"
+    }
+   ],
+   "cq_id": "CQ-13",
+   "origin": "compliance",
+   "question": "May ZBM crawl X's and Meta's policy pages?",
+   "related": [],
+   "source_url": "https://techcrunch.com/2023/09/08/x-updates-its-terms-to-ban-crawling-and-scraping",
+   "why_counsel_only": "X terms bar crawling"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "compliance",
+     "what": "all gates for CA-QC"
+    }
+   ],
+   "cq_id": "CQ-14",
+   "origin": "compliance",
+   "question": "Do clients selling into Quebec trigger Charter of the French Language duties for ZBM's creative?",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "not researched"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "legal",
+     "what": "portal FAQ (forced off)"
+    },
+    {
+     "service": "legal",
+     "what": "not_legal_advice_v1 approval"
+    }
+   ],
+   "cq_id": "CQ-15",
+   "origin": "legal",
+   "question": "Which agent activities fall inside B&P 6125, and what portal language keeps them outside?",
+   "related": [
+    "CN-CQ-08"
+   ],
+   "source_url": "https://law.justia.com/codes/california/2005/bpc/6125-6140.05.html",
+   "why_counsel_only": "6125 undefined; 6126 criminal"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "clipper_network",
+     "what": "campaign enrolment"
+    }
+   ],
+   "cq_id": "CQ-16",
+   "origin": "legal",
+   "question": "Does the Talent Agencies Act reach a clipping agency; does buyer-of-deliverables with no agency avoid 1700.5 and 1700.25?",
+   "related": [],
+   "source_url": "https://www.dir.ca.gov/dlse/talent/talent_laws_relating_to_talent_agencies.pdf",
+   "why_counsel_only": "no Labor Commissioner ruling found"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "legal",
+     "what": "approval of ic_agreement"
+    }
+   ],
+   "cq_id": "CQ-17",
+   "origin": "legal",
+   "question": "Which 2775 exemption (2776 B2B, 2778) fits clippers and editors; which practices break it?",
+   "related": [
+    "CQ-01"
+   ],
+   "source_url": "https://www.labor.ca.gov/employmentstatus/faq/",
+   "why_counsel_only": "prong B; Tomasello split"
+  },
+  {
+   "alias_of": null,
+   "blocks": [],
+   "cq_id": "CQ-18",
+   "origin": "legal",
+   "question": "Are arbitration, class waiver, minimum-live forfeiture and clawback enforceable if a clipper is later an employee or consumer?",
+   "related": [
+    "CQ-11"
+   ],
+   "source_url": null,
+   "why_counsel_only": "status-dependent"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "legal",
+     "what": "clickwrap evidence_sufficient"
+    }
+   ],
+   "cq_id": "CQ-19",
+   "origin": "legal",
+   "question": "What clickwrap presentation and versioned-acceptance evidence satisfies Civ. Code 1633.9; which documents need 7001(c) consent?",
+   "related": [],
+   "source_url": "https://law.justia.com/codes/california/code-civ/division-3/part-2/title-2-5/section-1633-9/",
+   "why_counsel_only": "attribution burden on ZBM; 1633.3 UNVERIFIED"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "legal",
+     "what": "clause MSA-CCPA-01 / Onboarding P23"
+    }
+   ],
+   "cq_id": "CQ-20",
+   "origin": "legal",
+   "question": "Mandatory CCPA service-provider terms; which client asks make ZBM a third party or a Delete Act data broker?",
+   "related": [
+    "CQ-10"
+   ],
+   "source_url": "https://oag.ca.gov/privacy/ccpa",
+   "why_counsel_only": "1798.100(d) not fetched"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "legal",
+     "what": "every music-bearing clip (LG-12)"
+    }
+   ],
+   "cq_id": "CQ-21",
+   "origin": "legal",
+   "question": "Music warranty, repost prohibition and indemnity; does a platform commercial library license a paid clip?",
+   "related": [],
+   "source_url": "https://www.musicbusinessworldwide.com/fashion-brand-quince-recently-valued-at-10b-sued-by-umg-over-unlicensed-use-of-music-from-sabrina-carpenter-justin-bieber-billie-eilish-and-more-in-tiktok-posts/",
+   "why_counsel_only": "labels plead creative control"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "verification_integrity",
+     "what": "portal media hosting"
+    }
+   ],
+   "cq_id": "CQ-22",
+   "origin": "legal",
+   "question": "DMCA agent and 512(i) policy for a portal hosting submissions; exposure as an uploader without safe harbor",
+   "related": [],
+   "source_url": "https://www.law.cornell.edu/uscode/text/17/512",
+   "why_counsel_only": "safe harbor covers hosted material only"
+  },
+  {
+   "alias_of": null,
+   "blocks": [],
+   "cq_id": "CQ-23",
+   "origin": "legal",
+   "question": "Which coverages and limits fit; which exclusions gut them?",
+   "related": [],
+   "source_url": "https://foundershield.com/business-insurance/media/advertising-insurance/",
+   "why_counsel_only": "broker pages omit exclusions"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "legal",
+     "what": "approval of engagement_letter without the AI clauses"
+    }
+   ],
+   "cq_id": "CQ-24",
+   "origin": "legal",
+   "question": "Engagement-letter terms on counsel's AI use, agent drafts, AI billing, conflicts",
+   "related": [],
+   "source_url": "https://www.calbar.ca.gov/Portals/0/documents/ethics/Generative-AI-Practical-Guidance.pdf",
+   "why_counsel_only": "Rule 1.5/1.6 duties are counsel's"
+  },
+  {
+   "alias_of": null,
+   "blocks": [],
+   "cq_id": "CQ-25",
+   "origin": "legal",
+   "question": "Which events beyond demand letters, subpoenas and complaints trigger preservation; hold scope for clipper-owned accounts?",
+   "related": [],
+   "source_url": "https://calawyers.org/law-practice-management-technology/preservation-obligations-preserving-potentially-relevant-evidence-in-california-litigation/",
+   "why_counsel_only": "fact-specific"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "legal",
+     "what": "every deletion by Legal"
+    }
+   ],
+   "cq_id": "CQ-26",
+   "origin": "legal",
+   "question": "Retention periods for payroll, contractor, tax and contract records; what survives a hold override?",
+   "related": [],
+   "source_url": "https://877suemyboss.com/labor-code-1174/",
+   "why_counsel_only": "1174 by paraphrase; others UNVERIFIED"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "legal",
+     "what": "trademark filings ready"
+    }
+   ],
+   "cq_id": "CQ-27",
+   "origin": "legal",
+   "question": "One class or several for Z Best Media / Z Best Clips; do the marks clear a search?",
+   "related": [],
+   "source_url": "https://www.uspto.gov/trademarks/fees-payment-information/summary-2025-trademark-fee-changes",
+   "why_counsel_only": "clearance is a legal judgment"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "verification_integrity",
+     "what": "YouTube anomaly signals; YouTube results to Creative Memory"
+    }
+   ],
+   "cq_id": "VI-CQ-01",
+   "origin": "vi",
+   "question": "Is fraud screening on YouTube API Data or a cross-clipper winners library derived data or prohibited aggregation?",
+   "related": [],
+   "source_url": "https://developers.google.com/youtube/terms/developer-policies",
+   "why_counsel_only": "YouTube audits use cases"
+  },
+  {
+   "alias_of": null,
+   "blocks": [],
+   "cq_id": "VI-CQ-02",
+   "origin": "vi",
+   "question": "Retention/use limits on TikTok, Instagram and X API data",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "not found (UNVERIFIED)"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "verification_integrity",
+     "what": "the retained HMACs"
+    }
+   ],
+   "cq_id": "VI-CQ-03",
+   "origin": "vi",
+   "question": "May V&I keep a minor's refusal record (result + identity HMACs)?",
+   "related": [],
+   "source_url": "https://www.ftc.gov/system/files/ftc_gov/pdf/coppa-age-verification-policy-statement.pdf",
+   "why_counsel_only": "FTC: delete promptly"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "verification_integrity",
+     "what": "device/IP signals"
+    }
+   ],
+   "cq_id": "VI-CQ-04",
+   "origin": "vi",
+   "question": "Device-fingerprint / IP collection for duplicate-identity checks",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "privacy law not researched"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "verification_integrity",
+     "what": "TikTok cover PDQ"
+    }
+   ],
+   "cq_id": "VI-CQ-05",
+   "origin": "vi",
+   "question": "May platform-returned thumbnails/media be hashed and compared?",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "ToS on media use not retrieved"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "verification_integrity",
+     "what": "X certification"
+    }
+   ],
+   "cq_id": "VI-CQ-06",
+   "origin": "vi",
+   "question": "Is X impression_count a payable view?",
+   "related": [],
+   "source_url": "https://docs.x.com/x-api/fundamentals/data-dictionary",
+   "why_counsel_only": "definition UNVERIFIED"
+  },
+  {
+   "alias_of": "CQ-16",
+   "blocks": [
+    {
+     "service": "clipper_network",
+     "what": "enrolment"
+    }
+   ],
+   "cq_id": "CN-CQ-01",
+   "origin": "cn",
+   "question": "Talent Agencies Act",
+   "related": [],
+   "source_url": "https://www.dir.ca.gov/dlse/talent/talent_laws_relating_to_talent_agencies.pdf",
+   "why_counsel_only": "alias"
+  },
+  {
+   "alias_of": "CQ-01",
+   "blocks": [],
+   "cq_id": "CN-CQ-02",
+   "origin": "cn",
+   "question": "AB 5",
+   "related": [],
+   "source_url": "https://www.labor.ca.gov/employmentstatus/faq/",
+   "why_counsel_only": "alias"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "clipper_network",
+     "what": "enrolment of members"
+    }
+   ],
+   "cq_id": "CN-CQ-03",
+   "origin": "cn",
+   "question": "May SAG-AFTRA members be admitted; does the 2025 Influencer Waiver apply?",
+   "related": [],
+   "source_url": "https://www.sagaftra.org/sites/default/files/2025%20Influencer-Produced%20Sponsored%20Content%20Waiver.pdf",
+   "why_counsel_only": "union obligations"
+  },
+  {
+   "alias_of": "CQ-11",
+   "blocks": [],
+   "cq_id": "CN-CQ-04",
+   "origin": "cn",
+   "question": "Minimum-live forfeiture and clawback vs wage challenges",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "alias"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "clipper_network",
+     "what": "Reddit, X channels"
+    }
+   ],
+   "cq_id": "CN-CQ-05",
+   "origin": "cn",
+   "question": "Reddit and X rules on paid-opportunity/recruiting posts",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "not fetched"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "clipper_network",
+     "what": "email to CA clippers"
+    }
+   ],
+   "cq_id": "CN-CQ-06",
+   "origin": "cn",
+   "question": "CASL for member messages to Canadian clippers",
+   "related": [],
+   "source_url": "https://www.fightspam.gc.ca/eic/site/030.nsf/eng/home",
+   "why_counsel_only": "CASL page not fetched"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "clipper_network",
+     "what": "SMS"
+    }
+   ],
+   "cq_id": "CN-CQ-07",
+   "origin": "cn",
+   "question": "TCPA consent for recruiting or member texts",
+   "related": [],
+   "source_url": "https://www.fcc.gov/consumers/guides/stop-unwanted-robocalls-and-texts",
+   "why_counsel_only": "FCC page not fetched"
+  },
+  {
+   "alias_of": null,
+   "blocks": [],
+   "cq_id": "CN-CQ-08",
+   "origin": "cn",
+   "question": "Automated-system disclosure wording (Cal. B&P 17941)",
+   "related": [
+    "CQ-15"
+   ],
+   "source_url": null,
+   "why_counsel_only": "wording by counsel"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "campaign fundable"
+    }
+   ],
+   "cq_id": "FIN-CQ-01",
+   "origin": "finance",
+   "question": "Does the client contract make prepayments ZBC's own customer deposit; does a segregated-account policy create a trust?",
+   "related": [
+    "CQ-02"
+   ],
+   "source_url": "https://www.law.cornell.edu/regulations/california/10-CCR-80.126.10",
+   "why_counsel_only": "money-transmitter exposure"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "any custody model other than own_deposit"
+    }
+   ],
+   "cq_id": "FIN-CQ-02",
+   "origin": "finance",
+   "question": "Third-party custody options (bank FBO, licensed escrow, processor segregation)",
+   "related": [],
+   "source_url": "https://dfpi.ca.gov/regulated-industries/escrow-law/about-the-escrow-law/",
+   "why_counsel_only": "escrow-law burden on the claimant"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "close finalization"
+    }
+   ],
+   "cq_id": "FIN-CQ-03",
+   "origin": "finance",
+   "question": "ASC 606 principal-versus-agent memo per service",
+   "related": [],
+   "source_url": "https://storage.fasb.org/ASU%202016-08.pdf",
+   "why_counsel_only": "judgment on control indicators"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "close finalization; admin fee"
+    }
+   ],
+   "cq_id": "FIN-CQ-04",
+   "origin": "finance",
+   "question": "Accounting for clawbacks and administrative holds",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "no primary source found"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "close finalization"
+    }
+   ],
+   "cq_id": "FIN-CQ-05",
+   "origin": "finance",
+   "question": "Does a contractual restriction make the deposit account restricted cash?",
+   "related": [],
+   "source_url": "https://storage.fasb.org/ASU%202016-18.pdf",
+   "why_counsel_only": "ASC 210 unverified"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "withhold_24 policy"
+    }
+   ],
+   "cq_id": "FIN-CQ-06",
+   "origin": "finance",
+   "question": "First-year TIN Matching and withholding posture",
+   "related": [],
+   "source_url": "https://www.irs.gov/tax-professionals/taxpayer-identification-number-tin-matching",
+   "why_counsel_only": "payer account file requirement"
+  },
+  {
+   "alias_of": "CQ-01",
+   "blocks": [],
+   "cq_id": "FIN-CQ-07",
+   "origin": "finance",
+   "question": "AB 5 classification of clippers",
+   "related": [],
+   "source_url": "https://www.dir.ca.gov/dlse/faq_independentcontractor.htm",
+   "why_counsel_only": "alias"
+  },
+  {
+   "alias_of": "CQ-04",
+   "blocks": [],
+   "cq_id": "FIN-CQ-08",
+   "origin": "finance",
+   "question": "Days-in-US allocation for foreign clippers",
+   "related": [],
+   "source_url": "https://www.irs.gov/publications/p515",
+   "why_counsel_only": "alias"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "late fees; card acceptance"
+    }
+   ],
+   "cq_id": "FIN-CQ-09",
+   "origin": "finance",
+   "question": "Does Civ. Code 1748.1 reach B2B invoices; what late fee survives 1671?",
+   "related": [],
+   "source_url": "https://codes.findlaw.com/ca/civil-code/civ-sect-1748-1/",
+   "why_counsel_only": "primary text robots-blocked"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "subscription/retainer invoices"
+    }
+   ],
+   "cq_id": "FIN-CQ-10",
+   "origin": "finance",
+   "question": "Does the ARL apply to small-business subscribers; which artifacts must be kept?",
+   "related": [],
+   "source_url": "https://www.cooley.com/news/insight/2025/2025-06-04-california-automatic-renewal-law-amendments-take-effect-on-july-1-2025",
+   "why_counsel_only": "consumer scope fact-specific"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "invoice issuance"
+    }
+   ],
+   "cq_id": "FIN-CQ-11",
+   "origin": "finance",
+   "question": "California sales tax on deliverables and portal SaaS; nexus",
+   "related": [
+    "CQ-12"
+   ],
+   "source_url": "https://www.cdtfa.ca.gov/formspubs/pub37.pdf",
+   "why_counsel_only": "Pub 37 text unverified"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "FC-12 stays red"
+    }
+   ],
+   "cq_id": "FIN-CQ-12",
+   "origin": "finance",
+   "question": "UCC 4A loss allocation under the bank's security-procedure agreement",
+   "related": [],
+   "source_url": "https://www.consumerfinance.gov/rules-policy/regulations/1005/2/",
+   "why_counsel_only": "4A rests on a secondary source"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "direct ACH rail"
+    }
+   ],
+   "cq_id": "FIN-CQ-13",
+   "origin": "finance",
+   "question": "If ZBC originates ACH: Nacha reversal rules, data security, fraud-monitoring procedure",
+   "related": [],
+   "source_url": "https://www.nacha.org/rules/operating-rules",
+   "why_counsel_only": "rules paywalled"
+  },
+  {
+   "alias_of": null,
+   "blocks": [
+    {
+     "service": "finance_31",
+     "what": "FBO custody model"
+    }
+   ],
+   "cq_id": "FIN-CQ-14",
+   "origin": "finance",
+   "question": "Status of the FDIC custodial-account recordkeeping rule; FBO pass-through insurance",
+   "related": [],
+   "source_url": "https://www.federalregister.gov/documents/2024/10/02/2024-22565/recordkeeping-for-custodial-accounts",
+   "why_counsel_only": "finalization UNVERIFIED"
+  },
+  {
+   "alias_of": "CQ-07",
+   "blocks": [],
+   "cq_id": "FIN-CQ-15",
+   "origin": "finance",
+   "question": "Marketplace platform-operator status (DAC7/UK/Canada)",
+   "related": [],
+   "source_url": null,
+   "why_counsel_only": "alias"
+  }
+ ],
+ "source": "LEGAL_SPEC.md rev 1 \u00a7I; FINANCE_SPEC \u00a7H",
+ "version": 1
+}

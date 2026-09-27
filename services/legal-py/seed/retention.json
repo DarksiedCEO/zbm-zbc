@@ -1,0 +1,51 @@
+{
+ "classes": [
+  {
+   "basis": "UNVERIFIED (LR: life of the contract plus the limitations period)",
+   "class": "contracts_and_esign_evidence",
+   "period": "UNVERIFIED"
+  },
+  {
+   "basis": "https://877suemyboss.com/labor-code-1174/ (secondary paraphrase)",
+   "class": "payroll",
+   "period": "P3Y"
+  },
+  {
+   "basis": "UNVERIFIED",
+   "class": "contractor_payments",
+   "period": "UNVERIFIED"
+  },
+  {
+   "basis": "UNVERIFIED (IRS four-year period not fetched)",
+   "class": "tax",
+   "period": "UNVERIFIED"
+  },
+  {
+   "basis": "UNVERIFIED",
+   "class": "takedowns",
+   "period": "UNVERIFIED"
+  },
+  {
+   "basis": "UNVERIFIED",
+   "class": "matters",
+   "period": "UNVERIFIED"
+  },
+  {
+   "basis": "UNVERIFIED",
+   "class": "holds",
+   "period": "UNVERIFIED"
+  },
+  {
+   "basis": "UNVERIFIED",
+   "class": "legal_memos",
+   "period": "UNVERIFIED"
+  },
+  {
+   "basis": "UNVERIFIED",
+   "class": "acceptance_records",
+   "period": "UNVERIFIED"
+  }
+ ],
+ "source": "LEGAL_SPEC.md rev 1 \u00a7B.10",
+ "version": 1
+}
