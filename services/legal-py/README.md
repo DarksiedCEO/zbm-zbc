@@ -16,7 +16,7 @@ refused, nothing deleted.
 ## Run
 
 ```bash
-cd services/legal-py && python3 -m pytest -q        # 212 tests, no network
+cd services/legal-py && python3 -m pytest -q        # 276 tests (212 + 64 AEGIS round 17), no network
 export LEGAL_SERVICE_TOKEN=<secret>                  # required: the service refuses to start without it
 export LEGAL_ANDRE_APPROVAL_TOKEN=<Andre's secret>   # unset -> nothing can ever be approved
 export LEGAL_CALLER_TOKENS='{"compliance_38": "<>=32 printable chars>", "clipper_network": "...", "hub": "...", "scheduler": "..."}'
@@ -52,7 +52,7 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `GET /legal/v1/documents/{doc_id}/current` | any | protocol answer for Compliance / Clipper Network |
 | `GET /legal/v1/documents/{doc_id}`, `.../versions/{v}` | any | register view (no text) |
 | `GET .../versions/{v}/text` | Andre | the text |
-| `POST /legal/v1/documents/{doc_id}/versions` | Andre (upload) or scheduler (template fill) | new draft |
+| `POST /legal/v1/documents/{doc_id}/versions` | Andre (upload; `bump: major` optional) or scheduler (template fill with `party_ref`); anyone else uploading -> 403 | new draft; Legal assigns the version number |
 | `POST .../versions/{v}/counsel-review`, `/counsel-signoff`, `/decision` | Andre | package; sign-off record; approve / retire / withdraw |
 | `POST /legal/v1/acceptances`; `GET /legal/v1/acceptances/{id}` | hub, clipper_network, onboarding; readers | clickwrap evidence |
 | `POST /legal/v1/envelopes`; `POST /legal/v1/esign/events` | Andre; esign_gateway | envelopes (provider not wired) |
@@ -63,6 +63,7 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `GET`, `PUT /legal/v1/contracts/{client_id}/terms` | onboarding | ContractTerms storage |
 | `GET /legal/v1/register`, `/register/{cq_id}`; `POST /register/{id}/invalidate` | any; compliance_38 | counsel-question mirror |
 | `POST /legal/v1/memos`; `GET /legal/v1/memos/{id}` | Andre; any | memo intake |
+| `POST /legal/v1/memos/{memo_id}/compliance-proposals` | Andre | step 2: Compliance proposals backed by the filed memo |
 | `POST /legal/v1/requests`; `GET /legal/v1/matters/{id}`; `POST .../close` | any; any; Andre | matters |
 | `GET /legal/v1/holds/check`; `POST /holds/{id}/acknowledgments`, `/release` | any; hub; Andre + memo | holds |
 | `POST /legal/v1/takedowns`, `/{id}/counter-notice`, `/claimant-action`, `/restore`, `/withdraw` | Andre, hub, clipper_network | takedown desk |
@@ -86,8 +87,16 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
    is filed.
 3. Documents: a document version becomes approvable only after a sign-off record whose memo cites
    `doc_id@version` and whose `doc_sha256` equals the version's hash; then Andre approves by that hash.
-4. Compliance rows: a memo's typed rows go to Compliance as proposals (evidence `legal37://memos/<id>`); a
+4. Compliance rows, two steps (AEGIS N17-8): file the memo (its id now exists), then
+   `POST /legal/v1/memos/{memo_id}/compliance-proposals` with rows whose `source_url` is exactly
+   `urn:legal37:memos:<memo_id>` (compliance-py accepts `urn:`; the old `legal37://` form was refused there). A
    Compliance-owned row turns verified in Legal's mirror only after Andre approves it at Compliance.
+5. Acceptances (AEGIS N17-4): a party accepts only an instance bound to it -- a fill names its `party_ref`; a
+   template (declared variables or any `{{...}}` left) is never acceptable; a version bound to no party and with no
+   placeholder is a standard form any party may accept.
+6. Every document, fills and SOWs included, needs counsel's sign-off on its exact hash (no SOW exception). The
+   advice-text guard is defense in depth, not the control (ADR 0010 amendment). No IP address is accepted in any
+   string of any write route (IPv4/IPv6, embedded, with a port, URL-encoded).
 
 ## Reconciling the local log with the ledger
 
@@ -106,7 +115,10 @@ reconcile/anchor/lease, a leak fuzz and details.
 
 ```bash
 LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py --ports 19500,19501,19502,19503
+python3 tests/contract_compliance_real.py      # Legal's real thin client against the REAL compliance-py app
 ```
+
+Fix 18 (Sep 27, 2026): live run 41/41 on ports 19560-19563 with the review-10 ledger binary.
 
 Real ledger binary, the production entrypoint, a Compliance stub behind the real thin client; kills only the PIDs
 it started; exit 0 only if every check holds and `GET /ledger/verify` is valid.

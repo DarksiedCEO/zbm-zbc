@@ -19,7 +19,7 @@
   },
   {
    "approval_blocked_by": [],
-   "counsel_required": false,
+   "counsel_required": true,
    "doc_id": "sow",
    "doc_type": "sow",
    "entities": [

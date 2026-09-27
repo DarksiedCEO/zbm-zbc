@@ -6,11 +6,13 @@ memo does not cite.
 Andre (token) uploads the memo blob plus the ``answers`` / ``cites`` structure he typed from it. Every effect
 must be named in ``cites`` (else 409 ``MEMO_DOES_NOT_CITE``, nothing filed, no Compliance call):
 - ``answers[].cq_id`` in ``cites.cq_ids`` (aliases are refused: a memo cites the canonical row);
-- ``compliance_rows[].obligation_id`` in ``cites.obligation_ids``;
+- step 2 (``memo_proposals``, AEGIS N17-8): each Compliance proposal targets a question the memo answered
+  ``verified_rule`` (supersede) or an obligation in ``cites.obligation_ids`` (amend / reverify), and its row
+  carries ``source_url: urn:legal37:memos:<memo_id>`` -- the id exists before the row is typed;
 - ``retention_periods`` keys in ``cites.retention_classes``; ``signoff_scopes`` keys in ``cites.signoff_topics``.
 A document version's counsel sign-off and a playbook's approval later consume the memo only for the
 ``doc_versions`` / ``clause_ids`` it cites. The Compliance proposal rows are Andre-typed; Legal only wraps them
-with the memo as evidence (``legal37://memos/<memo_id>``).
+with the memo as evidence (``urn:legal37:memos:<memo_id>``).
 """
 
 from __future__ import annotations
@@ -34,9 +36,6 @@ def uncited(memo: dict) -> list[dict]:
         if a["cq_id"] not in c["cq_ids"]:
             out.append(R.item("MEMO_DOES_NOT_CITE", f"answer for {a['cq_id']} but the memo cites "
                               f"{', '.join(c['cq_ids']) or 'no counsel question'}", cq_id=a["cq_id"]))
-    for r in memo["compliance_rows"]:
-        if r["obligation_id"] not in c["obligation_ids"]:
-            out.append(R.item("MEMO_DOES_NOT_CITE", f"Compliance row {r['obligation_id']} is not cited by the memo"))
     for k in memo["retention_periods"]:
         if k not in c["retention_classes"]:
             out.append(R.item("MEMO_DOES_NOT_CITE", f"retention class {k} is not cited by the memo"))
@@ -46,7 +45,13 @@ def uncited(memo: dict) -> list[dict]:
     return out
 
 
+def memo_urn(memo_id: str) -> str:
+    """The memo's evidence URL. compliance-py accepts http(s) and ``urn:`` URLs only; the earlier
+    ``legal37://memos/<id>`` form was refused (422) by the real compliance-py (AEGIS N17-8)."""
+    return f"urn:legal37:memos:{memo_id}"
+
+
 def evidence(memo_id: str, memo_sha256: str, received_at: str, excerpt: str) -> dict:
     """Compliance B.1 evidence for a memo-backed proposal (spec §C.5)."""
-    return {"source_url": f"legal37://memos/{memo_id}", "fetched_at": received_at, "snapshot_sha256": memo_sha256,
+    return {"source_url": memo_urn(memo_id), "fetched_at": received_at, "snapshot_sha256": memo_sha256,
             "normalized_text_sha256": memo_sha256, "quoted_excerpt": excerpt, "doc_number": memo_id}

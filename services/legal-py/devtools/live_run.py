@@ -122,6 +122,9 @@ class ComplianceStub(BaseHTTPRequestHandler):
             return self._send(403, {"detail": "caller"})
         if self.path != "/compliance/v1/register/proposals":
             return self._send(404, {"detail": "no route"})
+        urls = [str((body.get("evidence") or {}).get("source_url")), str((body.get("proposed_row") or {}).get("source_url"))]
+        if not all(u.startswith(("https://", "http://", "urn:")) for u in urls):   # what compliance-py enforces
+            return self._send(422, {"detail": "source_url must be an http(s) or urn: URL"})
         for rid_, b in STUB["proposals"]:
             if rid_ == body.get("request_id"):
                 return self._send(201, {"proposal": {"proposal_id": f"prop-{rid_[:40]}"}})
@@ -208,7 +211,7 @@ def main() -> int:
 
         # --- engagement letter (LG-17) --------------------------------------------------------------------
         eng_text = f"Engagement letter with {COUNSEL}: scope, billing guidelines, AI-use terms (ENG-AI-01)."
-        e = a.post("/legal/v1/documents/engagement_letter/versions", {"request_id": a.rid(), "version": "1.0",
+        e = a.post("/legal/v1/documents/engagement_letter/versions", {"request_id": a.rid(),
                    "entity": "zbm", "text": eng_text, "clause_ids": [{"clause_id": "ENG-AI-01", "position": "standard"}]},
                    andre=True).json()
         a.post("/legal/v1/documents/engagement_letter/versions/1.0/counsel-signoff",
@@ -254,7 +257,13 @@ def main() -> int:
 
         # --- document draft -> counsel sign-off -> Andre approval -------------------------------------------------
         tpl = "MASTER SERVICES AGREEMENT between Z Best Media and {{client_name}}; term ends {{end_date}}."
-        d = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "version": "1.0", "entity": "zbm",
+        r = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "version": "1.0", "entity": "zbm",
+                   "text": tpl}, andre=True)
+        check("a caller-supplied version number -> 422 (Legal assigns it, AEGIS N17-5)", r.status_code == 422)
+        r = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "entity": "zbm", "text": "x"},
+                   caller="scheduler")
+        check("an upload by anyone but Andre -> 403 (AEGIS N17-5)", r.status_code == 403)
+        d = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "entity": "zbm",
                    "text": tpl, "template_variables": {"client_name": {"type": "string", "max_length": 120},
                                                       "end_date": {"type": "date"}},
                    "clause_ids": [{"clause_id": c, "position": "standard"} for c in clauses]}, andre=True)
@@ -271,8 +280,9 @@ def main() -> int:
         r = a.post("/legal/v1/documents/client_msa/versions/1.0/decision",
                    {"request_id": a.rid(), "decision": "approve", "version_sha256": db["sha256"]}, andre=True)
         check("Andre approves client_msa 1.0", r.json().get("status") == "approved")
-        f = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "version": "1.1", "entity": "zbm",
+        f = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "party_ref": "client:acme", "entity": "zbm",
                    "variables": {"client_name": "Acme Outdoor Co", "end_date": "2027-09-30"}}, caller="scheduler").json()
+        check("the scheduler's fill is numbered 1.1 by Legal and bound to client:acme", f.get("version") == "1.1")
         say(f"scheduler template fill client_msa 1.1 -> sha256={f['sha256'][:16]}... review_label={f['review_label']}")
         a.post("/legal/v1/documents/client_msa/versions/1.1/counsel-signoff",
                {"request_id": a.rid(), "counsel_ref": COUNSEL, "signed_on": today, "doc_sha256": f["sha256"],
@@ -283,7 +293,7 @@ def main() -> int:
         say(f"current_version(client_msa) -> {cur['current_version']} sha={str(cur['doc_sha256'])[:16]}... "
             f"review_by={cur['review_by']}")
         check("the filled 1.1 is current with its own hash", cur["current_version"] == "1.1" and cur["doc_sha256"] == f["sha256"])
-        bad = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "version": "1.2", "entity": "zbm",
+        bad = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "party_ref": "client:acme", "entity": "zbm",
                      "variables": {"client_name": "You must sign this today", "end_date": "2027-09-30"}}, caller="scheduler")
         check("a template variable that reads as advice -> 422 ADVICE_TEXT_BLOCKED",
               bad.status_code == 422 and bad.json()["detail"] == "ADVICE_TEXT_BLOCKED")
@@ -303,6 +313,23 @@ def main() -> int:
                    "presented_sha256": f["sha256"], "method": "clickwrap_unticked_box", "presentation": "link",
                    "affirmative_act": True, "ip": "203.0.113.5"}, caller="onboarding")
         check("an acceptance carrying an IP address -> 422", r.status_code == 422)
+        r = a.post("/legal/v1/acceptances", {"request_id": a.rid(), "party_ref": "client:acme",
+                   "signer_identity_ref": "client:192.168.1.1", "doc_id": "client_msa", "version": "1.1",
+                   "doc_sha256": f["sha256"], "presented_sha256": f["sha256"], "method": "clickwrap_unticked_box",
+                   "presentation": "link", "affirmative_act": True}, caller="onboarding")
+        check("an IP address inside a ref value -> 422 (AEGIS N17-6)", r.status_code == 422)
+        r = a.post("/legal/v1/acceptances", {"request_id": a.rid(), "party_ref": "client:globex",
+                   "signer_identity_ref": "globex-1", "doc_id": "client_msa", "version": "1.1",
+                   "doc_sha256": f["sha256"], "presented_sha256": f["sha256"], "method": "clickwrap_unticked_box",
+                   "presentation": "link", "affirmative_act": True}, caller="onboarding")
+        check("another client accepting acme's instance -> 409 INSTANCE_NOT_BOUND (AEGIS N17-4)",
+              r.status_code == 409 and r.json()["detail"] == "INSTANCE_NOT_BOUND")
+        r = a.post("/legal/v1/acceptances", {"request_id": a.rid(), "party_ref": "client:initech",
+                   "signer_identity_ref": "initech-1", "doc_id": "client_msa", "version": "1.0",
+                   "doc_sha256": db["sha256"], "presented_sha256": db["sha256"], "method": "clickwrap_unticked_box",
+                   "presentation": "link", "affirmative_act": True}, caller="onboarding")
+        check("accepting the unfilled template -> 409 TEMPLATE_NOT_ACCEPTABLE (AEGIS N17-4)",
+              r.status_code == 409 and r.json()["detail"] == "TEMPLATE_NOT_ACCEPTABLE")
         obs = a.get("/legal/v1/obligations", party_ref="client:acme").json()["items"]
         say("obligations: " + "; ".join(f"{o['obligation_code']} due {o['due']} owner {o['owner_department']}" for o in obs))
         check("obligations extracted and bound (renewal 2027-08-31; payment +10 business days)",
@@ -323,18 +350,25 @@ def main() -> int:
                     "content_b64": b64(b"Counsel memo 2: creator agreement venue and minimum-live forfeiture."),
                     "cites": {"cq_ids": ["CQ-11"]},
                     "answers": [{"cq_id": "CQ-11", "resolution": "verified_rule",
-                                 "proposed_row": {"id": "CQ-11-MEMO-1", "status": "verified"},
                                  "quoted_excerpt": "Counsel answers CQ-11 for the current clipper agreement."}]},
                     andre=True).json()
-        say(f"memo #2 -> {m2['memo_id']} proposals={m2['proposals']}")
-        check("memo produced exactly one Compliance proposal, delivered through the thin client",
-              len(m2["proposals"]) == 1 and m2["proposals"][0]["status"] == "delivered" and len(STUB["proposals"]) == 1)
+        check("memo #2 filed; no Compliance call until the row is proposed (step 1 of 2, AEGIS N17-8)",
+              m2["proposals"] == [] and len(STUB["proposals"]) == 0)
+        mp = a.post(f"/legal/v1/memos/{m2['memo_id']}/compliance-proposals", {"request_id": a.rid(), "proposals": [
+                    {"kind": "supersede", "target_id": "CQ-11",
+                     "proposed_row": {"id": "CQ-11-MEMO-1", "status": "verified",
+                                      "source_url": f"urn:legal37:memos:{m2['memo_id']}"},
+                     "quoted_excerpt": "Counsel answers CQ-11 for the current clipper agreement."}]}, andre=True).json()
+        say(f"memo #2 -> {m2['memo_id']} proposals={mp['proposals']}")
+        check("step 2 produced exactly one Compliance proposal, delivered through the thin client",
+              len(mp["proposals"]) == 1 and mp["proposals"][0]["status"] == "delivered" and len(STUB["proposals"]) == 1)
         _, sent = STUB["proposals"][0]
         ev = sent["evidence"]
         say(f"stub received: kind={sent['kind']} target={sent['target_id']} source_url={ev['source_url']} "
             f"doc_number={ev['doc_number']}")
-        check("proposal carries legal37://memos/<id> evidence and the memo hash",
-              ev["source_url"] == f"legal37://memos/{m2['memo_id']}" and ev["snapshot_sha256"] == m2["memo_sha256"])
+        check("proposal carries urn:legal37:memos:<id> evidence (row and evidence) and the memo hash",
+              ev["source_url"] == f"urn:legal37:memos:{m2['memo_id']}" and ev["snapshot_sha256"] == m2["memo_sha256"]
+              and sent["proposed_row"]["source_url"] == ev["source_url"])
         row = a.get("/legal/v1/register/CQ-11").json()
         check("CQ-11 stays unverified until Andre approves at Compliance", row["status"] == "unverified")
         r = a.post("/legal/v1/memos", {"request_id": a.rid(), "counsel_ref": COUNSEL, "memo_date": today,

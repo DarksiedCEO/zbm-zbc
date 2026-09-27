@@ -52,11 +52,11 @@ wall-clock deadline.
 | File | SHA-256 |
 |---|---|
 | `legal_rules_seed.json` | `cebb5b1418eee245a472d040bfd8795ce3d93338902c4939b0454655f90afe9b` |
-| `documents.json` | `24795d97d4f17a2498c7f44730c17ca01bc05d3c0d0497af19101a4d9aa892c5` |
+| `documents.json` | `c4819ab8017e4d563a776b0e57964ff821b69f000ec5189581be858fb933f823` |
 | `counsel_questions.json` | `8a00b2912611547fe7d38c3f9d3794824df804168aa2673cd1532cb666da2778` |
 | `retention.json` | `712efb7a7ed72bdd5896c47f51f9f1cd9fcc7503383ced80568b1385d80ae286` |
 | `signoff_topics.json` | `3651fc599248be8656e83fcffc9c5b66d48a0d9712437c316f6678c95a9ab590` |
-| `advice_patterns.json` | `675beec6dc4e1f9ddf5792e4af56b26aa2a6df7d1468f38aa63ec116f1d4d70c` |
+| `advice_patterns.json` | `cf43405ee79ac0779ac466605b31e7ea6e61fa9ba9a7af1ca3e7a440a1719be3` |
 | `us_federal_holidays.json` | `54cf0db79fa3c4f9eb452797681d8c7114bd57aa43557896a76eaaada8b1b1f5` |
 
 `python3 devtools/gen_seeds.py` regenerates them byte for byte; `--pin` rewrites `src/config.py`.
@@ -271,3 +271,53 @@ A1-A12 (`test_cert_attacks.py`), guardrails G1-G8 (`test_guardrails.py`), auth/l
 ledger/anchor/store failure = no effect on every write route (`test_ledger_no_effect.py`), reconcile/anchor/lease
 (`test_reconcile_anchor.py`), the leak fuzz (`test_leak_fuzz.py`) and details. A socket guard fails any test that
 tries the network. Live run: `LEDGER_BIN=... python3 devtools/live_run.py --ports 19500,19501,19502,19503`.
+
+## Amendment — AEGIS round 17 (fix 18, Sep 27, 2026)
+
+Branch `fix18-fin-legal` from `integration-2026-09-24` @ `680c289`. Tests: `tests/test_aegis_r17.py` (64) and
+`tests/contract_compliance_real.py`; existing tests that enshrined the flaws were changed (report lists them).
+
+1. **Acceptance binds to the party's instance (N17-4).** A scheduler fill must name `party_ref`; the version records
+   it (and `unresolved_fields`, true when any `{{...}}` is left). An acceptance (and an envelope) is refused 409
+   `TEMPLATE_NOT_ACCEPTABLE` for a template (declared variables or unresolved fields) and `INSTANCE_NOT_BOUND` for an
+   instance bound to another party, or a fill recorded before this fix with no party. A version bound to no party
+   with no placeholder is a standard form (e.g. the clipper agreement) and any party may accept it -- Andre's
+   explicit choice when he uploads one text for everyone. `clickwrap_sufficient` takes the binding as a required
+   input, so evidence is never sufficient for an unbound instance on any path.
+2. **Server-assigned version numbers (N17-5).** `DocVersionCreate` has no `version`: Legal assigns the next number,
+   monotonic per document and never reused (withdrawn numbers included) -- `1.0`, then the next minor; Andre may ask
+   for the next major (`bump: major`). Only Andre's token uploads text; any other caller doing so gets 403 (fills
+   stay the scheduler's). A caller can no longer freeze a document by burning `9999.9999`.
+3. **IP addresses (N17-6).** Every string (and key) of every write body and every path id is scanned
+   (`textguard.ip_in`): IPv4 dotted (leading zeros, a port, embedded in a ref such as `client:192.168.1.1`), the
+   `ip-10-0-0-1` host form, IPv6 full/compressed/IPv4-mapped/zone, each also after percent-decoding -> 422
+   `IP_ADDRESS_REFUSED`. Candidates are confirmed by the `ipaddress` module (timestamps and 2-part versions never
+   hit). Integer (`3232235777`) and hex (`0a000001`) encodings are NOT detected: indistinguishable from counts and
+   hashes. The same scan was swept into finance-py.
+4. **Advice: structure first (N17-7).** The control is structural: every document version, fills and SOWs
+   included, becomes current only after counsel's sign-off on its exact hash (the SOW exception is removed:
+   `documents.json` `sow.counsel_required: true`); document text leaves Legal only through the blob store by hash;
+   answers to non-Andre callers carry ids, enums, dates, amounts, hashes and Legal's own reason lines, never caller
+   free text (the sign-off `topic` is now an id; a test drives a marker phrase through the free-text inputs of the
+   non-Andre routes and checks no answer echoes it). The phrase guard stays as defense in depth, extended with
+   AP-15..AP-22 (Spanish, German/French/Portuguese, Chinese, conditional, recommendation, imperative, third-person,
+   assurance phrasings) and a normalizer that keeps letters of every script; the round-17 list goes from 30 missed
+   of 38 to 0 of 38, and the 1,000-sentence benign set still has 0 false positives. Pinned seed hashes:
+   `documents.json` `c4819ab8017e4d563a776b0e57964ff821b69f000ec5189581be858fb933f823`, `advice_patterns.json`
+   `cf43405ee79ac0779ac466605b31e7ea6e61fa9ba9a7af1ca3e7a440a1719be3`.
+5. **Memo -> Compliance proposal (N17-8).** Two steps: `POST /legal/v1/memos` files the memo (answers carry no
+   rows; a Compliance-owned question it answers is `awaiting_proposal`), then
+   `POST /legal/v1/memos/{memo_id}/compliance-proposals` (Andre) with rows whose `source_url` must equal
+   `urn:legal37:memos:<memo_id>`; evidence uses the same urn (compliance-py refused the old `legal37://` URL). Every
+   target must be cited by the memo (a `verified_rule` answer for supersede; `cites.obligation_ids` for amend /
+   reverify). `tests/contract_compliance_real.py` proves the path in one process against the REAL compliance-py
+   app: delivered (201, real proposal id) -> Andre approves at Compliance -> Legal's delivery job reads the row back
+   and only then marks CQ-11 verified.
+6. **Blob subject refs grow (N17-14).** A blob's `subject_refs` and retention `classes` are sets that grow with
+   every writer of the same bytes (within one operation and across operations; no cap that could drop a held
+   subject); `last_ref_at` restarts the retention clock; retention deletes only when every class is verified and
+   past its period and no active hold covers any of the refs.
+7. **Port answers (N17-3 sweep).** `src/answers.py`: strict pydantic checks of `Delivery`, `ProposalAnswer`,
+   `ComplianceRow` and `EnvelopeAnswer` in `Op.call`, the proposal delivery and the row confirmation. A malformed
+   answer is refused whole (`adapter_answer_refused`) and the fail-closed fallback is used -- a malformed
+   `create_proposal` answer used to be recorded as `delivered` with a non-string id.

@@ -20,7 +20,7 @@ from typing import Annotated, Any, Literal, Optional
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer
 
 import money as M
-from textguard import has_control_chars, iter_strings
+from textguard import has_control_chars, ip_in, iter_strings
 
 ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 SHA_RE = re.compile(r"[0-9a-f]{64}")
@@ -73,9 +73,17 @@ def _iban_ok(s: str) -> bool:
 _ACCOUNT = re.compile(r"(?<![0-9A-Za-z.])[0-9](?:[ -]?[0-9]){9,16}(?![0-9A-Za-z])")
 
 
+# AEGIS N17-10: Finance's OWN generated ids (``service.rid``: fin-<prefix>-<26 Crockford base32>; ``ledger.derived_id``:
+# fin-<prefix>-<40 hex>) are never refused as look-alikes -- a Crockford id can happen to pass the IBAN mod-97 or
+# Luhn check. Only a value that IS such an id in full is exempt; the same characters inside any other value are not.
+OWN_ID_RE = re.compile(r"fin-[a-z][a-z0-9]{0,7}-(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{40})")
+
+
 def sensitive_value(s: str) -> Optional[str]:
-    if SHA_RE.fullmatch(s) or M.WIRE_PATTERN.fullmatch(s):
+    if SHA_RE.fullmatch(s) or M.WIRE_PATTERN.fullmatch(s) or OWN_ID_RE.fullmatch(s):
         return None
+    if ip_in(s):                                            # AEGIS N17-6 (swept into Finance)
+        return "ip_address_shape"
     if _ACCOUNT.search(s):
         return "bank_account_or_phone_number_shape"
     if _SSN.search(s):
@@ -457,8 +465,18 @@ class ApplyReceipt(Strict):
 class TopUp(Strict):
     request_id: Id
     amount: PositiveMoney
-    reason_code: Literal["clawback_after_release", "over_budget", "dispute_loss", "other"] = "other"
+    reason_code: Literal["clawback_after_release", "over_budget", "dispute_loss", "deposit_return_shortfall",
+                         "other"] = "other"
     notes: Optional[Note] = None
+    shortfall_id: Optional[Id] = None
+
+
+class DepositReturn(Strict):
+    """A matched client deposit returned by the bank (ACH return), AEGIS N17-9. No amount: the whole receipt."""
+    request_id: Id
+    return_ref_sha256: Sha
+    return_code: Annotated[str, Field(pattern=r"^R[0-9]{2}$")]
+    value_date: date
 
 
 class CorrectionLine(Strict):

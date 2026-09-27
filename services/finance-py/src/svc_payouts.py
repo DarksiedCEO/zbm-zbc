@@ -40,7 +40,7 @@ from intelligences import i08_treasury as T
 from ledger import derived_id
 from ports import (BankBalance, Certification, ComplianceRuling, HoldsAnswer, JurisdictionAnswer, RailAccount,
                    RailBalance, RailLookup, RailSubmit, SanctionsAnswer, TaxAgentAnswer)
-from service import Gather, Op, PostingRefused, Refused, rid, sha
+from service import RUNNABLE, Gather, Op, PostingRefused, Refused, rid, sha, unbatched
 
 OFAC_ROWS = ("US-OFAC-01", "US-OFAC-02", "US-OFAC-03")
 CERT_ROWS = ("HR-12", "HR-13")
@@ -49,6 +49,21 @@ RAIL_ROWS = ("US-STRIPE-KYC",)
 
 def _asdict(x):
     return dataclasses.asdict(x) if dataclasses.is_dataclass(x) else x
+
+
+def _gate_view(inputs: dict) -> dict:
+    """Hashable view of every gate input. ``ofac`` values are (role, subject, answer) triples; ``rows`` values are
+    lists of reason items (a Compliance row that is unavailable or not verified) -- before fix 18 a non-empty
+    ``rows`` list was unpacked as a triple and the whole run answered 500 instead of excluding the payee."""
+    out: dict = {}
+    for k, v in inputs.items():
+        if not isinstance(v, dict):
+            out[k] = _asdict(v)
+        elif k == "ofac":
+            out[k] = {kk: [[a, b, _asdict(c)] for a, b, c in vv] for kk, vv in v.items()}
+        else:
+            out[k] = {kk: (list(vv) if isinstance(vv, list) else _asdict(vv)) for kk, vv in v.items()}
+    return out
 
 
 class PayoutsMixin:
@@ -150,6 +165,9 @@ class PayoutsMixin:
         if brks:
             out.append(R.item("RECON_BREAK", f"{len(brks)} reconciliation break(s) open (FC-02 red)",
                               [b["break_id"] for b in brks]))
+        for sf in self._open_shortfalls():          # AEGIS N17-9: a returned deposit creators were paid against
+            out.append(R.item("DEPOSIT_SHORTFALL", f"deposit shortfall {sf['shortfall_id']} ({sf['amount']}) open: "
+                                                   "Andre tops up restricted cash first", [sf["shortfall_id"]]))
         pos = T.position(self.balances)
         if pos["gap"] < 0:
             out.append(R.item("TREASURY_BREACH", f"journal: restricted pool {M.sfmt(pos['pool'])} below creator/client "
@@ -284,11 +302,26 @@ class PayoutsMixin:
     def _amounts(self, payee: dict, payables: list[dict], withhold_unmatched: bool, op: Optional[Op] = None) -> dict:
         gross = M.total(p["current_amount"] for p in payables)
         open_rcv = max(M.ZERO, self.bal("1200", f"payee:{payee['payee_id']}", op=op))
-        netted = I5.netted(open_rcv, gross)
         flagged = bool(((self.db["tax"].get(payee["payee_id"]) or {}).get("backup_withholding") or {}).get("flag"))
-        withheld = M.pct(M.q(gross - netted), I6.BACKUP_PCT) if (flagged or withhold_unmatched) else M.ZERO
+        withhold = flagged or withhold_unmatched
+        basis = self.withholding_basis()
+        if withhold and basis == "gross":
+            # AEGIS N17-12 / spec §C.6: 24% of the GROSS payment; netting takes only what is left after withholding
+            withheld = M.pct(gross, I6.BACKUP_PCT)
+            netted = I5.netted(open_rcv, M.q(gross - withheld))
+        else:
+            netted = I5.netted(open_rcv, gross)
+            withheld = M.pct(M.q(gross - netted), I6.BACKUP_PCT) if withhold else M.ZERO
         net = M.q(gross - netted - withheld)
         return {"gross": gross, "netted": netted, "withheld": withheld, "net": net}
+
+    def withholding_basis(self) -> str:
+        """``FIN_WITHHOLDING_BASIS`` (default ``gross``, spec §C.6). ``gross_minus_netting`` takes effect only while
+        the CPA row FIN-CQ-16 is verified; until then the spec's gross basis applies (never less withholding than
+        the spec without a memo)."""
+        if self.cfg.withholding_basis == "gross_minus_netting" and self.counsel_verified("FIN-CQ-16"):
+            return "gross_minus_netting"
+        return "gross"
 
     def _rolling_30d(self, pid: str) -> Decimal:
         since = self._now() - timedelta(days=30)
@@ -326,7 +359,7 @@ class PayoutsMixin:
                 for pid in it["payable_ids"]:
                     p = op.get("payables", pid)
                     if p and p["status"] == "batched":
-                        op.put("payables", pid, {**p, "status": "accrued", "batch_item_id": None})
+                        op.put("payables", pid, unbatched(p))
         op.put("batches", b["batch_id"], {**op.get("batches", b["batch_id"]), "status": status, "ended_at": iso(self._now())})
         op.record(derived_id("bend", b["batch_id"], status), event, I4.ACTOR, b["batch_id"],
                   {"batch_id": b["batch_id"], "status": status}, f"Payout batch {status}")
@@ -344,7 +377,7 @@ class PayoutsMixin:
         spoken_for: list[dict] = []
         for p in self.db["payables"].values():
             payee = self.db["payees"].get(p["payee_id"])
-            if p["status"] != "accrued" or not payee or payee.get("rail") != rail:
+            if p["status"] not in RUNNABLE or not payee or payee.get("rail") != rail:
                 continue
             if p["payable_id"] in live:          # FIN-09: a payable sits in at most one live item
                 spoken_for.append({"payee_id": p["payee_id"], "payable_ids": [p["payable_id"]], "reasons": [
@@ -373,7 +406,7 @@ class PayoutsMixin:
                 payee = op.get("payees", pid)
                 # re-read under the lock: a payable changed since the gather (a clawback, another run) is never used stale
                 payables = sorted((self.db["payables"][p["payable_id"]] for p in cands[pid]
-                                   if self.db["payables"][p["payable_id"]]["status"] == "accrued"
+                                   if self.db["payables"][p["payable_id"]]["status"] in RUNNABLE
                                    and p["payable_id"] not in live_now), key=lambda p: p["payable_id"])
                 good, per = [], []
                 for p in payables:
@@ -421,9 +454,7 @@ class PayoutsMixin:
                               "override_exception_id": ov["exception_id"] if ov_ok else None,
                               "payable_amounts": {p["payable_id"]: p["current_amount"] for p in good}})
                 batch_net = M.q(batch_net + amts["net"])
-            gate_sha = sha({k: ({kk: _asdict(vv) if not isinstance(vv, list) else [[a, b, _asdict(c)] for a, b, c in vv]
-                                 for kk, vv in v.items()} if isinstance(v, dict) else _asdict(v))
-                            for k, v in inputs.items()})
+            gate_sha = sha(_gate_view(inputs))
             if run_reasons or not items:
                 reasons = run_reasons or [R.item("BELOW_MINIMUM", "no payee passed every gate this run", rule="FIN-08")]
                 op.record(derived_id("rempty", principal, request_id), "run_empty", I4.ACTOR, f"run:{rail}:{period}",
@@ -452,7 +483,8 @@ class PayoutsMixin:
                 op.put("items", it["item_id"], it)
                 for pid in it["payable_ids"]:
                     p = op.get("payables", pid)
-                    op.put("payables", pid, {**p, "status": "batched", "batch_item_id": it["item_id"]})
+                    op.put("payables", pid, {**p, "status": "batched", "batch_item_id": it["item_id"],
+                                             "resume_status": p["status"]})
                 if it["override_exception_id"]:
                     ex = op.get("exceptions", it["override_exception_id"])
                     op.put("exceptions", ex["exception_id"], {**ex, "consumed_by": it["item_id"]})
@@ -490,7 +522,38 @@ class PayoutsMixin:
 
     # ================================================================== checker (Andre)
 
-    def decide_batch(self, request_id: str, batch_id: str, body: dict, second_ok: bool) -> dict:
+    def _needs_second(self, b: dict) -> bool:
+        return bool(self.cfg.second_approver_token) and M.D(b["totals"]["net"]) >= self.cfg.dual_human_threshold
+
+    def _approve_batch(self, op: Op, b: dict, request_id: str, second: Optional[dict]) -> dict:
+        """Both approvals present (or only Andre's needed): the batch is approved, bound to its content hash."""
+        now = self._now()
+        batch_id = b["batch_id"]
+        did = rid("dec", batch_id, request_id)
+        andre_ap = b.get("andre_approval") or {}
+        approval = {"decision_id": did, "approved_by": "andre", "approved_at": andre_ap.get("at") or iso(now),
+                    "content_sha256": b["content_sha256"],
+                    "second_approver": "second_approver" if second else None,
+                    "second_approval_id": second["approval_id"] if second else None,
+                    "note_sha256": andre_ap.get("note_sha256")}
+        nb = {**b, "status": "approved", "approval": approval,
+              "release_not_before": iso(now + timedelta(hours=self.cfg.release_delay_h)),
+              "approval_expires_at": iso(now + timedelta(hours=self.cfg.approval_ttl_h))}
+        op.put("batches", batch_id, nb)
+        for iid in b["item_ids"]:
+            it = op.get("items", iid)
+            op.put("items", iid, {**it, "status": "approved"})
+        op.record(derived_id("bapp", batch_id, b["content_sha256"]), "batch_approved_by_andre", "andre", batch_id,
+                  {"batch_id": batch_id, "content_sha256": b["content_sha256"], "decision_id": did,
+                   "net": b["totals"]["net"], "second_approver": approval["second_approver"],
+                   "second_approval_id": approval["second_approval_id"]},
+                  f"Andre approved payout batch ({b['totals']['count']} items, net {b['totals']['net']})")
+        return nb
+
+    def decide_batch(self, request_id: str, batch_id: str, body: dict) -> dict:
+        """Andre's decision. Above the dual-human threshold the second approver approves on a SEPARATE request with
+        a separate identity (``second_approval``, AEGIS N17-13); whichever of the two comes second completes the
+        approval. Andre's approval alone is recorded as ``andre_approval`` and the batch stays ``proposed``."""
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"batch/{batch_id}", body)
             if ent:
@@ -509,7 +572,6 @@ class PayoutsMixin:
             if body["content_sha256"] != b["content_sha256"]:
                 raise Conflict("batch content changed since you read it (content_sha256 mismatch); nothing approved")
             self._injection(op, {"note": body.get("note")})
-            now = self._now()
             if body["decision"] == "reject":
                 self._end_batch(op, b, "rejected", "batch_rejected")
                 resp = {"batch_id": batch_id, "status": "rejected", "ledger_event_ids": op.events,
@@ -517,28 +579,79 @@ class PayoutsMixin:
                 self._idem_add(op, key, h, resp)
                 self._commit(op)
                 return resp
-            needs_second = bool(self.cfg.second_approver_token) and M.D(b["totals"]["net"]) >= self.cfg.dual_human_threshold
-            if needs_second and not second_ok:
-                raise Refused("second approver required", [R.item("NOT_APPROVED", "this batch's net total needs the "
-                                                                  "second human approver too (FIN_SECOND_APPROVER_TOKEN)")])
-            did = rid("dec", batch_id, request_id)
-            approval = {"decision_id": did, "approved_by": "andre", "approved_at": iso(now),
-                        "content_sha256": b["content_sha256"], "second_approver": "second_approver" if needs_second else None,
+            if b.get("andre_approval"):
+                raise Conflict("Andre already approved this batch; it waits for the second approver")
+            andre_ap = {"at": iso(self._now()), "content_sha256": b["content_sha256"], "request_id": request_id,
                         "note_sha256": sha(body.get("note")) if body.get("note") else None}
-            nb = {**b, "status": "approved", "approval": approval,
-                  "release_not_before": iso(now + timedelta(hours=self.cfg.release_delay_h)),
-                  "approval_expires_at": iso(now + timedelta(hours=self.cfg.approval_ttl_h))}
-            op.put("batches", batch_id, nb)
-            for iid in b["item_ids"]:
-                it = op.get("items", iid)
-                op.put("items", iid, {**it, "status": "approved"})
-            op.record(derived_id("bapp", batch_id, b["content_sha256"]), "batch_approved_by_andre", "andre", batch_id,
-                      {"batch_id": batch_id, "content_sha256": b["content_sha256"], "decision_id": did,
-                       "net": b["totals"]["net"], "second_approver": approval["second_approver"]},
-                      f"Andre approved payout batch ({b['totals']['count']} items, net {b['totals']['net']})")
-            resp = {"batch_id": batch_id, "status": "approved", "approval": approval,
+            b = {**b, "andre_approval": andre_ap}
+            second = b.get("second_approval")
+            if self._needs_second(b) and not (second and second.get("content_sha256") == b["content_sha256"]):
+                op.put("batches", batch_id, b)
+                op.record(derived_id("bapa", batch_id, b["content_sha256"]), "batch_approval_pending_second", "andre",
+                          batch_id, {"batch_id": batch_id, "content_sha256": b["content_sha256"],
+                                     "net": b["totals"]["net"]},
+                          "Andre approved; the second approver must approve on its own request")
+                resp = {"batch_id": batch_id, "status": "awaiting_second_approver", "andre_approval": andre_ap,
+                        "ledger_event_ids": op.events, "request_id": request_id}
+                self._idem_add(op, key, h, resp)
+                self._commit(op)
+                return resp
+            nb = self._approve_batch(op, b, request_id, second if self._needs_second(b) else None)
+            resp = {"batch_id": batch_id, "status": "approved", "approval": nb["approval"],
                     "release_not_before": nb["release_not_before"], "approval_expires_at": nb["approval_expires_at"],
                     "ledger_event_ids": op.events, "request_id": request_id}
+            self._idem_add(op, key, h, resp)
+            self._commit(op)
+            return resp
+
+    def second_approve_batch(self, request_id: str, batch_id: str, body: dict) -> dict:
+        """The second human approver's own request (own token, own actor ``second_approver``), AEGIS N17-13."""
+        with self.lock:
+            key, h, ent = self._idem("second_approver", request_id, f"batch2/{batch_id}", body)
+            if ent:
+                return ent["response"]
+            self.require_rules()
+            b = self.db["batches"].get(batch_id)
+            if b is None:
+                raise NotFound("no such batch")
+            op = Op(self, f"bdec2|{request_id}", "second_approver", batch_id)
+            self._expire_stale(op)
+            b = op.get("batches", batch_id)
+            if b["status"] != "proposed":
+                if op.ops:
+                    self._commit(op)
+                raise Conflict(f"batch is {b['status']}, not proposed")
+            if not self._needs_second(b):
+                raise Conflict("this batch does not need a second approver (below FIN_DUAL_HUMAN_THRESHOLD)")
+            if body["content_sha256"] != b["content_sha256"]:
+                raise Conflict("batch content changed since you read it (content_sha256 mismatch); nothing approved")
+            if b.get("second_approval"):
+                raise Conflict("the second approver already approved this batch")
+            if body["decision"] == "reject":
+                self._end_batch(op, b, "rejected", "batch_rejected")
+                resp = {"batch_id": batch_id, "status": "rejected", "by": "second_approver",
+                        "ledger_event_ids": op.events, "request_id": request_id}
+                self._idem_add(op, key, h, resp)
+                self._commit(op)
+                return resp
+            second = {"approval_id": rid("dec2", batch_id, request_id), "by": "second_approver",
+                      "at": iso(self._now()), "content_sha256": b["content_sha256"], "request_id": request_id}
+            b = {**b, "second_approval": second}
+            op.record(derived_id("bap2", batch_id, b["content_sha256"]), "batch_second_approved", "second_approver",
+                      batch_id, {"batch_id": batch_id, "content_sha256": b["content_sha256"],
+                                 "approval_id": second["approval_id"]},
+                      "Second approver approved the payout batch (own request, own token)")
+            andre_ap = b.get("andre_approval")
+            if andre_ap and andre_ap.get("content_sha256") == b["content_sha256"]:
+                nb = self._approve_batch(op, b, andre_ap["request_id"], second)
+                resp = {"batch_id": batch_id, "status": "approved", "approval": nb["approval"],
+                        "release_not_before": nb["release_not_before"],
+                        "approval_expires_at": nb["approval_expires_at"], "ledger_event_ids": op.events,
+                        "request_id": request_id}
+            else:
+                op.put("batches", batch_id, b)
+                resp = {"batch_id": batch_id, "status": "awaiting_andre", "second_approval": second,
+                        "ledger_event_ids": op.events, "request_id": request_id}
             self._idem_add(op, key, h, resp)
             self._commit(op)
             return resp
@@ -574,6 +687,10 @@ class PayoutsMixin:
             if appr.get("content_sha256") != b["content_sha256"] or appr.get("approved_by") != "andre":
                 raise Refused("approval does not match", [R.item("NOT_APPROVED", "approval does not bind this batch's "
                                                                                  "content_sha256")])
+            if self._needs_second(b) and ((b.get("second_approval") or {}).get("content_sha256") != b["content_sha256"]
+                                          or not appr.get("second_approval_id")):
+                raise Refused("second approval missing", [R.item("NOT_APPROVED", "this batch needs the second "
+                                                                 "approver's own approval of its content hash")])
             if now < parse_iso(b["release_not_before"]):
                 raise Refused("too early", [R.item("RELEASE_TOO_EARLY", f"release not before {b['release_not_before']} "
                                                    f"({self.cfg.release_delay_h} h after approval)")])
@@ -636,7 +753,7 @@ class PayoutsMixin:
                     for pid in it["payable_ids"]:
                         p = op.get("payables", pid)
                         if p["status"] == "batched":
-                            op.put("payables", pid, {**p, "status": "accrued", "batch_item_id": None})
+                            op.put("payables", pid, unbatched(p))
                     op.record(derived_id("iexc", it["item_id"]), "item_excluded_at_release", I4.ACTOR, it["item_id"],
                               {"item_id": it["item_id"], "codes": R.codes(rs)}, "Item excluded at release")
                     results.append({"item_id": it["item_id"], "status": "excluded_at_release", "reasons": rs})
@@ -710,12 +827,18 @@ class PayoutsMixin:
                                   "first_submitted_at": iso(self._now()), "submitted_at": iso(self._now())})
             self._commit(op)
             ref = payee.get("rail_account_ref")
+        return self._record_outcome(iid, self._rail_submit(it, ref))
+
+    def _rail_submit(self, it: dict, ref: Optional[str]) -> RailSubmit:
+        """The rail submit, its answer strictly type-checked (AEGIS N17-3): an exception or a malformed answer is a
+        transport error (the idempotency key makes the retry safe), never an acceptance."""
         rail = self._rail(it["rail"])
         try:
-            ans = rail.submit(it["idempotency_key"], ref, it["net"], iid)
+            ans = rail.submit(it["idempotency_key"], ref, it["net"], it["item_id"])
         except Exception:  # noqa: BLE001 - an exception is a transport error: the key makes a retry safe
-            ans = RailSubmit("transport_error")
-        return self._record_outcome(iid, ans if isinstance(ans, RailSubmit) else RailSubmit("transport_error"))
+            return RailSubmit("transport_error")
+        return self._checked_answer(None, f"rail_{it['rail']}", "submit", (it["item_id"], it["idempotency_key"]), ans,
+                                    RailSubmit("transport_error"), actor=I4.ACTOR, subject=it["item_id"])
 
     def _record_outcome(self, iid: str, ans: RailSubmit) -> dict:
         with self.lock:
@@ -787,17 +910,15 @@ class PayoutsMixin:
                 op.put("items", iid, {**self.db["items"][iid], "attempts": n})
                 self._commit(op)
             if not lookup_mode:
-                try:
-                    ans = rail.submit(it["idempotency_key"], ref, it["net"], iid)
-                except Exception:  # noqa: BLE001
-                    ans = RailSubmit("transport_error")
-                out.append(self._record_outcome(iid, ans if isinstance(ans, RailSubmit) else RailSubmit("transport_error")))
+                out.append(self._record_outcome(iid, self._rail_submit(it, ref)))
                 continue
             try:
                 lk = rail.lookup(it["idempotency_key"], iid)
             except Exception:  # noqa: BLE001
                 lk = RailLookup(False)
-            lk = lk if isinstance(lk, RailLookup) else RailLookup(False)
+            else:
+                lk = self._checked_answer(None, f"rail_{it['rail']}", "lookup", (iid, it["idempotency_key"]), lk,
+                                          RailLookup(False), actor=I4.ACTOR, subject=iid)
             if lk.available and lk.found:
                 out.append(self._record_outcome(iid, RailSubmit("accepted", lk.rail_ref)))
             elif lk.available and not lk.found and it.get("resubmits", 0) == 0:
@@ -809,11 +930,7 @@ class PayoutsMixin:
                                "idempotency_key": it["idempotency_key"], "resubmit": True},
                               "Item not found at the rail after lookup: submitted exactly once more")
                     self._commit(op)
-                try:
-                    ans = rail.submit(it["idempotency_key"], ref, it["net"], iid)
-                except Exception:  # noqa: BLE001
-                    ans = RailSubmit("transport_error")
-                out.append(self._record_outcome(iid, ans if isinstance(ans, RailSubmit) else RailSubmit("transport_error")))
+                out.append(self._record_outcome(iid, self._rail_submit(it, ref)))
             else:
                 with self.lock:
                     bid = rid("brk", "rsu", iid)

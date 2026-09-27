@@ -26,7 +26,7 @@ from intelligences import i01_journal as J
 from intelligences import i06_tax as I6
 from ledger import derived_id
 from ports import RailAccount, TaxAgentAnswer
-from service import Gather, InvalidReasons, Op, PostingRefused, Refused, facts_sha256, rid, sha, sha_text
+from service import Gather, InvalidReasons, Op, PostingRefused, Refused, facts_sha256, rid, sha, sha_text, unbatched
 
 _REACH = json.loads(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "seed", "stripe_reach.json"),
                          "rb").read())
@@ -221,7 +221,7 @@ class PayeesMixin:
         ans = self._tax_answer(g, pid)
         with self.lock:
             unpaid = [p for p in self.db["payables"].values() if p["payee_id"] == pid and p["status"] in
-                      ("pending_checks", "accrued", "over_budget_hold", "batched")]
+                      ("pending_checks", "accrued", "returned", "over_budget_hold", "batched")]
             transit = [i for i in self.db["items"].values() if i["payee_id"] == pid and i["status"] in
                        ("submitting", "submitted")]
             claw = self.bal("1200", f"payee:{pid}") > 0
@@ -452,11 +452,13 @@ class PayeesMixin:
             self._post(op, "zbc", J.reversal_lines(orig), "correction", {"kind": "batch_item", "id": item["item_id"]},
                        f"rev|{eid}|{why}", reverses=eid, actor="intel_04_payout_run")
 
-    def _payables_back(self, op: Op, item: dict) -> None:
+    def _payables_back(self, op: Op, item: dict, returned: bool = False) -> None:
+        """Payables of a failed / rejected / returned item are owed again. A payable that was PAID and came back
+        (F4g) becomes ``returned`` -- runnable again, never ``accrued`` again (AEGIS N17-1)."""
         for pid in item["payable_ids"]:
             p = op.get("payables", pid)
             if p:
-                op.put("payables", pid, {**p, "status": "accrued", "batch_item_id": None})
+                op.put("payables", pid, {**unbatched(p), "status": "returned"} if returned else unbatched(p))
 
     def _rail_event(self, op: Op, rail_name: str, ev: dict) -> str:
         t = ev["type"]
@@ -507,7 +509,7 @@ class PayeesMixin:
                            actor="intel_04_payout_run")
                 self._reverse_item_entries(op, item, "returned")
                 op.put("items", item["item_id"], {**item, "status": "returned", "returned_at": iso(self._now())})
-                self._payables_back(op, item)
+                self._payables_back(op, item, returned=True)
                 if payee:
                     self._open_hold(op, payee, "returned", ev["event_id"])
                 bid = rid("brk", "return", item["item_id"])

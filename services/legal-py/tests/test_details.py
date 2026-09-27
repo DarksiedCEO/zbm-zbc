@@ -127,17 +127,20 @@ def test_envelope_completion_with_a_wired_provider_stores_the_certificate():
 
 def test_document_version_rules(he):
     he.upload("sow", "sow 1", entity="zbm")
+    # fix 18 (AEGIS N17-5): the number is Legal's. A caller-supplied version is refused (before: 1.0 again -> 409,
+    # 0.9 -> 409, and any caller could pick 9999.9999 and freeze the document)
     assert he.apost("/legal/v1/documents/sow/versions", {"request_id": rid(), "version": "1.0", "entity": "zbm",
-                                                         "text": "again"}).status_code == 409
-    assert he.apost("/legal/v1/documents/sow/versions", {"request_id": rid(), "version": "0.9", "entity": "zbm",
-                                                         "text": "older"}).status_code == 409
-    r = he.apost("/legal/v1/documents/sow/versions", {"request_id": rid(), "version": "2.0", "entity": "zbm",
+                                                         "text": "again"}).status_code == 422
+    assert he.upload("sow", "again", "1.1", entity="zbm")["version"] == "1.1"      # next minor, assigned
+    r = he.apost("/legal/v1/documents/sow/versions", {"request_id": rid(), "bump": "major", "entity": "zbm",
                                                       "text": "Hello {{name}}"})
     assert r.status_code == 422                                          # placeholder without a schema entry
-    assert he.apost("/legal/v1/documents/unknown_doc/versions", {"request_id": rid(), "version": "1.0",
+    assert he.apost("/legal/v1/documents/unknown_doc/versions", {"request_id": rid(),
                                                                  "entity": "zbm", "text": "x"}).status_code == 404
-    assert he.post("/legal/v1/documents/soi_zbc/versions", {"request_id": rid(), "version": "1.0", "entity": "zbc",
+    assert he.post("/legal/v1/documents/soi_zbc/versions", {"request_id": rid(), "entity": "zbc",
                                                             "variables": {}}, caller="scheduler").status_code == 404
+    assert he.post("/legal/v1/documents/sow/versions", {"request_id": rid(), "entity": "zbm", "text": "x"},
+                   caller="scheduler").status_code == 403                # only Andre uploads
     r = he.ok(he.get("/legal/v1/documents/nope_doc/current"))
     assert r["available"] is False and "DOCUMENT_UNKNOWN" in r["reason"]
     assert he.client.get("/legal/v1/documents/sow/versions/1.0/text",
@@ -145,17 +148,19 @@ def test_document_version_rules(he):
 
 
 def test_template_fill_needs_an_approved_template_and_typed_variables(he):
-    r = he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "version": "1.1", "entity": "zbm",
+    r = he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "entity": "zbm", "party_ref": "client:a",
                 "variables": {"client_name": "A", "end_date": "2027-01-01"}}, caller="scheduler")
     assert r.status_code == 409 and r.json()["detail"] == "NO_APPROVED_TEMPLATE"
     he.approve_doc("client_msa", MSA_TEXT, "1.0", "zbm", [("MSA-RENEW-01", "standard")], MSA_VARS)
     for bad in ({"client_name": "A"}, {"client_name": "A", "end_date": "soon"},
                 {"client_name": "A", "end_date": "2027-01-01", "extra": "x"}, {"client_name": "A\nB", "end_date": "2027-01-01"}):
-        r = he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "version": "1.1", "entity": "zbm",
-                    "variables": bad}, caller="scheduler")
+        r = he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "entity": "zbm",
+                    "party_ref": "client:acme", "variables": bad}, caller="scheduler")
         assert r.status_code == 422, bad
-    ok = he.ok(he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "version": "1.1", "entity": "zbm",
-               "variables": {"client_name": "Acme Co", "end_date": "2027-01-01"}}, caller="scheduler"), 201)
+    r = he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "entity": "zbm",
+                "variables": {"client_name": "Acme Co", "end_date": "2027-01-01"}}, caller="scheduler")
+    assert r.status_code == 422                                          # fix 18: a fill names its party
+    ok = he.fill("client_msa", {"client_name": "Acme Co", "end_date": "2027-01-01"}, "client:acme", expect="1.1")
     assert ok["sha256"] == sha(MSA_TEXT.replace("{{client_name}}", "Acme Co").replace("{{end_date}}", "2027-01-01"))
     assert ok["review_label"] == "counsel_template:client_msa@1.0"
 
@@ -345,10 +350,9 @@ def test_engagement_renewal_keeps_the_counsel_ref_and_memos_follow_the_current_l
 def test_fills_keep_using_the_template_after_an_instance_is_approved_and_old_instances_stay_acceptable(he):
     from builders import executed_msa
     fill, acc = executed_msa(he)                                    # 1.0 template, 1.1 acme instance (approved)
-    b = he.ok(he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "version": "1.2", "entity": "zbm",
-              "variables": {"client_name": "Beta LLC", "end_date": "2027-12-31"}}, caller="scheduler"), 201)
+    b = he.fill("client_msa", {"client_name": "Beta LLC", "end_date": "2027-12-31"}, "client:beta", expect="1.2")
     assert b["review_label"] == "counsel_template:client_msa@1.0"
-    r = he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "version": "1.3", "entity": "zbm",
+    r = he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "entity": "zbm", "party_ref": "client:c",
                 "variables": {"client_name": "You must sign this today", "end_date": "2027-12-31"}}, caller="scheduler")
     assert r.status_code == 422 and r.json()["detail"] == "ADVICE_TEXT_BLOCKED"
     memo = he.memo(cites={"doc_versions": ["client_msa@1.2"]})
@@ -357,5 +361,10 @@ def test_fills_keep_using_the_template_after_an_instance_is_approved_and_old_ins
                     "memo_id": memo["memo_id"], "memo_sha256": memo["memo_sha256"]}))
     he.ok(he.apost("/legal/v1/documents/client_msa/versions/1.2/decision",
                    {"request_id": rid(), "decision": "approve", "version_sha256": b["sha256"]}))
-    a2 = he.clickwrap("client_msa", "1.1", fill["sha256"], party="client:acme2", caller="onboarding")
+    a2 = he.clickwrap("client_msa", "1.1", fill["sha256"], party="client:acme", caller="onboarding")
     assert a2["evidence_sufficient"] is True                        # 1.1 is still approved and in force
+    a3 = he.clickwrap("client_msa", "1.2", b["sha256"], party="client:beta", caller="onboarding")
+    assert a3["evidence_sufficient"] is True
+    # fix 18 (AEGIS N17-4): acme's instance is acme's; another client accepting it is refused (before: sufficient)
+    r = he.clickwrap("client_msa", "1.1", fill["sha256"], party="client:acme2", caller="onboarding", code=409)
+    assert r["detail"] == "INSTANCE_NOT_BOUND"

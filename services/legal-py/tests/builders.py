@@ -49,9 +49,8 @@ def executed_msa(x, client="acme", end_date="2027-09-30", with_ccpa=True, verify
     playbook(x)
     uses = [("MSA-RENEW-01", "standard"), ("MSA-PAY-01", "standard")] + ([("MSA-CCPA-01", "standard")] if with_ccpa else [])
     x.approve_doc("client_msa", MSA_TEXT, "1.0", "zbm", uses, MSA_VARS)
-    fill = x.ok(x.post("/legal/v1/documents/client_msa/versions",
-                       {"request_id": rid("fill"), "version": "1.1", "entity": "zbm",
-                        "variables": {"client_name": f"Client {client}", "end_date": end_date}}, caller="scheduler"), 201)
+    fill = x.fill("client_msa", {"client_name": f"Client {client}", "end_date": end_date}, f"client:{client}",
+                  expect="1.1")
     memo = x.memo(cites={"doc_versions": ["client_msa@1.1"]})
     x.ok(x.apost("/legal/v1/documents/client_msa/versions/1.1/counsel-signoff",
                  {"request_id": rid("so"), "counsel_ref": COUNSEL_REF, "signed_on": "2026-10-01",

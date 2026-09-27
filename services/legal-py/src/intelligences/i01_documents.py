@@ -80,6 +80,29 @@ def placeholders(text: str) -> set[str]:
     return set(PLACEHOLDER.findall(text))
 
 
+_ANY_FIELD = re.compile(r"\{\{[^{}]{0,80}\}\}")
+
+
+def has_unresolved(text: str) -> bool:
+    """Any ``{{...}}`` left in a text (well-formed placeholder or not): a template or a broken fill, never an
+    instance a party can accept (AEGIS N17-4)."""
+    return bool(_ANY_FIELD.search(text))
+
+
+def next_version(existing: list[str], bump: str = "minor") -> Optional[str]:
+    """The next version number of a document, assigned by Legal (AEGIS N17-5): 1.0 first; then the next minor
+    (``a.b`` -> ``a.(b+1)``, rolling to ``(a+1).0`` after .9999) or, for Andre's ``bump: major``, ``(a+1).0``.
+    None when the number space is exhausted."""
+    if not existing:
+        return "1.0"
+    a, b = max(vkey(v) for v in existing)
+    if bump == "major" or b >= 9999:
+        a, b = a + 1, 0
+    else:
+        b += 1
+    return None if a > 9999 else f"{a}.{b}"
+
+
 def check_variables(schema: dict, variables) -> dict:
     """Type/bounds check of supplied variables (all declared variables required, no others). Returns the values
     as strings for rendering. Raises ValueError."""

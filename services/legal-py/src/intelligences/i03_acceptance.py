@@ -47,8 +47,10 @@ def forbidden_keys(obj: Any, path: str = "", depth: int = 0) -> list[str]:
     return out
 
 
-def clickwrap_sufficient(record: dict, cq19_verified: bool, consent_required: bool) -> bool:
-    if not cq19_verified:
+def clickwrap_sufficient(record: dict, cq19_verified: bool, consent_required: bool, bound_instance: bool) -> bool:
+    """``bound_instance``: the accepted version is a filled instance bound to the accepting party, or a standard
+    form (AEGIS N17-4); a template or another party's instance is never sufficient."""
+    if not cq19_verified or bound_instance is not True:
         return False
     need = ("party_ref", "signer_identity_ref", "doc_id", "version", "doc_sha256", "presented_sha256", "accepted_at",
             "method", "presentation")

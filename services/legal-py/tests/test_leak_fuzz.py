@@ -26,15 +26,16 @@ def test_no_text_in_ledger_log_audit_or_errors():
     # document text, template fill variables (a client name), counsel question and proposed edit
     tpl = MSA_TEXT + " " + _c("doctext")
     x.approve_doc("client_msa", tpl, "1.0", "zbm", [("MSA-RENEW-01", "standard")], MSA_VARS)
-    x.ok(x.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "version": "1.1", "entity": "zbm",
-                "variables": {"client_name": _c("clientname"), "end_date": "2027-01-01"}}, caller="scheduler"), 201)
+    x.fill("client_msa", {"client_name": _c("clientname"), "end_date": "2027-01-01"}, "client:acme", expect="1.1")
     x.ok(x.apost("/legal/v1/documents/client_msa/versions/1.1/counsel-review",
                  {"request_id": rid(), "question_text": _c("question"), "proposed_edit_text": _c("edit"),
                   "facts": {"k": _c("facts")}}))
     # memo content, answers excerpt (goes to Compliance only), playbook clause texts
-    x.memo(content=_c("memobody").encode(), cites={"cq_ids": ["CQ-22"]},
-           answers=[{"cq_id": "CQ-22", "resolution": "verified_rule", "proposed_row": {"id": "CQ-22-M"},
-                     "quoted_excerpt": _c("excerpt")}])
+    mm = x.memo(content=_c("memobody").encode(), cites={"cq_ids": ["CQ-22"]},
+                answers=[{"cq_id": "CQ-22", "resolution": "verified_rule", "quoted_excerpt": _c("excerpt")}])
+    x.memo_proposals(mm["memo_id"], [{"kind": "supersede", "target_id": "CQ-22", "quoted_excerpt": _c("excerpt"),
+                                      "proposed_row": {"id": "CQ-22-M",
+                                                       "source_url": f"urn:legal37:memos:{mm['memo_id']}"}}])
     from builders import MSA_CLAUSES, clause
     cl = [dict(c) for c in MSA_CLAUSES] + [clause("MSA-LEAK-01", _c("clausetext"), _c("fallback"))]
     playbook(x, clauses=cl)
@@ -50,7 +51,7 @@ def test_no_text_in_ledger_log_audit_or_errors():
                                                 "kind": _c("badkind")}, caller="hub"))
     errors.append(x.post("/legal/v1/requests", {"request_id": rid(), "channel": "email",
                                                 "requester_ref": _c("requester"), "kind": "question"}, caller="hub"))
-    errors.append(x.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "version": "1.2",
+    errors.append(x.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "party_ref": "client:b",
                          "entity": "zbm", "variables": {"client_name": "you must " + _c("advice"),
                                                         "end_date": "2027-01-01"}}, caller="scheduler"))
     errors.append(x.apost("/legal/v1/memos", {"request_id": rid(), "counsel_ref": COUNSEL_REF, "memo_date": "2026-10-01",

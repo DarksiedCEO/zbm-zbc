@@ -27,6 +27,7 @@ from decimal import Decimal
 from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
+import answers as A
 import chart as C
 import money as M
 import reasons as R
@@ -52,7 +53,7 @@ _SUBJECT_BAD = __import__("re").compile(r"[^A-Za-z0-9._:-]")
 COLLECTIONS = ("rc_proposals", "rate_cards", "profiles", "client_profiles", "payees", "callbacks", "tax", "handoffs",
                "payables", "batches", "items", "exceptions", "recon_runs", "breaks", "invoices", "receipts", "disputes",
                "refunds", "treasury_ops", "controls", "close", "locks", "tax_readiness", "job_runs", "rail_events",
-               "integrity_checks", "clawbacks", "offboarding")
+               "integrity_checks", "clawbacks", "offboarding", "shortfalls")
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -99,6 +100,56 @@ class InvalidReasons(FinError):
         super().__init__(message, reasons=reasons, reason_lines=R.lines(reasons), **body)
 
 
+class IntegrityRefused(FinError):
+    """409 — a write would rebind a payable to another submission/payee/campaign/clip or move it backwards
+    (AEGIS N17-1). A code path that tries it is refused whole; nothing is written."""
+
+    status_code = 409
+
+
+# AEGIS N17-1: a payable's identity is its certification AND the bindings fixed at creation.
+PAYABLE_BINDINGS = ("payable_id", "certification_id", "submission_id", "payee_id", "campaign_id", "posting_time")
+# "returned" = paid, then sent back by the rail (F4g): owed again, runnable again, but never "accrued" again.
+RUNNABLE = ("accrued", "returned")
+PAYABLE_TRANSITIONS = {
+    None: {"accrued", "over_budget_hold", "pending_checks"},
+    "pending_checks": {"pending_checks", "accrued", "over_budget_hold"},
+    "over_budget_hold": {"over_budget_hold", "accrued"},
+    "accrued": {"accrued", "batched"},
+    "returned": {"returned", "batched"},
+    "batched": {"batched", "accrued", "returned", "released", "netted"},
+    "released": {"released", "settled", "accrued", "returned"},
+    "settled": {"settled", "returned"},
+    "netted": {"netted"},
+}
+
+
+def unbatched(p: dict) -> dict:
+    """A payable taken out of a batch goes back to the status it was batched from (``accrued`` or ``returned``)."""
+    return {**p, "status": p.get("resume_status") or "accrued", "batch_item_id": None}
+
+
+def payable_change_problem(old: Optional[dict], new: dict, key: str) -> Optional[str]:
+    """Why writing ``new`` over ``old`` would break a payable's identity or its one-way status (None = fine)."""
+    if not isinstance(new, dict) or new.get("payable_id") != key:
+        return "payable record does not carry its own id"
+    for f in ("certification_id", "submission_id", "payee_id", "campaign_id"):
+        if not isinstance(new.get(f), str) or not ID_RE.fullmatch(new[f]):
+            return f"payable {f} is not an id"
+    status = new.get("status")
+    if old is None:
+        return None if status in PAYABLE_TRANSITIONS[None] else f"a new payable cannot start as {status}"
+    changed = [f for f in PAYABLE_BINDINGS if old.get(f) != new.get(f)]
+    if changed:
+        return f"payable {key} would be rebound ({', '.join(changed)}): refused, never rewritten"
+    if status not in PAYABLE_TRANSITIONS.get(old.get("status"), set()):
+        return f"payable {key} cannot move from {old.get('status')} to {status}"
+    if old.get("status") != "over_budget_hold" and (old.get("amount"), old.get("revenue_amount")) != \
+            (new.get("amount"), new.get("revenue_amount")):
+        return f"payable {key}: the accrued amount is fixed at accrual (adjustments go through clawbacks)"
+    return None
+
+
 class PostingRefused(Exception):
     def __init__(self, status: int, reasons: list[dict]):
         super().__init__(R.lines(reasons)[0] if reasons else "refused")
@@ -130,6 +181,8 @@ class Gather:
             ans = fn()
         except Exception:  # noqa: BLE001 - a port that raises is unavailable, never a pass; its text is dropped
             ans = fallback
+        else:
+            ans = self.svc._checked_answer(self, port, action, args, ans, fallback)   # AEGIS N17-3
         self.memo[k] = ans
         return ans
 
@@ -152,6 +205,10 @@ class Op:
 
     def put(self, coll: str, key: str, rec: dict) -> dict:
         assert coll in COLLECTIONS, coll
+        if coll == "payables":
+            problem = payable_change_problem(self.get(coll, key), rec, key)
+            if problem:                      # AEGIS N17-1: a payable is never rebound or moved backwards
+                raise IntegrityRefused(problem)
         self.ops.append(("put", {"coll": coll, "id": key, "rec": rec}))
         self.staged.setdefault(coll, {})[key] = rec
         return rec
@@ -196,7 +253,9 @@ class FinanceService:
         self.balances: dict = {}
         self.pay_by_sub: dict[str, str] = {}
         self.pay_by_cert: dict[str, str] = {}
-        self.idem: "OrderedDict[tuple[str, str], dict]" = OrderedDict()
+        self.integrity_findings: list[str] = []
+        self.findings: dict[str, dict] = {}
+        self.idem:"OrderedDict[tuple[str, str], dict]" = OrderedDict()
         self._ledger_conflict = False
         self.instance_id = secrets.token_hex(8)
         self.reconcile_mode = settings.reconcile_mode
@@ -286,16 +345,30 @@ class FinanceService:
 
     def _apply(self, kind: str, r: dict) -> None:
         if kind == "put":
-            self.db[r["coll"]][r["id"]] = r["rec"]
             if r["coll"] == "payables":
-                self.pay_by_sub[r["rec"]["submission_id"]] = r["id"]
-                self.pay_by_cert[r["rec"]["certification_id"]] = r["id"]
+                # replay is total: a record that would rebind a payable (a log written before the N17-1 fix) is
+                # applied as written but becomes an integrity finding (FC-04 red), never a crash
+                problem = payable_change_problem(self.db["payables"].get(r["id"]), r["rec"], r["id"])
+                if problem:
+                    self.integrity_findings.append(problem[:200])
+                for idx, f in ((self.pay_by_sub, "submission_id"), (self.pay_by_cert, "certification_id")):
+                    v = r["rec"].get(f) if isinstance(r["rec"], dict) else None
+                    if not isinstance(v, str):
+                        continue
+                    prev = idx.get(v)
+                    if prev is not None and prev != r["id"]:
+                        self.integrity_findings.append(f"{f} {v[:60]} is bound to two payables")
+                        continue
+                    idx[v] = r["id"]
+            self.db[r["coll"]][r["id"]] = r["rec"]
         elif kind == "journal":
             self.entries.append(r)
             self.entries_by_id[r["entry_id"]] = r
             self.entry_keys[(r["entity"], r["idempotency_key"])] = r["entry_id"]
             self.heads[r["entity"]] = r["entry_sha256"]
             J.apply_balances(self.balances, r)
+        elif kind == "integrity_finding":
+            self.findings[r["finding_id"]] = r
         elif kind == "idem":
             key = (r["principal"], r["request_id"])
             self.idem[key] = {"h": r["h"], "at": parse_iso(r["at"]), "response": r["response"]}
@@ -313,6 +386,31 @@ class FinanceService:
                 self.versions.append(RU.Version(v["version"], v["created_at"], v["approved_by"], tuple(v["proposal_ids"]),
                                                 v["rows_sha256"], v["prev_version_sha256"], tuple(v["rows"])))
         # lease, reconcile, founder_refused, injection, audit: evidence only
+
+    # --- adapter answers (AEGIS N17-3) ---------------------------------------------------------------------------------
+
+    def _checked_answer(self, g: Optional["Gather"], port: str, action: str, args: tuple, ans: Any, fallback: Any,
+                        actor: Optional[str] = None, subject: Optional[str] = None) -> Any:
+        """Strict type check of a port answer BEFORE anything derived from it is staged or anchored. A malformed
+        answer is refused whole (the fail-closed fallback is used) and the refusal is recorded on the ledger."""
+        try:
+            if fallback is None or isinstance(fallback, bool):
+                return A.check_primitive(action, ans)
+            return A.check(ans, fallback, self.cfg.max_certified_views)
+        except A.Malformed as exc:
+            op_id = g.op_id if g is not None else f"direct|{port}|{action}"
+            eid = derived_id("xbad", op_id, port, action, list(args))
+            try:
+                self._record(eid, "adapter_answer_refused", actor or (g.actor if g else EVIDENCE),
+                             subject or (g.subject if g else port),
+                             {"port": port, "action": action, "args_sha256": sha(list(args)),
+                              "problem": A.kind_text(exc.kind)},
+                             f"Malformed answer from {port} ({action}) refused; the fail-closed answer is used")
+                if g is not None and eid not in g.events:
+                    g.events.append(eid)
+            except Unavailable:
+                pass                        # the fallback is used either way; the operation's own record follows
+            return fallback
 
     # --- idempotency (15 min window; different body -> 409; stored answer persisted with the operation) --------------
 
@@ -359,7 +457,7 @@ class FinanceService:
 
     def _post(self, op: Op, entity: str, lines: list[dict], memo: str, source: dict, key: str,
               approval_ref: Optional[str] = None, reverses: Optional[str] = None,
-              effective_date: Optional[date] = None, actor: str = J.ACTOR) -> dict:
+              effective_date: Optional[date] = None, actor: str = J.ACTOR, fact: bool = False) -> dict:
         """Validate and stage one journal entry (idempotent per (entity, key)). Raises PostingRefused."""
         existing = self._find_entry(op, entity, key)
         if existing is not None:
@@ -376,7 +474,7 @@ class FinanceService:
         problems = J.validate(entry, self._locked_periods(op), by_id)
         if problems:
             raise PostingRefused(422, problems)
-        ok, before, after = T.posting_allowed(self._staged_balances(op), entry)
+        ok, before, after = T.posting_allowed(self._staged_balances(op), entry, fact)
         if not ok:
             raise PostingRefused(409, [R.item("TREASURY_BREACH", f"posting {memo} would leave the restricted pool "
                                                                  f"{M.sfmt(after['gap'])} short of creator/client "
@@ -387,7 +485,7 @@ class FinanceService:
                    "entry_sha256": entry["entry_sha256"], "lines": len(entry["lines"]),
                    "source_kind": source.get("kind"), "source_id": source.get("id")},
                   f"Journal {entity} {memo}: {M.fmt(d_tot)} ({len(entry['lines'])} lines)")
-        if entity == "zbc" and after["gap"] < 0 and memo in T.FACT_FLOWS:
+        if entity == "zbc" and after["gap"] < 0 and (memo in T.FACT_FLOWS or fact):
             op.record(derived_id("tb", entry_id), "treasury_breach", T.ACTOR, entry_id,
                       {"entry_id": entry_id, "gap": M.sfmt(after["gap"]), "flow": memo},
                       f"Treasury invariant broken by {memo}: gap {M.sfmt(after['gap'])} (FC-03 red)")
@@ -443,6 +541,8 @@ class FinanceService:
             jp = J.verify_chain(self.entries)
             if jp:
                 problems.append(jp)
+            problems += self.integrity_findings[:50]
+            problems += self._payable_invariant_problems()[:50]
             try:
                 if not self.recorder.client.verify():
                     problems.append("GET /ledger/verify is not valid")
@@ -450,7 +550,8 @@ class FinanceService:
                 problems.append("GET /ledger/verify could not be read")
             out = {"status": "red" if problems else "green", "problems": problems, "log_lines": len(self.log),
                    "journal_entries": len(self.entries), "rules_version": self.rules_version,
-                   "checked_at": iso(self._now())}
+                   "checked_at": iso(self._now()),
+                   "findings": sorted(self.findings.values(), key=lambda f: (f["at"], f["finding_id"]))[-50:]}
             if record and not self.reconcile_mode:
                 op = Op(self, f"integrity|{iso(self._now())}|{len(self.log)}", EVIDENCE, "integrity")
                 cid = rid("int", op.op_id)
@@ -462,6 +563,50 @@ class FinanceService:
                                                  "problems": [p[:200] for p in problems]})
                 self._commit(op)
             return out
+
+    def _payable_invariant_problems(self) -> list[str]:
+        """C-11-style per-payable invariant (AEGIS N17-1): every payable is bound to exactly one certification and
+        one submission; the accrual entry it cites was posted FOR that certification, to that payee's and that
+        campaign's sub-ledgers, for exactly its accrued amounts; and no creator/client liability sub-ledger carries
+        a debit balance (a liability moved to another sub-ledger nets to zero in a total and shows only here)."""
+        out: list[str] = []
+        certs: dict[str, str] = {}
+        subs: dict[str, str] = {}
+        for pid, p in sorted(self.db["payables"].items()):
+            for idx, f in ((certs, "certification_id"), (subs, "submission_id")):
+                v = p.get(f)
+                if v in idx and idx[v] != pid:
+                    out.append(f"payables {idx[v]} and {pid} share {f}")
+                idx[v] = pid
+            if p.get("status") in ("pending_checks", "over_budget_hold"):
+                continue
+            eids = p.get("entry_ids") or []
+            amt, rev = M.D(p["amount"]), M.D(p["revenue_amount"])
+            if not eids:
+                if amt > 0 or rev > 0:
+                    out.append(f"payable {pid} is {p.get('status')} without its accrual entry")
+                continue
+            e = self.entries_by_id.get(eids[0])
+            if e is None:
+                out.append(f"payable {pid} cites a journal entry that does not exist")
+                continue
+            if e.get("memo_code") != "F2" or (e.get("source") or {}).get("id") != p["certification_id"]:
+                out.append(f"payable {pid}: its accrual entry was posted for another certification")
+                continue
+            got = {(l["account"], l["subledger"]): (M.D(l["debit"]), M.D(l["credit"])) for l in e["lines"]}
+            want = {}
+            if amt > 0:
+                want[("2020", f"payee:{p['payee_id']}")] = (M.ZERO, amt)
+            if rev > 0:
+                want[("2010", f"campaign:{p['campaign_id']}")] = (rev, M.ZERO)
+            for k, v in want.items():
+                if got.get(k) != v:
+                    out.append(f"payable {pid}: accrual entry does not post {k[0]} {k[1][:60]} for its amount")
+        for acct in C.LIABILITIES:
+            for sub, v in J.subledgers(self.balances, "zbc", acct).items():
+                if v < 0:
+                    out.append(f"liability {acct} {sub[:60]} carries a debit balance {M.sfmt(v)}")
+        return out
 
     def _write_lease(self) -> None:
         with self.lock:

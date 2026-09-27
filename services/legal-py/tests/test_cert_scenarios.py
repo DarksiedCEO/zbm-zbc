@@ -22,7 +22,7 @@ def _music(x, platform="tiktok", present=True, source="commercial_library", trac
 # --- S1 ------------------------------------------------------------------------------------------------------------
 
 WRITES = [
-    ("/legal/v1/documents/sow/versions", "andre", {"request_id": "s1a", "version": "1.0", "entity": "zbm", "text": "x"}),
+    ("/legal/v1/documents/sow/versions", "andre", {"request_id": "s1a", "entity": "zbm", "text": "x"}),
     ("/legal/v1/acceptances", "hub", {"request_id": "s1b", "party_ref": "clipper:c1", "signer_identity_ref": "c1",
                                       "doc_id": "clipper_agreement", "version": "1.0", "doc_sha256": POST,
                                       "presented_sha256": POST, "method": "clickwrap_unticked_box",

@@ -136,9 +136,15 @@ def test_a2_second_approver_required_above_threshold():
     x.recon()
     b = x.run()["batch"]
     body = {"request_id": rid(), "content_sha256": b["content_sha256"], "decision": "approve"}
+    # fix 18 (AEGIS N17-13): Andre's approval alone does not approve; the second approver sends its OWN request
+    # (before: a 409, then both tokens on ONE request approved -- one request is one actor, not two)
     r = x.post(f"/fin/v1/payout-batches/{b['batch_id']}/decision", body, andre=ANDRE_TOKEN)
-    assert r.status_code == 409 and "second" in r.text
+    assert r.status_code == 200 and r.json()["status"] == "awaiting_second_approver"
+    assert x.batch(b["batch_id"])["status"] == "proposed"
     r = x.post(f"/fin/v1/payout-batches/{b['batch_id']}/decision", {**body, "request_id": rid()}, andre=ANDRE_TOKEN,
+               second="test-second-approver-token-fin-do-not-use")
+    assert r.status_code == 403
+    r = x.post(f"/fin/v1/payout-batches/{b['batch_id']}/second-approval", {**body, "request_id": rid()},
                second="test-second-approver-token-fin-do-not-use")
     assert r.status_code == 200 and r.json()["approval"]["second_approver"] == "second_approver"
 

@@ -49,6 +49,7 @@ from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
 from ports import Ports
 from service import JOBS, LegalService, Seeds
 from store import BlobStore, RecordLog
+from textguard import ip_fields, ip_in
 
 log = logging.getLogger("legal.api")
 
@@ -250,8 +251,8 @@ SHA = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _id(value: str, rx=SUB_ID) -> str:
-    if not isinstance(value, str) or not rx.fullmatch(value):
-        raise Invalid("id format")
+    if not isinstance(value, str) or not rx.fullmatch(value) or ip_in(value):
+        raise Invalid("id format (never an IP address)")
     return value
 
 
@@ -308,6 +309,11 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                 raise RequestValidationError([{"loc": ("body", b), "msg": "Legal stores no IP address, device, "
                                                "user-agent, DOB, government-id or payment data",
                                                "type": "forbidden_field"} for b in bad[:20]])
+            ips = ip_fields(payload)             # AEGIS N17-6: an IP address in ANY string of ANY write route
+            if ips:
+                raise RequestValidationError([{"loc": (p,), "msg": "Legal stores no IP address (IPv4, IPv6, embedded "
+                                               "in a ref, with a port or URL-encoded)", "type": "IP_ADDRESS_REFUSED"}
+                                              for p in ips])
             try:
                 return model.model_validate(payload)
             except ValidationError as exc:
@@ -491,6 +497,11 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
     @app.post("/legal/v1/memos", dependencies=auth, status_code=201)
     def memo(_: str = Depends(andre("memos")), req: m.MemoIntake = Depends(body(m.MemoIntake))) -> dict:
         return _echo(req.request_id, svc.file_memo(req.request_id, req.model_dump()))
+
+    @app.post("/legal/v1/memos/{memo_id}/compliance-proposals", dependencies=auth, status_code=201)
+    def memo_proposals(memo_id: str, _: str = Depends(andre("memos/compliance-proposals")),
+                       req: m.MemoProposals = Depends(body(m.MemoProposals))) -> dict:
+        return _echo(req.request_id, svc.memo_proposals(req.request_id, _id(memo_id, LG_ID), req.model_dump()))
 
     @app.get("/legal/v1/memos/{memo_id}", dependencies=auth)
     def memo_get(memo_id: str, _: str = Depends(reader)) -> dict:
