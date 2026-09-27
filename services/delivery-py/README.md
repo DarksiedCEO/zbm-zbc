@@ -29,7 +29,7 @@ Nothing is ever marked fixed on the agent's word; nothing the agent's process pr
 
 ```bash
 cd services/delivery-py
-uv sync --frozen --no-dev            # python 3.12; the harness comes from the pinned deer-flow git source (uv.lock)
+uv sync --frozen                     # python 3.12 or 3.13 (pytest is in the dev group); the harness comes from the pinned deer-flow git source (uv.lock)
 .venv/bin/python -m pytest -q        # 425 tests, no network, no Docker needed (the Docker live module skips with its reason)
 ruff check src tests devtools
 

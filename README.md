@@ -712,5 +712,5 @@ and self-modification are denied unconditionally. Architecture, pins, the 28 cho
   ledger-anchored local log line before it takes effect; an unverifiable test result is `unknown`, never green.
 
 ```bash
-cd services/delivery-py && uv sync --frozen --no-dev && .venv/bin/python -m pytest -q     # 425 tests
+cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 425 tests
 ```
