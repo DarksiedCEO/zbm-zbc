@@ -1,0 +1,20 @@
+baseline: STARTED
+symlinked SKILL.md under a copied root: GATE REFUSED: refusing to start: symlink under the root: custom/evil/SKILL.md
+skills root is itself a symlink (same content): STARTED
+tampered tool_policy_seed (git_remote -> allow_with_token): GATE REFUSED: refusing to start: seed/tool_policy_seed.json sha256 does not match the pin in config.py
+weakened yaml (allow_host_bash) against the pin: GATE REFUSED: refusing to start: deer-flow config sha256 does not match the pin (spec C.1.3; round 18 R11: the pin is mandatory in every mode, there is no
+same, with DLV_ALLOW_UNPINNED_CONFIG=1 + stated sha (non-prod): CONFIG REFUSED: DLV_ALLOW_UNPINNED_CONFIG: no such switch exists; nothing unlocks the unconditional denies or the config pin (
+unpinned yaml adding read_before_write/projects/task_continuity/summarization/skill_scan: CONFIG REFUSED: DLV_ALLOW_UNPINNED_CONFIG: no such switch exists; nothing unlocks the unconditional denies or the config pin (
+unpinned without DLV_NON_PRODUCTION: CONFIG REFUSED: DLV_ALLOW_UNPINNED_CONFIG: no such switch exists; nothing unlocks the unconditional denies or the config pin (
+env LANGSMITH_API_KEY=x: CONFIG REFUSED: environment contains names outside DLV_ENV_ALLOWLIST (spec C.1.7, ST-06): LANGSMITH_API_KEY (forbidden: a gate
+env DEER_FLOW_AUTH_DISABLED=1: CONFIG REFUSED: environment contains names outside DLV_ENV_ALLOWLIST (spec C.1.7, ST-06): DEER_FLOW_AUTH_DISABLED (forbidden: 
+env PYTHONPATH=/x: CONFIG REFUSED: environment contains names outside DLV_ENV_ALLOWLIST (spec C.1.7, ST-06): PYTHONPATH; start the service with a
+env DLV_TOTALLY_UNKNOWN=1: STARTED
+env LEDGER_SERVICE_WHATEVER=1: STARTED
+env DEER_FLOW_CONFIG_PATH=/x: CONFIG REFUSED: environment contains names outside DLV_ENV_ALLOWLIST (spec C.1.7, ST-06): DEER_FLOW_CONFIG_PATH; start the ser
+env DEER_FLOW_HOME=/x: CONFIG REFUSED: environment contains names outside DLV_ENV_ALLOWLIST (spec C.1.7, ST-06): DEER_FLOW_HOME; start the service wi
+env DOCKER_HOST=tcp://1.2.3.4:2375: STARTED
+env DLV_ALLOW_PUSH=1: CONFIG REFUSED: DLV_ALLOW_PUSH: no such switch exists; nothing unlocks the unconditional denies or the config pin (spec C.3.2;
+env DLV_SANDBOX_NETWORK=host: CONFIG REFUSED: DLV_SANDBOX_NETWORK='host': only none is built (round 18 R4: the sandbox has no network at all; the LLM is rea
+
+harness.prepare_environment sets DEER_FLOW_CONFIG_PATH to the gate-checked path; DF loads it lazily at first get_app_config()

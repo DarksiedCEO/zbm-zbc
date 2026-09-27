@@ -1,0 +1,23 @@
+https://api.anthropic.com/v1/messages              ALLOWED
+http://api.anthropic.com/v1/messages               refused: only https leaves the box
+https://api.anthropic.com:8443/x                   refused: host not on the egress allowlist (or wrong port): api.anthro
+https://api.anthropic.com./x                       refused: host is not a plain lower-case DNS name
+https://API.anthropic.com/x                        ALLOWED
+https://user@api.anthropic.com/x                   refused: userinfo in url refused
+https://api.anthropic.com@evil.tld/x               refused: userinfo in url refused
+https://api.anthropic.com.evil.tld/x               refused: host not on the egress allowlist (or wrong port): api.anthro
+https://evil.tld#@api.anthropic.com/               refused: host not on the egress allowlist (or wrong port): evil.tld
+https://104.18.0.1/x                               refused: host is not a plain lower-case DNS name
+https://[2606:4700::1]/x                           refused: host is not a plain lower-case DNS name
+https://0x7f000001/x                               refused: host not on the egress allowlist (or wrong port): 0x7f000001
+https://2130706433/x                               refused: host is not a plain lower-case DNS name
+https://0177.0.0.1/x                               refused: host is not a plain lower-case DNS name
+https://api.anthropic.com%2eevil.tld/x             refused: host not on the egress allowlist (or wrong port): api.anthro
+https://api.anthropic.com\@evil.tld/x              refused: userinfo in url refused
+https://xn--pi-6ka.anthropic.com/x                 refused: host not on the egress allowlist (or wrong port): xn--pi-6ka
+https://api.anthropic.com:443/x                    ALLOWED
+https://api.anthropic.com:/x                       ALLOWED
+getaddrinfo calls during allowlist probes: []
+LLM call state after 45 s: ended: EgressFailed egress total deadline exceeded while reading the response elapsed 4.0s
+read timeout 3 s; server trickles 1 byte / 2 s; declared body 100000 bytes -> the call would hold ~55 h
+VERDICT: per-read timeout only; no total deadline -> enforced

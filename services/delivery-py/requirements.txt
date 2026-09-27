@@ -1,0 +1,7 @@
+# BUILD_CONTRACTS §0 pins for the FastAPI part; the deer-flow harness is resolved by pyproject.toml + uv.lock
+# (spec §0.3): `uv sync --frozen` builds the whole runtime venv, this file is the pin record for the API layer.
+pydantic==2.13.3
+pytest==9.1.1
+fastapi==0.141.1
+uvicorn[standard]==0.46.0
+httpx==0.28.1

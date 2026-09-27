@@ -1,0 +1,171 @@
+"""
+Request models (spec §B.1, §C.8.7, §D): strict pydantic v2 (unknown key → 422); every free-text field is checked
+for control characters (422) and scanned for injection (recorded, outcome unchanged — the text is data).
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from zbm_delivery.textguard import has_control_chars
+
+ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+FINDING_ID_RE = re.compile(r"^(?:[A-Z]{1,4}[0-9]{1,3}-[0-9]{1,3}|[A-Za-z0-9._-]{1,32})$")
+SERVICE_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{0,60}$")
+SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
+REF_RE = re.compile(r"^[A-Za-z0-9._/\-]{1,200}$")
+PATH_RE = re.compile(r"^services/[a-z0-9][a-z0-9\-]{0,60}/[A-Za-z0-9._/\-]{1,400}$")
+SEVERITIES = ("critical", "high", "medium", "low", "info")
+FREE_TEXT_MAX = 4096
+
+
+class Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_max_length=FREE_TEXT_MAX)
+
+
+def _text(v: str, name: str, allow_newlines: bool = True, max_len: int = FREE_TEXT_MAX) -> str:
+    if not isinstance(v, str):
+        raise ValueError(f"{name} must be a string")
+    if len(v) > max_len:
+        raise ValueError(f"{name} longer than {max_len} characters")
+    if has_control_chars(v, allow_newlines=allow_newlines):
+        raise ValueError(f"{name} contains control characters")
+    return v
+
+
+class Source(Strict):
+    kind: Literal["aegis_review", "andre_session"]
+    ref: str = Field(min_length=1, max_length=128)
+    sha256: str = Field(pattern=SHA_RE.pattern)
+
+    @field_validator("ref")
+    @classmethod
+    def _ref(cls, v):
+        return _text(v, "source.ref", allow_newlines=False, max_len=128)
+
+
+class Finding(Strict):
+    id: str = Field(pattern=FINDING_ID_RE.pattern)
+    severity: Literal["critical", "high", "medium", "low", "info"]
+    title: str = Field(min_length=1, max_length=400)
+    file: str = Field(pattern=PATH_RE.pattern)
+    line: int = Field(ge=1, le=10 ** 6)
+    reproduction: str = Field(min_length=1, max_length=FREE_TEXT_MAX)
+    expected: str = Field(min_length=1, max_length=FREE_TEXT_MAX)
+    observed: str = Field(min_length=1, max_length=FREE_TEXT_MAX)
+    class_hint: Optional[str] = Field(default=None, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def _title(cls, v):
+        return _text(v, "title", allow_newlines=False, max_len=400)
+
+    @field_validator("reproduction", "expected", "observed")
+    @classmethod
+    def _free(cls, v):
+        return _text(v, "finding text")
+
+    @field_validator("class_hint")
+    @classmethod
+    def _hint(cls, v):
+        if v is None:
+            return v
+        if not re.fullmatch(r"[a-z0-9_\-]{1,120}", v):
+            raise ValueError("class_hint must be a snake_case identifier")
+        return v
+
+    @field_validator("file")
+    @classmethod
+    def _file(cls, v):
+        if ".." in v.split("/") or "//" in v:
+            raise ValueError("file must be a plain path under services/<service>/")
+        return v
+
+
+class FindingsDocument(Strict):
+    request_id: str = Field(pattern=f"^{ID_RE.pattern}$")
+    source: Source
+    base_ref: str = Field(pattern=REF_RE.pattern)
+    base_sha: str = Field(pattern=COMMIT_RE.pattern)
+    service: str = Field(pattern=SERVICE_RE.pattern)
+    findings: list[Finding] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        ids = [f.id for f in self.findings]
+        if len(set(ids)) != len(ids):
+            raise ValueError("finding ids must be unique")
+        for f in self.findings:
+            if not f.file.startswith(f"services/{self.service}/"):
+                raise ValueError(f"finding {f.id}: file must be inside services/{self.service}/")
+        if self.base_ref.startswith("-") or ".." in self.base_ref:
+            raise ValueError("base_ref must be a plain ref name")
+        return self
+
+
+class ReviewRequest(Strict):
+    request_id: str = Field(pattern=f"^{ID_RE.pattern}$")
+    review_ref: str = Field(min_length=1, max_length=128)
+    sha256: str = Field(pattern=SHA_RE.pattern)
+    verdict: Literal["pass", "fail"]
+    reopened: list[str] = Field(default_factory=list, max_length=200)
+    new_findings: list[Finding] = Field(default_factory=list, max_length=200)
+
+    @field_validator("review_ref")
+    @classmethod
+    def _ref(cls, v):
+        return _text(v, "review_ref", allow_newlines=False, max_len=128)
+
+    @field_validator("reopened")
+    @classmethod
+    def _reopened(cls, v):
+        for x in v:
+            if not FINDING_ID_RE.fullmatch(x):
+                raise ValueError("reopened ids must be finding ids")
+        if len(set(v)) != len(v):
+            raise ValueError("reopened ids must be unique")
+        return v
+
+    @model_validator(mode="after")
+    def _fail_needs_work(self):
+        if self.verdict == "pass" and (self.reopened or self.new_findings):
+            raise ValueError("a pass carries no reopened or new findings")
+        if self.verdict == "fail" and not (self.reopened or self.new_findings):
+            raise ValueError("a fail names at least one reopened or new finding")
+        return self
+
+
+class CancelRequest(Strict):
+    request_id: str = Field(pattern=f"^{ID_RE.pattern}$")
+    reason: str = Field(min_length=1, max_length=400)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, v):
+        return _text(v, "reason", allow_newlines=False, max_len=400)
+
+
+class ReconcileRequest(Strict):
+    request_id: str = Field(pattern=f"^{ID_RE.pattern}$")
+    head_sha256: str = Field(pattern=SHA_RE.pattern)
+    void_lines: list[int] = Field(default_factory=list, max_length=10_000)
+    void_event_ids: list[str] = Field(default_factory=list, max_length=10_000)
+
+    @field_validator("void_lines")
+    @classmethod
+    def _lines(cls, v):
+        if any(not (1 <= n <= 10 ** 12) for n in v):
+            raise ValueError("void_lines out of range")
+        return v
+
+    @field_validator("void_event_ids")
+    @classmethod
+    def _ids(cls, v):
+        for x in v:
+            if not ID_RE.fullmatch(x):
+                raise ValueError("void_event_ids must be ledger event ids")
+        return v

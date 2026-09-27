@@ -681,3 +681,36 @@ export LEGAL_CALLER_TOKENS='{"compliance_38": "<>=32 chars>", "hub": "...", "sch
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> LEGAL_DATA_DIR=<dir>
 cd src && python3 -m api   # LEGAL_BIND_ADDR (default 127.0.0.1), LEGAL_PORT (default 8420)
 ```
+
+## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026 (fix wave 19 applied)
+
+The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;
+Superpowers `8ca22dba` prompt texts forked as ours). A findings document goes in; the ENGINE opens a
+`fix<N>-<service>` worktree, runs one agent engineer per finding inside our Docker sandbox (`--network none`, no
+`.git`, no `curl`) under our guardrail, runs the failing test, the passing test, a split-diff verification (base +
+the agent's source changes + its RED test file alone must pass; base + the RED test alone must fail) and the whole
+suite itself with its own pytest configuration and a junit report it cross-checks, commits, writes the report from
+its records and hands the run to AEGIS re-review — nothing is fixed on the agent's word, nothing the agent's
+process prints is ever a count, and `git push`, merges, network, deletion outside the service directory, ACP/MCP
+and self-modification are denied unconditionally. Architecture, pins, the 28 choices, the round-18 amendments
+(R1-R11) and the spec defects: `docs/adr/0011-delivery-department-architecture.md`. Routes and settings:
+`services/delivery-py/README.md`.
+
+- **Status:** built and tested (425 tests: 422 passed, 3 skipped with the printed reason; `ruff` clean). The loop is
+  proven end to end with a deterministic model against the `fixtures/dlv/toy-py` fixture through the REAL harness
+  and guardrail; every round-18 attack (conftest monkeypatch, forged summary, neutered `pytest.ini`, deleted test,
+  trivial `DISPROOF:`, hung or flooded suite) now ends the run `failed`. **Docker live: not provable here** (no
+  daemon on the build box; `tests/test_live_docker.py` lists the properties only a daemon can prove). **Not
+  certified for a fix run against `main`.** pip-audit not run (tool absent); image digests are required build
+  arguments. cargo/go/npm services cannot reach `fixed` in this build (no engine-owned test report for them: their
+  counts are `unknown` by construction).
+- **Fails closed.** Refuse-to-start on any pinned hash (no unpinned mode exists), any tampered prompt/skill/seed,
+  any forbidden module, a deer-flow commit other than the pin, any env name outside the allowlist, a tag-only image,
+  a sandbox network other than `none`, subagents turned on, a licence outside the allowlist (incl. `*.egg-info` and
+  vendored packages without a record), a repository with remotes. No Docker daemon or no provider key → every run
+  503, nothing queued. Every transition is a ledger event (department `delivery`) and a hash-chained,
+  ledger-anchored local log line before it takes effect; an unverifiable test result is `unknown`, never green.
+
+```bash
+cd services/delivery-py && uv sync --frozen --no-dev && .venv/bin/python -m pytest -q     # 425 tests
+```

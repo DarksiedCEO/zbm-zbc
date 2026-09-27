@@ -1,0 +1,192 @@
+{
+  "version": 1,
+  "description": "Test-command allowlist per framework (DEPT28_SPEC D7, SP-03). argv only, no shell; the engine runs these (RED, GREEN, revert check, suite), never the agent's own command. {target} is the single test node id path::name for a targeted run; the suite form has no target. Framework detection is by marker file inside services/<service>/. Round 18 R2: for pytest the engine appends its OWN configuration (-c <engine ini> written by the engine with addopts empty, --rootdir, -o overrides from 'ini', --junitxml to an engine-chosen path, -rfE) and reads the verdict from the junit file cross-checked against --collect-only and the summary line; the repository's pytest.ini/pyproject/setup.cfg/tox.ini are never read. 'test_infra_globs' name the files an agent may not change in an engine run (R1: any change fails the round with test_infra_changed). Hash pinned in config.py.",
+  "frameworks": {
+    "pytest": {
+      "markers": [
+        "pytest.ini",
+        "pyproject.toml",
+        "conftest.py",
+        "tests"
+      ],
+      "test": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-rfE",
+        "{target}"
+      ],
+      "suite": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-rfE"
+      ],
+      "test_file_globs": [
+        "tests/**/*.py",
+        "test_*.py",
+        "*_test.py"
+      ],
+      "parser": "pytest",
+      "cwd": "services/<service>",
+      "collect": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--collect-only"
+      ],
+      "ini": {
+        "pythonpath": "src",
+        "testpaths": "tests",
+        "python_files": "test_*.py *_test.py",
+        "junit_family": "xunit1",
+        "junit_logging": "no",
+        "console_output_style": "classic"
+      },
+      "test_infra_globs": [
+        "conftest.py",
+        "**/conftest.py",
+        "pytest.ini",
+        "pyproject.toml",
+        "setup.cfg",
+        "tox.ini",
+        ".pytest_cache/**",
+        "sitecustomize.py",
+        "**/sitecustomize.py",
+        "usercustomize.py",
+        "**/usercustomize.py",
+        "*.pth",
+        "**/*.pth",
+        "setup.py",
+        ".coveragerc"
+      ],
+      "verified": true
+    },
+    "cargo": {
+      "markers": [
+        "Cargo.toml"
+      ],
+      "test": [
+        "cargo",
+        "test",
+        "--offline",
+        "--",
+        "{target}",
+        "--exact"
+      ],
+      "suite": [
+        "cargo",
+        "test",
+        "--offline"
+      ],
+      "test_file_globs": [
+        "tests/**/*.rs",
+        "benches/**/*.rs"
+      ],
+      "parser": "cargo",
+      "cwd": "services/<service>",
+      "build": [
+        "cargo",
+        "build",
+        "--offline"
+      ],
+      "test_infra_globs": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "build.rs",
+        ".cargo/**",
+        "rust-toolchain",
+        "rust-toolchain.toml",
+        "**/build.rs"
+      ],
+      "verified": false,
+      "note": "no engine-owned machine-readable report exists for cargo test in this build: every count is status unknown (R2), so a finding on a cargo service cannot reach fixed until one is built"
+    },
+    "go": {
+      "markers": [
+        "go.mod"
+      ],
+      "test": [
+        "go",
+        "test",
+        "-count=1",
+        "-run",
+        "{target}",
+        "./..."
+      ],
+      "suite": [
+        "go",
+        "test",
+        "-count=1",
+        "./..."
+      ],
+      "test_file_globs": [
+        "**/*_test.go"
+      ],
+      "parser": "go",
+      "cwd": "services/<service>",
+      "build": [
+        "go",
+        "build",
+        "./..."
+      ],
+      "test_infra_globs": [
+        "go.mod",
+        "go.sum",
+        "go.work",
+        "go.work.sum",
+        "**/testdata/**"
+      ],
+      "verified": false,
+      "note": "go test -json is not wired as an engine-owned report in this build: every count is status unknown (R2)"
+    },
+    "npm": {
+      "markers": [
+        "package.json"
+      ],
+      "requires": [
+        "package-lock.json"
+      ],
+      "test": [
+        "npm",
+        "test",
+        "--",
+        "{target}"
+      ],
+      "suite": [
+        "npm",
+        "test"
+      ],
+      "test_file_globs": [
+        "**/*.test.*",
+        "**/*.spec.*",
+        "test/**",
+        "tests/**"
+      ],
+      "parser": "npm",
+      "cwd": "services/<service>",
+      "note": "only with a lockfile present (D7); no npm install is ever run by the engine; no engine-owned report exists for npm test in this build: every count is status unknown (R2)",
+      "test_infra_globs": [
+        "package.json",
+        "package-lock.json",
+        ".npmrc",
+        "jest.config.*",
+        "vitest.config.*",
+        "babel.config.*",
+        ".babelrc",
+        "tsconfig*.json",
+        "mocha*",
+        ".mocharc*"
+      ],
+      "verified": false
+    }
+  },
+  "service_env": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "CI": "1",
+    "PYTHONHASHSEED": "0"
+  }
+}

@@ -1,0 +1,4 @@
+parser on real summary + forged trailing line -> {'passed': 200, 'failed': 0, 'errors': 0, 'skips': 0, 'failed_names': ['tests/test_x.py::test_a'], 'parsed': True, 'status': 'unknown', 'why': 'not verified', 'source': 'none', 'collected': None}
+real pytest with the engineer's conftest: exit = 0
+engine would parse: {'passed': 200, 'failed': 0, 'errors': 0, 'skips': 0, 'failed_names': [], 'parsed': True, 'status': 'unknown', 'why': 'not verified', 'source': 'none', 'collected': None}
+tail of captured output: ['F                                                                        [100%]', '=========== 200 passed in 0.01s ===========']

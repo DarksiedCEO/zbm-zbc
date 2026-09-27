@@ -1,0 +1,436 @@
+[
+  {
+    "agent": {
+      "denies": 0,
+      "event_id": "dlv-fnd-7e1d9241b376e596cc38b650da746bdbed8aaf28",
+      "opaque_execs": 0,
+      "thread_id": "dlv-Q9RAD31PDCEQ1WTSF01CAM859Q",
+      "tokens_in": 70,
+      "tokens_out": 35,
+      "tool_calls": 4,
+      "turns": 2
+    },
+    "brief_evidence_id": "dlv-ev-3472dd1ef159df3690fc27f017",
+    "changed_tests": [],
+    "class_hint": "wrong_operator",
+    "commit_files": [
+      "services/toy-py/src/toy/calc.py",
+      "services/toy-py/tests/test_fix_n1_1.py"
+    ],
+    "commit_sha": "d1b2d26054399a2ee8f1eb01fecc4eed8916858f",
+    "disproof": null,
+    "file": "services/toy-py/src/toy/calc.py",
+    "finding_id": "N1-1",
+    "green": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-rfE",
+        "-c",
+        "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini",
+        "--rootdir=/mnt/user-data/workspace/services/toy-py",
+        "-o",
+        "addopts=",
+        "-o",
+        "python_files=test_*.py *_test.py",
+        "-o",
+        "testpaths=/mnt/user-data/workspace/services/toy-py/tests",
+        "-o",
+        "pythonpath=/mnt/user-data/workspace/services/toy-py/src",
+        "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-b2b646ea6020.xml",
+        "tests/test_fix_n1_1.py::test_add_sum"
+      ],
+      "collected": 1,
+      "cwd": "/mnt/user-data/workspace/services/toy-py",
+      "evidence_id": "dlv-ev-0e226e633ae5b5f4bb1cc054e1",
+      "exit": 0,
+      "junit_sha256": "f76561d4f8541fa04afd2facdc322e9478f4b806ae35b4bfee2b4c92f0e95688",
+      "output_sha256": "0e226e633ae5b5f4bb1cc054e16669d44f9686fa57a0de94f53d9ad680293f91",
+      "test_name": "test_add_sum",
+      "test_path": "tests/test_fix_n1_1.py",
+      "timed_out": false,
+      "truncated": false,
+      "verdict": "pass"
+    },
+    "injection_rules": [],
+    "line": 6,
+    "reasons": [],
+    "red": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-rfE",
+        "-c",
+        "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini",
+        "--rootdir=/mnt/user-data/workspace/services/toy-py",
+        "-o",
+        "addopts=",
+        "-o",
+        "python_files=test_*.py *_test.py",
+        "-o",
+        "testpaths=/mnt/user-data/workspace/services/toy-py/tests",
+        "-o",
+        "pythonpath=/mnt/user-data/workspace/services/toy-py/src",
+        "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-a8cd2c6953fc.xml",
+        "tests/test_fix_n1_1.py::test_add_sum"
+      ],
+      "collected": 1,
+      "cwd": "/mnt/user-data/workspace/services/toy-py",
+      "evidence_id": "dlv-ev-2c1a836395410f3d8fb8a600ef",
+      "exit": 1,
+      "junit_sha256": "c4b50694db9580ac90b8d37df58c1f8ac08e76af3844a36b39bec18d1f958b4d",
+      "output_sha256": "2c1a836395410f3d8fb8a600ef1b6a1519ae7d681703086e7f2d85a3276692a6",
+      "test_name": "test_add_sum",
+      "test_path": "tests/test_fix_n1_1.py",
+      "timed_out": false,
+      "truncated": false,
+      "verdict": "fail"
+    },
+    "revert_check": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-rfE",
+        "-c",
+        "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-cfaa665a5121.ini",
+        "--rootdir=/mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services/toy-py",
+        "-o",
+        "addopts=",
+        "-o",
+        "python_files=test_*.py *_test.py",
+        "-o",
+        "testpaths=/mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services/toy-py/tests",
+        "-o",
+        "pythonpath=/mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services/toy-py/src",
+        "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-4040ef9068ae.xml",
+        "tests/test_fix_n1_1.py::test_add_sum"
+      ],
+      "evidence_id": "dlv-ev-a7eaa4778de83b68d28b736227",
+      "exit": 1,
+      "output_sha256": "a7eaa4778de83b68d28b73622700578dab7b686bd7e608eca0cb9e0e4902ff45",
+      "restored_exit": 0,
+      "restored_verdict": "pass",
+      "verdict": "fail"
+    },
+    "rounds": 1,
+    "run_id": "dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q",
+    "severity": "high",
+    "state": "fixed",
+    "suite_failures": [],
+    "sweep": {
+      "class_hint": "wrong_operator",
+      "dropped": [],
+      "evidence_id": "dlv-ev-a4f8e77e87a03ab9ea0537cdcd",
+      "sites": [
+        {
+          "file": "src/toy/calc.py",
+          "line": 6
+        }
+      ]
+    },
+    "title_sha256": "75db6b0f97384e9c9c0e4b48e167c3358070b8bce9dd7653e72f5faab2518256",
+    "verification": {
+      "agent_tree": {
+        "evidence_id": "dlv-ev-0e226e633ae5b5f4bb1cc054e1",
+        "exit": 0,
+        "verdict": "pass"
+      },
+      "base_sha": "051a6f231eaa129d5be664e881a0a837afcdadb9",
+      "classification": {
+        "src": [
+          "services/toy-py/src/toy/calc.py"
+        ],
+        "test": [
+          "services/toy-py/tests/test_fix_n1_1.py"
+        ],
+        "test_infra": []
+      },
+      "red_test_file": "services/toy-py/tests/test_fix_n1_1.py",
+      "reverted_checkout": {
+        "argv": [
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "-rfE",
+          "-c",
+          "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-cfaa665a5121.ini",
+          "--rootdir=/mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services/toy-py",
+          "-o",
+          "addopts=",
+          "-o",
+          "python_files=test_*.py *_test.py",
+          "-o",
+          "testpaths=/mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services/toy-py/tests",
+          "-o",
+          "pythonpath=/mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services/toy-py/src",
+          "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-4040ef9068ae.xml",
+          "tests/test_fix_n1_1.py::test_add_sum"
+        ],
+        "collected": 1,
+        "cwd": "/mnt/user-data/workspace/.dlv-verify/reverted-0dff133d6229/services/toy-py",
+        "evidence_id": "dlv-ev-a7eaa4778de83b68d28b736227",
+        "exit": 1,
+        "junit_sha256": "89a455816eda6203201ec9f792120710848be1d77a510933e27ec9fb55be3169",
+        "output_sha256": "d1fc22e98aefbf2001df8c60764243913986aca6aa4e4ef38e467655db76ce72",
+        "timed_out": false,
+        "truncated": false,
+        "verdict": "fail"
+      },
+      "verification_checkout": {
+        "argv": [
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "-rfE",
+          "-c",
+          "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-69d62b9a0578.ini",
+          "--rootdir=/mnt/user-data/workspace/.dlv-verify/verify-d23d7fdbbffe/services/toy-py",
+          "-o",
+          "addopts=",
+          "-o",
+          "python_files=test_*.py *_test.py",
+          "-o",
+          "testpaths=/mnt/user-data/workspace/.dlv-verify/verify-d23d7fdbbffe/services/toy-py/tests",
+          "-o",
+          "pythonpath=/mnt/user-data/workspace/.dlv-verify/verify-d23d7fdbbffe/services/toy-py/src",
+          "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-e40c318e5e61.xml",
+          "tests/test_fix_n1_1.py::test_add_sum"
+        ],
+        "collected": 1,
+        "cwd": "/mnt/user-data/workspace/.dlv-verify/verify-d23d7fdbbffe/services/toy-py",
+        "evidence_id": "dlv-ev-a7eaa4778de83b68d28b736227",
+        "exit": 0,
+        "junit_sha256": "9c7a827f4205379ab3c359e1414847f7839239c435e91e71a989d4316b0e4893",
+        "output_sha256": "0e226e633ae5b5f4bb1cc054e16669d44f9686fa57a0de94f53d9ad680293f91",
+        "timed_out": false,
+        "truncated": false,
+        "verdict": "pass"
+      }
+    }
+  },
+  {
+    "agent": {
+      "denies": 0,
+      "event_id": "dlv-fnd-875969bb36c3bc77ada7ef3567adde0ea905fcf1",
+      "opaque_execs": 0,
+      "thread_id": "dlv-Q9RAD31PDCEQ1WTSF01CAM859Q",
+      "tokens_in": 70,
+      "tokens_out": 35,
+      "tool_calls": 4,
+      "turns": 2
+    },
+    "brief_evidence_id": "dlv-ev-ae445f33ecc0dabc7d871961a5",
+    "changed_tests": [],
+    "class_hint": "division_by_zero",
+    "commit_files": [
+      "services/toy-py/src/toy/calc.py",
+      "services/toy-py/tests/test_fix_n1_2.py"
+    ],
+    "commit_sha": "a16c816b19aea79f6c930e83fafc5240deb220d1",
+    "disproof": null,
+    "file": "services/toy-py/src/toy/calc.py",
+    "finding_id": "N1-2",
+    "green": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-rfE",
+        "-c",
+        "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini",
+        "--rootdir=/mnt/user-data/workspace/services/toy-py",
+        "-o",
+        "addopts=",
+        "-o",
+        "python_files=test_*.py *_test.py",
+        "-o",
+        "testpaths=/mnt/user-data/workspace/services/toy-py/tests",
+        "-o",
+        "pythonpath=/mnt/user-data/workspace/services/toy-py/src",
+        "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-91343cf344a9.xml",
+        "tests/test_fix_n1_2.py::test_percent_zero_whole"
+      ],
+      "collected": 1,
+      "cwd": "/mnt/user-data/workspace/services/toy-py",
+      "evidence_id": "dlv-ev-ecdce3f42b4cbd8c8ddc0d8f3c",
+      "exit": 0,
+      "junit_sha256": "808fbc723a997da994cedb9454284906487a08d6e0fcee546c83000efe352b51",
+      "output_sha256": "ecdce3f42b4cbd8c8ddc0d8f3cdf59b57ec43301ac109b9b6f654e301a4556b7",
+      "test_name": "test_percent_zero_whole",
+      "test_path": "tests/test_fix_n1_2.py",
+      "timed_out": false,
+      "truncated": false,
+      "verdict": "pass"
+    },
+    "injection_rules": [],
+    "line": 11,
+    "reasons": [],
+    "red": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-rfE",
+        "-c",
+        "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-c99366e1411b.ini",
+        "--rootdir=/mnt/user-data/workspace/services/toy-py",
+        "-o",
+        "addopts=",
+        "-o",
+        "python_files=test_*.py *_test.py",
+        "-o",
+        "testpaths=/mnt/user-data/workspace/services/toy-py/tests",
+        "-o",
+        "pythonpath=/mnt/user-data/workspace/services/toy-py/src",
+        "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-8d62e54e8171.xml",
+        "tests/test_fix_n1_2.py::test_percent_zero_whole"
+      ],
+      "collected": 1,
+      "cwd": "/mnt/user-data/workspace/services/toy-py",
+      "evidence_id": "dlv-ev-b3662df89d2df425ade2765e74",
+      "exit": 1,
+      "junit_sha256": "54b03a6a3ebb8c8e1bda0fec02fc31baeda69e8d0eb6c62b2ab1dc1d38e7ce48",
+      "output_sha256": "b3662df89d2df425ade2765e742df1f44b43b0300e278babc38888fa913ae9c3",
+      "test_name": "test_percent_zero_whole",
+      "test_path": "tests/test_fix_n1_2.py",
+      "timed_out": false,
+      "truncated": false,
+      "verdict": "fail"
+    },
+    "revert_check": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-rfE",
+        "-c",
+        "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-90adb23c0560.ini",
+        "--rootdir=/mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services/toy-py",
+        "-o",
+        "addopts=",
+        "-o",
+        "python_files=test_*.py *_test.py",
+        "-o",
+        "testpaths=/mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services/toy-py/tests",
+        "-o",
+        "pythonpath=/mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services/toy-py/src",
+        "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-c4cf990fa625.xml",
+        "tests/test_fix_n1_2.py::test_percent_zero_whole"
+      ],
+      "evidence_id": "dlv-ev-42bb319ec867fd13868b9fe390",
+      "exit": 1,
+      "output_sha256": "42bb319ec867fd13868b9fe390b08e11583c5644538456523440514e43e0d2c8",
+      "restored_exit": 0,
+      "restored_verdict": "pass",
+      "verdict": "fail"
+    },
+    "rounds": 1,
+    "run_id": "dlv-run-Q9RAD31PDCEQ1WTSF01CAM859Q",
+    "severity": "high",
+    "state": "fixed",
+    "suite_failures": [],
+    "sweep": {
+      "class_hint": "division_by_zero",
+      "dropped": [],
+      "evidence_id": "dlv-ev-02df61509ebf9d861bd3787839",
+      "sites": [
+        {
+          "file": "src/toy/calc.py",
+          "line": 11
+        }
+      ]
+    },
+    "title_sha256": "2c2f2678e1fbc0c935a6846142fc2d8dc3fe9e1ee23e0629b913c1ee57b3253e",
+    "verification": {
+      "agent_tree": {
+        "evidence_id": "dlv-ev-ecdce3f42b4cbd8c8ddc0d8f3c",
+        "exit": 0,
+        "verdict": "pass"
+      },
+      "base_sha": "d1b2d26054399a2ee8f1eb01fecc4eed8916858f",
+      "classification": {
+        "src": [
+          "services/toy-py/src/toy/calc.py"
+        ],
+        "test": [
+          "services/toy-py/tests/test_fix_n1_2.py"
+        ],
+        "test_infra": []
+      },
+      "red_test_file": "services/toy-py/tests/test_fix_n1_2.py",
+      "reverted_checkout": {
+        "argv": [
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "-rfE",
+          "-c",
+          "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-90adb23c0560.ini",
+          "--rootdir=/mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services/toy-py",
+          "-o",
+          "addopts=",
+          "-o",
+          "python_files=test_*.py *_test.py",
+          "-o",
+          "testpaths=/mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services/toy-py/tests",
+          "-o",
+          "pythonpath=/mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services/toy-py/src",
+          "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-c4cf990fa625.xml",
+          "tests/test_fix_n1_2.py::test_percent_zero_whole"
+        ],
+        "collected": 1,
+        "cwd": "/mnt/user-data/workspace/.dlv-verify/reverted-bd3f47027205/services/toy-py",
+        "evidence_id": "dlv-ev-42bb319ec867fd13868b9fe390",
+        "exit": 1,
+        "junit_sha256": "3bf27cacd43224f6443c2803e652ad1192c1c250ae7628405680fcc56912ee93",
+        "output_sha256": "315fbdfca01430f52720d84bfd5e33b736a604f6a20047961584fbbd04b4c144",
+        "timed_out": false,
+        "truncated": false,
+        "verdict": "fail"
+      },
+      "verification_checkout": {
+        "argv": [
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "-rfE",
+          "-c",
+          "/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/engine-f0a11b5bdd97.ini",
+          "--rootdir=/mnt/user-data/workspace/.dlv-verify/verify-857063310144/services/toy-py",
+          "-o",
+          "addopts=",
+          "-o",
+          "python_files=test_*.py *_test.py",
+          "-o",
+          "testpaths=/mnt/user-data/workspace/.dlv-verify/verify-857063310144/services/toy-py/tests",
+          "-o",
+          "pythonpath=/mnt/user-data/workspace/.dlv-verify/verify-857063310144/services/toy-py/src",
+          "--junitxml=/mnt/user-data/workspace/.dlv-engine/c8d7ab70319f923f/run-79b0e6076e3f.xml",
+          "tests/test_fix_n1_2.py::test_percent_zero_whole"
+        ],
+        "collected": 1,
+        "cwd": "/mnt/user-data/workspace/.dlv-verify/verify-857063310144/services/toy-py",
+        "evidence_id": "dlv-ev-42bb319ec867fd13868b9fe390",
+        "exit": 0,
+        "junit_sha256": "925149d367e013503174285bd18b4b9450a1ccb6e439815c9e2ca3ba1f08f2f7",
+        "output_sha256": "0e226e633ae5b5f4bb1cc054e16669d44f9686fa57a0de94f53d9ad680293f91",
+        "timed_out": false,
+        "truncated": false,
+        "verdict": "pass"
+      }
+    }
+  }
+]

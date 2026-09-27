@@ -1,0 +1,7 @@
+container after acquire: ['dlv-dlv-run-P8']
+destroy raised: sandbox release failed: container exit 1
+container still known to the daemon double: ['dlv-dlv-run-P8'] | provider forgot it: True
+docker calls in destroy: [['rm', '-f', 'dlv-dlv-run-P8']]
+service start/stop lists or removes leftover dlv-* containers: False
+_fail_live_runs_at_start touches docker: False
+stop() touches docker/provider: True

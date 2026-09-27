@@ -1,0 +1,106 @@
+# G10 — refusal messages for every single-key mutation of config/deerflow.engine.yaml
+
+sandbox.allow_host_bash = true
+    refused: sandbox.allow_host_bash must be false
+sandbox.use = "deerflow.sandbox.local:LocalSandboxProvider"
+    refused: sandbox.use must be zbm_delivery.adapters.sandbox:ZbmDockerSandboxProvider
+sandbox.use = "deerflow.community.aio_sandbox.aio_sandbox_provider:AioSand
+    refused: sandbox.use must be zbm_delivery.adapters.sandbox:ZbmDockerSandboxProvider
+sandbox.image = "registry.test/zbm/dlv-sandbox:latest"
+    refused: sandbox.image: DLV_SANDBOX_IMAGE must be <registry-host>/<path>@sha256:<64 hex> (a tag-only reference is refused, ST-03)
+sandbox.image = "docker.io/library/python@sha256:000000000000000000000000000
+    refused: sandbox.image: DLV_SANDBOX_IMAGE host 'docker.io' is not DLV_IMAGE_REGISTRY 'registry.test'
+sandbox.network = {"mode": "proxy"}
+    refused: sandbox.network.* must be absent (the proxy sidecar is not used; network policy is Docker-level)
+sandbox.mounts = [{"source": "/", "target": "/host"}]
+    refused: sandbox.mounts must be absent
+sandbox.environment = {"A": "b"}
+    refused: sandbox.environment must be absent
+sandbox.bash_command_timeout = 100000
+    refused: sandbox.bash_command_timeout must be an integer <= DLV_CMD_TIMEOUT_S
+sandbox.port = 8080
+    refused: sandbox.port must be absent
+sandbox.thread_data_mounts = true
+    refused: sandbox.thread_data_mounts must be absent
+guardrails.enabled = false
+    refused: guardrails.enabled must be true
+guardrails.fail_closed = false
+    refused: guardrails.fail_closed must be true
+guardrails.provider.use = "deerflow.guardrails.builtin:AllowlistProvider"
+    refused: guardrails.provider.use must be zbm_delivery.adapters.guardrail:ZbmGuardrailProvider
+guardrails.passport = "/tmp/passport"
+    refused: guardrails.passport must be absent
+guardrails = null
+    refused: guardrails.enabled must be true
+    refused: guardrails.fail_closed must be true
+    refused: guardrails.provider.use must be zbm_delivery.adapters.guardrail:ZbmGuardrailProvider
+memory.enabled = true
+    refused: memory.enabled must be false
+memory.injection_enabled = true
+    refused: memory.injection_enabled must be false
+memory.manager_class = "deermem"
+    refused: memory.manager_class must be noop
+memory = null
+    refused: memory.enabled must be false
+    refused: memory.injection_enabled must be false
+    refused: memory.manager_class must be noop
+skill_evolution.enabled = true
+    refused: skill_evolution.enabled must be false
+acp_agents = {"claude": {"command": "npx", "args": ["-y", "x"]}}
+    refused: acp_agents must be empty
+extensions = {"mcp_servers": {"gh": {"command": "npx"}}}
+    refused: extensions.mcp_servers must be empty
+extensions = {"middlewares": ["x:y"]}
+    refused: extensions.middlewares must be empty (our middlewares are passed in code)
+plugins = ["x"]
+    refused: plugins must be empty
+tools+ = {"name": "web_fetch", "group": "web", "use": "deerflow.commu
+    refused: tools: 'web_fetch' is outside the sandbox group
+tools+ = {"name": "web_search", "group": "web", "use": "deerflow.comm
+    refused: tools: 'web_search' is outside the sandbox group
+tools+ = {"name": "image_search", "group": "web", "use": "deerflow.co
+    refused: tools: 'image_search' is outside the sandbox group
+tools+ = {"name": "browser_navigate", "group": "browser", "use": "dee
+    refused: tools: 'browser_navigate' is outside the sandbox group
+tools = []
+    refused: tools must list the sandbox group
+tools = null
+    refused: tools must list the sandbox group
+models+ = {"name": "second", "use": "langchain_openai:ChatOpenAI", "mo
+    refused: models must have exactly one entry
+models.0.use = "langchain_anthropic:ChatAnthropic"
+    refused: models[0].use must be zbm_delivery.adapters.model:EgressChatModel
+models.0.use = "langchain_openai:ChatOpenAI"
+    refused: models[0].use must be zbm_delivery.adapters.model:EgressChatModel
+models.0.name = "other"
+    refused: models[0].name must be engine
+models = []
+    refused: models must have exactly one entry
+skills.path = "/tmp/other-skills"
+    refused: skills.path must be our skills root (DLV_SKILLS_ROOT)
+skills.use = "deerflow.skills.storage.remote:RemoteSkillStorage"
+    refused: skills.use must be the local skill storage
+verification.receipts_enabled = false
+    refused: verification.receipts_enabled must be true
+verification.judge_enabled = true
+    refused: verification.judge_enabled must not be true
+recursion_limit = 1000
+    refused: recursion_limit must be an integer <= DLV_RECURSION_LIMIT
+max_recursion_limit = 1000
+    refused: max_recursion_limit must be an integer <= DLV_RECURSION_LIMIT
+subagents.timeout_seconds = 1800
+    refused: subagents.timeout_seconds must be an integer <= DLV_SUBAGENT_TIMEOUT_S
+subagents.max_turns = 200
+    refused: subagents.max_turns must be an integer <= DLV_SUBAGENT_MAX_TURNS
+subagents.max_total_per_run = 50
+    refused: subagents.max_total_per_run must be 1 (deer-flow's floor) with DLV_MAX_SUBAGENTS_PER_RUN unset: subagents are off in this build (round 18 R8)
+token_budget.enabled = false
+    refused: token_budget.enabled must be true
+tracing = {"langfuse": {"enabled": true}}
+    refused: tracing must be absent
+channel_connections = {"telegram": {}}
+    refused: channel_connections must be absent
+agents_api = {"enabled": true}
+    refused: agents_api must be absent
+authorization = {"enabled": true}
+    refused: authorization must be absent

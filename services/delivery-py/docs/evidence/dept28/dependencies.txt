@@ -1,0 +1,36 @@
+# resolved versions (uv.lock) — the three floors of spec 0.3 and the audited langchain/langgraph family
+
+anyio                    4.15.1
+langchain-anthropic      1.4.6
+soupsieve                2.10
+websockets               16.0
+langgraph                1.2.9
+langchain                1.3.14
+langchain-core           1.4.9
+langchain-openai         1.2.1
+langgraph-checkpoint     4.1.1
+langgraph-prebuilt       1.1.0
+deerflow-harness         2.1.0
+deerflow-extension-api   0.2.1
+fastapi                  0.141.1
+pydantic                 2.13.3
+uvicorn                  0.46.0
+httpx                    0.28.1
+tiktoken                 0.14.0
+pytest                   9.1.1
+
+floor anyio >= 4.14.2: resolved 4.15.1 -> held
+floor langchain-anthropic >= 1.4.6: resolved 1.4.6 -> held
+floor soupsieve >= 2.9.0: resolved 2.10 -> held
+
+# dropped packages in uv export --frozen (still listed, marker sys_platform == 'never', never installed):
+  langchain-openviking==0.1.0 ; sys_platform == 'never'
+  langgraph-api==0.15.1 ; sys_platform == 'never'
+  langgraph-cli==0.4.32 ; sys_platform == 'never'
+  langgraph-runtime-inmem==0.35.1 ; sys_platform == 'never'
+  openviking-sdk==0.1.12 ; sys_platform == 'never'
+
+# ls site-packages | grep (must be empty for the dropped set and forbiddenfruit / telegram):
+  (none present)
+
+# uv lock --check: rc=0 Resolved 211 packages in 3ms

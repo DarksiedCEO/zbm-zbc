@@ -1,0 +1,1311 @@
+{
+  "distributions": [
+    {
+      "licence": "Apache-2.0",
+      "name": "agent-client-protocol",
+      "problem": null,
+      "source": "exception:file",
+      "version": "0.12.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "agent-sandbox",
+      "problem": null,
+      "source": "license",
+      "version": "0.0.30"
+    },
+    {
+      "licence": "PSF-2.0",
+      "name": "aiohappyeyeballs",
+      "problem": null,
+      "source": "license",
+      "version": "2.7.1"
+    },
+    {
+      "licence": "Apache-2.0 AND MIT",
+      "name": "aiohttp",
+      "problem": null,
+      "source": "license",
+      "version": "3.14.3"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "aiosignal",
+      "problem": null,
+      "source": "license",
+      "version": "1.4.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "aiosqlite",
+      "problem": null,
+      "source": "classifier",
+      "version": "0.22.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "alembic",
+      "problem": null,
+      "source": "expression",
+      "version": "1.20.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "annotated-doc",
+      "problem": null,
+      "source": "expression",
+      "version": "0.0.5"
+    },
+    {
+      "licence": "MIT",
+      "name": "annotated-types",
+      "problem": null,
+      "source": "expression",
+      "version": "0.8.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "anthropic",
+      "problem": null,
+      "source": "license",
+      "version": "0.125.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "anyio",
+      "problem": null,
+      "source": "expression",
+      "version": "4.15.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "attrs",
+      "problem": null,
+      "source": "expression",
+      "version": "26.1.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "azure-ai-documentintelligence",
+      "problem": null,
+      "source": "license",
+      "version": "1.0.2"
+    },
+    {
+      "licence": "MIT",
+      "name": "azure-core",
+      "problem": null,
+      "source": "expression",
+      "version": "1.41.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "azure-identity",
+      "problem": null,
+      "source": "expression",
+      "version": "1.25.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "backoff",
+      "problem": null,
+      "source": "license",
+      "version": "2.2.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "beautifulsoup4",
+      "problem": null,
+      "source": "license",
+      "version": "4.15.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "bracex",
+      "problem": null,
+      "source": "expression",
+      "version": "3.0.1"
+    },
+    {
+      "licence": "MPL-2.0",
+      "name": "certifi",
+      "problem": null,
+      "source": "license",
+      "version": "2026.7.22"
+    },
+    {
+      "licence": "MIT-0",
+      "name": "cffi",
+      "problem": null,
+      "source": "expression",
+      "version": "2.1.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "charset-normalizer",
+      "problem": null,
+      "source": "license",
+      "version": "3.5.1"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "click",
+      "problem": null,
+      "source": "expression",
+      "version": "8.5.0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "cobble",
+      "problem": null,
+      "source": "classifier",
+      "version": "0.1.4"
+    },
+    {
+      "licence": "MIT",
+      "name": "coloredlogs",
+      "problem": null,
+      "source": "license",
+      "version": "15.0.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "connectrpc",
+      "problem": null,
+      "source": "expression",
+      "version": "0.11.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "croniter",
+      "problem": null,
+      "source": "expression",
+      "version": "6.2.4"
+    },
+    {
+      "licence": "Apache-2.0 OR BSD-3-Clause",
+      "name": "cryptography",
+      "problem": null,
+      "source": "expression",
+      "version": "50.0.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "ddgs",
+      "problem": null,
+      "source": "expression",
+      "version": "9.16.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "deerflow-extension-api",
+      "problem": null,
+      "source": "exception:stated",
+      "version": "0.2.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "deerflow-harness",
+      "problem": null,
+      "source": "exception:stated",
+      "version": "2.1.0"
+    },
+    {
+      "licence": "PSF-2.0",
+      "name": "defusedxml",
+      "problem": null,
+      "source": "license",
+      "version": "0.7.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "distro",
+      "problem": null,
+      "source": "license",
+      "version": "1.9.0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "dockerfile-parse",
+      "problem": null,
+      "source": "license",
+      "version": "2.0.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "docstring-parser",
+      "problem": null,
+      "source": "license",
+      "version": "0.18.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "dotenv",
+      "problem": null,
+      "source": "exception:file",
+      "version": "0.9.9"
+    },
+    {
+      "licence": "MIT",
+      "name": "duckdb",
+      "problem": null,
+      "source": "classifier",
+      "version": "1.5.5"
+    },
+    {
+      "licence": "MIT",
+      "name": "durationpy",
+      "problem": null,
+      "source": "license",
+      "version": "0.11"
+    },
+    {
+      "licence": "MIT",
+      "name": "e2b",
+      "problem": null,
+      "source": "expression",
+      "version": "2.51.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "e2b-code-interpreter",
+      "problem": null,
+      "source": "expression",
+      "version": "2.10.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "et-xmlfile",
+      "problem": null,
+      "source": "license",
+      "version": "2.0.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "exa-py",
+      "problem": null,
+      "source": "license",
+      "version": "2.22.2"
+    },
+    {
+      "licence": "MIT",
+      "name": "fastapi",
+      "problem": null,
+      "source": "expression",
+      "version": "0.141.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "filetype",
+      "problem": null,
+      "source": "license",
+      "version": "1.2.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "firecrawl-py",
+      "problem": null,
+      "source": "license",
+      "version": "4.44.0"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "flatbuffers",
+      "problem": null,
+      "source": "license",
+      "version": "25.12.19"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "frozenlist",
+      "problem": null,
+      "source": "license",
+      "version": "1.8.0"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "google-auth",
+      "problem": null,
+      "source": "license",
+      "version": "2.58.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "google-genai",
+      "problem": null,
+      "source": "expression",
+      "version": "1.75.0"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "googleapis-common-protos",
+      "problem": null,
+      "source": "expression",
+      "version": "1.75.4"
+    },
+    {
+      "licence": "MIT AND PSF-2.0",
+      "name": "greenlet",
+      "problem": null,
+      "source": "expression",
+      "version": "3.5.6"
+    },
+    {
+      "licence": "MIT",
+      "name": "h11",
+      "problem": null,
+      "source": "license",
+      "version": "0.16.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "h2",
+      "problem": null,
+      "source": "expression",
+      "version": "4.4.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "hpack",
+      "problem": null,
+      "source": "expression",
+      "version": "4.2.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "html5lib",
+      "problem": null,
+      "source": "license",
+      "version": "1.1"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "httpcore",
+      "problem": null,
+      "source": "expression",
+      "version": "1.0.9"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "httpcore2",
+      "problem": null,
+      "source": "expression",
+      "version": "2.13.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "httptools",
+      "problem": null,
+      "source": "expression",
+      "version": "0.8.0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "httpx",
+      "problem": null,
+      "source": "license",
+      "version": "0.28.1"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "httpx2",
+      "problem": null,
+      "source": "expression",
+      "version": "2.13.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "httpx-sse",
+      "problem": null,
+      "source": "license",
+      "version": "0.4.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "humanfriendly",
+      "problem": null,
+      "source": "license",
+      "version": "10.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "hyperframe",
+      "problem": null,
+      "source": "classifier",
+      "version": "6.1.0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "idna",
+      "problem": null,
+      "source": "expression",
+      "version": "3.20"
+    },
+    {
+      "licence": "MIT",
+      "name": "iniconfig",
+      "problem": null,
+      "source": "expression",
+      "version": "2.3.0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "isodate",
+      "problem": null,
+      "source": "classifier",
+      "version": "0.7.2"
+    },
+    {
+      "licence": "MIT",
+      "name": "jiter",
+      "problem": null,
+      "source": "expression",
+      "version": "0.17.0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "jsonpatch",
+      "problem": null,
+      "source": "classifier",
+      "version": "1.33"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "jsonpointer",
+      "problem": null,
+      "source": "classifier",
+      "version": "3.1.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "jsonschema",
+      "problem": null,
+      "source": "expression",
+      "version": "4.26.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "jsonschema-specifications",
+      "problem": null,
+      "source": "expression",
+      "version": "2025.9.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "kubernetes",
+      "problem": null,
+      "source": "classifier",
+      "version": "36.0.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "langchain",
+      "problem": null,
+      "source": "license",
+      "version": "1.3.14"
+    },
+    {
+      "licence": "MIT",
+      "name": "langchain-anthropic",
+      "problem": null,
+      "source": "license",
+      "version": "1.4.6"
+    },
+    {
+      "licence": "MIT",
+      "name": "langchain-core",
+      "problem": null,
+      "source": "license",
+      "version": "1.4.9"
+    },
+    {
+      "licence": "MIT",
+      "name": "langchain-deepseek",
+      "problem": null,
+      "source": "license",
+      "version": "1.0.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "langchain-google-genai",
+      "problem": null,
+      "source": "license",
+      "version": "4.2.2"
+    },
+    {
+      "licence": "MIT",
+      "name": "langchain-mcp-adapters",
+      "problem": null,
+      "source": "expression",
+      "version": "0.2.2"
+    },
+    {
+      "licence": "MIT",
+      "name": "langchain-openai",
+      "problem": null,
+      "source": "license",
+      "version": "1.2.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "langchain-protocol",
+      "problem": null,
+      "source": "license",
+      "version": "0.0.19"
+    },
+    {
+      "licence": "MIT",
+      "name": "langfuse",
+      "problem": null,
+      "source": "expression",
+      "version": "4.15.6"
+    },
+    {
+      "licence": "MIT",
+      "name": "langgraph",
+      "problem": null,
+      "source": "expression",
+      "version": "1.2.9"
+    },
+    {
+      "licence": "MIT",
+      "name": "langgraph-checkpoint",
+      "problem": null,
+      "source": "expression",
+      "version": "4.1.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "langgraph-checkpoint-sqlite",
+      "problem": null,
+      "source": "expression",
+      "version": "3.1.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "langgraph-prebuilt",
+      "problem": null,
+      "source": "expression",
+      "version": "1.1.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "langgraph-sdk",
+      "problem": null,
+      "source": "expression",
+      "version": "0.4.5"
+    },
+    {
+      "licence": "MIT",
+      "name": "langsmith",
+      "problem": null,
+      "source": "license",
+      "version": "0.14.1"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "lxml",
+      "problem": null,
+      "source": "license",
+      "version": "6.1.3"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "magika",
+      "problem": null,
+      "source": "license",
+      "version": "0.6.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "mako",
+      "problem": null,
+      "source": "expression",
+      "version": "1.4.3"
+    },
+    {
+      "licence": "BSD-2-Clause",
+      "name": "mammoth",
+      "problem": null,
+      "source": "license",
+      "version": "1.11.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "markdown-it-py",
+      "problem": null,
+      "source": "classifier",
+      "version": "4.2.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "markdownify",
+      "problem": null,
+      "source": "classifier",
+      "version": "1.2.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "markitdown",
+      "problem": null,
+      "source": "expression",
+      "version": "0.1.5"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "markupsafe",
+      "problem": null,
+      "source": "expression",
+      "version": "3.0.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "mcp",
+      "problem": null,
+      "source": "license",
+      "version": "1.30.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "mdurl",
+      "problem": null,
+      "source": "classifier",
+      "version": "0.1.2"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "mpmath",
+      "problem": null,
+      "source": "license",
+      "version": "1.3.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "msal",
+      "problem": null,
+      "source": "license",
+      "version": "1.39.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "msal-extensions",
+      "problem": null,
+      "source": "license",
+      "version": "1.3.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "multidict",
+      "problem": null,
+      "source": "license",
+      "version": "6.9.1"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "nest-asyncio",
+      "problem": null,
+      "source": "license",
+      "version": "1.6.0"
+    },
+    {
+      "licence": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+      "name": "numpy",
+      "problem": null,
+      "source": "expression",
+      "version": "2.5.3"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "oauthlib",
+      "problem": null,
+      "source": "license",
+      "version": "3.3.1"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "olefile",
+      "problem": null,
+      "source": "license",
+      "version": "0.47"
+    },
+    {
+      "licence": "MIT",
+      "name": "onnxruntime",
+      "problem": null,
+      "source": "license",
+      "version": "1.20.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "openai",
+      "problem": null,
+      "source": "license",
+      "version": "2.54.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "openpyxl",
+      "problem": null,
+      "source": "license",
+      "version": "3.1.5"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "opentelemetry-api",
+      "problem": null,
+      "source": "expression",
+      "version": "1.42.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "opentelemetry-exporter-otlp-proto-common",
+      "problem": null,
+      "source": "expression",
+      "version": "1.42.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "opentelemetry-exporter-otlp-proto-http",
+      "problem": null,
+      "source": "expression",
+      "version": "1.42.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "opentelemetry-proto",
+      "problem": null,
+      "source": "expression",
+      "version": "1.42.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "opentelemetry-sdk",
+      "problem": null,
+      "source": "expression",
+      "version": "1.42.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "opentelemetry-semantic-conventions",
+      "problem": null,
+      "source": "expression",
+      "version": "0.63b1"
+    },
+    {
+      "licence": "MPL-2.0 AND (Apache-2.0 OR MIT)",
+      "name": "orjson",
+      "problem": null,
+      "source": "expression",
+      "version": "3.12.0"
+    },
+    {
+      "licence": "Apache-2.0 OR MIT",
+      "name": "ormsgpack",
+      "problem": null,
+      "source": "expression",
+      "version": "1.12.2"
+    },
+    {
+      "licence": "Apache-2.0 OR BSD-2-Clause",
+      "name": "packaging",
+      "problem": null,
+      "source": "expression",
+      "version": "26.3"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "pandas",
+      "problem": null,
+      "source": "classifier",
+      "version": "3.0.6"
+    },
+    {
+      "licence": "MIT",
+      "name": "pdfminer-six",
+      "problem": null,
+      "source": "expression",
+      "version": "20260107"
+    },
+    {
+      "licence": "MIT",
+      "name": "pdfplumber",
+      "problem": null,
+      "source": "classifier",
+      "version": "0.11.10"
+    },
+    {
+      "licence": "MIT-CMU",
+      "name": "pillow",
+      "problem": null,
+      "source": "expression",
+      "version": "12.3.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "pluggy",
+      "problem": null,
+      "source": "license",
+      "version": "1.6.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "primp",
+      "problem": null,
+      "source": "license",
+      "version": "2.0.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "propcache",
+      "problem": null,
+      "source": "license",
+      "version": "0.5.4"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "protobuf",
+      "problem": null,
+      "source": "license",
+      "version": "6.33.6"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "protobuf-py",
+      "problem": null,
+      "source": "expression",
+      "version": "0.1.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "protobuf-py-ext",
+      "problem": null,
+      "source": "exception:sibling",
+      "version": "0.1.1"
+    },
+    {
+      "licence": "BSD-2-Clause",
+      "name": "pyasn1",
+      "problem": null,
+      "source": "license",
+      "version": "0.6.4"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "pyasn1-modules",
+      "problem": null,
+      "source": "license",
+      "version": "0.4.2"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "pycparser",
+      "problem": null,
+      "source": "expression",
+      "version": "3.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "pydantic",
+      "problem": null,
+      "source": "expression",
+      "version": "2.13.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "pydantic-core",
+      "problem": null,
+      "source": "expression",
+      "version": "2.46.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "pydantic-settings",
+      "problem": null,
+      "source": "expression",
+      "version": "2.15.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "pydub",
+      "problem": null,
+      "source": "license",
+      "version": "0.25.1"
+    },
+    {
+      "licence": "BSD-2-Clause",
+      "name": "pygments",
+      "problem": null,
+      "source": "expression",
+      "version": "2.21.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "pyjwt",
+      "problem": null,
+      "source": "expression",
+      "version": "2.15.0"
+    },
+    {
+      "licence": "BSD-3-Clause OR Apache-2.0",
+      "name": "pypdfium2",
+      "problem": null,
+      "source": "license",
+      "version": "5.13.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "pyqwest",
+      "problem": null,
+      "source": "classifier",
+      "version": "0.10.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "pytest",
+      "problem": null,
+      "source": "expression",
+      "version": "9.1.1"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "python-dateutil",
+      "problem": null,
+      "source": "classifier",
+      "version": "2.9.0.post0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "python-dotenv",
+      "problem": null,
+      "source": "license",
+      "version": "1.2.3"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "python-multipart",
+      "problem": null,
+      "source": "expression",
+      "version": "0.0.32"
+    },
+    {
+      "licence": "MIT",
+      "name": "python-pptx",
+      "problem": null,
+      "source": "license",
+      "version": "1.0.2"
+    },
+    {
+      "licence": "MIT",
+      "name": "pyyaml",
+      "problem": null,
+      "source": "license",
+      "version": "6.0.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "readabilipy",
+      "problem": null,
+      "source": "license",
+      "version": "0.3.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "referencing",
+      "problem": null,
+      "source": "expression",
+      "version": "0.37.0"
+    },
+    {
+      "licence": "Apache-2.0 AND CNRI-Python",
+      "name": "regex",
+      "problem": null,
+      "source": "expression",
+      "version": "2026.9.10"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "requests",
+      "problem": null,
+      "source": "license",
+      "version": "2.34.2"
+    },
+    {
+      "licence": "ISC",
+      "name": "requests-oauthlib",
+      "problem": null,
+      "source": "license",
+      "version": "2.0.0"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "requests-toolbelt",
+      "problem": null,
+      "source": "license",
+      "version": "1.0.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "rich",
+      "problem": null,
+      "source": "license",
+      "version": "15.0.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "rpds-py",
+      "problem": null,
+      "source": "expression",
+      "version": "2026.6.3"
+    },
+    {
+      "licence": "MIT",
+      "name": "six",
+      "problem": null,
+      "source": "license",
+      "version": "1.17.0"
+    },
+    {
+      "licence": "MIT OR Apache-2.0",
+      "name": "sniffio",
+      "problem": null,
+      "source": "license",
+      "version": "1.3.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "socksio",
+      "problem": null,
+      "source": "classifier",
+      "version": "1.0.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "soupsieve",
+      "problem": null,
+      "source": "expression",
+      "version": "2.10"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "speechrecognition",
+      "problem": null,
+      "source": "expression",
+      "version": "3.17.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "sqlalchemy",
+      "problem": null,
+      "source": "expression",
+      "version": "2.1.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "sqlite-vec",
+      "problem": null,
+      "source": "exception:license_field",
+      "version": "0.1.9"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "sse-starlette",
+      "problem": null,
+      "source": "expression",
+      "version": "3.4.11"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "starlette",
+      "problem": null,
+      "source": "expression",
+      "version": "1.7.0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "sympy",
+      "problem": null,
+      "source": "license",
+      "version": "1.14.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "tavily-python",
+      "problem": null,
+      "source": "classifier",
+      "version": "0.8.4"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "tenacity",
+      "problem": null,
+      "source": "license",
+      "version": "9.1.4"
+    },
+    {
+      "licence": "MIT",
+      "name": "tiktoken",
+      "problem": null,
+      "source": "exception:file",
+      "version": "0.14.0"
+    },
+    {
+      "licence": "MPL-2.0 AND MIT",
+      "name": "tqdm",
+      "problem": null,
+      "source": "license",
+      "version": "4.70.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "truststore",
+      "problem": null,
+      "source": "expression",
+      "version": "0.10.4"
+    },
+    {
+      "licence": "PSF-2.0",
+      "name": "typing-extensions",
+      "problem": null,
+      "source": "expression",
+      "version": "4.16.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "typing-inspection",
+      "problem": null,
+      "source": "expression",
+      "version": "0.4.4"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "tzdata",
+      "problem": null,
+      "source": "license",
+      "version": "2026.4"
+    },
+    {
+      "licence": "MIT",
+      "name": "urllib3",
+      "problem": null,
+      "source": "expression",
+      "version": "2.8.0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "uuid-utils",
+      "problem": null,
+      "source": "expression",
+      "version": "0.17.1"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "uvicorn",
+      "problem": null,
+      "source": "expression",
+      "version": "0.46.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "uvloop",
+      "problem": null,
+      "source": "license",
+      "version": "0.22.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "volcengine-python-sdk",
+      "problem": null,
+      "source": "expression",
+      "version": "5.0.50"
+    },
+    {
+      "licence": "MIT",
+      "name": "watchfiles",
+      "problem": null,
+      "source": "license",
+      "version": "1.3.0"
+    },
+    {
+      "licence": "MIT",
+      "name": "wcmatch",
+      "problem": null,
+      "source": "expression",
+      "version": "11.0.1"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "webencodings",
+      "problem": null,
+      "source": "classifier",
+      "version": "0.6.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "websocket-client",
+      "problem": null,
+      "source": "license",
+      "version": "1.9.2"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "websockets",
+      "problem": null,
+      "source": "expression",
+      "version": "16.0"
+    },
+    {
+      "licence": "BSD-2-Clause",
+      "name": "wrapt",
+      "problem": null,
+      "source": "expression",
+      "version": "2.5.0"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "xlrd",
+      "problem": null,
+      "source": "license",
+      "version": "2.0.2"
+    },
+    {
+      "licence": "BSD-2-Clause",
+      "name": "xlsxwriter",
+      "problem": null,
+      "source": "license",
+      "version": "3.2.9"
+    },
+    {
+      "licence": "BSD-2-Clause",
+      "name": "xxhash",
+      "problem": null,
+      "source": "license",
+      "version": "4.0.1"
+    },
+    {
+      "licence": "Apache-2.0",
+      "name": "yarl",
+      "problem": null,
+      "source": "license",
+      "version": "1.25.1"
+    },
+    {
+      "licence": "MIT",
+      "name": "youtube-transcript-api",
+      "problem": null,
+      "source": "license",
+      "version": "1.0.3"
+    },
+    {
+      "licence": "BSD-3-Clause",
+      "name": "zstandard",
+      "problem": null,
+      "source": "expression",
+      "version": "0.25.0"
+    }
+  ],
+  "generated_at": "2026-09-27T15:07:32+00:00",
+  "ok": true,
+  "problems": [],
+  "python": "3.12.3",
+  "site_packages": "/home/claude/wt/delivery/services/delivery-py/.venv/lib/python3.12/site-packages"
+}

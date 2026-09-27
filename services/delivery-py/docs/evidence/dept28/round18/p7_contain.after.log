@@ -1,0 +1,7 @@
+write through link (target dir exists)                     refused: symlink escape refused
+write through link + MISSING intermediate dir              refused: symlink escape refused
+  files now outside the workspace: []
+read_file through link: refused: symlink escape refused
+read_file through link + missing intermediate: PermissionError symlink escape refused
+copy_out + extract ok; members: ['toy-py']
+symlink landed on host: False

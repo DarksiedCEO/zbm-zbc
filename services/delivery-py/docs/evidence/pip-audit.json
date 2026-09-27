@@ -1,0 +1,5 @@
+{
+  "advisories": [],
+  "audit": "not_run",
+  "why": "pip-audit not on PATH (not a runtime dependency; install it in a tooling venv)"
+}
