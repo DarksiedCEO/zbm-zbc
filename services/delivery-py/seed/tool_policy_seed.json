@@ -1,0 +1,57 @@
+{
+  "policy_version": 1,
+  "description": "Tool-call classes for the fix engine's guardrail (DEPT28_SPEC B.5, D6). Hash pinned in config.py; changed only through the rules pattern (an ADR 0011 amendment). The classifier in policy.py reads this file; the decisions are code. bash commands are split into simple commands on ; && || | and each argv is classified; the whole call takes the most restrictive class.",
+  "classes": {
+    "read": {
+      "decision": "allow",
+      "tools": ["read_file", "ls", "glob", "grep"],
+      "bash_argv0": ["cat", "ls", "head", "tail", "wc", "grep", "egrep", "fgrep", "find", "echo", "pwd", "true", "false", "test", "[", "cd", "diff", "sort", "uniq", "tr", "cut", "stat", "file", "which", "env", "printenv", "basename", "dirname", "realpath", "readlink", "date", "sha256sum", "md5sum", "tree", "less", "more", "xxd", "od", "nl", "tac", "seq", "printf", "sleep", "uname", "id", "whoami"],
+      "git_subcommands": ["status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog", "grep", "cat-file", "ls-tree", "branch --list", "branch --show-current"],
+      "pytest_flags_read": ["--collect-only", "--co", "--version", "--help"]
+    },
+    "write": {
+      "decision": "allow_with_token",
+      "tools": ["write_file", "str_replace", "update_file"],
+      "path_rule": "inside <workspace>/services/<service>/ or <workspace>/docs/adr/00NN-*.md of the same service"
+    },
+    "exec": {
+      "decision": "allow_with_token",
+      "bash_argv0": ["python", "python3", "pytest", "cargo", "go", "npm", "mkdir", "cp", "mv", "rm", "sed", "awk", "touch", "chmod", "ln", "tee", "sh", "bash", "ruff", "black", "mypy", "node", "rustc", "gofmt", "make"],
+      "note": "rm/find with a target outside the workspace, sh -c/bash -c, python -c mentioning subprocess/os.system, and every network verb are re-classified by the rules below; test commands are runner-captured when they match test_commands_seed.json"
+    },
+    "subagent": {
+      "decision": "allow_with_token",
+      "tools": ["task", "task_status"],
+      "max_per_run": 8
+    },
+    "network": {
+      "decision": "deny",
+      "tools": ["web_fetch", "web_search", "image_search", "browser_navigate", "browser_click", "browser_type"],
+      "bash_argv0": ["curl", "wget", "nc", "ncat", "netcat", "ssh", "scp", "sftp", "rsync", "telnet", "ftp", "pip", "pip3", "pipx", "poetry", "conda"],
+      "bash_patterns": ["pip install", "pip3 install", "python -m pip", "python3 -m pip", "npm install", "npm i ", "npm add", "npx ", "yarn add", "yarn install", "pnpm add", "pnpm install", "uv add", "uv pip", "uv sync", "uv tool", "uvx ", "cargo add", "cargo install", "go get", "go install", "gem install", "apt-get", "apt ", "apk add", "brew install"],
+      "python_c_words": ["urllib", "socket", "requests", "httpx", "aiohttp", "http.client", "ftplib", "smtplib", "telnetlib", "xmlrpc"]
+    },
+    "git_remote": {
+      "decision": "deny_unconditionally",
+      "git_subcommands": ["push", "pull", "fetch", "remote", "clone", "merge", "worktree", "clean", "gc", "prune", "submodule", "svn", "lfs", "send-email", "request-pull", "archive", "bundle", "filter-branch", "replace", "update-ref", "symbolic-ref", "reflog", "rebase", "cherry-pick", "revert", "reset", "checkout", "switch", "restore", "branch", "tag", "commit", "add", "stash", "rm", "mv", "am", "apply", "config", "init"],
+      "git_read_exceptions": "the read class above names the read-only git subcommands; every other git subcommand is refused: the ENGINE adds, commits and stashes (spec C.8.2), the engineer never does",
+      "bash_argv0": ["gh", "hub", "glab"],
+      "flags_anywhere": ["--force", "-f", "--no-verify", "--hard", "-D", "--delete"]
+    },
+    "destructive_outside_workspace": {
+      "decision": "deny_unconditionally",
+      "bash_rules": ["rm -r/-rf/-fr/-R with any target not under <workspace> after normalisation (.., absolute outside, symlink escape)", "rm of <workspace>/.git, of the evidence root or of /", "find … -delete or -exec rm outside the workspace", "python -c mentioning shutil.rmtree or os.remove/os.unlink/os.rmdir with an absolute path outside the workspace"]
+    },
+    "acp": {"decision": "deny_unconditionally", "tools": ["invoke_acp_agent"]},
+    "mcp": {"decision": "deny_unconditionally", "tools": [], "tag": "deerflow_mcp"},
+    "self_modify": {"decision": "deny_unconditionally", "tools": ["update_agent", "skill_manage", "memory_add", "memory_search", "memory_update", "memory_delete", "memory_get_context", "skill_evolve", "install_skill", "skills_add"]},
+    "unknown": {"decision": "deny", "note": "any tool name or bash argv[0] not named above"}
+  },
+  "raw_string_denies": ["$(", "`", "${", "eval ", "exec ", "xargs", "sh -c", "bash -c", "zsh -c", "dash -c", "| sh", "| bash", "|sh", "|bash", "<(", ">(", "\\x", "\\u", "$'"],
+  "python_c_deny_words": ["subprocess", "os.system", "os.popen", "os.exec", "os.spawn", "pty.spawn", "ctypes", "shutil.rmtree", "os.remove", "os.unlink", "os.rmdir", "importlib", "__import__", "compile(", "exec(", "eval("],
+  "write_targets": {
+    "service_dir": "<workspace>/services/<service>/",
+    "adr_glob": "<workspace>/docs/adr/00[0-9][0-9]-*.md",
+    "readme_root_section": false
+  }
+}

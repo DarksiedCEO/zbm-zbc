@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "description": "Test-command allowlist per framework (DEPT28_SPEC D7, SP-03). argv only, no shell; the engine runs these (RED, GREEN, revert check, suite), never the agent's own command. {target} is the single test node id path::name for a targeted run; the suite form has no target. Framework detection is by marker file inside services/<service>/. Hash pinned in config.py.",
+  "frameworks": {
+    "pytest": {
+      "markers": ["pytest.ini", "pyproject.toml", "conftest.py", "tests"],
+      "test": ["pytest", "-q", "-p", "no:cacheprovider", "{target}"],
+      "suite": ["pytest", "-q", "-p", "no:cacheprovider"],
+      "test_file_globs": ["tests/**/*.py", "test_*.py", "*_test.py"],
+      "parser": "pytest",
+      "cwd": "services/<service>"
+    },
+    "cargo": {
+      "markers": ["Cargo.toml"],
+      "test": ["cargo", "test", "--offline", "--", "{target}", "--exact"],
+      "suite": ["cargo", "test", "--offline"],
+      "test_file_globs": ["tests/**/*.rs", "src/**/*.rs"],
+      "parser": "cargo",
+      "cwd": "services/<service>",
+      "build": ["cargo", "build", "--offline"]
+    },
+    "go": {
+      "markers": ["go.mod"],
+      "test": ["go", "test", "-count=1", "-run", "{target}", "./..."],
+      "suite": ["go", "test", "-count=1", "./..."],
+      "test_file_globs": ["**/*_test.go"],
+      "parser": "go",
+      "cwd": "services/<service>",
+      "build": ["go", "build", "./..."]
+    },
+    "npm": {
+      "markers": ["package.json"],
+      "requires": ["package-lock.json"],
+      "test": ["npm", "test", "--", "{target}"],
+      "suite": ["npm", "test"],
+      "test_file_globs": ["**/*.test.*", "**/*.spec.*", "test/**", "tests/**"],
+      "parser": "npm",
+      "cwd": "services/<service>",
+      "note": "only with a lockfile present (D7); no npm install is ever run by the engine"
+    }
+  },
+  "service_env": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "CI": "1",
+    "PYTHONHASHSEED": "0"
+  }
+}

@@ -681,3 +681,28 @@ export LEGAL_CALLER_TOKENS='{"compliance_38": "<>=32 chars>", "hub": "...", "sch
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> LEGAL_DATA_DIR=<dir>
 cd src && python3 -m api   # LEGAL_BIND_ADDR (default 127.0.0.1), LEGAL_PORT (default 8420)
 ```
+
+## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026
+
+The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;
+Superpowers `8ca22dba` prompt texts forked as ours). A findings document goes in; the ENGINE opens a
+`fix<N>-<service>` worktree, runs one agent engineer per finding inside our Docker sandbox under our guardrail,
+runs the failing test, the passing test, the revert check and the whole suite itself, commits, writes the report
+from its records and hands the run to AEGIS re-review — nothing is fixed on the agent's word, and `git push`,
+merges, network, deletion outside the workspace, ACP/MCP and self-modification are denied unconditionally.
+Architecture, pins, the 28 choices and the spec defects: `docs/adr/0011-delivery-department-architecture.md`.
+Routes and settings: `services/delivery-py/README.md`.
+
+- **Status:** built and tested (391 tests: 388 passed, 3 skipped with the printed reason; `ruff` clean). The loop is
+  proven end to end with a deterministic model against the `fixtures/dlv/toy-py` fixture through the REAL harness
+  and guardrail. **Docker live: not provable here** (no daemon on the build box; the argv-level double proves the
+  adapter, `tests/test_live_docker.py` lists the seven properties only a daemon can prove). **Not certified for a
+  fix run against `main`.** pip-audit not run (tool absent); image digests are required build arguments.
+- **Fails closed.** Refuse-to-start on any pinned hash, any tampered prompt/skill/seed, any forbidden module, a
+  deer-flow commit other than the pin, any env name outside the allowlist, a tag-only image, a licence outside the
+  allowlist. No Docker daemon or no provider key → every run 503, nothing queued. Every transition is a ledger
+  event (department `delivery`) and a hash-chained, ledger-anchored local log line before it takes effect.
+
+```bash
+cd services/delivery-py && uv sync --frozen --no-dev && .venv/bin/python -m pytest -q     # 391 tests
+```

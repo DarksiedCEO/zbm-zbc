@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "description": "Distributions whose metadata carries no usable licence expression (DEPT28_SPEC C.7.2, D13: exceptions by name with a reason). proof kinds: 'file' = the bundled licence file inside the installed dist-info whose first line is re-read by the gate; 'sibling' = another installed distribution from the same source repository whose License-Expression the gate re-reads; 'stated' = a licence verified outside the venv (the pinned repository's LICENSE, sha256 recorded) that the gate cannot re-read \u2014 accepted by name with the reason, as D13 allows. The spec's list named only lark-oapi and agent-client-protocol (df-state); the resolved runtime set needed four more (recorded in ADR 0011). lark-oapi is a gateway dependency and is NOT in this service's runtime set (spec 0.3); its entry is inert while the distribution is absent.",
+  "exceptions": {
+    "lark-oapi": {
+      "licence": "MIT",
+      "proof": "LICENSE",
+      "first_line": "MIT License",
+      "reason": "METADATA has License-File only; the bundled LICENSE is the MIT text (df-state)",
+      "kind": "file"
+    },
+    "agent-client-protocol": {
+      "licence": "Apache-2.0",
+      "proof": "licenses/LICENSE",
+      "first_line": "Apache License",
+      "reason": "METADATA has no License-Expression; the bundled licenses/LICENSE is the Apache-2.0 text (df-state)",
+      "kind": "file"
+    },
+    "deerflow-harness": {
+      "kind": "stated",
+      "licence": "MIT",
+      "reason": "deer-flow repository LICENSE at commit 345f08be00c8a9495079b732a39b46aa9af1584e is the MIT text (sha256 b23dff4d4bac8d17b6efaaa7e88c2b730149c4dda45699ce676b719cfdffe7e1; VERDICT: 'deer-flow itself is MIT'); the harness subpackage pyproject declares no license field and the git-built dist-info carries no licence file"
+    },
+    "deerflow-extension-api": {
+      "kind": "stated",
+      "licence": "MIT",
+      "reason": "same repository and commit as deerflow-harness (backend/packages/extension-api); no license metadata in its pyproject"
+    },
+    "protobuf-py-ext": {
+      "kind": "sibling",
+      "licence": "Apache-2.0",
+      "sibling": "protobuf-py",
+      "reason": "native extension built from the same repository (github.com/bufbuild/protobuf-py) as protobuf-py, whose METADATA carries License-Expression: Apache-2.0; the repository LICENSE is Apache-2.0 (verified 2026-09-27); the ext wheel ships no licence metadata"
+    },
+    "sqlite-vec": {
+      "kind": "license_field",
+      "licence": "MIT",
+      "reason": "METADATA License field reads 'MIT License, Apache License, Version 2.0' (dual-licensed); the gate normalises the comma list and accepts MIT"
+    }
+  }
+}

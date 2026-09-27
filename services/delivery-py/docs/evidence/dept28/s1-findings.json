@@ -1,0 +1,162 @@
+[
+  {
+    "agent": {
+      "thread_id": "dlv-CT9N5DC5KYVQWQKKDJP2NGCE0D",
+      "tokens_in": 70,
+      "tokens_out": 35,
+      "tool_calls": 4,
+      "turns": 2
+    },
+    "brief_evidence_id": "dlv-ev-992212ffa51ca2d35360ef03bb",
+    "changed_tests": [],
+    "class_hint": "wrong_operator",
+    "commit_files": [
+      "services/toy-py/src/toy/calc.py",
+      "services/toy-py/tests/test_fix_n1_1.py"
+    ],
+    "commit_sha": "546af22f4a98150eb652ead40671762ae5b4580c",
+    "disproof": null,
+    "file": "services/toy-py/src/toy/calc.py",
+    "finding_id": "N1-1",
+    "green": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_fix_n1_1.py::test_add_sum"
+      ],
+      "evidence_id": "dlv-ev-4bcefcc9f6c645923b9993ccf7",
+      "exit": 0,
+      "output_sha256": "4bcefcc9f6c645923b9993ccf73ad92e6b400ca25458ea14e095857fc2131342",
+      "test_name": "test_add_sum",
+      "test_path": "tests/test_fix_n1_1.py"
+    },
+    "injection_rules": [],
+    "line": 6,
+    "reasons": [],
+    "red": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_fix_n1_1.py::test_add_sum"
+      ],
+      "evidence_id": "dlv-ev-cd869f49e72e4aa2470ace2129",
+      "exit": 1,
+      "output_sha256": "cd869f49e72e4aa2470ace2129dfffbee3ea4dd3e623dbeeb29586f7e8a9d9e4",
+      "test_name": "test_add_sum",
+      "test_path": "tests/test_fix_n1_1.py"
+    },
+    "revert_check": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_fix_n1_1.py::test_add_sum"
+      ],
+      "evidence_id": "dlv-ev-b6df622a9a45aa1c0a8215a676",
+      "exit": 1,
+      "output_sha256": "b6df622a9a45aa1c0a8215a676ae516e306aa63c82046a1741ffa56963f2a159",
+      "restored_exit": 0
+    },
+    "rounds": 1,
+    "run_id": "dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D",
+    "severity": "high",
+    "state": "fixed",
+    "suite_failures": [],
+    "sweep": {
+      "class_hint": "wrong_operator",
+      "evidence_id": "dlv-ev-a4f8e77e87a03ab9ea0537cdcd",
+      "sites": [
+        {
+          "file": "src/toy/calc.py",
+          "line": 6
+        }
+      ]
+    },
+    "title_sha256": "75db6b0f97384e9c9c0e4b48e167c3358070b8bce9dd7653e72f5faab2518256"
+  },
+  {
+    "agent": {
+      "thread_id": "dlv-CT9N5DC5KYVQWQKKDJP2NGCE0D",
+      "tokens_in": 70,
+      "tokens_out": 35,
+      "tool_calls": 4,
+      "turns": 2
+    },
+    "brief_evidence_id": "dlv-ev-8ba69cc6bffc07bb0aaaed4253",
+    "changed_tests": [],
+    "class_hint": "division_by_zero",
+    "commit_files": [
+      "services/toy-py/src/toy/calc.py",
+      "services/toy-py/tests/test_fix_n1_2.py"
+    ],
+    "commit_sha": "31729adbdecf02a7da06dfcd083bb973af6a8886",
+    "disproof": null,
+    "file": "services/toy-py/src/toy/calc.py",
+    "finding_id": "N1-2",
+    "green": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_fix_n1_2.py::test_percent_zero_whole"
+      ],
+      "evidence_id": "dlv-ev-4bcefcc9f6c645923b9993ccf7",
+      "exit": 0,
+      "output_sha256": "4bcefcc9f6c645923b9993ccf73ad92e6b400ca25458ea14e095857fc2131342",
+      "test_name": "test_percent_zero_whole",
+      "test_path": "tests/test_fix_n1_2.py"
+    },
+    "injection_rules": [],
+    "line": 11,
+    "reasons": [],
+    "red": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_fix_n1_2.py::test_percent_zero_whole"
+      ],
+      "evidence_id": "dlv-ev-96cea0496bf7a7c7ef483b0d98",
+      "exit": 1,
+      "output_sha256": "96cea0496bf7a7c7ef483b0d98ebfac4fdb69af3a2fff16df84e7de453ebb4b4",
+      "test_name": "test_percent_zero_whole",
+      "test_path": "tests/test_fix_n1_2.py"
+    },
+    "revert_check": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_fix_n1_2.py::test_percent_zero_whole"
+      ],
+      "evidence_id": "dlv-ev-aacfd7d7ef86b0eb4101b068f7",
+      "exit": 1,
+      "output_sha256": "aacfd7d7ef86b0eb4101b068f717c2928bbf780aa3a37ee39aa6d949ae2b21f5",
+      "restored_exit": 0
+    },
+    "rounds": 1,
+    "run_id": "dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D",
+    "severity": "high",
+    "state": "fixed",
+    "suite_failures": [],
+    "sweep": {
+      "class_hint": "division_by_zero",
+      "evidence_id": "dlv-ev-02df61509ebf9d861bd3787839",
+      "sites": [
+        {
+          "file": "src/toy/calc.py",
+          "line": 11
+        }
+      ]
+    },
+    "title_sha256": "2c2f2678e1fbc0c935a6846142fc2d8dc3fe9e1ee23e0629b913c1ee57b3253e"
+  }
+]

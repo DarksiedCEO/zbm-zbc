@@ -1,0 +1,9 @@
+# full suite: .venv/bin/python -m pytest -q -rs  (Sep 27 2026; wall 201 s; 388 passed, 3 skipped, 0 failed; skips = tests/test_live_docker.py, reason printed below)
+SKIPPED [1] tests/test_live_docker.py:70: Docker live: not provable here — docker daemon not reachable: failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon
+SKIPPED [1] tests/test_live_docker.py:81: Docker live: not provable here — docker daemon not reachable: failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon
+SKIPPED [1] tests/test_live_docker.py:87: Docker live: not provable here — docker daemon not reachable: failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon
+388 passed, 3 skipped in 201.23s (0:03:21)
+
+real	3m23.154s
+user	2m47.609s
+sys	0m15.323s

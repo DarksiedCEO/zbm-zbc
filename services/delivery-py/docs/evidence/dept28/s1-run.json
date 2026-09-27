@@ -1,0 +1,253 @@
+{
+  "base_ref": "integration-2026-09-24",
+  "base_sha": "b1e36f9765197529940346f361f307bb479d4002",
+  "branch": "fix1-toy-py",
+  "caller": "aegis",
+  "commits": [
+    {
+      "diff_evidence_id": "dlv-ev-8eaa85cd02ead57517c464ee6c",
+      "files": [
+        "services/toy-py/src/toy/calc.py",
+        "services/toy-py/tests/test_fix_n1_1.py"
+      ],
+      "finding_id": "N1-1",
+      "message_sha256": "944dcf2eb51d14ff57b8ecb3677eda06c275b4e43e8c4d4da74ec371f5f970c6",
+      "sha": "546af22f4a98150eb652ead40671762ae5b4580c"
+    },
+    {
+      "diff_evidence_id": "dlv-ev-c3247a508276a0e2579fcd46be",
+      "files": [
+        "services/toy-py/src/toy/calc.py",
+        "services/toy-py/tests/test_fix_n1_2.py"
+      ],
+      "finding_id": "N1-2",
+      "message_sha256": "595e9ba47eeae88744012f8edc64aa7f83121ab9b84f58a6a9b7528e9c316362",
+      "sha": "31729adbdecf02a7da06dfcd083bb973af6a8886"
+    }
+  ],
+  "created_at": "2026-09-27T12:00:00Z",
+  "deadline_at": "2026-09-27T12:45:00Z",
+  "evidence": [
+    {
+      "bytes": 782,
+      "evidence_id": "dlv-ev-471edebf08719283a6d5649c76",
+      "kind": "suite_output",
+      "sha256": "471edebf08719283a6d5649c765fe5070b22ac015f1e0219991c3e5b573e47df"
+    },
+    {
+      "bytes": 41851,
+      "evidence_id": "dlv-ev-b89f789b8a68bcd67a4a0a443e",
+      "kind": "prompt_manifest",
+      "sha256": "b89f789b8a68bcd67a4a0a443ec1870ec2bbf0aca1cf19d73ea0fa8c0995f4c4"
+    },
+    {
+      "bytes": 1708,
+      "evidence_id": "dlv-ev-992212ffa51ca2d35360ef03bb",
+      "kind": "brief",
+      "sha256": "992212ffa51ca2d35360ef03bbe59e249c072517b4a00f3b4dc23f3db33bb3bc"
+    },
+    {
+      "bytes": 763,
+      "evidence_id": "dlv-ev-cd869f49e72e4aa2470ace2129",
+      "kind": "test_output",
+      "sha256": "cd869f49e72e4aa2470ace2129dfffbee3ea4dd3e623dbeeb29586f7e8a9d9e4"
+    },
+    {
+      "bytes": 98,
+      "evidence_id": "dlv-ev-4bcefcc9f6c645923b9993ccf7",
+      "kind": "test_output",
+      "sha256": "4bcefcc9f6c645923b9993ccf73ad92e6b400ca25458ea14e095857fc2131342"
+    },
+    {
+      "bytes": 879,
+      "evidence_id": "dlv-ev-b6df622a9a45aa1c0a8215a676",
+      "kind": "test_output",
+      "sha256": "b6df622a9a45aa1c0a8215a676ae516e306aa63c82046a1741ffa56963f2a159"
+    },
+    {
+      "bytes": 358,
+      "evidence_id": "dlv-ev-a4f8e77e87a03ab9ea0537cdcd",
+      "kind": "diff",
+      "sha256": "a4f8e77e87a03ab9ea0537cdcd9072bfbd76d8677c0ed704523c7d6a3b7eada8"
+    },
+    {
+      "bytes": 98,
+      "evidence_id": "dlv-ev-4250d1f2029068ddc50a143f43",
+      "kind": "suite_output",
+      "sha256": "4250d1f2029068ddc50a143f438d48c0e151e05c734fe713ffea94436ecf9381"
+    },
+    {
+      "bytes": 649,
+      "evidence_id": "dlv-ev-8eaa85cd02ead57517c464ee6c",
+      "kind": "diff",
+      "sha256": "8eaa85cd02ead57517c464ee6c0a88c07248bde56553f126c084b7d793be6bb6"
+    },
+    {
+      "bytes": 1699,
+      "evidence_id": "dlv-ev-8ba69cc6bffc07bb0aaaed4253",
+      "kind": "brief",
+      "sha256": "8ba69cc6bffc07bb0aaaed42534a420224be585bf319f46f23ea4b5ee0821c0e"
+    },
+    {
+      "bytes": 980,
+      "evidence_id": "dlv-ev-96cea0496bf7a7c7ef483b0d98",
+      "kind": "test_output",
+      "sha256": "96cea0496bf7a7c7ef483b0d98ebfac4fdb69af3a2fff16df84e7de453ebb4b4"
+    },
+    {
+      "bytes": 1096,
+      "evidence_id": "dlv-ev-aacfd7d7ef86b0eb4101b068f7",
+      "kind": "test_output",
+      "sha256": "aacfd7d7ef86b0eb4101b068f717c2928bbf780aa3a37ee39aa6d949ae2b21f5"
+    },
+    {
+      "bytes": 463,
+      "evidence_id": "dlv-ev-02df61509ebf9d861bd3787839",
+      "kind": "diff",
+      "sha256": "02df61509ebf9d861bd378783914d5407b190a48c51c0853d91476b4ad684f48"
+    },
+    {
+      "bytes": 98,
+      "evidence_id": "dlv-ev-9310d484212a1fe2c33b4b8acc",
+      "kind": "suite_output",
+      "sha256": "9310d484212a1fe2c33b4b8accdf50a2639f09ba039354f8448f8aa8d173e1ff"
+    },
+    {
+      "bytes": 771,
+      "evidence_id": "dlv-ev-c3247a508276a0e2579fcd46be",
+      "kind": "diff",
+      "sha256": "c3247a508276a0e2579fcd46bedcbd8e1d808bfe039b091b94dfe88202ee0925"
+    },
+    {
+      "bytes": 7035,
+      "evidence_id": "dlv-ev-bb2daabead39e3e6c9ad594bb1",
+      "kind": "report",
+      "sha256": "bb2daabead39e3e6c9ad594bb15ecc55484972ec1b29de92b210aaa76a3a9b87"
+    }
+  ],
+  "facts_sha256": "4ffd0148c921349f9ffd5bd63d45a3eb0d57b7c8bfe0250112692556f7e798b0",
+  "finding_ids": [
+    "N1-1",
+    "N1-2"
+  ],
+  "finished_at": "2026-09-27T12:00:00Z",
+  "injection_rules": [],
+  "ledger_event_ids": [
+    "dlv-rcv-a61001b69a273751aeda6bf3842ba4e98b0bbca9",
+    "dlv-run-767760a48d45a4417fbd5006f8923fa858a9e489",
+    "dlv-run-a03f19da1d647eebcb3202e6813dca638365f202",
+    "dlv-run-9ba2b801594f6bbb44ce794a30117076ac0f3a4a",
+    "dlv-run-ea7fa3b52ff9ed702324a275698ac31acd626da3",
+    "dlv-run-c8b425be7ab6db815f45e81c8b2e074197115474",
+    "dlv-run-39640ebe021cc71456a189f20086b953d2945409",
+    "dlv-fnd-223549c253bc218661992c98e8bf07a64ab608b6",
+    "dlv-fnd-7268211184db4aea4e6da474c23733f6b13f77a6",
+    "dlv-fnd-1d3d0a08a294cc2c3ce03217c948448cf2890672",
+    "dlv-fns-4b661ae59c6e36ddbacc5f76c12e1778b808bcea",
+    "dlv-fnd-ed7f445faf71d5dc8db10ad4b2763bae850d0f6d",
+    "dlv-fns-7be6944b52e4b8a8f876c16bbb7a6e1a1a91000f",
+    "dlv-fnd-c93fc689a02e8b8a7166d73e7671fcca78938a0d",
+    "dlv-fns-18e5761edd24b934cddcf482218c2ada332e34cd",
+    "dlv-run-af974d590e120b88f77e2942481e3165234d9693",
+    "dlv-fnd-5a25fe95c69ddd73a7ecf5ef3676c7fb3d6e140f",
+    "dlv-fnd-2548cfdeaa7c1f3306f4ce6ab44e0325af1e8d77",
+    "dlv-fns-5cf5fcf5c0ef657c3ef95e73d92d68de8fbbd33b",
+    "dlv-fnd-0c96244107408dd94d3582353c885dcb84fe3881",
+    "dlv-fnd-c4b901eb371cc09eaa69fe432f216b5b778eec1d",
+    "dlv-fnd-c6bf8ab90ae06bb979c74f14d6e61c3e72bd3d72",
+    "dlv-fns-712fbbdae44f8aae331fb6572db7b887392777f8",
+    "dlv-fnd-d4044642426f89d55418c4cab08a44c0b6bb9750",
+    "dlv-fns-166526c24dfb769d24eb127984e6e6e8e61e8d37",
+    "dlv-fnd-5e01de942a186ca0160cea358e9748228b3278ec",
+    "dlv-fns-5ab9444074f847804ebb6574113a519e8d08e72e",
+    "dlv-run-4f882a75a64c4b3249c5e057f49bdde22fa4ca3d",
+    "dlv-fnd-9ce1871ddca31b840184e4936846fb828c1be9ca",
+    "dlv-fnd-b3644f1ea36bd3e480bf17e75c414c7b8099c294",
+    "dlv-fns-fa86d2e90a64656a07a017c7bdd1508987574187",
+    "dlv-run-32a50c57a72157e1c9394c6d4cf8b77809e83302",
+    "dlv-run-e09961a339a6979109ada280a01f3d77ba4a6fda",
+    "dlv-run-6e339a2dbd81c95b7ff853e245d633ecfc2be48d",
+    "dlv-run-b65ccf6b462fc170c0dad0f0c2829e25a33370ff",
+    "dlv-run-0b0611c7842f552aaab59cdad058c2874d2ae59c"
+  ],
+  "llm": {
+    "fake": true,
+    "model": "fake-engineer",
+    "provider": "fake"
+  },
+  "new_defects": [],
+  "parent_run_id": null,
+  "policy_version": 1,
+  "principal": {
+    "id": "aegis",
+    "kind": "service",
+    "tenant": "zbm"
+  },
+  "principal_user_id": "zbm--dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D",
+  "prompts_manifest_sha256": "064a5e3e3b3ea696cce1a586eef792a9a73e26ed8b45dabe9dfa20fa2d295440",
+  "reasons": [],
+  "report_evidence_id": "dlv-ev-bb2daabead39e3e6c9ad594bb1",
+  "report_sha256": "bb2daabead39e3e6c9ad594bb15ecc55484972ec1b29de92b210aaa76a3a9b87",
+  "request_id": "req-f00251ec545142929b9a",
+  "review": null,
+  "run_id": "dlv-run-CT9N5DC5KYVQWQKKDJP2NGCE0D",
+  "sandbox": {
+    "container_id_sha256": "2803aa64780ccfc0354fe3d4e92edce67e6c11d797c0fa61085a229a1d1968ab",
+    "image_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "service": "toy-py",
+  "source": {
+    "kind": "aegis_review",
+    "ref": "review-test",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "status": "awaiting_review",
+  "suite": {
+    "after": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "counts": {
+        "errors": 0,
+        "failed": 0,
+        "failed_names": [],
+        "parsed": true,
+        "passed": 5,
+        "skips": 0
+      },
+      "evidence_id": "dlv-ev-9310d484212a1fe2c33b4b8acc",
+      "exit": 0,
+      "output_sha256": "9310d484212a1fe2c33b4b8accdf50a2639f09ba039354f8448f8aa8d173e1ff",
+      "timed_out": false,
+      "truncated": false
+    },
+    "before": {
+      "argv": [
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "counts": {
+        "errors": 0,
+        "failed": 1,
+        "failed_names": [
+          "tests/test_calc.py::test_add_returns_sum"
+        ],
+        "parsed": true,
+        "passed": 2,
+        "skips": 0
+      },
+      "evidence_id": "dlv-ev-471edebf08719283a6d5649c76",
+      "exit": 1,
+      "output_sha256": "471edebf08719283a6d5649c765fe5070b22ac015f1e0219991c3e5b573e47df",
+      "timed_out": false,
+      "truncated": false
+    }
+  },
+  "thread_id": "dlv-CT9N5DC5KYVQWQKKDJP2NGCE0D",
+  "worktree_path": "/tmp/dlv-test-a1twx0gm/worktrees/fix1-toy-py"
+}

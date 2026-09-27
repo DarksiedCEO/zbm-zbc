@@ -1,0 +1,49 @@
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+TESTS = Path(__file__).resolve().parent
+for p in (SRC, TESTS):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+# The suite builds every service from an explicit env dict; the process environment must not leak DLV_* or the
+# ledger settings into anything that reads os.environ (the harness module sets only the DEER_FLOW_* it owns).
+for k in list(os.environ):
+    if k.startswith(("DLV_", "DEER_FLOW_", "LEDGER_SERVICE_", "LANGSMITH_", "LANGFUSE_", "GATEWAY_")):
+        os.environ.pop(k, None)
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch, request):
+    """G13 / BUILD_CONTRACTS §0: no socket connect in tests other than through the egress client's mock transport
+    (which never opens a socket). Any real connect raises. The live modules (test_live_*) talk to a server they
+    started on 127.0.0.1 within the assigned port range and are exempt."""
+    import socket
+
+    if request.module.__name__.startswith("test_live_"):
+        return
+
+    def refuse(*a, **k):
+        raise RuntimeError("network access attempted in a test (not allowed)")
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket.socket, "connect_ex", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("DNS lookup attempted in a test")))
+
+
+@pytest.fixture(autouse=True)
+def _no_tiktoken_download(monkeypatch):
+    """G11: tiktoken may be imported by langchain_openai's module; its loader must never run (it downloads)."""
+    try:
+        import tiktoken.load as tl
+    except ImportError:
+        return
+
+    def boom(*a, **k):
+        raise RuntimeError("tiktoken.load.read_file called in a test (a download path)")
+    monkeypatch.setattr(tl, "read_file", boom)
+    monkeypatch.setattr(tl, "read_file_cached", boom, raising=False)
