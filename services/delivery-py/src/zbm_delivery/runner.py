@@ -3,20 +3,24 @@ The engine's own test execution (spec §C.8.4 steps 2, 4, 5; D7; SP-03; round 18
 seeded argv (no shell) inside the run's sandbox from a service directory, captures exit code and output, and computes
 the verdict from artefacts the engine controls. Nothing the agent prints is ever a count.
 
-pytest (the only framework with an engine-owned report in this build): every invocation carries
-``-c <engine ini>`` (written by the engine under ``/mnt/user-data/workspace/.dlv-engine/``, ``addopts`` empty),
-``--rootdir=<service dir>``, ``-o`` overrides for ``python_files``/``testpaths``/``pythonpath`` from the seed,
-``-p no:cacheprovider`` and ``--junitxml=<engine path>``; the repository's ``pytest.ini``/``pyproject``/``setup.cfg``/
-``tox.ini`` are never read. The junit file is read back with ``docker cp`` (the daemon, not a process in the box)
-and cross-checked against a separate ``--collect-only -q`` run, the summary line and the exit code
-(``parsers.verified_counts``). Any disagreement is ``unknown``; ``unknown`` is never green and never a valid RED.
-cargo / go / npm have no engine-owned report here: their counts are ``unknown`` by construction (seed ``verified``).
+Every seeded framework has an engine-owned verdict path (``engine/toolchains.py``): pytest (``--junitxml`` to an
+engine path + ``--collect-only`` + summary + exit), go (``go test -json`` events + ``go test -json -list`` + package
+results + exit), cargo (per-test lines + ``-- --list`` + per-binary result lines + exit, stable toolchain) and
+node (``--test-reporter=junit`` to an engine path + the TAP stream + exit; Node has no collect-only). Any
+disagreement is ``unknown``; ``unknown`` is never green and never a valid RED. A framework whose seed says
+``verified: false`` (none shipped) stays ``unknown`` by construction.
 
-Residual (accepted, ADR 0011): a test process runs as the same uid in the same container as the engine's files;
-agent code that runs inside pytest (a test module) can read ``sys.argv``, find the junit path and rewrite it. The
-cross-checks make that expensive — it must also forge the collect-only count (a second process), the summary line
-and the exit code, and it cannot touch ``conftest.py``/``pytest.ini`` (R1 rejects them) — and the verification
-checkout (R1) runs the RED test file alone on base + src, where no other agent file exists.
+pytest detail: every invocation carries ``-c <engine ini>`` (written by the engine under
+``/mnt/user-data/workspace/.dlv-engine/``, ``addopts`` empty), ``--rootdir=<service dir>``, ``-o`` overrides for
+``python_files``/``testpaths``/``pythonpath`` from the seed and ``-p no:cacheprovider``; the repository's
+``pytest.ini``/``pyproject``/``setup.cfg``/``tox.ini`` are never read. Report files are read back with ``docker cp``
+(the daemon, not a process in the box). cargo builds into an engine-owned ``--target-dir`` under the engine directory,
+never the service's ``target/``.
+
+Residual (accepted, ADR 0011): a test process runs as the same uid in the same container as the engine's files; the
+cross-checks make forging expensive (a second process's listing, per-line multiplicities, package/binary results and
+the exit code must all be forged together; per-ecosystem content rules in the seed refuse the cheap routes), and the
+verification checkout (R1) runs the RED test file alone on base + src, where no other agent file exists.
 """
 
 from __future__ import annotations
@@ -30,12 +34,14 @@ import secrets
 from dataclasses import dataclass, field
 from typing import Optional
 
-from zbm_delivery.engine import parsers
+from zbm_delivery.engine import parsers, toolchains
 from zbm_delivery.policy import WORKSPACE
 from zbm_delivery.ports import ExecResult
 
 _TARGET_RE = re.compile(r"^[A-Za-z0-9_./\-]+::[A-Za-z_][A-Za-z0-9_:]*(?:\[[^\]\n]{1,120}\])?$")
-_NODE_IN_TEXT = re.compile(r"(?<![A-Za-z0-9_./\-])((?:tests?/)?[A-Za-z0-9_./\-]+\.py::[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*(?:\[[^\]\n]{1,120}\])?)")
+_EXTS = r"(?:py|rs|go|ts|mts|cts|js|mjs|cjs)"
+_NODE_IN_TEXT = re.compile(r"(?<![A-Za-z0-9_./\-])((?:tests?/)?[A-Za-z0-9_./\-]+\." + _EXTS +
+                           r"::[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*(?:\[[^\]\n]{1,120}\])?)")
 ENGINE_DIR = f"{WORKSPACE}/.dlv-engine"
 VERIFY_DIR = f"{WORKSPACE}/.dlv-verify"
 
@@ -54,14 +60,15 @@ class TestRun:
     truncated: bool
     counts: Optional[parsers.Counts] = None
     verdict: str = "unknown"                 # pass | fail | unknown — for a targeted run (R2)
-    junit_sha256: Optional[str] = None
+    junit_sha256: Optional[str] = None       # sha256 of the engine-read report file (junit for pytest/node)
     collected: Optional[int] = None
     cwd: str = ""
     extra: dict = field(default_factory=dict)
 
 
 def node_id_in_text(text: str) -> Optional[str]:
-    """The first pytest node id named in a finding's free text (R3: the finding's own reproduction), or None."""
+    """The first test target (``<path>::<name>``, any seeded ecosystem's source extension) named in a finding's
+    free text (R3: the finding's own reproduction), or None."""
     if not isinstance(text, str):
         return None
     m = _NODE_IN_TEXT.search(text)
@@ -74,6 +81,19 @@ def node_id_in_text(text: str) -> Optional[str]:
     return node
 
 
+def same_test(failed_name: str, target: str) -> bool:
+    """Whether a failure name from a verified count set names the test ``<path>::<name>`` (a finding's
+    reproduction): pytest keys are the node id itself; cargo keys are the libtest name alone; go keys are
+    ``<pkg dir>::<TestName>``; node keys are the name, ``suite > name`` or ``name #n``."""
+    path, _, name = target.partition("::")
+    if not name:
+        return False
+    d = posixpath.dirname(path) or "."
+    return (failed_name == target or failed_name == name or failed_name == f"{d}::{name}"
+            or failed_name.endswith(" > " + name) or failed_name.startswith(name + " #")
+            or failed_name.startswith(target + "[") or failed_name.startswith(target + "::"))
+
+
 class TestRunner:  # noqa: N801
     __test__ = False  # not a pytest collection target
 
@@ -83,10 +103,13 @@ class TestRunner:  # noqa: N801
         self.sandbox = sandbox
         self.worktree = worktree_path
         self.cmd_timeout_s = cmd_timeout_s
-        self.framework = self.detect(test_seed, os.path.join(worktree_path, "services", service))
+        service_dir = os.path.join(worktree_path, "services", service)
+        self.framework = self.detect(test_seed, service_dir)
         self.cwd = f"{WORKSPACE}/services/{service}"
         self.engine_dir = f"{ENGINE_DIR}/{secrets.token_hex(8)}"
         self._ini_written: set[str] = set()
+        self._engine_dir_made = False
+        self.toolchain = self._toolchain(service_dir)
 
     @staticmethod
     def detect(seed: dict, service_dir: str) -> str:
@@ -97,13 +120,26 @@ class TestRunner:  # noqa: N801
                     return name
         raise RunnerRefused("no seeded test framework matches the service directory (D7: nothing else is run)")
 
+    def _toolchain(self, service_dir: str) -> Optional[toolchains.Toolchain]:
+        if not self.fw.get("verified"):
+            return None
+        if self.framework == "pytest":
+            return toolchains.PytestToolchain(self.fw, service_dir, self._ini_path, self._ini_values)
+        if self.framework == "go":
+            return toolchains.GoToolchain(self.fw, service_dir)
+        if self.framework == "cargo":
+            return toolchains.CargoToolchain(self.fw, service_dir, self.engine_dir)
+        if self.framework == "npm":
+            return toolchains.NodeToolchain(self.fw, service_dir)
+        raise RunnerRefused(f"seed marks {self.framework} verified but the engine has no adapter for it")
+
     @property
     def fw(self) -> dict:
         return self.seed["frameworks"][self.framework]
 
     @property
     def verified(self) -> bool:
-        return self.framework == "pytest" and bool(self.fw.get("verified"))
+        return self.toolchain is not None
 
     # --- argv -------------------------------------------------------------------------------------------------------
 
@@ -112,9 +148,23 @@ class TestRunner:  # noqa: N801
             raise RunnerRefused("test target must be <path>::<name> relative to the service directory")
         return target
 
+    def target_tokens(self, target: str) -> list[str]:
+        return self.toolchain.target_tokens(target) if self.toolchain is not None else [target]
+
     def test_argv(self, target: str) -> list[str]:
         self.check_target(target)
-        return [target if a == "{target}" else a for a in self.fw["test"]]
+        out: list[str] = []
+        for a in self.fw["test"]:
+            out += self.target_tokens(target) if a == "{target}" else [a]
+        return out
+
+    def example_test_argv(self) -> list[str]:
+        """The targeted argv shown in the brief, with the seed's example target expanded (per ecosystem)."""
+        example = self.fw.get("target_example") or "tests/test_<file>.py::test_<name>"
+        out: list[str] = []
+        for a in self.fw["test"]:
+            out += (self.toolchain.target_tokens(example) if self.toolchain is not None else [example]) if a == "{target}" else [a]
+        return out
 
     def suite_argv(self) -> list[str]:
         return list(self.fw["suite"])
@@ -138,21 +188,18 @@ class TestRunner:  # noqa: N801
             lines.append(f"{k} = {ini[k]}")
         return "\n".join(lines) + "\n"
 
-    def _engine_options(self, cwd: str, junit: str) -> list[str]:
-        ini = self._ini_values(cwd)
-        opts = ["-c", self._ini_path(cwd), f"--rootdir={cwd}", "-o", "addopts="]
-        for k in ("python_files", "testpaths", "pythonpath"):
-            if k in ini:
-                opts += ["-o", f"{k}={ini[k]}"]
-        opts.append(f"--junitxml={junit}")
-        return opts
-
-    def _ensure_ini(self, cwd: str) -> None:
-        if cwd in self._ini_written or not self.verified:
+    def _ensure_engine_dir(self) -> None:
+        if self._engine_dir_made or not self.verified:
             return
         mk = self.sandbox.exec_argv(["mkdir", "-p", "--", self.engine_dir], cwd=WORKSPACE, timeout=30)
         if mk.exit_code != 0:
             raise RunnerRefused("could not create the engine directory in the sandbox")
+        self._engine_dir_made = True
+
+    def _ensure_ini(self, cwd: str) -> None:
+        self._ensure_engine_dir()
+        if cwd in self._ini_written or self.framework != "pytest" or not self.verified:
+            return
         self.sandbox.put_bytes(self._ini_path(cwd), self.ini_text(cwd).encode("utf-8"))
         self._ini_written.add(cwd)
 
@@ -162,44 +209,46 @@ class TestRunner:  # noqa: N801
         env = dict(self.seed.get("service_env") or {})
         cwd = cwd or self.cwd
         r: ExecResult = self.sandbox.exec_argv(argv, cwd=cwd, env=env, timeout=self.cmd_timeout_s)
-        text = r.stdout.decode("utf-8", "replace") + ("\n--- stderr ---\n" + r.stderr.decode("utf-8", "replace") if r.stderr else "")
+        text = r.stdout.decode("utf-8", "replace") + (toolchains.STDERR_MARK + r.stderr.decode("utf-8", "replace") if r.stderr else "")
         return TestRun(argv=list(argv), exit=r.exit_code, output=text,
                        output_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
                        timed_out=r.timed_out, truncated=r.truncated, cwd=cwd)
 
-    def _collect(self, cwd: str, target: Optional[str]) -> tuple[Optional[int], TestRun]:
-        junit = f"{self.engine_dir}/collect-{secrets.token_hex(6)}.xml"
-        argv = list(self.fw["collect"]) + self._engine_options(cwd, junit) + ([target] if target else [])
+    def _collect(self, cwd: str, target: Optional[str]) -> tuple[Optional[toolchains.Listing], Optional[TestRun]]:
+        """The ecosystem's collect-only equivalent, run separately (None for an ecosystem without one)."""
+        argv = self.toolchain.collect_argv(cwd, target)
+        if argv is None:
+            return None, None
         t = self._exec(argv, cwd)
-        if t.timed_out or t.truncated or t.exit not in (0, 5):
-            return None, t
-        return parsers.parse_collected(t.output), t
+        return self.toolchain.parse_listing(t.output, t.exit, t.timed_out, t.truncated), t
 
     def _verified_run(self, base_argv: list[str], cwd: str, target: Optional[str]) -> TestRun:
-        """A pytest run with the engine's configuration; the verdict from junit + collect-only + summary + exit."""
+        """One run with the engine's configuration; the verdict from the report + listing + transcript + exit."""
+        tc = self.toolchain
         self._ensure_ini(cwd)
-        junit = f"{self.engine_dir}/run-{secrets.token_hex(6)}.xml"
-        argv = list(base_argv)
-        # the target stays last; the engine options go before it
-        if target is not None and argv and argv[-1] == target:
-            argv = argv[:-1] + self._engine_options(cwd, junit) + [target]
-        else:
-            argv = argv + self._engine_options(cwd, junit)
+        report = f"{self.engine_dir}/run-{secrets.token_hex(6)}.{tc.report_ext}" if tc.report_ext else None
+        argv = tc.run_argv(base_argv, cwd, report, target)
+        tc.prepare(self.sandbox, cwd)
         t = self._exec(argv, cwd)
-        xml = None
-        data = self.sandbox.get_bytes(junit) if not t.timed_out else None
-        if data is not None:
-            xml = data.decode("utf-8", "replace")
-            t.junit_sha256 = hashlib.sha256(data).hexdigest()
-        collected, ct = self._collect(cwd, target)
-        t.collected = collected
-        t.extra["collect_exit"] = ct.exit
-        t.extra["collect_output_sha256"] = ct.output_sha256
-        t.counts = parsers.verified_counts(junit_xml=xml, output=t.output, collected=collected, exit_code=t.exit,
-                                           timed_out=t.timed_out, truncated=t.truncated)
-        t.verdict = t.counts.verdict_for(target) if target else ("pass" if t.counts.ok and not t.counts.failed_names else
-                                                                 ("fail" if t.counts.ok else "unknown"))
-        self.sandbox.exec_argv(["rm", "-f", "--", junit], cwd=WORKSPACE, timeout=20)
+        report_text = None
+        if report is not None:
+            data = self.sandbox.get_bytes(report) if not t.timed_out else None
+            if data is not None:
+                report_text = data.decode("utf-8", "replace")
+                t.junit_sha256 = hashlib.sha256(data).hexdigest()
+        listing, ct = self._collect(cwd, target)
+        if ct is not None:
+            t.extra["collect_exit"] = ct.exit
+            t.extra["collect_output_sha256"] = ct.output_sha256
+        t.counts = tc.verify(report=report_text, output=t.output, listing=listing, exit_code=t.exit,
+                             timed_out=t.timed_out, truncated=t.truncated)
+        t.collected = t.counts.collected if t.counts.collected is not None else (listing.total if listing else None)
+        if target:
+            t.verdict = t.counts.verdict_for(tc.case_key(target), tc.case_under)
+        else:
+            t.verdict = "pass" if t.counts.ok and not t.counts.failed_names else ("fail" if t.counts.ok else "unknown")
+        if report is not None:
+            self.sandbox.exec_argv(["rm", "-f", "--", report], cwd=WORKSPACE, timeout=20)
         return t
 
     def run_test(self, target: str, cwd: Optional[str] = None) -> TestRun:
@@ -266,3 +315,13 @@ class TestRunner:  # noqa: N801
             else:
                 out["src"].append(p)
         return out
+
+    def denied_test_content(self, text: str) -> Optional[str]:
+        """The first seeded ``test_content_deny`` rule (regex, per ecosystem) a test file's text matches, or None:
+        the cheap structural refusals of the routes a test process could use to forge the ecosystem's transcript
+        (a Go ``TestMain``/``os.Exit``/test2json ``\\x16`` frame; a Rust ``process::exit``/raw fd write; a Node
+        ``process.exit``/serialized frame)."""
+        for rule in self.fw.get("test_content_deny", []):
+            if re.search(rule["pattern"], text):
+                return rule["name"]
+        return None

@@ -54,7 +54,9 @@ def test_docker_run_argv_token_by_token(h):
 def test_env_file_is_exactly_the_allowlist(h):
     text = S.ZbmDockerSandboxProvider.env_file_text(h.svc.test_seed)
     lines = dict(ln.split("=", 1) for ln in text.strip().splitlines())
-    assert set(lines) == {"PATH", "HOME", "LANG", "TZ", "PYTHONDONTWRITEBYTECODE", "CI", "PYTHONHASHSEED"}
+    assert set(lines) == {"PATH", "HOME", "LANG", "TZ", "PYTHONDONTWRITEBYTECODE", "CI", "PYTHONHASHSEED", "NO_COLOR", "FORCE_COLOR",
+                          "CARGO_TERM_COLOR", "CARGO_NET_OFFLINE", "GOPROXY", "GOTOOLCHAIN"}
+    assert lines["GOPROXY"] == "off" and lines["GOTOOLCHAIN"] == "local" and lines["CARGO_NET_OFFLINE"] == "true"
     assert lines["HOME"] == WORKSPACE and "DLV_SERVICE_TOKEN" not in text and "LEDGER" not in text
 
 

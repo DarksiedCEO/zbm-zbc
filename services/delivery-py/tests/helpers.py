@@ -22,7 +22,8 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 TESTS = Path(__file__).resolve().parent
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = SERVICE_ROOT.parents[1]
-FIXTURE = REPO_ROOT / "fixtures" / "dlv" / "toy-py"
+FIXTURES = REPO_ROOT / "fixtures" / "dlv"
+FIXTURE = FIXTURES / "toy-py"
 for p in (SRC, TESTS):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
@@ -91,12 +92,13 @@ def make_repo(tmp: str, service: str = "toy-py") -> tuple[str, str]:
     os.makedirs(repo)
     git("init", "-q", "-b", "integration-2026-09-24", cwd=repo)
     dst = os.path.join(repo, "services", service)
-    shutil.copytree(FIXTURE, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"))
+    shutil.copytree(FIXTURES / service, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "target",
+                                                                           "node_modules"))
     os.makedirs(os.path.join(repo, "docs", "adr"))
     with open(os.path.join(repo, "docs", "adr", "0001-toy.md"), "w") as fh:
         fh.write("# ADR 0001 toy\n")
     git("add", "-A", cwd=repo)
-    git("commit", "-q", "-m", "fixture: toy-py on the integration branch", cwd=repo)
+    git("commit", "-q", "-m", f"fixture: {service} on the integration branch", cwd=repo)
     return repo, git("rev-parse", "HEAD", cwd=repo)
 
 
@@ -188,9 +190,10 @@ class Harness:
     def __init__(self, *, docker: bool = True, llm: str = "fake", data_dir: bool = True, ledger_ok: bool = True,
                  scenario: Optional[list] = None, extra_env: Optional[dict] = None, wire_harness: bool = True,
                  clock: Optional[FixedClock] = None, tmp: Optional[str] = None, site_packages: str = SITE_PACKAGES,
-                 gate_report=None, ledger: Optional[FakeLedgerClient] = None):
+                 gate_report=None, ledger: Optional[FakeLedgerClient] = None, service: str = "toy-py"):
         self.tmp = tmp or tempfile.mkdtemp(prefix="dlv-test-")
-        self.repo, self.base_sha = make_repo(self.tmp)
+        self.service = service
+        self.repo, self.base_sha = make_repo(self.tmp, service)
         self.env = base_env(self.tmp, self.repo, data_dir=data_dir, llm=llm, extra=extra_env)
         self.settings = config_mod.load(self.env)
         self.clock = clock or FixedClock(datetime(2026, 9, 27, 12, 0, 0, tzinfo=timezone.utc))

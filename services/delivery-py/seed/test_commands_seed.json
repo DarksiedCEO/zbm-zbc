@@ -1,13 +1,15 @@
 {
   "version": 1,
-  "description": "Test-command allowlist per framework (DEPT28_SPEC D7, SP-03). argv only, no shell; the engine runs these (RED, GREEN, revert check, suite), never the agent's own command. {target} is the single test node id path::name for a targeted run; the suite form has no target. Framework detection is by marker file inside services/<service>/. Round 18 R2: for pytest the engine appends its OWN configuration (-c <engine ini> written by the engine with addopts empty, --rootdir, -o overrides from 'ini', --junitxml to an engine-chosen path, -rfE) and reads the verdict from the junit file cross-checked against --collect-only and the summary line; the repository's pytest.ini/pyproject/setup.cfg/tox.ini are never read. 'test_infra_globs' name the files an agent may not change in an engine run (R1: any change fails the round with test_infra_changed). Hash pinned in config.py.",
+  "description": "Test-command allowlist per framework (DEPT28_SPEC D7, SP-03). argv only, no shell; the engine runs these (RED, GREEN, revert check, suite), never the agent's own command. {target} is the single test target <path>::<name> relative to the service directory, expanded per ecosystem by engine/toolchains.py (pytest: the node id; go: -run '^Name$' ./dir; cargo: --test <bin>|--lib|--bin <name> -- <name> --exact; node: --test-name-pattern='^name$' <file>); the suite form has no target. Framework detection is by marker file inside services/<service>/. Round 18 R2 for EVERY framework: the engine appends its OWN options (pytest: -c <engine ini> with addopts empty, --rootdir, -o overrides from 'ini', --junitxml to an engine path; cargo: --target-dir under the engine directory; node: --test-reporter=junit to an engine path plus the TAP reporter on stdout; go: the seeded -json stream) and reads the verdict from the engine-owned artefact cross-checked against 'collect' (pytest --collect-only, go test -json -list, cargo test -- --list; node has none, stated), the transcript and the exit code. The repository's own test configuration is never read. 'test_infra_globs' name the files an agent may not change in an engine run (R1: any change fails the round with test_infra_changed); 'test_content_deny' are regexes a changed or new TEST file may not match (the cheap forgery routes of that ecosystem's transcript; a hit fails the round test_content_denied). 'target_example' is the example target shown in the brief. Hash pinned in config.py.",
   "frameworks": {
     "pytest": {
       "markers": [
         "pytest.ini",
         "pyproject.toml",
         "conftest.py",
-        "tests"
+        "requirements.txt",
+        "setup.cfg",
+        "tox.ini"
       ],
       "test": [
         "pytest",
@@ -63,7 +65,10 @@
         "setup.py",
         ".coveragerc"
       ],
-      "verified": true
+      "verified": true,
+      "target_example": "tests/test_<file>.py::test_<name>",
+      "test_content_deny": [],
+      "note": "detected by a Python project file, never by a bare tests/ directory (every ecosystem has one)"
     },
     "cargo": {
       "markers": [
@@ -72,38 +77,72 @@
       "test": [
         "cargo",
         "test",
+        "--locked",
         "--offline",
-        "--",
-        "{target}",
-        "--exact"
+        "--no-fail-fast",
+        "{target}"
       ],
       "suite": [
         "cargo",
         "test",
-        "--offline"
+        "--locked",
+        "--offline",
+        "--no-fail-fast"
+      ],
+      "collect": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--no-fail-fast"
       ],
       "test_file_globs": [
         "tests/**/*.rs",
-        "benches/**/*.rs"
+        "benches/**/*.rs",
+        "examples/**/*.rs"
       ],
       "parser": "cargo",
       "cwd": "services/<service>",
       "build": [
         "cargo",
         "build",
+        "--locked",
         "--offline"
       ],
+      "target_example": "tests/<file>.rs::<test_fn>",
       "test_infra_globs": [
         "Cargo.toml",
+        "**/Cargo.toml",
         "Cargo.lock",
+        "**/Cargo.lock",
         "build.rs",
+        "**/build.rs",
         ".cargo/**",
+        "**/.cargo/**",
         "rust-toolchain",
         "rust-toolchain.toml",
-        "**/build.rs"
+        "**/rust-toolchain",
+        "**/rust-toolchain.toml",
+        ".config/nextest.toml",
+        "clippy.toml",
+        "rustfmt.toml"
       ],
-      "verified": false,
-      "note": "no engine-owned machine-readable report exists for cargo test in this build: every count is status unknown (R2), so a finding on a cargo service cannot reach fixed until one is built"
+      "test_content_deny": [
+        {
+          "name": "process_exit",
+          "pattern": "process::exit\\s*\\(|std::process::abort|libc::_?exit\\s*\\("
+        },
+        {
+          "name": "raw_fd_write",
+          "pattern": "from_raw_fd|libc::write\\s*\\(|libc::dup2|as_raw_fd\\s*\\(\\s*\\)"
+        },
+        {
+          "name": "custom_harness",
+          "pattern": "#!\\[no_main\\]|#!\\[test_runner|custom_test_frameworks"
+        }
+      ],
+      "verified": true,
+      "note": "stable toolchain only: -Z unstable-options --format json (nightly) is not used and cargo nextest is not a dependency of this build (ADR 0011). The RED test must be a separate test file under tests/ (an integration test): a #[cfg(test)] unit test inside a source file cannot be split from the source by the R1 verification checkouts. Every test binary of the package runs (--no-fail-fast); a workspace is run from its root."
     },
     "go": {
       "markers": [
@@ -112,16 +151,24 @@
       "test": [
         "go",
         "test",
+        "-json",
         "-count=1",
-        "-run",
-        "{target}",
-        "./..."
+        "-race",
+        "{target}"
       ],
       "suite": [
         "go",
         "test",
+        "-json",
         "-count=1",
+        "-race",
         "./..."
+      ],
+      "collect": [
+        "go",
+        "test",
+        "-json",
+        "-count=1"
       ],
       "test_file_globs": [
         "**/*_test.go"
@@ -133,15 +180,36 @@
         "build",
         "./..."
       ],
+      "target_example": "<pkg dir>/<file>_test.go::Test<Name>",
       "test_infra_globs": [
         "go.mod",
         "go.sum",
         "go.work",
         "go.work.sum",
-        "**/testdata/**"
+        "**/go.mod",
+        "**/go.sum",
+        "**/testdata/**",
+        "vendor/**",
+        "**/vendor/**",
+        ".golangci*",
+        "tools.go"
       ],
-      "verified": false,
-      "note": "go test -json is not wired as an engine-owned report in this build: every count is status unknown (R2)"
+      "test_content_deny": [
+        {
+          "name": "test_main",
+          "pattern": "func\\s+TestMain\\s*\\("
+        },
+        {
+          "name": "process_exit",
+          "pattern": "os\\.Exit\\s*\\(|syscall\\.Exit\\s*\\(|runtime\\.Goexit\\s*\\("
+        },
+        {
+          "name": "test2json_frame",
+          "pattern": "\\x16|\\\\x16|\\\\u0016|\\\\026"
+        }
+      ],
+      "verified": true,
+      "note": "-race and -count=1 per the repository's CI; -json is test2json-framed so a test's own prints are output events, never results; the listing is go test -json -list per package (Test* functions only: examples and benchmarks are not counted). Sub-tests are recorded but the count is per top-level Test function."
     },
     "npm": {
       "markers": [
@@ -151,14 +219,15 @@
         "package-lock.json"
       ],
       "test": [
-        "npm",
-        "test",
-        "--",
+        "node",
+        "--test",
         "{target}"
       ],
       "suite": [
-        "npm",
-        "test"
+        "node",
+        "--test",
+        "**/*.test.{ts,mts,cts,js,mjs,cjs}",
+        "**/*.spec.{ts,mts,cts,js,mjs,cjs}"
       ],
       "test_file_globs": [
         "**/*.test.*",
@@ -168,25 +237,55 @@
       ],
       "parser": "npm",
       "cwd": "services/<service>",
-      "note": "only with a lockfile present (D7); no npm install is ever run by the engine; no engine-owned report exists for npm test in this build: every count is status unknown (R2)",
+      "target_example": "tests/<file>.test.ts::<test_name>",
+      "note": "only with a lockfile present (D7); no npm install is ever run by the engine and node_modules is never shipped to a verification checkout, so a test must run on Node's built-ins and the service's own sources. Node 22 has no collect-only mechanism: the junit report is cross-checked against the TAP stream and the exit code (stated in ADR 0011). A test's name must be an identifier (the TEST: grammar), matched with --test-name-pattern='^name$'.",
       "test_infra_globs": [
         "package.json",
+        "**/package.json",
         "package-lock.json",
+        "npm-shrinkwrap.json",
         ".npmrc",
         "jest.config.*",
         "vitest.config.*",
         "babel.config.*",
         ".babelrc",
         "tsconfig*.json",
+        "**/tsconfig*.json",
         "mocha*",
-        ".mocharc*"
+        ".mocharc*",
+        "node_modules/**",
+        "**/node_modules/**",
+        ".nvmrc",
+        ".node-version",
+        "*.snapshot",
+        "**/*.snapshot"
       ],
-      "verified": false
+      "test_content_deny": [
+        {
+          "name": "process_exit",
+          "pattern": "process\\.(?:exit|abort|reallyExit|kill)\\s*\\("
+        },
+        {
+          "name": "serialized_frame",
+          "pattern": "v8\\.serialize|serialize\\s*\\(|\\\\xff\\\\x0f|Serializer"
+        },
+        {
+          "name": "raw_stdout_fd",
+          "pattern": "writeSync\\s*\\(\\s*1\\b|fs\\.write\\s*\\(\\s*1\\b|process\\.stdout\\.(?:write|_write)\\s*\\("
+        }
+      ],
+      "verified": true
     }
   },
   "service_env": {
     "PYTHONDONTWRITEBYTECODE": "1",
     "CI": "1",
-    "PYTHONHASHSEED": "0"
+    "PYTHONHASHSEED": "0",
+    "NO_COLOR": "1",
+    "FORCE_COLOR": "0",
+    "CARGO_TERM_COLOR": "never",
+    "CARGO_NET_OFFLINE": "true",
+    "GOPROXY": "off",
+    "GOTOOLCHAIN": "local"
   }
 }

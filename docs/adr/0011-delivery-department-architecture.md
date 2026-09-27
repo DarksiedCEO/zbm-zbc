@@ -1,7 +1,8 @@
 # ADR 0011 — Client Delivery & Operations (28): agent runtime adapters and the fix engine (`services/delivery-py`)
 
 - **Status:** accepted for build (Sep 27, 2026); amended the same day by fix wave 19 (AEGIS round 18, rulings
-  R1-R11 — see "Round 18 amendments" below). Built, tested (425 tests: 422 passed, 3 skipped with the printed
+  R1-R11 — see "Round 18 amendments" below) and by the toolchain amendment (engine-owned verdicts for Go, Rust
+  and Node — see "Toolchain amendment" below). Built, tested (449 tests: 446 passed, 3 skipped with the printed
   reason) and live-run on this box; **not certified for a fix run against `main`** and not certified for any run
   at all until the Docker properties of §C.2 are proven on a machine with a daemon (see "Known limitations") and a
   provider key exists.
@@ -47,9 +48,10 @@ ledger-anchored local log with the instance lease and Andre's reconcile).
 | `src/zbm_delivery/policy.py` | the tool-call classifier over `seed/tool_policy_seed.json` (B.5) |
 | `src/zbm_delivery/registry.py` | the process-level bridge between the service and the classes deer-flow instantiates by class path; per-run bindings with the in-memory run token |
 | `src/zbm_delivery/gitport.py` | `GitPort`: fixed argv, the allowlisted subcommands only, attribution trailer |
-| `src/zbm_delivery/runner.py` | `TestRunner`: the seeded test/suite argv, no shell, framework detection, counts parsed |
+| `src/zbm_delivery/runner.py` | `TestRunner`: the seeded test/suite argv, no shell, framework detection, the verified run (report + listing + transcript + exit), path classes, content rules |
+| `src/zbm_delivery/engine/toolchains.py` | the per-ecosystem result adapters (pytest, go, cargo, node): target expansion, engine options, collect-only equivalent, the cross-checked verdict |
 | `src/zbm_delivery/engine/states.py` | run and finding states and the transition invariants (B.2, B.3; G4) |
-| `src/zbm_delivery/engine/parsers.py` | the strict reply-line parser and the pytest/cargo/go/npm suite parsers |
+| `src/zbm_delivery/engine/parsers.py` | the strict reply-line parser, the pytest junit/collect/summary cross-check, Node's junit reader, the summary-only fallbacks (never `ok`) |
 | `src/zbm_delivery/engine/brief.py` | the brief compiler (C.8.3) and the system prompt assembly from `prompts/` |
 | `src/zbm_delivery/engine/report.py` | the report writer (C.8.6): records only, never the agent's prose |
 | `src/zbm_delivery/engine/loop.py` | `FixEngine`: prepare → sandbox → suite before → per finding → suite after → report; the exception boundary |
@@ -74,7 +76,7 @@ ledger-anchored local log with the instance lease and Andre's reconcile).
 | `seed/skills_manifest.json` | `26f51402a23232a6b3f6a5764829800c3570403e2694ee1a9f331fe23e040320` |
 | `seed/prompts_manifest.json` | `a55a2a0f6ef5979a4ff4df702b126bb3d43d05c208cbae6d10e0da8bc420ee1e` (wave 19: `engine.system.md` rules 2 and 5 restated for R1/R3) |
 | `seed/tool_policy_seed.json` | `5c8ac4620ab2ebdc961fb8e0bd00567fab0a25a500d8d9e8880786f7299b47d1` |
-| `seed/test_commands_seed.json` | `89cf7fee7e295e6becfdd29dae30ce86d2fae737e63394f8d7646d6e2e036705` (wave 19: engine ini values, `collect`, `-rfE`, `test_infra_globs`, `verified`, cargo globs) |
+| `seed/test_commands_seed.json` | `18b4cdc0e913c8e7a71492d22499ddd30a47a4a8a0455f958a8411112a8f6cd5` (toolchain amendment: go/cargo/npm `verified: true` with their engine argv, `collect`, `target_example`, `test_content_deny`, per-ecosystem `test_infra_globs`; pytest markers no longer include a bare `tests/`; `service_env` gains the toolchain determinism switches) |
 | `seed/licence_allowlist.json` | `c02f367f3e6cd02949e18dbc2eaa2ceabcb917ac4aa5fc58ad73bec4ac6dfb6e` (wave 19: `unrecorded_allow`) |
 | `seed/licence_exceptions.json` | `10695daf388308309d5b32057e9d0b764817b80979e8459db68ad5b48ac0ef62` (wave 19: `dotenv`, `tiktoken`) |
 | `docs/evidence/licences-2026-09-27.json` (the licence report) | `f154e1b56befac3a939d69cfeece434516d172fa0c6aedbfbaeab464d1ee0e8d` (wave 19: dotenv + tiktoken via file exceptions) |
@@ -245,9 +247,8 @@ impossible the state is `unknown`, never green.
   disagreement, a missing/unparseable junit, exit 5, exit 124 / timeout or a truncated capture is `status:
   unknown` — never a valid RED, never GREEN, never a green suite; `suite.after` must be `ok` with no failure or the
   run ends `failed` (`SUITE_UNKNOWN` / `SUITE_NOT_GREEN`; a pre-existing failure nobody fixed can no longer ride
-  a disproved finding to `awaiting_review`). cargo/go/npm have no engine-owned report in this build: their counts
-  are `unknown` by construction (seed `verified: false`), so a finding on such a service cannot reach `fixed`
-  until one is built — stated, not hidden. **Accepted residual:** a test module runs as the same uid in the same
+  a disproved finding to `awaiting_review`). cargo/go/npm had no engine-owned report in wave 19; the toolchain
+  amendment below builds one for each. **Accepted residual:** a test module runs as the same uid in the same
   container as the engine's junit file; agent code inside pytest can read `sys.argv`, find the path and rewrite
   it. It must then also forge the collect-only count (a second process), the summary line and the exit code, and
   R1 rejects the only places (`conftest.py`, `pytest.ini`) where that code could live outside the RED test file
@@ -325,19 +326,121 @@ finding's reproduction is, and N1-1 is fixed first so `suite.after` is green), t
 (labels, `--network none`), A3/A4 (`none`), A1 (`opaque` in the decision payload), G14 (the seeded `collect` argv,
 the `remote`/`archive`/`show` git reads, `mv`/`test` execs), the runner argv test (`-rfE`).
 
+## Toolchain amendment (Sep 27, 2026): engine-owned verdicts for Go, Rust and Node
+
+Wave 19 left `cargo`, `go` and `npm` at `verified: false` — every count `unknown` by construction, so a finding
+on ledger-rust, orchestrator-go or a Node service could never reach `fixed`. This amendment builds the R2
+discipline for each in `engine/toolchains.py` (one adapter per ecosystem behind `TestRunner`), with the same rule
+everywhere: the engine's invocation, an engine-read artefact, an independent enumeration where the ecosystem has
+one, the transcript and the exit code must all agree, or the result is `unknown` (never green, never a valid RED,
+never a green suite). The target grammar stays `<path>::<name>` for every ecosystem (`TEST:` lines, `DISPROOF`
+reproductions, `node_id_in_text` now accepts `.rs`/`.go`/`.ts`/`.js` families).
+
+- **Go** (`GoToolchain`): `go test -json -count=1 -race` (the repository's CI flags; `-run '^Name$' ./dir` for a
+  target). The result is the `test2json` event stream captured by the engine: `pass`/`fail`/`skip` per
+  package+test, and a test's own prints arrive as `output` events (proven: a printed `--- PASS:` line is text;
+  only a `\x16`-framed line becomes an event, and that yields an unlisted or duplicate terminal event → unknown).
+  Cross-checks: `go test -json -list` per package (the names the test binaries enumerate; `Test*` functions only,
+  examples/benchmarks not counted; sub-tests recorded but counted under their parent) — exactly one terminal
+  event per listed test, no event for an unlisted `Test*`; exactly one package-level result per listed package,
+  consistent with its tests (`fail` with no failed test = panic/build failure → unknown; `skip` only for a
+  package with no tests); a `build-fail` event or a non-event line on stdout → unknown; exit 0 ⇔ no failed
+  test, else 1. Module-relative package dirs come from `go.mod` (`module` line). Zero listed tests → unknown.
+- **Rust** (`CargoToolchain`): stable toolchain only — `cargo test -- -Z unstable-options --format json` needs
+  nightly and is not used; `cargo nextest` is not a dependency (a new binary in the sandbox image with its own
+  supply chain and licence entry, and it does not close the early-exit residual above; its per-process isolation
+  buys nothing the cross-checks below do not already detect). `cargo test --locked --offline --no-fail-fast`
+  (every test binary runs even when one fails), `--test <bin>` / `--lib` / `--bin <name>` / `--bins` selected
+  from the target's path plus `-- <name> --exact`, and `--target-dir` under the engine directory **per checkout**
+  (a shared directory handed the reverted checkout the verification checkout's binary: cargo's metadata hash does
+  not separate two copies of a package at different paths and its freshness check is mtime-based; seen in the
+  smoke run). Before every run the engine touches every file of the tree (`find … -exec touch`), because a file
+  written in the same second as the previous build was served the previous binary (seen: the forger's binary
+  answered for the clean test); files shipped into the box now carry fractional PAX mtimes for the same reason.
+  Cross-checks: `cargo test … -- --list` (every `<name>: test` line per binary, doc-tests included, with each
+  binary's `N tests, M benchmarks` summary agreeing with its lines) — the multiset of `test <name> ... ok|FAILED|
+  ignored` lines must equal the listed multiset (a name printed twice — a forged line next to libtest's — or an
+  unlisted name → unknown; a raw `write` to fd 1 bypasses libtest's capture, proven); the number of `running N
+  tests` and `test result:` lines must equal the number of binaries the listing saw and their totals must equal
+  the per-line counts; exit 0 ⇔ no failure, 101 with a failure (101 with none = compile error → unknown).
+  Consequence for engineers: the RED test must be an integration test under `tests/` (a `#[cfg(test)]` unit test
+  inside a source file cannot be split from the source by the R1 checkouts) — the brief's example says so.
+- **Node** (`NodeToolchain`, `node --test`, Node 22.22 verified on this box): `--test-reporter=junit
+  --test-reporter-destination=<engine path>` plus `--test-reporter=tap --test-reporter-destination=stdout`; a
+  target is `--test-name-pattern='^name$' <file>` (non-matching tests are not reported in 22.22). Node has **no
+  collect-only mechanism** (no dry run, no list; `--test-only` runs `only` tests) — stated: the cross-check is the
+  junit file (read back by the engine) against the TAP summary (`# tests/pass/fail/cancelled/skipped/todo`), the
+  TAP plan and top-level result lines, and the exit code (0 ⇔ no failure). Both reporters are produced by the
+  runner process from the child's event stream, so a child's prints cannot forge them (proven: printed TAP lines
+  become `# …` comments), but the cross-check binds the file to that process's transcript, not to an independent
+  enumeration. Node's junit carries no file attribute and nests suites; cases are keyed `suite > name`, a
+  duplicate name is a second case, and a target's verdict is every case of that name agreeing. Zero tests →
+  unknown. The suite globs are seeded (`**/*.test.{ts,…}`, `**/*.spec.{…}`); `.ts` runs on Node 22's type
+  stripping.
+- **Detection defect fixed** (failing first: `test_detection_is_by_project_file_never_by_a_bare_tests_dir`):
+  pytest's markers included a bare `tests/` directory, so toy-rs and toy-ts — every ecosystem has `tests/` — were
+  detected as pytest. Markers are now project files only (`pytest.ini`, `pyproject.toml`, `conftest.py`,
+  `requirements.txt`, `setup.cfg`, `tox.ini`; the three Python services without a `pytest.ini` have
+  `requirements.txt`).
+- **R1 for every ecosystem**: `test_infra_globs` per ecosystem (cargo: `Cargo.toml`/`Cargo.lock` at any depth,
+  `build.rs`, `.cargo/`, `rust-toolchain*`, `.config/nextest.toml`, `clippy.toml`, `rustfmt.toml`; go: `go.mod`/
+  `go.sum` at any depth, `go.work*`, `testdata/`, `vendor/`, `tools.go`, `.golangci*`; npm: `package.json` at any
+  depth, the lockfile(s), `.npmrc`, `tsconfig*.json`, `node_modules/`, jest/vitest/babel/mocha configs, `.nvmrc`,
+  snapshots) and `test_file_globs` (`tests/**/*.rs`, `benches/`, `examples/`; `**/*_test.go`; `**/*.test.*`,
+  `**/*.spec.*`, `test/`, `tests/`) drive `runner.classify_paths`. New: **content rules** (`test_content_deny`,
+  regexes per ecosystem) applied to every changed or new test file after `FIXED` — a hit fails the round
+  `test_content_denied` with the rule name (Go: `TestMain`, `os.Exit`/`syscall.Exit`/`runtime.Goexit`, a `\x16`
+  byte or its escapes; Rust: `process::exit`/`abort`, `from_raw_fd`/`libc::write`/`as_raw_fd`, `#![no_main]`/
+  custom test frameworks; Node: `process.exit`/`abort`/`kill`, `v8.serialize`/`Serializer`, `writeSync(1, …)`/
+  `process.stdout.write`). These are the cheap structural answers to the R2 residual for the routes we know;
+  they are not a proof (an obfuscated spelling passes them, and so does a helper placed in a SOURCE file that the
+  test calls — source files are what the fix is allowed to change) and the residual is restated under "Known
+  limitations".
+- **Baseline-failure attribution** (§C.8.4 step 5, `service.attributable_failures`): a pre-existing failure may
+  remain only when it belongs to another open finding; the match now understands each ecosystem's case keys
+  (`runner.same_test`: cargo's bare libtest name, go's `<pkg dir>::<Test>`, node's `suite > name`) next to the
+  file match and the pytest node id.
+- **Sandbox env**: `service_env` gains `NO_COLOR=1`, `FORCE_COLOR=0`, `CARGO_TERM_COLOR=never`,
+  `CARGO_NET_OFFLINE=true`, `GOPROXY=off`, `GOTOOLCHAIN=local` (determinism and no toolchain download attempts;
+  `EXTRA_ENV_ALLOWLIST` in `adapters/sandbox.py` names exactly these).
+- **Proof**: `fixtures/dlv/toy-rs`, `toy-go`, `toy-ts` (each with the toy-py defects: `add` subtracts, `percent`
+  divides by zero; a skipped/ignored test; toy-rs has a doc-test and two test binaries, toy-go two packages with a
+  sub-test) run through the whole loop with the deterministic fake model and the real toolchains
+  (`tests/test_toolchains.py`): `awaiting_review` with `suite.before` = 3/1/1 (go, cargo) and 2/1/1 (node),
+  verified `ok`, and the deny paths per ecosystem — forged transcript at RED (`red_unknown` for go and cargo; a
+  no-op comment for node), test-infra edit (`test_infra_changed`), deleted existing test (`test_deleted`),
+  content rule (`test_content_denied`), hung suite (`suite_unknown`, "timed out"), then `fixed` once clean.
+
 ## Known limitations
 
 - The tool-call classifier is a denylist over an unbounded language (df-exec F-03): it is the record and the
   first refusal; an interpreter/shell/make invocation is recorded as `allow_opaque` (R5) and the BOUNDARY is the
   sandbox (non-root, `--cap-drop=ALL`, default seccomp, `--read-only`, `--network none`, no socket mount, no
   `.git`, no `curl`/`wget`) — and those properties are unproven on this box.
-- What a lazy or hostile agent can still do to reach `awaiting_review` with the defect intact (after wave 19):
-  write a RED test whose body inspects the source text (or otherwise decides pass/fail without exercising the
-  defect) and a source change that satisfies it — the engine proves RED→GREEN, the split-diff verification and a
-  green suite, not that the test exercises the finding; or have agent code that runs inside the RED test module
-  rewrite the engine's junit file AND print a matching summary, exit code and collect-only count (all four in the
-  same container, same uid). Both leave the finding's own reproduction (if one is named) and AEGIS re-review as
-  the checks that catch them.
+- What a lazy or hostile agent can still do to reach `awaiting_review` with the defect intact (after wave 19 and
+  the toolchain amendment): write a RED test whose body inspects the source text (or otherwise decides pass/fail
+  without exercising the defect) and a source change that satisfies it — the engine proves RED→GREEN, the
+  split-diff verification and a green suite, not that the test exercises the finding; or have agent code that runs
+  inside the RED test process forge the ecosystem's whole transcript at once and end the process early (pytest:
+  rewrite the junit file AND print a matching summary, exit code and collect-only count; Go: emit a `\x16`-framed
+  test2json line for every listed test and `os.Exit(0)` before `testing` reports — `TestMain`, `os.Exit` and the
+  `\x16` byte in a test file are refused by the content rules, so the route needs an obfuscated byte; Rust: write
+  libtest's per-test and `test result:` lines for every listed test of every binary to fd 1 and `process::exit`
+  — refused by the content rules for the plain spellings; Node: reproduce the runner's internal v8-serialized
+  child→parent frame on stdout). All leave the finding's own reproduction (if one is named) and AEGIS re-review as
+  the checks that catch them. The residual that no ecosystem closes: a test process that exits 0 after a complete
+  forged transcript is indistinguishable from a passing one; `cargo nextest` would not close it either (a test
+  process that exits 0 early is a pass there too), which is one of the two reasons it is not a dependency.
+- Services outside `services/<name>/` (the dashboard lives in `apps/dashboard-ts/`) are outside the findings
+  document's path grammar (§B.1: `file` under `services/<service>/`), so a run against `apps/dashboard-ts` cannot
+  be submitted; the Node adapter is proven on `fixtures/dlv/toy-ts` and applies to any `services/<svc>` with a
+  `package.json` + lockfile. A Node service's tests must run on Node's built-ins and the service's own sources:
+  `node_modules` is never shipped to a verification checkout and `npm ci` is never run by the engine (the sandbox
+  has no network). ledger-rust's crates.io dependencies need a populated `CARGO_HOME` registry cache in the
+  sandbox image for `--offline` builds; the image does not vendor one yet (unchanged from wave 19).
+- The sandbox image (`docker/sandbox.Dockerfile`) now installs Node 22 with a required `NODE_SHA256` build
+  argument and sets `RUSTUP_HOME`/`CARGO_HOME` for uid 65532 (before this amendment the rustup proxy would not
+  have resolved a toolchain as that uid: `HOME` is the workspace); neither change is proven here (no daemon).
 - No retention job; one run in flight per process; a harness crash is a run failure (worker-thread exception
   boundary), never a service crash; a ledger failure mid-run leaves the run failed in memory and unrecorded until
   the next start.
@@ -373,6 +476,8 @@ the `remote`/`archive`/`show` git reads, `mv`/`test` execs), the runner argv tes
 `cd services/delivery-py && .venv/bin/python -m pytest -q` (no network; the real deer-flow harness, the real
 guardrail, the argv-level Docker double, a scripted model, a temporary git repository). 425 tests: 422 passed,
 3 skipped (the Docker live module, reason printed), ~14 min wall (wave 19 added the collect-only cross-check and
-two verification checkouts per fix). `ruff check src tests devtools` clean. Round-18 findings: `tests/test_round18.py`
-(one failing-first test per finding). Evidence: `services/delivery-py/docs/evidence/dept28/` (incl. the wave-19 live
+two verification checkouts per fix); the toolchain amendment brings it to 449 tests (446 passed, 3 skipped, +2 min:
+`tests/test_toolchains.py` runs the real `cargo`, `go` and `node` on the toy fixtures through the whole loop).
+`ruff check src tests devtools` clean. Round-18 findings: `tests/test_round18.py` (one failing-first test per
+finding). Evidence: `services/delivery-py/docs/evidence/dept28/` (incl. the wave-19 live
 log and the re-run of the reviewers' probes) and `docs/evidence/licences-2026-09-27.json`.

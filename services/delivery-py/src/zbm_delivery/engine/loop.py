@@ -467,9 +467,8 @@ class FixEngine:
         run_id, fid = run["run_id"], finding["finding_id"]
         max_rounds = self.settings.max_rounds_per_finding
         doc = self.svc.finding_document(run_id, fid)
-        test_argv_example = [("tests/test_<file>.py::test_<name>" if a == "{target}" else a) for a in runner.fw["test"]]
         brief_text = B.compile_brief(self.prompts["brief.template.md"], run=run, finding=doc, round_no=1,
-                                     max_rounds=max_rounds, test_argv=test_argv_example, suite_argv=runner.suite_argv())
+                                     max_rounds=max_rounds, test_argv=runner.example_test_argv(), suite_argv=runner.suite_argv())
         brief_ev = self.svc.evidence_put(run_id, "brief", brief_text.encode("utf-8"))
         hits = self.svc.injection_hits(run_id, fid)
         self.svc.finding_update(run_id, fid, "brief_written", {"run_id": run_id, "finding_id": fid,
@@ -567,8 +566,9 @@ class FixEngine:
                         continue
                     current_test = target
                     prompt = self._note(f"RED confirmed: `{target}` failed with exit {t.exit} on the unfixed code. Now fix the "
-                                        "ROOT CAUSE in the source (never in conftest.py, pytest.ini or any test-infra file — the "
-                                        "engine rejects those and re-runs your test on base + your source changes alone); sweep the "
+                                        "ROOT CAUSE in the source (never in conftest.py, pytest.ini, Cargo.toml, go.mod, package.json "
+                                        "or any test-infra file — the engine rejects those and re-runs your test on base + your "
+                                        "source changes alone); sweep the "
                                         "class hint; list every site as `SWEEP: file:line`; list any existing test you changed as "
                                         "`CHANGED_TEST: path — why`; then reply `FIXED`." + self._tail(t.output), rounds, max_rounds)
                     continue
@@ -635,7 +635,17 @@ class FixEngine:
             self._back_to_red(run_id, fid, f)
             return ("You changed test infrastructure the engine never accepts in a fix run: " + ", ".join(classes["test_infra"])
                     + ". Revert those files (conftest.py, pytest.ini, pyproject [tool.pytest], setup.cfg, tox.ini, *.pth, "
-                    "sitecustomize) and fix the root cause in the source; then reply `FIXED`.")
+                    "sitecustomize; Cargo.toml/Cargo.lock/build.rs/.cargo; go.mod/go.sum/testdata; package.json, the lockfile, "
+                    "tsconfig, node_modules) and fix the root cause in the source; then reply `FIXED`.")
+        # per-ecosystem content rules (R2 residual made expensive): a test file may not carry the cheap forgery routes
+        denied = self._denied_test_content(runner, worktree, classes["test"])
+        if denied:
+            self._round_failed(run_id, fid, rounds, "test_content_denied", paths=[f"{p} ({rule})" for p, rule in denied][:20])
+            self._back_to_red(run_id, fid, f)
+            return ("A test file you wrote or changed matches a content rule the engine refuses ("
+                    + ", ".join(f"{p}: {rule}" for p, rule in denied)
+                    + "): a test must not exit the process, define its own main/TestMain, or write to the runner's "
+                    "transcript. Remove that code and reply `FIXED`.")
         # §C.8.4 step 8: every EXISTING test file the engineer touched needs a CHANGED_TEST line; a deleted one is refused
         tracked_changed = [p for p in self.git.diff_name_only(worktree, run_id=run_id) if not _junk(p)]
         touched_tests = [p for p in tracked_changed if runner.is_test_path(p)]
@@ -770,6 +780,23 @@ class FixEngine:
         if not self.svc.finding_transition(run_id, fid, "fixed", {}, [ev_diff], suite_after_commit=True):
             return "The fixed transition was refused."
         return None
+
+    @staticmethod
+    def _denied_test_content(runner: TestRunner, worktree: str, test_paths: list[str]) -> list[tuple[str, str]]:
+        out = []
+        for p in test_paths:
+            full = os.path.join(worktree, p)
+            if not os.path.isfile(full) or os.path.islink(full):
+                continue
+            try:
+                with open(full, "r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            rule = runner.denied_test_content(text)
+            if rule:
+                out.append((p, rule))
+        return out
 
     def _back_to_red(self, run_id: str, fid: str, f: dict) -> None:
         if f["state"] != "red":

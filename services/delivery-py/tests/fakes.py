@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -210,7 +211,7 @@ class FakeDockerCli:
             code, self.exec_fail_next = self.exec_fail_next, None
             return ExecResult(code, b"", b"simulated exec failure\n")
         full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": vol, "LANG": "C.UTF-8",
-                    "PYTHONDONTWRITEBYTECODE": "1", **env}
+                    "PYTHONDONTWRITEBYTECODE": "1", **self.toolchain_env(), **env}
         try:
             r = subprocess.run(cmd, cwd=local_cwd, capture_output=True, timeout=secs, env=full_env)
         except subprocess.TimeoutExpired as exc:
@@ -220,6 +221,19 @@ class FakeDockerCli:
         out, err = self._map_out(r.stdout, vol), self._map_out(r.stderr, vol)
         truncated = len(out) > output_cap
         return ExecResult(r.returncode, out[:output_cap], err[:output_cap], False, truncated)
+
+    @staticmethod
+    def toolchain_env() -> dict:
+        """What the sandbox IMAGE provides and this double must stand in for: the host's rust toolchain (rustup needs
+        its home when HOME is the volume) and a Go build cache shared by every fake container of the session (the
+        image's cache lives under the container HOME; a cold cache per double would rebuild the race runtime each
+        time). Nothing here reaches the engine's argv or the seed."""
+        real_home = os.path.expanduser("~")
+        gocache = os.path.join(tempfile.gettempdir(), "dlv-test-gocache")
+        os.makedirs(gocache, exist_ok=True)
+        return {"RUSTUP_HOME": os.environ.get("RUSTUP_HOME", os.path.join(real_home, ".rustup")),
+                "CARGO_HOME": os.environ.get("CARGO_HOME", os.path.join(real_home, ".cargo")),
+                "GOCACHE": gocache, "GOPATH": os.path.join(gocache, "gopath")}
 
     # --- inspection ---------------------------------------------------------------------------------------------------
 

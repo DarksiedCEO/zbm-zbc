@@ -2,7 +2,7 @@
 # installed from lockfiles at build time, run as uid 65532 with NO network at run time (--network none, R4).
 # The base digest is a REQUIRED build argument (see docker/Dockerfile for why). Record the resulting image digest
 # in ADR 0011 and set DLV_SANDBOX_IMAGE=<registry>/zbm/dlv-sandbox@sha256:<digest>.
-#   docker build -f docker/sandbox.Dockerfile --build-arg BASE_DIGEST=<64 hex> -t registry.zbm.internal/zbm/dlv-sandbox ../..
+#   docker build -f docker/sandbox.Dockerfile --build-arg BASE_DIGEST=<64 hex> --build-arg NODE_SHA256=<64 hex> -t registry.zbm.internal/zbm/dlv-sandbox ../..
 ARG BASE_DIGEST
 FROM python:3.12-slim@sha256:${BASE_DIGEST}
 
@@ -14,12 +14,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 # python: the monorepo's pinned FastAPI stack (BUILD_CONTRACTS §0) so every *-py service's suite runs offline
 COPY services/finance-py/requirements.txt /tmp/req-python.txt
 RUN pip install --no-cache-dir -r /tmp/req-python.txt && rm /tmp/req-python.txt
-# rust stable + go, for ledger-rust and orchestrator-go suites (cargo test --offline / go test)
-RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
-    && ln -s /root/.cargo/bin/* /usr/local/bin/
+# rust stable + go + node, for the ledger-rust / orchestrator-go / node suites (cargo test --locked --offline,
+# go test -json -race, node --test). The engineer runs as uid 65532 with HOME=/mnt/user-data/workspace, so the
+# rustup proxy needs RUSTUP_HOME/CARGO_HOME outside HOME and world-readable (ADR 0011 toolchain amendment; the
+# read-only root's interaction with cargo's $CARGO_HOME/.package-cache lock is not proven on this box).
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \
+    && ln -s /opt/cargo/bin/* /usr/local/bin/ && chmod -R a+rX /opt/rustup /opt/cargo
 ARG GO_VERSION=1.23.1
 RUN curl -sSfL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /usr/local -xz \
     && ln -s /usr/local/go/bin/go /usr/local/bin/go && ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+# node 22 (the dashboard's tests need Node 22.18+ type stripping): the tarball's SHA-256 from
+# https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt is a REQUIRED build argument, like BASE_DIGEST.
+ARG NODE_VERSION=22.22.2
+ARG NODE_SHA256
+RUN test -n "${NODE_SHA256}" \
+    && curl -sSfL -o /tmp/node.tar.xz https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz \
+    && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
+    && mkdir -p /opt/node && tar -C /opt/node --strip-components=1 -xJf /tmp/node.tar.xz && rm /tmp/node.tar.xz \
+    && ln -s /opt/node/bin/node /usr/local/bin/node && ln -s /opt/node/bin/npm /usr/local/bin/npm
 # Round 18 R4: the box has no network (--network none) AND no egress client — curl/wget are purged once the
 # toolchains are installed (tests/test_live_docker.py asserts `command -v curl wget` fails inside the container).
 RUN apt-get purge -y curl wget && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
