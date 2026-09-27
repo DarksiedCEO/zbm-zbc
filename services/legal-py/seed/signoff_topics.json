@@ -1,0 +1,18 @@
+{
+ "source": "LEGAL_SPEC.md rev 1 \u00a7B.11",
+ "topics": [
+  {
+   "scope_key": "asset_ids",
+   "topic": "ai_generative_fill"
+  },
+  {
+   "scope_key": "component_ids",
+   "topic": "agpl_code"
+  },
+  {
+   "scope_key": "subject_ids",
+   "topic": "reuse_bridge"
+  }
+ ],
+ "version": 1
+}

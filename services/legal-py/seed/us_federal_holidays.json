@@ -1,0 +1,228 @@
+{
+ "first_year": 2026,
+ "holidays": [
+  {
+   "date": "2026-01-01",
+   "name": "new_years_day"
+  },
+  {
+   "date": "2026-01-19",
+   "name": "mlk_day"
+  },
+  {
+   "date": "2026-02-16",
+   "name": "washingtons_birthday"
+  },
+  {
+   "date": "2026-05-25",
+   "name": "memorial_day"
+  },
+  {
+   "date": "2026-06-19",
+   "name": "juneteenth"
+  },
+  {
+   "date": "2026-07-03",
+   "name": "independence_day"
+  },
+  {
+   "date": "2026-09-07",
+   "name": "labor_day"
+  },
+  {
+   "date": "2026-10-12",
+   "name": "columbus_day"
+  },
+  {
+   "date": "2026-11-11",
+   "name": "veterans_day"
+  },
+  {
+   "date": "2026-11-26",
+   "name": "thanksgiving"
+  },
+  {
+   "date": "2026-12-25",
+   "name": "christmas"
+  },
+  {
+   "date": "2027-01-01",
+   "name": "new_years_day"
+  },
+  {
+   "date": "2027-01-18",
+   "name": "mlk_day"
+  },
+  {
+   "date": "2027-02-15",
+   "name": "washingtons_birthday"
+  },
+  {
+   "date": "2027-05-31",
+   "name": "memorial_day"
+  },
+  {
+   "date": "2027-06-18",
+   "name": "juneteenth"
+  },
+  {
+   "date": "2027-07-05",
+   "name": "independence_day"
+  },
+  {
+   "date": "2027-09-06",
+   "name": "labor_day"
+  },
+  {
+   "date": "2027-10-11",
+   "name": "columbus_day"
+  },
+  {
+   "date": "2027-11-11",
+   "name": "veterans_day"
+  },
+  {
+   "date": "2027-11-25",
+   "name": "thanksgiving"
+  },
+  {
+   "date": "2027-12-24",
+   "name": "christmas"
+  },
+  {
+   "date": "2027-12-31",
+   "name": "new_years_day"
+  },
+  {
+   "date": "2028-01-17",
+   "name": "mlk_day"
+  },
+  {
+   "date": "2028-02-21",
+   "name": "washingtons_birthday"
+  },
+  {
+   "date": "2028-05-29",
+   "name": "memorial_day"
+  },
+  {
+   "date": "2028-06-19",
+   "name": "juneteenth"
+  },
+  {
+   "date": "2028-07-04",
+   "name": "independence_day"
+  },
+  {
+   "date": "2028-09-04",
+   "name": "labor_day"
+  },
+  {
+   "date": "2028-10-09",
+   "name": "columbus_day"
+  },
+  {
+   "date": "2028-11-10",
+   "name": "veterans_day"
+  },
+  {
+   "date": "2028-11-23",
+   "name": "thanksgiving"
+  },
+  {
+   "date": "2028-12-25",
+   "name": "christmas"
+  },
+  {
+   "date": "2029-01-01",
+   "name": "new_years_day"
+  },
+  {
+   "date": "2029-01-15",
+   "name": "mlk_day"
+  },
+  {
+   "date": "2029-02-19",
+   "name": "washingtons_birthday"
+  },
+  {
+   "date": "2029-05-28",
+   "name": "memorial_day"
+  },
+  {
+   "date": "2029-06-19",
+   "name": "juneteenth"
+  },
+  {
+   "date": "2029-07-04",
+   "name": "independence_day"
+  },
+  {
+   "date": "2029-09-03",
+   "name": "labor_day"
+  },
+  {
+   "date": "2029-10-08",
+   "name": "columbus_day"
+  },
+  {
+   "date": "2029-11-12",
+   "name": "veterans_day"
+  },
+  {
+   "date": "2029-11-22",
+   "name": "thanksgiving"
+  },
+  {
+   "date": "2029-12-25",
+   "name": "christmas"
+  },
+  {
+   "date": "2030-01-01",
+   "name": "new_years_day"
+  },
+  {
+   "date": "2030-01-21",
+   "name": "mlk_day"
+  },
+  {
+   "date": "2030-02-18",
+   "name": "washingtons_birthday"
+  },
+  {
+   "date": "2030-05-27",
+   "name": "memorial_day"
+  },
+  {
+   "date": "2030-06-19",
+   "name": "juneteenth"
+  },
+  {
+   "date": "2030-07-04",
+   "name": "independence_day"
+  },
+  {
+   "date": "2030-09-02",
+   "name": "labor_day"
+  },
+  {
+   "date": "2030-10-14",
+   "name": "columbus_day"
+  },
+  {
+   "date": "2030-11-11",
+   "name": "veterans_day"
+  },
+  {
+   "date": "2030-11-28",
+   "name": "thanksgiving"
+  },
+  {
+   "date": "2030-12-25",
+   "name": "christmas"
+  }
+ ],
+ "last_year": 2030,
+ "source": "5 U.S.C. 6103 with observance shifts (spec choice; counsel to confirm the business-day definition)",
+ "version": 1
+}

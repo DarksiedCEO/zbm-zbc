@@ -1,0 +1,134 @@
+{
+ "patterns": [
+  {
+   "examples": [
+    "You must file a counter-notice",
+    "you should sign this",
+    "You have to respond by Friday",
+    "you need to keep records",
+    "you are required to disclose",
+    "You ought to consult nobody",
+    "you had better accept"
+   ],
+   "id": "AP-01",
+   "regex": "\\byou (should|must|need to|are required to|have to|ought to|had better)\\b"
+  },
+  {
+   "examples": [
+    "Legally you are required to",
+    "under the law this works",
+    "In my opinion the term is fine",
+    "my advice is to wait",
+    "we advise against it"
+   ],
+   "id": "AP-02",
+   "regex": "\\b(legally|under (the )?law|in my opinion|my advice|we advise|i advise|our advice)\\b"
+  },
+  {
+   "examples": [
+    "this clause is unenforceable",
+    "That is illegal",
+    "the waiver is not enforceable",
+    "the contract is binding on you",
+    "this term is void"
+   ],
+   "id": "AP-03",
+   "regex": "\\b(is|are|was|were|be|seems|looks) (not )?(legal|illegal|lawful|unlawful|enforceable|unenforceable|void|voidable|binding|valid|invalid)\\b(?! (advice|counsel|department|review|team|hold|notice|matter))"
+  },
+  {
+   "examples": [
+    "This means you lose the deposit",
+    "this requires that you notify us"
+   ],
+   "id": "AP-04",
+   "regex": "\\bthis (means|requires) (that )?you\\b"
+  },
+  {
+   "examples": [
+    "u must sign",
+    "ya need to file"
+   ],
+   "id": "AP-05",
+   "regex": "\\b(u|ya|yall|y all) (should|must|need to|have to)\\b"
+  },
+  {
+   "examples": [
+    "you are liable for the damages",
+    "you are not entitled to a refund",
+    "you are in breach"
+   ],
+   "id": "AP-06",
+   "regex": "\\byou (are|were) (not )?(liable|obligated|entitled|protected|in breach|in violation)\\b"
+  },
+  {
+   "examples": [
+    "We recommend that you sign",
+    "I suggest you file a response"
+   ],
+   "id": "AP-07",
+   "regex": "\\b(we|i) (recommend|suggest|advise) (that )?(you|u)\\b"
+  },
+  {
+   "examples": [
+    "your rights are limited here",
+    "Your obligations include indemnity",
+    "your claim is weak"
+   ],
+   "id": "AP-08",
+   "regex": "\\byour (legal )?(rights|obligations|liability|claim|defen[cs]e) (is|are|include|includes|would be)\\b"
+  },
+  {
+   "examples": [
+    "you can sue them",
+    "you cannot win this",
+    "you may lawfully refuse"
+   ],
+   "id": "AP-09",
+   "regex": "\\b(you can|you may|you cannot|you can not) (legally|lawfully|sue|be sued|win|lose)\\b"
+  },
+  {
+   "examples": [
+    "fair use applies to this clip",
+    "public domain covers the track"
+   ],
+   "id": "AP-10",
+   "regex": "\\b(fair use|infring(e|es|ing|ement)|licensed|public domain) (applies|covers|protects|does not apply)\\b"
+  },
+  {
+   "examples": [
+    "this does not constitute infringement",
+    "posting it would amount to a breach"
+   ],
+   "id": "AP-11",
+   "regex": "\\b(does|do|would) (not )?(constitute|amount to) (fair use|infringement|a breach|a violation)\\b"
+  },
+  {
+   "examples": [
+    "the law requires notice",
+    "a court would enforce it",
+    "the statute allows this"
+   ],
+   "id": "AP-12",
+   "regex": "\\b(the law|the statute|the court|a court|courts) (requires|require|says|say|allows|allow|would|will)\\b"
+  },
+  {
+   "examples": [
+    "Don't sign that",
+    "do not file a counter-notice",
+    "never accept those terms"
+   ],
+   "id": "AP-13",
+   "regex": "\\b(don t|do not|never) (sign|accept|file|respond|reply|agree)\\b"
+  },
+  {
+   "examples": [
+    "I think you will win",
+    "we believe the clause is weak"
+   ],
+   "id": "AP-14",
+   "regex": "\\b(i|we) (think|believe) (you|the (clause|contract|term|claim|notice))\\b"
+  }
+ ],
+ "source": "LEGAL_SPEC.md rev 1 \u00a7A.3",
+ "version": 1
+}
