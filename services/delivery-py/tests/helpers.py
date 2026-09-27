@@ -44,7 +44,25 @@ SCHEDULER_TOKEN = "test-dlv-scheduler-caller-token-01234567"
 ANDRE_TOKEN = "test-dlv-andre-approval-token-0123456789"
 FAKE_KEY = "sk-test-FAKEKEYFAKEKEYFAKEKEYFAKEKEY00"
 IMAGE = "registry.test/zbm/dlv-sandbox@sha256:" + "0" * 64
-SITE_PACKAGES = str(SERVICE_ROOT / ".venv" / "lib" / "python3.12" / "site-packages")
+def _site_packages() -> str:
+    """The running interpreter's purelib (the service venv when tests run under it).
+
+    Wave 16 / wave 19b portability: never hard-code the Python minor version — the Mac
+    runs a different one than this box. Falls back to the venv layout only if the
+    interpreter is not the venv, so the licence gate still sees the real environment."""
+    import sysconfig
+    purelib = sysconfig.get_paths()["purelib"]
+    if os.path.isdir(purelib):
+        return purelib
+    lib = SERVICE_ROOT / ".venv" / "lib"
+    for entry in sorted(os.listdir(lib)) if lib.is_dir() else []:
+        cand = lib / entry / "site-packages"
+        if entry.startswith("python") and cand.is_dir():
+            return str(cand)
+    return purelib
+
+
+SITE_PACKAGES = _site_packages()
 CALLERS = {"aegis": AEGIS_TOKEN, "andre_session": ANDRE_SESSION_TOKEN, "scheduler": SCHEDULER_TOKEN}
 _GATE_CACHE: dict = {}
 
