@@ -591,7 +591,7 @@ workspace), G14's engine exec heads (`python3 -I /mnt/dlv/resolve.py --` is the 
 
 Pins after this wave: `seed/tool_policy_seed.json` `078560a463fd04a11fb3a358e8ebc5a1a782dcedfbd635192bc9a77738787f4d`,
 `seed/test_commands_seed.json` `6c3a39edc981c969d1b1d538049ec097c59dd36dd51b27bc2407440568de5a30`,
-`seed/licence_exceptions.json` `7ae1f460a312a01cf56fc8701e869629f55bca64fccaff51d0226ed47e6fa92f`; the resolver
+`seed/licence_exceptions.json` `e93abd348a10f89838e11a19c7f52994e18a20f4d52a6809b49a0a6fafe53606`; the resolver
 `adapters/tools/resolve.py` and the plugin `adapters/tools/zbm_engine_plugin.py` are pinned in
 `adapters/sandbox.py` / `runner.py` (`RESOLVE_HELPER_SHA256`, `PLUGIN_SHA256`).
 
