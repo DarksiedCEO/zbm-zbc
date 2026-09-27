@@ -1,0 +1,551 @@
+# zbm-zbc continuous integration.
+#
+# One job per service (the nine pip-managed Python services share one matrix definition and report as separate
+# checks, e.g. "python-tests (finance-py, 3.13)"), the uv-managed delivery-py, ledger-rust, orchestrator-go, the
+# dashboard, the five self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
+# delivery-py, dependency and secret scans, and one `required` job that needs every other job so branch protection
+# has a single check to require. See docs/ci.md for what each job proves and what is deliberately not here yet.
+#
+# Every third-party action is pinned to a commit SHA (the tag it corresponds to is in the trailing comment). The
+# SHAs were resolved with `git ls-remote --tags` against github.com on 2026-09-27.
+#
+# Path filtering is done by the `changes` job (a plain `git diff`, no third-party action) so an unrelated change
+# does not run every suite. Shared files (root README.md, BUILD_CONTRACTS.md, docs/**, fixtures/**, .github/**)
+# run everything. The ten Python services are one cluster: their tests read each other's sources (ports.py,
+# requirements.txt, api.py, ledger-rust's server.rs), so a change to any of them, or to ledger-rust, runs all of
+# them. A path no rule knows about runs everything (fail safe).
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "integration-**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded runs on pull requests only; every push to main / integration-* runs to completion.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------------------------------------------
+  # Which parts of the tree changed. Outputs are "true"/"false". Anything that is not a pull request with a
+  # resolvable base, or a push with a known previous commit, runs everything.
+  # ---------------------------------------------------------------------------------------------------------------
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      rust: ${{ steps.filter.outputs.rust }}
+      go: ${{ steps.filter.outputs.go }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          run_all=false
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            run_all=true
+          elif [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            run_all=true   # first push of a branch, or a force push: no reliable base
+          elif ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            run_all=true   # base commit is not in this clone (rewritten history)
+          fi
+          if [ "$run_all" = true ]; then
+            echo "no reliable base commit; running every job"
+            printf 'python=true\nrust=true\ngo=true\ndashboard=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt
+          echo "changed files:"; sed 's/^/  /' /tmp/changed.txt
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import re
+          changed = [l.strip() for l in open("/tmp/changed.txt") if l.strip()]
+          # Shared inputs: anything here runs every suite.
+          shared_files = {"README.md", "BUILD_CONTRACTS.md", ".gitleaks.toml", ".gitignore"}
+          shared_dirs = ("docs/", "fixtures/", ".github/")
+          groups = {"python": False, "rust": False, "go": False, "dashboard": False}
+          py_re = re.compile(r"^services/[a-z0-9-]+-py/")
+          for f in changed:
+              if f in shared_files or f.startswith(shared_dirs):
+                  groups = {k: True for k in groups}
+                  break
+              if py_re.match(f):
+                  groups["python"] = True
+              elif f.startswith("services/ledger-rust/"):
+                  groups["python"] = True   # onboarding-py builds it; creative-py reads src/bin/server.rs
+                  groups["rust"] = True
+              elif f.startswith("services/orchestrator-go/"):
+                  groups["go"] = True
+              elif f.startswith("apps/dashboard-ts/"):
+                  groups["dashboard"] = True
+              else:
+                  groups = {k: True for k in groups}   # unknown path: fail safe, run everything
+                  break
+          for k, v in groups.items():
+              print(f"{k}={'true' if v else 'false'}")
+          EOF
+          echo "outputs:"; tail -n 4 "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # Python services managed by requirements.txt. Each entry: `cd services/<svc> && python -m pytest -q -rs`
+  # (root README "Testing": use `python -m pytest`, never the bare `pytest` binary). onboarding-py's live tests
+  # build ledger-rust with `cargo build --release --bin server` from inside the suite, so that entry gets Rust.
+  # ---------------------------------------------------------------------------------------------------------------
+  python-tests:
+    name: python-tests (${{ matrix.service }}, ${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+        service:
+          - detection-py
+          - fulfillment-py
+          - onboarding-py
+          - creative-py
+          - compliance-py
+          - verification-py
+          - clipper-network-py
+          - finance-py
+          - legal-py
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: services/${{ matrix.service }}/requirements.txt
+      - name: Rust toolchain (onboarding-py builds ledger-rust inside its suite)
+        if: matrix.service == 'onboarding-py'
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo --version
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: matrix.service == 'onboarding-py'
+        with:
+          workspaces: services/ledger-rust -> target
+      - name: Install pinned requirements
+        run: python -m pip install -r services/${{ matrix.service }}/requirements.txt
+      - name: Test
+        working-directory: services/${{ matrix.service }}
+        run: python -m pytest -q -rs -p no:cacheprovider
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # delivery-py is uv-managed: `uv sync --frozen` (the dev group holds pytest; the READMEs' `--no-dev` leaves no
+  # pytest in the venv), then `.venv/bin/python -m pytest -q` and `ruff check src tests devtools`. The Docker
+  # live module skips here with its printed reason; the delivery-docker-live job below is where it must run.
+  # ---------------------------------------------------------------------------------------------------------------
+  delivery-py:
+    name: delivery-py (${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: services/delivery-py
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.8.17"   # the version uv.lock was produced with (services/delivery-py/docker/Dockerfile)
+          enable-cache: true
+          cache-dependency-glob: services/delivery-py/uv.lock
+      - name: Sync the locked environment
+        run: uv sync --frozen --python ${{ matrix.python }}
+      - name: Lint
+        run: uvx ruff@0.15.11 check src tests devtools
+      - name: Test
+        run: .venv/bin/python -m pytest -q -rs -p no:cacheprovider
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # ledger-rust: root README "Testing" — `cargo test` (60 unit + 31 integration; the integration tests spawn the
+  # compiled binary over a real TCP socket) and `cargo clippy --all-targets -- -D warnings`. `--locked` refuses a
+  # Cargo.lock drift.
+  # ---------------------------------------------------------------------------------------------------------------
+  ledger-rust:
+    name: ledger-rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: services/ledger-rust
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Rust stable with clippy
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+          cargo --version && cargo clippy --version
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: services/ledger-rust -> target
+      - name: Test
+        run: cargo test --locked
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # orchestrator-go: root README "Testing" — `go vet ./... && go test -count=1 ./...`, with the race detector on.
+  # ---------------------------------------------------------------------------------------------------------------
+  orchestrator-go:
+    name: orchestrator-go
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/orchestrator-go
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: services/orchestrator-go/go.mod
+          cache: false   # no go.sum (no module dependencies); nothing to key a cache on
+      - name: Vet
+        run: go vet ./...
+      - name: Test (race detector)
+        run: go test -race -count=1 ./...
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # Dashboard: root README "Testing" — `npm ci && npx tsc --noEmit && npm run build && npm test` (3 of the 27
+  # tests start the built server, so build comes first), plus the package's own `check:dynamic` script.
+  # `npm audit` is in the audit-node job.
+  # ---------------------------------------------------------------------------------------------------------------
+  dashboard-ts:
+    name: dashboard-ts
+    needs: changes
+    if: needs.changes.outputs.dashboard == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/dashboard-ts
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"   # `npm test` runs .ts files under `node --test`; needs Node 22.18+ type stripping
+          cache: npm
+          cache-dependency-path: apps/dashboard-ts/package-lock.json
+      - name: Install (clean, from the lockfile)
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test
+      - name: Dynamic-route check
+        run: npm run check:dynamic
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # Live runs: each department's own `devtools/live_run.py` — the REAL ledger-rust binary and the department's
+  # production entrypoint as separate processes over real HTTP, every narrated behaviour asserted, exit 0 only when
+  # the ledger(s) verify valid (GET /ledger/verify) and every check held. These are the integration runs the
+  # department READMEs describe. There is no script for the Revenue Recovery three-process run
+  # (ledger + detection + orchestrator) described in the root README, so that one is not here — see docs/ci.md.
+  # ---------------------------------------------------------------------------------------------------------------
+  live-runs:
+    name: live-run (${{ matrix.service }}, ${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+        service: [compliance-py, verification-py, clipper-network-py, finance-py, legal-py]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: services/${{ matrix.service }}/requirements.txt
+      - name: Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: services/ledger-rust -> target
+      - name: Build the real ledger-rust server
+        working-directory: services/ledger-rust
+        run: cargo build --locked --release --bin server
+      - name: Install pinned requirements
+        # verification-py's live run also starts compliance-py's production entrypoint; the pins are identical
+        # today, and installing both keeps that true by construction.
+        run: |
+          python -m pip install -r services/${{ matrix.service }}/requirements.txt
+          if [ "${{ matrix.service }}" = "verification-py" ]; then
+            python -m pip install -r services/compliance-py/requirements.txt
+          fi
+      - name: Live run
+        working-directory: services/${{ matrix.service }}
+        env:
+          LEDGER_BIN: ${{ github.workspace }}/services/ledger-rust/target/release/server
+        run: python devtools/live_run.py
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # delivery-py's Docker live proof (tests/test_live_docker.py): the properties only a machine with a Docker daemon
+  # can prove (uid 65532, seccomp on, --network none with no egress client, read-only root, deadline kill, volume
+  # reaped). The test skips with a printed reason when it cannot run; this job FAILS if any of its tests skipped.
+  #
+  # The test wants DLV_LIVE_SANDBOX_IMAGE=<registry-host>/<path>@sha256:<digest> (a digest-pinned image; a tag-only
+  # reference is refused by the adapter, ST-03) and derives DLV_IMAGE_REGISTRY from the host. A locally built image
+  # has no repository digest, so the image is pushed to a registry container on 127.0.0.1:5000 and referenced by
+  # the digest that push produces. docker/sandbox.Dockerfile needs the python:3.12-slim base digest as a build
+  # argument; ADR 0011 records none yet. Set the repository variable DLV_SANDBOX_BASE_DIGEST (64 hex) once it is
+  # recorded; until then this job resolves the CURRENT digest of python:3.12-slim and prints it (an unpinned
+  # float, stated plainly in docs/ci.md).
+  # ---------------------------------------------------------------------------------------------------------------
+  delivery-docker-live:
+    name: delivery-docker-live
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SANDBOX_TAG: 127.0.0.1:5000/zbm/dlv-sandbox:ci
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Docker daemon present
+        run: docker info --format '{{.ServerVersion}}'
+      - name: Resolve the python:3.12-slim base digest
+        id: base
+        env:
+          PINNED: ${{ vars.DLV_SANDBOX_BASE_DIGEST }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PINNED" ]; then
+            echo "$PINNED" | grep -Eq '^[0-9a-f]{64}$' || { echo "DLV_SANDBOX_BASE_DIGEST is not 64 hex"; exit 1; }
+            digest="$PINNED"; echo "using the recorded base digest"
+          else
+            digest=$(docker buildx imagetools inspect python:3.12-slim --format '{{.Manifest.Digest}}' | sed 's/^sha256://')
+            echo "::warning title=unpinned base image::ADR 0011 records no python:3.12-slim digest; built from the current one: sha256:$digest. Record it and set the DLV_SANDBOX_BASE_DIGEST repository variable."
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Local registry (so the image gets a repository digest)
+        run: |
+          docker run -d --name ci-registry -p 127.0.0.1:5000:5000 registry:2
+          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:5000/v2/ >/dev/null && break; sleep 1; done
+          curl -fsS http://127.0.0.1:5000/v2/
+      - name: Build the sandbox image
+        run: |
+          docker build -f services/delivery-py/docker/sandbox.Dockerfile \
+            --build-arg BASE_DIGEST=${{ steps.base.outputs.digest }} -t "$SANDBOX_TAG" .
+      - name: Push and pin by digest
+        id: image
+        run: |
+          set -euo pipefail
+          docker push "$SANDBOX_TAG"
+          ref=$(docker image inspect "$SANDBOX_TAG" --format '{{index .RepoDigests 0}}')
+          echo "$ref" | grep -Eq '^127\.0\.0\.1:5000/zbm/dlv-sandbox@sha256:[0-9a-f]{64}$' || { echo "unexpected digest reference: $ref"; exit 1; }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "sandbox image: $ref"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.8.17"
+          enable-cache: true
+          cache-dependency-glob: services/delivery-py/uv.lock
+      - name: Sync the locked environment
+        working-directory: services/delivery-py
+        run: uv sync --frozen --python 3.12
+      - name: Run the Docker live tests
+        working-directory: services/delivery-py
+        env:
+          DLV_LIVE_SANDBOX_IMAGE: ${{ steps.image.outputs.ref }}
+        run: .venv/bin/python -m pytest -q -rs -p no:cacheprovider tests/test_live_docker.py --junitxml=/tmp/live-docker.xml
+      - name: Fail if any Docker live test was skipped
+        run: |
+          python3 - <<'EOF'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("/tmp/live-docker.xml").getroot()
+          cases = list(root.iter("testcase"))
+          skipped = [c.get("name") for c in cases if c.find("skipped") is not None]
+          print(f"{len(cases)} test cases, {len(skipped)} skipped")
+          assert cases, "no test cases collected from tests/test_live_docker.py"
+          assert not skipped, f"Docker live tests skipped (must run here): {skipped}"
+          EOF
+      - name: Registry teardown
+        if: always()
+        run: docker rm -f ci-registry >/dev/null 2>&1 || true
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # Dependency audits. Always run (they are cheap next to the suites and a lockfile change anywhere matters).
+  # ---------------------------------------------------------------------------------------------------------------
+  audit-python:
+    name: audit-python (pip-audit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.8.17"
+      - name: Install pip-audit
+        run: python -m pip install pip-audit==2.10.1
+      - name: pip-audit every requirements.txt
+        run: |
+          set -euo pipefail
+          for req in services/*-py/requirements.txt; do
+            echo "== $req"
+            pip-audit -r "$req" --strict --progress-spinner off
+          done
+      - name: pip-audit delivery-py's uv.lock
+        # The two deer-flow packages are git-sourced (pinned to a commit) and have no registry version to look up;
+        # pip-audit refuses URL requirements, so they are excluded here and stated in docs/ci.md.
+        working-directory: services/delivery-py
+        run: |
+          set -euo pipefail
+          uv export --frozen --no-hashes --no-emit-project --format requirements-txt -o /tmp/dlv-lock.txt
+          grep -v '@ git+' /tmp/dlv-lock.txt > /tmp/dlv-registry.txt
+          echo "excluded (git-sourced):"; grep '@ git+' /tmp/dlv-lock.txt || true
+          pip-audit -r /tmp/dlv-registry.txt --no-deps --disable-pip --strict --progress-spinner off
+
+  audit-rust:
+    name: audit-rust (cargo audit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/ledger-rust
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: services/ledger-rust -> target
+          cache-all-crates: true   # keeps the installed cargo-audit binary between runs
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+      - name: cargo audit
+        run: cargo audit
+
+  audit-node:
+    name: audit-node (npm audit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/dashboard-ts
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+      - name: npm audit (high and above fail)
+        run: npm audit --audit-level=high
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # Secret scan over the whole git history with the gitleaks release binary (checksum-verified download; no
+  # third-party action, no licence key). .gitleaks.toml allowlists four exact fake strings used by onboarding-py's
+  # redaction tests and nothing else.
+  # ---------------------------------------------------------------------------------------------------------------
+  secret-scan:
+    name: secret-scan (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb   # gitleaks_8.30.1_linux_x64.tar.gz
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks (checksum-verified release binary)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
+          mkdir -p /tmp/gitleaks && tar -xzf /tmp/gitleaks.tgz -C /tmp/gitleaks
+          /tmp/gitleaks/gitleaks version
+      - name: Scan the full history
+        run: /tmp/gitleaks/gitleaks git --no-banner --redact --exit-code 1 --config .gitleaks.toml .
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # The one check branch protection requires. A skipped upstream job (path filter said its inputs did not change)
+  # is fine; a failed or cancelled one is not.
+  # ---------------------------------------------------------------------------------------------------------------
+  required:
+    name: required
+    if: always()
+    needs:
+      - changes
+      - python-tests
+      - delivery-py
+      - ledger-rust
+      - orchestrator-go
+      - dashboard-ts
+      - live-runs
+      - delivery-docker-live
+      - audit-python
+      - audit-rust
+      - audit-node
+      - secret-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every needed job succeeded or was skipped by the path filter
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          needs = json.loads(os.environ["RESULTS"])
+          bad = {k: v["result"] for k, v in needs.items() if v["result"] not in ("success", "skipped")}
+          for k, v in sorted(needs.items()):
+              print(f"{k:24s} {v['result']}")
+          if needs["changes"]["result"] != "success":
+              raise SystemExit("the changes job did not succeed; nothing downstream is trustworthy")
+          if bad:
+              raise SystemExit(f"failed or cancelled: {bad}")
+          print("all required jobs passed")
+          EOF

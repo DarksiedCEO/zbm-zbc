@@ -1,0 +1,17 @@
+# gitleaks configuration for zbm-zbc (used by the `secret-scan` job in .github/workflows/ci.yml).
+# Extends the default ruleset. The allowlist below is deliberately narrow: exact strings only, no file or
+# path exemptions, so a real secret added to any file (including these tests) is still caught.
+title = "zbm-zbc"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deliberately fake secret shapes used by onboarding-py's redaction/attack tests (test_cert_attack.py, test_fix_wave1.py): two fake AWS-key shapes, a fake high-entropy token and a fake cued password. Exact strings, matched against the detected secret."
+regexTarget = "secret"
+regexes = [
+  '''^AKIAQWERTYUIOPASDFGH$''',
+  '''^AKIAABCDEFGHIJKLMNOP$''',
+  '''^FAKEsecret9Zq7Hunter2Xy81Lp$''',
+  '''^tangerine-walrus-42$''',
+]
