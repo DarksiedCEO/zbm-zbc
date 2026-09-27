@@ -770,6 +770,17 @@ class LegalService:
     def _current(self, doc_id: str) -> Optional[dict]:
         return i01.current(self._versions_of(doc_id), self._now())
 
+    def _in_force(self, v: dict) -> bool:
+        """Approved, effective and not past review_by at this instant (spec §B.2 "approved at accepted_at")."""
+        return i01.current([v], self._now()) is not None
+
+    def _template(self, doc_id: str) -> Optional[dict]:
+        """The version a scheduler fill uses: the highest in-force approved version that is itself a template
+        (declares template variables and is not a fill). A filled instance is never a template."""
+        vs = [v for v in self._versions_of(doc_id) if v.get("template_variables") and not v.get("template_ref")
+              and self._in_force(v)]
+        return max(vs, key=lambda v: i01.vkey(v["version"]), default=None)
+
     def _version(self, doc_id: str, version: str) -> dict:
         v = self.doc_versions.get(f"{doc_id}@{version}")
         if v is None:
@@ -875,10 +886,10 @@ class LegalService:
             else:
                 if body.get("text") is not None or body.get("variables") is None or body.get("template_variables"):
                     raise Invalid("a template fill carries variables only (the template is the current version)")
-                tpl = self._current(doc_id)
+                tpl = self._template(doc_id)
                 if tpl is None:
                     raise Refused("NO_APPROVED_TEMPLATE", reasons=[R.item("NO_APPROVED_TEMPLATE", f"{doc_id} has no "
-                                  "current counsel-approved version to fill")], recorded=False)
+                                  "in-force counsel-approved template version to fill")], recorded=False)
                 if body["entity"] != tpl["entity"]:
                     raise Invalid("a fill keeps the template's entity")
                 schema = tpl["template_variables"] or {}
@@ -1076,10 +1087,9 @@ class LegalService:
             else:
                 if body["doc_sha256"] != v["sha256"]:
                     reasons.append(R.item("ACCEPTANCE_HASH_MISMATCH", "doc_sha256 differs from the register's hash"))
-                cur = self._current(body["doc_id"])
-                if cur is None or cur["key"] != v["key"]:
-                    reasons.append(R.item("VERSION_NOT_IN_FORCE", f"{body['doc_id']} {body['version']} is not the "
-                                          "approved, effective version at accepted_at"))
+                if not self._in_force(v):
+                    reasons.append(R.item("VERSION_NOT_IN_FORCE", f"{body['doc_id']} {body['version']} is not "
+                                          "approved and in force at accepted_at"))
             if body["presented_sha256"] != body["doc_sha256"]:
                 reasons.append(R.item("PRESENTED_TEXT_MISMATCH", "the text shown is not the document exactly"))
             if body["affirmative_act"] is not True:
@@ -1169,10 +1179,9 @@ class LegalService:
                 raise Refused("ESIGN_DOC_TYPE_EXCLUDED", reasons=[R.item("ESIGN_DOC_TYPE_EXCLUDED", f"{d['doc_type']} "
                               "is outside ordinary commercial contracts (UETA 1633.3 exclusions UNVERIFIED)")],
                               recorded=False)
-            cur = self._current(body["doc_id"])
-            if cur is None or cur["key"] != v["key"]:
-                raise Refused("VERSION_NOT_IN_FORCE", reasons=[R.item("VERSION_NOT_IN_FORCE", "only the current "
-                              "approved version goes out for signature")], recorded=False)
+            if not self._in_force(v):
+                raise Refused("VERSION_NOT_IN_FORCE", reasons=[R.item("VERSION_NOT_IN_FORCE", "only an approved, "
+                              "in-force version goes out for signature")], recorded=False)
             op = Op(self, f"env|{request_id}", i03.ACTOR, body["party_ref"])
             esign = self.ports.esign
             ans = op.call("esign_provider", "create_envelope", (body["doc_id"], body["version"], v["sha256"]),
@@ -2176,7 +2185,7 @@ class LegalService:
             key, h, ent = self._idem("andre", request_id, "takedowns/outbound", body)
             if ent:
                 return ent["response"]
-            tpl = self._current("dmca_procedure")
+            tpl = self._template("dmca_procedure") or self._current("dmca_procedure")
             if tpl is None:
                 raise Refused("NO_APPROVED_TEMPLATE", reasons=[R.item("NO_APPROVED_TEMPLATE", "outbound notices are "
                               "drafted only from the counsel-approved dmca_procedure template")], recorded=False)

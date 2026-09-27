@@ -9,7 +9,8 @@ version.
   sign-off whose ``doc_sha256`` equals the version SHA-256). Documents a counsel question blocks (§I: CQ-17 ->
   ic_agreement, CQ-15 -> not_legal_advice_v1) also need that question verified (LG-18); the engagement letter
   needs its AI-use clause ``ENG-AI-01`` (CQ-24, LG-17).
-- Template fill: the template is the document's own CURRENT (approved) version; placeholders ``{{name}}`` are
+- Template fill: the template is the document's highest in-force approved version that declares template
+  variables and is not itself a fill (a filled instance is never a template); placeholders ``{{name}}`` are
   replaced by typed, bounded variables only. Every string variable passes the advice-text guard (the counsel-
   approved body does not need to).
 """

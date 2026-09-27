@@ -340,3 +340,22 @@ def test_engagement_renewal_keeps_the_counsel_ref_and_memos_follow_the_current_l
     assert r.status_code == 409 and r.json()["detail"] == "ENGAGEMENT_NOT_APPROVED"
     he.engage(version="1.1")                                                   # same counsel, a new countersigned version
     assert he.memo(content=b"after renewal", memo_date="2026-12-31")["memo_id"]
+
+
+def test_fills_keep_using_the_template_after_an_instance_is_approved_and_old_instances_stay_acceptable(he):
+    from builders import executed_msa
+    fill, acc = executed_msa(he)                                    # 1.0 template, 1.1 acme instance (approved)
+    b = he.ok(he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "version": "1.2", "entity": "zbm",
+              "variables": {"client_name": "Beta LLC", "end_date": "2027-12-31"}}, caller="scheduler"), 201)
+    assert b["review_label"] == "counsel_template:client_msa@1.0"
+    r = he.post("/legal/v1/documents/client_msa/versions", {"request_id": rid(), "version": "1.3", "entity": "zbm",
+                "variables": {"client_name": "You must sign this today", "end_date": "2027-12-31"}}, caller="scheduler")
+    assert r.status_code == 422 and r.json()["detail"] == "ADVICE_TEXT_BLOCKED"
+    memo = he.memo(cites={"doc_versions": ["client_msa@1.2"]})
+    he.ok(he.apost("/legal/v1/documents/client_msa/versions/1.2/counsel-signoff",
+                   {"request_id": rid(), "counsel_ref": COUNSEL_REF, "signed_on": "2026-10-01", "doc_sha256": b["sha256"],
+                    "memo_id": memo["memo_id"], "memo_sha256": memo["memo_sha256"]}))
+    he.ok(he.apost("/legal/v1/documents/client_msa/versions/1.2/decision",
+                   {"request_id": rid(), "decision": "approve", "version_sha256": b["sha256"]}))
+    a2 = he.clickwrap("client_msa", "1.1", fill["sha256"], party="client:acme2", caller="onboarding")
+    assert a2["evidence_sufficient"] is True                        # 1.1 is still approved and in force
