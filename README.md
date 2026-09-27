@@ -585,3 +585,53 @@ export CN_CALLER_TOKENS='{"hub": "<>=32 chars>", "onboarding": "...", "creative_
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> CN_DATA_DIR=<dir>
 cd src && python3 -m api   # CN_BIND_ADDR (default 127.0.0.1), CN_PORT (default 8400)
 ```
+
+## Finance (31) (`services/finance-py`) — Sep 26, 2026
+
+ZBC's and ZBM's books (two entities, two charts, never mixed), ZBC's client
+deposits held in a ZBC-owned restricted account titled `ZBC Client Campaign
+Deposits` (never "escrow", "trust" or "FBO" — those words are refused),
+creator payables accrued only from V&I certifications, the weekly payout
+under maker-checker (the system proposes, Andre approves, the system
+releases), clawbacks by netting only, tax records, daily reconciliation to
+zero and the month-end close. Built from the locked Finance spec (rev 1): 10
+deterministic single-task intelligences, no model calls, money as `Decimal`
+two-decimal strings with one half-up rounding per payable. Architecture,
+every choice made where the spec was silent, and the unlock list:
+`docs/adr/0009-finance-department-architecture.md`. Routes and settings:
+`services/finance-py/README.md`.
+
+- **Status:** built and tested (264 tests, `python3 -m pytest -q`; no
+  network). **Not certified for any real dollar.** Rails (Stripe/Trolley),
+  bank feed and transfers, tax agent, GL, vault, Clipper Network, Legal,
+  People and push are fail-closed stand-ins (no rail or bank adapter code
+  exists yet — only the ports); the V&I and Compliance thin clients exist
+  but are unwired by default. On day one nothing accrues, activates,
+  issues, reconciles or pays.
+- **Controls:** double-entry journal that must balance to zero, append-only,
+  hash-chained and anchored on the ledger; restricted pool ≥ creator and
+  client liabilities checked before every posting; twelve release gates
+  (certification, Compliance, tax status, OFAC ≤ 1 day, rail, payee
+  hold/callback, minimum, velocity limits, reconciliation, treasury,
+  controls, rules) re-run at release — property-tested over all 2,047
+  combinations of absent inputs; release idempotency keyed per
+  batch/payee/period and a payable in at most one live item; zero-tolerance
+  reconciliation whose open breaks block the next run; separation of duties
+  by caller identity. **With one human approver this is compensating dual
+  control, not dual control** (FR's definition) until a second approver is
+  named.
+- **Live run** (real ledger-rust binary): production entrypoint on
+  stand-ins refuses everything; then with the test fakes: prepayment →
+  certification → payable 29.01 → batch proposed → Andre approves → funding
+  → release after the 12 h delay → paid → clawback after payment → next
+  week's earnings net it → reconciliation green → restart with anchor check;
+  `GET /ledger/verify` → `{"entries":34,"valid":true}` and
+  `{"entries":232,"valid":true}`.
+
+```bash
+cd services/finance-py && python3 -m pytest -q      # 264 tests
+export FIN_SERVICE_TOKEN=<secret> FIN_ANDRE_APPROVAL_TOKEN=<Andre's secret>
+export FIN_CALLER_TOKENS='{"scheduler": "<>=32 chars>", "creative_production": "...", "onboarding": "...", "clipper_network": "..."}'
+export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> FIN_DATA_DIR=<dir>
+cd src && python3 -m api   # FIN_BIND_ADDR (default 127.0.0.1), FIN_PORT (default 8410)
+```
