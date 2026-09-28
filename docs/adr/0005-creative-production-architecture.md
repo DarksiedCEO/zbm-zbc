@@ -1674,6 +1674,30 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     superseded versions compactly (serialised) and load one only to
     judge a clip made under it.
 
+18. **Memory under junk floods is judged as a plateau (fix wave 21,
+    AEGIS round 20 N20-M-6).** `test_fix_wave_6.py`'s flood test asserted
+    one absolute RSS sample (`rss < 250`) after one flood, with no
+    baseline: it could neither see a leak below the ceiling nor tell a
+    plateau from a climb (with 100 KiB retained per junk request it still
+    passed). Replaced by
+    `test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb`:
+    a fresh server, the baseline before any flood, then 10 rounds of both
+    floods (20 concurrent x 3 of the 1 MiB junk, then of the 60k-keys
+    junk), RSS sampled after each flood, a round's value the larger of its
+    two samples. Asserted: (a) RSS[10] - RSS[5] < 24 MiB — the reviewer's
+    plateau data (Linux, 12 + 6 rounds) show per-round peaks moving within
+    13 MiB with no trend; this wave's 10 Linux runs gave RSS[10] - RSS[5]
+    from -7 to +14 MiB. 24 sits above that noise; a retention of >= ~55 KiB
+    per junk request (600 requests in rounds 6-10: 31 MiB over the worst
+    negative noise) always fails, a smaller one may pass. Mutation check: a
+    sitecustomize retaining 100 KiB per `json.loads` passes the old single
+    sample (RSS 93/96 MB) and fails this test (climb 86 MiB);
+    (b) plateau - baseline < 170 MiB — measured at most 135 (199 - 64),
+    plus ~25 % for allocator and scheduling variation; (c) plateau < 250
+    MiB, the absolute ceiling kept. Every sample is printed and in the
+    assertion message. Linux only so far; macOS is decided by the CI entry
+    `python-tests (creative-py, 3.13, macos-14)`.
+
 ## Verified
 
 See `services/creative-py/README.md` for the exact commands, test

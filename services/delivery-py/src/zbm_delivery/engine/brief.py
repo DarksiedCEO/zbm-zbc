@@ -59,7 +59,9 @@ def data_block(finding: dict) -> str:
 
 
 def compile_brief(template: str, *, run: dict, finding: dict, round_no: int, max_rounds: int, test_argv: list[str],
-                  suite_argv: list[str], engine_notes: str = "") -> str:
+                  suite_argv: list[str], engine_notes: str = "", repro_argv: list[str] | None = None) -> str:
+    """``repro_argv`` (wave 21, R1): the seeded argv of the finding's own reproduction — built from the node id the
+    engine extracted and validated (``<path>::<name>``, a closed character set), never the reviewer's free text."""
     body = template
     fields = {
         "{finding_id}": finding["id"], "{severity}": finding["severity"], "{run_id}": run["run_id"],
@@ -68,6 +70,8 @@ def compile_brief(template: str, *, run: dict, finding: dict, round_no: int, max
         "{line}": str(finding["line"]), "{class_hint}": finding.get("class_hint") or "(none given)",
         "{test_argv}": " ".join(shlex.quote(a) for a in test_argv),
         "{suite_argv}": " ".join(shlex.quote(a) for a in suite_argv),
+        "{repro_argv}": (" ".join(shlex.quote(a) for a in repro_argv) if repro_argv
+                         else "(none: this finding names no runnable reproduction and cannot be fixed)"),
         "{data_block}": data_block(finding),
         "{engine_notes}": engine_notes.strip(),
     }

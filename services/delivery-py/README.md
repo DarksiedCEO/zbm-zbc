@@ -18,8 +18,11 @@ RED (the test fails on the unfixed tree), GREEN (passes with everything the agen
 checkout (base + the SOURCE changes + the RED test file only: must pass), the reverted checkout (base + the RED
 test only: must fail), the **single-file revert** (the whole fix EXCEPT the finding's file: the RED test must
 fail — the test is tied to the finding's file, and that file must carry a hunk of the fix), the **finding's own
-reproduction** when the document names a test node id (must pass in the verification checkout and fail in the
-reverted one, run alone in its own container), the **src-only check** (every baseline failure the fix claims must
+reproduction** — always: every finding must name a test node id (`<path>::<name>`) of the service's own test
+runner that exists at the base commit, or the document is refused `422 reproduction_not_runnable` before a run
+exists (wave 21; a `fail` review's reopened/new findings are checked the same way against the run's head before
+the review is recorded) — which must pass in the verification checkout and fail in the reverted one, run alone in
+its own container, the **src-only check** (every baseline failure the fix claims must
 pass on base + the source changes alone), the whole suite on the exact tree that is then committed (its content
 digest is recorded and re-derived from the commit; **outcome deltas are verdicts**: a test that was passed/failed at
 baseline and is skipped or missing afterwards fails the round, and no `CHANGED_TEST:` excuses it or may touch an
@@ -40,7 +43,8 @@ honoured only when the finding's own reproduction (a test node id named in the f
 untouched base tree. The report is written from the engine's records; the run ends `awaiting_review` for AEGIS
 (`POST …/review`), which can reopen findings into a new run on the same branch. Every tool call is decided by our
 guardrail and recorded on the ledger BEFORE it runs (a bash command must be a single line; an interpreter/shell/
-make/linter call is recorded `allow_opaque`; write operands are resolved inside the container by a pinned
+make/linter call is recorded `allow_opaque`, but a pipe or here-string INTO one is refused however it is spelled;
+a hard link (`ln` without `-s`, `cp -l`/`--link`) or `mv` whose source is outside the write roots is refused; write operands are resolved inside the container by a pinned
 read-only helper in ONE exec, after the decision is recorded, capped at 16 operands and 64 components; file-tool
 writes are contained to `services/<service>/` and `docs/adr/00NN-*.md`); `git push`/`merge`/remote operations,
 network, deletion outside the service directory, ACP/MCP, subagents and self-modification are denied
@@ -52,9 +56,11 @@ Nothing is ever marked fixed on the agent's word; nothing the agent's process pr
 ```bash
 cd services/delivery-py
 uv sync --frozen                     # python 3.12 or 3.13 (pytest is in the dev group); the harness comes from the pinned deer-flow git source (uv.lock)
-.venv/bin/python -m pytest -q        # 489 tests, no network, no Docker needed (the Docker live module skips with its reason);
+.venv/bin/python -m pytest -q        # 561 tests, no network, no Docker needed (the Docker live module skips with its reason);
                                      # cargo, go and node must be on PATH (the toolchain module runs the toy fixtures for real);
-                                     # tests/test_live_round19.py needs a free port in 18800-18849 (a local TLS server)
+                                     # the live tests need a free port in 18800-18849 (DLV_TEST_PORT_RANGE=lo-hi moves them);
+                                     # passes with TMPDIR behind a symlink too (wave 21, N20-D-4); live-run logs go to the
+                                     # gitignored docs/evidence/dept28/_runs/ — no test rewrites a tracked file (N20-D-1)
 ruff check src tests devtools
 
 # a clean environment: the gate refuses ANY name outside the allowlist (DLV_*, LEDGER_SERVICE_*, PATH, HOME, LANG,

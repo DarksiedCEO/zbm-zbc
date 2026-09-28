@@ -11,7 +11,7 @@ disagreement is ``unknown``; ``unknown`` is never green and never a valid RED. A
 ``verified: false`` (none shipped) stays ``unknown`` by construction.
 
 pytest detail: every invocation carries ``-c <engine ini>`` (written by the engine under
-``/mnt/user-data/workspace/.dlv-engine/``, ``addopts`` empty), ``--rootdir=<service dir>``, ``-o`` overrides for
+``/mnt/user-data/workspace/.dlv-engine/``, ``addopts`` empty), ``--rootdir=.`` (the service directory the engine runs in, as the process resolves it: the physical path; wave 21, N20-D-4), ``-o`` overrides for
 ``python_files``/``testpaths``/``pythonpath`` from the seed and ``-p no:cacheprovider``; the repository's
 ``pytest.ini``/``pyproject``/``setup.cfg``/``tox.ini`` are never read. Report files are read back with ``docker cp``
 (the daemon, not a process in the box). cargo builds into an engine-owned ``--target-dir`` under the engine directory,
@@ -39,7 +39,7 @@ import posixpath
 import re
 import secrets
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from zbm_delivery.engine import parsers, toolchains
 from zbm_delivery.policy import WORKSPACE
@@ -91,6 +91,54 @@ def node_id_in_text(text: str) -> Optional[str]:
     return node
 
 
+# wave 21 (R1, N20-D-3): the source files each seeded ecosystem runs tests from (a reproduction must name one)
+REPRO_SUFFIXES = {"pytest": (".py",), "cargo": (".rs",), "go": ("_test.go",),
+                  "npm": (".ts", ".mts", ".cts", ".js", ".mjs", ".cjs")}
+
+
+def detect_framework(seed: dict, exists: Callable[[str], bool]) -> Optional[str]:
+    """The seeded framework whose marker files exist (``exists(<path relative to the service directory>)``), in
+    seed order, else None (D7). ``TestRunner.detect`` is this over the worktree's service directory."""
+    for name, fw in seed["frameworks"].items():
+        if any(exists(m) for m in fw["markers"]):
+            if all(exists(r) for r in fw.get("requires", [])):
+                return name
+    return None
+
+
+def reproduction_problem(seed: dict, text: str, exists: Callable[[str], bool],
+                         read: Callable[[str], Optional[str]]) -> tuple[Optional[str], Optional[str]]:
+    """``(node id, None)`` when the finding's ``reproduction`` text names a test the service's toolchain can run
+    on the base tree, else ``(node id or None, why not)`` (wave 21, R1: a prose reproduction is refused at
+    ingestion). ``exists``/``read`` see the BASE commit's service directory. Resolvable means: a ``<path>::<name>``
+    node id in the text; a seeded framework detected at base; the path a source file of that ecosystem's test
+    runner (``REPRO_SUFFIXES``; not test infrastructure), present at base; and the test's own name (the last ``::``
+    part, without a ``[param]``) appearing as an identifier in that file. That is what the seeded ``{target}``
+    argv selects (``engine/toolchains.py``); whether the test FAILS on base is the engine's RED/reverted runs."""
+    node = node_id_in_text(text)
+    if node is None:
+        return None, "the reproduction names no test node id (<path>::<name> relative to the service directory)"
+    if not _TARGET_RE.fullmatch(node) or ".." in node.split("/") or node.startswith("/"):
+        return node, "the node id is not a plain <path>::<name> relative to the service directory"
+    fw_name = detect_framework(seed, exists)
+    if fw_name is None:
+        return node, "no seeded test framework matches the service directory at the base commit"
+    fw = seed["frameworks"][fw_name]
+    path, _, name = node.partition("::")
+    if not path.endswith(REPRO_SUFFIXES.get(fw_name, ())):
+        return node, f"{path} is not a {fw_name} test source ({', '.join(REPRO_SUFFIXES.get(fw_name, ()))})"
+    base = posixpath.basename(path)
+    if any(TestRunner._match(path, g) or fnmatch.fnmatch(base, g) for g in fw.get("test_infra_globs", [])):
+        return node, f"{path} is test infrastructure, not a test"
+    body = read(path)
+    if body is None:
+        return node, f"{path} is not a file of the base commit"
+    func = name.split("[", 1)[0].rsplit("::", 1)[-1]
+    if not re.search(r"(?<![A-Za-z0-9_])" + re.escape(func) + r"(?![A-Za-z0-9_])", body):
+        return node, f"{func} does not occur in {path} at the base commit"
+    return node, None
+
+
 def same_test(failed_name: str, target: str) -> bool:
     """Whether a failure name from a verified count set names the test ``<path>::<name>`` (a finding's
     reproduction): pytest keys are the node id itself; cargo keys are the libtest name alone; go keys are
@@ -122,11 +170,10 @@ class TestRunner:  # noqa: N801
     @staticmethod
     def detect(seed: dict, service_dir: str) -> str:
         """Framework by marker file inside the service directory (D7); ``npm`` needs the lockfile."""
-        for name, fw in seed["frameworks"].items():
-            if any(os.path.exists(os.path.join(service_dir, m)) for m in fw["markers"]):
-                if all(os.path.exists(os.path.join(service_dir, r)) for r in fw.get("requires", [])):
-                    return name
-        raise RunnerRefused("no seeded test framework matches the service directory (D7: nothing else is run)")
+        name = detect_framework(seed, lambda rel: os.path.exists(os.path.join(service_dir, rel)))
+        if name is None:
+            raise RunnerRefused("no seeded test framework matches the service directory (D7: nothing else is run)")
+        return name
 
     def _toolchain(self, service_dir: str) -> Optional[toolchains.Toolchain]:
         if not self.fw.get("verified"):
@@ -181,13 +228,21 @@ class TestRunner:  # noqa: N801
         return f"{self.engine_dir}/engine-{hashlib.sha256(cwd.encode()).hexdigest()[:12]}.ini"
 
     def _ini_values(self, cwd: str) -> dict:
-        """The seed's ini values with every path made ABSOLUTE under ``cwd`` (pytest resolves ``paths``-typed ini
-        values against the ini file's directory, which is the engine directory, never the service); the engine
-        directory comes FIRST on ``pythonpath`` so ``-p zbm_engine_plugin`` can only resolve to the engine's copy (R4)."""
+        """The seed's ini values with ``pythonpath`` made ABSOLUTE under ``cwd`` (pytest resolves that ``paths``-typed
+        value against the ini file's directory, which is the engine directory, never the service); the engine
+        directory comes FIRST on ``pythonpath`` so ``-p zbm_engine_plugin`` can only resolve to the engine's copy (R4).
+        ``testpaths`` stays RELATIVE (wave 21, N20-D-4): it is an ``args``-typed value pytest globs against the
+        process's working directory — the service directory, as the process resolves it — and uses only when that
+        directory is the rootdir (``--rootdir=.``). Made absolute, a working directory reached through a symlink gave
+        collected paths outside the rootdir (``../../<link>/...`` node ids) and every suite verdict was unknown."""
         ini = dict(self.fw.get("ini") or {})
-        for k in ("pythonpath", "testpaths"):
-            if k in ini:
-                ini[k] = " ".join(posixpath.normpath(posixpath.join(cwd, part)) for part in str(ini[k]).split())
+        if "pythonpath" in ini:
+            ini["pythonpath"] = " ".join(posixpath.normpath(posixpath.join(cwd, part)) for part in str(ini["pythonpath"]).split())
+        if "testpaths" in ini:
+            parts = str(ini["testpaths"]).split()
+            if any(p.startswith("/") or ".." in p.split("/") for p in parts):
+                raise RunnerRefused("seed testpaths must be relative to the service directory")
+            ini["testpaths"] = " ".join(parts)
         ini["pythonpath"] = (self.engine_dir + " " + ini["pythonpath"]).strip() if ini.get("pythonpath") else self.engine_dir
         return ini
 

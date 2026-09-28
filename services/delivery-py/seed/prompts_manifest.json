@@ -1,9 +1,9 @@
 {
-  "CHANGES.md": "97d59ff0a4f07fff9bde0b57d2577c3d034ebc8927a80ee0cb838b1be23c78aa",
-  "brief.template.md": "d0f55f3ed9c3b8a4b0de406f1405070462329c4d95d8a7302596ec09462ff793",
-  "engine.system.md": "36d2f7a326aaeb1fdc1b70b3f61b15325fb0f65f39dcd2b42bf6e22d30defa91",
+  "CHANGES.md": "3836c21f64bd88e07d773202067868e48bfc69994e35c9ffa25cdd97d420d278",
+  "brief.template.md": "e5f93ff984dd77a3ab25bd52f6d1ab3d4602ad004b37cf11a45dad6f8587bd09",
+  "engine.system.md": "40bc2c58f9a6f13c21c19d37a9384a3f13c0cbc59382bad2823548da14378f0d",
   "executing-plans.md": "08cee54c9eb85b1817a279c38461d5674bfa9f5f4333deb6acfcbf95a905a94a",
-  "reviewer.md": "cdb3dc9d5a09df808cc45b30d052d8c2dc81be62bc348e647fd181575af971a5",
+  "reviewer.md": "e02c494e1e86ad46692e6fda8e3c718f880eb6ea48f0dbc69e2b4adc11e3d999",
   "systematic-debugging.md": "572a6425d31247b849968e11cd68e41a9e78110a46fda23fb933510458a7660f",
   "test-driven-development.md": "4fd84151f92ae05e018c92b955bcfe8720021557b189388ef83bde71a44437a2",
   "verification-before-completion.md": "2a5e33c8f7dfc7063dcfba7d62625b07940effc76ee5d8c93baca34d45e20b01",

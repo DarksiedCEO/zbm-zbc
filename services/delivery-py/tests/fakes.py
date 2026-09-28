@@ -107,7 +107,14 @@ class FakeDockerCli:
         return s
 
     def _map_out(self, b: bytes, vol: str) -> bytes:
-        return b.replace(vol.encode(), WORKSPACE.encode())
+        """Every host spelling of the volume back to the container path (wave 21, N20-D-4): the volume as the
+        double named it AND its realpath — a process started in a directory reached through a symlink (``TMPDIR``
+        behind a link, macOS ``/var`` → ``/private/var``) reports the physical path (``getcwd``), so mapping only
+        the spelled path handed host paths back to the engine and its containment checks."""
+        spellings = {vol, os.path.realpath(vol)}
+        for s in sorted(spellings, key=len, reverse=True):
+            b = b.replace(s.encode(), WORKSPACE.encode())
+        return b
 
     def run(self, argv, *, timeout_s: float, stdin: bytes | None = None, output_cap: int = 1024 * 1024) -> ExecResult:
         argv = [str(a) for a in argv]

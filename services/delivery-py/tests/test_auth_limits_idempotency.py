@@ -93,8 +93,9 @@ def test_strict_schema_422(h):
     for b in bad:
         r = h.post("/dlv/v1/fix-runs", b)
         assert r.status_code == 422, (json.dumps(b)[:200], r.text)
-    # newlines are allowed in the free-text fields (a reproduction is multi-line)
-    ok = dict(doc, request_id=rid(), findings=[dict(doc["findings"][0], reproduction="line1\nline2\ttab")])
+    # newlines are allowed in the free-text fields (a reproduction is multi-line; wave 21: and it names a test)
+    ok = dict(doc, request_id=rid(), findings=[dict(doc["findings"][0],
+                                                   reproduction="line1 tests/test_calc.py::test_add_returns_sum\nline2\ttab")])
     assert h.post("/dlv/v1/fix-runs", ok).status_code in (202, 409)
     # review and cancel schemas
     assert h.post("/dlv/v1/fix-runs/dlv-run-" + "A" * 26 + "/review", {"request_id": rid(), "review_ref": "r", "sha256": "a" * 64,

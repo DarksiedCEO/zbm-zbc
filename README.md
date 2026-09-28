@@ -271,7 +271,7 @@ cd services/detection-py && python3 -m pytest -q
 # Go — 59 tests
 cd services/orchestrator-go && go vet ./... && go test -count=1 ./...
 
-# Rust — 91 tests (60 unit + 31 integration; the integration tests spawn
+# Rust — 104 tests (60 unit + 44 integration; the integration tests spawn
 # the real compiled binary and talk to it over a real TCP socket — see
 # tests/server_auth.rs, tests/server_events.rs, tests/server_hardening.rs)
 cd services/ledger-rust && cargo test && cargo clippy --all-targets -- -D warnings
@@ -700,7 +700,8 @@ push`, merges, network, deletion outside the service directory, ACP/MCP and self
 unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 amendments and the spec defects:
 `docs/adr/0011-delivery-department-architecture.md`. Routes and settings: `services/delivery-py/README.md`.
 
-- **Status:** built and tested (489 tests: 486 passed, 3 skipped with the printed reason; `ruff` clean). The loop is
+- **Status:** built and tested (561 tests: 558 passed, 3 skipped with the printed reason, also with `TMPDIR` behind a
+  symlink; `ruff` clean; wave 21: every finding must name a runnable reproduction or is refused 422). The loop is
   proven end to end with a deterministic model against the `fixtures/dlv/toy-py`, `toy-rs`, `toy-go` and `toy-ts`
   fixtures (the real `cargo`, `go` and `node`) through the REAL harness and guardrail; every round-18 attack (conftest monkeypatch, forged summary, neutered `pytest.ini`, deleted test,
   trivial `DISPROOF:`, hung or flooded suite) and every round-19 route (a fix in a new module the test imports, a
@@ -720,5 +721,5 @@ unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 a
   ledger-anchored local log line before it takes effect; an unverifiable test result is `unknown`, never green.
 
 ```bash
-cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 489 tests (cargo, go, node on PATH)
+cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 561 tests (cargo, go, node on PATH)
 ```

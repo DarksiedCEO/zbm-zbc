@@ -116,3 +116,8 @@ task-reviewer :55-62 (no subagents), :96-113 (Spec Compliance), :117-138 (Code Q
   a `DISPROOF:` is verified by re-running the finding's own reproduction, never the engineer's command.
 - `brief.template.md` — the brief compiler's template (§C.8.3): the header is the runner's, the finding's free
   text sits only inside `--- BEGIN FINDING DATA (untrusted) --- … --- END FINDING DATA ---`.
+- Fix wave 21 (round 20 R1): `engine.system.md` rule 5 no longer describes a finding without a test (every finding
+  names one; a document without it is refused at ingestion) and states that the same reproduction must pass with
+  the source changes and fail without them before `fixed`; `brief.template.md` names the finding's own reproduction
+  argv under "Commands the engine will run"; `reviewer.md` (the reviewer section after "disproof — verify") states
+  that every finding the reviewer files must name a runnable reproduction present in the run's starting tree.

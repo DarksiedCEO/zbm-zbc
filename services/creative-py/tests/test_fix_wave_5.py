@@ -563,8 +563,12 @@ def test_lowd_ledger_shed_body_matches_ledger_rust_source():
     assert '"ledger-rust is at its connection limit; retry shortly"' in shed[:400]
     assert "503 Service Unavailable" in shed[:800]
     serve_fn = src[src.index("async fn serve(listener"):]
-    # the shed path answers without reading the request or touching the ledger
-    assert "tokio::spawn(shed(stream))" in serve_fn and "serve_connection" in serve_fn
+    # the shed path answers without parsing the request or touching the ledger. Fix wave 21 (ledger N20-M-1): shed()
+    # also takes the shared drain bound — after the 503 it discards (never parses) the unread request bytes, bounded,
+    # before closing — so the spawn is `shed(stream, <drains>)`, no longer `shed(stream)`.
+    shed_fn = shed[:shed.index("\nasync fn ", 10)] if "\nasync fn " in shed[10:] else shed
+    assert "tokio::spawn(shed(stream" in serve_fn and "serve_connection" in serve_fn
+    assert "on_ledger" not in shed_fn and "handle(" not in shed_fn and "serve_connection" not in shed_fn
 
 
 class LoseBeforeCommit(FakeLedgerClient):

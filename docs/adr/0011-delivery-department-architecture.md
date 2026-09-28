@@ -74,9 +74,9 @@ ledger-anchored local log with the instance lease and Andre's reconcile).
 | `config/deerflow.engine.yaml` | `e4d51379594e0f7dc2265a0fee0ff25aa7134b1e6aecabe91b291a1d18064f0e` (wave 19: `subagents.max_total_per_run: 1`, deer-flow's floor, with subagents disabled in code) |
 | `config/extensions_config.json` | `4875b2992e9062d6f8084ac64d543f50a29624bd0e7eb82586e31b3056563807` |
 | `seed/skills_manifest.json` | `26f51402a23232a6b3f6a5764829800c3570403e2694ee1a9f331fe23e040320` |
-| `seed/prompts_manifest.json` | `a55a2a0f6ef5979a4ff4df702b126bb3d43d05c208cbae6d10e0da8bc420ee1e` (wave 19: `engine.system.md` rules 2 and 5 restated for R1/R3) |
+| `seed/prompts_manifest.json` | `7090c2d48d25f257231c2578e931594bcb30a095599aee08cf59b51e3ee99d37` (wave 21: `engine.system.md` rule 5, `brief.template.md` names the finding's reproduction argv, `reviewer.md` requires a runnable reproduction for every finding filed, `CHANGES.md`; wave 19: `engine.system.md` rules 2 and 5 restated for R1/R3) |
 | `seed/tool_policy_seed.json` | `078560a463fd04a11fb3a358e8ebc5a1a782dcedfbd635192bc9a77738787f4d` (wave 20: `pylint`/`isort`/`pre-commit` in the exec allowlist, R6/R9 notes) |
-| `seed/test_commands_seed.json` | `6c3a39edc981c969d1b1d538049ec097c59dd36dd51b27bc2407440568de5a30` (wave 20: pytest `test_content_deny` for re-plugging spellings, `src_content_deny`, `zbm_engine_plugin*` as test infra; toolchain amendment: go/cargo/npm `verified: true` with their engine argv, `collect`, `target_example`, `test_content_deny`, per-ecosystem `test_infra_globs`; pytest markers no longer include a bare `tests/`; `service_env` gains the toolchain determinism switches) |
+| `seed/test_commands_seed.json` | `eed14d324f00cfac09dc085bd362113740138ac68ff5c7c1eb7669749ae54785` (wave 21: pytest `test_content_deny` gains `process_exit`, `fd_write`, `capture_bypass`; wave 20: pytest `test_content_deny` for re-plugging spellings, `src_content_deny`, `zbm_engine_plugin*` as test infra; toolchain amendment: go/cargo/npm `verified: true` with their engine argv, `collect`, `target_example`, `test_content_deny`, per-ecosystem `test_infra_globs`; pytest markers no longer include a bare `tests/`; `service_env` gains the toolchain determinism switches) |
 | `seed/licence_allowlist.json` | `c02f367f3e6cd02949e18dbc2eaa2ceabcb917ac4aa5fc58ad73bec4ac6dfb6e` (wave 19: `unrecorded_allow`) |
 | `seed/licence_exceptions.json` | `e93abd348a10f89838e11a19c7f52994e18a20f4d52a6809b49a0a6fafe53606` (wave 20 close-out: `speechrecognition` removed from the lock instead of excepted; wave 19: `dotenv`, `tiktoken`) |
 | `docs/evidence/licences-2026-09-27.json` (the licence report) | `f154e1b56befac3a939d69cfeece434516d172fa0c6aedbfbaeab464d1ee0e8d` (wave 19: dotenv + tiktoken via file exceptions) |
@@ -594,6 +594,89 @@ Pins after this wave: `seed/tool_policy_seed.json` `078560a463fd04a11fb3a358e8eb
 `seed/licence_exceptions.json` `e93abd348a10f89838e11a19c7f52994e18a20f4d52a6809b49a0a6fafe53606`; the resolver
 `adapters/tools/resolve.py` and the plugin `adapters/tools/zbm_engine_plugin.py` are pinned in
 `adapters/sandbox.py` / `runner.py` (`RESOLVE_HELPER_SHA256`, `PLUGIN_SHA256`).
+
+## Round 20 amendments (fix wave 21, Sep 28, 2026; lead rulings R1-R6, binding)
+
+- **R1 — the reproduction is mandatory (N20-D-3).** The reviewer reproduced the admitted residual of wave 20: a
+  finding whose `reproduction` was prose skipped the reproduction check, so a marker-constant "fix" with a
+  tautological RED test reached `awaiting_review` with `percent(1, 0)` still raising (`probe_d3c`). The prose route
+  is removed. `POST /dlv/v1/fix-runs` refuses (`422`, `code: reproduction_not_runnable`, the finding id and the node
+  id in the body; `fix_run_refused` with `REPRODUCTION_NOT_RUNNABLE`, rule `DLV-19`, on the ledger when it answers)
+  any finding whose reproduction does not resolve at the base commit (`runner.reproduction_problem`): a
+  `<path>::<name>` node id in the text; a seeded framework detected at base by its marker files; the path a source
+  file of that runner (`.py`; `.rs`; `_test.go`; `.ts`/`.js` family), not test infrastructure, present at base;
+  the test's own name occurring in that file. A `fail` review's reopened and new findings are checked the same way
+  against the run's head BEFORE the review is recorded (a refused review changes nothing). In the loop the check
+  is unconditional: a finding that somehow has no runnable reproduction fails the round
+  `reproduction_not_runnable` and can never be fixed, and `states.finding_transition_problem(…, "fixed")` refuses a
+  finding without a passing-with/failing-without reproduction record. The brief names the reproduction's argv; the
+  reviewer prompt says every finding filed must name one. **Consequence, stated for the lead:** a genuinely new
+  defect found at review has no failing test in the run's head (the head's suite is green by construction), so the
+  review route can no longer carry a NEW finding the engine can fix; the reviewer lands the failing test on the base
+  branch and files a new findings document. The toy fixture gains N1-2's reproduction
+  (`tests/test_percent.py::test_percent_zero_whole`); single-finding harnesses leave it out (`pct_repro=False`).
+- **R2 — symlinked roots (N20-D-4).** Two causes, both fixed. (a) The Docker CLI test double mapped only the volume
+  path as spelled back to the container path; a process started under a symlinked `TMPDIR` reports the physical
+  path, so host paths reached the engine (`tests/fakes.py::_map_out` maps the realpath too). (b) The engine gave
+  pytest `--rootdir=<cwd as spelled>` and an ABSOLUTE `testpaths`; pytest resolves explicit targets against the
+  process's physical working directory, so node ids in the terminal summary (`../../<link>/…`) and junit disagreed
+  and every verdict was `unknown` (fail closed, but nothing could pass). Now `--rootdir=.` and `testpaths` stay
+  relative (it is an `args` value pytest globs against the working directory and uses only when that directory is
+  the rootdir); `pythonpath` stays absolute (a `paths` value resolved against the ini's directory). Proven by
+  `test_round20.py::test_n20_d4_whole_loop_with_tmpdir_behind_a_symlink_reaches_awaiting_review` and by the whole
+  suite under `TMPDIR=<symlink>`. Production container paths are not symlinks; this matters for the test double and
+  for any host whose temp or checkout path is (macOS `/var` → `/private/var`).
+- **R3 — tests never rewrite tracked files (N20-D-1).** `test_live_launcher.py` wrote its run log over the tracked
+  `docs/evidence/dept28/live-launcher-run.log` on every green run; it now writes `docs/evidence/dept28/_runs/`
+  (gitignored). The committed `live-launcher-run*.log` files are frozen artefacts of the waves that produced them.
+  `tests/test_live_tracked_files.py` runs the live modules in a child pytest and fails if `git status --porcelain`
+  (untracked files included) changed.
+- **R4 — a pipe into an interpreter is denied however spelled (N20-D-5).** `|  bash`, `| /bin/bash`,
+  `| python3` were `allow_opaque` (the raw-string rule knew `| bash`/`|bash` only). The tokeniser now records, per
+  simple command, whether its stdin is a pipe (`|`, `|&`) or a here-string/here-document (`<<<`, `<<`); a command
+  so fed whose argv[0] basename (any path spelling, after shlex has normalised whitespace and quotes) is in
+  `OPAQUE_ARGV0` or any `*sh` name is refused `pipe_to_interpreter`. Direct execution (`python3 x.py`,
+  `bash x.sh`) stays `allow_opaque`. Denying every `OPAQUE_ARGV0` member (not only shells and Python) is
+  deliberate: `sed -f -`, `awk -f -`, `make -f -` also read a program from stdin; a plain `| sed 's/a/b/'` is
+  refused too (use a file).
+- **R5 — hard links (N20-D-6).** `ln` without `-s`/`--symbolic` (including `-P`/`-L`) and `cp` with `-l`/`--link`
+  (alone or in a cluster: `-al`, `-la`, `-rl`, `-a --link`) are write-class on BOTH operands: every source must
+  normalise inside the write roots and is added to the operands the guardrail re-resolves in the container.
+  `link` is not in the seed (denied `unknown`). Swept in the same class: `mv` REMOVES its sources, and
+  `mv services/other/a services/<svc>/b` was allowed — sources of `mv` are now checked the same way. Symbolic links
+  (`ln -s`, `cp -s`) are unchanged: the link is inside the roots and the target is resolved by the in-box resolver
+  and bounded by the tar/sync code on the host.
+- **R6 — docs == implementation (N20-D-8).** The engine note says a test must not exit the process or write to the
+  runner's transcript; the pytest seed had rules for neither. `test_content_deny` (pytest) gains `process_exit`
+  (`os._exit`, `_exit(`, `sys.exit`, `SystemExit`, `pytest.exit`, `os.abort`/`kill`/`killpg`, bare
+  `exit()`/`quit()`, `from os|sys|builtins import …exit…`, the quoted names), `fd_write` (`os.write`/`writev`/
+  `pwrite`/`dup`/`dup2`/`fdopen`/`sendfile`, `sys.__stdout__`/`__stderr__`, `/dev/stdout|stderr|tty|fd/`,
+  `/proc/self/fd`, `open(1|2)`, `.fileno()`) and `capture_bypass` (`capsys`/`capfd`, `.disabled()`, the terminal
+  reporter). Stated as what they are: a cheap layer, a regex over the test file's text — the verdict still comes
+  from the engine's junit file cross-checked with its own plugin record, collect-only and the exit code.
+- **N20-D-9 (broad excepts).** Audited every `except Exception` in `src/`: each either fails the run/round closed
+  (`HARNESS_ERROR`, `mark_failed_unrecorded`), denies (guardrail, egress, sandbox record-first paths), or is
+  best-effort bookkeeping after a verdict (the `agent_usage` record, the reaper, the watchdog's own error, which
+  leaves the loop's `_check_live`). None turns an exception into `pass`, `fixed` or `disproved`; none is in
+  `runner.py`, `engine/parsers.py` or `engine/toolchains.py`. No change.
+- **N20-D-10 (hard-coded test ports).** The live tests read `DLV_TEST_PORT_RANGE` (`lo-hi`, inclusive; default
+  18800-18849, unchanged) through `tests/helpers.py::live_ports()`.
+- **N20-D-7** passed review (resolver cap/pin); no change. **N20-D-2** is named by the lead's wave brief but has no
+  entry in the round-20 verdicts or the reviewers' evidence; nothing was changed for it.
+
+Changed existing tests (they enshrined the prose route or assumed its fixture): `test_n18_e1_finding_without_a_
+machine_runnable_reproduction_…` (now refused at ingestion), `test_n19_e1_ingestion_rejects_a_finding_without_a_file`
+(prose is 422), `test_n19_e6_fixed_invariant_…` (the good record carries a reproduction record), the round-19 tests
+that used a prose reproduction to keep `tests/test_calc.py` editable (their reproduction now lives in
+`tests/test_add_repro.py`, committed by the harness), `test_s5_review_fail_reopens_…` (a prose new finding is
+refused before the review is recorded; with a runnable but passing reproduction the new finding is never fixed),
+`test_s12_…`, `test_a6_…` (the injected text still carries a node id), S1's counts (N1-2's reproduction is a
+second baseline failure), the late-plugin probe's host tree (4 tests, without `test_percent.py`) and six
+single-finding scenarios (`pct_repro=False`).
+
+Pins after this wave: `seed/test_commands_seed.json` `eed14d324f00cfac09dc085bd362113740138ac68ff5c7c1eb7669749ae54785`,
+`seed/prompts_manifest.json` `7090c2d48d25f257231c2578e931594bcb30a095599aee08cf59b51e3ee99d37`;
+`seed/tool_policy_seed.json` unchanged (`078560a4…`).
 
 ## Known limitations
 

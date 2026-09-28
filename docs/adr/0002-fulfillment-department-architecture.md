@@ -538,6 +538,30 @@ future real dialer/CRM adapter; idempotency keys for
 `resolution-writeback/resolve` across retries; per-customer time zone
 storage. (Bounded in-memory state: decided in Decision 14.)
 
+## Fix wave 21, Sep 28 2026 — test amendment (no product change)
+
+AEGIS round 20 N20-M-4 / N20-M-5, `tests/test_fix8_n7_2_body_prealloc.py::
+test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut`:
+
+- **N20-M-5 (test defect, E3).** The test sampled RSS only while its
+  sender threads were alive; under load every sender can have its answer
+  (408/503) before the server has released the bytes, so no settled
+  sample existed (`settled_at None`, 1/10 on a busy box). Sampling now
+  runs until RSS settles (a sample after 2 s within 24 MiB of the
+  baseline) or the test's own bound elapses
+  (`BODY_MIN_RATE_GRACE_S + BODY_DEADLINE_GRACE_S + 3` = 13 s),
+  whatever the senders are doing. The full line (codes, base, peak,
+  growth, `settled_at`, bound, every sample) is printed and flushed
+  before any assertion and is every assertion's message, so a failing
+  run on another OS (the Mac) yields its evidence.
+- **N20-M-4 (limit untouched).** The growth bound stays
+  `_INFLIGHT_BODY_BYTES // MiB + 32` = 96 MiB. It rests on one Linux
+  measurement (+84 MiB) plus 12 MiB; Linux growth measured 84–91 MiB.
+  Whether macOS's allocator stays under it is UNDETERMINED (the relayed
+  Mac evidence is E0); the macOS CI entry added in this wave
+  (`python-tests (fulfillment-py, 3.13, macos-14)`) is where that is
+  decided. Not raised to make a test pass.
+
 ## Verified so far (Sep 22, 2026 build session)
 
 See `services/fulfillment-py/README.md` for the actual test count, what

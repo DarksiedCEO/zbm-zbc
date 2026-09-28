@@ -451,31 +451,43 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
             codes[got] = codes.get(got, 0) + 1
 
     threads = [threading.Thread(target=sender) for _ in range(http_limits.LIMIT_CONCURRENCY)]
+    # admitted bodies are cut at the app's grace; the 503'd senders' unread
+    # bytes go when the protocol's (grace + BODY_DEADLINE_GRACE_S) closes them
+    bound = http_limits.BODY_MIN_RATE_GRACE_S + http_limits.BODY_DEADLINE_GRACE_S + 3
     t0 = time.monotonic()
     for t in threads:
         t.start()
     peak = base
     samples = []
-    while any(t.is_alive() for t in threads) and time.monotonic() - t0 < 25:
+    settled_at = None
+    # Fix wave 21 (AEGIS N20-M-5): sampling runs until RSS settles or the bound
+    # elapses, whatever the sender threads are doing. It used to stop as soon
+    # as every sender had its answer, which under load can be before the
+    # server has released the bytes (settled_at None: a test defect, not a
+    # server one). The 96 MiB growth bound below is unchanged (N20-M-4).
+    while time.monotonic() - t0 < bound:
         time.sleep(0.5)
         r = _rss_mib(proc.pid)
+        at = round(time.monotonic() - t0, 1)
         peak = max(peak, r)
-        samples.append((round(time.monotonic() - t0, 1), r))
+        samples.append((at, r))
+        if at > 2 and r - base < 24:
+            settled_at = at
+            break
     for t in threads:
-        t.join(timeout=5)
+        t.join(timeout=20)
     for s in socks:
         s.close()
-    settled_at = next((at for at, r in samples if at > 2 and r - base < 24), None)
-    print(f"codes {codes}; RSS base {base} peak {peak}; samples {samples}")
+    # the whole line, flushed, before any assertion: a failing run (e.g. on a Mac runner) keeps its evidence
+    line = (f"codes {codes}; RSS base {base} peak {peak} growth {peak - base} MiB; settled_at {settled_at} "
+            f"(bound {bound}); samples {samples}")
+    print(line, flush=True)
     # the budget, plus uvicorn's own per-connection buffers (<= 64 KiB x 128) and the
     # 503'd bodies' drains — measured +84 MiB (base 54, peak 138)
-    assert peak - base < api._INFLIGHT_BODY_BYTES // MIB + 32, f"RSS grew {peak - base} MiB"
-    assert codes.get("408", 0) + codes.get("503", 0) == len(threads), codes  # none held silently
-    assert codes.get("408", 0) > 0, codes  # the admitted, stalled ones were cut
-    # admitted bodies are cut at the app's grace; the 503'd senders' unread
-    # bytes go when the protocol's (grace + BODY_DEADLINE_GRACE_S) closes them
-    bound = http_limits.BODY_MIN_RATE_GRACE_S + http_limits.BODY_DEADLINE_GRACE_S + 3
-    assert settled_at is not None and settled_at < bound, samples
+    assert peak - base < api._INFLIGHT_BODY_BYTES // MIB + 32, f"RSS grew {peak - base} MiB -- {line}"
+    assert codes.get("408", 0) + codes.get("503", 0) == len(threads), line  # none held silently
+    assert codes.get("408", 0) > 0, line  # the admitted, stalled ones were cut
+    assert settled_at is not None and settled_at < bound, line
 
 
 def test_live_unread_trickling_body_is_closed_by_the_protocol_within_the_grace_period(server):

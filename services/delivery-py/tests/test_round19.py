@@ -14,8 +14,8 @@ from datetime import timedelta
 
 import pytest
 
-from helpers import (FIX_ADD, FIX_PCT, SERVICE_ROOT, TEST_ADD, TEST_PCT, WS, Harness, finding, findings_doc, flat,
-                     replace, rid, two_findings, write_test)
+from helpers import (ADD_REPRO_ELSEWHERE, ADD_REPRO_FILES, FIX_ADD, FIX_PCT, SERVICE_ROOT, TEST_ADD, TEST_PCT, WS, Harness,
+                     finding, findings_doc, flat, replace, rid, two_findings, write_test)
 
 from zbm_delivery import gitport, licences, policy, registry
 from zbm_delivery.adapters import sandbox as S
@@ -34,7 +34,7 @@ SEED = json.load(open(SERVICE_ROOT / "seed" / "tool_policy_seed.json"))
 TSEED = json.load(open(SERVICE_ROOT / "seed" / "test_commands_seed.json"))
 CTX = policy.Context(service="toy-py", workspace=WORKSPACE, evidence_root="/data/evidence")
 REPRO = "run tests/test_calc.py::test_add_returns_sum: add(2, 3) answers -1 (a - b)"
-PROSE = "add(2, 3) answers -1 when called from the CLI (no test named)"
+PROSE = "add(2, 3) answers -1 when called from the CLI (no test named)"   # refused at ingestion since wave 21 (R1)
 MARK = replace("src/toy/calc.py", '"""Arithmetic helpers with two planted defects (fixture; see README.md)."""\n',
                '"""Arithmetic helpers with two planted defects (fixture; see README.md)."""\nPATCHED = True\n')
 
@@ -132,9 +132,9 @@ def test_n19_e1_fix_in_a_new_module_the_test_imports_is_refused():
     scenario = [write_test("test_fix_n1_1", test), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                 {"tool_calls": [{"name": "write_file", "args": {"path": f"{WS}/src/toy/fixed.py", "content": "def add(a, b):\n    return a + b\n"}}]},
                 {"text": "SWEEP: src/toy/fixed.py:1\nFIXED"}, {"text": "FIXED"}]
-    h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"})
+    h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"}, pct_repro=False)
     try:
-        run, f = _one(h, reproduction=PROSE)
+        run, f = _one(h, reproduction=REPRO)          # wave 21: every reproduction names a test (was PROSE)
         assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == [] and _defect_intact(run)
         assert "finding_file_unchanged" in _whys(h), _whys(h)
         rf = [e["payload"] for e in h.events("round_failed") if e["payload"]["why"] == "finding_file_unchanged"]
@@ -173,9 +173,9 @@ def test_n19_e1_single_file_revert_ties_the_test_to_the_findings_file():
     scenario = flat([write_test("test_fix_n1_1", test), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                      {"tool_calls": [{"name": "write_file", "args": {"path": f"{WS}/src/toy/helper.py", "content": "def add(a, b):\n    return a + b\n"}}]},
                      MARK, {"text": "SWEEP: src/toy/calc.py:2\nFIXED"}, {"text": "FIXED"}])
-    h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"})
+    h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"}, pct_repro=False)
     try:
-        run, f = _one(h, reproduction=PROSE)
+        run, f = _one(h, reproduction=REPRO)          # wave 21: every reproduction names a test (was PROSE)
         assert run["status"] == "failed" and f["state"] != "fixed" and _defect_intact(run)
         assert "test_not_tied_to_file" in _whys(h), _whys(h)
         sf = [e["payload"] for e in h.events("single_file_revert_checked")]
@@ -210,7 +210,11 @@ def test_n19_e1_ingestion_rejects_a_finding_without_a_file():
         doc = findings_doc(h.base_sha, [finding("N1-1")])
         del doc["findings"][0]["file"]
         assert h.post("/dlv/v1/fix-runs", doc).status_code == 422
-        doc = findings_doc(h.base_sha, [finding("N1-1", reproduction=PROSE)])       # a file alone is accepted
+        # wave 21 (R1): a file and a runnable reproduction are both required; a prose reproduction is refused 422
+        doc = findings_doc(h.base_sha, [finding("N1-1", reproduction=PROSE)])
+        r = h.post("/dlv/v1/fix-runs", doc, caller="aegis")
+        assert r.status_code == 422 and r.json()["code"] == "reproduction_not_runnable", r.text
+        doc = findings_doc(h.base_sha, [finding("N1-1", reproduction=REPRO)])
         assert h.post("/dlv/v1/fix-runs", doc, caller="aegis").status_code == 202
         h.svc.wait_idle()
     finally:
@@ -250,7 +254,7 @@ def _plugin_run(svc_dir: str, eng: str, extra_args: list[str] = ()) -> tuple[dic
     shutil.copy(str(SERVICE_ROOT / "src" / "zbm_delivery" / "adapters" / "tools" / f"{PLUGIN_NAME}.py"), eng)
     xml = os.path.join(eng, "r.xml")
     argv = [str(SERVICE_ROOT / ".venv" / "bin" / "python"), "-P", "-m", "pytest", "-q", "-p", "no:cacheprovider", "-rfE", "-c", ini,
-            f"--rootdir={svc_dir}", "-o", "addopts=", "-o", f"pythonpath={eng} {svc_dir}/src", f"--junitxml={xml}",
+            "--rootdir=.", "-o", "addopts=", "-o", f"pythonpath={eng} {svc_dir}/src", f"--junitxml={xml}",
             "--disable-plugin-autoload", "-p", PLUGIN_NAME, *extra_args]
     r = subprocess.run(argv, cwd=svc_dir, capture_output=True, text=True, timeout=120)
     with open(xml + ".zbm.json") as fh:
@@ -289,7 +293,8 @@ def test_n19_e2_late_plugin_registration_is_a_violation_and_the_verdict_is_unkno
     """The reviewer's flip plugin (spelled so the cheap content rules do not see it): pytest itself reports the
     failing test as passed and junit == collected == summary == exit — the engine plugin's record says otherwise."""
     svc = tmp_path / "svc"
-    shutil.copytree(SERVICE_ROOT.parents[1] / "fixtures" / "dlv" / "toy-py", svc, ignore=shutil.ignore_patterns("__pycache__"))
+    # wave 21: the fixture's N1-2 reproduction (tests/test_percent.py) is left out — this probe is the 4-test tree
+    shutil.copytree(SERVICE_ROOT.parents[1] / "fixtures" / "dlv" / "toy-py", svc, ignore=shutil.ignore_patterns("__pycache__", "test_percent.py"))
     (svc / "tests" / "test_aaa_fix.py").write_text(FLIP_OBFUSCATED)
     calc = svc / "src" / "toy" / "calc.py"
     calc.write_text(calc.read_text().replace('README.md)."""\n', 'README.md)."""\nPATCHED = True\n', 1))
@@ -384,16 +389,17 @@ SKIP_EXISTING = replace("tests/test_calc.py", "def test_add_returns_sum():\n",
 
 
 def test_n19_e3_skipping_the_baseline_failure_under_changed_test_is_an_outcome_regression():
-    """probe e3 with a prose reproduction (so the file is not protected): the skip is a regression, no CHANGED_TEST excuses it."""
+    """probe e3 with N1-1's reproduction in its own file (so tests/test_calc.py is not protected; it was a prose
+    reproduction before wave 21): the skip is a regression, no CHANGED_TEST excuses it."""
     test = "def test_add_sum():\n    from toy.fixed import add\n    assert add(2, 3) == 5\n"
     scenario = flat([write_test("test_fix_n1_1", test), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                      {"tool_calls": [{"name": "write_file", "args": {"path": f"{WS}/src/toy/fixed.py", "content": "def add(a, b):\n    return a + b\n"}}]},
                      MARK, SKIP_EXISTING,
                      {"text": "SWEEP: src/toy/calc.py:2\nCHANGED_TEST: tests/test_calc.py — flaky, skipped pending investigation\nFIXED"},
                      {"text": "FIXED"}])
-    h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"})
+    h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"}, pct_repro=False, extra_files=ADD_REPRO_FILES)
     try:
-        run, f = _one(h, reproduction=PROSE)
+        run, f = _one(h, reproduction=ADD_REPRO_ELSEWHERE)
         assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == [] and _defect_intact(run)
         whys = _whys(h)
         assert "outcome_regressed" in whys or "test_not_tied_to_file" in whys, whys
@@ -409,9 +415,9 @@ def test_n19_e3_outcome_regression_alone_blocks_a_genuine_fix():
     skip_clamp = replace("tests/test_calc.py", "def test_clamp():\n", "import pytest\n\n\n@pytest.mark.skip(reason='slow')\ndef test_clamp():\n")
     scenario = flat([write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"}, FIX_ADD, skip_clamp,
                      {"text": "SWEEP: src/toy/calc.py:6\nCHANGED_TEST: tests/test_calc.py — clamp is slow on CI\nFIXED"}, {"text": "FIXED"}])
-    h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"})
+    h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"}, pct_repro=False, extra_files=ADD_REPRO_FILES)
     try:
-        run, f = _one(h, reproduction=PROSE)
+        run, f = _one(h, reproduction=ADD_REPRO_ELSEWHERE)     # wave 21: was PROSE (test_calc.py must stay editable)
         assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == []
         assert "outcome_regressed" in _whys(h), _whys(h)
         assert f["outcome_regressions"] == [{"test": "tests/test_calc.py::test_clamp", "baseline": "pass", "after": "skip"}]
@@ -439,9 +445,9 @@ def test_n19_e3_changed_test_reason_is_in_the_report_verbatim_inside_the_fence()
     scenario = flat([write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"}, FIX_ADD,
                      replace("tests/test_calc.py", "def test_clamp():\n", "def test_clamp():\n    # clarified\n"),
                      {"text": f"SWEEP: src/toy/calc.py:6\nCHANGED_TEST: tests/test_calc.py — {why}\nFIXED"}])
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False, extra_files=ADD_REPRO_FILES)
     try:
-        run, f = _one(h, reproduction=PROSE)
+        run, f = _one(h, reproduction=ADD_REPRO_ELSEWHERE)     # wave 21: was PROSE (test_calc.py must stay editable)
         assert run["status"] == "awaiting_review", (run["reasons"], _whys(h))
         assert f["changed_tests"][0]["why"] == why
         rep = h.report(run["run_id"])
@@ -533,7 +539,9 @@ def test_n19_e6_fixed_invariant_requires_verification_and_the_committed_tree():
             "green": {"exit": 0, "verdict": "pass"}, "revert_check": {"exit": 1, "verdict": "fail"},
             "verification": {"verification_checkout": {"verdict": "pass"}, "reverted_checkout": {"verdict": "fail"}},
             "finding_file_hunk": True, "single_file_revert": {"verdict": "fail", "file": "services/toy-py/src/toy/calc.py"},
-            "repro_check": None, "src_only_check": None, "sweep": {"sites": []}, "suite_tree_sha256": "a" * 64,
+            # wave 21 (R1): a reproduction record is required for fixed (it was None here: the prose route)
+            "repro_check": {"verification": {"verdict": "pass"}, "reverted": {"verdict": "fail"}},
+            "src_only_check": None, "sweep": {"sites": []}, "suite_tree_sha256": "a" * 64,
             "commit_tree_sha256": "a" * 64, "suite_failures": [], "outcome_regressions": []}
     assert states.finding_transition_problem(good, "fixed") is None
     no_ver = {**good, "verification": None}

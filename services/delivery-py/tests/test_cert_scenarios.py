@@ -8,8 +8,8 @@ import os
 
 import pytest
 
-from helpers import (FIX_ADD, TEST_ADD, WS, Harness, finding, findings_doc, replace, rid, scenario_s1, two_findings,
-                     write_test)
+from helpers import (ADD_REPRO_ELSEWHERE, ADD_REPRO_FILES, FIX_ADD, TEST_ADD, WS, Harness, finding, findings_doc, replace,
+                     rid, scenario_s1, two_findings, write_test)
 
 
 @pytest.fixture
@@ -35,10 +35,12 @@ def test_s1_clean_loop_reaches_awaiting_review(s1: Harness):
     # branch D8 in the temp repo: no fix<N>- branch existed → fix1-toy-py
     assert run["branch"] == "fix1-toy-py"
     assert os.path.isdir(run["worktree_path"])
-    # suite before N-1 passed / 1 failed → after N passed
+    # suite before: 2 passed / 2 failed (each finding's reproduction; wave 21 added N1-2's) → after: 6 passed
+    # (the 4 fixture tests + the two RED tests)
     before, after = run["suite"]["before"]["counts"], run["suite"]["after"]["counts"]
-    assert (before["passed"], before["failed"]) == (2, 1) and before["failed_names"] == ["tests/test_calc.py::test_add_returns_sum"]
-    assert (after["passed"], after["failed"]) == (5, 0)
+    assert (before["passed"], before["failed"]) == (2, 2), before
+    assert sorted(before["failed_names"]) == ["tests/test_calc.py::test_add_returns_sum", "tests/test_percent.py::test_percent_zero_whole"]
+    assert (after["passed"], after["failed"]) == (6, 0)
     # per finding: RED (exit 1) then GREEN (exit 0), revert check failed-then-passed, sweep, commit, fixed
     fs = {f["finding_id"]: f for f in h.findings(run_id)}
     for fid in ("N1-1", "N1-2"):
@@ -69,7 +71,7 @@ def test_s1_clean_loop_reaches_awaiting_review(s1: Harness):
     for ev in run["evidence"]:
         if ev["evidence_id"] != run["report_evidence_id"]:          # the report cannot cite its own hash
             assert ev["evidence_id"] in report
-    assert "5 passed / 0 failed" in report and "2 passed / 1 failed" in report
+    assert "6 passed / 0 failed" in report and "2 passed / 2 failed" in report      # wave 21: + N1-2's reproduction
     # evidence files: content addressed, 0444, hash matches
     for ev in run["evidence"]:
         path = os.path.join(h.svc.evidence_root, run_id, ev["evidence_id"])
@@ -92,7 +94,7 @@ def test_s2_test_passing_on_unfixed_code_fails_the_round():
         write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
         FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"},
     ]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         doc = findings_doc(h.base_sha, [finding("N1-1")])
         run_id = h.submit(doc).json()["run_id"]
@@ -143,7 +145,7 @@ def test_s4_disproof_with_a_reproduction_the_engine_ran():
     scenario = [write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                 FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"},
                 {"text": "DISPROOF: pytest -q -p no:cacheprovider tests/test_calc.py::test_clamp\n" + statement}]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         doc = findings_doc(h.base_sha, [finding("N1-1"),
                                         finding("N1-2", line=11, reproduction="run tests/test_calc.py::test_percent_basic: percent(1, 4) answers 20.0",
@@ -180,8 +182,19 @@ def test_s5_review_fail_reopens_and_opens_a_new_run_on_the_same_branch():
     try:
         run_id = h.submit().json()["run_id"]
         assert h.run(run_id)["status"] == "awaiting_review"
-        review = {"request_id": rid(), "review_ref": "review-2", "sha256": "b" * 64, "verdict": "fail", "reopened": ["N1-1"],
-                  "new_findings": [finding("N2-1", line=15, class_hint="argument_validation", reproduction="clamp(5, 3, 0) answers 3 silently",
+        # wave 21 (R1): a new finding at review must name a reproduction runnable at the run's head; a prose one is
+        # refused 422 BEFORE the review is recorded — the run stays awaiting_review, nothing reopened
+        prose = {"request_id": rid(), "review_ref": "review-2", "sha256": "b" * 64, "verdict": "fail", "reopened": ["N1-1"],
+                 "new_findings": [finding("N2-1", line=15, class_hint="argument_validation", reproduction="clamp(5, 3, 0) answers 3 silently",
+                                          expected="ValueError for lo > hi", observed="3")]}
+        r0 = h.post(f"/dlv/v1/fix-runs/{run_id}/review", prose)
+        assert r0.status_code == 422 and r0.json()["code"] == "reproduction_not_runnable" and r0.json()["finding_id"] == "N2-1", r0.text
+        assert h.run(run_id)["status"] == "awaiting_review" and not h.events("fix_run_reviewed")
+        # a runnable one: tests/test_calc.py::test_clamp exists at the head (it passes there, so N2-1 can never be
+        # fixed by this engine — its reproduction must fail without the fix; the child run ends with it open)
+        review = {**prose, "request_id": rid(),
+                  "new_findings": [finding("N2-1", line=15, class_hint="argument_validation",
+                                           reproduction="run tests/test_calc.py::test_clamp: clamp(5, 3, 0) answers 3 silently",
                                            expected="ValueError for lo > hi", observed="3")]}
         r = h.post(f"/dlv/v1/fix-runs/{run_id}/review", review)
         assert r.status_code == 200, r.text
@@ -193,9 +206,13 @@ def test_s5_review_fail_reopens_and_opens_a_new_run_on_the_same_branch():
         assert child["worktree_path"] == h.run(run_id)["worktree_path"]
         assert sorted(child["finding_ids"]) == ["N1-1", "N2-1"]
         # both findings entered the loop: N1-1's test passed on the (already fixed) tree, then the engineer replied
-        # BLOCKED → the child run ends failed with N1-1 blocked and N2-1 fixed (no parking, §0.1.5)
+        # BLOCKED → N1-1 blocked. N2-1's RED test and fix are honest, but its own reproduction (test_clamp) passes
+        # without the fix, so it is never fixed (wave 21: no fixed without the finding's reproduction failing first;
+        # before wave 21 a prose reproduction let it through). The child run ends failed, nothing parked (§0.1.5).
         fs = {f["finding_id"]: f for f in h.findings(body["next_run_id"])}
-        assert fs["N2-1"]["state"] == "fixed" and fs["N1-1"]["state"] == "blocked"
+        assert fs["N1-1"]["state"] == "blocked" and fs["N2-1"]["state"] != "fixed", fs
+        assert any(e["payload"].get("why") == "reproduction_passes_without_fix" and e["payload"].get("finding_id") == "N2-1"
+                   for e in h.events("round_failed")), [e["payload"] for e in h.events("round_failed")]
         assert child["status"] == "failed"
         # the review is recorded once, with request_id + facts_sha256; a replay returns the stored answer (A13)
         assert len(h.events("fix_run_reviewed")) == 1
@@ -325,11 +342,12 @@ def test_s12_changing_an_existing_test_without_changed_test_line_fails_the_round
         FIX_ADD, edit_existing, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"},
         {"text": "SWEEP: src/toy/calc.py:6\nCHANGED_TEST: tests/test_calc.py — comment only, same assertion\nFIXED"},
     ]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False, extra_files=ADD_REPRO_FILES)
     try:
         # wave 20 (R3): tests/test_calc.py holds the finding's reproduction when the document names it, and a CHANGED_TEST
-        # there is denied whatever the reason; this scenario is about the missing line, so the reproduction is prose
-        run_id = h.submit(findings_doc(h.base_sha, [finding("N1-1", reproduction="add(2, 3) answers -1 (a - b); no test named")])).json()["run_id"]
+        # there is denied whatever the reason; this scenario is about the missing line, so the reproduction lives in its
+        # own file (wave 21, R1: a reproduction always names a test — it was prose here)
+        run_id = h.submit(findings_doc(h.base_sha, [finding("N1-1", reproduction=ADD_REPRO_ELSEWHERE)])).json()["run_id"]
         run = h.run(run_id)
         assert run["status"] == "awaiting_review", run["reasons"]
         f = h.findings(run_id)[0]

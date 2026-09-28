@@ -98,8 +98,9 @@ def finding_transition_problem(rec: dict, to: str, *, red_test_name: Optional[st
         if sf.get("verdict") != "fail" or sf.get("file") != rec.get("file"):
             return "fixed requires the single-file revert of the finding's file to fail the RED test (R2)"
         rp = rec.get("repro_check")
-        if rp is not None and (rp.get("verification", {}).get("verdict") != "pass" or rp.get("reverted", {}).get("verdict") != "fail"):
-            return "fixed requires the finding's reproduction to pass with the fix and fail without it (R2)"
+        if not rp or rp.get("verification", {}).get("verdict") != "pass" or rp.get("reverted", {}).get("verdict") != "fail":
+            # wave 21 (R1): a reproduction record is REQUIRED — there is no fixed without the finding's own test
+            return "fixed requires the finding's reproduction to pass with the fix and fail without it (R2; wave 21: always)"
         so = rec.get("src_only_check")
         if so is not None and so.get("verdict") != "pass":
             return "fixed requires the claimed baseline failures to pass on base + the source changes alone"

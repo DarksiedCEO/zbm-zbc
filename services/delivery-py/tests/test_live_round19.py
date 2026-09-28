@@ -1,7 +1,7 @@
 """Round 19 R12 (N19-A-6), live on the assigned port range: the reviewer's headers-then-silence TLS server. Before
 this wave ``abort()`` closed the response object and the blocked reader returned only when the read timeout struck
 (18 s after the abort in the reviewer's run); now the socket is shut down first and the reader returns at once.
-A ``test_live_*`` module: the conftest's no-network guard exempts it (the server is 127.0.0.1 on 18800-18849)."""
+A ``test_live_*`` module: the conftest's no-network guard exempts it (the server is 127.0.0.1 on 18800-18849, or DLV_TEST_PORT_RANGE)."""
 
 from __future__ import annotations
 
@@ -16,18 +16,12 @@ import pytest
 
 from zbm_delivery.adapters import egress as E
 
-PORTS = range(18800, 18850)
 
 
 def _free_port() -> int:
-    for port in PORTS:
-        with socket.socket() as s:
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return port
-    pytest.skip("no free port in 18800-18849 (the assigned live range)")
+    """A port of the assigned live range (default 18800-18849; ``DLV_TEST_PORT_RANGE`` overrides — wave 21)."""
+    from helpers import free_live_port
+    return free_live_port()
 
 
 def _cert(tmp: str) -> tuple[str, str]:

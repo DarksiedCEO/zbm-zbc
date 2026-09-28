@@ -1,4 +1,5 @@
-"""L2 (spec §F Live): the hardened launcher (serve.py) started as a real process on a port from 18800-18849 with a
+"""L2 (spec §F Live): the hardened launcher (serve.py) started as a real process on a port from 18800-18849 (or
+``DLV_TEST_PORT_RANGE``) with a
 clean, allowlisted environment: loopback bind (via _procinfo), the request-head cap and deadline, the concurrency
 bound, /health shape, and the bind-address override. Skipped with the reason printed when no port is free."""
 
@@ -16,24 +17,19 @@ import httpx
 import pytest
 
 from _procinfo import NO_OVERRIDE_ADDR_REASON, listening_addrs, override_bind_addr, rss_kib, url_host
-from helpers import SERVICE_ROOT, base_env, make_repo
+from helpers import SERVICE_ROOT, base_env, free_live_port, make_repo
 
 HTTP = httpx.Client(trust_env=False)          # never a proxy between the test and 127.0.0.x
 SRC = SERVICE_ROOT / "src"
-PORTS = range(18800, 18850)
 PYTHON = str(SERVICE_ROOT / ".venv" / "bin" / "python")
-LOG_DIR = SERVICE_ROOT / "docs" / "evidence" / "dept28"
+# Wave 21 (N20-D-1): a live run's log goes to an UNTRACKED directory (docs/evidence/dept28/_runs/, gitignored); the
+# committed docs/evidence/dept28/live-launcher-run*.log files are frozen artefacts a test never rewrites.
+LOG_DIR = SERVICE_ROOT / "docs" / "evidence" / "dept28" / "_runs"
 
 
 def _free_port() -> int:
-    for port in PORTS:
-        with socket.socket() as s:
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return port
-    pytest.skip("no free port in 18800-18849 (the assigned live range)")
+    """A port of the assigned live range (default 18800-18849; ``DLV_TEST_PORT_RANGE`` overrides — wave 21)."""
+    return free_live_port()
 
 
 def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1"):
@@ -162,7 +158,8 @@ def test_l2_refuses_to_start_with_a_stray_env_name(tmp_path):
 
 
 def test_l2_live_log_is_written(server, tmp_path):
-    """The live-run log under docs/evidence/dept28/ (spec brief): the exchange above, captured from the process."""
+    """The live-run log under docs/evidence/dept28/_runs/ (untracked; spec brief): the exchange above, captured from the
+    process. Wave 21 (N20-D-1): it used to overwrite the tracked docs/evidence/dept28/live-launcher-run.log."""
     proc, port, env, log_path = server
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     out = LOG_DIR / "live-launcher-run.log"

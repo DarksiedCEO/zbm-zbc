@@ -90,6 +90,13 @@ For each finding in The Findings Under Verification, in order:
 A `disproved` finding is flagged "disproof — verify": run the recorded reproduction argv yourself (through the
 engine) and judge whether its output contradicts the finding. A disproof you cannot reproduce reopens the finding.
 
+Every finding you file — in a findings document or as a new finding of a `fail` review — names its reproduction:
+the `reproduction` text must contain a test node id `<path>::<name>` relative to the service directory, of the
+service's own test runner, present in the tree the run starts from (the base commit; for a review, the run's
+head), whose name occurs in that file. It must fail without the fix. Anything else is refused `422
+reproduction_not_runnable` before a run exists (a review so refused is not recorded). A defect with no such test in
+that tree yet: land the failing test on the base branch first, then file a new findings document.
+
 ## Part 2: Spec Compliance
 
 Compare the diff against What Was Requested:

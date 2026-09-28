@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .dlv-mem/
+# wave 21 (N20-D-1): live test runs write their logs here, never over the tracked evidence files
+docs/evidence/dept28/_runs/

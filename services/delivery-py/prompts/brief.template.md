@@ -12,6 +12,8 @@ Run: {run_id} · Service: `{service}` · Base: `{base_sha}` on `{base_ref}` · R
 
 - Targeted test: `{test_argv}`
 - Whole suite: `{suite_argv}`
+- The finding's own reproduction: `{repro_argv}` — the engine runs it with your source changes (it must pass) and
+  without them (it must fail) before the finding can be `fixed`; you may not change the file that holds it.
 
 ## Rules in force
 

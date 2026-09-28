@@ -41,7 +41,8 @@ from zbm_delivery.errors import Conflict, DlvError, Invalid, NotFound, Refused, 
 from zbm_delivery.ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
 from zbm_delivery.models import ID_RE
 from zbm_delivery.ports import NoChatBackend
-from zbm_delivery.runner import node_id_in_text, same_test
+from zbm_delivery.gitport import GitRefused
+from zbm_delivery.runner import node_id_in_text, reproduction_problem, same_test
 from zbm_delivery.store import RecordLog, StoreWriteError
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
@@ -439,6 +440,42 @@ class DeliveryService:
             pass                              # a refusal stands whether or not it was recorded
         raise Refused(message, [R.item(code, message)], request_id=request_id, facts_sha256=facts, took_effect=False)
 
+    def _refuse_unrunnable(self, principal: str, request_id: str, facts: str, finding_id: str, node: Optional[str],
+                           why: str) -> None:
+        """Wave 21 (R1, N20-D-3): a finding whose ``reproduction`` names no test the service's toolchain can run on
+        the base tree is refused at ingestion — 422 ``reproduction_not_runnable``, nothing created. The refusal is
+        recorded when the ledger answers; it stands either way."""
+        code = "REPRODUCTION_NOT_RUNNABLE"
+        message = f"finding {finding_id}: reproduction not runnable: {why}"
+        eid = derived_id("ref", principal, request_id, facts, code, finding_id)
+        try:
+            self._record_plain(eid, "fix_run_refused", GATE, request_id, {"request_id": request_id, "facts_sha256": facts,
+                                                                          "code": code, "principal": principal,
+                                                                          "finding_id": finding_id, "target": node},
+                               f"Fix run refused: {code} ({finding_id})")
+        except Unavailable:
+            pass
+        raise Invalid(message, code="reproduction_not_runnable", finding_id=finding_id, target=node,
+                      reasons=[R.item(code, message)], request_id=request_id, facts_sha256=facts, took_effect=False)
+
+    def _check_reproductions(self, caller: str, request_id: str, facts: str, base_sha: str, service: str,
+                             findings: list[dict]) -> None:
+        """Every finding's reproduction resolves to a test of the service's toolchain AT THE BASE COMMIT (R1): the
+        engine runs it in the verification checkout (must pass) and the reverted one (must fail) before ``fixed``,
+        and on the untouched base tree for a ``DISPROOF``. There is no prose-reproduction route."""
+        prefix = f"services/{service}/"
+
+        def exists(rel: str) -> bool:
+            return self.git.blob_exists(base_sha, prefix + rel, run_id="-")
+
+        def read(rel: str) -> Optional[str]:
+            return self.git.show_file(base_sha, prefix + rel, self.git.repo, run_id="-")
+
+        for f in findings:
+            node, why = reproduction_problem(self.test_seed, f.get("reproduction") or "", exists, read)
+            if why is not None:
+                self._refuse_unrunnable(caller, request_id, facts, f["id"], node, why)
+
     def create_fix_run(self, caller: str, body: dict, *, parent_run_id: Optional[str] = None) -> dict:
         from zbm_delivery.adapters.identity import PrincipalMissing, principal_for
         request_id = body["request_id"]
@@ -476,6 +513,10 @@ class DeliveryService:
                         self._refuse(caller, request_id, facts, "GIT_REFUSED", f"finding {f['id']}: file is not in the base commit")
             else:
                 base_sha = body["base_sha"]
+            try:
+                self._check_reproductions(caller, request_id, facts, base_sha, service, body["findings"])
+            except GitRefused:
+                self._refuse(caller, request_id, facts, "GIT_REFUSED", "the base commit could not be read")
             run_id = rid("run", "run", caller, request_id, facts)
             if run_id in self.runs:
                 raise Conflict("run already exists")
@@ -821,6 +862,17 @@ class DeliveryService:
                     raise Invalid("new findings must be inside the run's service")
                 if f["id"] in known:
                     raise Invalid("a new finding id collides with a finding of this run")
+            if body["verdict"] == "fail":
+                # wave 21 (R1): the child run's findings must each name a reproduction runnable on the child's base
+                # (this run's head) — checked BEFORE the review is recorded, so a refused review changes nothing
+                head0 = run["commits"][-1]["sha"] if run.get("commits") else run["base_sha"]
+                docs0 = self.finding_docs[run_id]
+                try:
+                    self._check_reproductions(caller, request_id, facts, head0, run["service"],
+                                              [dict(docs0[fid]) for fid in body.get("reopened", [])]
+                                              + [dict(f) for f in body.get("new_findings", [])])
+                except GitRefused:
+                    raise Invalid("the run's head commit could not be read") from None
             to = "reviewed_pass" if body["verdict"] == "pass" else "reviewed_fail"
             review = {"request_id": request_id, "facts_sha256": facts, "verdict": body["verdict"],
                       "review_ref": body["review_ref"], "sha256": body["sha256"], "reopened_ids": list(body.get("reopened", [])),

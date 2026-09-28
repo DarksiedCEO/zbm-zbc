@@ -17,6 +17,8 @@
 //! server itself cuts the stalled connection within its documented deadline.
 //! The concurrency tests pin that appends stay strictly serialized.
 
+mod common;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -25,6 +27,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use common::PortFile;
 use serde_json::{json, Value};
 
 const TOKEN: &str = "slow-clients-test-token";
@@ -40,6 +43,7 @@ const SLACK: Duration = Duration::from_secs(2);
 struct ServerHandle {
     child: Child,
     port: u16,
+    _port_file: PortFile,
 }
 
 impl Drop for ServerHandle {
@@ -66,23 +70,28 @@ fn scratch(label: &str) -> Scratch {
     Scratch(p)
 }
 
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
-}
-
+/// Fix wave 21 (N20-M-3): the server binds port 0 and writes the bound port to
+/// LEDGER_PORT_FILE; no port is picked here and released for the server to race for.
 fn start_with(log: &Scratch, env: &[(&str, &str)]) -> ServerHandle {
-    let port = free_port();
+    let pf = PortFile::new("slow");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_server"));
     cmd.env("LEDGER_SERVICE_TOKEN", TOKEN)
-        .env("LEDGER_PORT", port.to_string())
         .env("LEDGER_LOG_PATH", log.0.to_str().unwrap())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    common::ephemeral(&mut cmd, &pf);
     for (k, v) in env {
         cmd.env(k, v);
     }
     let mut child = cmd.spawn().expect("failed to spawn ledger-rust server");
+    let port = match common::wait_port(&mut child, &pf, Duration::from_secs(30)) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{e}");
+        }
+    };
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(st) = child.try_wait().unwrap() {
@@ -94,36 +103,21 @@ fn start_with(log: &Scratch, env: &[(&str, &str)]) -> ServerHandle {
         assert!(Instant::now() < deadline, "server did not come up");
         std::thread::sleep(Duration::from_millis(50));
     }
-    ServerHandle { child, port }
+    ServerHandle { child, port, _port_file: pf }
 }
 
 fn start(log: &Scratch) -> ServerHandle {
     start_with(log, &[])
 }
 
-/// One HTTP/1.1 request on a fresh connection; the client itself gives up
-/// after 15 s so a hung server fails the test instead of hanging it.
+/// One HTTP/1.1 request on a fresh connection, read to its Content-Length
+/// (fix wave 21, N20-M-1: never to EOF); the client itself gives up after
+/// 15 s so a hung server fails the test instead of hanging it.
 fn request(port: u16, method: &str, path: &str, auth: Option<&str>, body: Option<&str>) -> std::io::Result<(u16, String)> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
-    stream.set_read_timeout(Some(Duration::from_secs(15)))?;
-    let auth_line = auth.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
-    let body = body.unwrap_or("");
-    let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{auth_line}Content-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(req.as_bytes())?;
-    let mut out = Vec::new();
-    stream.read_to_end(&mut out)?;
-    let resp = String::from_utf8_lossy(&out).to_string();
-    let status = resp
-        .lines()
-        .next()
-        .and_then(|l| l.split_whitespace().nth(1))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    Ok((status, resp.split("\r\n\r\n").nth(1).unwrap_or("").to_string()))
+    let bearer = auth.map(|t| format!("Bearer {t}"));
+    let raw = common::raw_request(method, path, bearer.as_deref(), body.unwrap_or(""));
+    let resp = common::exchange(port, &raw, Duration::from_secs(15))?;
+    Ok((resp.status, resp.text()))
 }
 
 fn authed(port: u16, method: &str, path: &str, body: Option<&str>) -> (u16, Value) {
@@ -396,23 +390,129 @@ fn many_concurrent_slow_clients_do_not_block_others() {
     drop(bad);
 }
 
+/// Whether a slow-body holder still occupies a connection slot: nothing has
+/// come back on it (a shed holder got a 503 or was closed). Non-blocking.
+fn still_held(h: &TcpStream) -> bool {
+    h.set_nonblocking(true).unwrap();
+    let mut b = [0u8; 64];
+    let held = matches!(h.peek(&mut b), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock);
+    h.set_nonblocking(false).unwrap();
+    held
+}
+
 /// Past the connection cap the server sheds load with an immediate 503
 /// instead of queueing the caller behind stalled connections, and it
 /// recovers as soon as the stalled connections hit their deadline.
+///
+/// Fix wave 21 (AEGIS N20-M-2): the holders used to be opened right after the
+/// readiness probe, whose connection slot is released asynchronously after
+/// its response — under CPU contention one holder was itself shed (2/20), so
+/// only 3 slots were held and the /health probe got a slot (200). Every
+/// holder is now confirmed held (nothing came back on it) before the
+/// assertion, and a shed holder is replaced. The first 503 is asserted
+/// exactly as before.
 #[test]
 fn over_connection_cap_gets_prompt_503_and_recovers() {
     let log = scratch("cap");
     let s = start_with(&log, &[("LEDGER_MAX_CONNECTIONS", "4")]);
-    let since = Instant::now();
-    let bad: Vec<TcpStream> = (0..4).map(|_| slow_body_client(s.port, TOKEN, "/ledger/events")).collect();
-    std::thread::sleep(Duration::from_millis(300));
+    let mut bad: Vec<TcpStream> = (0..4).map(|_| slow_body_client(s.port, TOKEN, "/ledger/events")).collect();
+    let mut replaced = 0;
+    let confirm_by = Instant::now() + Duration::from_secs(3);
+    loop {
+        std::thread::sleep(Duration::from_millis(300));
+        let shed: Vec<usize> = (0..bad.len()).filter(|&i| !still_held(&bad[i])).collect();
+        if shed.is_empty() {
+            break;
+        }
+        assert!(Instant::now() < confirm_by, "holders kept being shed after {replaced} replacements");
+        for i in shed {
+            bad[i] = slow_body_client(s.port, TOKEN, "/ledger/events");
+            replaced += 1;
+        }
+    }
     let t = Instant::now();
     let (status, body) = request(s.port, "GET", "/health", None, None).unwrap();
-    assert_eq!(status, 503, "{body}");
+    assert_eq!(status, 503, "{body} (holders replaced: {replaced})");
     assert!(t.elapsed() < PROMPT, "503 took {:?}", t.elapsed());
-    std::thread::sleep((BODY_READ_TIMEOUT + SLACK).saturating_sub(since.elapsed()));
+    // the newest holder started at the last replacement, before this point: its body deadline is over after this
+    std::thread::sleep(BODY_READ_TIMEOUT + SLACK);
     assert_others_served_promptly(s.port, "after the stalled connections were cut");
     drop(bad);
+}
+
+// --- graceful close (fix wave 21, AEGIS N20-M-1) -------------------------------------------------
+
+/// After reading a whole response (to its Content-Length) and then EOF, the
+/// client socket must carry no error: the server closed gracefully instead of
+/// resetting a connection it had not read to the end. Returns (status, what
+/// the read after the response saw, SO_ERROR).
+fn close_outcome(port: u16, raw: &[u8]) -> (u16, String, Option<std::io::Error>) {
+    let mut c = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    // the request is written whole even when the server answers after the head
+    // (413): the server must keep reading it, or the kernel resets the connection
+    let _ = c.write_all(raw);
+    let resp = common::read_response(&mut c).unwrap();
+    let mut rest = [0u8; 256];
+    let after = match c.read(&mut rest) {
+        Ok(0) => "eof".to_string(),
+        Ok(n) => format!("{n} extra bytes"),
+        Err(e) => format!("read error: {e}"),
+    };
+    std::thread::sleep(Duration::from_millis(200)); // a RST that follows the FIN lands here
+    (resp.status, after, c.take_error().unwrap())
+}
+
+/// Linux reports a RST that arrives after the FIN as EPIPE in SO_ERROR (the
+/// reviewer's rst_witness.py: 10/10 on the shed and 413 paths); macOS turns it
+/// into ECONNRESET on the read. Both fail here.
+#[test]
+fn every_early_answer_closes_gracefully_so_error_is_clean() {
+    let log = scratch("graceful");
+    let s = start(&log);
+    // 413: a declared length over the cap (65 KiB, just past 64 KiB), the body sent whole
+    let body = format!("{{\"pad\":\"{}\"}}", "a".repeat(65 * 1024));
+    let big = common::raw_request("POST", "/ledger/events", Some(&format!("Bearer {TOKEN}")), &body);
+    // 401 before the body is read, with a body sent
+    let wrong = common::raw_request("POST", "/ledger/events", Some("Bearer wrong"), &"x".repeat(300));
+    // 404 before the body is read, with a body sent
+    let unknown = common::raw_request("POST", "/nowhere", Some(&format!("Bearer {TOKEN}")), &"y".repeat(2000));
+    // a refusal hyper answers itself (400: an unparseable Content-Length), with bytes after the head
+    let mut malformed = b"POST /ledger/events HTTP/1.1\r\nHost: x\r\nContent-Length: abc\r\n\r\n".to_vec();
+    malformed.extend(std::iter::repeat_n(b'z', 30 * 1024));
+    for (label, raw, want) in [("413", &big, 413u16), ("401", &wrong, 401), ("404", &unknown, 404), ("400", &malformed, 400)] {
+        for i in 0..5 {
+            let (status, after, err) = close_outcome(s.port, raw);
+            assert_eq!(status, want, "{label} #{i}");
+            assert_eq!(after, "eof", "{label} #{i}: the read after the response");
+            assert!(err.is_none(), "{label} #{i}: SO_ERROR after a whole response and EOF: {err:?}");
+        }
+    }
+    drop(s);
+
+    // the load-shed 503: the request is never read by the server
+    let log = scratch("graceful_shed");
+    let s = start_with(&log, &[("LEDGER_MAX_CONNECTIONS", "1")]);
+    let mut holder = slow_body_client(s.port, TOKEN, "/ledger/events");
+    let health = common::raw_request("GET", "/health", None, "");
+    let mut checked = 0;
+    let until = Instant::now() + Duration::from_secs(4); // inside the holder's 5 s body deadline
+    while checked < 5 {
+        assert!(Instant::now() < until, "only {checked} shed responses before the holder's deadline");
+        if !still_held(&holder) {
+            holder = slow_body_client(s.port, TOKEN, "/ledger/events");
+            std::thread::sleep(Duration::from_millis(200));
+            continue;
+        }
+        let (status, after, err) = close_outcome(s.port, &health);
+        if status != 503 {
+            continue; // the holder's slot was being released; re-arm and retry
+        }
+        assert_eq!(after, "eof", "shed #{checked}: the read after the response");
+        assert!(err.is_none(), "shed #{checked}: SO_ERROR after a whole 503 and EOF: {err:?}");
+        checked += 1;
+    }
+    drop(holder);
 }
 
 // --- concurrency guarantees (appends strictly serialized) ------------------------------------------

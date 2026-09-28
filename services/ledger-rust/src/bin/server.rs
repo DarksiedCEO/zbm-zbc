@@ -75,8 +75,33 @@
 //!   - the ledger Mutex is taken only after the body has been fully read and
 //!     parsed, inside a bounded blocking pool, so appends stay strictly
 //!     serialized exactly as before (same chain, same idempotency rules).
+//!
+//! Fix wave 21, Sep 28 2026 (docs/adr/0003 section 8), AEGIS N20-M-1: every
+//! path that answers without reading the whole request (the 503 load shed,
+//! 401/404 before the body, 413 on the declared length, 408, a hyper-level
+//! refusal) used to close the socket with request bytes still unread, so the
+//! kernel sent RST after the response (Linux: EPIPE in SO_ERROR after EOF;
+//! macOS: ECONNRESET on the client's read, the Mac "connection reset by
+//! peer"). RFC 9112 section 9.6 graceful close now: after the response the
+//! write side is shut down (FIN), then up to DRAIN_MAX_BYTES are read and
+//! discarded for at most DRAIN_TIMEOUT, then the socket is closed. The answer
+//! still never waits for the body; only the close is deferred, and it is
+//! bounded. hyper serves without shutting the socket down itself
+//! (`poll_without_shutdown`), so the socket comes back whatever way the
+//! connection ended; no extra descriptor per connection. A connection that
+//! has been answered gives its connection slot back BEFORE it drains (the
+//! cap counts connections being served, as before); draining sockets — served
+//! and load-shed alike — have their own bound (DRAINS_MAX), past which a
+//! socket is closed at once (the old behaviour, RST included).
+//!
+//! Fix wave 21 (N20-M-3): LEDGER_PORT=0 binds an ephemeral port, and
+//! LEDGER_PORT_FILE, when set, receives the bound port (written atomically
+//! after the bind) so a caller never has to guess a free port and race
+//! another process for it.
 use std::convert::Infallible;
+use std::future::Future;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -88,7 +113,7 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use ledger_rust::{ledger_log, EventAppendOutcome, EventInput, LedgerRecordInput, PersistError, PersistentLedger};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::Semaphore;
 
@@ -122,6 +147,16 @@ const WORKER_THREADS: usize = 4;
 const MAX_BLOCKING_THREADS: usize = 16;
 /// How long a load-shed connection gets to receive its 503.
 const SHED_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+/// Graceful close (RFC 9112 section 9.6, fix wave 21): after the response and
+/// the FIN, unread request bytes are read and discarded for at most this long…
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+/// …or until this many bytes were discarded, whichever comes first; then the
+/// socket is closed (a peer still sending past this gets the kernel's RST).
+const DRAIN_MAX_BYTES: usize = 64 * 1024;
+/// At most this many answered connections (served or load-shed) drain at
+/// once; past it a socket is closed immediately. Separate from the connection
+/// cap so a peer slow to close never holds a serving slot.
+const DRAINS_MAX: usize = 512;
 
 type Body = Full<Bytes>;
 
@@ -356,43 +391,88 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
     }
 }
 
-/// Serves exactly one request on `stream` within REQUEST_DEADLINE. Dropping
-/// the connection future on timeout closes the socket; ledger work already
-/// handed to the blocking pool still completes (it is never torn halfway).
-async fn serve_connection(stream: TcpStream, app: Arc<App>) {
+/// Graceful close (fix wave 21, N20-M-1): shut the write side down (FIN after
+/// whatever response was written), then read and discard what the peer still
+/// sends — at most DRAIN_MAX_BYTES within DRAIN_TIMEOUT — and close. Closing
+/// with unread bytes in the receive queue makes the kernel send RST, which a
+/// client may see before (macOS) or after (Linux) the response it was sent.
+async fn graceful_close(mut stream: TcpStream) {
+    let _ = tokio::time::timeout(DRAIN_TIMEOUT, stream.shutdown()).await;
+    let mut buf = [0u8; 8192];
+    let mut left = DRAIN_MAX_BYTES;
+    let _ = tokio::time::timeout(DRAIN_TIMEOUT, async {
+        while left > 0 {
+            let want = left.min(buf.len());
+            match stream.read(&mut buf[..want]).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => left -= n,
+            }
+        }
+    })
+    .await;
+}
+
+/// The service future, boxed: `poll_without_shutdown` needs an `Unpin` future.
+type HandlerFuture = Pin<Box<dyn Future<Output = Result<Response<Body>, Infallible>> + Send>>;
+
+/// Serves exactly one request on `stream` within REQUEST_DEADLINE and hands the
+/// socket back for the graceful close. hyper runs WITHOUT shutting the socket
+/// down itself (`poll_without_shutdown`), so the socket comes back however the
+/// connection ended — the answer written, the deadline, or a protocol error
+/// hyper answered itself. Ledger work already handed to the blocking pool
+/// still completes (it is never torn halfway).
+async fn serve_connection(stream: TcpStream, app: Arc<App>) -> TcpStream {
     let service = service_fn(move |request| {
         let app = Arc::clone(&app);
-        async move { Ok::<_, Infallible>(json_response(handle(request, app).await)) }
+        let fut: HandlerFuture = Box::pin(async move { Ok::<_, Infallible>(json_response(handle(request, app).await)) });
+        fut
     });
-    let conn = http1::Builder::new()
+    let mut conn = http1::Builder::new()
         .timer(TokioTimer::new())
         .header_read_timeout(HEADER_READ_TIMEOUT)
         .keep_alive(false)
         .max_buf_size(MAX_READ_BUF)
         .serve_connection(TokioIo::new(stream), service);
-    // Timeout or connection error: either way the socket is closed on drop,
-    // and there is no one left to answer.
-    let _ = tokio::time::timeout(REQUEST_DEADLINE, conn).await;
+    // Done, a connection error or the deadline: in every case the socket is
+    // taken back and closed gracefully (anything hyper had not flushed by the
+    // deadline is dropped, exactly as before).
+    let _ = tokio::time::timeout(REQUEST_DEADLINE, std::future::poll_fn(|cx| conn.poll_without_shutdown(cx))).await;
+    conn.into_parts().io.into_inner()
+}
+
+/// Closes an answered socket: gracefully when a drain slot is free, else at
+/// once (FIN; the kernel resets it if request bytes are still unread).
+async fn close_answered(mut stream: TcpStream, drains: Arc<Semaphore>) {
+    match drains.try_acquire_owned() {
+        Ok(permit) => {
+            graceful_close(stream).await;
+            drop(permit);
+        }
+        Err(_) => {
+            let _ = tokio::time::timeout(SHED_WRITE_TIMEOUT, stream.shutdown()).await;
+        }
+    }
 }
 
 /// Over the connection cap: answer 503 at once (bounded by
-/// SHED_WRITE_TIMEOUT) and close, without reading the request.
-async fn shed(mut stream: TcpStream) {
+/// SHED_WRITE_TIMEOUT) without reading the request, then close gracefully
+/// (the unread request is drained, bounded) when a drain slot is free.
+async fn shed(mut stream: TcpStream, drains: Arc<Semaphore>) {
     let body = serde_json::json!({"error": "ledger-rust is at its connection limit; retry shortly"}).to_string();
     let resp = format!(
         "HTTP/1.1 503 Service Unavailable\r\n{CONTENT_TYPE}: application/json\r\n{RETRY_AFTER}: 1\r\n\
          {CONNECTION}: close\r\n{CONTENT_LENGTH}: {}\r\n\r\n{body}",
         body.len()
     );
-    let _ = tokio::time::timeout(SHED_WRITE_TIMEOUT, async {
-        stream.write_all(resp.as_bytes()).await?;
-        stream.shutdown().await
-    })
-    .await;
+    let written = tokio::time::timeout(SHED_WRITE_TIMEOUT, stream.write_all(resp.as_bytes())).await;
+    if matches!(written, Ok(Ok(()))) {
+        close_answered(stream, drains).await;
+    }
 }
 
 async fn serve(listener: TcpListener, app: Arc<App>, max_connections: usize) {
     let slots = Arc::new(Semaphore::new(max_connections));
+    let drains = Arc::new(Semaphore::new(DRAINS_MAX));
     loop {
         let stream = match listener.accept().await {
             Ok((stream, _)) => stream,
@@ -408,13 +488,15 @@ async fn serve(listener: TcpListener, app: Arc<App>, max_connections: usize) {
         match Arc::clone(&slots).try_acquire_owned() {
             Ok(slot) => {
                 let app = Arc::clone(&app);
+                let drains = Arc::clone(&drains);
                 tokio::spawn(async move {
-                    serve_connection(stream, app).await;
-                    drop(slot);
+                    let stream = serve_connection(stream, app).await;
+                    drop(slot); // answered: the slot is free before the (bounded) drain
+                    close_answered(stream, drains).await;
                 });
             }
             Err(_) => {
-                tokio::spawn(shed(stream));
+                tokio::spawn(shed(stream, Arc::clone(&drains)));
             }
         }
     }
@@ -429,6 +511,15 @@ fn bind(addr: &str) -> std::io::Result<TcpListener> {
     socket.set_reuseaddr(true)?;
     socket.bind(sock_addr)?;
     socket.listen(LISTEN_BACKLOG)
+}
+
+/// Writes the bound port to `path` atomically (a sibling temp file, then
+/// rename), so a reader never sees a partial number (fix wave 21, N20-M-3).
+fn write_port_file(path: &str, listener: &TcpListener) -> std::io::Result<()> {
+    let port = listener.local_addr()?.port();
+    let tmp = format!("{path}.tmp-{}", std::process::id());
+    std::fs::write(&tmp, format!("{port}\n"))?;
+    std::fs::rename(&tmp, path)
 }
 
 fn load_required_token() -> String {
@@ -476,6 +567,12 @@ fn main() {
         .build()
         .expect("failed to build the ledger-rust runtime");
     let listener = runtime.block_on(async { bind(&addr) }).expect("failed to bind ledger-rust HTTP server");
+    if let Ok(port_file) = std::env::var("LEDGER_PORT_FILE") {
+        if let Err(e) = write_port_file(&port_file, &listener) {
+            ledger_log!("ledger-rust: REFUSING TO START — LEDGER_PORT_FILE={port_file:?} could not be written: {e}");
+            std::process::exit(1);
+        }
+    }
 
     let ledger = match PersistentLedger::open(&log_path) {
         Ok(l) => {

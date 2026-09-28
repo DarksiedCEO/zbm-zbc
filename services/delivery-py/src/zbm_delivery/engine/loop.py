@@ -26,8 +26,8 @@ started by ``provider.start_engine_box`` from a tree the engine built on the hos
 an overlay of exactly the worktree paths that run may see) and destroyed right after; the agent's container is
 ``docker kill``ed on cancel/deadline. The RED test is tied to the finding: the finding's file must carry a hunk of
 the fix diff; a checkout with the whole fix EXCEPT that file must make the RED test fail (single-file revert); the
-finding's own reproduction, when it names a test, must pass in the verification checkout and fail in the reverted
-one; baseline failures the fix claims are re-run on base + the source changes alone. Outcome deltas are verdicts:
+finding's own reproduction must pass in the verification checkout and fail in the reverted one (wave 21: always —
+a finding without a runnable reproduction is refused at ingestion, 422 ``reproduction_not_runnable``); baseline failures the fix claims are re-run on base + the source changes alone. Outcome deltas are verdicts:
 a test that was passed/failed at baseline and is skipped/xfail/missing afterwards fails the round and the run; a
 ``CHANGED_TEST:`` naming any open finding's reproduction is denied; the reason text goes to the report verbatim.
 ``_check_live`` gates every phase and the service refuses records on a run that is not live.
@@ -551,8 +551,14 @@ class FixEngine:
         run_id, fid = run["run_id"], finding["finding_id"]
         max_rounds = self.settings.max_rounds_per_finding
         doc = self.svc.finding_document(run_id, fid)
+        repro = runner.reproduction_target(doc)
+        try:
+            repro_argv = runner.test_argv(repro) if repro is not None else None
+        except RunnerRefused:
+            repro_argv = None
         brief_text = B.compile_brief(self.prompts["brief.template.md"], run=run, finding=doc, round_no=1,
-                                     max_rounds=max_rounds, test_argv=runner.example_test_argv(), suite_argv=runner.suite_argv())
+                                     max_rounds=max_rounds, test_argv=runner.example_test_argv(), suite_argv=runner.suite_argv(),
+                                     repro_argv=repro_argv)
         brief_ev = self.svc.evidence_put(run_id, "brief", brief_text.encode("utf-8"))
         hits = self.svc.injection_hits(run_id, fid)
         self.svc.finding_update(run_id, fid, "brief_written", {"run_id": run_id, "finding_id": fid,
@@ -864,37 +870,43 @@ class FixEngine:
                     "file (the behaviour it checks lives elsewhere). The fix of THIS finding must be in that file and the test "
                     "must fail without it. Fix and reply `FIXED`." % ("still passed" if t_sf.verdict == "pass" else "could not be verified")
                     + self._tail(t_sf.output))
-        # R2(c): the finding's own reproduction must pass in the verification checkout and fail in the reverted one
+        # R2(c): the finding's own reproduction must pass in the verification checkout and fail in the reverted one —
+        # ALWAYS (wave 21, R1: ingestion refuses a finding without a runnable reproduction; one that still reaches
+        # this point fails closed here and can never be fixed)
         repro = runner.reproduction_target(doc)
-        repro_check = None
         if repro is not None:
             try:
                 runner.check_target(repro)
             except RunnerRefused:
                 repro = None
-        if repro is not None:
-            r_ver = self._run_in_fresh(ctx, self._tree(ctx, classes["src"] + [red_file]), "reproverify", repro)
-            r_rev = self._run_in_fresh(ctx, self._tree(ctx, [red_file]), "reproreverted", repro)
-            joined_r = (r_rev.output + "\n--- reproduction in the verification checkout ---\n" + r_ver.output)
-            ev_r = self.svc.evidence_put(run_id, "test_output", joined_r.encode("utf-8", "surrogatepass"))
-            repro_check = {"target": repro, "verification": {**self._run_record(r_ver), "evidence_id": ev_r},
-                           "reverted": {**self._run_record(r_rev), "evidence_id": ev_r}}
-            self.svc.finding_update(run_id, fid, "reproduction_checked", {"run_id": run_id, "finding_id": fid, "target": repro,
-                                                                          "verification_verdict": r_ver.verdict,
-                                                                          "reverted_verdict": r_rev.verdict, "evidence_id": ev_r},
-                                    f"Reproduction check for {fid}: verification {r_ver.verdict}, reverted {r_rev.verdict} ({run_id})",
-                                    {"repro_check": repro_check})
-            if r_ver.verdict != "pass" or r_rev.verdict != "fail":
-                why = ("reproduction_not_fixed" if r_ver.verdict == "fail" else
-                       "reproduction_passes_without_fix" if r_rev.verdict == "pass" else "reproduction_unknown")
-                self._round_failed(run_id, fid, rounds, why, evidence_id=ev_r)
-                self._back_to_red(run_id, fid, f)
-                return (f"The finding's own reproduction `{repro}` %s (verification checkout: {r_ver.verdict}; reverted: "
-                        f"{r_rev.verdict}). Your source change must make that reproduction pass, and it must fail without it. "
-                        "Fix the root cause and reply `FIXED`." % ("still fails with your source changes" if r_ver.verdict == "fail" else
-                                                                    "passes even without your source changes" if r_rev.verdict == "pass" else
-                                                                    "could not be verified")
-                        + self._tail(r_ver.output if r_ver.verdict != "pass" else r_rev.output))
+        if repro is None:
+            self._round_failed(run_id, fid, rounds, "reproduction_not_runnable")
+            self._back_to_red(run_id, fid, f)
+            return ("This finding's reproduction names no test the engine can run, so the engine cannot confirm your "
+                    "fix (a finding is fixed only when its own reproduction passes with the fix and fails without "
+                    "it). Reply `BLOCKED: reproduction_not_runnable`.")
+        r_ver = self._run_in_fresh(ctx, self._tree(ctx, classes["src"] + [red_file]), "reproverify", repro)
+        r_rev = self._run_in_fresh(ctx, self._tree(ctx, [red_file]), "reproreverted", repro)
+        joined_r = (r_rev.output + "\n--- reproduction in the verification checkout ---\n" + r_ver.output)
+        ev_r = self.svc.evidence_put(run_id, "test_output", joined_r.encode("utf-8", "surrogatepass"))
+        repro_check = {"target": repro, "verification": {**self._run_record(r_ver), "evidence_id": ev_r},
+                       "reverted": {**self._run_record(r_rev), "evidence_id": ev_r}}
+        self.svc.finding_update(run_id, fid, "reproduction_checked", {"run_id": run_id, "finding_id": fid, "target": repro,
+                                                                      "verification_verdict": r_ver.verdict,
+                                                                      "reverted_verdict": r_rev.verdict, "evidence_id": ev_r},
+                                f"Reproduction check for {fid}: verification {r_ver.verdict}, reverted {r_rev.verdict} ({run_id})",
+                                {"repro_check": repro_check})
+        if r_ver.verdict != "pass" or r_rev.verdict != "fail":
+            why = ("reproduction_not_fixed" if r_ver.verdict == "fail" else
+                   "reproduction_passes_without_fix" if r_rev.verdict == "pass" else "reproduction_unknown")
+            self._round_failed(run_id, fid, rounds, why, evidence_id=ev_r)
+            self._back_to_red(run_id, fid, f)
+            return (f"The finding's own reproduction `{repro}` %s (verification checkout: {r_ver.verdict}; reverted: "
+                    f"{r_rev.verdict}). Your source change must make that reproduction pass, and it must fail without it. "
+                    "Fix the root cause and reply `FIXED`." % ("still fails with your source changes" if r_ver.verdict == "fail" else
+                                                                "passes even without your source changes" if r_rev.verdict == "pass" else
+                                                                "could not be verified")
+                    + self._tail(r_ver.output if r_ver.verdict != "pass" else r_rev.output))
         green = {"test_path": f["red"]["test_path"], "test_name": f["red"]["test_name"], **self._run_record(t), "evidence_id": ev}
         if not self.svc.finding_transition(run_id, fid, "green", {"green": green}, [ev], red_test_name=f["red"]["test_name"]):
             return "The GREEN transition was refused by the engine's invariants (no matching RED)."

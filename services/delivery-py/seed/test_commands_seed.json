@@ -89,9 +89,21 @@
         {
           "name": "pytest_internals",
           "pattern": "_pytest\\b|gc\\.get_objects|gc\\.get_referrers|sys\\.settrace|sys\\.setprofile"
+        },
+        {
+          "name": "process_exit",
+          "pattern": "\\bos\\._exit\\b|\\b_exit\\s*\\(|\\bsys\\.exit\\b|\\bSystemExit\\b|\\bpytest\\.exit\\b|\\bos\\.abort\\b|\\bos\\.kill\\b|\\bos\\.killpg\\b|(?<![\\w.])(?:exit|quit)\\s*\\(|\\bfrom\\s+(?:os|sys|builtins)\\s+import\\b[^\\n]*\\b(?:_exit|exit|abort|kill|killpg)\\b|[\\\"'](?:_exit|exit|abort)[\\\"']"
+        },
+        {
+          "name": "fd_write",
+          "pattern": "\\bos\\.(?:write|writev|pwrite|dup|dup2|fdopen|sendfile)\\s*\\(|\\bfrom\\s+os\\s+import\\b[^\\n]*\\b(?:write|writev|dup2?|fdopen)\\b|\\bsys\\.__std(?:out|err)__\\b|/dev/(?:stdout|stderr|tty|fd/)|/proc/self/fd|\\bopen\\s*\\(\\s*[12]\\s*[,)]|\\.fileno\\s*\\("
+        },
+        {
+          "name": "capture_bypass",
+          "pattern": "\\bcapsys\\b|\\bcapfd\\b|\\bcapsysbinary\\b|\\bcapfdbinary\\b|\\.disabled\\s*\\(|terminalreporter|TerminalReporter|get_terminal_writer|\\b_tw\\b"
         }
       ],
-      "note": "detected by a Python project file, never by a bare tests/ directory (every ecosystem has one). Round 19 R4: pytest runs with --disable-plugin-autoload and -p zbm_engine_plugin (the engine's own plugin, first on pythonpath; a tree entry named zbm_engine_plugin* is test infra); test_content_deny refuses the cheap re-plugging spellings in a test file and src_content_deny the same in a changed source file (stated as cheap layers).",
+      "note": "detected by a Python project file, never by a bare tests/ directory (every ecosystem has one). Round 19 R4: pytest runs with --disable-plugin-autoload and -p zbm_engine_plugin (the engine's own plugin, first on pythonpath; a tree entry named zbm_engine_plugin* is test infra); test_content_deny refuses the cheap re-plugging spellings in a test file and src_content_deny the same in a changed source file (stated as cheap layers). Wave 21 (N20-D-8): test_content_deny also refuses, as the same cheap layer (a regex over the test file's text, not a proof), a test that exits the process (os._exit, sys.exit, SystemExit, pytest.exit, os.abort/kill, exit()/quit()), writes at the fd level (os.write/dup/dup2/fdopen, sys.__stdout__/__stderr__, /dev/stdout|stderr|tty|fd, /proc/self/fd, open(1|2), .fileno()) or bypasses pytest's capture (capsys/capfd, .disabled(), the terminal reporter) - the routes to the runner's transcript the engine note names; the verdict still comes from the engine's junit file and its own plugin record.",
       "src_content_deny": [
         {
           "name": "pytest_internals",

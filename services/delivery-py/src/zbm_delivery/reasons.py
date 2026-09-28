@@ -33,6 +33,7 @@ CATALOG: dict[str, str] = {
     "SUITE_NOT_GREEN": "DLV-16",
     "SUITE_UNKNOWN": "DLV-16",
     "HARNESS_ERROR": "DLV-18",
+    "REPRODUCTION_NOT_RUNNABLE": "DLV-19",     # wave 21 (R1): a finding's reproduction names no runnable test
 }
 MESSAGE_MAX = 200
 LINE_MAX = 400

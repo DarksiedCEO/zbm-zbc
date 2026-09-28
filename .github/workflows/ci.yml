@@ -9,6 +9,11 @@
 # Every third-party action is pinned to a commit SHA (the tag it corresponds to is in the trailing comment). The
 # SHAs were resolved with `git ls-remote --tags` against github.com on 2026-09-27.
 #
+# macOS (fix wave 21, founder: the Mac checks run without him): every Python service, delivery-py, ledger-rust and
+# orchestrator-go also run on `macos-14` (GitHub's Apple Silicon runner, arm64), one Python version (3.13) for the
+# Python services; the results feed the same `required` job. GitHub's macOS runners have no Docker, so the
+# delivery-docker-live job stays Linux-only (delivery-py's Docker live module skips on macOS with its printed reason).
+#
 # Path filtering is done by the `changes` job (a plain `git diff`, no third-party action) so an unrelated change
 # does not run every suite. Shared files (root README.md, BUILD_CONTRACTS.md, docs/**, fixtures/**, .github/**)
 # run everything. The ten Python services are one cluster: their tests read each other's sources (ports.py,
@@ -114,14 +119,15 @@ jobs:
   # build ledger-rust with `cargo build --release --bin server` from inside the suite, so that entry gets Rust.
   # ---------------------------------------------------------------------------------------------------------------
   python-tests:
-    name: python-tests (${{ matrix.service }}, ${{ matrix.python }})
+    name: python-tests (${{ matrix.service }}, ${{ matrix.python }}, ${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.python == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-24.04]
         python: ["3.12", "3.13"]
         service:
           - detection-py
@@ -133,6 +139,17 @@ jobs:
           - clipper-network-py
           - finance-py
           - legal-py
+        # macOS (Apple Silicon): every service once, on Python 3.13
+        include:
+          - {os: macos-14, python: "3.13", service: detection-py}
+          - {os: macos-14, python: "3.13", service: fulfillment-py}
+          - {os: macos-14, python: "3.13", service: onboarding-py}
+          - {os: macos-14, python: "3.13", service: creative-py}
+          - {os: macos-14, python: "3.13", service: compliance-py}
+          - {os: macos-14, python: "3.13", service: verification-py}
+          - {os: macos-14, python: "3.13", service: clipper-network-py}
+          - {os: macos-14, python: "3.13", service: finance-py}
+          - {os: macos-14, python: "3.13", service: legal-py}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -165,15 +182,20 @@ jobs:
   # tests run instead of failing on a missing binary.
   # ---------------------------------------------------------------------------------------------------------------
   delivery-py:
-    name: delivery-py (${{ matrix.python }})
+    name: delivery-py (${{ matrix.python }}, ${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.python == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-24.04]
         python: ["3.12", "3.13"]
+        include:
+          # macOS (Apple Silicon): no Docker on the runner — tests/test_live_docker.py skips with its reason here
+          # and must run in delivery-docker-live (Linux) instead
+          - {os: macos-14, python: "3.13"}
     defaults:
       run:
         working-directory: services/delivery-py
@@ -207,16 +229,20 @@ jobs:
         run: .venv/bin/python -m pytest -q -rs -p no:cacheprovider
 
   # ---------------------------------------------------------------------------------------------------------------
-  # ledger-rust: root README "Testing" — `cargo test` (60 unit + 31 integration; the integration tests spawn the
+  # ledger-rust: root README "Testing" — `cargo test` (60 unit + 44 integration; the integration tests spawn the
   # compiled binary over a real TCP socket) and `cargo clippy --all-targets -- -D warnings`. `--locked` refuses a
   # Cargo.lock drift.
   # ---------------------------------------------------------------------------------------------------------------
   ledger-rust:
-    name: ledger-rust
+    name: ledger-rust (${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
     defaults:
       run:
         working-directory: services/ledger-rust
@@ -239,11 +265,15 @@ jobs:
   # orchestrator-go: root README "Testing" — `go vet ./... && go test -count=1 ./...`, with the race detector on.
   # ---------------------------------------------------------------------------------------------------------------
   orchestrator-go:
-    name: orchestrator-go
+    name: orchestrator-go (${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
     defaults:
       run:
         working-directory: services/orchestrator-go

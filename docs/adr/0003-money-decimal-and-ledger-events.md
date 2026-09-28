@@ -465,6 +465,67 @@ bad connection within its deadline. Plus the two concurrency tests above.
 Before the fix 9 of the 11 failed (the two concurrency tests passed; they
 guard against the new concurrency).
 
+## 8. Graceful close and ephemeral test ports (fix wave 21, Sep 28 2026)
+
+AEGIS round 20, N20-M-1 (E3; low-severity product defect and test defect):
+every path that answers without reading the whole request — the 503 load
+shed (`shed()`, which never reads the request), a `401`/`404` answered
+before the body, the `413` on a declared `Content-Length` over the cap, a
+`408`, a refusal hyper produces itself — closed the socket with request
+bytes still unread. The kernel then sends RST after the response: Linux
+reports it as `EPIPE` in the client's `SO_ERROR` after a clean EOF (the
+reviewer's `rst_witness.py`: 10/10 on the shed and 413 paths); macOS XNU
+checks `so_error` before `SS_CANTRCVMORE` and returns `ECONNRESET` from the
+client's read — the Mac "connection reset by peer" failures, because the
+tests read responses to EOF.
+
+Decision (RFC 9112 section 9.6, graceful close): after the response the
+server shuts its write side down (FIN), then reads and discards what the
+peer still sends — at most `DRAIN_MAX_BYTES` (64 KiB) within
+`DRAIN_TIMEOUT` (1 s) — and only then closes. The answer still never
+waits for the body (a slow-body client still gets its `401` at once); only
+the close is deferred, and it is bounded. hyper serves each connection
+without shutting the socket down itself (`poll_without_shutdown`), and the
+socket is taken back (`into_parts`) however the connection ended — answer
+written, deadline, or a protocol error hyper answered itself — so the
+graceful close covers every path with one descriptor per connection (a
+`dup(2)` kept outside hyper would have doubled the descriptors and made the
+512-connection cap unreachable under the common 1024 limit). An answered
+connection gives its connection slot back BEFORE it drains, so the cap
+still counts connections being served and a peer slow to close never holds
+a serving slot; draining sockets — served and load-shed alike — have their
+own bound, `DRAINS_MAX` (512), past which a socket is closed at once (the
+old behaviour, RST included). Descriptors are therefore bounded by the cap
+plus 512 draining plus the load-shed writes in flight. A peer that keeps
+sending past 64 KiB or 1 s still gets the kernel's RST — by design.
+
+Tests read every response to its `Content-Length` (`tests/common/mod.rs`),
+never to EOF. `server_slow_clients.rs::every_early_answer_closes_gracefully_so_error_is_clean`
+asserts, for the 413 (65 KiB body sent whole), the 401 and 404 (body sent),
+a 400 hyper answers itself (unparseable `Content-Length`, 30 KiB after the
+head) and the load-shed 503, that after the whole response and EOF the
+client's `SO_ERROR` is clean. With the old close it failed with `EPIPE` on
+the 413, 400 and shed paths (the small 401/404 bodies sat in hyper's read
+buffer, so those two were already clean).
+
+N20-M-2 (test race): `over_connection_cap_gets_prompt_503_and_recovers`
+opened its four slow-body holders right after the readiness probe, whose
+connection slot is released asynchronously; under CPU contention a holder
+was itself shed and `/health` got the free slot (200). The test now
+confirms every holder is held (nothing came back on it, non-blocking peek)
+and replaces a shed one before asserting the 503. The server was correct.
+
+N20-M-3: the tests' `free_port()` picked a port, released it and passed it
+to the server — a window in which another process can take it. The server
+now accepts `LEDGER_PORT=0` (the kernel picks) and `LEDGER_PORT_FILE`:
+after the bind it writes the bound port there atomically (temp file +
+rename); a write failure refuses to start. Every integration test starts
+the server that way and reads the port back; no test picks a port. The
+second Mac `server_events` failure in the relayed E4 summary stays
+unidentified (no log received); this removes the two candidate causes the
+reviewer named that are in the test harness (the port race; a 5 s startup
+wait, now 10 s behind the port file).
+
 ## Verification
 
 Commands, counts and a live three-process run are recorded in the README

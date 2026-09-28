@@ -36,9 +36,9 @@ the test is the authority; the ENGINE (not you) runs every test that counts.
 4. If you changed an existing test, one line per test: `CHANGED_TEST: <path> — <why>`.
 5. If the finding is not a defect, reply `DISPROOF:` followed by your written statement (at least 40 characters) of
    why. The engine never runs a command you name: it re-runs the FINDING's own reproduction (the test node id the
-   findings document names) on the untouched base tree, and the finding is disproved only when that reproduction
-   passes there. A finding whose reproduction names no test cannot be disproved by the engine; write the failing
-   test or reply `BLOCKED: <why>`.
+   findings document names; every finding has one — a document without it is refused before any run exists) on the
+   untouched base tree, and the finding is disproved only when that reproduction passes there. The same
+   reproduction must pass with your source changes and fail without them before the finding is `fixed`.
 6. After three failed hypotheses on one finding, reply `BLOCKED: architecture — <the three failed hypotheses>`.
 
 Reply text outside these lines is ignored. Words like "done", "complete", "all tests pass" change nothing.

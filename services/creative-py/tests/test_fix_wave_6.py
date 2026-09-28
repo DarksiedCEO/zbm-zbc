@@ -799,7 +799,64 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
     assert health and health[-1] < 0.5 * slow, (health[-1], slow)
     assert health[len(health) // 2] < 0.15 * slow, (health[len(health) // 2], slow)
     assert 408 not in legit and sum(v for k, v in legit.items() if isinstance(k, int)) == 10, legit
-    assert rss < 250, rss
+    # Fix wave 21 (AEGIS N20-M-6): the single absolute RSS sample (rss < 250) that stood here was
+    # removed: one number after one flood, with no baseline, can neither see a leak below the ceiling
+    # nor tell a plateau from a climb. Memory is judged by the plateau test below. The number is
+    # still printed above.
+
+
+# Fix wave 21 (AEGIS N20-M-6): memory under repeated junk floods is judged as a plateau, not as one
+# absolute sample. Derived from the reviewer's plateau data (review20/mac/logs/cre_plateau_*.log,
+# Linux, 12 + 6 rounds of both floods on one server; baseline 62-64 MiB; per-round peak = the larger
+# of the two post-flood samples of a round):
+#   - per-round peaks from round 1 on: 179-192 MiB (default run), 192-199 MiB (second run): a
+#     round-to-round spread of at most 13 MiB with no trend; 10 runs of this test in fix wave 21 gave
+#     RSS[10] - RSS[5] from -7 to +14 MiB. PLATEAU_LEAK_DELTA_MIB = 24 sits above that noise: with
+#     N = 10 rounds the last N/2 rounds carry 600 junk requests, so a retention of >= ~55 KiB per
+#     request always fails (a) (31 MiB over the worst negative noise). The old single sample
+#     (< 250 MB after two floods) passed a 100 KiB-per-request leak (RSS 93/96 MB); this test fails it
+#     (climb 86 MiB).
+#   - plateau - baseline: at most 135 MiB (199 - 64). PLATEAU_BUDGET_MIB = 170 (about 1.25 x that)
+#     for allocator and scheduling variation; with a ~64 MiB baseline that is ~234 MiB, inside the
+#     250 MB absolute ceiling, which is kept.
+PLATEAU_ROUNDS = 10
+PLATEAU_LEAK_DELTA_MIB = 24
+PLATEAU_BUDGET_MIB = 170
+PLATEAU_CEILING_MIB = 250
+
+
+def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
+    """Baseline before any flood; PLATEAU_ROUNDS rounds of both floods (20 concurrent x 3 of the
+    1 MiB junk, then of the 60k-keys junk) on one fresh server; RSS sampled after each flood.
+    (a) RSS[N] - RSS[N/2] < PLATEAU_LEAK_DELTA_MIB (no climb), (b) plateau - baseline <
+    PLATEAU_BUDGET_MIB, (c) plateau < PLATEAU_CEILING_MIB. Every sample is printed (and is in the
+    assertion message) so a failing run on another OS yields the evidence."""
+    proc, port = _start()
+    try:
+        baseline = _rss_kb(proc.pid) // 1024
+        per_round: list[int] = []
+        samples: list[tuple[int, str, int]] = []
+        for r in range(1, PLATEAU_ROUNDS + 1):
+            peak = 0
+            for name, body in (("1mib", JUNK_1MIB), ("60k", JUNK_60K_KEYS)):
+                codes, _, _, _ = _flood(port, body, nconc=20, reps=3, sample_health=False)
+                assert codes == {422: 60}, (r, name, codes)
+                rss = _rss_kb(proc.pid) // 1024
+                samples.append((r, name, rss))
+                peak = max(peak, rss)
+            per_round.append(peak)
+    finally:
+        _stop(proc)
+    half = PLATEAU_ROUNDS // 2
+    climb = per_round[-1] - per_round[half - 1]
+    plateau = max(per_round)
+    line = (f"baseline {baseline} MiB; per-round peaks {per_round}; RSS[{PLATEAU_ROUNDS}] - RSS[{half}] = {climb} MiB "
+            f"(< {PLATEAU_LEAK_DELTA_MIB}); plateau - baseline = {plateau - baseline} MiB (< {PLATEAU_BUDGET_MIB}); "
+            f"plateau {plateau} MiB (< {PLATEAU_CEILING_MIB}); samples {samples}")
+    print("\nN2 plateau: " + line, flush=True)
+    assert climb < PLATEAU_LEAK_DELTA_MIB, line
+    assert plateau - baseline < PLATEAU_BUDGET_MIB, line
+    assert plateau < PLATEAU_CEILING_MIB, line
 
 
 CALIBRATION_S = 0.12  # json.loads of JUNK_60K_KEYS x5, best of 7, on the reference 2-vCPU host, idle (fix wave 9)

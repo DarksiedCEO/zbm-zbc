@@ -303,13 +303,15 @@ def test_n18_e1_disproof_after_engine_saw_red_is_refused():
         h.close()
 
 
-def test_n18_e1_finding_without_a_machine_runnable_reproduction_stays_open():
+def test_n18_e1_finding_without_a_machine_runnable_reproduction_is_refused_at_ingestion():
+    """Changed in wave 21 (R1, N20-D-3): this test used to accept a prose reproduction and assert the finding stayed
+    open after a DISPROOF — the prose route is removed; the document is refused 422 before any run exists."""
     h = Harness(scenario=[{"text": "DISPROOF: pytest -q tests/test_calc.py::test_percent_basic\n" + NONSENSE}, {"text": "BLOCKED: x"}])
     try:
-        run, f = _one(h, reproduction="percent(1, 4) answers 20.0 (no test named)")
-        assert f["state"] == "blocked" and run["status"] == "failed"
-        assert any(e["payload"].get("why") == "disproof_not_machine_runnable" for e in h.events("round_failed"))
-        assert not any(e["payload"].get("phase") == "disproof" for e in h.events("test_run"))
+        r = h.submit(findings_doc(h.base_sha, [finding("N1-1", reproduction="percent(1, 4) answers 20.0 (no test named)")]))
+        assert r.status_code == 422, r.text
+        assert r.json()["code"] == "reproduction_not_runnable" and h.svc.runs == {}
+        assert not h.events("fix_run_received") and h.events("fix_run_refused")
     finally:
         h.close()
 
@@ -321,7 +323,7 @@ def test_n18_e1_true_disproof_runs_the_findings_reproduction_on_the_base_tree():
     scenario = [write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                 FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"},
                 {"text": "DISPROOF: pytest --version\n" + statement}]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         doc = findings_doc(h.base_sha, [finding("N1-1"),
                                         finding("N1-2", line=11, reproduction="run tests/test_calc.py::test_percent_basic: percent(1, 4) answers 20.0",
@@ -393,7 +395,7 @@ def test_n18_s3_guardrail_records_opaque_and_the_report_counts_it():
                 {"tool_calls": [{"name": "bash", "args": {"command": "python -c 'print(1)'"}}]},
                 {"tool_calls": [{"name": "bash", "args": {"command": "ls"}}]},
                 FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"}]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         run, f = _one(h)
         assert run["status"] == "awaiting_review", run["reasons"]
@@ -789,7 +791,7 @@ BREAKOUT = ("from toy import calc\n\n\ndef test_add_sum():\n"
 def test_n18_e6_report_fences_are_longer_than_any_backtick_run_in_the_content():
     scenario = [write_test("test_fix_n1_1", BREAKOUT), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                 FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"}]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         run, f = _one(h)
         assert run["status"] == "awaiting_review", run["reasons"]
@@ -807,7 +809,7 @@ def test_n18_e7_sweep_sites_are_validated_and_agent_numbers_trace_to_the_ledger(
     scenario = [write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                 FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nSWEEP: src/toy/nonexistent.py:999\nSWEEP: src/toy/calc.py:14\n"
                                   "SWEEP: tests/test_calc.py:2\nFIXED"}]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         run, f = _one(h)
         assert run["status"] == "awaiting_review", run["reasons"]

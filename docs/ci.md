@@ -51,19 +51,45 @@ silently green the first time one was missed.
 The audit jobs (`audit-python`, `audit-rust`, `audit-node`) and `secret-scan` always run. With no reliable base
 commit (first push of a branch, a force push, `workflow_dispatch`) every job runs.
 
+## macOS (fix wave 21)
+
+The founder's rule: the Mac checks run without him. Every job that ran only on Linux and has a Mac failure history
+(or could have one) now also runs on **`macos-14`** — GitHub's Apple Silicon (arm64) runner, pinned by name like
+`ubuntu-24.04`:
+
+| Job | macOS entries |
+|---|---|
+| `python-tests` | one per service (all nine) on Python 3.13, next to the 18 Linux entries (3.12 + 3.13) |
+| `delivery-py` | one entry, Python 3.13, with the same Node 22 / Go / Rust / uv steps as on Linux |
+| `ledger-rust` | `cargo test --locked` + clippy, same as Linux |
+| `orchestrator-go (ubuntu-24.04 / macos-14)` | `go vet` + `go test -race`, same as Linux |
+
+They report as separate checks (e.g. `python-tests (creative-py, 3.13, macos-14)`, `ledger-rust (macos-14)`) and
+all of them feed the one `required` check: a red Mac entry is a red `required`. One Python version on macOS keeps
+the (roughly ten times more expensive) macOS minutes bounded; the 3.12/3.13 split is still covered on Linux.
+
+GitHub's macOS runners have **no Docker daemon**, so `delivery-docker-live` stays Linux-only; delivery-py's
+`tests/test_live_docker.py` skips on the macOS entry with its printed reason, exactly as it does in the Linux
+`delivery-py` job, and must pass (no skip allowed) in `delivery-docker-live`. The `live-runs` and audit jobs are
+unchanged (Linux only: they prove cross-process behaviour and dependency advisories, not OS behaviour).
+
+What this does not prove: that the founder's own Mac (its macOS version, Python build, Homebrew toolchains, a
+Docker Desktop VM) behaves like GitHub's `macos-14` image. The first CI run on this workflow is the first time
+these suites run on macOS without a person; its results were not available when this was written.
+
 ## Jobs and what each one proves
 
-Runner: `ubuntu-24.04` everywhere (what `ubuntu-latest` resolves to today; pinned by name so a runner-image
-migration is a deliberate change). Preinstalled tools relied on and verified against the runner image README
+Runner: `ubuntu-24.04` everywhere except the macOS entries above (what `ubuntu-latest` resolves to today; pinned by
+name so a runner-image migration is a deliberate change). Preinstalled tools relied on and verified against the runner image README
 (image 20260920.314.1): Docker 28.0.4 client and server, rustup 1.29 with a stable toolchain, gcc (the Go race
 detector needs cgo), `curl`, `python3`. Everything else is installed by a pinned step.
 
 | Job | Command(s) run (from the service directory) | Proves |
 |---|---|---|
 | `changes` | `git diff --name-only <base> <head>` + the classification script | which suites a change can affect |
-| `python-tests (<svc>, 3.12/3.13)` for detection-py, fulfillment-py, onboarding-py, creative-py, compliance-py, verification-py, clipper-network-py, finance-py, legal-py | `python -m pip install -r requirements.txt` then `python -m pytest -q -rs -p no:cacheprovider` | each department's suite (unit, scenario, attack, guardrail and live-launcher tests) on both interpreters. onboarding-py's entry installs Rust stable first because its conftest runs `cargo build --release --bin server` on ledger-rust and drives the real binary; without cargo those tests skip and the count is a lie. |
-| `delivery-py (3.12/3.13)` | Node 22 (setup-node) + Go (setup-go, version from `fixtures/dlv/toy-go/go.mod`) + Rust stable (`rustup toolchain install stable --profile minimal`) → `uv sync --frozen --python <v>` (uv 0.8.17, the version `uv.lock` was produced with) → `uvx ruff@0.15.11 check src tests devtools` → `.venv/bin/python -m pytest -q -rs -p no:cacheprovider` | the fix-engine suite plus lint, including `tests/test_toolchains.py`, which runs the REAL `go`, `cargo` and `node` on the toy fixtures through the whole loop (fix wave 20 / R15: without the three toolchains those tests fail on a missing binary instead of skipping, so the job installs them first). `tests/test_live_docker.py` skips here with its printed reason — that is expected; the next job is where it must pass. |
-| `ledger-rust` | `rustup toolchain install stable --profile minimal --component clippy` → `cargo test --locked` → `cargo clippy --locked --all-targets -- -D warnings` | 60 unit + 31 integration tests (the integration tests spawn the compiled server over a real TCP socket), clippy clean, and `Cargo.lock` matches `Cargo.toml` (`--locked` fails on drift). |
+| `python-tests (<svc>, 3.12/3.13, ubuntu-24.04)` and `(<svc>, 3.13, macos-14)` for detection-py, fulfillment-py, onboarding-py, creative-py, compliance-py, verification-py, clipper-network-py, finance-py, legal-py | `python -m pip install -r requirements.txt` then `python -m pytest -q -rs -p no:cacheprovider` | each department's suite (unit, scenario, attack, guardrail and live-launcher tests) on both interpreters. onboarding-py's entry installs Rust stable first because its conftest runs `cargo build --release --bin server` on ledger-rust and drives the real binary; without cargo those tests skip and the count is a lie. |
+| `delivery-py (3.12/3.13, ubuntu-24.04)`, `delivery-py (3.13, macos-14)` | Node 22 (setup-node) + Go (setup-go, version from `fixtures/dlv/toy-go/go.mod`) + Rust stable (`rustup toolchain install stable --profile minimal`) → `uv sync --frozen --python <v>` (uv 0.8.17, the version `uv.lock` was produced with) → `uvx ruff@0.15.11 check src tests devtools` → `.venv/bin/python -m pytest -q -rs -p no:cacheprovider` | the fix-engine suite plus lint, including `tests/test_toolchains.py`, which runs the REAL `go`, `cargo` and `node` on the toy fixtures through the whole loop (fix wave 20 / R15: without the three toolchains those tests fail on a missing binary instead of skipping, so the job installs them first). `tests/test_live_docker.py` skips here with its printed reason — that is expected; the next job is where it must pass. |
+| `ledger-rust (ubuntu-24.04 / macos-14)` | `rustup toolchain install stable --profile minimal --component clippy` → `cargo test --locked` → `cargo clippy --locked --all-targets -- -D warnings` | 60 unit + 44 integration tests (the integration tests spawn the compiled server over a real TCP socket, on a port the server picks and reports back), clippy clean, and `Cargo.lock` matches `Cargo.toml` (`--locked` fails on drift). |
 | `orchestrator-go` | `go vet ./...` → `go test -race -count=1 ./...` (Go version from `go.mod`, 1.24.7) | the orchestrator's tests (three packages) with the race detector; no cached results. |
 | `dashboard-ts` | Node 22 → `npm ci` → `npx tsc --noEmit` → `npm run build` → `npm test` → `npm run check:dynamic` | lockfile-exact install, typecheck, production build, the 27 tests (3 start the built server; money vectors shared with the other three languages), and the package's own check that `/` and `/healthz` are dynamic routes. |
 | `live-run (<svc>, 3.12/3.13)` for compliance-py, verification-py, clipper-network-py, finance-py, legal-py | `cargo build --locked --release --bin server` in ledger-rust, then `LEDGER_BIN=<that binary> python devtools/live_run.py` | each department's own live integration run: the real ledger-rust binary and the department's production entrypoint as separate processes over real HTTP with real tokens, every narrated behaviour asserted, a restart with the ledger-anchor check, and `GET /ledger/verify` valid on every ledger at the end. Exit 0 only when every check held (33/33 for finance, 28/28 for verification, and so on). verification-py's run also starts compliance-py's production entrypoint, so both requirement files are installed. |
@@ -118,8 +144,12 @@ detector needs cgo), `curl`, `python3`. Everything else is installed by a pinned
 - The READMEs say `uv sync --frozen --no-dev` for delivery-py; that leaves no `pytest` in the venv (`pytest` is
   in the `dev` dependency group in `pyproject.toml` / `uv.lock`). CI runs `uv sync --frozen` (dev group included).
 - delivery-py's `tests/test_live_launcher.py` requires the venv to be at `services/delivery-py/.venv` (it spawns
-  `.venv/bin/python`); CI uses uv's default location, so this holds. It also rewrites the tracked file
-  `services/delivery-py/docs/evidence/dept28/live-launcher-run.log` when it runs — harmless in CI.
+  `.venv/bin/python`); CI uses uv's default location, so this holds. Since fix wave 21 (N20-D-1) its live log goes
+  to the gitignored `services/delivery-py/docs/evidence/dept28/_runs/`; no test rewrites a tracked file, and
+  `tests/test_live_tracked_files.py` fails if the live tests change `git status --porcelain`.
+- delivery-py's live tests bind 127.0.0.1 on 18800-18849 by default; `DLV_TEST_PORT_RANGE=lo-hi` moves them
+  (fulfillment-py: `FULFILLMENT_TEST_PORT_RANGE`, creative-py: `CREATIVE_TEST_PORTS`). ledger-rust's integration
+  tests start the server on port 0 and read the bound port back from `LEDGER_PORT_FILE`; they never pick a port.
 - onboarding-py's suite is the slow one (~6 minutes plus a cold ledger-rust release build); the
   `test_procinfo.py` copies in creative-py, fulfillment-py and onboarding-py skip one IPv6 case on hosts without
   an IPv6 loopback and say so.

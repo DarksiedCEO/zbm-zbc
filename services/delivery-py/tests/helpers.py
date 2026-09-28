@@ -68,6 +68,35 @@ CALLERS = {"aegis": AEGIS_TOKEN, "andre_session": ANDRE_SESSION_TOKEN, "schedule
 _GATE_CACHE: dict = {}
 
 
+def live_ports() -> range:
+    """The ports the live tests may bind (wave 21, N20-D-10): ``DLV_TEST_PORT_RANGE`` ("lo-hi", inclusive) when set,
+    else the default 18800-18849 — so a run can stay inside whatever range its operator was given."""
+    spec = os.environ.get("DLV_TEST_PORT_RANGE", "").strip()
+    if not spec:
+        return range(18800, 18850)
+    lo, _, hi = spec.partition("-")
+    lo_i, hi_i = int(lo), int(hi or lo)
+    if not (1024 <= lo_i <= hi_i <= 65535):
+        raise ValueError(f"DLV_TEST_PORT_RANGE={spec!r} is not lo-hi within 1024-65535")
+    return range(lo_i, hi_i + 1)
+
+
+def free_live_port() -> int:
+    """The first port of ``live_ports()`` that binds on 127.0.0.1 (skips with the range named when none does)."""
+    import socket
+
+    import pytest
+    ports = live_ports()
+    for port in ports:
+        with socket.socket() as s:
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    pytest.skip(f"no free port in {ports.start}-{ports.stop - 1} (the assigned live range; DLV_TEST_PORT_RANGE)")
+
+
 def rid() -> str:
     return "req-" + uuid.uuid4().hex[:20]
 
@@ -84,16 +113,32 @@ def git(*args, cwd: str) -> str:
     return r.stdout.strip()
 
 
-def make_repo(tmp: str, service: str = "toy-py") -> tuple[str, str]:
-    """A fresh repository with the fixture service committed on integration-2026-09-24. Returns (path, sha)."""
+PCT_REPRO = "run tests/test_percent.py::test_percent_zero_whole: percent(1, 0) raises ZeroDivisionError"
+
+
+# a reproduction of N1-1 in its own file (wave 21): a scenario that edits tests/test_calc.py under CHANGED_TEST needs
+# N1-1's reproduction elsewhere (an open finding's reproduction file is protected, R3 of round 19)
+ADD_REPRO_FILES = {"tests/test_add_repro.py": "from toy import calc\n\n\ndef test_add_two_and_three():\n    assert calc.add(2, 3) == 5\n"}
+ADD_REPRO_ELSEWHERE = "run tests/test_add_repro.py::test_add_two_and_three: add(2, 3) answers -1 (a - b)"
+
+
+def make_repo(tmp: str, service: str = "toy-py", pct_repro: bool = True, extra_files: Optional[dict] = None) -> tuple[str, str]:
+    """A fresh repository with the fixture service committed on integration-2026-09-24. Returns (path, sha).
+    ``pct_repro=False`` (toy-py) leaves N1-2's reproduction ``tests/test_percent.py`` out of the commit (wave 21:
+    a run about N1-1 alone then has no unrelated pre-existing failure; see fixtures/dlv/toy-py/README.md)."""
     repo = os.path.join(tmp, "repo")
     if os.path.isdir(repo):                     # a restart harness on the same directory (S9)
         return repo, git("rev-parse", "HEAD", cwd=repo)
     os.makedirs(repo)
     git("init", "-q", "-b", "integration-2026-09-24", cwd=repo)
     dst = os.path.join(repo, "services", service)
-    shutil.copytree(FIXTURES / service, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "target",
-                                                                           "node_modules"))
+    skip = ["__pycache__", "*.pyc", ".pytest_cache", "target", "node_modules"] + ([] if pct_repro else ["test_percent.py"])
+    shutil.copytree(FIXTURES / service, dst, ignore=shutil.ignore_patterns(*skip))
+    for rel, text in (extra_files or {}).items():            # extra files committed into the service at base
+        path = os.path.join(dst, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
     os.makedirs(os.path.join(repo, "docs", "adr"))
     with open(os.path.join(repo, "docs", "adr", "0001-toy.md"), "w") as fh:
         fh.write("# ADR 0001 toy\n")
@@ -140,7 +185,7 @@ def findings_doc(base_sha: str, findings: list[dict], request_id: Optional[str] 
 def two_findings(base_sha: str, request_id: Optional[str] = None) -> dict:
     return findings_doc(base_sha, [
         finding("N1-1", line=6, reproduction="run tests/test_calc.py::test_add_returns_sum: add(2, 3) answers -1 (a - b)"),
-        finding("N1-2", line=11, class_hint="division_by_zero", reproduction="percent(1, 0) raises ZeroDivisionError",
+        finding("N1-2", line=11, class_hint="division_by_zero", reproduction=PCT_REPRO,
                 expected="percent(1, 0) == 0.0", observed="ZeroDivisionError"),
     ], request_id)
 
@@ -224,10 +269,11 @@ class Harness:
     def __init__(self, *, docker: bool = True, llm: str = "fake", data_dir: bool = True, ledger_ok: bool = True,
                  scenario: Optional[list] = None, extra_env: Optional[dict] = None, wire_harness: bool = True,
                  clock: Optional[FixedClock] = None, tmp: Optional[str] = None, site_packages: str = SITE_PACKAGES,
-                 gate_report=None, ledger: Optional[FakeLedgerClient] = None, service: str = "toy-py"):
+                 gate_report=None, ledger: Optional[FakeLedgerClient] = None, service: str = "toy-py",
+                 pct_repro: bool = True, extra_files: Optional[dict] = None):
         self.tmp = tmp or tempfile.mkdtemp(prefix="dlv-test-")
         self.service = service
-        self.repo, self.base_sha = make_repo(self.tmp, service)
+        self.repo, self.base_sha = make_repo(self.tmp, service, pct_repro=pct_repro, extra_files=extra_files)
         self.env = base_env(self.tmp, self.repo, data_dir=data_dir, llm=llm, extra=extra_env)
         self.settings = config_mod.load(self.env)
         self.clock = clock or FixedClock(datetime(2026, 9, 27, 12, 0, 0, tzinfo=timezone.utc))
