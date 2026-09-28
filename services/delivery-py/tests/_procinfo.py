@@ -161,6 +161,20 @@ def can_bind(host: str, port: int = 0) -> bool:
         return False
 
 
+def port_free(host: str, port: int) -> bool:
+    """True when a SERVER could bind ``host``:``port`` now: the probe sets SO_REUSEADDR as the services' listeners
+    (uvicorn) do, so a port whose earlier connections sit in TIME_WAIT counts as free (fix wave 22, G3: without it
+    a narrow assigned range ran out after a few live tests and the rest were skipped). A port with a listener
+    still fails the bind on Linux and macOS alike."""
+    try:
+        with socket.socket(_family(host), socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+        return True
+    except OSError:
+        return False
+
+
 def override_bind_addr() -> str | None:
     """The first non-default address this OS can bind (see
     BIND_OVERRIDE_CANDIDATES), or None when it has neither."""

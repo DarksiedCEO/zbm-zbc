@@ -619,6 +619,28 @@ The WIP commit was replaced; it doesn't remain in history.
 - There's no route to mark platform facts verified. Today that means editing
   `PLATFORM_KNOWLEDGE` under review.
 
+## Fix wave 22, Sep 28 2026 (AEGIS round 21; lead rulings G3, G6, G9) — tests and transport
+
+- **G9 (N21-C-8, the `guardrails._DOLLAR` linearity flake).** The failing assertion was the harness's 10 KB → 100 KB
+  ratio (20.2 against 20, `$1,` × N, under load). The pattern is linear (`\$\s?\d[\d,]*(?:\.\d+)?`: each match is
+  3 characters, nothing is retried). The harness timed `[m.span() for m in p.finditer(s)]`: on 100 KB that is 33,333
+  retained span tuples, which drive the interpreter's cyclic GC — 15 collections inside the timed call, each walking
+  the growing list — so the ratio measured the harness's garbage. `tests/redos_harness.py` now drains the matches
+  without keeping them (`_drain_matches`: every match produced and its span taken, as the service uses them) and
+  times each run with the cyclic GC off; the 10 KB base is best-of-5 like the 100 KB run. Measured with
+  `w22/g9_probe.py` (30 pairs each, the machine loaded): ratio median 13.0 / max 15.7 before, 9.8 / 13.5 after
+  (ideal 10); 0 collections inside a timed 100 KB run after, 15 before. The bounds (50 ms / 100 KB, ratio 20) are
+  unchanged.
+- **G3 (N21-C-6).** The round-21 review found `ledger-rust` still running hours after a suite: `proxied_stack`
+  (`tests/test_fix_wave6.py`) started the ledger and then, outside any `try`, picked the API's port — a narrow
+  `ONBOARDING_TEST_PORT_RANGE` whose ports sat in TIME_WAIT made `free_test_port()` skip, and the ledger was
+  orphaned. `proxied_stack`, `RealStack` and the wave-5 `Stack` now start everything inside one try/finally (a
+  failure or a skip at any step stops what was started), and `free_test_port()` probes with `SO_REUSEADDR`, as the
+  servers bind, so a port in TIME_WAIT is free.
+- **G6.** `serve.py`'s graceful close is the module shared by the ten Python services (`src/graceful_close.py`;
+  ADR 0003 §9): the concurrency slot is given back before the drain, at most `ONBOARDING_DRAINS_MAX` (default 512)
+  drain at once, reads are bounded to 16 KiB and drained bytes are discarded in one buffer.
+
 ## Contract observations (reported, not changed)
 
 - **Section 2** defines `payload_sha256` but no home for the payload itself. Without

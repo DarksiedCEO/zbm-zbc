@@ -74,7 +74,7 @@ LINEAR_RATIO = 20.0  # 10 KB -> 100 KB
 
 
 def slowdown() -> float:
-    t = H.best_time(lambda s: [m.span() for m in _REF.finditer(s)], _REF_INPUT, runs=5)
+    t = H.best_time(lambda s: H._drain_matches(_REF.finditer(s)), _REF_INPUT, runs=5)
     return min(SLOWDOWN_CAP, max(1.0, t / REF_NOMINAL_S))
 
 
@@ -148,7 +148,7 @@ def test_r1_every_pattern_linear_on_adversarial_input(name):
     #    bound, and 10 KB -> 100 KB must scale linearly whatever the machine
     for _, unit, tail in ranked[:3]:
         s10 = unit * (10_000 // len(unit)) + tail
-        t10 = H.best_time(fn, s10)
+        t10 = H.best_time(fn, s10, runs=5)                 # best of 5, like the 100 KB run it is the ratio's base
         assert t10 < PER_10KB_S * slow, f"{name}: {unit!r}+{tail!r} took {t10 * 1000:.1f} ms on 10 KB (slowdown {slow:.1f}x)"
         s100 = unit * (100_000 // len(unit)) + tail
         t100 = H.best_time(fn, s100, runs=5)

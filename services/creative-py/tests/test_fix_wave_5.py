@@ -340,6 +340,7 @@ KEEP_ALIVE_TIMEOUT_S = 5
 def _free_port() -> int:
     for port in PORTS:
         with socket.socket() as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # fix wave 22 (G3): TIME_WAIT is free
             try:
                 s.bind(("127.0.0.1", port))
             except OSError:

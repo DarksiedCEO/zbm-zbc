@@ -1687,10 +1687,19 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     two samples. Asserted: (a) RSS[10] - RSS[5] < 24 MiB — the reviewer's
     plateau data (Linux, 12 + 6 rounds) show per-round peaks moving within
     13 MiB with no trend; this wave's 10 Linux runs gave RSS[10] - RSS[5]
-    from -7 to +14 MiB. 24 sits above that noise; a retention of >= ~55 KiB
-    per junk request (600 requests in rounds 6-10: 31 MiB over the worst
-    negative noise) always fails, a smaller one may pass. Mutation check: a
-    sitecustomize retaining 100 KiB per `json.loads` passes the old single
+    from -7 to +14 MiB. 24 sits above that noise. What it detects is
+    MEASURED, not derived (fix wave 22, lead ruling G8; AEGIS round 21
+    N21-C-5 — the wave-21 text claimed "a retention of >= ~55 KiB per junk
+    request always fails", an arithmetic bound nobody had run): the
+    reviewer's mutation runs (a sitecustomize retaining N bytes per
+    `json.loads`, Linux) gave RSS[10] - RSS[5] = 32 and 26 MiB at 64 KiB per
+    request (detected, 2/2), 18 and 16 MiB at 32 KiB (not detected, 0/2),
+    11 and 11 MiB at 16 KiB (0/2), 2, 8 and 10 MiB with no leak. The
+    measured floor is therefore between 32 and 64 KiB retained per junk
+    request: 64 KiB was caught in both runs, 32 KiB in neither; nothing is
+    claimed about 33-63 KiB. A slower leak is this test's residual (the
+    absolute budget (b) and ceiling (c) still bound it within one run).
+    Mutation check (wave 21): 100 KiB per `json.loads` passes the old single
     sample (RSS 93/96 MB) and fails this test (climb 86 MiB);
     (b) plateau - baseline < 170 MiB — measured at most 135 (199 - 64),
     plus ~25 % for allocator and scheduling variation; (c) plateau < 250

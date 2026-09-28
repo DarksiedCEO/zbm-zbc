@@ -9,6 +9,7 @@ with a few failing tails. Shared by the test module and the live probe.
 
 from __future__ import annotations
 
+import gc
 import importlib
 import re
 import time
@@ -92,17 +93,39 @@ def use_of(name: str, p: re.Pattern) -> Callable[[str], object]:
         return p.match
     if how == "fullmatch":
         return p.fullmatch
-    return lambda s: [m.span() for m in p.finditer(s)]
+    return lambda s: _drain_matches(p.finditer(s))
+
+
+def _drain_matches(it) -> int:
+    """Run a search to the end the way the service does (every match produced and its span taken) WITHOUT keeping
+    the results: fix wave 22 (G9, AEGIS N21-C-8) — the harness used to build a list of every span, and on a 100 KB
+    input of 33,333 matches those retained tuples drove the interpreter's cyclic GC (15 collections, each walking the
+    growing list), so the 10 KB → 100 KB ratio measured the harness's garbage, not the regex (``_DOLLAR`` on
+    ``$1,`` × N: 20.2 against the bound 20 under load; the pattern itself is linear)."""
+    n = 0
+    for m in it:
+        m.span()
+        n += 1
+    return n
 
 
 def best_time(fn: Callable[[str], object], s: str, runs: int = 3) -> float:
     """Best of ``runs`` of the calling thread's OWN CPU time (fix wave 6:
     wall-clock time made the bounds depend on machine load — a 1 ms run fits
     in one scheduler quantum, a 40 ms run is pre-empted by other processes —
-    and the cost being bounded is CPU work, not waiting)."""
+    and the cost being bounded is CPU work, not waiting). Fix wave 22 (G9): the
+    cyclic GC is OFF while a run is timed, so a run measures the pattern's work,
+    not a collection the harness's (or the suite's) allocations happened to
+    trigger inside it."""
     best = float("inf")
     for _ in range(runs):
-        t = time.thread_time()
-        fn(s)
-        best = min(best, time.thread_time() - t)
+        was = gc.isenabled()
+        gc.disable()
+        try:
+            t = time.thread_time()
+            fn(s)
+            best = min(best, time.thread_time() - t)
+        finally:
+            if was:
+                gc.enable()
     return best

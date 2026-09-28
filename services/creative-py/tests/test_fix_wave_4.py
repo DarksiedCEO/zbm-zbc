@@ -317,20 +317,51 @@ def _wait(url: str, headers=None) -> None:
 @pytest.fixture
 def lossy_ledger():
     """fake ledger server over real HTTP behind devtools/lossy_proxy.py."""
+    yield from _lossy_stack()
+
+
+def _lossy_stack(popen=subprocess.Popen):
     lp, pp = _free_port(), _free_port()
     env = {**os.environ, "FAKE_LEDGER_TOKEN": "lossy-test-ledger-token"}
-    procs = [subprocess.Popen([sys.executable, str(DEVTOOLS / "fake_ledger_server.py"), str(lp)], env=env,
-                              stderr=subprocess.DEVNULL),
-             subprocess.Popen([sys.executable, str(DEVTOOLS / "lossy_proxy.py"), str(pp), f"http://127.0.0.1:{lp}"],
-                              stderr=subprocess.DEVNULL)]
+    procs = []
+    # Fix wave 22 (G3, N21-C-6): every process is started INSIDE the try, so a failure to start the second one (or
+    # anything after the first) still stops the first — the ledger was left running (orphaned) before; and a
+    # process that ignores SIGTERM is killed, never left behind by a timeout in the cleanup.
     try:
+        procs.append(popen([sys.executable, str(DEVTOOLS / "fake_ledger_server.py"), str(lp)], env=env,
+                           stderr=subprocess.DEVNULL))
+        procs.append(popen([sys.executable, str(DEVTOOLS / "lossy_proxy.py"), str(pp), f"http://127.0.0.1:{lp}"],
+                           stderr=subprocess.DEVNULL))
         _wait(f"http://127.0.0.1:{lp}/ledger/entries")
         _wait(f"http://127.0.0.1:{pp}/__stats")
         yield f"http://127.0.0.1:{pp}", f"http://127.0.0.1:{lp}", "lossy-test-ledger-token"
     finally:
         for p in procs:
             p.terminate()
-            p.wait(timeout=5)
+        for p in procs:
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+
+
+def test_the_stack_never_orphans_the_ledger_when_the_proxy_fails_to_start():
+    """Fix wave 22 (G3, N21-C-6): the proxy's start fails after the ledger started — the ledger is stopped, not
+    left running (it was started outside the try and orphaned)."""
+    started = []
+
+    def popen(argv, **kw):
+        if "lossy_proxy.py" in argv[1]:
+            raise OSError("simulated: the proxy could not start")
+        p = subprocess.Popen(argv, **kw)
+        started.append(p)
+        return p
+
+    gen = _lossy_stack(popen)
+    with pytest.raises(OSError, match="simulated"):
+        next(gen)
+    assert len(started) == 1 and started[0].poll() is not None, "the ledger was left running"
 
 
 def test_lost_clip_response_over_real_http_lossy_proxy(lossy_ledger):

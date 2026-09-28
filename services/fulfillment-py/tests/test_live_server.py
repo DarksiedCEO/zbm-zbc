@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from _procinfo import NO_OVERRIDE_ADDR_REASON, can_bind, listening_addrs, override_bind_addr
+from _procinfo import NO_OVERRIDE_ADDR_REASON, can_bind, listening_addrs, override_bind_addr, port_free
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 TOKEN = "live-test-token-not-a-secret"
@@ -41,7 +41,7 @@ def _free_port() -> int:
     lo, hi = (int(x) for x in rng.split("-"))
     hosts = ["127.0.0.1"] + [h for h in (override_bind_addr(),) if h]
     for port in range(lo, hi + 1):
-        if all(can_bind(host, port) for host in hosts):
+        if all(port_free(host, port) for host in hosts):
             return port
     raise AssertionError(f"no free port in FULFILLMENT_TEST_PORT_RANGE={rng}")
 

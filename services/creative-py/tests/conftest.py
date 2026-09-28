@@ -175,6 +175,7 @@ def free_port() -> int:
         if port in recent:
             continue
         with socket.socket() as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # fix wave 22 (G3): TIME_WAIT is free
             try:
                 sock.bind(("127.0.0.1", port))
             except OSError:

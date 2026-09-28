@@ -85,30 +85,34 @@ class Stack:
     and onboarding-py started exactly as the README says: ``python3 -m api``."""
 
     def __init__(self, **env):
-        self.lport = free_test_port()
-        lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN)
-        self.ledger = subprocess.Popen([sys.executable, str(ROOT / "tools" / "fake_ledger_server.py"), "--port", str(self.lport)],
-                                       env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # the ledger listens before the api's port is chosen, so they differ
-        _wait_health(self.lport, self.ledger, "fake ledger")
-        self.port = free_test_port()
-        aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
-        aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(self.port),
-                     "LEDGER_SERVICE_URL": f"http://127.0.0.1:{self.lport}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
-                     "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1", **env})
-        self.api = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=aenv, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True)
+        self.ledger = self.api = None
+        self.out = ""
+        # Fix wave 22 (G3, N21-C-6): a failure or skip at any step after the ledger started stops what was started.
         try:
+            self.lport = free_test_port()
+            lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN)
+            self.ledger = subprocess.Popen([sys.executable, str(ROOT / "tools" / "fake_ledger_server.py"), "--port", str(self.lport)],
+                                           env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # the ledger listens before the api's port is chosen, so they differ
+            _wait_health(self.lport, self.ledger, "fake ledger")
+            self.port = free_test_port()
+            aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
+            aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(self.port),
+                         "LEDGER_SERVICE_URL": f"http://127.0.0.1:{self.lport}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
+                         "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1", **env})
+            self.api = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=aenv, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True)
             _wait_health(self.port, self.api, "onboarding-py")
-        except Exception:
-            _stop(self.ledger)
+        except BaseException:
+            self.close()
             raise
         self.base = f"http://127.0.0.1:{self.port}"
-        self.out = ""
 
     def close(self) -> None:
-        self.out = _stop(self.api)
-        _stop(self.ledger)
+        if self.api is not None:
+            self.out = _stop(self.api)
+        if self.ledger is not None:
+            _stop(self.ledger)
 
     def pid(self) -> int:
         return self.api.pid

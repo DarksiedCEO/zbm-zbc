@@ -602,6 +602,7 @@ JUNK_60K_KEYS = json.dumps({f"k{i}": "x" for i in range(60_000)}).encode()  # 60
 def _free_port() -> int:
     for port in PORTS:
         with socket.socket() as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # fix wave 22 (G3): TIME_WAIT is free
             try:
                 s.bind(("127.0.0.1", port))
             except OSError:
@@ -811,11 +812,13 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
 # of the two post-flood samples of a round):
 #   - per-round peaks from round 1 on: 179-192 MiB (default run), 192-199 MiB (second run): a
 #     round-to-round spread of at most 13 MiB with no trend; 10 runs of this test in fix wave 21 gave
-#     RSS[10] - RSS[5] from -7 to +14 MiB. PLATEAU_LEAK_DELTA_MIB = 24 sits above that noise: with
-#     N = 10 rounds the last N/2 rounds carry 600 junk requests, so a retention of >= ~55 KiB per
-#     request always fails (a) (31 MiB over the worst negative noise). The old single sample
-#     (< 250 MB after two floods) passed a 100 KiB-per-request leak (RSS 93/96 MB); this test fails it
-#     (climb 86 MiB).
+#     RSS[10] - RSS[5] from -7 to +14 MiB. PLATEAU_LEAK_DELTA_MIB = 24 sits above that noise. What (a)
+#     detects is MEASURED (fix wave 22, G8; AEGIS N21-C-5 — the wave-21 comment claimed ">= ~55 KiB per
+#     request always fails", derived, never run): the reviewer's mutation runs (retaining N bytes per
+#     json.loads) — 64 KiB/request: climb 32 and 26 MiB, detected 2/2; 32 KiB: 18 and 16, missed 0/2;
+#     16 KiB: 11 and 11, missed; no leak: 2, 8, 10. The floor lies between 32 and 64 KiB per request;
+#     a slower leak is this test's residual. The old single sample (< 250 MB after two floods) passed a
+#     100 KiB-per-request leak (RSS 93/96 MB); this test fails it (climb 86 MiB).
 #   - plateau - baseline: at most 135 MiB (199 - 64). PLATEAU_BUDGET_MIB = 170 (about 1.25 x that)
 #     for allocator and scheduling variation; with a ~64 MiB baseline that is ~234 MiB, inside the
 #     250 MB absolute ceiling, which is kept.

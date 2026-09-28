@@ -544,6 +544,46 @@ unidentified (no log received); this removes the two candidate causes the
 reviewer named that are in the test harness (the port race; a 5 s startup
 wait, now 10 s behind the port file).
 
+## 9. LEDGER_PORT_FILE hardened; the Python drains bounded like the ledger's (fix wave 22, Sep 28 2026)
+
+**LEDGER_PORT_FILE (AEGIS round 21 N21-C-2, lead ruling G7).** Wave 21 wrote the port to `<path>.tmp-<pid>` with
+`std::fs::write` — a predictable name, followed if it was a symlink (a link planted there made the server overwrite
+the link's target with the port number: `tests/server_port_file.rs`, run on the wave-21 server through
+`sh -c 'ln -s … "$LEDGER_PORT_FILE.tmp-$$" && exec server'`, left the victim holding `36667\n`) — with the default
+mode (0644), BEFORE the ledger log was opened (a server refusing a corrupt log had already announced a port), and
+never removed it. Now (`src/bin/server.rs`, `write_port_file`/`publish_port_file`): a target that is a symlink
+(or not a regular file) is refused — the server does not start; the port is written only after the log opened and
+verified; to `.<name>.tmp-<16 hex from /dev/urandom>` in the target's directory, created
+`O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC` with mode 0600, written and fsynced, then `rename`d over the target (the
+symlink check is repeated just before; `rename` never follows a link at the destination); on SIGTERM/SIGINT an
+async-signal-safe handler `lstat`s the path and unlinks it only if it is still the regular file the server
+renamed there (same device and inode), then re-raises the signal with the default disposition (the process ends
+as before, killed by the signal); a `main` that returns removes it the same way. `libc` became a direct
+dependency for `O_NOFOLLOW`, `lstat`/`unlink`/`signal`/`raise` — it was already in the build through tokio/mio at
+the same version (Cargo.lock gains one dependency edge, no new package); tokio's `signal` feature would have
+added `signal-hook-registry`, which this offline build does not carry. Tests (`tests/server_port_file.rs`, 5):
+the planted temp-name link is never followed; a symlinked target is refused; nothing is written when the log
+fails verification; a stale file is replaced by a 0600 file and SIGTERM removes it; a file that is no longer the
+server's own is left alone. Wave-21 server: 4 of the 5 fail (the fifth, "leave someone else's file", passes
+trivially — it never removed anything).
+
+**The Python services' graceful close (AEGIS round 21 N21-C-1, N21-C-3; lead rulings G5, G6).** The ten Python
+services now share ONE module, byte-identical (`src/graceful_close.py`; delivery `src/zbm_delivery/graceful_close.py`;
+`tests/test_live_graceful_close_module.py`, itself byte-identical in every service, pins its sha256 and compares
+every copy the checkout holds). Mirroring §8: an answered connection gives its uvicorn concurrency slot back
+(`server_state.connections`) BEFORE it drains; at most `drains_max` connections of one server drain at once
+(`<PREFIX>_DRAINS_MAX`, default 512: `CN_`, `COMPLIANCE_`, `CREATIVE_`, `DETECTION_`, `DLV_`, `FIN_`,
+`FULFILLMENT_`, `LEGAL_`, `ONBOARDING_`, `VI_`; anything but a positive integer refuses startup), past which the
+socket is closed at once. Measured on the wave-21 code with the service's own protocol under uvicorn
+(`w22/g6_live.py`): a request arriving while one answered connection drains got uvicorn's 503 (limit 2: the
+draining one still counted), and three answered connections all drained with a cap of 2 configured nowhere; now
+the request is served and the third is closed at once. The body uvicorn buffered for the request a connection
+answered is released when its drain starts. Reads go through a `BufferedProtocol` in front of uvicorn's protocol
+into ONE 16 KiB buffer per event-loop thread: a read hands the parser at most 16 KiB (the loops read up to
+256 KiB, and uvicorn buffers a request's body up to its 64 KiB high-water mark PLUS the read that crossed it);
+drained bytes are counted in that buffer and discarded (no bytes object at all). The attribution behind this,
+and fulfillment's 96 MiB bound, are in ADR 0002 ("Fix wave 22").
+
 ## Verification
 
 Commands, counts and a live three-process run are recorded in the README

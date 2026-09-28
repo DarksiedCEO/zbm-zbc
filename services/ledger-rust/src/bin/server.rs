@@ -95,13 +95,29 @@
 //! socket is closed at once (the old behaviour, RST included).
 //!
 //! Fix wave 21 (N20-M-3): LEDGER_PORT=0 binds an ephemeral port, and
-//! LEDGER_PORT_FILE, when set, receives the bound port (written atomically
-//! after the bind) so a caller never has to guess a free port and race
-//! another process for it.
+//! LEDGER_PORT_FILE, when set, receives the bound port so a caller never has
+//! to guess a free port and race another process for it.
+//!
+//! Fix wave 22 (AEGIS N21-C-2, lead ruling G7): the port file is written only
+//! AFTER the ledger log opened (a server that refuses to start announces no
+//! port); a target that is a symlink is refused (the server does not start);
+//! the number goes to a temp file in the target's directory created
+//! O_CREAT|O_EXCL|O_NOFOLLOW with a random suffix, mode 0600, fsynced, then
+//! renamed into place (rename never follows a link at the destination); the
+//! file is removed on SIGTERM/SIGINT and on a clean exit — only while it is
+//! still the file this server wrote (same device and inode). Before, the temp
+//! name was `<path>.tmp-<pid>` (predictable) and a link planted there was
+//! followed: the server overwrote the link's target.
 use std::convert::Infallible;
+use std::ffi::CString;
+use std::fs::OpenOptions;
 use std::future::Future;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -513,13 +529,123 @@ fn bind(addr: &str) -> std::io::Result<TcpListener> {
     socket.listen(LISTEN_BACKLOG)
 }
 
-/// Writes the bound port to `path` atomically (a sibling temp file, then
-/// rename), so a reader never sees a partial number (fix wave 21, N20-M-3).
-fn write_port_file(path: &str, listener: &TcpListener) -> std::io::Result<()> {
-    let port = listener.local_addr()?.port();
-    let tmp = format!("{path}.tmp-{}", std::process::id());
-    std::fs::write(&tmp, format!("{port}\n"))?;
-    std::fs::rename(&tmp, path)
+/// The port file this server wrote: its path (NUL-terminated, for the signal
+/// handler) and the device/inode of the file it renamed into place. Set once.
+static PORT_FILE_PATH: AtomicPtr<libc::c_char> = AtomicPtr::new(std::ptr::null_mut());
+static PORT_FILE_DEV: AtomicU64 = AtomicU64::new(0);
+static PORT_FILE_INO: AtomicU64 = AtomicU64::new(0);
+
+fn random_hex(n: usize) -> std::io::Result<String> {
+    let mut bytes = vec![0u8; n];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn refuse_symlink(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the port file path is a symlink (refused: it is never followed or replaced)",
+        )),
+        Ok(m) if !m.file_type().is_file() => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the port file path exists and is not a regular file",
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Writes `port` to `path` (fix wave 22, G7): refuses a symlinked target; a
+/// temp file in the same directory, `.<name>.tmp-<16 random hex>`, created
+/// O_CREAT|O_EXCL|O_NOFOLLOW with mode 0600, written and fsynced, then renamed
+/// over `path` (atomic; a reader never sees a partial number). Returns the
+/// device and inode of the file now at `path`.
+fn write_port_file(path: &str, port: u16) -> std::io::Result<(u64, u64)> {
+    let target = Path::new(path);
+    refuse_symlink(target)?;
+    let name = target
+        .file_name()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "the port file path names no file"))?;
+    let dir = match target.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let tmp = dir.join(format!(".{}.tmp-{}", name.to_string_lossy(), random_hex(8)?));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&tmp)?;
+    let written = file.write_all(format!("{port}\n").as_bytes()).and_then(|_| file.sync_all()).and_then(|_| file.metadata());
+    drop(file);
+    let meta = match written {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+    };
+    if let Err(e) = refuse_symlink(target).and_then(|_| std::fs::rename(&tmp, target)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok((meta.dev(), meta.ino()))
+}
+
+/// Removes the port file if it is still the one this server wrote. Called
+/// from the signal handler: only async-signal-safe calls (lstat, unlink).
+fn remove_own_port_file() {
+    let p = PORT_FILE_PATH.load(Ordering::SeqCst);
+    if p.is_null() {
+        return;
+    }
+    // SAFETY: `p` points at a leaked, NUL-terminated CString that lives for the process; `st` is plain data.
+    unsafe {
+        let mut st: libc::stat = std::mem::zeroed();
+        if libc::lstat(p, &mut st) == 0
+            && (st.st_mode & libc::S_IFMT) == libc::S_IFREG
+            && st.st_dev as u64 == PORT_FILE_DEV.load(Ordering::SeqCst)
+            && st.st_ino as u64 == PORT_FILE_INO.load(Ordering::SeqCst)
+        {
+            libc::unlink(p);
+        }
+    }
+}
+
+extern "C" fn on_stop_signal(sig: libc::c_int) {
+    remove_own_port_file();
+    // SAFETY: restoring the default disposition and re-raising is async-signal-safe; the process then ends
+    // exactly as it did before a handler existed (killed by `sig`).
+    unsafe {
+        libc::signal(sig, libc::SIG_DFL);
+        libc::raise(sig);
+    }
+}
+
+/// Publishes the port file and arms its removal (SIGTERM, SIGINT, clean exit).
+fn publish_port_file(path: &str, port: u16) -> std::io::Result<PortFileGuard> {
+    let (dev, ino) = write_port_file(path, port)?;
+    let c = CString::new(path).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in the port file path"))?;
+    PORT_FILE_DEV.store(dev, Ordering::SeqCst);
+    PORT_FILE_INO.store(ino, Ordering::SeqCst);
+    PORT_FILE_PATH.store(c.into_raw(), Ordering::SeqCst);
+    // SAFETY: installing a handler that only calls async-signal-safe functions.
+    unsafe {
+        let handler = on_stop_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
+        libc::signal(libc::SIGTERM, handler);
+        libc::signal(libc::SIGINT, handler);
+    }
+    Ok(PortFileGuard)
+}
+
+/// Removes the port file when `main` returns normally.
+struct PortFileGuard;
+
+impl Drop for PortFileGuard {
+    fn drop(&mut self) {
+        remove_own_port_file();
+    }
 }
 
 fn load_required_token() -> String {
@@ -567,9 +693,10 @@ fn main() {
         .build()
         .expect("failed to build the ledger-rust runtime");
     let listener = runtime.block_on(async { bind(&addr) }).expect("failed to bind ledger-rust HTTP server");
-    if let Ok(port_file) = std::env::var("LEDGER_PORT_FILE") {
-        if let Err(e) = write_port_file(&port_file, &listener) {
-            ledger_log!("ledger-rust: REFUSING TO START — LEDGER_PORT_FILE={port_file:?} could not be written: {e}");
+    let port_file = std::env::var("LEDGER_PORT_FILE").ok();
+    if let Some(pf) = &port_file {
+        if let Err(e) = refuse_symlink(Path::new(pf)) {
+            ledger_log!("ledger-rust: REFUSING TO START — LEDGER_PORT_FILE={pf:?}: {e}");
             std::process::exit(1);
         }
     }
@@ -600,6 +727,27 @@ fn main() {
         Ok(a) => ledger_log!("ledger-rust listening on {a} (log: {log_path})"),
         Err(_) => ledger_log!("ledger-rust listening on {addr} (log: {log_path})"),
     }
+
+    // G7: announced only now — the log opened and verified, the socket bound
+    let _port_file_guard = match &port_file {
+        Some(pf) => {
+            let port = match listener.local_addr() {
+                Ok(a) => a.port(),
+                Err(e) => {
+                    ledger_log!("ledger-rust: REFUSING TO START — the bound port cannot be read: {e}");
+                    std::process::exit(1);
+                }
+            };
+            match publish_port_file(pf, port) {
+                Ok(g) => Some(g),
+                Err(e) => {
+                    ledger_log!("ledger-rust: REFUSING TO START — LEDGER_PORT_FILE={pf:?} could not be written: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => None,
+    };
 
     let app = Arc::new(App { ledger, required_token });
     runtime.block_on(serve(listener, app, max_connections));

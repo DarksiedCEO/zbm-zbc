@@ -158,6 +158,7 @@ def free_test_port() -> int:
     lo, hi = (int(x) for x in os.environ.get("ONBOARDING_TEST_PORT_RANGE", "19920-19939").split("-"))
     for port in range(lo, hi + 1):
         with socket.socket() as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # fix wave 22 (G3): TIME_WAIT is free
             try:
                 s.bind(("127.0.0.1", port))
                 return port
