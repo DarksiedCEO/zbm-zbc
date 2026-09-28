@@ -10,6 +10,8 @@ for p in (SRC, TESTS):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
+import _tmproot  # noqa: E402  (fix wave 21, L4: before anything imports tempfile users — gitport makes its dir at import)
+
 # The suite builds every service from an explicit env dict; the process environment must not leak DLV_* or the
 # ledger settings into anything that reads os.environ (the harness module sets only the DEER_FLOW_* it owns).
 for k in list(os.environ):
@@ -47,3 +49,29 @@ def _no_tiktoken_download(monkeypatch):
         raise RuntimeError("tiktoken.load.read_file called in a test (a download path)")
     monkeypatch.setattr(tl, "read_file", boom)
     monkeypatch.setattr(tl, "read_file_cached", boom, raising=False)
+
+
+def pytest_unconfigure(config):
+    """L4: the session's private temp root goes with the session."""
+    _tmproot.remove_session_root()
+
+
+@pytest.fixture(autouse=True)
+def _harness_cleanup():
+    """L4: every Harness a test made is closed and its OWN temp dir removed when the test ends (pass or fail), so
+    a full run never holds more than one test's worth of harness trees. Harnesses a module-scoped fixture made
+    exist before this fixture starts and are left to that fixture (and to the session root)."""
+    import helpers
+    start = len(helpers.HARNESSES)
+    yield
+    made = helpers.HARNESSES[start:]
+    del helpers.HARNESSES[start:]
+    for h in made:
+        try:
+            h.close()
+        except Exception:  # noqa: BLE001 - a harness the test already closed or that never started
+            pass
+    import shutil
+    for h in made:
+        if h.owns_tmp:
+            shutil.rmtree(h.tmp, ignore_errors=True)

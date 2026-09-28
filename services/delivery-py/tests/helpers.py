@@ -265,13 +265,18 @@ class llm_scope:
 
 # --- the harness ------------------------------------------------------------------------------------------------------
 
+HARNESSES: list = []   # every Harness made, in order (conftest._harness_cleanup closes and removes per test; L4)
+
+
 class Harness:
     def __init__(self, *, docker: bool = True, llm: str = "fake", data_dir: bool = True, ledger_ok: bool = True,
                  scenario: Optional[list] = None, extra_env: Optional[dict] = None, wire_harness: bool = True,
                  clock: Optional[FixedClock] = None, tmp: Optional[str] = None, site_packages: str = SITE_PACKAGES,
                  gate_report=None, ledger: Optional[FakeLedgerClient] = None, service: str = "toy-py",
                  pct_repro: bool = True, extra_files: Optional[dict] = None):
+        self.owns_tmp = tmp is None
         self.tmp = tmp or tempfile.mkdtemp(prefix="dlv-test-")
+        HARNESSES.append(self)
         self.service = service
         self.repo, self.base_sha = make_repo(self.tmp, service, pct_repro=pct_repro, extra_files=extra_files)
         self.env = base_env(self.tmp, self.repo, data_dir=data_dir, llm=llm, extra=extra_env)

@@ -42,6 +42,7 @@ import re
 import shutil
 import tempfile
 import threading
+from datetime import timedelta
 from typing import Optional
 
 from zbm_delivery import fsops, registry
@@ -108,16 +109,17 @@ def _hunk_lines(diff_text: str, service: str) -> dict[str, set[int]]:
     return out
 
 
-def _tree_digest(root: str) -> str:
+def _tree_digest(root: str, exclude: frozenset = frozenset()) -> str:
     """sha256 over the sorted (relative path, sha256 of content, executable bit) of every regular file under
-    ``root`` (junk excluded): two trees with the same digest hold the same files."""
+    ``root`` (junk excluded, and the relative paths in ``exclude`` — the run's reviewer-authored tests, which are
+    overlaid on every engine tree and never committed): two trees with the same digest hold the same files."""
     h = hashlib.sha256()
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in JUNK_DIRS and not os.path.islink(os.path.join(dirpath, d)))
         for name in sorted(filenames):
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, root)
-            if _junk(rel) or os.path.islink(full) or not os.path.isfile(full):
+            if _junk(rel) or rel in exclude or os.path.islink(full) or not os.path.isfile(full):
                 continue
             with open(full, "rb") as fh:
                 digest = hashlib.sha256(fh.read()).hexdigest()
@@ -136,6 +138,24 @@ def _outcome_regressions(baseline: parsers.Counts, after: parsers.Counts) -> lis
         if now is None or now == "skip":
             out.append({"test": node, "baseline": was, "after": now or "missing"})
     return out
+
+
+def _write_reviewer_test(service_dir: str, rel: str, content: str) -> None:
+    """Overlay one reviewer-authored test (L2) at ``rel`` under ``service_dir`` (the path was validated at the
+    schema edge: relative, no ``..``); a symlinked parent in the extracted tree is refused, never followed."""
+    parts = rel.split("/")
+    cur = service_dir
+    for part in parts[:-1]:
+        cur = os.path.join(cur, part)
+        if os.path.islink(cur) or (os.path.lexists(cur) and not os.path.isdir(cur)):
+            raise RunnerRefused(f"reviewer test path {rel} crosses a symlink or a file of the tree")
+        if not os.path.lexists(cur):
+            os.mkdir(cur)
+    full = os.path.join(cur, parts[-1])
+    if os.path.lexists(full):
+        raise RunnerRefused(f"reviewer test path {rel} is not a new file of the tree")
+    with open(full, "x", encoding="utf-8", newline="") as fh:
+        fh.write(content)
 
 
 def _drop_temp(root: str) -> None:
@@ -476,7 +496,44 @@ class FixEngine:
         extract_tar(data, root)
         out = os.path.join(root, "services", service)
         os.makedirs(out, exist_ok=True)
+        for rt in self.svc.reviewer_tests(run_id):          # L2: the reviewer's RED tests are part of every engine tree
+            _write_reviewer_test(out, rt["path"], rt["content"])
         return out
+
+    def _reviewer_paths(self, run_id: str) -> frozenset:
+        return frozenset(rt["path"] for rt in self.svc.reviewer_tests(run_id))
+
+    # ================================================================ reviewer-authored reproductions (L2)
+
+    def reproduction_red(self, *, run_id: str, service: str, base_sha: str, principal_user_id: str, finding_id: str,
+                         path: str, content: str, node: str):
+        """Run a reviewer-authored reproduction on ``base_sha`` with the test overlaid, in a fresh engine container,
+        BEFORE the run exists (the service refuses the document unless the verdict is ``fail``). ``run_id`` is the
+        admission id (``dlv-run-…`` derived from the request, never the run's own id): the container's crossings
+        are recorded under it and the reaper covers it by its label."""
+        binding = registry.RunBinding(run_id=run_id, thread_id=f"dlv-{run_id[-26:]}", service=service,
+                                      principal_user_id=principal_user_id, workspace=WORKSPACE,
+                                      deadline_at=self.svc.now() + timedelta(seconds=self.settings.cmd_timeout_s * 3),
+                                      status=lambda: "preparing")
+        tree = self._base_tree(base_sha, service, run_id)
+        _write_reviewer_test(tree, path, content)
+        root = os.path.dirname(os.path.dirname(tree))
+        runner = TestRunner(self.test_seed, service, root, self.settings.cmd_timeout_s)
+        provider = self.provider_factory()
+        box = None
+        try:
+            box = provider.start_engine_box(binding, "admission")
+            provider.ship_tree(box, tree, runner.cwd)
+            t = runner.run_test(box, node)
+            t.extra["container"] = box.container
+            return t
+        finally:
+            if box is not None:
+                try:
+                    provider.destroy_box(box, run_id)
+                except Exception:  # noqa: BLE001 - recorded sandbox_release_failed; the reaper removes it later
+                    pass
+            _drop_temp(root)
 
     def _overlay(self, tree: str, worktree: str, service: str, paths: list[str]) -> None:
         """Copy the worktree's version of ``paths`` (repo-relative) onto ``tree``; a path absent in the worktree is
@@ -721,6 +778,18 @@ class FixEngine:
         self._check_live(run_id, ctx.interrupt)
         self._sync_out(provider, sandbox_id, worktree, service)
         changed = self._changed(worktree, run_id)
+        # L2: a reviewer-authored reproduction is never the agent's to write, change or delete (it is not in the
+        # worktree; ANY diff at its path — a new file there included — is refused)
+        reviewer = {f"services/{service}/{p}" for p in self._reviewer_paths(run_id)}
+        tracked_now = set(self.git.diff_name_only(worktree, run_id=run_id))
+        hit_rt = sorted(p for p in (set(changed) | tracked_now) if p in reviewer)
+        if hit_rt:
+            self._round_failed(run_id, fid, rounds, "changed_test_denied", targets=hit_rt[:20], reviewer_authored=True)
+            self._back_to_red(run_id, fid, f)
+            return ("You wrote to the path of a reviewer-authored reproduction (" + ", ".join(hit_rt)
+                    + "). That test belongs to the reviewer: the engine adds it to every tree it builds and never "
+                    "accepts a change to it. Remove your file at that path and fix the root cause in the source; "
+                    "then reply `FIXED`.")
         classes = runner.classify_paths(changed)
         # pyproject.toml is test-infra only when its [tool.pytest*] sections changed (R1)
         for p in list(classes["test_infra"]):
@@ -919,7 +988,7 @@ class FixEngine:
         # suite on the commit tree (HEAD + everything the agent changed), in a fresh container
         self._check_live(run_id, ctx.interrupt)
         commit_tree = self._tree(ctx, changed)
-        tree_sha = _tree_digest(commit_tree)
+        tree_sha = _tree_digest(commit_tree, self._reviewer_paths(run_id))
         counts = self._suite(ctx, "per_finding", tree=commit_tree, finding_id=fid, tree_sha256=tree_sha)
         if not counts.ok:
             self._round_failed(run_id, fid, rounds, "suite_unknown", detail=counts.why[:120])
@@ -992,7 +1061,7 @@ class FixEngine:
         ev_diff = self.svc.evidence_put(run_id, "diff", self._commit_diff(worktree, sha, run_id).encode("utf-8", "surrogatepass"))
         committed = self._base_tree(sha, service, run_id)
         try:
-            commit_tree_sha = _tree_digest(committed)
+            commit_tree_sha = _tree_digest(committed, self._reviewer_paths(run_id))
         finally:
             _drop_temp(os.path.dirname(os.path.dirname(committed)))
         run_now = self.svc.run_get(run_id)

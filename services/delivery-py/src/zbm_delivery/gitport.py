@@ -21,6 +21,7 @@ neither become git's global config nor run a hook on the engine's commit.
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import os
 import re
@@ -29,6 +30,7 @@ import tempfile
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
+from zbm_delivery import fsops
 from zbm_delivery.ledger import derived_id
 
 ACTOR = "intel_08_engine"
@@ -63,6 +65,8 @@ _EMPTY_HOOKS = os.path.join(_ISOLATION_DIR, "hooks")
 os.makedirs(_PRIVATE_HOME, exist_ok=True)
 os.makedirs(_EMPTY_HOOKS, exist_ok=True)
 ISOLATION_ARGS = ("-c", f"core.hooksPath={_EMPTY_HOOKS}", "-c", "core.fsmonitor=false")
+# fix wave 21 (L4): the per-process dir goes with the process (it was left in the temp dir on every start).
+atexit.register(fsops.drop_own_temp, _ISOLATION_DIR)
 
 
 def git_env() -> dict:

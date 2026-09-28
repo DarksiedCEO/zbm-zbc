@@ -26,10 +26,11 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+import _tmproot  # noqa: E402  (tests/_tmproot.py; L4)
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
@@ -285,7 +286,7 @@ class FakeDockerCli:
         image's cache lives under the container HOME; a cold cache per double would rebuild the race runtime each
         time). Nothing here reaches the engine's argv or the seed."""
         real_home = os.path.expanduser("~")
-        gocache = os.path.join(tempfile.gettempdir(), "dlv-test-gocache")
+        gocache = os.path.join(_tmproot.ORIG_TMP, "dlv-test-gocache")   # deliberately cross-session (L4)
         os.makedirs(gocache, exist_ok=True)
         return {"RUSTUP_HOME": os.environ.get("RUSTUP_HOME", os.path.join(real_home, ".rustup")),
                 "CARGO_HOME": os.environ.get("CARGO_HOME", os.path.join(real_home, ".cargo")),

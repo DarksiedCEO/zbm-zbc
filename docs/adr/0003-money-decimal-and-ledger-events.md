@@ -499,6 +499,24 @@ old behaviour, RST included). Descriptors are therefore bounded by the cap
 plus 512 draining plus the load-shed writes in flight. A peer that keeps
 sending past 64 KiB or 1 s still gets the kernel's RST — by design.
 
+Swept to the Python services (fix wave 21, lead ruling L1): uvicorn closes an answered connection with
+`transport.close()` at once — its own `limit_concurrency` 503, a 400 it writes itself, an app answer with
+`Connection: close`, every deadline — so bytes of a body still arriving after the answer made the kernel send RST
+(the client's `SO_ERROR` was `EPIPE`, error 32, on all three paths in every service). Each service's protocol class
+(`serve.py` of clipper-network, compliance, creative, delivery, detection, finance, legal, onboarding, verification;
+fulfillment's `http_limits.py`) now mixes in `GracefulCloseMixin`: FIN once the answer is flushed (`write_eof`),
+then at most 64 KiB / 1 s of the client's bytes read and discarded, then close. The mixin wraps the transport
+uvicorn sees, so every close uvicorn or the service makes goes through it. `tests/test_fix21_graceful_close.py`
+(delivery: `test_live_graceful_close.py`) in each service drives that service's protocol class under uvicorn.
+The bound is the ledger's and it is real: a client that writes a 3.9 MB body with a blocking `sendall` and reads
+only afterwards, answered early by uvicorn's `limit_concurrency` 503, still has MBs unsent when the 64 KiB drain
+ends and is reset without reading the answer (measured with fulfillment's protocol: 20/20 reset at 64 KiB, 20/20
+clean with the bound raised to 8 MiB, 20/20 clean at 64 KiB for a client that reads while it sends). Under uvicorn
+the only server-side remedy is reading the whole declared body (up to 4 MiB per connection, times the connection
+cap), which is the unbounded drain the ruling excludes; so fulfillment's 128-sender test client
+(`test_fix8_n7_2_body_prealloc.py::_send_reading`) now reads while it sends, stops at the answer and reads it to
+its `Content-Length` — a reset after a complete answer is the server's documented behaviour.
+
 Tests read every response to its `Content-Length` (`tests/common/mod.rs`),
 never to EOF. `server_slow_clients.rs::every_early_answer_closes_gracefully_so_error_is_clean`
 asserts, for the 413 (65 KiB body sent whole), the 401 and 404 (body sent),

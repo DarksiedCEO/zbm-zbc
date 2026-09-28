@@ -48,25 +48,40 @@ BODY_TIMEOUT_UNDER_TEST = 3.0  # narrowed via FULFILLMENT_BODY_READ_TIMEOUT_S (m
 SLACK_S = 2.5
 
 
-def _start(env_extra: dict[str, str] | None = None):
-    port = _free_port()
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
-           "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port), **(env_extra or {})}
-    # DEVNULL, not PIPE: the refused requests below each log a warning, and
-    # an unread pipe would eventually block the server.
-    proc = subprocess.Popen([sys.executable, "-m", "api"], env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.time() + 15
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            raise AssertionError("service exited early")
-        try:
-            if _health(port, timeout=0.5)[0] == 200:
-                return proc, port
-        except OSError:
-            time.sleep(0.1)
-    proc.kill()
-    raise AssertionError("service did not start within 15s")
+def _start(env_extra: dict[str, str] | None = None, _attempts: int = 5):
+    """Start the service on a free port. Fix wave 21: the output goes to a
+    temp file (not DEVNULL: an early exit is reported with it; not PIPE: an
+    unread pipe would block the server), and a start that lost the port to
+    another process between the free-port check and the bind (EADDRINUSE,
+    the N20-M-3 race) is retried on a fresh port, up to ``_attempts`` times."""
+    import tempfile
+    for attempt in range(_attempts):
+        port = _free_port()
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
+               "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port), **(env_extra or {})}
+        log = tempfile.TemporaryFile(mode="w+b")
+        proc = subprocess.Popen([sys.executable, "-m", "api"], env=env, stdout=log, stderr=subprocess.STDOUT)
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                log.seek(0)
+                output = log.read().decode(errors="replace")
+                log.close()
+                if "address already in use" in output.lower() and attempt + 1 < _attempts:
+                    time.sleep(0.2)
+                    break
+                raise AssertionError(f"service exited early (port {port}): {output[-2000:]}")
+            try:
+                if _health(port, timeout=0.5)[0] == 200:
+                    log.close()          # the child keeps its own descriptor
+                    return proc, port
+            except OSError:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+            log.close()
+            raise AssertionError("service did not start within 15s")
+    raise AssertionError("service could not bind a free port")
 
 
 def _stop(proc) -> None:

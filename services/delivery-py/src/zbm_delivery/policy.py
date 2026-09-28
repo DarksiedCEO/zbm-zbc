@@ -482,9 +482,11 @@ def _classify_bash(seed: dict, raw: str, ctx: Context) -> tuple[str, str, bool, 
     for argv, _redirects, meta in parsed:
         target = _stdin_program_target(argv)
         if target and meta["piped"]:
-            return "unknown", f"pipe_to_interpreter: output piped into {target} (indirect execution is refused)", False, []
+            return "unknown", (f"pipe_to_interpreter: output piped into {target} (indirect execution is refused, even when "
+                               "harmless; edit files with read_file/str_replace/write_file)"), False, []
         if target and meta["here"]:
-            return "unknown", f"pipe_to_interpreter: a here-string/here-document fed to {target} (indirect execution is refused)", False, []
+            return "unknown", (f"pipe_to_interpreter: a here-string/here-document fed to {target} (indirect execution is "
+                               "refused, even when harmless; edit files with read_file/str_replace/write_file)"), False, []
     cmds = [(argv, redirects) for argv, redirects, _ in parsed]
     worst, why, cwd = "read", "read-only command", ctx.workspace
     opaque = False

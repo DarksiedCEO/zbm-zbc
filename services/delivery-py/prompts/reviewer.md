@@ -95,7 +95,11 @@ the `reproduction` text must contain a test node id `<path>::<name>` relative to
 service's own test runner, present in the tree the run starts from (the base commit; for a review, the run's
 head), whose name occurs in that file. It must fail without the fix. Anything else is refused `422
 reproduction_not_runnable` before a run exists (a review so refused is not recorded). A defect with no such test in
-that tree yet: land the failing test on the base branch first, then file a new findings document.
+that tree yet: attach the test yourself as the finding's `reproduction_test` = `{"path": <new test file, relative to
+the service directory>, "content": <its full text>}` and name `<path>::<test>` in `reproduction`. The engine runs it
+on the starting tree before anything is recorded — if it passes there the finding is refused `422
+reproduction_not_red` — then adds it to every tree it builds for the run (never to a commit) and records its sha256
+as reviewer-authored; the engineer may never write that path.
 
 ## Part 2: Spec Compliance
 

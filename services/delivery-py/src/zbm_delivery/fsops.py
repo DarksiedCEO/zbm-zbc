@@ -53,6 +53,14 @@ def delete_tree(path: str, *, within: str) -> None:
         os.remove(real)
 
 
+def drop_own_temp(path: str) -> None:
+    """Remove one of the process's own temp dirs (at exit; fix wave 21, L4): best effort, never a protected root."""
+    try:
+        delete_tree(path, within=os.path.dirname(path))
+    except (OSError, ProtectedPath):
+        pass
+
+
 def delete_file(path: str, *, within: str) -> None:
     real = _check(path, within)
     if os.path.lexists(real) and not os.path.isdir(real):

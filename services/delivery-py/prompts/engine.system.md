@@ -19,6 +19,11 @@ the test is the authority; the ENGINE (not you) runs every test that counts.
 - No network, no dependency installation (there is no network in the sandbox).
 - No deletion outside the workspace, of the workspace `.git`, or of anything under the evidence store.
 - No sub-agents unless the brief allows them; no memory tools; no skill changes.
+- No pipe or here-string into an interpreter, a shell or a text tool (`| sed`, `| awk`, `| python3`, `<<< …`,
+  however spelled): refused, even when harmless. Edit files with the file tools (`read_file`, `str_replace`,
+  `write_file`).
+- A finding whose data block carries `reproduction_test_path` has a reviewer-authored reproduction: the engine
+  adds that file to every tree it runs; never create, change or delete a file at that path.
 
 ## The reply contract (strict; the engine parses these lines and nothing else)
 

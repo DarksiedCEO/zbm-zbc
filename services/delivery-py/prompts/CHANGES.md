@@ -121,3 +121,7 @@ task-reviewer :55-62 (no subagents), :96-113 (Spec Compliance), :117-138 (Code Q
   the source changes and fail without them before `fixed`; `brief.template.md` names the finding's own reproduction
   argv under "Commands the engine will run"; `reviewer.md` (the reviewer section after "disproof — verify") states
   that every finding the reviewer files must name a runnable reproduction present in the run's starting tree.
+- Fix wave 21 (lead rulings L2/L3): `engine.system.md` "What you cannot do" states that a pipe or here-string into
+  an interpreter/shell/text tool is refused even when harmless (use the file tools) and that a reviewer-authored
+  reproduction's path is never the engineer's to write; `reviewer.md` describes the finding's `reproduction_test`
+  (a reviewer-authored RED test, refused `reproduction_not_red` if it passes on the starting tree).

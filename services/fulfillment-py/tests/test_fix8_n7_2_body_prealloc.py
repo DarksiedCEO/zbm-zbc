@@ -423,6 +423,42 @@ def test_live_trickling_body_is_cut_within_the_grace_period_not_the_30s_deadline
     assert elapsed >= http_limits.BODY_MIN_RATE_GRACE_S - 0.5, f"cut too early at {elapsed:.1f}s"
 
 
+def _send_reading(s: socket.socket, data: bytes, idle_timeout: float) -> str:
+    """Send ``data`` while reading; returns the answer's status code once the
+    answer is complete to its Content-Length, "closed" on EOF with no answer,
+    or the error that ended the exchange before a complete answer. After the
+    last byte is sent the client waits up to ``idle_timeout`` for the answer."""
+    import select
+    s.setblocking(False)
+    sent, buf, last = 0, b"", time.monotonic()
+    while time.monotonic() - last < idle_timeout:
+        r, w, _ = select.select([s], [s] if sent < len(data) else [], [], 0.5)
+        if r:
+            try:
+                chunk = s.recv(65536)
+            except BlockingIOError:
+                continue
+            except OSError as exc:
+                return type(exc).__name__
+            if not chunk:
+                return buf[9:12].decode() or "closed"
+            buf += chunk
+            head, sep, body = buf.partition(b"\r\n\r\n")
+            if sep:
+                cl = [int(ln.split(b":", 1)[1]) for ln in head.split(b"\r\n") if ln.lower().startswith(b"content-length:")]
+                if not cl or len(body) >= cl[0]:
+                    return buf[9:12].decode()
+        elif w:
+            try:
+                sent += s.send(data[sent:sent + 65536])
+                last = time.monotonic()
+            except BlockingIOError:
+                pass
+            except OSError:
+                sent = len(data)              # the server stopped reading: read what it answered
+    return "timeout"
+
+
 def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut(server):
     """Real bytes, then a stall: before, 128 x 4 MiB pinned for 30 s. Now at
     most _INFLIGHT_BODY_BYTES (64 MiB) is buffered (the rest 503), and the
@@ -435,18 +471,23 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     socks, codes, lock = [], {}, threading.Lock()
 
     def sender():
+        # Fix wave 21 (lead ruling L1): the client sends WHILE reading, stops
+        # sending at the answer and reads it to Content-Length (a reset after a
+        # complete answer is the server's documented behaviour: its drain after
+        # the answer is bounded, 64 KiB / 1 s). The old client wrote the whole
+        # 3.9 MB with a blocking sendall before reading anything; answered
+        # early (uvicorn's limit_concurrency 503), it could still have MBs
+        # unsent when the bounded drain ended, and was reset mid-send without
+        # ever reading the 503 (w21 logs/L1-proof-probe.log: 20/20 reset at the
+        # 64 KiB bound, 20/20 clean with an 8 MiB bound or a reading client).
         try:
             s = socket.create_connection(("127.0.0.1", port), timeout=30)
-            with lock:
-                socks.append(s)
-            s.sendall(_head(4 * MIB) + payload)
-            s.settimeout(20)
-            try:
-                got = s.recv(64)[9:12].decode() or "closed"
-            except OSError as exc:
-                got = type(exc).__name__
         except OSError as exc:
             got = "connect:" + type(exc).__name__
+        else:
+            with lock:
+                socks.append(s)
+            got = _send_reading(s, _head(4 * MIB) + payload, 20)
         with lock:
             codes[got] = codes.get(got, 0) + 1
 

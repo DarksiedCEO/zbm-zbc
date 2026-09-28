@@ -48,6 +48,34 @@ class Source(Strict):
         return _text(v, "source.ref", allow_newlines=False, max_len=128)
 
 
+REPRO_TEST_MAX = 64 * 1024
+REPRO_TEST_PATH_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._/\-]{0,399}$")
+
+
+class ReproductionTest(BaseModel):
+    """Wave 21 (L2): a RED test authored by the reviewer (AEGIS) for a finding that has no test at the base commit.
+    ``path`` is relative to the service directory and must be a NEW file there; the engine writes ``content`` onto
+    every tree it builds for the run (never into a commit), records its sha256 as reviewer-authored, and denies
+    any change of that path by the agent. The finding's ``reproduction`` must name ``<path>::<test>``."""
+    model_config = ConfigDict(extra="forbid", str_max_length=REPRO_TEST_MAX)
+    path: str = Field(min_length=1, max_length=400)
+    content: str = Field(min_length=1, max_length=REPRO_TEST_MAX)
+
+    @field_validator("path")
+    @classmethod
+    def _path(cls, v):
+        if not REPRO_TEST_PATH_RE.fullmatch(v) or ".." in v.split("/") or "//" in v or v.endswith("/"):
+            raise ValueError("reproduction_test.path must be a plain path relative to the service directory")
+        return v
+
+    @field_validator("content")
+    @classmethod
+    def _content(cls, v):
+        if "\x00" in v or has_control_chars(v.replace("\t", " ").replace("\r", ""), allow_newlines=True):
+            raise ValueError("reproduction_test.content contains control characters")
+        return v
+
+
 class Finding(Strict):
     id: str = Field(pattern=FINDING_ID_RE.pattern)
     severity: Literal["critical", "high", "medium", "low", "info"]
@@ -58,6 +86,7 @@ class Finding(Strict):
     expected: str = Field(min_length=1, max_length=FREE_TEXT_MAX)
     observed: str = Field(min_length=1, max_length=FREE_TEXT_MAX)
     class_hint: Optional[str] = Field(default=None, max_length=120)
+    reproduction_test: Optional[ReproductionTest] = None
 
     @field_validator("title")
     @classmethod

@@ -678,6 +678,48 @@ Pins after this wave: `seed/test_commands_seed.json` `eed14d324f00cfac09dc085bd3
 `seed/prompts_manifest.json` `7090c2d48d25f257231c2578e931594bcb30a095599aee08cf59b51e3ee99d37`;
 `seed/tool_policy_seed.json` unchanged (`078560a4…`).
 
+### Lead rulings on the round-20 open items (fix wave 21, second commit; L1-L6, binding)
+
+- **L2 — the review route under R1.** A finding may carry `reproduction_test` = `{path, content}` authored by the
+  reviewer (`models.ReproductionTest`: a plain path relative to the service directory, content <= 64 KiB, no
+  control characters but tab/CR/LF, no other field). Its `reproduction` must name `<path>::<test>` of that file; the
+  file must be NEW at the starting tree (base commit, or the run's head for a review), a test source of the service's
+  runner (not test infrastructure), and pass the seed's `test_content_deny` rules — else 422
+  `reproduction_not_runnable`. Before anything is recorded the engine runs it on the starting tree in a fresh engine
+  container (`FixEngine.reproduction_red`, outside the service lock, under its own admission id
+  `rid("run", "admission", caller, request_id, facts)` so its crossings never collide with the run's event ids);
+  a pass or an unknown verdict is refused 422 `reproduction_not_red` (`fix_run_refused`, `REPRODUCTION_NOT_RED`,
+  DLV-19, with the verdict, exit and output digest); a fail is recorded `reproduction_red_checked`. The run then
+  records the test as reviewer-authored (`fix_run_received.reviewer_tests`, the finding's `reviewer_test`
+  `{path, author: "reviewer", sha256}`); `_base_tree` writes it onto EVERY tree the engine builds for the run
+  (suite before/after, RED, GREEN, verification, reverted, reproduction, src-only, disproof), so the finding's
+  reproduction check runs it with and without the fix; it is never in the agent's worktree and never committed
+  (tree digests exclude it). Any diff at its path — the agent creating a file there included — is refused
+  `changed_test_denied` (`reviewer_authored: true`) before anything else in the GREEN phase. The brief's data block
+  carries the path and content (untrusted data, verbatim). Tests: `tests/test_round21.py` (RED→fixed through the
+  reviewer test; the agent writing that path denied; a passing reviewer test refused for a document and for a
+  review; the static refusals; the schema edge).
+- **L3 — R4 stays strict.** A pipe or here-string into any `OPAQUE_ARGV0` member or `*sh` is refused however
+  harmless (`| sed 's/a/b/'`, `| awk '{print $1}'`, `sed … <<< …`); the refusal and `prompts/engine.system.md`
+  ("What you cannot do") tell the engineer to use `read_file`/`str_replace`/`write_file`.
+- **L4 — no temp-dir leak.** `tests/_tmproot.py` (imported first by conftest) points `tempfile` and `TMPDIR` at one
+  private `dlv-tests-*` directory per session, created under the host temp dir AS GIVEN (a symlinked TMPDIR stays a
+  symlink), removed by `pytest_unconfigure`; the autouse `_harness_cleanup` fixture closes every Harness a test made
+  and removes the temp dir it owns when the test ends, so a run never holds more than one test's trees. The Go build
+  cache `dlv-test-gocache` stays in the host temp dir on purpose (shared across sessions). Product: gitport's
+  per-process `dlv-git-*` dir is removed at exit, and the in-memory sandbox env-file dir is now a private
+  `mkdtemp` (was the predictable `<tmp>/dlv-<pid>`) removed at exit. `tests/test_round21.py::test_l4_…` runs a child
+  session with a fresh TMPDIR and asserts it is left empty but for the Go cache.
+
+- **L6 — symlinked TMPDIR at `/tmp/<link>`.** The whole suite ran with `TMPDIR=/tmp/dlvlink21` (a symlink to a
+  scratch directory, as the reviewer set it up): 579 passed, 3 skipped (Docker live, no daemon), the link target
+  left holding only the Go build cache, `git status` unchanged.
+- **L1** (every Python service, this one included): `serve.py` mixes in the graceful close — see ADR 0003 §8.
+
+Pins after this commit: `seed/prompts_manifest.json` `110d732ebddd6b1154845c78da41050dbee9f206932bba094145dbd4803dd697`
+(engine.system.md, reviewer.md, CHANGES.md re-pinned);
+`seed/test_commands_seed.json` and `seed/tool_policy_seed.json` unchanged.
+
 ## Known limitations
 
 - The tool-call classifier is a denylist over an unbounded language (df-exec F-03): it is the record and the

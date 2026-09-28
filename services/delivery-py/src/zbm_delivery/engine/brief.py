@@ -55,6 +55,10 @@ def data_block(finding: dict) -> str:
             continue
         text = str(val)
         rows.append(f"{key}: {text}" if "\n" not in text else f"{key}: |\n" + "\n".join("  " + ln for ln in text.splitlines()))
+    rt = finding.get("reproduction_test")
+    if rt:   # L2: the reviewer-authored RED test (the engine adds it to every tree it builds; never write that path)
+        rows.append(f"reproduction_test_path: {rt['path']}")
+        rows.append("reproduction_test_content: |\n" + "\n".join("  " + ln for ln in rt["content"].splitlines()))
     return "\n".join(rows)
 
 

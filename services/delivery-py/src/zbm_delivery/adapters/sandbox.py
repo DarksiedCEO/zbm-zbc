@@ -67,7 +67,7 @@ from deerflow.sandbox.sandbox import Sandbox, _validate_extra_env
 from deerflow.sandbox.sandbox_provider import SandboxProvider
 from deerflow.sandbox.search import GrepMatch
 
-from zbm_delivery import policy, registry
+from zbm_delivery import fsops, policy, registry
 from zbm_delivery.ledger import derived_id
 from zbm_delivery.policy import SKILLS_MOUNT, WORKSPACE, inside
 from zbm_delivery.ports import DockerCli, DockerUnavailable, ExecResult
@@ -99,6 +99,22 @@ EXTRA_ENV_ALLOWLIST = ("PYTHONDONTWRITEBYTECODE", "CI", "PYTHONHASHSEED", "TZ", 
                        "CARGO_TERM_COLOR", "CARGO_NET_OFFLINE", "GOPROXY", "GOTOOLCHAIN")
 CONTAINER_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": WORKSPACE, "LANG": "C.UTF-8", "TZ": "UTC",
                  "PYTHONDONTWRITEBYTECODE": "1", "CI": "1"}
+
+
+_TEMP_BASE: Optional[str] = None
+_TEMP_BASE_LOCK = threading.Lock()
+
+
+def _private_temp_base() -> str:
+    """In-memory mode (no data dir): one private 0700 temp dir per process for the sandbox env files, removed at
+    exit (fix wave 21, L4: it was ``<tmp>/dlv-<pid>``, predictable and never removed)."""
+    global _TEMP_BASE
+    with _TEMP_BASE_LOCK:
+        if _TEMP_BASE is None:
+            import atexit
+            _TEMP_BASE = tempfile.mkdtemp(prefix="dlv-sbx-")
+            atexit.register(fsops.drop_own_temp, _TEMP_BASE)
+        return _TEMP_BASE
 
 
 def _sha(b: bytes) -> str:
@@ -743,7 +759,7 @@ class ZbmDockerSandboxProvider(SandboxProvider):
 
     def _env_file(self, rt: registry.Runtime, run_id: str) -> str:
         # the env file lives under the data dir; in-memory mode (no data dir) uses a private temp dir, never cwd
-        base = rt.settings.data_dir or os.path.join(tempfile.gettempdir(), f"dlv-{os.getpid()}")
+        base = rt.settings.data_dir or _private_temp_base()
         env_dir = os.path.join(base, "sandbox-env")
         os.makedirs(env_dir, exist_ok=True)
         env_file = os.path.join(env_dir, f"{run_id}.env")
