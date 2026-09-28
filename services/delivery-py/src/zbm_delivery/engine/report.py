@@ -102,6 +102,14 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
         if rp:
             L.append(f"- finding's reproduction `{rp.get('target')}`: verification checkout {rp.get('verification', {}).get('verdict')} · "
                      f"reverted {rp.get('reverted', {}).get('verdict')} · evidence `{rp.get('verification', {}).get('evidence_id')}`")
+        sc = f.get("standalone_check")
+        if sc:
+            ver, rev = sc.get("verification") or {}, sc.get("reverted") or {}
+            L.append(f"- reproduction OUTSIDE the test runner ({sc.get('how')}; `{sc.get('target')}`): verification checkout "
+                     f"{ver.get('verdict')} · reverted {rev.get('verdict')} → outcome **{sc.get('outcome')}**"
+                     + (" · conftest on the test's path: " + ", ".join(f"`{c}`" for c in ver.get("conftest") or rev.get("conftest") or [])
+                        if sc.get("conftest") else "")
+                     + f" · evidence `{ver.get('evidence_id')}`")
         so = f.get("src_only_check")
         if so:
             L.append(f"- src-only check ({', '.join(f'`{t}`' for t in so.get('targets') or [])}): verdict {so.get('verdict')} · evidence `{so.get('evidence_id')}`")
@@ -139,6 +147,20 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
             L.append(f"- agent: turns {a.get('turns', 0)} · tool calls {a.get('tool_calls', 0)} · opaque exec {a.get('opaque_execs', 0)} · "
                      f"denies {a.get('denies', 0)} · tokens in/out {a.get('tokens_in', 0)}/{a.get('tokens_out', 0)} · "
                      f"ledger event `{a.get('event_id')}`")
+    L.append("")
+    L.append("## Needs review — NOT fixed (the reproduction could not be confirmed outside the test runner)")
+    L.append("")
+    nr = [f for f in findings if f["state"] == "needs_review_runner_dependent"]
+    if not nr:
+        L.append("- none")
+    for f in nr:
+        sc = f.get("standalone_check") or {}
+        why = (sc.get("verification") or {}).get("why") or (sc.get("reverted") or {}).get("why") or "-"
+        L.append(f"- {f['finding_id']}: every check passed under the test runner and the fix is committed (`{f.get('commit_sha')}`), "
+                 f"but the reproduction `{sc.get('target')}` needs the runner (\"{why}\""
+                 + ("; a conftest.py is on its path" if sc.get("conftest") else "")
+                 + "), so the engine could not rule out a fix that only works under test. A human decides: review "
+                 "pass → reviewed; review fail with this finding reopened → a new run.")
     L.append("")
     L.append("## Blocked")
     L.append("")

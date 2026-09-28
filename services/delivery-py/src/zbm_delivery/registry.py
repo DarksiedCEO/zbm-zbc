@@ -37,6 +37,9 @@ class Runtime:
     resolve_sandbox_path: Callable[[str, str], Optional[str]]   # (run_id, path) -> realpath inside the sandbox
     evidence_root: str = ""
     resolve_sandbox_paths: Optional[Callable[[str, list], list]] = None   # R8: (run_id, paths) -> realpaths, ONE exec
+    # wave 22 (G4): record_if_live(status_fn, *record args) -> bool — records only while status_fn() is a live status,
+    # holding the service lock across the check and the record (cancel/deadline change the status under that lock)
+    record_if_live: Optional[Callable[..., bool]] = None
 
 
 @dataclass

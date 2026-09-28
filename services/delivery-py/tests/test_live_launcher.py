@@ -21,7 +21,7 @@ from helpers import SERVICE_ROOT, base_env, free_live_port, make_repo
 
 HTTP = httpx.Client(trust_env=False)          # never a proxy between the test and 127.0.0.x
 SRC = SERVICE_ROOT / "src"
-PYTHON = str(SERVICE_ROOT / ".venv" / "bin" / "python")
+PYTHON = sys.executable      # wave 22: the interpreter running the suite (the service's venv, wherever it was built)
 # Wave 21 (N20-D-1): a live run's log goes to an UNTRACKED directory (docs/evidence/dept28/_runs/, gitignored); the
 # committed docs/evidence/dept28/live-launcher-run*.log files are frozen artefacts a test never rewrites.
 LOG_DIR = SERVICE_ROOT / "docs" / "evidence" / "dept28" / "_runs"

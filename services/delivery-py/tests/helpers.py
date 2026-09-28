@@ -82,13 +82,17 @@ def live_ports() -> range:
 
 
 def free_live_port() -> int:
-    """The first port of ``live_ports()`` that binds on 127.0.0.1 (skips with the range named when none does)."""
+    """The first port of ``live_ports()`` that binds on 127.0.0.1 (skips with the range named when none does). Wave 22
+    (G3, N21-C-6 class): the probe bind sets SO_REUSEADDR, as the servers' own listeners do — a port whose earlier
+    connections sit in TIME_WAIT is free for a server, and without the option the probe skipped it (a narrow range
+    ran out after a few live tests)."""
     import socket
 
     import pytest
     ports = live_ports()
     for port in ports:
         with socket.socket() as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(("127.0.0.1", port))
             except OSError:

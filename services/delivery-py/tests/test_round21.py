@@ -49,25 +49,34 @@ def _first_run_awaiting_review(h: Harness) -> str:
 
 # ====================================================================== L2: the review route under R1
 
+# wave 22 (G1(b)): a reviewer test that runs outside pytest (plain asserts, no fixtures) — the one that imports pytest
+# (RT_CONTENT) cannot confirm a fix outside the runner and ends needs_review_runner_dependent (tests/test_round22.py)
+RT_PLAIN = ("from toy import calc\n\n\ndef test_clamp_rejects_inverted_bounds():\n    try:\n        calc.clamp(5, 3, 0)\n"
+            "    except ValueError:\n        return\n    raise AssertionError('clamp(5, 3, 0) did not raise')\n")
+
+
 def test_l2_new_finding_at_review_with_a_reviewer_test_goes_red_to_fixed_honestly():
     """A defect with NO test at the run's head (clamp accepts lo > hi) raised at review with a reviewer-authored
     reproduction: RED on the head at ingestion, then the child run's agent fixes the source and the finding is
-    fixed ONLY through that test (verification pass, reverted fail). The test is recorded as reviewer-authored
-    and is never committed by the engine."""
+    fixed ONLY through that test (verification pass, reverted fail — under pytest and, wave 22, outside it). The
+    test is recorded as reviewer-authored and is never committed by the engine."""
     scenario = scenario_s1() + flat([AGENT_RED, {"text": "TEST: tests/test_fix_n2_1.py::test_clamp_inverted"},
                                      FIX_CLAMP, {"text": "SWEEP: src/toy/calc.py:15\nFIXED"}])
     h = Harness(scenario=scenario)
     try:
         run_id = _first_run_awaiting_review(h)
-        r = h.post(f"/dlv/v1/fix-runs/{run_id}/review", _review([_n21()]))
+        r = h.post(f"/dlv/v1/fix-runs/{run_id}/review", _review([_n21(reproduction_test={"path": RT_PATH, "content": RT_PLAIN})]))
         assert r.status_code == 200, r.text
         child_id = r.json()["next_run_id"]
         h.svc.wait_idle()
         child = h.run(child_id)
         assert child["status"] == "awaiting_review", child["reasons"]
         f = {x["finding_id"]: x for x in h.findings(child_id)}["N2-1"]
-        sha = hashlib.sha256(RT_CONTENT.encode()).hexdigest()
-        assert f["state"] == "fixed" and f["reviewer_test"] == {"path": RT_PATH, "author": "reviewer", "sha256": sha}, f
+        sha = hashlib.sha256(RT_PLAIN.encode()).hexdigest()
+        red_id = [e["event_id"] for e in h.events("reproduction_red_checked")]
+        assert f["state"] == "fixed" and f["reviewer_test"] == {"path": RT_PATH, "author": "reviewer", "sha256": sha,
+                                                                "red_checked_event_id": red_id[0]}, f
+        assert f["standalone_check"]["outcome"] == "confirmed", f["standalone_check"]
         rc = f["repro_check"]
         assert rc["target"] == RT_NODE and rc["verification"]["verdict"] == "pass" and rc["reverted"]["verdict"] == "fail", rc
         received = [e["payload"] for e in h.events("fix_run_received") if e["payload"]["run_id"] == child_id]

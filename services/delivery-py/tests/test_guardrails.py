@@ -337,8 +337,10 @@ def test_g14_every_runner_argv_is_seeded_and_every_git_call_is_allowlisted():
             body = c[c.index("timeout") + 4:]
             head = body[0]
             assert head in ("pytest", "cat", "find", "grep", "mkdir", "rm", "mv", "test", "python3") or head.startswith("/bin/"), c
-            if head == "python3":                          # wave 20 R8: only the pinned resolver, in isolated mode
-                assert body[:4] == ["python3", "-I", "/mnt/dlv/resolve.py", "--"], c
+            if head == "python3":                          # wave 20 R8: only the pinned resolver, in isolated mode;
+                # wave 22 (G1): or the pinned standalone runner (its request on stdin, nothing else in argv)
+                assert body[:4] == ["python3", "-I", "/mnt/dlv/resolve.py", "--"] or \
+                    body == ["python3", "-I", "/mnt/dlv/zbm_standalone_runner.py"], c
             if head == "pytest":
                 assert any(tuple(body[:len(p)]) == p for p in allowed_prefixes), c
         git_ok = {"rev-parse", "merge-base", "for-each-ref", "worktree", "status", "diff", "log", "add", "commit", "stash",

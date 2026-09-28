@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import timedelta
@@ -78,12 +79,14 @@ def test_n19_a13_every_verdict_runs_in_a_fresh_engine_container_never_the_agents
                 assert c[c.index("-w") + 3] == agent            # the agent's bash runs in the agent's container
                 continue
             body = c[c.index("timeout") + 4:]
-            if body[0] in ("pytest",):
+            # wave 22 (G1): the standalone re-execution of the reproduction is a verdict run too
+            if body[0] in ("pytest",) or body[:3] == ["python3", "-I", "/mnt/dlv/zbm_standalone_runner.py"]:
                 name = c[c.index("timeout") - 1]
                 assert name != agent and name.startswith(f"{agent}-"), c
                 engine_names.add(name)
         tags = {n[len(agent) + 1:].rsplit("-", 1)[0] for n in engine_names}
-        assert {"suite", "red", "green", "verify", "reverted", "reproverify", "reproreverted", "srconly"} <= tags, tags
+        assert {"suite", "red", "green", "verify", "reverted", "reproverify", "reproreverted", "srconly",
+                "soloverify", "soloreverted"} <= tags, tags
         # each engine container was started (record-first) and destroyed; one per verdict run; the elapsed time is recorded
         started = [e["payload"] for e in h.events("engine_box_started")]
         released = [e["payload"] for e in h.events("engine_box_released")]
@@ -253,7 +256,7 @@ def _plugin_run(svc_dir: str, eng: str, extra_args: list[str] = ()) -> tuple[dic
         fh.write(f"[pytest]\naddopts =\npythonpath = {eng} {svc_dir}/src\ntestpaths = {svc_dir}/tests\njunit_family = xunit1\n")
     shutil.copy(str(SERVICE_ROOT / "src" / "zbm_delivery" / "adapters" / "tools" / f"{PLUGIN_NAME}.py"), eng)
     xml = os.path.join(eng, "r.xml")
-    argv = [str(SERVICE_ROOT / ".venv" / "bin" / "python"), "-P", "-m", "pytest", "-q", "-p", "no:cacheprovider", "-rfE", "-c", ini,
+    argv = [sys.executable, "-P", "-m", "pytest", "-q", "-p", "no:cacheprovider", "-rfE", "-c", ini,
             "--rootdir=.", "-o", "addopts=", "-o", f"pythonpath={eng} {svc_dir}/src", f"--junitxml={xml}",
             "--disable-plugin-autoload", "-p", PLUGIN_NAME, *extra_args]
     r = subprocess.run(argv, cwd=svc_dir, capture_output=True, text=True, timeout=120)
@@ -491,10 +494,14 @@ def test_n19_e4_cancel_during_the_green_phase_commits_nothing():
         assert run["status"] == "failed" and run["commits"] == [] and f["state"] != "fixed"
         seq = [e["event_type"] for e in h.events()]
         after = seq[seq.index("fix_run_cancelled") + 1:]
+        # wave 22 (G4, N21-D-4): an engine container whose start raced the cancel is killed and recorded
+        # engine_box_killed_after_cancel; engine_box_started (and a docker run request) never follows fix_run_cancelled
         allowed = {"run_interrupted", "sandbox_released", "agent_usage", "agent_usage_linked", "sandbox_exec_requested",
                    "sandbox_exec_completed", "sandbox_cp_requested", "sandbox_cp_completed", "engine_box_released",
-                   "sandbox_kill_requested", "crossing_git_requested", "local_log_appended", "sandbox_release_failed"}
+                   "sandbox_kill_requested", "crossing_git_requested", "local_log_appended", "sandbox_release_failed",
+                   "engine_box_killed_after_cancel"}
         assert set(after) <= allowed, sorted(set(after) - allowed)
+        assert "engine_box_started" not in after and "crossing_docker_requested" not in after
         assert not any(t in after for t in ("commit_recorded", "finding_state_changed", "verification_run", "suite_run"))
         log = subprocess.run(["git", "log", "--oneline", "-3"], cwd=run["worktree_path"], capture_output=True, text=True).stdout
         assert "fix(toy-py)" not in log
@@ -542,7 +549,9 @@ def test_n19_e6_fixed_invariant_requires_verification_and_the_committed_tree():
             # wave 21 (R1): a reproduction record is required for fixed (it was None here: the prose route)
             "repro_check": {"verification": {"verdict": "pass"}, "reverted": {"verdict": "fail"}},
             "src_only_check": None, "sweep": {"sites": []}, "suite_tree_sha256": "a" * 64,
-            "commit_tree_sha256": "a" * 64, "suite_failures": [], "outcome_regressions": []}
+            "commit_tree_sha256": "a" * 64, "suite_failures": [], "outcome_regressions": [],
+            # wave 22 (G1): the reproduction confirmed outside the test runner is required for fixed as well
+            "standalone_check": {"outcome": "confirmed"}}
     assert states.finding_transition_problem(good, "fixed") is None
     no_ver = {**good, "verification": None}
     assert "verification record" in states.finding_transition_problem(no_ver, "fixed")
@@ -749,7 +758,7 @@ def test_n19_a3_resolver_is_pinned_and_resolves_the_longest_existing_prefix():
     os.symlink(os.path.join(tmp, "loop2"), os.path.join(tmp, "loop1"))
     os.symlink(os.path.join(tmp, "loop1"), os.path.join(tmp, "loop2"))
     open(os.path.join(tmp, "file"), "w").close()
-    r = subprocess.run([str(SERVICE_ROOT / ".venv" / "bin" / "python"), "-I", S.RESOLVE_HELPER, "--",
+    r = subprocess.run([sys.executable, "-I", S.RESOLVE_HELPER, "--",
                         f"{tmp}/link/new/deep", f"{tmp}/real", f"{tmp}/loop1/x", "relative/x", f"{tmp}/../etc", f"{tmp}/file/child", f"{tmp}/nope/a"],
                        capture_output=True, text=True, check=True)
     out = r.stdout.split("\0")

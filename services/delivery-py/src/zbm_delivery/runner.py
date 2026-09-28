@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import json
 import os
 import posixpath
 import re
@@ -53,6 +54,15 @@ ENGINE_DIR = f"{WORKSPACE}/.dlv-engine"
 PLUGIN_NAME = "zbm_engine_plugin"
 PLUGIN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adapters", "tools", f"{PLUGIN_NAME}.py")
 PLUGIN_SHA256 = "05ab874b93ce2a69b543c580bce4efd8ffdc22622552d43ac938f5e67040d845"
+# wave 22 (G1(b), N21-D-1): the runner-independent re-execution of a finding's reproduction (read-only at /mnt/dlv)
+STANDALONE_NAME = "zbm_standalone_runner.py"
+STANDALONE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adapters", "tools", STANDALONE_NAME)
+STANDALONE_SHA256 = "e1f917d8b9b1fd2d3812a3634849d4b6955d274b2f7bcc06e8728d4e483055e8"
+STANDALONE_EXIT = {0: "pass", 1: "fail", 3: "runner_dependent"}
+# the names a scrubbed-environment re-run unsets for the toolchains without a standalone runner (go, cargo, node):
+# every name the container env file can carry that says "a CI/test run", plus the common CI markers
+SCRUB_ENV_NAMES = ("CI", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER", "RUN_ID", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE",
+                   "JENKINS_URL", "TEAMCITY_VERSION", "TF_BUILD", "RUST_TEST_THREADS", "RUST_TEST_NOCAPTURE", "GOFLAGS")
 
 
 class RunnerRefused(RuntimeError):
@@ -285,17 +295,17 @@ class TestRunner:  # noqa: N801
                        output_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
                        timed_out=r.timed_out, truncated=r.truncated, cwd=cwd)
 
-    def _collect(self, box, cwd: str, targets: list[str]) -> tuple[Optional[toolchains.Listing], Optional[TestRun]]:
+    def _collect(self, box, cwd: str, targets: list[str], prefix: tuple = ()) -> tuple[Optional[toolchains.Listing], Optional[TestRun]]:
         """The ecosystem's collect-only equivalent, run separately (None for an ecosystem without one)."""
         argv = self.toolchain.collect_argv(cwd, targets[0] if len(targets) == 1 else None)
         if argv is None:
             return None, None
         if len(targets) > 1:
             argv = argv + list(targets)
-        t = self._exec(box, argv, cwd)
+        t = self._exec(box, list(prefix) + argv, cwd)
         return self.toolchain.parse_listing(t.output, t.exit, t.timed_out, t.truncated), t
 
-    def _verified_run(self, box, base_argv: list[str], cwd: str, targets: list[str]) -> TestRun:
+    def _verified_run(self, box, base_argv: list[str], cwd: str, targets: list[str], prefix: tuple = ()) -> TestRun:
         """One run with the engine's configuration in ``box``; the verdict from the report + listing + transcript
         + exit (+ the plugin record for pytest). ``targets``: none for the suite, one for RED/GREEN/checkouts, several
         for the src-only check (every one gets its own verdict in ``TestRun.verdicts``)."""
@@ -306,7 +316,7 @@ class TestRunner:  # noqa: N801
         if len(targets) > 1:
             argv = argv + list(targets)
         tc.prepare(box, cwd)
-        t = self._exec(box, argv, cwd)
+        t = self._exec(box, list(prefix) + argv, cwd)
         report_text = None
         extra_text = None
         if report is not None:
@@ -319,7 +329,7 @@ class TestRunner:  # noqa: N801
                 if rec is not None:
                     extra_text = rec.decode("utf-8", "replace")
                     t.extra["plugin_record_sha256"] = hashlib.sha256(rec).hexdigest()
-        listing, ct = self._collect(box, cwd, targets)
+        listing, ct = self._collect(box, cwd, targets, prefix)
         if ct is not None:
             t.extra["collect_exit"] = ct.exit
             t.extra["collect_output_sha256"] = ct.output_sha256
@@ -358,6 +368,87 @@ class TestRunner:  # noqa: N801
             raise RunnerRefused("multi-target runs are built for pytest only")
         argv = self.test_argv(targets[0])
         return self._verified_run(box, argv[:-1], cwd or self.cwd, targets)
+
+    # --- runner-independent re-execution (wave 22, G1(b)) -----------------------------------------------------------
+
+    @staticmethod
+    def standalone_bytes() -> bytes:
+        """The standalone runner, verified against its pin (a modified runner never runs)."""
+        with open(STANDALONE_PATH, "rb") as fh:
+            data = fh.read()
+        if hashlib.sha256(data).hexdigest() != STANDALONE_SHA256:
+            raise RunnerRefused("adapters/tools/zbm_standalone_runner.py does not match its pinned hash (G1)")
+        return data
+
+    def _standalone_paths(self, cwd: str) -> list[str]:
+        """The seed's ``pythonpath`` entries made absolute under ``cwd`` (never the engine directory)."""
+        raw = str((self.fw.get("ini") or {}).get("pythonpath") or "")
+        return [posixpath.normpath(posixpath.join(cwd, part)) for part in raw.split()]
+
+    def run_standalone(self, box, target: str, cwd: Optional[str] = None) -> TestRun:
+        """G1(b): run the test function ``target`` OUTSIDE pytest in ``box`` (a fresh engine container): the pinned
+        standalone runner from the read-only tools mount, ``python3 -I``, pytest not importable, CI/PYTEST*/TEST*
+        scrubbed from the environment, the request (with a nonce) on stdin. The verdict comes from the runner's
+        report file (read back with ``docker cp``) and must agree with the exit code: ``pass`` / ``fail`` /
+        ``runner_dependent``; anything else is ``unknown``. pytest services only (``RunnerRefused`` otherwise)."""
+        if self.framework != "pytest" or not self.verified:
+            raise RunnerRefused("the standalone runner is built for pytest services")
+        self.check_target(target)
+        cwd = cwd or self.cwd
+        self.standalone_bytes()                                  # the pin, before anything runs
+        self.prepare_box(box, cwd)
+        from zbm_delivery.adapters.sandbox import TOOLS_MOUNT
+        script = f"{TOOLS_MOUNT}/{STANDALONE_NAME}"
+        nonce = secrets.token_hex(16)
+        report = f"{self.engine_dir}/solo-{secrets.token_hex(8)}.json"
+        path, _, name = target.partition("::")
+        request = {"nonce": nonce, "report": report, "service_dir": cwd, "paths": self._standalone_paths(cwd),
+                   "test_file": posixpath.join(cwd, path), "test": name}
+        argv = ["python3", "-I", script]
+        r: ExecResult = box.exec_argv(argv, cwd=cwd, env={}, timeout=self.cmd_timeout_s,
+                                      stdin=json.dumps(request).encode("utf-8"))
+        text = r.stdout.decode("utf-8", "replace") + (toolchains.STDERR_MARK + r.stderr.decode("utf-8", "replace") if r.stderr else "")
+        t = TestRun(argv=argv + [target], exit=r.exit_code, output=text,
+                    output_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
+                    timed_out=r.timed_out, truncated=r.truncated, cwd=cwd)
+        data = box.get_bytes(report) if not r.timed_out else None
+        rec: dict = {}
+        if data is not None:
+            t.output += "\n[engine: the standalone runner's report] " + data.decode("utf-8", "replace")[:4000] + "\n"
+            t.output_sha256 = hashlib.sha256(t.output.encode("utf-8", "surrogatepass")).hexdigest()
+            t.junit_sha256 = hashlib.sha256(data).hexdigest()
+            try:
+                rec = json.loads(data.decode("utf-8"))
+            except ValueError:
+                rec = {}
+        claimed = rec.get("verdict") if isinstance(rec, dict) else None
+        agree = (isinstance(rec, dict) and rec.get("nonce") == nonce and claimed in STANDALONE_EXIT.values()
+                 and STANDALONE_EXIT.get(r.exit_code) == claimed and not r.timed_out and not r.truncated)
+        t.verdict = claimed if agree else "unknown"
+        why = str(rec.get("why") or "") if isinstance(rec, dict) else ""
+        t.extra["standalone"] = {"why": (why if agree else f"no agreeing report (exit {r.exit_code}, report "
+                                                              f"{'present' if data is not None else 'missing'})")[:400],
+                                 "conftest": list(rec.get("conftest") or [])[:10] if agree else [],
+                                 "blocked_imports": list(rec.get("blocked_imports") or [])[:10] if agree else [],
+                                 "report_sha256": t.junit_sha256}
+        return t
+
+    def run_scrubbed(self, box, target: str, cwd: Optional[str] = None) -> TestRun:
+        """G1(b) for go/cargo/node (no standalone runner exists): the seeded targeted run through the verified
+        toolchain with ``SCRUB_ENV_NAMES`` unset (``env -u``). The same test runner runs, so this defeats only an
+        environment-conditional fix; the toolchain's own detection hooks (Go ``testing.Testing()``, Node's
+        ``NODE_TEST_CONTEXT``, the libtest harness's arguments) remain — ``src_content_deny`` refuses their cheap
+        spellings (the residual, stated in ADR 0011)."""
+        if self.framework == "pytest":
+            raise RunnerRefused("pytest services use the standalone runner")
+        prefix = ["env"] + [x for n in SCRUB_ENV_NAMES for x in ("-u", n)]
+        argv = self.test_argv(target)
+        if self.verified:
+            return self._verified_run(box, argv, cwd or self.cwd, [target], prefix=prefix)
+        t = self._exec(box, prefix + argv, cwd)
+        t.counts = parsers.parse_counts(self.fw["parser"], t.output)
+        t.verdict = "unknown"
+        return t
 
     def run_suite(self, box, cwd: Optional[str] = None) -> TestRun:
         if self.verified:

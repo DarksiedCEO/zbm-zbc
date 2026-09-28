@@ -14,8 +14,11 @@ import _tmproot  # noqa: E402  (fix wave 21, L4: before anything imports tempfil
 
 # The suite builds every service from an explicit env dict; the process environment must not leak DLV_* or the
 # ledger settings into anything that reads os.environ (the harness module sets only the DEER_FLOW_* it owns).
+# Wave 22 (G3, N21-D-3): the suite's OWN settings survive — DLV_TEST_PORT_RANGE is the operator's port assignment for
+# the live tests, not a service setting (it used to be popped here, so every run fell back to 18800-18849).
+SUITE_SETTINGS = ("DLV_TEST_PORT_RANGE",)
 for k in list(os.environ):
-    if k.startswith(("DLV_", "DEER_FLOW_", "LEDGER_SERVICE_", "LANGSMITH_", "LANGFUSE_", "GATEWAY_")):
+    if k.startswith(("DLV_", "DEER_FLOW_", "LEDGER_SERVICE_", "LANGSMITH_", "LANGFUSE_", "GATEWAY_")) and k not in SUITE_SETTINGS:
         os.environ.pop(k, None)
 
 

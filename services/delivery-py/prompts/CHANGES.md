@@ -125,3 +125,7 @@ task-reviewer :55-62 (no subagents), :96-113 (Spec Compliance), :117-138 (Code Q
   an interpreter/shell/text tool is refused even when harmless (use the file tools) and that a reviewer-authored
   reproduction's path is never the engineer's to write; `reviewer.md` describes the finding's `reproduction_test`
   (a reviewer-authored RED test, refused `reproduction_not_red` if it passes on the starting tree).
+- Fix wave 22 (lead rulings G1/G2): `engine.system.md` rule 5 states that the reproduction must also pass and fail
+  OUTSIDE the test runner and that runner-detecting source is refused; `reviewer.md` names `reproduction_red_unverified`
+  and asks for reviewer-authored tests without pytest imports or fixtures (a reproduction that needs pytest ends
+  `needs_review_runner_dependent`, never `fixed`).

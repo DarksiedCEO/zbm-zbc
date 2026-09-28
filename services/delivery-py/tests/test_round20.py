@@ -129,7 +129,9 @@ def test_n20_d3_fixed_invariant_requires_a_reproduction_record():
             "finding_file_hunk": True, "single_file_revert": {"verdict": "fail", "file": "services/toy-py/src/toy/calc.py"},
             "repro_check": {"verification": {"verdict": "pass"}, "reverted": {"verdict": "fail"}},
             "src_only_check": None, "sweep": {"sites": []}, "suite_tree_sha256": "a" * 64,
-            "commit_tree_sha256": "a" * 64, "suite_failures": [], "outcome_regressions": []}
+            "commit_tree_sha256": "a" * 64, "suite_failures": [], "outcome_regressions": [],
+            # wave 22 (G1): the reproduction confirmed outside the test runner is required for fixed as well
+            "standalone_check": {"outcome": "confirmed"}}
     assert states.finding_transition_problem(good, "fixed") is None
     for missing in (None, {}):
         problem = states.finding_transition_problem({**good, "repro_check": missing}, "fixed")
@@ -256,9 +258,12 @@ def test_n20_d8_ordinary_pytest_tests_are_not_refused():
 
 # ====================================================================== N20-D-10: live test ports are configurable
 
-def test_n20_d10_live_port_range_comes_from_the_environment(monkeypatch):
+def test_n20_d10_live_port_range_spec_parser_and_no_hard_coded_range(monkeypatch):
+    """The PARSER of DLV_TEST_PORT_RANGE, and no live module hard-codes the range. Wave 22 (N21-D-3): this test used
+    to be the only evidence that the range "comes from the environment" while setting the variable itself — the
+    conftest popped the operator's value before any test ran. That claim is now proven from outside the process by
+    test_round22.py::test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests."""
     import helpers
-    assert hasattr(helpers, "live_ports"), "no DLV_TEST_PORT_RANGE support"
     monkeypatch.delenv("DLV_TEST_PORT_RANGE", raising=False)
     assert helpers.live_ports() == range(18800, 18850)
     monkeypatch.setenv("DLV_TEST_PORT_RANGE", "18830-18839")

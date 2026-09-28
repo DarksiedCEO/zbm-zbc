@@ -58,6 +58,8 @@ EVIDENCE_KINDS = ("brief", "test_output", "suite_output", "diff", "report", "rev
 EVIDENCE_MAX_BYTES = 8 * 1024 * 1024
 # R5: the only run events accepted once a run is no longer live (bookkeeping of a stopped run)
 POST_MORTEM_EVENTS = ("run_interrupted", "sandbox_released", "agent_usage", "agent_usage_linked")
+# the finding states a run can end awaiting review with (wave 22: needs_review_runner_dependent is NOT fixed)
+DONE_STATES = ("fixed", "disproved", "needs_review_runner_dependent")
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -179,7 +181,8 @@ class DeliveryService:
             settings=settings, recorder=recorder, docker=docker, chat_backend=chat_backend, egress=egress,
             policy_seed=policy_seed, test_seed=test_seed, clock=self.clock, on_ledger_failure=self._on_ledger_failure,
             record=self._record_plain, resolve_sandbox_path=self._resolve_sandbox_path,
-            resolve_sandbox_paths=self._resolve_sandbox_paths, evidence_root=self.evidence_root))
+            resolve_sandbox_paths=self._resolve_sandbox_paths, evidence_root=self.evidence_root,
+            record_if_live=self._record_if_live))
         if self.reconcile_mode:
             return
         if not self.log.in_memory and len(self.log):
@@ -232,6 +235,17 @@ class DeliveryService:
                              "payload": payload})
             self._commit(op)
             return event_id
+
+    def _record_if_live(self, status_fn, event_id, event_type, actor, subject, payload, summary) -> bool:
+        """Wave 22 (G4, N21-D-4): ``_record_plain`` only while ``status_fn()`` is live — the status read and the record
+        under ONE hold of the service lock. Cancel and the deadline change a run's status under the same lock, so an
+        engine container is either recorded started before ``fix_run_cancelled`` (and killed by the interrupt that
+        follows it) or never recorded started at all."""
+        with self.lock:
+            if status_fn() in states.TERMINAL or status_fn() == "awaiting_review":
+                return False
+            self._record_plain(event_id, event_type, actor, subject, payload, summary)
+            return True
 
     def _commit(self, op: Op) -> None:
         if not op.ops:
@@ -513,75 +527,83 @@ class DeliveryService:
                                 "sha256": hashlib.sha256(rt["content"].encode("utf-8", "surrogatepass")).hexdigest()})
             return out
 
-    def _red_precheck(self, caller: str, request_id: str, facts: str, base_sha: str, service: str, run_id: str,
-                      principal_user_id: str, findings: list[dict]) -> None:
-        """L2: every reviewer-authored reproduction must FAIL on ``base_sha`` before anything is recorded: run in a
-        fresh engine container on the base tree with the test overlaid. A pass (or an unknown verdict) is refused
-        — 422 ``reproduction_not_red`` — and the refusal recorded. Runs OUTSIDE the service lock (a container run
-        must not stall the other runs); the caller re-checks everything under the lock afterwards."""
+    def _refuse_red(self, caller: str, request_id: str, facts: str, code: str, finding_id: str, node: Optional[str],
+                    message: str, extra: dict) -> None:
+        """422 for a reviewer-authored reproduction that is not verified RED; the refusal is recorded when the ledger
+        answers and stands either way (nothing was created)."""
+        eid = derived_id("ref", caller, request_id, facts, code, finding_id)
+        try:
+            self._record_plain(eid, "fix_run_refused", GATE, request_id,
+                               {"request_id": request_id, "facts_sha256": facts, "code": code, "principal": caller,
+                                "finding_id": finding_id, "target": node, **extra},
+                               f"Fix run refused: {code} ({finding_id})")
+        except Unavailable:
+            pass
+        raise Invalid(message, code=code.lower(), finding_id=finding_id, target=node, reasons=[R.item(code, message)],
+                      request_id=request_id, facts_sha256=facts, took_effect=False)
+
+    def _red_check_locked(self, caller: str, request_id: str, facts: str, base_sha: str, service: str, principal,
+                          findings: list[dict]) -> dict[str, str]:
+        """Wave 22 (G2, N21-D-2): every reviewer-authored reproduction must FAIL on ``base_sha`` — run in a fresh
+        engine container with the test overlaid — as PART OF ADMISSION, under the service lock (the caller holds it:
+        nothing about the admission can change between this check and the run's creation). The verdict is recorded
+        ``reproduction_red_checked`` and its event id returned per finding (``{finding_id: event id}``); the finding
+        record carries it and ``fixed``/``disproved`` require it (states invariant). Refused, never admitted:
+        a passing test → 422 ``reproduction_not_red``; ANY other outcome — an exception (the container could not
+        start or run, a crossing that could not be recorded), ``Unavailable``, an ``unknown`` verdict, a verdict that
+        could not be recorded, no engine or no sandbox — → 422 ``reproduction_red_unverified``."""
         items = [f for f in findings if f.get("reproduction_test")]
-        if not items or self._engine is None or not hasattr(self._engine, "reproduction_red"):
-            return
+        out: dict[str, str] = {}
+        if not items:
+            return out
+        adm = rid("run", "admission", caller, request_id, facts)     # its own id: never the run's event ids
         for f in items:
             node = node_id_in_text(f.get("reproduction") or "")
+            code = "REPRODUCTION_RED_UNVERIFIED"
+            if self._engine is None or not hasattr(self._engine, "reproduction_red") or not self.sandbox_available():
+                self._refuse_red(caller, request_id, facts, code, f["id"], node,
+                                 f"finding {f['id']}: the reviewer-authored reproduction {node} could not be run RED on the "
+                                 "base commit (no engine or no sandbox): refused, never admitted unchecked", {"why": "no_sandbox"})
             try:
-                t = self._engine.reproduction_red(run_id=run_id, service=service, base_sha=base_sha,
-                                                  principal_user_id=principal_user_id, finding_id=f["id"],
+                t = self._engine.reproduction_red(run_id=adm, service=service, base_sha=base_sha,
+                                                  principal_user_id=principal.user_id(adm), finding_id=f["id"],
                                                   path=f["reproduction_test"]["path"],
                                                   content=f["reproduction_test"]["content"], node=node)
+            except Exception as exc:  # noqa: BLE001 - Unavailable included: the RED check did not complete → refused
+                self._refuse_red(caller, request_id, facts, code, f["id"], node,
+                                 f"finding {f['id']}: the RED check of the reviewer-authored reproduction {node} could not "
+                                 f"complete ({type(exc).__name__}): refused, never admitted unchecked",
+                                 {"why": type(exc).__name__[:60]})
+            if t.verdict == "pass":
+                self._refuse_red(caller, request_id, facts, "REPRODUCTION_NOT_RED", f["id"], node,
+                                 f"finding {f['id']}: the reviewer-authored reproduction {node} passes on the base commit",
+                                 {"verdict": t.verdict, "exit": t.exit, "output_sha256": t.output_sha256})
+            if t.verdict != "fail":
+                why = (t.counts.why if t.counts else "unknown")[:120]
+                self._refuse_red(caller, request_id, facts, code, f["id"], node,
+                                 f"finding {f['id']}: the reviewer-authored reproduction {node} could not be verified RED on "
+                                 f"the base commit ({why}): refused, never admitted unchecked",
+                                 {"verdict": t.verdict, "exit": t.exit, "output_sha256": t.output_sha256})
+            eid = derived_id("red", adm, f["id"], t.output_sha256)
+            try:
+                self._record_plain(eid, "reproduction_red_checked", GATE, request_id,
+                                   {"request_id": request_id, "facts_sha256": facts, "admission_id": adm,
+                                    "finding_id": f["id"], "target": node, "base_sha": base_sha, "verdict": t.verdict,
+                                    "exit": t.exit, "output_sha256": t.output_sha256,
+                                    "test_sha256": sha_text(f["reproduction_test"]["content"])},
+                                   f"Reviewer reproduction RED on base for {f['id']}")
             except Unavailable:
-                raise
-            except Exception as exc:  # noqa: BLE001 - the container could not run: refused, never admitted unchecked
-                self._refuse(caller, request_id, facts, "HARNESS_ERROR",
-                             f"finding {f['id']}: the reproduction RED check could not run ({type(exc).__name__})")
-            if t.verdict == "fail":
-                try:
-                    self._record_plain(derived_id("red", run_id, f["id"], t.output_sha256), "reproduction_red_checked", GATE,
-                                       request_id, {"request_id": request_id, "facts_sha256": facts, "admission_id": run_id,
-                                                    "finding_id": f["id"], "target": node, "base_sha": base_sha,
-                                                    "verdict": t.verdict, "exit": t.exit, "output_sha256": t.output_sha256,
-                                                    "test_sha256": sha_text(f["reproduction_test"]["content"])},
-                                       f"Reviewer reproduction RED on base for {f['id']}")
-                except Unavailable:
-                    raise
-            else:
-                code = "REPRODUCTION_NOT_RED"
-                why = ("passes on the base commit" if t.verdict == "pass" else
-                       f"could not be verified on the base commit ({(t.counts.why if t.counts else 'unknown')[:120]})")
-                message = f"finding {f['id']}: the reviewer-authored reproduction {node} {why}"
-                eid = derived_id("ref", caller, request_id, facts, code, f["id"])
-                try:
-                    self._record_plain(eid, "fix_run_refused", GATE, request_id,
-                                       {"request_id": request_id, "facts_sha256": facts, "code": code, "principal": caller,
-                                        "finding_id": f["id"], "target": node, "verdict": t.verdict, "exit": t.exit,
-                                        "output_sha256": t.output_sha256},
-                                       f"Fix run refused: {code} ({f['id']})")
-                except Unavailable:
-                    pass
-                raise Invalid(message, code="reproduction_not_red", finding_id=f["id"], target=node,
-                              reasons=[R.item(code, message)], request_id=request_id, facts_sha256=facts, took_effect=False)
+                self._refuse_red(caller, request_id, facts, code, f["id"], node,
+                                 f"finding {f['id']}: the RED verdict of the reviewer-authored reproduction {node} could not "
+                                 "be recorded: refused, never admitted unchecked", {"why": "record_failed"})
+            out[f["id"]] = eid
+        return out
 
-    def _precheck_document(self, caller: str, principal, request_id: str, facts: str, body: dict) -> None:
-        """L2: before the lock, for a findings document carrying reviewer-authored tests: a replay returns through
-        the normal path; otherwise the static checks, then the RED run of each reviewer test on the base. Any state
-        this needs that is missing (no engine, no sandbox, a bad base) is left to the normal path to refuse."""
-        with self.lock:
-            _, _, ent = self._idem(caller, request_id, "fix-runs", body)
-            if ent is not None or self._engine is None or not self.sandbox_available():
-                return
-            try:
-                base_sha = self.git.rev_parse(body["base_sha"], run_id="-")
-            except Exception:  # noqa: BLE001 - the normal path refuses (GIT_REFUSED) or raises Unavailable
-                return
-            try:
-                self._check_reproductions(caller, request_id, facts, base_sha, body["service"], body["findings"])
-            except GitRefused:
-                return
-        adm = rid("run", "admission", caller, request_id, facts)     # its own id: never the run's event ids
-        self._red_precheck(caller, request_id, facts, base_sha, body["service"], adm, principal.user_id(adm),
-                           body["findings"])
-
-    def create_fix_run(self, caller: str, body: dict, *, parent_run_id: Optional[str] = None) -> dict:
+    def create_fix_run(self, caller: str, body: dict, *, parent_run_id: Optional[str] = None,
+                       red_checks: Optional[dict] = None) -> dict:
+        """Admission (§C.8.1). Everything runs under the service lock, the reviewer-authored reproductions' RED check
+        included (wave 22, G2). A child run (``parent_run_id``) is created by ``review`` inside the same lock hold,
+        with the RED checks ``review`` ran on the child's base before recording anything (``red_checks``)."""
         from zbm_delivery.adapters.identity import PrincipalMissing, principal_for
         request_id = body["request_id"]
         facts = facts_sha256(body)
@@ -589,8 +611,6 @@ class DeliveryService:
             principal = principal_for(caller)
         except PrincipalMissing:
             self._refuse(caller, request_id, facts, "PRINCIPAL_MISSING", "the caller maps to no principal")
-        if parent_run_id is None and any(f.get("reproduction_test") for f in body["findings"]):
-            self._precheck_document(caller, principal, request_id, facts, body)
         with self.lock:
             key, h, ent = self._idem(caller, request_id, "fix-runs", body)
             if ent is not None:
@@ -624,6 +644,14 @@ class DeliveryService:
                 self._check_reproductions(caller, request_id, facts, base_sha, service, body["findings"])
             except GitRefused:
                 self._refuse(caller, request_id, facts, "GIT_REFUSED", "the base commit could not be read")
+            if parent_run_id is None:
+                red_checks = self._red_check_locked(caller, request_id, facts, base_sha, service, principal, body["findings"])
+            red_checks = dict(red_checks or {})
+            missing = [f["id"] for f in body["findings"] if f.get("reproduction_test") and not red_checks.get(f["id"])]
+            if missing:
+                self._refuse_red(caller, request_id, facts, "REPRODUCTION_RED_UNVERIFIED", missing[0], None,
+                                 f"finding {missing[0]}: no admission RED check for its reviewer-authored reproduction",
+                                 {"why": "no_red_check"})
             run_id = rid("run", "run", caller, request_id, facts)
             if run_id in self.runs:
                 raise Conflict("run already exists")
@@ -671,7 +699,8 @@ class DeliveryService:
                                    "reasons": [], "suite_failures": [], "brief_evidence_id": None,
                                    "injection_rules": textguard.injection_rules_in(f),
                                    "reviewer_test": ({"path": f["reproduction_test"]["path"], "author": "reviewer",
-                                                      "sha256": sha_text(f["reproduction_test"]["content"])}
+                                                      "sha256": sha_text(f["reproduction_test"]["content"]),
+                                                      "red_checked_event_id": red_checks[f["id"]]}
                                                      if f.get("reproduction_test") else None)})
             resp = self._stamp({"run_id": run_id, "status": "received", "request_id": request_id, "facts_sha256": facts,
                                 "ledger_event_id": eid})
@@ -776,7 +805,7 @@ class DeliveryService:
             recs = self.findings.get(run_id, {})
             service = self.runs[run_id]["service"]
             for fid, doc in docs.items():
-                if fid == finding_id or recs.get(fid, {}).get("state") in ("fixed", "disproved"):
+                if fid == finding_id or recs.get(fid, {}).get("state") in DONE_STATES:
                     continue
                 rel = doc["file"][len(f"services/{service}/"):]
                 repro = doc.get("reproduction", "")
@@ -801,7 +830,7 @@ class DeliveryService:
             recs = self.findings.get(run_id, {})
             out = []
             for fid, doc in docs.items():
-                if recs.get(fid, {}).get("state") in ("fixed", "disproved", "reviewed"):
+                if recs.get(fid, {}).get("state") in DONE_STATES + ("reviewed",):
                     continue
                 t = node_id_in_text(doc.get("reproduction") or "")
                 if t:
@@ -956,8 +985,6 @@ class DeliveryService:
     def review(self, caller: str, run_id: str, body: dict) -> dict:
         request_id = body["request_id"]
         facts = facts_sha256(body)
-        if body["verdict"] == "fail":
-            self._precheck_review(caller, run_id, request_id, facts, body)
         with self.lock:
             key, h, ent = self._idem(caller, request_id, f"review/{run_id}", body)
             if ent is not None:
@@ -982,12 +1009,20 @@ class DeliveryService:
                 # (this run's head) — checked BEFORE the review is recorded, so a refused review changes nothing
                 head0 = run["commits"][-1]["sha"] if run.get("commits") else run["base_sha"]
                 docs0 = self.finding_docs[run_id]
+                child_findings = ([dict(docs0[fid]) for fid in body.get("reopened", [])]
+                                  + [dict(f) for f in body.get("new_findings", [])])
                 try:
-                    self._check_reproductions(caller, request_id, facts, head0, run["service"],
-                                              [dict(docs0[fid]) for fid in body.get("reopened", [])]
-                                              + [dict(f) for f in body.get("new_findings", [])])
+                    self._check_reproductions(caller, request_id, facts, head0, run["service"], child_findings)
                 except GitRefused:
                     raise Invalid("the run's head commit could not be read") from None
+                # wave 22 (G2): the child's reviewer-authored reproductions are run RED on the child's base (this run's
+                # head) now, under the lock, BEFORE the review is recorded — a refusal leaves the run awaiting review
+                from zbm_delivery.adapters.identity import PrincipalMissing, principal_for
+                try:
+                    principal = principal_for(caller)
+                except PrincipalMissing:
+                    raise Invalid("the caller maps to no principal") from None
+                child_red = self._red_check_locked(caller, request_id, facts, head0, run["service"], principal, child_findings)
             to = "reviewed_pass" if body["verdict"] == "pass" else "reviewed_fail"
             review = {"request_id": request_id, "facts_sha256": facts, "verdict": body["verdict"],
                       "review_ref": body["review_ref"], "sha256": body["sha256"], "reopened_ids": list(body.get("reopened", [])),
@@ -1004,11 +1039,11 @@ class DeliveryService:
             new["ledger_event_ids"].append(eid)
             for fid in review["reopened_ids"]:
                 rec = json.loads(json.dumps(self.findings[run_id][fid]))
-                rec["state"] = "reviewed" if rec["state"] in ("fixed", "disproved") else rec["state"]
+                rec["state"] = "reviewed" if rec["state"] in DONE_STATES else rec["state"]
                 op.add("finding", rec)
             if body["verdict"] == "pass":
                 for rec in self.findings[run_id].values():
-                    if rec["state"] in ("fixed", "disproved"):
+                    if rec["state"] in DONE_STATES:
                         r2 = json.loads(json.dumps(rec))
                         r2["state"] = "reviewed"
                         op.add("finding", r2)
@@ -1021,7 +1056,7 @@ class DeliveryService:
                 findings = [dict(docs[fid]) for fid in review["reopened_ids"]] + [dict(f) for f in body.get("new_findings", [])]
                 head = new["commits"][-1]["sha"] if new.get("commits") else new["base_sha"]
                 child = self._child_body(request_id, body, run, findings, head)
-                child_resp = self.create_fix_run(caller, child, parent_run_id=run_id)
+                child_resp = self.create_fix_run(caller, child, parent_run_id=run_id, red_checks=child_red)
                 resp = dict(resp, next_run_id=child_resp["run_id"])
                 ent2 = self.idem.get(key)
                 if ent2 is not None:
@@ -1033,35 +1068,6 @@ class DeliveryService:
         return {"request_id": f"{request_id}:rerun", "source": {"kind": "aegis_review", "ref": body["review_ref"],
                                                                "sha256": body["sha256"]},
                 "base_ref": run["base_ref"], "base_sha": head, "service": run["service"], "findings": findings}
-
-    def _precheck_review(self, caller: str, run_id: str, request_id: str, facts: str, body: dict) -> None:
-        """L2: a failing review whose reopened or new findings carry reviewer-authored tests: each must FAIL on the
-        run's head (the child run's base) before the review is recorded. Everything else is left to review()."""
-        with self.lock:
-            _, _, ent = self._idem(caller, request_id, f"review/{run_id}", body)
-            run = self.runs.get(run_id)
-            if ent is not None or run is None or run["status"] != "awaiting_review" or self._engine is None:
-                return
-            docs0 = self.finding_docs.get(run_id, {})
-            known = set(run["finding_ids"])
-            if any(x not in known for x in body.get("reopened", [])):
-                return
-            findings = [dict(docs0[fid]) for fid in body.get("reopened", [])] + [dict(f) for f in body.get("new_findings", [])]
-            if not any(f.get("reproduction_test") for f in findings) or not self.sandbox_available():
-                return
-            head0 = run["commits"][-1]["sha"] if run.get("commits") else run["base_sha"]
-            service = run["service"]
-            try:
-                self._check_reproductions(caller, request_id, facts, head0, service, findings)
-            except GitRefused:
-                return
-        adm = rid("run", "admission", caller, request_id, facts)
-        from zbm_delivery.adapters.identity import PrincipalMissing, principal_for
-        try:
-            principal = principal_for(caller)
-        except PrincipalMissing:
-            return
-        self._red_precheck(caller, request_id, facts, head0, service, adm, principal.user_id(adm), findings)
 
     def cancel(self, caller: str, run_id: str, body: dict) -> dict:
         request_id = body["request_id"]

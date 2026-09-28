@@ -93,6 +93,7 @@ class FakeDockerCli:
         self.binds: dict[str, dict[str, str]] = {}   # container name -> {dst: host src} for the read-only bind mounts
         self.killed: set[str] = set()             # containers a `docker kill` stopped (every later exec fails)
         self.procs: dict[str, list] = {}          # container name -> running Popen objects (kill terminates them)
+        self.env_files: dict[str, dict] = {}      # container name -> the --env-file's variables (wave 22: CI=1 etc.)
         self.exec_fail_next: Optional[int] = None
         os.makedirs(self.root, exist_ok=True)
 
@@ -132,6 +133,16 @@ class FakeDockerCli:
             self.killed.discard(name)
             if "--label" in argv:
                 self.labels[name] = argv[argv.index("--label") + 1].split("=", 1)[1]
+            if "--env-file" in argv and os.path.isfile(argv[argv.index("--env-file") + 1]):
+                # wave 22: the container's environment comes from the env file, as with the real CLI (PATH and HOME
+                # stay the double's: the host's toolchains and the volume as HOME stand in for the image's)
+                file_env = {}
+                with open(argv[argv.index("--env-file") + 1], encoding="ascii") as fh:
+                    for ln in fh.read().splitlines():
+                        k, sep, v = ln.partition("=")
+                        if sep and k not in ("PATH", "HOME"):
+                            file_env[k] = v
+                self.env_files[name] = file_env
             for a in argv:
                 if a.startswith("type=volume,"):
                     opts = dict(kv.split("=", 1) for kv in a.split(",") if "=" in kv)
@@ -187,7 +198,7 @@ class FakeDockerCli:
         if argv[0] == "cp":
             return self._cp(argv, stdin)
         if argv[0] == "exec":
-            return self._exec(argv, timeout_s, output_cap)
+            return self._exec(argv, timeout_s, output_cap, stdin)
         return ExecResult(125, b"", b"unknown docker subcommand (test double)\n")
 
     def _cp(self, argv, stdin) -> ExecResult:
@@ -214,12 +225,16 @@ class FakeDockerCli:
             tar.add(local, arcname=os.path.basename(local.rstrip("/")))
         return ExecResult(0, buf.getvalue(), b"")
 
-    def _exec(self, argv, timeout_s, output_cap) -> ExecResult:
+    def _exec(self, argv, timeout_s, output_cap, stdin=None) -> ExecResult:
         i = 1
         cwd = WORKSPACE
         env = {}
+        interactive = False
         while argv[i].startswith("-"):
-            if argv[i] == "--user":
+            if argv[i] == "-i":
+                interactive = True
+                i += 1
+            elif argv[i] == "--user":
                 i += 2
             elif argv[i] == "-w":
                 cwd = argv[i + 1]
@@ -243,6 +258,9 @@ class FakeDockerCli:
             cmd = cmd[4:]
         binds = self.binds.get(name)
         cmd = [self._map_in(a, vol, binds) for a in cmd]
+        if interactive and stdin:
+            # wave 22: what the process reads on stdin names container paths, like its argv — mapped the same way
+            stdin = self._map_in(stdin.decode("utf-8", "surrogateescape"), vol, binds).encode("utf-8", "surrogateescape")
         if cmd[0] in ("pytest",):
             # the image's `pytest` script has the script's bin dir as sys.path[0], never the cwd: -P makes the
             # double's `python -m pytest` behave the same (nothing in the service directory shadows a module)
@@ -256,14 +274,15 @@ class FakeDockerCli:
             code, self.exec_fail_next = self.exec_fail_next, None
             return ExecResult(code, b"", b"simulated exec failure\n")
         full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": vol, "LANG": "C.UTF-8",
-                    "PYTHONDONTWRITEBYTECODE": "1", **self.toolchain_env(), **env}
+                    "PYTHONDONTWRITEBYTECODE": "1", **self.env_files.get(name, {}), **self.toolchain_env(), **env}
         try:
-            proc = subprocess.Popen(cmd, cwd=local_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=full_env)
+            proc = subprocess.Popen(cmd, cwd=local_cwd, stdin=subprocess.PIPE if interactive else subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=full_env)
         except OSError as exc:
             return ExecResult(127, b"", f"{type(exc).__name__}\n".encode())
         self.procs.setdefault(name, []).append(proc)
         try:
-            stdout, stderr = proc.communicate(timeout=secs)
+            stdout, stderr = proc.communicate(input=(stdin or b"") if interactive else None, timeout=secs)
         except subprocess.TimeoutExpired:
             proc.kill()
             stdout, stderr = proc.communicate()

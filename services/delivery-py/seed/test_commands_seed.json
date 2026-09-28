@@ -103,11 +103,39 @@
           "pattern": "\\bcapsys\\b|\\bcapfd\\b|\\bcapsysbinary\\b|\\bcapfdbinary\\b|\\.disabled\\s*\\(|terminalreporter|TerminalReporter|get_terminal_writer|\\b_tw\\b"
         }
       ],
-      "note": "detected by a Python project file, never by a bare tests/ directory (every ecosystem has one). Round 19 R4: pytest runs with --disable-plugin-autoload and -p zbm_engine_plugin (the engine's own plugin, first on pythonpath; a tree entry named zbm_engine_plugin* is test infra); test_content_deny refuses the cheap re-plugging spellings in a test file and src_content_deny the same in a changed source file (stated as cheap layers). Wave 21 (N20-D-8): test_content_deny also refuses, as the same cheap layer (a regex over the test file's text, not a proof), a test that exits the process (os._exit, sys.exit, SystemExit, pytest.exit, os.abort/kill, exit()/quit()), writes at the fd level (os.write/dup/dup2/fdopen, sys.__stdout__/__stderr__, /dev/stdout|stderr|tty|fd, /proc/self/fd, open(1|2), .fileno()) or bypasses pytest's capture (capsys/capfd, .disabled(), the terminal reporter) - the routes to the runner's transcript the engine note names; the verdict still comes from the engine's junit file and its own plugin record.",
+      "note": "detected by a Python project file, never by a bare tests/ directory (every ecosystem has one). Round 19 R4: pytest runs with --disable-plugin-autoload and -p zbm_engine_plugin (the engine's own plugin, first on pythonpath; a tree entry named zbm_engine_plugin* is test infra); test_content_deny refuses the cheap re-plugging spellings in a test file and src_content_deny the same in a changed source file (stated as cheap layers). Wave 21 (N20-D-8): test_content_deny also refuses, as the same cheap layer (a regex over the test file's text, not a proof), a test that exits the process (os._exit, sys.exit, SystemExit, pytest.exit, os.abort/kill, exit()/quit()), writes at the fd level (os.write/dup/dup2/fdopen, sys.__stdout__/__stderr__, /dev/stdout|stderr|tty|fd, /proc/self/fd, open(1|2), .fileno()) or bypasses pytest's capture (capsys/capfd, .disabled(), the terminal reporter) - the routes to the runner's transcript the engine note names; the verdict still comes from the engine's junit file and its own plugin record. Wave 22 (G1, N21-D-1): src_content_deny is the CHEAP layer of runner-detection refusals, applied to the lines a fix ADDS to a source file (a new source file: all of it): test-runner name literals, sys.modules lookups of test frameworks, PYTEST_ names, os.environ/getenv reads of CI/PYTEST*/TEST*, unittest.mock, frame/stack introspection, /proc/self/environ|cmdline and sys.flags. A regex over text, not a proof: the STRUCTURAL layer is the engine's runner-independent re-execution of the finding's reproduction outside pytest (adapters/tools/zbm_standalone_runner.py; python -I, pytest not importable, CI/PYTEST*/TEST* scrubbed), which must pass with the fix and fail on the reverted checkout before fixed.",
       "src_content_deny": [
         {
           "name": "pytest_internals",
           "pattern": "_pytest\\b|\\bpluggy\\b|pluginmanager|gc\\.get_objects|gc\\.get_referrers"
+        },
+        {
+          "name": "test_runner_name_literal",
+          "pattern": "[\"'](?:_?pytest\\w*|py\\.test|zbm_(?:standalone|engine)\\w*)[\"']"
+        },
+        {
+          "name": "test_framework_in_sys_modules",
+          "pattern": "sys\\.modules[^\\n]{0,120}(?:pytest|unittest|nose|doctest|hypothesis|zbm_)|(?:pytest|unittest|nose|doctest|hypothesis|zbm_)[^\\n]{0,120}sys\\.modules"
+        },
+        {
+          "name": "pytest_env_name",
+          "pattern": "PYTEST_"
+        },
+        {
+          "name": "ci_or_test_env_read",
+          "pattern": "(?:environ|getenv)[^\\n]{0,60}[\"'](?i:ci|continuous_integration|github_actions|pytest\\w*|test\\w*|_?testing)[\"']"
+        },
+        {
+          "name": "unittest_mock_in_src",
+          "pattern": "unittest\\.mock|from\\s+unittest\\s+import\\s+mock\\b|^\\s*import\\s+mock\\b"
+        },
+        {
+          "name": "stack_introspection",
+          "pattern": "inspect\\.(?:stack|currentframe|getouterframes|getframeinfo|trace)\\b|sys\\._getframe|sys\\._current_frames|traceback\\.(?:extract_stack|walk_stack|print_stack|format_stack)|\\bf_back\\b|\\bf_globals\\b|\\bf_locals\\b|\\btb_frame\\b"
+        },
+        {
+          "name": "process_self_introspection",
+          "pattern": "/proc/(?:self|\\d+|\\{[^}\\n]*\\})/(?:environ|cmdline)|sys\\.flags\\b|sys\\.orig_argv"
         }
       ]
     },
@@ -183,7 +211,21 @@
         }
       ],
       "verified": true,
-      "note": "stable toolchain only: -Z unstable-options --format json (nightly) is not used and cargo nextest is not a dependency of this build (ADR 0011). The RED test must be a separate test file under tests/ (an integration test): a #[cfg(test)] unit test inside a source file cannot be split from the source by the R1 verification checkouts. Every test binary of the package runs (--no-fail-fast); a workspace is run from its root."
+      "note": "stable toolchain only: -Z unstable-options --format json (nightly) is not used and cargo nextest is not a dependency of this build (ADR 0011). The RED test must be a separate test file under tests/ (an integration test): a #[cfg(test)] unit test inside a source file cannot be split from the source by the R1 verification checkouts. Every test binary of the package runs (--no-fail-fast); a workspace is run from its root. Wave 22 (G1): src_content_deny refuses RUST_TEST*, cfg!(test), the libtest arguments, CI/TEST/CARGO_* env reads and backtrace capture in the lines a fix adds to a source file; the reproduction is also re-run with the CI markers unset. The same libtest harness runs both (residual, ADR 0011).",
+      "src_content_deny": [
+        {
+          "name": "rust_test_detection",
+          "pattern": "RUST_TEST\\w*|cfg!\\(\\s*test\\s*\\)|std::env::args(?:_os)?\\(\\)[^\\n]{0,80}(?:--test|--nocapture|--exact|--list)"
+        },
+        {
+          "name": "rust_ci_or_test_env_read",
+          "pattern": "env::var(?:_os)?\\(\\s*\"(?i:ci|continuous_integration|test\\w*|cargo_\\w*)\"|env::vars(?:_os)?\\(\\)"
+        },
+        {
+          "name": "rust_stack_introspection",
+          "pattern": "Backtrace::(?:capture|force_capture)|backtrace::"
+        }
+      ]
     },
     "go": {
       "markers": [
@@ -250,7 +292,21 @@
         }
       ],
       "verified": true,
-      "note": "-race and -count=1 per the repository's CI; -json is test2json-framed so a test's own prints are output events, never results; the listing is go test -json -list per package (Test* functions only: examples and benchmarks are not counted). Sub-tests are recorded but the count is per top-level Test function."
+      "note": "-race and -count=1 per the repository's CI; -json is test2json-framed so a test's own prints are output events, never results; the listing is go test -json -list per package (Test* functions only: examples and benchmarks are not counted). Sub-tests are recorded but the count is per top-level Test function. Wave 22 (G1): src_content_deny refuses the cheap runner-detection spellings in the lines a fix adds to a non-test .go file (testing.Testing(), -test.* flags, the testing import, CI/TEST env reads, runtime.Caller*/debug.Stack); the finding's reproduction is also re-run with CI and the CI markers unset (env -u) and must pass with the fix and fail reverted. The same go test runs both: a check of the test binary itself is only the cheap layer (residual, ADR 0011).",
+      "src_content_deny": [
+        {
+          "name": "go_test_detection",
+          "pattern": "testing\\.Testing\\(\\)|flag\\.Lookup\\(\\s*\"test\\.|\"-test\\.|os\\.Args[^\\n]{0,80}\\.test\\b|^\\s*(?:import\\s+)?\"testing\"\\s*$"
+        },
+        {
+          "name": "go_ci_or_test_env_read",
+          "pattern": "os\\.Environ\\(\\)|os\\.(?:Getenv|LookupEnv)\\(\\s*\"(?i:ci|continuous_integration|go_?test\\w*|test\\w*)\""
+        },
+        {
+          "name": "go_stack_introspection",
+          "pattern": "runtime\\.(?:Callers|Caller|Stack|FuncForPC)\\b|debug\\.Stack\\(\\)"
+        }
+      ]
     },
     "npm": {
       "markers": [
@@ -279,7 +335,7 @@
       "parser": "npm",
       "cwd": "services/<service>",
       "target_example": "tests/<file>.test.ts::<test_name>",
-      "note": "only with a lockfile present (D7); no npm install is ever run by the engine and node_modules is never shipped to a verification checkout, so a test must run on Node's built-ins and the service's own sources. Node 22 has no collect-only mechanism: the junit report is cross-checked against the TAP stream and the exit code (stated in ADR 0011). A test's name must be an identifier (the TEST: grammar), matched with --test-name-pattern='^name$'.",
+      "note": "only with a lockfile present (D7); no npm install is ever run by the engine and node_modules is never shipped to a verification checkout, so a test must run on Node's built-ins and the service's own sources. Node 22 has no collect-only mechanism: the junit report is cross-checked against the TAP stream and the exit code (stated in ADR 0011). A test's name must be an identifier (the TEST: grammar), matched with --test-name-pattern='^name$'. Wave 22 (G1): src_content_deny refuses NODE_TEST_CONTEXT, node:test, --test argv checks, NODE_ENV === 'test', CI/TEST env reads and stack capture in the lines a fix adds to a source file; the reproduction is also re-run with the CI markers unset. node --test sets NODE_TEST_CONTEXT for the test process itself, which env -u cannot remove (residual, ADR 0011).",
       "test_infra_globs": [
         "package.json",
         "**/package.json",
@@ -315,7 +371,21 @@
           "pattern": "writeSync\\s*\\(\\s*1\\b|fs\\.write\\s*\\(\\s*1\\b|process\\.stdout\\.(?:write|_write)\\s*\\("
         }
       ],
-      "verified": true
+      "verified": true,
+      "src_content_deny": [
+        {
+          "name": "node_test_detection",
+          "pattern": "NODE_TEST_CONTEXT|['\"]node:test['\"]|process\\.(?:argv|execArgv)[^\\n]{0,80}--test|NODE_ENV[^\\n]{0,20}['\"]test['\"]"
+        },
+        {
+          "name": "node_ci_or_test_env_read",
+          "pattern": "process\\.env\\.(?i:ci|continuous_integration|test\\w*)\\b|process\\.env\\[\\s*['\"](?i:ci|continuous_integration|test\\w*)['\"]"
+        },
+        {
+          "name": "node_stack_introspection",
+          "pattern": "new\\s+Error\\(\\)\\.stack|Error\\.captureStackTrace|Error\\.prepareStackTrace|\\.callee\\b|\\.caller\\b"
+        }
+      ]
     }
   },
   "service_env": {

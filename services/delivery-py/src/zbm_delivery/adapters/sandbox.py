@@ -121,6 +121,11 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+class EngineBoxNotLive(RuntimeError):
+    """Wave 22 (G4, N21-D-4): the run stopped (cancel, deadline) before its engine container could be started or
+    recorded started; nothing runs in it (it was never started, or it was killed and removed at once)."""
+
+
 class RealDockerCli:
     """argv runner for the docker binary (the only subprocess site of this module; ``shell=False``)."""
 
@@ -396,8 +401,9 @@ class ZbmDockerSandbox(Sandbox):
             raise RuntimeError("sandbox exec refused: the ledger record failed (record-first)") from None
 
     def exec_argv(self, argv: Sequence[str], *, cwd: str = WORKSPACE, env: Optional[dict] = None,
-                  timeout: Optional[float] = None) -> ExecResult:
-        """Run ``argv`` in the container with no shell (the runner's test commands)."""
+                  timeout: Optional[float] = None, stdin: Optional[bytes] = None) -> ExecResult:
+        """Run ``argv`` in the container with no shell (the runner's test commands). ``stdin`` (wave 22): bytes fed to
+        the process's standard input (``docker exec -i``) — the standalone runner's request, never in argv or env."""
         if self.binding.finished:
             raise RuntimeError("sandbox released")
         argv = [str(a) for a in argv]
@@ -414,13 +420,16 @@ class ZbmDockerSandbox(Sandbox):
         self.binding.exec_seq += 1
         seq = self.binding.exec_seq
         command_sha = _sha(("\0".join(argv)).encode("utf-8", "surrogatepass"))
-        self._record_exec("requested", command_sha, cwd, list(env), {"argv_len": len(argv), "timeout_s": secs}, seq)
-        docker_argv = ["exec", "--user", UID, "-w", cwd]
+        extra = {"argv_len": len(argv), "timeout_s": secs}
+        if stdin is not None:
+            extra["stdin_sha256"] = _sha(stdin)
+        self._record_exec("requested", command_sha, cwd, list(env), extra, seq)
+        docker_argv = ["exec", "--user", UID, "-w", cwd] + (["-i"] if stdin is not None else [])
         for k in sorted(env):
             docker_argv += ["--env", f"{k}={env[k]}"]
         docker_argv += [self.container, "timeout", "-k", "5", str(secs), *argv]
         started = time.monotonic()
-        r = self._rt().docker.run(docker_argv, timeout_s=secs + 15, output_cap=OUTPUT_CAP)
+        r = self._rt().docker.run(docker_argv, timeout_s=secs + 15, output_cap=OUTPUT_CAP, stdin=stdin)
         if r.exit_code == 124 or r.timed_out:
             r = ExecResult(r.exit_code if r.exit_code else 124, r.stdout, r.stderr, True, r.truncated)
         self._record_exec("completed", command_sha, cwd, list(env),
@@ -768,6 +777,17 @@ class ZbmDockerSandboxProvider(SandboxProvider):
         os.chmod(env_file, 0o600)
         return env_file
 
+    @staticmethod
+    def _record_live(rt: registry.Runtime, binding: registry.RunBinding, *args) -> bool:
+        """Record ``args`` (``record``'s arguments) only while the run is live, atomically with the liveness check
+        (wave 22, G4: the service lock is held across the status read and the record, and cancel/deadline change the
+        status under the same lock). False: not live, nothing recorded."""
+        rif = getattr(rt, "record_if_live", None)
+        if rif is None:
+            rt.record(*args)
+            return True
+        return bool(rif(binding.status, *args))
+
     def _start_container(self, rt: registry.Runtime, binding: registry.RunBinding, sandbox_id: str,
                          *, name: Optional[str] = None, volume: Optional[str] = None, op: str = "run") -> ZbmDockerSandbox:
         if not daemon_available(rt.docker):
@@ -775,11 +795,16 @@ class ZbmDockerSandboxProvider(SandboxProvider):
         resolve_helper_bytes()                                    # R8: the helper we are about to mount matches its pin
         env_file = self._env_file(rt, binding.run_id)
         argv = self.run_argv(rt.settings, binding.run_id, env_file, name=name, volume=volume)
-        rt.record(derived_id("dk", binding.run_id, op, name or "agent"), "crossing_docker_requested", ACTOR, binding.run_id,
-                  {"run_id": binding.run_id, "op": op, "argv_sha256": _sha("\0".join(argv).encode()),
-                   "image": rt.settings.sandbox_image, "network": rt.settings.sandbox_network,
-                   "container": name or f"dlv-{binding.run_id}"},
-                  f"docker run requested ({binding.run_id})")
+        req = (derived_id("dk", binding.run_id, op, name or "agent"), "crossing_docker_requested", ACTOR, binding.run_id,
+               {"run_id": binding.run_id, "op": op, "argv_sha256": _sha("\0".join(argv).encode()),
+                "image": rt.settings.sandbox_image, "network": rt.settings.sandbox_network,
+                "container": name or f"dlv-{binding.run_id}"},
+               f"docker run requested ({binding.run_id})")
+        if op == "run_engine":
+            if not self._record_live(rt, binding, *req):          # G4: no container is started for a stopped run
+                raise EngineBoxNotLive("the run is not live: no engine container started")
+        else:
+            rt.record(*req)
         r = rt.docker.run(argv, timeout_s=120)
         if r.exit_code != 0:
             raise DockerUnavailable(f"docker run failed (exit {r.exit_code})")
@@ -834,12 +859,28 @@ class ZbmDockerSandboxProvider(SandboxProvider):
         with self._lock:
             self._engine_boxes[name] = box
         try:
-            rt.record(derived_id("ebx", binding.run_id, name), "engine_box_started", ACTOR, binding.run_id,
-                      {"run_id": binding.run_id, "tag": tag, "container": name, "container_id_sha256": box.container_id_sha256},
-                      f"Engine container started for {tag} ({binding.run_id})")
+            live = self._record_live(rt, binding, derived_id("ebx", binding.run_id, name), "engine_box_started", ACTOR,
+                                     binding.run_id, {"run_id": binding.run_id, "tag": tag, "container": name,
+                                                      "container_id_sha256": box.container_id_sha256},
+                                     f"Engine container started for {tag} ({binding.run_id})")
         except Exception:  # noqa: BLE001 - the ledger is down: the box must not be used
             self.destroy_box(box, binding.run_id)
             raise
+        if not live:
+            # G4 (N21-D-4): cancel/deadline landed while the container was starting — it is killed and removed now,
+            # recorded engine_box_killed_after_cancel; engine_box_started is never recorded for it
+            try:
+                rt.record(derived_id("ebk", binding.run_id, name), "engine_box_killed_after_cancel", ACTOR, binding.run_id,
+                          {"run_id": binding.run_id, "tag": tag, "container": name, "status": str(binding.status())[:40]},
+                          f"Engine container killed: the run stopped while it started ({binding.run_id})")
+            except Exception:  # noqa: BLE001 - unrecorded: the kill and the removal below still happen
+                rt.on_ledger_failure(binding.run_id, "engine_box_killed_after_cancel record failed")
+            rt.docker.run(["kill", name], timeout_s=30)
+            try:
+                self.destroy_box(box, binding.run_id)
+            except DockerUnavailable:
+                pass                                              # recorded sandbox_release_failed; the reaper removes it
+            raise EngineBoxNotLive("the run stopped while its engine container started: killed and removed")
         return box
 
     def ship_tree(self, box: ZbmDockerSandbox, host_dir: str, dest: str) -> int:

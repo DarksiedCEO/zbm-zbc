@@ -43,7 +43,10 @@ the test is the authority; the ENGINE (not you) runs every test that counts.
    why. The engine never runs a command you name: it re-runs the FINDING's own reproduction (the test node id the
    findings document names; every finding has one — a document without it is refused before any run exists) on the
    untouched base tree, and the finding is disproved only when that reproduction passes there. The same
-   reproduction must pass with your source changes and fail without them before the finding is `fixed`.
+   reproduction must pass with your source changes and fail without them before the finding is `fixed` — under the
+   test runner AND outside it (the engine also calls the test function by itself, with pytest not importable and
+   CI/PYTEST*/TEST* unset). Source code that behaves differently under test (checks for pytest, a test framework in
+   `sys.modules`, `PYTEST_*`/`CI`/`TEST*` variables, the caller's frames) is refused.
 6. After three failed hypotheses on one finding, reply `BLOCKED: architecture — <the three failed hypotheses>`.
 
 Reply text outside these lines is ignored. Words like "done", "complete", "all tests pass" change nothing.

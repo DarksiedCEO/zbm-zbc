@@ -98,8 +98,16 @@ reproduction_not_runnable` before a run exists (a review so refused is not recor
 that tree yet: attach the test yourself as the finding's `reproduction_test` = `{"path": <new test file, relative to
 the service directory>, "content": <its full text>}` and name `<path>::<test>` in `reproduction`. The engine runs it
 on the starting tree before anything is recorded — if it passes there the finding is refused `422
-reproduction_not_red` — then adds it to every tree it builds for the run (never to a commit) and records its sha256
-as reviewer-authored; the engineer may never write that path.
+reproduction_not_red`, and if the check cannot complete or verify it (no sandbox, a crossing that could not be
+recorded, an unknown verdict) `422 reproduction_red_unverified` — then adds it to every tree it builds for the run
+(never to a commit) and records its sha256 as reviewer-authored; the engineer may never write that path.
+
+The engine also runs a finding's reproduction OUTSIDE the test runner (the test function called by itself, pytest
+not importable, CI and PYTEST*/TEST* unset) with and without the fix; a fix that only works under the runner is
+refused. Write a reviewer-authored test as a plain function with plain asserts — no `import pytest`, no fixtures,
+no parametrization: a reproduction that needs pytest cannot be run outside it, and its finding can then end at
+best `needs_review_runner_dependent` — committed, NOT fixed, listed under "Needs review" in the report for you to
+judge (review pass → reviewed; review fail with it reopened → a new run).
 
 ## Part 2: Spec Compliance
 

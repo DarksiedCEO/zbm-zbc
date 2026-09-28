@@ -48,7 +48,7 @@ from typing import Optional
 from zbm_delivery import fsops, registry
 from zbm_delivery import reasons as R
 from zbm_delivery.adapters.identity import assert_effective, bound_user
-from zbm_delivery.adapters.sandbox import extract_tar
+from zbm_delivery.adapters.sandbox import EngineBoxNotLive, extract_tar
 from zbm_delivery.engine import brief as B
 from zbm_delivery.engine import parsers, report
 from zbm_delivery.errors import Unavailable
@@ -64,6 +64,9 @@ MIN_DISPROOF_STATEMENT = 40
 CAPTURED_BEGIN = "--- BEGIN CAPTURED OUTPUT (untrusted) ---"
 CAPTURED_END = "--- END CAPTURED OUTPUT ---"
 WATCHDOG_PERIOD_S = 0.25
+# the states a finding leaves a run in without failing it (wave 22: a runner-dependent reproduction is NOT fixed; the
+# run reaches awaiting_review and the report lists the finding under "Needs review", with its commit)
+DONE_STATES = ("fixed", "disproved", "needs_review_runner_dependent")
 
 
 class RunEnded(Exception):
@@ -301,7 +304,7 @@ class FixEngine:
             last = run_now["commits"][-1]["sha"] if run_now.get("commits") else base_sha
             after = self._suite(ctx, "after", tree=self._base_tree(last, run["service"], run_id), commit_sha=last)
             findings = self.svc.findings_get(run_id)
-            not_done = [f["finding_id"] for f in findings if f["state"] not in ("fixed", "disproved")]
+            not_done = [f["finding_id"] for f in findings if f["state"] not in DONE_STATES]
             if not_done:
                 self._fail(run_id, R.item("BLOCKED", f"{len(not_done)} finding(s) not fixed or disproved: "
                                                      + ", ".join(not_done[:10])))
@@ -423,7 +426,10 @@ class FixEngine:
         box = None
         try:
             self._check_live(run_id, ctx.interrupt)
-            box = ctx.provider.start_engine_box(ctx.binding, tag)
+            try:
+                box = ctx.provider.start_engine_box(ctx.binding, tag)
+            except EngineBoxNotLive:
+                raise RunEnded() from None        # G4: the run stopped while the box started (killed, recorded)
             ctx.provider.ship_tree(box, tree, ctx.runner.cwd)
             t = fn(box)
             if hasattr(t, "extra"):
@@ -638,7 +644,7 @@ class FixEngine:
         try:
             while True:
                 f = self.svc.findings_get_one(run_id, fid)
-                if f["state"] in ("fixed", "disproved", "blocked"):
+                if f["state"] in DONE_STATES + ("blocked",):
                     return
                 if rounds >= max_rounds:
                     self._block(run_id, fid, agent, f"no RED→GREEN or disproof within {max_rounds} rounds")
@@ -819,13 +825,17 @@ class FixEngine:
                     + ", ".join(f"{p}: {rule}" for p, rule in denied)
                     + "): a test must not exit the process, define its own main/TestMain, write to the runner's "
                     "transcript or reach for pytest's plugin manager/hooks. Remove that code and reply `FIXED`.")
-        denied = self._denied_content(runner, worktree, classes["src"], runner.denied_src_content)
+        denied = self._denied_added_src(runner, worktree, classes["src"],
+                                        set(self.git.diff_name_only(worktree, run_id=run_id)), self.git.diff(worktree, run_id=run_id))
         if denied:
             self._round_failed(run_id, fid, rounds, "src_content_denied", paths=[f"{p} ({rule})" for p, rule in denied][:20])
             self._back_to_red(run_id, fid, f)
             return ("A source file you changed matches a content rule the engine refuses ("
                     + ", ".join(f"{p}: {rule}" for p, rule in denied)
-                    + "): source code must not reach for pytest's internals or the plugin manager. Remove that code and reply `FIXED`.")
+                    + "): source code must not reach for the test runner's internals, detect that it runs under a test "
+                    "runner or CI (runner names, sys.modules lookups of test frameworks, PYTEST_/CI/TEST env reads, "
+                    "stack/frame introspection) or read its own process environment. A fix must behave the same under "
+                    "the runner and in production. Remove that code and reply `FIXED`.")
         # §C.8.4 step 8: every EXISTING test file the engineer touched needs a CHANGED_TEST line; a deleted one is refused
         tracked_changed = [p for p in self.git.diff_name_only(worktree, run_id=run_id) if not _junk(p)]
         touched_tests = [p for p in tracked_changed if runner.is_test_path(p)]
@@ -976,6 +986,11 @@ class FixEngine:
                                                                 "passes even without your source changes" if r_rev.verdict == "pass" else
                                                                 "could not be verified")
                     + self._tail(r_ver.output if r_ver.verdict != "pass" else r_rev.output))
+        # wave 22 (G1(b), N21-D-1): the finding's reproduction again, OUTSIDE the test runner — pass with the fix,
+        # fail on the reverted checkout — or the finding cannot be fixed (runner-dependent: needs review, never fixed)
+        solo_note = self._standalone_phase(ctx, f, repro, classes["src"], red_file, rounds)
+        if solo_note is not None:
+            return solo_note
         green = {"test_path": f["red"]["test_path"], "test_name": f["red"]["test_name"], **self._run_record(t), "evidence_id": ev}
         if not self.svc.finding_transition(run_id, fid, "green", {"green": green}, [ev], red_test_name=f["red"]["test_name"]):
             return "The GREEN transition was refused by the engine's invariants (no matching RED)."
@@ -1080,11 +1095,113 @@ class FixEngine:
             self._round_failed(run_id, fid, rounds, "commit_tree_mismatch", suite_tree_sha256=tree_sha, commit_tree_sha256=commit_tree_sha)
             self.svc.finding_transition(run_id, fid, "red", {}, [])
             return "The committed tree is not the tree the suite ran on; the engine refuses `fixed`. Reply `FIXED` to retry."
-        if not self.svc.finding_transition(run_id, fid, "fixed", {}, [ev_diff]):
-            return "The fixed transition was refused."
+        final = "fixed" if (self.svc.findings_get_one(run_id, fid).get("standalone_check") or {}).get("outcome") == "confirmed" \
+            else "needs_review_runner_dependent"
+        if not self.svc.finding_transition(run_id, fid, final, {}, [ev_diff]):
+            return f"The {final} transition was refused."
         ctx.head = sha
         ctx.current = counts
         return None
+
+    @staticmethod
+    def _added_lines(diff_text: str) -> dict[str, list[str]]:
+        """{repo path: the lines the diff ADDS to it} (``+`` lines of each file's hunks)."""
+        out: dict[str, list[str]] = {}
+        cur: Optional[str] = None
+        for ln in diff_text.splitlines():
+            if ln.startswith("+++ "):
+                p = ln[4:].strip()
+                cur = (p[2:] if p.startswith("b/") else p) if p != "/dev/null" else None
+                if cur is not None:
+                    out.setdefault(cur, [])
+                continue
+            if ln.startswith("--- ") or ln.startswith("diff --git "):
+                continue
+            if cur is not None and ln.startswith("+"):
+                out[cur].append(ln[1:])
+        return out
+
+    @classmethod
+    def _denied_added_src(cls, runner: TestRunner, worktree: str, paths: list[str], tracked: set,
+                          diff_text: str) -> list[tuple[str, str]]:
+        """Wave 22 (G1(a)): the ``src_content_deny`` rules over the lines a fix ADDS to each changed source file (a
+        tracked file: its diff's ``+`` lines; a new, untracked file: every line), one line at a time — so a rule
+        never fires on what the base already had, and ``^``/``$`` anchor to a line."""
+        added = cls._added_lines(diff_text)
+        out = []
+        for p in paths:
+            full = os.path.join(worktree, p)
+            if p in tracked:
+                lines = added.get(p, [])
+            else:
+                if not os.path.isfile(full) or os.path.islink(full):
+                    continue
+                try:
+                    with open(full, "r", encoding="utf-8", errors="replace") as fh:
+                        lines = fh.read().splitlines()
+                except OSError:
+                    continue
+            for line in lines:
+                rule = runner.denied_src_content(line)
+                if rule:
+                    out.append((p, rule))
+                    break
+        return out
+
+    def _standalone_phase(self, ctx: "_RunCtx", f: dict, repro: str, src: list[str], red_file: str,
+                          rounds: int) -> Optional[str]:
+        """G1(b): the finding's reproduction re-run OUTSIDE the test runner in two fresh engine containers — the
+        verification checkout (HEAD + the src changes + the RED test file) and the reverted one (HEAD + the RED test
+        file). pytest: the pinned standalone runner (``python -I``, pytest not importable, CI/PYTEST*/TEST*
+        scrubbed); go/cargo/node: the toolchain with the CI markers unset. Recorded ``reproduction_standalone_checked``
+        and kept as the finding's ``standalone_check`` (outcome ``confirmed`` or ``runner_dependent``); a
+        ``runner_dependent`` outcome continues to the commit but ends ``needs_review_runner_dependent``, never
+        ``fixed``. Returns the note for the next turn when the round fails, else None."""
+        run, runner = ctx.run, ctx.runner
+        run_id, fid = run["run_id"], f["finding_id"]
+        solo = runner.run_standalone if runner.framework == "pytest" else runner.run_scrubbed
+        how = "standalone" if runner.framework == "pytest" else "scrubbed_env"
+        s_ver = self._verdict_box(ctx, self._tree(ctx, src + [red_file]), "soloverify", lambda box: solo(box, repro))
+        s_rev = self._verdict_box(ctx, self._tree(ctx, [red_file]), "soloreverted", lambda box: solo(box, repro))
+        joined = (s_rev.output + "\n--- reproduction outside the test runner, verification checkout ---\n" + s_ver.output)
+        ev = self.svc.evidence_put(run_id, "test_output", joined.encode("utf-8", "surrogatepass"))
+        v, rv = s_ver.verdict, s_rev.verdict
+        conftest = bool((s_ver.extra.get("standalone") or {}).get("conftest") or (s_rev.extra.get("standalone") or {}).get("conftest"))
+        if v == "pass" and rv == "fail":
+            outcome, why = "confirmed", None
+        elif "unknown" in (v, rv):
+            outcome, why = "unknown", "standalone_unknown"
+        elif "runner_dependent" in (v, rv) or conftest:
+            # a test that needs pytest (imports it, takes fixtures, is parametrized, …) — or one whose service has a
+            # conftest.py on its path, whose autouse fixtures a standalone run cannot provide — cannot confirm the fix
+            outcome, why = "runner_dependent", None
+        elif v == "fail":
+            outcome, why = "runner_detected", "fix_depends_on_the_test_runner"
+        else:
+            outcome, why = "runner_detected", "reproduction_passes_without_fix_outside_the_runner"
+        rec = {"how": how, "target": repro, "outcome": outcome, "conftest": conftest,
+               "verification": {**self._run_record(s_ver), "evidence_id": ev, **(s_ver.extra.get("standalone") or {})},
+               "reverted": {**self._run_record(s_rev), "evidence_id": ev, **(s_rev.extra.get("standalone") or {})}}
+        self.svc.finding_update(run_id, fid, "reproduction_standalone_checked",
+                                {"run_id": run_id, "finding_id": fid, "target": repro, "how": how, "outcome": outcome,
+                                 "verification_verdict": v, "reverted_verdict": rv, "conftest": conftest,
+                                 "evidence_id": ev},
+                                f"Reproduction outside the runner for {fid}: verification {v}, reverted {rv} → {outcome} ({run_id})",
+                                {"standalone_check": rec})
+        if why is None:
+            return None
+        self._round_failed(run_id, fid, rounds, why, evidence_id=ev)
+        self._back_to_red(run_id, fid, f)
+        if why == "standalone_unknown":
+            return (f"The engine re-ran the finding's reproduction `{repro}` outside the test runner and could not verify "
+                    f"the result (verification checkout: {v}; reverted: {rv}). Fix the root cause in the source and reply "
+                    "`FIXED`." + self._tail(s_ver.output if v == "unknown" else s_rev.output))
+        return (f"The finding's reproduction `{repro}` passes under the test runner with your change but %s when the "
+                "engine runs the same test function OUTSIDE the runner (pytest not importable, CI/PYTEST*/TEST* not set; "
+                f"verification checkout: {v}; reverted: {rv}). Your change behaves differently under test than in "
+                "production. Fix the root cause so the code is correct whatever runs it, and reply `FIXED`."
+                % ("fails" if v == "fail" else "does not fail without it")
+                + self._tail(s_ver.output if v != "pass" else s_rev.output))
 
     @staticmethod
     def _denied_content(runner: TestRunner, worktree: str, paths: list[str], rule_fn) -> list[tuple[str, str]]:

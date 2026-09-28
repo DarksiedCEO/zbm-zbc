@@ -74,9 +74,9 @@ ledger-anchored local log with the instance lease and Andre's reconcile).
 | `config/deerflow.engine.yaml` | `e4d51379594e0f7dc2265a0fee0ff25aa7134b1e6aecabe91b291a1d18064f0e` (wave 19: `subagents.max_total_per_run: 1`, deer-flow's floor, with subagents disabled in code) |
 | `config/extensions_config.json` | `4875b2992e9062d6f8084ac64d543f50a29624bd0e7eb82586e31b3056563807` |
 | `seed/skills_manifest.json` | `26f51402a23232a6b3f6a5764829800c3570403e2694ee1a9f331fe23e040320` |
-| `seed/prompts_manifest.json` | `7090c2d48d25f257231c2578e931594bcb30a095599aee08cf59b51e3ee99d37` (wave 21: `engine.system.md` rule 5, `brief.template.md` names the finding's reproduction argv, `reviewer.md` requires a runnable reproduction for every finding filed, `CHANGES.md`; wave 19: `engine.system.md` rules 2 and 5 restated for R1/R3) |
+| `seed/prompts_manifest.json` | `263f568ec1ab8f858f3fa37e559b8e7765a0e085b1a74ce91c1bcc97b7a8599f` (wave 22: engine.system.md rule 5 and reviewer.md on the reproduction outside the runner, `reproduction_red_unverified`; wave 21: `engine.system.md` rule 5, `brief.template.md` names the finding's reproduction argv, `reviewer.md` requires a runnable reproduction for every finding filed, `CHANGES.md`; wave 19: `engine.system.md` rules 2 and 5 restated for R1/R3) |
 | `seed/tool_policy_seed.json` | `078560a463fd04a11fb3a358e8ebc5a1a782dcedfbd635192bc9a77738787f4d` (wave 20: `pylint`/`isort`/`pre-commit` in the exec allowlist, R6/R9 notes) |
-| `seed/test_commands_seed.json` | `eed14d324f00cfac09dc085bd362113740138ac68ff5c7c1eb7669749ae54785` (wave 21: pytest `test_content_deny` gains `process_exit`, `fd_write`, `capture_bypass`; wave 20: pytest `test_content_deny` for re-plugging spellings, `src_content_deny`, `zbm_engine_plugin*` as test infra; toolchain amendment: go/cargo/npm `verified: true` with their engine argv, `collect`, `target_example`, `test_content_deny`, per-ecosystem `test_infra_globs`; pytest markers no longer include a bare `tests/`; `service_env` gains the toolchain determinism switches) |
+| `seed/test_commands_seed.json` | `7af32cf3eeb92446638d3c66ba6efe5af06e4aa1d70afdd18d1c4241487bb0f3` (wave 22: `src_content_deny` runner-detection rules for all four ecosystems, applied to added lines; wave 21: pytest `test_content_deny` gains `process_exit`, `fd_write`, `capture_bypass`; wave 20: pytest `test_content_deny` for re-plugging spellings, `src_content_deny`, `zbm_engine_plugin*` as test infra; toolchain amendment: go/cargo/npm `verified: true` with their engine argv, `collect`, `target_example`, `test_content_deny`, per-ecosystem `test_infra_globs`; pytest markers no longer include a bare `tests/`; `service_env` gains the toolchain determinism switches) |
 | `seed/licence_allowlist.json` | `c02f367f3e6cd02949e18dbc2eaa2ceabcb917ac4aa5fc58ad73bec4ac6dfb6e` (wave 19: `unrecorded_allow`) |
 | `seed/licence_exceptions.json` | `e93abd348a10f89838e11a19c7f52994e18a20f4d52a6809b49a0a6fafe53606` (wave 20 close-out: `speechrecognition` removed from the lock instead of excepted; wave 19: `dotenv`, `tiktoken`) |
 | `docs/evidence/licences-2026-09-27.json` (the licence report) | `f154e1b56befac3a939d69cfeece434516d172fa0c6aedbfbaeab464d1ee0e8d` (wave 19: dotenv + tiktoken via file exceptions) |
@@ -720,12 +720,108 @@ Pins after this commit: `seed/prompts_manifest.json` `110d732ebddd6b1154845c78da
 (engine.system.md, reviewer.md, CHANGES.md re-pinned);
 `seed/test_commands_seed.json` and `seed/tool_policy_seed.json` unchanged.
 
+## Round 21 amendments (fix wave 22, Sep 28, 2026; lead rulings G1-G4, binding)
+
+- **G1 — runner detection (N21-D-1).** Round 21 showed two fake fixes reaching `fixed`: a source change returning
+  the "fixed" value only when `"pytest" in sys.modules` (P1, an existing-node reproduction) and one raising only when
+  `PYTEST_CURRENT_TEST` is set (P3, a reviewer-authored reproduction); every runner-bound check — GREEN, the
+  verification and reverted checkouts, the single-file revert, the reproduction check, the suite — ran under pytest
+  and was fooled. Two layers now:
+  - *(a) cheap:* `src_content_deny` (seed) refuses, in the lines a fix ADDS to a source file (a new source file:
+    all of it; wave 21 applied the old rule to the whole file, so base content could deny a fix forever),
+    test-runner name literals (`"pytest"`, `"_pytest"`, `"zbm_standalone…"`), `sys.modules` lookups of test
+    frameworks, `PYTEST_` names, `os.environ`/`getenv` reads of `CI`/`PYTEST*`/`TEST*`/`TESTING`, `unittest.mock`,
+    frame/stack introspection (`inspect.stack/currentframe`, `sys._getframe`, `f_back`, `traceback.extract_stack`
+    …), `/proc/self/environ|cmdline`, `sys.flags`; go/cargo/node get the equivalent (`testing.Testing()`, the
+    `-test.*` flags and the `testing` import in a non-test file, `CI`/`TEST*` env reads, `runtime.Caller`;
+    `RUST_TEST*`, `cfg!(test)`, `env::var("CI"|"TEST*"|"CARGO_*")`; `NODE_TEST_CONTEXT`, `node:test`,
+    `NODE_ENV === 'test'`, `process.env.CI`). A regex over text — the reviewers' P1 and P3 now end
+    `src_content_denied` → `blocked` — and a spelling it does not know passes it.
+  - *(b) structural — runner-independent re-execution.* After the reproduction check passes, the engine runs the
+    finding's reproduction again in two more fresh engine containers — the verification checkout (HEAD + the src
+    changes + the RED test file) and the reverted one (HEAD + the RED test file) — OUTSIDE the test runner. pytest
+    services: `adapters/tools/zbm_standalone_runner.py`, hash pinned in `runner.py` (`STANDALONE_SHA256`), run
+    read-only from the tools mount as `python3 -I /mnt/dlv/zbm_standalone_runner.py`; the request (nonce, report
+    path, service dir, the seed's `pythonpath`, the test) arrives on stdin (`docker exec -i`; never argv/env);
+    stage 1 re-execs the interpreter with `CI`, `CONTINUOUS_INTEGRATION`, the common CI markers and every
+    `PYTEST*`/`TEST*`/`_PYTEST*` name removed from the new process's initial environment (so `/proc/self/environ`
+    lacks them too); stage 2 installs an import hook that refuses `pytest`/`_pytest`/`pytest_*`
+    (`ModuleNotFoundError`, what production sees), drops any such module a `.pth` imported, sets `sys.path` to the
+    test's import root + the seed's `pythonpath` + the interpreter's own entries, imports the test module under
+    the name pytest gives it and calls the function (a `unittest.TestCase` through unittest). Deviation from the
+    ruling's wording, stated: `python -I` ignores `PYTHONPATH` and user site, so the path and the import block are
+    set by the pinned runner itself as its first statements rather than by `PYTHONPATH` + a `sitecustomize`. The
+    verdict is the runner's report file (`O_CREAT|O_EXCL|O_NOFOLLOW`, 0600, written only after the function
+    returned or raised, read back with `docker cp`), which must carry the nonce and agree with the exit code
+    (0 pass, 1 fail, 3 runner_dependent) — `os._exit(0)` from the code under test leaves no report: `unknown`.
+    A test that needs pytest — it imports pytest, takes fixtures, is parametrized, async or a generator, relies on
+    xunit `setup_*`/`teardown_*`, or skips itself — is `runner_dependent`, never `pass`. go/cargo/node: the
+    seeded targeted run through the verified toolchain again with `env -u` of `SCRUB_ENV_NAMES` (`CI` and the CI
+    markers). Recorded `reproduction_standalone_checked` and kept as the finding's `standalone_check`
+    (`how`, `outcome`, both verdicts, the runner's `why`, `conftest`). Outcome: verification pass and reverted fail
+    → `confirmed`; either `unknown` → round failed `standalone_unknown`; either `runner_dependent`, or a failure
+    when a `conftest.py` sits on the test's path (its autouse fixtures cannot be provided outside pytest) →
+    `runner_dependent`; otherwise → round failed `fix_depends_on_the_test_runner` (verification fail) or
+    `reproduction_passes_without_fix_outside_the_runner`. The states invariant: `fixed` requires
+    `standalone_check.outcome == "confirmed"` for the reproduction's own target; a `runner_dependent` outcome
+    continues through the sweep, suite and commit and ends in the new finding state
+    **`needs_review_runner_dependent`** — committed, NOT fixed, listed in the report under "Needs review — NOT
+    fixed"; the run reaches `awaiting_review` (a review pass → `reviewed`; a fail reopening it → a new run). The
+    reviewer prompt asks for reviewer-authored tests without pytest imports or fixtures. Probes: the reviewers' P1
+    and P3 end `blocked` (layer a); `tests/test_round22.py` obfuscates both past layer (a) and they still never
+    reach `fixed` (layer b: P1 `fix_depends_on_the_test_runner`; P3 with a plain reviewer test the same; P3 with
+    the reviewers' pytest-importing test `needs_review_runner_dependent`), and a Go fix conditional on `CI`
+    fails the scrubbed-env re-run.
+- **G2 — the reviewer-test RED check is admission (N21-D-2).** The unlocked pre-checks (`_precheck_document`,
+  `_precheck_review`) are gone: their early returns (a docker or ledger blip) admitted the document with NO RED
+  check (round 21 A/B/C: 202, the finding later `disproved`, no `reproduction_red_checked`). `create_fix_run` now
+  runs `_red_check_locked` under the service lock after the static checks; `review` runs it for the child's
+  reviewer tests on the run's head before the review is recorded and hands the event ids to the child's
+  `create_fix_run` inside the same lock hold. A pass → 422 `reproduction_not_red`; any exception (the container
+  could not start or run, a crossing that could not be recorded), `Unavailable`, an `unknown` verdict, a RED
+  verdict that could not be recorded, no engine or sandbox → 422 **`reproduction_red_unverified`** (DLV-19),
+  refusal recorded when the ledger answers, nothing created. The finding record's `reviewer_test` carries
+  `red_checked_event_id`; `fixed`, `disproved` and `needs_review_runner_dependent` require it (states invariant).
+  A container run under the service lock stalls every other record for its duration — the cost of making the
+  check part of admission, accepted by the ruling. A blip BEFORE the RED stage is the normal path's own refusal:
+  docker down → 503 `SANDBOX_UNAVAILABLE`, a git crossing that could not be recorded → 503; neither admits.
+- **G3 — ports (N21-D-3).** `tests/conftest.py` keeps `DLV_TEST_PORT_RANGE` (it popped every `DLV_*`, so the
+  operator's range never reached a live test; the round-20 test proved "comes from the environment" by setting the
+  variable itself). `test_round22.py::test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests` sets it on a
+  child pytest from outside; the round-20 test is now only the parser's test. `helpers.free_live_port` probes with
+  `SO_REUSEADDR` (a port in TIME_WAIT is free for a server). The live launcher and the round-19 plugin tests run
+  `sys.executable` (the suite's interpreter), not a venv inside the worktree.
+- **G4 — cancel vs a starting engine container (N21-D-4).** `start_engine_box` records `crossing_docker_requested`
+  and `engine_box_started` through `Runtime.record_if_live` (`DeliveryService._record_if_live`: the run's status
+  read and the record under ONE hold of the service lock; cancel and the deadline change the status under the same
+  lock). A run already stopped → no container is requested; a run stopped while the container started → it is
+  `docker kill`ed and removed, recorded `engine_box_killed_after_cancel`, never `engine_box_started`
+  (`EngineBoxNotLive` → the loop's `RunEnded`). `test_n19_e4` asserts nothing but post-mortem events (now incl.
+  `engine_box_killed_after_cancel`) follows `fix_run_cancelled`, and never `engine_box_started` or a docker run
+  request.
+
+Pins after this commit: `seed/test_commands_seed.json` `7af32cf3eeb92446638d3c66ba6efe5af06e4aa1d70afdd18d1c4241487bb0f3`,
+`seed/prompts_manifest.json` `263f568ec1ab8f858f3fa37e559b8e7765a0e085b1a74ce91c1bcc97b7a8599f` (engine.system.md rule 5,
+reviewer.md, CHANGES.md), `adapters/tools/zbm_standalone_runner.py` `e1f917d8b9b1fd2d3812a3634849d4b6955d274b2f7bcc06e8728d4e483055e8`
+(`runner.STANDALONE_SHA256`); `graceful_close.py` (the module shared by the ten Python services; ADR 0003 §9).
+
 ## Known limitations
 
 - The tool-call classifier is a denylist over an unbounded language (df-exec F-03): it is the record and the
   first refusal; an interpreter/shell/make invocation is recorded as `allow_opaque` (R5) and the BOUNDARY is the
   sandbox (non-root, `--cap-drop=ALL`, default seccomp, `--read-only`, `--network none`, no socket mount, no
   `.git`, no `curl`/`wget`) — and those properties are unproven on this box.
+- Runner detection (wave 22, G1): the standalone re-execution defeats a fix conditional on pytest (its modules,
+  its environment, its runner) — not one conditional on "not production" in general. Code under test runs in the
+  same process and uid as the standalone runner: it can still tell a test run from production by signals the cheap
+  layer does not spell (`sys.flags.isolated` spelled indirectly, the test module in `sys.modules`, walking the
+  frames up to the runner and reading its nonce, `os.environ` iterated instead of indexed), and a forgery that finds
+  the nonce and writes the report is the same residual as the pytest plugin's. go/cargo/node have no standalone
+  runner: their re-run is the same toolchain with the CI markers unset, so `testing.Testing()`, Node's
+  `NODE_TEST_CONTEXT` (set by `node --test` for the test process itself; `env -u` cannot remove it) and the libtest
+  harness's own arguments stay detectable by a spelling the cheap rules miss. A reproduction that needs pytest
+  (fixtures, `pytest.raises`, parametrization) — or whose service has a `conftest.py` on the test's path — can
+  never confirm a fix: it ends `needs_review_runner_dependent`, i.e. a human decides.
 - What a lazy or hostile agent can still do to reach `awaiting_review` with the defect intact (after wave 20):
   for a finding whose `reproduction` names NO test node id, write a RED test that is a tautology tied to the
   finding's file (it asserts a marker the "fix" adds to that file) — the file hunk, the single-file revert, the
