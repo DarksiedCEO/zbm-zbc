@@ -1,6 +1,6 @@
 {
   "policy_version": 1,
-  "description": "Tool-call classes for the fix engine's guardrail (DEPT28_SPEC B.5, D6). Hash pinned in config.py; changed only through the rules pattern (an ADR 0011 amendment). The classifier in policy.py reads this file; the decisions are code. bash commands are split into simple commands on ; && || | and each argv is classified; the whole call takes the most restrictive class.",
+  "description": "Tool-call classes for the fix engine's guardrail (DEPT28_SPEC B.5, D6). Hash pinned in config.py; changed only through the rules pattern (an ADR 0011 amendment). The classifier in policy.py reads this file; the decisions are code. bash commands are split into simple commands on ; && || | and each argv is classified; the whole call takes the most restrictive class. Round 19 R6: a command carrying a line separator (\\n, \\r, NUL, \\f, \\v, U+2028/2029, U+0085) is refused multiline_command before tokenising.",
   "classes": {
     "read": {
       "decision": "allow",
@@ -16,8 +16,8 @@
     },
     "exec": {
       "decision": "allow_with_token",
-      "bash_argv0": ["python", "python3", "pytest", "cargo", "go", "npm", "mkdir", "cp", "mv", "rm", "sed", "awk", "touch", "chmod", "ln", "tee", "sh", "bash", "ruff", "black", "mypy", "node", "rustc", "gofmt", "make"],
-      "note": "rm/find with a target outside the workspace, sh -c/bash -c, python -c mentioning subprocess/os.system, and every network verb are re-classified by the rules below; test commands are runner-captured when they match test_commands_seed.json"
+      "bash_argv0": ["python", "python3", "pytest", "cargo", "go", "npm", "mkdir", "cp", "mv", "rm", "sed", "awk", "touch", "chmod", "ln", "tee", "sh", "bash", "ruff", "black", "mypy", "pylint", "isort", "pre-commit", "node", "rustc", "gofmt", "make"],
+      "note": "rm/find with a target outside the workspace, sh -c/bash -c, python -c mentioning subprocess/os.system, and every network verb are re-classified by the rules below; test commands are runner-captured when they match test_commands_seed.json. Round 19 R9: mypy/pylint/black/isort/pre-commit/ruff/gofmt are recorded allow_opaque (they load plugins or configuration from the tree)"
     },
     "subagent": {
       "decision": "allow_with_token",

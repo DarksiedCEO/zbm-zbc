@@ -1,0 +1,4 @@
+            assert eg._inflight, "the request never reached the body-read phase"
+>           assert n == 1 and not th.is_alive(), out
+E           assert (1 == 1 and not True)
+1 failed, 1 warning in 16.08s

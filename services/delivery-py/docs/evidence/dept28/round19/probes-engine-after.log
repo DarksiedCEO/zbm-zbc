@@ -1,0 +1,146 @@
+=== probe_e1_newmodule
+{
+ "label": "e1a-new-module",
+ "status": "failed",
+ "reasons": [
+  {
+   "code": "BLOCKED",
+   "rule_id": "DLV-12",
+   "message": "1 finding(s) not fixed or disproved: N1-1",
+   "evidence_ids": []
+  }
+ ],
+ "commits": [],
+ "findings": [
+  {
+   "finding_id": "N1-1",
+   "state": "blocked",
+   "rounds": 3,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  }
+ ],
+ "round_failed": [
+  "finding_file_unchanged",
+  "finding_file_unchanged"
+ ],
+ "suite_after": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+=== probe_e1b
+{
+ "label": "e1b-new-module-N1-2",
+ "status": "failed",
+ "reasons": [
+  {
+   "code": "BLOCKED",
+   "rule_id": "DLV-12",
+   "message": "1 finding(s) not fixed or disproved: N1-2",
+   "evidence_ids": []
+  }
+ ],
+ "commits": [
+  {
+   "sha": "737ab63f1e134ef671a65dfccb5ba90fdb2b9c27",
+   "message_sha256": "944dcf2eb51d14ff57b8ecb3677eda06c275b4e43e8c4d4da74ec371f5f970c6",
+   "files": [
+    "services/toy-py/src/toy/calc.py",
+    "services/toy-py/tests/test_fix_n1_1.py"
+   ],
+   "finding_id": "N1-1",
+   "diff_evidence_id": "dlv-ev-8eaa85cd02ead57517c464ee6c",
+   "tree_sha256": "5f2aa028507763554fe83ebf52b687708eeb19bb5225c832eb6e673f990ad418"
+  }
+ ],
+ "findings": [
+  {
+   "finding_id": "N1-1",
+   "state": "fixed",
+   "rounds": 1,
+   "commit_files": [
+=== probe_e2_flip
+{
+ "label": "e2-flip-plugin",
+ "status": "failed",
+ "reasons": [
+  {
+   "code": "BLOCKED",
+   "rule_id": "DLV-12",
+   "message": "2 finding(s) not fixed or disproved: N1-1, N1-2",
+   "evidence_ids": []
+  }
+ ],
+ "commits": [],
+ "findings": [
+  {
+   "finding_id": "N1-1",
+   "state": "blocked",
+   "rounds": 3,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  },
+  {
+   "finding_id": "N1-2",
+   "state": "blocked",
+   "rounds": 1,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  }
+ ],
+=== probe_e3_skip
+{
+ "label": "e3-skip-changed-test",
+ "status": "failed",
+ "reasons": [
+  {
+   "code": "BLOCKED",
+   "rule_id": "DLV-12",
+   "message": "1 finding(s) not fixed or disproved: N1-1",
+   "evidence_ids": []
+  }
+ ],
+ "commits": [],
+ "findings": [
+  {
+   "finding_id": "N1-1",
+   "state": "blocked",
+   "rounds": 3,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  }
+ ],
+ "round_failed": [
+  "changed_test_denied",
+  "changed_test_unexplained"
+ ],
+ "suite_after": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+=== probe_e4_cancel
+   "tests/test_calc.py::test_add_returns_sum"
+  ],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 3
+ },
+}
+events after fix_run_cancelled: ['local_log_appended', 'local_log_appended', 'sandbox_kill_requested', 'local_log_appended', 'sandbox_kill_requested', 'local_log_appended', 'run_interrupted', 'local_log_appended', 'sandbox_exec_completed', 'local_log_appended', 'sandbox_exec_requested', 'local_log_appended', 'sandbox_exec_completed', 'local_log_appended', 'engine_box_released', 'local_log_appended', 'agent_usage', 'local_log_appended', 'agent_usage_linked', 'local_log_appended', 'sandbox_released', 'local_log_appended']
+finding states in the cancel event vs final: [None] [('N1-1', 'red')]
+45776cb fixture: toy-py on the integration branch
+=== probe_rename
+           ~~~~~~~~~~~~~~~~~^^^^^^
+tests/test_calc_old.py -> failed ['test_deleted', 'test_deleted'] [('N1-1', 'blocked')]
+           ~~~~~~~~~~~~~~~~~^^^^^^
+tests/calc_check.txt -> failed ['test_deleted', 'test_deleted'] [('N1-1', 'blocked')]
+=== probe_baseline
+           ~~~~~~~~~~~~~~~~~^^^^^^
+           ~~~~~~~~~~~~~~~~~^^^^^^
+awaiting_review [] 14.257893562316895

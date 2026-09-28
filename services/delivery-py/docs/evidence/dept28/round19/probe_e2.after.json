@@ -1,0 +1,68 @@
+{
+ "label": "e2-flip-plugin",
+ "status": "failed",
+ "reasons": [
+  {
+   "code": "BLOCKED",
+   "rule_id": "DLV-12",
+   "message": "2 finding(s) not fixed or disproved: N1-1, N1-2",
+   "evidence_ids": []
+  }
+ ],
+ "commits": [],
+ "findings": [
+  {
+   "finding_id": "N1-1",
+   "state": "blocked",
+   "rounds": 3,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  },
+  {
+   "finding_id": "N1-2",
+   "state": "blocked",
+   "rounds": 1,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  }
+ ],
+ "round_failed": [
+  "test_content_denied",
+  "test_content_denied",
+  "test_content_denied"
+ ],
+ "suite_after": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+  "skips": 0,
+  "failed_names": [
+   "tests/test_calc.py::test_add_returns_sum"
+  ],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 3
+ },
+ "suite_before": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+  "skips": 0,
+  "failed_names": [
+   "tests/test_calc.py::test_add_returns_sum"
+  ],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 3
+ },
+ "secs": 8.0,
+ "worktree": "/tmp/dlv-test-ofsm4j2m/worktrees/fix1-toy-py",
+ "run_id": "dlv-run-MF2SEDCVBTCWBJXMSCQTFX819X",
+ "calc_add_defect_intact": true
+}

@@ -1,0 +1,59 @@
+{
+ "label": "e1a-new-module",
+ "status": "failed",
+ "reasons": [
+  {
+   "code": "BLOCKED",
+   "rule_id": "DLV-12",
+   "message": "1 finding(s) not fixed or disproved: N1-1",
+   "evidence_ids": []
+  }
+ ],
+ "commits": [],
+ "findings": [
+  {
+   "finding_id": "N1-1",
+   "state": "blocked",
+   "rounds": 3,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  }
+ ],
+ "round_failed": [
+  "finding_file_unchanged",
+  "finding_file_unchanged"
+ ],
+ "suite_after": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+  "skips": 0,
+  "failed_names": [
+   "tests/test_calc.py::test_add_returns_sum"
+  ],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 3
+ },
+ "suite_before": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+  "skips": 0,
+  "failed_names": [
+   "tests/test_calc.py::test_add_returns_sum"
+  ],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 3
+ },
+ "secs": 7.4,
+ "worktree": "/tmp/dlv-test-j7ybrwvg/worktrees/fix1-toy-py",
+ "run_id": "dlv-run-12EDFD19CZHACEG4D4MPFAZW6V",
+ "calc_add_defect_intact": true
+}

@@ -69,6 +69,20 @@ def parse_target(url: str) -> tuple[str, int]:
     return host, port
 
 
+def _shutdown_socket(resp) -> bool:
+    """``SHUT_RDWR`` on the response's network socket (httpcore exposes it as the ``network_stream`` extension); a
+    mock transport has none — False then, and ``close()`` is all that happens."""
+    try:
+        stream = (resp.extensions or {}).get("network_stream")
+        sock = stream.get_extra_info("socket") if stream is not None else None
+        if sock is None:
+            return False
+        sock.shutdown(2)                          # SHUT_RDWR (the socket module is never imported here: G13)
+        return True
+    except Exception:  # noqa: BLE001 - already closed, or not a socket
+        return False
+
+
 class EgressClient:
     def __init__(self, allow_hosts: tuple, *, record, default_timeout_s: float = 10.0, llm_read_timeout_s: float = 60.0,
                  transport: Optional[httpx.BaseTransport] = None, env: Optional[dict] = None):
@@ -98,13 +112,15 @@ class EgressClient:
         self._client.close()
 
     def abort(self, run_id: str) -> int:
-        """Close every in-flight response of ``run_id`` (R6: a cancel or the watchdog interrupts the LLM call). Returns
-        how many were closed."""
+        """Close every in-flight response of ``run_id`` (R6: a cancel or the watchdog interrupts the LLM call). R12
+        (N19-A-6): the underlying socket is ``shutdown(SHUT_RDWR)`` first, so a reader blocked in ``recv`` with no
+        bytes arriving returns at once instead of after the read timeout. Returns how many were closed."""
         with self._lock:
             victims = [(k, r) for k, (rid, r) in self._inflight.items() if rid == run_id]
             for k, _ in victims:
                 self._aborted.add(k)
         for _, resp in victims:
+            _shutdown_socket(resp)
             try:
                 resp.close()
             except Exception:  # noqa: BLE001

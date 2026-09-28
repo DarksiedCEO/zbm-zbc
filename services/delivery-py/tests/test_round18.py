@@ -217,7 +217,8 @@ def test_n18_e2_fix_that_lives_in_a_test_helper_is_fix_not_in_source():
         run, f = _one(h)
         assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == []
         whys = [e["payload"].get("why") for e in h.events("round_failed")]
-        assert "fix_not_in_source" in whys or "no_source_change" in whys, whys
+        # wave 20 (R2a): the finding's file carries no hunk of the fix, refused before GREEN even runs
+        assert "fix_not_in_source" in whys or "no_source_change" in whys or "finding_file_unchanged" in whys, whys
     finally:
         h.close()
 
@@ -610,6 +611,7 @@ def test_n18_s6_write_through_symlink_with_missing_intermediate_is_refused():
         set_current_user(type("U", (), {"id": b.principal_user_id})())
         h.svc._resolve_sandbox_path = lambda run_id, path: None
         registry.runtime().resolve_sandbox_path = lambda run_id, path: None
+        registry.runtime().resolve_sandbox_paths = lambda run_id, paths: [None] * len(paths)    # wave 20 R8: one call, all operands
         dec = ZbmGuardrailProvider().evaluate(GuardrailRequest(tool_name="bash", tool_input={"command": "rm -rf services/toy-py/build"},
                                                                thread_id=b.thread_id, user_id=b.principal_user_id))
         assert not dec.allow
@@ -848,7 +850,7 @@ def test_p14_cargo_src_is_not_a_test_path():
     tmp = tempfile.mkdtemp()
     os.makedirs(os.path.join(tmp, "services", "ledger-rust"))
     open(os.path.join(tmp, "services", "ledger-rust", "Cargo.toml"), "w").write("[package]\n")
-    r = TestRunner(seed, "ledger-rust", None, tmp, 10)
+    r = TestRunner(seed, "ledger-rust", tmp, 10)
     assert r.is_test_path("services/ledger-rust/src/ledger/mod.rs") is False
     assert r.is_test_path("services/ledger-rust/tests/it.rs") is True
     assert r.is_test_infra_path("services/ledger-rust/Cargo.toml") is True

@@ -133,25 +133,28 @@ class _WireBackend:
         self.base_url = base_url.rstrip("/")
 
     @staticmethod
-    def _run_scope() -> tuple[str, Optional[float]]:
+    def _run_scope() -> tuple[str, float]:
         """(run_id, remaining wall clock seconds) of the run whose turn is in flight — the binding whose principal is
-        the effective user id (R6: the egress total deadline never exceeds the run's remaining wall clock)."""
-        try:
-            from datetime import timezone
+        the effective user id (R6: the egress total deadline never exceeds the run's remaining wall clock). R14
+        (N19-A-12): fails CLOSED — no bound live run, no runtime, or any error → ``EgressRefused`` (no LLM call
+        leaves the box without a run id and a deadline cap)."""
+        from datetime import timezone
 
-            from deerflow.runtime.user_context import get_effective_user_id
+        from deerflow.runtime.user_context import get_effective_user_id
+        try:
             uid = get_effective_user_id()
-            rt = registry.runtime_or_none()
-            for b in registry.all_bindings():
-                if b.principal_user_id == uid:
-                    remaining = None
-                    if rt is not None:
-                        now = rt.clock.now().astimezone(timezone.utc)
-                        remaining = max(0.0, (b.deadline_at - now).total_seconds())
-                    return b.run_id, remaining
-        except Exception:  # noqa: BLE001
-            pass
-        return "-", None
+        except Exception as exc:  # noqa: BLE001
+            raise EgressRefused(f"LLM call refused: no effective user ({type(exc).__name__})") from None
+        rt = registry.runtime_or_none()
+        if rt is None or uid in (None, "", "default"):
+            raise EgressRefused("LLM call refused: no runtime or no effective user bound to this thread")
+        now = rt.clock.now().astimezone(timezone.utc)
+        for b in registry.all_bindings():
+            if b.principal_user_id == uid:
+                if not b.live(now):
+                    raise EgressRefused("LLM call refused: the bound run is not live")
+                return b.run_id, max(0.0, (b.deadline_at - now).total_seconds())
+        raise EgressRefused("LLM call refused: no run is bound to the effective user")
 
     def _post(self, url: str, headers: dict, payload: dict) -> dict:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")

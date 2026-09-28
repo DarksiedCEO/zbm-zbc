@@ -12,6 +12,11 @@ Round 18: ``remote`` (no arguments: the listing) is a read — a run worktree mu
 has nowhere to go even if the classifier is wrong; a linked worktree shares the repository's config, so the
 repository itself must be remote-less); ``archive`` (``git archive --format=tar <sha> -- <path>``) is the read the
 engine's split-diff verification checkout is built from (R1).
+
+Round 19 R11 (N19-A-7): every git command runs with a PRIVATE empty ``HOME`` (a temp directory the port owns),
+``GIT_CONFIG_GLOBAL=/dev/null``, ``GIT_CONFIG_NOSYSTEM=1`` and ``-c core.hooksPath=<empty engine dir>`` /
+``-c core.fsmonitor=false`` on every argv — a ``.gitconfig`` or a hooks directory tracked in the worktree can
+neither become git's global config nor run a hook on the engine's commit.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ import hashlib
 import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
@@ -51,6 +57,23 @@ def _check_path(p: str) -> str:
     return p
 
 
+_ISOLATION_DIR = tempfile.mkdtemp(prefix="dlv-git-")          # private HOME and an EMPTY hooks dir, per process
+_PRIVATE_HOME = os.path.join(_ISOLATION_DIR, "home")
+_EMPTY_HOOKS = os.path.join(_ISOLATION_DIR, "hooks")
+os.makedirs(_PRIVATE_HOME, exist_ok=True)
+os.makedirs(_EMPTY_HOOKS, exist_ok=True)
+ISOLATION_ARGS = ("-c", f"core.hooksPath={_EMPTY_HOOKS}", "-c", "core.fsmonitor=false")
+
+
+def git_env() -> dict:
+    """The environment of every git command (R11): a private empty HOME, no global or system config."""
+    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": _PRIVATE_HOME, "LANG": "C.UTF-8",
+            "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+            "XDG_CONFIG_HOME": os.path.join(_PRIVATE_HOME, "xdg"),
+            "GIT_AUTHOR_NAME": "zbm-fix-engine", "GIT_AUTHOR_EMAIL": "fix-engine@zbm.invalid",
+            "GIT_COMMITTER_NAME": "zbm-fix-engine", "GIT_COMMITTER_EMAIL": "fix-engine@zbm.invalid"}
+
+
 class GitPort:
     def __init__(self, repo_path: str, *, record: Callable[..., str], runner: Optional[Callable] = None):
         if not repo_path or not os.path.isdir(os.path.join(repo_path, ".git")) and not os.path.isfile(os.path.join(repo_path, ".git")):
@@ -65,12 +88,8 @@ class GitPort:
 
     @staticmethod
     def _subprocess(argv: Sequence[str], cwd: str) -> GitResult:
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": cwd, "LANG": "C.UTF-8",
-               "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "zbm-fix-engine",
-               "GIT_AUTHOR_EMAIL": "fix-engine@zbm.invalid", "GIT_COMMITTER_NAME": "zbm-fix-engine",
-               "GIT_COMMITTER_EMAIL": "fix-engine@zbm.invalid"}
         try:
-            r = subprocess.run(list(argv), cwd=cwd, capture_output=True, timeout=TIMEOUT_S, shell=False, env=env,
+            r = subprocess.run(list(argv), cwd=cwd, capture_output=True, timeout=TIMEOUT_S, shell=False, env=git_env(),
                                stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             return GitResult(124, "", "git command timed out")
@@ -79,7 +98,7 @@ class GitPort:
         return GitResult(r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"))
 
     def _git(self, op: str, args: list[str], cwd: str, run_id: str = "-") -> GitResult:
-        argv = ["git", "-C", cwd, *args]
+        argv = ["git", *ISOLATION_ARGS, "-C", cwd, *args]
         self._seq += 1
         self.record(derived_id("gt", run_id, self._seq, op, hashlib.sha256("\0".join(argv).encode()).hexdigest()),
                     "crossing_git_requested", ACTOR, run_id if run_id != "-" else "git",
@@ -184,7 +203,7 @@ class GitPort:
         if not _SHA_RE.fullmatch(sha):
             raise GitRefused("bad sha")
         _check_path(path)
-        argv = ["git", "-C", self.repo, "archive", "--format=tar", sha, "--", path]
+        argv = ["git", *ISOLATION_ARGS, "-C", self.repo, "archive", "--format=tar", sha, "--", path]
         self._seq += 1
         self.record(derived_id("gt", run_id, self._seq, "archive", hashlib.sha256("\0".join(argv).encode()).hexdigest()),
                     "crossing_git_requested", ACTOR, run_id if run_id != "-" else "git",
@@ -198,10 +217,8 @@ class GitPort:
 
     @staticmethod
     def _run_bytes(argv: Sequence[str], cwd: str) -> tuple[int, bytes]:
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": cwd, "LANG": "C.UTF-8", "GIT_TERMINAL_PROMPT": "0",
-               "GIT_CONFIG_NOSYSTEM": "1"}
         try:
-            r = subprocess.run(list(argv), cwd=cwd, capture_output=True, timeout=TIMEOUT_S, shell=False, env=env,
+            r = subprocess.run(list(argv), cwd=cwd, capture_output=True, timeout=TIMEOUT_S, shell=False, env=git_env(),
                                stdin=subprocess.DEVNULL)
         except (subprocess.TimeoutExpired, OSError):
             return 124, b""

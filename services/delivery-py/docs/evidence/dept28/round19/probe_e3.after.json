@@ -1,0 +1,59 @@
+{
+ "label": "e3-skip-changed-test",
+ "status": "failed",
+ "reasons": [
+  {
+   "code": "BLOCKED",
+   "rule_id": "DLV-12",
+   "message": "1 finding(s) not fixed or disproved: N1-1",
+   "evidence_ids": []
+  }
+ ],
+ "commits": [],
+ "findings": [
+  {
+   "finding_id": "N1-1",
+   "state": "blocked",
+   "rounds": 3,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  }
+ ],
+ "round_failed": [
+  "changed_test_denied",
+  "changed_test_unexplained"
+ ],
+ "suite_after": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+  "skips": 0,
+  "failed_names": [
+   "tests/test_calc.py::test_add_returns_sum"
+  ],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 3
+ },
+ "suite_before": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+  "skips": 0,
+  "failed_names": [
+   "tests/test_calc.py::test_add_returns_sum"
+  ],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 3
+ },
+ "secs": 7.4,
+ "worktree": "/tmp/dlv-test-c8hdzaxr/worktrees/fix1-toy-py",
+ "run_id": "dlv-run-9GMPEPD53MS31BXZPWC207CX1R",
+ "calc_add_defect_intact": true
+}

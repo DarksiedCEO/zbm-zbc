@@ -67,8 +67,7 @@ def run_transition_problem(frm: str, to: str) -> Optional[str]:
     return None
 
 
-def finding_transition_problem(rec: dict, to: str, *, red_test_name: Optional[str] = None,
-                               suite_after_commit: bool = False) -> Optional[str]:
+def finding_transition_problem(rec: dict, to: str, *, red_test_name: Optional[str] = None) -> Optional[str]:
     """§B.3 invariants. ``rec`` is the finding record before the transition."""
     frm = rec.get("state")
     if to not in FINDING_TRANSITIONS.get(frm, set()):
@@ -89,14 +88,29 @@ def finding_transition_problem(rec: dict, to: str, *, red_test_name: Optional[st
         if not rc or rc.get("exit") == 0 or rc.get("verdict", "fail") != "fail":
             return "fixed requires a revert check that failed with the fix reverted"
         v = rec.get("verification") or {}
-        if v and (v.get("verification_checkout", {}).get("verdict") != "pass" or v.get("reverted_checkout", {}).get("verdict") != "fail"):
+        if not v:
+            return "fixed requires a verification record (R1; N19-E-6)"
+        if v.get("verification_checkout", {}).get("verdict") != "pass" or v.get("reverted_checkout", {}).get("verdict") != "fail":
             return "fixed requires the verification checkout to pass and the reverted checkout to fail (R1)"
+        if not rec.get("finding_file_hunk"):
+            return "fixed requires the finding's file to carry a hunk of the fix (R2)"
+        sf = rec.get("single_file_revert") or {}
+        if sf.get("verdict") != "fail" or sf.get("file") != rec.get("file"):
+            return "fixed requires the single-file revert of the finding's file to fail the RED test (R2)"
+        rp = rec.get("repro_check")
+        if rp is not None and (rp.get("verification", {}).get("verdict") != "pass" or rp.get("reverted", {}).get("verdict") != "fail"):
+            return "fixed requires the finding's reproduction to pass with the fix and fail without it (R2)"
+        so = rec.get("src_only_check")
+        if so is not None and so.get("verdict") != "pass":
+            return "fixed requires the claimed baseline failures to pass on base + the source changes alone"
         if not rec.get("sweep"):
             return "fixed requires a sweep record"
-        if not suite_after_commit:
-            return "fixed requires a suite run after the commit"
+        if not rec.get("suite_tree_sha256") or rec.get("suite_tree_sha256") != rec.get("commit_tree_sha256"):
+            return "fixed requires the suite to have run on the committed tree (tree digests must match; N19-E-6)"
         if rec.get("suite_failures"):
             return "fixed requires a green suite (failures remain)"
+        if rec.get("outcome_regressions"):
+            return "fixed requires no outcome regression against the baseline (R3)"
     if to == "disproved":
         d = rec.get("disproof")
         if not d or not d.get("reproduction_argv") or d.get("output_sha256") is None or not d.get("statement_sha256"):

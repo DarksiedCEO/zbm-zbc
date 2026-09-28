@@ -1,0 +1,180 @@
+   newline: echo then curl            deny          unknown                          opaque=False targets=[]  # network verb after a NEWLINE
+   newline: cat then git push         deny          unknown                          opaque=False targets=[]  # git_remote after a NEWLINE
+   newline: ls then rm -rf ws         deny          unknown                          opaque=False targets=[]  # rm of the workspace after a NEWLINE
+   newline: ls then rm -rf .dlv-engine deny          unknown                          opaque=False targets=[]  # engine dir wiped after a NEWLINE
+   newline: ls then cp into .dlv-engine deny          unknown                          opaque=False targets=[]  # write outside roots after a NEWLINE
+   newline: ls then bash -c           deny          unknown                          opaque=False targets=[]  # raw rule still catches 'bash -c' (expected deny)
+   newline: ls then pip install       deny          unknown                          opaque=False targets=[]  # network argv0 after NEWLINE (pattern 'pip install' in raw ->
+   CR only: ls then curl              deny          unknown                          opaque=False targets=[]  # CR as separator (bash treats \r as part of the word; harmles
+   cp -t outside root                 deny          destructive_outside_workspace    opaque=False targets=[]  # cp --target-directory: the real destination is the -t operan
+   cp --target-directory=             deny          destructive_outside_workspace    opaque=False targets=[]  # long form
+   mv -t outside root                 deny          destructive_outside_workspace    opaque=False targets=[]  # mv -t
+   ln -t outside root                 deny          destructive_outside_workspace    opaque=False targets=[]  # ln -t
+   chmod -x outside root              deny          destructive_outside_workspace    opaque=False targets=[]  # chmod with a dash-mode: the mode is taken as a flag, operand
+   chmod -R -w outside                deny          destructive_outside_workspace    opaque=False targets=[]  # chmod -R -w on the workspace root
+   chmod =x                           deny          destructive_outside_workspace    opaque=False targets=[]  # chmod =mode (no dash, first positional is the mode)
+   sed --in-place outside             deny          destructive_outside_workspace    opaque=False targets=[]  # sed long-form in-place (not '-i')
+   sed -i inside                      allow_opaque  exec                             opaque=True  targets=[$WS/services/toy-py/x.py]  # control: sed -i inside root
+   mypy (config plugins)              allow_opaque  exec                             opaque=True  targets=[]  # mypy loads plugins from pyproject/mypy.ini in the write root
+   ruff                               allow_opaque  exec                             opaque=True  targets=[]  # control
+   black                              allow_opaque  exec                             opaque=True  targets=[]  # control
+   2>file outside root                deny          destructive_outside_workspace    opaque=False targets=[]  # stderr redirection outside the roots
+   2> file (split) outside            deny          destructive_outside_workspace    opaque=False targets=[]  # split form
+   &> outside                         deny          destructive_outside_workspace    opaque=False targets=[]  # &> form
+   >| outside                         deny          destructive_outside_workspace    opaque=False targets=[]  # clobber form
+   1>>file inside                     allow         exec                             opaque=False targets=[$WS/services/toy-py/log]  # control inside
+   here-doc body with git push        deny          unknown                          opaque=False targets=[]  # here-doc body tokens become argv
+   cd -                               allow         exec                             opaque=False targets=[$WS/services/toy-py/-/x]  # cd - is OLDPWD (workspace) -> tee x lands at ws/x; the model
+   cd with trailing slash tricks      allow         exec                             opaque=False targets=[$WS/services/toy-py/b]  # control
+   -- then outside path               deny          destructive_outside_workspace    opaque=False targets=[]  # -- handling
+   quoted operand                     allow         exec                             opaque=False targets=[$WS/services/toy-py/a b]  # control quoted
+   docs/adr arbitrary name            deny          destructive_outside_workspace    opaque=False targets=[]  # bash write allowed anywhere under docs/adr; the write tool a
+   docs/adr subdir                    deny          destructive_outside_workspace    opaque=False targets=[]  # same
+   touch -d date                      allow         exec                             opaque=False targets=[$WS/services/toy-py/x]  # false positive check: date operand
+   find -delete inside                allow_opaque  exec                             opaque=True  targets=[$WS/services/toy-py]  # control: glob in -name is not an operand
+   find -exec rm outside start        deny          unknown                          opaque=False targets=[]  # find -exec with an rm of an outside path: only the start dir
+   find -execdir cp outside           deny          destructive_outside_workspace    opaque=False targets=[]  # same with cp
+   git --git-dir opaque               allow_opaque  exec                             opaque=True  targets=[]  # expected: exec opaque
+   git -c pager                       allow_opaque  exec                             opaque=True  targets=[]  # expected: exec opaque
+   pytest -p plugin                   allow_opaque  exec                             opaque=True  targets=[]  # expected: exec opaque
+   python -m pip                      deny          network                          opaque=False targets=[]  # expected: network deny (pattern)
+   python3 -m pip (split)             deny          network                          opaque=False targets=[]  # double space defeats the joined pattern? tokens are re-joine
+   uv run                             deny          unknown                          opaque=False targets=[]  # uv not in seed -> unknown deny
+   perl                               deny          unknown                          opaque=False targets=[]  # perl not in exec seed -> unknown deny
+   background daemon                  allow_opaque  exec                             opaque=True  targets=[]  # expected: allow_opaque; the daemon outlives the exec
+   bash script then rm script         allow_opaque  exec                             opaque=True  targets=[$WS/services/toy-py/d.sh]  # daemon launched, script removed from the diff
+   cp from container fs into root     allow         exec                             opaque=False targets=[$WS/services/toy-py/etc]  # source outside is a read; lands in the diff
+   tee to /dev/stderr                 allow         read                             opaque=False targets=[]  # control /dev/
+   dd of=                             deny          unknown                          opaque=False targets=[]  # dd not in exec seed -> unknown
+   mkdir deep (amplification)         allow         exec                             opaque=False targets=[$WS/services/toy-py/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/]  # one operand, 40 components -> the guardrail resolves it with
+   touch many (amplification)         deny          unknown                          opaque=False targets=[]  # 2000 operands -> 2000 readlink execs (each recorded twice) b
+
+0 of 50 rows: effect is a denied class / an out-of-root write, record says a classified allow
+/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/fix20/probes/adapters/p1b_variants.py:13: SyntaxWarning: invalid escape sequence '\;'
+  ("find -exec cp outside \;", f"find services/toy-py -name x -exec cp {{}} {WS}/.dlv-engine/ \;"),
+/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/fix20/probes/adapters/p1b_variants.py:13: SyntaxWarning: invalid escape sequence '\;'
+  ("find -exec cp outside \;", f"find services/toy-py -name x -exec cp {{}} {WS}/.dlv-engine/ \;"),
+cd; cp -t outside                        deny          destructive_outside_workspace    opaque=False ntargets=0 targets=[]
+cd; mv -t outside                        deny          destructive_outside_workspace    opaque=False ntargets=0 targets=[]
+cd; cp --target-directory outside        deny          destructive_outside_workspace    opaque=False ntargets=0 targets=[]
+cd; install -t                           deny          unknown                          opaque=False ntargets=0 targets=[]
+find -exec rm outside +                  deny          unknown                          opaque=False ntargets=0 targets=[]
+find -exec cp outside \;                 deny          unknown                          opaque=False ntargets=0 targets=[]
+newline in the middle of args            deny          unknown                          opaque=False ntargets=0 targets=[]
+newline then write_file-equivalent tee   deny          unknown                          opaque=False ntargets=0 targets=[]
+newline then ln into engine dir          deny          unknown                          opaque=False ntargets=0 targets=[]
+touch 600 (amplification)                deny          unknown                          opaque=False ntargets=0 targets=[]
+mkdir 500 deep                           deny          unknown                          opaque=False ntargets=0 targets=[]
+tab separated                            allow         read                             opaque=False ntargets=0 targets=[]
+form feed                                deny          unknown                          opaque=False ntargets=0 targets=[]
+vertical tab                             deny          unknown                          opaque=False ntargets=0 targets=[]
+=== p2_runargv19
+  --network none (ours)                            PASSES
+  --network=none                                   PASSES
+  --network=NONE                                   caught '--network=NONE'
+  --network host                                   caught '--network host'
+  --network=host                                   caught '--network=host'
+  --net host                                       caught '--net host'
+  --net=bridge                                     caught '--net=bridge'
+  --network container:x                            caught '--network container:x'
+  --network=bridge                                 caught '--network=bridge'
+  --network mynet                                  caught '--network mynet'
+  --network  host (2 spaces in join)               caught '--network'
+  --security-opt apparmor=unconfined (2 tokens)    caught '--security-opt apparmor=unconfined'
+  --security-opt=apparmor=unconfined               caught '--security-opt=apparmor=unconfined'
+  --security-opt seccomp=unconfined                caught '--security-opt seccomp=unconfined'
+  --security-opt systempaths=unconfined            caught '--security-opt systempaths=unconfined'
+  --security-opt label=disable                     caught '--security-opt label=disable'
+  --pid host (2 tokens)                            caught '--pid'
+  --pid=host                                       caught '--pid'
+  --userns host                                    caught '--userns'
+  --ipc host                                       caught '--ipc'
+  --ipc=host                                       caught '--ipc'
+  --cgroupns host                                  caught '--cgroupns'
+  --uts host                                       caught '--uts'
+  --add-host x:1.2.3.4                             caught '--add-host'
+  --privileged                                     caught '--privileged'
+  --cap-add SYS_ADMIN                              caught '--cap-add'
+  --device /dev/sda                                caught '--device'
+  --gpus all                                       caught '--gpus'
+  -v /:/host                                       caught '-v'
+  --volume /:/host                                 caught '--volume'
+  --mount type=bind,src=/,dst=/host                caught '--mount type=bind,src=/,dst=/host'
+  --mount ... docker.sock                          caught '--mount type=bind,src=/var/run/docker.sock,dst=/s'
+  unicode dashes ‐‐network host                    caught '‐‐network'
+  --dns 1.1.1.1                                    caught '--dns'
+  --sysctl net.ipv4.ip_forward=1                   caught '--sysctl'
+  --ulimit                                         PASSES
+forms that pass the check (unreachable from run_argv as built, but the check would not stop a future edit): ['--ulimit']
+    argv = S.ZbmDockerSandboxProvider.run_argv(St, "r", "/tmp/e.env")
+PermissionError: the skills root path cannot be a mount source (must be an absolute directory with no ',', '=' or ':')
+=== p3_contain19
+== (a) amplification: docker execs and ledger records spent by ONE bash tool call before its decision ==
+  mkdir 500 deep (missing)     allow=False docker_execs=0     ledger_records=1       0.0s (local double; a real docker exec is ~50-150 ms each)
+  touch 600 files              allow=False docker_execs=0     ledger_records=1       0.0s (local double; a real docker exec is ~50-150 ms each)
+  control: touch 1 file        allow=True  docker_execs=1     ledger_records=4       0.0s (local double; a real docker exec is ~50-150 ms each)
+== (b) DF file tools: write through an in-volume symlink into the engine directory ==
+  bash 'ln -s $WS/.dlv-engine/abcd1234 services/toy-py/eng' -> ALLOW
+  guardrail on write_file services/toy-py/eng/engine-deadbeef0000.ini -> ALLOW class=write
+  sandbox.write_file through the link -> refused: symlink escape refused: the write resolves outside the write roots (R7)
+  engine ini now reads: '[pytest]\naddopts =\n'
+  bash 'tee services/toy-py/eng/engine-...ini' -> deny (a write operand resolves outside the service directory (symlink))
+== (c) the staging directory is inside the agent-owned volume ==
+  STAGE_DIR = /mnt/user-data/workspace/.dlv-write | ENGINE_DIR = /mnt/user-data/workspace/.dlv-engine | same uid as the agent's execs: 65532:65532
+  stage dir left behind after a write: none (parent .dlv-stage kept: False )
+  a bash 'ln -s /tmp $WS/.dlv-stage' by the agent is refused by the operand rule: True | but 'python d.py' (opaque) or a NEWLINE-joined command can do it (p1)
+=== p5_reap19
+containers: ['dlv-dlv-run-A', 'dlv-dlv-run-B'] volumes: ['dlv-ws-dlv-run-A', 'dlv-ws-dlv-run-B']
+(a) failing ledger: reaped=[] rm/volume-rm calls=0 containers left=['dlv-dlv-run-A', 'dlv-dlv-run-B']
+(b) `docker ps` exit 1: reaped=[('volume', 'dlv-ws-dlv-run-A'), ('volume', 'dlv-ws-dlv-run-B')] events=[('sandbox_reap_failed', 'reaper'), ('sandbox_reaped', 'dlv-run-A'), ('sandbox_reaped', 'dlv-run-B')] (containers untouched, no event says the sweep failed)
+(c) real `docker ps -a --filter label=zbm.dlv.run --format ...` stderr first line: failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory
+    -> with quiet+format the CLI prints container IDs only; reap() then parses parts[0]=<id>, run_id='' for every container
+    reap() with ID-only ps output -> events: [('sandbox_reaped', 'reaper', '', 'container'), ('sandbox_reaped', 'reaper', '', 'container')]
+(d) destroy raised DockerUnavailable: sandbox release failed: container exit 1; events=[('sandbox_release_failed', [{'kind': 'container', 'exit': 1}])]; provider forgot the box: True; binding.finished=True
+(d2) destroy with rm failing AND ledger down raised DockerUnavailable (sandbox release failed: container exit 1) -> the loop's `except Exception: pass` swallows it; sandbox_released is NOT recorded; nothing marks the run
+=== p6_licence19
+problems:
+  - clfie 1.0: metadata says MIT but the bundled licence file(s) read AGPL-3.0
+  - legacy-single 1.0: METADATA Name 'totally-fine' does not match the distribution directory 'legacy-single'
+  - twoexpr 1.0: METADATA carries License-Expression twice (which one applies is undefined)
+  - clfie: importable top-level entry with no distribution record (vendored package without metadata; spec C.7.2)
+  - cover: importable top-level entry with no distribution record (vendored package without metadata; spec C.7.2)
+  - eggnorec: importable top-level entry with no distribution record (vendored package without metadata; spec C.7.2)
+  - nspkg: importable top-level entry with no distribution record (vendored package without metadata; spec C.7.2)
+  - pather.pth: importable top-level entry with no distribution record (vendored package without metadata; spec C.7.2)
+  - twoexpr: importable top-level entry with no distribution record (vendored package without metadata; spec C.7.2)
+  - vendored_agpl: importable top-level entry with no distribution record (vendored package without metadata; spec C.7.2)
+  - pather.pth: adds /tmp/p6-outside-4l6f6xhw to sys.path, outside the virtual environment (never scanned by this gate)
+dists seen: [('clfie', 'MIT', 'classifier', False), ('cover', 'MIT', 'expression', True), ('eggnorec', 'MIT', 'expression', True), ('legacy-single', 'UNKNOWN', 'none', False), ('pather', 'MIT', 'expression', True), ('twoexpr', 'UNKNOWN', 'none', False)]
+readings:
+  1 eggnorec (egg-info, no RECORD): top-level dir flagged
+  2 nspkg namespace dir: flagged
+  3 agplhidden via pather.pth (outside path): NEVER SCANNED (the .pth line is a path, not a top-level entry; the gate walks one directory)
+  4 twoexpr (MIT then AGPL fields): ['UNKNOWN'] -> first field wins
+  5 clfie (classifier MIT, LICENSE AGPL): [('MIT', 'classifier', 'metadata says MIT but the bundled licence file(s) read AGPL-3.0')]
+  6 vendored_agpl covered by cover's RECORD: flagged
+  7 _virtualenv.py content is never read; unrecorded_allow matches the bare name: True
+  8 legacy single-file egg-info spoofed Name: [('legacy-single', "METADATA Name 'totally-fine' does not match the distribution directory 'legacy-single'")]
+real venv /home/claude/wt/fix20/services/delivery-py/.venv/lib/python3.13/site-packages: 189 dists, problems=[]
+real venv .pth files: ['coloredlogs.pth', '_virtualenv.pth'] | coloredlogs.pth is an exec() line (import-time code) recorded by coloredlogs' RECORD
+=== p7_recordfirst19
+    runner = TestRunner(tseed, "toy-py", box, repo, 60)
+TypeError: TestRunner.__init__() takes 5 positional arguments but 6 were given
+=== p7 (adapted: the wave-20 constructor/ship_tree/prepare_box names; same questions)
+== working ledger: events recorded vs docker calls made, per new effect ==
+  verification checkout: events=['sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed'] docker=[['exec', '--user', '65532:65532'], ['cp', '-', 'dlv-dlv-run-P7:/mnt/user-data/workspace/']] err=None
+    -> the mkdir exec is recorded; the `docker cp` that ships the tree is NOT (no crossing_docker_requested / cp_in event)
+  engine ini write: events=['sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed'] docker=['exec', 'exec', 'cp', 'exec', 'exec', 'exec', 'exec', 'exec', 'exec', 'cp', 'exec', 'exec', 'exec', 'exec', 'exec'] err=None
+  junit read-back get_bytes: events=['sandbox_exec_requested', 'sandbox_exec_completed'] docker=[['cp', 'dlv-dlv-run-P7:/mnt/user-data/workspace/services/toy-py/j.xml', '-']] err=None
+    -> a `docker cp` out with no event of its own (the sha lands in the later suite_run/test event)
+  copy_in (pre-existing, for comparison): events=['sandbox_exec_requested', 'sandbox_exec_completed', 'sandbox_exec_requested', 'sandbox_exec_completed'] docker=['cp', 'exec']
+== dead ledger from now on: which effects still happen? ==
+  verification checkout: docker=[] err=RuntimeError: sandbox exec refused: the ledger record failed (record-first  (stopped only because the mkdir exec is record-first)
+  junit read-back: docker=[] err=RuntimeError: sandbox exec refused: the ledger record failed (record-first  -> proceeds with a dead ledger
+  copy_in: docker=[] err=RuntimeError: sandbox exec refused: the ledger record failed (record-first  -> the cp proceeds; the post-copy `test ! -e .git` exec then refuses
+  disproof/RED re-run (run_test): docker=[] err=RuntimeError: sandbox exec refused: the ledger record failed (record-first  -> refused before any exec (record-first holds)
+  ledger dies right after the mkdir: docker=['exec'] err=RuntimeError: sandbox exec refused: the ledger record failed (record-first -> the tree is shipped with no event after the mkdir
+(1) trickle 1 B/0.5 s, llm total 4 s  -> EgressFailed: egress total deadline exceeded while reading the response after 4.0s
+(2) headers then silence, read 20 s; abort('r1') at 2.0 s closed 1 response(s) -> EgressFailed: egress aborted (run interrupted) 0.0s AFTER the abort (2.0s total)
+(2b) headers then silence, deadline_s=3 (read 20 s) -> EgressFailed: transport error: ConnectTimeout after 3.0s
+(3) TLS handshake stall, deadline_s=3; abort at 1 s closed 0 (nothing in flight yet) -> EgressFailed: transport error: ConnectTimeout after 3.0s

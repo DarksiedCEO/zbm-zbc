@@ -9,10 +9,18 @@ directory's name (a spoofed name is a problem, and the forbidden-distribution ch
 top-level entry of site-packages must be covered by some distribution's ``RECORD`` (a vendored package with no
 metadata is a problem) unless the allowlist names it under ``unrecorded_allow``. Run at start (``gate.py``) and by
 ``devtools/licence_gate.py`` (which writes the JSON report under ``docs/evidence/``).
+
+Round 19 R13 (N19-A-9): a ``.pth`` path line naming a directory outside the virtual environment is a problem, one
+inside it is scanned as a further site directory; a top-level entry is covered by a distribution only when that
+distribution's RECORD lists files under it WITH hashes that verify on disk (a bare line "covers" nothing); a
+METADATA with two ``License-Expression`` / ``License`` fields is a problem; a metadata licence that contradicts every
+bundled LICENSE file whose heading is recognised is a problem (the classifier-vs-file residual of wave 19 is closed).
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
 import re
 from dataclasses import dataclass, field
@@ -48,8 +56,19 @@ _CLASSIFIER = re.compile(r"^License :: (?:OSI Approved :: )?(.+)$")
 _FIRST_LINE = {
     "mit license": "MIT", "the mit license (mit)": "MIT", "apache license": "Apache-2.0", "bsd 3-clause license": "BSD-3-Clause",
     "bsd 2-clause license": "BSD-2-Clause", "isc license": "ISC", "mozilla public license version 2.0": "MPL-2.0",
+    "mozilla public license, version 2.0": "MPL-2.0",
+    "gnu affero general public license": "AGPL-3.0", "gnu general public license": "GPL-3.0",
+    "gnu lesser general public license": "LGPL-3.0", "gnu library general public license": "LGPL-2.0",
+    "eclipse public license": "EPL-2.0", "the unlicense": "Unlicense", "server side public license": "SSPL-1.0",
+    "business source license": "BUSL-1.1", "elastic license": "Elastic-2.0",
     "copyright (c)": "UNKNOWN",
 }
+_GPL_FAMILY = {"AGPL-3.0": ("AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later"),
+               "GPL-3.0": ("GPL-3.0", "GPL-3.0-only", "GPL-3.0-or-later", "GPL-2.0", "GPL-2.0-only", "GPL-2.0-or-later"),
+               "LGPL-3.0": ("LGPL-3.0", "LGPL-3.0-only", "LGPL-3.0-or-later", "LGPL-2.1", "LGPL-2.1-only", "LGPL-2.1-or-later", "LGPL-2.0"),
+               "LGPL-2.0": ("LGPL-2.0", "LGPL-2.1", "LGPL-3.0"), "MPL-2.0": ("MPL-2.0",), "EPL-2.0": ("EPL-2.0", "EPL-1.0"),
+               # a bare "BSD" in metadata normalises to 3-clause; a 2-clause file is the same permissive family
+               "BSD-2-Clause": ("BSD-2-Clause", "BSD-3-Clause", "0BSD"), "BSD-3-Clause": ("BSD-3-Clause", "BSD-2-Clause", "0BSD")}
 
 
 @dataclass
@@ -131,6 +150,52 @@ def _first_line_licence(dist_info: str) -> tuple[str, str]:
     return "", ""
 
 
+def licence_file_ids(dist_info: str) -> list[str]:
+    """The SPDX id read from the heading of EVERY bundled LICENSE*/LICENCE*/COPYING* file (top level and
+    ``licenses/``), unknown headings dropped: what the distribution itself ships, next to what its metadata says."""
+    out: list[str] = []
+    for sub in ("", "licenses", "license_files"):
+        d = os.path.join(dist_info, sub) if sub else dist_info
+        if not os.path.isdir(d):
+            continue
+        for name in sorted(os.listdir(d)):
+            if not name.upper().startswith(("LICENSE", "LICENCE", "COPYING")):
+                continue
+            try:
+                with open(os.path.join(d, name), "r", encoding="utf-8", errors="replace") as fh:
+                    for ln in fh:
+                        if ln.strip():
+                            first = " ".join(ln.strip().split()).lower()
+                            found = ""
+                            for k, v in _FIRST_LINE.items():
+                                if first.startswith(k):
+                                    found = v
+                                    break
+                            if not found:
+                                found = normalise(ln.strip())
+                            if found and found != "UNKNOWN":
+                                out.append(found)
+                            break
+            except OSError:
+                continue
+    return out
+
+
+def file_contradicts(metadata_ids: list[str], file_ids: list[str]) -> bool:
+    """True when the bundled licence files name licences and NONE of them is one the metadata names (a GPL family
+    heading matches any version of that family; a dual-licensed package that ships both files matches on either)."""
+    if not file_ids:
+        return False
+    meta = {i for i in metadata_ids if i and i != "UNKNOWN"}
+    if not meta:
+        return False
+    for fid in file_ids:
+        family = set(_GPL_FAMILY.get(fid, (fid,)))
+        if meta & family or any(m.startswith(fid) for m in meta) or any(fid.startswith(m) for m in meta):
+            return False
+    return True
+
+
 def dir_name(entry: str) -> str:
     """The distribution name a ``*.dist-info`` / ``*.egg-info`` entry carries in its own name (normalised)."""
     base = os.path.basename(entry)
@@ -171,6 +236,9 @@ def licence_of(dist_info: str) -> Dist:
         return Dist(name, meta.get("Version") or "", "UNKNOWN", "none", dist_info,
                     f"METADATA Name {stated!r} does not match the distribution directory {name!r}")
     version = meta.get("Version") or ""
+    for field_name in ("License-Expression", "License"):
+        if len(meta.get_all(field_name) or []) > 1:
+            return Dist(name, version, "UNKNOWN", "none", dist_info, f"METADATA carries {field_name} twice (which one applies is undefined)")
     expr = meta.get("License-Expression")
     if expr:
         return Dist(name, version, normalise(expr) if " " not in expr.strip() else expr.strip(), "expression", dist_info)
@@ -242,8 +310,42 @@ def _find_dist(site_packages: str, name: str) -> Optional[Dist]:
     return None
 
 
+_HASH_CAP = 4 * 1024 * 1024
+
+
+def _record_lines(path: str):
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for ln in fh:
+            parts = ln.rstrip("\n").split(",")
+            rel = parts[0].strip()
+            if not rel or rel.startswith("..") or rel.startswith("/"):
+                continue
+            yield rel, (parts[1].strip() if len(parts) > 1 else ""), (parts[2].strip() if len(parts) > 2 else "")
+
+
+def _hash_ok(site_packages: str, rel: str, stated: str, size: str) -> bool:
+    """RECORD's ``sha256=<urlsafe b64, no padding>`` against the file on disk; a file over 4 MiB (a compiled
+    library) is checked by its recorded size instead (the gate runs at every start; stated)."""
+    if not stated.startswith("sha256="):
+        return False
+    full = os.path.join(site_packages, rel)
+    try:
+        st = os.stat(full)
+        if st.st_size > _HASH_CAP:
+            return size.isdigit() and int(size) == st.st_size
+        with open(full, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).digest()
+    except OSError:
+        return False
+    want = stated[len("sha256="):]
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii") == want
+
+
 def _recorded_top_levels(site_packages: str) -> set[str]:
-    """Top-level names every distribution's RECORD (or SOURCES.txt / top_level.txt for egg-info) accounts for."""
+    """Top-level names a distribution's RECORD accounts for — only when EVERY RECORD line under that name that
+    names a file present on disk carries a sha256 that verifies (R13: a bare line covers nothing). egg-info
+    ``SOURCES.txt`` / ``top_level.txt`` / ``installed-files.txt`` carry no hashes: they cover a name only when the
+    distribution's own ``top_level.txt`` names it (its stated own top-levels)."""
     out: set[str] = set()
     for entry in os.listdir(site_packages):
         if not entry.endswith(_DIST_SUFFIXES):
@@ -251,19 +353,61 @@ def _recorded_top_levels(site_packages: str) -> set[str]:
         d = os.path.join(site_packages, entry)
         if not os.path.isdir(d):
             continue
-        for fname in ("RECORD", "SOURCES.txt", "top_level.txt", "installed-files.txt"):
-            p = os.path.join(d, fname)
-            if not os.path.isfile(p):
-                continue
+        record = os.path.join(d, "RECORD")
+        if os.path.isfile(record):
+            per_top: dict[str, list[bool]] = {}
             try:
-                with open(p, "r", encoding="utf-8", errors="replace") as fh:
-                    for ln in fh:
-                        path = ln.split(",")[0].strip()
-                        if not path or path.startswith(".."):
-                            continue
-                        out.add(path.split("/")[0])
+                for rel, stated, size in _record_lines(record):
+                    top = rel.split("/")[0]
+                    if top == entry or rel.endswith((".pyc", ".pth")) and not stated:
+                        continue
+                    if not os.path.isfile(os.path.join(site_packages, rel)):
+                        continue
+                    per_top.setdefault(top, []).append(_hash_ok(site_packages, rel, stated, size))
             except OSError:
                 continue
+            for top, oks in per_top.items():
+                if oks and all(oks):
+                    out.add(top)
+            continue
+        tl = os.path.join(d, "top_level.txt")
+        if os.path.isfile(tl):
+            try:
+                with open(tl, "r", encoding="utf-8", errors="replace") as fh:
+                    for ln in fh:
+                        if ln.strip():
+                            out.add(ln.strip())
+            except OSError:
+                continue
+    return out
+
+
+def _venv_root(site_packages: str) -> Optional[str]:
+    """``<venv>/lib/pythonX.Y/site-packages`` → ``<venv>``; None for any other layout."""
+    parts = os.path.normpath(site_packages).split(os.sep)
+    if len(parts) >= 3 and parts[-1] == "site-packages" and parts[-2].startswith("python") and parts[-3] in ("lib", "lib64", "Lib"):
+        return os.sep.join(parts[:-3]) or os.sep
+    if len(parts) >= 2 and parts[-1] == "site-packages" and parts[-2] == "Lib":
+        return os.sep.join(parts[:-2]) or os.sep
+    return None
+
+
+def pth_paths(site_packages: str) -> list[tuple[str, str]]:
+    """(pth file, resolved directory) for every path line of every ``.pth`` (``import`` lines and comments are
+    not paths; a relative line is relative to site-packages)."""
+    out = []
+    for entry in sorted(os.listdir(site_packages)):
+        if not entry.endswith(".pth"):
+            continue
+        try:
+            with open(os.path.join(site_packages, entry), "r", encoding="utf-8", errors="replace") as fh:
+                for ln in fh:
+                    line = ln.strip()
+                    if not line or line.startswith("#") or line.startswith(("import ", "import\t")):
+                        continue
+                    out.append((entry, os.path.realpath(os.path.join(site_packages, line))))
+        except OSError:
+            continue
     return out
 
 
@@ -279,8 +423,10 @@ def _stated_first_line(dist_info: str, proof: str) -> Optional[str]:
     return None
 
 
-def check(site_packages: str, allowlist: dict, exceptions: dict) -> Report:
+def check(site_packages: str, allowlist: dict, exceptions: dict, *, _seen: Optional[set] = None) -> Report:
     rep = Report(site_packages=site_packages)
+    seen = _seen if _seen is not None else set()
+    seen.add(os.path.realpath(site_packages))
     allowed = set(allowlist["allowed"])
     forbidden = {n.lower() for n in allowlist.get("forbidden_distributions", [])}
     unrecorded_allow = set(allowlist.get("unrecorded_allow") or [])
@@ -317,6 +463,13 @@ def check(site_packages: str, allowlist: dict, exceptions: dict) -> Report:
                     ids = [d.licence]
                 else:
                     d.problem = "exception entry does not match the installed proof"
+            if d.problem is None and d.source in ("expression", "license", "classifier"):
+                files = licence_file_ids(d.dist_info)
+                e = exc.get(d.name) or {}
+                if e.get("kind") == "bundled_licence_file" and e.get("reason") and e.get("file_licence") in files and d.licence in allowed:
+                    files = [x for x in files if x != e["file_licence"]]     # an explicitly ruled bundled component
+                if file_contradicts(ids, files):
+                    d.problem = f"metadata says {d.licence} but the bundled licence file(s) read {', '.join(sorted(set(files)))}"
             if d.problem is None:
                 if d.source == "file":
                     d.problem = ("licence unknown in metadata (the bundled licence file reads %s): needs an explicit "
@@ -342,4 +495,15 @@ def check(site_packages: str, allowlist: dict, exceptions: dict) -> Report:
         if importable:
             rep.problems.append(f"{entry}: importable top-level entry with no distribution record (vendored package "
                                 "without metadata; spec C.7.2)")
+    # R13: .pth path lines — outside the venv is a problem; inside it is another site directory to scan
+    venv = _venv_root(site_packages)
+    for pth, target in pth_paths(site_packages):
+        if venv is None or not (target == venv or target.startswith(venv.rstrip(os.sep) + os.sep)):
+            rep.problems.append(f"{pth}: adds {target} to sys.path, outside the virtual environment (never scanned by this gate)")
+            continue
+        if not os.path.isdir(target) or os.path.realpath(target) in seen:
+            continue
+        sub = check(target, allowlist, exceptions, _seen=seen)
+        rep.dists.extend(sub.dists)
+        rep.problems.extend(f"{pth} → {p}" for p in sub.problems)
     return rep

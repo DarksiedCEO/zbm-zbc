@@ -13,6 +13,7 @@ same rule; ``parse_junit_node`` here reads Node's junit reporter (no file attrib
 
 from __future__ import annotations
 
+import json
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -391,3 +392,91 @@ def parse_junit_node(xml_text: Optional[str]) -> Optional[Counts]:
     c.parsed = True
     c.source = "junit"
     return c
+
+
+# --- the engine plugin's record (R4) -----------------------------------------------------------------------------------
+
+# pytest's report outcomes mapped to the junit kinds this module uses (anything that is neither passed nor failed
+# is pytest's third outcome, the one junit records as a <skipped> element)
+_KIND = {"passed": "pass", "failed": "fail"}
+
+
+def _kind(outcome) -> Optional[str]:
+    if not isinstance(outcome, str) or not outcome:
+        return None
+    return _KIND.get(outcome, "skip")
+
+
+def _record_case_outcome(phases: dict) -> Optional[str]:
+    """junit's outcome for one case from the plugin's per-phase final outcomes (None when a phase is inconsistent)."""
+    for ph in phases.values():
+        raw, final, logged = _kind(ph.get("raw_outcome")), _kind(ph.get("final_outcome")), _kind(ph.get("logged_outcome"))
+        if raw is None or final is None or logged != final:
+            return None
+        if ph.get("excinfo_none") != (raw == "pass"):
+            return None
+        if raw != final and not (ph.get("final_wasxfail") or ph.get("xfail_marked")):
+            return None
+    call = phases.get("call") or {}
+    setup, teardown = phases.get("setup") or {}, phases.get("teardown") or {}
+    if _kind(setup.get("final_outcome")) == "fail" or _kind(teardown.get("final_outcome")) == "fail":
+        return "error"
+    if _kind(call.get("final_outcome")) == "fail":
+        return "fail"
+    if any(_kind(ph.get("final_outcome")) == "skip" for ph in phases.values()):
+        return "skip"
+    if call.get("final_wasxfail") and _kind(call.get("final_outcome")) == "pass":
+        return "skip"                  # xpass (non-strict): junit records a <skipped> element
+    if setup and not call and _kind(setup.get("final_outcome")) == "pass":
+        return "error"                 # a setup that passed with no call phase: not a shape pytest produces
+    return "pass"
+
+
+def plugin_record_problem(record_text: Optional[str], counts: Counts, *, engine_dir: str,
+                          plugin_sha256: Optional[str] = None) -> Optional[str]:
+    """Why the engine plugin's record does not confirm ``counts`` (a verified junit result), or None when it does:
+    the record must exist, name the pinned plugin at the engine directory, show a started/collected/finished session
+    with plugin autoload disabled and no violation, and every junit case must have a record whose four positions
+    agree with each other and with junit's outcome (and vice versa)."""
+    from zbm_delivery.runner import PLUGIN_NAME, PLUGIN_SHA256
+    if not record_text:
+        return "record missing"
+    try:
+        rec = json.loads(record_text)
+    except ValueError:
+        return "record unparseable"
+    if not isinstance(rec, dict):
+        return "record is not an object"
+    if rec.get("plugin_sha256") != (plugin_sha256 or PLUGIN_SHA256):
+        return "plugin hash does not match the pin"
+    # the engine directory's nonce-named tail (the double maps the workspace to a host directory in file contents)
+    tail = "/" + "/".join(engine_dir.rstrip("/").split("/")[-2:]) + f"/{PLUGIN_NAME}.py" if engine_dir else f"/{PLUGIN_NAME}.py"
+    if not str(rec.get("plugin_file") or "").endswith(tail):
+        return "plugin loaded from outside the engine directory"
+    for flag in ("session_started", "collection_finished", "session_finished", "disable_plugin_autoload"):
+        if rec.get(flag) is not True:
+            return f"{flag} is not true"
+    violations = rec.get("violations")
+    if not isinstance(violations, list):
+        return "violations missing"
+    if violations:
+        return "violation: " + str(violations[0])[:160]
+    tests = rec.get("tests")
+    if not isinstance(tests, dict):
+        return "tests missing"
+    if rec.get("collected") is not None and counts.collected is not None and rec["collected"] != counts.collected:
+        return f"plugin collected {rec['collected']} != {counts.collected}"
+    junit_ids = set(counts.cases)
+    rec_ids = set(tests)
+    if junit_ids != rec_ids:
+        missing = sorted(junit_ids ^ rec_ids)[:3]
+        return "junit cases and the plugin record name different tests: " + ", ".join(missing)
+    for nodeid, phases in tests.items():
+        if not isinstance(phases, dict) or "call" not in phases and "setup" not in phases:
+            return f"{nodeid}: no phase recorded"
+        out = _record_case_outcome(phases)
+        if out is None:
+            return f"{nodeid}: the four report positions disagree"
+        if out != counts.cases.get(nodeid):
+            return f"{nodeid}: plugin says {out}, junit says {counts.cases.get(nodeid)}"
+    return None

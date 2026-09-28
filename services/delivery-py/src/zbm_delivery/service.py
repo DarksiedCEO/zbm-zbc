@@ -11,6 +11,11 @@ committed or reported. State is event-sourced from the log; no data dir → in-m
 run survives a restart (S9: a run found in a live state at start-up is recorded ``fix_run_failed``).
 
 Runs execute one at a time on a worker thread (``_worker``) inside ``FixEngine.execute``'s exception boundary.
+
+Round 19 R5: ``run_update`` / ``finding_update`` / ``finding_transition`` refuse (``Conflict``) on a run that is not
+live (failed, reviewed or awaiting review) — after ``fix_run_cancelled`` or the deadline nothing is recorded on the
+run except the post-mortem events (``run_interrupted``, ``sandbox_released``, ``agent_usage``), and nothing that is
+not recorded takes effect.
 """
 
 from __future__ import annotations
@@ -49,6 +54,8 @@ _SUBJECT_BAD = __import__("re").compile(r"[^A-Za-z0-9._:-]")
 EVIDENCE_KINDS = ("brief", "test_output", "suite_output", "diff", "report", "review", "prompt_manifest",
                   "config_snapshot", "sandbox_exec")
 EVIDENCE_MAX_BYTES = 8 * 1024 * 1024
+# R5: the only run events accepted once a run is no longer live (bookkeeping of a stopped run)
+POST_MORTEM_EVENTS = ("run_interrupted", "sandbox_released", "agent_usage", "agent_usage_linked")
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -169,7 +176,8 @@ class DeliveryService:
         registry.install(registry.Runtime(
             settings=settings, recorder=recorder, docker=docker, chat_backend=chat_backend, egress=egress,
             policy_seed=policy_seed, test_seed=test_seed, clock=self.clock, on_ledger_failure=self._on_ledger_failure,
-            record=self._record_plain, resolve_sandbox_path=self._resolve_sandbox_path, evidence_root=self.evidence_root))
+            record=self._record_plain, resolve_sandbox_path=self._resolve_sandbox_path,
+            resolve_sandbox_paths=self._resolve_sandbox_paths, evidence_root=self.evidence_root))
         if self.reconcile_mode:
             return
         if not self.log.in_memory and len(self.log):
@@ -624,6 +632,28 @@ class DeliveryService:
                         out.add(name)
         return out
 
+    def _require_live(self, run: dict, event_type: str) -> None:
+        """R5: a run that is failed / reviewed / awaiting review accepts no further engine record (the post-mortem
+        events excepted); an in-memory unrecorded failure counts as not live too."""
+        if event_type in POST_MORTEM_EVENTS:
+            return
+        if run.get("status") in states.TERMINAL or run.get("status") == "awaiting_review" or run.get("unrecorded_failure"):
+            raise Conflict(f"the run is not live ({run.get('status')}); {event_type} refused")
+
+    def protected_reproductions(self, run_id: str) -> list[str]:
+        """R3: the reproduction node ids of every OPEN finding of the run (a CHANGED_TEST touching one is denied)."""
+        with self.lock:
+            docs = self.finding_docs.get(run_id, {})
+            recs = self.findings.get(run_id, {})
+            out = []
+            for fid, doc in docs.items():
+                if recs.get(fid, {}).get("state") in ("fixed", "disproved", "reviewed"):
+                    continue
+                t = node_id_in_text(doc.get("reproduction") or "")
+                if t:
+                    out.append(t)
+            return sorted(set(out))
+
     def run_transition(self, run_id: str, to: str, event_type: str, payload: dict, summary: str,
                        fields: Optional[dict] = None) -> str:
         with self.lock:
@@ -645,6 +675,7 @@ class DeliveryService:
     def run_update(self, run_id: str, event_type: str, payload: dict, summary: str, fields: Optional[dict] = None) -> str:
         with self.lock:
             run = self.runs[run_id]
+            self._require_live(run, event_type)
             new = {**json.loads(json.dumps(run)), **(fields or {})}
             op = Op(self, f"run|{run_id}|{event_type}|{len(run['ledger_event_ids'])}", ENGINE, run_id)
             eid = op.record(derived_id("run", run_id, event_type, len(run["ledger_event_ids"]), sha(payload)), event_type,
@@ -657,13 +688,14 @@ class DeliveryService:
     def try_run_update(self, run_id: str, event_type: str, payload: dict, summary: str) -> Optional[str]:
         try:
             return self.run_update(run_id, event_type, payload, summary)
-        except (Unavailable, KeyError):
+        except (Unavailable, KeyError, Conflict):
             return None
 
     def finding_update(self, run_id: str, finding_id: str, event_type: str, payload: dict, summary: str,
                        fields: Optional[dict] = None, run_fields: Optional[dict] = None) -> str:
         with self.lock:
             run = self.runs[run_id]
+            self._require_live(run, event_type)
             rec = self.findings[run_id][finding_id]
             new = {**json.loads(json.dumps(rec)), **(fields or {})}
             op = Op(self, f"finding|{run_id}|{finding_id}|{event_type}|{len(run['ledger_event_ids'])}", ENGINE, run_id)
@@ -677,13 +709,13 @@ class DeliveryService:
             return eid
 
     def finding_transition(self, run_id: str, finding_id: str, to: str, fields: dict, evidence_ids: list[str], *,
-                           red_test_name: Optional[str] = None, suite_after_commit: bool = False) -> bool:
+                           red_test_name: Optional[str] = None) -> bool:
         with self.lock:
             run = self.runs[run_id]
+            self._require_live(run, "finding_state_changed")
             rec = self.findings[run_id][finding_id]
             candidate = {**json.loads(json.dumps(rec)), **fields}
-            problem = states.finding_transition_problem(candidate, to, red_test_name=red_test_name,
-                                                        suite_after_commit=suite_after_commit)
+            problem = states.finding_transition_problem(candidate, to, red_test_name=red_test_name)
             n = len(run["ledger_event_ids"])
             if problem:
                 op = Op(self, f"finding|{run_id}|{finding_id}|refused|{n}", ENGINE, run_id)
@@ -749,17 +781,21 @@ class DeliveryService:
         self.mark_failed_unrecorded(run_id, R.item("LEDGER_UNAVAILABLE", why[:160]))
 
     def _resolve_sandbox_path(self, run_id: str, path: str) -> Optional[str]:
+        return self._resolve_sandbox_paths(run_id, [path])[0]
+
+    def _resolve_sandbox_paths(self, run_id: str, paths: list[str]) -> list[Optional[str]]:
+        """R8: every operand of one tool call resolved inside the run's sandbox in ONE exec."""
         b = registry.by_run(run_id)
         if b is None or b.container_name is None or self._engine is None:
-            return None
+            return [None] * len(paths)
         provider = self._engine.provider_factory()
         box = provider.get(b.container_name)
         if box is None:
-            return None
+            return [None] * len(paths)
         try:
-            return box.realpath(path if path.startswith("/") else f"{b.workspace}/{path}")
+            return box.realpath_many([p if p.startswith("/") else f"{b.workspace}/{p}" for p in paths])
         except Exception:  # noqa: BLE001
-            return None
+            return [None] * len(paths)
 
     # ================================================================== review (§C.8.7), cancel
 

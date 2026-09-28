@@ -94,8 +94,20 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
                      f"test {', '.join(f'`{p}`' for p in cl.get('test') or []) or '-'} · test-infra {', '.join(cl.get('test_infra') or []) or 'none'} · "
                      f"agent tree {v.get('agent_tree', {}).get('verdict')} · verification checkout {v.get('verification_checkout', {}).get('verdict')} · "
                      f"reverted checkout {v.get('reverted_checkout', {}).get('verdict')}")
+        sf = f.get("single_file_revert")
+        if sf:
+            L.append(f"- single-file revert (everything except `{sf.get('file')}`): exit {sf.get('exit')} · verdict {sf.get('verdict', '-')} "
+                     f"(must be fail{'; identical to the reverted checkout' if sf.get('identical_to_reverted') else ''}) · evidence `{sf.get('evidence_id')}`")
+        rp = f.get("repro_check")
+        if rp:
+            L.append(f"- finding's reproduction `{rp.get('target')}`: verification checkout {rp.get('verification', {}).get('verdict')} · "
+                     f"reverted {rp.get('reverted', {}).get('verdict')} · evidence `{rp.get('verification', {}).get('evidence_id')}`")
+        so = f.get("src_only_check")
+        if so:
+            L.append(f"- src-only check ({', '.join(f'`{t}`' for t in so.get('targets') or [])}): verdict {so.get('verdict')} · evidence `{so.get('evidence_id')}`")
         if f.get("commit_sha"):
-            L.append(f"- fix commit `{f['commit_sha']}` · files: " + ", ".join(f"`{p}`" for p in f.get("commit_files") or []))
+            L.append(f"- fix commit `{f['commit_sha']}` · files: " + ", ".join(f"`{p}`" for p in f.get("commit_files") or [])
+                     + f" · tree sha256 `{f.get('commit_tree_sha256')}` (suite ran on `{f.get('suite_tree_sha256')}`)")
         sweep = f.get("sweep") or {}
         if sweep:
             sites = ", ".join(f"`{s['file']}:{s['line']}`" for s in sweep.get("sites") or []) or "(none listed)"
@@ -103,7 +115,16 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
             note = f" · dropped {len(dropped)} sweep site(s) not in the diff" if dropped else ""
             L.append(f"- sweep ({sweep.get('class_hint') or '-'}): {sites} · evidence `{sweep.get('evidence_id')}`{note}")
         for ct in f.get("changed_tests") or []:
-            L.append(f"- changed test `{ct['path']}` — why sha256 `{ct['why_sha256']}`")
+            why = ct.get("why")
+            L.append(f"- changed test `{ct['path']}` — why sha256 `{ct['why_sha256']}`" + (" · the engineer's reason (untrusted text):" if why else ""))
+            if why:
+                fence = fence_for(why)
+                L.append("")
+                L.append(fence + "text")
+                L.append(why)
+                L.append(fence)
+        for r in f.get("outcome_regressions") or []:
+            L.append(f"- outcome regression: `{r.get('test')}` was {r.get('baseline')} at baseline, {r.get('after')} after")
         d = f.get("disproof")
         if d:
             L.append(f"- DISPROOF — VERIFY: the finding's reproduction `{' '.join(d.get('reproduction_argv') or [])}` on base "

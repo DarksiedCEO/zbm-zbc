@@ -1,0 +1,81 @@
+{
+ "label": "e1b-new-module-N1-2",
+ "status": "failed",
+ "reasons": [
+  {
+   "code": "BLOCKED",
+   "rule_id": "DLV-12",
+   "message": "1 finding(s) not fixed or disproved: N1-2",
+   "evidence_ids": []
+  }
+ ],
+ "commits": [
+  {
+   "sha": "737ab63f1e134ef671a65dfccb5ba90fdb2b9c27",
+   "message_sha256": "944dcf2eb51d14ff57b8ecb3677eda06c275b4e43e8c4d4da74ec371f5f970c6",
+   "files": [
+    "services/toy-py/src/toy/calc.py",
+    "services/toy-py/tests/test_fix_n1_1.py"
+   ],
+   "finding_id": "N1-1",
+   "diff_evidence_id": "dlv-ev-8eaa85cd02ead57517c464ee6c",
+   "tree_sha256": "5f2aa028507763554fe83ebf52b687708eeb19bb5225c832eb6e673f990ad418"
+  }
+ ],
+ "findings": [
+  {
+   "finding_id": "N1-1",
+   "state": "fixed",
+   "rounds": 1,
+   "commit_files": [
+    "services/toy-py/src/toy/calc.py",
+    "services/toy-py/tests/test_fix_n1_1.py"
+   ],
+   "changed_tests": [],
+   "suite_failures": []
+  },
+  {
+   "finding_id": "N1-2",
+   "state": "blocked",
+   "rounds": 3,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  }
+ ],
+ "round_failed": [
+  "finding_file_unchanged",
+  "finding_file_unchanged"
+ ],
+ "suite_after": {
+  "passed": 4,
+  "failed": 0,
+  "errors": 0,
+  "skips": 0,
+  "failed_names": [],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 4
+ },
+ "suite_before": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+  "skips": 0,
+  "failed_names": [
+   "tests/test_calc.py::test_add_returns_sum"
+  ],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 3
+ },
+ "secs": 12.3,
+ "worktree": "/tmp/dlv-test-1r8zn_ip/worktrees/fix1-toy-py",
+ "run_id": "dlv-run-VF5H5T05Y4A3AYFZWW81JADMFJ",
+ "calc_add_defect_intact": false,
+ "percent_defect_intact": true
+}

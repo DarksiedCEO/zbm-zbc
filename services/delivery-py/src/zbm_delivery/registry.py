@@ -36,6 +36,7 @@ class Runtime:
     record: Callable[..., str]    # record(event_id, event_type, actor, subject, payload, summary) -> event id
     resolve_sandbox_path: Callable[[str, str], Optional[str]]   # (run_id, path) -> realpath inside the sandbox
     evidence_root: str = ""
+    resolve_sandbox_paths: Optional[Callable[[str, list], list]] = None   # R8: (run_id, paths) -> realpaths, ONE exec
 
 
 @dataclass

@@ -38,16 +38,16 @@ def _bind(h: Harness, run_id: str = "dlv-run-" + "A" * 26, deadline_s: int = 600
 def test_docker_run_argv_token_by_token(h):
     argv = S.ZbmDockerSandboxProvider.run_argv(h.settings, "dlv-run-" + "A" * 26, "/data/sandbox-env/x.env")
     skills = os.path.realpath(str(SERVICE_ROOT / "skills"))
+    tools = os.path.realpath(S.TOOLS_SRC_DIR)                    # wave 20 R8: the pinned resolver, read-only
     run_id = "dlv-run-" + "A" * 26
     assert argv == ["run", "-d", "--name", f"dlv-{run_id}", "--label", f"zbm.dlv.run={run_id}", "--user", "65532:65532", "--cap-drop=ALL",
                     "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,nosuid,size=512m",
                     "--pids-limit", "512", "--memory", "4g", "--cpus", "2", "--network", "none",
                     "--mount", f"type=volume,src=dlv-ws-{run_id},dst={WORKSPACE},volume-label=zbm.dlv.run={run_id}",
                     "--mount", f"type=bind,src={skills},dst=/mnt/skills,ro",
+                    "--mount", f"type=bind,src={tools},dst=/mnt/dlv,ro",
                     "--env-file", "/data/sandbox-env/x.env", IMAGE, "sleep", "infinity"]
-    for tok in argv:
-        for bad in S.FORBIDDEN_RUN_TOKENS:
-            assert bad not in tok
+    assert S.forbidden_run_token(argv) is None
     assert "docker.sock" not in " ".join(argv) and "--privileged" not in argv and "seccomp" not in " ".join(argv)
 
 
@@ -140,24 +140,28 @@ def test_file_operations_contain_paths(h):
     b = _bind(h)
     sid = p.acquire(b.thread_id, user_id=b.principal_user_id)
     box = p.get(sid)
-    box.write_file(f"{WORKSPACE}/a/b.txt", "hello")
-    assert box.read_file(f"{WORKSPACE}/a/b.txt") == "hello"
-    box.write_file(f"{WORKSPACE}/a/b.txt", " world", append=True)
-    assert box.read_file(f"{WORKSPACE}/a/b.txt") == "hello world"
-    assert box.read_file(f"{WORKSPACE}/a/b.txt", 1, 1) == "hello world"
-    assert f"{WORKSPACE}/a/b.txt" in box.list_dir(f"{WORKSPACE}/a")
+    # wave 20 R7: file-tool writes are contained to the WRITE ROOTS (services/<service>/, docs/adr/00NN-*.md), not the workspace
+    A = f"{WORKSPACE}/services/toy-py/a"
+    with pytest.raises(PermissionError, match="write roots|R7"):
+        box.write_file(f"{WORKSPACE}/a/b.txt", "hello")
+    box.write_file(f"{A}/b.txt", "hello")
+    assert box.read_file(f"{A}/b.txt") == "hello"
+    box.write_file(f"{A}/b.txt", " world", append=True)
+    assert box.read_file(f"{A}/b.txt") == "hello world"
+    assert box.read_file(f"{A}/b.txt", 1, 1) == "hello world"
+    assert f"{A}/b.txt" in box.list_dir(A)
     for bad in ("/etc/passwd", f"{WORKSPACE}/../etc/passwd", "../x", f"{WORKSPACE}/a/../../x"):
         with pytest.raises(PermissionError):
             box.read_file(bad)
         with pytest.raises(PermissionError):
             box.write_file(bad, "x")
     # a symlink escape resolved inside the sandbox
-    box.exec_argv(["ln", "-s", "/etc", f"{WORKSPACE}/a/link"])
+    box.exec_argv(["ln", "-s", "/etc", f"{A}/link"])
     with pytest.raises(PermissionError, match="symlink"):
-        box.read_file(f"{WORKSPACE}/a/link/hostname")
-    matches, _ = box.glob(f"{WORKSPACE}/a", "*.txt")
-    assert matches == [f"{WORKSPACE}/a/b.txt"]
-    hits, _ = box.grep(f"{WORKSPACE}/a", "hello", literal=True)
+        box.read_file(f"{A}/link/hostname")
+    matches, _ = box.glob(A, "*.txt")
+    assert matches == [f"{A}/b.txt"]
+    hits, _ = box.grep(A, "hello", literal=True)
     assert hits and hits[0].line_number == 1
     # the copy-in tar stream is owned by 65532 and never a bind mount of the repo
     data = S.tar_of_dir(str(SERVICE_ROOT / "skills"))

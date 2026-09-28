@@ -1,0 +1,43 @@
+{
+ "label": "e4-cancel-in-green-phase",
+ "status": "failed",
+ "reasons": [
+  {
+   "code": "CANCELLED",
+   "rule_id": "DLV-14",
+   "message": "cancelled by aegis",
+   "evidence_ids": []
+  }
+ ],
+ "commits": [],
+ "findings": [
+  {
+   "finding_id": "N1-1",
+   "state": "red",
+   "rounds": 1,
+   "commit_files": [],
+   "changed_tests": [],
+   "suite_failures": []
+  }
+ ],
+ "round_failed": [],
+ "suite_after": null,
+ "suite_before": {
+  "passed": 2,
+  "failed": 1,
+  "errors": 0,
+  "skips": 0,
+  "failed_names": [
+   "tests/test_calc.py::test_add_returns_sum"
+  ],
+  "parsed": true,
+  "status": "ok",
+  "why": "junit == collected == summary == exit",
+  "source": "junit",
+  "collected": 3
+ },
+ "secs": 7.1,
+ "worktree": "/tmp/dlv-test-d_a9adal/worktrees/fix1-toy-py",
+ "run_id": "dlv-run-XP89VVZJ53SB9F86MKRYC6E1EG",
+ "calc_add_defect_intact": false
+}
