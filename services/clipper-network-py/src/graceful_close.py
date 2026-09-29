@@ -33,7 +33,7 @@ import os
 import threading
 
 DRAIN_MAX_BYTES = 64 * 1024
-DRAIN_TIMEOUT_S = 1.0
+DRAIN_TIMEOUT_S = 1           # seconds; an int: no float literal in any service's src (finance-py's G1 guardrail)
 DRAINS_MAX = 512
 READ_BUFFER_BYTES = 16 * 1024
 

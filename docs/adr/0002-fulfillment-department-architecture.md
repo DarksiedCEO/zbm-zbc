@@ -538,7 +538,17 @@ future real dialer/CRM adapter; idempotency keys for
 `resolution-writeback/resolve` across retries; per-customer time zone
 storage. (Bounded in-memory state: decided in Decision 14.)
 
-## Fix wave 21, Sep 28 2026 — test amendment (no product change)
+## Fix wave 21, Sep 28 2026 — a test amendment AND a product change
+
+(Corrected in fix wave 22, lead ruling G8; AEGIS round 21 N21-C-4. This heading used to say "test amendment (no
+product change)". Wave 21 did change the product: `src/http_limits.py`'s protocol gained the graceful close
+(lead ruling L1, ADR 0003 §8) — FIN after an answer, then a bounded drain of the client's remaining bytes (64 KiB /
+1 s) — and the 128-sender test's CLIENT changed with it: it now sends while it reads, stops at the answer and
+reads it to Content-Length (`_send_reading`), where it used to write 3.9 MB with a blocking `sendall` before
+reading anything. Round 21 ruled that client legitimate (not a fake green) and showed that the stale 0/10
+evidence of wave 21 predated the change; the numbers below it are from before either change. The product change
+and its bounds are in ADR 0003 §8/§9; the blocking client's residual is pinned by
+`tests/test_fix22_drain_residual.py` — see "Fix wave 22" below.)
 
 AEGIS round 20 N20-M-4 / N20-M-5, `tests/test_fix8_n7_2_body_prealloc.py::
 test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut`:
@@ -561,6 +571,42 @@ test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budge
   Mac evidence is E0); the macOS CI entry added in this wave
   (`python-tests (fulfillment-py, 3.13, macos-14)`) is where that is
   decided. Not raised to make a test pass.
+
+## Fix wave 22, Sep 28 2026 — what the reading client added, and the peak's variance (product changes)
+
+AEGIS round 21 N21-C-1 (lead ruling G5; the 96 MiB bound is NOT raised): the 128-sender test failed under load
+(2/10 module, 5/20 single) and the reviewer traced it to the wave-21 reading client. The lead's hypothesis — 128
+concurrent drains each allocating a read buffer of up to 64 KiB, ~8 MiB — was checked and is NOT what the
+measurements show:
+
+- *tracemalloc at the server's traced peak* (w22 `ful_attr.py`: the server under `-X tracemalloc`, the test's own
+  reading client, 128 senders): 68.4 MiB in the app's body buffers (the 64 MiB in-flight budget, bytearray
+  over-allocation included), 15.6 MiB in uvicorn's `cycle.body` across ~100 connections (~150 KiB each: uvicorn
+  buffers a request's body up to its 64 KiB high-water mark PLUS the read that crossed it — the event loop reads up
+  to 256 KiB — and ~100 of the 128 are answered 503 before their app ever runs), 7.7 MiB of receive-path copies of
+  those buffers. No drain allocation appears: drained bytes were never retained. What the reading client adds is
+  bigger reads (it sends 64 KiB at a time with the default send buffer, where the old client's `sendall` was
+  throttled by a 64 KiB `SO_SNDBUF`), so more unread body per connection before backpressure — and, with the
+  wave-21 drain, that buffered body stayed referenced until the drain ended (up to 1 s).
+- *The peak's variance* (RSS A/B under 3 busy loops, 8 runs each, the test's client): wave-21 code 87-92 MiB
+  growth (mean 89.4), with bounded reads (below) 80-89 (83.8), with bounded reads and a fixed mmap threshold
+  80-82 (81.0). The tail that crossed 96 was glibc's DYNAMIC mmap threshold: once a large body buffer is freed the
+  threshold rises to its size, later buffers come from the heap, and freed heap blocks below the top stay resident
+  (`tests/test_fix22_mmap_threshold.py`: 95 freed 512 KiB blocks under a survivor — 47 MiB resident with the
+  dynamic threshold, 0 with it fixed).
+
+Decided (product):
+- the transport (ADR 0003 §9, `src/graceful_close.py`, shared by the ten Python services): every read goes through
+  one 16 KiB buffer, so a connection's unread body is bounded by uvicorn's 64 KiB mark + 16 KiB; drained bytes are
+  discarded in that buffer; the answered request's body is released when the drain starts; the concurrency slot is
+  released before the drain; at most `FULFILLMENT_DRAINS_MAX` (512) drain at once;
+- `python3 -m api` fixes `M_MMAP_THRESHOLD` at 128 KiB (glibc's initial value) beside the arena limit (glibc only;
+  an operator's `MALLOC_MMAP_THRESHOLD_` wins; elsewhere a warning, and the peak's variance on that allocator is
+  UNDETERMINED until the macOS CI entry runs).
+
+Kept: the reading client (ruled legitimate in round 21) and the 96 MiB bound. The blocking client's residual —
+a 3.9 MB blocking `sendall` answered 503 early is reset once the bounded drain ends and never reads the answer — is
+the design and is pinned by `tests/test_fix22_drain_residual.py` (with the reading client's clean 503 beside it).
 
 ## Verified so far (Sep 22, 2026 build session)
 

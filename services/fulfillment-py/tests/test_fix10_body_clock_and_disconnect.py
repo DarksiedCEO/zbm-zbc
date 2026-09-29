@@ -28,6 +28,7 @@ import asyncio
 import http.client
 import json
 import logging
+import os
 import re
 import socket
 import subprocess
@@ -268,6 +269,8 @@ def logged_server():
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        log.close()                       # fix wave 22: the log file never outlives the module (it used to be
+        os.unlink(log.name)               # left in TMPDIR on every run)
 
 
 def _log_since(path: str, offset: int) -> str:

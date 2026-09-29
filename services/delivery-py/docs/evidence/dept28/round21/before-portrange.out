@@ -1,0 +1,5 @@
+before 18800-18849
+after conftest None range(18800, 18850)
+.
+1 passed, 70 deselected in 0.44s
+Mon Sep 28 22:15:28 UTC 2026

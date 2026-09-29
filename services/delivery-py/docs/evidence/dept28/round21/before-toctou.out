@@ -1,0 +1,10 @@
+CONTROL 422 reproduction_not_red ['REPRODUCTION_NOT_RED'] runs 0
+.A submit 202 None
+A {"status": "awaiting_review", "states": {"N1-1": "fixed", "N1-2": "fixed", "N2-1": "disproved"}, "red_checked": [], "refused": [], "clamp(5,3,0) outside pytest": "3"}
+.B submit 202 None
+B {"status": "awaiting_review", "states": {"N1-1": "fixed", "N1-2": "fixed", "N2-1": "disproved"}, "red_checked": [], "refused": [], "clamp(5,3,0) outside pytest": "3"}
+.C review 200 {"run_id":"dlv-run-CQ4GKQS8GJ20YV8CH13FV4HWD3","status":"reviewed_fail","next_run_id":"dlv-run-XSJR6NKRD6CXXXH9BQXE2062XM","request_id":"req-c5acf505372d4399be4d","facts_sha256":"9655ef341a72ab569a900a39f20f4be65a3c18a2fbed723a4103c6adc7d2b1d1","policy_version":1,"prompts_manifest_sha256":"110d732eb
+C {"status": "awaiting_review", "states": {"N2-1": "disproved"}, "red_checked": [], "refused": [], "clamp(5,3,0) outside pytest": "3"}
+.
+4 passed in 49.09s
+EXIT=0

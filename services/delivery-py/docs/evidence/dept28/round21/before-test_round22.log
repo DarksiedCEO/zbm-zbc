@@ -1,0 +1,50 @@
+start 2026-09-28T22:57:07Z tree=base(e49d506)+tests/test_round22.py
+=========================== short test summary info ============================
+FAILED tests/test_round22.py::test_g1a_src_rules_refuse_the_runner_detection_spellings
+FAILED tests/test_round22.py::test_g1a_rules_apply_to_the_lines_a_fix_adds_never_to_what_the_base_had
+FAILED tests/test_round22.py::test_g1b_runner_scrubs_the_environment_and_pytest_is_not_importable
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[pass] - AttributeError...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[fail] - AttributeError...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[sys-exit] - AttributeE...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[fixture] - AttributeEr...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[imports-pytest] - Attr...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[lazy-pytest] - Attribu...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[param-id] - AttributeE...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[async] - AttributeErro...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[xunit] - AttributeErro...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[class-method] - Attrib...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[unittest-fail] - Attri...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[missing] - AttributeEr...
+FAILED tests/test_round22.py::test_g1b_runner_verdicts[src-fallback] - Attrib...
+FAILED tests/test_round22.py::test_g1b_a_source_module_that_ends_the_process_leaves_no_report
+FAILED tests/test_round22.py::test_g1b_engine_verdict_needs_the_nonced_report_and_the_exit_code_to_agree[no-report]
+FAILED tests/test_round22.py::test_g1b_engine_verdict_needs_the_nonced_report_and_the_exit_code_to_agree[wrong-nonce]
+FAILED tests/test_round22.py::test_g1b_engine_verdict_needs_the_nonced_report_and_the_exit_code_to_agree[exit-mismatch]
+FAILED tests/test_round22.py::test_g1b_engine_verdict_needs_the_nonced_report_and_the_exit_code_to_agree[pass]
+FAILED tests/test_round22.py::test_g1b_engine_verdict_needs_the_nonced_report_and_the_exit_code_to_agree[runner-dependent]
+FAILED tests/test_round22.py::test_g1b_the_runner_is_pinned - AttributeError:...
+FAILED tests/test_round22.py::test_g1b_p1_runner_conditional_fix_that_the_cheap_layer_misses_is_not_fixed
+FAILED tests/test_round22.py::test_g1b_p3_env_conditional_fix_with_a_plain_reviewer_test_is_not_fixed
+FAILED tests/test_round22.py::test_g1b_p3_with_a_reviewer_test_that_needs_pytest_ends_needs_review_never_fixed
+FAILED tests/test_round22.py::test_g1b_an_honest_fix_confirmed_outside_the_runner_is_fixed_with_its_record
+FAILED tests/test_round22.py::test_g1b_go_env_conditional_fix_fails_the_scrubbed_env_rerun
+FAILED tests/test_round22.py::test_g1_states_fixed_and_needs_review_require_their_standalone_outcome
+FAILED tests/test_round22.py::test_g2_a_red_check_that_cannot_complete_refuses_422_unverified[unavailable]
+FAILED tests/test_round22.py::test_g2_a_red_check_that_cannot_complete_refuses_422_unverified[docker_down]
+FAILED tests/test_round22.py::test_g2_a_red_check_that_cannot_complete_refuses_422_unverified[exception]
+FAILED tests/test_round22.py::test_g2_a_red_check_that_cannot_complete_refuses_422_unverified[unknown]
+FAILED tests/test_round22.py::test_g2_a_red_check_that_cannot_complete_refuses_422_unverified[record_fails]
+FAILED tests/test_round22.py::test_g2_the_review_route_refuses_the_same_and_records_no_review[unavailable]
+FAILED tests/test_round22.py::test_g2_the_review_route_refuses_the_same_and_records_no_review[docker_down]
+FAILED tests/test_round22.py::test_g2_the_review_route_refuses_the_same_and_records_no_review[unknown]
+FAILED tests/test_round22.py::test_g2_the_review_route_refuses_the_same_and_records_no_review[record_fails]
+FAILED tests/test_round22.py::test_g2_the_red_check_runs_under_the_service_lock_and_the_finding_carries_its_event_id
+FAILED tests/test_round22.py::test_g2_toctou_blips_before_and_inside_the_red_stage_never_admit
+FAILED tests/test_round22.py::test_g2_states_refuse_fixed_or_disproved_without_the_admission_red_check
+FAILED tests/test_round22.py::test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests
+FAILED tests/test_round22.py::test_g4_cancel_while_an_engine_container_starts_kills_it_and_never_records_it_started
+FAILED tests/test_round22.py::test_g4_a_run_stopped_before_the_container_request_starts_no_container
+FAILED tests/test_round22.py::test_g4_record_if_live_is_atomic_with_the_status
+SKIPPED [1] tests/test_round22.py:562: inner half of test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests
+45 failed, 1 skipped in 206.00s (0:03:25)
+EXIT=1 end 2026-09-28T23:00:35Z

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-PINNED_SHA256 = "c41d0a484f5c54cd9e38f60a139d850593f775d3652886860874f5bbc213cea3"
+PINNED_SHA256 = "333767ce1738b2738d24ddeb63e3091361bf2bce563036e76386b95b4845b749"
 SERVICE = Path(__file__).resolve().parents[1]
 SRC = SERVICE / "src"
 SERVICES = SERVICE.parent
@@ -83,7 +83,7 @@ def test_the_module_is_the_shared_one_pinned_and_identical_to_its_siblings():
 
 def test_the_drain_cap_is_configured_from_the_services_env_and_refuses_nonsense(monkeypatch):
     gc = _module()
-    assert gc.DRAINS_MAX == 512 and gc.DRAIN_MAX_BYTES == 64 * 1024 and gc.DRAIN_TIMEOUT_S == 1.0
+    assert gc.DRAINS_MAX == 512 and gc.DRAIN_MAX_BYTES == 64 * 1024 and gc.DRAIN_TIMEOUT_S == 1
     monkeypatch.delenv(_ENV, raising=False)
     assert gc.drains_max_from_env(_ENV) == 512
     monkeypatch.setenv(_ENV, "7")

@@ -581,8 +581,26 @@ the request is served and the third is closed at once. The body uvicorn buffered
 answered is released when its drain starts. Reads go through a `BufferedProtocol` in front of uvicorn's protocol
 into ONE 16 KiB buffer per event-loop thread: a read hands the parser at most 16 KiB (the loops read up to
 256 KiB, and uvicorn buffers a request's body up to its 64 KiB high-water mark PLUS the read that crossed it);
-drained bytes are counted in that buffer and discarded (no bytes object at all). The attribution behind this,
+drained bytes are counted in that buffer and discarded (no bytes object at all). The module holds no float
+literal (`DRAIN_TIMEOUT_S = 1`, seconds): it sits in every service's `src/`, and finance-py's G1 guardrail
+(`test_g1_no_float_in_money_paths`) refuses a float literal in any `src/` file outside its transport allowlist —
+the first 3.13 suite run of this wave caught `1.0` there (1 failed, finance-py); the guardrail was kept as it
+was and the module changed. The attribution behind this,
 and fulfillment's 96 MiB bound, are in ADR 0002 ("Fix wave 22").
+
+**Evidence, fix wave 22 (all runs 2026-09-29 00:00–00:05Z, against 1391b5c; the round-21 reviewers' close probes,
+paths re-pointed, ports 18840–18847).** `g6_live.py`, all ten services: the wave-21 code answers the second request
+503 and drains all three sockets; this code answers it and closes the third at once (detection and creative
+re-run with their service token, 00:03Z). `rst_probe`: shed-503, 413 and 401 each 50/50 clean EOF; `rst_witness`
+40/40; `cap_race` 100/100 under three busy loops; `l1_probe` unchanged (a blocking 3.9 MB `sendall` 20/20
+BrokenPipe — the pinned residual — and a reading client 20/20 503); `ledger_drain` (the Rust server, 1500 unclosed
+answered connections): fds peak 641 with its DRAINS_MAX 512, back to 8 after 2.5 s. `drain_dos` (Python,
+a 12k-connection flood of early-answered requests): fds peak 2284 → 534 (the cap holds), and legitimate `/health`
+went from 8×200 + 19×503 to 7×200 with no 503 — BUT its latency rose (p50 0.002 s → 1.4 s, max 1.9 s): the event
+loop is saturated by the flood either way, and the wave-21 code turned that into fast 503s where this code queues
+the request. That trade is not hidden: neither is a DoS defence; the ingress in front is. `drain_dos_slowhead`
+(connections that never finish their head) is UNCHANGED (fds peak 12022 in both): those are never answered, so
+the drain cap does not apply — a head timeout is their bound, outside this change.
 
 ## Verification
 

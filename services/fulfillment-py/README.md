@@ -601,6 +601,35 @@ request-derived content (the escaped path).
 **Suite:** 1005 passed before → 1015 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=18550-18569 python3 -m pytest`).
 
+## Fix wave 22, Sep 28 2026 — the 128-sender RSS bound held by the product (N21-C-1), drains bounded (N21-C-3)
+
+AEGIS round 21: `test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut`
+exceeded its 96 MiB growth bound under load (2/10 module, 5/20 single), driven by the wave-21 reading client, and
+the wave-21 "0/10" predated the change. The bound is unchanged. What the client added and the fix are in ADR 0002
+("Fix wave 22") and ADR 0003 §9; in short: bigger reads left more unread body buffered per connection (uvicorn's
+64 KiB high-water + the up-to-256 KiB read that crossed it), held through the drain; and the peak's run-to-run
+variance was glibc's dynamic mmap threshold. Product changes: `src/graceful_close.py` (the module shared by the ten
+Python services: 16 KiB reads through one buffer, drains discard in it, the slot and the answered body released
+before the drain, at most `FULFILLMENT_DRAINS_MAX`=512 drains) and `api._fix_mmap_threshold` (M_MMAP_THRESHOLD
+fixed at 128 KiB by `python3 -m api`, glibc only).
+
+Evidence, 3 busy loops (`w22/ful_loops.sh`; single = the test alone, module = `test_fix8_n7_2_body_prealloc.py`):
+
+| Code | single 20x | module 10x | growth (single / module) |
+|---|---|---|---|
+| wave 21 (e49d506) | **2 failed** (106, 97 MiB) | 0 failed | 83-106, median 86 / 81-86 |
+| bounded reads (8424e27) | 0 failed | 0 failed | 81-94, median 87.5 / 79-87 |
+| + fixed mmap threshold (1391b5c) | 0 failed | 0 failed | **77-80, median 79 / 74-77** |
+
+New tests: `tests/test_live_graceful_close_module.py` (the shared module: pinned, identical in every service; the
+slot released before the drain; the drain cap; allocation-free drained reads), `tests/test_fix22_drain_residual.py`
+(pins the blocking-client residual — a blocking `sendall` of 3.9 MB answered 503 early is reset after the bounded
+drain — and the reading client's clean 503), `tests/test_fix22_mmap_threshold.py` (the allocator mechanism in a
+child process: 47 MiB resident with the dynamic threshold, 0 with it fixed; the launcher sets it). Tests changed: none
+of the existing ones; `test_live_server._free_port` now probes with `SO_REUSEADDR` (`_procinfo.port_free`).
+Not determined: macOS (not glibc: the threshold call is a no-op there and the bound's margin on its allocator is
+unmeasured until the CI's macOS entry runs).
+
 ## Running it
 
 ```bash

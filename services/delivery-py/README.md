@@ -51,6 +51,18 @@ network, deletion outside the service directory, ACP/MCP, subagents and self-mod
 unconditionally. A cancel or the deadline kills the run's containers and nothing is recorded on the run afterwards.
 Nothing is ever marked fixed on the agent's word; nothing the agent's process prints is ever a count.
 
+**Wave 22 (AEGIS round 21).** The finding's reproduction is ALSO run outside the test runner — pytest services:
+the pinned `adapters/tools/zbm_standalone_runner.py` calls the test function with pytest not importable and
+`CI`/`PYTEST*`/`TEST*` removed from the process environment; go/cargo/node: the toolchain with the CI markers unset —
+and must pass with the fix and fail on the reverted checkout; a fix that only works under the runner fails the
+round, and a reproduction that needs pytest (fixtures, `pytest.raises`, parametrization, a `conftest.py` on its
+path) ends `needs_review_runner_dependent` (committed, NOT fixed, listed under "Needs review" in the report).
+`src_content_deny` refuses the cheap runner-detection spellings in the lines a fix adds. A reviewer-authored
+reproduction's RED check is part of admission, under the service lock: a check that cannot complete or verify is
+`422 reproduction_red_unverified`, never an unchecked admission. An engine container whose start raced a cancel is
+killed and recorded `engine_box_killed_after_cancel`, never `engine_box_started`. `DLV_TEST_PORT_RANGE` now reaches
+the live tests; `DLV_DRAINS_MAX` (default 512) caps the HTTP graceful-close drains (ADR 0003 §9).
+
 ## Running it
 
 ```bash
