@@ -192,8 +192,12 @@ def test_r1_scanners_linear_up_to_1mb(scanner):
         small = H.best_time(fn, unit * (10_000 // len(unit)) + "!", 1)
         assert small < 0.25, f"{scanner} {unit!r}: {small:.2f}s on 10 KB"  # fails fast if quadratic
         at_100kb.append((H.best_time(fn, unit * (100_000 // len(unit)) + "!", 1), unit))
-    for t100, unit in sorted(at_100kb, reverse=True)[:5]:  # the five worst shapes, at 1 MB
-        t1m = H.best_time(fn, unit * (1_000_000 // len(unit)) + "!", 1)
+    for _, unit in sorted(at_100kb, reverse=True)[:5]:  # the five worst shapes, at 1 MB
+        # fix wave 22 (G9 class): the ratio's two points are each a best of 3 (one sample each measured scheduling
+        # noise: normalize '1 ' — median ratio 13.5, single-sample max 19.6, one 3.12 suite run 22.2 > 20; best of 3:
+        # max 14.5-15.1 over 10 pairs on 3.12 and 3.13). The single 100 KB sample above only ranks the shapes.
+        t100 = H.best_time(fn, unit * (100_000 // len(unit)) + "!", 3)
+        t1m = H.best_time(fn, unit * (1_000_000 // len(unit)) + "!", 3)
         # linear: 10x the input costs ~10x (never 100x), and 1 MB stays cheap
         assert t1m < max(20 * t100, 0.05), f"{scanner} {unit!r}: 100 KB {t100:.3f}s, 1 MB {t1m:.3f}s"
         assert t1m < 4.0, f"{scanner} {unit!r}: {t1m:.2f}s on 1 MB"
