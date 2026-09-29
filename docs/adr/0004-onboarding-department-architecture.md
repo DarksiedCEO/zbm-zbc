@@ -630,7 +630,14 @@ The WIP commit was replaced; it doesn't remain in history.
   times each run with the cyclic GC off; the 10 KB base is best-of-5 like the 100 KB run. Measured with
   `w22/g9_probe.py` (30 pairs each, the machine loaded): ratio median 13.0 / max 15.7 before, 9.8 / 13.5 after
   (ideal 10); 0 collections inside a timed 100 KB run after, 15 before. The bounds (50 ms / 100 KB, ratio 20) are
-  unchanged.
+  unchanged. Honest caveat: the 30× loop of that test under three busy loops passed 30/30 on the wave-21 harness as
+  well as on this one — the flake did not reproduce on this machine; the evidence is the distribution above.
+  The same class, missed in that first sweep and caught by the 3.12 suite on 657f70e:
+  `test_r1_scanners_linear_up_to_1mb[normalize]` failed once (100 KB 0.006 s, 1 MB 0.127 s: ratio 22.2 > 20), both
+  points single samples. `normalize` is linear (20 single-sample pairs: median ratio 13.3, max 19.6; best of 3:
+  max 14.5–15.1, on 3.12 and 3.13). The ratio's 100 KB base is now best of 3 and a 1 MB sample over the bound is
+  re-measured best of 3 before it fails (bbcbbda; 48e1166 sampled every 1 MB point 3× and nearly tripled the test's
+  time under load). Limits unchanged.
 - **G3 (N21-C-6).** The round-21 review found `ledger-rust` still running hours after a suite: `proxied_stack`
   (`tests/test_fix_wave6.py`) started the ledger and then, outside any `try`, picked the API's port — a narrow
   `ONBOARDING_TEST_PORT_RANGE` whose ports sat in TIME_WAIT made `free_test_port()` skip, and the ledger was

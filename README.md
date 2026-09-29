@@ -700,10 +700,14 @@ push`, merges, network, deletion outside the service directory, ACP/MCP and self
 unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 amendments and the spec defects:
 `docs/adr/0011-delivery-department-architecture.md`. Routes and settings: `services/delivery-py/README.md`.
 
-- **Status:** built and tested (582 tests: 579 passed, 3 skipped with the printed reason, also with `TMPDIR` a
-  symlink at `/tmp/<link>`; a run leaves nothing in the temp dir but the shared Go build cache; `ruff` clean;
-  wave 21: every finding must name a runnable reproduction — an existing test or a reviewer-authored
-  `reproduction_test` that fails on the starting tree — or is refused 422). The loop is
+- **Status:** built and tested (fix wave 22, commit 657f70e: 635 tests — 631 passed, 4 skipped with the printed
+  reason — on Python 3.13.13 and on 3.12.3; a run leaves nothing in its `TMPDIR` but the shared Go build cache,
+  BUT it leaves four `dlv-git-*` isolation dirs and one `go-build*` dir in `/tmp` itself — processes started with
+  a scrubbed environment (no `TMPDIR`) and then ended by a signal, so their `atexit` cleanup never runs: known,
+  not fixed; wave 21: every finding must name a runnable reproduction — an existing test or a reviewer-authored
+  `reproduction_test` that fails on the starting tree — or is refused 422, and since wave 22 that RED check is
+  part of admission under the service lock, and the reproduction must also hold OUTSIDE the test runner — a
+  reproduction that needs pytest ends `needs_review_runner_dependent`, never `fixed`). The loop is
   proven end to end with a deterministic model against the `fixtures/dlv/toy-py`, `toy-rs`, `toy-go` and `toy-ts`
   fixtures (the real `cargo`, `go` and `node`) through the REAL harness and guardrail; every round-18 attack (conftest monkeypatch, forged summary, neutered `pytest.ini`, deleted test,
   trivial `DISPROOF:`, hung or flooded suite) and every round-19 route (a fix in a new module the test imports, a
@@ -723,5 +727,5 @@ unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 a
   ledger-anchored local log line before it takes effect; an unverifiable test result is `unknown`, never green.
 
 ```bash
-cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 582 tests (cargo, go, node on PATH)
+cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 635 tests (cargo, go, node on PATH)
 ```

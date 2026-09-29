@@ -803,7 +803,21 @@ Pins after this commit: `seed/prompts_manifest.json` `110d732ebddd6b1154845c78da
 Pins after this commit: `seed/test_commands_seed.json` `7af32cf3eeb92446638d3c66ba6efe5af06e4aa1d70afdd18d1c4241487bb0f3`,
 `seed/prompts_manifest.json` `263f568ec1ab8f858f3fa37e559b8e7765a0e085b1a74ce91c1bcc97b7a8599f` (engine.system.md rule 5,
 reviewer.md, CHANGES.md), `adapters/tools/zbm_standalone_runner.py` `e1f917d8b9b1fd2d3812a3634849d4b6955d274b2f7bcc06e8728d4e483055e8`
-(`runner.STANDALONE_SHA256`); `graceful_close.py` (the module shared by the ten Python services; ADR 0003 §9).
+(`runner.STANDALONE_SHA256`); `graceful_close.py` (the module shared by the ten Python services; ADR 0003 §9),
+`333767ce1738b2738d24ddeb63e3091361bf2bce563036e76386b95b4845b749` since 657f70e (no float literal: finance-py's G1
+guardrail).
+
+Evidence, fix wave 22 (the round-21 reviewers' probes, paths re-pointed; `docs/evidence/dept28/round21/`, each
+file dated after the commit it covers): P1 (a fix that returns early under `CI`) and P3 (under a pytest module
+in `sys.modules`) — wave-21 code: `fixed`; now: the finding `blocked` and the run `failed` (`src_content_denied`;
+N1-2 in P1, N2-1 in P3), the honest findings beside them still `fixed`.
+toctou A and B (docker down / a crossing that cannot be recorded, before RED) — wave 21: admitted unchecked; now
+503, nothing created. C (the RED check itself cannot complete) — wave 21: admitted; now 422
+`reproduction_red_unverified`. The control (a reproduction that passes on the starting tree) — 422
+`reproduction_not_red`, as before. `DLV_TEST_PORT_RANGE` set outside — wave 21: dropped by conftest; now reaches
+the live tests. `test_n19_e4` 50× under three busy loops — wave 21: 2 failed; 1391b5c: 0 failed.
+`tests/test_round22.py` on the wave-21 tree: 45 failed. Full suite on 657f70e: 631 passed, 4 skipped on
+Python 3.13.13 (22 min) and on 3.12.3 (30 min).
 
 ## Known limitations
 
