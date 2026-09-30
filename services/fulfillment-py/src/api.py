@@ -1652,31 +1652,6 @@ def _limit_malloc_arenas() -> bool:
         return False
 
 
-# Fix wave 22 (lead ruling G5, AEGIS N21-C-1): glibc's mmap threshold is DYNAMIC
-# by default — freeing an mmapped block raises the threshold to that block's
-# size (up to 32 MiB), so after the first large request body is released, the
-# next bodies' buffers (bytearrays of 128 KiB to 4 MiB, grown chunk by chunk)
-# come from the heap instead, and a freed heap block that is not at the top of
-# the heap stays resident. The 128-sender test's RSS peak varied with that
-# (measured under 3 busy loops, 8 runs each: growth 80-89 MiB with the dynamic
-# threshold, 80-82 MiB with it fixed; the wave-21 code 87-92 MiB) and its
-# failures were the tail of that variance. Fixed at glibc's own initial value,
-# 128 KiB, the threshold never moves: every body buffer of 128 KiB or more is
-# its own mapping, returned to the OS the moment it is freed (and grown with
-# mremap). Best effort and glibc only, like the arena limit; an operator-set
-# MALLOC_MMAP_THRESHOLD_ wins.
-_MMAP_THRESHOLD_BYTES = 128 * 1024  # M_MMAP_THRESHOLD
-
-
-def _fix_mmap_threshold() -> bool:
-    if os.environ.get("MALLOC_MMAP_THRESHOLD_"):
-        return True  # the operator chose; glibc read it at startup
-    try:
-        return bool(_LIBC.mallopt(-3, _MMAP_THRESHOLD_BYTES))  # M_MMAP_THRESHOLD == -3
-    except AttributeError:
-        return False
-
-
 def _malloc_trim() -> None:
     # Fix wave 7 (see _TRIM_IDLE_S): return freed heap pages to the OS once
     # no large body is being parsed. glibc only; a no-op elsewhere.
@@ -1691,8 +1666,6 @@ def main() -> None:
 
     if not _limit_malloc_arenas():
         _log.warning("could not limit malloc arenas (not glibc?); RSS after bursts of bad bodies may stay higher")
-    if not _fix_mmap_threshold():
-        _log.warning("could not fix the malloc mmap threshold (not glibc?); RSS under body floods may vary more")
     host = os.environ.get("FULFILLMENT_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("FULFILLMENT_PORT", "8091"))
     http_limits.DeadlineH11Protocol.body_timeout_s = _BODY_READ_TIMEOUT_S
