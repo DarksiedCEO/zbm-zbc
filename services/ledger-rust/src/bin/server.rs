@@ -108,16 +108,29 @@
 //! still the file this server wrote (same device and inode). Before, the temp
 //! name was `<path>.tmp-<pid>` (predictable) and a link planted there was
 //! followed: the server overwrote the link's target.
+//!
+//! Fix wave 23 (AEGIS N22-C-3): the PARENT directory is never reached through
+//! a symlink either. The parent path is walked one component at a time from
+//! `/` (absolute) or the working directory (relative), each opened
+//! O_DIRECTORY|O_NOFOLLOW (O_PATH on Linux) and checked to be a directory; a
+//! symlink anywhere in it refuses the start. The temp file is created, the
+//! target checked and the rename done relative to that directory descriptor
+//! (openat / fstatat / renameat), which stays open for the life of the process,
+//! so the removal (unlinkat, after fstatat checks device and inode) acts on the
+//! directory the file was written in even if a path component is swapped later.
+//! The removal runs on SIGTERM, SIGINT, SIGHUP and SIGQUIT (the handler then
+//! restores the default disposition and re-raises: the process still dies of
+//! the signal) and on a clean exit. A caller whose temp directory sits behind
+//! a symlink (macOS `/var` -> `/private/var`) passes the canonical path.
 use std::convert::Infallible;
 use std::ffi::CString;
-use std::fs::OpenOptions;
 use std::future::Future;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -529,11 +542,16 @@ fn bind(addr: &str) -> std::io::Result<TcpListener> {
     socket.listen(LISTEN_BACKLOG)
 }
 
-/// The port file this server wrote: its path (NUL-terminated, for the signal
-/// handler) and the device/inode of the file it renamed into place. Set once.
-static PORT_FILE_PATH: AtomicPtr<libc::c_char> = AtomicPtr::new(std::ptr::null_mut());
+/// The port file this server wrote: its NAME (NUL-terminated, for the signal
+/// handler), the descriptor of the directory it was written in (walked without
+/// following any symlink; kept open), and the device/inode of the file it
+/// renamed into place. Set once.
+static PORT_FILE_NAME: AtomicPtr<libc::c_char> = AtomicPtr::new(std::ptr::null_mut());
+static PORT_FILE_DIR_FD: AtomicI32 = AtomicI32::new(-1);
 static PORT_FILE_DEV: AtomicU64 = AtomicU64::new(0);
 static PORT_FILE_INO: AtomicU64 = AtomicU64::new(0);
+/// The signals that remove the port file before the process dies of them.
+const STOP_SIGNALS: [libc::c_int; 4] = [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT];
 
 fn random_hex(n: usize) -> std::io::Result<String> {
     let mut bytes = vec![0u8; n];
@@ -541,74 +559,205 @@ fn random_hex(n: usize) -> std::io::Result<String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn refuse_symlink(path: &Path) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_symlink() => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "the port file path is a symlink (refused: it is never followed or replaced)",
-        )),
-        Ok(m) if !m.file_type().is_file() => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "the port file path exists and is not a regular file",
-        )),
-        _ => Ok(()),
+fn invalid(msg: String) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, msg)
+}
+
+/// A directory descriptor this module owns (closed on drop unless kept).
+struct DirFd(libc::c_int);
+
+impl Drop for DirFd {
+    fn drop(&mut self) {
+        if self.0 >= 0 {
+            // SAFETY: closing a descriptor this struct owns.
+            unsafe {
+                libc::close(self.0);
+            }
+        }
     }
 }
 
-/// Writes `port` to `path` (fix wave 22, G7): refuses a symlinked target; a
-/// temp file in the same directory, `.<name>.tmp-<16 random hex>`, created
-/// O_CREAT|O_EXCL|O_NOFOLLOW with mode 0600, written and fsynced, then renamed
-/// over `path` (atomic; a reader never sees a partial number). Returns the
-/// device and inode of the file now at `path`.
-fn write_port_file(path: &str, port: u16) -> std::io::Result<(u64, u64)> {
+impl DirFd {
+    fn keep(mut self) -> libc::c_int {
+        std::mem::replace(&mut self.0, -1)
+    }
+}
+
+#[cfg(target_os = "linux")]
+const DIR_OPEN_FLAGS: libc::c_int = libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+#[cfg(not(target_os = "linux"))]
+const DIR_OPEN_FLAGS: libc::c_int = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+
+fn c_name(os: &std::ffi::OsStr) -> std::io::Result<CString> {
+    use std::os::unix::ffi::OsStrExt;
+    CString::new(os.as_bytes()).map_err(|_| invalid("NUL in the port file path".to_string()))
+}
+
+fn fstat_fd(fd: libc::c_int) -> std::io::Result<libc::stat> {
+    // SAFETY: `st` is plain data; `fd` is a descriptor this module opened.
+    unsafe {
+        let mut st: libc::stat = std::mem::zeroed();
+        if libc::fstat(fd, &mut st) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(st)
+    }
+}
+
+/// Fix wave 23 (N22-C-3): opens the parent directory of the port file one
+/// component at a time, never following a symlink (O_NOFOLLOW on every
+/// component; each descriptor checked to be a directory). A symlink anywhere
+/// in the parent path is refused, naming the component.
+fn open_parent_nofollow(parent: &Path) -> std::io::Result<DirFd> {
+    use std::path::Component;
+    let start: &[u8] = if parent.is_absolute() { b"/\0" } else { b".\0" };
+    // SAFETY: a NUL-terminated literal path; the result is checked.
+    let fd = unsafe { libc::open(start.as_ptr() as *const libc::c_char, DIR_OPEN_FLAGS & !libc::O_NOFOLLOW) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut cur = DirFd(fd);
+    for comp in parent.components() {
+        let name = match comp {
+            Component::RootDir | Component::CurDir | Component::Prefix(_) => continue,
+            Component::ParentDir => std::ffi::OsStr::new(".."),
+            Component::Normal(n) => n,
+        };
+        let c = c_name(name)?;
+        // SAFETY: `cur.0` is an open directory descriptor; `c` is NUL-terminated.
+        let next = unsafe { libc::openat(cur.0, c.as_ptr(), DIR_OPEN_FLAGS) };
+        if next < 0 {
+            let e = std::io::Error::last_os_error();
+            return Err(match e.raw_os_error() {
+                Some(libc::ELOOP) | Some(libc::ENOTDIR) => invalid(format!(
+                    "the port file's parent directory {parent:?} reaches {name:?} through a symlink or a non-directory \
+                     (refused: a symlink in the parent path is never followed; pass the canonical path)"
+                )),
+                _ => e,
+            });
+        }
+        let next = DirFd(next);
+        let st = fstat_fd(next.0)?;
+        if (st.st_mode & libc::S_IFMT) != libc::S_IFDIR {
+            return Err(invalid(format!(
+                "the port file's parent directory {parent:?} reaches {name:?}, which is a symlink or not a directory \
+                 (refused: a symlink in the parent path is never followed; pass the canonical path)"
+            )));
+        }
+        cur = next;
+    }
+    Ok(cur)
+}
+
+/// The target inside `dir`: absent, or a regular file (a symlink or anything
+/// else is refused).
+fn check_target(dir: libc::c_int, name: &CString) -> std::io::Result<()> {
+    // SAFETY: `st` is plain data; `dir` is an open directory descriptor; `name` is NUL-terminated.
+    unsafe {
+        let mut st: libc::stat = std::mem::zeroed();
+        if libc::fstatat(dir, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) != 0 {
+            let e = std::io::Error::last_os_error();
+            return if e.raw_os_error() == Some(libc::ENOENT) { Ok(()) } else { Err(e) };
+        }
+        match st.st_mode & libc::S_IFMT {
+            libc::S_IFLNK => Err(invalid("the port file path is a symlink (refused: it is never followed or replaced)".to_string())),
+            libc::S_IFREG => Ok(()),
+            _ => Err(invalid("the port file path exists and is not a regular file".to_string())),
+        }
+    }
+}
+
+/// The directory descriptor (walked without following symlinks) and the file
+/// name of the port file `path`.
+fn port_file_location(path: &str) -> std::io::Result<(DirFd, CString)> {
     let target = Path::new(path);
-    refuse_symlink(target)?;
-    let name = target
-        .file_name()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "the port file path names no file"))?;
-    let dir = match target.parent() {
+    let name = target.file_name().ok_or_else(|| invalid("the port file path names no file".to_string()))?;
+    let parent = match target.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
         _ => PathBuf::from("."),
     };
-    let tmp = dir.join(format!(".{}.tmp-{}", name.to_string_lossy(), random_hex(8)?));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&tmp)?;
+    let dir = open_parent_nofollow(&parent)?;
+    let c = c_name(name)?;
+    check_target(dir.0, &c)?;
+    Ok((dir, c))
+}
+
+/// Refuses, at start-up, a port file path the server would refuse to publish
+/// (a symlinked parent component or target, a target that is not a regular file).
+fn check_port_file_path(path: &str) -> std::io::Result<()> {
+    port_file_location(path).map(|_| ())
+}
+
+/// Writes `port` to `path` (fix wave 22, G7; wave 23, N22-C-3): the parent is
+/// walked without following symlinks; a temp file in that directory,
+/// `.<name>.tmp-<16 random hex>`, is created (openat O_CREAT|O_EXCL|O_NOFOLLOW,
+/// mode 0600), written and fsynced, then renamed over `<name>` within the same
+/// directory descriptor (renameat: atomic; a reader never sees a partial
+/// number; a link at the destination is replaced, never followed). Returns
+/// the directory descriptor (kept open), the name, and the device and inode of
+/// the file now at `path`.
+fn write_port_file(path: &str, port: u16) -> std::io::Result<(DirFd, CString, u64, u64)> {
+    let (dir, name) = port_file_location(path)?;
+    let tmp = c_name(std::ffi::OsStr::new(&format!(".{}.tmp-{}", name.to_string_lossy(), random_hex(8)?)))?;
+    // SAFETY: `dir.0` is an open directory descriptor; `tmp` is NUL-terminated; mode passed for O_CREAT.
+    let fd = unsafe {
+        libc::openat(dir.0, tmp.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                     0o600 as libc::c_uint)
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `fd` was just opened here and is owned by the File from now on.
+    let mut file = unsafe { <std::fs::File as std::os::unix::io::FromRawFd>::from_raw_fd(fd) };
     let written = file.write_all(format!("{port}\n").as_bytes()).and_then(|_| file.sync_all()).and_then(|_| file.metadata());
     drop(file);
+    let unlink_tmp = || {
+        // SAFETY: removing the temp name this function created, relative to `dir`.
+        unsafe {
+            libc::unlinkat(dir.0, tmp.as_ptr(), 0);
+        }
+    };
     let meta = match written {
         Ok(m) => m,
         Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
+            unlink_tmp();
             return Err(e);
         }
     };
-    if let Err(e) = refuse_symlink(target).and_then(|_| std::fs::rename(&tmp, target)) {
-        let _ = std::fs::remove_file(&tmp);
+    let renamed = check_target(dir.0, &name).and_then(|_| {
+        // SAFETY: both names are NUL-terminated and relative to the same open directory descriptor.
+        if unsafe { libc::renameat(dir.0, tmp.as_ptr(), dir.0, name.as_ptr()) } != 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(e) = renamed {
+        unlink_tmp();
         return Err(e);
     }
-    Ok((meta.dev(), meta.ino()))
+    Ok((dir, name, meta.dev(), meta.ino()))
 }
 
-/// Removes the port file if it is still the one this server wrote. Called
-/// from the signal handler: only async-signal-safe calls (lstat, unlink).
+/// Removes the port file if it is still the one this server wrote, in the
+/// directory it was written in. Called from the signal handler: only
+/// async-signal-safe calls (fstatat, unlinkat).
 fn remove_own_port_file() {
-    let p = PORT_FILE_PATH.load(Ordering::SeqCst);
-    if p.is_null() {
+    let name = PORT_FILE_NAME.load(Ordering::SeqCst);
+    let dir = PORT_FILE_DIR_FD.load(Ordering::SeqCst);
+    if name.is_null() || dir < 0 {
         return;
     }
-    // SAFETY: `p` points at a leaked, NUL-terminated CString that lives for the process; `st` is plain data.
+    // SAFETY: `name` points at a leaked, NUL-terminated CString that lives for the process; `dir` is a descriptor
+    // kept open for the process; `st` is plain data.
     unsafe {
         let mut st: libc::stat = std::mem::zeroed();
-        if libc::lstat(p, &mut st) == 0
+        if libc::fstatat(dir, name, &mut st, libc::AT_SYMLINK_NOFOLLOW) == 0
             && (st.st_mode & libc::S_IFMT) == libc::S_IFREG
             && st.st_dev as u64 == PORT_FILE_DEV.load(Ordering::SeqCst)
             && st.st_ino as u64 == PORT_FILE_INO.load(Ordering::SeqCst)
         {
-            libc::unlink(p);
+            libc::unlinkat(dir, name, 0);
         }
     }
 }
@@ -623,18 +772,20 @@ extern "C" fn on_stop_signal(sig: libc::c_int) {
     }
 }
 
-/// Publishes the port file and arms its removal (SIGTERM, SIGINT, clean exit).
+/// Publishes the port file and arms its removal (SIGTERM, SIGINT, SIGHUP,
+/// SIGQUIT, clean exit).
 fn publish_port_file(path: &str, port: u16) -> std::io::Result<PortFileGuard> {
-    let (dev, ino) = write_port_file(path, port)?;
-    let c = CString::new(path).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in the port file path"))?;
+    let (dir, name, dev, ino) = write_port_file(path, port)?;
     PORT_FILE_DEV.store(dev, Ordering::SeqCst);
     PORT_FILE_INO.store(ino, Ordering::SeqCst);
-    PORT_FILE_PATH.store(c.into_raw(), Ordering::SeqCst);
+    PORT_FILE_DIR_FD.store(dir.keep(), Ordering::SeqCst);
+    PORT_FILE_NAME.store(name.into_raw(), Ordering::SeqCst);
     // SAFETY: installing a handler that only calls async-signal-safe functions.
     unsafe {
         let handler = on_stop_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
-        libc::signal(libc::SIGTERM, handler);
-        libc::signal(libc::SIGINT, handler);
+        for sig in STOP_SIGNALS {
+            libc::signal(sig, handler);
+        }
     }
     Ok(PortFileGuard)
 }
@@ -695,7 +846,7 @@ fn main() {
     let listener = runtime.block_on(async { bind(&addr) }).expect("failed to bind ledger-rust HTTP server");
     let port_file = std::env::var("LEDGER_PORT_FILE").ok();
     if let Some(pf) = &port_file {
-        if let Err(e) = refuse_symlink(Path::new(pf)) {
+        if let Err(e) = check_port_file_path(pf) {
             ledger_log!("ledger-rust: REFUSING TO START — LEDGER_PORT_FILE={pf:?}: {e}");
             std::process::exit(1);
         }

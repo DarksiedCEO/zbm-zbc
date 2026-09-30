@@ -28,7 +28,7 @@ impl Drop for Scratch {
 
 fn scratch(label: &str) -> Scratch {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("ledger_pf_{label}_{}_{nanos}", std::process::id()));
+    let d = common::real_temp_dir().join(format!("ledger_pf_{label}_{}_{nanos}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     Scratch(d)
 }
@@ -187,4 +187,88 @@ fn sigterm_leaves_a_port_file_that_is_no_longer_the_servers_own() {
     term(child);
     wait_exit(child, Duration::from_secs(10)).expect("SIGTERM did not stop the server");
     assert_eq!(std::fs::read(&pf.0).unwrap(), b"4242\n");
+}
+
+// ---- fix wave 23 (AEGIS round 22, N22-C-3): the PARENT of the port file -----------------------------------------
+
+fn names(dir: &Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    v.sort();
+    v
+}
+
+fn stderr_of(child: &mut Child) -> String {
+    let mut err = String::new();
+    std::io::Read::read_to_string(child.stderr.as_mut().unwrap(), &mut err).unwrap();
+    err
+}
+
+#[test]
+fn a_port_file_whose_parent_directory_is_a_symlink_is_refused_and_the_file_behind_it_is_untouched() {
+    // the reviewers' g7_dirlink: LEDGER_PORT_FILE=<dir>/linkdir/p3.port where linkdir -> victimdir holding a regular
+    // p3.port. Before: the server replaced victimdir/p3.port (0600, its port) and SIGTERM then deleted it.
+    let s = scratch("dir_link");
+    let victim_dir = s.0.join("victimdir");
+    std::fs::create_dir(&victim_dir).unwrap();
+    let victim = victim_dir.join("p3.port");
+    std::fs::write(&victim, b"VICTIM-DIR-FILE\n").unwrap();
+    let link = s.0.join("linkdir");
+    std::os::unix::fs::symlink(&victim_dir, &link).unwrap();
+    let pf = link.join("p3.port");
+    let mut srv = Srv(server(&s.0, &pf, &s.0.join("ledger.jsonl")).spawn().unwrap());
+    let child = &mut srv.0;
+    let st = wait_exit(child, Duration::from_secs(20)).expect("the server kept running with its port file behind a directory symlink");
+    assert!(!st.success(), "{st}");
+    assert_eq!(std::fs::read(&victim).unwrap(), b"VICTIM-DIR-FILE\n");
+    assert_eq!(std::fs::metadata(&victim).unwrap().mode() & 0o777, 0o644);
+    assert_eq!(names(&victim_dir), vec!["p3.port".to_string()]);
+    let err = stderr_of(child);
+    assert!(err.contains("symlink") && err.contains("linkdir"), "{err}");
+}
+
+#[test]
+fn a_symlink_anywhere_in_the_parent_path_is_refused() {
+    // real/a/ holds the target directory; hop -> real; LEDGER_PORT_FILE=<dir>/hop/a/ledger.port
+    let s = scratch("deep_link");
+    let deep = s.0.join("real").join("a");
+    std::fs::create_dir_all(&deep).unwrap();
+    std::os::unix::fs::symlink(s.0.join("real"), s.0.join("hop")).unwrap();
+    let pf = s.0.join("hop").join("a").join("ledger.port");
+    let mut srv = Srv(server(&s.0, &pf, &s.0.join("ledger.jsonl")).spawn().unwrap());
+    let child = &mut srv.0;
+    let st = wait_exit(child, Duration::from_secs(20)).expect("the server kept running with a symlink in its port file's parent path");
+    assert!(!st.success(), "{st}");
+    assert!(names(&deep).is_empty(), "{:?}", names(&deep));
+    let err = stderr_of(child);
+    assert!(err.contains("symlink") && err.contains("hop"), "{err}");
+}
+
+#[test]
+fn a_relative_port_file_in_a_real_directory_still_works() {
+    let s = scratch("relative");
+    std::fs::create_dir(s.0.join("sub")).unwrap();
+    let mut srv = Srv(server(&s.0, Path::new("sub/ledger.port"), &s.0.join("ledger.jsonl")).spawn().unwrap());
+    let child = &mut srv.0;
+    let pf = PortFile(s.0.join("sub").join("ledger.port"));
+    let port = wait_port(child, &pf, Duration::from_secs(20));
+    assert!(port.is_ok(), "{port:?}");
+    term(child);
+    wait_exit(child, Duration::from_secs(10)).expect("SIGTERM did not stop the server");
+    assert!(!pf.0.exists());
+}
+
+#[test]
+fn sighup_and_sigquit_remove_the_port_file_as_sigterm_does() {
+    for sig in ["-HUP", "-QUIT"] {
+        let s = scratch(&format!("sig{}", &sig[1..]));
+        let pf = PortFile(s.0.join("ledger.port"));
+        let mut srv = Srv(server(&s.0, &pf.0, &s.0.join("ledger.jsonl")).spawn().unwrap());
+        let child = &mut srv.0;
+        wait_port(child, &pf, Duration::from_secs(20)).unwrap();
+        let ok = Command::new("kill").arg(sig).arg(child.id().to_string()).status().unwrap();
+        assert!(ok.success());
+        let st = wait_exit(child, Duration::from_secs(10)).unwrap_or_else(|| panic!("{sig} did not stop the server"));
+        assert!(!st.success(), "{sig}: {st}");                 // still killed by the signal (default disposition re-raised)
+        assert!(!pf.0.exists(), "{sig}: the port file outlived the server");
+    }
 }

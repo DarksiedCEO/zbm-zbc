@@ -15,6 +15,13 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+/// The temp directory with every symlink resolved (fix wave 23, N22-C-3: the server refuses a port file whose parent
+/// path crosses a symlink — macOS's temp dir is under `/var` -> `/private/var`).
+pub fn real_temp_dir() -> PathBuf {
+    let t = std::env::temp_dir();
+    std::fs::canonicalize(&t).unwrap_or(t)
+}
+
 /// A port file next to the test's scratch files; removed on drop.
 pub struct PortFile(pub PathBuf);
 
@@ -30,7 +37,7 @@ impl PortFile {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let p = std::env::temp_dir().join(format!("ledger_port_{label}_{}_{nanos}.port", std::process::id()));
+        let p = real_temp_dir().join(format!("ledger_port_{label}_{}_{nanos}.port", std::process::id()));
         let _ = std::fs::remove_file(&p);
         PortFile(p)
     }
