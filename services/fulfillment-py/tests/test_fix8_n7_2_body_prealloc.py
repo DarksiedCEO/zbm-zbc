@@ -423,11 +423,14 @@ def test_live_trickling_body_is_cut_within_the_grace_period_not_the_30s_deadline
     assert elapsed >= http_limits.BODY_MIN_RATE_GRACE_S - 0.5, f"cut too early at {elapsed:.1f}s"
 
 
-def _send_reading(s: socket.socket, data: bytes, idle_timeout: float) -> str:
+def _send_reading(s: socket.socket, data: bytes, idle_timeout: float, answer: dict | None = None) -> str:
     """Send ``data`` while reading; returns the answer's status code once the
     answer is complete to its Content-Length, "closed" on EOF with no answer,
     or the error that ended the exchange before a complete answer. After the
-    last byte is sent the client waits up to ``idle_timeout`` for the answer."""
+    last byte is sent the client waits up to ``idle_timeout`` for the answer.
+    When ``answer`` is given, ``answer["head"]`` receives the answer's raw head
+    and ``answer["sent"]`` the bytes sent (fix wave 23: a keep-alive caller
+    decides from the head whether the connection can be reused)."""
     import select
     s.setblocking(False)
     sent, buf, last = 0, b"", time.monotonic()
@@ -447,6 +450,8 @@ def _send_reading(s: socket.socket, data: bytes, idle_timeout: float) -> str:
             if sep:
                 cl = [int(ln.split(b":", 1)[1]) for ln in head.split(b"\r\n") if ln.lower().startswith(b"content-length:")]
                 if not cl or len(body) >= cl[0]:
+                    if answer is not None:
+                        answer["head"], answer["sent"] = head, sent
                     return buf[9:12].decode()
         elif w:
             try:
