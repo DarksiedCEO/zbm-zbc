@@ -6,6 +6,10 @@
   reason) and live-run on this box; **not certified for a fix run against `main`** and not certified for any run
   at all until the Docker properties of §C.2 are proven on a machine with a daemon (see "Known limitations") and a
   provider key exists.
+- **Wave 23 (Sep 30, 2026), read first:** the engine never claims a finding is fixed. Its per-finding end state is
+  `candidate_passed_checks` (checks passed: necessary, not sufficient); only an AEGIS review with a verdict per
+  finding makes one `accepted`. Where earlier sections say `fixed`, read `candidate_passed_checks` (kept as decided;
+  see "Round 22 amendments").
 - **Spec:** `DEPT28_SPEC.md` rev 1 (binding), the AEGIS audit of deer-flow v2.1.0 / Superpowers v6.4.2
   (`scratchpad/audit28/VERDICT.md` + four reports), `FIX_WAVE_1_COMMON.md`, BUILD_CONTRACTS.md, ADR 0006 / 0009.
 - **Base:** branch `delivery-department` from `integration-2026-09-24` @ `71f121e`.
@@ -74,7 +78,7 @@ ledger-anchored local log with the instance lease and Andre's reconcile).
 | `config/deerflow.engine.yaml` | `e4d51379594e0f7dc2265a0fee0ff25aa7134b1e6aecabe91b291a1d18064f0e` (wave 19: `subagents.max_total_per_run: 1`, deer-flow's floor, with subagents disabled in code) |
 | `config/extensions_config.json` | `4875b2992e9062d6f8084ac64d543f50a29624bd0e7eb82586e31b3056563807` |
 | `seed/skills_manifest.json` | `26f51402a23232a6b3f6a5764829800c3570403e2694ee1a9f331fe23e040320` |
-| `seed/prompts_manifest.json` | `263f568ec1ab8f858f3fa37e559b8e7765a0e085b1a74ce91c1bcc97b7a8599f` (wave 22: engine.system.md rule 5 and reviewer.md on the reproduction outside the runner, `reproduction_red_unverified`; wave 21: `engine.system.md` rule 5, `brief.template.md` names the finding's reproduction argv, `reviewer.md` requires a runnable reproduction for every finding filed, `CHANGES.md`; wave 19: `engine.system.md` rules 2 and 5 restated for R1/R3) |
+| `seed/prompts_manifest.json` | `eff72a748472a4fb97f68dfc7158c41473cc00ebcf4186b04481dd9c5a7b6717` (wave 23: brief, engine.system.md rule 5, executing-plans and reviewer.md name the end state `candidate_passed_checks`, the review flags and the review contract; wave 22: engine.system.md rule 5 and reviewer.md on the reproduction outside the runner, `reproduction_red_unverified`; wave 21: `engine.system.md` rule 5, `brief.template.md` names the finding's reproduction argv, `reviewer.md` requires a runnable reproduction for every finding filed, `CHANGES.md`; wave 19: `engine.system.md` rules 2 and 5 restated for R1/R3) |
 | `seed/tool_policy_seed.json` | `078560a463fd04a11fb3a358e8ebc5a1a782dcedfbd635192bc9a77738787f4d` (wave 20: `pylint`/`isort`/`pre-commit` in the exec allowlist, R6/R9 notes) |
 | `seed/test_commands_seed.json` | `7af32cf3eeb92446638d3c66ba6efe5af06e4aa1d70afdd18d1c4241487bb0f3` (wave 22: `src_content_deny` runner-detection rules for all four ecosystems, applied to added lines; wave 21: pytest `test_content_deny` gains `process_exit`, `fd_write`, `capture_bypass`; wave 20: pytest `test_content_deny` for re-plugging spellings, `src_content_deny`, `zbm_engine_plugin*` as test infra; toolchain amendment: go/cargo/npm `verified: true` with their engine argv, `collect`, `target_example`, `test_content_deny`, per-ecosystem `test_infra_globs`; pytest markers no longer include a bare `tests/`; `service_env` gains the toolchain determinism switches) |
 | `seed/licence_allowlist.json` | `c02f367f3e6cd02949e18dbc2eaa2ceabcb917ac4aa5fc58ad73bec4ac6dfb6e` (wave 19: `unrecorded_allow`) |
@@ -819,6 +823,98 @@ the live tests. `test_n19_e4` 50× under three busy loops — wave 21: 2 failed;
 `tests/test_round22.py` on the wave-21 tree: 45 failed. Full suite on 657f70e: 631 passed, 4 skipped on
 Python 3.13.13 (22 min) and on 3.12.3 (30 min).
 
+## Round 22 amendments (fix wave 23, Sep 30, 2026; founder design change D1-D3, binding; AEGIS N22-D-2..8)
+
+**Why the design changed.** Rounds 20-22 showed that the engine cannot win an arms race against source code that
+detects it is under test: each detector the engine learned to defeat (pytest in `sys.modules`, then the
+environment, then `test_` modules, `argv`, `sys.flags`) was replaced by the next — round 22's B3/B4 probe (a plain
+"a `test_*` module is loaded" check) passes under pytest AND in the standalone run. Detection stays as a cheap
+layer (`src_content_deny`, the standalone re-run); the engine's claim no longer rests on it.
+
+**Terminology (D1).** Where this ADR's earlier sections say a finding is `fixed`, read `candidate_passed_checks`:
+the state was renamed in wave 23 and those sections are kept as they were decided. The engine NEVER asserts that a
+finding is fixed. Its end states for a finding are `candidate_passed_checks` (every check it runs passed —
+necessary, not sufficient), `disproved`, and `needs_review_runner_dependent`; the run still ends `awaiting_review`.
+
+- **D1 — honest claims.** `engine/states.py`: `fixed` → `candidate_passed_checks` (every invariant unchanged); new
+  states `accepted` and `reopened` that ONLY `DeliveryService.review` sets (`review_transition_problem`); the
+  engine's `finding_transition_problem` refuses both. Migration: a finding record read from the local log with
+  `state: "fixed"` is applied as `candidate_passed_checks` (`states.normalize_finding_state`, in `_apply`); the
+  pre-wave-23 `reviewed` state stays as a read-only terminal legacy state (it meant "review pass" or "reopened"
+  alike, so it cannot be mapped). The review contract (`models.ReviewRequest`, caller `aegis` only, as before):
+  `finding_verdicts` = one `{finding_id, verdict: accept|reopen, note}` per finding; a pass needs an accept for
+  EVERY finding awaiting a verdict (422 otherwise, naming the missing ids); a reopen must also be in `reopened`;
+  a fail may accept some findings and reopen others (findings it names in neither keep their end state — not
+  accepted). The ledger event `fix_run_reviewed` carries `accepted`, `reopened`, `flags_addressed`, the notes'
+  sha256 and `next_run_id`. The report header says, in plain words: "Checks passed are necessary, not sufficient.
+  This diff has not been reviewed." Every report line, API field, prompt, README and this ADR's current-state text
+  uses the new wording; the agent's own reply line stays `FIXED` (it is the engineer's claim the engine checks, not
+  the engine's).
+- **D2 — flag, don't chase.** `engine/review_flags.py`: for every line the finding's commit ADDS to a source file
+  (`runner.classify_paths` → `src`; tests and test infrastructure are never scanned) the engine produces a flag
+  (`<finding>-F001` …: file, line, construct, reason, the redacted line) for any construct that can observe the
+  execution context — the founder's list, no wider: Python `sys.modules`, `sys.argv`, `sys.flags`,
+  `sys._getframe` (and frame walking), `inspect`, `traceback`, `os.environ`/`getenv`, `__import__`/`importlib`,
+  `globals()`/`vars()`/`__dict__`, `getattr`/`hasattr`/`setattr` on a module, `__main__`, `atexit`, `signal`,
+  `threading.enumerate`, `gc.get_objects`, `builtins`, string concatenation used to form an identifier (literal +
+  literal, `join` of literals, a placeholder-only `%`/`.format` template, an f-string of a literal, `chr()+`); Go
+  `os.Args`/`flag.Lookup`, `os.Getenv`, `testing.Testing()` (and `"testing"` imported by a source file),
+  `runtime.Caller`/`Stack`, `os/signal`; Rust `cfg!(test)`/`#[cfg(test)]` (inline test modules are flagged too:
+  the engine does not parse Rust), `std::env`, backtraces; Node `process.argv`, `process.env`, `require.main`/
+  `module.parent`, stack-trace hooks, process exit/signal hooks, `globalThis`, dynamic `require`/`import`. The
+  flags are recorded `review_flags_recorded` BEFORE the end state (payload: the first 200 and a digest of all),
+  kept on the finding record (`review_flags`), and rendered FIRST in the report ("Review flags"), above every line
+  that reports a passed check. A review that accepts a finding must name each of its flag ids in
+  `flags_addressed` (422 naming the unaddressed ids; an unknown id is 422 too). `src_content_deny` is kept as it
+  was; no regex was added to it.
+- **D3 — nothing parked (N22-D-2, N22-D-3).** `_standalone_phase` order: a pytest import the standalone runner
+  refused from a SOURCE frame in the verification checkout → round failed `fix_imports_test_runner` (caught or
+  not); verification pass + reverted fail → `confirmed` (a `conftest.py` on the path no longer matters); either
+  `unknown` → `standalone_unknown`; verification `fail` → `fix_depends_on_the_test_runner` (before: parked as
+  runner-dependent when a conftest was present — round 22's C); reverted `pass` →
+  `reproduction_passes_without_fix_outside_the_runner`; only what is left — a `runner_dependent` verdict, which
+  the runner now returns for a TEST-side cause only — is `runner_dependent`. The runner (`zbm_standalone_runner.py`)
+  records for every refused import the frame that asked for it (`blocked_from`: name, file relative to the
+  service, side `test` = the test file, a `conftest.py`, a file under `tests/`/`test/` or named `test_*.py`/
+  `*_test.py`; `src` = any other file of the service, and exec'd text (fail closed); `lib` = outside the service); a
+  refused import that propagates from a `src`/`lib` frame is the code under test failing: `fail`, never
+  `runner_dependent` (round 22's E: before, `__import__('py'+'test')` in the source parked the finding). A
+  `needs_review_runner_dependent` finding carries the flag `<finding>-RD` (the reproduction's `def` line) and only
+  a review accept with a note of at least 20 characters makes it `accepted`.
+- **B1 — no orphaned review (N22-D-4).** A failing review is refused 409 `RUN_IN_PROGRESS` BEFORE anything is
+  recorded while another run or pending admission of the service is in flight (a replay then answers the same
+  409; nothing was stored under its request id, so a fresh review is accepted once the service is free). The
+  review's records, the findings' new states and the child run are ONE operation — one local-log line — committed
+  in one hold of the service lock; every refusal (the findings' transitions, the child's RED checks, its id and
+  request id) is decided before the first ledger record.
+- **B2 — no container under the service lock (N22-D-5).** Admission of reviewer-authored reproductions is three
+  phases: (1) under the lock, every static check, then `reproduction_red_check_started` is recorded (record-first:
+  an unrecorded reservation does not exist) and a pending admission reserves the service's run slot
+  (`DeliveryService._admissions`; it counts as in flight for the service, so B1 holds and a second document for the
+  service is 409); (2) the lock is released and the RED containers run (`_red_run` refuses to run under the lock);
+  (3) one later hold of the lock releases the reservation, records `reproduction_red_checked` per finding and admits
+  (or refuses) atomically. A review of the run cannot slip in meanwhile (a pending review admission refuses a second
+  review of the same run 409). GET, cancel, health and every other service never wait on a container (measured:
+  < 10 ms during a 15 s reviewer test; the test bound is 250 ms). A restart forgets pending admissions (in memory);
+  their containers carry the admission id's label and the start-up reaper removes them.
+- **B3 — the settled signal (N22-D-6).** `wait_idle` returns only when no run is live AND
+  `queue.unfinished_tasks == 0` (the worker calls `task_done` after `FixEngine.execute` returns): a cancelled run's
+  status turns `failed` while the engine thread may still be inside `docker run`, about to kill and record that
+  container.
+- **B4 — ruling on the kill after a cancel (N22-D-7).** The kill of an engine container that started after its run
+  was cancelled follows `kill_run`'s record-first rule: `sandbox_kill_requested` (id `dlv-kac-…`, `why:
+  started_after_cancel`) BEFORE `docker kill`, then `engine_box_killed_after_cancel` with the kill's exit code.
+  One deliberate difference, ruled "safety wins": when the request cannot be recorded, the container is killed
+  anyway (nobody may use a container of a stopped run) and the run is marked `unrecorded_failure` with a
+  `LEDGER_UNAVAILABLE` reason — `mark_failed_unrecorded` now marks a run that is already terminal too (status kept),
+  where before the mark was silently dropped for a cancelled run. `kill_run` itself keeps its rule (unrecorded →
+  not killed; the container's own deadline bounds it) — stated, not changed here.
+- **B5 (N22-D-8).** Two module docstrings named test files that do not exist: `graceful_close.py` (the module
+  shared by the ten Python services) named `tests/test_graceful_close_module.py` — every service's file is
+  `tests/test_live_graceful_close_module.py`; all ten copies are corrected together (byte-identical, new pin in
+  each service's test) — and `serve.py` named `test_fix_wave7.py`, which lives only in onboarding-py (the
+  delivery, verification, clipper-network, finance and legal copies now say so).
+
 ## Known limitations
 
 - The tool-call classifier is a denylist over an unbounded language (df-exec F-03): it is the record and the
@@ -834,8 +930,22 @@ Python 3.13.13 (22 min) and on 3.12.3 (30 min).
   runner: their re-run is the same toolchain with the CI markers unset, so `testing.Testing()`, Node's
   `NODE_TEST_CONTEXT` (set by `node --test` for the test process itself; `env -u` cannot remove it) and the libtest
   harness's own arguments stay detectable by a spelling the cheap rules miss. A reproduction that needs pytest
-  (fixtures, `pytest.raises`, parametrization) — or whose service has a `conftest.py` on the test's path — can
-  never confirm a fix: it ends `needs_review_runner_dependent`, i.e. a human decides.
+  (fixtures, `pytest.raises`, parametrization) can never confirm a change outside the runner: it ends
+  `needs_review_runner_dependent`, flagged `<finding>-RD`, and only a review with a note accepts it (wave 23: a
+  `conftest.py` on the path no longer makes an EXECUTED standalone verdict runner-dependent).
+- Wave 23 (D1/D2), stated plainly: the engine's checks are necessary, not sufficient. A detector that sees the test
+  process by a signal the checks cannot distinguish from production (round 22's "a `test_*` module is loaded")
+  passes every check; what the engine now guarantees is that every added source line that can observe the execution
+  context is FLAGGED with its file and line at the top of the report, and that no finding is `accepted` without a
+  review that names each flag. The flag list is a spelling list: a construct reached without any listed spelling (a
+  module object handed in from elsewhere, a C extension, a non-Python/Go/Rust/Node source file, reflection through
+  an object the list does not name, `exec`/`eval`/`compile` of an encoded string — none of the three is on the
+  founder's list, so an `exec(codecs.decode(…))` that spells nothing listed is not flagged) is not flagged. The
+  scan reads raw line text, so a listed spelling inside a string literal (`exec("import sys; sys.modules")`) IS
+  flagged. Old ledger events keep their words (`finding_state_changed` with `to: "fixed"` stays as recorded; the
+  alias applies to the records the service reads back). It over-flags on purpose (every `signal`, every `__main__`,
+  every Rust inline test module). The engine never claims a finding is fixed; a reviewer who accepts without reading
+  the flagged lines accepts what the engine could not rule out.
 - What a lazy or hostile agent can still do to reach `awaiting_review` with the defect intact (after wave 20):
   for a finding whose `reproduction` names NO test node id, write a RED test that is a tautology tied to the
   finding's file (it asserts a marker the "fix" adds to that file) — the file hunk, the single-file revert, the

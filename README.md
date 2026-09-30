@@ -695,7 +695,10 @@ suite on the exact tree it commits, with its own configuration, an engine-owned 
 result it cross-checks (pytest junit + collect-only + the plugin record; `go test -json` + `-list`; `cargo test`
 lines + `-- --list`; `node --test` junit + TAP); a test that was passed/failed at baseline and is skipped or
 missing afterwards fails the run. It commits, writes the report from its records and hands the run to AEGIS
-re-review — nothing is fixed on the agent's word, nothing the agent's process prints is ever a count, and `git
+re-review — the engine never claims a finding is fixed (wave 23: its end state is `candidate_passed_checks`,
+checks passed, necessary not sufficient; only an AEGIS review with a verdict per finding makes one `accepted`, and
+every added source line that can observe the execution context is a review flag at the top of the report), nothing
+the agent's process prints is ever a count, and `git
 push`, merges, network, deletion outside the service directory, ACP/MCP and self-modification are denied
 unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 amendments and the spec defects:
 `docs/adr/0011-delivery-department-architecture.md`. Routes and settings: `services/delivery-py/README.md`.
@@ -706,8 +709,9 @@ unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 a
   a scrubbed environment (no `TMPDIR`) and then ended by a signal, so their `atexit` cleanup never runs: known,
   not fixed; wave 21: every finding must name a runnable reproduction — an existing test or a reviewer-authored
   `reproduction_test` that fails on the starting tree — or is refused 422, and since wave 22 that RED check is
-  part of admission under the service lock, and the reproduction must also hold OUTSIDE the test runner — a
-  reproduction that needs pytest ends `needs_review_runner_dependent`, never `fixed`). The loop is
+  part of admission (wave 23: its containers run outside the service lock, the service's run slot reserved), and
+  the reproduction must also hold OUTSIDE the test runner — a reproduction whose TEST needs pytest ends
+  `needs_review_runner_dependent`, flagged for the reviewer). The loop is
   proven end to end with a deterministic model against the `fixtures/dlv/toy-py`, `toy-rs`, `toy-go` and `toy-ts`
   fixtures (the real `cargo`, `go` and `node`) through the REAL harness and guardrail; every round-18 attack (conftest monkeypatch, forged summary, neutered `pytest.ini`, deleted test,
   trivial `DISPROOF:`, hung or flooded suite) and every round-19 route (a fix in a new module the test imports, a

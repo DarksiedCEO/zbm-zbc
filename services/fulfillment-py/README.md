@@ -630,6 +630,17 @@ of the existing ones; `test_live_server._free_port` now probes with `SO_REUSEADD
 Not determined: macOS (not glibc: the threshold call is a no-op there and the bound's margin on its allocator is
 unmeasured until the CI's macOS entry runs).
 
+## Fix wave 23, Sep 30 2026 — the mmap-threshold call withdrawn (N22-C-1, N22-C-2)
+
+Wave 22's `api._fix_mmap_threshold` (and `tests/test_fix22_mmap_threshold.py`) are removed: they contradicted ADR 0002
+Decision 21, which measured and rejected a fixed threshold for its CPU cost (round 22 re-measured it: 256 KiB
+alloc/free ~15x slower). The fix of N21-C-1 is the 16 KiB bounded reads of `src/graceful_close.py`. With the call
+removed, under three busy loops (Python 3.13.13; the 96 MiB bound unchanged): the 128-sender test alone **20x, 0
+failed** (growth 82-92 MiB, median 88); `tests/test_fix8_n7_2_body_prealloc.py` as a module **10x, 0 failed**
+(81-90 MiB). The worst run is 4 MiB under the bound — the margin is thin and stated. New test:
+`tests/test_fix23_no_mmap_threshold.py` (3). `src/graceful_close.py`'s docstring now names the pinning test that
+exists (`tests/test_live_graceful_close_module.py`; new pin in that test, identical in all ten services).
+
 ## Running it
 
 ```bash

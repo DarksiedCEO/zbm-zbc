@@ -14,7 +14,7 @@ finding — has the embedded deer-flow engineer write a failing test and fix the
 a FRESH container the agent never had a process in** (fix wave 20, R1): the engine builds the tree on the host
 (`git archive` of the base + exactly the worktree paths that run may see), ships it by `docker cp` into a new
 container on a new volume, runs, reads its result files back and destroys the container. The checks per finding:
-RED (the test fails on the unfixed tree), GREEN (passes with everything the agent changed), the verification
+RED (the test fails on the base tree), GREEN (passes with everything the agent changed), the verification
 checkout (base + the SOURCE changes + the RED test file only: must pass), the reverted checkout (base + the RED
 test only: must fail), the **single-file revert** (the whole fix EXCEPT the finding's file: the RED test must
 fail — the test is tied to the finding's file, and that file must carry a hunk of the fix), the **finding's own
@@ -49,19 +49,40 @@ read-only helper in ONE exec, after the decision is recorded, capped at 16 opera
 writes are contained to `services/<service>/` and `docs/adr/00NN-*.md`); `git push`/`merge`/remote operations,
 network, deletion outside the service directory, ACP/MCP, subagents and self-modification are denied
 unconditionally. A cancel or the deadline kills the run's containers and nothing is recorded on the run afterwards.
-Nothing is ever marked fixed on the agent's word; nothing the agent's process prints is ever a count.
+Nothing the agent's process prints is ever a count, and the ENGINE never claims a finding is fixed (wave 23): its
+per-finding end state is `candidate_passed_checks` — every check above passed, which is necessary, not sufficient;
+the report says so in its header ("Checks passed are necessary, not sufficient. This diff has not been reviewed.").
 
 **Wave 22 (AEGIS round 21).** The finding's reproduction is ALSO run outside the test runner — pytest services:
 the pinned `adapters/tools/zbm_standalone_runner.py` calls the test function with pytest not importable and
 `CI`/`PYTEST*`/`TEST*` removed from the process environment; go/cargo/node: the toolchain with the CI markers unset —
 and must pass with the fix and fail on the reverted checkout; a fix that only works under the runner fails the
 round, and a reproduction that needs pytest (fixtures, `pytest.raises`, parametrization, a `conftest.py` on its
-path) ends `needs_review_runner_dependent` (committed, NOT fixed, listed under "Needs review" in the report).
+path) ends `needs_review_runner_dependent` (committed; wave 23: a conftest no longer decides it — see below).
 `src_content_deny` refuses the cheap runner-detection spellings in the lines a fix adds. A reviewer-authored
 reproduction's RED check is part of admission, under the service lock: a check that cannot complete or verify is
 `422 reproduction_red_unverified`, never an unchecked admission. An engine container whose start raced a cancel is
 killed and recorded `engine_box_killed_after_cancel`, never `engine_box_started`. `DLV_TEST_PORT_RANGE` now reaches
 the live tests; `DLV_DRAINS_MAX` (default 512) caps the HTTP graceful-close drains (ADR 0003 §9).
+
+**Wave 23 (AEGIS round 22; founder design change D1-D3).** The engine flags instead of chasing detectors. *D1:*
+`fixed` is renamed `candidate_passed_checks`; `accepted` (and `reopened`) are set ONLY by `POST …/review` from the
+`aegis` caller with `finding_verdicts` — one `{finding_id, verdict: accept|reopen, note}` per finding (a pass needs an
+accept for every finding); records written as `fixed` read as `candidate_passed_checks`. *D2:* every line a finding's
+commit adds to a SOURCE file that can observe the execution context (`sys.modules`, `sys.argv`, `sys.flags`, frames,
+`inspect`, `traceback`, the environment, `__import__`/`importlib`, `globals()`/`vars()`/`getattr` on modules,
+`__main__`, `atexit`, `signal`, `threading.enumerate`, `gc.get_objects`, `builtins`, names built from string pieces;
+the Go/Rust/Node equivalents) is a review flag `<finding>-F001` (file:line, construct, reason), recorded
+`review_flags_recorded`, listed FIRST in the report, and a review that accepts the finding must name each flag id in
+`flags_addressed`. *D3:* a standalone run that executed is authoritative (a `fail` with the fix fails the round
+whatever conftest is present); a pytest import refused from a SOURCE frame fails the round
+(`fix_imports_test_runner`); a TEST that cannot run outside pytest ends `needs_review_runner_dependent` with the flag
+`<finding>-RD`, accepted only with a review note. Also: a failing review while another run of the service is in
+flight is refused 409 before anything is recorded, and its child run is created in the same operation; the
+admission RED check of reviewer tests runs its containers WITHOUT the service lock (a recorded pending admission
+holds the service's run slot); `wait_idle` waits for the engine thread to return; the kill of a container that
+started after a cancel is recorded first (`sandbox_kill_requested`), and an unrecordable one still kills and marks
+the run `unrecorded_failure`. ADR 0011, "Round 22 amendments".
 
 ## Running it
 
@@ -100,7 +121,7 @@ is 503 `LLM_NOT_CONFIGURED`; with no ledger every write is 503. Nothing is queue
 | `GET /health` | none | status, `in_memory`, `ledger`, `sandbox`, `llm`, `non_production`, the config/prompts hashes, policy version, deer-flow commit |
 | `POST /dlv/v1/fix-runs` | aegis, andre_session | ingest a findings document → 202 `{run_id, status, request_id, facts_sha256}` |
 | `GET /dlv/v1/fix-runs/{id}` · `/findings` · `/report` · `/evidence/{evidence_id}` | any caller | the run, its finding records, the report (markdown), an evidence file (content-addressed, hash-checked on read) |
-| `POST /dlv/v1/fix-runs/{id}/review` | aegis | `pass` → terminal; `fail` → the reopened ∪ new findings enter a new run on the same branch (`next_run_id`) |
+| `POST /dlv/v1/fix-runs/{id}/review` | aegis | wave 23: `finding_verdicts` (accept/reopen + note per finding; a pass accepts EVERY finding, a runner-dependent accept needs a note ≥ 20 chars) and `flags_addressed` (every flag id of each accepted finding); accepted findings → `accepted` (the only route); `pass` → terminal; `fail` → the reopened ∪ new findings enter a new run on the same branch (`next_run_id`, created in the same operation as the review); 409 before anything is recorded while another run of the service is in flight |
 | `POST /dlv/v1/fix-runs/{id}/cancel` | aegis, andre_session | stops a live run (`failed`, evidence kept) |
 | `GET /dlv/v1/policy` | any caller | tool classes, test commands, the pinned hashes (no seed text) |
 | `GET /dlv/v1/audit/export` | any caller | the local log in order with ledger ids and the chain check |

@@ -602,6 +602,29 @@ the request. That trade is not hidden: neither is a DoS defence; the ingress in 
 (connections that never finish their head) is UNCHANGED (fds peak 12022 in both): those are never answered, so
 the drain cap does not apply — a head timeout is their bound, outside this change.
 
+## 10. LEDGER_PORT_FILE's parent directory, and every stop signal (fix wave 23, Sep 30 2026)
+
+**AEGIS round 22 N22-C-3.** §9 refused a symlink AT the port file path but followed one in its PARENT: with
+`LEDGER_PORT_FILE=<dir>/linkdir/p3.port` and `linkdir -> victimdir` holding a regular `p3.port`, the server replaced
+`victimdir/p3.port` (0600, its port) and SIGTERM then deleted it; SIGHUP and SIGQUIT left the file behind (the
+reviewers' `g7_dirlink.py` / `g7_portfile.py` item 3/3b/9). Now (`src/bin/server.rs`, `open_parent_nofollow`,
+`port_file_location`, `write_port_file`): the parent path is walked one component at a time from `/` (absolute) or
+the working directory (relative), each component opened `O_DIRECTORY|O_NOFOLLOW` (`O_PATH` on Linux, so a
+search-only directory is walkable; `O_RDONLY` elsewhere) and `fstat`-checked to be a directory; a symlink anywhere
+in the parent path refuses the start, naming the component (checked before the log opens, and again when the file
+is published). The target check (`fstatat … AT_SYMLINK_NOFOLLOW`), the temp file (`openat
+O_CREAT|O_EXCL|O_NOFOLLOW`, 0600) and the rename (`renameat`) are all relative to that directory descriptor, which
+stays open for the life of the process: the removal (`fstatat` same device and inode, then `unlinkat` — both
+async-signal-safe) acts on the directory the file was written in even if a path component is swapped afterwards.
+The removal runs on SIGTERM, SIGINT, SIGHUP and SIGQUIT (the handler then restores the default disposition and
+re-raises: the process still dies of the signal) and when `main` returns. A caller whose temp directory sits behind
+a symlink (macOS `/var` -> `/private/var`) must pass the canonical path: the integration tests' port files now come
+from `common::real_temp_dir()` (the canonicalized temp dir). Tests (`tests/server_port_file.rs`, +4): a symlinked
+parent directory is refused and the file behind it untouched; a symlink deeper in the parent path is refused; a
+relative path in a real directory still works; SIGHUP and SIGQUIT remove the file. On the 540a64e server the first,
+second and fourth fail; the third passes (a regression guard). Evidence: `services/delivery-py/docs/evidence/
+dept28/round22/` (ledger logs and the reviewers' probes re-run against the release binary).
+
 ## Verification
 
 Commands, counts and a live three-process run are recorded in the README

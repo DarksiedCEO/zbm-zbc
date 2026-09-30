@@ -600,13 +600,33 @@ Decided (product):
   one 16 KiB buffer, so a connection's unread body is bounded by uvicorn's 64 KiB mark + 16 KiB; drained bytes are
   discarded in that buffer; the answered request's body is released when the drain starts; the concurrency slot is
   released before the drain; at most `FULFILLMENT_DRAINS_MAX` (512) drain at once;
-- `python3 -m api` fixes `M_MMAP_THRESHOLD` at 128 KiB (glibc's initial value) beside the arena limit (glibc only;
-  an operator's `MALLOC_MMAP_THRESHOLD_` wins; elsewhere a warning, and the peak's variance on that allocator is
-  UNDETERMINED until the macOS CI entry runs).
+- ~~`python3 -m api` fixes `M_MMAP_THRESHOLD` at 128 KiB~~ — WITHDRAWN in fix wave 23 (see below): it contradicted
+  Decision 21, which stands as written.
 
 Kept: the reading client (ruled legitimate in round 21) and the 96 MiB bound. The blocking client's residual —
 a 3.9 MB blocking `sendall` answered 503 early is reset once the bounded drain ends and never reads the answer — is
 the design and is pinned by `tests/test_fix22_drain_residual.py` (with the reading client's clean 503 beside it).
+
+## Fix wave 23, Sep 30 2026 — the mmap-threshold call withdrawn; Decision 21 stands (AEGIS round 22 N22-C-1/C-2)
+
+Decision 21 (fix wave 7) measured a fixed 128 KiB mmap threshold and REJECTED it: every large body ~50% more CPU in
+page faults (19 vs 13 ms per 3.4 MiB); it kept glibc's dynamic threshold and returns freed heap pages with
+`malloc_trim(0)` one idle second after the last large parse. Wave 22 fixed the threshold anyway
+(`api._fix_mmap_threshold`, 1391b5c) to narrow the 128-sender test's peak variance — a product change bought to
+steady a test, and one Decision 21 had already priced: round 22 re-measured it (alloc/free of 256 KiB blocks ~15x
+slower, a growing 4 MiB bytearray ~5x, a mixed 200 KiB/1 KiB churn ~6-7x; the reviewers' `mmap_cost.log`). The call, its constant and
+`tests/test_fix22_mmap_threshold.py` (with its musl/stub-libc question, N22-C-2) are removed; `src/api.py` is
+byte-identical to its pre-1391b5c blob. **The fix of N21-C-1 is the 16 KiB bounded reads** of `src/graceful_close.py`
+(ADR 0003 §9: every read through one 16 KiB buffer, drains discard in it, the answered body released before the
+drain, the concurrency slot released before the drain, at most 512 drains). `tests/test_fix23_no_mmap_threshold.py`
+pins that the launcher leaves the threshold alone and that Decision 21's arena limit and idle trim stay.
+
+Measured with the call removed (e96bf0b and later; HEAD c71e363), Python 3.13.13, three busy loops, the test's own
+reading client, 96 MiB bound unchanged: `test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut`
+**20x alone: 0 failed**, growth 82-92 MiB (median 88); `tests/test_fix8_n7_2_body_prealloc.py` **10x as a module:
+0 failed**, growth 81-90 MiB (median 86). The margin is real but thin: the worst run is 4 MiB under the bound (wave
+22 with the fixed threshold measured 77-80; round 22's own no-threshold runs 81-94). The bound was not raised; a
+future change that adds per-connection buffering will show here first.
 
 ## Verified so far (Sep 22, 2026 build session)
 
