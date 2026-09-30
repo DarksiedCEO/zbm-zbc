@@ -1,0 +1,15 @@
+start 2026-09-30T13:52:17Z HEAD=c827329fa6bbb48a2d94460362092e07ad3aed33 Python 3.13.13
+test_r22_g1 exit=0 | 7 passed in 204.33s (0:03:24)
+test_r22_g1b exit=0 | 3 passed in 41.60s
+test_r22_g2 exit=0 | 1 passed in 68.57s (0:01:08)
+test_r22_g2b exit=0 | 1 passed in 87.08s (0:01:27)
+test_r22_lost exit=0 | 1 passed in 36.25s
+test_r22_pin exit=0 | 1 passed in 10.76s
+test_r22_rf exit=0 | 2 passed in 32.38s
+test_r22_g4 exit=0 | 20 passed in 75.26s (0:01:15)
+r21/test_d3_refusal exit=0 | 1 passed in 4.14s
+r21/test_toctou exit=0 | 4 passed in 21.91s
+r21/test_recordfirst exit=0 | 1 passed in 5.59s
+r21/test_route4 exit=0 | 3 passed in 60.01s (0:01:00)
+left in TMPDIR: dlv-test-gocache dlv-tests-0ivbwjik dlv-tests-3ae8oyzx dlv-tests-_m62tzkw dlv-tests-cbe01lh7 dlv-tests-gnb01j5d dlv-tests-lkshm3rz dlv-tests-ojhnrboh dlv-tests-rnbpn_v_ dlv-tests-s4k7q2tx dlv-tests-w2_g4tj3 dlv-tests-wqch21de dlv-tests-yp7ovwii 
+end 2026-09-30T14:03:29Z

@@ -703,7 +703,7 @@ push`, merges, network, deletion outside the service directory, ACP/MCP and self
 unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 amendments and the spec defects:
 `docs/adr/0011-delivery-department-architecture.md`. Routes and settings: `services/delivery-py/README.md`.
 
-- **Status:** built and tested (fix wave 22, commit 657f70e: 635 tests — 631 passed, 4 skipped with the printed
+- **Status:** built and tested (fix wave 23, c71e363: 651 tests — 647 passed, 4 skipped with the printed
   reason — on Python 3.13.13 and on 3.12.3; a run leaves nothing in its `TMPDIR` but the shared Go build cache,
   BUT it leaves four `dlv-git-*` isolation dirs and one `go-build*` dir in `/tmp` itself — processes started with
   a scrubbed environment (no `TMPDIR`) and then ended by a signal, so their `atexit` cleanup never runs: known,
@@ -731,5 +731,5 @@ unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 a
   ledger-anchored local log line before it takes effect; an unverifiable test result is `unknown`, never green.
 
 ```bash
-cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 635 tests (cargo, go, node on PATH)
+cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 651 tests (cargo, go, node on PATH)
 ```

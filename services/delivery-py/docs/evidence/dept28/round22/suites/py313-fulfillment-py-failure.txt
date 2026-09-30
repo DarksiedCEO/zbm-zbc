@@ -1,0 +1,36 @@
+=================================== FAILURES ===================================
+____ test_live_junk_flood_does_not_starve_small_legit_requests[8-oversized] ____
+
+server = (<Popen: returncode: None args: ['/tmp/claude-0/-home-claude/e0c1f780-1103-5c...>, '127.0.0.1', 18820)
+n_senders = 8, kind = 'oversized'
+
+    @pytest.mark.parametrize("n_senders,kind", [(8, "keys"), (32, "keys"), (32, "objs"), (32, "array"), (8, "oversized")])
+    def test_live_junk_flood_does_not_starve_small_legit_requests(server, n_senders, kind):
+        junk = LIVE_JUNK[kind]()
+        res = _flood(server, n_senders, 6.0, junk)
+        codes, legit, health = res["codes"], res["legit"], res["health"]
+        summary = (f"{n_senders} {kind} senders: codes={codes} legit n={len(legit)} p50={_pct(legit, .5) * 1000:.0f}ms "
+                   f"p99={_pct(legit, .99) * 1000:.0f}ms max={max(legit) * 1000:.0f}ms; /health p50={_pct(health, .5) * 1000:.0f}ms "
+                   f"p99={_pct(health, .99) * 1000:.0f}ms max={max(health) * 1000:.0f}ms; RSS base {res['base']} peak {res['peak']} "
+                   f"idle {res['idle']} MiB; large batch {res['big'][0]} in {res['big'][1]:.2f}s ({res['big'][2]} attempts)")
+        print(summary)
+        assert res["errors"] == [], res["errors"]
+        # A refused sender may also see a reset: a 413 closes the connection
+        # with its body unread (fix wave 4), and a client still writing gets RST.
+        assert all(k[0] != "junk" or k[1] in (413, 422, 503, "ConnectionResetError", "BrokenPipeError") for k in codes), codes
+>       assert codes.get(("junk", 413 if kind == "oversized" else 422), 0) > 0, codes
+E       AssertionError: {('legit', 200): 114, ('junk', 'BrokenPipeError'): 192}
+E       assert 0 > 0
+E        +  where 0 = <built-in method get of dict object at 0x7f4f91b6dd00>(('junk', 413), 0)
+E        +    where <built-in method get of dict object at 0x7f4f91b6dd00> = {('legit', 200): 114, ('junk', 'BrokenPipeError'): 192}.get
+
+tests/test_fix7_new4_parse_fairness.py:530: AssertionError
+----------------------------- Captured stdout call -----------------------------
+8 oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} legit n=114 p50=5ms p99=34ms max=36ms; /health p50=2ms p99=50ms max=50ms; RSS base 58 peak 73 idle 60 MiB; large batch 200 in 0.09s (1 attempts)
+=============================== warnings summary ===============================
+../../../../../../tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/ful313/lib/python3.13/site-packages/fastapi/testclient.py:1
+  /tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/ful313/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================

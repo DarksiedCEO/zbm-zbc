@@ -640,6 +640,8 @@ failed** (growth 82-92 MiB, median 88); `tests/test_fix8_n7_2_body_prealloc.py` 
 (81-90 MiB). The worst run is 4 MiB under the bound — the margin is thin and stated. New test:
 `tests/test_fix23_no_mmap_threshold.py` (3). `src/graceful_close.py`'s docstring now names the pinning test that
 exists (`tests/test_live_graceful_close_module.py`; new pin in that test, identical in all ten services).
+Full suite: 1034 passed, 1 skipped, **1 failed** on 3.13.13 and on 3.12.3 — the `[8-oversized]` junk-flood case sees
+no 413 (every request `BrokenPipeError`); it fails the same way on 540a64e on this box (ADR 0002, "Fix wave 23").
 
 ## Running it
 

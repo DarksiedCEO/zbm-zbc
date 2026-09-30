@@ -1,0 +1,9 @@
+start 2026-09-30T14:03:29Z HEAD=c827329fa6bbb48a2d94460362092e07ad3aed33 ledger 26621d887680fa4d2aed7e7ac226c26e7e4328c307b92691aff052dfb0c8b100 Python 3.13.13
+compliance-py exit=0 19s | 
+verification-py exit=0 376s | [07:10:04] 28/28 checks passed
+clipper-network-py exit=0 17s | [07:10:21] RESULT: 22/22 narrated behaviours held
+finance-py exit=0 24s | [07:10:46] RESULT: 33/33 checks passed; work dir /tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/tmp-live/finlive-j3k905os
+legal-py exit=0 10s | [07:10:56] 41/41 checks passed
+new /tmp entries: 
+left in TMPDIR: cmp-live-f2novf3c cn-live-cdif6y0h finlive-j3k905os legal-live-d914bluc vi-live-gmrxk72p 
+end 2026-09-30T14:10:56Z

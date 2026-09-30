@@ -89,7 +89,7 @@ the run `unrecorded_failure`. ADR 0011, "Round 22 amendments".
 ```bash
 cd services/delivery-py
 uv sync --frozen                     # python 3.12 or 3.13 (pytest is in the dev group); the harness comes from the pinned deer-flow git source (uv.lock)
-.venv/bin/python -m pytest -q        # 561 tests, no network, no Docker needed (the Docker live module skips with its reason);
+.venv/bin/python -m pytest -q        # 651 tests (wave 23), no network, no Docker needed (the Docker live module skips with its reason);
                                      # cargo, go and node must be on PATH (the toolchain module runs the toy fixtures for real);
                                      # the live tests need a free port in 18800-18849 (DLV_TEST_PORT_RANGE=lo-hi moves them);
                                      # passes with TMPDIR behind a symlink too (wave 21, N20-D-4); live-run logs go to the

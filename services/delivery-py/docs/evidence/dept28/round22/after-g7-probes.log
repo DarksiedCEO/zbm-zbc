@@ -1,0 +1,37 @@
+2026-09-30T12:55:23Z
+binary: /tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/ledger-rel/release/server sha256 26621d887680fa4d2aed7e7ac226c26e7e4328c307b92691aff052dfb0c8b100 built from HEAD c71e3630c87f4cb186c9b0ffe4200ad16c28ca46
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/probes22/close/g7_portfile.py", line 86
+    f"started={ok} victim_dir_file_now={after!r} replaced={after != b'VICTIM-DIR-FILE\n'} mode={oct(os.stat(v).st_mode & 0o777)}")
+                                                                                                                                 ^
+SyntaxError: f-string expression part cannot include a backslash
+--- g7_dirlink x3
+victim-dir file now: b'VICTIM-DIR-FILE\n' replaced: False mode: 0o644
+rc 1 after SIGTERM victim-dir file exists: True
+victim-dir file now: b'VICTIM-DIR-FILE\n' replaced: False mode: 0o644
+rc 1 after SIGTERM victim-dir file exists: True
+victim-dir file now: b'VICTIM-DIR-FILE\n' replaced: False mode: 0o644
+rc 1 after SIGTERM victim-dir file exists: True
+2026-09-30T12:55:39Z
+
+=== g7_portfile.py under Python 3.13 (the system python3 cannot parse its f-string), 2026-09-30T12:55:45Z
+PASS 1 symlink target refused, victim intact: rc=1 victim=b'VICTIM-ORIGINAL\n' err='ledger-rust: REFUSING TO START — LEDGER_PORT_FILE="/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/g7work/p1.port": the port file path is a symlink (refused: it is never'
+PASS 2 dangling symlink refused, nothing created: rc=1 created=False
+PASS 3 dir-symlink parent: victim-dir file replaced? (INFO: parent links are followed): started=True victim_dir_file_now=b'VICTIM-DIR-FILE\n' replaced=False mode=0o644
+FAIL 3b SIGTERM removes it (through the dir link): rc=-15 exists_after=True
+PASS 4 TOCTOU symlink race x100: victim never overwritten: overwritten=0 refused=34 published=66
+PASS 5 post-publish swap + SIGTERM: link and victim untouched: published=True rc=-15 link_still=True
+PASS 6 SIGKILL stale file left (expected, unavoidable) and restart overwrites it: stale_after_kill=True port1=35757 port2=45217 alive=True
+PASS 6b no temp files left in the dir: []
+PASS 7 unwritable dir: refuses (exit!=0), nothing written: rc=1 err='ledger-rust: REFUSING TO START — LEDGER_PORT_FILE="/tmp/aegis-r22-g7-3gd_qiu2/ro/p7.port" could not be written: Permission denied (os error 13)' dir=[]
+PASS 7b as nobody, writable dir: published then removed on SIGTERM: published=True rc=-15 exists_after=False
+PASS 8a target is a directory: refused: rc=1 err='ledger-rust: REFUSING TO START — LEDGER_PORT_FILE="/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/g7work/p8dir": the port file path exists and is not a regular file'
+PASS 8b target is a FIFO: refused: rc=1 err='ledger-rust: REFUSING TO START — LEDGER_PORT_FILE="/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/g7work/p8fifo": the port file path exists and is not a regular file'
+PASS 9 SIGINT: file removed?: rc=-2 exists_after=False
+PASS 9 SIGHUP: file removed?: rc=-1 exists_after=False
+PASS 9 SIGQUIT: file removed?: rc=-3 exists_after=False
+PASS 10 first server's exit leaves the second's file: pa=34635 pb=39661 exists=True
+PASS 11 mode 0600: 0o600
+PASS 12 refused start announces no port: rc=1 exists=False
+ALIVE_AFTER: []
+SUMMARY 17 / 18
+2026-09-30T12:58:56Z

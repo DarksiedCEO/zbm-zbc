@@ -915,6 +915,30 @@ necessary, not sufficient), `disproved`, and `needs_review_runner_dependent`; th
   each service's test) — and `serve.py` named `test_fix_wave7.py`, which lives only in onboarding-py (the
   delivery, verification, clipper-network, finance and legal copies now say so).
 
+Pins after this wave: `seed/prompts_manifest.json` `eff72a748472a4fb97f68dfc7158c41473cc00ebcf4186b04481dd9c5a7b6717`,
+`adapters/tools/zbm_standalone_runner.py` `40c50dea1ce106c49021c18cb034c2ccc8a7fb745c5c0300fa73ded0d6eeb5b8`
+(`runner.STANDALONE_SHA256`), `graceful_close.py` `3df4e0258c48b4a9c9476d2528531bb5b0487292e0fe6bbb99b459dd36a2d17a`
+(all ten copies); `seed/test_commands_seed.json` unchanged (`src_content_deny` not widened).
+
+Evidence, fix wave 23 (`services/delivery-py/docs/evidence/dept28/round22/`, INDEX.md; every "after" run dated after
+the commits): `tests/test_round23.py` — 16 tests, all 16 failing on 540a64e (the GET behind the admission took 15.2 s
+there; < 10 ms now). The round-22 probes: G1 A/A2 (the engineer's obfuscated fix, with and without a conftest) — the
+finding `blocked`, `fix_depends_on_the_test_runner`; C (env-conditional fix, plain reviewer test, base conftest) —
+before `needs_review_runner_dependent`, now `blocked`; E (the source imports pytest) — before parked, now `blocked`,
+`fix_imports_test_runner`; B/B2/B3/B4 (detectors that pass under pytest AND standalone) — `candidate_passed_checks`
+WITH flags on the detector's lines (`__import__`, `vars()`, `getattr` on a module, string concatenation;
+`sys.modules`), at the top of the report, an accept without `flags_addressed` refused 422 (the engine does not
+claim them fixed; a reviewer decides); D (honest fix) — `candidate_passed_checks`; F (the agent plants a conftest) —
+`blocked`, `test_infra_changed`. `test_r22_lost` — 409 with nothing recorded, the replay 409, a fresh review later
+200 with N9-1 in the child (one `fix_run_reviewed`). `test_r22_g2` — GET 0.01 s during the 15 s admission (was
+16.0 s). `test_r22_g2b` — the review refused 409 in 0.03 s (another run in flight; no container ran). `test_r22_rf`
+— the kill of the post-cancel box is preceded by `sandbox_kill_requested`; its `not_record_first` list (the solo
+boxes' `docker cp`, recorded first as `sandbox_exec_requested` with `kind: sandbox_cp`) is unchanged from round 22
+and is the probe expecting a `sandbox_cp_requested` event type, not a missing record. `test_r22_pin` — fails closed
+as before. `test_r22_g4` 20/20; the G4 test 50/50 under three busy loops on 3.13 and on 3.12. The round-21 toctou
+A/B/C, d3_refusal, recordfirst and route4 probes pass. Full suite: 651 tests — 647 passed, 4 skipped — on Python
+3.13.13 (37 min) and on 3.12.3 (47 min).
+
 ## Known limitations
 
 - The tool-call classifier is a denylist over an unbounded language (df-exec F-03): it is the record and the

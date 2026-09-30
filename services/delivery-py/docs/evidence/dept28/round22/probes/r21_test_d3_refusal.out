@@ -1,0 +1,7 @@
+R21 d3_prose 422 {"detail": "finding N1-1: reproduction not runnable: the reproduction names no test node id (<path>::<name> relative to the service directory)", "code": "reproduction_not_runnable", "finding_id": "N1-1", "target": null, "reasons": [{"code": "REPRODUCTION_NOT_RUNNABLE", "rule_id": "DLV-19", "message": "finding N1-1: reproduction not runnable: the reproduction names no test node id (<path>::<name> r
+R21 d3c_prose_n12 422 {"detail": "finding N1-2: reproduction not runnable: the reproduction names no test node id (<path>::<name> relative to the service directory)", "code": "reproduction_not_runnable", "finding_id": "N1-2", "target": null, "reasons": [{"code": "REPRODUCTION_NOT_RUNNABLE", "rule_id": "DLV-19", "message": "finding N1-2: reproduction not runnable: the reproduction names no test node id (<path>::<name> r
+R21 comment_only_name 422 {"detail": "finding N1-2: reproduction not runnable: test_percent_zero_whole does not occur in tests/test_calc.py at the base commit", "code": "reproduction_not_runnable", "finding_id": "N1-2", "target": "tests/test_calc.py::test_percent_zero_whole", "reasons": [{"code": "REPRODUCTION_NOT_RUNNABLE", "rule_id": "DLV-19", "message": "finding N1-2: reproduction not runnable: test_percent_zero_whole d
+R21 refused_events [('REPRODUCTION_NOT_RUNNABLE', 'N1-1'), ('REPRODUCTION_NOT_RUNNABLE', 'N1-2'), ('REPRODUCTION_NOT_RUNNABLE', 'N1-2')]
+R21 runs 0
+.
+1 passed in 4.14s

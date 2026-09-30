@@ -628,6 +628,15 @@ reading client, 96 MiB bound unchanged: `test_live_128_senders_of_3_9mb_that_the
 22 with the fixed threshold measured 77-80; round 22's own no-threshold runs 81-94). The bound was not raised; a
 future change that adds per-connection buffering will show here first.
 
+Full suite (3.13.13 and 3.12.3): 1036 tests — 1034 passed, 1 skipped, 1 failed each —
+`test_fix7_new4_parse_fairness.py::test_live_junk_flood_does_not_starve_small_legit_requests[8-oversized]`: all 192
+junk requests end `BrokenPipeError`, none reads its 413. It fails identically on 540a64e on this box (3/3 per Python,
+A/B alternating with this wave's tree: `services/delivery-py/docs/evidence/dept28/round22/ab-*`), so it is not this
+wave's change; it passed in round 22's runs on 540a64e. The test expects a blocking 4 MiB `sendall` to read an early
+413 — the residual ADR 0003 §9 accepted and `tests/test_fix22_drain_residual.py` pins for 503 (the client is reset
+once the bounded drain ends) — so whether any 413 is read depends on how much of the 4 MiB the socket buffers absorb
+before the drain ends. Reported, not changed: making the test accept zero 413s would weaken it without a ruling.
+
 ## Verified so far (Sep 22, 2026 build session)
 
 See `services/fulfillment-py/README.md` for the actual test count, what

@@ -1,0 +1,79 @@
+2026-09-30T12:50:33Z
+tree: git archive 540a64e (src/bin/server.rs unchanged) + tests/server_port_file.rs and tests/common/mod.rs from the wave-23 worktree
+             at ./tests/server_port_file.rs:207:100
+   7: core::ops::function::FnOnce::call_once
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:250:5
+   8: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+---- a_symlink_anywhere_in_the_parent_path_is_refused stdout ----
+
+thread 'a_symlink_anywhere_in_the_parent_path_is_refused' (15096) panicked at tests/server_port_file.rs:239:56:
+the server kept running with a symlink in its port file's parent path
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
+   2: core::panicking::panic_display::<&str>
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:259:5
+   3: core::option::expect_failed
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/option.rs:2245:5
+   4: core::option::Option<T>::expect
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/option.rs:971:21
+   5: server_port_file::a_symlink_anywhere_in_the_parent_path_is_refused
+             at ./tests/server_port_file.rs:239:56
+   6: server_port_file::a_symlink_anywhere_in_the_parent_path_is_refused::{{closure}}
+             at ./tests/server_port_file.rs:230:54
+   7: core::ops::function::FnOnce::call_once
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:250:5
+   8: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+---- sighup_and_sigquit_remove_the_port_file_as_sigterm_does stdout ----
+
+thread 'sighup_and_sigquit_remove_the_port_file_as_sigterm_does' (15116) panicked at tests/server_port_file.rs:272:9:
+-HUP: the port file outlived the server
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
+   2: server_port_file::sighup_and_sigquit_remove_the_port_file_as_sigterm_does
+             at ./tests/server_port_file.rs:272:9
+   3: server_port_file::sighup_and_sigquit_remove_the_port_file_as_sigterm_does::{{closure}}
+             at ./tests/server_port_file.rs:261:61
+   4: core::ops::function::FnOnce::call_once
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:250:5
+   5: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+
+failures:
+    a_port_file_whose_parent_directory_is_a_symlink_is_refused_and_the_file_behind_it_is_untouched
+    a_symlink_anywhere_in_the_parent_path_is_refused
+    sighup_and_sigquit_remove_the_port_file_as_sigterm_does
+
+test result: FAILED. 6 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.36s
+
+error: test failed, to rerun pass `--test server_port_file`
+
+=== re-run of the dir-link test alone, 2026-09-30T12:51:28Z
+failures:
+
+---- a_port_file_whose_parent_directory_is_a_symlink_is_refused_and_the_file_behind_it_is_untouched stdout ----
+
+thread 'a_port_file_whose_parent_directory_is_a_symlink_is_refused_and_the_file_behind_it_is_untouched' (15164) panicked at tests/server_port_file.rs:220:56:
+the server kept running with its port file behind a directory symlink
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_port_file_whose_parent_directory_is_a_symlink_is_refused_and_the_file_behind_it_is_untouched
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 20.02s
+
+error: test failed, to rerun pass `--test server_port_file`
