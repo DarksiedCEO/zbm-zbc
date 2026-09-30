@@ -162,7 +162,16 @@ p50 6–17 ms, max 0.08–0.22 s (8 runs, 2-CPU host, the 16 clients on the same
 host); `tests/test_request_limits_live.py` asserts max < 0.5 s. Before this
 fix, 16 concurrent 1,000-order batches (0.61 MiB each) held `/health` at p50
 0.89 s, max 1.08 s; after it, the same load gives p50 6 ms, max 47 ms, with
-the same batch throughput (one run each).
+the same batch throughput (one run each). **Fix wave 23:** on the w23
+2-CPU box that bound failed (max 0.50–0.63 s at 5ba1eb6; 4/6 at 540a64e).
+It measured the server (time to first byte, prober in its own process) and
+the event loop was never blocked for more than 0.13 s: the time was the GIL
+convoy — `/health` re-acquires the GIL after every syscall and waited up to
+a 5 ms switch slice each time behind the ~0.5 s parse. `serve.py` now sets
+`sys.setswitchinterval(0.001)` (`DETECTION_SWITCH_INTERVAL_SECONDS`), as the
+other `serve.py` launchers have since fix wave 7 (NEW-5): max 0.11–0.15 s,
+p50 13–17 ms, batch throughput unchanged (13 × 200 in 8 s). The bound is
+unchanged.
 
 Largest detection-py *responses* at these limits: 5.3 MiB (discount-misuse on
 1,000 worst-case orders) and 8.6 MiB (`/correlation/overlaps` echoing 1,000

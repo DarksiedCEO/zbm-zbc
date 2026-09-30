@@ -15,6 +15,8 @@ Body limits are enforced by api._BodyLimitMiddleware under any launcher.
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
@@ -28,6 +30,36 @@ from api import MAX_HEADER_BYTES
 # long as it kept trickling (measured: still open after 20 s). The event loop
 # was not blocked, but every such connection is held forever.
 REQUEST_HEAD_TIMEOUT_S = 10.0
+
+
+# The switch interval (fix wave 23; the class fixed in onboarding-py and the
+# other serve.py launchers in fix wave 7, NEW-5, that detection-py missed):
+# the interpreter lets a thread hold the GIL for sys.getswitchinterval()
+# (5 ms by default) before another thread that wants it is served. A
+# worst-case ~28 MiB batch is one CPU-bound parse of ~0.5 s in the threadpool,
+# and GET /health needs the GIL on the event loop several times on its way
+# through (accept, read, route, write) — each time it gave the GIL up for a
+# syscall it waited up to a full slice to get it back, behind the parse and
+# behind the loop's other work (503 refusals and their drains). Measured on
+# the w23 box with 16 clients sending worst-case batches (/health prober in
+# its own process, time to first byte): 5 ms slices -> max 0.44-0.51 s (the
+# event loop's own lag never exceeded 0.13 s: the time was GIL re-acquisition,
+# not one long block); 1 ms -> max 0.09-0.10 s. DETECTION_SWITCH_INTERVAL_SECONDS
+# overrides it (a positive number of seconds).
+def _switch_interval_from_env(name: str = "DETECTION_SWITCH_INTERVAL_SECONDS", default: float = 0.001) -> float:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0.0
+    if not (0 < value < 1):  # also refuses nan and inf
+        raise RuntimeError(f"{name}={raw!r} is invalid: expected seconds, 0 < value < 1")
+    return value
+
+
+SWITCH_INTERVAL_S: float = _switch_interval_from_env()
 
 
 # Graceful close (fix wave 21, L1) with the wave-22 bounds (G5/G6: bounded reads
@@ -91,6 +123,7 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="bind address (default: loopback only)")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
+    sys.setswitchinterval(SWITCH_INTERVAL_S)
     uvicorn.run(
         "api:app",
         host=args.host,

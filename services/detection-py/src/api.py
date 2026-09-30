@@ -162,7 +162,11 @@ app = FastAPI(
 #     run in parallel anyway — they only take turns delaying the event loop.
 #     Measured with 16 clients sending ~28 MiB worst-case batches: cap 2 ->
 #     /health max 0.43-0.52 s, p50 50-120 ms; cap 1 -> max 0.19-0.22 s, p50
-#     8 ms, with the same batch throughput. Small requests (every
+#     8 ms, with the same batch throughput. Fix wave 23: on a 2-CPU box the
+#     cap-1 max was 0.44-0.63 s — GIL re-acquisition at the default 5 ms
+#     switch interval, not a blocked loop; serve.py now sets 1 ms (as the
+#     other serve.py launchers do): max 0.11-0.15 s, p50 13-17 ms, same
+#     batch throughput (13 x 200 in 8 s). Small requests (every
 #     orchestrator scan sends fixture-sized batches) are never capped.
 #   - BODY_READ_TIMEOUT_S bounds how long one request may take to deliver its
 #     body (408), so a slow-drip body cannot hold a request open forever.
