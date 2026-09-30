@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-PINNED_SHA256 = "333767ce1738b2738d24ddeb63e3091361bf2bce563036e76386b95b4845b749"
+PINNED_SHA256 = "3df4e0258c48b4a9c9476d2528531bb5b0487292e0fe6bbb99b459dd36a2d17a"
 SERVICE = Path(__file__).resolve().parents[1]
 SRC = SERVICE / "src"
 SERVICES = SERVICE.parent

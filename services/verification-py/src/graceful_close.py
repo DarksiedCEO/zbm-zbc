@@ -1,6 +1,6 @@
 """
 Graceful close and bounded reads for uvicorn's h11 protocol — ONE module, byte-identical in all ten Python
-services (fix wave 22, lead ruling G6; each service's tests/test_graceful_close_module.py pins this file's sha256
+services (fix wave 22, lead ruling G6; each service's tests/test_live_graceful_close_module.py pins this file's sha256
 and compares it with the sibling copies it can see). Mix ``GracefulCloseMixin`` in BEFORE uvicorn's ``H11Protocol``.
 
 Fix wave 21 (lead ruling L1; the ledger-rust N20-M-1 class): uvicorn closes a connection it has answered with

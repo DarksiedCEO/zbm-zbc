@@ -38,7 +38,8 @@ thread that wants it is served. A body scan is one CPU-bound thread for up
 to ~1 s, and a light request needs the GIL several times on its way through
 (the event loop parses it, a worker checks the body, the handler runs, the
 loop writes the response), so with 5 ms slices a 40-byte message beside a
-416 KB scan was p50 49-67 ms; at 1 ms it is 12-25 ms (test_fix_wave7.py,
+416 KB scan was p50 49-67 ms; at 1 ms it is 12-25 ms (measured in onboarding-py:
+services/onboarding-py/tests/test_fix_wave7.py,
 live). The scan pays for the extra switches: measured +3-4% of CPU with
 three chatty threads beside it, nothing when it runs alone.
 """
