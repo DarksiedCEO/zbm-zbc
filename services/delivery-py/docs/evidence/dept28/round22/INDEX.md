@@ -15,6 +15,7 @@ docs only). "Before" runs are on a `git archive 540a64e` tree with ONLY the new 
 | `after-ful-128senders-20x-single-busy.txt`, `after-ful-fix8-module-10x-busy.txt` | B6: 20/20 and 10/10 under three busy loops with the mmap call removed |
 | `after-g4-50x-busy-py313.txt`, `after-g4-50x-busy-py312.txt` | B3: the G4 test 50/50 on each Python under three busy loops |
 | `probes/` | every round-22 delivery probe (and the round-21 probes it carried) re-pointed at the worktree; `test_w23_flags_of_r22.out` is an engineer-written supplement (the flags of the detectors that pass both runners) |
+| `after-close-probes.log` | the reviewers' other round-22 close probes against the worktree: g9_scaling (onboarding), readsize (legal: 16 KiB shared / 256 KiB plain, both loops), mmap_cost (the fixed threshold's cost again: 256 KiB alloc/free 85 → 1877 ms), loop_health (clipper-network), drain_dos + slowhead, ledger_drain on the release binary — the same shapes as round 22 |
 | `after-live5-summary.txt` | the five live runs (compliance, verification, clipper-network, finance, legal) against the fresh release ledger |
 | `suites/` | full suites of every touched service, Python 3.13.13 and 3.12.3, with the three non-delivery failures' output |
 | `ab-suite-failures-head-vs-540a64e-py31*.txt` | the three non-delivery failures A/B'd, HEAD vs 540a64e, same box, alternating: present on 540a64e at the same or a higher rate |
