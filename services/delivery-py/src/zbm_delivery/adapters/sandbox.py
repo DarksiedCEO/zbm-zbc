@@ -867,15 +867,27 @@ class ZbmDockerSandboxProvider(SandboxProvider):
             self.destroy_box(box, binding.run_id)
             raise
         if not live:
-            # G4 (N21-D-4): cancel/deadline landed while the container was starting — it is killed and removed now,
-            # recorded engine_box_killed_after_cancel; engine_box_started is never recorded for it
+            # G4 (N21-D-4): cancel/deadline landed while the container was starting — it is killed and removed now;
+            # engine_box_started is never recorded for it. Wave 23 (B4, N22-D-7; ADR 0011): the kill follows kill_run's
+            # record-first rule — ``sandbox_kill_requested`` BEFORE ``docker kill`` — with one difference, ruled
+            # "safety wins": a kill that cannot be recorded still happens (a container nobody may use must not keep
+            # running) and the run is marked ``unrecorded_failure`` (the ledger does not hold the effect). The outcome
+            # is recorded after the kill (``engine_box_killed_after_cancel``, with the kill's exit code).
+            status = str(binding.status())[:40]
+            try:
+                rt.record(derived_id("kac", binding.run_id, name), "sandbox_kill_requested", ACTOR, binding.run_id,
+                          {"run_id": binding.run_id, "container": name, "why": "started_after_cancel", "status": status},
+                          f"docker kill requested: the run stopped while its engine container started ({binding.run_id})")
+            except Exception:  # noqa: BLE001 - unrecorded: killed anyway (safety wins), the run marked below
+                rt.on_ledger_failure(binding.run_id, "sandbox_kill_requested could not be recorded before the kill of "
+                                                     "an engine container that started after the run stopped")
+            r = rt.docker.run(["kill", name], timeout_s=30)
             try:
                 rt.record(derived_id("ebk", binding.run_id, name), "engine_box_killed_after_cancel", ACTOR, binding.run_id,
-                          {"run_id": binding.run_id, "tag": tag, "container": name, "status": str(binding.status())[:40]},
+                          {"run_id": binding.run_id, "tag": tag, "container": name, "status": status, "exit": r.exit_code},
                           f"Engine container killed: the run stopped while it started ({binding.run_id})")
-            except Exception:  # noqa: BLE001 - unrecorded: the kill and the removal below still happen
-                rt.on_ledger_failure(binding.run_id, "engine_box_killed_after_cancel record failed")
-            rt.docker.run(["kill", name], timeout_s=30)
+            except Exception:  # noqa: BLE001 - the kill happened; the ledger does not say so
+                rt.on_ledger_failure(binding.run_id, "engine_box_killed_after_cancel could not be recorded")
             try:
                 self.destroy_box(box, binding.run_id)
             except DockerUnavailable:

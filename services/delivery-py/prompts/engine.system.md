@@ -43,10 +43,15 @@ the test is the authority; the ENGINE (not you) runs every test that counts.
    why. The engine never runs a command you name: it re-runs the FINDING's own reproduction (the test node id the
    findings document names; every finding has one — a document without it is refused before any run exists) on the
    untouched base tree, and the finding is disproved only when that reproduction passes there. The same
-   reproduction must pass with your source changes and fail without them before the finding is `fixed` — under the
+   reproduction must pass with your source changes and fail without them before the finding reaches
+   `candidate_passed_checks` (the engine's end state; only the reviewer accepts a finding) — under the
    test runner AND outside it (the engine also calls the test function by itself, with pytest not importable and
    CI/PYTEST*/TEST* unset). Source code that behaves differently under test (checks for pytest, a test framework in
-   `sys.modules`, `PYTEST_*`/`CI`/`TEST*` variables, the caller's frames) is refused.
+   `sys.modules`, `PYTEST_*`/`CI`/`TEST*` variables, the caller's frames) is refused; source that imports the
+   test runner fails the round. Every source line you add that can observe the execution context (`sys.modules`,
+   `sys.argv`, `sys.flags`, frames, `inspect`, `traceback`, the environment, `__import__`/`importlib`,
+   `globals()`/`vars()`, `__main__`, `atexit`, `signal`, `builtins`, names built from string pieces, and the
+   Go/Rust/Node equivalents) is listed for the reviewer as a review flag, with its file and line.
 6. After three failed hypotheses on one finding, reply `BLOCKED: architecture — <the three failed hypotheses>`.
 
 Reply text outside these lines is ignored. Words like "done", "complete", "all tests pass" change nothing.

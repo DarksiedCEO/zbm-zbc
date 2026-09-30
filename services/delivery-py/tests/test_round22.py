@@ -273,7 +273,7 @@ def test_g1b_p1_runner_conditional_fix_that_the_cheap_layer_misses_is_not_fixed(
         run_id = h.submit(two_findings(h.base_sha)).json()["run_id"]
         run = h.run(run_id)
         fs = {f["finding_id"]: f for f in h.findings(run_id)}
-        assert fs["N1-1"]["state"] == "fixed" and fs["N1-1"]["standalone_check"]["outcome"] == "confirmed"
+        assert fs["N1-1"]["state"] == "candidate_passed_checks" and fs["N1-1"]["standalone_check"]["outcome"] == "confirmed"
         assert fs["N1-2"]["state"] == "blocked" and run["status"] == "failed", (fs["N1-2"]["state"], run["reasons"])
         assert "fix_depends_on_the_test_runner" in _whys(h), _whys(h)
         # the runner-bound checks were all fooled: verification pass, reverted fail — only G1(b) stopped it
@@ -318,12 +318,14 @@ def test_g1b_p3_with_a_reviewer_test_that_needs_pytest_ends_needs_review_never_f
         run_id = h.submit(doc).json()["run_id"]
         run = h.run(run_id)
         f = {x["finding_id"]: x for x in h.findings(run_id)}["N2-1"]
-        assert f["state"] == "needs_review_runner_dependent" and f["state"] != "fixed"
+        assert f["state"] == "needs_review_runner_dependent" and f["state"] != "candidate_passed_checks"
         assert run["status"] == "awaiting_review", run["reasons"]
         sc = f["standalone_check"]
         assert sc["outcome"] == "runner_dependent" and "pytest" in sc["verification"]["why"], sc
         rep = h.report(run_id)
-        assert "## Needs review — NOT fixed" in rep and "- N2-1: every check passed under the test runner" in rep
+        # wave 23 (D3): runner-dependent is a flag, listed under the flags at the top and in its own section
+        assert "## Runner-dependent" in rep and "- N2-1: every check passed under the test runner" in rep
+        assert "`N2-1-RD`" in rep.split("## Suite", 1)[0]
         assert f["commit_sha"] and _prod(run["worktree_path"], "calc.clamp(5, 3, 0)") == "3"
         sc_events = [e["payload"] for e in h.events("reproduction_standalone_checked") if e["payload"]["finding_id"] == "N2-1"]
         assert sc_events and sc_events[-1]["outcome"] == "runner_dependent"
@@ -340,7 +342,7 @@ def test_g1b_an_honest_fix_confirmed_outside_the_runner_is_fixed_with_its_record
         doc["findings"].append(_n21(reproduction_test={"path": RT_PATH, "content": PLAIN_RT}))
         run_id = h.submit(doc).json()["run_id"]
         f = {x["finding_id"]: x for x in h.findings(run_id)}["N2-1"]
-        assert f["state"] == "fixed", (f["state"], _whys(h))
+        assert f["state"] == "candidate_passed_checks", (f["state"], _whys(h))
         sc = f["standalone_check"]
         assert sc["outcome"] == "confirmed" and sc["target"] == RT_NODE
         assert (sc["verification"]["verdict"], sc["reverted"]["verdict"]) == ("pass", "fail")
@@ -370,7 +372,7 @@ def test_g1b_go_env_conditional_fix_fails_the_scrubbed_env_rerun():
     try:
         run_id = h.submit(one_finding(eco, h.base_sha)).json()["run_id"]
         f = h.findings(run_id)[0]
-        assert f["state"] != "fixed" and "fix_depends_on_the_test_runner" in _whys(h), (f["state"], _whys(h))
+        assert f["state"] != "candidate_passed_checks" and "fix_depends_on_the_test_runner" in _whys(h), (f["state"], _whys(h))
         sc = f["standalone_check"]
         assert sc["how"] == "scrubbed_env" and sc["verification"]["verdict"] == "fail" and sc["verification"]["argv"][:3] == ["env", "-u", "CI"]
         assert f["repro_check"]["verification"]["verdict"] == "pass"                     # under CI=1: fooled
@@ -385,17 +387,17 @@ def test_g1_states_fixed_and_needs_review_require_their_standalone_outcome():
             "finding_file_hunk": True, "single_file_revert": {"verdict": "fail", "file": "services/toy-py/src/toy/calc.py"},
             "repro_check": {"target": "tests/t.py::t", "verification": {"verdict": "pass"}, "reverted": {"verdict": "fail"}},
             "sweep": {"sites": []}, "suite_tree_sha256": "a", "commit_tree_sha256": "a", "suite_failures": [], "reviewer_test": None}
-    assert "outside the test runner" in states.finding_transition_problem(base, "fixed")
+    assert "outside the test runner" in states.finding_transition_problem(base, "candidate_passed_checks")
     ok = {**base, "standalone_check": {"target": "tests/t.py::t", "outcome": "confirmed"}}
-    assert states.finding_transition_problem(ok, "fixed") is None
+    assert states.finding_transition_problem(ok, "candidate_passed_checks") is None
     assert "outside the test runner" in states.finding_transition_problem(ok, "needs_review_runner_dependent")
     rd = {**base, "standalone_check": {"target": "tests/t.py::t", "outcome": "runner_dependent"}}
     assert states.finding_transition_problem(rd, "needs_review_runner_dependent") is None
-    assert "outside the test runner" in states.finding_transition_problem(rd, "fixed")
+    assert "outside the test runner" in states.finding_transition_problem(rd, "candidate_passed_checks")
     other = {**base, "standalone_check": {"target": "tests/other.py::t", "outcome": "confirmed"}}
-    assert states.finding_transition_problem(other, "fixed")                            # the record is for the reproduction
+    assert states.finding_transition_problem(other, "candidate_passed_checks")                            # the record is for the reproduction
     assert "needs_review_runner_dependent" in {m.value for m in states.FindingState}
-    assert states.FINDING_TRANSITIONS["needs_review_runner_dependent"] == {"reviewed", "queued"}
+    assert states.FINDING_TRANSITIONS["needs_review_runner_dependent"] == {"accepted", "reopened"}   # wave 23: only a review
 
 
 # ====================================================================== G2: the RED check is admission, locked, fail-closed
@@ -463,7 +465,10 @@ def test_g2_the_review_route_refuses_the_same_and_records_no_review(mode):
         h.close()
 
 
-def test_g2_the_red_check_runs_under_the_service_lock_and_the_finding_carries_its_event_id():
+def test_g2_the_red_check_runs_without_the_service_lock_and_the_finding_carries_its_event_id():
+    """Wave 23 (B2, N22-D-5) changed this test: it asserted the RED check ran UNDER the service lock (wave 22's
+    design, which stalled every GET, cancel and record for the container's duration). Now the pending admission is
+    recorded and holds the service's run slot while the containers run without the lock."""
     h = Harness(scenario=scenario_s1())
     try:
         eng = h.svc._engine
@@ -471,13 +476,16 @@ def test_g2_the_red_check_runs_under_the_service_lock_and_the_finding_carries_it
         held = []
 
         def wrapped(**kw):
-            held.append(h.svc.lock._is_owned())
+            held.append((h.svc.lock._is_owned(), [a["service"] for a in h.svc._admissions.values()]))
             return real(**kw)
         eng.reproduction_red = wrapped
         doc = findings_doc(h.base_sha, [_n21()])
         r = h.post("/dlv/v1/fix-runs", doc)
         assert r.status_code == 202, r.text
-        assert held == [True]
+        assert held == [(False, ["toy-py"])], held
+        assert h.svc._admissions == {}
+        started = h.events("reproduction_red_check_started")
+        assert len(started) == 1 and started[0]["payload"]["finding_ids"] == ["N2-1"]
         red = h.events("reproduction_red_checked")
         rec = h.svc.findings[r.json()["run_id"]]["N2-1"]
         assert len(red) == 1 and rec["reviewer_test"]["red_checked_event_id"] == red[0]["event_id"], (red, rec["reviewer_test"])
@@ -550,7 +558,7 @@ def test_g2_states_refuse_fixed_or_disproved_without_the_admission_red_check():
     rec["reviewer_test"]["red_checked_event_id"] = "dlv-red-x"
     assert states.finding_transition_problem(rec, "disproved") is None
     swept = {"state": "swept", "reviewer_test": {"path": RT_PATH}}
-    assert "reproduction_red_checked" in states.finding_transition_problem(swept, "fixed")
+    assert "reproduction_red_checked" in states.finding_transition_problem(swept, "candidate_passed_checks")
 
 
 # ====================================================================== G3: the port range reaches the live tests
@@ -623,7 +631,7 @@ def test_g4_cancel_while_an_engine_container_starts_kills_it_and_never_records_i
         killed = [e["payload"]["container"] for e in h.events("engine_box_killed_after_cancel")]
         assert any(c[:1] == ["kill"] and c[-1] == killed[0] for c in h.docker.calls) and killed[0] not in h.docker.containers
         run, f = h.run(box["id"]), h.findings(box["id"])[0]
-        assert run["status"] == "failed" and run["commits"] == [] and f["state"] != "fixed"
+        assert run["status"] == "failed" and run["commits"] == [] and f["state"] != "candidate_passed_checks"
     finally:
         h.close()
 

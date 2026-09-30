@@ -74,7 +74,7 @@ def test_l2_new_finding_at_review_with_a_reviewer_test_goes_red_to_fixed_honestl
         f = {x["finding_id"]: x for x in h.findings(child_id)}["N2-1"]
         sha = hashlib.sha256(RT_PLAIN.encode()).hexdigest()
         red_id = [e["event_id"] for e in h.events("reproduction_red_checked")]
-        assert f["state"] == "fixed" and f["reviewer_test"] == {"path": RT_PATH, "author": "reviewer", "sha256": sha,
+        assert f["state"] == "candidate_passed_checks" and f["reviewer_test"] == {"path": RT_PATH, "author": "reviewer", "sha256": sha,
                                                                 "red_checked_event_id": red_id[0]}, f
         assert f["standalone_check"]["outcome"] == "confirmed", f["standalone_check"]
         rc = f["repro_check"]
@@ -110,7 +110,7 @@ def test_l2_the_agent_writing_the_reviewer_test_path_is_denied():
         child_id = r.json()["next_run_id"]
         h.svc.wait_idle()
         f = {x["finding_id"]: x for x in h.findings(child_id)}["N2-1"]
-        assert f["state"] != "fixed", f
+        assert f["state"] != "candidate_passed_checks", f
         denied = [e["payload"] for e in h.events("round_failed")
                   if e["payload"].get("why") == "changed_test_denied" and e["payload"].get("finding_id") == "N2-1"]
         assert denied and denied[0]["reviewer_authored"] is True and denied[0]["targets"] == [f"services/toy-py/{RT_PATH}"], denied

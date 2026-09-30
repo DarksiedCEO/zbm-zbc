@@ -57,7 +57,7 @@ PLUGIN_SHA256 = "05ab874b93ce2a69b543c580bce4efd8ffdc22622552d43ac938f5e67040d84
 # wave 22 (G1(b), N21-D-1): the runner-independent re-execution of a finding's reproduction (read-only at /mnt/dlv)
 STANDALONE_NAME = "zbm_standalone_runner.py"
 STANDALONE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adapters", "tools", STANDALONE_NAME)
-STANDALONE_SHA256 = "e1f917d8b9b1fd2d3812a3634849d4b6955d274b2f7bcc06e8728d4e483055e8"
+STANDALONE_SHA256 = "40c50dea1ce106c49021c18cb034c2ccc8a7fb745c5c0300fa73ded0d6eeb5b8"
 STANDALONE_EXIT = {0: "pass", 1: "fail", 3: "runner_dependent"}
 # the names a scrubbed-environment re-run unsets for the toolchains without a standalone runner (go, cargo, node):
 # every name the container env file can carry that says "a CI/test run", plus the common CI markers
@@ -430,6 +430,11 @@ class TestRunner:  # noqa: N801
                                                               f"{'present' if data is not None else 'missing'})")[:400],
                                  "conftest": list(rec.get("conftest") or [])[:10] if agree else [],
                                  "blocked_imports": list(rec.get("blocked_imports") or [])[:10] if agree else [],
+                                 # wave 23 (D3): where each refused pytest import came from (test / src / lib side)
+                                 "blocked_from": [{"name": str(b.get("name", ""))[:80], "side": str(b.get("side", "")),
+                                                   "file": str(b.get("file", ""))[:200]}
+                                                  for b in (rec.get("blocked_from") or [])[:10] if isinstance(b, dict)]
+                                                 if agree else [],
                                  "report_sha256": t.junit_sha256}
         return t
 

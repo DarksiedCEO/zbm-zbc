@@ -106,8 +106,17 @@ The engine also runs a finding's reproduction OUTSIDE the test runner (the test 
 not importable, CI and PYTEST*/TEST* unset) with and without the fix; a fix that only works under the runner is
 refused. Write a reviewer-authored test as a plain function with plain asserts — no `import pytest`, no fixtures,
 no parametrization: a reproduction that needs pytest cannot be run outside it, and its finding can then end at
-best `needs_review_runner_dependent` — committed, NOT fixed, listed under "Needs review" in the report for you to
-judge (review pass → reviewed; review fail with it reopened → a new run).
+best `needs_review_runner_dependent` — committed, listed at the top of the report as the flag `<finding>-RD`.
+
+The engine never claims a finding is fixed. Its end state is `candidate_passed_checks`: every check it runs passed,
+which is necessary, not sufficient — the diff has not been reviewed. The report opens with the review flags: every
+source line the fix added that can observe the execution context (`<finding>-F001` …, file:line, construct, reason)
+and every runner-dependent reproduction (`<finding>-RD`). A finding becomes `accepted` only through your review
+(`POST /dlv/v1/fix-runs/{id}/review`): `finding_verdicts` = one `{"finding_id", "verdict": "accept" | "reopen",
+"note"}` per finding (a pass needs an accept for EVERY finding; a reopen is also listed in `reopened`; accepting a
+runner-dependent finding needs a note of at least 20 characters on what you checked), and `flags_addressed` must
+name every flag id of each finding you accept — read the flagged line, decide whether it changes behaviour under
+test, and reopen the finding if it does.
 
 ## Part 2: Spec Compliance
 

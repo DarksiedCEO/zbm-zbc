@@ -4,7 +4,7 @@ read-only bind-mounted into every container at ``/mnt/dlv`` (the same mount as `
 tree. It runs ONE pytest-style test function OUTSIDE pytest, so a source change that detects the test runner (a
 ``"pytest" in sys.modules`` check, a ``PYTEST_CURRENT_TEST`` read, a look at the caller's frames) and "fixes" the
 defect only under the runner is seen for what it is: the finding's reproduction must also pass here with the fix and
-fail here on the reverted checkout, or the finding never reaches ``fixed``.
+fail here on the reverted checkout, or the finding never reaches ``candidate_passed_checks``.
 
 Invocation (the engine's argv; nothing here comes from the agent)::
 
@@ -29,6 +29,14 @@ Stage 2 (``--stage2 <fd>``): before anything of the tree is importable,
   3. the test module is imported under the name pytest would give it and the function is called. A test that needs
      pytest (it imports pytest, takes fixtures, is parametrized, is async or a generator, relies on xunit
      ``setup_*``/``teardown_*`` or is skipped) cannot run here: the verdict is ``runner_dependent`` — never ``pass``.
+
+Wave 23 (D3): ``runner_dependent`` is returned only for a TEST-side cause. The import hook records, for every refused
+import, the frame that asked for it (``blocked_from``: the module name, the file relative to the service, and its
+side — ``test`` for the test file, a ``conftest.py`` or a file under a ``tests``/``test`` directory or named
+``test_*.py``/``*_test.py``; ``src`` for any other file of the service; ``lib`` outside it). A refused import that
+propagates from a ``src`` or ``lib`` frame is the code under test failing outside the runner: verdict ``fail``,
+never ``runner_dependent``; the engine fails the round (``fix_imports_test_runner``) on any ``src`` entry of the
+verification checkout, caught or not.
 
 The report (``O_CREAT|O_EXCL|O_NOFOLLOW``, 0600, written only after the function returned or raised) carries the
 nonce; the exit code must agree with it (0 pass, 1 fail, 3 runner_dependent); anything else is ``unknown`` for the
@@ -74,7 +82,9 @@ def _stage1():
 
 
 class RunnerDependent(ModuleNotFoundError):
-    """An import of pytest (or one of its packages) outside pytest."""
+    """An import of pytest (or one of its packages) outside pytest; ``side`` is where the import came from."""
+
+    side = "lib"
 
 
 def _stage2(fd):
@@ -93,18 +103,52 @@ def _stage2(fd):
     os.close(fd)
     req = json.loads(b"".join(chunks).decode("utf-8"))
     nonce, report = req["nonce"], req["report"]
-    state = {"blocked": [], "dropped": []}
+    state = {"blocked": [], "dropped": [], "from": [], "service_dir": None, "test_file": None}
+    here = os.path.realpath(__file__)
+    importlib_dir = os.path.dirname(os.path.realpath(importlib.__file__))
 
     def blocked_name(name):
         root = name.partition(".")[0]
         return root in ("pytest", "_pytest") or root.startswith(("pytest_", "_pytest"))
 
+    def importer():
+        """The file of the first frame above the import machinery: the code that asked for the module."""
+        f = sys._getframe(2)
+        while f is not None:
+            fn = f.f_code.co_filename
+            if fn.startswith("<") and not fn.startswith(("<frozen ", "<builtin")):
+                return fn                     # exec'd / compiled text: nobody can say whose it is (side_of: src)
+            if not fn.startswith("<"):
+                real = os.path.realpath(fn)
+                if real != here and os.path.dirname(real) != importlib_dir:
+                    return real
+            f = f.f_back
+        return ""
+
+    def side_of(real):
+        sd, tf = state["service_dir"], state["test_file"]
+        if real.startswith("<"):
+            return "src", real[:80]           # fail closed: an import from exec'd text never counts as the test's
+        if not real or not sd or not (real == sd or real.startswith(sd + os.sep)):
+            return "lib", os.path.basename(real)
+        rel = os.path.relpath(real, sd)
+        parts = rel.split(os.sep)
+        base = parts[-1]
+        if (real == tf or base == "conftest.py" or any(p in ("tests", "test") for p in parts[:-1])
+                or base.startswith("test_") or base.endswith("_test.py")):
+            return "test", rel
+        return "src", rel
+
     class _Block(importlib.abc.MetaPathFinder):
         def find_spec(self, name, path=None, target=None):
             if blocked_name(name):
+                side, where = side_of(importer())
                 state["blocked"].append(name)
-                raise RunnerDependent(f"No module named {name!r} (the engine's standalone run: pytest is not importable)",
+                state["from"].append({"name": name[:80], "side": side, "file": where[:200]})
+                exc = RunnerDependent(f"No module named {name!r} (the engine's standalone run: pytest is not importable)",
                                       name=name)
+                exc.side = side
+                raise exc
             return None
 
     sys.meta_path.insert(0, _Block())
@@ -116,7 +160,7 @@ def _stage2(fd):
 
     def finish(verdict, why, **extra):
         payload = {"nonce": nonce, "verdict": verdict, "why": str(why)[:400], "blocked_imports": state["blocked"][:20],
-                   "dropped_at_start": state["dropped"][:20], **extra}
+                   "blocked_from": state["from"][:20], "dropped_at_start": state["dropped"][:20], **extra}
         data = json.dumps(payload, sort_keys=True).encode("utf-8")
         try:
             out = os.open(report, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
@@ -133,17 +177,29 @@ def _stage2(fd):
             pass
         os._exit(_EXIT[verdict])
 
-    def caused_by_block(exc):
+    def blocking(exc):
+        """The RunnerDependent that ``exc`` came from, or None."""
         seen = set()
         while exc is not None and id(exc) not in seen:
             seen.add(id(exc))
             if isinstance(exc, RunnerDependent):
-                return True
+                return exc
             exc = exc.__cause__ or exc.__context__
-        return False
+        return None
+
+    def classify(exc, what):
+        """D3: a refused pytest import is ``runner_dependent`` only when the TEST side asked for it; from the code
+        under test (``src``) or a library (``lib``) it is that code failing outside the runner: ``fail``."""
+        blk = blocking(exc)
+        if blk is None:
+            return "fail", f"{what} raised {type(exc).__name__}"
+        if blk.side == "test":
+            return "runner_dependent", f"{what}: the test needs pytest ({type(exc).__name__})"
+        return "fail", f"{what}: the {blk.side} code imports the test runner ({blk.name!r})"
 
     service_dir = os.path.realpath(req["service_dir"])
     test_file = os.path.realpath(req["test_file"])
+    state["service_dir"], state["test_file"] = service_dir, test_file
     test = req["test"]
     if not (test_file == service_dir or test_file.startswith(service_dir + os.sep)) or not os.path.isfile(test_file):
         finish("unknown", "the test file is not a file of the service directory")
@@ -171,9 +227,7 @@ def _stage2(fd):
     try:
         mod = importlib.import_module(modname)
     except BaseException as exc:  # noqa: BLE001 - the verdict is the classification of whatever happened
-        if caused_by_block(exc):
-            finish("runner_dependent", f"importing the test module needs pytest ({type(exc).__name__})", **info)
-        finish("fail", f"importing the test module raised {type(exc).__name__}", **info)
+        finish(*classify(exc, "importing the test module"), **info)
     names = test.split("::")
     owner, obj = None, mod
     try:
@@ -190,11 +244,13 @@ def _stage2(fd):
             try:
                 owner(names[-1]).run(result)
             except BaseException as exc:  # noqa: BLE001
-                finish("runner_dependent" if caused_by_block(exc) else "fail", f"unittest raised {type(exc).__name__}", **info)
+                finish(*classify(exc, "the unittest case"), **info)
             if result.skipped:
                 finish("runner_dependent", "the unittest case was skipped", **info)
             problems = result.errors + result.failures
             if any("RunnerDependent" in tb for _, tb in problems):
+                if any(b["side"] != "test" for b in state["from"]):
+                    finish("fail", "the unittest case: the code under test imports the test runner", **info)
                 finish("runner_dependent", "the unittest case needs pytest", **info)
             finish("fail" if problems or result.unexpectedSuccesses else "pass",
                    f"unittest: {len(result.errors)} error(s), {len(result.failures)} failure(s)", **info)
@@ -203,7 +259,7 @@ def _stage2(fd):
         try:
             fn = getattr(owner(), names[-1])
         except BaseException as exc:  # noqa: BLE001
-            finish("runner_dependent" if caused_by_block(exc) else "fail", f"instantiating the test class raised {type(exc).__name__}", **info)
+            finish(*classify(exc, "instantiating the test class"), **info)
     elif owner is not mod:
         finish("unknown", f"{test} is not a module-level function or a class's method", **info)
     if not callable(fn):
@@ -223,9 +279,8 @@ def _stage2(fd):
     except BaseException as exc:  # noqa: BLE001 - SystemExit / KeyboardInterrupt from the code under test fail the test
         if isinstance(exc, unittest.SkipTest):
             finish("runner_dependent", "the test skipped itself", **info)
-        if caused_by_block(exc):
-            finish("runner_dependent", f"the test needs pytest ({type(exc).__name__})", **info)
-        finish("fail", f"the test raised {type(exc).__name__}", **info)
+        verdict, why = classify(exc, "the test")
+        finish(verdict, why if verdict == "runner_dependent" or blocking(exc) else f"the test raised {type(exc).__name__}", **info)
     finish("pass", "the test function returned", **info)
 
 

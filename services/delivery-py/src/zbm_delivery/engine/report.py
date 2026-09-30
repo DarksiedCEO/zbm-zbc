@@ -5,6 +5,11 @@ codes, the runner's verified counts, commit shas and file lists from the diff. T
 fence longer than the longest backtick run in the content (a test's stdout cannot close the fence and inject report
 structure); sweep sites are the validated ones (dropped ones are counted with the reason); every number traces to
 a ledger event id (the agent line cites its ``agent_usage`` event).
+
+Wave 23 (founder design change D1/D2): the header says in plain words that the checks are necessary, not sufficient,
+and that the diff has not been reviewed; the engine's end state is ``candidate_passed_checks`` (never "fixed"); the
+review flags (``review_flags``: file:line, construct, reason — a runner-dependent reproduction included, D3) come
+FIRST, above every line that reports a passed check.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ import re
 from typing import Callable
 
 TAIL_LINES = 200
+HEADER = "Checks passed are necessary, not sufficient. This diff has not been reviewed."
 _BACKTICKS = re.compile(r"`+")
 
 
@@ -52,10 +58,36 @@ def _phase(name: str, rec: dict | None, read_evidence: Callable[[str], str]) -> 
     return out
 
 
+def _code(text: str) -> str:
+    """An inline code span that no backtick run in ``text`` can close (untrusted source text)."""
+    t = " ".join(str(text).split())
+    fence = fence_for(t)
+    return f"{fence} {t} {fence}" if t else ""
+
+
+def flags_section(findings: list[dict]) -> list[str]:
+    """D2: every review flag of the run, above everything else the report says."""
+    L = ["## Review flags (read these first: a review that accepts a finding must address each id)", ""]
+    flags = [fl for f in findings for fl in (f.get("review_flags") or [])]
+    if not flags:
+        L.append("- none: no added source line uses a construct that can observe the execution context, and no "
+                 "reproduction is runner-dependent")
+    for fl in flags:
+        snip = _code(fl.get("snippet") or "")
+        L.append(f"- `{fl['id']}` · `{fl['file']}:{fl['line']}` · {fl['construct']} — {fl['reason']}"
+                 + (f" · {snip}" if snip else ""))
+    L.append("")
+    return L
+
+
 def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str]) -> str:
     L: list[str] = []
     L.append(f"# Fix run report — {run['run_id']}")
     L.append("")
+    L.append(f"**{HEADER}** The engine's end state for a finding is `candidate_passed_checks`: every check it runs "
+             "passed. Only an AEGIS review with a verdict per finding makes a finding `accepted`.")
+    L.append("")
+    L += flags_section(findings)
     L.append(f"- Service: `{run['service']}` · Branch: `{run.get('branch')}` · Base: `{run['base_sha']}` ({run['base_ref']})")
     L.append(f"- Request: `{run['request_id']}` · facts_sha256 `{run['facts_sha256']}`")
     L.append(f"- Model: {run['llm']['provider']} / {run['llm']['model']}" + (" (FAKE, non-production)" if run['llm'].get('fake') else ""))
@@ -139,7 +171,7 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
                      f"`{d.get('base_sha')}`: exit {d.get('exit')}, verdict {d.get('verdict')} · "
                      f"statement sha256 `{d.get('statement_sha256')}` · evidence `{d.get('evidence_id')}`")
         if f.get("suite_failures"):
-            L.append("- suite failures blocking `fixed`: " + ", ".join(f"`{n}`" for n in f["suite_failures"]))
+            L.append("- suite failures blocking `candidate_passed_checks`: " + ", ".join(f"`{n}`" for n in f["suite_failures"]))
         for r in f.get("reasons") or []:
             L.append(f"- reason: {r.get('code')} — {r.get('message')}")
         a = f.get("agent") or {}
@@ -148,7 +180,7 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
                      f"denies {a.get('denies', 0)} · tokens in/out {a.get('tokens_in', 0)}/{a.get('tokens_out', 0)} · "
                      f"ledger event `{a.get('event_id')}`")
     L.append("")
-    L.append("## Needs review — NOT fixed (the reproduction could not be confirmed outside the test runner)")
+    L.append("## Runner-dependent — the reproduction could not be executed outside the test runner (flagged `<id>-RD`)")
     L.append("")
     nr = [f for f in findings if f["state"] == "needs_review_runner_dependent"]
     if not nr:
@@ -156,11 +188,12 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
     for f in nr:
         sc = f.get("standalone_check") or {}
         why = (sc.get("verification") or {}).get("why") or (sc.get("reverted") or {}).get("why") or "-"
-        L.append(f"- {f['finding_id']}: every check passed under the test runner and the fix is committed (`{f.get('commit_sha')}`), "
-                 f"but the reproduction `{sc.get('target')}` needs the runner (\"{why}\""
+        L.append(f"- {f['finding_id']}: every check passed under the test runner and the change is committed "
+                 f"(`{f.get('commit_sha')}`), but the reproduction `{sc.get('target')}` cannot run outside it (\"{why}\""
                  + ("; a conftest.py is on its path" if sc.get("conftest") else "")
-                 + "), so the engine could not rule out a fix that only works under test. A human decides: review "
-                 "pass → reviewed; review fail with this finding reopened → a new run.")
+                 + "), so the engine could not rule out a change that only works under test. Flag "
+                 f"`{f['finding_id']}-RD`: an AEGIS review accepts it only with a note on what the reviewer checked; "
+                 "a review that reopens it starts a new run.")
     L.append("")
     L.append("## Blocked")
     L.append("")

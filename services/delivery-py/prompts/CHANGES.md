@@ -129,3 +129,9 @@ task-reviewer :55-62 (no subagents), :96-113 (Spec Compliance), :117-138 (Code Q
   OUTSIDE the test runner and that runner-detecting source is refused; `reviewer.md` names `reproduction_red_unverified`
   and asks for reviewer-authored tests without pytest imports or fixtures (a reproduction that needs pytest ends
   `needs_review_runner_dependent`, never `fixed`).
+- Fix wave 23 (founder design change D1-D3): the engine never claims `fixed` — `brief.template.md`,
+  `engine.system.md` rule 5 and `executing-plans.md` name its end state `candidate_passed_checks` and say that only
+  the reviewer accepts a finding; `engine.system.md` rule 5 adds that source importing the test runner fails the
+  round and that every added source line able to observe the execution context becomes a review flag;
+  `reviewer.md` describes the review flags at the top of the report and the review contract (`finding_verdicts`
+  with an explicit accept/reopen per finding, a note for a runner-dependent accept, `flags_addressed`).

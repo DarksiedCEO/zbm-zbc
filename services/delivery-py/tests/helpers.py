@@ -199,6 +199,31 @@ def two_findings(base_sha: str, request_id: Optional[str] = None) -> dict:
 WS = "/mnt/user-data/workspace/services/toy-py"
 
 
+REVIEW_DONE_STATES = ("candidate_passed_checks", "disproved", "needs_review_runner_dependent")
+RD_NOTE = "the reviewer read the diff and the runner-dependent reproduction; accepted for this test"
+
+
+def review_body(h, run_id: str, verdict: str = "pass", reopened=(), new_findings=(), notes: Optional[dict] = None,
+                flags: Optional[list] = None, request_id: Optional[str] = None) -> dict:
+    """Wave 23 (D1/D2): a review with an explicit verdict per finding (``accept`` unless reopened) and — unless
+    ``flags`` is given — every review flag of the run named in ``flags_addressed``. A runner-dependent finding's
+    accept carries ``RD_NOTE`` unless ``notes`` says otherwise."""
+    fs = h.findings(run_id)
+    notes = notes or {}
+    fv = []
+    for f in fs:
+        if f["state"] not in REVIEW_DONE_STATES:
+            continue
+        fid = f["finding_id"]
+        default = RD_NOTE if f["state"] == "needs_review_runner_dependent" else ""
+        fv.append({"finding_id": fid, "verdict": "reopen" if fid in reopened else "accept", "note": notes.get(fid, default)})
+    if flags is None:
+        flags = sorted({fl["id"] for f in fs for fl in (f.get("review_flags") or [])})
+    return {"request_id": request_id or rid(), "review_ref": "review-test", "sha256": "b" * 64, "verdict": verdict,
+            "reopened": list(reopened), "new_findings": list(new_findings), "finding_verdicts": fv,
+            "flags_addressed": list(flags)}
+
+
 def write_test(name: str, body: str) -> dict:
     return {"tool_calls": [{"name": "write_file", "args": {"path": f"{WS}/tests/{name}.py", "content": body}}]}
 

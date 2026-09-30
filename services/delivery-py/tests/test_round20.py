@@ -98,7 +98,7 @@ def test_n20_d3_probe_d3c_scenario_with_a_runnable_reproduction_never_fixes_the_
         assert r.status_code == 202, r.text
         run = h.run(r.json()["run_id"])
         fs = {x["finding_id"]: x for x in h.findings(run["run_id"])}
-        assert fs["N1-1"]["state"] == "fixed" and fs["N1-2"]["state"] != "fixed", {k: v["state"] for k, v in fs.items()}
+        assert fs["N1-1"]["state"] == "candidate_passed_checks" and fs["N1-2"]["state"] != "candidate_passed_checks", {k: v["state"] for k, v in fs.items()}
         assert run["status"] == "failed" and [c["finding_id"] for c in run["commits"]] == ["N1-1"]
         assert "reproduction_not_fixed" in _whys(h), _whys(h)
         with open(os.path.join(run["worktree_path"], "services/toy-py/src/toy/calc.py")) as fh:
@@ -115,7 +115,7 @@ def test_n20_d3_honest_fix_of_both_findings_with_named_reproductions_reaches_awa
         assert run["status"] == "awaiting_review", run["reasons"]
         for f in h.findings(run["run_id"]):
             rc = f["repro_check"]
-            assert f["state"] == "fixed" and rc["verification"]["verdict"] == "pass" and rc["reverted"]["verdict"] == "fail", f
+            assert f["state"] == "candidate_passed_checks" and rc["verification"]["verdict"] == "pass" and rc["reverted"]["verdict"] == "fail", f
     finally:
         h.close()
 
@@ -132,9 +132,9 @@ def test_n20_d3_fixed_invariant_requires_a_reproduction_record():
             "commit_tree_sha256": "a" * 64, "suite_failures": [], "outcome_regressions": [],
             # wave 22 (G1): the reproduction confirmed outside the test runner is required for fixed as well
             "standalone_check": {"outcome": "confirmed"}}
-    assert states.finding_transition_problem(good, "fixed") is None
+    assert states.finding_transition_problem(good, "candidate_passed_checks") is None
     for missing in (None, {}):
-        problem = states.finding_transition_problem({**good, "repro_check": missing}, "fixed")
+        problem = states.finding_transition_problem({**good, "repro_check": missing}, "candidate_passed_checks")
         assert problem and "reproduction" in problem, (missing, problem)
 
 

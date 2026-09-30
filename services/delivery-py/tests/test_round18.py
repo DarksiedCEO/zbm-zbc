@@ -128,7 +128,7 @@ def test_n18_s2_forged_sessionfinish_is_test_infra_and_the_round_fails():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"})
     try:
         run, f = _one(h)
-        assert run["status"] == "failed" and f["state"] != "fixed"
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks"
         rf = [e["payload"] for e in h.events("round_failed") if e["payload"].get("why") == "test_infra_changed"]
         assert rf and "services/toy-py/tests/conftest.py" in rf[0]["paths"]
         assert run["commits"] == []
@@ -144,7 +144,7 @@ def test_n18_e3_forged_summary_line_never_becomes_the_counts():
         run, f = _one(h)
         suite_events = [e["payload"] for e in h.events("suite_run")]
         assert all(p["passed"] != 999 for p in suite_events)
-        assert f["state"] != "fixed" and run["status"] == "failed"
+        assert f["state"] != "candidate_passed_checks" and run["status"] == "failed"
         # the forged line is caught at the first engine run that sees it (the RED run's summary disagrees with junit)
         whys = {e["payload"].get("why") for e in h.events("round_failed")}
         assert whys & {"red_unknown", "suite_unknown"}, whys
@@ -193,7 +193,7 @@ def test_n18_e2_conftest_monkeypatch_is_not_a_fix():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
     try:
         run, f = _one(h)
-        assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == []
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks" and run["commits"] == []
         assert any(e["payload"].get("why") == "test_infra_changed" for e in h.events("round_failed"))
         with open(os.path.join(run["worktree_path"], "services/toy-py/src/toy/calc.py")) as fh:
             assert "return a - b" in fh.read()
@@ -215,7 +215,7 @@ def test_n18_e2_fix_that_lives_in_a_test_helper_is_fix_not_in_source():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
     try:
         run, f = _one(h)
-        assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == []
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks" and run["commits"] == []
         whys = [e["payload"].get("why") for e in h.events("round_failed")]
         # wave 20 (R2a): the finding's file carries no hunk of the fix, refused before GREEN even runs
         assert "fix_not_in_source" in whys or "no_source_change" in whys or "finding_file_unchanged" in whys, whys
@@ -235,7 +235,7 @@ def test_n18_e4_pytest_ini_change_is_test_infra():
         h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
         try:
             run, f = _one(h)
-            assert run["status"] == "failed" and f["state"] != "fixed", ini
+            assert run["status"] == "failed" and f["state"] != "candidate_passed_checks", ini
             rf = [e["payload"] for e in h.events("round_failed") if e["payload"].get("why") == "test_infra_changed"]
             assert rf and "services/toy-py/pytest.ini" in rf[0]["paths"]
         finally:
@@ -250,7 +250,7 @@ def test_n18_e4_deleting_an_existing_test_file_fails_the_round():
     h = Harness(scenario=steps, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
     try:
         run, f = _one(h)
-        assert run["status"] == "failed" and f["state"] != "fixed"
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks"
         assert any(e["payload"].get("why") == "test_deleted" for e in h.events("round_failed"))
     finally:
         h.close()
@@ -756,7 +756,7 @@ def test_n18_e5_suite_timeout_is_unknown_never_green():
     h = Harness(scenario=scenario)
     try:
         run, f = _one(h)
-        assert f["state"] != "fixed" and run["status"] == "failed"
+        assert f["state"] != "candidate_passed_checks" and run["status"] == "failed"
         assert run["reasons"][0]["code"] != "HARNESS_ERROR", run["reasons"]
         per = [e["payload"] for e in h.events("suite_run") if e["payload"]["phase"] == "per_finding"]
         assert per and per[-1]["status"] == "unknown" and "timed out" in per[-1]["why"]
@@ -771,7 +771,7 @@ def test_n18_e5_output_flood_is_unknown_never_green():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
     try:
         run, f = _one(h)
-        assert f["state"] != "fixed" and run["status"] == "failed"
+        assert f["state"] != "candidate_passed_checks" and run["status"] == "failed"
         assert run["reasons"][0]["code"] != "HARNESS_ERROR", run["reasons"]
         per = [e["payload"] for e in h.events("suite_run") if e["payload"]["phase"] == "per_finding"]
         assert per and per[-1]["status"] == "unknown" and "truncated" in per[-1]["why"]

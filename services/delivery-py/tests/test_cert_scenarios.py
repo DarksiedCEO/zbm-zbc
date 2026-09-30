@@ -9,7 +9,7 @@ import os
 import pytest
 
 from helpers import (ADD_REPRO_ELSEWHERE, ADD_REPRO_FILES, FIX_ADD, TEST_ADD, WS, Harness, finding, findings_doc, replace,
-                     rid, scenario_s1, two_findings, write_test)
+                     review_body, rid, scenario_s1, two_findings, write_test)
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def test_s1_clean_loop_reaches_awaiting_review(s1: Harness):
     fs = {f["finding_id"]: f for f in h.findings(run_id)}
     for fid in ("N1-1", "N1-2"):
         f = fs[fid]
-        assert f["state"] == "fixed", f
+        assert f["state"] == "candidate_passed_checks", f
         assert f["red"]["exit"] == 1 and f["green"]["exit"] == 0
         assert f["red"]["test_name"] == f["green"]["test_name"]
         assert f["revert_check"]["exit"] != 0 and f["revert_check"]["restored_exit"] == 0
@@ -101,7 +101,7 @@ def test_s2_test_passing_on_unfixed_code_fails_the_round():
         run = h.run(run_id)
         assert run["status"] == "awaiting_review", run["reasons"]
         f = h.findings(run_id)[0]
-        assert f["state"] == "fixed" and f["rounds"] >= 2
+        assert f["state"] == "candidate_passed_checks" and f["rounds"] >= 2
         reds = [e for e in h.events("test_run") if e["payload"]["phase"] == "red"]
         assert [e["payload"]["exit"] for e in reds] == [0, 1]
         assert any(e["payload"].get("why") == "test_passes_on_unfixed_code" for e in h.events("round_failed"))
@@ -210,7 +210,7 @@ def test_s5_review_fail_reopens_and_opens_a_new_run_on_the_same_branch():
         # without the fix, so it is never fixed (wave 21: no fixed without the finding's reproduction failing first;
         # before wave 21 a prose reproduction let it through). The child run ends failed, nothing parked (§0.1.5).
         fs = {f["finding_id"]: f for f in h.findings(body["next_run_id"])}
-        assert fs["N1-1"]["state"] == "blocked" and fs["N2-1"]["state"] != "fixed", fs
+        assert fs["N1-1"]["state"] == "blocked" and fs["N2-1"]["state"] != "candidate_passed_checks", fs
         assert any(e["payload"].get("why") == "reproduction_passes_without_fix" and e["payload"].get("finding_id") == "N2-1"
                    for e in h.events("round_failed")), [e["payload"] for e in h.events("round_failed")]
         assert child["status"] == "failed"
@@ -230,9 +230,12 @@ def test_s5b_review_pass_is_terminal():
     h = Harness()
     try:
         run_id = h.submit().json()["run_id"]
+        # wave 23 (D1): a pass without a verdict per finding is refused; with them, every finding is accepted
         r = h.post(f"/dlv/v1/fix-runs/{run_id}/review", {"request_id": rid(), "review_ref": "r", "sha256": "c" * 64, "verdict": "pass"})
+        assert r.status_code == 422, r.text
+        r = h.post(f"/dlv/v1/fix-runs/{run_id}/review", review_body(h, run_id))
         assert r.status_code == 200 and r.json()["status"] == "reviewed_pass" and r.json()["next_run_id"] is None
-        assert all(f["state"] == "reviewed" for f in h.findings(run_id))
+        assert all(f["state"] == "accepted" for f in h.findings(run_id))
         assert h.post(f"/dlv/v1/fix-runs/{run_id}/cancel", {"request_id": rid(), "reason": "x"}).status_code == 409
     finally:
         h.close()
@@ -351,7 +354,7 @@ def test_s12_changing_an_existing_test_without_changed_test_line_fails_the_round
         run = h.run(run_id)
         assert run["status"] == "awaiting_review", run["reasons"]
         f = h.findings(run_id)[0]
-        assert f["state"] == "fixed" and f["changed_tests"][0]["path"] == "tests/test_calc.py"
+        assert f["state"] == "candidate_passed_checks" and f["changed_tests"][0]["path"] == "tests/test_calc.py"
         assert any(e["payload"].get("why") == "changed_test_unexplained" for e in h.events("round_failed"))
         assert "changed test `tests/test_calc.py`" in h.report(run_id)
     finally:

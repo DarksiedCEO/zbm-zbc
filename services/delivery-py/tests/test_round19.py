@@ -138,7 +138,7 @@ def test_n19_e1_fix_in_a_new_module_the_test_imports_is_refused():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"}, pct_repro=False)
     try:
         run, f = _one(h, reproduction=REPRO)          # wave 21: every reproduction names a test (was PROSE)
-        assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == [] and _defect_intact(run)
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks" and run["commits"] == [] and _defect_intact(run)
         assert "finding_file_unchanged" in _whys(h), _whys(h)
         rf = [e["payload"] for e in h.events("round_failed") if e["payload"]["why"] == "finding_file_unchanged"]
         assert rf[0]["file"] == "services/toy-py/src/toy/calc.py"
@@ -159,7 +159,7 @@ def test_n19_e1_second_finding_fixed_in_a_new_module_is_refused_while_the_first_
     try:
         run_id = h.submit(two_findings(h.base_sha)).json()["run_id"]
         run, fs = h.run(run_id), {x["finding_id"]: x for x in h.findings(run_id)}
-        assert fs["N1-1"]["state"] == "fixed" and fs["N1-2"]["state"] != "fixed" and run["status"] == "failed"
+        assert fs["N1-1"]["state"] == "candidate_passed_checks" and fs["N1-2"]["state"] != "candidate_passed_checks" and run["status"] == "failed"
         with open(os.path.join(run["worktree_path"], "services/toy-py/src/toy/calc.py")) as fh:
             assert "if whole == 0" not in fh.read()
         assert "finding_file_unchanged" in _whys(h)
@@ -179,7 +179,7 @@ def test_n19_e1_single_file_revert_ties_the_test_to_the_findings_file():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"}, pct_repro=False)
     try:
         run, f = _one(h, reproduction=REPRO)          # wave 21: every reproduction names a test (was PROSE)
-        assert run["status"] == "failed" and f["state"] != "fixed" and _defect_intact(run)
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks" and _defect_intact(run)
         assert "test_not_tied_to_file" in _whys(h), _whys(h)
         sf = [e["payload"] for e in h.events("single_file_revert_checked")]
         assert sf and sf[0]["verdict"] == "pass" and sf[0]["file"] == "services/toy-py/src/toy/calc.py"
@@ -197,7 +197,7 @@ def test_n19_e1_findings_reproduction_must_pass_with_the_fix_and_fail_without_it
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"})
     try:
         run, f = _one(h, reproduction=REPRO)
-        assert run["status"] == "failed" and f["state"] != "fixed" and _defect_intact(run)
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks" and _defect_intact(run)
         assert "reproduction_not_fixed" in _whys(h), _whys(h)
         rc = [e["payload"] for e in h.events("reproduction_checked")]
         assert rc and rc[0]["target"] == "tests/test_calc.py::test_add_returns_sum"
@@ -241,7 +241,7 @@ def test_n19_e1_clean_fix_records_all_three_ties_and_the_invariant_needs_them():
         for k, why in (("finding_file_hunk", "hunk"), ("single_file_revert", "single-file"), ("repro_check", "reproduction"),
                        ("src_only_check", "source changes alone"), ("verification", "verification record")):
             rec = {**json.loads(json.dumps(f)), "state": "swept", k: broken[k]}
-            problem = states.finding_transition_problem(rec, "fixed")
+            problem = states.finding_transition_problem(rec, "candidate_passed_checks")
             assert problem and why in problem, (k, problem)
     finally:
         h.close()
@@ -350,7 +350,7 @@ def test_n19_e2_flip_plugin_through_the_whole_loop_never_reaches_fixed():
         try:
             run_id = h.submit(two_findings(h.base_sha)).json()["run_id"]
             run, fs = h.run(run_id), {x["finding_id"]: x for x in h.findings(run_id)}
-            assert fs["N1-1"]["state"] != "fixed" and run["status"] == "failed" and _defect_intact(run), (expect, _whys(h))
+            assert fs["N1-1"]["state"] != "candidate_passed_checks" and run["status"] == "failed" and _defect_intact(run), (expect, _whys(h))
             if expect:
                 assert expect in _whys(h), _whys(h)
             else:
@@ -403,7 +403,7 @@ def test_n19_e3_skipping_the_baseline_failure_under_changed_test_is_an_outcome_r
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"}, pct_repro=False, extra_files=ADD_REPRO_FILES)
     try:
         run, f = _one(h, reproduction=ADD_REPRO_ELSEWHERE)
-        assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == [] and _defect_intact(run)
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks" and run["commits"] == [] and _defect_intact(run)
         whys = _whys(h)
         assert "outcome_regressed" in whys or "test_not_tied_to_file" in whys, whys
         if "outcome_regressed" in whys:
@@ -421,7 +421,7 @@ def test_n19_e3_outcome_regression_alone_blocks_a_genuine_fix():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"}, pct_repro=False, extra_files=ADD_REPRO_FILES)
     try:
         run, f = _one(h, reproduction=ADD_REPRO_ELSEWHERE)     # wave 21: was PROSE (test_calc.py must stay editable)
-        assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == []
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks" and run["commits"] == []
         assert "outcome_regressed" in _whys(h), _whys(h)
         assert f["outcome_regressions"] == [{"test": "tests/test_calc.py::test_clamp", "baseline": "pass", "after": "skip"}]
     finally:
@@ -435,7 +435,7 @@ def test_n19_e3_changed_test_naming_an_open_findings_reproduction_is_denied():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"})
     try:
         run, f = _one(h, reproduction=REPRO)
-        assert run["status"] == "failed" and f["state"] != "fixed"
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks"
         assert "changed_test_denied" in _whys(h), _whys(h)
         ev = [e["payload"] for e in h.events("round_failed") if e["payload"]["why"] == "changed_test_denied"][0]
         assert ev["targets"] == ["tests/test_calc.py::test_add_returns_sum"]
@@ -491,7 +491,7 @@ def test_n19_e4_cancel_during_the_green_phase_commits_nothing():
                 break
             time.sleep(0.05)
         run, f = h.run(run_id), h.findings(run_id)[0]
-        assert run["status"] == "failed" and run["commits"] == [] and f["state"] != "fixed"
+        assert run["status"] == "failed" and run["commits"] == [] and f["state"] != "candidate_passed_checks"
         seq = [e["event_type"] for e in h.events()]
         after = seq[seq.index("fix_run_cancelled") + 1:]
         # wave 22 (G4, N21-D-4): an engine container whose start raced the cancel is killed and recorded
@@ -552,13 +552,13 @@ def test_n19_e6_fixed_invariant_requires_verification_and_the_committed_tree():
             "commit_tree_sha256": "a" * 64, "suite_failures": [], "outcome_regressions": [],
             # wave 22 (G1): the reproduction confirmed outside the test runner is required for fixed as well
             "standalone_check": {"outcome": "confirmed"}}
-    assert states.finding_transition_problem(good, "fixed") is None
+    assert states.finding_transition_problem(good, "candidate_passed_checks") is None
     no_ver = {**good, "verification": None}
-    assert "verification record" in states.finding_transition_problem(no_ver, "fixed")
+    assert "verification record" in states.finding_transition_problem(no_ver, "candidate_passed_checks")
     mismatch = {**good, "commit_tree_sha256": "b" * 64}
-    assert "committed tree" in states.finding_transition_problem(mismatch, "fixed")
-    assert "committed tree" in states.finding_transition_problem({**good, "suite_tree_sha256": None, "commit_tree_sha256": None}, "fixed")
-    assert "regression" in states.finding_transition_problem({**good, "outcome_regressions": [{"test": "x"}]}, "fixed")
+    assert "committed tree" in states.finding_transition_problem(mismatch, "candidate_passed_checks")
+    assert "committed tree" in states.finding_transition_problem({**good, "suite_tree_sha256": None, "commit_tree_sha256": None}, "candidate_passed_checks")
+    assert "regression" in states.finding_transition_problem({**good, "outcome_regressions": [{"test": "x"}]}, "candidate_passed_checks")
     # the tree digest is content-based: two trees with the same files agree, a one-byte change does not
     a, b = tempfile.mkdtemp(), tempfile.mkdtemp()
     for root in (a, b):
@@ -1156,7 +1156,7 @@ def test_n19_toolchain_loops_still_reach_fixed_under_fresh_containers():
         h = Harness(scenario=scenario, service=svc)
         try:
             run, f = _run(h, eco)
-            assert run["status"] == "awaiting_review" and f["state"] == "fixed", (name, run["reasons"], _whys(h))
+            assert run["status"] == "awaiting_review" and f["state"] == "candidate_passed_checks", (name, run["reasons"], _whys(h))
             names = {e["payload"]["container"] for e in h.events("engine_box_started")}
             assert len(names) >= 7 and not h.docker.containers
             if name == "go":

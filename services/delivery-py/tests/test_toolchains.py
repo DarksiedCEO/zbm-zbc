@@ -422,7 +422,7 @@ def test_full_loop_reaches_fixed_with_engine_owned_counts(name):
     try:
         run, f = _run(h, eco)
         assert run["status"] == "awaiting_review", (run["reasons"], _why(h))
-        assert f["state"] == "fixed" and f["red"]["verdict"] == "fail" and f["green"]["verdict"] == "pass"
+        assert f["state"] == "candidate_passed_checks" and f["red"]["verdict"] == "fail" and f["green"]["verdict"] == "pass"
         assert f["verification"]["verification_checkout"]["verdict"] == "pass" and f["verification"]["reverted_checkout"]["verdict"] == "fail"
         before, after = run["suite"]["before"]["counts"], run["suite"]["after"]["counts"]
         assert before["status"] == "ok" and before["source"] == eco["source"] and before["failed_names"] == [eco["failed_name"]]
@@ -453,7 +453,7 @@ def test_full_loop_reaches_fixed_with_engine_owned_counts(name):
                 assert tuple(body[:2]) in seeded, c
         assert ran >= 6                                                     # suite before, RED(+list), GREEN, 2 checkouts, suites
         rep_text = h.report(run["run_id"])
-        assert "### N1-1" in rep_text and "fixed" in rep_text
+        assert "### N1-1" in rep_text and "candidate_passed_checks" in rep_text
     finally:
         h.close()
 
@@ -483,7 +483,7 @@ def test_deny_paths_infra_edit_deleted_test_content_rule_then_fixed(name):
         assert rf[0]["paths"] == [f"services/{svc}/{ipath}"]
         assert rf[1]["paths"] == [f"services/{svc}/{eco['existing_test']}"]
         assert rf[2]["paths"] == [f"services/{svc}/{eco['content_path']} ({eco['content_rule']})"]
-        assert run["status"] == "awaiting_review" and f["state"] == "fixed", (run["reasons"], whys)
+        assert run["status"] == "awaiting_review" and f["state"] == "candidate_passed_checks", (run["reasons"], whys)
         assert f["verification"]["classification"]["test_infra"] == [] and f["commit_sha"]
     finally:
         h.close()
@@ -518,6 +518,6 @@ def test_deny_paths_forged_transcript_and_hung_test_are_unknown_never_red(name):
         assert reds[1]["verdict"] == "fail"
         per = [e["payload"] for e in h.events("suite_run") if e["payload"]["phase"] == "per_finding"]
         assert per and per[-1]["status"] == "unknown" and "timed out" in per[-1]["why"]
-        assert "suite_unknown" in _why(h) and f["state"] != "fixed" and run["status"] == "failed"
+        assert "suite_unknown" in _why(h) and f["state"] != "candidate_passed_checks" and run["status"] == "failed"
     finally:
         h.close()
