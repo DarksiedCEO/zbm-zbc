@@ -4,8 +4,9 @@
 Two halves:
 
 ``run`` — wraps ONE full suite run (any language) and fails it when, for that run:
-  R1 tracked   a tracked file changed (``git status --porcelain`` differs after the run from before it; CI starts clean,
-               so any difference is the suite's);
+  R1 tracked   a tracked file changed (``git status --porcelain`` differs after the run from before it, or a path it
+               already listed before the run has different content after it; CI starts clean, so any difference is
+               the suite's);
   R2 ignored   a new git-ignored file or directory appeared in the checkout (``git status --porcelain --ignored``,
                before vs after; build outputs a job made BEFORE the run are in the "before" set; paths given with
                --allow-ignored, e.g. a venv, are allowed);
@@ -26,8 +27,8 @@ Two halves:
                (``--counts check``), or rewrites that row (``--counts write``).
 
 ``lint`` — static rules over the whole tree:
-  L1 wallclock a test asserts an UPPER bound on a wall-clock delta against a literal (Python: an ``assert`` /
-               ``self.assert*`` comparing ``time.time()/perf_counter()/monotonic()`` (or ``*_ns``) deltas — direct or
+  L1 wallclock a test asserts an UPPER bound on a wall-clock delta against a literal (Python: an ``assert``,
+               ``self.assertLess*`` / ``assertTrue`` / ``assertFalse`` or an ``if … : raise / pytest.fail`` comparing ``time.time()/perf_counter()/monotonic()`` (or ``*_ns``) deltas — direct or
                through a local name — with a numeric literal; Rust/Go/TS: an ``elapsed``/``time.Since``/``Date.now()``
                delta compared with a literal duration). Fails unless an allowlist entry with a reason covers it. Lower
                bounds (delta >= literal) are not flagged: load can only lengthen elapsed time, so they cannot flake;
@@ -98,6 +99,22 @@ def git_state() -> tuple[set[str], set[str]]:
     plain = {x for x in git("status", "--porcelain", "--untracked-files=all").splitlines() if x}
     ignored = {x[3:] for x in git("status", "--porcelain", "--ignored").splitlines() if x.startswith("!! ")}
     return plain, ignored
+
+
+def dirty_digests(plain: set[str]) -> dict[str, str]:
+    """sha256 of every path ``git status`` already lists before the run (a local checkout may be dirty; CI's is not):
+    a suite that changes such a file again leaves its status line as it was, so R1 compares the CONTENT too
+    (fix wave 25, E-C review: the E0 check compared status lines only)."""
+    import hashlib
+    out = {}
+    for line in plain:
+        path = line[3:].split(" -> ")[-1].strip('"')
+        f = REPO / path
+        try:
+            out[path] = hashlib.sha256(f.read_bytes()).hexdigest() if f.is_file() else "<not a file>"
+        except OSError:
+            out[path] = "<unreadable>"
+    return out
 
 
 def system_tmp() -> Path:
@@ -320,6 +337,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         env["ZBM_HYGIENE_RESULTS"] = str(results)
 
     plain_before, ignored_before = git_state()
+    digests_before = dirty_digests(plain_before)
     tmp_before = list_dir(systmp)
     subreaper = _set_subreaper()
     print(f"hygiene_check: suite {suite} in {cwd}\n  private TMPDIR {private_tmp}\n  subreaper {subreaper}\n"
@@ -349,6 +367,9 @@ def cmd_run(a: argparse.Namespace) -> int:
     plain_after, ignored_after = git_state()
     for line in sorted(plain_after ^ plain_before):
         problems.append(violation("R1-tracked", suite, f"git status changed: {line!r}"))
+    for path, digest in sorted(dirty_digests(plain_before & plain_after).items()):
+        if digests_before.get(path) != digest:
+            problems.append(violation("R1-tracked", suite, f"{path} (already changed before the run) was changed again"))
     allowed = [x.rstrip("/") + "/" for x in a.allow_ignored] + [x for x in a.allow_ignored if not x.endswith("/")]
     for path in sorted(ignored_after - ignored_before):
         if any(path == x.rstrip("/") or path.startswith(x.rstrip("/") + "/") for x in allowed):
@@ -534,16 +555,47 @@ class _ClockFlow(ast.NodeVisitor):
                 left = right
             return False
 
+        def exceeded(cmp: ast.Compare) -> bool:
+            """The negation of an upper bound: ``delta > literal`` (a failure condition)."""
+            left = cmp.left
+            for op, right in zip(cmp.ops, cmp.comparators):
+                if isinstance(op, (ast.Gt, ast.GtE)) and is_delta(left) and lit(right):
+                    return True
+                if isinstance(op, (ast.Lt, ast.LtE)) and lit(left) and is_delta(right):
+                    return True
+                left = right
+            return False
+
+        def fails(body: list[ast.stmt]) -> bool:
+            """A block that fails the test: ``raise``, ``pytest.fail(...)`` or ``self.fail(...)``."""
+            for st in body:
+                for x in ast.walk(st):
+                    if isinstance(x, ast.Raise):
+                        return True
+                    if isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute) and x.func.attr == "fail":
+                        return True
+            return False
+
+        def any_compare(e: ast.AST, pred) -> bool:
+            return any(isinstance(c, ast.Compare) and pred(c) for c in ast.walk(e))
+
         for sub in ast.walk(node):
             if isinstance(sub, ast.Assert):
-                for c in ast.walk(sub.test):
-                    if isinstance(c, ast.Compare) and upper_bound(c):
-                        self.hits.append((sub.lineno, node.name))
-                        break
+                if any_compare(sub.test, upper_bound):
+                    self.hits.append((sub.lineno, node.name))
             elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and \
                     sub.func.attr in ("assertLess", "assertLessEqual") and len(sub.args) >= 2:
                 if is_delta(sub.args[0]) and lit(sub.args[1]):
                     self.hits.append((sub.lineno, node.name))
+            elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.args and \
+                    sub.func.attr in ("assertTrue", "assertFalse"):
+                # fix wave 25 (E-C review): assertTrue(took < 1) / assertFalse(took > 1) are the same bound
+                pred = upper_bound if sub.func.attr == "assertTrue" else exceeded
+                if any_compare(sub.args[0], pred):
+                    self.hits.append((sub.lineno, node.name))
+            elif isinstance(sub, ast.If) and any_compare(sub.test, exceeded) and fails(sub.body):
+                # ``if took > 1: pytest.fail(...)`` / ``raise AssertionError`` — the same bound, spelled as a branch
+                self.hits.append((sub.lineno, node.name))
         self.func_stack.pop()
 
     def visit_FunctionDef(self, node):

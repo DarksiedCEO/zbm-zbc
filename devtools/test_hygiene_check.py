@@ -82,6 +82,14 @@ class Dynamic(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("HYGIENE R1-tracked", out)
 
+    def test_r1_a_file_already_dirty_changed_again(self):
+        (self.r.root / "README.md").write_text("dirty before the run\n")      # a local checkout may be dirty
+        rc, out = self.r.suite("true")
+        self.assertEqual(rc, 0, out)                                          # left as it was: not the suite's
+        rc, out = self.r.suite("echo planted >> README.md")                   # same status line, new content
+        self.assertEqual(rc, 1, out)
+        self.assertIn("HYGIENE R1-tracked go:probe: README.md (already changed before the run) was changed again", out)
+
     def test_r2_a_new_ignored_file(self):
         rc, out = self.r.suite("echo x > planted.pyc")
         self.assertEqual(rc, 1, out)
@@ -279,6 +287,23 @@ class Static(unittest.TestCase):
                       "L2-ports apps/dashboard-ts/tests/x.test.mjs:3"):
             self.assertIn(where, out)
         self.assertNotIn("probe.rs:12", out)            # a lower bound is not flagged
+
+    def test_l1_other_python_spellings_of_the_bound(self):
+        (self.t / "test_d.py").write_text(
+            "import time, unittest, pytest\n\nclass T(unittest.TestCase):\n    def test_a(self):\n"
+            "        t0 = time.monotonic()\n        self.assertTrue(time.monotonic() - t0 < 1.0)\n"
+            "    def test_b(self):\n        t0 = time.monotonic()\n        self.assertFalse(time.monotonic() - t0 > 1.0)\n\n"
+            "def test_c():\n    t0 = time.perf_counter()\n    took = time.perf_counter() - t0\n    if took > 2:\n"
+            "        pytest.fail('slow')\n\ndef test_d():\n    t0 = time.monotonic()\n"
+            "    if time.monotonic() - t0 > 2:\n        raise AssertionError('slow')\n\n"
+            "def test_ok():\n    t0 = time.monotonic()\n    if time.monotonic() - t0 > 2:\n        print('slow')\n"
+            "    assert time.monotonic() - t0 >= 0\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for ln in (6, 9, 14, 19):
+            self.assertIn(f"L1-wallclock services/probe-py/tests/test_d.py:{ln}:", out)
+        self.assertNotIn("test_d.py:23", out)           # a branch that does not fail the test is not a bound
+        self.assertNotIn("test_d.py:25", out)           # a lower bound is not flagged
 
     def test_l1_a_named_python_constant_is_a_literal(self):
         (self.t / "test_c.py").write_text("import time\nLIMIT = 2.0\n\ndef test_x():\n    t0 = time.monotonic()\n"
