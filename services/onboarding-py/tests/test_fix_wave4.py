@@ -70,7 +70,14 @@ _REF = re.compile(r"(?i)\bcan(?:no|')?t\s+(?:\w+\s+){0,3}?zzz\b")
 _REF_INPUT = "cannot " * (100_000 // 7) + "!"
 REF_NOMINAL_S = 0.008
 SLOWDOWN_CAP = 8.0
-LINEAR_RATIO = 20.0  # 10 KB -> 100 KB
+LINEAR_RATIO = 20.0  # 10 KB -> 100 KB, i.e. 2x the linear ideal of 10
+# Fix wave 23: a ratio over the bound is re-measured as one 100 KB input
+# against ten 10 KB inputs timed back to back (the same bytes, the same
+# duration; see redos_harness.best_time_back_to_back) before it fails. Its
+# linear ideal is 1 and the bound keeps the same 2x tolerance; a quadratic
+# pattern costs ~10x the ten 10 KB inputs
+# (test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own).
+SAME_WORK_RATIO = LINEAR_RATIO / 10
 
 
 def slowdown() -> float:
@@ -147,15 +154,37 @@ def test_r1_every_pattern_linear_on_adversarial_input(name):
     # 2. the three worst shapes: 10 KB (fail fast), then 100 KB against the
     #    bound, and 10 KB -> 100 KB must scale linearly whatever the machine
     for _, unit, tail in ranked[:3]:
-        s10 = unit * (10_000 // len(unit)) + tail
-        t10 = H.best_time(fn, s10, runs=5)                 # best of 5, like the 100 KB run it is the ratio's base
-        assert t10 < PER_10KB_S * slow, f"{name}: {unit!r}+{tail!r} took {t10 * 1000:.1f} ms on 10 KB (slowdown {slow:.1f}x)"
-        s100 = unit * (100_000 // len(unit)) + tail
-        t100 = H.best_time(fn, s100, runs=5)
-        assert t100 < PER_100KB_S * slow, f"{name}: {unit!r}+{tail!r} took {t100 * 1000:.1f} ms on 100 KB (slowdown {slow:.1f}x)"
-        # timer floor of 0.2 ms so a microsecond t10 does not make the ratio noise
-        assert t100 < LINEAR_RATIO * max(t10, 0.0002), \
-            f"{name}: {unit!r}+{tail!r} not linear: {t10 * 1000:.2f} ms on 10 KB, {t100 * 1000:.1f} ms on 100 KB"
+        _assert_scales_linearly(name, fn, unit, tail, slow)
+
+
+def _assert_scales_linearly(name, fn, unit, tail, slow):
+    s10 = unit * (10_000 // len(unit)) + tail
+    t10 = H.best_time(fn, s10, runs=5)
+    assert t10 < PER_10KB_S * slow, f"{name}: {unit!r}+{tail!r} took {t10 * 1000:.1f} ms on 10 KB (slowdown {slow:.1f}x)"
+    s100 = unit * (100_000 // len(unit)) + tail
+    t100 = H.best_time(fn, s100, runs=5)
+    assert t100 < PER_100KB_S * slow, f"{name}: {unit!r}+{tail!r} took {t100 * 1000:.1f} ms on 100 KB (slowdown {slow:.1f}x)"
+    # timer floor of 0.2 ms so a microsecond t10 does not make the ratio noise
+    if t100 < LINEAR_RATIO * max(t10, 0.0002):
+        return  # within 2x of linear even against the short run (load only inflates the long one)
+    # Fix wave 23: before it fails, the ratio is re-measured against ten 10 KB inputs back to back — the same work
+    # and the same duration as the 100 KB run (a single ~1 ms run measured the scheduler, not the pattern: see
+    # redos_harness.best_time_back_to_back). Timer floor 2 ms (0.2 ms x 10). A quadratic pattern fails this too.
+    t10x10 = H.best_time_back_to_back(fn, [s10] * 10, runs=5)
+    assert t100 < SAME_WORK_RATIO * max(t10x10, 0.002), \
+        (f"{name}: {unit!r}+{tail!r} not linear: {t10 * 1000:.2f} ms on 10 KB, {t10x10 * 1000:.1f} ms for "
+         f"10 x 10 KB, {t100 * 1000:.1f} ms on 100 KB")
+
+
+def test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own():
+    """Fix wave 23: the same-work ratio still catches a quadratic pattern when the absolute bounds cannot (slowdown
+    set absurdly high). Every '?' starts a match whose lookahead scans to the '@' at the end: O(n) per match, n/100
+    matches — 10x the input costs ~100x. The linear control (the lookahead stops at the next character) passes."""
+    unit, tail = "?" + " " * 99, "@"
+    quadratic = re.compile(r"\?(?=[^@]*@)")
+    with pytest.raises(AssertionError, match="not linear"):
+        _assert_scales_linearly("quadratic mutant", H.use_of("mutant", quadratic), unit, tail, slow=1e6)
+    _assert_scales_linearly("linear control", H.use_of("control", re.compile(r"\?(?= )")), unit, tail, slow=1e6)
 
 
 # The whole scanners, on the hostile shapes of the finding, up to 1 MB.
@@ -197,13 +226,18 @@ def test_r1_scanners_linear_up_to_1mb(scanner):
         # best of 3 before it fails (one sample each measured scheduling noise: normalize '1 ' — median ratio 13.5,
         # single-sample max 19.6, one 3.12 suite run 22.2 > 20; best of 3: max 14.5-15.1 over 10 pairs on 3.12 and
         # 3.13). A superlinear scanner fails the re-measure too. The single 100 KB sample above only ranks shapes.
-        t100 = H.best_time(fn, unit * (100_000 // len(unit)) + "!", 3)
+        s100 = unit * (100_000 // len(unit)) + "!"
+        t100 = H.best_time(fn, s100, 3)
         s1m = unit * (1_000_000 // len(unit)) + "!"
         t1m = H.best_time(fn, s1m, 1)
         if t1m >= max(20 * t100, 0.05):
-            t1m = H.best_time(fn, s1m, 3)  # not a scheduling hiccup?
+            # fix wave 23 (the same class as the per-pattern ratio): re-measured best of 3 against ten 100 KB
+            # inputs back to back — the same work and duration as the 1 MB run — before it fails
+            t1m = H.best_time(fn, s1m, 3)
+            t100x10 = H.best_time_back_to_back(fn, [s100] * 10, 3)
+            assert t1m < max(SAME_WORK_RATIO * t100x10, 0.05), \
+                f"{scanner} {unit!r}: 100 KB {t100:.3f}s, 10 x 100 KB {t100x10:.3f}s, 1 MB {t1m:.3f}s"
         # linear: 10x the input costs ~10x (never 100x), and 1 MB stays cheap
-        assert t1m < max(20 * t100, 0.05), f"{scanner} {unit!r}: 100 KB {t100:.3f}s, 1 MB {t1m:.3f}s"
         assert t1m < 4.0, f"{scanner} {unit!r}: {t1m:.2f}s on 1 MB"
 
 

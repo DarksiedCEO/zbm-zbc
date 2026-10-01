@@ -129,3 +129,27 @@ def best_time(fn: Callable[[str], object], s: str, runs: int = 3) -> float:
             if was:
                 gc.enable()
     return best
+
+
+def best_time_back_to_back(fn: Callable[[str], object], items: list[str], runs: int = 3) -> float:
+    """Best of ``runs`` of the thread CPU time to run ``fn`` over every item back to back, as ONE timed block (GC off,
+    as in ``best_time``). Fix wave 23: the linearity ratios compared a short run (10 KB, ~1 ms) with a run 10x longer
+    (100 KB, ~10-20 ms). Under load those are not the same measurement — a ~1 ms run fits in one scheduler slice with
+    a warm cache, a 10-20 ms run is sliced and refills its cache on every resume, and thread CPU time counts that
+    refill — so a linear pattern's ratio drifted from ~10 toward the bound 20 (w23, 3.13, three busy loops:
+    ``redaction._URL_PART`` 'a;'+'@' 1.05 ms -> 21.2 ms, ratio 20.2). Timing 10 x 10 KB back to back is the same
+    work over the same duration as one 100 KB run, so what differs between the two sides is only how the cost grows
+    with the length of one input."""
+    best = float("inf")
+    for _ in range(runs):
+        was = gc.isenabled()
+        gc.disable()
+        try:
+            t = time.thread_time()
+            for s in items:
+                fn(s)
+            best = min(best, time.thread_time() - t)
+        finally:
+            if was:
+                gc.enable()
+    return best

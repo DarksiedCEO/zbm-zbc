@@ -195,7 +195,10 @@ status says it is not certified.
     bounds are scaled by a slowdown factor measured on a known linear regex
     right before each pattern (never below 1x, never above 8x), and a
     machine-independent linearity ratio is asserted too (10x the input may
-    cost at most 20x the CPU). Under three CPU-burning processes on a 2-vCPU
+    cost at most 20x the CPU; since fix wave 23 a ratio over that is
+    re-measured before it fails against ten 10 KB inputs timed back to back,
+    the same work and duration as the 100 KB run, at most 2x — a single ~1 ms
+    run measured the scheduler). Under three CPU-burning processes on a 2-vCPU
     box the old test failed six patterns; the new one passes all 78. It also
     asserts linear scaling to 1 MB for the whole scanners. A real-uvicorn test sends max-size hostile URLs
     and bodies while polling `/health`, which must answer within 1 s.
