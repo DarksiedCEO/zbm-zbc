@@ -361,26 +361,39 @@ def test_heavy_slot_is_not_held_by_a_stalled_request_without_a_valid_token(serve
     batch = _orders_body(1000)
     assert len(batch) > HEAVY_BODY_BYTES  # a real heavy request
 
-    def stalled_then_batch(auth_line: str) -> tuple[bytes, int]:
-        with socket.create_connection(("127.0.0.1", server), timeout=5) as s:
-            s.sendall((f"POST {DETECT} HTTP/1.1\r\nHost: t\r\n{auth_line}"
-                       f"Content-Type: application/json\r\nContent-Length: {HEAVY_BODY_BYTES + 1}\r\n\r\n").encode())
-            time.sleep(0.3)  # head parsed; the body is never sent
-            status, _, _ = _request(server, "POST", DETECT, batch, timeout=60, headers={"Authorization": AUTH})
-            s.settimeout(0.5)
-            try:
-                first_line = s.recv(200).split(b"\r\n")[0]
-            except (TimeoutError, socket.timeout):
-                first_line = b""
-        return first_line, status
+    # Fix wave 25 (scout A D3): synchronised on the server's own state, not `time.sleep(0.3)  # head parsed` (on a
+    # loaded box the batch could arrive before the stalled head was parsed and take the slot itself).
+    def head(auth_line: str) -> bytes:
+        return (f"POST {DETECT} HTTP/1.1\r\nHost: t\r\n{auth_line}"
+                f"Content-Type: application/json\r\nContent-Length: {HEAVY_BODY_BYTES + 1}\r\n\r\n").encode()
 
     for auth_line in ("", "Authorization: Bearer not-the-token\r\n"):
-        first_line, status = stalled_then_batch(auth_line)
-        assert first_line.startswith(b"HTTP/1.1 401"), first_line
-        assert status == 200, status
-    first_line, status = stalled_then_batch(f"Authorization: {AUTH}\r\n")
+        with socket.create_connection(("127.0.0.1", server), timeout=10) as s:
+            s.sendall(head(auth_line))
+            # the 401 comes for the head alone (the body is never sent): once it is here the head was parsed and
+            # answered, and the slot it took must be free again
+            first_line = s.recv(200).split(b"\r\n")[0]
+            assert first_line.startswith(b"HTTP/1.1 401"), first_line
+            status, _, _ = _request(server, "POST", DETECT, batch, timeout=60, headers={"Authorization": AUTH})
+            assert status == 200, status
+    with socket.create_connection(("127.0.0.1", server), timeout=10) as s:
+        s.sendall(head(f"Authorization: {AUTH}\r\n"))
+        # with a valid token nothing is answered; the head holds the slot once the server has parsed it — a batch
+        # sent before that gets the slot itself (200), so batches are sent until one is refused (each a full
+        # request: no wall-clock bound, at most 40 tries)
+        statuses = []
+        for _ in range(40):
+            statuses.append(_request(server, "POST", DETECT, batch, timeout=60, headers={"Authorization": AUTH})[0])
+            if statuses[-1] != 200:
+                break
+            time.sleep(0.05)
+        s.settimeout(0.5)
+        try:
+            first_line = s.recv(200).split(b"\r\n")[0]
+        except (TimeoutError, socket.timeout):
+            first_line = b""
     assert first_line == b""  # still waiting for its body: it holds the slot
-    assert status == 503
+    assert statuses[-1] == 503, statuses
 
 
 def test_oversized_content_length_is_refused_before_the_body_is_sent(server):

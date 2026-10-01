@@ -133,7 +133,10 @@ def test_declared_content_length_does_not_preallocate_the_body_buffer():
             tasks = [asyncio.ensure_future(c.run()) for c in clients]
             for c in clients:
                 await c.feed(b"{")
-            await asyncio.sleep(0.3)  # every request has read its one byte and is waiting for more
+            # fix wave 25 (scout A F4): until every request has TAKEN its one byte (its queue is empty) or been
+            # answered — it slept 0.3 s, and a request that had not read its byte yet allocated nothing for it, so
+            # the measurement could pass without measuring (the large lane admits ~8 bodies a second)
+            await _until(lambda: all(c.queue.empty() or c.status is not None for c in clients), timeout=30)
             held, _ = tracemalloc.get_traced_memory()
             for c in clients:
                 await c.disconnect()

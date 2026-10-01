@@ -786,8 +786,22 @@ the hard deadline. Residual: the protocol's `_body_last_lost` is read in `data_r
 same loop pass has run, so after a freeze the protocol's own stall clock (a backstop at 10 s) can credit the freeze
 once more.
 
-**Proofs** — PENDING-E-A-CAMPAIGN (filled from the E-A campaign logs; the draft's numbers were the stopped
-engineer's own and are not repeated here).
+**Proofs** (E-A, Oct 1 2026, 21:24-21:31Z, this 2-CPU box, Python 3.13.13, head = ef14a52; exactly 2 busy loops —
+R-LOAD — started and killed by the campaign script; a ps snapshot of other CPU users is logged per run: another
+engineer's processes ran unlocked beside some of them; logs `w25-reports/E-A/logs/campaign-ef14a52-TS/`). The draft's
+numbers were the stopped engineer's own and are not repeated here.
+- Interleaved, 5 rounds of b51f307 / head / 01e2851, the reviewer's `f1_timeline.py` unchanged: settle (< 24 MiB)
+  head 8.9-9.4 s (median 9.0), 01e2851 7.8-9.4 s (median 8.9), b51f307 7.9-9.5 s; last 408 head 7.8-8.2 s, 01e2851
+  7.7-8.3 s, b51f307 7.8-8.3 s; first 408 head 1.5-1.8 s, 01e2851 1.8-2.1 s; **no sender unanswered on any side**
+  (every one 408 or 503); sampled peak head 62-65 MiB, b51f307 63-65, 01e2851 94-114. Head is no worse than 01e2851
+  at the worst settle (9.4 vs 9.4) and its median is 0.1 s later (the sampler's step is 0.25 s).
+  **Not shown:** under these conditions (2 busy loops, no co-tenant suite) b51f307 did NOT reproduce round 24's
+  regression either (settle <= 9.5 s, nothing unanswered) — round 24 measured 3 busy loops plus an uncontrolled
+  co-tenant. So this campaign shows the head is no worse than both bases at R-LOAD; it does not show that the
+  wave-25 change is what removed a regression.
+- `test_live_128_senders_..._cut` alone, 20 runs: **20/20 passed**; growth 63-65 MiB (kernel VmHWM), settled at
+  7.5-8.5 s against the fixed 13 s bound; the server's main thread waited 0.49-0.72 s in the run queue per burst
+  (printed only); load average 2.4-3.0.
 
 **Not proven / could still be wrong.** Small-body models are counted but not bounded structurally (above). Other
 allocators and Pythons (macOS; the batches ran on 3.13). Whether a request model shape exists whose model is larger

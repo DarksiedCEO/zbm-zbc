@@ -824,7 +824,7 @@ money. ZBC's unit of work is a campaign, not a clip.
     AEGIS class-C pairs are a human's call in five field arrangements.
 
 32. **Stacked respellings (fix wave 8; AEGIS round 7 class B, 9 of the 30
-    passed).** "grnteed retunrs", "overnlte sccss", "lose vvait fst",
+    got through).** "grnteed retunrs", "overnlte sccss", "lose vvait fst",
     "mk rnunny" — a vowel drop, a homophone and a lookalike in one
     phrase — were outside every single signal's budget. Root causes:
     (a) the skeleton signal's vowel-drop evidence skipped the very token
