@@ -24,12 +24,15 @@ struct ServerHandle {
     child: Child,
     port: u16,
     _port_file: PortFile,
+    /// Fix wave 24: the scratch log, removed with the server (it was left in the temp dir, 8 files a run).
+    log_path: std::path::PathBuf,
 }
 
 impl Drop for ServerHandle {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        let _ = std::fs::remove_file(&self.log_path);
     }
 }
 
@@ -59,10 +62,11 @@ fn start_server(token: &str, bind_addr: Option<&str>) -> ServerHandle {
         Err(e) => {
             let _ = child.kill();
             let _ = child.wait();
+            let _ = std::fs::remove_file(&log_path);
             panic!("{e}");
         }
     };
-    let handle = ServerHandle { child, port, _port_file: pf };
+    let handle = ServerHandle { child, port, _port_file: pf, log_path };
     let host = bind_addr.unwrap_or("127.0.0.1");
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
