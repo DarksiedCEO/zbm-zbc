@@ -539,73 +539,149 @@ def test_the_settle_check_waits_for_the_peak_phase_and_a_run_without_one_is_inva
     assert _settled_at(real[:3], 53) == (None, True)          # peak reached, not yet settled
 
 
+def _senders_on_one_thread(port: int, data: bytes, n: int, idle_timeout: float, every: float, tick) -> list[dict]:
+    """Fix wave 25 (H1/H2; AEGIS N24-S-1, -13): the 128 senders of the test below, driven by ONE thread through a
+    selector — each exactly `_send_reading`'s client (sends while reading, stops sending at the answer, reads it to
+    Content-Length, waits `idle_timeout` after its last byte out) — with `tick(elapsed)` called every `every` s
+    (the RSS sampler; it returns False to stop sampling). The test used to run 128 Python threads plus a sampler
+    thread: on a loaded 2-CPU box that client process was the bottleneck — the sampler's first 0.5 s sleep came back
+    after 1.3-1.7 s typically, 2.9 s and 4.7 s at worst (wave 25, campaign B), and in exactly those runs the senders
+    got their bytes out late, so stalled bodies were cut late and the settle bound measured the CLIENT (the one
+    module failure: samples from 4.7 s, settled None). One thread with no GIL to share drives the same scenario
+    as specified. Returns per sender: code, connected, last_send (s since start; None if nothing went out) and
+    answered."""
+    import errno
+    import selectors
+
+    sel = selectors.DefaultSelector()
+    t0 = time.monotonic()
+    recs = []
+
+    def finish(rec, code):
+        rec["code"], rec["answered"] = code, time.monotonic() - t0
+        sel.unregister(rec["sock"])
+        rec["sock"].close()
+
+    for _ in range(n):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setblocking(False)
+        rec = {"sock": sock, "sent": 0, "buf": b"", "last": time.monotonic(), "code": None, "connected": None,
+               "last_send": None, "answered": None}
+        recs.append(rec)
+        err = sock.connect_ex(("127.0.0.1", port))
+        sel.register(sock, selectors.EVENT_READ | selectors.EVENT_WRITE, rec)
+        if err not in (0, errno.EINPROGRESS):
+            finish(rec, "connect:" + errno.errorcode.get(err, str(err)))
+    next_tick, sampling = t0 + every, True
+    while sampling or any(r["code"] is None for r in recs):
+        events = sel.select(max(0.0, min(next_tick - time.monotonic(), 0.1)) if sampling else 0.1)
+        now = time.monotonic()
+        for key, mask in events:
+            rec, sock = key.data, key.fileobj
+            if rec["code"] is not None:
+                continue
+            if rec["connected"] is None:
+                err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if err:
+                    finish(rec, "connect:" + errno.errorcode.get(err, str(err)))
+                    continue
+                rec["connected"], rec["last"] = now - t0, now
+            if mask & selectors.EVENT_READ:
+                try:
+                    chunk = sock.recv(65536)
+                except BlockingIOError:
+                    chunk = None
+                except OSError as exc:
+                    finish(rec, type(exc).__name__)
+                    continue
+                if chunk == b"":
+                    finish(rec, rec["buf"][9:12].decode() or "closed")
+                    continue
+                if chunk:
+                    rec["buf"] += chunk
+                    head, sep, body = rec["buf"].partition(b"\r\n\r\n")
+                    if sep:
+                        cl = [int(ln.split(b":", 1)[1]) for ln in head.split(b"\r\n") if ln.lower().startswith(b"content-length:")]
+                        if not cl or len(body) >= cl[0]:
+                            finish(rec, rec["buf"][9:12].decode())
+                            continue
+            if mask & selectors.EVENT_WRITE and rec["sent"] < len(data):
+                try:
+                    rec["sent"] += sock.send(data[rec["sent"]:rec["sent"] + 65536])
+                    rec["last"], rec["last_send"] = now, now - t0
+                except BlockingIOError:
+                    pass
+                except OSError:
+                    rec["sent"] = len(data)        # the server stopped reading: read what it answered
+                if rec["sent"] >= len(data):
+                    sel.modify(sock, selectors.EVENT_READ, rec)
+        for rec in recs:
+            if rec["code"] is None and now - rec["last"] >= idle_timeout:
+                finish(rec, "timeout")
+        if sampling and now >= next_tick:
+            next_tick += every
+            sampling = tick(now - t0)
+    sel.close()
+    return recs
+
+
 def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut(server):
     """Real bytes, then a stall: before, 128 x 4 MiB pinned for 30 s. Now at
     most _INFLIGHT_BODY_BYTES (64 MiB) is buffered (the rest 503), and the
     stalled bodies are cut by the throughput rule within the grace period, so
     RSS is back near baseline well before the 30 s deadline."""
-    import threading
     proc, port = server
     base = _rss_mib(proc.pid)
     hwm_ok = _hwm_reset(proc.pid)
     payload = b'{"call_events":[' + b" " * (3_900_000 - 16)
-    socks, codes, lock = [], {}, threading.Lock()
-
-    def sender():
-        # Fix wave 21 (lead ruling L1): the client sends WHILE reading, stops
-        # sending at the answer and reads it to Content-Length (a reset after a
-        # complete answer is the server's documented behaviour: its drain after
-        # the answer is bounded, 64 KiB / 1 s). The old client wrote the whole
-        # 3.9 MB with a blocking sendall before reading anything; answered
-        # early (uvicorn's limit_concurrency 503), it could still have MBs
-        # unsent when the bounded drain ended, and was reset mid-send without
-        # ever reading the 503 (w21 logs/L1-proof-probe.log: 20/20 reset at the
-        # 64 KiB bound, 20/20 clean with an 8 MiB bound or a reading client).
-        try:
-            s = socket.create_connection(("127.0.0.1", port), timeout=30)
-        except OSError as exc:
-            got = "connect:" + type(exc).__name__
-        else:
-            with lock:
-                socks.append(s)
-            got = _send_reading(s, _head(4 * MIB) + payload, 20)
-        with lock:
-            codes[got] = codes.get(got, 0) + 1
-
-    threads = [threading.Thread(target=sender) for _ in range(http_limits.LIMIT_CONCURRENCY)]
+    # Fix wave 21 (lead ruling L1): each sender sends WHILE reading, stops
+    # sending at the answer and reads it to Content-Length (a reset after a
+    # complete answer is the server's documented behaviour: its drain after
+    # the answer is bounded, 64 KiB / 1 s). The old client wrote the whole
+    # 3.9 MB with a blocking sendall before reading anything; answered
+    # early (uvicorn's limit_concurrency 503), it could still have MBs
+    # unsent when the bounded drain ended, and was reset mid-send without
+    # ever reading the 503 (w21 logs/L1-proof-probe.log: 20/20 reset at the
+    # 64 KiB bound, 20/20 clean with an 8 MiB bound or a reading client).
+    # Fix wave 25: all 128 of them on one thread (_senders_on_one_thread).
+    n = http_limits.LIMIT_CONCURRENCY
     # admitted bodies are cut at the app's grace; the 503'd senders' unread
     # bytes go when the protocol's (grace + BODY_DEADLINE_GRACE_S) closes them
     bound = http_limits.BODY_MIN_RATE_GRACE_S + http_limits.BODY_DEADLINE_GRACE_S + 3
-    t0 = time.monotonic()
-    for t in threads:
-        t.start()
     peak = base
-    samples = []
-    settled_at = None
+    samples: list[tuple[float, int]] = []
+    state = {"settled_at": None, "reached": False}
+
     # Fix wave 21 (AEGIS N20-M-5): sampling runs until RSS settles or the bound
-    # elapses, whatever the sender threads are doing. It used to stop as soon
-    # as every sender had its answer, which under load can be before the
-    # server has released the bytes (settled_at None: a test defect, not a
-    # server one). The 96 MiB growth bound below is unchanged (N20-M-4).
-    reached = False
-    while time.monotonic() - t0 < bound:
-        time.sleep(0.5)
+    # elapses, whatever the senders are doing (it used to stop as soon as every
+    # sender had its answer). Fix wave 25, H2: "settled" only counts after the
+    # peak phase (_settled_at). The 96 MiB growth bound below is unchanged (N20-M-4).
+    def tick(elapsed: float) -> bool:
+        nonlocal peak
         r = _rss_mib(proc.pid)
-        at = round(time.monotonic() - t0, 1)
         peak = max(peak, r)
-        samples.append((at, r))
-        settled_at, reached = _settled_at(samples, base)      # fix wave 25, H2: only after the peak phase
-        if settled_at is not None:
-            break
-    for t in threads:
-        t.join(timeout=20)
-    for s in socks:
-        s.close()
+        samples.append((round(elapsed, 1), r))
+        state["settled_at"], state["reached"] = _settled_at(samples, base)
+        return state["settled_at"] is None and elapsed < bound
+
+    recs = _senders_on_one_thread(port, _head(4 * MIB) + payload, n, 20, 0.5, tick)
+    settled_at, reached = state["settled_at"], state["reached"]
+    codes: dict[str, int] = {}
+    for r in recs:
+        codes[r["code"]] = codes.get(r["code"], 0) + 1
     hwm = _hwm_mib(proc.pid) if hwm_ok else None
+    # fix wave 25: when the clients connected, last got bytes out and were answered — a starved client (late
+    # connects / sends) and a slow server (late answers after the last byte) read differently here
+    q = lambda v: f"{min(v):.1f}/{sorted(v)[len(v) // 2]:.1f}/{max(v):.1f}" if v else "-"
+    cut = [r for r in recs if r["code"] == "408"]
+    clients = (f"connected {q([r['connected'] for r in recs if r['connected'] is not None])} s; "
+               f"408 last byte {q([r['last_send'] for r in cut if r['last_send'] is not None])} s, "
+               f"answered {q([r['answered'] for r in cut])} s; "
+               f"503 answered {q([r['answered'] for r in recs if r['code'] == '503'])} s (min/median/max)")
     # the whole line, flushed, before any assertion: a failing run (e.g. on a Mac runner) keeps its evidence
     line = (f"codes {codes}; RSS base {base} peak {peak} growth {peak - base} MiB; hwm_growth "
             f"{None if hwm is None else hwm - base} MiB; peak phase reached {reached}; settled_at {settled_at} "
-            f"(bound {bound}); samples {samples}")
+            f"(bound {bound}); clients: {clients}; samples {samples}")
     print(line, flush=True)
     if not reached:
         pytest.fail(f"INVALID run: memory never reached base + {_PEAK_FLOOR_MIB} MiB, so nothing was measured -- {line}")
@@ -614,7 +690,7 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     # the kernel's peak RSS where it is available (the 0.5 s sampler can miss a peak).
     growth = (hwm if hwm is not None else peak) - base
     assert growth < api._INFLIGHT_BODY_BYTES // MIB + 32, f"RSS grew {growth} MiB -- {line}"
-    assert codes.get("408", 0) + codes.get("503", 0) == len(threads), line  # none held silently
+    assert codes.get("408", 0) + codes.get("503", 0) == n, line  # none held silently
     assert codes.get("408", 0) > 0, line  # the admitted, stalled ones were cut
     assert settled_at is not None and settled_at < bound, line
 
