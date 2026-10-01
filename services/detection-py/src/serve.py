@@ -41,12 +41,20 @@ REQUEST_HEAD_TIMEOUT_S = 10.0
 # and GET /health needs the GIL on the event loop several times on its way
 # through (accept, read, route, write) — each time it gave the GIL up for a
 # syscall it waited up to a full slice to get it back, behind the parse and
-# behind the loop's other work (503 refusals and their drains). Measured on
-# the w23 box with 16 clients sending worst-case batches (/health prober in
-# its own process, time to first byte): 5 ms slices -> max 0.44-0.51 s (the
-# event loop's own lag never exceeded 0.13 s: the time was GIL re-acquisition,
-# not one long block); 1 ms -> max 0.09-0.10 s. DETECTION_SWITCH_INTERVAL_SECONDS
-# overrides it.
+# behind the loop's other work (503 refusals and their drains). Found on the
+# w23 box: 5 ms slices -> max 0.44-0.51 s, the event loop's own lag never over
+# 0.13 s (the time was GIL re-acquisition, not one long block).
+# Measured (fix wave 24, Oct 1 2026; this 2-CPU box, Python 3.13.13; the live
+# test test_health_latency_bound_under_16_concurrent_worst_case_batches: 16
+# clients sending ~28 MiB worst-case batches, /health time to first byte from a
+# prober in its own process; 5 runs per row):
+#   1 ms, no other load ............ p50 11-17 ms, max 0.10-0.16 s
+#   1 ms, three busy loops ......... p50 6-8 ms,   max 0.21-0.27 s
+#   5 ms, three busy loops ......... p50 11-14 ms, max 0.23-0.45 s
+# (The wave-23 notes said 0.09-0.10 s here and 0.11-0.15 s in api.py: single
+# sessions under unstated load; AEGIS round 23, three busy loops: 1 ms max
+# 0.11-0.17 s, 5 ms 0.12-0.24 s.) The test's bound, 0.5 s, is unchanged.
+# DETECTION_SWITCH_INTERVAL_SECONDS overrides the interval.
 #
 # Fix wave 24, F3 (AEGIS N23-S-3): the override accepted anything in (0, 1) —
 # 0.5 s (a thread could hold the GIL for half a second: the bound this setting

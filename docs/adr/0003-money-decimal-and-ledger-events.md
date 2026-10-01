@@ -630,6 +630,24 @@ through the dir link"), which now CANNOT happen — the file behind the link is 
 refused with the victim intact. Evidence: `services/delivery-py/docs/evidence/
 dept28/round22/` (ledger logs and the reviewers' probes re-run against the release binary).
 
+## 11. The publish window: stop signals blocked, removal armed before anything is written (fix wave 24, Oct 1 2026)
+
+**AEGIS round 23 N23-S-2.** §9/§10 installed the stop-signal handlers only AFTER the rename. The reviewers'
+`g7_publish_window.py` fired SIGTERM the moment the temp file appeared: 298/300 signals landed in the window and 297
+left `.<name>.tmp-<hex>` behind (the default disposition killed the process mid-publish); fired the moment the port
+file appeared, a signal between the rename and the handlers would leave the port file. Now (`src/bin/server.rs`,
+`publish_port_file` / `write_and_rename`): `main` blocks SIGTERM/SIGINT/SIGHUP/SIGQUIT before the tokio runtime starts
+its threads (they inherit the mask, so only the main thread ever takes a stop signal) and unblocks them in the main
+thread at once; the publish blocks them again in the main thread — so for the whole process — from before the temp
+file is created until the port file is in place and armed; the removal is armed BEFORE anything is written (the
+directory descriptor, the published name and the temp name recorded, the handlers installed; the temp file's
+device/inode recorded before the rename, which keeps the inode); the handler removes the temp name while the publish
+is in progress and the published name while it is still this server's file (same device and inode), then restores
+the default disposition and re-raises. A signal sent during the publish stays pending and is handled the moment the
+mask is restored, with the port file in place and armed. Test (`tests/server_port_file.rs`,
+`a_stop_signal_aimed_at_the_publish_window_leaves_neither_the_temp_file_nor_the_port_file`, 100 + 100 aimed
+SIGTERMs): before, temp file left 94/100 and port file left 2/100; after, 0/100 and 0/100.
+
 ## Verification
 
 Commands, counts and a live three-process run are recorded in the README

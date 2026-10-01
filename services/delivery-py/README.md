@@ -69,7 +69,8 @@ the live tests; `DLV_DRAINS_MAX` (default 512) caps the HTTP graceful-close drai
 `fixed` is renamed `candidate_passed_checks`; `accepted` (and `reopened`) are set ONLY by `POST …/review` from the
 `aegis` caller with `finding_verdicts` — one `{finding_id, verdict: accept|reopen, note}` per finding (a pass needs an
 accept for every finding); records written as `fixed` read as `candidate_passed_checks`. *D2:* every line a finding's
-commit adds to a SOURCE file that can observe the execution context (`sys.modules`, `sys.argv`, `sys.flags`, frames,
+commit adds to a SOURCE file that uses one of the listed SPELLINGS of a construct that can observe the execution
+context (a spelling list — wave 24: it proves nothing by its silence) (`sys.modules`, `sys.argv`, `sys.flags`, frames,
 `inspect`, `traceback`, the environment, `__import__`/`importlib`, `globals()`/`vars()`/`getattr` on modules,
 `__main__`, `atexit`, `signal`, `threading.enumerate`, `gc.get_objects`, `builtins`, names built from string pieces;
 the Go/Rust/Node equivalents) is a review flag `<finding>-F001` (file:line, construct, reason), recorded
@@ -83,6 +84,20 @@ admission RED check of reviewer tests runs its containers WITHOUT the service lo
 holds the service's run slot); `wait_idle` waits for the engine thread to return; the kill of a container that
 started after a cancel is recorded first (`sandbox_kill_requested`), and an unrecordable one still kills and marks
 the run `unrecorded_failure`. ADR 0011, "Round 22 amendments".
+
+**Wave 24 (AEGIS round 23; lead rulings E1-E6).** The flags are a spelling list and the engine claims nothing beyond
+it: the report's flags section opens with "These flags come from a spelling list. They are an aid, not a guarantee:
+absence of flags proves nothing. Read the full source diff below." and never says "none"; the scan also reads
+aliases and star imports of the listed modules, `eval`/`exec`/`compile` of a non-literal, `/proc` and
+`conftest`/`pytest`/`test` literals, and a source import of a test framework (also refused). Every report embeds the
+COMPLETE source diff of the run (renames off: a moved file is shown in full) and its `src_diff_sha256`; a review that
+accepts any finding must carry that hash (else `422 diff_not_attested`) and a real note on every flag
+(`flags_addressed: [{flag_id, note}]`: ≥ 20 characters, not one repeated character, no two flag notes alike). A
+runner-dependent fix checkout whose reverted checkout executed, or a `SkipTest` raised from source, fails the round;
+the standalone runner's notion of "test side" is the engine's own (`path_class`, pinned). A legacy run awaiting review
+is re-scanned at start-up (`run_rescanned_for_review`) and its old report is never served. Pending admissions can be
+cancelled (the slot is freed at once). The suite writes nothing into the source tree. ADR 0011, "Round 23
+amendments".
 
 ## Running it
 
@@ -121,8 +136,8 @@ is 503 `LLM_NOT_CONFIGURED`; with no ledger every write is 503. Nothing is queue
 | `GET /health` | none | status, `in_memory`, `ledger`, `sandbox`, `llm`, `non_production`, the config/prompts hashes, policy version, deer-flow commit |
 | `POST /dlv/v1/fix-runs` | aegis, andre_session | ingest a findings document → 202 `{run_id, status, request_id, facts_sha256}` |
 | `GET /dlv/v1/fix-runs/{id}` · `/findings` · `/report` · `/evidence/{evidence_id}` | any caller | the run, its finding records, the report (markdown), an evidence file (content-addressed, hash-checked on read) |
-| `POST /dlv/v1/fix-runs/{id}/review` | aegis | wave 23: `finding_verdicts` (accept/reopen + note per finding; a pass accepts EVERY finding, a runner-dependent accept needs a note ≥ 20 chars) and `flags_addressed` (every flag id of each accepted finding); accepted findings → `accepted` (the only route); `pass` → terminal; `fail` → the reopened ∪ new findings enter a new run on the same branch (`next_run_id`, created in the same operation as the review); 409 before anything is recorded while another run of the service is in flight |
-| `POST /dlv/v1/fix-runs/{id}/cancel` | aegis, andre_session | stops a live run (`failed`, evidence kept) |
+| `POST /dlv/v1/fix-runs/{id}/review` | aegis | wave 23: `finding_verdicts` (accept/reopen + note per finding; a pass accepts EVERY finding, a runner-dependent accept needs a note ≥ 20 chars); wave 24: `src_diff_sha256` (the run's, when anything is accepted: else 422 `diff_not_attested`) and `flags_addressed` = `[{flag_id, note}]` for every flag of each accepted finding (a real note each); accepted findings → `accepted` (the only route); `pass` → terminal; `fail` → the reopened ∪ new findings enter a new run on the same branch (`next_run_id`, created in the same operation as the review); 409 before anything is recorded while another run of the service is in flight |
+| `POST /dlv/v1/fix-runs/{id}/cancel` | aegis, andre_session | stops a live run (`failed`, evidence kept); wave 24: also cancels a pending admission (its id from `reproduction_red_check_started`), freeing the service's slot |
 | `GET /dlv/v1/policy` | any caller | tool classes, test commands, the pinned hashes (no seed text) |
 | `GET /dlv/v1/audit/export` | any caller | the local log in order with ledger ids and the chain check |
 | `GET|POST /dlv/v1/reconcile` | Andre token + `DLV_RECONCILE_MODE=1` | ADR 0006 N15 reconcile of a split local log |

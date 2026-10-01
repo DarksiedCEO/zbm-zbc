@@ -10,6 +10,10 @@
   `candidate_passed_checks` (checks passed: necessary, not sufficient); only an AEGIS review with a verdict per
   finding makes one `accepted`. Where earlier sections say `fixed`, read `candidate_passed_checks` (kept as decided;
   see "Round 22 amendments").
+- **Wave 24 (Oct 1, 2026), read first:** the review flags are a SPELLING list and the engine claims nothing about
+  what they do not spell (absence of flags proves nothing). What carries weight is a reviewer who attests, bound by
+  hash, to having read the entire source diff: every report embeds it (`src_diff_sha256`), and an accepting review
+  must carry that hash and a note per flag. See "Round 23 amendments".
 - **Spec:** `DEPT28_SPEC.md` rev 1 (binding), the AEGIS audit of deer-flow v2.1.0 / Superpowers v6.4.2
   (`scratchpad/audit28/VERDICT.md` + four reports), `FIX_WAVE_1_COMMON.md`, BUILD_CONTRACTS.md, ADR 0006 / 0009.
 - **Base:** branch `delivery-department` from `integration-2026-09-24` @ `71f121e`.
@@ -852,8 +856,9 @@ necessary, not sufficient), `disproved`, and `needs_review_runner_dependent`; th
   the engine's).
 - **D2 — flag, don't chase.** `engine/review_flags.py`: for every line the finding's commit ADDS to a source file
   (`runner.classify_paths` → `src`; tests and test infrastructure are never scanned) the engine produces a flag
-  (`<finding>-F001` …: file, line, construct, reason, the redacted line) for any construct that can observe the
-  execution context — the founder's list, no wider: Python `sys.modules`, `sys.argv`, `sys.flags`,
+  (`<finding>-F001` …: file, line, construct, reason, the redacted line) for each of these SPELLINGS of a construct
+  that can observe the execution context (wave 24 correction: this used to read "for any construct that can observe
+  the execution context" — false: it is a spelling list, see "Round 23 amendments") — the founder's list, no wider: Python `sys.modules`, `sys.argv`, `sys.flags`,
   `sys._getframe` (and frame walking), `inspect`, `traceback`, `os.environ`/`getenv`, `__import__`/`importlib`,
   `globals()`/`vars()`/`__dict__`, `getattr`/`hasattr`/`setattr` on a module, `__main__`, `atexit`, `signal`,
   `threading.enumerate`, `gc.get_objects`, `builtins`, string concatenation used to form an identifier (literal +
@@ -939,6 +944,85 @@ as before. `test_r22_g4` 20/20; the G4 test 50/50 under three busy loops on 3.13
 A/B/C, d3_refusal, recordfirst and route4 probes pass. Full suite: 651 tests — 647 passed, 4 skipped — on Python
 3.13.13 (37 min) and on 3.12.3 (47 min).
 
+## Round 23 amendments (fix wave 24, Oct 1, 2026; lead rulings E1-E6, binding; AEGIS N23-D-1..9)
+
+**The principle (the lead's, binding).** Any list of suspicious constructs is a spelling list. The engine therefore
+never claims completeness of any detection. The gate that carries weight is a human-or-AEGIS reviewer who attests to
+having read the entire source diff, bound by hash.
+
+- **E1 — no completeness claims (N23-D-1 part).** The report's flags section never says "none" and always opens
+  with: "These flags come from a spelling list. They are an aid, not a guarantee: absence of flags proves nothing.
+  Read the full source diff below." (`report.FLAGS_OPENER`; an empty list renders as a list that matched nothing,
+  "that says nothing about what the diff does"). `review_flags.py`'s "it cannot under-flag a construct that is
+  spelled out" and this ADR's two completeness sentences (D2 above; the wave-23 limitation below) are corrected
+  in place; the module docstring states the residual: a module object reached without an import the scanner can
+  read (an argument, `type(x)`, `__loader__`/`__spec__`, `__globals__`, a frame from an exception or a generator),
+  bracket/attribute access built from pieces the patterns do not cover, exec/eval of encoded text (flagged as
+  exec/eval, never decoded), renamed or re-exported modules, file and /proc probes whose path is built at run
+  time, the process tree, sockets, timing, ctypes and C extensions, and other languages beyond the few Go/Rust/Node
+  spellings. The scan was extended only where trivially sound: the listed modules reached through an alias
+  (`import sys as s`, `from sys import modules as m` — the alias's uses read as the module's; aliases are taken from
+  the file's full new text at the commit, so one bound on an unchanged line counts), a star import of a listed
+  module (flagged itself), `eval`/`exec`/`compile` called on anything but a string literal, `/proc` path literals,
+  string literals naming `conftest`/`pytest`/`test`, and a source import of `pytest`/`_pytest`/`unittest`. The
+  round-23 probe `test_r23_scan.py` counts what is still unflagged; that number is a property of the spelling
+  list, not a defect to chase.
+- **E2 — diff-bound review (N23-D-1, N23-D-4).** At the end of a run the engine records `src_diff_recorded`: the
+  complete diff base..last commit of every changed path `path_class` does not call test or test infrastructure (a
+  path outside the service directory included), rename detection off, stored as evidence; `src_diff_sha256` is the
+  sha256 of that evidence exactly as stored and embedded (evidence is redacted of secret shapes like all evidence:
+  the hash binds what the reviewer reads). The report embeds it in full under "Source diff", right after the flags.
+  A diff over 6 MiB, or a report that would not fit one 8 MiB evidence file, fails the run (`EVIDENCE_UNAVAILABLE`):
+  a cut diff is never presented as complete. The review contract: `src_diff_sha256` (required when any finding is
+  accepted; missing or different → 422 `diff_not_attested`) and `flags_addressed: [{flag_id, note}]` — every flag
+  of every accepted finding needs a note of ≥ 20 characters in which no single character is more than half, and no
+  two flag notes of the review may be the same text; a bare flag id is read as an empty note and refused with its
+  reason; a runner-dependent finding's own accept note keeps the wave-23 rule, now with the same filler check. `fix_run_reviewed` records `src_diff_sha256`, the flag ids and each note's
+  sha256; the run's `review` keeps the notes. Whether a note is true is the reviewer's attestation; the engine
+  checks only that it is a note.
+- **E3 — renames and moves (N23-D-2).** `git diff` never detects renames or copies (`--no-renames` on every diff,
+  `diff.renames=false` and `status.renames=false` on every git command): a file moved or copied into `src/` is its
+  full text added — scanned line by line and shown whole in the source diff. Before, git's default rename detection
+  showed a 100% move as "similarity index 100%" with no `+` lines (the reviewers' MOVE2 helper reached
+  `candidate_passed_checks` with zero flags).
+- **E4 — parking closed (N23-D-3).** `_standalone_phase`: verification `runner_dependent` while the reverted checkout
+  EXECUTED (`fail`) → round failed `fix_depends_on_the_test_runner` — the reverted run proves the test runs outside
+  the runner, so the fix made it runner-dependent (only `runner_dependent` on BOTH checkouts can end
+  `needs_review_runner_dependent`). A `SkipTest` (or anything named `Skipped`/`SkipTest`) is "the test skipped
+  itself" only when the frame that built it AND the innermost service frame it was raised through are test-side;
+  from a source or unknown frame the standalone verdict is `fail` (`skip_from` in its report). `side_of` IS the
+  engine's classification: `path_class` (in the pinned `zbm_standalone_runner.py`) is the one function that sorts
+  a path into src/test/test_infra; `runner.classify_paths` loads it from that file after checking its pin, and the
+  request carries the seed's globs. Before, `src/toy/tests/shim.py` was `src` to the engine and `test` to the
+  runner (any `tests` directory), so a source shim's pytest import parked the finding (the reviewers' SHIM). A
+  source line importing `pytest`/`_pytest`/`unittest` is flagged (`test framework import`) and refused by the new
+  `src_content_deny` rule `test_framework_import` (last in the list, so the older rule names stay first).
+- **E5 — legacy runs (N23-D-5).** At start-up (after replay, before the worker starts; not in reconcile mode) every
+  `awaiting_review` run whose records lack `review_flags` or `src_diff_sha256` is re-scanned from its commits
+  (`DeliveryService._rescan_run`: the flags of each committed finding from `git diff --no-renames <sha>^ <sha>` and
+  the file text at the commit; the `-RD` flag of a runner-dependent one; the complete source diff) and its report
+  regenerated; ONE record-first operation (`run_rescanned_for_review`, then the local-log line with the new run and
+  finding records) puts them in place. A run that cannot be re-scanned is failed (`EVIDENCE_UNAVAILABLE`,
+  `legacy_rescan_failed`); a ledger outage refuses the start. A report without `src_diff_sha256` is never served
+  (409), and a review that would accept on records that were not re-scanned is refused 409.
+- **E6 — small (N23-D-6..9).** `DeliveryService.review` refuses (403) any caller but `aegis` itself, whatever route
+  reaches it. A pending admission (`reproduction_red_check_started`, its RED containers running outside the lock) can
+  be cancelled through `POST /fix-runs/{admission_id}/cancel` (aegis, andre_session): `admission_cancelled` is
+  recorded first (with the idempotency record, one local-log line), the service's slot is free at once, and when
+  the containers end nothing is recorded or admitted from them — the admission (or the failing review that started
+  it) answers 409. The remaining engine text that said "fixed" (the suite note to the agent, the reproduction
+  docstring, the attributable-failures docstring, the brief's no-reproduction line, the seed note) now names the end
+  state; the agent's reply token stays `FIXED` (its claim, which the engine checks). The suite writes nothing into
+  the source tree: every child process gets `PYTHONDONTWRITEBYTECODE=1` (and the parent's `PYTHONPYCACHEPREFIX`)
+  through `helpers.child_env()`; an in-memory service's scratch home is a private temp dir removed at exit (it was
+  `<cwd>/.dlv-mem`); the live launcher's log goes under the session temp dir (it was `docs/evidence/dept28/_runs/`);
+  a process that imports the test helpers removes the temp dirs its harnesses made when it exits.
+
+Pins after this wave: `adapters/tools/zbm_standalone_runner.py` `ce227a83fc4b297a12cfa8e98d6510a8e04a17e70d8919362300a11ff896907d`
+(`runner.STANDALONE_SHA256`), `seed/test_commands_seed.json` `897b5dd2c860bc73fd56bfeccd3260f9ad38027b69209e249b7e0001a8241310`
+(`config.PINNED_TEST_COMMANDS_SHA256`: the `test_framework_import` rule and the reworded note); the prompts manifest
+is unchanged.
+
 ## Known limitations
 
 - The tool-call classifier is a denylist over an unbounded language (df-exec F-03): it is the record and the
@@ -959,9 +1043,11 @@ A/B/C, d3_refusal, recordfirst and route4 probes pass. Full suite: 651 tests —
   `conftest.py` on the path no longer makes an EXECUTED standalone verdict runner-dependent).
 - Wave 23 (D1/D2), stated plainly: the engine's checks are necessary, not sufficient. A detector that sees the test
   process by a signal the checks cannot distinguish from production (round 22's "a `test_*` module is loaded")
-  passes every check; what the engine now guarantees is that every added source line that can observe the execution
-  context is FLAGGED with its file and line at the top of the report, and that no finding is `accepted` without a
-  review that names each flag. The flag list is a spelling list: a construct reached without any listed spelling (a
+  passes every check. (Wave 24 correction: this sentence used to say the engine "guarantees" that every added
+  source line that can observe the execution context is flagged — false.) What the engine guarantees is narrower:
+  every added source line that uses one of the listed SPELLINGS is flagged with its file and line at the top of the
+  report, the complete source diff is embedded below it, and no finding is `accepted` without a review that carries
+  the diff's `src_diff_sha256` and a note on each flag. The flag list is a spelling list: a construct reached without any listed spelling (a
   module object handed in from elsewhere, a C extension, a non-Python/Go/Rust/Node source file, reflection through
   an object the list does not name, `exec`/`eval`/`compile` of an encoded string — none of the three is on the
   founder's list, so an `exec(codecs.decode(…))` that spells nothing listed is not flagged) is not flagged. The

@@ -169,9 +169,20 @@ the event loop was never blocked for more than 0.13 s: the time was the GIL
 convoy — `/health` re-acquires the GIL after every syscall and waited up to
 a 5 ms switch slice each time behind the ~0.5 s parse. `serve.py` now sets
 `sys.setswitchinterval(0.001)` (`DETECTION_SWITCH_INTERVAL_SECONDS`), as the
-other `serve.py` launchers have since fix wave 7 (NEW-5): max 0.11–0.15 s,
-p50 13–17 ms, batch throughput unchanged (13 × 200 in 8 s). The bound is
-unchanged.
+other `serve.py` launchers have since fix wave 7 (NEW-5). The bound is
+unchanged. **Fix wave 24 (AEGIS round 23 N23-S-3/S-4):** the override is
+accepted only in 0.0001–0.05 s and `serve.py` refuses to start unless the
+interval in force (`sys.getswitchinterval()` after setting it) is the one
+set; and the numbers, now the same in `serve.py`, `api.py` and here, with
+their conditions — measured on this 2-CPU box, Python 3.13.13, the live test
+above (16 clients, ~28 MiB worst-case batches, `/health` time to first byte
+from a prober in its own process), 5 runs each: 1 ms with no other load —
+p50 11–17 ms, max 0.10–0.16 s; 1 ms with three busy loops — p50 6–8 ms, max
+0.21–0.27 s; 5 ms with three busy loops — p50 11–14 ms, max 0.23–0.45 s. The
+wave-23 notes' 0.09–0.10 s (`serve.py`) and 0.11–0.15 s (`api.py`, here) were
+single sessions under unstated load; AEGIS round 23 measured, with three busy
+loops, 1 ms max 0.11–0.17 s and 5 ms 0.12–0.24 s. The earlier "max 0.08–0.22 s
+(8 runs)" above is the wave-1 measurement at the 5 ms default.
 
 Largest detection-py *responses* at these limits: 5.3 MiB (discount-misuse on
 1,000 worst-case orders) and 8.6 MiB (`/correlation/overlaps` echoing 1,000

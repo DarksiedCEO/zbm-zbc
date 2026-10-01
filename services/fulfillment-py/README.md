@@ -642,6 +642,28 @@ failed** (growth 82-92 MiB, median 88); `tests/test_fix8_n7_2_body_prealloc.py` 
 exists (`tests/test_live_graceful_close_module.py`; new pin in that test, identical in all ten services).
 Full suite: 1034 passed, 1 skipped, **1 failed** on 3.13.13 and on 3.12.3 — the `[8-oversized]` junk-flood case sees
 no 413 (every request `BrokenPipeError`); it fails the same way on 540a64e on this box (ADR 0002, "Fix wave 23").
+**Correction (fix wave 24, N23-S-4):** later in wave 23 the lead ruled the client change legitimate (FIX_WAVE_23b
+brief, Sep 30) and commit 1e1fc59 changed the test's junk sender, not the service: it now sends while reading and
+reads every answer (`_send_reading`), every junk request must end 413/422/503 (every `oversized` one 413), and the
+blocking client's reset-before-reading residual is pinned live by
+`test_live_blocking_sendall_oversized_client_is_reset_before_reading_its_413`. From 1e1fc59 on the full suite had
+no failure (ADR 0002, "Fix wave 23", correction).
+
+## Fix wave 24, Oct 1 2026 — request-body memory inside the one budget (N23-S-1, N23-S-9)
+
+`_INFLIGHT_BODY_BYTES` (64 MiB) is now the whole budget for request-body bytes — the 8 MiB small reserve is carved out
+of it (shared pool 56 MiB) — and every body byte the process holds is in it: `BodySizeLimitMiddleware` counts each
+chunk the moment the app receives it and does not read the body further until the budget covers it (503 after the
+wait; preemption as before); under `python3 -m api` uvicorn reads a body only when the app asks, one 16 KiB read at a
+time (it read on to 64 KiB + a read); the body is kept as the chunks received and joined once in the parse slot (no
+bytearray growth headroom). By construction <= 70 MiB of body bytes (64 counted + 2 for chunks waiting to be covered
++ 4 for one unasked read per connection); measured fixed term 0.9 MiB (growth = 0.998 x budget + 0.86 MiB over
+budgets of 8-64 MiB). The 128-sender test under three busy loops: 20/20 alone (64-65 MiB) and 10/10 as a module
+(57-62 MiB); with a concurrent heavy tenant as well: 20/20 (64-67) and 10/10 (58-62); the 96 MiB bound is unchanged
+(ADR 0002, "Fix wave 24"). Tests: `tests/test_fix24_body_memory_accounted.py` (3), `tests/test_fix24_child_env.py`
+(3: every Python child the suite starts — the live servers included — runs with PYTHONDONTWRITEBYTECODE=1 and the
+parent's PYTHONPYCACHEPREFIX, through `conftest.child_env()`). Changed: the five in-process tests that size the shared
+pool through `_INFLIGHT_BODY_BYTES` add `_SMALL_RESERVE_BYTES` to it.
 
 ## Running it
 
