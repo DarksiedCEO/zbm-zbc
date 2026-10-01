@@ -325,6 +325,11 @@ jobs:
     if: needs.changes.outputs.dashboard == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      # npm (10.x) turns on Node's module compile cache in $TMPDIR/node-compile-cache for every `npm run`; under the
+      # hygiene wrapper that directory is a leftover in the suite's private TMPDIR (rule R3, seen in fix wave 25)
+      NODE_DISABLE_COMPILE_CACHE: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
     defaults:
       run:
         working-directory: apps/dashboard-ts

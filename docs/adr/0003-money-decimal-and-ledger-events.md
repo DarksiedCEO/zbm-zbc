@@ -672,16 +672,25 @@ starved box the property could be measured before the stall existed (C2-4, C2-5)
   its response already queued in its socket; a wrong-token client by its 401 having arrived.
 - **Ordering, not stopwatch.** Others are served (a shed caused by the test's own small cap is retried; hang guard =
   the request deadline), and only THEN is every stalled connection checked to be still held (nothing came back on
-  it) — a server that served the others behind the stalled client could only do so after cutting it. Proof (mutant:
-  `serve_connection` awaited inline in the accept loop, one connection at a time — the wave-4 defect class): 7 of the
-  12 tests failed; the slow-reader test passed on it, was then given the ordering check above, and fails on the
-  mutant too. The four that pass on that mutant do not depend on concurrent connections: the two append-serialisation
-  tests, the oversized-Content-Length 413 and the wrong-token 401 (answered before the body is read).
+  it) — a server that served the others behind the stalled client could only do so after cutting it. For the slow
+  reader (whose socket always holds queued response bytes, so "nothing came back" cannot be observed) the ordering is
+  the request deadline itself: the only thing that cuts it is that 15 s deadline, which starts after the request was
+  sent, so others answered before `since + REQUEST_DEADLINE` were answered before the cut. Proof: the mutant
+  `serve_connection` awaited inline in the accept loop (one connection at a time — the wave-4 defect class) fails the
+  connection-dependent tests; the run that shows it is in the wave-25 E-C report (logs `proof-ledger_mut`), not
+  restated here as a count.
 - **Deadlines:** the cut is an event (the read ends because the server closed); a lower bound (not before the
-  deadline) stays — load cannot break it; the only upper bound left is `elapsed < BODY_READ_TIMEOUT` for the
-  wrong-token client: it separates "closed at once" from "closed by the body deadline", and it is the server's own
-  deadline, not a literal. The trickle test's "the deadline is total, not per read" is now an ordering: the server's
-  cut reaches the trickling writer before its 20 s of bytes are sent.
+  deadline) stays — load cannot break it. Two upper bounds remain, each against the server's own deadline constant
+  (never a literal) and each separating two causes: the wrong-token client's EOF must come before the 5 s body
+  deadline (closed at once vs closed by the deadline; read right after the 401, so nothing else is inside the bound),
+  and the slow reader's others before the 15 s request deadline (above). Both are allowlisted with these reasons in
+  `devtools/hygiene_allowlist.json` (rule L1 flags a bound held in a constant too). The trickle test's "the
+  deadline is total, not per read" is an ordering: the server's cut reaches the trickling writer before its 20 s
+  of bytes are sent.
+- Review of the first wave-25 version of these tests (E-C, same wave): the wrong-token EOF was read only after the
+  others were served (their service time counted against the 5 s bound), and the slow-reader check drained the
+  socket until it would block — which can consume the whole multi-MB response the test then asserts was truncated.
+  Both changed as described above.
 - `tests/server_port_file.rs`, aimed-signal test (C2-6): the sample is now 100 signals that landed IN the publish
   window, however many spawns that takes (at most 400); before, fewer than 90 hits in 100 spawns failed a correct
   server whenever the poller missed the window.
@@ -697,7 +706,9 @@ machine's /tmp are from earlier waves' code and are not removed by this wave —
 
 Current test counts: [docs/test-counts.md](../test-counts.md) (generated). The original commands and a live
 three-process run are recorded in the README ("Sep 24 2026 — money is exact, ledger records events"). Fix wave 25
-(H7, AEGIS N24-S-8) verified that §11's SIGKILL/OOM residual paragraph and the matching module documentation in
-`src/bin/server.rs` are present (text only; the AEGIS round-24 SIGKILL measurements it quotes were not re-run in
-wave 25). FIX_WAVE_23b.md, the ruling record for wave 23b, concerns fulfillment, detection and onboarding tests,
-not the ledger; it is cited here only so the ledger's ADR does not claim a ruling it was not part of.
+(H7, AEGIS N24-S-8) checked that §11's SIGKILL/OOM residual paragraph (commit 27d3440) and the matching module
+documentation in `src/bin/server.rs` are present and that its numbers (49/50 temp files, 50/50 port files) are the
+ones in the AEGIS round-24 services report (text only; those SIGKILL measurements were not re-run in wave 25).
+`FIX_WAVE_23b.md` — the wave-23b ruling record, which lives in the review session's scratchpad, NOT in this
+repository — concerns fulfillment, detection and onboarding tests, not the ledger; it is cited so this ADR does not
+claim a ruling it was not part of (docs/findings/OPEN.md C4-5 tracks such out-of-repo references).
