@@ -206,7 +206,9 @@ been answered, not after a fixed 0.5 s. The live server is accepted only after i
 (an answer on a port picked free a moment earlier can be another process's), and ports are OS-assigned unless
 `DETECTION_LIVE_TEST_PORTS` is set (the literal default 19960-19969 is gone). `test_oversized_content_length_is_
 refused_before_the_body_is_sent` no longer bounds the wall clock: no body byte is ever sent, so a 413 at all is the
-refusal before the body. Measured under 2 busy loops: see "E-A measurements" in the fix-wave-25 report
+refusal before the body. Settings (scout A D10): `DETECTION_DRAINS_MAX` (default 512) caps how many graceful-close
+drains run at once (`src/serve.py`, the shared module of ADR 0003); `DETECTION_LIVE_TEST_PORTS` (`lo-hi`, test-only)
+pins the live tests to a port range — unset, the OS assigns ports. Measured under 2 busy loops: see "E-A measurements" in the fix-wave-25 report
 (`w25-reports/E-A.md`); the test prints every raw number.
 
 Largest detection-py *responses* at these limits: 5.3 MiB (discount-misuse on
