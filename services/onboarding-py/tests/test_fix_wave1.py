@@ -170,7 +170,7 @@ def test_f2_client_handoff_is_not_made_when_the_activation_ruling_cannot_be_reco
     c = client_for(svc)
     _ready_client(c)
     svc.ledger.fail_types = {"activation_ruling"}
-    svc.ledger.__class__ = FailOn  # noqa: keep events; fail from now on
+    svc.ledger.__class__ = FailOn  # keep events; fail from now on
     r = c.post("/onboarding/clients/client_a/activate")
     assert r.status_code == 503 and r.json()["proceeded"] is False, r.text
     assert svc.depts.handoff.received == []

@@ -519,7 +519,7 @@ The WIP commit was replaced; it doesn't remain in history.
   clipper terms are stored.
 - The proving campaign is capped at $500.00, 3 creators, 14 days (draft).
 - Payments are tracked only for a creator whose activation is complete: vetting
-  approved, gates 14 and 15 passed, payout account active (fix wave 4, owner ruling
+  approved, gates 14 and 15 both passed, payout account active (fix wave 4, owner ruling
   by the founder's operator: refuse). A W-9 alone isn't enough. Otherwise 409 with the
   reason, and nothing is recorded as a tracked payment.
 - A date of birth before 1900-01-01, or one that makes the applicant older than 120
@@ -665,6 +665,38 @@ The WIP commit was replaced; it doesn't remain in history.
   the same base (ten 100 KB inputs). After: 30/30 on 3.12 and 30/30 on 3.13 under three busy loops; the 1 MB test
   5/5 on each. Bounds unchanged. Not proven: that the slicing/cache effect is the cause (no excursion was caught
   in the act), and a 1-in-60 flake rate is not excluded by 60 clean runs alone.
+
+## Fix wave 25, Oct 1 2026 — launcher range, the fake ledger pinned to ledger-rust, synchronised live tests
+
+- **Switch interval (scout C5-3).** `ONBOARDING_SWITCH_INTERVAL_SECONDS` accepted any positive number (3600 s, 1e-9 s;
+  `nan` passed the `<= 0` check) and the interval was never checked in force. Now only 0.0001 .. 0.05 s starts
+  (unset or empty: 1 ms), and `serve.run()` compares the interval in force in whole microseconds (CPython keeps it
+  truncated to the microsecond; detection-py's wave-25 H5) and prints it before serving.
+  `tests/test_fix25_switch_interval.py`.
+- **The fake ledger (scout A X8).** `tools/fake_ledger_server.py` said it "validates exactly like" ledger-rust and the
+  live `Stack` tests (test_fix_wave5) run against it, but nothing checked it. One set of accept and reject cases is now
+  put to the REAL ledger-rust binary (201 vs 400), the fake's `validate` and the client's own mirror
+  `ledger.ledger_rust_accepts`; all three must agree (`tests/test_fix25_fake_ledger_matches_rust.py`).
+- **Synchronisation, not sleeps (scout A O1, O3).** The shed test released the ledger's one held connection and slept
+  0.5 s before the retry; in a full-suite run under load the retry was shed (503). Both of its waits now poll the
+  ledger's own `/health` until it answers 503 (the slot is held) or 200 (the slot is free). The large-lane test waited
+  0.3 s and asserted the second large body had not finished — also true when it had not even reached the lane yet; it
+  now waits until the second body is queued on the large lane (read through the lane's own `waiting` count — the
+  stopped engineer's draft held on to the lane's private waiter list, which the lane replaces on every grant).
+- **Ports and wall clocks (scout A O2, O4; R-HYGIENE L1/L2).** `conftest.free_test_port` has no literal default range
+  any more (OS-assigned unless `ONBOARDING_TEST_PORT_RANGE` is set) and an exhausted range fails instead of skipping.
+  The hostile-body test bounds the onboarding process's CPU for each request (Linux `/proc`), not the client's wall
+  clock; the Compliance (38) client's total-deadline test checks that the client gave up with the dripping body still
+  unread (a per-read timeout would read it all). The remaining wall-clock bounds in `test_fix_wave5.py` /
+  `test_fix_wave6.py` are deadline properties (a 2 s head / body deadline, a 0.3 s queue wait) and are listed for a
+  reviewed allowlist entry (fix-wave-25 E-A report), not rewritten.
+- **Tests run with their own token (scout A O8).** `tests/conftest.py` set `ONBOARDING_SERVICE_TOKEN` with
+  `setdefault`, so a shell that exports the operator's token broke the in-process auth; it is now always the test
+  token (`tests/test_fix25_test_token.py`).
+- **Docs.** README: the hand-written test counts (a total and a per-file column that had drifted, four files missing)
+  are gone in favour of the generated `docs/test-counts.md`; "0 skipped with cargo" corrected (the IPv6 check skips
+  without `::1`); `ONBOARDING_INTAKE_CHANNEL` (read, used by nothing yet: an open item) and
+  `ONBOARDING_SPANISH_ENABLED` (refuses startup) documented.
 
 ## Contract observations (reported, not changed)
 

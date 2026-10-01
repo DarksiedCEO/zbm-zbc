@@ -53,7 +53,7 @@ from conftest import TEST_SERVICE_TOKEN, client_for, free_test_port, make_servic
 import ledger
 from ledger import HttpLedgerClient, LedgerWriteError
 from onboarding_schema import requests as rq
-from test_fix_wave5 import BENIGN_VALUE, MAX_FACTS, _fact, _stop, _wait_health
+from test_fix_wave5 import BENIGN_VALUE, _fact, _stop, _wait_health
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -487,14 +487,27 @@ def shed_stack(ledger_bin):
     s.close()
 
 
+def _ledger_health_until(port: int, want: int, within: float = 15.0) -> httpx.Response:
+    """Fix wave 25 (scout A O1/O3): wait for the ledger's own answer to change, not a fixed sleep. ledger-rust
+    counts a connection when its accept loop takes it and frees the slot when it sees the client's EOF — on a
+    loaded box either can take longer than the 0.2 s / 0.5 s this test used to sleep (O1: the retry after the
+    release got 503 "shed" in a full-suite run under load). Polls GET /health (each probe is its own connection)
+    until it answers `want`; returns the last answer, whatever it was, after `within` s."""
+    deadline = time.monotonic() + within
+    while True:
+        r = httpx.get(f"http://127.0.0.1:{port}/health", timeout=5)
+        if r.status_code == want or time.monotonic() >= deadline:
+            return r
+        time.sleep(0.05)
+
+
 def test_n6_live_ledger_rust_shed_503_is_reported_as_not_recorded(shed_stack):
     c = httpx.Client(base_url=shed_stack.base, headers=AUTH, timeout=30)
     # the ledger's one connection slot is held by an idle socket -> every
     # further connection gets shed() : 503 + exact body, request never read
     held = _hold_ledger_connections(shed_stack.lport, 1)
     try:
-        time.sleep(0.2)
-        probe = httpx.get(f"http://127.0.0.1:{shed_stack.lport}/health", timeout=5)
+        probe = _ledger_health_until(shed_stack.lport, 503)   # the held socket has the slot
         assert probe.status_code == 503 and probe.json() == LEDGER_SHED_BODY, probe.text
         r = c.post("/onboarding/clients", json=start_body("shed_a"))
         assert r.status_code == 503, r.text
@@ -505,7 +518,7 @@ def test_n6_live_ledger_rust_shed_503_is_reported_as_not_recorded(shed_stack):
     finally:
         for s in held:
             s.close()
-    time.sleep(0.5)
+    assert _ledger_health_until(shed_stack.lport, 200).status_code == 200   # the ledger has freed the slot
     # the slot is free again: the identical retry proceeds
     r = c.post("/onboarding/clients", json=start_body("shed_a"))
     assert r.status_code == 201, r.text

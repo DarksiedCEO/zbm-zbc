@@ -280,10 +280,10 @@ def scan_calls(monkeypatch):
 
 
 def test_r1_over_long_field_is_refused_without_any_scan(scan_calls):
-    t = time.perf_counter()
+    t = time.thread_time()                 # fix wave 25 (scout A O2; R-HYGIENE L1): this thread's CPU, not wall
     with pytest.raises(ValidationError):
         rq.MessageRequest.model_validate({"text": "a" * 60_000})
-    assert time.perf_counter() - t < 0.2
+    assert time.thread_time() - t < 0.2
     assert scan_calls == [], "a 60 KB message was scanned before its 5,000-character limit was checked"
     with pytest.raises(ValidationError):
         rq.DocumentRequest.model_validate({"name": "n", "text": "a@" * 30_000})
@@ -367,17 +367,17 @@ def test_r1_access_log_line_is_capped_before_it_is_scrubbed():
     for path in ("/" + "a" * 20_000 + "?" + "&".join(f"k{i}=aA1!aA1!aA1!" for i in range(60_000)),
                  "/" + "a@" * 500_000, "/x?" + "login=" * 200_000, "/" + "orders/" * 150_000):
         rec = _access(path)
-        t = time.perf_counter()
+        t = time.thread_time()             # fix wave 25 (scout A O2; R-HYGIENE L1): this thread's CPU, not wall
         redaction.scrub_log_record(rec)
-        assert time.perf_counter() - t < 0.2
+        assert time.thread_time() - t < 0.2
         assert len(rec.getMessage()) < redaction.LOG_PATH_MAX + 200
     rec = _access("/" + "orders/" * 150_000)
     redaction.scrub_log_record(rec)
     assert "truncated" in rec.getMessage()
     other = logging.LogRecord("onboarding.x", logging.INFO, __file__, 1, "%s", ("login " + "a" * 1_000_000,), None)
-    t = time.perf_counter()
+    t = time.thread_time()
     redaction.scrub_log_record(other)
-    assert time.perf_counter() - t < 0.5 and len(other.getMessage()) < redaction.LOG_TEXT_MAX + 200
+    assert time.thread_time() - t < 0.5 and len(other.getMessage()) < redaction.LOG_TEXT_MAX + 200
 
 
 # =============================================================================

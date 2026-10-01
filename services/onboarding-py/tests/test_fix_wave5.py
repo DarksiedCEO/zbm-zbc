@@ -32,7 +32,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -306,16 +306,41 @@ def test_new2_real_uvicorn_hostile_bodies_are_still_refused_quickly(stack):
     c = httpx.Client(base_url=stack.base, headers=AUTH, timeout=60)
     assert c.post("/onboarding/clients", json=start_body("host_a")).status_code == 201
     # a max-size body whose LAST string carries a credential: refused 422
+    # Fix wave 25 (scout A O2; R-HYGIENE L1): "quickly" is the SERVER's CPU for the request (Linux /proc: utime +
+    # stime of the onboarding process), not the client's wall clock on a possibly starved box; a request that hung
+    # without using CPU raises at the client's timeout (60 s). Where /proc is not available the CPU is not asserted.
+    pid = stack.pid()
     facts = [_fact(i, BENIGN_VALUE) for i in range(199)] + [_fact(199, "the shopify password is Tangerine!42")]
-    t = time.monotonic()
+    c0 = _proc_cpu_s(pid)
     r = c.post("/onboarding/clients/host_a/intake/facts", json={"facts": facts})
-    assert r.status_code == 422 and time.monotonic() - t < 5, (r.status_code, r.text[:200])
+    cpu = _cpu_since(pid, c0)
+    print(f"credential body: {r.status_code}, server CPU {cpu}")
+    assert r.status_code == 422, (r.status_code, r.text[:200])
+    assert cpu is None or cpu < 5, cpu
     # adversarial max-size text (the round-3 pathological shapes): answered
     # quickly (credential refusal, a check, or the CPU budget), never hung
     for unit in ("a@", "login=", "user:", "eyJ-"):
-        t = time.monotonic()
+        c0 = _proc_cpu_s(pid)
         r = c.post("/onboarding/clients/host_a/access/website-scan", json={"html": unit * (499_000 // len(unit))})
-        assert r.status_code in (200, 422) and time.monotonic() - t < 10, (unit, r.status_code, r.text[:200])
+        cpu = _cpu_since(pid, c0)
+        print(f"{unit!r} x max: {r.status_code}, server CPU {cpu}")
+        assert r.status_code in (200, 422), (unit, r.status_code, r.text[:200])
+        assert cpu is None or cpu < 10, (unit, cpu)
+
+
+def _proc_cpu_s(pid: int) -> float | None:
+    """utime + stime of process `pid` in seconds (Linux /proc), None elsewhere (fix wave 25)."""
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            f = fh.read().rsplit(")", 1)[1].split()
+        return (int(f[11]) + int(f[12])) / os.sysconf("SC_CLK_TCK")
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _cpu_since(pid: int, c0: float | None) -> float | None:
+    c1 = _proc_cpu_s(pid)
+    return None if c0 is None or c1 is None else c1 - c0
 
 
 # =============================================================================
