@@ -134,12 +134,13 @@ def best_time(fn: Callable[[str], object], s: str, runs: int = 3) -> float:
 def best_time_back_to_back(fn: Callable[[str], object], items: list[str], runs: int = 3) -> float:
     """Best of ``runs`` of the thread CPU time to run ``fn`` over every item back to back, as ONE timed block (GC off,
     as in ``best_time``). Fix wave 23: the linearity ratios compared a short run (10 KB, ~1 ms) with a run 10x longer
-    (100 KB, ~10-20 ms). Under load those are not the same measurement — a ~1 ms run fits in one scheduler slice with
-    a warm cache, a 10-20 ms run is sliced and refills its cache on every resume, and thread CPU time counts that
-    refill — so a linear pattern's ratio drifted from ~10 toward the bound 20 (w23, 3.13, three busy loops:
-    ``redaction._URL_PART`` 'a;'+'@' 1.05 ms -> 21.2 ms, ratio 20.2). Timing 10 x 10 KB back to back is the same
-    work over the same duration as one 100 KB run, so what differs between the two sides is only how the cost grows
-    with the length of one input."""
+    (100 KB, ~10-20 ms), and a linear pattern occasionally measured over the bound 20 under load (w23, 3.13, three
+    busy loops: ``redaction._URL_PART`` 'a;'+'@' 1.05 ms -> 21.2 ms, ratio 20.2 — about one ratio check in 14,000;
+    3 x 234 checks per Python showed median 10.1, max 12.3). The two sides are not the same measurement under load:
+    a ~1 ms run fits in one scheduler slice with a warm cache, a 10-20 ms run is sliced and refills its cache on
+    every resume, which thread CPU time counts. That is the likely cause, not a proven one (no excursion was caught
+    in the act). Timing 10 x 10 KB back to back is the same work over the same duration as one 100 KB run, so what
+    differs between the two sides is only how the cost grows with the length of one input (median 0.99, max 1.35)."""
     best = float("inf")
     for _ in range(runs):
         was = gc.isenabled()

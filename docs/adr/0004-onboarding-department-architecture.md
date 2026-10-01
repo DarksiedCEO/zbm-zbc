@@ -648,6 +648,24 @@ The WIP commit was replaced; it doesn't remain in history.
   ADR 0003 §9): the concurrency slot is given back before the drain, at most `ONBOARDING_DRAINS_MAX` (default 512)
   drain at once, reads are bounded to 16 KiB and drained bytes are discarded in one buffer.
 
+## Fix wave 23, Sep 30 2026 — the linearity ratio, again
+
+- `test_r1_every_pattern_linear_on_adversarial_input` failed once in the w23 3.12 suite
+  (`practices.ad_disclosure._MARKER` `'? '+'!'`: 0.62 → 14.9 ms, ratio 24.1 > 20; 0/12 in that wave's A/B). Run
+  30× per Python under three busy loops on the 2-vCPU box: 3.12 30/30, 3.13 29/30 (`redaction._URL_PART`
+  `'a;'+'@'`: 1.05 → 21.2 ms, ratio 20.2). A probe of every pattern's three worst shapes (3 rounds, 702 ratios
+  per Python, same load) measured the old ratio at median 10.1, max 11.4 / 12.3, none over 15: the excursion is
+  rare (~1 check in 14,000), and the patterns are linear.
+- The test compared a ~1 ms run with a 10–20 ms run; under load those differ in more than input length (scheduler
+  slices, cache refills that thread CPU time counts). A ratio over 20 is now re-measured, before it fails, against
+  ten 10 KB inputs timed back to back — the same work and duration as the 100 KB run
+  (`redos_harness.best_time_back_to_back`) — with the same 2× tolerance (`SAME_WORK_RATIO` = 2, floor 2 ms). That
+  ratio measured median 0.99, max 1.31 / 1.35. `test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own`
+  shows a quadratic mutant still fails it with the absolute bounds disabled. The 1 MB scanner test's re-measure got
+  the same base (ten 100 KB inputs). After: 30/30 on 3.12 and 30/30 on 3.13 under three busy loops; the 1 MB test
+  5/5 on each. Bounds unchanged. Not proven: that the slicing/cache effect is the cause (no excursion was caught
+  in the act), and a 1-in-60 flake rate is not excluded by 60 clean runs alone.
+
 ## Contract observations (reported, not changed)
 
 - **Section 2** defines `payload_sha256` but no home for the payload itself. Without
