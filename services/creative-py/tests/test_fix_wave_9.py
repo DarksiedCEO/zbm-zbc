@@ -32,6 +32,7 @@ L4  415 was answered before authentication.
 
 from __future__ import annotations
 
+import gc
 import itertools
 import json
 import random
@@ -634,28 +635,75 @@ def test_l2_memory_per_revision_does_not_grow_with_history(registry):
     assert late < early * 1.25 + 64 * 1024, (early, late)
 
 
+def _get_endpoint(app, path: str):
+    for route in app.routes:
+        if getattr(route, "path", None) == path and "GET" in getattr(route, "methods", ()):
+            return route.endpoint
+    raise LookupError(path)
+
+
+def _block_cpu(fn, n: int) -> float:
+    """Thread CPU time of `fn` run `n` times back to back, the cyclic GC off (a collection the suite's garbage
+    triggers is not this code's work)."""
+    was = gc.isenabled()
+    gc.disable()
+    try:
+        t = time.thread_time()
+        for _ in range(n):
+            fn()
+        return time.thread_time() - t
+    finally:
+        if was:
+            gc.enable()
+
+
+def same_work_ratio(handler, n: int, rounds: int = 5) -> float:
+    """Fix wave 25, H6 (AEGIS N24-S-11): the CPU a GET handler spends building its answer, over the CPU of
+    serialising that same answer with json.dumps — both measured in this thread, interleaved, best of `rounds`
+    blocks of `n` calls. The old check timed one request's WALL clock through a fresh TestClient: on a starved
+    2-CPU box that is mostly scheduling (3 busy loops: 16/20 failed at 188-292 ms against 0.2 s) and, even on a
+    quiet one, mostly the app's first-request start (server-side CPU: 72-83 ms for the first request, 1.4-3 ms
+    for the same GET after it). A ratio of two CPU measurements taken side by side cancels the machine's speed and
+    load; what is left is how much work the handler does per byte it answers."""
+    out = handler()
+    h, ref = float("inf"), float("inf")
+    for _ in range(rounds):
+        h = min(h, _block_cpu(handler, n))
+        ref = min(ref, _block_cpu(lambda: json.dumps(out), n))
+    return h / ref
+
+
+# Measured (fix wave 25; 2-CPU box, Python 3.13; quiet and under 3 busy loops, same numbers): the version list
+# 0.36-0.40, one version 0.94-1.01; a handler made 3x slower (each call done three times) 1.06-1.15 and 2.91-3.11.
+# The bounds sit between: the 3x-slower handler fails both.
+LIST_RATIO_MAX = 0.75
+VERSION_RATIO_MAX = 2.0
+
+
 def test_l2_rulebooks_get_is_summarised_and_retired_ids_paginated(api):
     from zbc.rulebook import RulebookStatus
+
+    import api as api_mod
 
     versions = _churn(api.zbc.registry)
     cid = versions[0].campaign_id
     for v in versions[:-1]:
         api.zbc.rulebooks.commit(v.model_copy(update={"status": RulebookStatus.SUPERSEDED}))
     api.zbc.rulebooks.commit(versions[-1].model_copy(update={"status": RulebookStatus.LIVE, "live_at": NOW}))
-    t0 = time.perf_counter()
     r = api.get(f"/zbc/campaigns/{cid}/rulebooks")
-    dt = time.perf_counter() - t0
     assert r.status_code == 200
     body = r.json()
-    print(f"\nL2 GET rulebooks (61 versions): {len(r.content)} B in {dt * 1000:.0f} ms")
-    assert len(r.content) < 2**20 and dt < 0.2, (len(r.content), dt)
+    ratio = same_work_ratio(lambda: _get_endpoint(api.app, "/zbc/campaigns/{campaign_id}/rulebooks")(
+        campaign_id=cid, offset=0, limit=api_mod.RULEBOOK_PAGE), n=200)
+    print(f"\nL2 GET rulebooks (61 versions): {len(r.content)} B; handler CPU / json.dumps CPU {ratio:.2f}")
+    assert len(r.content) < 2**20 and ratio < LIST_RATIO_MAX, (len(r.content), ratio)
     assert body["total"] == 61 and len(body["versions"]) <= 61
     assert body["versions"][-1]["retired_rule_count"] == 60_000
     # one version: its rules, a retired-id summary, never the whole retired list
-    t0 = time.perf_counter()
     one = api.get(f"/zbc/campaigns/{cid}/rulebooks/61")
-    dt1 = time.perf_counter() - t0
-    assert one.status_code == 200 and len(one.content) < 2**20 and dt1 < 0.2, (len(one.content), dt1)
+    ratio1 = same_work_ratio(lambda: _get_endpoint(api.app, "/zbc/campaigns/{campaign_id}/rulebooks/{version}")(
+        campaign_id=cid, version=61), n=20)
+    assert one.status_code == 200 and len(one.content) < 2**20 and ratio1 < VERSION_RATIO_MAX, (len(one.content), ratio1)
     assert "retired_rule_ids" not in one.json() and one.json()["retired_rule_count"] == 60_000
     # the retired ids, a page at a time
     page = api.get(f"/zbc/campaigns/{cid}/rulebooks/61/retired-rule-ids", params={"offset": 0, "limit": 500}).json()

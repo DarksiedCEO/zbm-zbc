@@ -552,19 +552,43 @@ def _adversarial_inputs(n: int) -> list[str]:
             "".join(chr(0x41 + (i * 7919) % 0x2000) for i in range(n))]
 
 
+def regex_cpu(p: re.Pattern, s: str, runs: int = 3) -> float:
+    """Fix wave 25, H6 (AEGIS N24-S-11): the CPU the pattern spends on `s` (sub + search + fullmatch), this
+    thread's own CPU time, the cyclic GC off, best of `runs`. It was ONE wall-clock reading: under three busy
+    loops on a 2-CPU box the regexes measured 0.051-0.080 s against the 0.05 s bound while their CPU time stayed
+    17-33 ms (wave 25) — the test measured the scheduler. The bound is unchanged and is on the work now: the
+    worst (pattern, input) here costs 17-41 ms of CPU, so a pattern three times slower fails it (wave-25 evidence:
+    the same check with every call made three times)."""
+    import gc
+
+    best = float("inf")
+    for _ in range(runs):
+        was = gc.isenabled()
+        gc.disable()
+        try:
+            t0 = time.thread_time()
+            p.sub(" ", s)
+            p.search(s)
+            p.fullmatch(s)
+            best = min(best, time.thread_time() - t0)
+        finally:
+            if was:
+                gc.enable()
+    return best
+
+
 def test_lim_every_regex_in_text_module_is_linear_time():
     import shared.text as text
 
     patterns = [v for v in vars(text).values() if isinstance(v, re.Pattern)]
     assert len(patterns) >= 2
+    worst = 0.0
     for p in patterns:
         for s in _adversarial_inputs(100_000):
-            t0 = time.perf_counter()
-            p.sub(" ", s)
-            p.search(s)
-            p.fullmatch(s)
-            dt = time.perf_counter() - t0
+            dt = regex_cpu(p, s)
+            worst = max(worst, dt)
             assert dt < 0.05, (p.pattern, s[:10], dt)
+    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per 100 KB input (bound 50 ms)")
 
 
 def test_lim_text_scanners_are_linear_time():
