@@ -55,33 +55,62 @@ _listening_addrs = listening_addrs
 _LOGS: dict[int, "tempfile._TemporaryFileWrapper"] = {}  # pid -> the server's captured output
 
 
-def _start(env_extra: dict[str, str]) -> tuple[subprocess.Popen, str, int]:
-    port = _free_port()
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC), **child_env(),
-           "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port), **env_extra}
-    # Fix wave 8: this piped stdout to PIPE and never drained it, so uvicorn's
-    # access log (one line per request) filled the 64 KiB pipe after a few
-    # hundred requests and blocked the server mid-test. A temp file is
-    # unbounded and still lets an early exit be reported with its output.
-    log = tempfile.TemporaryFile(mode="w+b")
-    proc = subprocess.Popen([sys.executable, "-m", "api"], env=env, stdout=log, stderr=subprocess.STDOUT)
-    _LOGS[proc.pid] = log
+def _announced_bind(log) -> bool:
+    """Fix wave 25: whether the child ITSELF has announced that it is listening.
+    uvicorn logs "Uvicorn running on" right after its bind, before the loop
+    serves anything; a child that lost the port to another process logs the
+    EADDRINUSE error and exits instead. Read with pread: the child writes at
+    the file offset it shares with this descriptor, which must not move."""
+    fd = log.fileno()
+    return b"Uvicorn running on" in os.pread(fd, os.fstat(fd).st_size, 0)
+
+
+def _start(env_extra: dict[str, str], _attempts: int = 5) -> tuple[subprocess.Popen, str, int]:
+    """Fix wave 25: an answer on the port is this child's only once the child
+    has announced its own bind (_announced_bind) and is still running — two
+    test processes sharing FULFILLMENT_TEST_PORT_RANGE can pick the same free
+    port, and the one whose child lost the bind used to take the winner's
+    answer for its own server. A child that lost the port is retried on a
+    fresh one, up to ``_attempts`` times (the N20-M-3 race)."""
     host = env_extra.get("FULFILLMENT_BIND_ADDR", "127.0.0.1")
-    deadline = time.time() + 15
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            log.seek(0)
-            output = log.read().decode(errors="replace")
-            _close_log(proc)
-            raise AssertionError(f"service exited early: {output}")
-        try:
-            with socket.create_connection((host, port), timeout=0.2):
+    for attempt in range(_attempts):
+        port = _free_port()
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC), **child_env(),
+               "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port), **env_extra}
+        # Fix wave 8: this piped stdout to PIPE and never drained it, so uvicorn's
+        # access log (one line per request) filled the 64 KiB pipe after a few
+        # hundred requests and blocked the server mid-test. A temp file is
+        # unbounded and still lets an early exit be reported with its output.
+        log = tempfile.TemporaryFile(mode="w+b")
+        proc = subprocess.Popen([sys.executable, "-m", "api"], env=env, stdout=log, stderr=subprocess.STDOUT)
+        _LOGS[proc.pid] = log
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                log.seek(0)
+                output = log.read().decode(errors="replace")
+                _close_log(proc)
+                if "address already in use" in output.lower() and attempt + 1 < _attempts:
+                    time.sleep(0.2)
+                    break
+                raise AssertionError(f"service exited early: {output}")
+            if not _announced_bind(log):
+                time.sleep(0.05)
+                continue
+            try:
+                with socket.create_connection((host, port), timeout=0.2):
+                    pass
+            except OSError:
+                time.sleep(0.1)
+                continue
+            if proc.poll() is None:
                 return proc, host, port
-        except OSError:
-            time.sleep(0.1)
-    proc.kill()
-    _close_log(proc)
-    raise AssertionError("service did not start listening within 15s")
+        else:
+            proc.kill()
+            proc.wait()
+            _close_log(proc)
+            raise AssertionError("service did not start listening within 15s")
+    raise AssertionError("service could not bind a free port")
 
 
 def _close_log(proc: subprocess.Popen) -> None:

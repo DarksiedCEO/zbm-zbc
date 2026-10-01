@@ -39,7 +39,7 @@ from pathlib import Path
 import pytest
 
 from _procinfo import rss_kib
-from test_live_server import SRC, TOKEN, _free_port
+from test_live_server import SRC, TOKEN, _announced_bind, _free_port
 
 import http_limits
 from conftest import child_env
@@ -54,7 +54,11 @@ def _start(env_extra: dict[str, str] | None = None, _attempts: int = 5):
     temp file (not DEVNULL: an early exit is reported with it; not PIPE: an
     unread pipe would block the server), and a start that lost the port to
     another process between the free-port check and the bind (EADDRINUSE,
-    the N20-M-3 race) is retried on a fresh port, up to ``_attempts`` times."""
+    the N20-M-3 race) is retried on a fresh port, up to ``_attempts`` times.
+    Fix wave 25: /health answering is this child's answer only once the child
+    has announced its own bind (test_live_server._announced_bind) — the race's
+    loser used to take the winner's 200 for its own server and return a
+    process about to exit."""
     import tempfile
     for attempt in range(_attempts):
         port = _free_port()
@@ -72,14 +76,18 @@ def _start(env_extra: dict[str, str] | None = None, _attempts: int = 5):
                     time.sleep(0.2)
                     break
                 raise AssertionError(f"service exited early (port {port}): {output[-2000:]}")
+            if not _announced_bind(log):
+                time.sleep(0.05)
+                continue
             try:
-                if _health(port, timeout=0.5)[0] == 200:
+                if _health(port, timeout=0.5)[0] == 200 and proc.poll() is None:
                     log.close()          # the child keeps its own descriptor
                     return proc, port
             except OSError:
                 time.sleep(0.1)
         else:
             proc.kill()
+            proc.wait()
             log.close()
             raise AssertionError("service did not start within 15s")
     raise AssertionError("service could not bind a free port")
