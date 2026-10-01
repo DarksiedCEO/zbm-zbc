@@ -12,6 +12,8 @@ with rename detection off (a moved or copied file is a full addition, E3). Its s
 from __future__ import annotations
 
 import hashlib
+import os
+import re
 from typing import Optional
 
 from zbm_delivery.runner import detect_framework, path_class
@@ -48,6 +50,50 @@ def record(svc, run_id: str, text: str, paths: list[str], base: str, head: str, 
     ev = svc.evidence_put(run_id, "diff", data)
     digest = hashlib.sha256(svc.evidence_read(run_id, ev)).hexdigest()
     return ev, digest, None
+
+
+# Wave 25 (H8, AEGIS N24-D-2): a binary file's CONTENT is not in a diff (git prints "Binary files a/x and b/x
+# differ"), so a reviewer attesting to the diff by hash has not seen it. A binary change under src therefore fails the
+# round (`binary_src_change`, loop._green_phase) and a diff that still carries one — anything git itself treats as
+# binary at commit time, a .gitattributes `binary`/`-diff` mark included — fails the run before a report is written:
+# the report's "every source file ... in full" is then true of every report there is.
+BINARY_SNIFF_BYTES = 8000            # git's own test (xdiff buffer_is_binary): a NUL byte in the first 8000 bytes
+_BINARY_LINE = re.compile(r"^Binary files (?P<names>.*) differ$", re.M)
+_BINARY_NAMES = re.compile(r"^(?:a/(?P<a>.+?)|/dev/null) and (?:b/(?P<b>.+?)|/dev/null)$")
+_BINARY_PATCH = re.compile(r"^GIT binary patch$", re.M)
+
+
+def binary_paths(diff_text: str) -> list[str]:
+    """The paths a git diff shows without their content — binary files, and submodule pointers (gitlinks) — sorted;
+    [] only when every change is shown as text. A name git quoted (non-ASCII, say) that does not parse is returned as
+    the line's names, never dropped."""
+    out: set[str] = set()
+    for m in _BINARY_LINE.finditer(diff_text or ""):
+        names = _BINARY_NAMES.match(m.group("names"))
+        out.add((names.group("b") or names.group("a")) if names and (names.group("b") or names.group("a"))
+                else m.group("names"))
+    if _BINARY_PATCH.search(diff_text or "") and not out:
+        out.add("(a GIT binary patch)")
+    # a submodule pointer (gitlink) shows only commit ids, never the code it brings in
+    current = None
+    for line in (diff_text or "").splitlines():
+        if line.startswith("diff --git "):
+            current = line.split(" b/", 1)[-1]
+        elif line.startswith(("+Subproject commit ", "-Subproject commit ")) and current:
+            out.add(current + " (submodule)")
+    return sorted(out)
+
+
+def is_binary_file(path: str) -> bool:
+    """git's rule for a file's content: a NUL byte in its first BINARY_SNIFF_BYTES. A missing or unreadable file is
+    not judged here (its change, if any, shows in the diff)."""
+    if not os.path.isfile(path) or os.path.islink(path):
+        return False
+    try:
+        with open(path, "rb") as fh:
+            return b"\0" in fh.read(BINARY_SNIFF_BYTES)
+    except OSError:
+        return False
 
 
 # the report is one evidence file (service.EVIDENCE_MAX_BYTES, 8 MiB: longer evidence is cut); it must hold the

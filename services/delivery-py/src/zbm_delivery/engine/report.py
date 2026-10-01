@@ -94,8 +94,10 @@ def source_diff_section(run: dict, read_evidence: Callable[[str], str]) -> list[
     digest, ev = run.get("src_diff_sha256"), run.get("src_diff_evidence_id")
     L = [f"## Source diff (complete; src_diff_sha256 `{digest}`)", "",
          "Every source file the run changed, base `" + str(run.get("base_sha")) + "` to the last commit, in full "
-         "(rename detection off: a moved or copied file is shown as added). A review that accepts any finding must "
-         "carry this `src_diff_sha256`.", ""]
+         "as text (rename detection off: a moved or copied file is shown as added). A change git cannot show as "
+         "text — a binary file, a submodule pointer — fails the round and the run before a report is written "
+         "(`binary_src_change`), so nothing below stands for content you cannot read. A review that accepts any "
+         "finding must carry this `src_diff_sha256`.", ""]
     text = read_evidence(ev) if ev else ""
     if not text:
         L.append("- (no source change was committed)")

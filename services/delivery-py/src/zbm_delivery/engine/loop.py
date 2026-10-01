@@ -837,8 +837,19 @@ class FixEngine:
                     + ", ".join(f"{p}: {rule}" for p, rule in denied)
                     + "): a test must not exit the process, define its own main/TestMain, write to the runner's "
                     "transcript or reach for pytest's plugin manager/hooks. Remove that code and reply `FIXED`.")
+        tracked_diff = self.git.diff(worktree, run_id=run_id)
+        # wave 25 (H8, N24-D-2): a binary source change cannot be shown in the diff a reviewer attests to by hash
+        binary = sorted({p.removesuffix(" (submodule)") for p in srcdiff.binary_paths(tracked_diff)} & set(classes["src"])
+                        | {p for p in classes["src"] if srcdiff.is_binary_file(os.path.join(worktree, p))})
+        if binary:
+            self._round_failed(run_id, fid, rounds, "binary_src_change", paths=binary[:20])
+            self._back_to_red(run_id, fid, f)
+            return ("You changed a binary (non-text) file under the source tree (" + ", ".join(binary[:20])
+                    + "). A reviewer must read every source change before anything is accepted, and a binary's "
+                    "content cannot be shown in the diff: the engine never accepts one. Remove it (or write it as "
+                    "text) and fix the root cause in the source; then reply `FIXED`.")
         denied = self._denied_added_src(runner, worktree, classes["src"],
-                                        set(self.git.diff_name_only(worktree, run_id=run_id)), self.git.diff(worktree, run_id=run_id))
+                                        set(self.git.diff_name_only(worktree, run_id=run_id)), tracked_diff)
         if denied:
             self._round_failed(run_id, fid, rounds, "src_content_denied", paths=[f"{p} ({rule})" for p, rule in denied][:20])
             self._back_to_red(run_id, fid, f)
@@ -1412,6 +1423,12 @@ class FixEngine:
         run = self.svc.run_get(run_id)
         head = run["commits"][-1]["sha"] if run.get("commits") else run["base_sha"]
         text, paths = srcdiff.src_diff(self.git, ctx.runner.fw, run["service"], ctx.worktree, run["base_sha"], head, run_id)
+        binary = srcdiff.binary_paths(text)
+        if binary:
+            # wave 25 (H8, N24-D-2): the diff would not show these files' content — no report claims it does
+            self._fail(run_id, R.item("EVIDENCE_UNAVAILABLE", "binary_src_change: the source diff shows binary file(s) "
+                                      "whose content a reviewer cannot read: " + ", ".join(binary[:5])))
+            raise RunEnded()
         ev_src, digest, problem = srcdiff.record(self.svc, run_id, text, paths, run["base_sha"], head, "src_diff_recorded")
         if problem:
             self._fail(run_id, R.item("EVIDENCE_UNAVAILABLE", problem))

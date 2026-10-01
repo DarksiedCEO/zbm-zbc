@@ -57,6 +57,9 @@ from zbm_delivery.store import RecordLog, StoreWriteError
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
 IDEMPOTENCY_MAX = 200_000
+# Wave 25 (H8, AEGIS N24-D-1): the recorded answers of closed admissions are kept like the idempotency records — the
+# most recent CLOSED_ADMISSIONS_MAX, oldest first out (each costs a RED container run or an operator's cancel).
+CLOSED_ADMISSIONS_MAX = 20_000
 EVIDENCE = EA.ACTOR
 GATE = "intel_01_gate"
 ENGINE = "intel_08_engine"
@@ -189,7 +192,10 @@ class DeliveryService:
         # or cancelled by the operator while the containers ran) — admission id -> {status, reason, body}. Applied from
         # the local log like every record: a replay of the same admission (same id: same caller, request id and body)
         # gets this answer and runs nothing again (its crossings would collide with the first attempt's records).
-        self._closed_admissions: dict[str, dict] = {}
+        self._closed_admissions: "OrderedDict[str, dict]" = OrderedDict()
+        # wave 25 (H8): admissions cancelled while their RED containers run — in memory only (nothing runs across a
+        # restart). The cancel is honoured from here whatever the bounded map above has forgotten meanwhile.
+        self._cancelled_running: set[str] = set()
         self._engine = None
         self._worker: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -320,7 +326,14 @@ class DeliveryService:
             while len(self.idem) > IDEMPOTENCY_MAX:
                 self.idem.popitem(last=False)
         elif kind == "admission_closed":
+            # wave 25 (H8, N24-D-1): bounded like `idem` — at start, the replay of the local log keeps only the most
+            # recent CLOSED_ADMISSIONS_MAX. An answer that has gone out of it is not needed for safety: a replay of
+            # that admission runs its RED check again under the same admission id and is judged on what it records
+            # then — never admitted without a RED verdict recorded for it.
             self._closed_admissions[r["admission_id"]] = r
+            self._closed_admissions.move_to_end(r["admission_id"])
+            while len(self._closed_admissions) > CLOSED_ADMISSIONS_MAX:
+                self._closed_admissions.popitem(last=False)
         # event, lease, reconcile, founder_refused, injection, audit: evidence only
 
     def _write_evidence_file(self, r_run_id: str, evidence_id: str, content: bytes) -> None:  # noqa: N803
@@ -481,6 +494,9 @@ class DeliveryService:
             rec["review_flags"] = flags
             findings.append(rec)
         text, paths = srcdiff.src_diff(self.git, fw, service, repo, base, head, run_id)
+        if srcdiff.binary_paths(text):
+            # wave 25 (H8): a legacy run whose source diff carries a binary change cannot be reviewed on that diff
+            raise ValueError("binary_src_change: the source diff shows binary file(s) whose content cannot be read")
         ev_src, digest, problem = srcdiff.record(self, run_id, text, paths, base, head, "run_rescanned_for_review")
         if problem:
             raise ValueError(problem)
@@ -809,6 +825,8 @@ class DeliveryService:
             with self.lock:
                 self._admissions.pop(pending["adm"], None)
                 closed = self._closed_admissions.get(pending["adm"])
+                if closed is None and pending["adm"] in self._cancelled_running:
+                    closed = self._cancelled_answer(pending["adm"], pending["request_id"], pending["facts"])
                 if closed is not None:
                     # wave 24 (E6): cancelled by the operator while the containers ran — nothing is recorded or
                     # admitted from them (the cancel was recorded first, with this answer, and freed the slot)
@@ -822,6 +840,14 @@ class DeliveryService:
         finally:
             with self.lock:
                 self._admissions.pop(pending["adm"], None)
+                self._cancelled_running.discard(pending["adm"])
+
+    @staticmethod
+    def _cancelled_answer(adm: str, request_id: str, facts: str) -> dict:
+        return {"admission_id": adm, "status": Conflict.status_code,
+                "reason": "this admission was cancelled while its RED check ran: nothing was admitted",
+                "body": {"reasons": [R.item("CANCELLED", adm)], "request_id": request_id, "facts_sha256": facts,
+                         "admission_id": adm}}
 
     @staticmethod
     def _closed_answer(closed: dict) -> DlvError:
@@ -1504,12 +1530,10 @@ class DeliveryService:
         self._idem_add(op, key, h, resp)
         # the admission's answer, in the same local-log line: the review (or admission) that started it is refused
         # with it when its containers end, and so is every replay of it, after a restart too
-        op.add("admission_closed", {"admission_id": adm, "status": Conflict.status_code,
-                                    "reason": "this admission was cancelled while its RED check ran: nothing was admitted",
-                                    "body": {"reasons": [R.item("CANCELLED", adm)], "request_id": a["request_id"],
-                                             "facts_sha256": a["facts"], "admission_id": adm}})
+        op.add("admission_closed", self._cancelled_answer(adm, a["request_id"], a["facts"]))
         self._commit(op)
         self._admissions.pop(adm, None)            # the slot is free now
+        self._cancelled_running.add(adm)           # wave 25: honoured when its containers end, bounded map or not
         return resp
 
     # ================================================================== audit, reconcile, founder refusals
