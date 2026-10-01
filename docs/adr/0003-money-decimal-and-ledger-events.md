@@ -648,6 +648,15 @@ mask is restored, with the port file in place and armed. Test (`tests/server_por
 `a_stop_signal_aimed_at_the_publish_window_leaves_neither_the_temp_file_nor_the_port_file`, 100 + 100 aimed
 SIGTERMs): before, temp file left 94/100 and port file left 2/100; after, 0/100 and 0/100.
 
+**Residual, stated (fix wave 25, AEGIS round 24 N24-S-8).** SIGKILL — and the kernel's OOM killer, which sends it —
+cannot be blocked, caught or handled: a server killed that way leaves what it had written. AEGIS round 24 measured it
+with aimed SIGKILLs: fired the moment the temp file appeared, 49/50 left `.<name>.tmp-<hex>`; fired the moment the
+port file appeared, 50/50 left the port file (by design: nothing runs after SIGKILL). The same holds for any death
+that skips the handlers (an abort, a power loss). So the port file is a HINT, not a promise: a reader connects to the
+port it names and checks it (`GET /health`) before trusting it — the port may be dead or already reused by another
+process — and treats a `.*.tmp-*` file beside it as debris to remove, never to read. `src/bin/server.rs`'s module
+documentation says the same.
+
 ## Verification
 
 Commands, counts and a live three-process run are recorded in the README

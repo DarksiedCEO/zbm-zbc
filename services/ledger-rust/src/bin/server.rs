@@ -133,6 +133,17 @@
 //! temp name, published name, then the temp file's device/inode before the
 //! rename); the handler removes the temp name while the publish is in
 //! progress and the published name while it is still this server's file.
+//!
+//! Fix wave 25 (AEGIS N24-S-8), the residual no handler can close: SIGKILL
+//! (and the kernel's OOM killer, which sends it) cannot be blocked, caught or
+//! handled, so a process killed that way leaves whatever it had written —
+//! the `.<name>.tmp-<hex>` temp file if it dies during the publish (AEGIS
+//! round 24: 49/50 aimed kills), the port file if it dies after (50/50). A
+//! reader of the port file must therefore treat it as a HINT: the port it
+//! names may be dead or reused, so connect and check (`GET /health`) before
+//! trusting it, and a stale `.*.tmp-*` beside it is debris to remove, never
+//! to read. The same holds for any crash that skips the handlers (an abort,
+//! a power loss).
 use std::convert::Infallible;
 use std::ffi::CString;
 use std::future::Future;
