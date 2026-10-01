@@ -40,11 +40,13 @@ def test_a1_double_release_concurrent_and_sequential_one_submission(hr):
     in the submit, and nothing showed the two calls ever overlapped — a sequential second release also gets 409)."""
     b = _approved(hr)
     orig = hr.stripe.submit
-    inside, second_done = threading.Event(), threading.Event()
+    inside, left, second_done = threading.Event(), threading.Event(), threading.Event()
+    seen = {}
 
     def held(*a):
         inside.set()
         second_done.wait(60)                       # a bound on a stall only
+        left.set()
         return orig(*a)
     hr.stripe.submit = held
     out = []
@@ -56,6 +58,10 @@ def test_a1_double_release_concurrent_and_sequential_one_submission(hr):
             out.append((tag, "err", type(exc).__name__))
         finally:
             if tag == "second":
+                # wave 25 (E-B): the overlap is read HERE, at the moment the second answered and before it lets the
+                # first go — the E0 version read `first.is_alive()` after this release, and a first release that
+                # finished in between made a correct run fail (1 of 5 under 2 busy loops, load-new-fin-budget-a1-r1-5)
+                seen["first_still_inside"] = inside.is_set() and not left.is_set()
                 second_done.set()
     first = threading.Thread(target=go, args=("first",))
     first.start()
@@ -63,11 +69,11 @@ def test_a1_double_release_concurrent_and_sequential_one_submission(hr):
     second = threading.Thread(target=go, args=("second",))
     second.start()
     second.join(60)
-    overlapped = not second.is_alive() and first.is_alive()   # the second answered while the first was still inside
     second_done.set()
     first.join(60)
     second.join(60)
-    assert overlapped, out
+    assert not first.is_alive() and not second.is_alive(), out
+    assert seen.get("first_still_inside") is True, (seen, out)   # the second answered while the first was inside
     assert sorted((o[0], o[1]) for o in out) == [("first", "ok"), ("second", "err")], out
     assert ("second", "err", "Conflict") in out
     assert len(_submits(hr)) == 1 and len(hr.stripe.payouts) == 1 and len(_flows(hr, "F4d")) == 1
