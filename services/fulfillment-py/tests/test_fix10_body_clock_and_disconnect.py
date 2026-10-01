@@ -44,6 +44,7 @@ from test_fix9_inflight_fairness import _large_body, _paced
 from test_live_server import SRC, TOKEN, _free_port
 
 import api
+from conftest import child_env
 
 KIB = 1024
 
@@ -62,7 +63,7 @@ def _hold_scenario(monkeypatch, factor: float, hold_at: float, hold_for: float):
     shared = 256 * KIB
     monkeypatch.setattr(api, "_BODY_READ_TIMEOUT_S", 3.0)
     monkeypatch.setattr(api, "_BODY_MIN_RATE_GRACE_S", 0.5)
-    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", shared)
+    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", api._SMALL_RESERVE_BYTES + shared)  # fix wave 24: the total includes the small reserve; `shared` is the shared pool
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 2.0)
     monkeypatch.setattr(api, "_PREEMPT_BYTE_SECONDS", 1e12)  # no preemption in this test
     body = _large_body(300_000)
@@ -246,7 +247,7 @@ def _head(path: str, content_length: int) -> bytes:
 def logged_server():
     port = _free_port()
     log = tempfile.NamedTemporaryFile(prefix="ful-fix10-", suffix=".log", delete=False)
-    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(SRC), "FULFILLMENT_SERVICE_TOKEN": TOKEN,
+    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(SRC), **child_env(), "FULFILLMENT_SERVICE_TOKEN": TOKEN,
            "FULFILLMENT_PORT": str(port), "PYTHONUNBUFFERED": "1"}
     proc = subprocess.Popen([sys.executable, "-c", _LAUNCH], env=env, cwd=str(SRC), stdout=log, stderr=log)
     try:

@@ -232,8 +232,10 @@ class _BodyPreempted(Exception):
 
 # Fix wave 9: per-request accounting of the shared in-flight bytes a body
 # holds, shared between BodySizeLimitMiddleware (which knows when the service
-# is waiting on the client) and _off_loop (which reserves the bytes).
+# is waiting on the client and, since fix wave 24, reserves the bytes through
+# _BodyHold) and _off_loop (which releases them once the body is parsed).
 _ACCOUNT_SCOPE_KEY = "fulfillment.body_account"
+_HOLD_SCOPE_KEY = "fulfillment.body_hold"
 
 
 class _BodyAccount:
@@ -262,6 +264,45 @@ class _BodyAccount:
     def client_wait_ended(self, now: float) -> None:
         self.byte_seconds = self.charge(now)
         self.waiting_since = None
+
+
+class _BodyHold:
+    """Fix wave 24, F1 (AEGIS N23-S-1): the in-flight budget bytes ONE request
+    body holds — every byte received so far, each in exactly one pool: the
+    first _SMALL_BODY_BYTES of the body in the small reserve, the rest in the
+    shared pool (charged to the body's account, so they count for
+    preemption). `cover(total)` reserves the bytes up to `total`, which are
+    ALREADY in memory: while it waits (503 after _INFLIGHT_WAIT_S, or
+    preempted) they are counted in the pool's `over`, and the body is not
+    read further. `release()` gives everything back (idempotent). Created by
+    BodySizeLimitMiddleware for every request; _off_loop releases it as soon
+    as the parse has dropped the body, the middleware again when the request
+    ends."""
+
+    __slots__ = ("lanes", "account", "small", "shared")
+
+    def __init__(self, lanes: "_Lanes", account: _BodyAccount) -> None:
+        self.lanes, self.account = lanes, account
+        self.small = 0
+        self.shared = 0
+
+    async def cover(self, total: int) -> None:
+        small = min(total, _SMALL_BODY_BYTES)
+        shared = total - small
+        if small > self.small:
+            await self.lanes.small_reserve.reserve(small - self.small, in_hand=True)
+            self.small = small
+        if shared > self.shared:
+            await self.lanes.inflight.reserve(shared - self.shared, self.account, in_hand=True)
+            self.shared = shared
+
+    def release(self) -> None:
+        if self.shared:
+            self.lanes.inflight.release(self.shared, self.account)
+            self.shared = 0
+        if self.small:
+            self.lanes.small_reserve.release(self.small)
+            self.small = 0
 
 
 # Fix wave 7 (NEW-4 sweep): a refusal decided from the request head alone
@@ -343,6 +384,13 @@ class BodySizeLimitMiddleware:
         disconnected = False  # the client's http.disconnect reached the app (fix wave 10, N9-8)
         account = _BodyAccount(loop)
         scope[_ACCOUNT_SCOPE_KEY] = account
+        # Fix wave 24, F1: every body byte this request holds is counted in the
+        # one in-flight budget as it arrives, and the body is not read further
+        # while the budget cannot cover it (_BodyHold, limited_receive below).
+        lanes = _lanes()
+        hold = _BodyHold(lanes, account)
+        scope[_HOLD_SCOPE_KEY] = hold
+        lanes.inflight.accounts.add(account)
 
         def drop_pending() -> None:
             nonlocal pending
@@ -410,8 +458,16 @@ class BodySizeLimitMiddleware:
                 received += len(message.get("body", b""))
                 if received > limit:
                     raise _BodyTooLarge()
+                # Fix wave 24, F1: the chunk is in this process now, so it is
+                # counted now (the pool's `over` while it waits to be covered) and
+                # the body is not read further until the budget covers it: the
+                # wait (service time, not the client's) happens before the next
+                # read. 503 after _INFLIGHT_WAIT_S, or 408 if this body is
+                # preempted (_InFlightBytes.reserve).
+                await hold.cover(received)
                 if not message.get("more_body", False):
                     body_done = True
+                    account.receiving = False  # complete: never preempted from here on
             else:
                 body_done = True
                 disconnected = disconnected or message["type"] == "http.disconnect"
@@ -424,38 +480,43 @@ class BodySizeLimitMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, limited_receive, tracking_send)
-        except ClientDisconnect:
-            # Fix wave 10, N9-8: a client that goes away mid-body is routine, not
-            # a server error — it used to escape as "Exception in ASGI
-            # application" with a ~60-line traceback per disconnect. One line,
-            # no traceback; nothing to answer. Only when the disconnect really
-            # reached the app: any other ClientDisconnect is a bug and propagates.
-            if not disconnected:
-                raise
-            _log.warning("client disconnected mid-body: route=%s bytes_received=%d declared=%s elapsed_s=%.3f",
-                         _log_safe(scope.get("path", "")), received,
-                         "none" if declared is None else declared, loop.time() - entered)
-        except _BodyTooLarge:
-            if started:
-                raise
-            await _too_large_response()(scope, receive, send)
-        except _BodyTimeout:
-            if started:
-                raise
-            await _refusal(408, f"request body not received within {_BODY_READ_TIMEOUT_S:g}s")(scope, receive, send)
-        except _BodyTooSlow:
-            if started:
-                raise
-            await _refusal(408, f"request body stalled for {grace:g}s or slower than {rate} bytes/s after {grace:g}s")(scope, receive, send)
-        except _BodyWontArrive as exc:
-            if started:
-                raise
-            await _refusal(408, _wont_arrive_detail(exc))(scope, receive, send)
-        except _BodyPreempted as exc:
-            if started:
-                raise
-            await _refusal(408, _preempted_detail(exc))(scope, receive, send)
+            try:
+                await self.app(scope, limited_receive, tracking_send)
+            except ClientDisconnect:
+                # Fix wave 10, N9-8: a client that goes away mid-body is routine, not
+                # a server error — it used to escape as "Exception in ASGI
+                # application" with a ~60-line traceback per disconnect. One line,
+                # no traceback; nothing to answer. Only when the disconnect really
+                # reached the app: any other ClientDisconnect is a bug and propagates.
+                if not disconnected:
+                    raise
+                _log.warning("client disconnected mid-body: route=%s bytes_received=%d declared=%s elapsed_s=%.3f",
+                             _log_safe(scope.get("path", "")), received,
+                             "none" if declared is None else declared, loop.time() - entered)
+            except _BodyTooLarge:
+                if started:
+                    raise
+                await _too_large_response()(scope, receive, send)
+            except _BodyTimeout:
+                if started:
+                    raise
+                await _refusal(408, f"request body not received within {_BODY_READ_TIMEOUT_S:g}s")(scope, receive, send)
+            except _BodyTooSlow:
+                if started:
+                    raise
+                await _refusal(408, f"request body stalled for {grace:g}s or slower than {rate} bytes/s after {grace:g}s")(scope, receive, send)
+            except _BodyWontArrive as exc:
+                if started:
+                    raise
+                await _refusal(408, _wont_arrive_detail(exc))(scope, receive, send)
+            except _BodyPreempted as exc:
+                if started:
+                    raise
+                await _refusal(408, _preempted_detail(exc))(scope, receive, send)
+        finally:
+            hold.release()            # whatever happened: the budget bytes go back (idempotent)
+            account.receiving = False
+            lanes.inflight.accounts.discard(account)
 
 
 def _log_safe(text: str, limit: int = 200) -> str:
@@ -731,8 +792,37 @@ _TRIM_IDLE_S = 1.0
 # only bound (http_limits.LIMIT_CONCURRENCY). A body that stalls after
 # sending its bytes is cut by the throughput rule (_BODY_MIN_BYTES_PER_S,
 # above) before the deadline, so a stalled sender holds its bytes ~5 s, not
-# 30. Bytes uvicorn itself buffers before the app reads them (<= 64 KiB per
-# connection, its flow-control high-water mark) are outside this budget.
+# 30.
+#
+# Fix wave 24, F1 (AEGIS N23-S-1): the bound held only by allocator luck
+# (growth 84-114 MiB against the 96 MiB bound, round 23) because the budget
+# counted only part of the body memory: the bytes the app had taken past each
+# body's first 64 KiB. Outside it were the small reserve (a separate 8 MiB
+# pool), the body bytes uvicorn's protocol buffers before the app reads them
+# (up to its 64 KiB high-water mark plus the read that crossed it, per
+# connection; tracemalloc: 15.6 MiB in `cycle.body` across the 128-sender
+# burst) and the chunk the app had just received while it waited to reserve
+# it. Now _INFLIGHT_BODY_BYTES is the WHOLE budget and every request-body
+# byte the process holds is in it:
+#   - the small reserve is part of it (_SMALL_RESERVE_BYTES of the 64 MiB;
+#     the shared pool is the rest, 56 MiB);
+#   - a chunk is counted the moment the app receives it — the chunk in hand
+#     while its body waits for the budget in the pool's `over` — and the body
+#     is not read further until the budget covers it (BodySizeLimitMiddleware
+#     via _BodyHold: the wait happens BEFORE the next read; 503 after
+#     _INFLIGHT_WAIT_S, preemption as before). So `used` <= the limit and
+#     `over` <= one chunk per body waiting;
+#   - under the real launcher uvicorn reads a body only when the app asks,
+#     one read of at most http_limits.READ_BUFFER_BYTES (16 KiB) at a time, so
+#     that chunk is <= 16 KiB and at most one more read sits in uvicorn's
+#     buffer per connection;
+#   - drained bytes are never held (graceful_close reads them into one shared
+#     16 KiB buffer and drops them).
+# What is therefore outside the 64 MiB, as a fixed term (ADR 0002, Decision
+# 21): <= 16 KiB per body waiting for the budget (<= LIMIT_CONCURRENCY) and
+# <= one read of 16 KiB per connection in uvicorn's buffer (<=
+# MAX_OPEN_CONNECTIONS) — 2 + 4 MiB at most — plus the per-connection
+# objects and the allocator's own overhead, measured (see the ADR).
 _INFLIGHT_BODY_BYTES = 64 * 1024 * 1024
 _INFLIGHT_WAIT_S = 2.0
 # Fix wave 9 (AEGIS round 8, Q1). Measured on the real launcher before: 64
@@ -779,7 +869,7 @@ _INFLIGHT_WAIT_S = 2.0
 # not per-client fairness; (c) connection slots are a separate limit —
 # LIMIT_CONCURRENCY (128) held connections, even at 1 KiB/s, still make
 # uvicorn answer 503 to everyone (http_limits, fix wave 5 trade-off).
-_SMALL_RESERVE_BYTES = http_limits.LIMIT_CONCURRENCY * _SMALL_BODY_BYTES
+_SMALL_RESERVE_BYTES = http_limits.LIMIT_CONCURRENCY * _SMALL_BODY_BYTES  # part of _INFLIGHT_BODY_BYTES (fix wave 24)
 _PREEMPT_BYTE_SECONDS = 4 * 1024 * 1024 * 1.0  # bytes x seconds
 
 
@@ -789,15 +879,26 @@ class _InFlightBytes:
     account is given, the heaviest preemptible holder (fix wave 9);
     `release` gives them back."""
 
-    __slots__ = ("limit", "used", "waiters", "accounts")
+    __slots__ = ("limit", "used", "over", "waiters", "accounts")
 
     def __init__(self, limit: int) -> None:
         self.limit, self.used = limit, 0
+        # Fix wave 24, F1: bytes ALREADY in memory waiting to be covered (a
+        # chunk the app holds while its body waits for the budget, `in_hand`);
+        # `used` <= `limit` always, `used + over` is what the pool's bodies hold.
+        self.over = 0
         self.waiters: list[asyncio.Future] = []
         self.accounts: set[_BodyAccount] = set()
 
-    async def reserve(self, n: int, account: _BodyAccount | None = None) -> None:
+    async def reserve(self, n: int, account: _BodyAccount | None = None, *, in_hand: bool = False) -> None:
         if n <= 0:
+            return
+        if in_hand:
+            self.over += n
+            try:
+                await self.reserve(n, account)
+            finally:
+                self.over -= n
             return
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _INFLIGHT_WAIT_S
@@ -894,8 +995,9 @@ class _Lanes:
         self.small = asyncio.Semaphore(_SMALL_LANE_SLOTS)
         self.large = asyncio.Semaphore(_LARGE_LANE_SLOTS)
         self.budget = _ByteBudget(_LARGE_BYTES_PER_S, _LARGE_BURST_BYTES)
-        self.inflight = _InFlightBytes(_INFLIGHT_BODY_BYTES)
+        # fix wave 24, F1: ONE budget — the small reserve is carved out of it
         self.small_reserve = _InFlightBytes(_SMALL_RESERVE_BYTES)
+        self.inflight = _InFlightBytes(_INFLIGHT_BODY_BYTES - _SMALL_RESERVE_BYTES)
         self.large_in_flight = 0
         self.trim_timer: asyncio.TimerHandle | None = None
 
@@ -957,28 +1059,21 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
         # before a byte of the body is read
         await _within(loop.time() + _LARGE_WAIT_S, lanes.budget.take(declared))
     lanes.large_in_flight += large
-    account: _BodyAccount | None = request.scope.get(_ACCOUNT_SCOPE_KEY)
-    if account is not None:
-        lanes.inflight.accounts.add(account)
-    held = 0  # bytes of this body counted against lanes.inflight (the shared budget)
-    small_held = 0  # ... and against lanes.small_reserve (its first _SMALL_BODY_BYTES)
+    hold: _BodyHold | None = request.scope.get(_HOLD_SCOPE_KEY)
     pos = 0
+    body = bytearray()
     try:
         # One copy of the body, not two: Request.body() collects the chunks
         # and then joins them (2x the body while in flight); pydantic parses
         # a bytearray directly. Fix wave 8, N7-2: NEVER sized from
         # Content-Length (see _INFLIGHT_BODY_BYTES) — it grows as the bytes
-        # arrive, each chunk reserved first: its part within the first
-        # _SMALL_BODY_BYTES from the small reserve, the rest from the shared
-        # budget (fix wave 9). Bounded by BodySizeLimitMiddleware.
-        body = bytearray()
+        # arrive. Fix wave 24, F1: every byte of it is counted in the in-flight
+        # budget as it arrives, and the body is not read further while the
+        # budget cannot cover it (BodySizeLimitMiddleware's _BodyHold — the
+        # middleware is installed on `app`, so every launcher has it).
+        # Bounded by BodySizeLimitMiddleware.
         charged = 0
         async for chunk in request.stream():
-            small_part = max(0, min(len(chunk), _SMALL_BODY_BYTES - pos))
-            await lanes.small_reserve.reserve(small_part)
-            small_held += small_part
-            await lanes.inflight.reserve(len(chunk) - small_part, account)
-            held += len(chunk) - small_part
             body += chunk
             pos += len(chunk)
             if not large and pos > _SMALL_BODY_BYTES:
@@ -991,8 +1086,6 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
                 # streaming 2 s after it arrived was refused 503.
                 await _within(loop.time() + _LARGE_WAIT_S, lanes.budget.take(pos - charged))
                 charged = pos
-        if account is not None:
-            account.receiving = False  # complete: never preempted from here on
         lane = lanes.large if large else lanes.small
         if large:
             # Fix wave 9: the wait for the parse slot is measured from now,
@@ -1007,13 +1100,14 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
             parsed = await run_in_threadpool(_parse, model, body)
         finally:
             lane.release()
-        del body
     finally:
-        lanes.inflight.release(held, account)
-        lanes.small_reserve.release(small_held)
-        if account is not None:
-            account.receiving = False
-            lanes.inflight.accounts.discard(account)
+        # Fix wave 24, F1: the buffer is dropped HERE, before the budget bytes
+        # go back — rebinding the name frees it even when a traceback still
+        # references this frame (a refusal raised above keeps the frame alive
+        # while the middleware answers).
+        body = None  # noqa: F841
+        if hold is not None:
+            hold.release()
         if large and declared is not None and declared > _SMALL_BODY_BYTES:
             lanes.budget.refund(declared - pos)  # declared but never received (fix wave 9)
         if large:

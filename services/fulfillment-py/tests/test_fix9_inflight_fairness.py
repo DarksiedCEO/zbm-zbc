@@ -133,7 +133,7 @@ def test_small_reserve_is_sized_so_the_real_launcher_cannot_exhaust_it():
 
 def _contended(monkeypatch, preempt_after_s: float):
     shared = 192 * KIB
-    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", shared)
+    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", api._SMALL_RESERVE_BYTES + shared)  # fix wave 24: the total includes the small reserve; `shared` is the shared pool
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 1.0)
     monkeypatch.setattr(api, "_PREEMPT_BYTE_SECONDS", shared * preempt_after_s)
     return shared

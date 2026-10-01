@@ -57,7 +57,16 @@ The limits, all enforced before routing and auth:
                                  bodies (each <= 4 MiB, api._MAX_BODY_BYTES) to
                                  128; the bytes actually buffered by them are
                                  bounded further by api._INFLIGHT_BODY_BYTES
-                                 (64 MiB, fix wave 8).
+                                 (64 MiB, fix wave 8; since fix wave 24 every
+                                 body byte the process holds, the small reserve
+                                 included).
+  body reads             one read (READ_BUFFER_BYTES, 16 KiB) at a time, and
+                                 only when the app asks (fix wave 24, F1):
+                                 uvicorn's protocol stops reading a body as soon
+                                 as it holds any of it unread; the app reserves
+                                 each read from the in-flight budget before it
+                                 asks. uvicorn alone read up to 64 KiB + a read
+                                 ahead per connection, outside the budget.
   MAX_OPEN_CONNECTIONS   256     hard cap on held sockets: uvicorn's
                                  limit_concurrency still accepts and holds
                                  connections, so a connection made while this
@@ -94,7 +103,9 @@ import os
 import h11
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
-from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
+from graceful_close import (  # noqa: F401
+    DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, READ_BUFFER_BYTES, GracefulCloseMixin, drains_max_from_env,
+)
 
 MAX_HEADER_BYTES = 16 * 1024
 REQUEST_HEAD_TIMEOUT_S = 10.0
@@ -201,6 +212,17 @@ class DeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
 
     def handle_events(self) -> None:
         super().handle_events()
+        # Fix wave 24, F1 (AEGIS N23-S-1): a body is read only when the app asks
+        # for it. uvicorn keeps reading a body until its buffer passes 64 KiB
+        # (its high-water mark) whether or not the app has asked — up to 64 KiB
+        # + one read per connection, outside the app's in-flight budget. Paused
+        # as soon as the buffer holds anything: the app's receive() resumes it,
+        # and the app covers each read from the budget BEFORE it asks
+        # (api.BodySizeLimitMiddleware), so at most one read (READ_BUFFER_BYTES,
+        # 16 KiB) of a body sits here unasked-for.
+        cycle = self.cycle
+        if cycle is not None and cycle.body and not cycle.response_complete:
+            self.flow.pause_reading()
         self._update_deadline()
 
     def on_response_complete(self) -> None:

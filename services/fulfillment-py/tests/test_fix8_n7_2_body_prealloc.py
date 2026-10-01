@@ -182,7 +182,7 @@ def test_stalled_bodies_exhaust_the_inflight_budget_and_the_next_chunk_is_503_un
     monkeypatch.setattr(api, "_SMALL_BODY_BYTES", 1024)
     chunk = b" " * 16 * 1024
     tail = b'{"call_events":[]}'
-    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", 2 * (len(chunk) + len(tail)))  # exactly two whole bodies
+    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", api._SMALL_RESERVE_BYTES + 2 * (len(chunk) + len(tail)))  # shared pool: exactly two whole bodies (fix wave 24: the total includes the small reserve)
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 0.2)
 
     async def scenario():
@@ -223,7 +223,7 @@ def test_inflight_budget_is_released_when_a_sender_disconnects_mid_body(monkeypa
     # as large (past 1 KiB) so the shared budget is what is exercised here.
     monkeypatch.setattr(api, "_SMALL_BODY_BYTES", 1024)
     chunk = b" " * 8 * 1024
-    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", len(chunk) + 18)  # exactly one whole body
+    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", api._SMALL_RESERVE_BYTES + len(chunk) + 18)  # shared pool: exactly one whole body (fix wave 24: the total includes the small reserve)
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 0.2)
 
     async def scenario():
@@ -325,7 +325,7 @@ def test_time_spent_waiting_for_the_inflight_budget_is_not_charged_to_the_client
     # as large (past 1 KiB) so the shared budget is what is exercised here.
     monkeypatch.setattr(api, "_SMALL_BODY_BYTES", 1024)
     chunk = b" " * 8 * 1024
-    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", len(chunk) + 18)  # exactly one whole body
+    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", api._SMALL_RESERVE_BYTES + len(chunk) + 18)  # shared pool: exactly one whole body (fix wave 24: the total includes the small reserve)
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 3.0)
     monkeypatch.setattr(api, "_BODY_MIN_RATE_GRACE_S", 0.3)
     monkeypatch.setattr(api, "_BODY_MIN_BYTES_PER_S", 1024)
