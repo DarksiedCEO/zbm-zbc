@@ -63,7 +63,7 @@ import pytest
 
 from test_fix4_limits import MAX_BATCHES
 from test_fix5_http_limits_live import _start as _start_quiet, _stop
-from test_fix8_n7_2_body_prealloc import DETECT, ORCHESTRATE, _Client, _event
+from test_fix8_n7_2_body_prealloc import DETECT, ORCHESTRATE, _Client, _event, _until
 from test_live_server import TOKEN
 
 import api
@@ -113,7 +113,7 @@ def test_first_small_body_bytes_of_a_large_body_come_from_the_reserve(monkeypatc
         c = _Client(content_length=len(body))
         task = asyncio.ensure_future(c.run())
         await c.feed(body[:150 * KIB])
-        await asyncio.sleep(0.05)
+        await _until(lambda: lanes.inflight.used >= 150 * KIB - api._SMALL_BODY_BYTES)   # fix wave 25: not sleep(0.05)
         seen = (lanes.small_reserve.used, lanes.inflight.used)
         await c.feed(body[150 * KIB:], more=False)
         await task
@@ -121,7 +121,11 @@ def test_first_small_body_bytes_of_a_large_body_come_from_the_reserve(monkeypatc
 
     c, seen, after = asyncio.run(scenario())
     assert c.status == 200, c.body[:200]
-    assert seen == (api._SMALL_BODY_BYTES, 150 * KIB - api._SMALL_BODY_BYTES), seen
+    # Fix wave 25, H1: the shared pool also holds the read-ahead grant the body
+    # reserved before asking for more (<= _READ_GRANT_BYTES, never past the
+    # declared length) — reserved from the shared pool too, never the reserve.
+    assert seen[0] == api._SMALL_BODY_BYTES, seen
+    assert 150 * KIB - api._SMALL_BODY_BYTES <= seen[1] <= min(150 * KIB + api._READ_GRANT_BYTES, 200 * KIB) - api._SMALL_BODY_BYTES, seen
     assert after == (0, 0), after
 
 

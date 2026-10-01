@@ -34,6 +34,7 @@ import hmac
 import json
 import logging
 import os
+import sys
 import threading
 import weakref
 from datetime import datetime, timedelta, timezone
@@ -235,31 +236,39 @@ class _BodyPreempted(Exception):
 # is waiting on the client and, since fix wave 24, reserves the bytes through
 # _BodyHold) and _off_loop (which releases them once the body is parsed).
 _ACCOUNT_SCOPE_KEY = "fulfillment.body_account"
-_HOLD_SCOPE_KEY = "fulfillment.body_hold"
+_HOLD_SCOPE_KEY = http_limits.BODY_HOLD_SCOPE_KEY  # also read by the protocol (fix wave 25, H1)
 
 
 class _BodyAccount:
     """`held`: shared in-flight bytes this body holds. `byte_seconds`: held x
     seconds, accrued ONLY while the service waits on the client (the service's
     own waits are not charged). `evicted` resolves when the body is
-    preempted; `receiving` is False once the body is complete."""
+    preempted; `receiving` is False once the body is complete. Fix wave 25,
+    H4: the seconds charged are the loop's running time (`lag`: time the event
+    loop was behind is not the client's)."""
 
-    __slots__ = ("held", "byte_seconds", "waiting_since", "receiving", "evicted")
+    __slots__ = ("held", "byte_seconds", "waiting_since", "lost_since", "lag", "receiving", "evicted")
 
-    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(self, loop: asyncio.AbstractEventLoop, lag: "http_limits.LoopLag | None" = None) -> None:
         self.held = 0
         self.byte_seconds = 0.0
         self.waiting_since: float | None = None
+        self.lost_since = 0.0
+        self.lag = lag
         self.receiving = True
         self.evicted: asyncio.Future = loop.create_future()
+
+    def _lost(self) -> float:
+        return self.lag.lost if self.lag is not None else 0.0
 
     def charge(self, now: float) -> float:
         if self.waiting_since is None:
             return self.byte_seconds
-        return self.byte_seconds + self.held * (now - self.waiting_since)
+        return self.byte_seconds + self.held * max(0.0, now - self.waiting_since - (self._lost() - self.lost_since))
 
     def client_wait_started(self, now: float) -> None:
         self.waiting_since = now
+        self.lost_since = self._lost()
 
     def client_wait_ended(self, now: float) -> None:
         self.byte_seconds = self.charge(now)
@@ -277,14 +286,32 @@ class _BodyHold:
     read further. `release()` gives everything back (idempotent). Created by
     BodySizeLimitMiddleware for every request; _off_loop releases it as soon
     as the parse has dropped the body, the middleware again when the request
-    ends."""
+    ends.
 
-    __slots__ = ("lanes", "account", "small", "shared")
+    Fix wave 25, H1 (AEGIS N24-S-1/-2): `grant(target)` reserves AHEAD of the
+    bytes received, without waiting — only what the pools have free and only
+    while no body is waiting for them (_InFlightBytes.try_reserve) — so the
+    protocol can keep reading covered bytes without a round trip through the
+    app per 16 KiB read (http_limits.DeadlineH11Protocol.handle_events reads
+    `covered` and `taken`); `trim(total)` gives back whatever was reserved past
+    `total` once the body is complete. The covered bytes are always a prefix
+    of the body: the shared pool is drawn on only once the small reserve covers
+    the body's first _SMALL_BODY_BYTES. `taken` is the body bytes the app has
+    taken from the protocol, counted in the same task step in which the
+    protocol's buffer is emptied (BodySizeLimitMiddleware), so `taken` + the
+    bytes the protocol buffers is every body byte that has reached the app."""
+
+    __slots__ = ("lanes", "account", "small", "shared", "taken")
 
     def __init__(self, lanes: "_Lanes", account: _BodyAccount) -> None:
         self.lanes, self.account = lanes, account
         self.small = 0
         self.shared = 0
+        self.taken = 0
+
+    @property
+    def covered(self) -> int:
+        return self.small + self.shared
 
     async def cover(self, total: int) -> None:
         small = min(total, _SMALL_BODY_BYTES)
@@ -295,6 +322,25 @@ class _BodyHold:
         if shared > self.shared:
             await self.lanes.inflight.reserve(shared - self.shared, self.account, in_hand=True)
             self.shared = shared
+
+    def grant(self, target: int) -> None:
+        small = min(target, _SMALL_BODY_BYTES)
+        if small > self.small:
+            self.small += self.lanes.small_reserve.try_reserve(small - self.small)
+        if self.small < _SMALL_BODY_BYTES:
+            return                     # a prefix: nothing from the shared pool before the first 64 KiB is covered
+        shared = target - _SMALL_BODY_BYTES
+        if shared > self.shared:
+            self.shared += self.lanes.inflight.try_reserve(shared - self.shared, self.account)
+
+    def trim(self, total: int) -> None:
+        small, shared = min(total, _SMALL_BODY_BYTES), max(0, total - _SMALL_BODY_BYTES)
+        if self.shared > shared:
+            self.lanes.inflight.release(self.shared - shared, self.account)
+            self.shared = shared
+        if self.small > small:
+            self.lanes.small_reserve.release(self.small - small)
+            self.small = small
 
     def release(self) -> None:
         if self.shared:
@@ -382,7 +428,15 @@ class BodySizeLimitMiddleware:
         deadline = entered + budget
         rate, grace = _BODY_MIN_BYTES_PER_S, _BODY_MIN_RATE_GRACE_S
         disconnected = False  # the client's http.disconnect reached the app (fix wave 10, N9-8)
-        account = _BodyAccount(loop)
+        # Fix wave 25, H4 (AEGIS N24-S-12): every rule below that judges the
+        # client by time — (a) stall, (b) trickle, (c) arrival, the preemption
+        # charge — runs on the time spent waiting for the client's bytes MINUS
+        # the time the event loop was behind meanwhile (http_limits.LoopLag):
+        # bytes a client sent while this process could not run are not a stall.
+        # The wall-clock deadline stays the hard bound.
+        lag = http_limits.loop_lag(loop)
+        lag.hold()
+        account = _BodyAccount(loop, lag)
         scope[_ACCOUNT_SCOPE_KEY] = account
         # Fix wave 24, F1: every body byte this request holds is counted in the
         # one in-flight budget as it arrives, and the body is not read further
@@ -391,6 +445,25 @@ class BodySizeLimitMiddleware:
         hold = _BodyHold(lanes, account)
         scope[_HOLD_SCOPE_KEY] = hold
         lanes.inflight.accounts.add(account)
+        # Fix wave 25, H1: the most of this body there can be (a declared length
+        # is exact: h11 reads no more as body), the end of every read-ahead grant.
+        body_cap = limit if declared is None else declared
+
+        async def taking_receive() -> Message:
+            # Fix wave 25, H1: before asking, reserve what is free of the next
+            # _READ_GRANT_BYTES (never waiting), so the protocol reads covered
+            # bytes without a round trip through here per read; and again in the
+            # same task step in which uvicorn empties its buffer into this message
+            # (its receive() resumes reading before it returns what was buffered,
+            # so the protocol finds the next window covered when it reads next).
+            # `taken` moves in that same step: no body byte is ever in neither count.
+            hold.grant(min(hold.taken + _READ_GRANT_BYTES, body_cap))
+            message = await receive()
+            if message["type"] == "http.request":
+                hold.taken += len(message.get("body", b""))
+                if message.get("more_body", False):
+                    hold.grant(min(hold.taken + _READ_GRANT_BYTES, body_cap))
+            return message
 
         def drop_pending() -> None:
             nonlocal pending
@@ -437,15 +510,17 @@ class BodySizeLimitMiddleware:
                         if seen <= 0 or waited + (declared - received) / seen > budget:
                             raise _BodyWontArrive(declared, received, seen)
                     if pending is None:
-                        pending = asyncio.ensure_future(receive())
+                        pending = asyncio.ensure_future(taking_receive())
                     account.client_wait_started(now)
+                    lost0 = lag.lost
                     try:
                         done, _ = await asyncio.wait({pending, account.evicted}, return_when=asyncio.FIRST_COMPLETED,
                                                      timeout=min(deadline - now, grace - gap, due - waited))
                     finally:
                         account.client_wait_ended(loop.time())
-                    waited += loop.time() - now
-                    gap += loop.time() - now
+                    spent = max(0.0, loop.time() - now - (lag.lost - lost0))  # fix wave 25, H4: not the loop's delay
+                    waited += spent
+                    gap += spent
                     if pending in done:
                         break
                 message = pending.result()
@@ -464,10 +539,21 @@ class BodySizeLimitMiddleware:
                 # wait (service time, not the client's) happens before the next
                 # read. 503 after _INFLIGHT_WAIT_S, or 408 if this body is
                 # preempted (_InFlightBytes.reserve).
-                await hold.cover(received)
+                # Fix wave 25, H1: never past the body deadline — a wait that would
+                # run past it is cut there (408), so every body is answered by the
+                # deadline however many budget waits it met (each <= 2 s).
+                left = deadline - loop.time()
+                if left < _INFLIGHT_WAIT_S:
+                    try:
+                        await asyncio.wait_for(hold.cover(received), max(0.0, left))
+                    except TimeoutError:
+                        raise _BodyTimeout() from None
+                else:
+                    await hold.cover(received)
                 if not message.get("more_body", False):
                     body_done = True
                     account.receiving = False  # complete: never preempted from here on
+                    hold.trim(received)        # fix wave 25: a grant past the body's end goes back now
             else:
                 body_done = True
                 disconnected = disconnected or message["type"] == "http.disconnect"
@@ -517,6 +603,7 @@ class BodySizeLimitMiddleware:
             hold.release()            # whatever happened: the budget bytes go back (idempotent)
             account.receiving = False
             lanes.inflight.accounts.discard(account)
+            lag.drop()
 
 
 def _log_safe(text: str, limit: int = 200) -> str:
@@ -566,6 +653,50 @@ def _render(result: Any) -> Response:
     # The same encoder FastAPI applied to these return values, run here so the
     # json.dumps happens in the worker thread, not on the event loop.
     return JSONResponse(content=jsonable_encoder(result))
+
+
+def _retained_bytes(obj: Any) -> int:
+    """Fix wave 25, H3 (AEGIS N24-S-4): the memory a parsed request model holds
+    — every object reachable through its fields, each counted once
+    (sys.getsizeof: a str's cached UTF-8 copy included; a datetime's tzinfo),
+    plus 1/16 for what no walk reaches (pydantic-core's own per-instance
+    allocations). Shared and cached objects (small ints, None, interned
+    strings) are counted as if they were the model's. Measured against
+    tracemalloc (the allocations validate_json left live), the worst valid
+    bodies found: 4 MiB CallEventsRequest of 1000 events whose 4009-char
+    transcripts each end in an astral character — counted 22.74 MB, traced
+    21.45 MB (5.1x the body); 64 KiB of 200 such events — counted 0.442 MB,
+    traced 0.437-0.450 MB (6.7x). 2-3 ms for a 4 MiB model."""
+    seen: set[int] = set()
+    total = 0
+    stack = [obj]
+    size = sys.getsizeof
+    while stack:
+        o = stack.pop()
+        if id(o) in seen:
+            continue
+        seen.add(id(o))
+        total += size(o)
+        if isinstance(o, BaseModel):
+            stack.append(o.__dict__)
+            for extra in (o.__pydantic_extra__, o.__pydantic_fields_set__, o.__pydantic_private__):
+                if extra is not None:
+                    stack.append(extra)
+        elif isinstance(o, dict):
+            stack.extend(o.keys())
+            stack.extend(o.values())
+        elif isinstance(o, (list, tuple, set, frozenset)):
+            stack.extend(o)
+        elif isinstance(o, datetime) and o.tzinfo is not None:
+            stack.append(o.tzinfo)
+    return total + total // 16
+
+
+def _parse_measured(model: type[_M], body: bytes | bytearray) -> tuple[_M | Response, int]:
+    """_parse, and the bytes the parsed model holds (0 for a refusal) — in the
+    same worker-thread call, inside the parse slot (fix wave 25, H3)."""
+    parsed = _parse(model, body)
+    return parsed, (0 if isinstance(parsed, Response) else _retained_bytes(parsed))
 
 
 def _parse(model: type[_M], body: bytes | bytearray) -> _M | Response:
@@ -829,6 +960,12 @@ _TRIM_IDLE_S = 1.0
 # objects and the allocator's own overhead, measured (see the ADR).
 _INFLIGHT_BODY_BYTES = 64 * 1024 * 1024
 _INFLIGHT_WAIT_S = 2.0
+# Fix wave 25, H1 (AEGIS N24-S-1/-2): how far ahead of the bytes it has taken a
+# body reserves budget before it asks for more (_BodyHold.grant, only from
+# free bytes and only while no body waits for the budget). uvicorn's own
+# high-water mark: covered bytes stream as they did before wave 24, and the
+# memory bound is unchanged (the bytes are reserved BEFORE they are read).
+_READ_GRANT_BYTES = 64 * 1024
 # Fix wave 9 (AEGIS round 8, Q1). Measured on the real launcher before: 64
 # authenticated senders that declared 4 MiB, sent 1 MiB at once and then
 # 2 KiB/s — above the 1 KiB/s floor, which credits the front-load for ~1000 s
@@ -881,9 +1018,10 @@ class _InFlightBytes:
     """Bytes buffered by request bodies being read, whole process (per loop):
     `reserve` waits (bounded) until `n` more fit — preempting, when an
     account is given, the heaviest preemptible holder (fix wave 9);
-    `release` gives them back."""
+    `release` gives them back. Fix wave 25: `try_reserve` takes what is free
+    now, never waits, and takes nothing while a reservation is waiting."""
 
-    __slots__ = ("limit", "used", "over", "waiters", "accounts")
+    __slots__ = ("limit", "used", "over", "waiters", "accounts", "blocked")
 
     def __init__(self, limit: int) -> None:
         self.limit, self.used = limit, 0
@@ -893,6 +1031,22 @@ class _InFlightBytes:
         self.over = 0
         self.waiters: list[asyncio.Future] = []
         self.accounts: set[_BodyAccount] = set()
+        self.blocked = 0  # reservations waiting for bytes (fix wave 25): read-ahead grants never overtake them
+
+    def try_reserve(self, n: int, account: _BodyAccount | None = None) -> int:
+        """Fix wave 25, H1: up to `n` bytes if they are free NOW, never
+        waiting, and none while any reservation is waiting (a grant ahead of
+        the bytes received must not take what a body holding received bytes
+        waits for). Returns the bytes reserved (0..n)."""
+        if n <= 0 or self.blocked:
+            return 0
+        got = min(n, self.limit - self.used)
+        if got <= 0:
+            return 0
+        self.used += got
+        if account is not None:
+            account.held += got
+        return got
 
     async def reserve(self, n: int, account: _BodyAccount | None = None, *, in_hand: bool = False) -> None:
         if n <= 0:
@@ -906,22 +1060,27 @@ class _InFlightBytes:
             return
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _INFLIGHT_WAIT_S
-        while self.used + n > self.limit:
-            if account is not None:
-                self._preempt_for(account, loop.time())
-            waiter = loop.create_future()
-            self.waiters.append(waiter)
-            wait_on = {waiter} if account is None else {waiter, account.evicted}
+        if self.used + n > self.limit:
+            self.blocked += 1
             try:
-                done, _ = await asyncio.wait(wait_on, timeout=max(0.0, deadline - loop.time()),
-                                             return_when=asyncio.FIRST_COMPLETED)
+                while self.used + n > self.limit:
+                    if account is not None:
+                        self._preempt_for(account, loop.time())
+                    waiter = loop.create_future()
+                    self.waiters.append(waiter)
+                    wait_on = {waiter} if account is None else {waiter, account.evicted}
+                    try:
+                        done, _ = await asyncio.wait(wait_on, timeout=max(0.0, deadline - loop.time()),
+                                                     return_when=asyncio.FIRST_COMPLETED)
+                    finally:
+                        if waiter in self.waiters:
+                            self.waiters.remove(waiter)
+                    if account is not None and account.evicted.done():
+                        raise _BodyPreempted(account.charge(loop.time()))
+                    if not done:
+                        raise _inflight_refused()
             finally:
-                if waiter in self.waiters:
-                    self.waiters.remove(waiter)
-            if account is not None and account.evicted.done():
-                raise _BodyPreempted(account.charge(loop.time()))
-            if not done:
-                raise _inflight_refused()
+                self.blocked -= 1
         self.used += n
         if account is not None:
             account.held += n
@@ -1066,6 +1225,7 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
     hold: _BodyHold | None = request.scope.get(_HOLD_SCOPE_KEY)
     pos = 0
     chunks: list[bytes] | None = []
+    parsed: Any = None
     try:
         # Fix wave 8, N7-2: nothing is allocated ahead of the bytes received
         # (NEVER sized from Content-Length, see _INFLIGHT_BODY_BYTES). Fix wave
@@ -1108,18 +1268,39 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
         try:
             body = b"".join(chunks)
             chunks = None                     # one copy from here on
-            parsed = await run_in_threadpool(_parse, model, body)
+            parsed, retained = await run_in_threadpool(_parse_measured, model, body)
+            body = None
+            if hold is not None and retained:
+                # Fix wave 25, H3 (AEGIS N24-S-4): the parsed model is counted in
+                # the budget from here until it is dropped — its measured size, in
+                # place of the body's bytes (the joined copy is gone). A model larger
+                # than the body (a 4 MiB body of transcripts each holding one astral
+                # character is a 20 MiB model: CPython stores the whole string at 4
+                # bytes a character, plus its UTF-8 copy) waits for the budget like
+                # a chunk in hand — INSIDE the parse slot, so at most one model per
+                # slot is ever uncounted; 503 after _INFLIGHT_WAIT_S. Models of
+                # consecutive requests coexist while their work runs (the slot is
+                # released before it): each is counted.
+                try:
+                    await hold.cover(retained)
+                except BaseException:
+                    parsed = None             # dropped now, not when the refusal's traceback goes
+                    raise
+                hold.trim(retained)
         finally:
             body = None  # noqa: F841
             lane.release()
+    except BaseException:
+        parsed = None
+        raise
     finally:
         # Fix wave 24, F1: the chunks are dropped HERE, before the budget bytes
         # go back — rebinding the name frees them even when a traceback still
         # references this frame (a refusal raised above keeps the frame alive
         # while the middleware answers).
         chunks = None
-        if hold is not None:
-            hold.release()
+        if hold is not None and not isinstance(parsed, BaseModel):
+            hold.release()                    # no model: nothing more is held (a model's bytes go after its work)
         if large and declared is not None and declared > _SMALL_BODY_BYTES:
             lanes.budget.refund(declared - pos)  # declared but never received (fix wave 9)
         if large:
@@ -1127,7 +1308,12 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
             _schedule_trim(lanes)
     if isinstance(parsed, Response):
         return parsed
-    return await run_in_threadpool(lambda: _render(work(parsed)))
+    try:
+        return await run_in_threadpool(lambda: _render(work(parsed)))
+    finally:
+        parsed = None                         # fix wave 25, H3: the model is dropped, then its bytes go back
+        if hold is not None:
+            hold.release()
 
 
 # --- bounded 422 (fix wave 6, N2, MED, CONFIRMED) -----------------------------

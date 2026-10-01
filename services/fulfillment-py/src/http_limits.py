@@ -60,13 +60,22 @@ The limits, all enforced before routing and auth:
                                  (64 MiB, fix wave 8; since fix wave 24 every
                                  body byte the process holds, the small reserve
                                  included).
-  body reads             one read (READ_BUFFER_BYTES, 16 KiB) at a time, and
-                                 only when the app asks (fix wave 24, F1):
-                                 uvicorn's protocol stops reading a body as soon
-                                 as it holds any of it unread; the app reserves
-                                 each read from the in-flight budget before it
-                                 asks. uvicorn alone read up to 64 KiB + a read
-                                 ahead per connection, outside the budget.
+  body reads             reads of READ_BUFFER_BYTES (16 KiB), and only
+                                 into in-flight budget the app has already
+                                 reserved for this body (fix wave 24, F1; fix
+                                 wave 25, H1): the protocol stops reading a body
+                                 once the bytes it has buffered for the app plus
+                                 the bytes the app has taken reach the bytes the
+                                 app has covered (api._BodyHold, found under
+                                 BODY_HOLD_SCOPE_KEY in the request's scope).
+                                 The app reserves up to api._READ_GRANT_BYTES
+                                 (64 KiB) ahead of what it has taken whenever
+                                 the budget has them free, so a body streams as
+                                 it did under uvicorn alone (which read up to
+                                 64 KiB + a read ahead per connection, outside
+                                 the budget); with no grant it is one read per
+                                 ask (wave 24). At most one read past the
+                                 covered bytes is ever buffered.
   MAX_OPEN_CONNECTIONS   256     hard cap on held sockets: uvicorn's
                                  limit_concurrency still accepts and holds
                                  connections, so a connection made while this
@@ -97,8 +106,10 @@ Trade-off (bounded, not free), exactly:
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
+import weakref
 
 import h11
 from uvicorn.protocols.http.h11_impl import H11Protocol
@@ -117,6 +128,10 @@ BODY_MIN_RATE_GRACE_S = 5.0
 LIMIT_CONCURRENCY = 128
 MAX_OPEN_CONNECTIONS = 256
 OVER_CAP_CLOSE_S = 1.0
+# Fix wave 25, H1: where the app puts the in-flight budget it holds for the body
+# (api._BodyHold: `covered`, the body bytes reserved; `taken`, the body bytes the
+# app has taken from this protocol). Read by DeadlineH11Protocol.handle_events.
+BODY_HOLD_SCOPE_KEY = "fulfillment.body_hold"
 
 _OVER_CAP_RESPONSE = (
     b"HTTP/1.1 503 Service Unavailable\r\n"
@@ -145,6 +160,71 @@ def load_body_read_timeout() -> float:
             f"0 < value <= {BODY_READ_TIMEOUT_S:g} (may only narrow). This service refuses to start."
         )
     return value
+
+
+# Fix wave 25, H4 (AEGIS N24-S-12): the rules that judge a CLIENT by time —
+# the app's stall, trickle and arrival rules (api.BodySizeLimitMiddleware) and
+# this protocol's own stall and rate rules for unread bodies — counted every
+# second of wall time spent waiting for the client's bytes, including time the
+# event loop could not run at all. Measured (wave 25, h4_freeze.py): a client
+# sending 32 KiB every 0.5 s, the server process stopped for 6 s or 9 s mid-body
+# -> 408 "stalled for 5s" 3/3 and 3/3; stopped for 3 s -> 408 "cannot complete"
+# 2/3 (the arrival projection divided the bytes by a wait that included the
+# stop). The client had sent all along; its bytes sat in the kernel. LoopLag
+# measures the time the loop was behind: a timer every LOOP_LAG_TICK_S, and
+# whatever it fires later than LOOP_LAG_SLACK_S past its time is added to
+# `lost`. The client-judging clocks subtract the `lost` that accrued while they
+# ran. The hard deadlines (BODY_READ_TIMEOUT_S, the protocol's +grace,
+# REQUEST_HEAD_TIMEOUT_S) stay wall-clock bounds. The timer runs only while
+# some body is being judged (`hold`/`drop`).
+LOOP_LAG_TICK_S = 0.05
+LOOP_LAG_SLACK_S = 0.05
+
+
+class LoopLag:
+    """Seconds the event loop has been behind (`lost`), measured while held."""
+
+    __slots__ = ("loop", "lost", "users", "_when", "_handle", "__weakref__")
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.loop = loop
+        self.lost = 0.0
+        self.users = 0
+        self._when = 0.0
+        self._handle: asyncio.TimerHandle | None = None
+
+    def hold(self) -> None:
+        self.users += 1
+        if self._handle is None:
+            self._arm()
+
+    def drop(self) -> None:
+        self.users -= 1
+        if self.users <= 0:
+            self.users = 0
+            if self._handle is not None:
+                self._handle.cancel()
+                self._handle = None
+
+    def _arm(self) -> None:
+        self._when = self.loop.time() + LOOP_LAG_TICK_S
+        self._handle = self.loop.call_at(self._when, self._tick)
+
+    def _tick(self) -> None:
+        late = self.loop.time() - self._when
+        if late > LOOP_LAG_SLACK_S:
+            self.lost += late - LOOP_LAG_SLACK_S
+        self._arm()
+
+
+_loop_lags: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, LoopLag]" = weakref.WeakKeyDictionary()
+
+
+def loop_lag(loop: asyncio.AbstractEventLoop) -> LoopLag:
+    lag = _loop_lags.get(loop)
+    if lag is None:
+        lag = _loop_lags[loop] = LoopLag(loop)
+    return lag
 
 
 # Graceful close (fix wave 21, L1) with the wave-22 bounds (G5/G6: the slot and the
@@ -181,6 +261,9 @@ class DeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
     _body_last = 0.0  # when the last body bytes arrived
     _body_bytes = 0
     _body_deadline = 0.0
+    _lag: LoopLag | None = None       # held while a body is judged (fix wave 25, H4)
+    _body_started_lost = 0.0
+    _body_last_lost = 0.0
 
     def connection_made(self, transport) -> None:  # type: ignore[override]
         super().connection_made(transport)
@@ -208,21 +291,33 @@ class DeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
         if self._deadline_state is h11.SEND_BODY:
             self._body_bytes += len(data)
             self._body_last = self.loop.time()
+            if self._lag is not None:
+                self._body_last_lost = self._lag.lost
         super().data_received(data)
 
     def handle_events(self) -> None:
         super().handle_events()
-        # Fix wave 24, F1 (AEGIS N23-S-1): a body is read only when the app asks
-        # for it. uvicorn keeps reading a body until its buffer passes 64 KiB
+        # Fix wave 24, F1 (AEGIS N23-S-1): a body is read only into budget the app
+        # holds for it. uvicorn keeps reading a body until its buffer passes 64 KiB
         # (its high-water mark) whether or not the app has asked — up to 64 KiB
-        # + one read per connection, outside the app's in-flight budget. Paused
-        # as soon as the buffer holds anything: the app's receive() resumes it,
-        # and the app covers each read from the budget BEFORE it asks
-        # (api.BodySizeLimitMiddleware), so at most one read (READ_BUFFER_BYTES,
-        # 16 KiB) of a body sits here unasked-for.
+        # + one read per connection, outside the app's in-flight budget.
+        # Fix wave 25, H1 (AEGIS N24-S-1/-2): wave 24 paused as soon as the buffer
+        # held anything, so every 16 KiB read waited for a round trip through the
+        # app (wake the app, take the chunk, cover it, ask again, resume, next
+        # loop pass) — under CPU contention per-body intake slowed and stalled
+        # bodies were cut later (settle 11.6-15.4 s against 11.3-12.5 s). Now the
+        # app reserves up to 64 KiB AHEAD of what it has taken whenever the
+        # budget has them free (api._BodyHold.grant), and reading pauses only
+        # when the bytes buffered here plus the bytes the app has taken reach
+        # the bytes it has covered: covered bytes stream without a round trip,
+        # and at most one read (READ_BUFFER_BYTES, 16 KiB) past them is ever
+        # buffered. No hold in the scope (the app has not started yet, or
+        # another app): paused as soon as anything is buffered, as in wave 24.
         cycle = self.cycle
         if cycle is not None and cycle.body and not cycle.response_complete:
-            self.flow.pause_reading()
+            hold = cycle.scope.get(BODY_HOLD_SCOPE_KEY)
+            if hold is None or hold.taken + len(cycle.body) >= hold.covered:
+                self.flow.pause_reading()
         self._update_deadline()
 
     def on_response_complete(self) -> None:
@@ -231,23 +326,34 @@ class DeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
 
     def connection_lost(self, exc) -> None:
         self._cancel_deadline()
+        self._drop_lag()
         super().connection_lost(exc)
 
     # --
 
+    def _drop_lag(self) -> None:
+        if self._lag is not None:
+            self._lag.drop()
+            self._lag = None
+
     def _update_deadline(self) -> None:
         if self.transport is None or self.transport.is_closing():
             self._cancel_deadline()
+            self._drop_lag()
             return
         state = self.conn.their_state
         if state is self._deadline_state:
             return
         self._cancel_deadline()
+        self._drop_lag()
         self._deadline_state = state
         if state is h11.IDLE:
             timeout = REQUEST_HEAD_TIMEOUT_S
         elif state is h11.SEND_BODY:
+            self._lag = loop_lag(self.loop)
+            self._lag.hold()
             self._body_started = self._body_last = self.loop.time()
+            self._body_started_lost = self._body_last_lost = self._lag.lost
             self._body_bytes = 0
             self._body_deadline = self._body_started + self.body_timeout_s + BODY_DEADLINE_GRACE_S
             self._body_check()
@@ -260,19 +366,23 @@ class DeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
         # Close at the hard deadline, when the body has stalled for the grace
         # period, or when it has fallen below the minimum rate after the grace
         # period; otherwise sleep until the earliest moment any could be true
-        # given the bytes so far.
+        # given the bytes so far. Fix wave 25, H4: the stall and the rate are
+        # judged on the time the loop was able to run (LoopLag), not wall time;
+        # the hard deadline stays wall-clock.
         self._deadline_timer = None
         now = self.loop.time()
-        elapsed = now - self._body_started
+        lost = self._lag.lost if self._lag is not None else 0.0
+        elapsed = max(0.0, now - self._body_started - (lost - self._body_started_lost))
+        stalled = max(0.0, now - self._body_last - (lost - self._body_last_lost))
         grace = BODY_MIN_RATE_GRACE_S + BODY_DEADLINE_GRACE_S
-        if now >= self._body_deadline or now - self._body_last >= grace or (
+        if now >= self._body_deadline or stalled >= grace or (
             elapsed >= grace and self._body_bytes < BODY_MIN_BYTES_PER_S * elapsed
         ):
             self._deadline_passed()
             return
-        due = self._body_started + max(grace, self._body_bytes / BODY_MIN_BYTES_PER_S)
-        wake = min(due, self._body_last + grace, self._body_deadline)
-        self._deadline_timer = self.loop.call_later(max(0.05, wake - now), self._body_check)
+        due = max(grace, self._body_bytes / BODY_MIN_BYTES_PER_S) - elapsed
+        wake = min(due, grace - stalled, self._body_deadline - now)
+        self._deadline_timer = self.loop.call_later(max(0.05, wake), self._body_check)
 
     def _cancel_deadline(self) -> None:
         if self._deadline_timer is not None:
