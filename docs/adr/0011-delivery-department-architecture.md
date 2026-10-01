@@ -942,7 +942,8 @@ boxes' `docker cp`, recorded first as `sandbox_exec_requested` with `kind: sandb
 and is the probe expecting a `sandbox_cp_requested` event type, not a missing record. `test_r22_pin` — fails closed
 as before. `test_r22_g4` 20/20; the G4 test 50/50 under three busy loops on 3.13 and on 3.12. The round-21 toctou
 A/B/C, d3_refusal, recordfirst and route4 probes pass. Full suite: 651 tests — 647 passed, 4 skipped — on Python
-3.13.13 (37 min) and on 3.12.3 (47 min).
+3.13.13 (37 min) and on 3.12.3 (47 min), on the code of `c827329` (its logs committed in `a5fb681`; wave 25 added
+this commit tie — the paragraph's only commit id had been the base, `540a64e`).
 
 ## Round 23 amendments (fix wave 24, Oct 1, 2026; lead rulings E1-E6, binding; AEGIS N23-D-1..9)
 
