@@ -556,9 +556,7 @@ def regex_cpu(p: re.Pattern, s: str, runs: int = 3) -> float:
     """Fix wave 25, H6 (AEGIS N24-S-11): the CPU the pattern spends on `s` (sub + search + fullmatch), this
     thread's own CPU time, the cyclic GC off, best of `runs`. It was ONE wall-clock reading: under three busy
     loops on a 2-CPU box the regexes measured 0.051-0.080 s against the 0.05 s bound while their CPU time stayed
-    17-33 ms (wave 25) — the test measured the scheduler. The bound is unchanged and is on the work now: the
-    worst (pattern, input) here costs 17-41 ms of CPU, so a pattern three times slower fails it (wave-25 evidence:
-    the same check with every call made three times)."""
+    10-20 ms — the test measured the scheduler."""
     import gc
 
     best = float("inf")
@@ -577,18 +575,33 @@ def regex_cpu(p: re.Pattern, s: str, runs: int = 3) -> float:
     return best
 
 
+# Fix wave 25, H6: the same three operations with a pattern that is linear by construction (one character class,
+# one quantifier) on the same input, measured right after the pattern under test. Their ratio is the work the
+# pattern does per character relative to a single scan, whatever the machine's speed or load. The CPU bound alone
+# could not tell a pattern three times slower: the worst pair costs 10-17 ms, three times that is 31-52 ms, and
+# 50 ms passed most of it. Measured (wave 25, 2-CPU box, 3 busy loops and a co-tenant, 3.12 and 3.13): the worst
+# pair's ratio 4.8-6.1; every operation done three times, 14.4-17.7. The bound sits between.
+LINEAR_REF = re.compile(r"[^\w#@]+")
+REGEX_RATIO_MAX = 9.0
+
+
 def test_lim_every_regex_in_text_module_is_linear_time():
     import shared.text as text
 
     patterns = [v for v in vars(text).values() if isinstance(v, re.Pattern)]
     assert len(patterns) >= 2
-    worst = 0.0
+    worst, worst_ratio, at = 0.0, 0.0, None
     for p in patterns:
         for s in _adversarial_inputs(100_000):
             dt = regex_cpu(p, s)
+            ref = regex_cpu(LINEAR_REF, s)
             worst = max(worst, dt)
+            if dt / ref > worst_ratio:
+                worst_ratio, at = dt / ref, (p.pattern, s[:10])
             assert dt < 0.05, (p.pattern, s[:10], dt)
-    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per 100 KB input (bound 50 ms)")
+            assert dt / ref < REGEX_RATIO_MAX, (p.pattern, s[:10], dt, ref)
+    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per 100 KB input (bound 50 ms); worst CPU ratio to a "
+          f"single linear scan {worst_ratio:.2f} (bound {REGEX_RATIO_MAX}) at {at!r}")
 
 
 def test_lim_text_scanners_are_linear_time():
