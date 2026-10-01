@@ -173,7 +173,13 @@ other `serve.py` launchers have since fix wave 7 (NEW-5). The bound is
 unchanged. **Fix wave 24 (AEGIS round 23 N23-S-3/S-4):** the override is
 accepted only in 0.0001–0.05 s and `serve.py` refuses to start unless the
 interval in force (`sys.getswitchinterval()` after setting it) is the one
-set; and the numbers, now the same in `serve.py`, `api.py` and here, with
+set (**fix wave 25, AEGIS round 24 N24-S-6:** compared in whole microseconds,
+`round(getswitchinterval() × 1e6)` in [100, 50 000] and within the microsecond
+CPython truncates — CPython keeps the interval as an integer number of
+microseconds and read 0.0001 back as 9.999999999999999e-05, so the float check
+refused the range's own lower end; `serve.py` now prints the interval in force
+at start, and `tests/test_fix23_switch_interval.py` starts the real launcher at
+0.0001 and 0.05); and the numbers, now the same in `serve.py`, `api.py` and here, with
 their conditions — measured on this 2-CPU box, Python 3.13.13, the live test
 above (16 clients, ~28 MiB worst-case batches, `/health` time to first byte
 from a prober in its own process), 5 runs each: 1 ms with no other load —

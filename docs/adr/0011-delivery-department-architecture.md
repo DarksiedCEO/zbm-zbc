@@ -1018,7 +1018,8 @@ having read the entire source diff, bound by hash.
   crossings collided with the first attempt's records; the same held for any replayed admission refused after its
   RED check (`reproduction_not_red` came back as `reproduction_red_unverified`). Never an admission either way; now
   the same answer. Residual: when the `admission_closed` record itself cannot be made (ledger or store down) the
-  refusal stands but a replay is refused as before (`reproduction_red_unverified`). The remaining engine text that
+  refusal stands but a replay is refused as before (`reproduction_red_unverified`). (Fix wave 25: these answers are
+  kept like the idempotency records, the most recent 20 000 — see "Round 24 amendments".) The remaining engine text that
   said "fixed" (the suite note to the agent, the reproduction docstring, the attributable-failures docstring, the
   brief's no-reproduction line, the seed note) now names the end state; the agent's reply token stays `FIXED` (its
   claim, which the engine checks). The suite writes nothing into the source tree: every child process that runs the
@@ -1041,6 +1042,32 @@ Pins after this wave: `adapters/tools/zbm_standalone_runner.py` `ce227a83fc4b297
 (`runner.STANDALONE_SHA256`), `seed/test_commands_seed.json` `897b5dd2c860bc73fd56bfeccd3260f9ad38027b69209e249b7e0001a8241310`
 (`config.PINNED_TEST_COMMANDS_SHA256`: the `test_framework_import` rule and the reworded note); the prompts manifest
 is unchanged.
+
+## Round 24 amendments (fix wave 25, Oct 1, 2026; AEGIS N24-D-1, N24-D-2)
+
+- **Closed admissions bounded (N24-D-1).** `_closed_admissions` grew with every admission refused after its RED check
+  ran and every pending admission cancelled, in memory and — re-materialised from the local log — at every start.
+  It is now kept like `idem`: an ordered map of the most recent `service.CLOSED_ADMISSIONS_MAX` (20 000) answers,
+  oldest out first, the start-up replay included (memory bounded; the replay still reads every line). The map is a
+  convenience for replays, not what enforces anything: a cancel made while the admission's containers run is
+  honoured when they end through an in-memory set of the admissions cancelled mid-run (nothing runs across a
+  restart), whatever the map has forgotten meanwhile (`tests/test_round25.py`: honoured with the cap at 0). An answer
+  that has gone out of the map leaves a replay of that admission to run its RED check again under the same admission
+  id; its sandbox crossings collide with the first attempt's records and it is refused (measured with the cap at 0:
+  refused, nothing admitted) — the pre-wave-24 behaviour, never an admission without a RED verdict recorded for it.
+  Not done: the local log is not compacted — its lines are anchored in the evidence ledger (each line's sha256), so
+  removing one would make the log fail its own verification; every record kind (idempotency included) grows the log
+  the same way, and each `admission_closed` line costs a RED container run or an operator's cancel. Residual: a
+  CANCELLED admission whose answer has left the map can, if replayed identically much later (20 000 closed
+  admissions later), be judged afresh rather than refused as cancelled.
+- **Nothing un-showable reaches a report (N24-D-2).** A binary file's content is not in a git diff ("Binary files … differ"),
+  nor is a submodule's (a gitlink shows two commit ids), so a reviewer attesting to `src_diff_sha256` had not seen
+  it, under a header that said "in full". Now a round whose source changes include a binary file (git's own rule: a
+  NUL byte in the first 8000 bytes; or shown as binary by the worktree diff) fails `binary_src_change`; a source
+  diff that still shows content git cannot show as text (`srcdiff.binary_paths`: binary files — a `.gitattributes`
+  `binary`/`-diff` mark included — and submodule pointers) fails the run before any report is written
+  (`EVIDENCE_UNAVAILABLE`, `binary_src_change`), and a legacy run re-scanned with one fails like any run that cannot
+  be re-scanned. The report header says "in full as text" and names what never appears in it.
 
 ## Known limitations
 
