@@ -10,6 +10,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -17,14 +18,15 @@ import httpx
 import pytest
 
 from _procinfo import NO_OVERRIDE_ADDR_REASON, listening_addrs, override_bind_addr, rss_kib, url_host
-from helpers import SERVICE_ROOT, base_env, free_live_port, make_repo
+from helpers import SERVICE_ROOT, base_env, child_python_args, free_live_port, make_repo
 
 HTTP = httpx.Client(trust_env=False)          # never a proxy between the test and 127.0.0.x
 SRC = SERVICE_ROOT / "src"
 PYTHON = sys.executable      # wave 22: the interpreter running the suite (the service's venv, wherever it was built)
-# Wave 21 (N20-D-1): a live run's log goes to an UNTRACKED directory (docs/evidence/dept28/_runs/, gitignored); the
-# committed docs/evidence/dept28/live-launcher-run*.log files are frozen artefacts a test never rewrites.
-LOG_DIR = SERVICE_ROOT / "docs" / "evidence" / "dept28" / "_runs"
+# Wave 21 (N20-D-1): a live run's log never rewrites the committed docs/evidence/dept28/live-launcher-run*.log files
+# (frozen artefacts). Wave 24 (E6, N23-D-9): nor does it go anywhere in the source tree (it went to an untracked
+# docs/evidence/dept28/_runs/): it is written under the session's temp dir (DLV_LIVE_LOG_DIR to keep it elsewhere).
+LOG_DIR = Path(os.environ.get("DLV_LIVE_LOG_DIR") or os.path.join(tempfile.gettempdir(), "dlv-live-runs"))
 
 
 def _free_port() -> int:
@@ -40,7 +42,7 @@ def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1"):
     env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
     log_path = Path(tmp) / "serve.log"
     log = open(log_path, "wb")
-    proc = subprocess.Popen([PYTHON, "-m", "zbm_delivery.api"], cwd=str(SRC), env=env, stdout=log, stderr=subprocess.STDOUT)
+    proc = subprocess.Popen([PYTHON, *child_python_args(), "-m", "zbm_delivery.api"], cwd=str(SRC), env=env, stdout=log, stderr=subprocess.STDOUT)
     deadline = time.monotonic() + 150
     while True:
         try:
@@ -153,13 +155,14 @@ def test_l2_refuses_to_start_with_a_stray_env_name(tmp_path):
     repo, _ = make_repo(str(tmp_path))
     env = base_env(str(tmp_path), repo, llm="none")
     env["OPENAI_API_KEY"] = "sk-nope"
-    r = subprocess.run([PYTHON, "-m", "zbm_delivery.api"], cwd=str(SRC), env=env, capture_output=True, text=True, timeout=120)
+    r = subprocess.run([PYTHON, *child_python_args(), "-m", "zbm_delivery.api"], cwd=str(SRC), env=env, capture_output=True, text=True, timeout=120)
     assert r.returncode != 0 and "DLV_ENV_ALLOWLIST" in r.stderr
 
 
 def test_l2_live_log_is_written(server, tmp_path):
-    """The live-run log under docs/evidence/dept28/_runs/ (untracked; spec brief): the exchange above, captured from the
-    process. Wave 21 (N20-D-1): it used to overwrite the tracked docs/evidence/dept28/live-launcher-run.log."""
+    """The live-run log (spec brief): the exchange above, captured from the process, written to LOG_DIR (wave 24: the
+    session's temp dir, never the source tree). Wave 21 (N20-D-1): it used to overwrite the tracked
+    docs/evidence/dept28/live-launcher-run.log."""
     proc, port, env, log_path = server
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     out = LOG_DIR / "live-launcher-run.log"
@@ -173,4 +176,5 @@ def test_l2_live_log_is_written(server, tmp_path):
     lines.append("server stdout/stderr tail:")
     lines.append(log_path.read_text()[-2000:])
     out.write_text("\n".join(lines) + "\n")
+    print(f"live-run log: {out}")
     assert out.exists()

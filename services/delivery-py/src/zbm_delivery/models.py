@@ -161,6 +161,26 @@ class FindingVerdict(Strict):
         return _text(v, "note", allow_newlines=True, max_len=2000)
 
 
+class FlagNote(Strict):
+    """Wave 24 (E2): the reviewer's note on ONE review flag — what was checked at that line. An accepting review
+    needs one per flag of every accepted finding: >= 20 characters, no single character over half of it, and not
+    the same text as another note of the review (checked by the service)."""
+    flag_id: str
+    note: str = Field(default="", max_length=2000)
+
+    @field_validator("flag_id")
+    @classmethod
+    def _fid(cls, v):
+        if not FLAG_ID_RE.fullmatch(v):
+            raise ValueError("flag_id must be a review flag id (<finding>-F001 / <finding>-RD)")
+        return v
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v):
+        return _text(v, "note", allow_newlines=True, max_len=2000)
+
+
 class ReviewRequest(Strict):
     request_id: str = Field(pattern=f"^{ID_RE.pattern}$")
     review_ref: str = Field(min_length=1, max_length=128)
@@ -171,7 +191,10 @@ class ReviewRequest(Strict):
     # wave 23 (D1/D2): a verdict per finding (a pass needs one for EVERY finding of the run, all accept) and every
     # review flag id of each accepted finding
     finding_verdicts: list[FindingVerdict] = Field(default_factory=list, max_length=200)
-    flags_addressed: list[str] = Field(default_factory=list, max_length=2000)
+    # wave 24 (E2): a note per flag (a bare flag id is read as a flag with an empty note — refused when it matters,
+    # with the reason, by the service) and the sha256 of the run's complete source diff the reviewer read
+    flags_addressed: list[FlagNote] = Field(default_factory=list, max_length=2000)
+    src_diff_sha256: Optional[str] = Field(default=None, pattern=SHA_RE.pattern)
 
     @field_validator("finding_verdicts")
     @classmethod
@@ -181,13 +204,18 @@ class ReviewRequest(Strict):
             raise ValueError("one verdict per finding")
         return v
 
+    @field_validator("flags_addressed", mode="before")
+    @classmethod
+    def _flag_ids_alone(cls, v):
+        if isinstance(v, list):
+            return [{"flag_id": x, "note": ""} if isinstance(x, str) else x for x in v]
+        return v
+
     @field_validator("flags_addressed")
     @classmethod
     def _flags(cls, v):
-        for x in v:
-            if not isinstance(x, str) or not FLAG_ID_RE.fullmatch(x):
-                raise ValueError("flags_addressed must be review flag ids (<finding>-F001 / <finding>-RD)")
-        if len(set(v)) != len(v):
+        ids = [x.flag_id for x in v]
+        if len(set(ids)) != len(ids):
             raise ValueError("flags_addressed ids must be unique")
         return v
 

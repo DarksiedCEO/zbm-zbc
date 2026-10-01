@@ -64,7 +64,10 @@ _PRIVATE_HOME = os.path.join(_ISOLATION_DIR, "home")
 _EMPTY_HOOKS = os.path.join(_ISOLATION_DIR, "hooks")
 os.makedirs(_PRIVATE_HOME, exist_ok=True)
 os.makedirs(_EMPTY_HOOKS, exist_ok=True)
-ISOLATION_ARGS = ("-c", f"core.hooksPath={_EMPTY_HOOKS}", "-c", "core.fsmonitor=false")
+# fix wave 24 (E3, N23-D-2): rename/copy detection off for every command — a file moved or copied into src/ is a
+# full addition (every line shown, every line scanned), never a "similarity index 100%" with no + lines
+ISOLATION_ARGS = ("-c", f"core.hooksPath={_EMPTY_HOOKS}", "-c", "core.fsmonitor=false", "-c", "diff.renames=false",
+                  "-c", "status.renames=false")
 # fix wave 21 (L4): the per-process dir goes with the process (it was left in the temp dir on every start).
 atexit.register(fsops.drop_own_temp, _ISOLATION_DIR)
 
@@ -158,15 +161,18 @@ class GitPort:
         return self._ok(self._git("status", ["status", "--porcelain=v1", "--untracked-files=all"], worktree, run_id), "status")
 
     def diff(self, worktree: str, *, staged: bool = False, run_id: str = "-") -> str:
-        args = ["diff", "--no-color", "--no-ext-diff"] + (["--cached"] if staged else [])
+        args = ["diff", "--no-renames", "--no-color", "--no-ext-diff"] + (["--cached"] if staged else [])
         return self._ok(self._git("diff", args, worktree, run_id), "diff")
 
-    def diff_name_only(self, worktree: str, pathspec: Sequence[str] = (), run_id: str = "-", commit: Optional[str] = None) -> list[str]:
-        args = ["diff", "--name-only", "--no-color"]
+    def diff_name_only(self, worktree: str, pathspec: Sequence[str] = (), run_id: str = "-", commit: Optional[str] = None,
+                       base: Optional[str] = None) -> list[str]:
+        """Changed paths: of the worktree, of one ``commit``, or between ``base`` and ``commit`` (wave 24). Renames are
+        never detected (E3): a moved file is its old path deleted and its new path added."""
+        args = ["diff", "--no-renames", "--name-only", "--no-color"]
         if commit:
-            if not _SHA_RE.fullmatch(commit):
+            if not _SHA_RE.fullmatch(commit) or (base is not None and not _SHA_RE.fullmatch(base)):
                 raise GitRefused("bad sha")
-            args = ["diff", "--name-only", "--no-color", f"{commit}^", commit]
+            args = ["diff", "--no-renames", "--name-only", "--no-color", base or f"{commit}^", commit]
         if pathspec:
             args += ["--", *[_check_path(p) for p in pathspec]]
         out = self._ok(self._git("diff", args, worktree, run_id), "diff --name-only")
@@ -175,8 +181,18 @@ class GitPort:
     def commit_diff(self, worktree: str, sha: str, run_id: str = "-") -> str:
         if not _SHA_RE.fullmatch(sha):
             raise GitRefused("bad sha")
-        r = self._git("diff", ["diff", "--no-color", "--no-ext-diff", f"{sha}^", sha], worktree, run_id)
+        r = self._git("diff", ["diff", "--no-renames", "--no-color", "--no-ext-diff", f"{sha}^", sha], worktree, run_id)
         return r.stdout if r.exit_code == 0 else ""
+
+    def range_diff(self, cwd: str, base: str, head: str, paths: Sequence[str], run_id: str = "-") -> str:
+        """Wave 24 (E2): the complete diff ``base..head`` of ``paths`` (renames off: a moved file in full). An empty
+        path list is an empty diff (never the whole tree)."""
+        if not _SHA_RE.fullmatch(base) or not _SHA_RE.fullmatch(head):
+            raise GitRefused("bad sha")
+        if not paths:
+            return ""
+        args = ["diff", "--no-renames", "--no-color", "--no-ext-diff", base, head, "--", *[_check_path(p) for p in paths]]
+        return self._ok(self._git("diff", args, cwd, run_id), "diff base..head")
 
     def changed_paths(self, worktree: str, run_id: str = "-") -> list[str]:
         """Modified, added and untracked paths of the worktree (from ``status --porcelain``)."""

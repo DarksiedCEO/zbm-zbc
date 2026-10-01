@@ -47,7 +47,7 @@ from zbm_delivery import textguard
 from zbm_delivery.clock import Clock, SystemClock, iso, parse_iso
 from zbm_delivery.config import POLICY_VERSION, Settings
 from zbm_delivery.engine import states
-from zbm_delivery.errors import Conflict, DlvError, Invalid, NotFound, Refused, Unavailable
+from zbm_delivery.errors import Conflict, DlvError, Forbidden, Invalid, NotFound, Refused, Unavailable
 from zbm_delivery.ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
 from zbm_delivery.models import ID_RE
 from zbm_delivery.ports import NoChatBackend
@@ -71,6 +71,22 @@ POST_MORTEM_EVENTS = ("run_interrupted", "sandbox_released", "agent_usage", "age
 DONE_STATES = states.ENGINE_DONE_STATES
 # a run in one of these holds its service's run slot (B1/B2: so does a pending admission)
 LIVE_RUN_STATES = ("received", "preparing", "running", "suite", "reporting")
+
+
+def _note_problem(note: str) -> Optional[str]:
+    """Wave 24 (E2): why a review note is not a note — shorter than REVIEW_NOTE_MIN characters, or one character
+    making up more than half of it (``xxxx…``, ``a.a.a.…``); None when it is acceptable as text. (Whether it is TRUE
+    is the reviewer's attestation, never the engine's.)"""
+    from collections import Counter
+
+    from zbm_delivery.models import REVIEW_NOTE_MIN
+    note = (note or "").strip()
+    if len(note) < REVIEW_NOTE_MIN:
+        return f"the note is shorter than {REVIEW_NOTE_MIN} characters"
+    ch, n = Counter(note).most_common(1)[0]
+    if n * 2 > len(note):
+        return f"the note is filler ({ch!r} is {n} of its {len(note)} characters)"
+    return None
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -169,6 +185,8 @@ class DeliveryService:
         # B2 (wave 23): admissions whose reviewer-test RED containers are running outside the lock — admission id ->
         # {service, request_id, review_of}; each holds its service's run slot until it is admitted or refused
         self._admissions: dict[str, dict] = {}
+        # wave 24 (E6, N23-D-7): admissions cancelled while their containers ran — refused when the containers end
+        self._cancelled_admissions: set[str] = set()
         self._engine = None
         self._worker: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -205,6 +223,7 @@ class DeliveryService:
             except Unavailable as exc:
                 raise RuntimeError(f"refusing to start: the instance lease could not be recorded ({exc.reason})") from None
         self._fail_live_runs_at_start()
+        self._rescan_legacy_runs()
         self._reap("start")
         if harness_factory is not None and provider_factory is not None:
             from zbm_delivery.engine.loop import FixEngine
@@ -382,6 +401,106 @@ class DeliveryService:
                 except Unavailable:
                     self.mark_failed_unrecorded(run_id, R.item("HARNESS_ERROR", "restart; ledger unavailable"))
 
+    def _rescan_legacy_runs(self) -> None:
+        """Wave 24 (E5, N23-D-5): a run awaiting review whose records predate the review flags or the embedded source
+        diff (no ``review_flags`` on a finding, or no ``src_diff_sha256`` on the run — every record written before
+        waves 23/24) is re-scanned from its commits at load: flags recomputed per committed finding, the complete
+        source diff recorded, the report regenerated, and ONE record-first operation (``run_rescanned_for_review``
+        on the ledger, then the local-log line) puts the new records in place. Its old report (the legacy "fixed"
+        wording) is never served again. A run that cannot be re-scanned (no git, a commit or framework that cannot
+        be read) is failed — it cannot be reviewed on records nobody can check."""
+        for run_id, run in sorted(self.runs.items()):
+            if run.get("status") != "awaiting_review":
+                continue
+            recs = self.findings.get(run_id, {})
+            if run.get("src_diff_sha256") and all("review_flags" in r for r in recs.values()):
+                continue
+            try:
+                self._rescan_run(run_id)
+            except Unavailable:
+                raise RuntimeError(f"refusing to start: the legacy run {run_id} could not be re-scanned "
+                                   "(the ledger or the store is unavailable)") from None
+            except Exception as exc:  # noqa: BLE001 - any reason the records cannot be rebuilt: the run is failed
+                try:
+                    self.run_transition(run_id, "failed", "fix_run_failed",
+                                        {"run_id": run_id, "code": "EVIDENCE_UNAVAILABLE", "why": "legacy_rescan_failed",
+                                         "error": type(exc).__name__},
+                                        f"Legacy run {run_id} could not be re-scanned: failed",
+                                        {"reasons": [R.item("EVIDENCE_UNAVAILABLE",
+                                                            f"legacy run not re-scannable ({type(exc).__name__})")],
+                                         "finished_at": self.now_iso()})
+                except Unavailable:
+                    raise RuntimeError(f"refusing to start: the legacy run {run_id} could neither be re-scanned nor "
+                                       "failed (the ledger is unavailable)") from None
+
+    def _rescan_run(self, run_id: str) -> None:
+        from zbm_delivery.engine import report as report_mod
+        from zbm_delivery.engine import review_flags as RF
+        from zbm_delivery.engine import srcdiff
+        from zbm_delivery.runner import path_class
+
+        if self.git is None:
+            raise GitRefused("no git port")
+        run = json.loads(json.dumps(self.runs[run_id]))
+        service, base = run["service"], run["base_sha"]
+        head = run["commits"][-1]["sha"] if run.get("commits") else base
+        fw = srcdiff.framework_at(self.git, self.test_seed, service, head, run_id)
+        if fw is None:
+            raise GitRefused("no seeded framework at the run's head")
+        tg, ig = fw.get("test_file_globs", []), fw.get("test_infra_globs", [])
+        prefix = f"services/{service}/"
+
+        def is_src(p: str) -> bool:
+            return not p.startswith(prefix) or path_class(p[len(prefix):], tg, ig) == "src"
+
+        repo = self.git.repo
+        reviewer = {rt["path"]: rt["content"] for rt in self.reviewer_tests(run_id)}
+        findings = []
+        for fid, rec0 in sorted(self.findings.get(run_id, {}).items()):
+            rec = json.loads(json.dumps(rec0))
+            flags: list[dict] = []
+            sha = rec.get("commit_sha")
+            if sha:
+                diff = self.git.commit_diff(repo, sha, run_id)
+                flags = RF.number(RF.scan(diff, service, is_test=lambda p: not is_src(p),
+                                          file_text=lambda p, _s=sha: self.git.show_file(_s, p, repo, run_id)), fid)
+            solo = rec.get("standalone_check") or {}
+            if rec.get("state") == "needs_review_runner_dependent" or solo.get("outcome") == "runner_dependent":
+                target = solo.get("target") or ""
+                path, _, name = target.partition("::")
+                text = reviewer.get(path)
+                if text is None and path:
+                    text = self.git.show_file(head, f"{prefix}{path}", repo, run_id)
+                why = (solo.get("verification") or {}).get("why") or (solo.get("reverted") or {}).get("why") or "-"
+                flags.append(RF.runner_dependent_flag(fid, target, f"{prefix}{path}", RF.def_line(text, name), why))
+            rec["review_flags"] = flags
+            findings.append(rec)
+        text, paths = srcdiff.src_diff(self.git, fw, service, repo, base, head, run_id)
+        ev_src, digest, problem = srcdiff.record(self, run_id, text, paths, base, head, "run_rescanned_for_review")
+        if problem:
+            raise ValueError(problem)
+        run.update(src_diff_sha256=digest, src_diff_evidence_id=ev_src)
+        body = report_mod.render(run, findings, lambda ev: self.evidence_text(run_id, ev))
+        data = body.encode("utf-8", "surrogatepass")
+        if len(data) > srcdiff.REPORT_MAX_BYTES:
+            raise ValueError("the regenerated report does not fit one evidence file")
+        ev_rep = self.evidence_put(run_id, "report", data)
+        report_sha = sha_text(body)
+        with self.lock:
+            op = Op(self, f"rescan|{run_id}|{digest}", ENGINE, run_id)
+            eid = op.record(derived_id("rsc", run_id, digest, report_sha), "run_rescanned_for_review", ENGINE, run_id,
+                            {"run_id": run_id, "src_diff_sha256": digest, "src_diff_evidence_id": ev_src,
+                             "report_sha256": report_sha, "report_evidence_id": ev_rep, "head_sha": head,
+                             "paths": paths[:200], "flags": {f["finding_id"]: len(f["review_flags"]) for f in findings},
+                             "legacy_report_evidence_id": run.get("report_evidence_id")},
+                            f"Legacy run re-scanned for review ({run_id})")
+            run.update(report_sha256=report_sha, report_evidence_id=ev_rep)
+            run["ledger_event_ids"] = list(run.get("ledger_event_ids") or []) + [eid]
+            op.add("run", run)
+            for rec in findings:
+                op.add("finding", rec)
+            self._commit(op)
+
     # ================================================================== worker
 
     def _work(self) -> None:
@@ -496,7 +615,8 @@ class DeliveryService:
     def _check_reproductions(self, caller: str, request_id: str, facts: str, base_sha: str, service: str,
                              findings: list[dict]) -> None:
         """Every finding's reproduction resolves to a test of the service's toolchain AT THE BASE COMMIT (R1): the
-        engine runs it in the verification checkout (must pass) and the reverted one (must fail) before ``fixed``,
+        engine runs it in the verification checkout (must pass) and the reverted one (must fail) before
+        ``candidate_passed_checks``,
         and on the untouched base tree for a ``DISPROOF``. There is no prose-reproduction route."""
         prefix = f"services/{service}/"
 
@@ -678,6 +798,13 @@ class DeliveryService:
             results = self._red_run(pending)
             with self.lock:
                 self._admissions.pop(pending["adm"], None)
+                if pending["adm"] in self._cancelled_admissions:
+                    # wave 24 (E6): cancelled by the operator while the containers ran — nothing is recorded or
+                    # admitted from them (the cancel was recorded first and freed the slot)
+                    self._cancelled_admissions.discard(pending["adm"])
+                    raise Conflict("this admission was cancelled while its RED check ran: nothing was admitted",
+                                   reasons=[R.item("CANCELLED", pending["adm"])], request_id=pending["request_id"],
+                                   facts_sha256=pending["facts"], admission_id=pending["adm"])
                 red = self._red_record_locked(pending, results)
                 return admit(red)
         finally:
@@ -832,6 +959,11 @@ class DeliveryService:
             ev = run.get("report_evidence_id")
             if not ev:
                 raise NotFound("no report for this run yet")
+            if not run.get("src_diff_sha256"):
+                # wave 24 (E5): a report written before the source diff was embedded (the legacy "fixed" wording, no
+                # spelling-list warning) is never served; an awaiting_review run is re-scanned at load instead
+                raise Conflict("this run's report predates the embedded source diff and is not served",
+                               reasons=[R.item("REVIEW_STATE", "legacy report")])
             return self.evidence_read(run_id, ev).decode("utf-8", "replace")
 
     def evidence_meta(self, run_id: str, evidence_id: str) -> dict:
@@ -897,8 +1029,9 @@ class DeliveryService:
             return list(self.findings[run_id][finding_id].get("injection_rules") or [])
 
     def attributable_failures(self, run_id: str, finding_id: str, baseline_failures: list[str]) -> set[str]:
-        """Baseline failures attributable to ANOTHER not-yet-fixed finding of this run (file match, or the node id
-        named in that finding's reproduction) may remain while this finding is fixed (§C.8.4 step 5)."""
+        """Baseline failures attributable to ANOTHER finding of this run not yet at an engine end state (file match,
+        or the node id named in that finding's reproduction) may remain while this finding is worked on (§C.8.4
+        step 5)."""
         out: set[str] = set()
         with self.lock:
             docs = self.finding_docs.get(run_id, {})
@@ -1089,8 +1222,8 @@ class DeliveryService:
     def _review_checks(self, caller: str, run_id: str, body: dict, request_id: str, facts: str) -> dict:
         """Everything a review is refused on before anything is recorded (the caller holds the lock): the run's state,
         a review of the run already in progress, the reopened / new finding ids, and (wave 23, D1/D2/D3) the
-        per-finding verdicts, the runner-dependent notes and the flags each accepted finding must address."""
-        from zbm_delivery.models import REVIEW_NOTE_MIN
+        per-finding verdicts, the runner-dependent notes and the flags each accepted finding must address; wave 24
+        (E2): the src_diff_sha256 an accept must carry and a real note per flag."""
         run = self.runs.get(run_id)
         if run is None:
             raise NotFound("no such run")
@@ -1122,20 +1255,46 @@ class DeliveryService:
                 raise Invalid("a pass needs an explicit verdict for every finding of the run (D1); missing: "
                               + ", ".join(missing[:20]))
         accepted = sorted(fid for fid, v in verdicts.items() if v["verdict"] == "accept")
+        if accepted:
+            # wave 24 (E2, N23-D-1/-4): an accept binds the reviewer to the complete source diff the report embeds
+            if any("review_flags" not in recs[fid] for fid in accepted) or not run.get("src_diff_sha256"):
+                raise Conflict("this run's records predate the review flags / source diff and have not been "
+                               "re-scanned: nothing can be accepted on them", reasons=[R.item("REVIEW_STATE", "legacy run")],
+                               request_id=request_id, facts_sha256=facts)
+            if body.get("src_diff_sha256") != run["src_diff_sha256"]:
+                msg = ("an accepting review must carry the run's src_diff_sha256 — the sha256 of the complete source "
+                       "diff embedded in the report — attesting that the reviewer read it (E2)")
+                raise Invalid(msg, code="diff_not_attested", reasons=[R.item("REVIEW_STATE", "diff_not_attested")],
+                              request_id=request_id, facts_sha256=facts)
         for fid in accepted:
-            if recs[fid]["state"] == "needs_review_runner_dependent" and len((verdicts[fid].get("note") or "").strip()) < REVIEW_NOTE_MIN:
-                raise Invalid(f"finding {fid} is runner-dependent: accepting it needs a review note of at least "
-                              f"{REVIEW_NOTE_MIN} characters saying what the reviewer checked (D3)")
+            if recs[fid]["state"] == "needs_review_runner_dependent":
+                problem = _note_problem((verdicts[fid].get("note") or "").strip())
+                if problem:
+                    raise Invalid(f"finding {fid} is runner-dependent: accepting it needs a review note saying what "
+                                  f"the reviewer checked (D3) — {problem}")
+        notes: list[tuple[str, str]] = []
         run_flags = {fl["id"]: fid for fid, r in recs.items() for fl in (r.get("review_flags") or [])}
-        addressed = list(body.get("flags_addressed") or [])
+        addressed = {x["flag_id"]: (x.get("note") or "").strip() for x in body.get("flags_addressed") or []}
         strange = sorted(x for x in addressed if x not in run_flags)
         if strange:
             raise Invalid("flags_addressed names flag ids this run does not have: " + ", ".join(strange[:20]))
         required = sorted(fl for fl, fid in run_flags.items() if fid in accepted)
-        unaddressed = [fl for fl in required if fl not in set(addressed)]
+        unaddressed = [fl for fl in required if fl not in addressed]
         if unaddressed:
             raise Invalid("accepting a finding with review flags needs every flag id in flags_addressed (D2); "
                           "not addressed: " + ", ".join(unaddressed[:40]))
+        for fl in required:
+            problem = _note_problem(addressed[fl])
+            if problem:
+                raise Invalid(f"flag {fl}: an accepting review needs a note on what the reviewer checked there (E2) — "
+                              f"{problem}")
+            notes.append((f"flag {fl}", addressed[fl]))
+        seen: dict[str, str] = {}
+        for where, note in notes:
+            if note in seen:
+                raise Invalid(f"the note on {where} is the same text as the note on {seen[note]}: each note says what "
+                              "was checked at its own flag (E2)")
+            seen[note] = where
         return run
 
     def review(self, caller: str, run_id: str, body: dict) -> dict:
@@ -1144,6 +1303,10 @@ class DeliveryService:
         BEFORE anything is recorded (B1); a fail with reviewer-authored reproductions runs their RED check with the
         lock released (B2, the service's run slot reserved); the review, the findings' new states and the child run
         are one operation (one local-log line) in one hold of the lock."""
+        if caller != "aegis":
+            # wave 24 (E6, N23-D-6): the route allows only aegis; the service checks it too, so no other path into
+            # review() (a future route, an internal call) can accept findings
+            raise Forbidden("only the aegis caller reviews a fix run")
         request_id = body["request_id"]
         facts = facts_sha256(body)
         with self.lock:
@@ -1191,7 +1354,10 @@ class DeliveryService:
         review = {"request_id": request_id, "facts_sha256": facts, "verdict": body["verdict"],
                   "review_ref": body["review_ref"], "sha256": body["sha256"], "reopened_ids": reopened,
                   "new_finding_ids": [f["id"] for f in body.get("new_findings", [])], "received_at": self.now_iso(),
-                  "caller": caller, "accepted_ids": accepted, "flags_addressed": sorted(body.get("flags_addressed") or []),
+                  "caller": caller, "accepted_ids": accepted, "src_diff_sha256": body.get("src_diff_sha256"),
+                  "flags_addressed": [{"flag_id": x["flag_id"], "note": x.get("note") or "",
+                                       "note_sha256": sha_text(x.get("note") or "")}
+                                      for x in sorted(body.get("flags_addressed") or [], key=lambda x: x["flag_id"])],
                   "finding_verdicts": [{"finding_id": fid, "verdict": v["verdict"], "note": v.get("note") or "",
                                         "note_sha256": sha_text(v.get("note") or "")} for fid, v in sorted(verdicts.items())]}
         new = json.loads(json.dumps(run))
@@ -1229,7 +1395,9 @@ class DeliveryService:
         eid = op.record(derived_id("rev", run_id, request_id, facts), "fix_run_reviewed", caller, run_id,
                         {"run_id": run_id, "request_id": request_id, "facts_sha256": facts, "verdict": body["verdict"],
                          "review_sha256": body["sha256"], "reopened": reopened, "accepted": accepted,
-                         "flags_addressed": review["flags_addressed"],
+                         "src_diff_sha256": review["src_diff_sha256"],
+                         "flags_addressed": [x["flag_id"] for x in review["flags_addressed"]],
+                         "flag_notes_sha256": {x["flag_id"]: x["note_sha256"] for x in review["flags_addressed"]},
                          "notes_sha256": {fid: sha_text(v.get("note") or "") for fid, v in sorted(verdicts.items())},
                          "new_findings": review["new_finding_ids"], "from": run["status"], "to": to,
                          "next_run_id": child_id},
@@ -1241,7 +1409,7 @@ class DeliveryService:
             rec["review"] = {"verdict": "accept" if target == "accepted" else "reopen", "request_id": request_id,
                              "note_sha256": sha_text((verdicts.get(fid) or {}).get("note") or ""),
                              "flags_addressed": sorted(fl["id"] for fl in rec0.get("review_flags") or []
-                                                       if fl["id"] in set(review["flags_addressed"]))}
+                                                       if fl["id"] in {x["flag_id"] for x in review["flags_addressed"]})}
             op.add("finding", rec)
         op.add("run", new)
         resp = self._stamp({"run_id": run_id, "status": to, "next_run_id": child_id, "request_id": request_id,
@@ -1271,6 +1439,8 @@ class DeliveryService:
             if ent is not None:
                 return ent["response"]
             run = self.runs.get(run_id)
+            if run is None and run_id in self._admissions:
+                return self._cancel_admission_locked(caller, run_id, body, request_id, facts, key, h)
             if run is None:
                 raise NotFound("no such run")
             if run["status"] in states.TERMINAL or run["status"] == "awaiting_review":
@@ -1286,6 +1456,27 @@ class DeliveryService:
             if self._engine is not None and hasattr(self._engine, "interrupt"):
                 self._engine.interrupt(run_id, "cancel")           # R6: the in-flight turn is stopped, not just flagged
             return resp
+
+    def _cancel_admission_locked(self, caller: str, adm: str, body: dict, request_id: str, facts: str, key: tuple,
+                                 h: str) -> dict:
+        """Wave 24 (E6, N23-D-7): the operator cancels a PENDING admission (its reviewer-test RED containers running
+        outside the lock). Recorded first (``admission_cancelled``, with the idempotency record in one local-log
+        line); then the service's slot is free at once, and when the containers end their results are discarded and
+        the admission (or the review that started it) is refused 409 — nothing is admitted from it."""
+        a = self._admissions[adm]
+        op = Op(self, f"admission-cancel|{adm}|{request_id}", caller, adm)
+        eid = op.record(derived_id("acx", adm, request_id), "admission_cancelled", caller, adm,
+                        {"admission_id": adm, "service": a["service"], "review_of": a.get("review_of"),
+                         "admission_request_id": a["request_id"], "request_id": request_id, "facts_sha256": facts,
+                         "reason_sha256": sha_text(body["reason"])},
+                        f"Pending admission cancelled ({a['service']})")
+        resp = self._stamp({"run_id": adm, "status": "cancelled", "request_id": request_id, "facts_sha256": facts,
+                            "ledger_event_id": eid})
+        self._idem_add(op, key, h, resp)
+        self._commit(op)
+        self._admissions.pop(adm, None)            # the slot is free now
+        self._cancelled_admissions.add(adm)
+        return resp
 
     # ================================================================== audit, reconcile, founder refusals
 

@@ -42,16 +42,46 @@ The report (``O_CREAT|O_EXCL|O_NOFOLLOW``, 0600, written only after the function
 nonce; the exit code must agree with it (0 pass, 1 fail, 3 runner_dependent); anything else is ``unknown`` for the
 engine. A source module that ends the process (``os._exit(0)``) leaves no report: ``unknown``, never ``pass``.
 
+Wave 24 (E4, AEGIS N23-D-3): ``side_of`` IS the engine's classification. ``path_class`` below is the one function
+that sorts a path of the service into ``src`` / ``test`` / ``test_infra``; the engine's ``runner.classify_paths``
+loads it from this (hash-pinned) file, and the request carries the seed's ``test_file_globs`` and
+``test_infra_globs``, so the two can never disagree (before, a source module under ``src/<pkg>/tests/`` was ``src`` to
+the engine and ``test`` here: its pytest import made the TEST "runner-dependent"). A ``SkipTest`` (or any exception
+named ``Skipped``/``SkipTest``) is the test skipping itself only when it came from the test side: the frame that
+built it AND the innermost service frame it was raised through are both test-side; from a source (or unknown) frame
+the verdict is ``fail`` (``skip_from`` in the report).
+
 Residual (stated, ADR 0011): this is a same-process, same-uid run. Code under test can still tell "not
 production" from other signals (``sys.flags.isolated``, the test module present in ``sys.modules``, walking the
 frames to this runner) — ``src_content_deny`` refuses the cheap spellings of those in a changed source file; a
 determined forgery that walks the frames to the nonce is the same residual as the pytest plugin's.
 """
 
+import fnmatch
 import os
 import sys
 
 _EXIT = {"pass": 0, "fail": 1, "runner_dependent": 3, "unknown": 4}
+
+
+def _glob_match(rel, g):
+    """fnmatch where ``**/`` also matches zero directories (``tests/**/*.rs`` matches ``tests/it.rs``)."""
+    return fnmatch.fnmatch(rel, g) or ("**/" in g and fnmatch.fnmatch(rel, g.replace("**/", "")))
+
+
+def path_class(rel, test_file_globs, test_infra_globs):
+    """THE classification of a path relative to the service directory (wave 24, E4): ``test_infra`` if it matches a
+    test-infrastructure glob (the path, or its file name), else ``test`` if it matches a test-file glob (the path;
+    a glob without ``/`` also by file name), else ``src``. The engine (``runner.classify_paths``) and this runner's
+    ``side_of`` both call this function — one source of truth, hash-pinned with this file."""
+    base = rel.rsplit("/", 1)[-1]
+    for g in test_infra_globs:
+        if _glob_match(rel, g) or fnmatch.fnmatch(base, g):
+            return "test_infra"
+    for g in test_file_globs:
+        if _glob_match(rel, g) or ("/" not in g and fnmatch.fnmatch(base, g)):
+            return "test"
+    return "src"
 _SCRUB_EXACT = ("CI", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER", "RUN_ID", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE",
                 "JENKINS_URL", "TEAMCITY_VERSION", "TF_BUILD")
 _SCRUB_PREFIX = ("PYTEST", "TEST", "_PYTEST", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PYTHONUSERBASE")
@@ -103,7 +133,8 @@ def _stage2(fd):
     os.close(fd)
     req = json.loads(b"".join(chunks).decode("utf-8"))
     nonce, report = req["nonce"], req["report"]
-    state = {"blocked": [], "dropped": [], "from": [], "service_dir": None, "test_file": None}
+    test_globs, infra_globs = list(req.get("test_file_globs") or []), list(req.get("test_infra_globs") or [])
+    state = {"blocked": [], "dropped": [], "from": [], "service_dir": None, "test_file": None, "skips": []}
     here = os.path.realpath(__file__)
     importlib_dir = os.path.dirname(os.path.realpath(importlib.__file__))
 
@@ -126,18 +157,54 @@ def _stage2(fd):
         return ""
 
     def side_of(real):
+        """``test`` for the test file and any path ``path_class`` calls test or test infrastructure, ``src`` for any
+        other file of the service (and, fail closed, for exec'd text), ``lib`` outside the service."""
         sd, tf = state["service_dir"], state["test_file"]
         if real.startswith("<"):
             return "src", real[:80]           # fail closed: an import from exec'd text never counts as the test's
         if not real or not sd or not (real == sd or real.startswith(sd + os.sep)):
             return "lib", os.path.basename(real)
-        rel = os.path.relpath(real, sd)
-        parts = rel.split(os.sep)
-        base = parts[-1]
-        if (real == tf or base == "conftest.py" or any(p in ("tests", "test") for p in parts[:-1])
-                or base.startswith("test_") or base.endswith("_test.py")):
+        rel = os.path.relpath(real, sd).replace(os.sep, "/")
+        if real == tf or path_class(rel, test_globs, infra_globs) != "src":
             return "test", rel
         return "src", rel
+
+    def service_side(frames):
+        """The side of the innermost frame (of ``frames``, outermost first) that is a file of the service, or None."""
+        for fn in reversed(frames):
+            if fn.startswith("<") and not fn.startswith(("<frozen ", "<builtin")):
+                return side_of(fn)
+            if not fn.startswith("<"):
+                real = os.path.realpath(fn)
+                sd = state["service_dir"]
+                if sd and (real == sd or real.startswith(sd + os.sep)):
+                    return side_of(real)
+        return None
+
+    # wave 24 (E4): where every SkipTest is BUILT (a subclass that never calls this __init__ has no record: fail closed)
+    def _skip_init(self, *args, **kwargs):
+        frames, f = [], sys._getframe(1)
+        while f is not None:
+            frames.append(f.f_code.co_filename)
+            f = f.f_back
+        self._zbm_built = service_side(list(reversed(frames)))
+        state["skips"].append(self._zbm_built)
+        Exception.__init__(self, *args, **kwargs)
+
+    unittest.SkipTest.__init__ = _skip_init
+
+    def skip_side(exc):
+        """``test`` only when the skip was built AND raised through the test side; else the side to blame."""
+        built = getattr(exc, "_zbm_built", None)
+        frames, tb = [], exc.__traceback__
+        while tb is not None:
+            frames.append(tb.tb_frame.f_code.co_filename)
+            tb = tb.tb_next
+        raised = service_side(frames)
+        for side in (built, raised):
+            if side is None or side[0] != "test":
+                return side or ("unknown", "")
+        return built
 
     class _Block(importlib.abc.MetaPathFinder):
         def find_spec(self, name, path=None, target=None):
@@ -246,6 +313,11 @@ def _stage2(fd):
             except BaseException as exc:  # noqa: BLE001
                 finish(*classify(exc, "the unittest case"), **info)
             if result.skipped:
+                built = [b for b in state["skips"] if b is None or b[0] != "test"]
+                if built or not state["skips"]:
+                    side, where = (built[0] if built and built[0] else ("unknown", ""))
+                    finish("fail", f"the unittest case was skipped from a {side} frame ({where}), not by the test",
+                           skip_from={"side": side, "file": where[:200]}, **info)
                 finish("runner_dependent", "the unittest case was skipped", **info)
             problems = result.errors + result.failures
             if any("RunnerDependent" in tb for _, tb in problems):
@@ -277,8 +349,12 @@ def _stage2(fd):
     try:
         fn()
     except BaseException as exc:  # noqa: BLE001 - SystemExit / KeyboardInterrupt from the code under test fail the test
-        if isinstance(exc, unittest.SkipTest):
-            finish("runner_dependent", "the test skipped itself", **info)
+        if isinstance(exc, unittest.SkipTest) or type(exc).__name__ in ("Skipped", "SkipTest"):
+            side, where = skip_side(exc)
+            if side == "test":
+                finish("runner_dependent", "the test skipped itself", **info)
+            finish("fail", f"the test was skipped from a {side} frame ({where}), not by the test",
+                   skip_from={"side": side, "file": where[:200]}, **info)
         verdict, why = classify(exc, "the test")
         finish(verdict, why if verdict == "runner_dependent" or blocking(exc) else f"the test raised {type(exc).__name__}", **info)
     finish("pass", "the test function returned", **info)

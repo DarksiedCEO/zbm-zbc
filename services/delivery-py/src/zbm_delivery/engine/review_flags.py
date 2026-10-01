@@ -1,25 +1,39 @@
 """
-Review flags (fix wave 23, founder design change D2 — "flag, don't chase", Sep 30 2026).
+Review flags (fix wave 23, founder design change D2 — "flag, don't chase", Sep 30 2026; fix wave 24, E1).
 
 Three review rounds (20-22) showed that the engine cannot win an arms race against source code that detects it is under
 test: every detector the engine learned to defeat (pytest in ``sys.modules``, then the environment, then ``test_``
 modules, ``argv``, ``sys.flags``) was replaced by the next one. Detection stays as a cheap layer (``src_content_deny``,
-the standalone re-run), but the engine's claim no longer rests on it. Instead, every line a fix ADDS to a SOURCE file
-(never a test file) that contains a construct able to observe the execution context becomes a review flag — file,
-line, the construct, the reason — shown at the top of the report above every "passed" line, recorded on the ledger
-(``review_flags_recorded``), and a review that accepts the finding must name each flag id in ``flags_addressed``.
+the standalone re-run), but the engine's claim no longer rests on it. Every line a fix ADDS to a SOURCE file (never a
+test file) that contains one of the spellings below becomes a review flag — file, line, the construct, the reason —
+shown at the top of the report, recorded on the ledger (``review_flags_recorded``); a review that accepts the finding
+must carry a note per flag id and the hash of the full source diff it read (wave 24, E2).
 
-The list is the founder's (D2), no wider: Python ``sys.modules``, ``sys.argv``, ``sys.flags``, ``sys._getframe``,
-``inspect``, ``traceback``, ``os.environ``/``getenv``, ``__import__``/``importlib``, ``globals()``/``vars()``/
-``getattr`` on modules, ``__main__``, ``atexit``, ``signal``, ``threading.enumerate``, ``gc.get_objects``,
-``builtins``, string concatenation used to form identifiers; and the Go / Rust / Node equivalents (``os.Args``,
-``os.Getenv``, ``testing.Testing()``, ``cfg!(test)``, ``std::env``, ``process.argv``, ``process.env``,
-``require.main``). A flag is not a verdict: it tells the reviewer where to look. It over-flags on purpose (a
-``signal`` or ``__main__`` in honest code is flagged too); it cannot under-flag a construct that is spelled out, and a
-construct reached WITHOUT any of these spellings (a module object passed in from elsewhere, a C extension) is not
-flagged — stated in ADR 0011.
+Wave 24 (E1, the lead's principle): this is a SPELLING list. It flags the spellings below and claims nothing about
+anything else: absence of flags proves nothing, and the report says so above the flags. What carries weight is a
+reviewer who read the entire source diff (embedded in the report, bound by ``src_diff_sha256``). Known residual —
+ways to observe the execution context this list does NOT spell, stated so nobody reads an empty list as a clean diff:
+a module object reached without an import the scanner can read (passed in as an argument, ``type(x)``, ``__loader__``/
+``__spec__``, a function's ``__globals__``, a frame from an exception or a generator); bracket or attribute access
+built from pieces the patterns do not cover; exec/eval of encoded text (flagged as exec/eval of a non-literal, but
+what the text does is not decoded); renamed or re-exported modules (a local module that re-exports ``sys``); file
+and /proc probes whose path is built at run time, filesystem probes for ``conftest.py``/``tests`` under a computed
+name, the process tree (``ps``), sockets, timing, ctypes and C extensions; and other languages beyond the few Go,
+Rust and Node spellings below (any other language: none).
 
-Pure functions: ``scan`` reads a unified diff; ``number`` assigns the ids (``<finding>-F001`` …).
+The spellings. Python: ``sys.modules``, ``sys.argv``, ``sys.flags``, ``sys._getframe``, ``inspect``, ``traceback``,
+``os.environ``/``getenv``, ``__import__``/``importlib``, ``globals()``/``vars()``/``getattr`` on modules, ``__main__``,
+``atexit``, ``signal``, ``threading.enumerate``, ``gc.get_objects``, ``builtins``, string concatenation used to form
+identifiers; and (wave 24, cheap and sound for what they spell) the listed modules through an alias (``import sys as
+s``, ``from sys import modules as m``: the alias's uses read as the module's) or a star import (``from sys import *``,
+flagged itself), ``eval``/``exec``/``compile`` called on anything but a string literal, ``/proc`` path literals,
+string literals naming ``conftest``/``pytest``/``test``, and an import of ``pytest``/``_pytest``/``unittest`` in a
+source file (also refused by ``src_content_deny``). Go / Rust / Node: ``os.Args``, ``os.Getenv``,
+``testing.Testing()``, ``cfg!(test)``, ``std::env``, ``process.argv``, ``process.env``, ``require.main`` and the few
+neighbours in ``RULES``. A flag is not a verdict: it tells the reviewer where to look, and it over-flags on purpose.
+
+Pure functions: ``scan`` reads a unified diff (and, when given, each file's new text, so an alias bound on an
+unchanged line is known); ``number`` assigns the ids (``<finding>-F001`` …).
 """
 
 from __future__ import annotations
@@ -113,6 +127,77 @@ RULES: dict[str, list[tuple[str, re.Pattern, str]]] = {
 _GETATTR = re.compile(r"\b(?:get|has|set|del)attr\s*\(\s*(__import__\s*\(|[A-Za-z_][A-Za-z0-9_.]*)")
 _PY_IMPORT = re.compile(r"^\s*import\s+(.+)$|^\s*from\s+[A-Za-z0-9_.]+\s+import\s+(.+)$")
 
+# wave 24 (E1): aliases of the listed modules, star imports, eval/exec/compile of a non-literal, /proc and
+# test-context literals, test-framework imports — cheap, and sound for what they spell (nothing more is claimed)
+_ALIAS_IMPORT = re.compile(r"^\s*import\s+(.+)$")
+_FROM_IMPORT = re.compile(r"^\s*from\s+([A-Za-z0-9_.]+)\s+import\s+\(?([^#)]*)\)?\s*$")
+STAR = "star import of a listed module"
+EVAL = "eval/exec/compile of a non-literal"
+PROC = "/proc path literal"
+TESTLIT = "test-context string literal"
+FRAMEWORK = "test framework import"
+# a call of the builtin (not a method: `re.compile(p)` is not it) whose first argument is not a string literal
+_EVAL_CALL = re.compile(r"""(?<![\w.])(?:eval|exec|compile)\s*\(\s*(?![rRbBuUfF]{0,2}['"])""")
+_STR_LIT = re.compile(r"""[rRbBuUfF]{0,2}('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`[^`\n]*`)""")
+_TEST_WORD = re.compile(r"(?i)conftest|pytest|(?<![a-z])test")
+_PROC_WORD = re.compile(r"/proc\b")
+_FRAMEWORK_IMPORT = re.compile(r"^\s*(?:import\s+[^#\n]*?(?<![\w.])(?:pytest|_pytest|unittest)\b|"
+                               r"from\s+(?:pytest|_pytest|unittest)\b)")
+
+
+def _py_aliases(lines: list[str]) -> dict[str, str]:
+    """{local name: listed module, or module.attr} bound by ``import m as a`` or ``from m import x [as y]`` where m
+    is one of the listed modules (wave 24, E1)."""
+    out: dict[str, str] = {}
+    for ln in lines:
+        code = ln.split("#", 1)[0]
+        m = _FROM_IMPORT.match(code)
+        if m:
+            if m.group(1).split(".")[0] in _PY_MODULES:
+                for part in m.group(2).split(","):
+                    name, _, alias = part.strip().partition(" as ")
+                    name = name.strip()
+                    if name and name != "*":
+                        out[(alias or name).strip()] = f"{m.group(1)}.{name}"
+            continue
+        m = _ALIAS_IMPORT.match(code)
+        if m:
+            for part in m.group(1).split(","):
+                name, _, alias = part.strip().partition(" as ")
+                name = name.strip()
+                if alias and name.split(".")[0] in _PY_MODULES:
+                    out[alias.strip()] = name
+    return out
+
+
+def _dealias(text: str, aliases: dict[str, str]) -> str:
+    """``text`` with every alias of a listed module written as what it names (``_s.modules`` → ``sys.modules``)."""
+    for alias, target in aliases.items():
+        if alias != target:
+            text = re.sub(rf"(?<![\w.]){re.escape(alias)}(?!\w)", target, text)
+    return text
+
+
+def _context_lines(diff_text: str) -> dict[str, list[str]]:
+    """{repo path: the context and added lines a diff shows of the new file} (used when no full text is given)."""
+    out: dict[str, list[str]] = {}
+    cur: Optional[str] = None
+    in_hunk = False
+    for ln in diff_text.splitlines():
+        if ln.startswith("diff --git "):
+            cur, in_hunk = None, False
+            continue
+        if not in_hunk and ln.startswith("+++ "):
+            p = ln[4:].strip()
+            cur = (p[2:] if p.startswith("b/") else p) if p != "/dev/null" else None
+            continue
+        if ln.startswith("@@ "):
+            in_hunk = True
+            continue
+        if in_hunk and cur is not None and (ln.startswith("+") or ln.startswith(" ")):
+            out.setdefault(cur, []).append(ln[1:])
+    return out
+
 
 def _py_module_names(lines: list[str]) -> set[str]:
     """Names the added lines of one Python file bind by ``import`` (``import a.b as c`` → ``c``; ``import a.b`` →
@@ -181,21 +266,46 @@ def _snippet(text: str) -> str:
     return s if len(s) <= SNIPPET_MAX else s[:SNIPPET_MAX - 1] + "…"
 
 
-def scan(diff_text: str, service: str, *, is_test: Callable[[str], bool]) -> list[dict]:
+def scan(diff_text: str, service: str, *, is_test: Callable[[str], bool],
+         file_text: Optional[Callable[[str], Optional[str]]] = None) -> list[dict]:
     """Every flag of the lines ``diff_text`` adds to a source file of ``services/<service>/`` (a file ``is_test``
-    says is a test — or test infrastructure — is never scanned). Unnumbered; ``number`` gives the ids."""
+    says is a test — or test infrastructure — is never scanned). ``file_text(path)``, when given, is the file's new
+    text, so an alias bound on an unchanged line is known too (wave 24); without it, the lines the diff shows.
+    Unnumbered; ``number`` gives the ids. A spelling list: an empty result says nothing about the diff."""
     prefix = f"services/{service}/"
     flags: list[dict] = []
+    shown = _context_lines(diff_text)
     for path, lines in sorted(added_lines(diff_text).items()):
         lang = _lang(path)
         if lang is None or not path.startswith(prefix) or is_test(path):
             continue
         modules = _py_module_names([t for _, t in lines]) if lang == "python" else set()
+        aliases: dict[str, str] = {}
+        if lang == "python":
+            whole = file_text(path) if file_text is not None else None
+            aliases = _py_aliases(whole.splitlines() if whole is not None else shown.get(path, [t for _, t in lines]))
+            modules |= set(aliases)
         for no, text in lines:
             hits: list[tuple[str, str]] = []
+            plain = _dealias(text, aliases) if aliases else text
             for construct, rx, reason in RULES[lang]:
-                if rx.search(text):
+                if rx.search(text) or rx.search(plain):
                     hits.append((construct, reason))
+            if lang == "python":
+                code = text.split("#", 1)[0]
+                m = _FROM_IMPORT.match(code)
+                if m and m.group(1).split(".")[0] in _PY_MODULES and m.group(2).strip() == "*":
+                    hits.append((STAR, "imports every name of a listed module unqualified (its uses cannot be read "
+                                       "as that module's)"))
+                if _EVAL_CALL.search(code):
+                    hits.append((EVAL, "runs code built at run time (the engine does not decode what it runs)"))
+                if _FRAMEWORK_IMPORT.search(code):
+                    hits.append((FRAMEWORK, "a source file imports a test framework (production never needs it)"))
+            for lit in _STR_LIT.findall(text):
+                if _PROC_WORD.search(lit):
+                    hits.append((PROC, "names a /proc path (the process table, its own or another process's state)"))
+                if _TEST_WORD.search(lit):
+                    hits.append((TESTLIT, "a string naming a test, a test runner or conftest (a name it may look for)"))
             if lang == "python":
                 for m in _GETATTR.finditer(text):
                     recv = m.group(1)
@@ -220,6 +330,15 @@ def number(flags: list[dict], finding_id: str) -> list[dict]:
     for i, fl in enumerate(sorted(flags, key=lambda f: (f["file"], f["line"], f["construct"])), start=1):
         out.append({"id": f"{finding_id}-F{i:03d}", "finding_id": finding_id, **fl})
     return out
+
+
+def def_line(text: Optional[str], name: str) -> int:
+    """The line of ``def <name>`` (the last ``::`` part, without a ``[param]``) in a test file's text; 1 when absent."""
+    leaf = name.split("::")[-1].split("[", 1)[0]
+    for i, ln in enumerate((text or "").splitlines(), start=1):
+        if re.match(rf"\s*(?:async\s+)?def\s+{re.escape(leaf)}\s*\(", ln):
+            return i
+    return 1
 
 
 def runner_dependent_flag(finding_id: str, target: str, file: str, line: int, why: str) -> dict:

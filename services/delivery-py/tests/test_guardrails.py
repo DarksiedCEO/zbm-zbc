@@ -346,8 +346,10 @@ def test_g14_every_runner_argv_is_seeded_and_every_git_call_is_allowlisted():
         git_ok = {"rev-parse", "merge-base", "for-each-ref", "worktree", "status", "diff", "log", "add", "commit", "stash",
                   "remote", "archive", "show"}                # remote (R4 listing), archive/show (R1 verification checkouts)
         for argv in h.git.calls:
-            assert argv[:2] == ["git", "-c"] and argv[2].startswith("core.hooksPath=") and argv[3:6] == ["-c", "core.fsmonitor=false", "-C"], argv
-            argv = argv[4:]                                       # wave 20 R11: the isolation -c pair precedes -C
+            # wave 20 R11: the isolation -c pairs precede -C; wave 24 (E3): rename detection off on every command
+            assert argv[:2] == ["git", "-c"] and argv[2].startswith("core.hooksPath=") and argv[3:10] == [
+                "-c", "core.fsmonitor=false", "-c", "diff.renames=false", "-c", "status.renames=false", "-C"], argv
+            argv = argv[8:]
             assert argv[3] in git_ok, argv
             if argv[3] == "stash":
                 assert argv[4] in ("push", "pop")            # the one revert-check form; never a remote push

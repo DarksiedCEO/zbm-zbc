@@ -57,8 +57,34 @@ PLUGIN_SHA256 = "05ab874b93ce2a69b543c580bce4efd8ffdc22622552d43ac938f5e67040d84
 # wave 22 (G1(b), N21-D-1): the runner-independent re-execution of a finding's reproduction (read-only at /mnt/dlv)
 STANDALONE_NAME = "zbm_standalone_runner.py"
 STANDALONE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adapters", "tools", STANDALONE_NAME)
-STANDALONE_SHA256 = "40c50dea1ce106c49021c18cb034c2ccc8a7fb745c5c0300fa73ded0d6eeb5b8"
+STANDALONE_SHA256 = "ce227a83fc4b297a12cfa8e98d6510a8e04a17e70d8919362300a11ff896907d"
 STANDALONE_EXIT = {0: "pass", 1: "fail", 3: "runner_dependent"}
+
+
+def _load_path_class():
+    """Wave 24 (E4, N23-D-3): THE src/test/test-infra classification lives in the pinned standalone runner
+    (``path_class``) — the engine's ``classify_paths`` and the runner's ``side_of`` call the same function. Loaded
+    here from that file, after its pin is checked (a modified runner is never loaded)."""
+    import importlib.abc
+    import importlib.util
+    with open(STANDALONE_PATH, "rb") as fh:
+        data = fh.read()
+    if hashlib.sha256(data).hexdigest() != STANDALONE_SHA256:
+        raise RunnerRefused("adapters/tools/zbm_standalone_runner.py does not match its pinned hash (G1)")
+
+    class _Checked(importlib.abc.SourceLoader):
+        """Loads the bytes just checked against the pin — never a second read of the file (no TOCTOU)."""
+
+        def get_filename(self, fullname: str) -> str:
+            return STANDALONE_PATH
+
+        def get_data(self, path: str) -> bytes:
+            return data
+
+    spec = importlib.util.spec_from_loader("zbm_standalone_runner", _Checked(), origin=STANDALONE_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.path_class
 # the names a scrubbed-environment re-run unsets for the toolchains without a standalone runner (go, cargo, node):
 # every name the container env file can carry that says "a CI/test run", plus the common CI markers
 SCRUB_ENV_NAMES = ("CI", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER", "RUN_ID", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE",
@@ -67,6 +93,9 @@ SCRUB_ENV_NAMES = ("CI", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER", "RUN_ID", "GI
 
 class RunnerRefused(RuntimeError):
     pass
+
+
+path_class = _load_path_class()
 
 
 @dataclass
@@ -137,8 +166,7 @@ def reproduction_problem(seed: dict, text: str, exists: Callable[[str], bool],
     path, _, name = node.partition("::")
     if not path.endswith(REPRO_SUFFIXES.get(fw_name, ())):
         return node, f"{path} is not a {fw_name} test source ({', '.join(REPRO_SUFFIXES.get(fw_name, ()))})"
-    base = posixpath.basename(path)
-    if any(TestRunner._match(path, g) or fnmatch.fnmatch(base, g) for g in fw.get("test_infra_globs", [])):
+    if path_class(path, fw.get("test_file_globs", []), fw.get("test_infra_globs", [])) == "test_infra":
         return node, f"{path} is test infrastructure, not a test"
     body = read(path)
     if body is None:
@@ -403,7 +431,10 @@ class TestRunner:  # noqa: N801
         report = f"{self.engine_dir}/solo-{secrets.token_hex(8)}.json"
         path, _, name = target.partition("::")
         request = {"nonce": nonce, "report": report, "service_dir": cwd, "paths": self._standalone_paths(cwd),
-                   "test_file": posixpath.join(cwd, path), "test": name}
+                   "test_file": posixpath.join(cwd, path), "test": name,
+                   # wave 24 (E4): the engine's own classification globs, so side_of == classify_paths
+                   "test_file_globs": list(self.fw.get("test_file_globs", [])),
+                   "test_infra_globs": list(self.fw.get("test_infra_globs", []))}
         argv = ["python3", "-I", script]
         r: ExecResult = box.exec_argv(argv, cwd=cwd, env={}, timeout=self.cmd_timeout_s,
                                       stdin=json.dumps(request).encode("utf-8"))
@@ -492,32 +523,22 @@ class TestRunner:  # noqa: N801
         """fnmatch where ``**/`` also matches zero directories (``tests/**/*.rs`` matches ``tests/it.rs``)."""
         return fnmatch.fnmatch(rel, g) or ("**/" in g and fnmatch.fnmatch(rel, g.replace("**/", "")))
 
+    def path_class(self, path: str) -> str:
+        """``src`` / ``test`` / ``test_infra`` for a repo or service-relative path — ``path_class`` of the pinned
+        standalone runner (wave 24, E4: the one classification the engine and the runner share)."""
+        return path_class(self._rel(path), self.fw.get("test_file_globs", []), self.fw.get("test_infra_globs", []))
+
     def is_test_infra_path(self, path: str) -> bool:
-        rel = self._rel(path)
-        for g in self.fw.get("test_infra_globs", []):
-            if self._match(rel, g) or fnmatch.fnmatch(posixpath.basename(rel), g):
-                return True
-        return False
+        return self.path_class(path) == "test_infra"
 
     def is_test_path(self, path: str) -> bool:
-        rel = self._rel(path)
-        if self.is_test_infra_path(path):
-            return False
-        for g in self.fw.get("test_file_globs", []):
-            if self._match(rel, g) or ("/" not in g and fnmatch.fnmatch(os.path.basename(rel), g)):
-                return True
-        return False
+        return self.path_class(path) == "test"
 
     def classify_paths(self, paths: list[str]) -> dict[str, list[str]]:
-        """Every changed path into ``src`` / ``test`` / ``test_infra`` (R1)."""
+        """Every changed path into ``src`` / ``test`` / ``test_infra`` (R1), by ``path_class``."""
         out: dict[str, list[str]] = {"src": [], "test": [], "test_infra": []}
         for p in sorted(set(paths)):
-            if self.is_test_infra_path(p):
-                out["test_infra"].append(p)
-            elif self.is_test_path(p):
-                out["test"].append(p)
-            else:
-                out["src"].append(p)
+            out[self.path_class(p)].append(p)
         return out
 
     def denied_src_content(self, text: str) -> Optional[str]:

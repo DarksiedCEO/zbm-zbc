@@ -151,6 +151,18 @@ def make_repo(tmp: str, service: str = "toy-py", pct_repro: bool = True, extra_f
     return repo, git("rev-parse", "HEAD", cwd=repo)
 
 
+def child_python_args() -> list[str]:
+    """Wave 24 (E6, N23-D-9): the interpreter options every Python child process of the suite that runs the SERVICE
+    gets — ``-B`` (PYTHONDONTWRITEBYTECODE: a test child never writes ``__pycache__`` into the source tree) and
+    ``-X pycache_prefix=…`` when the parent has PYTHONPYCACHEPREFIX. As options, not environment variables: the
+    service refuses to start with any environment name outside DLV_ENV_ALLOWLIST (spec C.1.7), and these two are
+    not on it."""
+    args = ["-B"]
+    if os.environ.get("PYTHONPYCACHEPREFIX"):
+        args += ["-X", f"pycache_prefix={os.environ['PYTHONPYCACHEPREFIX']}"]
+    return args
+
+
 def base_env(tmp: str, repo: str, *, data_dir: bool = True, llm: str = "fake", extra: Optional[dict] = None) -> dict:
     env = {
         "DLV_SERVICE_TOKEN": SERVICE_TOKEN, "DLV_CALLER_TOKENS": json.dumps(CALLERS), "DLV_ANDRE_APPROVAL_TOKEN": ANDRE_TOKEN,
@@ -218,10 +230,16 @@ def review_body(h, run_id: str, verdict: str = "pass", reopened=(), new_findings
         default = RD_NOTE if f["state"] == "needs_review_runner_dependent" else ""
         fv.append({"finding_id": fid, "verdict": "reopen" if fid in reopened else "accept", "note": notes.get(fid, default)})
     if flags is None:
-        flags = sorted({fl["id"] for f in fs for fl in (f.get("review_flags") or [])})
-    return {"request_id": request_id or rid(), "review_ref": "review-test", "sha256": "b" * 64, "verdict": verdict,
+        # wave 24 (E2): a note per flag (distinct, >= 20 characters, saying where the reviewer looked)
+        flags = [{"flag_id": fl["id"], "note": f"the reviewer read {fl['id']} at {fl['file']}:{fl['line']} in the diff"}
+                 for f in fs for fl in (f.get("review_flags") or [])]
+    body = {"request_id": request_id or rid(), "review_ref": "review-test", "sha256": "b" * 64, "verdict": verdict,
             "reopened": list(reopened), "new_findings": list(new_findings), "finding_verdicts": fv,
             "flags_addressed": list(flags)}
+    src = (h.run(run_id) or {}).get("src_diff_sha256")
+    if src:
+        body["src_diff_sha256"] = src          # wave 24 (E2): the hash of the complete source diff it read
+    return body
 
 
 def write_test(name: str, body: str) -> dict:
@@ -295,6 +313,24 @@ class llm_scope:
 # --- the harness ------------------------------------------------------------------------------------------------------
 
 HARNESSES: list = []   # every Harness made, in order (conftest._harness_cleanup closes and removes per test; L4)
+_OWNED_TMP: list = []  # every temp dir a Harness made in this process
+
+
+def _drop_owned_tmp() -> None:
+    """Wave 24 (E6, N23-D-9): a process that imports these helpers — a reviewer's probe, run outside pytest and its
+    conftest — removes the temp dirs its harnesses made when it exits (a restart harness reuses one while the
+    process lives, so they go at exit, not at close)."""
+    for h in list(HARNESSES):
+        try:
+            h.close()
+        except Exception:  # noqa: BLE001 - already closed, or never started
+            pass
+    for d in _OWNED_TMP:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+import atexit as _atexit  # noqa: E402
+_atexit.register(_drop_owned_tmp)
 
 
 class Harness:
@@ -305,6 +341,8 @@ class Harness:
                  pct_repro: bool = True, extra_files: Optional[dict] = None):
         self.owns_tmp = tmp is None
         self.tmp = tmp or tempfile.mkdtemp(prefix="dlv-test-")
+        if self.owns_tmp:
+            _OWNED_TMP.append(self.tmp)
         HARNESSES.append(self)
         self.service = service
         self.repo, self.base_sha = make_repo(self.tmp, service, pct_repro=pct_repro, extra_files=extra_files)

@@ -10,6 +10,9 @@ Wave 23 (founder design change D1/D2): the header says in plain words that the c
 and that the diff has not been reviewed; the engine's end state is ``candidate_passed_checks`` (never "fixed"); the
 review flags (``review_flags``: file:line, construct, reason — a runner-dependent reproduction included, D3) come
 FIRST, above every line that reports a passed check.
+
+Wave 24 (E1/E2): the flags section opens with the spelling-list warning and never says "none"; the complete source
+diff of the run follows it, with its ``src_diff_sha256`` (what an accepting review must carry).
 """
 
 from __future__ import annotations
@@ -19,6 +22,9 @@ from typing import Callable
 
 TAIL_LINES = 200
 HEADER = "Checks passed are necessary, not sufficient. This diff has not been reviewed."
+# wave 24 (E1): the flags come from a spelling list; the section says so before anything else, and never "none"
+FLAGS_OPENER = ("These flags come from a spelling list. They are an aid, not a guarantee: absence of flags proves "
+                "nothing. Read the full source diff below.")
 _BACKTICKS = re.compile(r"`+")
 
 
@@ -66,17 +72,37 @@ def _code(text: str) -> str:
 
 
 def flags_section(findings: list[dict]) -> list[str]:
-    """D2: every review flag of the run, above everything else the report says."""
-    L = ["## Review flags (read these first: a review that accepts a finding must address each id)", ""]
+    """D2: every review flag of the run, above everything else the report says. Wave 24 (E1): it opens with the
+    spelling-list warning and never says "none" — an empty list is reported as what it is, a list that matched
+    nothing, not as evidence about the diff."""
+    L = ["## Review flags (a review that accepts a finding must note each id)", "", f"**{FLAGS_OPENER}**", ""]
     flags = [fl for f in findings for fl in (f.get("review_flags") or [])]
     if not flags:
-        L.append("- none: no added source line uses a construct that can observe the execution context, and no "
-                 "reproduction is runner-dependent")
+        L.append("- (the spelling list matched no added source line and no reproduction is runner-dependent; that "
+                 "says nothing about what the diff does — read it)")
     for fl in flags:
         snip = _code(fl.get("snippet") or "")
         L.append(f"- `{fl['id']}` · `{fl['file']}:{fl['line']}` · {fl['construct']} — {fl['reason']}"
                  + (f" · {snip}" if snip else ""))
     L.append("")
+    return L
+
+
+def source_diff_section(run: dict, read_evidence: Callable[[str], str]) -> list[str]:
+    """Wave 24 (E2): the COMPLETE source diff of the run (base..last commit, every changed source file, renames and
+    moves as full additions) and its sha256 — the text a review that accepts a finding attests to having read."""
+    digest, ev = run.get("src_diff_sha256"), run.get("src_diff_evidence_id")
+    L = [f"## Source diff (complete; src_diff_sha256 `{digest}`)", "",
+         "Every source file the run changed, base `" + str(run.get("base_sha")) + "` to the last commit, in full "
+         "(rename detection off: a moved or copied file is shown as added). A review that accepts any finding must "
+         "carry this `src_diff_sha256`.", ""]
+    text = read_evidence(ev) if ev else ""
+    if not text:
+        L.append("- (no source change was committed)")
+        L.append("")
+        return L
+    fence = fence_for(text)
+    L += [fence + "diff", text.rstrip("\n"), fence, ""]
     return L
 
 
@@ -88,6 +114,7 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
              "passed. Only an AEGIS review with a verdict per finding makes a finding `accepted`.")
     L.append("")
     L += flags_section(findings)
+    L += source_diff_section(run, read_evidence)
     L.append(f"- Service: `{run['service']}` · Branch: `{run.get('branch')}` · Base: `{run['base_sha']}` ({run['base_ref']})")
     L.append(f"- Request: `{run['request_id']}` · facts_sha256 `{run['facts_sha256']}`")
     L.append(f"- Model: {run['llm']['provider']} / {run['llm']['model']}" + (" (FAKE, non-production)" if run['llm'].get('fake') else ""))

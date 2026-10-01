@@ -75,7 +75,7 @@ def compile_brief(template: str, *, run: dict, finding: dict, round_no: int, max
         "{test_argv}": " ".join(shlex.quote(a) for a in test_argv),
         "{suite_argv}": " ".join(shlex.quote(a) for a in suite_argv),
         "{repro_argv}": (" ".join(shlex.quote(a) for a in repro_argv) if repro_argv
-                         else "(none: this finding names no runnable reproduction and cannot be fixed)"),
+                         else "(none: this finding names no runnable reproduction; the engine cannot check a fix for it)"),
         "{data_block}": data_block(finding),
         "{engine_notes}": engine_notes.strip(),
     }

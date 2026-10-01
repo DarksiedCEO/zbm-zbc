@@ -61,6 +61,7 @@ from zbm_delivery.adapters.sandbox import EngineBoxNotLive, extract_tar
 from zbm_delivery.engine import brief as B
 from zbm_delivery.engine import parsers, report, states
 from zbm_delivery.engine import review_flags as RF
+from zbm_delivery.engine import srcdiff
 from zbm_delivery.errors import Unavailable
 from zbm_delivery.gitport import GitPort, GitRefused
 from zbm_delivery.policy import WORKSPACE
@@ -338,7 +339,7 @@ class FixEngine:
                 raise RunEnded()
             self._check_live(run_id, interrupt)
             self.svc.run_transition(run_id, "reporting", "fix_run_reporting", {"run_id": run_id}, f"Reporting ({run_id})")
-            self._report(run_id)
+            self._report(run_id, ctx)
         except RunEnded:
             pass
         except Unavailable as exc:
@@ -1043,7 +1044,7 @@ class FixEngine:
         if remaining:
             self.svc.finding_transition(run_id, fid, "red", {}, [])
             return ("The whole suite is not green after your fix: %s. Every failure — including one you did not cause "
-                    "— blocks `fixed` until green. Fix and reply `FIXED`." % ", ".join(remaining[:20]))
+                    "— blocks `candidate_passed_checks` until green. Fix and reply `FIXED`." % ", ".join(remaining[:20]))
         # src-only check: every baseline failure this fix claims must pass on HEAD + the source changes ALONE (no test
         # file of the agent's, so an in-process patch from a test module cannot be what made it pass)
         claimed = sorted(n for n in ctx.current.failed_names if n not in allowed and counts.cases.get(n) == "pass")
@@ -1173,7 +1174,8 @@ class FixEngine:
         run_id, fid, service = run["run_id"], f["finding_id"], run["service"]
         files = sorted(RF.added_lines(diff_text))
         src = set(runner.classify_paths(files)["src"])
-        flags = RF.number(RF.scan(diff_text, service, is_test=lambda p: p not in src), fid)
+        flags = RF.number(RF.scan(diff_text, service, is_test=lambda p: p not in src,
+                                  file_text=lambda p: self.git.show_file(sha, p, ctx.worktree, run_id)), fid)
         if solo.get("outcome") == "runner_dependent":
             target = solo.get("target") or ""
             path, _, name = target.partition("::")
@@ -1197,11 +1199,7 @@ class FixEngine:
                     text = fh.read()
             except OSError:
                 return 1
-        leaf = name.split("::")[-1].split("[", 1)[0]
-        for i, ln in enumerate(text.splitlines(), start=1):
-            if re.match(rf"\s*(?:async\s+)?def\s+{re.escape(leaf)}\s*\(", ln):
-                return i
-        return 1
+        return RF.def_line(text, name)
 
     def _standalone_phase(self, ctx: "_RunCtx", f: dict, repro: str, src: list[str], red_file: str,
                           rounds: int) -> Optional[str]:
@@ -1216,10 +1214,13 @@ class FixEngine:
         the verification checkout → round failed ``fix_imports_test_runner``; verification pass + reverted fail →
         ``confirmed``; either ``unknown`` → round failed ``standalone_unknown``; verification ``fail`` → round failed
         ``fix_depends_on_the_test_runner``; reverted ``pass`` → round failed
-        ``reproduction_passes_without_fix_outside_the_runner``; what is left has a ``runner_dependent`` verdict — the
-        TEST itself cannot run outside pytest (the runner only returns it for a test-side cause) → outcome
+        ``reproduction_passes_without_fix_outside_the_runner``; wave 24 (E4): verification ``runner_dependent`` while
+        the reverted checkout EXECUTED (``fail``: the test runs outside the runner) → round failed
+        ``fix_depends_on_the_test_runner`` (a skip raised from a source frame is a ``fail`` in the runner itself);
+        what is left has a ``runner_dependent`` verdict on BOTH checkouts — the TEST itself cannot run outside pytest
+        (the runner only returns it for a test-side cause, classified by the engine's own ``path_class``) → outcome
         ``runner_dependent``: the finding ends ``needs_review_runner_dependent``, flagged ``<finding>-RD``, and only a
-        review with a per-finding note accepts it. Returns the note for the next turn when the round fails, else
+        review with a note per flag accepts it. Returns the note for the next turn when the round fails, else
         None."""
         run, runner = ctx.run, ctx.runner
         run_id, fid = run["run_id"], f["finding_id"]
@@ -1243,6 +1244,10 @@ class FixEngine:
             outcome, why = "runner_detected", "fix_depends_on_the_test_runner"
         elif rv == "pass":
             outcome, why = "runner_detected", "reproduction_passes_without_fix_outside_the_runner"
+        elif v == "runner_dependent" and rv == "fail":
+            # wave 24 (E4, N23-D-3): the reverted checkout's standalone run EXECUTED the test (it returned a verdict),
+            # so the test runs outside the runner; that it cannot with the fix is the fix's doing
+            outcome, why = "runner_detected", "fix_depends_on_the_test_runner"
         elif "runner_dependent" in (v, rv):
             outcome, why = "runner_dependent", None
         else:
@@ -1400,11 +1405,29 @@ class FixEngine:
 
     # ================================================================ report
 
-    def _report(self, run_id: str) -> None:
+    def _report(self, run_id: str, ctx: "_RunCtx") -> None:
+        """Wave 24 (E2): the complete source diff of the run (base..last commit) is recorded first
+        (``src_diff_recorded``: its sha256 and evidence id), then the report — which embeds it — is written."""
         self._check_live(run_id)
+        run = self.svc.run_get(run_id)
+        head = run["commits"][-1]["sha"] if run.get("commits") else run["base_sha"]
+        text, paths = srcdiff.src_diff(self.git, ctx.runner.fw, run["service"], ctx.worktree, run["base_sha"], head, run_id)
+        ev_src, digest, problem = srcdiff.record(self.svc, run_id, text, paths, run["base_sha"], head, "src_diff_recorded")
+        if problem:
+            self._fail(run_id, R.item("EVIDENCE_UNAVAILABLE", problem))
+            raise RunEnded()
+        self.svc.run_update(run_id, "src_diff_recorded", {"run_id": run_id, "src_diff_sha256": digest, "evidence_id": ev_src,
+                                                          "base_sha": run["base_sha"], "head_sha": head,
+                                                          "paths": paths[:200], "path_count": len(paths)},
+                            f"Source diff recorded ({len(paths)} file(s), {run_id})",
+                            {"src_diff_sha256": digest, "src_diff_evidence_id": ev_src})
         run = self.svc.run_get(run_id)
         findings = self.svc.findings_get(run_id)
         text = report.render(run, findings, lambda ev: self.svc.evidence_text(run_id, ev))
+        if len(text.encode("utf-8", "surrogatepass")) > srcdiff.REPORT_MAX_BYTES:
+            self._fail(run_id, R.item("EVIDENCE_UNAVAILABLE", "the report with the complete source diff does not fit one "
+                                                              "evidence file: it would be cut, so it is not written"))
+            raise RunEnded()
         ev = self.svc.evidence_put(run_id, "report", text.encode("utf-8", "surrogatepass"))
         sha = _sha_text(text)
         self.svc.run_update(run_id, "report_written", {"run_id": run_id, "report_sha256": sha, "evidence_id": ev},
