@@ -299,7 +299,12 @@ def test_slow_body_gets_408_and_the_connection_is_closed(server):
     finally:
         s.close()
     assert got.startswith(b"HTTP/1.1 408"), got[:80]
-    assert elapsed <= BODY_TIMEOUT_UNDER_TEST + SLACK_S, f"slow body held {elapsed:.1f}s"
+    # fix wave 25 (R-HYGIENE L1): was `elapsed <= BODY_TIMEOUT_UNDER_TEST + SLACK_S` (a wall-clock upper bound). The
+    # 408's detail names the rule that cut the body: only the narrowed body deadline (3 s) says "not received within
+    # 3s" — the 30 s default would say 30s, the min-rate rule "stalled ... slower than", the projection "cannot
+    # complete". The loop above gives up at BODY_TIMEOUT_UNDER_TEST + SLACK_S + 3 s, so a held body still fails.
+    assert f"not received within {BODY_TIMEOUT_UNDER_TEST:g}s".encode() in got, got[:400]
+    print(f"slow body cut after {elapsed:.1f}s (printed only)")
 
 
 def test_slow_body_the_app_never_reads_is_still_closed(server):

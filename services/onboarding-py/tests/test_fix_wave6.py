@@ -196,15 +196,17 @@ def test_n4_a_waiter_is_admitted_when_budget_frees_and_times_out_otherwise():
     time.sleep(0.15)
     assert not got  # still waiting: nothing free
     first.__exit__(None, None, None)
-    th.join(2)
-    assert got and got[0] < 0.5
+    th.join(30)
+    # fix wave 25 (R-HYGIENE L1): was `got[0] < 0.5`. Admitted, not timed out: a waiter that timed out raises
+    # ServiceBusy and appends nothing; it was still waiting before the release (above)
+    assert got
     # timeout: the budget stays taken past wait_s -> busy, and the waiter count is back to 0
     with g.hold(1000):
         t = time.monotonic()
         with pytest.raises(ServiceBusy):
             with g.hold(1):
                 pass
-        assert 0.4 <= time.monotonic() - t < 2
+        assert time.monotonic() - t >= 0.4  # fix wave 25 (R-HYGIENE L1): upper bound dropped; ServiceBusy is the proof
         assert g.waiting == 0
 
 

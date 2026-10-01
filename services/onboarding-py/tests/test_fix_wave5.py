@@ -272,7 +272,10 @@ def test_new2_queue_wait_limit_is_503_not_422():
         t = time.monotonic()
         r = c.post("/onboarding/clients/client_a/intake/facts", json=MAX_FACTS)
         assert r.status_code == 503 and "Retry-After" in r.headers, r.text
-        assert 0.25 <= time.monotonic() - t < 5
+        # fix wave 25 (R-HYGIENE L1): the wall-clock upper bound (< 5 s) is gone — the 503 itself shows the wait gave
+        # up (the budget is held for the whole test, so a wait without a limit would never answer); the lower bound
+        # shows it waited its scan_wait_seconds first (load can only lengthen it)
+        assert time.monotonic() - t >= 0.25
     finally:
         gate.release_for_test()
 
@@ -369,6 +372,30 @@ def _read_status(sock: socket.socket, timeout: float = 10) -> int:
     return int(data.split(b" ", 2)[1]) if data.startswith(b"HTTP/") else 0
 
 
+# fix wave 25 (R-HYGIENE L1): the head-deadline tests wait at most this long for the server to close the socket and no
+# longer assert `closed <= 4.5` (a wall-clock bound). The fast stack's head deadline is 2 s; the default is 10 s and
+# uvicorn's keep-alive timer starts only after a response — so a close inside this window can only be the narrowed head
+# deadline's (a server ignoring ONBOARDING_REQUEST_HEAD_TIMEOUT_SECONDS closes at 10 s: after the window).
+_HEAD_WAIT_S = 8.0
+
+
+def _server_closed_count(socks: list[socket.socket]) -> int:
+    """How many of `socks` the server has closed (EOF / reset); the sockets are left blocking."""
+    n = 0
+    for s in socks:
+        s.setblocking(False)
+        try:
+            if s.recv(1) == b"":
+                n += 1
+        except BlockingIOError:
+            pass
+        except OSError:
+            n += 1
+        finally:
+            s.setblocking(True)
+    return n
+
+
 def _closed_within(sock: socket.socket, bound: float) -> float | None:
     t0 = time.monotonic()
     while time.monotonic() - t0 < bound:
@@ -416,8 +443,9 @@ def test_new3_idle_and_partial_head_connections_are_closed(fast_stack, opening):
     with socket.create_connection(("127.0.0.1", fast_stack.port), timeout=10) as s:
         if opening:
             s.sendall(opening)
-        closed = _closed_within(s, 8)
-    assert closed is not None and closed <= 4.5, f"connection still open (opening={opening!r})"
+        closed = _closed_within(s, _HEAD_WAIT_S)
+    # fix wave 25 (R-HYGIENE L1): was `closed <= 4.5`; see _HEAD_WAIT_S
+    assert closed is not None, f"connection still open (opening={opening!r})"
 
 
 def test_new3_trickled_head_is_cut_off_at_the_deadline(fast_stack):
@@ -425,7 +453,7 @@ def test_new3_trickled_head_is_cut_off_at_the_deadline(fast_stack):
         s.sendall(b"GET /health HTTP/1.1\r\nHost: x\r\nX-Slow: ")
         t0 = time.monotonic()
         closed = None
-        while time.monotonic() - t0 < 10:
+        while time.monotonic() - t0 < _HEAD_WAIT_S:
             try:
                 s.sendall(b"a")
             except OSError:
@@ -440,17 +468,27 @@ def test_new3_trickled_head_is_cut_off_at_the_deadline(fast_stack):
                 except OSError:
                     closed = time.monotonic() - t0
                     break
-        assert closed is not None and closed <= 4.5, closed
+        assert closed is not None, closed  # fix wave 25 (R-HYGIENE L1): was `closed <= 4.5`; see _HEAD_WAIT_S
 
 
 def test_new3_trickled_body_is_answered_408_at_the_body_deadline(fast_stack):
     with socket.create_connection(("127.0.0.1", fast_stack.port), timeout=10) as s:
         s.sendall((f"POST /onboarding/clients/x/messages HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TEST_SERVICE_TOKEN}\r\n"
                    "Content-Type: application/json\r\nContent-Length: 1000\r\n\r\n{").encode())
-        t0 = time.monotonic()
-        status = _read_status(s, 8)
-        took = time.monotonic() - t0
-    assert status == 408 and took < 5, (status, took)
+        s.settimeout(_HEAD_WAIT_S)
+        raw = b""
+        try:
+            while b"refused" not in raw:  # the 408's detail ends "...; refused"
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                raw += chunk
+        except (ConnectionResetError, socket.timeout):
+            pass
+    # fix wave 25 (R-HYGIENE L1): was `status == 408 and took < 5`. The 408's detail names the deadline that fired:
+    # only the narrowed body deadline of this stack says "within 2s" (the default says 30s)
+    assert raw.startswith(b"HTTP/1.1 408"), raw[:200]
+    assert b"request body not received within 2s" in raw, raw[:400]
 
 
 def test_new3_keep_alive_and_pipelining_still_work_and_idle_keep_alive_closes(fast_stack):
@@ -484,9 +522,11 @@ def test_new3_health_stays_responsive_while_idle_sockets_are_held(fast_stack):
     socks = [socket.create_connection(("127.0.0.1", fast_stack.port), timeout=5) for _ in range(20)]
     try:
         for _ in range(3):
-            t = time.monotonic()
-            assert httpx.get(fast_stack.base + "/health", timeout=3).status_code == 200
-            assert time.monotonic() - t < 1
+            assert httpx.get(fast_stack.base + "/health", timeout=30).status_code == 200
+            # fix wave 25 (R-HYGIENE L1): was `time.monotonic() - t < 1`. Answered WHILE the idle sockets were held:
+            # right after the answer the server has not yet closed one of them (it closes them at its own 2 s head
+            # deadline) — an implementation that served /health only once they were gone fails here
+            assert _server_closed_count(socks) == 0
         time.sleep(3.5)
         still_open = 0
         for s in socks:
