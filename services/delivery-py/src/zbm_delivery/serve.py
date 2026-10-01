@@ -46,6 +46,7 @@ three chatty threads beside it, nothing when it runs alone.
 from __future__ import annotations
 
 import os
+import signal
 import sys
 
 import uvicorn
@@ -135,6 +136,16 @@ def uvicorn_kwargs() -> dict:
     }
 
 
+def _exit_on_sigterm(signum, frame) -> None:
+    """Wave 24 (E6 sweep): SIGTERM ends the process through a normal interpreter exit (status 143), so its exit
+    handlers run. uvicorn captures SIGTERM, shuts down gracefully and then RE-RAISES it with the disposition it found
+    at start; that disposition was the default one, so the process died of the signal and no ``atexit`` handler ran:
+    every stop left the process's own temp dirs (gitport's private git HOME, the in-memory home, the sandbox temp
+    base) behind in TMPDIR. A SIGTERM before uvicorn installs its own handler takes the same exit."""
+    raise SystemExit(128 + signum)
+
+
 def run(app, host: str, port: int) -> None:
     sys.setswitchinterval(SWITCH_INTERVAL_S)
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
     uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())

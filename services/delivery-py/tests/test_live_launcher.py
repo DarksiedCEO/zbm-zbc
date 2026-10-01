@@ -178,3 +178,29 @@ def test_l2_live_log_is_written(server, tmp_path):
     out.write_text("\n".join(lines) + "\n")
     print(f"live-run log: {out}")
     assert out.exists()
+
+
+def test_l2_a_sigterm_stop_leaves_no_temp_dir_of_the_service(tmp_path):
+    """Wave 24 (E6 sweep, found by the suite's /tmp check): uvicorn re-raises the SIGTERM it captured once its graceful
+    shutdown is done; with the default disposition the process then died OF the signal (-15) and no atexit handler
+    ran — every stop left the service's own temp dirs (gitport's dlv-git-*, the in-memory home, the sandbox base)
+    in TMPDIR, in production as in the suite. Now the stop is a normal exit (143): the dirs are removed."""
+    own_tmp = tmp_path / "svc-tmp"
+    own_tmp.mkdir()
+    (tmp_path / "w").mkdir()
+    proc, port, _, _ = _start(str(tmp_path / "w"), extra={"TMPDIR": str(own_tmp)})
+    try:
+        assert HTTP.get(f"http://127.0.0.1:{port}/health", timeout=5).status_code == 200
+        assert any(p.name.startswith("dlv-git-") for p in own_tmp.iterdir()), list(own_tmp.iterdir())
+    finally:
+        _stop(proc)
+    assert proc.returncode == 143, proc.returncode
+    assert sorted(p.name for p in own_tmp.iterdir()) == []
+
+
+def test_l2_service_children_get_the_suites_temp_dir():
+    """The other half: a child the suite has to SIGKILL (a hung start, say) runs no exit handler at all — its temp
+    dirs must land under the session's temp root, which the suite removes, not in the host's /tmp (TMPDIR is on
+    DLV_ENV_ALLOWLIST)."""
+    env = base_env(tempfile.mkdtemp(), "/nonexistent-repo")
+    assert env.get("TMPDIR") == tempfile.gettempdir(), env.get("TMPDIR")

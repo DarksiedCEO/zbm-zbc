@@ -1027,7 +1027,13 @@ having read the entire source diff, bound by hash.
   environment name outside `DLV_ENV_ALLOWLIST` (spec C.1.7); other children inherit the parent's environment; an
   in-memory service's scratch home is a private temp dir removed at exit (it was
   `<cwd>/.dlv-mem`); the live launcher's log goes under the session temp dir (it was `docs/evidence/dept28/_runs/`);
-  a process that imports the test helpers removes the temp dirs its harnesses made when it exits.
+  a process that imports the test helpers removes the temp dirs its harnesses made when it exits. Found by this
+  wave's full-suite /tmp check: a service stopped with SIGTERM died OF the signal (uvicorn re-raises the SIGTERM it
+  captured once its graceful shutdown is done, with the default disposition it found) and ran no exit handler, so
+  every stop — in production as in the suite — left the process's own temp dirs (gitport's `dlv-git-*`, the
+  in-memory home, the sandbox temp base) in TMPDIR (the host had > 150 `dlv-git-*` from earlier sessions). `serve.run`
+  now makes SIGTERM a normal interpreter exit (status 143): the exit handlers run. The suite's service children also
+  get the suite's TMPDIR (`helpers.base_env`), so a child the suite must SIGKILL leaves nothing in the host's temp dir.
 
 Pins after this wave: `adapters/tools/zbm_standalone_runner.py` `ce227a83fc4b297a12cfa8e98d6510a8e04a17e70d8919362300a11ff896907d`
 (`runner.STANDALONE_SHA256`), `seed/test_commands_seed.json` `897b5dd2c860bc73fd56bfeccd3260f9ad38027b69209e249b7e0001a8241310`

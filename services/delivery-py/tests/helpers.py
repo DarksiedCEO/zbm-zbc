@@ -170,6 +170,9 @@ def base_env(tmp: str, repo: str, *, data_dir: bool = True, llm: str = "fake", e
         "DLV_REPO_PATH": repo, "DLV_WORKTREES_DIR": os.path.join(tmp, "worktrees"), "DLV_BASE_REF": "integration-2026-09-24",
         "DLV_RUN_WALL_CLOCK_S": "2700", "DLV_CMD_TIMEOUT_S": "600", "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": tmp, "DLV_SKILLS_ROOT": str(SERVICE_ROOT / "skills"),
+        # wave 24 (E6 sweep): the suite's temp dir (the session root, removed by the suite), never the host's — a
+        # child the suite has to SIGKILL runs no exit handler; TMPDIR is on DLV_ENV_ALLOWLIST
+        "TMPDIR": tempfile.gettempdir(),
     }
     if data_dir:
         env["DLV_DATA_DIR"] = os.path.join(tmp, "data")
