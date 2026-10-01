@@ -122,6 +122,17 @@
 //! restores the default disposition and re-raises: the process still dies of
 //! the signal) and on a clean exit. A caller whose temp directory sits behind
 //! a symlink (macOS `/var` -> `/private/var`) passes the canonical path.
+//!
+//! Fix wave 24 (AEGIS N23-S-2): the handlers used to be installed only after
+//! the rename, so a stop signal while the temp file existed left it behind
+//! (AEGIS, aimed SIGTERM: 297/300) and one between the rename and the
+//! handlers left the port file. Now the stop signals are blocked across the
+//! whole publish (main blocks them before the runtime starts its threads, so
+//! only the main thread ever takes one, and blocking it there blocks it for
+//! the process); the removal is armed BEFORE anything is written (directory,
+//! temp name, published name, then the temp file's device/inode before the
+//! rename); the handler removes the temp name while the publish is in
+//! progress and the published name while it is still this server's file.
 use std::convert::Infallible;
 use std::ffi::CString;
 use std::future::Future;
@@ -547,6 +558,9 @@ fn bind(addr: &str) -> std::io::Result<TcpListener> {
 /// following any symlink; kept open), and the device/inode of the file it
 /// renamed into place. Set once.
 static PORT_FILE_NAME: AtomicPtr<libc::c_char> = AtomicPtr::new(std::ptr::null_mut());
+/// Fix wave 24 (F2): the temp name while the publish is in progress (null otherwise), so a stop signal that
+/// lands mid-publish removes it too.
+static PORT_FILE_TMP: AtomicPtr<libc::c_char> = AtomicPtr::new(std::ptr::null_mut());
 static PORT_FILE_DIR_FD: AtomicI32 = AtomicI32::new(-1);
 static PORT_FILE_DEV: AtomicU64 = AtomicU64::new(0);
 static PORT_FILE_INO: AtomicU64 = AtomicU64::new(0);
@@ -688,20 +702,79 @@ fn check_port_file_path(path: &str) -> std::io::Result<()> {
     port_file_location(path).map(|_| ())
 }
 
-/// Writes `port` to `path` (fix wave 22, G7; wave 23, N22-C-3): the parent is
-/// walked without following symlinks; a temp file in that directory,
-/// `.<name>.tmp-<16 random hex>`, is created (openat O_CREAT|O_EXCL|O_NOFOLLOW,
-/// mode 0600), written and fsynced, then renamed over `<name>` within the same
-/// directory descriptor (renameat: atomic; a reader never sees a partial
-/// number; a link at the destination is replaced, never followed). Returns
-/// the directory descriptor (kept open), the name, and the device and inode of
-/// the file now at `path`.
-fn write_port_file(path: &str, port: u16) -> std::io::Result<(DirFd, CString, u64, u64)> {
+/// The stop signals as a signal set.
+fn stop_signal_set() -> libc::sigset_t {
+    // SAFETY: plain data initialised by sigemptyset/sigaddset.
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        for sig in STOP_SIGNALS {
+            libc::sigaddset(&mut set, sig);
+        }
+        set
+    }
+}
+
+/// Blocks the stop signals in the calling thread; returns the mask to restore. A stop signal sent meanwhile stays
+/// pending and is delivered when the mask is restored.
+fn block_stop_signals() -> libc::sigset_t {
+    let set = stop_signal_set();
+    // SAFETY: `set` and `old` are valid sigsets; pthread_sigmask only changes this thread's mask.
+    unsafe {
+        let mut old: libc::sigset_t = std::mem::zeroed();
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, &mut old);
+        old
+    }
+}
+
+fn restore_signal_mask(old: &libc::sigset_t) {
+    // SAFETY: `old` is the mask block_stop_signals returned.
+    unsafe {
+        libc::pthread_sigmask(libc::SIG_SETMASK, old, std::ptr::null_mut());
+    }
+}
+
+/// Writes `port` to `path` (fix wave 22, G7; wave 23, N22-C-3; wave 24, F2): the parent is walked without
+/// following symlinks; a temp file in that directory, `.<name>.tmp-<16 random hex>`, is created (openat
+/// O_CREAT|O_EXCL|O_NOFOLLOW, mode 0600), written and fsynced, then renamed over `<name>` within the same
+/// directory descriptor (renameat: atomic; a reader never sees a partial number; a link at the destination is
+/// replaced, never followed).
+///
+/// Fix wave 24 (AEGIS N23-S-2): the stop signals are BLOCKED across the whole publish (so none is handled half
+/// way: one sent meanwhile stays pending and is handled once the port file is in place and armed), and the removal
+/// is armed BEFORE anything is written: the directory, the temp name and the published name are recorded first,
+/// the handlers installed, and the device/inode of the temp file recorded before the rename (the rename keeps the
+/// inode). The handler removes the temp name (while the publish is in progress) and the published name (only if
+/// it is still the file this server wrote). Before, the handlers were installed after the rename: a SIGTERM while
+/// the temp file existed left it behind (AEGIS: 297/300), one between the rename and the handlers left the port
+/// file. Worker threads never take a stop signal (main blocks them before the runtime starts its threads, which
+/// inherit the mask), so blocking them here in the main thread blocks them for the process.
+fn publish_port_file(path: &str, port: u16) -> std::io::Result<PortFileGuard> {
     let (dir, name) = port_file_location(path)?;
     let tmp = c_name(std::ffi::OsStr::new(&format!(".{}.tmp-{}", name.to_string_lossy(), random_hex(8)?)))?;
-    // SAFETY: `dir.0` is an open directory descriptor; `tmp` is NUL-terminated; mode passed for O_CREAT.
+    let old = block_stop_signals();
+    let dir = dir.keep();
+    PORT_FILE_DIR_FD.store(dir, Ordering::SeqCst);
+    PORT_FILE_NAME.store(name.clone().into_raw(), Ordering::SeqCst);
+    PORT_FILE_TMP.store(tmp.clone().into_raw(), Ordering::SeqCst);
+    // SAFETY: installing a handler that only calls async-signal-safe functions.
+    unsafe {
+        let handler = on_stop_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
+        for sig in STOP_SIGNALS {
+            libc::signal(sig, handler);
+        }
+    }
+    let written = write_and_rename(dir, &tmp, &name, port);
+    PORT_FILE_TMP.store(std::ptr::null_mut(), Ordering::SeqCst); // the temp name is gone (renamed or removed)
+    restore_signal_mask(&old);                                     // a pending stop signal is handled from here on
+    written.map(|_| PortFileGuard)
+}
+
+/// The write itself (stop signals blocked by the caller): temp file, fsync, device/inode recorded, rename.
+fn write_and_rename(dir: libc::c_int, tmp: &CString, name: &CString, port: u16) -> std::io::Result<()> {
+    // SAFETY: `dir` is an open directory descriptor; `tmp` is NUL-terminated; mode passed for O_CREAT.
     let fd = unsafe {
-        libc::openat(dir.0, tmp.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        libc::openat(dir, tmp.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
                      0o600 as libc::c_uint)
     };
     if fd < 0 {
@@ -714,7 +787,7 @@ fn write_port_file(path: &str, port: u16) -> std::io::Result<(DirFd, CString, u6
     let unlink_tmp = || {
         // SAFETY: removing the temp name this function created, relative to `dir`.
         unsafe {
-            libc::unlinkat(dir.0, tmp.as_ptr(), 0);
+            libc::unlinkat(dir, tmp.as_ptr(), 0);
         }
     };
     let meta = match written {
@@ -724,9 +797,11 @@ fn write_port_file(path: &str, port: u16) -> std::io::Result<(DirFd, CString, u6
             return Err(e);
         }
     };
-    let renamed = check_target(dir.0, &name).and_then(|_| {
+    PORT_FILE_DEV.store(meta.dev(), Ordering::SeqCst);
+    PORT_FILE_INO.store(meta.ino(), Ordering::SeqCst);
+    let renamed = check_target(dir, name).and_then(|_| {
         // SAFETY: both names are NUL-terminated and relative to the same open directory descriptor.
-        if unsafe { libc::renameat(dir.0, tmp.as_ptr(), dir.0, name.as_ptr()) } != 0 {
+        if unsafe { libc::renameat(dir, tmp.as_ptr(), dir, name.as_ptr()) } != 0 {
             Err(std::io::Error::last_os_error())
         } else {
             Ok(())
@@ -736,16 +811,26 @@ fn write_port_file(path: &str, port: u16) -> std::io::Result<(DirFd, CString, u6
         unlink_tmp();
         return Err(e);
     }
-    Ok((dir, name, meta.dev(), meta.ino()))
+    Ok(())
 }
 
-/// Removes the port file if it is still the one this server wrote, in the
-/// directory it was written in. Called from the signal handler: only
-/// async-signal-safe calls (fstatat, unlinkat).
+/// Removes, in the directory the port file was written in, the temp name while a publish is in progress, and the
+/// port file if it is still the one this server wrote. Called from the signal handler: only async-signal-safe
+/// calls (fstatat, unlinkat).
 fn remove_own_port_file() {
-    let name = PORT_FILE_NAME.load(Ordering::SeqCst);
     let dir = PORT_FILE_DIR_FD.load(Ordering::SeqCst);
-    if name.is_null() || dir < 0 {
+    if dir < 0 {
+        return;
+    }
+    let tmp = PORT_FILE_TMP.load(Ordering::SeqCst);
+    if !tmp.is_null() {
+        // SAFETY: `tmp` points at a leaked, NUL-terminated CString; `dir` is a descriptor kept open for the process.
+        unsafe {
+            libc::unlinkat(dir, tmp, 0);
+        }
+    }
+    let name = PORT_FILE_NAME.load(Ordering::SeqCst);
+    if name.is_null() {
         return;
     }
     // SAFETY: `name` points at a leaked, NUL-terminated CString that lives for the process; `dir` is a descriptor
@@ -770,24 +855,6 @@ extern "C" fn on_stop_signal(sig: libc::c_int) {
         libc::signal(sig, libc::SIG_DFL);
         libc::raise(sig);
     }
-}
-
-/// Publishes the port file and arms its removal (SIGTERM, SIGINT, SIGHUP,
-/// SIGQUIT, clean exit).
-fn publish_port_file(path: &str, port: u16) -> std::io::Result<PortFileGuard> {
-    let (dir, name, dev, ino) = write_port_file(path, port)?;
-    PORT_FILE_DEV.store(dev, Ordering::SeqCst);
-    PORT_FILE_INO.store(ino, Ordering::SeqCst);
-    PORT_FILE_DIR_FD.store(dir.keep(), Ordering::SeqCst);
-    PORT_FILE_NAME.store(name.into_raw(), Ordering::SeqCst);
-    // SAFETY: installing a handler that only calls async-signal-safe functions.
-    unsafe {
-        let handler = on_stop_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
-        for sig in STOP_SIGNALS {
-            libc::signal(sig, handler);
-        }
-    }
-    Ok(PortFileGuard)
 }
 
 /// Removes the port file when `main` returns normally.
@@ -836,6 +903,10 @@ fn main() {
     let bind_host = std::env::var("LEDGER_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1".to_string());
     let addr = format!("{bind_host}:{port}");
 
+    // Fix wave 24 (F2): the runtime's threads start with the stop signals blocked (they inherit this mask), so a
+    // stop signal is only ever handled by the main thread — and blocking it there across the port file's publish
+    // blocks it for the whole process.
+    let mask = block_stop_signals();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(WORKER_THREADS)
         .max_blocking_threads(MAX_BLOCKING_THREADS)
@@ -843,6 +914,7 @@ fn main() {
         .enable_time()
         .build()
         .expect("failed to build the ledger-rust runtime");
+    restore_signal_mask(&mask);
     let listener = runtime.block_on(async { bind(&addr) }).expect("failed to bind ledger-rust HTTP server");
     let port_file = std::env::var("LEDGER_PORT_FILE").ok();
     if let Some(pf) = &port_file {

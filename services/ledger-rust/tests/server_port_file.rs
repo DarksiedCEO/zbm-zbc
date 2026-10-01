@@ -272,3 +272,45 @@ fn sighup_and_sigquit_remove_the_port_file_as_sigterm_does() {
         assert!(!pf.0.exists(), "{sig}: the port file outlived the server");
     }
 }
+
+/// Fix wave 24, F2 (AEGIS N23-S-2): a stop signal aimed at the publish window. The handlers used to be installed
+/// only AFTER the rename, so a SIGTERM that arrived while the temp file existed killed the server with the default
+/// disposition and left `.<name>.tmp-<hex>` behind (AEGIS: 297/300), and one that arrived between the rename and
+/// the handlers left the port file. Now the stop signals are blocked across the whole publish and the handlers are
+/// installed before anything is written; the handler removes the temp name and the published name. Fired the
+/// moment the temp name (`T`) or the port file (`P`) appears; nothing may be left either way.
+#[test]
+fn a_stop_signal_aimed_at_the_publish_window_leaves_neither_the_temp_file_nor_the_port_file() {
+    const N: usize = 100;
+    let mut report = Vec::new();
+    for mode in ['T', 'P'] {
+        let (mut hit, mut stale) = (0usize, Vec::new());
+        for k in 0..N {
+            let s = scratch(&format!("aim{mode}{k}"));
+            let pf = PortFile(s.0.join("x.port"));
+            let mut srv = Srv(server(&s.0, &pf.0, &s.0.join("l.jsonl")).stderr(Stdio::null()).spawn().unwrap());
+            let child = &mut srv.0;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < deadline && child.try_wait().unwrap().is_none() {
+                let ns = names(&s.0);
+                let (tmp, port) = (ns.iter().any(|n| n.contains(".tmp-")), ns.iter().any(|n| n == "x.port"));
+                if (mode == 'T' && tmp) || port {
+                    // SAFETY: signalling the child this test spawned (still unreaped: its pid is not reused).
+                    unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+                    hit += usize::from(mode == 'P' || tmp);  // mode T: a miss when only the port file was seen
+                    break;
+                }
+            }
+            wait_exit(child, Duration::from_secs(10)).expect("the server did not stop");
+            let left: Vec<String> = names(&s.0).into_iter().filter(|n| n.contains(".tmp-") || n == "x.port").collect();
+            if !left.is_empty() {
+                stale.push(format!("#{k}: {left:?}"));
+            }
+        }
+        report.push(format!("mode {mode}: n={N} signalled_in_window={hit} left_behind={} {:?}", stale.len(),
+                            stale.iter().take(3).collect::<Vec<_>>()));
+        assert!(hit * 10 >= N * 9, "the window was hit only {hit}/{N} times: {report:?}");
+    }
+    eprintln!("{}", report.join("\n"));
+    assert!(report.iter().all(|r| r.contains("left_behind=0 ")), "{report:#?}");
+}
