@@ -500,6 +500,17 @@ Tests changed because they enshrined the old behaviour:
 `test_cert_guardrail.py` / `test_cert_scenario.py` (two new keys), and the
 thin-client mocks (they now echo `request_id` / `facts_sha256`).
 
+## Fix wave 25, Oct 1 2026 — the launcher's settings, bounded and documented
+
+- `COMPLIANCE_SWITCH_INTERVAL_SECONDS` accepted any positive number (scout C5-3; `nan` passed the `<= 0` check); only
+  0.0001 .. 0.05 s now starts, and `serve.run()` checks the interval in force in whole microseconds and prints it
+  (`tests/test_fix25_switch_interval.py`). The launcher's other settings (request-head and keep-alive timeouts,
+  `limit_concurrency`, `COMPLIANCE_DRAINS_MAX`) are now in the README, not only in `serve.py`'s docstring (scout A P4).
+- `tests/conftest.py` always uses the test token, whatever the shell exports (scout A P2;
+  `tests/test_fix25_test_token.py`).
+- ruff F/E9 clean: 13 unused test imports removed, and the unused `now = self._now()` in `_process_source` (a clock
+  read with no effect: the clocks have no side effects) dropped.
+
 ## Testing
 
 Certification tests §H 1–31 are in `tests/test_cert_scenario.py`,

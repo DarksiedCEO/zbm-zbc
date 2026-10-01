@@ -6,7 +6,7 @@ import pytest
 
 from clock import iso
 from controls import SEED_CONTROLS
-from helpers import (ANDRE_TOKEN, NOW, Harness, client_facts, clip_facts, creator_facts, publish_facts, rid,
+from helpers import (ANDRE_TOKEN, NOW, client_facts, clip_facts, creator_facts, publish_facts, rid,
                      unmet_codes)
 from intelligences.i05_control_monitor import test_c05 as c05
 from intelligences.i07_jurisdiction import Params, resolve_person, resolve_target
