@@ -31,7 +31,7 @@ import uvicorn
 from uvicorn.server import ServerState
 
 from conftest import TEST_SERVICE_TOKEN
-from test_fix8_n7_2_body_prealloc import DETECT, _Client
+from test_fix8_n7_2_body_prealloc import DETECT, _Client, _until
 
 import api
 import http_limits
@@ -72,6 +72,9 @@ def test_a_chunk_in_hand_is_counted_and_the_next_one_is_not_read_until_covered(m
         await asyncio.sleep(0.1)
         await c.feed(b" " * 128 * KIB)
         await c.feed(b" " * 128 * KIB)
+        # fix wave 25: until the chunk is in hand (on a starved box 0.3 s did not always get the app there), then
+        # long enough for a wrong implementation to take the second one too
+        await _until(lambda: getattr(inflight, "over", 0) > 0)
         await asyncio.sleep(0.3)
         seen = (getattr(inflight, "over", 0), c.queue.qsize())
         inflight.release(inflight.limit)

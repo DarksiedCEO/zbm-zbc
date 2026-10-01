@@ -96,6 +96,20 @@ class _Client:
         return self
 
 
+async def _until(predicate, timeout: float = 10.0) -> None:
+    """Fix wave 25 (AEGIS N24-S-12): wait for a state of the app, not for a
+    wall-clock interval. These in-process tests used to `sleep(0.05)` and
+    assume the app had got there — each request crosses the thread pool (the
+    sync auth dependency) first, so on a starved box it had not, and a later
+    request took the budget the test meant for an earlier one."""
+    loop = asyncio.get_running_loop()
+    end = loop.time() + timeout
+    while not predicate():
+        if loop.time() > end:
+            raise AssertionError(f"the app did not reach the expected state within {timeout:g}s")
+        await asyncio.sleep(0.01)
+
+
 def _event() -> bytes:
     return json.dumps({"call_events": [{
         "call_id": "c1", "phone_number": "+15550100", "direction": "inbound", "status": "voicemail",
@@ -186,11 +200,13 @@ def test_stalled_bodies_exhaust_the_inflight_budget_and_the_next_chunk_is_503_un
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 0.2)
 
     async def scenario():
+        lanes = api._lanes()
         stalled = [_Client(content_length=len(chunk) + 18) for _ in range(2)]
         stalled_tasks = [asyncio.ensure_future(c.run()) for c in stalled]
         for c in stalled:
             await c.feed(chunk)  # buffered; the budget is now full
-        await asyncio.sleep(0.05)
+        # fix wave 25: until both stalled bodies' bytes are counted (it was sleep(0.05): N24-S-12, module run B#9)
+        await _until(lambda: lanes.inflight.used >= 2 * (len(chunk) - api._SMALL_BODY_BYTES))
         third = _Client(content_length=len(chunk) + 18)
         third_task = asyncio.ensure_future(third.run())
         t0 = time.perf_counter()
@@ -464,6 +480,65 @@ def _send_reading(s: socket.socket, data: bytes, idle_timeout: float, answer: di
     return "timeout"
 
 
+# Fix wave 25, H2 (AEGIS N24-S-13): the settle check of the 128-sender test
+# could pass without measuring anything — "settled" was any sample after 2 s
+# under base + 24 MiB, so a run whose sender threads were slow to start (a
+# loaded box) settled at 2.6 s with growth 22 MiB, before the senders had
+# built any memory. The check now starts only once memory has reached its
+# peak phase (a sample at base + _PEAK_FLOOR_MIB or more), and a run that never
+# got there measured nothing: it fails as INVALID, never passes.
+_PEAK_FLOOR_MIB = 32   # half the 64 MiB budget the ~20 admitted 3.9 MB bodies fill
+_SETTLED_MIB = 24
+
+
+def _settled_at(samples: list[tuple[float, int]], base: int) -> tuple[float | None, bool]:
+    """(the first sample time under base + _SETTLED_MIB AFTER the first sample
+    at base + _PEAK_FLOOR_MIB or more — None if none yet; whether that floor
+    has been reached)."""
+    reached = False
+    for at, rss in samples:
+        if rss - base >= _PEAK_FLOOR_MIB:
+            reached = True
+        elif reached and rss - base < _SETTLED_MIB:
+            return at, True
+    return None, reached
+
+
+def _hwm_reset(pid: int) -> bool:
+    """Linux: reset the process's peak RSS (VmHWM) to its current RSS; False
+    where that is not available (the sampled peak is used instead)."""
+    try:
+        with open(f"/proc/{pid}/clear_refs", "w") as fh:
+            fh.write("5")
+        return True
+    except OSError:
+        return False
+
+
+def _hwm_mib(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                if line.startswith("VmHWM:"):
+                    return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return None
+
+
+def test_the_settle_check_waits_for_the_peak_phase_and_a_run_without_one_is_invalid():
+    """N24-S-13, the reviewer's run A single #5 — base 53 MiB, samples [(2.0, 71), (2.6, 75)] (its log): the old
+    check said settled_at 2.6 s with growth 22 MiB; it measured nothing. Now: no settle before the floor, and the
+    run is reported invalid."""
+    vacuous = [(2.0, 71), (2.6, 75)]
+    old = next((at for at, r in vacuous if at > 2 and r - 53 < 24), None)
+    assert old == 2.6                                         # what the old rule concluded
+    assert _settled_at(vacuous, 53) == (None, False)          # not settled, and not a valid run
+    real = [(1.0, 53 + 9), (2.0, 53 + 59), (6.0, 53 + 64), (11.1, 53 + 36), (12.2, 53 + 2)]
+    assert _settled_at(real, 53) == (12.2, True)
+    assert _settled_at(real[:3], 53) == (None, True)          # peak reached, not yet settled
+
+
 def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut(server):
     """Real bytes, then a stall: before, 128 x 4 MiB pinned for 30 s. Now at
     most _INFLIGHT_BODY_BYTES (64 MiB) is buffered (the rest 503), and the
@@ -472,6 +547,7 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     import threading
     proc, port = server
     base = _rss_mib(proc.pid)
+    hwm_ok = _hwm_reset(proc.pid)
     payload = b'{"call_events":[' + b" " * (3_900_000 - 16)
     socks, codes, lock = [], {}, threading.Lock()
 
@@ -511,26 +587,33 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     # as every sender had its answer, which under load can be before the
     # server has released the bytes (settled_at None: a test defect, not a
     # server one). The 96 MiB growth bound below is unchanged (N20-M-4).
+    reached = False
     while time.monotonic() - t0 < bound:
         time.sleep(0.5)
         r = _rss_mib(proc.pid)
         at = round(time.monotonic() - t0, 1)
         peak = max(peak, r)
         samples.append((at, r))
-        if at > 2 and r - base < 24:
-            settled_at = at
+        settled_at, reached = _settled_at(samples, base)      # fix wave 25, H2: only after the peak phase
+        if settled_at is not None:
             break
     for t in threads:
         t.join(timeout=20)
     for s in socks:
         s.close()
+    hwm = _hwm_mib(proc.pid) if hwm_ok else None
     # the whole line, flushed, before any assertion: a failing run (e.g. on a Mac runner) keeps its evidence
-    line = (f"codes {codes}; RSS base {base} peak {peak} growth {peak - base} MiB; settled_at {settled_at} "
+    line = (f"codes {codes}; RSS base {base} peak {peak} growth {peak - base} MiB; hwm_growth "
+            f"{None if hwm is None else hwm - base} MiB; peak phase reached {reached}; settled_at {settled_at} "
             f"(bound {bound}); samples {samples}")
     print(line, flush=True)
+    if not reached:
+        pytest.fail(f"INVALID run: memory never reached base + {_PEAK_FLOOR_MIB} MiB, so nothing was measured -- {line}")
     # the budget, plus uvicorn's own per-connection buffers (<= 64 KiB x 128) and the
-    # 503'd bodies' drains — measured +84 MiB (base 54, peak 138)
-    assert peak - base < api._INFLIGHT_BODY_BYTES // MIB + 32, f"RSS grew {peak - base} MiB -- {line}"
+    # 503'd bodies' drains — measured +84 MiB (base 54, peak 138). Fix wave 25, H2:
+    # the kernel's peak RSS where it is available (the 0.5 s sampler can miss a peak).
+    growth = (hwm if hwm is not None else peak) - base
+    assert growth < api._INFLIGHT_BODY_BYTES // MIB + 32, f"RSS grew {growth} MiB -- {line}"
     assert codes.get("408", 0) + codes.get("503", 0) == len(threads), line  # none held silently
     assert codes.get("408", 0) > 0, line  # the admitted, stalled ones were cut
     assert settled_at is not None and settled_at < bound, line
