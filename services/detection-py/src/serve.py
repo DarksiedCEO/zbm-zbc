@@ -15,6 +15,7 @@ Body limits are enforced by api._BodyLimitMiddleware under any launcher.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 
@@ -45,7 +46,19 @@ REQUEST_HEAD_TIMEOUT_S = 10.0
 # its own process, time to first byte): 5 ms slices -> max 0.44-0.51 s (the
 # event loop's own lag never exceeded 0.13 s: the time was GIL re-acquisition,
 # not one long block); 1 ms -> max 0.09-0.10 s. DETECTION_SWITCH_INTERVAL_SECONDS
-# overrides it (a positive number of seconds).
+# overrides it.
+#
+# Fix wave 24, F3 (AEGIS N23-S-3): the override accepted anything in (0, 1) —
+# 0.5 s (a thread could hold the GIL for half a second: the bound this setting
+# exists for is gone) or 1e-7 s (a switch storm) started the service. Only
+# SWITCH_INTERVAL_MIN_S <= value <= SWITCH_INTERVAL_MAX_S (100 us .. 50 ms)
+# starts; and the launcher checks the interval actually in force
+# (sys.getswitchinterval() after setting it, to the microsecond CPython keeps)
+# before it serves — anything else refuses to start.
+SWITCH_INTERVAL_MIN_S = 0.0001
+SWITCH_INTERVAL_MAX_S = 0.05
+
+
 def _switch_interval_from_env(name: str = "DETECTION_SWITCH_INTERVAL_SECONDS", default: float = 0.001) -> float:
     raw = os.environ.get(name)
     if not raw:
@@ -53,10 +66,22 @@ def _switch_interval_from_env(name: str = "DETECTION_SWITCH_INTERVAL_SECONDS", d
     try:
         value = float(raw)
     except ValueError:
-        value = 0.0
-    if not (0 < value < 1):  # also refuses nan and inf
-        raise RuntimeError(f"{name}={raw!r} is invalid: expected seconds, 0 < value < 1")
+        value = math.nan
+    if not (SWITCH_INTERVAL_MIN_S <= value <= SWITCH_INTERVAL_MAX_S):  # also refuses nan and inf
+        raise RuntimeError(f"{name}={raw!r} is invalid: expected seconds, "
+                           f"{SWITCH_INTERVAL_MIN_S:g} <= value <= {SWITCH_INTERVAL_MAX_S:g}")
     return value
+
+
+def _apply_switch_interval(value: float) -> float:
+    """Sets the interval and returns the one in force; refuses (RuntimeError) unless it is `value` (to the
+    microsecond) and within the accepted range."""
+    sys.setswitchinterval(value)
+    in_force = sys.getswitchinterval()
+    if not (SWITCH_INTERVAL_MIN_S <= in_force <= SWITCH_INTERVAL_MAX_S) or abs(in_force - value) > 1e-6:
+        raise RuntimeError(f"the GIL switch interval in force is {in_force!r} s, not the {value!r} s set "
+                           f"(DETECTION_SWITCH_INTERVAL_SECONDS): this service refuses to start")
+    return in_force
 
 
 SWITCH_INTERVAL_S: float = _switch_interval_from_env()
@@ -123,7 +148,7 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="bind address (default: loopback only)")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
-    sys.setswitchinterval(SWITCH_INTERVAL_S)
+    _apply_switch_interval(SWITCH_INTERVAL_S)
     uvicorn.run(
         "api:app",
         host=args.host,
