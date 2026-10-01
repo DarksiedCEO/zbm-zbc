@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from _procinfo import NO_OVERRIDE_ADDR_REASON, can_bind, listening_addrs, override_bind_addr, port_free
+from conftest import child_env
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 TOKEN = "live-test-token-not-a-secret"
@@ -56,7 +57,7 @@ _LOGS: dict[int, "tempfile._TemporaryFileWrapper"] = {}  # pid -> the server's c
 
 def _start(env_extra: dict[str, str]) -> tuple[subprocess.Popen, str, int]:
     port = _free_port()
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC), **child_env(),
            "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port), **env_extra}
     # Fix wave 8: this piped stdout to PIPE and never drained it, so uvicorn's
     # access log (one line per request) filled the 64 KiB pipe after a few
@@ -157,7 +158,7 @@ def test_live_docs_are_disabled(default_server):
 
 
 def test_malformed_contact_window_refuses_to_start():
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC), **child_env(),
            "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_CONTACT_WINDOW": "06:00-23:00"}
     r = subprocess.run([sys.executable, "-c", "import api"], env=env, capture_output=True, text=True, timeout=30)
     assert r.returncode != 0

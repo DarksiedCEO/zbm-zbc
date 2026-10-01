@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import child_env
+
 SRC = Path(__file__).resolve().parents[1] / "src"
 BODY = 3_900_000
 
@@ -59,7 +61,7 @@ def _loopback_only(monkeypatch):
 @pytest.fixture
 def one_slot_held():
     p = subprocess.Popen([sys.executable, "-c", CHILD], cwd=SRC, stdout=subprocess.PIPE, text=True,
-                         env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(SRC)})
+                         env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(SRC), **child_env()})
     try:
         port = int(p.stdout.readline())
         for _ in range(100):                                                  # until uvicorn listens

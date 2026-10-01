@@ -42,6 +42,7 @@ from _procinfo import rss_kib
 from test_live_server import SRC, TOKEN, _free_port
 
 import http_limits
+from conftest import child_env
 
 MIB = 1024 * 1024
 BODY_TIMEOUT_UNDER_TEST = 3.0  # narrowed via FULFILLMENT_BODY_READ_TIMEOUT_S (may only narrow)
@@ -57,7 +58,7 @@ def _start(env_extra: dict[str, str] | None = None, _attempts: int = 5):
     import tempfile
     for attempt in range(_attempts):
         port = _free_port()
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC), **child_env(),
                "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port), **(env_extra or {})}
         log = tempfile.TemporaryFile(mode="w+b")
         proc = subprocess.Popen([sys.executable, "-m", "api"], env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -363,7 +364,7 @@ def test_connection_count_is_bounded_and_health_recovers(server):
 def test_body_timeout_env_may_only_narrow():
     for bad in ("0", "-1", "31", "nan", "abc"):
         port = _free_port()
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC), **child_env(),
                "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port),
                "FULFILLMENT_BODY_READ_TIMEOUT_S": bad}
         r = subprocess.run([sys.executable, "-m", "api"], env=env, capture_output=True, timeout=20)

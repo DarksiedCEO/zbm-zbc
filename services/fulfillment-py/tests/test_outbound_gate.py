@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import child_env
+
 from contact_window import ContactWindow
 from fulfillment_schema import TaskChannel
 from integrations.message_sender import NotWiredMessageSender
@@ -333,7 +335,7 @@ def test_not_wired_transports_make_no_contact_and_consume_no_attempt():
     ("FULFILLMENT_COUNTRY_ZONES", "44=Not/AZone"),
 ])
 def test_bad_gate_configuration_refuses_to_start(var, value):
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC), **child_env(),
            "FULFILLMENT_SERVICE_TOKEN": "t", var: value}
     r = subprocess.run([sys.executable, "-c", "import api"], env=env, capture_output=True, text=True, timeout=30)
     assert r.returncode != 0
