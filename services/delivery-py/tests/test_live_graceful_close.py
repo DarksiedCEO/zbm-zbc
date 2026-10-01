@@ -269,25 +269,29 @@ def test_the_drain_is_bounded_in_bytes_a_client_that_keeps_sending_is_cut(one_sl
 def test_the_drain_is_bounded_in_time_a_slow_sender_is_cut():
     """The drain WINDOW (DRAIN_TIMEOUT_S, the module's default here): a client trickling a byte every 20 ms — far
     under the byte bound — is cut once the window ends. The cut is an event (its send fails); the only time
-    assertion is a LOWER bound (not before the window), which load cannot break."""
+    assertion is a LOWER bound (not before the window) measured from before the request, which load cannot break."""
     child = _Child(limit=100, drain_s="default")
     try:
         mod = _module()
         s = child.connect()
+        # The clock starts BEFORE the request is sent (fix wave 25, E-C): the server cannot answer — so its drain
+        # window cannot start — before it has the request, so "cut >= window after this stamp" holds however late
+        # this process gets to read the answer. (Stamped after the read, a test process starved between the
+        # server's answer and its own read measured less than the window and failed a correct server.)
+        sent_at = time.monotonic()
         s.sendall(b"POST /x HTTP/1.1\r\nHost: t\r\nContent-Length: 100000000\r\n\r\n")
         assert _read_answer(s).startswith(b"HTTP/1.1 401")
-        answered = time.monotonic()
         cut = None
-        while time.monotonic() - answered < HANG_GUARD_S:
+        while time.monotonic() - sent_at < HANG_GUARD_S:
             try:
                 s.send(b"x")
             except OSError as exc:
                 cut = type(exc).__name__
                 break
             time.sleep(0.02)
-        took = time.monotonic() - answered
+        took = time.monotonic() - sent_at
         assert cut is not None, "a slow sender was never cut: the drain window does not end"
-        assert took >= mod.DRAIN_TIMEOUT_S * 0.9, f"cut after {took:.2f} s, before the {mod.DRAIN_TIMEOUT_S} s window"
+        assert took >= mod.DRAIN_TIMEOUT_S, f"cut {took:.2f} s after the request, before the {mod.DRAIN_TIMEOUT_S} s window"
         s.close()
     finally:
         child.close()
