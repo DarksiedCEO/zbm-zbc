@@ -185,8 +185,11 @@ class DeliveryService:
         # B2 (wave 23): admissions whose reviewer-test RED containers are running outside the lock — admission id ->
         # {service, request_id, review_of}; each holds its service's run slot until it is admitted or refused
         self._admissions: dict[str, dict] = {}
-        # wave 24 (E6, N23-D-7): admissions cancelled while their containers ran — refused when the containers end
-        self._cancelled_admissions: set[str] = set()
+        # wave 24 (E6, N23-D-7): admissions that ran their RED containers and ended without being admitted (refused,
+        # or cancelled by the operator while the containers ran) — admission id -> {status, reason, body}. Applied from
+        # the local log like every record: a replay of the same admission (same id: same caller, request id and body)
+        # gets this answer and runs nothing again (its crossings would collide with the first attempt's records).
+        self._closed_admissions: dict[str, dict] = {}
         self._engine = None
         self._worker: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -316,6 +319,8 @@ class DeliveryService:
             self.idem.move_to_end(key)
             while len(self.idem) > IDEMPOTENCY_MAX:
                 self.idem.popitem(last=False)
+        elif kind == "admission_closed":
+            self._closed_admissions[r["admission_id"]] = r
         # event, lease, reconcile, founder_refused, injection, audit: evidence only
 
     def _write_evidence_file(self, r_run_id: str, evidence_id: str, content: bytes) -> None:  # noqa: N803
@@ -711,6 +716,9 @@ class DeliveryService:
         if not items:
             return None
         adm = rid("run", "admission", caller, request_id, facts)     # its own id: never the run's event ids
+        closed = self._closed_admissions.get(adm)
+        if closed is not None:
+            raise self._closed_answer(closed)        # wave 24 (E6): its recorded answer; nothing recorded or run again
         if adm in self._admissions:
             raise Conflict("this admission is already in progress", reasons=[R.item("RUN_IN_PROGRESS", adm)],
                            request_id=request_id, facts_sha256=facts)
@@ -724,7 +732,8 @@ class DeliveryService:
                            {"request_id": request_id, "facts_sha256": facts, "admission_id": adm, "service": service,
                             "base_sha": base_sha, "finding_ids": [f["id"] for f in items], "review_of": review_of},
                            f"Admission RED check started for {service}: {len(items)} reviewer test(s)")
-        self._admissions[adm] = {"service": service, "request_id": request_id, "caller": caller, "review_of": review_of}
+        self._admissions[adm] = {"service": service, "request_id": request_id, "facts": facts, "caller": caller,
+                                 "review_of": review_of}
         return {"adm": adm, "items": items, "caller": caller, "request_id": request_id, "facts": facts,
                 "base_sha": base_sha, "service": service, "principal": principal}
 
@@ -793,23 +802,43 @@ class DeliveryService:
     def _red_finish(self, pending: dict, admit) -> dict:
         """Phases 2-3: the containers without the lock, then ONE hold of the lock that releases the reservation,
         records the verdicts and admits (``admit(red_checks)``) or refuses. The reservation is released whatever
-        happens (a refusal, an exception)."""
+        happens (a refusal, an exception). A refusal (422/409) after the containers ran is recorded as the admission's
+        answer (``admission_closed``, wave 24): its replay gets it without running them again."""
         try:
             results = self._red_run(pending)
             with self.lock:
                 self._admissions.pop(pending["adm"], None)
-                if pending["adm"] in self._cancelled_admissions:
+                closed = self._closed_admissions.get(pending["adm"])
+                if closed is not None:
                     # wave 24 (E6): cancelled by the operator while the containers ran — nothing is recorded or
-                    # admitted from them (the cancel was recorded first and freed the slot)
-                    self._cancelled_admissions.discard(pending["adm"])
-                    raise Conflict("this admission was cancelled while its RED check ran: nothing was admitted",
-                                   reasons=[R.item("CANCELLED", pending["adm"])], request_id=pending["request_id"],
-                                   facts_sha256=pending["facts"], admission_id=pending["adm"])
-                red = self._red_record_locked(pending, results)
-                return admit(red)
+                    # admitted from them (the cancel was recorded first, with this answer, and freed the slot)
+                    raise self._closed_answer(closed)
+                try:
+                    red = self._red_record_locked(pending, results)
+                    return admit(red)
+                except (Invalid, Conflict) as exc:
+                    self._close_admission(pending["adm"], pending["caller"], exc)
+                    raise
         finally:
             with self.lock:
                 self._admissions.pop(pending["adm"], None)
+
+    @staticmethod
+    def _closed_answer(closed: dict) -> DlvError:
+        cls = Conflict if closed["status"] == Conflict.status_code else Invalid
+        return cls(closed["reason"], **closed["body"])
+
+    def _close_admission(self, adm: str, caller: str, exc: DlvError) -> None:
+        """Record ``exc`` as the answer of admission ``adm`` (the caller holds the lock). Best effort: when the record
+        cannot be made the refusal still stands; a replay then runs the admission again and is refused again (its
+        crossings collide with the first attempt's records: 422 ``reproduction_red_unverified``) — never admitted."""
+        op = Op(self, f"admission-closed|{adm}", caller, adm)
+        op.add("admission_closed", {"admission_id": adm, "status": exc.status_code, "reason": exc.reason,
+                                    "body": json.loads(json.dumps(exc.body, default=str))})
+        try:
+            self._commit(op)
+        except Unavailable:
+            pass
 
     def create_fix_run(self, caller: str, body: dict) -> dict:
         """Admission (§C.8.1). The static checks run under the service lock; a document with reviewer-authored
@@ -1473,9 +1502,14 @@ class DeliveryService:
         resp = self._stamp({"run_id": adm, "status": "cancelled", "request_id": request_id, "facts_sha256": facts,
                             "ledger_event_id": eid})
         self._idem_add(op, key, h, resp)
+        # the admission's answer, in the same local-log line: the review (or admission) that started it is refused
+        # with it when its containers end, and so is every replay of it, after a restart too
+        op.add("admission_closed", {"admission_id": adm, "status": Conflict.status_code,
+                                    "reason": "this admission was cancelled while its RED check ran: nothing was admitted",
+                                    "body": {"reasons": [R.item("CANCELLED", adm)], "request_id": a["request_id"],
+                                             "facts_sha256": a["facts"], "admission_id": adm}})
         self._commit(op)
         self._admissions.pop(adm, None)            # the slot is free now
-        self._cancelled_admissions.add(adm)
         return resp
 
     # ================================================================== audit, reconcile, founder refusals

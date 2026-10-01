@@ -96,7 +96,8 @@ accepts any finding must carry that hash (else `422 diff_not_attested`) and a re
 runner-dependent fix checkout whose reverted checkout executed, or a `SkipTest` raised from source, fails the round;
 the standalone runner's notion of "test side" is the engine's own (`path_class`, pinned). A legacy run awaiting review
 is re-scanned at start-up (`run_rescanned_for_review`) and its old report is never served. Pending admissions can be
-cancelled (the slot is freed at once). The suite writes nothing into the source tree. ADR 0011, "Round 23
+cancelled (the slot is freed at once); a replay of an admission that was cancelled, or refused after its RED check
+ran, gets the same recorded answer and runs nothing again (`admission_closed`). The suite writes nothing into the source tree. ADR 0011, "Round 23
 amendments".
 
 ## Running it

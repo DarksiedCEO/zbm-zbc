@@ -1010,11 +1010,22 @@ having read the entire source diff, bound by hash.
   be cancelled through `POST /fix-runs/{admission_id}/cancel` (aegis, andre_session): `admission_cancelled` is
   recorded first (with the idempotency record, one local-log line), the service's slot is free at once, and when
   the containers end nothing is recorded or admitted from them — the admission (or the failing review that started
-  it) answers 409. The remaining engine text that said "fixed" (the suite note to the agent, the reproduction
-  docstring, the attributable-failures docstring, the brief's no-reproduction line, the seed note) now names the end
-  state; the agent's reply token stays `FIXED` (its claim, which the engine checks). The suite writes nothing into
-  the source tree: every child process gets `PYTHONDONTWRITEBYTECODE=1` (and the parent's `PYTHONPYCACHEPREFIX`)
-  through `helpers.child_env()`; an in-memory service's scratch home is a private temp dir removed at exit (it was
+  it) answers 409. That answer is the admission's own record (`admission_closed`, in the cancel's local-log line),
+  and so is a refusal (422/409) reached after an admission's containers ran: a replay of the same admission (its id
+  is derived from caller, request id and body) gets the recorded answer — also after a restart — and runs nothing
+  again. Found by the round-23 race probe re-run in this wave: the replay of the cancelled review answered 422
+  `reproduction_red_unverified` (RuntimeError), because it ran the admission again under the same id and its sandbox
+  crossings collided with the first attempt's records; the same held for any replayed admission refused after its
+  RED check (`reproduction_not_red` came back as `reproduction_red_unverified`). Never an admission either way; now
+  the same answer. Residual: when the `admission_closed` record itself cannot be made (ledger or store down) the
+  refusal stands but a replay is refused as before (`reproduction_red_unverified`). The remaining engine text that
+  said "fixed" (the suite note to the agent, the reproduction docstring, the attributable-failures docstring, the
+  brief's no-reproduction line, the seed note) now names the end state; the agent's reply token stays `FIXED` (its
+  claim, which the engine checks). The suite writes nothing into the source tree: every child process that runs the
+  service gets `-B` (and `-X pycache_prefix=…` when the parent has `PYTHONPYCACHEPREFIX`) through
+  `helpers.child_python_args()` — interpreter options, not environment variables, because the service refuses any
+  environment name outside `DLV_ENV_ALLOWLIST` (spec C.1.7); other children inherit the parent's environment; an
+  in-memory service's scratch home is a private temp dir removed at exit (it was
   `<cwd>/.dlv-mem`); the live launcher's log goes under the session temp dir (it was `docs/evidence/dept28/_runs/`);
   a process that imports the test helpers removes the temp dirs its harnesses made when it exits.
 

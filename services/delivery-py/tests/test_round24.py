@@ -440,6 +440,18 @@ HANG_RT = ("import time\n\nfrom toy import calc\n\n\ndef test_clamp_hangs():\n  
            "    assert calc.clamp(5, 3, 0) != 3\n")
 
 
+# what a request records before its admission is looked at (its git reads, their local-log anchors) is allowed;
+# a container, a sandbox exec, a RED check or a refusal record is not
+_RAN = re.compile(r"^(sandbox_|crossing_docker|reproduction_red_|fix_run_refused$|admission_)")
+
+
+def _nothing_ran_again(h: Harness, n_events: int) -> bool:
+    new = [e["event_type"] for e in h.ledger.entries()[n_events:]]
+    ran = [t for t in new if _RAN.match(t)]
+    assert not ran, (ran, new)
+    return True
+
+
 def test_e6_a_pending_admission_can_be_cancelled_and_frees_the_service_slot():
     """The reviewers' race (round 23): cancel of the pending admission answered 404 and the slot stayed reserved for
     the whole RED check. Now the operator cancels it (recorded first), the slot is free at once, and the review whose
@@ -475,6 +487,52 @@ def test_e6_a_pending_admission_can_be_cancelled_and_frees_the_service_slot():
         assert h.run(run1)["status"] == "awaiting_review"
         assert not h.events("fix_run_reviewed")
         assert not [r for r in h.svc.runs.values() if "N9-1" in (r.get("finding_ids") or [])]
+        # the reviewers' probe (round 24 re-run): a replay of the cancelled review answered 422 "could not complete
+        # (RuntimeError)" — it ran the admission again under the same admission id, and its sandbox crossings
+        # collided with the first attempt's records. The cancel is the admission's answer: the replay gets it, with
+        # nothing recorded or run again — also after a restart.
+        n_events = len(h.ledger.entries())
+        t0 = time.monotonic()
+        again = h.post(f"/dlv/v1/fix-runs/{run1}/review", body)
+        assert again.status_code == 409 and "cancelled" in again.text, again.text
+        assert time.monotonic() - t0 < 1.0
+        assert _nothing_ran_again(h, n_events)
+        h.close()
+        h2 = Harness(tmp=h.tmp, ledger=h.ledger, clock=h.clock, scenario=[])
+        try:
+            r2 = h2.post(f"/dlv/v1/fix-runs/{run1}/review", body)
+            assert r2.status_code == 409 and "cancelled" in r2.text, r2.text
+            assert h2.run(run1)["status"] == "awaiting_review"
+        finally:
+            h2.close()
+    finally:
+        h.svc.wait_idle(240)
+        h.close()
+
+
+def test_e6_a_replayed_admission_whose_red_check_refused_it_gets_the_same_answer():
+    """Same class as the cancelled replay: a review whose reviewer test PASSES on the base is refused 422
+    reproduction_not_red after its container ran. Its replay ran the container again under the same admission id;
+    the crossing records collided and the answer became reproduction_red_unverified (RuntimeError). Now the refusal
+    is the admission's recorded answer and the replay gets exactly it, running nothing."""
+    green = ("from toy import calc\n\n\ndef test_clamp_is_green_on_base():\n"
+             "    assert calc.clamp(5, 3, 0) == 3\n")
+    h = Harness(scenario=scenario_s1())
+    try:
+        run1 = h.submit(two_findings(h.base_sha)).json()["run_id"]
+        assert h.run(run1)["status"] == "awaiting_review"
+        nf = finding("N9-3", line=15, class_hint="argument_validation",
+                     reproduction=f"run {HANG_PATH}::test_clamp_is_green_on_base: clamp(5, 3, 0) answers 3",
+                     expected="ValueError", observed="3", reproduction_test={"path": HANG_PATH, "content": green})
+        body = {"request_id": rid(), "review_ref": "r24-e6b", "sha256": "e" * 64, "verdict": "fail", "reopened": [],
+                "new_findings": [nf]}
+        first = h.post(f"/dlv/v1/fix-runs/{run1}/review", body)
+        assert first.status_code == 422 and first.json()["code"] == "reproduction_not_red", first.text
+        n_events = len(h.ledger.entries())
+        again = h.post(f"/dlv/v1/fix-runs/{run1}/review", body)
+        assert again.status_code == 422 and again.json()["code"] == "reproduction_not_red", again.text
+        assert _nothing_ran_again(h, n_events)
+        assert h.run(run1)["status"] == "awaiting_review" and not h.events("fix_run_reviewed")
     finally:
         h.svc.wait_idle(240)
         h.close()
