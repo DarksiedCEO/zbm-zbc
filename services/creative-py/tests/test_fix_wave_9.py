@@ -44,7 +44,6 @@ import unicodedata
 
 import pytest
 from aegis8_corpus import CAPTIONS as CORPUS8
-from aegis8_corpus import EMOJI as CORPUS8_EMOJI
 from aegis8_corpus import NEVER_SAY_A, NEVER_SAY_B
 from conftest import NOW, TEST_SERVICE_TOKEN
 from samples import TODAY, zbc_clip, zbc_goal

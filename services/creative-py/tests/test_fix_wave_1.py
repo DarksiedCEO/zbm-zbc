@@ -175,7 +175,6 @@ def test_f9_open_job_ledger_down_no_commission_no_job(spy_api):
 
 
 def test_f9_open_job_probe_c2_outcome_record_failure_is_reported_honestly(make_api):
-    from shared.departments import Departments
     from shared.ledger import FakeLedgerClient, LedgerNotRecorded
 
     class FailType(FakeLedgerClient):

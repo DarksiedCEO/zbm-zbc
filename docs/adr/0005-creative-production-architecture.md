@@ -823,7 +823,7 @@ money. ZBC's unit of work is a campaign, not a clip.
     corpus caption pairs (caption + bio) flagged as a spread; the 13
     AEGIS class-C pairs are a human's call in five field arrangements.
 
-32. **Stacked respellings (fix wave 8; AEGIS round 7 class B, 9 of 30
+32. **Stacked respellings (fix wave 8; AEGIS round 7 class B, 9 of the 30
     passed).** "grnteed retunrs", "overnlte sccss", "lose vvait fst",
     "mk rnunny" — a vowel drop, a homophone and a lookalike in one
     phrase — were outside every single signal's budget. Root causes:
@@ -1272,7 +1272,7 @@ money. ZBC's unit of work is a campaign, not a clip.
     indicators and in squared letters with VS16; the ASCII "cur" passes
     too). Real flag rows (9 + 9 captions) still pass.
 48. **The regional reading gets the field joints (fix wave 11; AEGIS
-    round 10 N10-3).** Wave 10 passed the regional reading to the
+    round 10 N10-3).** Wave 10 handed the regional reading to the
     never-say signals with no field edges and no submission, so a phrase
     split over two fields in regional indicators passed. The reading now
     gets the main reading's field joints and symbol-across-fields check

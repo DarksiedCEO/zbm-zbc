@@ -31,7 +31,6 @@ import inspect
 import os
 import random
 import re
-import socket
 import subprocess
 import sys
 import time
@@ -609,14 +608,14 @@ def test_lim_text_scanners_are_linear_time():
 
     phrases = ["guaranteed returns", "get rich", "risk free", "double your money"]
     for s in _adversarial_inputs(50_000):
-        t0 = time.perf_counter()
+        t0 = time.thread_time()  # fix wave 25 (scout A C3; R-HYGIENE L1): this thread's CPU time, not the wall clock
         for p in phrases:
             text.match_phrase(s, p)
         text.obfuscation_signals(s)
         text.non_latin_letters(s)
         text.mixed_symbol_words(s)
         text.unfolded_latin_letters(s)
-        dt = time.perf_counter() - t0
+        dt = time.thread_time() - t0
         assert dt < 2.0, (s[:10], dt)
 
 

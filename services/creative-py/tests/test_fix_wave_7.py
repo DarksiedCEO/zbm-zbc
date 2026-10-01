@@ -36,10 +36,10 @@ import time
 import typing
 
 import pytest
-from conftest import NOW, TEST_FOUNDER_TOKEN
+from conftest import NOW
 from flows import C, ok, zbc_live, zbc_open
 from ordinary_captions import CAPTIONS as IMPL_CAPTIONS
-from samples import TODAY, zbc_clip, zbc_goal, zbc_source
+from samples import TODAY, zbc_clip, zbc_goal
 from test_fix_wave_6 import AEGIS_CAPTIONS as AEGIS5_CAPTIONS
 
 TAIL = " This budget myth. Listen on Pod Plus. #ad"
@@ -623,11 +623,11 @@ def test_new2_new3_signals_are_bounded_on_100kb():
     phrases = tuple((p, False) for p in NEVER_SAY)
     worst = 0.0
     for s in inputs:
-        t0 = time.perf_counter()
+        t0 = time.thread_time()  # fix wave 25 (scout A C3; R-HYGIENE L1): this thread's CPU time, not the wall clock
         skeleton_near_misses(s, phrases)
         for p, f in phrases:
             phonetic_near_miss(s, p, f)
-        dt = time.perf_counter() - t0
+        dt = time.thread_time() - t0
         worst = max(worst, dt)
         assert dt < 6.0, (s[:20], dt)
     print(f"\nNEW-2/3 skeleton + phonetic signals, worst input: {worst:.2f}s per 100 KB, {len(phrases)} phrases")
