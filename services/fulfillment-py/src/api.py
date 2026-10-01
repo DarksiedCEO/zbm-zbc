@@ -782,7 +782,11 @@ _TRIM_IDLE_S = 1.0
 # pages are touched until bytes land in them, so resident memory tracks the
 # bytes actually received; measured 0.13 ms per 3.4 MiB in 64 KiB chunks,
 # against 0.32 ms for the pre-sized-and-memset buffer: the "~3 ms of realloc"
-# fix wave 7 was avoiding was not what `+=` costs). And the bytes buffered by
+# fix wave 7 was avoiding was not what `+=` costs). (Fix wave 24, F1: "resident
+# memory tracks the bytes received" held only roughly — growth headroom and
+# realloc copies landing on reused heap pages made it ~1.16x — so the body is
+# now kept as the chunks received and joined once in the parse slot; see
+# _off_loop.) And the bytes buffered by
 # ALL in-flight bodies share one
 # budget, _INFLIGHT_BODY_BYTES: a request that cannot buffer its next chunk
 # within _INFLIGHT_WAIT_S is answered 503 + Retry-After: 1 (uvicorn drains
@@ -1061,20 +1065,25 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
     lanes.large_in_flight += large
     hold: _BodyHold | None = request.scope.get(_HOLD_SCOPE_KEY)
     pos = 0
-    body = bytearray()
+    chunks: list[bytes] | None = []
     try:
-        # One copy of the body, not two: Request.body() collects the chunks
-        # and then joins them (2x the body while in flight); pydantic parses
-        # a bytearray directly. Fix wave 8, N7-2: NEVER sized from
-        # Content-Length (see _INFLIGHT_BODY_BYTES) — it grows as the bytes
-        # arrive. Fix wave 24, F1: every byte of it is counted in the in-flight
-        # budget as it arrives, and the body is not read further while the
-        # budget cannot cover it (BodySizeLimitMiddleware's _BodyHold — the
-        # middleware is installed on `app`, so every launcher has it).
-        # Bounded by BodySizeLimitMiddleware.
+        # Fix wave 8, N7-2: nothing is allocated ahead of the bytes received
+        # (NEVER sized from Content-Length, see _INFLIGHT_BODY_BYTES). Fix wave
+        # 24, F1: every byte is counted in the in-flight budget as it arrives,
+        # and the body is not read further while the budget cannot cover it
+        # (BodySizeLimitMiddleware's _BodyHold — installed on `app`, so every
+        # launcher has it). The chunks are KEPT AS RECEIVED (uvicorn's bytes
+        # objects, exact size) and joined once, inside the parse slot: a
+        # growing bytearray (the wave-8..23 buffer) realloc'd as the body
+        # arrived, and its 12.5% growth headroom plus the copies left behind
+        # in reused heap pages made resident memory ~1.16x the bytes counted
+        # (measured, ADR 0002 "Fix wave 24") — memory the budget did not see.
+        # The join costs one copy of ONE body at a time (the large lane has one
+        # slot; small bodies are <= 64 KiB), a fixed term. Bounded by
+        # BodySizeLimitMiddleware.
         charged = 0
         async for chunk in request.stream():
-            body += chunk
+            chunks.append(chunk)
             pos += len(chunk)
             if not large and pos > _SMALL_BODY_BYTES:
                 lanes.large_in_flight += 1
@@ -1097,15 +1106,18 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
         else:
             await lane.acquire()
         try:
+            body = b"".join(chunks)
+            chunks = None                     # one copy from here on
             parsed = await run_in_threadpool(_parse, model, body)
         finally:
+            body = None  # noqa: F841
             lane.release()
     finally:
-        # Fix wave 24, F1: the buffer is dropped HERE, before the budget bytes
-        # go back — rebinding the name frees it even when a traceback still
+        # Fix wave 24, F1: the chunks are dropped HERE, before the budget bytes
+        # go back — rebinding the name frees them even when a traceback still
         # references this frame (a refusal raised above keeps the frame alive
         # while the middleware answers).
-        body = None  # noqa: F841
+        chunks = None
         if hold is not None:
             hold.release()
         if large and declared is not None and declared > _SMALL_BODY_BYTES:
