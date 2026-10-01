@@ -267,13 +267,15 @@ fn slow_body_with_wrong_token_does_not_block_others_and_gets_prompt_401() {
     let first = common::read_response(&mut bad).expect("no answer to the wrong-token head");
     assert_eq!(first.status, 401, "stalled wrong-token client");
 
-    assert_others_served_while_stalled(s.port, "wrong-token slow body", &[]);
-
     // The stalled client is closed WITHOUT the server waiting for (draining) the 4988 missing body bytes: EOF arrives
-    // before the body deadline could have fired (that deadline is what would close it otherwise).
+    // before the body deadline could have fired (that deadline is what would close it otherwise). Read at once, right
+    // after the 401 (fix wave 25, E-C review): the E0 version read it only after serving the others, so the others'
+    // own service time counted against this bound.
     let (rest, elapsed) = read_until_closed(&mut bad, since);
     assert_eq!(rest, "", "bytes after the 401");
     assert!(elapsed < BODY_READ_TIMEOUT, "401 + close took {elapsed:?}: the body deadline closed it, the server waited for the body");
+
+    assert_others_served_while_stalled(s.port, "after a wrong-token slow body", &[]);
 }
 
 // --- slow body with the RIGHT token ------------------------------------------------------------
@@ -422,15 +424,20 @@ fn slow_reader_does_not_block_others_and_is_cut_off() {
     queued_at_least(&bad, 64 * 1024);
 
     assert_others_served_while_stalled(s.port, "slow reader", &[]);
-    // Ordering: the others were served while this response was still being written (the connection not yet cut).
-    let mut early = Vec::new();
-    assert!(!closed_yet(&mut bad, &mut early), "the slow reader had already been cut when the others were served");
+    // Ordering: the others were served while this response was still being written. The only thing that cuts the
+    // slow reader is the request deadline, which starts after `since` (the server cannot have read the request
+    // before it was sent), so others answered before `since + REQUEST_DEADLINE` were answered before the cut. A
+    // server that serialised them behind the slow reader answers them only after the cut. (Fix wave 25, E-C review:
+    // the E0 check drained the socket until it would block, which could consume the whole multi-MB response — and
+    // the truncation assertion below with it — whenever the server kept up with the reader. This bound is the
+    // server's own deadline, not a literal; reviewed allowlist entry in devtools/hygiene_allowlist.json.)
+    let elapsed = since.elapsed();
+    assert!(elapsed < REQUEST_DEADLINE, "others were answered only after {elapsed:?}: after the slow reader's cut");
 
     // Wait out the request deadline, then read: the server must have given up
     // (connection closed before the full multi-MB body was delivered).
     std::thread::sleep((REQUEST_DEADLINE + SLACK).saturating_sub(since.elapsed()));
-    let (rest, _) = read_until_closed(&mut bad, since);
-    let resp = String::from_utf8_lossy(&early).to_string() + &rest;
+    let (resp, _) = read_until_closed(&mut bad, since);
     assert_eq!(status_of(&resp), 200);
     let body_len = resp.split("\r\n\r\n").nth(1).unwrap_or("").len();
     let (_, entries) = request(s.port, "GET", "/ledger/entries", Some(TOKEN), None).unwrap();
@@ -695,21 +702,4 @@ fn queued_at_least(c: &TcpStream, n: usize) {
         assert!(Instant::now() < guard, "the server queued fewer than {n} bytes to the slow reader");
         std::thread::sleep(Duration::from_millis(20));
     }
-}
-
-/// Reads whatever is queued on `c` without blocking (into `acc`); true when the read reached EOF or an error, i.e.
-/// the server has closed the connection.
-fn closed_yet(c: &mut TcpStream, acc: &mut Vec<u8>) -> bool {
-    c.set_nonblocking(true).unwrap();
-    let mut buf = [0u8; 65536];
-    let closed = loop {
-        match c.read(&mut buf) {
-            Ok(0) => break true,
-            Ok(n) => acc.extend_from_slice(&buf[..n]),
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break false,
-            Err(_) => break true,
-        }
-    };
-    c.set_nonblocking(false).unwrap();
-    closed
 }

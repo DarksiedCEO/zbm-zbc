@@ -326,12 +326,17 @@ def _closed_by_server(s: socket.socket, window: float) -> bool:
     the next send then fails. Polls for that event for up to ``window`` seconds. A server still draining reads the
     bytes silently. (The server already sent FIN, so the socket is always readable; only the send can tell.)"""
     deadline = time.monotonic() + window
+    sends = 0
     while True:
         try:
             s.send(b"x")
         except OSError:
             return True
-        if time.monotonic() >= deadline:
+        sends += 1
+        # "Not closed" needs at least three sends (fix wave 25, E-C review): a test process starved past the window
+        # after its first send would otherwise report "still draining" for a socket whose RST simply had not been
+        # looked for yet — a closed-at-once server passing the check.
+        if time.monotonic() >= deadline and sends >= 3:
             return False
         time.sleep(0.01)
 

@@ -258,6 +258,9 @@ def test_the_drain_is_bounded_in_bytes_a_client_that_keeps_sending_is_cut(one_sl
                 cut = type(exc).__name__
                 break
         assert cut is not None, f"{sent} bytes accepted after the answer: the drain is not bounded in bytes"
+        # The server's close, not the client's own hang guard (fix wave 25, E-C review): a server that simply stopped
+        # reading would block this send until the socket timeout, and a TimeoutError is not a cut.
+        assert cut in ("ConnectionResetError", "BrokenPipeError", "ConnectionAbortedError"), (cut, sent)
     finally:
         s.close()
         hold.close()

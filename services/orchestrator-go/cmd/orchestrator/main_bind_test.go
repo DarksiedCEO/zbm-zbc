@@ -146,7 +146,9 @@ func tryStartOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (st
 			return "", fmt.Errorf("orchestrator announced no port: %s", stderr.String())
 		}
 	}
-	// 2. /health on that port, while the child is still alive.
+	// 2. /health on that port, while the child is still alive. Each probe has its own hang guard (fix wave 25, E-C
+	// review: the default client has none, so a listener that accepted and never answered hung the harness).
+	probe := &http.Client{Timeout: 10 * time.Second}
 	for {
 		select {
 		case err := <-exited:
@@ -154,7 +156,7 @@ func tryStartOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (st
 			return "", fmt.Errorf("orchestrator exited after announcing port %s (%v): %s", port, err, stderr.String())
 		default:
 		}
-		resp, err := http.Get("http://127.0.0.1:" + port + "/health")
+		resp, err := probe.Get("http://127.0.0.1:" + port + "/health")
 		if err == nil {
 			resp.Body.Close()
 			return port, nil

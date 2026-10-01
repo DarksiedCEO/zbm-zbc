@@ -381,18 +381,23 @@ def cmd_run(a: argparse.Namespace) -> int:
         if not any(re.search(e["reason_regex"], s["reason"]) for e in expected):
             problems.append(violation("R5-skips", suite, f"unexpected {s['kind']}: {s['nodeid']}: {s['reason']}"))
     if a.counts != "off" and kind != "none":
+        # docs/test-counts.md holds the Linux count; a suite that compiles fewer tests on another OS (a
+        # #[cfg(target_os = "linux")] test) says so in the allowlist's "count_os_delta", with the reason.
+        osname = "linux" if sys.platform.startswith("linux") else sys.platform
+        delta = allow.get("count_os_delta", {}).get(suite, {}).get(osname, {}).get("delta", 0)
         if count is None:
             problems.append(violation("R6-counts", suite, "could not determine how many tests ran"))
         elif a.counts == "write":
-            write_counts_doc({suite: (count, kind)})
-            print(f"hygiene_check: docs/test-counts.md row `{suite}` = {count}")
+            write_counts_doc({suite: (count - delta, kind)})
+            print(f"hygiene_check: docs/test-counts.md row `{suite}` = {count - delta}")
         else:
             doc = read_counts_doc()
             if suite not in doc:
                 problems.append(violation("R6-counts", suite, f"no row in docs/test-counts.md (this run: {count})"))
-            elif doc[suite] != count:
-                problems.append(violation("R6-counts", suite, f"docs/test-counts.md says {doc[suite]}, this run "
-                                                              f"counted {count}; regenerate with --counts write"))
+            elif doc[suite] + delta != count:
+                problems.append(violation("R6-counts", suite, f"docs/test-counts.md says {doc[suite]}"
+                                          + (f" ({delta:+d} on {osname})" if delta else "")
+                                          + f", this run counted {count}; regenerate with --counts write"))
 
     shutil.rmtree(work, ignore_errors=True)
     print(f"hygiene_check: suite {suite} exited {rc}; tests counted: {count}; skips: {len(skips)}; "
@@ -423,28 +428,74 @@ def _is_clock_call(node: ast.AST) -> bool:
     return False
 
 
-def _numeric_literal(node: ast.AST) -> bool:
+def _numeric_literal(node: ast.AST, consts: frozenset[str] = frozenset()) -> bool:
+    """A numeric literal, an arithmetic expression of literals, or a NAME bound only to such an expression (module- or
+    function-level ``PROMPT = 1.0``): a bound moved into a constant is still a literal bound (fix wave 25, E-C)."""
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
         return True
+    if isinstance(node, ast.Name):
+        return node.id in consts
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
-        return _numeric_literal(node.operand)
+        return _numeric_literal(node.operand, consts)
     if isinstance(node, ast.BinOp):
-        return _numeric_literal(node.left) and _numeric_literal(node.right)
+        return _numeric_literal(node.left, consts) and _numeric_literal(node.right, consts)
     return False
+
+
+def _literal_names(scope: ast.AST) -> frozenset[str]:
+    """Names in ``scope`` (not descending into nested functions/classes) whose every binding is a numeric literal
+    expression; a name bound anything else even once is not a constant."""
+    good: set[str] = set()
+    bad: set[str] = set()
+    todo = list(ast.iter_child_nodes(scope))
+    while todo:
+        n = todo.pop()
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        todo.extend(ast.iter_child_nodes(n))
+        targets: list[ast.AST] = []
+        value = None
+        if isinstance(n, ast.Assign):
+            targets, value = n.targets, n.value
+        elif isinstance(n, ast.AnnAssign) and n.value is not None:
+            targets, value = [n.target], n.value
+        elif isinstance(n, (ast.AugAssign, ast.For, ast.AsyncFor, ast.NamedExpr, ast.With, ast.AsyncWith)):
+            tgts = [i.optional_vars for i in n.items if i.optional_vars is not None] \
+                if isinstance(n, (ast.With, ast.AsyncWith)) else [n.target]
+            for t in tgts:
+                for x in ast.walk(t):
+                    if isinstance(x, ast.Name):
+                        bad.add(x.id)
+            continue
+        for t in targets:
+            if isinstance(t, ast.Name):
+                (good if _numeric_literal(value) else bad).add(t.id)
+            else:
+                for x in ast.walk(t):
+                    if isinstance(x, ast.Name):
+                        bad.add(x.id)
+    return frozenset(good - bad)
 
 
 class _ClockFlow(ast.NodeVisitor):
     """Per function: names bound to clock readings (t0 = time.monotonic()) and to clock deltas
     (took = time.monotonic() - t0); then flags upper-bound assertions of a delta against a literal."""
 
-    def __init__(self, path: str, lines: list[str]):
+    def __init__(self, path: str, lines: list[str], module_consts: frozenset[str] = frozenset()):
         self.path, self.lines, self.hits = path, lines, []
         self.func_stack: list[str] = []
+        self.module_consts = module_consts
 
     def _scan_function(self, node):
         self.func_stack.append(node.name)
         stamps: set[str] = set()
         deltas: set[str] = set()
+        local = _literal_names(node)
+        assigned_here = {t.id for t in ast.walk(node) if isinstance(t, ast.Name) and isinstance(t.ctx, ast.Store)}
+        consts = frozenset(local | (self.module_consts - assigned_here))
+
+        def lit(e: ast.AST) -> bool:
+            return _numeric_literal(e, consts)
 
         def is_delta(e: ast.AST) -> bool:
             if isinstance(e, ast.Name):
@@ -457,7 +508,7 @@ class _ClockFlow(ast.NodeVisitor):
             if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in ("round", "abs", "float"):
                 return bool(e.args) and is_delta(e.args[0])
             if isinstance(e, ast.BinOp) and isinstance(e.op, (ast.Mult, ast.Div)):
-                return (is_delta(e.left) and _numeric_literal(e.right)) or (is_delta(e.right) and _numeric_literal(e.left))
+                return (is_delta(e.left) and lit(e.right)) or (is_delta(e.right) and lit(e.left))
             return False
 
         for sub in ast.walk(node):
@@ -476,9 +527,9 @@ class _ClockFlow(ast.NodeVisitor):
         def upper_bound(cmp: ast.Compare) -> bool:
             left = cmp.left
             for op, right in zip(cmp.ops, cmp.comparators):
-                if isinstance(op, (ast.Lt, ast.LtE)) and is_delta(left) and _numeric_literal(right):
+                if isinstance(op, (ast.Lt, ast.LtE)) and is_delta(left) and lit(right):
                     return True
-                if isinstance(op, (ast.Gt, ast.GtE)) and _numeric_literal(left) and is_delta(right):
+                if isinstance(op, (ast.Gt, ast.GtE)) and lit(left) and is_delta(right):
                     return True
                 left = right
             return False
@@ -491,7 +542,7 @@ class _ClockFlow(ast.NodeVisitor):
                         break
             elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and \
                     sub.func.attr in ("assertLess", "assertLessEqual") and len(sub.args) >= 2:
-                if is_delta(sub.args[0]) and _numeric_literal(sub.args[1]):
+                if is_delta(sub.args[0]) and lit(sub.args[1]):
                     self.hits.append((sub.lineno, node.name))
         self.func_stack.pop()
 
@@ -596,6 +647,29 @@ OTHER_WALLCLOCK = {
             re.compile(r"\belapsed\w*\s*<=?\s*\d")],
 }
 OTHER_WALLCLOCK[".mjs"] = OTHER_WALLCLOCK[".ts"]
+# A bound held in a named constant whose value is a literal duration is a literal bound too (fix wave 25, E-C):
+# per file, the constants are collected, then the same comparisons are matched against their names ({C}).
+OTHER_CONST_DEF = {
+    ".rs": re.compile(r"\bconst\s+([A-Z_][A-Z0-9_]*)\s*:\s*Duration\s*=\s*Duration::from_\w+\(\s*\d[\d_]*\s*\)\s*;"),
+    ".go": re.compile(r"^\s*(?:const\s+)?([A-Za-z_]\w*)\s*(?:time\.Duration\s*)?=\s*\d+\s*\*\s*time\.\w+\s*$", re.M),
+    ".ts": re.compile(r"\bconst\s+([A-Za-z_]\w*)\s*(?::\s*number\s*)?=\s*[\d_]+\s*;"),
+}
+OTHER_CONST_DEF[".mjs"] = OTHER_CONST_DEF[".ts"]
+OTHER_WALLCLOCK_CONST = {
+    ".rs": [r"\belapsed(?:\(\))?\s*<=?\s*{C}\b", r"\.elapsed\(\)\s*<=?\s*{C}\b"],
+    ".go": [r"(?:time\.Since\([^)]*\)|\belapsed\b|\bopen\b)\s*>=?\s*{C}\b"],
+    ".ts": [r"(?:Date\.now\(\)|performance\.now\(\))\s*-\s*\w+\s*<=?\s*{C}\b", r"\belapsed\w*\s*<=?\s*{C}\b"],
+}
+OTHER_WALLCLOCK_CONST[".mjs"] = OTHER_WALLCLOCK_CONST[".ts"]
+
+
+def _const_wallclock_patterns(suffix: str, text: str) -> list[re.Pattern]:
+    d = OTHER_CONST_DEF.get(suffix)
+    names = sorted(set(d.findall(text))) if d else []
+    if not names:
+        return []
+    alt = "(?:" + "|".join(re.escape(n) for n in names) + ")"
+    return [re.compile(t.replace("{C}", alt)) for t in OTHER_WALLCLOCK_CONST.get(suffix, [])]
 OTHER_PORTS = {
     ".rs": [re.compile(r"\"(?:127\.0\.0\.1|localhost|0\.0\.0\.0):([1-9]\d{3,4})\"")],
     ".go": [re.compile(r"\"(?:127\.0\.0\.1|localhost|0\.0\.0\.0)?:([1-9]\d{3,4})\""),
@@ -692,15 +766,18 @@ def lint_counts(allow: dict) -> list[str]:
             pinned = any(_commit_exists(h, cache) for h in COMMIT_RE.findall(block) if not h.isdigit())
             if pinned:
                 continue
-            for i in range(a, b):
-                for m in COUNT_CLAIM.finditer(lines[i]):
-                    snippet = m.group(0)
-                    e = _allowed(allow.get("allow", []), "L3-counts", str(rel), "<doc>", lines[i])
-                    if e:
-                        continue
-                    problems.append(violation("L3-counts", f"{rel}:{i + 1}",
-                                              f"hand-written test count {snippet!r} — link docs/test-counts.md, or "
-                                              f"tie a historical count to its commit"))
+            # matched over the whole paragraph (line breaks as spaces, offsets kept), so a count wrapped across two
+            # lines ("`cargo test`: 84\n  passed") is caught too (fix wave 25, E-C); reported at its first line
+            flat = block.replace("\n", " ")
+            for m in COUNT_CLAIM.finditer(flat):
+                i = a + block.count("\n", 0, m.start())
+                snippet = " ".join(m.group(0).split())
+                e = _allowed(allow.get("allow", []), "L3-counts", str(rel), "<doc>", lines[i])
+                if e:
+                    continue
+                problems.append(violation("L3-counts", f"{rel}:{i + 1}",
+                                          f"hand-written test count {snippet!r} — link docs/test-counts.md, or "
+                                          f"tie a historical count to its commit"))
     return problems
 
 
@@ -763,7 +840,7 @@ def cmd_lint(a: argparse.Namespace) -> int:
                 problems.append(violation("L0-parse", str(rel), str(e)))
                 continue
             if "L1" in rules:
-                v = _ClockFlow(str(rel), lines)
+                v = _ClockFlow(str(rel), lines, _literal_names(tree))
                 v.visit(tree)
                 for ln, func in v.hits:
                     e = _allowed(entries, "L1-wallclock", str(rel), func, lines[ln - 1])
@@ -780,10 +857,11 @@ def cmd_lint(a: argparse.Namespace) -> int:
                     problems.append(violation("L2-ports", f"{rel}:{ln}", f"in {func}: hard-coded port ({what})"))
         else:
             suffix = rel.suffix
+            wallclock = {suffix: OTHER_WALLCLOCK.get(suffix, []) + _const_wallclock_patterns(suffix, text)}
             for i, line in enumerate(lines):
                 if line.lstrip().startswith(("//", "#", "*")):
                     continue
-                for rule, table, label in (("L1-wallclock", OTHER_WALLCLOCK, "wall-clock upper bound"),
+                for rule, table, label in (("L1-wallclock", wallclock, "wall-clock upper bound"),
                                            ("L2-ports", OTHER_PORTS, "hard-coded port")):
                     if rule[:2] not in rules:
                         continue
@@ -817,13 +895,21 @@ def cmd_lint(a: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+SUITES = tuple(f"python:{s}" for s in PY_SERVICES) + ("rust:ledger-rust", "go:orchestrator-go", "node:dashboard-ts")
+
+
 def cmd_counts(a: argparse.Namespace) -> int:
     rows = read_counts_doc()
     if a.check:
-        if not rows:
-            print("HYGIENE R6-counts docs/test-counts.md: no suite rows")
+        missing = [s for s in SUITES if s not in rows]
+        extra = [s for s in rows if s not in SUITES]
+        for s in missing:
+            print(f"HYGIENE R6-counts docs/test-counts.md: no row for suite {s}")
+        for s in extra:
+            print(f"HYGIENE R6-counts docs/test-counts.md: row for unknown suite {s}")
+        if missing or extra:
             return 1
-        print(f"docs/test-counts.md: {len(rows)} suites")
+        print(f"docs/test-counts.md: {len(rows)} suites, one row each")
         return 0
     for k, v in sorted(rows.items()):
         print(f"{k}\t{v}")

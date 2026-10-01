@@ -600,12 +600,17 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0   # L3 accepts a count tied to a commit only if that commit resolves
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: pytest for the self-test's pytest-plugin cases (the services' pin)
+        run: python -m pip install pytest==9.1.1
       - name: The checker's own self-test (every rule fails on a planted violation; the clean probe passes)
-        run: python3 -m unittest devtools/test_hygiene_check.py -v
+        run: python -m unittest devtools/test_hygiene_check.py -v
       - name: Static rules L1-L4
-        run: python3 devtools/hygiene_check.py lint --strict-allowlist
+        run: python devtools/hygiene_check.py lint --strict-allowlist
       - name: docs/test-counts.md is present and well-formed
-        run: python3 devtools/hygiene_check.py counts --check
+        run: python devtools/hygiene_check.py counts --check
 
   # ---------------------------------------------------------------------------------------------------------------
   # The one check branch protection requires. A skipped upstream job (path filter said its inputs did not change)

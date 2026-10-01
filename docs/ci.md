@@ -77,7 +77,7 @@ a deliberate change. Its image README (`images/macos/macos-26-arm64-Readme.md`, 
 | `python-tests` | one per service (all nine) on Python 3.13, next to the 18 Linux entries (3.12 + 3.13) |
 | `delivery-py` | one entry, Python 3.13, with the same Node 22 / Go / Rust / uv steps as on Linux |
 | `ledger-rust` | `cargo test --locked` + clippy, same as Linux |
-| `orchestrator-go (ubuntu-24.04 / macos-14)` | `go vet` + `go test -race`, same as Linux |
+| `orchestrator-go` | `go vet` + `go test -race`, same as Linux |
 
 They report as separate checks (e.g. `python-tests (creative-py, 3.13, macos-26)`, `ledger-rust (macos-26)`) and
 all of them feed the one `required` check: a red Mac entry is a red `required`. One Python version on macOS keeps
@@ -95,9 +95,13 @@ these suites run on macOS without a person; its results were not available when 
 ## Jobs and what each one proves
 
 Runner: `ubuntu-24.04` everywhere except the macOS entries above (what `ubuntu-latest` resolves to today; pinned by
-name so a runner-image migration is a deliberate change). Preinstalled tools relied on and verified against the runner image README
-(image 20260920.314.1): Docker 28.0.4 client and server, rustup 1.29 with a stable toolchain, gcc (the Go race
-detector needs cgo), `curl`, `python3`. Everything else is installed by a pinned step.
+name so a runner-image migration is a deliberate change). Preinstalled tools relied on, checked against the runner
+image README (`https://raw.githubusercontent.com/actions/runner-images/main/images/ubuntu/Ubuntu2404-Readme.md`, read
+2026-10-01 by fix wave 25, scout C3-11: "Image Version: 20260920.314.1", Docker Client and Server 28.0.4, Rustup
+1.29.1, Cargo/Rust 1.98.1, GNU C++ 12.4/13.3/14.2 — the Go race detector needs cgo —, curl 8.5.0, Python 3.12.3).
+Everything else is installed by a pinned step. **Rust is not pinned:** every Rust-using job runs `rustup toolchain
+install stable`, which floats with the stable channel (scout C3-12; a new stable can add a clippy lint and turn
+`ledger-rust` red without a code change — pin a version in `rust-toolchain.toml` if that becomes a problem).
 
 | Job | Command(s) run (from the service directory) | Proves |
 |---|---|---|
@@ -113,7 +117,7 @@ detector needs cgo), `curl`, `python3`. Everything else is installed by a pinned
 | `audit-rust` | `cargo install cargo-audit --locked --version 0.22.2` → `cargo audit` | no RustSec advisory against `Cargo.lock` (70 crates). |
 | `audit-node` | `npm audit --audit-level=high` | no high or critical advisory against `package-lock.json`. |
 | `secret-scan` | gitleaks 8.30.1 release binary (sha256 `551f6fc8…` verified before use) → `gitleaks git --no-banner --redact --exit-code 1 --config .gitleaks.toml .` over the full history | no secret in any commit. `.gitleaks.toml` allowlists four exact strings (two fake `AKIA…` shapes, one fake token, one fake cued password) that onboarding-py's redaction tests use as inputs; it exempts no file and no path. |
-| `hygiene-static` | `python3 -m unittest devtools/test_hygiene_check.py` → `python3 devtools/hygiene_check.py lint --strict-allowlist` → `python3 devtools/hygiene_check.py counts --check` | the checker's self-test (each rule fails on a planted violation in a throwaway repository, the clean probe passes), then the static hygiene rules over the whole tree (below); always runs. |
+| `hygiene-static` | Python 3.13 (setup-python) + `pip install pytest==9.1.1` (the services' pin; the self-test drives a planted pytest suite through the plugin) → `python -m unittest devtools/test_hygiene_check.py` → `python devtools/hygiene_check.py lint --strict-allowlist` → `python devtools/hygiene_check.py counts --check` | the checker's self-test (each rule fails on a planted violation in a throwaway repository, the clean probe passes), then the static hygiene rules over the whole tree (below), then one row per suite in `docs/test-counts.md`; always runs. |
 | `required` | reads the result of every job above | one green check for branch protection; red if any job failed or was cancelled; a job skipped by the path filter is fine. |
 
 ## Pins
@@ -123,8 +127,9 @@ detector needs cgo), `curl`, `python3`. Everything else is installed by a pinned
   v6.5.0, `astral-sh/setup-uv` v7.6.0, `Swatinem/rust-cache` v2.9.2. No other third-party action is used: Rust
   comes from the runner's `rustup`, gitleaks and cargo-audit are installed by version, path filtering is a script.
 - Tools by version: uv 0.8.17, ruff 0.15.11, pip-audit 2.10.1, cargo-audit 0.22.2, gitleaks 8.30.1 (checksum
-  verified). Language runtimes: Python 3.12 and 3.13 (both, because a 3.13-only breakage has been missed before),
-  Go from `go.mod`, Rust stable, Node 22.
+  verified), pytest 9.1.1 (hygiene-static). Language runtimes: Python 3.12 and 3.13 (both, because a 3.13-only
+  breakage has been missed before), Go from `go.mod`, Node 22 — and Rust **stable, floating** (not pinned; see above).
+  Not pinned either: `registry:2` and `python:3.12-slim` in `delivery-docker-live` (below).
 - Concurrency: one run per ref; a newer push to a pull request cancels the older run. Pushes to `main` and
   `integration-*` are never cancelled.
 - `permissions: contents: read` for the whole workflow.
@@ -170,17 +175,32 @@ and on Linux the wrapper is its child subreaper. The job fails when, for that ru
 | R5 skips | a test was skipped (Python), skipped (Go `--- SKIP`), ignored (cargo) or skipped (node) for a reason not on the suite's `expected_skips` list in `devtools/hygiene_allowlist.json` — scout C3-5: before, `-rs` only printed skips |
 | R6 counts | the suite's test count differs from its row in `docs/test-counts.md` (regenerate with `--counts write`) |
 
-`lint` (job `hygiene-static`): L1 a test asserting an upper bound on a wall-clock delta against a literal (lower
-bounds are not flagged: load can only lengthen elapsed time); L2 a test binding or targeting a hard-coded port; L3 a
-hand-written test count in README / docs/ci.md / an ADR / ci.yml comments (a count tied to a resolvable commit in
-the same paragraph is history and allowed); L4 the shared files (`graceful_close.py`, the two shared graceful-close
-test files, `tests/_procinfo.py`, `tests/test_procinfo.py`) differing between services. Exceptions need an entry with
-a reason in `devtools/hygiene_allowlist.json`; `--strict-allowlist` also fails an entry that matches nothing.
+`lint` (job `hygiene-static`): L1 a test asserting an upper bound on a wall-clock delta against a literal — or
+against a name bound only to a literal (`PROMPT = 1.0`, `const PROMPT: Duration = Duration::from_secs(1)`, `const
+bound = 2 * time.Second`) — (lower bounds are not flagged: load can only lengthen elapsed time); L2 a test binding or
+targeting a hard-coded port; L3 a hand-written test count in README / docs/ci.md / an ADR / a service README /
+ci.yml comments, also when it is wrapped across two lines (a count tied to a resolvable commit in the same paragraph
+is history and allowed); L4 the shared files (`graceful_close.py` and its pin, the two shared graceful-close test
+files, `tests/_procinfo.py`, `tests/test_procinfo.py`, `tests/test_shared_ports.py`) differing between services.
+Exceptions need an entry with a reason in `devtools/hygiene_allowlist.json`; `--strict-allowlist` also fails an
+entry that matches nothing. `docs/test-counts.md` holds the Linux counts; a suite that compiles fewer tests on
+another OS declares it in the allowlist's `count_os_delta` with the reason (today: ledger-rust, −1 on macOS — one
+`#[cfg(target_os = "linux")]` test).
+
+The test counts are a committed, generated file: after a change that adds or removes tests, run the suite under
+`hygiene_check.py run … --counts write` and commit the changed row. Every CI test job checks its row; when two
+branches that each changed tests are merged, the merge commit regenerates the rows (CI says which row and the new
+number).
 
 What the dynamic rules cannot see: a file a suite writes OUTSIDE the checkout, its TMPDIR and `/tmp` (e.g. `~/.cache`,
 `~/.config/go/telemetry` — the Go job sets `GOTELEMETRY=off`); a process that left the session, scrubbed its
 environment AND runs on macOS (no subreaper there). On a shared machine another process can create `/tmp` entries
 during a run; R3 prints the names (a CI runner is the job's alone).
+
+The `live-runs` job runs each department's `devtools/live_run.py` under the same wrapper (`--kind none`). Those
+scripts `mkdtemp` a work directory and never remove it (scout C6-2), so R3 fails that job until each script removes
+its work directory on exit — the fix is in the department files (docs/findings/OPEN.md, C6-2); the rule is not
+relaxed for it.
 
 ## Known behaviours worth knowing before you debug a red run
 
