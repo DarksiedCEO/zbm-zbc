@@ -1033,7 +1033,9 @@ having read the entire source diff, bound by hash.
   every stop — in production as in the suite — left the process's own temp dirs (gitport's `dlv-git-*`, the
   in-memory home, the sandbox temp base) in TMPDIR (the host had > 150 `dlv-git-*` from earlier sessions). `serve.run`
   now makes SIGTERM a normal interpreter exit (status 143): the exit handlers run. The suite's service children also
-  get the suite's TMPDIR (`helpers.base_env`), so a child the suite must SIGKILL leaves nothing in the host's temp dir.
+  get the suite's TMPDIR (`helpers.base_env`), so a child the suite must SIGKILL leaves nothing in the host's temp dir;
+  so do the sandbox double's processes (`FakeDockerCli.toolchain_env`; a `go test` it killed on its deadline left a
+  `go-build*` work dir in the host's /tmp).
 
 Pins after this wave: `adapters/tools/zbm_standalone_runner.py` `ce227a83fc4b297a12cfa8e98d6510a8e04a17e70d8919362300a11ff896907d`
 (`runner.STANDALONE_SHA256`), `seed/test_commands_seed.json` `897b5dd2c860bc73fd56bfeccd3260f9ad38027b69209e249b7e0001a8241310`

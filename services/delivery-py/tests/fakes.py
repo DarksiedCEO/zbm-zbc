@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -303,13 +304,15 @@ class FakeDockerCli:
         """What the sandbox IMAGE provides and this double must stand in for: the host's rust toolchain (rustup needs
         its home when HOME is the volume) and a Go build cache shared by every fake container of the session (the
         image's cache lives under the container HOME; a cold cache per double would rebuild the race runtime each
-        time). Nothing here reaches the engine's argv or the seed."""
+        time). Nothing here reaches the engine's argv or the seed. Wave 24 (E6 sweep): TMPDIR — the image's /tmp goes
+        with its container; the double's processes run on the host, so their stand-in is the suite's temp root (the
+        suite removes it), never the host's /tmp (a go test the double kills on its deadline left go-build* there)."""
         real_home = os.path.expanduser("~")
         gocache = os.path.join(_tmproot.ORIG_TMP, "dlv-test-gocache")   # deliberately cross-session (L4)
         os.makedirs(gocache, exist_ok=True)
         return {"RUSTUP_HOME": os.environ.get("RUSTUP_HOME", os.path.join(real_home, ".rustup")),
                 "CARGO_HOME": os.environ.get("CARGO_HOME", os.path.join(real_home, ".cargo")),
-                "GOCACHE": gocache, "GOPATH": os.path.join(gocache, "gopath")}
+                "GOCACHE": gocache, "GOPATH": os.path.join(gocache, "gopath"), "TMPDIR": tempfile.gettempdir()}
 
     # --- inspection ---------------------------------------------------------------------------------------------------
 

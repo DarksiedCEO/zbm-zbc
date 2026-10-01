@@ -538,6 +538,16 @@ def test_e6_a_replayed_admission_whose_red_check_refused_it_gets_the_same_answer
         h.close()
 
 
+def test_e6_the_sandbox_double_gives_its_processes_the_suites_temp_dir():
+    """Found by this wave's full-suite /tmp check (go-build* dirs in the host /tmp): the sandbox double runs the
+    engine's commands as host processes with an environment that had no TMPDIR, so go, pytest and cargo inside it
+    used the HOST's /tmp — and a command the double kills on its deadline (go test, say) leaves its work dir there.
+    The image's /tmp goes with its container; the double's stand-in is the suite's temp root, which the suite
+    removes."""
+    from fakes import FakeDockerCli
+    assert FakeDockerCli.toolchain_env().get("TMPDIR") == tempfile.gettempdir()
+
+
 def test_e6_no_engine_text_says_fixed():
     pats = re.compile(r"blocks `fixed`|before ``fixed``|before fixed\b|not-yet-fixed|this finding is fixed|cannot be fixed")
     hits = []
