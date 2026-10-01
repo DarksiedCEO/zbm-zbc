@@ -26,7 +26,7 @@ import threading
 import time
 from pathlib import Path
 
-from helpers import SERVICE_ROOT, Harness, finding, flat, rid, scenario_s1, two_findings
+from helpers import SERVICE_ROOT, Harness, finding, findings_doc, flat, review_body, rid, scenario_s1, two_findings
 from test_round23 import _p1, _states, _whys
 from test_round23 import DONE
 from test_round24 import HANG_PATH, HANG_RT, OLD
@@ -403,3 +403,48 @@ def test_adr_0011_pinned_hash_table_matches_every_file_it_names():
         if got != want:
             wrong.append(f"{rel}: ADR {want[:12]}…, file {got[:12]}")
     assert not wrong, wrong
+
+
+# ====================================================================== wave 25 E-B: DLV_MAX_FINDINGS is applied
+
+def test_dlv_max_findings_caps_the_findings_document():
+    """Spec D12 / §B.1 ("1..`DLV_MAX_FINDINGS` findings", strict schema → 422): config.py parsed DLV_MAX_FINDINGS
+    (1..200) into a setting nothing read, so DLV_MAX_FINDINGS=2 still admitted a three-finding document (the request
+    model's own cap of 200 was the only one). Now a document over the cap is the same 422 schema answer a 201-finding
+    document gets, and nothing is created; at the cap it is admitted."""
+    h = Harness(scenario=[], extra_env={"DLV_MAX_FINDINGS": "2"})
+    try:
+        three = findings_doc(h.base_sha, [finding("N1-1", line=6), finding("N1-2", line=11), finding("N1-3", line=15)])
+        n_events = len(h.events())
+        r = h.post("/dlv/v1/fix-runs", three)
+        assert r.status_code == 422, r.text
+        assert any(e["loc"][-1] == "findings" and "DLV_MAX_FINDINGS" in e["msg"] for e in r.json()["detail"]), r.text
+        assert not h.svc.runs and len(h.events()) == n_events, [e["event_type"] for e in h.events()[n_events:]]
+        ok = h.post("/dlv/v1/fix-runs", two_findings(h.base_sha))
+        assert ok.status_code == 202, ok.text
+    finally:
+        h.svc.wait_idle(240)
+        h.close()
+
+
+def test_dlv_max_findings_caps_the_run_a_failing_review_would_open():
+    """D12 is per RUN: a failing review opens a child run holding the reopened findings plus the new ones, which the
+    request model capped at 200 EACH (400 together) and DLV_MAX_FINDINGS not at all. Now a review whose child run
+    would carry more than DLV_MAX_FINDINGS findings is a 422 before anything is admitted or run."""
+    h = Harness(scenario=scenario_s1(), extra_env={"DLV_MAX_FINDINGS": "2"})
+    try:
+        run1 = h.submit(two_findings(h.base_sha)).json()["run_id"]
+        assert h.run(run1)["status"] == "awaiting_review"
+        nf = finding("N9-1", line=15, class_hint="argument_validation",
+                     reproduction=f"run {HANG_PATH}::test_clamp_hangs: clamp(5, 3, 0) answers 3", expected="ValueError",
+                     observed="3", reproduction_test={"path": HANG_PATH, "content": HANG_RT})
+        body = review_body(h, run1, verdict="fail", reopened=("N1-1", "N1-2"), new_findings=(nf,))
+        n_events = len(h.events())
+        r = h.post(f"/dlv/v1/fix-runs/{run1}/review", body)
+        assert r.status_code == 422, r.text
+        assert any("DLV_MAX_FINDINGS" in e["msg"] for e in r.json()["detail"]), r.text
+        assert len(h.events()) == n_events, [e["event_type"] for e in h.events()[n_events:]]
+        assert h.run(run1)["status"] == "awaiting_review"
+    finally:
+        h.svc.wait_idle(240)
+        h.close()

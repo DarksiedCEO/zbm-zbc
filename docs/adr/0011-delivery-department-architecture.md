@@ -1128,9 +1128,12 @@ Evidence for every item below (failing-first runs on `0f017a7` / `b51f307`, muta
 - **Settings and their documentation (scout B Lows, M6 class).** Every `DLV_*` variable `src/` reads is named in
   the README; `tests/test_env_documented.py` fails on one that is not, and a name that unlocks or weakens something
   (`ALLOW`, `ACCEPT`, `UNPINNED`, `UNSAFE`, `NON_PRODUCTION`, …) must be spelled out, never covered by a glob.
-  `DLV_LIVE_PORT_RANGE`, parsed into a setting nothing read, is gone. `DLV_MAX_FINDINGS` is parsed but not applied
-  (the request model's own cap of 200 holds): stated, open — applying it needs a reason code the closed catalog
-  (spec §A) does not have. The sandbox double's Go build cache lives in the session's temp root (it was left in the
+  `DLV_LIVE_PORT_RANGE`, parsed into a setting nothing read, is gone. `DLV_MAX_FINDINGS` was parsed and applied nowhere
+  (the request models' own caps of 200 per list held; a failing review could open a child run of up to 400 findings,
+  against D12's 200 per run): it is applied now in `api.py` (`within_max_findings`) as spec §B.1 reads it ("1..
+  `DLV_MAX_FINDINGS` findings", strict schema → 422) — a document over the cap, or a failing review whose reopened
+  plus new findings exceed it, gets the same 422 schema answer an over-long list gets, before anything is recorded
+  (no new reason code; `tests/test_round25.py`, failing first on `75e7010`). The sandbox double's Go build cache lives in the session's temp root (it was left in the
   host temp dir by design); `DLV_TEST_GOCACHE` names one to keep. The G3 child is a plain process (it was a test
   that skipped itself on every ordinary run).
 - **H8 (N24-D-1/-2, commit `cf54e9f`).** Its six tests fail on `b51f307` and pass now; the replay claims in "Round 24

@@ -150,8 +150,9 @@ now fails on any that is not):
 - **Run limits**: `DLV_RUN_WALL_CLOCK_S` (2700, 60..86400; `DLV_CMD_TIMEOUT_S` may not exceed it),
   `DLV_MAX_ROUNDS_PER_FINDING` (5, 1..5), `DLV_SUBAGENT_TIMEOUT_S` (900), `DLV_SUBAGENT_MAX_TURNS` (50),
   `DLV_RECURSION_LIMIT` (200, 10..200), `DLV_SANDBOX_MEM` (`4g`) and `DLV_SANDBOX_CPUS` (`2`) for the container.
-  `DLV_MAX_FINDINGS` (200, 1..200) is parsed but **not applied**: the request model's own cap of 200 findings is
-  what holds (wave 25 found it; tracked in `docs/findings/OPEN.md`).
+  `DLV_MAX_FINDINGS` (200, 1..200): the most findings a run holds — a findings document over it, or a failing review
+  whose reopened plus new findings exceed it, is a 422 schema answer and nothing is recorded (wave 25: it was parsed
+  and applied nowhere, so a lower value changed nothing and a review could open a run of up to 400).
 - **Server tuning**, read once at start by `serve.py` (a non-numeric or non-positive value refuses to start):
   `DLV_REQUEST_HEAD_TIMEOUT_SECONDS` (10), `DLV_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `DLV_LIMIT_CONCURRENCY` (128 open
   connections, then 503), `DLV_SWITCH_INTERVAL_SECONDS` (0.001), `DLV_DRAINS_MAX` (512 concurrent drains).
