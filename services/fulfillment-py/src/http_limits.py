@@ -109,6 +109,7 @@ from __future__ import annotations
 import asyncio
 import math
 import os
+import sys
 import weakref
 
 import h11
@@ -160,6 +161,56 @@ def load_body_read_timeout() -> float:
             f"0 < value <= {BODY_READ_TIMEOUT_S:g} (may only narrow). This service refuses to start."
         )
     return value
+
+
+# Fix wave 25 (scout C5-2; FIX_WAVE_23b item 2 ruled the same gap in detection-py
+# a product defect): the GIL switch interval. A thread holds the GIL for
+# sys.getswitchinterval() (CPython's default 5 ms) before a thread that wants it
+# is served; a 4 MiB parse (run_in_threadpool) is CPU-bound for tens of ms, and
+# the event loop gives the GIL up on every syscall (accept, recv, send) and
+# waited up to a full slice to get it back each time — the latency of every
+# small request and /health behind a large parse or a junk flood. `python3 -m
+# api` never set it. Now 1 ms, as every other launcher in this repo;
+# FULFILLMENT_SWITCH_INTERVAL_SECONDS overrides it only within [100 us, 50 ms]
+# (detection-py's range, fix wave 24 F3: 0.5 s would let a thread hold the GIL
+# half a second, 1e-7 s is a switch storm), read at import (refuses startup, as
+# FULFILLMENT_BODY_READ_TIMEOUT_S), and the launcher checks the interval in
+# force in whole microseconds (CPython truncates 1e6 x the value: 0.0001 reads
+# back as 9.999999999999999e-05 — detection-py's wave-25 H5) and prints it.
+SWITCH_INTERVAL_DEFAULT_S = 0.001
+SWITCH_INTERVAL_MIN_US = 100
+SWITCH_INTERVAL_MAX_US = 50_000
+_SWITCH_ENV = "FULFILLMENT_SWITCH_INTERVAL_SECONDS"
+
+
+def load_switch_interval() -> float:
+    """SWITCH_INTERVAL_DEFAULT_S, or FULFILLMENT_SWITCH_INTERVAL_SECONDS
+    (unset or empty: the default). Raises RuntimeError (refuse startup) unless
+    100 us <= value <= 50 ms."""
+    raw = os.environ.get(_SWITCH_ENV)
+    if raw is None or not raw.strip():
+        return SWITCH_INTERVAL_DEFAULT_S
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not (SWITCH_INTERVAL_MIN_US / 1e6 <= value <= SWITCH_INTERVAL_MAX_US / 1e6):  # refuses nan and inf too
+        raise RuntimeError(f"{_SWITCH_ENV}={raw!r} is invalid: expected seconds, "
+                           f"{SWITCH_INTERVAL_MIN_US / 1e6:g} <= value <= {SWITCH_INTERVAL_MAX_US / 1e6:g}. "
+                           f"This service refuses to start.")
+    return value
+
+
+def apply_switch_interval(value: float) -> int:
+    """Sets the interval and returns the one in force in whole microseconds
+    (as CPython keeps it); RuntimeError unless it is within [MIN_US, MAX_US]
+    and is `value` to within the microsecond CPython truncates."""
+    sys.setswitchinterval(value)
+    in_force_us = round(sys.getswitchinterval() * 1_000_000)
+    if not (SWITCH_INTERVAL_MIN_US <= in_force_us <= SWITCH_INTERVAL_MAX_US) or abs(in_force_us - value * 1_000_000) >= 1:
+        raise RuntimeError(f"the GIL switch interval in force is {in_force_us} us, not the {value!r} s set "
+                           f"({_SWITCH_ENV}): this service refuses to start")
+    return in_force_us
 
 
 # Fix wave 25, H4 (AEGIS N24-S-12): the rules that judge a CLIENT by time —

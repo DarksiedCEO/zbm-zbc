@@ -178,6 +178,7 @@ _MAX_BODY_BYTES = 4 * 1024 * 1024
 # see http_limits.py, which `python3 -m api` runs (main() below).
 _MAX_HEADER_BYTES = http_limits.MAX_HEADER_BYTES
 _BODY_READ_TIMEOUT_S = http_limits.load_body_read_timeout()  # refuses startup if invalid
+_SWITCH_INTERVAL_S = http_limits.load_switch_interval()  # refuses startup if invalid (fix wave 25, C5-2)
 # Fix wave 8, N7-2: the deadline alone let one byte per 20 s hold a body (and
 # whatever was buffered for it) for the whole 30 s. Now a body is answered 408
 # when (a) a single wait for its next chunk reaches _BODY_MIN_RATE_GRACE_S
@@ -1961,6 +1962,8 @@ def main() -> None:
     host = os.environ.get("FULFILLMENT_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("FULFILLMENT_PORT", "8091"))
     http_limits.DeadlineH11Protocol.body_timeout_s = _BODY_READ_TIMEOUT_S
+    in_force_us = http_limits.apply_switch_interval(_SWITCH_INTERVAL_S)  # fix wave 25, C5-2 (http_limits)
+    print(f"fulfillment-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
     uvicorn.run(
         app,
         host=host,
