@@ -18,6 +18,7 @@ import sys
 import pytest
 
 import serve
+from conftest import TEST_SERVICE_TOKEN
 
 
 def test_the_launcher_sets_a_1ms_switch_interval_before_serving(monkeypatch):
@@ -85,3 +86,70 @@ def test_the_launcher_refuses_to_serve_when_the_interval_in_force_is_not_the_one
         monkeypatch.undo()
         sys.setswitchinterval(before)
     assert served == []
+
+
+# --- fix wave 25, H5 (AEGIS N24-S-6): the range's own ends start the REAL launcher -------------------------------
+
+@pytest.mark.parametrize("value,us", [(0.0001, 100), (0.05, 50_000), (0.00015, 150), (0.0123456789, 12_345)])
+def test_the_interval_in_force_is_compared_in_whole_microseconds(value, us):
+    """CPython keeps the interval as whole microseconds (it truncates 1e6 x the value) and reads 0.0001 back as
+    9.999999999999999e-05: the float comparison refused the documented lower bound (b51f307: RuntimeError)."""
+    before = sys.getswitchinterval()
+    try:
+        assert serve._apply_switch_interval(value) == us
+    finally:
+        sys.setswitchinterval(before)
+
+
+def _launch(raw: str | None, timeout: float = 20.0) -> tuple[int | None, str]:
+    """`python3 serve.py` with DETECTION_SWITCH_INTERVAL_SECONDS=raw: (the /health status once it serves, or None if
+    it exited; everything it wrote to stderr)."""
+    import os
+    import subprocess
+    import tempfile
+    import time
+
+    from test_request_limits_live import SRC, _free_port, _request
+
+    port = _free_port()
+    env = {**os.environ, "ZBM_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "PYTHONDONTWRITEBYTECODE": "1"}
+    env.pop("DETECTION_SWITCH_INTERVAL_SECONDS", None)
+    if raw is not None:
+        env["DETECTION_SWITCH_INTERVAL_SECONDS"] = raw
+    with tempfile.TemporaryFile(mode="w+") as err:
+        proc = subprocess.Popen([sys.executable, "serve.py", "--host", "127.0.0.1", "--port", str(port)],
+                                cwd=SRC, env=env, stdout=subprocess.DEVNULL, stderr=err)
+        status = None
+        try:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline and proc.poll() is None:
+                try:
+                    status = _request(port, "GET", "/health", timeout=1)[0]
+                    break
+                except OSError:
+                    time.sleep(0.1)
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        err.seek(0)
+        return status, err.read()
+
+
+@pytest.mark.parametrize("raw,us", [("0.0001", 100), ("0.05", 50_000), (None, 1000)])
+def test_the_launcher_serves_at_both_ends_of_the_range(raw, us):
+    """The reviewer's probe, as a test: the real launcher started with the documented range ends serves /health, and
+    the interval it reports in force is the one set (b51f307: 0.0001 refused to start)."""
+    status, err = _launch(raw)
+    assert status == 200, err[-2000:]
+    assert f"GIL switch interval in force: {us} us" in err, err[-2000:]
+
+
+@pytest.mark.parametrize("raw", ["0.0000999", "0.0500001"])
+def test_the_launcher_refuses_just_outside_the_range(raw):
+    status, err = _launch(raw, timeout=10)
+    assert status is None
+    assert "DETECTION_SWITCH_INTERVAL_SECONDS" in err, err[-2000:]

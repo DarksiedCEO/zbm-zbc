@@ -63,8 +63,19 @@ REQUEST_HEAD_TIMEOUT_S = 10.0
 # starts; and the launcher checks the interval actually in force
 # (sys.getswitchinterval() after setting it, to the microsecond CPython keeps)
 # before it serves — anything else refuses to start.
-SWITCH_INTERVAL_MIN_S = 0.0001
-SWITCH_INTERVAL_MAX_S = 0.05
+#
+# Fix wave 25, H5 (AEGIS N24-S-6): the in-force check compared floats, and
+# CPython keeps the interval as a whole number of microseconds (it truncates
+# 1e6 x the value): 0.0001 is kept as 100 us and read back as
+# 9.999999999999999e-05, below the 0.0001 float bound — the launcher refused
+# the range's own lower end. The interval in force is now compared in integer
+# microseconds, round(getswitchinterval() x 1e6), against [100, 50000], and
+# with the value set to within the microsecond CPython truncates. The value
+# in force is printed at start (stderr) so a launcher-level check can read it.
+SWITCH_INTERVAL_MIN_US = 100
+SWITCH_INTERVAL_MAX_US = 50_000
+SWITCH_INTERVAL_MIN_S = SWITCH_INTERVAL_MIN_US / 1_000_000   # 0.0001: the env value's own range check
+SWITCH_INTERVAL_MAX_S = SWITCH_INTERVAL_MAX_US / 1_000_000   # 0.05
 
 
 def _switch_interval_from_env(name: str = "DETECTION_SWITCH_INTERVAL_SECONDS", default: float = 0.001) -> float:
@@ -81,15 +92,16 @@ def _switch_interval_from_env(name: str = "DETECTION_SWITCH_INTERVAL_SECONDS", d
     return value
 
 
-def _apply_switch_interval(value: float) -> float:
-    """Sets the interval and returns the one in force; refuses (RuntimeError) unless it is `value` (to the
-    microsecond) and within the accepted range."""
+def _apply_switch_interval(value: float) -> int:
+    """Sets the interval and returns the one in force, in whole microseconds (as CPython keeps it); refuses
+    (RuntimeError) unless it is within [SWITCH_INTERVAL_MIN_US, SWITCH_INTERVAL_MAX_US] and is `value` to within the
+    microsecond CPython truncates."""
     sys.setswitchinterval(value)
-    in_force = sys.getswitchinterval()
-    if not (SWITCH_INTERVAL_MIN_S <= in_force <= SWITCH_INTERVAL_MAX_S) or abs(in_force - value) > 1e-6:
-        raise RuntimeError(f"the GIL switch interval in force is {in_force!r} s, not the {value!r} s set "
+    in_force_us = round(sys.getswitchinterval() * 1_000_000)
+    if not (SWITCH_INTERVAL_MIN_US <= in_force_us <= SWITCH_INTERVAL_MAX_US) or abs(in_force_us - value * 1_000_000) >= 1:
+        raise RuntimeError(f"the GIL switch interval in force is {in_force_us} us, not the {value!r} s set "
                            f"(DETECTION_SWITCH_INTERVAL_SECONDS): this service refuses to start")
-    return in_force
+    return in_force_us
 
 
 SWITCH_INTERVAL_S: float = _switch_interval_from_env()
@@ -156,7 +168,8 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="bind address (default: loopback only)")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
-    _apply_switch_interval(SWITCH_INTERVAL_S)
+    in_force_us = _apply_switch_interval(SWITCH_INTERVAL_S)
+    print(f"detection-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
     uvicorn.run(
         "api:app",
         host=args.host,
