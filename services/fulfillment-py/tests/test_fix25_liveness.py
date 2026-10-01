@@ -41,7 +41,6 @@ import os
 import select
 import signal
 import socket
-import sys
 import time
 
 import h11
@@ -361,6 +360,87 @@ def test_the_model_measure_is_not_below_what_the_model_holds(limit, events):
     counted = api._retained_bytes(model)
     assert counted >= traced * 0.97, (counted, traced)
     assert counted <= traced * 1.25, (counted, traced)        # and not so far above that it starves the budget
+
+
+def test_a_small_body_never_waits_for_the_shared_budget_even_when_its_model_is_larger(monkeypatch):
+    """Fix wave 25 (E-A review of H3): ADR 0002 Decision 23 — a small body (<= 64 KiB) never waits for in-flight
+    bytes under the real launcher (its bytes come from the small reserve). H3 as first committed (cd5fb49) charged
+    every parsed model through `_BodyHold.cover`, which takes everything past 64 KiB from the SHARED pool and waits
+    for it: a 64 KiB valid body whose model is ~0.44 MB (200 transcripts ending in an astral character) waited
+    `_INFLIGHT_WAIT_S` and was answered 503 whenever the shared pool was held — e.g. by stalled senders, exactly
+    the attack the small reserve exists for. The model is still counted (what the shared pool has free, the rest
+    in the pool's `over`), but a small body never waits for it."""
+    monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 1.0)
+    body = _astral_detect_body(200, 64 * KIB)
+    assert len(body) <= api._SMALL_BODY_BYTES
+
+    async def scenario():
+        lanes = api._lanes()
+        await lanes.inflight.reserve(lanes.inflight.limit)          # every shared byte held by others
+        try:
+            c = _Client(content_length=len(body))
+            task = asyncio.ensure_future(c.run())
+            await c.feed(body, more=False)
+            await asyncio.wait_for(task, 20)
+            return c, (lanes.inflight.used - lanes.inflight.limit, lanes.inflight.over, lanes.small_reserve.used)
+        finally:
+            lanes.inflight.release(lanes.inflight.limit)
+
+    c, left = asyncio.run(scenario())
+    # the shared pool was held whole throughout: a body that waited for it would have been 503 after the wait
+    assert c.status == 200, (c.status, c.body[:200])
+    assert left == (0, 0, 0), left                                  # nothing of this request is left counted
+
+
+def _worst_bodies():
+    """The worst model per byte the E-A review found (wave 25, h3_routes probe): strings ending in an astral
+    character at their max length (CallEvents, DossierUpdate), and minimal objects at the item caps."""
+    import json
+
+    def ev(i, t):
+        e = {"call_id": f"c{i}", "phone_number": "+14155550100", "direction": "inbound", "status": "voicemail",
+             "started_at": "2026-09-01T10:00:00Z", "line_id": "l1"}
+        if t:
+            e["voicemail_transcript"] = "a" * (t - 1) + "\U0001F600"
+        return e
+
+    def appt(i):
+        return {"appointment_id": f"a{i}", "customer_id": f"k{i}", "scheduled_at": "2026-09-01T10:00:00Z",
+                "service_type": "\U0001F600", "status": "scheduled"}
+
+    enc = lambda o: json.dumps(o, ensure_ascii=False, separators=(",", ":")).encode()  # noqa: E731
+    dossier = None
+    for t in range(3800, 3700, -1):
+        b = enc({"call_events": [ev(i, t) for i in range(1000)], "appointments": [appt(i) for i in range(1000)]})
+        if len(b) <= api._MAX_BODY_BYTES:
+            dossier = b
+            break
+    return [(api.CallEventsRequest, _astral_detect_body()), (api.DossierUpdateRequest, dossier),
+            (api.AppointmentsRequest, enc({"appointments": [appt(i) for i in range(1000)]})),
+            (api.CallEventsRequest, enc({"call_events": [ev(i, 0) for i in range(1000)]})),
+            (api.DossierUpdateRequest, enc({"call_events": [ev(i, 0) for i in range(1000)],
+                                            "appointments": [appt(i) for i in range(1000)]}))]
+
+
+def test_the_model_measure_is_not_below_what_the_worst_models_of_every_shape_hold():
+    """Fix wave 25 (E-A review of H3; AEGIS N24-S-4 UNVERIFIED "only CallEventsRequest was probed"): the counted
+    measure against tracemalloc for the worst shapes found across request models — long strings ending in an
+    astral character (CallEvents, DossierUpdate: ~5.1-5.3x the body) and minimal objects at the item caps (up to
+    ~10.8x a small body)."""
+    import gc
+    import tracemalloc
+    for model, body in _worst_bodies():
+        model.model_validate_json(body)
+        gc.collect()
+        tracemalloc.start()
+        try:
+            m = model.model_validate_json(body)
+            traced, _ = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        counted = api._retained_bytes(m)
+        del m
+        assert traced * 0.97 <= counted <= traced * 1.25, (model.__name__, len(body), traced, counted)
 
 
 # --- H4: loop lag is not the client's time -------------------------------------------------------------

@@ -24,7 +24,7 @@ import time
 
 import pytest
 
-from test_fix5_http_limits_live import _closed_by_peer, _health, _read_status, _start, _stop
+from test_fix5_http_limits_live import _closed_by_peer, _health, _start, _stop
 
 import http_limits
 

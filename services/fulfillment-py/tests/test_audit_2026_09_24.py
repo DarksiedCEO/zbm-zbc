@@ -36,7 +36,7 @@ from fulfillment_schema import (
     TaskPurpose,
     TaskStatus,
 )
-from integrations.sip_dialer import DialAttemptResult, InMemorySipDialer
+from integrations.sip_dialer import InMemorySipDialer
 from outbound_gate import AttemptLimits, OutboundContactGate
 
 SRC = Path(__file__).resolve().parents[1] / "src"

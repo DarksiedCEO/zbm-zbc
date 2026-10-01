@@ -628,7 +628,7 @@ reading client, 96 MiB bound unchanged: `test_live_128_senders_of_3_9mb_that_the
 22 with the fixed threshold measured 77-80; round 22's own no-threshold runs 81-94). The bound was not raised; a
 future change that adds per-connection buffering will show here first.
 
-Full suite (3.13.13 and 3.12.3): 1036 tests — 1034 passed, 1 skipped, 1 failed each —
+Full suite (3.13.13 and 3.12.3): 1036 tests (recorded in a5fb681) — 1034 passed, 1 skipped, 1 failed each —
 `test_fix7_new4_parse_fairness.py::test_live_junk_flood_does_not_starve_small_legit_requests[8-oversized]`: all 192
 junk requests end `BrokenPipeError`, none reads its 413. It fails identically on 540a64e on this box (3/3 per Python,
 A/B alternating with this wave's tree: `services/delivery-py/docs/evidence/dept28/round22/ab-*`), so it is not this
@@ -647,7 +647,7 @@ when the server kept it open), and its codes assertion no longer admits resets �
 413/422/503, every `oversized` one 413. The blocking client's residual is pinned live by
 `test_live_blocking_sendall_oversized_client_is_reset_before_reading_its_413` (a blocking `sendall` is reset; the same
 bytes from a reading client get their 413) beside the synthetic `tests/test_fix22_drain_residual.py`. After 1e1fc59
-the full suite had no failure on this box (the reviewers' round-23 runs: 1036 passed, 1 skipped on 3.12.3 and on
+the full suite had no failure on this box (the reviewers' round-23 runs: 1036 passed (recorded in 34daeeb), 1 skipped on 3.12.3 and on
 3.13.13).
 
 ## Fix wave 24, Oct 1 2026 — every request-body byte inside the one 64 MiB budget, by construction (AEGIS round 23 N23-S-1)
@@ -687,9 +687,18 @@ of X). Derived bound at 64 MiB: 70 MiB by construction + 0.9 MiB measured fixed 
 the 96 MiB bound as stated margin for what the derivation does not count (per-connection objects beyond the sweep's
 128, allocator variance on another libc, another Python). The 96 MiB bound is reachable and was not changed.
 
+**Correction (fix wave 25; AEGIS round 24 N24-S-1, N24-S-15).** The "60/60" below was the implementing engineer's
+own run. On the same code (b51f307) AEGIS round 24 measured **7 failures in 60** under busy loops plus an uncontrolled
+co-tenant — every one on liveness (settle time, senders left unanswered within the client's 20 s), never on memory —
+and a liveness regression against 01e2851 (N24-S-2). The paragraph stands as a record of what was claimed; fix wave 25
+below is the answer. "The five in-process tests" at the end of this section was also wrong: the wave-24 commit
+(79fe238) made **six** edits to existing tests — five `_INFLIGHT_BODY_BYTES` patches
+(`test_fix10_body_clock_and_disconnect.py` one, `test_fix8_n7_2_body_prealloc.py` three, `test_fix9_inflight_fairness.py`
+one) and one `child_env()` line in `test_fix10_body_clock_and_disconnect.py`'s launcher.
+
 **Measured on the final code** (Python 3.13.13, this 2-CPU box, the test's own reading client, 96 MiB bound):
 `test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut` alone and
-`tests/test_fix8_n7_2_body_prealloc.py` as a module — (A) under three busy loops: single **20/20 passed** (growth
+`tests/test_fix8_n7_2_body_prealloc.py` as a module — (A) under three busy loops: single **20/20 passed** (recorded in 34daeeb) (growth
 64-65 MiB, median 65), module **10/10** (57-62, median 60); (B) three busy loops AND a concurrent heavy tenant
 (creative-py's full suite looping; load average up to 10.7): single **20/20** (64-67, median 65), module **10/10**
 (58-62, median 62). Every one of the 60 runs answered all 128 senders (408 or 503) and settled within 11.3 s (the
@@ -706,6 +715,84 @@ Tests: `tests/test_fix24_body_memory_accounted.py` (3, all failing on 01e2851: t
 in hand was not counted; uvicorn buffered 81 733 body bytes for an app that never asked). Changed: the five
 in-process tests that patch `_INFLIGHT_BODY_BYTES` to size the SHARED pool now add `api._SMALL_RESERVE_BYTES` (the
 total includes the small reserve; their shared pool is what it was).
+
+## Fix wave 25, Oct 1 2026 — liveness restored, parsed models counted, loop lag not charged to the client (AEGIS round 24 N24-S-1..-4, -12, -13; FIX_WAVE_25 H1-H4)
+
+Ruling record: `FIX_WAVE_23b.md` (the wave-23 rulings, recorded Oct 1 because round 24 found them only in a dispatch
+prompt) and `FIX_WAVE_25.md` (H1-H4; R-LOAD: load proofs under **2** busy loops, heavier co-tenant runs informational).
+The first wave-25 commits (cd5fb49, b6790d3, cc5582e, 0c4784c) were made without a report; the E-A engineer re-verified
+them, found one regression in them and fixed it (H3 below), and ran the proofs below on the result.
+
+**H1 — liveness (N24-S-1/-2).** Wave 24 paused the protocol as soon as it buffered ANY body byte the app had not taken,
+so every 16 KiB read waited for a round trip through the app; under CPU contention bodies arrived more slowly and
+stalled bodies were cut later. Now the app reserves up to `_READ_GRANT_BYTES` (64 KiB, uvicorn's own high-water mark)
+AHEAD of what it has taken — only from free budget and never while another body waits for it
+(`_BodyHold.grant`, `_InFlightBytes.try_reserve`) — and the protocol keeps reading while the bytes it buffers plus the
+bytes the app has taken are below the bytes covered (`http_limits.DeadlineH11Protocol.handle_events`; the hold is in the
+request scope under `BODY_HOLD_SCOPE_KEY`). Covered bytes stream; at most one read past them is ever buffered (the
+wave-24 bound is unchanged); a grant past the end of a chunked body is given back when it completes (`trim`). A budget
+wait never runs past the body deadline (it is cut there, 408), so every sender is answered by the 30 s deadline +
+5 s however many budget waits it met. The launcher also sets the GIL switch interval it never set (1 ms; scout C5-2;
+`FULFILLMENT_SWITCH_INTERVAL_SECONDS`, only 100 us .. 50 ms, checked in force in whole microseconds and printed).
+
+**H2 — the test measures something (N24-S-13).** The 128-sender test's settle check starts only after the peak phase
+(a sample at base + 32 MiB); a run that never reached it is reported INVALID and fails. The senders run on one thread
+(a selector), so a starved client process no longer decides the result. The settle bound stays the fixed 13 s. (The
+stopped engineer's draft extended it by the server loop's measured run-queue wait; the E-A review reverted that — it
+raises a test bound — and the wait is only printed now, `/proc/<pid>/task/<pid>/schedstat`, so a slow server and a
+starved one read differently in the log.)
+
+**H3 — parsed models (N24-S-4).** The derivation left out the parsed model, which outlives the body's budget bytes and
+can be ~5x the body (CPython stores a string with one astral character at 4 bytes a character, plus its UTF-8 copy).
+Each model's size is measured right after the parse (`_retained_bytes`: everything reachable, each object once, +1/16;
+against tracemalloc it counts 1.03-1.06x what the model holds — `tests/test_fix25_liveness.py`) and counted in the
+budget until the model is dropped (after the agent's work). Measured worst models per request model: PENDING-E-A-H3 (E-A `h3_models` probe). A large body's model waits for
+the budget like a chunk in hand (503 after `_INFLIGHT_WAIT_S`).
+**Regression found and fixed in review:** as first committed (cd5fb49) a SMALL body's model waited for the shared pool
+too — a 64 KiB valid body whose model is ~0.44 MB was answered 503 whenever the shared pool was held (by stalled senders,
+the very attack the small reserve exists for), breaking Decision 23 ("a small body never waits for in-flight bytes");
+on b51f307 the same request was 200 (`test_a_small_body_never_waits_for_the_shared_budget_even_when_its_model_is_larger`,
+failing on cd5fb49..da30363). A small body's model is now counted without waiting (`_BodyHold.cover_now`): what the
+pools have free, the rest in the shared pool's `over` until the model is dropped.
+**Chosen: count, not reserve ahead.** Reserving the worst model (5.5x + up to 3 MiB) BEFORE the parse would put the
+parse in progress inside the budget too; it was built and measured and is not used: with 64 front-loaded slow
+senders holding the shared pool, every legit large batch was refused 503 (3/3, `test_live_q1_slow_senders_..._do_not_
+starve_legit_clients[1MiB-front-...]`, Decision 23's other half), because a ~1 MiB body then needs ~9 MiB of budget and
+preemption frees one holder at a time.
+
+**The bound, restated (H3).** Request memory the process holds at most:
+- counted, `used` <= the limit: **64 MiB** — body bytes, read-ahead grants, and every parsed model after its parse;
+- `over` (in memory, outside the limit): <= one 16 KiB chunk per body waiting to be covered (<= 128: **2 MiB**); a large
+  body's model while it waits to be covered (one at a time: the large lane has one slot; <= 21.2 MiB measured worst —
+  the same model as the next term, not in addition to it); small bodies' models past what the pools had free (each
+  <= ~0.7 MiB measured; how many coexist depends on how many small requests are in the agent's work at once — NOT
+  bounded structurally, see "Not proven");
+- uncounted: one unasked 16 KiB read per open connection in uvicorn's buffer (<= 256: **4 MiB**); the parse in
+  progress — per large slot (one) the joined body copy (<= **4 MiB**) and the model being built (<= **21.2 MiB** measured
+  worst), per small slot (four) <= 64 KiB + ~0.7 MiB (<= **3 MiB**);
+- the measured fixed term (wave-24 budget sweep): **0.9 MiB**.
+Sum with no parse in flight (the 128-sender scenario the 96 MiB test bound is for): 64 + 2 + 4 + 0.9 = **71 MiB**, margin
+25 MiB. With the worst large parse in flight as well: 71 + 4 + 21.2 + 3 = **99 MiB** — above 96 MiB: the 96 MiB bound is
+the 128-sender scenario's (bodies only, no parse), not a bound on every mix. Measured (2 busy loops, the reviewer's probes): PENDING-E-A-ASTRAL.
+
+**H4 — loop lag is not the client's time (N24-S-12).** The rules that judge a client by time (the app's stall,
+trickle and arrival rules, the preemption charge, the protocol's stall and rate rules for unread bodies) counted every
+second of wall time spent waiting for the client's bytes, including time the event loop could not run. Measured: a
+client sending 32 KiB every 0.5 s with the server process stopped (SIGSTOP) 6 s mid-body was 408 "stalled for 5s" 3/3.
+`http_limits.LoopLag` measures the time the loop was behind (a 50 ms tick; lateness past 50 ms is `lost`) and those
+rules subtract it; the hard deadlines (30 s + 5 s, the head deadline) stay wall-clock. Consequence, accepted by the
+ruling: on a starved box stalled bodies are cut later in wall-clock seconds, by about the starvation, never later than
+the hard deadline. Residual: the protocol's `_body_last_lost` is read in `data_received` before the late tick of the
+same loop pass has run, so after a freeze the protocol's own stall clock (a backstop at 10 s) can credit the freeze
+once more.
+
+**Proofs** — PENDING-E-A-CAMPAIGN (filled from the E-A campaign logs; the draft's numbers were the stopped
+engineer's own and are not repeated here).
+
+**Not proven / could still be wrong.** Small-body models are counted but not bounded structurally (above). Other
+allocators and Pythons (macOS; the batches ran on 3.13). Whether a request model shape exists whose model is larger
+than the measured worst (the probe tried the long-string and many-object extremes of every request model, not every
+mix). The protocol's double credit after a freeze (above). Uncontrolled co-tenants were present for every load run.
 
 ## Verified so far (Sep 22, 2026 build session)
 

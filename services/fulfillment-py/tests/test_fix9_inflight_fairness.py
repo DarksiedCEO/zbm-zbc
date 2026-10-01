@@ -101,8 +101,11 @@ def test_small_body_is_not_blocked_by_an_exhausted_shared_budget(monkeypatch):
         return c, took
 
     c, took = asyncio.run(scenario())
+    # fix wave 25 (scout A F3; R-HYGIENE L1): the 200 is the proof — the shared pool is held throughout, so a small
+    # body that waited for it would have been answered 503 after _INFLIGHT_WAIT_S. (`took < 0.3` was a wall-clock
+    # bound on a starved box; printed now.)
+    print(f"small body answered in {took * 1000:.0f} ms")
     assert c.status == 200, (c.status, c.body[:200])
-    assert took < 0.3, f"small body waited {took:.2f}s for the shared budget"
 
 
 def test_first_small_body_bytes_of_a_large_body_come_from_the_reserve(monkeypatch):
@@ -166,8 +169,10 @@ def test_slow_holder_of_the_shared_budget_is_preempted_for_a_newcomer(monkeypatc
         return holder, newcomer, took
 
     holder, newcomer, took = asyncio.run(scenario())
+    # fix wave 25 (scout A F3; R-HYGIENE L1): without the preemption the newcomer waits _INFLIGHT_WAIT_S (1 s) for
+    # bytes nobody gives back and is answered 503 — its 200 and the holder's "preempted" 408 are the proof.
+    print(f"newcomer answered in {took * 1000:.0f} ms")
     assert newcomer.status == 200, (newcomer.status, newcomer.body[:200])
-    assert took < 0.5, took
     assert holder.status == 408, (holder.status, holder.body[:200])
     assert "preempted" in holder.body.decode()
 
@@ -261,8 +266,9 @@ def test_projected_arrival_after_the_deadline_is_refused_at_the_grace(monkeypatc
     assert c.status == expect, (c.status, c.body[:300], took)
     if expect == 408:
         detail = json.loads(c.body)["detail"]
-        assert "split the batch" in detail and "bytes/s" in detail, detail
-        assert took < 1.2, f"refused after {took:.2f}s: should be at the 0.5 s grace, not the deadline"
+        # fix wave 25 (scout A F3; R-HYGIENE L1): the projection's own message is the proof it was the projection at
+        # the grace, not the 3 s deadline (whose 408 says "not received within 3s"); `took < 1.2` was wall clock.
+        assert "split the batch" in detail and "bytes/s" in detail, (detail, took)
 
 
 def test_projection_needs_a_declared_length():

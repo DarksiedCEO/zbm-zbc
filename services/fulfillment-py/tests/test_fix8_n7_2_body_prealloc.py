@@ -228,7 +228,9 @@ def test_stalled_bodies_exhaust_the_inflight_budget_and_the_next_chunk_is_503_un
     assert third.status == 503, (third.status, third.body[:200])
     assert third.headers.get("retry-after") == "1"
     assert "in-flight" in third.body.decode()
-    assert 0.15 < refused_after < 0.6, refused_after
+    # fix wave 25 (scout A F3; R-HYGIENE L1): it waited for the budget before refusing (the lower bound cannot flake
+    # under load); the upper bound (< 0.6 s) measured the box, and the 503 "in-flight" above is the refusal itself.
+    assert refused_after > 0.15, refused_after
     assert [c.status for c in stalled] == [200, 200], [c.body[:100] for c in stalled]
     assert fourth.status == 200, fourth.body[:200]
 
@@ -539,6 +541,16 @@ def test_the_settle_check_waits_for_the_peak_phase_and_a_run_without_one_is_inva
     assert _settled_at(real[:3], 53) == (None, True)          # peak reached, not yet settled
 
 
+def _runqueue_wait_s(pid: int) -> float | None:
+    """Linux: seconds the process's main thread (its event loop) has spent RUNNABLE but not running — waiting for a
+    CPU (/proc/<pid>/task/<pid>/schedstat, field 2, ns). None where that is not available."""
+    try:
+        with open(f"/proc/{pid}/task/{pid}/schedstat") as fh:
+            return int(fh.read().split()[1]) / 1e9
+    except (OSError, IndexError, ValueError):
+        return None
+
+
 def _senders_on_one_thread(port: int, data: bytes, n: int, idle_timeout: float, every: float, tick) -> list[dict]:
     """Fix wave 25 (H1/H2; AEGIS N24-S-1, -13): the 128 senders of the test below, driven by ONE thread through a
     selector — each exactly `_send_reading`'s client (sends while reading, stops sending at the answer, reads it to
@@ -651,6 +663,9 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     peak = base
     samples: list[tuple[float, int]] = []
     state = {"settled_at": None, "reached": False}
+    # fix wave 25 (E-A): the server main thread's run-queue wait during the burst is PRINTED (diagnostics: a slow
+    # server and a starved one read differently); the settle bound itself is fixed and is not extended by it.
+    wait0 = _runqueue_wait_s(proc.pid)
 
     # Fix wave 21 (AEGIS N20-M-5): sampling runs until RSS settles or the bound
     # elapses, whatever the senders are doing (it used to stop as soon as every
@@ -666,6 +681,8 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
 
     recs = _senders_on_one_thread(port, _head(4 * MIB) + payload, n, 20, 0.5, tick)
     settled_at, reached = state["settled_at"], state["reached"]
+    wait1 = _runqueue_wait_s(proc.pid)
+    rq = "n/a" if wait0 is None or wait1 is None else f"{wait1 - wait0:.2f} s"
     codes: dict[str, int] = {}
     for r in recs:
         codes[r["code"]] = codes.get(r["code"], 0) + 1
@@ -681,7 +698,8 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     # the whole line, flushed, before any assertion: a failing run (e.g. on a Mac runner) keeps its evidence
     line = (f"codes {codes}; RSS base {base} peak {peak} growth {peak - base} MiB; hwm_growth "
             f"{None if hwm is None else hwm - base} MiB; peak phase reached {reached}; settled_at {settled_at} "
-            f"(bound {bound}); clients: {clients}; samples {samples}")
+            f"(bound {bound}); server main-thread run-queue wait {rq}; clients: {clients}; "
+            f"samples {samples}")
     print(line, flush=True)
     if not reached:
         pytest.fail(f"INVALID run: memory never reached base + {_PEAK_FLOOR_MIB} MiB, so nothing was measured -- {line}")

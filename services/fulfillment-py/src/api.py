@@ -302,13 +302,14 @@ class _BodyHold:
     protocol's buffer is emptied (BodySizeLimitMiddleware), so `taken` + the
     bytes the protocol buffers is every body byte that has reached the app."""
 
-    __slots__ = ("lanes", "account", "small", "shared", "taken")
+    __slots__ = ("lanes", "account", "small", "shared", "taken", "unheld")
 
     def __init__(self, lanes: "_Lanes", account: _BodyAccount) -> None:
         self.lanes, self.account = lanes, account
         self.small = 0
         self.shared = 0
         self.taken = 0
+        self.unheld = 0  # fix wave 25 (E-A): bytes counted in the shared pool's `over` by cover_now
 
     @property
     def covered(self) -> int:
@@ -324,6 +325,22 @@ class _BodyHold:
             await self.lanes.inflight.reserve(shared - self.shared, self.account, in_hand=True)
             self.shared = shared
 
+    def cover_now(self, total: int) -> None:
+        """Fix wave 25 (E-A review of H3; ADR 0002 Decision 23 — a small body never waits for in-flight bytes):
+        count `total` bytes WITHOUT waiting — what the pools have free (never ahead of a waiting body), and the rest
+        in the shared pool's `over` (memory held outside the limit, visible there) until trim / release."""
+        small = min(total, _SMALL_BODY_BYTES)
+        if small > self.small:
+            self.small += self.lanes.small_reserve.try_reserve(small - self.small)
+        need = total - self.covered - self.unheld
+        if need > 0 and self.small >= _SMALL_BODY_BYTES:
+            got = self.lanes.inflight.try_reserve(need, self.account)
+            self.shared += got
+            need -= got
+        if need > 0:
+            self.lanes.inflight.over += need
+            self.unheld += need
+
     def grant(self, target: int) -> None:
         small = min(target, _SMALL_BODY_BYTES)
         if small > self.small:
@@ -335,6 +352,11 @@ class _BodyHold:
             self.shared += self.lanes.inflight.try_reserve(shared - self.shared, self.account)
 
     def trim(self, total: int) -> None:
+        if self.unheld:                                # what is outside the limit goes first
+            gone = min(self.unheld, max(0, self.covered + self.unheld - total))
+            self.lanes.inflight.over -= gone
+            self.unheld -= gone
+        total -= self.unheld                           # the covered bytes to keep
         small, shared = min(total, _SMALL_BODY_BYTES), max(0, total - _SMALL_BODY_BYTES)
         if self.shared > shared:
             self.lanes.inflight.release(self.shared - shared, self.account)
@@ -344,6 +366,9 @@ class _BodyHold:
             self.small = small
 
     def release(self) -> None:
+        if self.unheld:
+            self.lanes.inflight.over -= self.unheld
+            self.unheld = 0
         if self.shared:
             self.lanes.inflight.release(self.shared, self.account)
             self.shared = 0
@@ -1279,11 +1304,19 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
                 # character is a 20 MiB model: CPython stores the whole string at 4
                 # bytes a character, plus its UTF-8 copy) waits for the budget like
                 # a chunk in hand — INSIDE the parse slot, so at most one model per
-                # slot is ever uncounted; 503 after _INFLIGHT_WAIT_S. Models of
-                # consecutive requests coexist while their work runs (the slot is
-                # released before it): each is counted.
+                # slot is ever uncounted (the one being parsed); 503 after
+                # _INFLIGHT_WAIT_S. A SMALL body's
+                # model never waits (Decision 23: a small body never waits for
+                # in-flight bytes — fix wave 25, E-A: as committed in cd5fb49 it
+                # waited for the shared pool, 503 under a stall flood): what the
+                # pools have free, the rest in the shared pool's `over`
+                # (_BodyHold.cover_now). Models of consecutive requests coexist while
+                # their work runs (the slot is released before it): each is counted.
                 try:
-                    await hold.cover(retained)
+                    if large:
+                        await hold.cover(retained)
+                    else:
+                        hold.cover_now(retained)
                 except BaseException:
                     parsed = None             # dropped now, not when the refusal's traceback goes
                     raise

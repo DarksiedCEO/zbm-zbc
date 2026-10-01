@@ -69,7 +69,7 @@ against the untouched tree; the outputs are quoted in the Evidence column.
 Tests are in `tests/test_audit_2026_09_24.py` (in-process) and
 `tests/test_live_server.py` (real process, real socket).
 
-**Suite: 64 passed before → 116 passed after** (`python3 -m pytest -q`
+**Suite: 64 passed (recorded in f58e81a) before → 116 passed after** (`python3 -m pytest -q`
 in this directory). 52 new tests; 11 pre-existing tests were updated
 because `orchestrate()` now requires the recipient's time zone and the API
 no longer accepts a caller-supplied `now` (see A1/A2). No pre-existing
@@ -168,12 +168,12 @@ local**. The suite's own tests enshrined it: every dialing test paired
 
 **Tests** — `tests/test_fix_wave_1_f3_api.py` (HTTP route; 15 of its 16
 tests failed on the pre-fix code, the 16th is the positive control) and
-`tests/test_outbound_gate.py` (81 unit tests: window edges in the
+`tests/test_outbound_gate.py` (81 unit tests (recorded in 13c5d09): window edges in the
 strictest zones in daylight and standard time, Hawaii/Alaska edges, zone
 allowlist, invalid/non-geographic numbers, country rules, limits,
 channel binding, forgery, single use, redeem-time recheck, 16-thread
 race, startup refusal of bad config). Mutation-checked: trusting the
-claimed zone alone fails 21 tests; dropping the 808 row fails 8; removing
+claimed zone alone fails 21 tests (recorded in 13c5d09); dropping the 808 row fails 8; removing
 the limits fails 9; removing the recheck at redeem fails 2; removing the
 redeem lock fails the race test.
 
@@ -189,7 +189,7 @@ hours). `test_api_quiet_hours_use_the_server_clock` now also asserts the
 refusal is for the contact window, not for an invalid number. No
 assertion was weakened.
 
-**Suite:** 116 passed before → 213 passed after.
+**Suite:** 116 passed (recorded in 13c5d09) before → 213 passed after.
 
 **Still open:** state is in process memory (restart/replicas forget the
 attempt history — the persistence layer is still the durable fix);
@@ -219,7 +219,7 @@ three strings moved to the rejection test. Four tests that reset
 `tests/test_live_server.py` honors `FULFILLMENT_TEST_PORT_RANGE=LO-HI`
 for assigned port ranges.
 
-**Suite:** 213 passed before → 815 passed after
+**Suite:** 213 passed (recorded in d9f521f) before → 815 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=19661-19679 python3 -m pytest`).
 
 **Live run:** the 249-case POST corpus against `python3 -m api` on
@@ -261,7 +261,7 @@ affected dossiers; orchestrate responses gain a `gate` object; anonymous
 requests are 401 before any body parsing; oversized bodies are 413; a
 non-JSON `Content-Type` is 415.
 
-**Suite:** 815 passed before → 880 passed after
+**Suite:** 815 passed (recorded in 2cfddea) before → 880 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=19980-19999 python3 -m pytest`).
 
 **Live run** (`python3 -m api`, `FULFILLMENT_SIP_DIALER=in_memory`, random
@@ -358,7 +358,7 @@ or closed; over 128 concurrent connections/requests is 503; a batch with
 more than 50 new customers at once gets the excess refused ("retry in a
 few seconds").
 
-**Suite:** 880 passed before → 901 passed after
+**Suite:** 880 passed (recorded in ee4cb7e) before → 901 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20140-20159 python3 -m pytest`).
 
 ## Fix wave 6, Sep 24 2026 — 422 amplification (N2) and over-cap connections (N7)
@@ -407,13 +407,13 @@ uvicorn's own access log prints the request line (path ≤ 16 KiB head) —
 1:1, not amplification. No 500 handler renders anything (FastAPI's default
 `Internal Server Error`).
 
-**Suite:** 901 passed before → 926 passed after
+**Suite:** 901 passed (recorded in 8d4bcef) before → 926 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20320-20339 python3 -m pytest`).
 
 ## Fix wave 7, Sep 24 2026 — the parse slot starved small requests (NEW-4)
 
 Tests first, failing on the pre-fix tree, then passing:
-`tests/test_fix7_new4_parse_fairness.py` (43 tests: pre-scan, lanes, budget,
+`tests/test_fix7_new4_parse_fairness.py` (at fix wave 7: pre-scan, lanes, budget,
 head-refusal hold in-process; the AEGIS scenario against the real
 `python3 -m api` over TCP with 8 and 32 senders of each junk kind). ADR 0002
 Decision 21.
@@ -446,13 +446,13 @@ the same file still asserts `too_many_fields`. Nothing was weakened.
 may get 503 + `Retry-After: 1` under load and must retry; 413/431/400
 (bad Content-Length) answers arrive 250 ms later.
 
-**Suite:** 926 passed before → 969 passed after
+**Suite:** 926 passed (recorded in 7031184431ec) before → 969 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20520-20539 python3 -m pytest`).
 
 ## Fix wave 8, Sep 24 2026 — Content-Length pre-allocation pinned memory (N7-2)
 
 Tests first, failing on the pre-fix tree, then passing:
-`tests/test_fix8_n7_2_body_prealloc.py` (20 tests: allocation, the in-flight
+`tests/test_fix8_n7_2_body_prealloc.py` (at fix wave 8: allocation, the in-flight
 budget and the throughput rule in-process against the ASGI app with
 hand-driven chunk delivery; the AEGIS scenario, a trickle, a front-loaded
 stall by 128 senders, and legit large batches against the real
@@ -494,7 +494,7 @@ keeps its assertions (its docstring no longer describes a pre-sized buffer).
 only at 30 s); 503 + `Retry-After: 1` when 64 MiB of body bytes are already
 buffered and a chunk cannot be admitted within 2 s.
 
-**Suite:** 969 passed before → 990 passed after
+**Suite:** 969 passed (recorded in ae5bbe4) before → 990 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20720-20739 python3 -m pytest`).
 
 ## Fix wave 9, Sep 25 2026 — in-flight budget fairness and slow uploads (AEGIS round 8, Q1/Q2)
@@ -502,7 +502,7 @@ buffered and a chunk cannot be admitted within 2 s.
 AEGIS round 8 could not finish two questions about the wave-8 body handling;
 assessed here with real sockets against `python3 -m api` (ports 20920–20939),
 then fixed. Tests first, failing on the pre-fix tree, then passing:
-`tests/test_fix9_inflight_fairness.py` (15 tests: 12 in-process against the
+`tests/test_fix9_inflight_fairness.py` (15 tests (recorded in 4111ea6): 12 in-process against the
 ASGI app with hand-driven chunk delivery, 3 against the real launcher over
 TCP). ADR 0002 Decision 23. Harness numbers below are 25–30 s runs: N
 authenticated senders on `detect` reconnecting whenever answered; a legit
@@ -557,13 +557,13 @@ cannot arrive in time, with a split hint; 408 "preempted" for the heaviest
 slow large body when the shared budget is contended; large bodies that take
 > 2 s to upload are no longer 503'd after arriving.
 
-**Suite:** 990 passed before → 1005 passed after
+**Suite:** 990 passed (recorded in 4111ea6) before → 1005 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=20920-20939 python3 -m pytest`).
 
 ## Fix wave 10, Sep 25 2026 — one clock for the early 408 (N9-6), disconnect log noise (N9-8)
 
 AEGIS round 9. Tests first, failing on ea708a1, then passing:
-`tests/test_fix10_body_clock_and_disconnect.py` (10 tests: 8 in-process
+`tests/test_fix10_body_clock_and_disconnect.py` (10 tests (recorded in 0c5cba3): 8 in-process
 against the ASGI app, 2 against the real launcher with its log captured).
 
 | Finding | Before (evidence) | Now |
@@ -598,7 +598,7 @@ disconnect mid-body no longer produces an error-level log with a
 traceback. The disconnect line is the only new log line with
 request-derived content (the escaped path).
 
-**Suite:** 1005 passed before → 1015 passed after
+**Suite:** 1005 passed (recorded in 0c5cba3) before → 1015 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=18550-18569 python3 -m pytest`).
 
 ## Fix wave 22, Sep 28 2026 — the 128-sender RSS bound held by the product (N21-C-1), drains bounded (N21-C-3)
@@ -640,7 +640,7 @@ failed** (growth 82-92 MiB, median 88); `tests/test_fix8_n7_2_body_prealloc.py` 
 (81-90 MiB). The worst run is 4 MiB under the bound — the margin is thin and stated. New test:
 `tests/test_fix23_no_mmap_threshold.py` (3). `src/graceful_close.py`'s docstring now names the pinning test that
 exists (`tests/test_live_graceful_close_module.py`; new pin in that test, identical in all ten services).
-Full suite: 1034 passed, 1 skipped, **1 failed** on 3.13.13 and on 3.12.3 — the `[8-oversized]` junk-flood case sees
+Full suite: 1034 passed (recorded in a5fb681), 1 skipped, **1 failed** on 3.13.13 and on 3.12.3 — the `[8-oversized]` junk-flood case sees
 no 413 (every request `BrokenPipeError`); it fails the same way on 540a64e on this box (ADR 0002, "Fix wave 23").
 **Correction (fix wave 24, N23-S-4):** later in wave 23 the lead ruled the client change legitimate (FIX_WAVE_23b
 brief, Sep 30) and commit 1e1fc59 changed the test's junk sender, not the service: it now sends while reading and
@@ -665,17 +665,42 @@ budgets of 8-64 MiB). The 128-sender test under three busy loops: 20/20 alone (6
 parent's PYTHONPYCACHEPREFIX, through `conftest.child_env()`). Changed: the five in-process tests that size the shared
 pool through `_INFLIGHT_BODY_BYTES` add `_SMALL_RESERVE_BYTES` to it.
 
+## Fix wave 25, Oct 1 2026 — liveness, parsed models, loop lag (AEGIS round 24 N24-S-1..-4, -12, -13), launcher interval
+
+Details and the derivation: ADR 0002, "Fix wave 25". In short:
+- **H1 liveness.** The app reserves up to 64 KiB of budget ahead of what it has taken (free budget only, never ahead of
+  a waiting body) and the protocol reads covered bytes without a round trip per 16 KiB read; a budget wait never runs
+  past the body deadline (408 there). The launcher sets a 1 ms GIL switch interval (`FULFILLMENT_SWITCH_INTERVAL_SECONDS`,
+  only 0.0001 .. 0.05, checked in force and printed at start; it never set one before).
+- **H2 the 128-sender test measures something.** Settle is judged only after the peak phase (else the run is INVALID
+  and fails); senders on one thread; the settle bound is the fixed 13 s (the server loop's run-queue wait is printed,
+  not added to it).
+- **H3 parsed models** are measured and counted in the budget until dropped; a small body's model never waits for the
+  shared pool (a regression in the first wave-25 commit, found in review and fixed: a 64 KiB body whose model was
+  ~0.44 MB was 503 under a stall flood). Worst models measured: 21.18 MiB from a 4 MiB DossierUpdateRequest (5.29x).
+- **H4** the rules that judge a client by time run on the event loop's running time; the hard deadlines stay wall-clock.
+- Tests run with their own token whatever the shell exports (the note that used to stand here — "do NOT pre-set
+  FULFILLMENT_SERVICE_TOKEN" — no longer applies). Test counts: `docs/test-counts.md` (generated), not hand-written here.
+- New tests: `tests/test_fix25_liveness.py`, `tests/test_fix25_start_owns_port.py`, `tests/test_fix25_switch_interval.py`,
+  `tests/test_fix25_test_token.py`. Changed: the 128-sender test (H2), `test_fix10_body_clock_and_disconnect.py` (its
+  server counts as its own only after it logged its bind; the "no traceback after the disconnect line" check waits on a
+  /health barrier instead of 0.3 s), `test_fix9_inflight_fairness.py` / `test_fix24_body_memory_accounted.py` (the
+  read-ahead grant in their expected budget numbers), `test_live_server.py` / `test_fix5_http_limits_live.py` (launchers
+  trust a port only after their own child announced the bind; the 1 500-request log test no longer also asserts
+  < 60 s overall — a blocked server answers nothing and the connection's 5 s timeout raises). Wall-clock upper bounds
+  that had a structural proof were replaced by it (R-HYGIENE L1; each change says which, in place): CPU time for the
+  pure-CPU checks, answer ORDER for the arrival-order test, a held parse instead of a 0.4 s one for the large-lane
+  test, and the 503 / 200 / message that only the property under test can produce for the budget tests.
+
 ## Running it
 
 ```bash
 cd services/fulfillment-py
 pip install -r requirements.txt
 
-# Tests: do NOT pre-set FULFILLMENT_SERVICE_TOKEN — tests/conftest.py
-# sets a fixed test-only token via os.environ.setdefault(...), and it
-# will silently lose to any value already in the environment, breaking
-# the auth tests with a token mismatch (verified).
-python3 -m pytest -q                     # 213 tests (tests/conftest.py puts src/ on sys.path)
+# Tests: tests/conftest.py always sets its own test-only token (fix wave 25;
+# a token exported in the shell no longer breaks the auth tests).
+python3 -m pytest -q                     # counts: docs/test-counts.md (tests/conftest.py puts src/ on sys.path)
 
 # Live service: THIS is where you set your own real shared secret.
 # Leave FULFILLMENT_SIP_DIALER / FULFILLMENT_SYSTEM_OF_RECORD unset for
@@ -693,6 +718,8 @@ PYTHONPATH=src python3 -m api
 #   FULFILLMENT_COUNTRY_ZONES  unset = only +1 numbers are ever contacted;
 #                              e.g. "44=Europe/London"; bad value refuses startup
 #   FULFILLMENT_BODY_READ_TIMEOUT_S  default 30; may only narrow (0 < s <= 30)
+#   FULFILLMENT_SWITCH_INTERVAL_SECONDS  default 0.001; only 0.0001 .. 0.05
+#                              (checked in force at start, printed to stderr)
 # Request bodies over 4 MiB are refused (413). Transport limits (fix wave 5,
 # src/http_limits.py): request head <= 16 KiB, complete within 10 s; idle
 # keep-alive 5 s; body complete within 30 s and never stalled for 5 s or

@@ -251,16 +251,21 @@ def logged_server():
            "FULFILLMENT_PORT": str(port), "PYTHONUNBUFFERED": "1"}
     proc = subprocess.Popen([sys.executable, "-c", _LAUNCH], env=env, cwd=str(SRC), stdout=log, stderr=log)
     try:
-        deadline = time.time() + 15
+        # Fix wave 25 (scout A F5): the answer on the port is this child's only once the child itself has logged its
+        # bind ("Uvicorn running on", as test_live_server._start since wave 25); monotonic deadline.
+        deadline = time.monotonic() + 15
         while True:
             assert proc.poll() is None, open(log.name).read()[-2000:]
+            assert time.monotonic() < deadline, "service did not start: " + open(log.name).read()[-2000:]
+            if f"Uvicorn running on http://127.0.0.1:{port}" not in open(log.name, errors="replace").read():
+                time.sleep(0.05)
+                continue
             try:
                 conn = http.client.HTTPConnection("127.0.0.1", port, timeout=0.5)
                 conn.request("GET", "/health")
                 if conn.getresponse().status == 200:
                     break
             except OSError:
-                assert time.time() < deadline, "service did not start"
                 time.sleep(0.1)
         yield port, log.name
     finally:
@@ -280,12 +285,20 @@ def _log_since(path: str, offset: int) -> str:
         return f.read().decode(errors="replace")
 
 
-def _settle(path: str, needle: str, offset: int, timeout: float = 5.0) -> str:
-    end = time.time() + timeout
-    while time.time() < end:
-        text = _log_since(path, offset)
-        if needle in text:
-            time.sleep(0.3)  # anything that would follow it (a traceback) is written by now
+def _settle(path: str, needle: str, offset: int, port: int, timeout: float = 5.0) -> str:
+    """The log from `offset` once `needle` is in it AND everything logged in the same event-loop step is too.
+    Fix wave 25 (scout A F4): it slept a fixed 0.3 s after the needle and the callers then asserted that NO
+    traceback followed — on a loaded box a traceback written later than that was simply not seen. The needle and
+    a traceback that would follow it are written in one step of the server's event loop (no await between the
+    middleware's log line and uvicorn's handler for an escaping exception), so one GET /health answered AFTER the
+    needle appeared is a barrier: the loop has finished that step before it served the probe."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if needle in _log_since(path, offset):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            conn.request("GET", "/health")
+            assert conn.getresponse().status == 200
+            conn.close()
             return _log_since(path, offset)
         time.sleep(0.05)
     return _log_since(path, offset)
@@ -297,7 +310,7 @@ def test_n9_8_live_disconnect_mid_body_is_one_line_without_traceback(logged_serv
     with socket.create_connection(("127.0.0.1", port)) as s:
         s.sendall(_head(DETECT, 200_000) + b'{"call_events":[' + b" " * 30_000)
         time.sleep(0.5)
-    text = _settle(log, "client disconnected", start)
+    text = _settle(log, "client disconnected", start, port)
     lines = [ln for ln in text.splitlines() if "client disconnected" in ln]
     assert len(lines) == 1, text[-3000:]
     assert f"route={DETECT}" in lines[0] and "bytes_received=" in lines[0] and "elapsed_s=" in lines[0], lines
@@ -312,6 +325,6 @@ def test_n9_8_live_unexpected_exception_still_logs_a_traceback(logged_server):
         s.sendall(_head(DETECT, len(body)) + body)
         status = s.recv(64)
     assert status.startswith(b"HTTP/1.1 500"), status
-    text = _settle(log, "deliberate test failure EXPLODE", start)
+    text = _settle(log, "deliberate test failure EXPLODE", start, port)
     assert "Traceback" in text and "RuntimeError: deliberate test failure EXPLODE" in text, text[-3000:]
     assert "client disconnected" not in text, text[-3000:]
