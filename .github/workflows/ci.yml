@@ -395,13 +395,27 @@ jobs:
           if [ "${{ matrix.service }}" = "verification-py" ]; then
             python -m pip install -r services/compliance-py/requirements.txt
           fi
-      - name: Live run (under the hygiene check; no work dir, temp file or process may outlive it)
+      # Scout C6-2 (fix wave 25): every live_run.py keeps its mkdtemp work dir (ledger logs, service logs — the run's
+      # evidence) and never removes it. The job asks for it explicitly in $RUNNER_TEMP/live-work (LIVE_WORK_DIR;
+      # finance-py reads FIN_LIVE_WORKDIR), outside the hygiene wrapper's private TMPDIR, so it is requested output,
+      # not a leftover; the next step prints what it holds and removes it. A temp file or process the run leaves
+      # anywhere else still fails the wrapper (R3/R4). Removing the dir inside the scripts is OPEN.md C6-2.
+      - name: Live run (under the hygiene check; no temp file or process may outlive it)
         env:
           LEDGER_BIN: ${{ github.workspace }}/services/ledger-rust/target/release/server
           SERVICE: ${{ matrix.service }}
         run: |
-          python devtools/hygiene_check.py run --suite "live:$SERVICE" --kind none --cwd "services/$SERVICE" \
+          mkdir -p "$RUNNER_TEMP/live-work"
+          LIVE_WORK_DIR="$RUNNER_TEMP/live-work" FIN_LIVE_WORKDIR="$RUNNER_TEMP/live-work" \
+            python devtools/hygiene_check.py run --suite "live:$SERVICE" --kind none --cwd "services/$SERVICE" \
             -- python devtools/live_run.py
+      - name: Live-run work dir (listed as evidence in this log, then removed)
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/live-work" ]; then
+            find "$RUNNER_TEMP/live-work" -maxdepth 2 | sort
+            rm -rf "$RUNNER_TEMP/live-work"
+          fi
 
   # ---------------------------------------------------------------------------------------------------------------
   # delivery-py's Docker live proof (tests/test_live_docker.py): the properties only a machine with a Docker daemon
