@@ -14,9 +14,15 @@
 //   HEAD /                              -> same status as GET; POST / -> 405
 //
 // and the same for GET /healthz (JSON). Needs `npm run build` first; it is
-// reported as SKIPPED (never silently passed) when there is no build.
+// reported as SKIPPED (never silently passed) when there is no build, and CI
+// fails the dashboard job on any skip (devtools/hygiene_check.py, fix wave 25).
 //
-// Ports: 20171 (dashboard), 20172 (stub orchestrator), 20173 (closed port).
+// Ports (fix wave 25, scout C2-2): none is fixed. The stub orchestrator and the
+// "closed" port are bound by this process on port 0; the dashboard is started
+// with `-p 0` and the test uses the port ITS OWN child printed after binding
+// ("- Local: http://127.0.0.1:<port>"), so a server left on some port by another
+// run or worktree can never be the one under test. The child must still be
+// alive when the port is read, and is killed with its whole process group.
 //
 // Run: npm run build && npm test
 
@@ -25,14 +31,15 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
+import { once } from "node:events";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const built = existsSync(join(root, ".next", "BUILD_ID"));
-const DASH_PORT = Number(process.env.DASHBOARD_TEST_PORT ?? 20171);
-const STUB_PORT = Number(process.env.DASHBOARD_TEST_STUB_PORT ?? 20172);
-const CLOSED_PORT = Number(process.env.DASHBOARD_TEST_CLOSED_PORT ?? 20173);
+let DASH_PORT = 0; // set from the dashboard child's own announcement
+let STUB_PORT = 0; // set when the stub is listening
+let CLOSED_PORT = 0; // a port this process bound and closed again: nothing listens there
 const TOKEN = "live-test-token";
 
 const VERIFIED = {
@@ -85,32 +92,88 @@ const stub = createServer((req, res) => {
 let dash;
 let dashLog = "";
 
+// The port the dashboard child announced, or an error if the child exited (or
+// said nothing) first. Only this child can have printed it, after it bound.
+function announcedPort(child) {
+  return new Promise((resolve, reject) => {
+    let seen = "";
+    const onData = (d) => {
+      seen += d;
+      const m = /- Local:\s+http:\/\/127\.0\.0\.1:(\d+)/.exec(seen);
+      if (m) done(null, Number(m[1]));
+    };
+    const onExit = (code, signal) => done(new Error(`dashboard exited (code ${code}, signal ${signal}) before announcing its port`));
+    const timer = setTimeout(() => done(new Error("dashboard announced no port within 60 s")), 60_000);
+    function done(err, port) {
+      clearTimeout(timer);
+      child.stdout.off("data", onData);
+      child.off("exit", onExit);
+      if (err) reject(err);
+      else resolve(port);
+    }
+    child.stdout.on("data", onData);
+    child.once("exit", onExit);
+  });
+}
+
+function killGroup(child, signal) {
+  try {
+    process.kill(-child.pid, signal); // the launcher leads its own process group (detached)
+  } catch {
+    // already gone
+  }
+}
+
 async function startDashboard(env) {
-  const child = spawn(process.execPath, ["scripts/serve.mjs", "start", "-p", String(DASH_PORT)], {
+  dashLog = "";
+  const child = spawn(process.execPath, ["scripts/serve.mjs", "start", "-p", "0"], {
     cwd: root,
-    env: { ...process.env, ...env, PORT: String(DASH_PORT) },
+    env: { ...process.env, ...env, PORT: "0" },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
   });
   child.stdout.on("data", (d) => (dashLog += d));
   child.stderr.on("data", (d) => (dashLog += d));
-  for (let i = 0; i < 100; i++) {
-    try {
-      await fetch(`http://127.0.0.1:${DASH_PORT}/healthz`, { signal: AbortSignal.timeout(5000) });
-      return child;
-    } catch {
-      await new Promise((r) => setTimeout(r, 100));
+  try {
+    DASH_PORT = await announcedPort(child);
+    for (let i = 0; i < 100; i++) {
+      if (child.exitCode !== null || child.signalCode !== null) throw new Error("dashboard exited after announcing its port");
+      try {
+        await fetch(`http://127.0.0.1:${DASH_PORT}/healthz`, { signal: AbortSignal.timeout(5000) });
+        return child;
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
     }
+    throw new Error("dashboard announced a port but never answered on it");
+  } catch (e) {
+    const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : once(child, "exit");
+    killGroup(child, "SIGKILL");
+    await exited;
+    throw new Error(`dashboard did not start: ${e.message}\n${dashLog}`);
   }
-  child.kill("SIGTERM");
-  throw new Error(`dashboard did not start:\n${dashLog}`);
 }
 
 async function stopDashboard() {
   if (!dash) return;
-  const exited = new Promise((r) => dash.once("exit", r));
-  dash.kill("SIGTERM");
-  await exited;
+  const child = dash;
   dash = undefined;
+  const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : once(child, "exit");
+  killGroup(child, "SIGTERM");
+  await exited;
+  killGroup(child, "SIGKILL"); // anything left in the group
+}
+
+// Listen on port 0 and resolve with the port; a listen error rejects (it used
+// to leave the before() hook pending until the 120 s test timeout).
+function listenOnAnyPort(server) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve(server.address().port);
+    });
+  });
 }
 
 async function get(path, headers = {}) {
@@ -120,13 +183,16 @@ async function get(path, headers = {}) {
 
 before(async () => {
   if (!built) return;
-  await new Promise((r) => stub.listen(STUB_PORT, "127.0.0.1", r));
+  STUB_PORT = await listenOnAnyPort(stub);
+  const probe = createServer();
+  CLOSED_PORT = await listenOnAnyPort(probe);
+  await new Promise((r) => probe.close(r));
 });
 
 after(async () => {
   await stopDashboard();
   stub.closeAllConnections();
-  stub.close();
+  if (stub.listening) await new Promise((r) => stub.close(r));
 });
 
 const opts = built ? { timeout: 120_000 } : { skip: "no .next build — run `npm run build` first" };

@@ -10,7 +10,14 @@
 //
 // -H/--hostname in the extra args is refused: the bind address has exactly
 // one knob, DASHBOARD_BIND_ADDR. tests/bind.test.mjs pins all of this.
-import { spawn } from "node:child_process";
+//
+// Fix wave 25 (scout C2-13): Next's CLI runs IN THIS PROCESS (it reads
+// process.argv), not as a child. Before, the launcher spawned `next` and
+// forwarded only SIGINT/SIGTERM; a SIGKILL (or SIGHUP) of the launcher — a
+// killed test runner, a closed terminal — left `next-server` running on its
+// port, and the next run talked to that stale server. With one process there
+// is nothing to orphan for `next start`. (`next dev` still forks its own
+// worker; that is Next's design and dev is not used by the tests or in CI.)
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
@@ -49,8 +56,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         "anyone who can reach this address can read every recorded finding."
     );
   }
-  const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
-  const child = spawn(process.execPath, [nextBin, ...args], { stdio: "inherit" });
-  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => child.kill(sig));
-  child.on("exit", (code, signal) => process.exit(signal ? 1 : (code ?? 1)));
+  const require = createRequire(import.meta.url);
+  const nextBin = require.resolve("next/dist/bin/next");
+  process.argv = [process.execPath, nextBin, ...args];
+  require(nextBin);
 }

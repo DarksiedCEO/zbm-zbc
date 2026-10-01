@@ -1,0 +1,32 @@
+{
+  "_doc": "Reviewed exceptions for devtools/hygiene_check.py (fix wave 25, founder ruling R-HYGIENE). 'allow': static-lint exceptions — rule, path, optional function, optional 'contains' (a snippet of the flagged line), and a mandatory reason; `lint --strict-allowlist` (CI) fails an entry that matches nothing. 'expected_skips': per suite id, the skip reasons that are legitimate on some machine (regex over the reason pytest/go/cargo/node reports); any other skip fails the run (rule R5). Add an entry only with a reason a reviewer can check.",
+  "allow": [
+    {
+      "rule": "L1-wallclock",
+      "path": "services/orchestrator-go/cmd/orchestrator/scan_errors_test.go",
+      "function": "TestScanRoute_LedgerDown_FailsFastWith502AndMakesNoDetectionCalls",
+      "contains": "elapsed > 2*time.Second",
+      "reason": "Guards against a retry/backoff loop when the ledger is down (the alternative is waiting out the 10 s upstream client timeout). The measured path is one refused loopback connect plus a 502 written by an in-process httptest server — no CPU-bound work, milliseconds — so 2 s is a >100x margin, and the structural half of the property (zero detection calls) is asserted separately. Reviewed fix wave 25 (E-C)."
+    }
+  ],
+  "expected_skips": {
+    "python:creative-py": [
+      {"reason_regex": "^no IPv6 loopback in this environment$", "why": "test_procinfo's IPv6 case needs ::1; containers without IPv6 loopback skip it"}
+    ],
+    "python:fulfillment-py": [
+      {"reason_regex": "^no IPv6 loopback in this environment$", "why": "as creative-py"},
+      {"reason_regex": "^cannot prove the bind-address override on this OS", "why": "macOS without a 127.0.0.2 alias and without ::1 (shared _procinfo.NO_OVERRIDE_ADDR_REASON)"},
+      {"reason_regex": "^reads /proc/<pid>/environ \\(Linux only\\)$", "why": "Linux-only evidence path; the macOS entry skips it"}
+    ],
+    "python:onboarding-py": [
+      {"reason_regex": "^no IPv6 loopback in this environment$", "why": "as creative-py"},
+      {"reason_regex": "^cannot prove the bind-address override on this OS", "why": "as fulfillment-py"}
+    ],
+    "python:delivery-py": [
+      {"reason_regex": "^Docker live: not provable here", "why": "no Docker daemon in the delivery-py jobs (macOS has none at all); the delivery-docker-live job runs tests/test_live_docker.py and fails on any skip"},
+      {"reason_regex": "^cannot prove the bind-address override on this OS", "why": "as fulfillment-py"},
+      {"reason_regex": "^Linux /proc \\(the scrub is also checked through os.environ\\)$", "why": "Linux-only evidence path; macOS checks os.environ instead"},
+      {"reason_regex": "^inner half of test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests$", "why": "the inner half runs only inside the subprocess its outer test starts; collected directly it always skips"}
+    ]
+  }
+}

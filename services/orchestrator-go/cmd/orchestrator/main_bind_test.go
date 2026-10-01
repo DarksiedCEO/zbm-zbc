@@ -17,96 +17,191 @@ package main
 // the ledger-rust integration tests do for the equivalent Rust binary.
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
 
-func buildOrchestratorBinary(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	binPath := filepath.Join(dir, "orchestrator-under-test")
-	cmd := exec.Command("go", "build", "-o", binPath, ".")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to build orchestrator binary: %v\n%s", err, out)
-	}
-	return binPath
-}
-
-// freePort picks a free port in 19970-19979 (the range assigned to these
-// binary tests). Ports are handed out once per test process, so parallel
-// tests never race for the same one.
+// The binary is built ONCE per test process (fix wave 25, scout C2-10: it was rebuilt by every test, six full
+// builds per run), with the go tool of the toolchain running these tests (not whatever `go` is first on PATH),
+// into a directory TestMain removes.
 var (
-	portMu   sync.Mutex
-	nextPort = 19970
+	buildOnce sync.Once
+	buildDir  string
+	builtBin  string
+	buildErr  error
 )
 
-func freePort(t *testing.T) string {
-	t.Helper()
-	portMu.Lock()
-	defer portMu.Unlock()
-	for ; nextPort <= 19979; nextPort++ {
-		l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(nextPort))
-		if err != nil {
-			continue
-		}
-		l.Close()
-		p := strconv.Itoa(nextPort)
-		nextPort++
-		return p
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if buildDir != "" {
+		os.RemoveAll(buildDir)
 	}
-	t.Fatalf("no free port left in 19970-19979")
-	return ""
+	os.Exit(code)
 }
 
+func goTool() string {
+	if root := runtime.GOROOT(); root != "" {
+		if p := filepath.Join(root, "bin", "go"); fileExists(p) {
+			return p
+		}
+	}
+	return "go"
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+func buildOrchestratorBinary(t *testing.T) string {
+	t.Helper()
+	buildOnce.Do(func() {
+		buildDir, buildErr = os.MkdirTemp("", "orchestrator-bin-")
+		if buildErr != nil {
+			return
+		}
+		builtBin = filepath.Join(buildDir, "orchestrator-under-test")
+		out, err := exec.Command(goTool(), "build", "-o", builtBin, ".").CombinedOutput()
+		if err != nil {
+			buildErr = fmt.Errorf("go build: %v\n%s", err, out)
+		}
+	})
+	if buildErr != nil {
+		t.Fatalf("failed to build orchestrator binary: %v", buildErr)
+	}
+	return builtBin
+}
+
+// startOrchestrator starts the real binary with ORCHESTRATOR_PORT=0 and ORCHESTRATOR_PORT_FILE (fix wave 25, scout
+// C2-1): the kernel picks the port, the child writes the port it bound, and the harness trusts that port only while
+// ITS child is alive — no pick-close-then-bind race, no fixed range, and a server some other run left on a port can
+// never be the one under test. The child is killed and reaped in t.Cleanup.
 func startOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (port string, waitForExit func()) {
 	t.Helper()
-	binPath := buildOrchestratorBinary(t)
-	port = freePort(t)
+	port, err := tryStartOrchestrator(t, bindAddr, extraEnv...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port, func() {}
+}
 
+func tryStartOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (string, error) {
+	t.Helper()
+	binPath := buildOrchestratorBinary(t)
+	portFile := filepath.Join(t.TempDir(), "orchestrator.port")
+	stderr := &syncBuffer{}
 	cmd := exec.Command(binPath)
 	cmd.Env = append(os.Environ(),
 		"DETECTION_SERVICE_TOKEN=test-detection-token",
 		"ORCHESTRATOR_SERVICE_TOKEN=test-orchestrator-token",
 		"LEDGER_SERVICE_TOKEN=test-ledger-token",
-		"ORCHESTRATOR_PORT="+port,
+		"ORCHESTRATOR_PORT=0",
+		"ORCHESTRATOR_PORT_FILE="+portFile,
 	)
 	if bindAddr != "" {
 		cmd.Env = append(cmd.Env, "ORCHESTRATOR_BIND_ADDR="+bindAddr)
 	}
 	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("failed to start orchestrator: %v", err)
+		return "", err
 	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		<-exited
 	})
 
-	// Poll /health on 127.0.0.1 until it's up — this also proves the
-	// server is reachable on loopback, which is the property under test
-	// for the default-bind case.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	// 1. The child announces the port it bound (or exits: then nothing it did not start is ever tested).
+	deadline := time.Now().Add(30 * time.Second) // a hang guard, not a measurement
+	var port string
+	for port == "" {
+		select {
+		case err := <-exited:
+			exited <- err
+			return "", fmt.Errorf("orchestrator exited before announcing its port (%v): %s", err, stderr.String())
+		case <-time.After(20 * time.Millisecond):
+		}
+		if b, err := os.ReadFile(portFile); err == nil && strings.HasSuffix(string(b), "\n") {
+			port = strings.TrimSpace(string(b))
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		if port == "" && time.Now().After(deadline) {
+			return "", fmt.Errorf("orchestrator announced no port: %s", stderr.String())
+		}
+	}
+	// 2. /health on that port, while the child is still alive.
+	for {
+		select {
+		case err := <-exited:
+			exited <- err
+			return "", fmt.Errorf("orchestrator exited after announcing port %s (%v): %s", port, err, stderr.String())
+		default:
+		}
 		resp, err := http.Get("http://127.0.0.1:" + port + "/health")
 		if err == nil {
 			resp.Body.Close()
-			return port, func() {}
+			return port, nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("orchestrator did not answer /health on its port %s: %v", port, err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("orchestrator did not come up on 127.0.0.1:%s within 5s", port)
-	return "", nil
+}
+
+// syncBuffer collects the child's stderr; the exec copier goroutine writes while the harness may read.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// Fix wave 25 (scout C2-1/C2-12): the harness must never test a server its own child did not start. A stranger
+// already listens on a port; the child is told to use that same port, so its bind fails and it exits. The harness
+// must report that, not hand back the stranger's port.
+func TestHarnessNeverTrustsAServerItsChildDidNotStart(t *testing.T) {
+	stranger, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stranger.Close()
+	go func() {
+		_ = http.Serve(stranger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+	}()
+	strangerPort := strconv.Itoa(stranger.Addr().(*net.TCPAddr).Port)
+	port, err := tryStartOrchestrator(t, "", "ORCHESTRATOR_PORT="+strangerPort)
+	if err == nil {
+		t.Fatalf("the harness accepted port %s, where a server it did not start answers /health", port)
+	}
+	t.Logf("refused as it must be: %v", err)
 }
 
 func TestDefaultBindIsLoopbackReachable(t *testing.T) {
@@ -130,5 +225,54 @@ func TestExplicitBindAddrOverrideStillWorks(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// ORCHESTRATOR_PORT=0 + ORCHESTRATOR_PORT_FILE (fix wave 25): the file names the port the child bound (it answers
+// there), and a normal stop (SIGTERM) removes it; SIGKILL cannot (stated in the README, like ledger-rust's).
+func TestPortFileNamesTheBoundPortAndIsRemovedOnSIGTERM(t *testing.T) {
+	binPath := buildOrchestratorBinary(t)
+	portFile := filepath.Join(t.TempDir(), "o.port")
+	cmd := exec.Command(binPath)
+	cmd.Env = append(os.Environ(), "DETECTION_SERVICE_TOKEN=d", "ORCHESTRATOR_SERVICE_TOKEN=o", "LEDGER_SERVICE_TOKEN=l",
+		"ORCHESTRATOR_PORT=0", "ORCHESTRATOR_PORT_FILE="+portFile)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	defer func() {
+		_ = cmd.Process.Kill()
+		<-exited
+		exited <- nil
+	}()
+	var port string
+	for deadline := time.Now().Add(30 * time.Second); port == ""; time.Sleep(20 * time.Millisecond) {
+		if b, err := os.ReadFile(portFile); err == nil && strings.HasSuffix(string(b), "\n") {
+			port = strings.TrimSpace(string(b))
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no port file")
+		}
+	}
+	if n, err := strconv.Atoi(port); err != nil || n <= 0 || n > 65535 {
+		t.Fatalf("port file holds %q", port)
+	}
+	resp, err := http.Get("http://127.0.0.1:" + port + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	entries, _ := os.ReadDir(filepath.Dir(portFile))
+	if len(entries) != 1 {
+		t.Fatalf("the publish left a temp file beside the port file: %v", entries)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	err = <-exited
+	exited <- err
+	if _, statErr := os.Stat(portFile); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("port file still present after SIGTERM (exit %v)", err)
 	}
 }

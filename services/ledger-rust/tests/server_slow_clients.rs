@@ -13,9 +13,28 @@
 //! write), and an absurd `Content-Length` (read up to 64 KiB before the 413).
 //!
 //! Every test here asserts that `/health` AND a normal authenticated append
-//! complete within `PROMPT` while the bad client(s) are stalled, and that the
-//! server itself cuts the stalled connection within its documented deadline.
-//! The concurrency tests pin that appends stay strictly serialized.
+//! are served while the bad client(s) are stalled, and that the server itself
+//! cuts the stalled connection by its documented deadline. The concurrency
+//! tests pin that appends stay strictly serialized.
+//!
+//! Fix wave 25 (scout C2-4/C2-5): no fixed sleep is a barrier and no latency
+//! bound is asserted on a loaded box.
+//!   - Barrier: before "others" are tried, the bad connections are CONFIRMED
+//!     to be held by the server: the server runs with a small connection cap,
+//!     holders fill the remaining slots, and `/health` must then be shed (503)
+//!     — which it can only be if every bad connection holds a slot — after
+//!     which the holders are dropped and `/health` must answer 200 again. A
+//!     slow reader is confirmed by the bytes the server has already queued to
+//!     it. A wrong-token client is confirmed by its 401 having arrived.
+//!   - "Served while stalled" is an ordering, not a stopwatch: others get
+//!     their answers, and only THEN is each bad connection checked to be still
+//!     held (nothing came back on it yet). A server that serialised behind the
+//!     stalled client could only answer the others after cutting it.
+//!   - Deadlines: the cut is an event (the read ends because the server
+//!     closed); lower bounds (no earlier than the deadline) are kept, they
+//!     cannot be broken by load; an upper bound remains only where it
+//!     separates two causes (a wrong-token 401 closed BEFORE the body deadline
+//!     could have fired), and it is the server's own deadline, not a literal.
 
 mod common;
 
@@ -31,13 +50,12 @@ use common::PortFile;
 use serde_json::{json, Value};
 
 const TOKEN: &str = "slow-clients-test-token";
-/// A well-behaved client must be served within this while others stall.
-const PROMPT: Duration = Duration::from_secs(1);
 /// Server deadlines (src/bin/server.rs, ADR 0003 section 7).
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_DEADLINE: Duration = Duration::from_secs(15);
-/// Scheduling slack on top of a server deadline before the test calls it hung.
+/// Hang guard on top of a server deadline: a test that waits this long fails
+/// as hung; it is not a measurement.
 const SLACK: Duration = Duration::from_secs(2);
 
 struct ServerHandle {
@@ -83,27 +101,23 @@ fn start_with(log: &Scratch, env: &[(&str, &str)]) -> ServerHandle {
     for (k, v) in env {
         cmd.env(k, v);
     }
-    let mut child = cmd.spawn().expect("failed to spawn ledger-rust server");
-    let port = match common::wait_port(&mut child, &pf, Duration::from_secs(30)) {
-        Ok(p) => p,
-        Err(e) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("{e}");
-        }
-    };
+    let child = cmd.spawn().expect("failed to spawn ledger-rust server");
+    // Fix wave 25 (scout C2-11): the child is owned by a ServerHandle (kill + wait on drop) BEFORE anything below can
+    // panic; a panic in the readiness loop used to leave a bare `Child`, which std does not kill on drop.
+    let mut h = ServerHandle { child, port: 0, _port_file: pf };
+    h.port = common::wait_port(&mut h.child, &h._port_file, Duration::from_secs(30)).unwrap_or_else(|e| panic!("{e}"));
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if let Some(st) = child.try_wait().unwrap() {
+        if let Some(st) = h.child.try_wait().unwrap() {
             panic!("server exited before coming up: {st}");
         }
-        if let Ok((200, _)) = request(port, "GET", "/health", None, None) {
+        if let Ok((200, _)) = request(h.port, "GET", "/health", None, None) {
             break;
         }
         assert!(Instant::now() < deadline, "server did not come up");
         std::thread::sleep(Duration::from_millis(50));
     }
-    ServerHandle { child, port, _port_file: pf }
+    h
 }
 
 fn start(log: &Scratch) -> ServerHandle {
@@ -142,21 +156,68 @@ fn event(event_id: &str) -> String {
     event_value(event_id, "Activation blocked: 2 requirements unmet").to_string()
 }
 
-/// The core assertion of this file: while bad clients are stalled, `/health`
-/// and an authenticated append each complete within PROMPT.
-fn assert_others_served_promptly(port: u16, label: &str) {
-    let t = Instant::now();
-    let (status, _) = request(port, "GET", "/health", None, None).unwrap();
-    let health = t.elapsed();
-    assert_eq!(status, 200, "{label}: /health status");
-    assert!(health < PROMPT, "{label}: /health took {health:?} (limit {PROMPT:?})");
-
+/// The core assertion of this file: `/health` and an authenticated append are
+/// served, and only AFTER both answers is every connection in `stalled`
+/// checked to be still held by the server (nothing came back on it). A server
+/// that made the others wait behind a stalled client could only answer them
+/// after it had cut that client, which this order catches without a clock.
+///
+/// The barrier tests run the server with a small connection cap, and a slot is released asynchronously after its
+/// answer, so a request can meet a slot that is still being released and be SHED (503, at once). A shed is retried
+/// (hang guard: the request deadline); it cannot hide the regression, because the stalled connections are checked
+/// only after the others were served.
+fn assert_others_served_while_stalled(port: u16, label: &str, stalled: &[&TcpStream]) {
+    let guard = Instant::now() + REQUEST_DEADLINE;
+    let served = |method: &str, path: &str, body: Option<&str>, want: u16| loop {
+        let (status, text) = request(port, method, path, if body.is_some() { Some(TOKEN) } else { None }, body).unwrap();
+        if status == 503 && Instant::now() < guard {
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+        assert_eq!(status, want, "{label}: {method} {path}: {text}");
+        break;
+    };
+    served("GET", "/health", None, 200);
     let id = format!("ok-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
-    let t = Instant::now();
-    let (status, _) = authed(port, "POST", "/ledger/events", Some(&event(&id)));
-    let append = t.elapsed();
-    assert_eq!(status, 201, "{label}: authenticated append status");
-    assert!(append < PROMPT, "{label}: authenticated append took {append:?} (limit {PROMPT:?})");
+    served("POST", "/ledger/events", Some(&event(&id)), 201);
+    let released = stalled.iter().filter(|c| !still_held(c)).count();
+    assert_eq!(released, 0, "{label}: {released} stalled connection(s) had already been answered or cut when the others were served");
+}
+
+/// Barrier (fix wave 25, scout C2-5): every connection in `bad` holds one of the server's `cap` slots. Holders fill
+/// the remaining `cap - bad.len()` slots (each confirmed held), `/health` must then be shed with 503 — only possible
+/// if the bad connections hold the rest — and once the holders are dropped `/health` answers 200 again (polled: slot
+/// release is asynchronous). Panics if the barrier cannot be established.
+fn confirm_held(port: u16, cap: usize, bad: &[&TcpStream]) {
+    assert!(bad.iter().all(|c| still_held(c)), "a bad connection was answered before the barrier");
+    let mut holders: Vec<TcpStream> = Vec::new();
+    let guard = Instant::now() + REQUEST_DEADLINE; // hang guard
+    while holders.len() < cap - bad.len() {
+        let h = slow_body_client(port, TOKEN, "/ledger/events");
+        holders.push(h);
+        holders.retain(still_held_after_accept);
+        assert!(Instant::now() < guard, "holders kept being shed: the bad connections hold more slots than expected?");
+    }
+    let (status, body) = request(port, "GET", "/health", None, None).unwrap();
+    assert_eq!(status, 503, "barrier: with {} holders and {} bad connections /health was not shed: {body}", holders.len(), bad.len());
+    drop(holders);
+    loop {
+        if let Ok((200, _)) = request(port, "GET", "/health", None, None) {
+            break;
+        }
+        assert!(Instant::now() < guard, "the holders' slots were never released");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(bad.iter().all(|c| still_held(c)), "a bad connection was answered during the barrier");
+}
+
+/// A fresh holder counts once the server has had the chance to shed it: a shed
+/// holder receives a 503 (and EOF) at once, a held one receives nothing. The
+/// /health round trip after it orders the check behind the server's accept.
+fn still_held_after_accept(h: &TcpStream) -> bool {
+    let port = h.peer_addr().unwrap().port();
+    let _ = request(port, "GET", "/health", None, None); // a round trip through the accept loop
+    still_held(h)
 }
 
 fn connect(port: u16) -> TcpStream {
@@ -202,15 +263,17 @@ fn slow_body_with_wrong_token_does_not_block_others_and_gets_prompt_401() {
     let s = start(&log);
     let since = Instant::now();
     let mut bad = slow_body_client(s.port, "WRONG", "/ledger/events");
-    std::thread::sleep(Duration::from_millis(300));
+    // Barrier: the 401 has arrived, so the server has read this request's head and answered it.
+    let first = common::read_response(&mut bad).expect("no answer to the wrong-token head");
+    assert_eq!(first.status, 401, "stalled wrong-token client");
 
-    assert_others_served_promptly(s.port, "wrong-token slow body");
+    assert_others_served_while_stalled(s.port, "wrong-token slow body", &[]);
 
-    // The stalled client itself is answered 401 and closed WITHOUT the server
-    // waiting for (draining) the 4988 missing body bytes.
-    let (resp, elapsed) = read_until_closed(&mut bad, since);
-    assert_eq!(status_of(&resp), 401, "stalled wrong-token client: {resp:?}");
-    assert!(elapsed < Duration::from_secs(3), "401 + close took {elapsed:?}; server waited for the body");
+    // The stalled client is closed WITHOUT the server waiting for (draining) the 4988 missing body bytes: EOF arrives
+    // before the body deadline could have fired (that deadline is what would close it otherwise).
+    let (rest, elapsed) = read_until_closed(&mut bad, since);
+    assert_eq!(rest, "", "bytes after the 401");
+    assert!(elapsed < BODY_READ_TIMEOUT, "401 + close took {elapsed:?}: the body deadline closed it, the server waited for the body");
 }
 
 // --- slow body with the RIGHT token ------------------------------------------------------------
@@ -218,19 +281,18 @@ fn slow_body_with_wrong_token_does_not_block_others_and_gets_prompt_401() {
 #[test]
 fn slow_body_with_right_token_does_not_block_others_and_is_cut_off() {
     let log = scratch("righttok");
-    let s = start(&log);
+    let s = start_capped(&log, CAP);
     let since = Instant::now();
     let mut bad = slow_body_client(s.port, TOKEN, "/ledger/events");
-    std::thread::sleep(Duration::from_millis(300));
+    confirm_held(s.port, CAP, &[&bad]);
 
-    assert_others_served_promptly(s.port, "right-token slow body");
+    assert_others_served_while_stalled(s.port, "right-token slow body", &[&bad]);
 
-    // The server gives up on the body after BODY_READ_TIMEOUT: 408, closed,
-    // nothing recorded from it.
+    // The server gives up on the body at BODY_READ_TIMEOUT: 408 (the deadline's own answer), closed, nothing
+    // recorded from it. Lower bound only: load can make the cut later, never earlier.
     let (resp, elapsed) = read_until_closed(&mut bad, since);
     assert_eq!(status_of(&resp), 408, "stalled right-token client: {resp:?}");
     assert!(elapsed >= BODY_READ_TIMEOUT - Duration::from_millis(500), "cut off too early: {elapsed:?}");
-    assert!(elapsed < BODY_READ_TIMEOUT + SLACK, "not cut off within the body deadline: {elapsed:?}");
     let (_, entries) = authed(s.port, "GET", "/ledger/entries", None);
     assert_eq!(entries.as_array().unwrap().len(), 1, "only the prompt append was recorded");
 }
@@ -241,24 +303,30 @@ fn slow_body_with_right_token_does_not_block_others_and_is_cut_off() {
 #[test]
 fn trickled_body_is_cut_off_at_the_total_body_deadline() {
     let log = scratch("trickle");
-    let s = start(&log);
-    let since = Instant::now();
+    let s = start_capped(&log, CAP);
     let mut bad = slow_body_client(s.port, TOKEN, "/ledger/append");
+    confirm_held(s.port, CAP, &[&bad]);
     let mut writer = bad.try_clone().unwrap();
+    // 40 bytes, one every 500 ms: 20 s of trickle, never idle for a per-read timeout. The thread reports whether it
+    // was still trickling when the server cut the connection.
     let trickle = std::thread::spawn(move || {
         for _ in 0..40 {
             std::thread::sleep(Duration::from_millis(500));
             if writer.write_all(b" ").is_err() {
-                break;
+                return true; // the server closed while the body was still arriving
             }
         }
+        false
     });
-    std::thread::sleep(Duration::from_millis(300));
-    assert_others_served_promptly(s.port, "trickled body");
-    let (resp, elapsed) = read_until_closed(&mut bad, since);
+    assert_others_served_while_stalled(s.port, "trickled body", &[&bad]);
+    let (resp, _) = read_until_closed(&mut bad, Instant::now());
     assert_eq!(status_of(&resp), 408, "{resp:?}");
-    assert!(elapsed < BODY_READ_TIMEOUT + SLACK, "trickle kept the connection for {elapsed:?}");
-    trickle.join().unwrap();
+    // The cut came while the client was still sending: an ordering, no stopwatch. A per-read deadline would never
+    // fire (the trickle is never idle) and the connection would outlive the trickle.
+    // (After the 408 and the server's bounded drain, the next byte is answered with RST and the one after fails:
+    // the trickle sees its error within ~2 s of the cut, long before its 20 s are over.)
+    drop(bad);
+    assert!(trickle.join().unwrap(), "the trickle finished before the server cut the connection");
 }
 
 // --- slow header ---------------------------------------------------------------------------------
@@ -266,28 +334,31 @@ fn trickled_body_is_cut_off_at_the_total_body_deadline() {
 #[test]
 fn slow_header_does_not_block_others_and_is_cut_off() {
     let log = scratch("slowhead");
-    let s = start(&log);
+    let s = start_capped(&log, CAP);
     let since = Instant::now();
     let mut bad = connect(s.port);
     bad.write_all(b"POST /ledger/events HTTP/1.1\r\nHost: x\r\nAuthor").unwrap();
-    std::thread::sleep(Duration::from_millis(300));
+    confirm_held(s.port, CAP, &[&bad]);
 
-    assert_others_served_promptly(s.port, "slow header");
+    assert_others_served_while_stalled(s.port, "slow header", &[&bad]);
 
+    // Cut by the server (the read ends; its timeout is the hang guard), no earlier than the header deadline.
     let (_, elapsed) = read_until_closed(&mut bad, since);
-    assert!(elapsed < HEADER_READ_TIMEOUT + SLACK, "slow-header connection held for {elapsed:?}");
+    assert!(elapsed >= HEADER_READ_TIMEOUT - Duration::from_millis(500), "cut off too early: {elapsed:?}");
 }
 
 /// A connection that sends nothing at all is closed by the header deadline too.
 #[test]
 fn idle_connection_is_closed_by_the_header_deadline() {
     let log = scratch("idle");
-    let s = start(&log);
+    let s = start_capped(&log, CAP);
     let since = Instant::now();
     let mut bad = connect(s.port);
-    assert_others_served_promptly(s.port, "idle connection");
-    let (_, elapsed) = read_until_closed(&mut bad, since);
-    assert!(elapsed < HEADER_READ_TIMEOUT + SLACK, "idle connection held for {elapsed:?}");
+    confirm_held(s.port, CAP, &[&bad]);
+    assert_others_served_while_stalled(s.port, "idle connection", &[&bad]);
+    let (got, elapsed) = read_until_closed(&mut bad, since);
+    assert_eq!(got, "", "an idle connection is closed, not answered");
+    assert!(elapsed >= HEADER_READ_TIMEOUT - Duration::from_millis(500), "cut off too early: {elapsed:?}");
 }
 
 // --- oversized Content-Length ------------------------------------------------------------------
@@ -299,16 +370,16 @@ fn oversized_content_length_is_413_before_any_body_is_read() {
     let log = scratch("bigcl");
     let s = start(&log);
     for path in ["/ledger/events", "/ledger/append"] {
-        let since = Instant::now();
         let mut c = connect(s.port);
         let head = format!(
             "POST {path} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n\
              Content-Type: application/json\r\nContent-Length: 10000000\r\n\r\n"
         );
         c.write_all(head.as_bytes()).unwrap();
-        let (resp, elapsed) = read_until_closed(&mut c, since);
+        // No body byte is ever sent: an answer at all proves it came from the header alone (a server waiting for the
+        // body could only answer at the body deadline, with 408).
+        let (resp, _) = read_until_closed(&mut c, Instant::now());
         assert_eq!(status_of(&resp), 413, "{path}: {resp:?}");
-        assert!(elapsed < PROMPT, "{path}: 413 took {elapsed:?} (server waited for the body)");
     }
     // Exactly at the limit is still read (and then judged on content).
     let at_limit = format!("{{\"pad\":\"{}\"}}", "a".repeat(64 * 1024 - 10));
@@ -346,14 +417,20 @@ fn slow_reader_does_not_block_others_and_is_cut_off() {
     let mut bad = connect(s.port);
     bad.write_all(format!("GET /ledger/entries HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n\r\n").as_bytes())
         .unwrap();
-    std::thread::sleep(Duration::from_millis(1500)); // let the server fill the socket buffers
+    // Barrier (fix wave 25): the server is writing this response — at least 64 KiB of it already sit unread in this
+    // socket's receive queue (the old barrier was a 1.5 s sleep). The response is multi-MB, so it cannot be done.
+    queued_at_least(&bad, 64 * 1024);
 
-    assert_others_served_promptly(s.port, "slow reader");
+    assert_others_served_while_stalled(s.port, "slow reader", &[]);
+    // Ordering: the others were served while this response was still being written (the connection not yet cut).
+    let mut early = Vec::new();
+    assert!(!closed_yet(&mut bad, &mut early), "the slow reader had already been cut when the others were served");
 
     // Wait out the request deadline, then read: the server must have given up
     // (connection closed before the full multi-MB body was delivered).
     std::thread::sleep((REQUEST_DEADLINE + SLACK).saturating_sub(since.elapsed()));
-    let (resp, _) = read_until_closed(&mut bad, since);
+    let (rest, _) = read_until_closed(&mut bad, since);
+    let resp = String::from_utf8_lossy(&early).to_string() + &rest;
     assert_eq!(status_of(&resp), 200);
     let body_len = resp.split("\r\n\r\n").nth(1).unwrap_or("").len();
     let (_, entries) = request(s.port, "GET", "/ledger/entries", Some(TOKEN), None).unwrap();
@@ -369,7 +446,7 @@ fn slow_reader_does_not_block_others_and_is_cut_off() {
 #[test]
 fn many_concurrent_slow_clients_do_not_block_others() {
     let log = scratch("many");
-    let s = start(&log);
+    let s = start_capped(&log, 150 + 2);
     let mut bad = Vec::new();
     for i in 0..150 {
         let c = match i % 3 {
@@ -383,9 +460,12 @@ fn many_concurrent_slow_clients_do_not_block_others() {
         };
         bad.push(c);
     }
-    std::thread::sleep(Duration::from_millis(300));
+    // The wrong-token third is answered 401 at once (that is the fix) and closed: only the right-token slow bodies
+    // and the slow heads are held.
+    let refs: Vec<&TcpStream> = bad.iter().enumerate().filter(|(i, _)| i % 3 != 0).map(|(_, c)| c).collect();
+    confirm_held(s.port, 150 + 2, &refs);
     for round in 0..3 {
-        assert_others_served_promptly(s.port, &format!("150 slow clients, round {round}"));
+        assert_others_served_while_stalled(s.port, &format!("150 slow clients, round {round}"), &refs);
     }
     drop(bad);
 }
@@ -430,13 +510,22 @@ fn over_connection_cap_gets_prompt_503_and_recovers() {
             replaced += 1;
         }
     }
-    let t = Instant::now();
+    // Shed, not queued: an answer at all while every slot is held can only be the shed path's (a queued request
+    // would be answered only after a holder's 5 s body deadline, and with 200).
     let (status, body) = request(s.port, "GET", "/health", None, None).unwrap();
     assert_eq!(status, 503, "{body} (holders replaced: {replaced})");
-    assert!(t.elapsed() < PROMPT, "503 took {:?}", t.elapsed());
-    // the newest holder started at the last replacement, before this point: its body deadline is over after this
-    std::thread::sleep(BODY_READ_TIMEOUT + SLACK);
-    assert_others_served_promptly(s.port, "after the stalled connections were cut");
+    // Recovery: once the holders hit their body deadline the server answers 408 and frees their slots — wait for
+    // those 408s (the event), then the others are served again.
+    for h in bad.iter_mut() {
+        let (resp, _) = read_until_closed(h, Instant::now());
+        assert_eq!(status_of(&resp), 408, "a holder was not cut by its body deadline: {resp:?}");
+    }
+    let guard = Instant::now() + REQUEST_DEADLINE; // hang guard: slot release after the 408 is asynchronous
+    while !matches!(request(s.port, "GET", "/health", None, None), Ok((200, _))) {
+        assert!(Instant::now() < guard, "the server never recovered after the stalled connections were cut");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_others_served_while_stalled(s.port, "after the stalled connections were cut", &[]);
     drop(bad);
 }
 
@@ -578,4 +667,49 @@ fn fifty_conflicting_posts_on_one_id_give_one_create_and_49_conflicts() {
     drop(s);
     let s = start(&log);
     assert_eq!(authed(s.port, "GET", "/ledger/verify", None).1, json!({"valid": true, "entries": 1}));
+}
+
+/// The connection cap the barrier tests run with: one slot for the bad connection, four for the others' requests
+/// (each releases its slot asynchronously after its answer).
+const CAP: usize = 5;
+
+fn start_capped(log: &Scratch, cap: usize) -> ServerHandle {
+    let cap = cap.to_string();
+    start_with(log, &[("LEDGER_MAX_CONNECTIONS", cap.as_str())])
+}
+
+/// Blocks until at least `n` response bytes sit unread in `c`'s receive queue (peeked, not consumed). The hang
+/// guard is the request deadline: the server must have started writing well before it.
+fn queued_at_least(c: &TcpStream, n: usize) {
+    let mut buf = vec![0u8; n];
+    let guard = Instant::now() + REQUEST_DEADLINE;
+    loop {
+        c.set_nonblocking(true).unwrap();
+        let got = c.peek(&mut buf);
+        c.set_nonblocking(false).unwrap();
+        if let Ok(k) = got {
+            if k >= n {
+                return;
+            }
+        }
+        assert!(Instant::now() < guard, "the server queued fewer than {n} bytes to the slow reader");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Reads whatever is queued on `c` without blocking (into `acc`); true when the read reached EOF or an error, i.e.
+/// the server has closed the connection.
+fn closed_yet(c: &mut TcpStream, acc: &mut Vec<u8>) -> bool {
+    c.set_nonblocking(true).unwrap();
+    let mut buf = [0u8; 65536];
+    let closed = loop {
+        match c.read(&mut buf) {
+            Ok(0) => break true,
+            Ok(n) => acc.extend_from_slice(&buf[..n]),
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break false,
+            Err(_) => break true,
+        }
+    };
+    c.set_nonblocking(false).unwrap();
+    closed
 }

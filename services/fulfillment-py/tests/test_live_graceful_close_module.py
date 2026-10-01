@@ -16,6 +16,7 @@ import hashlib
 import importlib
 import os
 import re
+import select
 import socket
 import subprocess
 import sys
@@ -212,12 +213,27 @@ def test_past_the_drain_cap_an_answered_socket_is_closed_at_once():
 
 
 # ====================================================================== live: the service's own protocol under uvicorn
+#
+# Fix wave 25 (scout X2): synchronised on real events, not sleeps. The child announces its port only once uvicorn
+# reports itself started (the listener exists), and every connection the server accepts is announced on the child's
+# stdout ("C"), so a test waits for the server's own accept instead of sleeping. The drain window is set to 30 s in
+# the child (the module's DRAIN_TIMEOUT_S, read at close time), so "still draining" is checked against a window no
+# scheduler stall can close; the 1 s default itself is pinned by the unit test above, and its timer path by
+# test_fix21_graceful_close.py. "Closed" is an event: the RST that answers a byte sent to a closed socket.
 
-CHILD = r'''
+CHILD = r"""
 import asyncio, socket, sys
 import uvicorn
 import importlib
 proto = getattr(importlib.import_module(sys.argv[1]), sys.argv[2])
+mixin = next(c for c in proto.__mro__ if c.__name__ == "GracefulCloseMixin")
+sys.modules[mixin.__module__].DRAIN_TIMEOUT_S = float(sys.argv[4])
+
+class Announcing(proto):
+    def connection_made(self, transport):
+        super().connection_made(transport)
+        sys.stdout.write("C\n")
+        sys.stdout.flush()
 
 async def app(scope, receive, send):
     if scope["type"] != "http":
@@ -229,37 +245,71 @@ async def app(scope, receive, send):
 sock = socket.socket()
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind(("127.0.0.1", 0))
-print(sock.getsockname()[1], flush=True)
-cfg = uvicorn.Config(app, http=proto, limit_concurrency=int(sys.argv[3]), log_level="warning",
+cfg = uvicorn.Config(app, http=Announcing, limit_concurrency=int(sys.argv[3]), log_level="warning",
                      h11_max_incomplete_event_size=16 * 1024, timeout_keep_alive=5, lifespan="off")
-uvicorn.Server(cfg).run(sockets=[sock])
-'''
+server = uvicorn.Server(cfg)
+
+async def main():
+    task = asyncio.ensure_future(server.serve(sockets=[sock]))
+    while not server.started:
+        if task.done():
+            return await task
+        await asyncio.sleep(0.01)
+    sys.stdout.write("%d\n" % sock.getsockname()[1])
+    sys.stdout.flush()
+    await task
+
+asyncio.run(main())
+"""
+
+HANG_GUARD_S = 60          # waits for an EVENT give up after this; never a measurement
 
 
-def _server(limit: int, env_extra: dict | None = None):
-    env = dict(os.environ, PYTHONPATH=str(SRC) + os.pathsep + os.environ.get("PYTHONPATH", ""), **(env_extra or {}))
-    p = subprocess.Popen([sys.executable, "-c", CHILD, _SERVE, _PROTOCOL, str(limit)], cwd=SRC, env=env,
-                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-    try:
-        port = int(p.stdout.readline())
-        for _ in range(100):
-            try:
-                socket.create_connection(("127.0.0.1", port), timeout=1).close()
-                break
-            except OSError:
-                time.sleep(0.05)
-        time.sleep(0.2)
-    except BaseException:
-        p.kill()                  # never an orphaned server (fix wave 22, G3 class)
-        p.wait()
-        raise
-    return p, port
+class _Child:
+    """The server child: its port, and its accept announcements."""
+
+    def __init__(self, limit: int, env_extra: dict | None = None, drain_s: float = 30.0):
+        env = dict(os.environ, PYTHONPATH=str(SRC) + os.pathsep + os.environ.get("PYTHONPATH", ""), **(env_extra or {}))
+        self.p = subprocess.Popen([sys.executable, "-c", CHILD, _SERVE, _PROTOCOL, str(limit), str(drain_s)], cwd=SRC,
+                                  env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.buf = b""
+        try:
+            self.port = int(self._line())
+        except BaseException:
+            self.close()          # never an orphaned server (fix wave 22, G3 class)
+            raise
+
+    def _line(self) -> bytes:
+        deadline = time.monotonic() + HANG_GUARD_S
+        while b"\n" not in self.buf:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError("the server child said nothing")
+            ready, _, _ = select.select([self.p.stdout], [], [], left)
+            if ready:
+                chunk = os.read(self.p.stdout.fileno(), 4096)
+                if not chunk:
+                    raise RuntimeError(f"the server child exited ({self.p.wait()})")
+                self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1)
+        return line
+
+    def accepted(self, n: int = 1) -> None:
+        """Blocks until the server has accepted ``n`` more connections."""
+        for _ in range(n):
+            assert self._line() == b"C"
+
+    def close(self) -> None:
+        self.p.kill()
+        self.p.wait()
+        self.p.stdout.close()
 
 
-def _answered(port: int) -> socket.socket:
+def _answered(child: _Child) -> socket.socket:
     """A connection whose request was answered (401, Connection: close) and read to EOF; left open (the server
     is draining it)."""
-    s = socket.create_connection(("127.0.0.1", port), timeout=5)
+    s = socket.create_connection(("127.0.0.1", child.port), timeout=HANG_GUARD_S)
+    child.accepted()
     s.sendall(b"GET /x HTTP/1.1\r\nHost: t\r\n\r\n")
     got = b""
     while True:
@@ -271,45 +321,51 @@ def _answered(port: int) -> socket.socket:
     return s
 
 
-def _server_closed(s: socket.socket) -> bool:
-    """Whether the server has closed its side for good (a send after its close is answered RST → EPIPE)."""
-    try:
-        s.send(b"x")
-        time.sleep(0.15)
-        s.send(b"x")
-        time.sleep(0.05)
-        s.send(b"x")
-        return False
-    except OSError:
-        return True
+def _closed_by_server(s: socket.socket, window: float) -> bool:
+    """Whether the server has closed its side for good: a byte sent to a closed socket is answered with RST, and
+    the next send then fails. Polls for that event for up to ``window`` seconds. A server still draining reads the
+    bytes silently. (The server already sent FIN, so the socket is always readable; only the send can tell.)"""
+    deadline = time.monotonic() + window
+    while True:
+        try:
+            s.send(b"x")
+        except OSError:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
 
 
 def test_live_a_draining_connection_does_not_hold_a_concurrency_slot():
     """limit_concurrency=2 (uvicorn counts the requesting connection itself): one connection answered with
     Connection: close and draining (its client silent, socket open), then a new request — served, not 503."""
-    p, port = _server(limit=2)
+    child = _Child(limit=2)
     try:
-        a = _answered(port)
-        b = socket.create_connection(("127.0.0.1", port), timeout=5)
+        a = _answered(child)
+        b = socket.create_connection(("127.0.0.1", child.port), timeout=HANG_GUARD_S)
+        child.accepted()
         b.sendall(b"GET /y HTTP/1.1\r\nHost: t\r\n\r\n")
         got = b.recv(64)
         b.close()
         assert got.startswith(b"HTTP/1.1 401"), got
-        assert not _server_closed(a)                           # a is still draining (within DRAIN_TIMEOUT_S)
+        # a is still draining: its 30 s window cannot have ended, and a byte sent to it is read, not reset. A server
+        # that closed a at its answer (the pre-wave-21 behaviour) had closed it before b even connected, so the RST
+        # comes back at once.
+        assert not _closed_by_server(a, window=0.5)
         a.close()
     finally:
-        p.kill()
-        p.wait()
+        child.close()
 
 
 def test_live_past_the_drain_cap_the_answered_socket_is_closed_at_once():
-    p, port = _server(limit=100, env_extra={_ENV: "2"})
+    child = _Child(limit=100, env_extra={_ENV: "2"})
     try:
-        socks = [_answered(port) for _ in range(3)]
-        closed = [_server_closed(s) for s in socks]
+        socks = [_answered(child) for _ in range(3)]
+        # the third was closed at its answer (the cap): its RST is an event — waited for, up to the hang guard
+        assert _closed_by_server(socks[2], window=HANG_GUARD_S)
+        # the first two are still in their 30 s drains
+        assert [_closed_by_server(s, window=0.5) for s in socks[:2]] == [False, False]
         for s in socks:
             s.close()
-        assert closed == [False, False, True], closed
     finally:
-        p.kill()
-        p.wait()
+        child.close()

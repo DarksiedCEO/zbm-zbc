@@ -10,13 +10,21 @@
 # SHAs were resolved with `git ls-remote --tags` against github.com on 2026-09-27.
 #
 # macOS (fix wave 21, founder: the Mac checks run without him): every Python service, delivery-py, ledger-rust and
-# orchestrator-go also run on `macos-14` (GitHub's Apple Silicon runner, arm64), one Python version (3.13) for the
+# orchestrator-go also run on `macos-26` (GitHub's Apple Silicon runner, arm64), one Python version (3.13) for the
 # Python services; the results feed the same `required` job. GitHub's macOS runners have no Docker, so the
 # delivery-docker-live job stays Linux-only (delivery-py's Docker live module skips on macOS with its printed reason).
+# Fix wave 25 (scout C3-2): was `macos-14`, which GitHub's runner-images README marks deprecated ("will be fully
+# unsupported by November 2nd", actions/runner-images#13518); `macos-26` is the GA arm64 image `macos-latest` points
+# to (README read 2026-10-01; docs/ci.md quotes it).
+#
+# Hygiene (fix wave 25, founder ruling R-HYGIENE): every suite runs under `devtools/hygiene_check.py run`, which fails
+# the job when the suite changes a tracked file, leaves a new git-ignored file, leaves anything in its private TMPDIR
+# or /tmp, leaves a process running, skips a test for a reason not on the suite's expected list, or runs a number of
+# tests different from docs/test-counts.md. The `hygiene-static` job runs the static rules over the whole tree.
 #
 # Path filtering is done by the `changes` job (a plain `git diff`, no third-party action) so an unrelated change
-# does not run every suite. Shared files (root README.md, BUILD_CONTRACTS.md, docs/**, fixtures/**, .github/**)
-# run everything. The ten Python services are one cluster: their tests read each other's sources (ports.py,
+# does not run every suite. Shared files (root README.md, docs/**, fixtures/**, devtools/**, .github/**) run
+# everything. The ten Python services are one cluster: their tests read each other's sources (ports.py,
 # requirements.txt, api.py, ledger-rust's server.rs), so a change to any of them, or to ledger-rust, runs all of
 # them. A path no rule knows about runs everything (fail safe).
 
@@ -82,14 +90,15 @@ jobs:
             printf 'python=true\nrust=true\ngo=true\ndashboard=true\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt
-          echo "changed files:"; sed 's/^/  /' /tmp/changed.txt
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed.txt"
+          echo "changed files:"; sed 's/^/  /' "$RUNNER_TEMP/changed.txt"
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import re
-          changed = [l.strip() for l in open("/tmp/changed.txt") if l.strip()]
-          # Shared inputs: anything here runs every suite.
-          shared_files = {"README.md", "BUILD_CONTRACTS.md", ".gitleaks.toml", ".gitignore"}
-          shared_dirs = ("docs/", "fixtures/", ".github/")
+          import os
+          changed = [l.strip() for l in open(os.path.join(os.environ["RUNNER_TEMP"], "changed.txt")) if l.strip()]
+          # Shared inputs: anything here runs every suite (devtools/: the hygiene check every suite runs under).
+          shared_files = {"README.md", ".gitleaks.toml", ".gitignore"}
+          shared_dirs = ("docs/", "fixtures/", ".github/", "devtools/")
           groups = {"python": False, "rust": False, "go": False, "dashboard": False}
           py_re = re.compile(r"^services/[a-z0-9-]+-py/")
           for f in changed:
@@ -115,8 +124,9 @@ jobs:
 
   # ---------------------------------------------------------------------------------------------------------------
   # Python services managed by requirements.txt. Each entry: `cd services/<svc> && python -m pytest -q -rs`
-  # (root README "Testing": use `python -m pytest`, never the bare `pytest` binary). onboarding-py's live tests
-  # build ledger-rust with `cargo build --release --bin server` from inside the suite, so that entry gets Rust.
+  # (root README "Testing": use `python -m pytest`, never the bare `pytest` binary), under the hygiene check.
+  # onboarding-py's live tests build ledger-rust with `cargo build --release --bin server` from inside the suite, so
+  # that entry gets Rust (and may create services/ledger-rust/target, the one ignored path it is allowed to make).
   # ---------------------------------------------------------------------------------------------------------------
   python-tests:
     name: python-tests (${{ matrix.service }}, ${{ matrix.python }}, ${{ matrix.os }})
@@ -141,15 +151,15 @@ jobs:
           - legal-py
         # macOS (Apple Silicon): every service once, on Python 3.13
         include:
-          - {os: macos-14, python: "3.13", service: detection-py}
-          - {os: macos-14, python: "3.13", service: fulfillment-py}
-          - {os: macos-14, python: "3.13", service: onboarding-py}
-          - {os: macos-14, python: "3.13", service: creative-py}
-          - {os: macos-14, python: "3.13", service: compliance-py}
-          - {os: macos-14, python: "3.13", service: verification-py}
-          - {os: macos-14, python: "3.13", service: clipper-network-py}
-          - {os: macos-14, python: "3.13", service: finance-py}
-          - {os: macos-14, python: "3.13", service: legal-py}
+          - {os: macos-26, python: "3.13", service: detection-py}
+          - {os: macos-26, python: "3.13", service: fulfillment-py}
+          - {os: macos-26, python: "3.13", service: onboarding-py}
+          - {os: macos-26, python: "3.13", service: creative-py}
+          - {os: macos-26, python: "3.13", service: compliance-py}
+          - {os: macos-26, python: "3.13", service: verification-py}
+          - {os: macos-26, python: "3.13", service: clipper-network-py}
+          - {os: macos-26, python: "3.13", service: finance-py}
+          - {os: macos-26, python: "3.13", service: legal-py}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -169,9 +179,13 @@ jobs:
           workspaces: services/ledger-rust -> target
       - name: Install pinned requirements
         run: python -m pip install -r services/${{ matrix.service }}/requirements.txt
-      - name: Test
-        working-directory: services/${{ matrix.service }}
-        run: python -m pytest -q -rs -p no:cacheprovider
+      - name: Test (under the hygiene check)
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          python devtools/hygiene_check.py run --suite "python:$SERVICE" --kind pytest --cwd "services/$SERVICE" \
+            --allow-ignored services/ledger-rust/target \
+            -- python -m pytest -q -rs -p no:cacheprovider
 
   # ---------------------------------------------------------------------------------------------------------------
   # delivery-py is uv-managed: `uv sync --frozen` (the dev group holds pytest; the READMEs' `--no-dev` leaves no
@@ -195,7 +209,7 @@ jobs:
         include:
           # macOS (Apple Silicon): no Docker on the runner — tests/test_live_docker.py skips with its reason here
           # and must run in delivery-docker-live (Linux) instead
-          - {os: macos-14, python: "3.13"}
+          - {os: macos-26, python: "3.13"}
     defaults:
       run:
         working-directory: services/delivery-py
@@ -225,13 +239,17 @@ jobs:
         run: uv sync --frozen --python ${{ matrix.python }}
       - name: Lint
         run: uvx ruff@0.15.11 check src tests devtools
-      - name: Test
-        run: .venv/bin/python -m pytest -q -rs -p no:cacheprovider
+      - name: Test (under the hygiene check)
+        working-directory: .
+        run: |
+          python devtools/hygiene_check.py run --suite python:delivery-py --kind pytest --cwd services/delivery-py \
+            --allow-ignored services/delivery-py/.venv \
+            -- "$GITHUB_WORKSPACE/services/delivery-py/.venv/bin/python" -m pytest -q -rs -p no:cacheprovider
 
   # ---------------------------------------------------------------------------------------------------------------
-  # ledger-rust: root README "Testing" — `cargo test` (60 unit + 44 integration; the integration tests spawn the
-  # compiled binary over a real TCP socket) and `cargo clippy --all-targets -- -D warnings`. `--locked` refuses a
-  # Cargo.lock drift.
+  # ledger-rust: root README "Testing" — `cargo test` (unit tests plus integration tests that spawn the compiled
+  # binary over a real TCP socket; counts in docs/test-counts.md) and `cargo clippy --all-targets -- -D warnings`.
+  # `--locked` refuses a Cargo.lock drift.
   # ---------------------------------------------------------------------------------------------------------------
   ledger-rust:
     name: ledger-rust (${{ matrix.os }})
@@ -242,7 +260,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-26]
     defaults:
       run:
         working-directory: services/ledger-rust
@@ -256,8 +274,11 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: services/ledger-rust -> target
-      - name: Test
-        run: cargo test --locked
+      - name: Test (under the hygiene check)
+        working-directory: .
+        run: |
+          python3 devtools/hygiene_check.py run --suite rust:ledger-rust --kind cargo --cwd services/ledger-rust \
+            --allow-ignored services/ledger-rust/target -- cargo test --locked
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
@@ -273,7 +294,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-26]
     defaults:
       run:
         working-directory: services/orchestrator-go
@@ -285,13 +306,18 @@ jobs:
           cache: false   # no go.sum (no module dependencies); nothing to key a cache on
       - name: Vet
         run: go vet ./...
-      - name: Test (race detector)
-        run: go test -race -count=1 ./...
+      - name: Test (race detector, under the hygiene check; -v so every test and skip is counted)
+        working-directory: .
+        env:
+          GOTELEMETRY: "off"
+        run: |
+          python3 devtools/hygiene_check.py run --suite go:orchestrator-go --kind go --cwd services/orchestrator-go \
+            -- go test -race -count=1 -v ./...
 
   # ---------------------------------------------------------------------------------------------------------------
-  # Dashboard: root README "Testing" — `npm ci && npx tsc --noEmit && npm run build && npm test` (3 of the 27
-  # tests start the built server, so build comes first), plus the package's own `check:dynamic` script.
-  # `npm audit` is in the audit-node job.
+  # Dashboard: root README "Testing" — `npm ci && npm run lint (tsc --noEmit) && npm run build && npm test` (the
+  # live tests start the built server, so build comes first), plus the package's own `check:dynamic` script.
+  # `npm audit` is in the audit-node job. A skipped test fails the job (the live tests skip without a build).
   # ---------------------------------------------------------------------------------------------------------------
   dashboard-ts:
     name: dashboard-ts
@@ -311,12 +337,13 @@ jobs:
           cache-dependency-path: apps/dashboard-ts/package-lock.json
       - name: Install (clean, from the lockfile)
         run: npm ci
-      - name: Typecheck
-        run: npx tsc --noEmit
+      - name: Typecheck (npm run lint = tsc --noEmit)
+        run: npm run lint
       - name: Build
         run: npm run build
-      - name: Test
-        run: npm test
+      - name: Test (under the hygiene check)
+        working-directory: .
+        run: python3 devtools/hygiene_check.py run --suite node:dashboard-ts --kind node --cwd apps/dashboard-ts -- npm test
       - name: Dynamic-route check
         run: npm run check:dynamic
 
@@ -363,11 +390,13 @@ jobs:
           if [ "${{ matrix.service }}" = "verification-py" ]; then
             python -m pip install -r services/compliance-py/requirements.txt
           fi
-      - name: Live run
-        working-directory: services/${{ matrix.service }}
+      - name: Live run (under the hygiene check; no work dir, temp file or process may outlive it)
         env:
           LEDGER_BIN: ${{ github.workspace }}/services/ledger-rust/target/release/server
-        run: python devtools/live_run.py
+          SERVICE: ${{ matrix.service }}
+        run: |
+          python devtools/hygiene_check.py run --suite "live:$SERVICE" --kind none --cwd "services/$SERVICE" \
+            -- python devtools/live_run.py
 
   # ---------------------------------------------------------------------------------------------------------------
   # delivery-py's Docker live proof (tests/test_live_docker.py): the properties only a machine with a Docker daemon
@@ -441,12 +470,13 @@ jobs:
         working-directory: services/delivery-py
         env:
           DLV_LIVE_SANDBOX_IMAGE: ${{ steps.image.outputs.ref }}
-        run: .venv/bin/python -m pytest -q -rs -p no:cacheprovider tests/test_live_docker.py --junitxml=/tmp/live-docker.xml
+        run: .venv/bin/python -m pytest -q -rs -p no:cacheprovider tests/test_live_docker.py --junitxml="$RUNNER_TEMP/live-docker.xml"
       - name: Fail if any Docker live test was skipped
         run: |
           python3 - <<'EOF'
+          import os
           import xml.etree.ElementTree as ET
-          root = ET.parse("/tmp/live-docker.xml").getroot()
+          root = ET.parse(os.path.join(os.environ["RUNNER_TEMP"], "live-docker.xml")).getroot()
           cases = list(root.iter("testcase"))
           skipped = [c.get("name") for c in cases if c.find("skipped") is not None]
           print(f"{len(cases)} test cases, {len(skipped)} skipped")
@@ -487,10 +517,10 @@ jobs:
         working-directory: services/delivery-py
         run: |
           set -euo pipefail
-          uv export --frozen --no-hashes --no-emit-project --format requirements-txt -o /tmp/dlv-lock.txt
-          grep -v '@ git+' /tmp/dlv-lock.txt > /tmp/dlv-registry.txt
-          echo "excluded (git-sourced):"; grep '@ git+' /tmp/dlv-lock.txt || true
-          pip-audit -r /tmp/dlv-registry.txt --no-deps --disable-pip --strict --progress-spinner off
+          uv export --frozen --no-hashes --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/dlv-lock.txt"
+          grep -v '@ git+' "$RUNNER_TEMP/dlv-lock.txt" > "$RUNNER_TEMP/dlv-registry.txt"
+          echo "excluded (git-sourced):"; grep '@ git+' "$RUNNER_TEMP/dlv-lock.txt" || true
+          pip-audit -r "$RUNNER_TEMP/dlv-registry.txt" --no-deps --disable-pip --strict --progress-spinner off
 
   audit-rust:
     name: audit-rust (cargo audit)
@@ -548,12 +578,34 @@ jobs:
       - name: Install gitleaks (checksum-verified release binary)
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
-          mkdir -p /tmp/gitleaks && tar -xzf /tmp/gitleaks.tgz -C /tmp/gitleaks
-          /tmp/gitleaks/gitleaks version
+          curl -fsSL -o "$RUNNER_TEMP/gitleaks.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/gitleaks" && tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP/gitleaks"
+          "$RUNNER_TEMP/gitleaks/gitleaks" version
       - name: Scan the full history
-        run: /tmp/gitleaks/gitleaks git --no-banner --redact --exit-code 1 --config .gitleaks.toml .
+        run: |
+          "$RUNNER_TEMP/gitleaks/gitleaks" git --no-banner --redact --exit-code 1 --config .gitleaks.toml .
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # Hygiene, static half (fix wave 25, R-HYGIENE): over the whole tree, always — wall-clock upper bounds in tests
+  # (L1), hard-coded test ports (L2), hand-written test counts in the docs (L3; counts live in the generated
+  # docs/test-counts.md), and the shared files byte-identical across services (L4). The dynamic half runs inside
+  # every test job above. `devtools/hygiene_check.py` is standard-library Python; nothing is installed.
+  # ---------------------------------------------------------------------------------------------------------------
+  hygiene-static:
+    name: hygiene-static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0   # L3 accepts a count tied to a commit only if that commit resolves
+      - name: The checker's own self-test (every rule fails on a planted violation; the clean probe passes)
+        run: python3 -m unittest devtools/test_hygiene_check.py -v
+      - name: Static rules L1-L4
+        run: python3 devtools/hygiene_check.py lint --strict-allowlist
+      - name: docs/test-counts.md is present and well-formed
+        run: python3 devtools/hygiene_check.py counts --check
 
   # ---------------------------------------------------------------------------------------------------------------
   # The one check branch protection requires. A skipped upstream job (path filter said its inputs did not change)
@@ -575,6 +627,7 @@ jobs:
       - audit-rust
       - audit-node
       - secret-scan
+      - hygiene-static
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

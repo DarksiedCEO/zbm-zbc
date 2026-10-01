@@ -657,7 +657,47 @@ port it names and checks it (`GET /health`) before trusting it — the port may 
 process — and treats a `.*.tmp-*` file beside it as debris to remove, never to read. `src/bin/server.rs`'s module
 documentation says the same.
 
+## 12. The ledger's own tests measure the server, not the box (fix wave 25, Oct 1 2026)
+
+Scout C (wave 25) found the slow-client tests (`tests/server_slow_clients.rs`) asserting latency bounds on a loaded
+machine (`/health` and an fsync'ing append within 1 s while 150 clients stall; a 401 within 3 s; cuts within the
+deadline + 2 s) and using fixed sleeps (300 ms, 1.5 s) as the "the bad client is now stalling the server" barrier —
+nothing confirmed the server had even accepted the bad connection before "others are served" was measured, so on a
+starved box the property could be measured before the stall existed (C2-4, C2-5). Under the wave-25 hygiene rule
+(R-HYGIENE, `devtools/hygiene_check.py`, rule L1) a wall-clock upper bound against a literal is not allowed. Now:
+
+- **Barrier, not sleep.** The server runs with a small `LEDGER_MAX_CONNECTIONS`; holders fill the slots the bad
+  connections do not hold; `/health` must then be SHED (503) — possible only if every bad connection holds a slot —
+  and after the holders are dropped `/health` answers 200 again. A slow reader is confirmed by at least 64 KiB of
+  its response already queued in its socket; a wrong-token client by its 401 having arrived.
+- **Ordering, not stopwatch.** Others are served (a shed caused by the test's own small cap is retried; hang guard =
+  the request deadline), and only THEN is every stalled connection checked to be still held (nothing came back on
+  it) — a server that served the others behind the stalled client could only do so after cutting it. Proof (mutant:
+  `serve_connection` awaited inline in the accept loop, one connection at a time — the wave-4 defect class): 7 of the
+  12 tests failed; the slow-reader test passed on it, was then given the ordering check above, and fails on the
+  mutant too. The four that pass on that mutant do not depend on concurrent connections: the two append-serialisation
+  tests, the oversized-Content-Length 413 and the wrong-token 401 (answered before the body is read).
+- **Deadlines:** the cut is an event (the read ends because the server closed); a lower bound (not before the
+  deadline) stays — load cannot break it; the only upper bound left is `elapsed < BODY_READ_TIMEOUT` for the
+  wrong-token client: it separates "closed at once" from "closed by the body deadline", and it is the server's own
+  deadline, not a literal. The trickle test's "the deadline is total, not per read" is now an ordering: the server's
+  cut reaches the trickling writer before its 20 s of bytes are sent.
+- `tests/server_port_file.rs`, aimed-signal test (C2-6): the sample is now 100 signals that landed IN the publish
+  window, however many spawns that takes (at most 400); before, fewer than 90 hits in 100 spawns failed a correct
+  server whenever the poller missed the window.
+- `start_with` (C2-11) owns the child in a `ServerHandle` (kill + wait on drop) before anything that can panic.
+
+Residual, stated: the barrier relies on the connection cap's shed path (a 503 before the request is read), which
+these tests therefore also exercise; the integration tests still write fixed-prefix files directly in the temp
+directory (`std::env::temp_dir()`, which honours TMPDIR — under the hygiene wrapper that is the run's private TMPDIR,
+so a crashed test's leftovers fail rule R3 instead of accumulating in /tmp; the 735 `ledger_test_*` logs in this
+machine's /tmp are from earlier waves' code and are not removed by this wave — other sessions' files).
+
 ## Verification
 
-Commands, counts and a live three-process run are recorded in the README
-("Sep 24 2026 — money is exact, ledger records events").
+Current test counts: [docs/test-counts.md](../test-counts.md) (generated). The original commands and a live
+three-process run are recorded in the README ("Sep 24 2026 — money is exact, ledger records events"). Fix wave 25
+(H7, AEGIS N24-S-8) verified that §11's SIGKILL/OOM residual paragraph and the matching module documentation in
+`src/bin/server.rs` are present (text only; the AEGIS round-24 SIGKILL measurements it quotes were not re-run in
+wave 25). FIX_WAVE_23b.md, the ruling record for wave 23b, concerns fulfillment, detection and onboarding tests,
+not the ledger; it is cited here only so the ledger's ADR does not claim a ruling it was not part of.
