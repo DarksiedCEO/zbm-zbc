@@ -170,8 +170,8 @@ def main() -> int:
         # ------------------------------------------------------------------ leg A: production entrypoint, day one
         for d in ("la", "lb", "fa", "fb"):
             (work / d).mkdir()
-        la = start([ledger_bin], {"LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEDGER_PORT": str(pla),
-                                  "LEDGER_LOG_PATH": str(work / "la" / "ledger.jsonl")}, str(work / "la"), "ledger_a", work)
+        start([ledger_bin], {"LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEDGER_PORT": str(pla),
+                             "LEDGER_LOG_PATH": str(work / "la" / "ledger.jsonl")}, str(work / "la"), "ledger_a", work)
         wait_up(f"{LA}/health")
         fa = start([sys.executable, "-m", "api"], {**common, "LEDGER_SERVICE_URL": LA, "FIN_PORT": str(pfa),
                                                    "FIN_DATA_DIR": str(work / "fa")}, str(SVC / "src"), "finance_a", work)
@@ -199,8 +199,8 @@ def main() -> int:
         stop(fa, "finance_a")
 
         # ------------------------------------------------------------------ leg B: the money path with fakes
-        lb = start([ledger_bin], {"LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEDGER_PORT": str(plb),
-                                  "LEDGER_LOG_PATH": str(work / "lb" / "ledger.jsonl")}, str(work / "lb"), "ledger_b", work)
+        start([ledger_bin], {"LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEDGER_PORT": str(plb),
+                             "LEDGER_LOG_PATH": str(work / "lb" / "ledger.jsonl")}, str(work / "lb"), "ledger_b", work)
         wait_up(f"{LB}/health")
         envb = {**common, "LEDGER_SERVICE_URL": LB, "FIN_PORT": str(pfb), "FIN_DATA_DIR": str(work / "fb"),
                 "FIN_DEVTOOLS_STATE_FILE": str(work / "fb_world.pkl")}

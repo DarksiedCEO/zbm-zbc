@@ -14,23 +14,37 @@ import hashlib
 import hmac
 import json
 import os
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Optional
 
 import chart as C
 import money as M
 import reasons as R
 from clock import iso, parse_iso
-from errors import Conflict, Forbidden, Invalid, NotFound
+from errors import Conflict, NotFound
 from intelligences import i01_journal as J
 from intelligences import i06_tax as I6
 from ledger import derived_id
 from ports import RailAccount, TaxAgentAnswer
 from service import Gather, InvalidReasons, Op, PostingRefused, Refused, facts_sha256, rid, sha, sha_text, unbatched
 
-_REACH = json.loads(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "seed", "stripe_reach.json"),
-                         "rb").read())
-STRIPE_REACH = frozenset(_REACH["stripe"])
+# Wave 25 (scout B Low): the payout-country list is a pinned seed like fin_rules_seed.json — a changed file refuses
+# the import (and so the start) instead of silently changing who can be paid; read through a closed handle.
+PINNED_STRIPE_REACH_SHA256 = "74f79a159e1ce878c22c225f3d78d646fed3c876844f079946a836e78214a842"
+STRIPE_REACH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "seed", "stripe_reach.json")
+
+
+def load_stripe_reach(path: str = STRIPE_REACH_PATH) -> frozenset:
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    got = hashlib.sha256(raw).hexdigest()
+    if got != PINNED_STRIPE_REACH_SHA256:
+        raise RuntimeError(f"seed/stripe_reach.json SHA-256 {got} is not the pinned {PINNED_STRIPE_REACH_SHA256}; "
+                           "refusing to start (payout-country eligibility must be the reviewed file)")
+    return frozenset(json.loads(raw)["stripe"])
+
+
+STRIPE_REACH = load_stripe_reach()
 
 
 def fp_sha(fingerprint: Optional[str]) -> Optional[str]:

@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 from datetime import timedelta
+from typing import Optional
 
 import httpx
 import pytest
@@ -415,31 +416,65 @@ def test_n18_s3_guardrail_records_opaque_and_the_report_counts_it():
 # ====================================================================== R6 / N18-S-4: deadlines, watchdog, cancel
 
 class _Trickle(httpx.SyncByteStream):
-    def __init__(self, period: float = 0.05, n: int = 10_000):
-        self.period, self.n = period, n
+    """A body that trickles one byte every ``period`` until the test ends it (``done``) — never on its own."""
+
+    def __init__(self, period: float, done: threading.Event, first: Optional[threading.Event] = None):
+        self.period, self.done, self.first = period, done, first
 
     def __iter__(self):
-        for _ in range(self.n):
-            time.sleep(self.period)
+        while not self.done.wait(self.period):
+            if self.first is not None:
+                self.first.set()
             yield b"{"
 
 
+def _returns_while_trickling(fn, done: threading.Event, stall_s: float = 60.0) -> dict:
+    """Run ``fn`` in a thread; report whether it returned while the body was still trickling (``done`` unset), and
+    what it raised. ``stall_s`` bounds a stall only; it never measures speed. Wave 25 (scout B M2)."""
+    out: dict = {}
+
+    def call():
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            out["exc"] = exc
+    t = threading.Thread(target=call, daemon=True)
+    t.start()
+    t.join(stall_s)
+    out["returned_while_trickling"] = not t.is_alive() and not done.is_set()
+    done.set()
+    t.join(stall_s)
+    return out
+
+
 def test_n18_s4_egress_total_deadline_is_enforced_by_the_client():
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"Content-Length": "100000"}, stream=_Trickle()))
+    """Wave 25 (scout B M2/M3): ordered by state, not by `< 5` / `< 1.5` wall-clock bounds and a `sleep(0.5)`. Each body
+    trickles a byte inside every per-read timeout and never ends until the test ends it: only a TOTAL deadline can
+    end the call while it still trickles."""
+    done = threading.Event()
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"Content-Length": "100000"},
+                                                             stream=_Trickle(0.05, done)))
     eg = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=1, llm_read_timeout_s=1,
                         transport=transport, env={})
-    t0 = time.monotonic()
-    with pytest.raises(E.EgressFailed, match="deadline"):
-        eg.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm", body=b"{}", run_id="r1")
-    assert time.monotonic() - t0 < 5
-    # a total deadline passed by the engine (the remaining wall clock) shortens it further
-    t0 = time.monotonic()
-    with pytest.raises(E.EgressFailed, match="deadline"):
-        eg.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm", body=b"{}", run_id="r1", deadline_s=0.3)
-    assert time.monotonic() - t0 < 1.5
-    # abort(run_id) interrupts an in-flight call from another thread
-    slow = httpx.MockTransport(lambda r: httpx.Response(200, stream=_Trickle(period=0.2, n=1000)))
-    eg2 = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=10, llm_read_timeout_s=60,
+    out = _returns_while_trickling(lambda: eg.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm",
+                                                      body=b"{}", run_id="r1"), done)
+    assert out["returned_while_trickling"] and isinstance(out.get("exc"), E.EgressFailed), out
+    assert "deadline" in str(out["exc"]), out
+    # a total deadline passed by the engine (the remaining wall clock) is enforced on its own: every other timeout of
+    # this client is 60 s, so only `deadline_s=0.3` can end the call while the body still trickles
+    done = threading.Event()
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"Content-Length": "100000"},
+                                                             stream=_Trickle(0.05, done)))
+    eg60 = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=60,
+                          llm_read_timeout_s=60, transport=transport, env={})
+    out = _returns_while_trickling(lambda: eg60.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm",
+                                                        body=b"{}", run_id="r1", deadline_s=0.3), done, stall_s=45)
+    assert out["returned_while_trickling"] and isinstance(out.get("exc"), E.EgressFailed), out
+    assert "deadline" in str(out["exc"]), out
+    # abort(run_id) interrupts an in-flight call from another thread — issued once the body is flowing (a state)
+    done, first = threading.Event(), threading.Event()
+    slow = httpx.MockTransport(lambda r: httpx.Response(200, stream=_Trickle(0.2, done, first)))
+    eg2 = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=60, llm_read_timeout_s=60,
                          transport=slow, env={})
     out = {}
 
@@ -450,10 +485,14 @@ def test_n18_s4_egress_total_deadline_is_enforced_by_the_client():
             out["exc"] = exc
     t = threading.Thread(target=call, daemon=True)
     t.start()
-    time.sleep(0.5)
-    assert eg2.abort("r2") >= 1
-    t.join(5)
-    assert not t.is_alive() and isinstance(out.get("exc"), E.EgressFailed)
+    try:
+        assert first.wait(60), "the call never started reading its body"
+        assert eg2.abort("r2") >= 1
+        t.join(60)                                    # a bound on a stall only
+        assert not t.is_alive() and not done.is_set() and isinstance(out.get("exc"), E.EgressFailed)
+    finally:
+        done.set()
+        t.join(60)
 
 
 def test_n18_s4_run_watchdog_fails_the_run_while_a_turn_is_stuck():

@@ -7,7 +7,6 @@ local log, the audit export — and every response for them.
 
 from __future__ import annotations
 
-import json
 import random
 
 import pytest

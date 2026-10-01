@@ -1,4 +1,4 @@
-"""L2 (spec §F Live): the hardened launcher (serve.py) started as a real process on a port from 18800-18849 (or
+"""L2 (spec §F Live): the hardened launcher (serve.py) started as a real process on an OS-assigned port (or one of
 ``DLV_TEST_PORT_RANGE``) with a
 clean, allowlisted environment: loopback bind (via _procinfo), the request-head cap and deadline, the concurrency
 bound, /health shape, and the bind-address override. Skipped with the reason printed when no port is free."""
@@ -30,7 +30,7 @@ LOG_DIR = Path(os.environ.get("DLV_LIVE_LOG_DIR") or os.path.join(tempfile.gette
 
 
 def _free_port() -> int:
-    """A port of the assigned live range (default 18800-18849; ``DLV_TEST_PORT_RANGE`` overrides — wave 21)."""
+    """A port of the assigned live range (``DLV_TEST_PORT_RANGE``, wave 21), else OS-assigned (wave 25)."""
     return free_live_port()
 
 
@@ -41,8 +41,9 @@ def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1"):
     env.update({"DLV_PORT": str(port), "DLV_BIND_ADDR": host, **(extra or {})})
     env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
     log_path = Path(tmp) / "serve.log"
-    log = open(log_path, "wb")
-    proc = subprocess.Popen([PYTHON, *child_python_args(), "-m", "zbm_delivery.api"], cwd=str(SRC), env=env, stdout=log, stderr=subprocess.STDOUT)
+    with open(log_path, "wb") as log:     # wave 25 (scout B Low): the child holds its own descriptor; ours is closed
+        proc = subprocess.Popen([PYTHON, *child_python_args(), "-m", "zbm_delivery.api"], cwd=str(SRC), env=env,
+                                stdout=log, stderr=subprocess.STDOUT)
     deadline = time.monotonic() + 150
     while True:
         try:
@@ -52,7 +53,7 @@ def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1"):
             pass
         if proc.poll() is not None or time.monotonic() > deadline:
             proc.kill()
-            log.close()
+            proc.wait()                      # wave 25: reaped, never a zombie until garbage collection
             raise RuntimeError("delivery-py did not start:\n" + log_path.read_text()[-3000:])
         time.sleep(0.2)
 
@@ -129,14 +130,14 @@ def test_l2_idle_head_is_closed_within_the_deadline(server):
     _, port, _, _ = server
     with socket.create_connection(("127.0.0.1", port), timeout=1) as s:
         s.sendall(b"GET /health HTTP/1.1\r\nHost: t\r\n")
-        t0 = time.monotonic()
         s.settimeout(14)
         try:
             data = s.recv(16)
         except socket.timeout:
             pytest.fail("half-sent head was not closed within the deadline")
         assert data == b"" or data.startswith(b"HTTP/1.1 4")
-        assert time.monotonic() - t0 <= 13
+        # wave 25 (scout B M2): the 14 s socket timeout above is the bound (a stall bound on the server's head deadline);
+        # the extra `<= 13` wall-clock assert only measured how starved the runner was
 
 
 def test_l2_bind_override(tmp_path):

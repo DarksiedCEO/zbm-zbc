@@ -8,8 +8,7 @@ import logging
 
 import pytest
 
-from fakes import AGREEMENT_SHA
-from helpers import ANDRE_TOKEN, CALLERS, DELEGATES, SERVICE_TOKEN, Harness, code_set, codes, rid
+from helpers import ANDRE_TOKEN, CALLERS, DELEGATES, SERVICE_TOKEN, Harness, codes, rid
 from ports import AgeAnswer, Ports
 
 
@@ -393,12 +392,18 @@ def test_a10_request_id_replay_with_a_different_body_is_409():
     a = h.apply(email="z@example.com", request_id="app-same")
     assert a.status_code == 201
     assert h.apply(email="z2@example.com", request_id="app-same").status_code == 409
-    b = h.post(f"/cn/v1/clippers/{cid}/age-check", {"request_id": "age-same", "dob": "1990-01-01",
+    # wave 25 (found by the ruff F841 sweep: `b` was never read): the age check went to an ACTIVE clipper, refused
+    # 409 CN-21 for its state on BOTH calls, so the replay's 409 proved nothing about the request id. An applicant
+    # (the only state the age check serves) answers the first call 200; the replay with another DOB is the 409.
+    app = a.json()["clipper_id"]
+    b = h.post(f"/cn/v1/clippers/{app}/age-check", {"request_id": "age-same", "dob": "1990-01-01",
                                                     "dob_field_neutral": True, "method": "photo_id_match",
                                                     "provider_session_ref": "p"}, caller="hub")
-    assert h.post(f"/cn/v1/clippers/{cid}/age-check", {"request_id": "age-same", "dob": "1990-01-02",
-                                                       "dob_field_neutral": True, "method": "photo_id_match",
-                                                       "provider_session_ref": "p"}, caller="hub").status_code == 409
+    assert b.status_code == 200, b.text
+    b2 = h.post(f"/cn/v1/clippers/{app}/age-check", {"request_id": "age-same", "dob": "1990-01-02",
+                                                     "dob_field_neutral": True, "method": "photo_id_match",
+                                                     "provider_session_ref": "p"}, caller="hub")
+    assert b2.status_code == 409 and "CN-21" not in b2.text, b2.text
 
 
 # ---------------------------------------------------------------- A11 ledger down

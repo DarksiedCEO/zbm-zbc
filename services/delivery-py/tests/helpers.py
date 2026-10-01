@@ -68,36 +68,43 @@ CALLERS = {"aegis": AEGIS_TOKEN, "andre_session": ANDRE_SESSION_TOKEN, "schedule
 _GATE_CACHE: dict = {}
 
 
-def live_ports() -> range:
-    """The ports the live tests may bind (wave 21, N20-D-10): ``DLV_TEST_PORT_RANGE`` ("lo-hi", inclusive) when set,
-    else the default 18800-18849 — so a run can stay inside whatever range its operator was given."""
-    spec = os.environ.get("DLV_TEST_PORT_RANGE", "").strip()
-    if not spec:
-        return range(18800, 18850)
+def live_ports() -> Optional[range]:
+    """The ports the live tests may bind (wave 21, N20-D-10): ``DLV_TEST_PORT_RANGE`` ("lo-hi", inclusive) when set
+    (or the repo-wide ``ZBM_TEST_PORT_RANGE``, wave 25), so a run stays inside whatever range its operator was given;
+    else None — OS-assigned ports. Wave 25 (R-HYGIENE L2): there is no hard-coded default range any more (it was
+    18800-18849, which overlaps every other engineer's and job's assignment on a shared machine)."""
+    for name in ("DLV_TEST_PORT_RANGE", "ZBM_TEST_PORT_RANGE"):
+        spec = os.environ.get(name, "").strip()
+        if spec:
+            break
+    else:
+        return None
     lo, _, hi = spec.partition("-")
     lo_i, hi_i = int(lo), int(hi or lo)
     if not (1024 <= lo_i <= hi_i <= 65535):
-        raise ValueError(f"DLV_TEST_PORT_RANGE={spec!r} is not lo-hi within 1024-65535")
+        raise ValueError(f"{name}={spec!r} is not lo-hi within 1024-65535")
     return range(lo_i, hi_i + 1)
 
 
 def free_live_port() -> int:
-    """The first port of ``live_ports()`` that binds on 127.0.0.1 (skips with the range named when none does). Wave 22
-    (G3, N21-C-6 class): the probe bind sets SO_REUSEADDR, as the servers' own listeners do — a port whose earlier
-    connections sit in TIME_WAIT is free for a server, and without the option the probe skipped it (a narrow range
-    ran out after a few live tests)."""
+    """A port a live server can bind on 127.0.0.1 now: the first of ``live_ports()`` that binds (skips with the range
+    named when none does), or one the OS assigns when no range was given. Wave 22 (G3, N21-C-6 class): the probe bind
+    sets SO_REUSEADDR, as the servers' own listeners do — a port whose earlier connections sit in TIME_WAIT is free for
+    a server, and without the option the probe skipped it (a narrow range ran out after a few live tests). Only a
+    candidate: another process can take it before the server binds (the shared owner-checked helper is E-C's
+    ``_procinfo.start_owned``, wave 25)."""
     import socket
 
     import pytest
     ports = live_ports()
-    for port in ports:
+    for port in ports if ports is not None else (0,):
         with socket.socket() as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(("127.0.0.1", port))
             except OSError:
                 continue
-            return port
+            return s.getsockname()[1]
     pytest.skip(f"no free port in {ports.start}-{ports.stop - 1} (the assigned live range; DLV_TEST_PORT_RANGE)")
 
 

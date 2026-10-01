@@ -23,7 +23,7 @@ from intelligences import i03_payables as I3
 from intelligences import i05_clawback as I5
 from ledger import derived_id
 from ports import Certification, ClawbackPage, ComplianceRuling, TierAnswer
-from service import Gather, Op, PostingRefused, Refused, facts_sha256, rid, sha, sha_text
+from service import Gather, Op, PostingRefused, Refused, facts_sha256, rid, sha_text
 
 ACCRUAL_ROWS = ("HR-12", "HR-13")
 

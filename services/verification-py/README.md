@@ -36,6 +36,7 @@ answered; if either fails the answer is 503 `{"issued": false}` and nothing chan
 |---|---|
 | `api.py` | FastAPI app: bearer / caller / Andre / reviewer auth, request limits (`InputLimits`), the forbidden-key rule, routes; `python3 -m api` runs it |
 | `serve.py` | Hardened uvicorn launcher (copied from compliance-py) |
+| `graceful_close.py` | The shared graceful-close module `serve.py` imports (byte-identical in every Python service, pinned by `tests/test_live_graceful_close_module.py`) |
 | `config.py` | Environment; refuses to start on anything it cannot honor; the pinned seed hash |
 | `service.py` | State, record-first plumbing (`Op`: crossings → events → one anchored log line → apply), every operation and job |
 | `rules.py` | Rule register: row schema, versions, proposals, weakening, founder/cited-rule protections |
@@ -133,10 +134,11 @@ provider's check time; then a re-check is required, AEGIS N16-8), `VI_MINOR_PURG
 `VI_FEED_YOUTUBE_ENABLED` (0), `VI_EVIDENCE_RETENTION_DAYS` (2557), `VI_LIVENESS_MAX_GAP_DAYS` (0),
 `VI_OEMBED_ENABLED` (0), `VI_OEMBED_MAX_CONSECUTIVE_DAYS` (2), `VI_YT_DAILY_UNITS` (10000),
 `VI_YT_RESERVE_UNITS` (1000), `VI_TT_MAX_PER_MIN` (500), `VI_IG_MAX_RPS` (1), `VI_X_MONTHLY_RESOURCE_BUDGET`
-(0), `VI_REVIEWER_TOKENS` (empty). `VI_VAULT`, `VI_HASHER`, `VI_AGE_PROVIDER`, `VI_MEDIA_INTAKE`,
+(0), `VI_OEMBED_MAX_RPS` (1, at most 10: oEmbed calls per second), `VI_REVIEWER_TOKENS` (empty). `VI_VAULT`, `VI_HASHER`, `VI_AGE_PROVIDER`, `VI_MEDIA_INTAKE`,
 `VI_<P>_APP_CREDENTIALS_REF` and `VI_DEVICE_SIGNALS_ENABLED=1` refuse to start: nothing is built behind them.
 The seed is pinned: `VI_SEED_PATH` / `VI_SEED_SHA256` may name another seed only with
 `VI_ALLOW_UNPINNED_SEED=1` (then `rules_pinned: false, production: false` everywhere).
+Server tuning, read once at start by `src/serve.py` (a non-numeric or non-positive value refuses to start): `VI_REQUEST_HEAD_TIMEOUT_SECONDS` (10: a request head must arrive within this many seconds of connect), `VI_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `VI_LIMIT_CONCURRENCY` (128 open connections; beyond it a connection is answered 503), `VI_SWITCH_INTERVAL_SECONDS` (0.001, the interpreter's thread switch interval) and `VI_DRAINS_MAX` (512 concurrent graceful-close drains; `src/graceful_close.py`). (Wave 25: these were documented only in `serve.py`'s docstring.)
 
 ## Reconciling the local log with the ledger
 

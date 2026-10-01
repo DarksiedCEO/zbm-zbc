@@ -5,8 +5,9 @@ N24-D-1  `_closed_admissions` (the recorded answer of every admission refused af
          while it ran) was an unbounded map, re-materialised from the local log at every start. It is now kept like
          `idem`: the most recent CLOSED_ADMISSIONS_MAX, oldest first out, at start too. A cancel made while the
          admission's containers run is honoured when they end whatever the bounded map has forgotten meanwhile; an
-         answer that has gone out of it is not needed for safety — a replay of that admission runs its RED check
-         again under the same admission id and is refused (its crossings collide with the first attempt's records).
+         answer that has gone out of it is not needed for safety — a replay of that admission runs its RED containers
+         again under the same admission id and is refused (measured: its sandbox-exec completion record collides with
+         the first attempt's; a collision, not a rule) — never admitted without a RED verdict recorded for it.
          The log itself is not compacted: its lines are anchored in the evidence ledger, like every other record's.
 N24-D-2  a binary file under src was "shown" in the report's complete source diff as "Binary files ... differ" —
          its content never — while the header said every source file was there "in full". A binary change under
@@ -16,13 +17,16 @@ N24-D-2  a binary file under src was "shown" in the report's complete source dif
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 
-import pytest
-
-from helpers import Harness, finding, flat, rid, scenario_s1, two_findings, write_test
+from helpers import SERVICE_ROOT, Harness, finding, flat, rid, scenario_s1, two_findings
 from test_round23 import _p1, _states, _whys
 from test_round23 import DONE
 from test_round24 import HANG_PATH, HANG_RT, OLD
@@ -86,8 +90,11 @@ def test_a_cancel_made_while_the_red_check_runs_is_honoured_even_when_the_map_ke
 
 
 def test_a_replay_of_an_admission_whose_answer_is_no_longer_kept_is_refused_never_admitted(monkeypatch):
-    """The safety the bound leans on, shown: a refused admission's answer pushed out of the map, the same review
-    replayed — its RED check runs again under the same admission id and it is refused again; nothing admitted."""
+    """What the bound costs, shown (wave 25 E-B, measured): a refused admission's answer pushed out of the map, the
+    same review replayed — its RED containers RUN AGAIN under the same admission id (not "nothing runs", as with the
+    answer kept), and it is refused: measured 422 `reproduction_red_unverified`, because the re-run's sandbox-exec
+    completion record collides with the first attempt's (same id, other elapsed time/output). That collision is what
+    refuses it, not a rule; the guarantee is only that nothing is admitted without a RED verdict recorded for it."""
     monkeypatch.setattr(SV, "CLOSED_ADMISSIONS_MAX", 0, raising=False)
     green = ("from toy import calc\n\n\ndef test_clamp_is_green_on_base():\n"
              "    assert calc.clamp(5, 3, 0) == 3\n")
@@ -103,8 +110,10 @@ def test_a_replay_of_an_admission_whose_answer_is_no_longer_kept_is_refused_neve
         first = h.post(f"/dlv/v1/fix-runs/{run1}/review", body)
         assert first.status_code == 422 and first.json()["code"] == "reproduction_not_red", first.text
         assert not h.svc._closed_admissions
+        boxes = len([e for e in h.events("engine_box_started") if e["payload"].get("tag") == "admission"])
         again = h.post(f"/dlv/v1/fix-runs/{run1}/review", body)
         assert again.status_code in (409, 422, 503), again.text
+        assert len([e for e in h.events("engine_box_started") if e["payload"].get("tag") == "admission"]) > boxes
         h.svc.wait_idle(240)
         assert h.run(run1)["status"] == "awaiting_review" and not h.events("fix_run_reviewed")
         assert not [r for r in h.svc.runs.values() if "N9-3" in (r.get("finding_ids") or [])]
@@ -172,3 +181,225 @@ def test_the_report_header_says_exactly_what_the_diff_shows():
                                    lambda ev: "diff --git a/x b/x\n")
     head = " ".join(lines[:3])
     assert "in full as text" in head and "binary_src_change" in head, head
+
+
+# ====================================================================== scout B H1: the Docker live job's input survives
+
+_ENV_READ = re.compile(r"""os\.environ(?:\.get\(\s*|\[\s*)["'](DLV_[A-Z0-9_]+)["']""")
+
+
+def test_every_dlv_variable_a_test_reads_survives_the_conftest_scrub():
+    """The class behind scout B H1: conftest.py removes every DLV_* variable except SUITE_SETTINGS, so a DLV_* name a
+    test (or a test helper) reads from os.environ that is not in SUITE_SETTINGS can never be set from outside — the
+    test sees it unset on every machine. 0f017a7: DLV_LIVE_SANDBOX_IMAGE (test_live_docker.py) was such a name."""
+    import conftest
+    read = {}
+    for p in sorted(Path(__file__).resolve().parent.glob("*.py")):
+        for m in _ENV_READ.finditer(p.read_text(encoding="utf-8")):
+            read.setdefault(m.group(1), set()).add(p.name)
+    assert {"DLV_LIVE_SANDBOX_IMAGE", "DLV_TEST_PORT_RANGE", "DLV_LIVE_LOG_DIR"} <= set(read), read
+    scrubbed = {k: sorted(v) for k, v in read.items() if k not in conftest.SUITE_SETTINGS}
+    assert not scrubbed, f"read by the suite but removed by conftest.py before any test runs: {scrubbed}"
+
+
+_FAKE_DOCKER = '''#!{python}
+import json, os, sys
+with open({log!r}, "a", encoding="utf-8") as fh:
+    fh.write(json.dumps(sys.argv[1:]) + "\\n")
+if sys.argv[1:2] == ["info"]:
+    print("29.4.3")
+    sys.exit(0)
+sys.stderr.write("fake docker (wave 25 wiring probe): every verb but info is refused\\n")
+sys.exit(1)
+'''
+
+
+def test_the_docker_live_job_input_reaches_the_live_tests(tmp_path):
+    """Scout B H1: the CI job delivery-docker-live sets DLV_LIVE_SANDBOX_IMAGE and fails when a live Docker test is
+    skipped; conftest.py removed the variable before the tests read it, so all three skipped "is not set" on every
+    machine and the job could never pass. Here the variable is set from OUTSIDE on a child pytest of
+    tests/test_live_docker.py, with a fake `docker` first on PATH that answers `info` (a daemon is "reachable") and
+    refuses everything else: the tests must get past the skip and reach the real adapter, which asks the fake to
+    `run` the image the variable names. What the fake cannot prove — the nine container properties — only a real
+    daemon can (the CI job); this proves only that the job's input arrives."""
+    image = "127.0.0.1:5000/zbm/dlv-sandbox@sha256:" + "a" * 64
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "docker-argv.jsonl"
+    shim = bindir / "docker"
+    shim.write_text(_FAKE_DOCKER.format(python=sys.executable, log=str(log)), encoding="utf-8")
+    shim.chmod(0o755)
+    junit = tmp_path / "live-docker.xml"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
+    env.update({"DLV_LIVE_SANDBOX_IMAGE": image, "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
+                "PYTHONDONTWRITEBYTECODE": "1"})
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider", "tests/test_live_docker.py",
+                        f"--junitxml={junit}"], cwd=SERVICE_ROOT, env=env, capture_output=True, text=True, timeout=600)
+    out = r.stdout[-3000:] + r.stderr[-2000:]
+    import xml.etree.ElementTree as ET
+    cases = list(ET.parse(junit).getroot().iter("testcase"))
+    skipped = [c.get("name") for c in cases if c.find("skipped") is not None]
+    assert len(cases) == 3 and not skipped, out           # the CI job's own check: three cases, none skipped
+    assert "is not set" not in out, out
+    calls = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines()]
+    runs = [c for c in calls if c[:1] == ["run"]]
+    assert runs and all(image in c for c in runs), calls  # the real adapter asked for exactly the job's image
+    # and they failed on the fake's refusal (exit 1: errors, never "passed" by a fake that proves nothing)
+    assert r.returncode == 1 and "docker run failed" in out, out
+
+
+# ====================================================================== scout B M1: the Docker double kills the whole box
+
+_LEADER = r'''
+import os, subprocess, sys, time
+d = sys.argv[1]
+hold = "import os,sys,time; open(sys.argv[1]+'/hold.pid','w').write(str(os.getpid())); time.sleep(20); open(sys.argv[1]+'/hold.survived','w').write('1')"
+loose = "import os,sys,time; open(sys.argv[1]+'/loose.pid','w').write(str(os.getpid())); time.sleep(20); open(sys.argv[1]+'/loose.survived','w').write('1')"
+subprocess.Popen([sys.executable, "-c", hold, d])                                                  # holds the exec's pipes
+subprocess.Popen([sys.executable, "-c", loose, d], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # does not
+while not (os.path.exists(d + "/hold.pid") and os.path.exists(d + "/loose.pid")):
+    time.sleep(0.01)
+open(d + "/ready", "w").write("1")
+time.sleep(60)
+'''
+
+
+def _gone(pid: int, within_s: float = 15.0) -> bool:
+    """True once ``pid`` no longer exists (polled; a state, not a sleep)."""
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < within_s:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        try:
+            with open(f"/proc/{pid}/stat", encoding="ascii") as fh:
+                if fh.read().rsplit(")", 1)[1].split()[0] == "Z":
+                    return True                               # a zombie: dead, waiting for whoever reaps it
+        except OSError:
+            pass
+        time.sleep(0.05)
+    return False
+
+
+def _box(tmp_path):
+    from fakes import FakeDockerCli
+    d = FakeDockerCli(str(tmp_path / "docker"))
+    assert d.run(["run", "--name", "dlv-m1", "img"], timeout_s=30).exit_code == 0
+    marks = tmp_path / "marks"
+    marks.mkdir()
+    return d, marks
+
+
+def test_the_docker_double_kills_every_process_of_a_command_past_its_deadline(tmp_path):
+    """Scout B M1: on the deadline the double killed only the process it started (`node --test`, `cargo test`, `go
+    test`), so a per-file test process / test binary outlived the suite (pid 19025, `node tests/zzz_hang.test.ts`),
+    and for one that still held the exec's pipes `communicate()` waited for it. The real sandbox kills the whole
+    container; the double now kills the command's whole process group. Shown with a leader that starts one child
+    holding its pipes and one that does not: past the 3 s deadline both are gone and neither lived to its 20 s mark."""
+    d, marks = _box(tmp_path)
+    r = d.run(["exec", "dlv-m1", "timeout", "-k", "5", "3", "python", "-c", _LEADER, str(marks)], timeout_s=60)
+    assert r.timed_out and (marks / "ready").exists(), (r, sorted(p.name for p in marks.iterdir()))
+    for name in ("hold", "loose"):
+        pid = int((marks / f"{name}.pid").read_text())
+        assert _gone(pid), f"{name} child {pid} outlived its command's deadline"
+        assert not (marks / f"{name}.survived").exists(), f"{name} child ran to its 20 s mark"
+
+
+def test_docker_kill_on_the_double_kills_every_process_the_box_runs(tmp_path):
+    """Scout B M1 (the `kill` verb, fakes.py:174-178 at 0f017a7): it killed only the direct child of each running
+    exec. Now the whole group of every command the container runs."""
+    d, marks = _box(tmp_path)
+    res = {}
+    th = threading.Thread(target=lambda: res.setdefault("r", d.run(
+        ["exec", "dlv-m1", "timeout", "-k", "5", "120", "python", "-c", _LEADER, str(marks)], timeout_s=200)))
+    th.start()
+    t0 = time.monotonic()
+    while not (marks / "ready").exists() and time.monotonic() - t0 < 60:
+        time.sleep(0.02)
+    assert (marks / "ready").exists()
+    assert d.run(["kill", "dlv-m1"], timeout_s=30).exit_code == 0
+    th.join(60)
+    assert not th.is_alive() and res["r"].exit_code != 0, res
+    for name in ("hold", "loose"):
+        pid = int((marks / f"{name}.pid").read_text())
+        assert _gone(pid), f"{name} child {pid} outlived `docker kill`"
+        assert not (marks / f"{name}.survived").exists()
+
+
+# ====================================================================== scout B Low: a setting nothing reads is gone
+
+def test_dlv_live_port_range_is_not_a_service_setting(tmp_path):
+    """Scout B (Low): config.py parsed DLV_LIVE_PORT_RANGE into Settings.live_port_range — read by nothing — and
+    refused to start on a malformed value of a variable that changed nothing. The live tests' range is the suite's
+    DLV_TEST_PORT_RANGE (tests/helpers.py); the service has no such setting."""
+    import dataclasses
+    from helpers import base_env
+    from zbm_delivery import config as C
+    assert "live_port_range" not in {f.name for f in dataclasses.fields(C.Settings)}
+    env = dict(base_env(str(tmp_path), str(tmp_path / "repo")), DLV_LIVE_PORT_RANGE="not-a-range")
+    C.load(env)                                       # 0f017a7: RuntimeError("DLV_LIVE_PORT_RANGE must be lo-hi")
+
+
+# ====================================================================== scout C C6-3: no temp dir at import
+
+_IMPORT_ONLY = r'''
+import sys
+sys.path.insert(0, "src")
+import zbm_delivery.gitport, zbm_delivery.adapters.sandbox, zbm_delivery.engine.loop, zbm_delivery.api  # noqa: E401,F401
+print("IMPORTED", flush=True)
+sys.stdin.read()
+'''
+
+
+def test_importing_the_service_creates_nothing_in_the_temp_dir(tmp_path):
+    """Scout C C6-3: gitport made its isolation dir (`dlv-git-*`) at IMPORT, in whatever TMPDIR the process had, and
+    removed it only at a normal exit — a child killed by a signal (SIGKILL; SIGTERM in an entrypoint without the
+    serve handler) left one behind for every process that merely imported the package, git used or not (scout C saw
+    147 in /tmp). Now nothing is made until the first git command needs it. Shown by importing every module the
+    service's entrypoint imports in a child with a private TMPDIR and SIGKILLing it."""
+    tmpdir = tmp_path / "t"
+    tmpdir.mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
+    env.update({"TMPDIR": str(tmpdir), "PYTHONDONTWRITEBYTECODE": "1"})
+    p = subprocess.Popen([sys.executable, "-c", _IMPORT_ONLY], cwd=SERVICE_ROOT, env=env, stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        line = p.stdout.readline()
+        assert line.strip() == "IMPORTED", line + p.stderr.read()
+        left_while_alive = sorted(x.name for x in tmpdir.iterdir())
+    finally:
+        p.kill()
+        p.communicate()
+    left = sorted(x.name for x in tmpdir.iterdir())
+    assert left_while_alive == [] and left == [], (left_while_alive, left)
+
+
+def test_the_git_isolation_dir_is_made_on_first_use_and_holds_nothing():
+    """C6-3, the other half: the first git command still runs with the private HOME and the empty hooks dir (R11)."""
+    from zbm_delivery import gitport
+    home, hooks = gitport._isolation()
+    assert os.path.isdir(home) and os.path.isdir(hooks) and os.listdir(hooks) == []
+    assert gitport.git_env()["HOME"] == home
+    assert gitport.isolation_args()[:2] == ("-c", f"core.hooksPath={hooks}")
+    assert gitport._isolation() == (home, hooks)                    # one dir per process, made once
+
+
+# ====================================================================== scout B M5: the ADR's pin table is the files'
+
+def test_adr_0011_pinned_hash_table_matches_every_file_it_names():
+    """Scout B M5: the "Pinned hashes" table of ADR 0011 went stale for two rows (the test-commands seed and uv.lock)
+    while the files changed — nothing compared them. Every row naming a file of this service (first backticked path)
+    must carry that file's sha256 now; a row naming a file that no longer exists fails too."""
+    import hashlib
+    adr = next((SERVICE_ROOT.parents[1] / "docs" / "adr").glob("0011-*.md")).read_text(encoding="utf-8")
+    table = adr.split("### Pinned hashes", 1)[1].split("\n### ", 1)[0]
+    rows = re.findall(r"^\| `([^`]+)`[^|]*\| `([0-9a-f]{64})`", table, re.M)
+    assert len(rows) >= 10, rows
+    wrong = []
+    for rel, want in rows:
+        p = SERVICE_ROOT / rel
+        got = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else "missing"
+        if got != want:
+            wrong.append(f"{rel}: ADR {want[:12]}…, file {got[:12]}")
+    assert not wrong, wrong

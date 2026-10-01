@@ -139,7 +139,7 @@ def test_velocity_spike_against_the_clippers_own_baseline():
     h.onboard("clip-v")
     for i in range(2):
         ref = f"https://www.tiktok.com/@c/video/b{i}"
-        v = h.post_video("tiktok", ref, views=100, likes=10)
+        h.post_video("tiktok", ref, views=100, likes=10)
         h.ok(h.register(f"b{i}", "clip-v", post_ref=ref), 201)
         h.approve(f"b{i}")
 

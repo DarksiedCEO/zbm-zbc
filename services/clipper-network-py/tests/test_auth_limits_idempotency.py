@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from helpers import ANDRE_TOKEN, CALLERS, SERVICE_TOKEN, Harness, rid
+from helpers import ANDRE_TOKEN, SERVICE_TOKEN, Harness, rid
 
 H = Harness()
 ROUTES = [(sorted(r.methods - {"HEAD"})[0], r.path) for r in H.app.routes

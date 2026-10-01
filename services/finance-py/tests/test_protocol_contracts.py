@@ -13,8 +13,6 @@ import re
 import sys
 from pathlib import Path
 
-import pytest
-
 from helpers import Harness, rid
 
 SERVICES = Path(__file__).resolve().parents[2]
@@ -98,7 +96,7 @@ def test_day_one_every_protocol_answer_is_negative_never_fine():
 
 
 def test_with_passing_fakes_every_protocol_answer_maps_cleanly(hr):
-    inv = hr.fund_campaign()
+    hr.fund_campaign()
     act = onb_ruling(hr.ok(hr.post("/fin/v1/payees", {"request_id": rid(), "payee_id": "clip-a", "kind": "clipper",
                                                         "declared_country": "US",
                                                         "callback_contact_ref": "vault:c-a"}, caller="onboarding")))

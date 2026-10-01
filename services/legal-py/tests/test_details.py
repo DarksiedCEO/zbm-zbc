@@ -4,7 +4,6 @@ entered from a memo, document-version rules."""
 from __future__ import annotations
 
 import json
-import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -297,12 +296,25 @@ def test_thin_client_row_reads():
 
 
 def test_thin_client_wall_clock_deadline():
+    """Wave 25 (scout B M2): ordered by state, not by a wall-clock bound a starved runner can break. The peer does not
+    answer until the test lets it: the 1.0 s deadline must return `unavailable` while the peer still holds the request
+    (0f017a7: a 3 s peer and `< 2.0`)."""
+    import threading
+    inside, release = threading.Event(), threading.Event()
+
     def slow(req):
-        time.sleep(3)
+        inside.set()
+        release.wait(120)
         return httpx.Response(201, json={"proposal": {"proposal_id": "late"}})
-    t0 = time.monotonic()
-    a = _client(slow, timeout=1.0).create_proposal("r", {})
-    assert a.status == "unavailable" and time.monotonic() - t0 < 2.0
+    got = {}
+    t = threading.Thread(target=lambda: got.update(a=_client(slow, timeout=1.0).create_proposal("r", {})))
+    t.start()
+    t.join(60)                                        # a bound on a stall, never on the answer's speed
+    returned_while_held = not t.is_alive() and inside.is_set() and not release.is_set()
+    release.set()
+    t.join(60)
+    assert returned_while_held, "the 1.0 s deadline waited for the peer's answer"
+    assert got["a"].status == "unavailable"
 
 
 # --- memos and the register ----------------------------------------------------------------------------------------

@@ -397,18 +397,26 @@ def _second_service(h: Harness) -> str:
     return git("rev-parse", "HEAD", cwd=h.repo)
 
 
-def _timed(fn):
+def _wait_for(pred, stall_s: float = 60.0) -> bool:
+    """Poll ``pred`` until it holds; False after ``stall_s`` (a bound on a stall, never a measured speed)."""
     t0 = time.monotonic()
-    r = fn()
-    return r, time.monotonic() - t0
+    while not pred():
+        if time.monotonic() - t0 > stall_s:
+            return False
+        time.sleep(0.02)
+    return True
 
 
 def test_b2_the_red_admission_check_never_holds_the_service_lock_across_a_container():
+    """Wave 25 (scout B M2): ordered by state, not by seven latencies under 0.25 s and a `sleep(1.0)`. The admission's
+    container is HELD (its first exec waits on a gate the test opens) and every probe must answer while it is held: a
+    service lock held across the container would keep them waiting until the gate opened."""
     h = Harness(scenario=scenario_s1())
     try:
         run1 = h.submit(two_findings(h.base_sha)).json()["run_id"]              # toy-py, awaiting review
         base2 = _second_service(h)
         held, entered = threading.Event(), threading.Event()
+        in_box, gate = threading.Event(), threading.Event()
         real = h.docker.run
 
         def hold(argv, **kw):                     # toy2-py's run waits inside its first engine container start
@@ -416,6 +424,9 @@ def test_b2_the_red_admission_check_never_holds_the_service_lock_across_a_contai
             if a[:1] == ["run"] and "-suite-" in a[a.index("--name") + 1] and run1 not in a[a.index("--name") + 1]:
                 entered.set()
                 held.wait(90)
+            if a[:1] == ["exec"] and any("-admission-" in x for x in a):
+                in_box.set()                      # the admission's RED container is running ...
+                gate.wait(120)                    # ... and stays so until the probes are done
             return real(argv, **kw)
         h.docker.run = hold
         doc2 = findings_doc(base2, [finding("N1-1", file="services/toy2-py/src/toy/calc.py")], service="toy2-py")
@@ -426,43 +437,47 @@ def test_b2_the_red_admission_check_never_holds_the_service_lock_across_a_contai
                                                   expected="ValueError", observed="3",
                                                   reproduction_test={"path": HANG_PATH, "content": HANG_RT})])
         res = {}
-
-        def admit():
-            res["r"], res["t"] = _timed(lambda: h.post("/dlv/v1/fix-runs", docA))
-        th = threading.Thread(target=admit)
+        th = threading.Thread(target=lambda: res.update(r=h.post("/dlv/v1/fix-runs", docA)))
         th.start()
-        t_wait = time.monotonic()
-        while not any(e["event_type"] == "engine_box_started" and e["payload"].get("tag") == "admission" for e in h.ledger.events):
-            assert time.monotonic() - t_wait < 60
-            time.sleep(0.02)
-        time.sleep(1.0)                                                          # well inside the 15 s test
-        g1, t_g1 = _timed(lambda: h.get(f"/dlv/v1/fix-runs/{run1}"))
-        g2, t_g2 = _timed(lambda: h.get(f"/dlv/v1/fix-runs/{run2}"))
-        c2, t_c2 = _timed(lambda: h.post(f"/dlv/v1/fix-runs/{run2}/cancel", {"request_id": rid(), "reason": "operator stop"}))
-        c1, t_c1 = _timed(lambda: h.post(f"/dlv/v1/fix-runs/{run1}/cancel", {"request_id": rid(), "reason": "stop"}))
-        hl, t_hl = _timed(lambda: h.client.get("/health"))
-        # the pending admission is in flight for toy-py: a second document and a failing review are refused at once
-        d2, t_d2 = _timed(lambda: h.post("/dlv/v1/fix-runs", two_findings(h.base_sha)))
-        rv, t_rv = _timed(lambda: h.post(f"/dlv/v1/fix-runs/{run1}/review", {
-            "request_id": rid(), "review_ref": "r23-b2", "sha256": "f" * 64, "verdict": "fail", "reopened": ["N1-1"],
-            "new_findings": []}))
+        assert in_box.wait(60), "the admission's container never ran"
+        assert _wait_for(lambda: any(e["event_type"] == "engine_box_started" and e["payload"].get("tag") == "admission"
+                                     for e in h.ledger.events))
+        p = {}
+
+        def probes():
+            p["g1"] = h.get(f"/dlv/v1/fix-runs/{run1}")
+            p["g2"] = h.get(f"/dlv/v1/fix-runs/{run2}")
+            p["c2"] = h.post(f"/dlv/v1/fix-runs/{run2}/cancel", {"request_id": rid(), "reason": "operator stop"})
+            p["c1"] = h.post(f"/dlv/v1/fix-runs/{run1}/cancel", {"request_id": rid(), "reason": "stop"})
+            p["hl"] = h.client.get("/health")
+            # the pending admission is in flight for toy-py: a second document and a failing review are refused at once
+            p["d2"] = h.post("/dlv/v1/fix-runs", two_findings(h.base_sha))
+            p["rv"] = h.post(f"/dlv/v1/fix-runs/{run1}/review", {
+                "request_id": rid(), "review_ref": "r23-b2", "sha256": "f" * 64, "verdict": "fail", "reopened": ["N1-1"],
+                "new_findings": []})
+        pt = threading.Thread(target=probes)
+        pt.start()
+        pt.join(60)                                                               # a bound on a stall only
+        answered_while_held = not pt.is_alive() and not gate.is_set()
         still_running = th.is_alive()
+        gate.set()
         held.set()
+        pt.join(120)
         th.join(120)
-        lat = {"get_run1": t_g1, "get_run2": t_g2, "cancel_run2": t_c2, "cancel_run1": t_c1, "health": t_hl,
-               "second_doc": t_d2, "review_fail": t_rv}
-        print("B2", json.dumps({k: round(v, 3) for k, v in lat.items()}), "admit", res["r"].status_code, round(res["t"], 2))
-        assert all(v < 0.25 for v in lat.values()), lat
+        print("B2 admit", res["r"].status_code)
+        assert answered_while_held, f"a probe waited behind the admission's running container: answered {sorted(p)}"
+        g1, g2, c2, c1, hl, d2, rv = (p[k] for k in ("g1", "g2", "c2", "c1", "hl", "d2", "rv"))
         assert still_running, "the admission finished before the probes: the probes proved nothing"
         assert (g1.status_code, g2.status_code, c2.status_code, c1.status_code, hl.status_code) == (200, 200, 200, 409, 200)
         assert c2.json()["status"] == "failed"
         assert d2.status_code == 409 and "RUN_IN_PROGRESS" in d2.text, d2.text
         assert rv.status_code == 409 and "RUN_IN_PROGRESS" in rv.text, rv.text
-        assert res["r"].status_code == 202 and res["t"] >= HANG_S, (res["r"].text, res["t"])
+        assert res["r"].status_code == 202, res["r"].text
         started = [e for e in h.events("reproduction_red_check_started")]
         assert len(started) == 1 and started[0]["payload"]["service"] == "toy-py"
         h.svc.wait_idle(240)
     finally:
+        gate.set()
         held.set()
         h.close()
 

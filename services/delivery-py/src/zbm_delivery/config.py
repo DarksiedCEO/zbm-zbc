@@ -121,7 +121,6 @@ class Settings:
     evidence_retention_days: int = 2557
     # ports (D9)
     port: int = 8430
-    live_port_range: tuple = (18800, 18849)
 
 
 def _int(env, name, default, lo, hi) -> int:
@@ -346,13 +345,6 @@ def load(env: Optional[dict] = None) -> Settings:
     rec = _int(env, "DLV_RECURSION_LIMIT", 200, 10, 200)
     if cmd > wall:
         raise RuntimeError("DLV_CMD_TIMEOUT_S must not exceed DLV_RUN_WALL_CLOCK_S")
-    lo_hi = (env.get("DLV_LIVE_PORT_RANGE") or "18800-18849").split("-")
-    try:
-        lo, hi = int(lo_hi[0]), int(lo_hi[1])
-    except (ValueError, IndexError):
-        raise RuntimeError("DLV_LIVE_PORT_RANGE must be lo-hi") from None
-    if not (1024 <= lo <= hi <= 65535):
-        raise RuntimeError("DLV_LIVE_PORT_RANGE must be 1024 <= lo <= hi <= 65535")
     skills_env = env.get("DEER_FLOW_SKILLS_PATH")
     skills_root = env.get("DLV_SKILLS_ROOT") or DEFAULT_SKILLS_ROOT
     if skills_env not in (None, "") and os.path.abspath(skills_env) != os.path.abspath(skills_root):
@@ -380,5 +372,5 @@ def load(env: Optional[dict] = None) -> Settings:
         llm_provider=provider, llm_api_key_ref=key_ref, llm_api_base=api_base, llm_model=model, vault=vault,
         repo_path=repo, worktrees_dir=worktrees, base_ref=base_ref,
         evidence_retention_days=_int(env, "DLV_EVIDENCE_RETENTION_DAYS", 2557, 2557, 36500),
-        port=_int(env, "DLV_PORT", 8430, 1024, 65535), live_port_range=(lo, hi),
+        port=_int(env, "DLV_PORT", 8430, 1024, 65535),
     )

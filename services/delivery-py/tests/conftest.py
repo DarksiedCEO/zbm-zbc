@@ -10,13 +10,17 @@ for p in (SRC, TESTS):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-import _tmproot  # noqa: E402  (fix wave 21, L4: before anything imports tempfile users — gitport makes its dir at import)
+import _tmproot  # noqa: E402  (fix wave 21, L4: before anything imports tempfile users; since wave 25 gitport makes its dir on first use)
 
 # The suite builds every service from an explicit env dict; the process environment must not leak DLV_* or the
 # ledger settings into anything that reads os.environ (the harness module sets only the DEER_FLOW_* it owns).
 # Wave 22 (G3, N21-D-3): the suite's OWN settings survive — DLV_TEST_PORT_RANGE is the operator's port assignment for
 # the live tests, not a service setting (it used to be popped here, so every run fell back to 18800-18849).
-SUITE_SETTINGS = ("DLV_TEST_PORT_RANGE", "DLV_LIVE_LOG_DIR")
+# Wave 25 (scout B H1): DLV_LIVE_SANDBOX_IMAGE too — the one input of tests/test_live_docker.py, set by the CI job
+# delivery-docker-live; popping it made all three Docker live tests skip "is not set" on every machine, so that job
+# (which fails on any skip) could never pass. tests/test_round25.py checks every DLV_* name a test reads is listed here.
+# DLV_TEST_GOCACHE (wave 25): a Go build cache to keep across sessions; unset, the session root holds it.
+SUITE_SETTINGS = ("DLV_TEST_PORT_RANGE", "DLV_LIVE_LOG_DIR", "DLV_LIVE_SANDBOX_IMAGE", "DLV_TEST_GOCACHE")
 for k in list(os.environ):
     if k.startswith(("DLV_", "DEER_FLOW_", "LEDGER_SERVICE_", "LANGSMITH_", "LANGFUSE_", "GATEWAY_")) and k not in SUITE_SETTINGS:
         os.environ.pop(k, None)

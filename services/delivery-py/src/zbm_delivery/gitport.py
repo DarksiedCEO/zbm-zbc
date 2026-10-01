@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
@@ -59,24 +60,40 @@ def _check_path(p: str) -> str:
     return p
 
 
-_ISOLATION_DIR = tempfile.mkdtemp(prefix="dlv-git-")          # private HOME and an EMPTY hooks dir, per process
-_PRIVATE_HOME = os.path.join(_ISOLATION_DIR, "home")
-_EMPTY_HOOKS = os.path.join(_ISOLATION_DIR, "hooks")
-os.makedirs(_PRIVATE_HOME, exist_ok=True)
-os.makedirs(_EMPTY_HOOKS, exist_ok=True)
-# fix wave 24 (E3, N23-D-2): rename/copy detection off for every command — a file moved or copied into src/ is a
-# full addition (every line shown, every line scanned), never a "similarity index 100%" with no + lines
-ISOLATION_ARGS = ("-c", f"core.hooksPath={_EMPTY_HOOKS}", "-c", "core.fsmonitor=false", "-c", "diff.renames=false",
-                  "-c", "status.renames=false")
-# fix wave 21 (L4): the per-process dir goes with the process (it was left in the temp dir on every start).
-atexit.register(fsops.drop_own_temp, _ISOLATION_DIR)
+# Wave 25 (scout C C6-3): the private HOME and EMPTY hooks dir are made on FIRST USE, once per process, never at
+# import — a process that only imported the package and was then killed by a signal (no atexit) left a `dlv-git-*`
+# dir in its temp dir. A process killed after its first git command can still leave one: atexit is the only cleanup.
+_ISOLATION: list = []                      # [(isolation dir, private home, empty hooks dir)] once made
+_ISOLATION_LOCK = threading.Lock()
+
+
+def _isolation() -> tuple[str, str]:
+    """(private HOME, EMPTY hooks dir) of this process, made on first call and removed at exit (fix wave 21, L4)."""
+    with _ISOLATION_LOCK:
+        if not _ISOLATION:
+            d = tempfile.mkdtemp(prefix="dlv-git-")
+            atexit.register(fsops.drop_own_temp, d)
+            home, hooks = os.path.join(d, "home"), os.path.join(d, "hooks")
+            os.makedirs(home, exist_ok=True)
+            os.makedirs(hooks, exist_ok=True)
+            _ISOLATION.append((d, home, hooks))
+        return _ISOLATION[0][1], _ISOLATION[0][2]
+
+
+def isolation_args() -> tuple[str, ...]:
+    """The ``-c`` options on every git argv (R11): the empty hooks dir, no fsmonitor; fix wave 24 (E3, N23-D-2):
+    rename/copy detection off for every command — a file moved or copied into src/ is a full addition (every line
+    shown, every line scanned), never a "similarity index 100%" with no + lines."""
+    return ("-c", f"core.hooksPath={_isolation()[1]}", "-c", "core.fsmonitor=false", "-c", "diff.renames=false",
+            "-c", "status.renames=false")
 
 
 def git_env() -> dict:
     """The environment of every git command (R11): a private empty HOME, no global or system config."""
-    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": _PRIVATE_HOME, "LANG": "C.UTF-8",
+    home = _isolation()[0]
+    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": home, "LANG": "C.UTF-8",
             "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
-            "XDG_CONFIG_HOME": os.path.join(_PRIVATE_HOME, "xdg"),
+            "XDG_CONFIG_HOME": os.path.join(home, "xdg"),
             "GIT_AUTHOR_NAME": "zbm-fix-engine", "GIT_AUTHOR_EMAIL": "fix-engine@zbm.invalid",
             "GIT_COMMITTER_NAME": "zbm-fix-engine", "GIT_COMMITTER_EMAIL": "fix-engine@zbm.invalid"}
 
@@ -105,7 +122,7 @@ class GitPort:
         return GitResult(r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"))
 
     def _git(self, op: str, args: list[str], cwd: str, run_id: str = "-") -> GitResult:
-        argv = ["git", *ISOLATION_ARGS, "-C", cwd, *args]
+        argv = ["git", *isolation_args(), "-C", cwd, *args]
         self._seq += 1
         self.record(derived_id("gt", run_id, self._seq, op, hashlib.sha256("\0".join(argv).encode()).hexdigest()),
                     "crossing_git_requested", ACTOR, run_id if run_id != "-" else "git",
@@ -223,7 +240,7 @@ class GitPort:
         if not _SHA_RE.fullmatch(sha):
             raise GitRefused("bad sha")
         _check_path(path)
-        argv = ["git", *ISOLATION_ARGS, "-C", self.repo, "archive", "--format=tar", sha, "--", path]
+        argv = ["git", *isolation_args(), "-C", self.repo, "archive", "--format=tar", sha, "--", path]
         self._seq += 1
         self.record(derived_id("gt", run_id, self._seq, "archive", hashlib.sha256("\0".join(argv).encode()).hexdigest()),
                     "crossing_git_requested", ACTOR, run_id if run_id != "-" else "git",
