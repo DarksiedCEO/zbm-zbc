@@ -759,6 +759,14 @@ the very attack the small reserve exists for), breaking Decision 23 ("a small bo
 on b51f307 the same request was 200 (`test_a_small_body_never_waits_for_the_shared_budget_even_when_its_model_is_larger`,
 failing on cd5fb49..da30363). A small body's model is now counted without waiting (`_BodyHold.cover_now`): what the
 pools have free, the rest in the shared pool's `over` until the model is dropped.
+**Second regression found and fixed (E-A successor, 20ab3e5):** a large body's model cover competed for freed bytes
+with every body chunk waiting for the shared pool; under the front-loaded slow-sender attack (fix9 Q1
+`[1MiB-front-then-2KiBps]`) the one model cover lost that race and the legit large batch was refused 503 AFTER its whole
+body had been received and parsed (diagnosed in a DIAG copy: `w25-reports/E-A/logs/q1-diag2/`; Q1 failed 3/6 runs on
+py3.12 vs 0/6 on b51f307). `_InFlightBytes.reserve(priority=True)`: while a priority reservation waits, no other
+reservation takes freed bytes; `_off_loop` covers a large model with it (one large parse slot: at most one priority
+wait, <= `_INFLIGHT_WAIT_S`). After: Q1 0/12 runs failed and 0 of 62 legit large batches 503 (before 10 of 53;
+`w25-reports/E-A/logs/q1-rep2/`).
 **Chosen: count, not reserve ahead.** Reserving the worst model (5.5x + up to 3 MiB) BEFORE the parse would put the
 parse in progress inside the budget too; it was built and measured and is not used: with 64 front-loaded slow
 senders holding the shared pool, every legit large batch was refused 503 (3/3, `test_live_q1_slow_senders_..._do_not_
@@ -785,7 +793,9 @@ each model ~5x its body) 66-70 MiB, 179/179 answered 200 (01e2851: 61-75 MiB); 6
 large-astral and /health traffic (`f1_exhaust.py stall 60 20`, `LARGE_KIND=astral`) 79-80 MiB (01e2851: 100-102 MiB),
 small 100/100 200, /health 100/100 200, but large legit astral batches 1/10 and 1/10 answered 200 (9/10 503 after the
 2 s budget wait) against 01e2851's 6/10 and 2/10 — the cost of counting the model: a ~1 MiB astral body needs ~6 MiB
-of budget that stalled senders hold.
+of budget that stalled senders hold. Re-measured after the priority fix (20ab3e5, 05:20-05:35Z,
+`w25-reports/E-A/logs/campaign-20ab3e5-SMHA/`): stall flood 85-86 MiB, large legit astral 4/10 and 5/10 200 (01e2851 in
+the same run 2/10 and 0/10), small and /health 100/100; astral clients 62-72 MiB, 179/179 200; 128 senders VmHWM 64-66.
 Small bodies' models (the uncounted-when-full part above) are bounded only through concurrency: at most
 `LIMIT_CONCURRENCY` (128) requests are in the app at once, so their models add at most 128 x the worst small model
 (<= ~0.7 MiB) — a loose bound well above the 96 MiB scenario bound; no probe filled it.
