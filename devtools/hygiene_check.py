@@ -19,12 +19,17 @@ Two halves:
                group and session (the suite starts as its own session leader), by an environment marker every
                descendant inherits unless it scrubs its environment, and — on Linux — by being the suite's child
                subreaper (PR_SET_CHILD_SUBREAPER), so even a double-forked, setsid'd, env-scrubbed grandchild is
-               re-parented to this process and found. Leftovers are listed, then killed (by PID; they are this
-               run's own) so the next job is not poisoned;
+               re-parented to this process and found. Elsewhere (macOS: no subreaper, no readable environment,
+               table from ``ps``) only the process group and its descendants are tracked — a setsid'd orphan
+               escapes there — and the checker's own ``ps`` helper is excluded by its pid. Each leftover is printed
+               with pid, ppid, pgid, stat and its full command, then killed (by PID; they are this run's own) so
+               the next job is not poisoned;
   R5 skips     a test was skipped for a reason not on the suite's expected-skip list (devtools/hygiene_allowlist.json,
                "expected_skips"); Go and Rust suites expect no skip or ignored test, the dashboard none;
   R6 counts    the number of tests the run executed/collected differs from the suite's row in docs/test-counts.md
-               (``--counts check``), or rewrites that row (``--counts write``).
+               (``--counts check``), or rewrites that row (``--counts write``). Tests that exist on some OSes only
+               are named in the allowlist ("platform_only_tests"); elsewhere they must be absent by name and the
+               expected count is lower by that many (printed in the summary line).
 
 ``lint`` — static rules over the whole tree:
   L1 wallclock a test asserts an UPPER bound on a wall-clock delta against a literal (Python: an ``assert``,
@@ -166,21 +171,29 @@ def _proc_table() -> list[dict]:
                     env = b""
             except (OSError, IndexError):
                 continue
-            rows.append({"pid": int(d), "state": rest[0], "ppid": int(rest[1]), "pgid": int(rest[2]),
+            rows.append({"pid": int(d), "state": rest[0], "stat": rest[0], "ppid": int(rest[1]), "pgid": int(rest[2]),
                          "sid": int(rest[3]), "cmd": cmd, "env": env})
         return rows
-    # macOS / BSD: ps (no environment; the marker check is Linux-only)
-    r = subprocess.run(["ps", "-axo", "pid=,ppid=,pgid=,stat=,command="], capture_output=True, text=True)
-    for line in r.stdout.splitlines():
+    # macOS / BSD: ps (no environment; the marker check is Linux-only). `ps -ax` lists ITSELF, as a child of this
+    # checker: that row is the checker's own helper, never the suite's, and is dropped by its pid (fix wave 26a,
+    # W26-1 — on every macOS job of CI #2 it was reported as "still alive: ps -axo pid=,ppid=,pgid=,stat=,command=").
+    helper = subprocess.Popen(["ps", "-axo", "pid=,ppid=,pgid=,stat=,command="], stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, text=True)
+    out, _ = helper.communicate()
+    for line in out.splitlines():
         f = line.split(None, 4)
-        if len(f) < 4:
+        if len(f) < 4 or not f[0].isdigit() or int(f[0]) == helper.pid:
             continue
         rows.append({"pid": int(f[0]), "ppid": int(f[1]), "pgid": int(f[2]), "sid": -1, "state": f[3][:1],
-                     "cmd": f[4] if len(f) > 4 else "", "env": b""})
+                     "stat": f[3], "cmd": f[4] if len(f) > 4 else "", "env": b""})
     return rows
 
 
-def leftover_processes(leader: int, token: str) -> list[dict]:
+def leftover_processes(leader: int, token: str, subreaper: bool) -> list[dict]:
+    """The suite's surviving processes: its process group / session (``leader``), anything carrying the run marker,
+    every descendant of those, and — ONLY when this checker is the child subreaper — this checker's own children
+    (orphans re-parented to it). Without a subreaper (macOS) a child of this checker is one of its own helpers
+    (``ps``), never the suite's, so it is not walked (fix wave 26a, W26-1)."""
     me = os.getpid()
     rows = [r for r in _proc_table() if r["pid"] != me and r["state"] != "Z"]
     by_parent: dict[int, list[dict]] = {}
@@ -191,7 +204,7 @@ def leftover_processes(leader: int, token: str) -> list[dict]:
     for r in rows:
         if r["pgid"] == leader or r["sid"] == leader or marker in r["env"].split(b"\0"):
             found[r["pid"]] = r
-    todo = [r["pid"] for r in by_parent.get(me, [])] + list(found)   # re-parented to us (subreaper), and descendants
+    todo = ([r["pid"] for r in by_parent.get(me, [])] if subreaper else []) + list(found)   # orphans + descendants
     while todo:
         pid = todo.pop()
         row = next((r for r in rows if r["pid"] == pid), None)
@@ -241,6 +254,36 @@ def _count_from_output(kind: str, text: str) -> int | None:
     return None
 
 
+def _names_from_output(kind: str, text: str) -> set[str] | None:
+    """Names of the tests that ran, as the runner prints them (cargo: ``test <name> ... <outcome>``; go: top-level
+    ``=== RUN <name>``); None for a kind whose output names no tests here (pytest, node)."""
+    if kind == "cargo":
+        return set(re.findall(r"^test (\S+) \.\.\. ", text, re.M))
+    if kind == "go":
+        return {n for n in re.findall(r"^=== RUN\s+(\S+)$", text, re.M) if "/" not in n}
+    return None
+
+
+def current_os() -> str:
+    return "linux" if sys.platform.startswith("linux") else sys.platform
+
+
+def platform_only(allow: dict, suite: str) -> list[dict]:
+    """The suite's tests that exist on some OSes only (allowlist "platform_only_tests"): each entry names the test
+    as the runner prints it, the OSes it runs on (``only_on``, sys.platform names, "linux" for Linux) and why.
+    docs/test-counts.md's row counts EVERY listed test; on an OS outside a test's ``only_on`` that test must be
+    absent and the expected count is one lower per such test (fix wave 26a, W26-5: an anonymous per-OS number
+    applied silently before)."""
+    return allow.get("platform_only_tests", {}).get(suite, [])
+
+
+def platform_note(entries: list[dict]) -> str:
+    """The docs/test-counts.md "Platform-only tests" cell for a suite (generated from the allowlist)."""
+    if not entries:
+        return "—"
+    return "; ".join(f"`{e['test']}` only on {', '.join(e['only_on'])}" for e in entries)
+
+
 def _skips_from_output(kind: str, text: str) -> list[dict]:
     if kind == "cargo":
         out = []
@@ -265,6 +308,16 @@ def read_counts_doc() -> dict[str, int]:
     return rows
 
 
+ROW_RE = re.compile(r"^\| `([^`]+)` \| (\d+) \| ([^|\n]+) \|(?: ([^|\n]*) \|)?[ \t]*$", re.M)
+
+
+def read_counts_notes() -> dict[str, str]:
+    """suite -> its "Platform-only tests" cell ("" for a row without that column)."""
+    if not COUNTS_DOC.exists():
+        return {}
+    return {m.group(1): (m.group(4) or "").strip() for m in ROW_RE.finditer(COUNTS_DOC.read_text())}
+
+
 COUNTS_HEADER = """# Test counts (generated)
 
 Generated by `devtools/hygiene_check.py run --counts write` from real suite runs; checked by every CI test job
@@ -275,21 +328,29 @@ How each suite is counted: Python — tests collected by pytest (skips included)
 (passed + failed + ignored, every test binary, doc tests included); Go — top-level tests run by `go test -v`
 (`=== RUN` lines without a `/`); dashboard — `# tests` reported by `node --test`.
 
-| Suite | Tests | Counted by |
-|---|---|---|
+A row counts every test of the suite, including tests that exist on some operating systems only. Those are named in
+the last column (from `devtools/hygiene_allowlist.json` "platform_only_tests", with the reason there): on any other
+OS the check expects exactly those tests to be absent — by name — and the count to be lower by that many, and it
+says so in its summary line; a listed test that runs where it should not, or is missing where it should run, fails
+the check.
+
+| Suite | Tests | Counted by | Platform-only tests |
+|---|---|---|---|
 """
 
 KIND_LABEL = {"pytest": "pytest collection", "cargo": "cargo test", "go": "go test -v", "node": "node --test"}
 
 
-def write_counts_doc(updates: dict[str, tuple[int, str]]) -> None:
+def write_counts_doc(updates: dict[str, tuple[int, str]], allow: dict | None = None) -> None:
+    allow = load_allowlist() if allow is None else allow
     rows = {}
     if COUNTS_DOC.exists():
-        for m in re.finditer(r"^\| `([^`]+)` \| (\d+) \| ([^|]+) \|", COUNTS_DOC.read_text(), re.M):
+        for m in ROW_RE.finditer(COUNTS_DOC.read_text()):
             rows[m.group(1)] = (int(m.group(2)), m.group(3).strip())
     for suite, (n, kind) in updates.items():
         rows[suite] = (n, KIND_LABEL.get(kind, kind))
-    body = "".join(f"| `{s}` | {n} | {k} |\n" for s, (n, k) in sorted(rows.items()))
+    body = "".join(f"| `{s}` | {n} | {k} | {platform_note(platform_only(allow, s))} |\n"
+                   for s, (n, k) in sorted(rows.items()))
     COUNTS_DOC.write_text(COUNTS_HEADER + body)
 
 
@@ -357,11 +418,13 @@ def cmd_run(a: argparse.Namespace) -> int:
 
     problems: list[str] = []
     # R4 first, so a leftover process cannot keep writing while the rest is checked
-    left = leftover_processes(leader, token)
+    left = leftover_processes(leader, token, subreaper)
     if left:
         for r in left:
-            problems.append(violation("R4-procs", suite, f"pid {r['pid']} (ppid {r['ppid']}, pgid {r['pgid']}) "
-                                                         f"still alive: {r['cmd'][:200]}"))
+            # every field a person needs to tell what it is, and the FULL command line (fix wave 26a, W26-1)
+            problems.append(violation("R4-procs", suite, f"pid {r['pid']} (ppid {r['ppid']}, pgid {r['pgid']}, "
+                                                         f"stat {r.get('stat', r['state'])}) still alive: "
+                                                         f"command {r['cmd'] or '<none>'}"))
         kill_pids([r["pid"] for r in left])
 
     plain_after, ignored_after = git_state()
@@ -401,27 +464,49 @@ def cmd_run(a: argparse.Namespace) -> int:
     for s in skips:
         if not any(re.search(e["reason_regex"], s["reason"]) for e in expected):
             problems.append(violation("R5-skips", suite, f"unexpected {s['kind']}: {s['nodeid']}: {s['reason']}"))
+    count_note = ""
     if a.counts != "off" and kind != "none":
-        # docs/test-counts.md holds the Linux count; a suite that compiles fewer tests on another OS (a
-        # #[cfg(target_os = "linux")] test) says so in the allowlist's "count_os_delta", with the reason.
-        osname = "linux" if sys.platform.startswith("linux") else sys.platform
-        delta = allow.get("count_os_delta", {}).get(suite, {}).get(osname, {}).get("delta", 0)
+        # docs/test-counts.md counts every test; tests that exist on some OSes only are NAMED in the allowlist
+        # ("platform_only_tests"): here they must be present or absent by name, and the expected count is lower by
+        # the absent ones — stated in the summary line (fix wave 26a, W26-5).
+        osname = a.count_os or current_os()
+        entries = platform_only(allow, suite)
+        absent = [e for e in entries if osname not in e["only_on"]]
+        names = _names_from_output(kind, out_text) if entries else None
+        if entries and names is None:
+            problems.append(violation("R6-counts", suite, f"platform_only_tests are listed but a {kind} run's "
+                                                          f"output names no tests, so they cannot be checked"))
+        for e in entries if names is not None else []:
+            here = osname in e["only_on"]
+            if here and e["test"] not in names:
+                problems.append(violation("R6-counts", suite, f"platform-only test {e['test']} (only on "
+                                          f"{', '.join(e['only_on'])}) did not run on {osname}"))
+            if not here and e["test"] in names:
+                problems.append(violation("R6-counts", suite, f"platform-only test {e['test']} (only on "
+                                          f"{', '.join(e['only_on'])}) ran on {osname}: remove its allowlist "
+                                          f"entry or restore its platform gate"))
+        if absent:
+            count_note = (f" ({len(absent)} platform-only test(s) not on {osname}: "
+                          + ", ".join(e["test"] for e in absent) + ")")
         if count is None:
             problems.append(violation("R6-counts", suite, "could not determine how many tests ran"))
         elif a.counts == "write":
-            write_counts_doc({suite: (count - delta, kind)})
-            print(f"hygiene_check: docs/test-counts.md row `{suite}` = {count - delta}")
+            write_counts_doc({suite: (count + len(absent), kind)}, allow)
+            print(f"hygiene_check: docs/test-counts.md row `{suite}` = {count + len(absent)}{count_note}")
         else:
             doc = read_counts_doc()
             if suite not in doc:
                 problems.append(violation("R6-counts", suite, f"no row in docs/test-counts.md (this run: {count})"))
-            elif doc[suite] + delta != count:
+            elif doc[suite] - len(absent) != count:
                 problems.append(violation("R6-counts", suite, f"docs/test-counts.md says {doc[suite]}"
-                                          + (f" ({delta:+d} on {osname})" if delta else "")
+                                          + (f" (expected {doc[suite] - len(absent)} on {osname}{count_note})"
+                                             if absent else "")
                                           + f", this run counted {count}; regenerate with --counts write"))
+            elif absent:
+                count_note += f"; docs/test-counts.md row {doc[suite]}"
 
     shutil.rmtree(work, ignore_errors=True)
-    print(f"hygiene_check: suite {suite} exited {rc}; tests counted: {count}; skips: {len(skips)}; "
+    print(f"hygiene_check: suite {suite} exited {rc}; tests counted: {count}{count_note}; skips: {len(skips)}; "
           f"hygiene violations: {len(problems)}", flush=True)
     for line in problems:
         print(line, flush=True)
@@ -959,7 +1044,28 @@ def cmd_counts(a: argparse.Namespace) -> int:
             print(f"HYGIENE R6-counts docs/test-counts.md: no row for suite {s}")
         for s in extra:
             print(f"HYGIENE R6-counts docs/test-counts.md: row for unknown suite {s}")
-        if missing or extra:
+        # the platform-only column is generated from the allowlist: the two must agree, and every entry is
+        # well-formed (fix wave 26a, W26-5)
+        allow = load_allowlist()
+        notes = read_counts_notes()
+        bad = []
+        for s, entries in allow.get("platform_only_tests", {}).items():
+            if s not in SUITES:
+                bad.append(f"allowlist platform_only_tests names unknown suite {s}")
+            for e in entries:
+                if not (isinstance(e.get("test"), str) and e["test"] and isinstance(e.get("only_on"), list)
+                        and e["only_on"] and all(isinstance(o, str) and o for o in e["only_on"]) and e.get("why")):
+                    bad.append(f"allowlist platform_only_tests entry for {s} needs test, only_on and why: {e}")
+        if "count_os_delta" in allow:
+            bad.append("allowlist key count_os_delta is no longer read: name the tests in platform_only_tests")
+        for s in rows:
+            want = platform_note(platform_only(allow, s))
+            if notes.get(s, "") != want:
+                bad.append(f"row `{s}` platform-only column is {notes.get(s, '')!r}, the allowlist says {want!r}; "
+                           f"regenerate with --counts write")
+        for b in bad:
+            print(f"HYGIENE R6-counts docs/test-counts.md: {b}")
+        if missing or extra or bad:
             return 1
         print(f"docs/test-counts.md: {len(rows)} suites, one row each")
         return 0
@@ -981,6 +1087,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--tmp-ignore", action="append", default=[],
                    help="regex of /tmp entry names another process on this machine creates (never in CI)")
     r.add_argument("--counts", choices=("check", "write", "off"), default="check")
+    r.add_argument("--count-os", help="OS whose platform-only tests R6 applies (default: this one; the self-test "
+                                      "uses it to check another OS's rules)")
     r.add_argument("command", nargs=argparse.REMAINDER)
     lp = sub.add_parser("lint", help="static rules L1-L4 over the whole tree")
     lp.add_argument("--rules", help="comma list of L1,L2,L3,L4 (default all)")

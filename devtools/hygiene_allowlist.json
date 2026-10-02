@@ -1,5 +1,5 @@
 {
-  "_doc": "Reviewed exceptions for devtools/hygiene_check.py (fix wave 25, founder ruling R-HYGIENE). 'allow': static-lint exceptions \u2014 rule, path, optional function, optional 'contains' (a snippet of the flagged line), and a mandatory reason; `lint --strict-allowlist` (CI) fails an entry that matches nothing. 'expected_skips': per suite id, the skip reasons that are legitimate on some machine (regex over the reason pytest/go/cargo/node reports); any other skip fails the run (rule R5). Add an entry only with a reason a reviewer can check. 'count_os_delta': per suite id and OS (sys.platform, 'linux' for Linux), how many tests fewer (negative) that OS compiles than the Linux count in docs/test-counts.md, with the reason.",
+  "_doc": "Reviewed exceptions for devtools/hygiene_check.py (fix wave 25, founder ruling R-HYGIENE). 'allow': static-lint exceptions \u2014 rule, path, optional function, optional 'contains' (a snippet of the flagged line), and a mandatory reason; `lint --strict-allowlist` (CI) fails an entry that matches nothing. 'expected_skips': per suite id, the skip reasons that are legitimate on some machine (regex over the reason pytest/go/cargo/node reports); any other skip fails the run (rule R5). Add an entry only with a reason a reviewer can check. 'platform_only_tests': per suite id, every test that exists on some OSes only \u2014 'test' (its name as the runner prints it: cargo's `test <name> ...`, go's top-level `=== RUN <name>`), 'only_on' (sys.platform names, 'linux' for Linux) and 'why'. docs/test-counts.md counts every test and names these in its last column (`counts --check` fails if the column and this list differ); on another OS R6 expects exactly these tests absent by name and the count lower by that many, and fails if a listed test runs where it should not or is missing where it should run (fix wave 26a, W26-5: replaced 'count_os_delta', an anonymous per-OS number).",
   "allow": [
     {
       "rule": "L1-wallclock",
@@ -73,12 +73,15 @@
       }
     ]
   },
-  "count_os_delta": {
-    "rust:ledger-rust": {
-      "darwin": {
-        "delta": -1,
+  "platform_only_tests": {
+    "rust:ledger-rust": [
+      {
+        "test": "f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers",
+        "only_on": [
+          "linux"
+        ],
         "why": "tests/server_hardening.rs f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers is #[cfg(target_os = \"linux\")] (XNU rejects the whole over-limit write, so the torn tail cannot be produced; the deterministic test beside it covers macOS)"
       }
-    }
+    ]
   }
 }
