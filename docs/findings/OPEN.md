@@ -6,15 +6,18 @@ fixes it (or that records the founder's ruling to close it). Format: `id | sever
 opened | what`.
 
 Ids: `C*` scout C (wave 25 hygiene catalogue), `H9-*` the wave-25 hygiene check's own findings on the tree. Counts of
-lint hits are as of the E-C branch (`w25c`) and are reproduced with `python3 devtools/hygiene_check.py lint`; the
-E-A / E-B branches change them when they merge.
+lint hits are as of the E-C branch (`w25c`, which carries the services' code as of 0f017a7) and are reproduced with
+`python3 devtools/hygiene_check.py lint`. Status 2026-10-01 16:10 PT (E-C's checker run over each owner's committed
+head, `scratchpad/w25-reports/E-C/hygiene-violations.md`): w25a @ 0fd7371 and w25b @ dc3fa76 each show 0 L1/L2/L3
+hits in their own services and ADRs, so H9-L1/L2/L3 close when those branches merge — the lines stay until the merge
+commit shows `lint` clean (R-GATE: a line leaves only in the commit that fixes it).
 
 | id | severity | owner | opened | what |
 |---|---|---|---|---|
 | H9-L1 | Medium | E-A / E-B, wave 26 | 2026-10-01 | Python tests assert upper bounds on wall-clock deltas against literals or literal-valued names (hygiene rule L1): fulfillment-py 14, onboarding-py 14, creative-py 11, delivery-py 9, finance-py 2, legal-py 2, verification-py 2, detection-py 1 — `lint --rules L1` lists each; convert to CPU-time / same-work ratios / events, or allowlist with a reviewed reason |
 | H9-L2 | Medium | E-A / E-B, wave 26 | 2026-10-01 | Hard-coded test ports/ranges (rule L2): delivery-py 5, creative-py 2, detection-py 1, onboarding-py 1 — move the live tests onto the shared helper in `tests/_procinfo.py` (`start_owned` / `wait_owned` / `assigned_port_range`); parser-only literals need an allowlist entry with a reason |
-| H9-L3 | Low | E-A / E-B, wave 26 | 2026-10-01 | Hand-written test counts (rule L3): fulfillment-py README 27, ADRs 0002 / 0004 / 0005 / 0010 / 0011 (13), onboarding-py README 2, delivery-py / finance-py / legal-py README 1 each — link docs/test-counts.md or tie each historical count to its commit |
-| C5-6 | Medium | E-A / E-B, wave 26 | 2026-10-01 | The Python live tests still use five per-service pick-then-bind port pickers (the race wave 21 removed from ledger-rust); the shared replacement with an owner check exists (`tests/_procinfo.py`, wave 25, identical in five services) but no live test calls it yet |
+| H9-L3 | Low | E-A / E-B, wave 26 | 2026-10-01 | Hand-written test counts (rule L3): fulfillment-py README 27, ADRs 0002 / 0004 / 0005 / 0010 / 0011 (1 / 1 / 2 / 1 / 8), onboarding-py README 2, delivery-py / finance-py / legal-py README 1 each — link docs/test-counts.md or tie each historical count to its commit |
+| C5-6 | Medium | E-A / E-B, wave 26 | 2026-10-01 | The Python live tests still use five per-service pick-then-bind port pickers (the race wave 21 removed from ledger-rust); the shared replacement with an owner check exists (`tests/_procinfo.py`, wave 25, identical in five services); at 16:10 PT only delivery-py's `tests/helpers.py` on w25b calls it (w25a's creative/detection launchers own their port by their own child's announcement instead) |
 | C6-2 | Medium | E-A (compliance) / E-B (verification, clipper-network, finance, legal), wave 26 | 2026-10-01 | `devtools/live_run.py` leaves its `mkdtemp` work dir behind on every run; under the CI live-runs job's hygiene check (R3) that fails the job; finance uses `FIN_LIVE_WORKDIR` where the others use `LIVE_WORK_DIR` (C5-7) |
 | C6-3 | Medium | E-B, wave 26 | 2026-10-01 | delivery-py `gitport.py` creates its `dlv-git-*` isolation dir at import time; a scrubbed-environment child killed by a signal leaves it in /tmp — the hygiene run of delivery-py (R3) is the test |
 | C1-1 | Low | E-C, wave 26 | 2026-10-01 | ledger-rust tests write fixed-prefix files straight into the temp dir (`ledger_*`, `zbm_ledger_test_*`); contained by the private TMPDIR under the hygiene wrapper, but a crashed test outside it leaves top-level /tmp entries — move them into one per-process directory |
