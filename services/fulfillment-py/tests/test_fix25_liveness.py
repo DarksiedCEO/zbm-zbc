@@ -575,9 +575,12 @@ def test_a_client_that_really_stalls_is_still_cut_on_the_loops_running_time(serv
     # the 2 s stop is not charged to the client (load can only make this later, never earlier)
     assert took >= grace + 1.5, took
     # fix wave 25 (E-A successor, R-HYGIENE L1): was also `took <= grace + 5.0`, a wall-clock upper bound that load
-    # can break (the cut moves later by any loop lag, by design). What it guarded — the STALL rule cut the body, not
-    # the 30 s deadline or the protocol's backstop — is read from the answer: only rule (a)/(b) says "stalled for".
-    assert answer and b"request body stalled for" in answer[0], (took, answer[:1])
+    # can break (the cut moves later by any loop lag, by design). What it guarded — a rule that judges the CLIENT cut
+    # the body, not the 30 s deadline ("not received within") or the protocol's backstop (a close with no 408) — is
+    # read from the answer. Either client rule may fire first: the stall rule (a) "stalled for", or the arrival
+    # projection (c) "cannot complete" — after a loop stop the wait can wake with the stall clock just under the grace
+    # while the total waiting is past it (seen in a full-suite run: (c) at 6.97 s).
+    assert answer and (b"request body stalled for" in answer[0] or b"cannot complete" in answer[0]), (took, answer[:1])
 
 
 def test_loop_lag_counts_only_time_the_loop_was_behind():
