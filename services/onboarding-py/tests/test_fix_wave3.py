@@ -38,8 +38,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from config import OnboardingConfig
-from conftest import GOOD_GRANT, TEST_SERVICE_TOKEN, Clock, client_for, finding, make_service, start_body
-from integrations.departments import FakePushNotifier
+from conftest import GOOD_GRANT, TEST_SERVICE_TOKEN, Clock, client_for, make_service, start_body
 from ledger import FakeLedgerClient, LedgerWriteError
 
 REPO = Path(__file__).resolve().parents[3]

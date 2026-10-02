@@ -563,27 +563,35 @@ def test_g2_states_refuse_fixed_or_disproved_without_the_admission_red_check():
 
 # ====================================================================== G3: the port range reaches the live tests
 
-def test_g3_inner_port_range_as_the_live_tests_see_it():
-    """Run by the test below in a child pytest (skipped on its own)."""
-    want = os.environ.get("W22_PORT_PROBE_EXPECT")
-    if not want:
-        pytest.skip("inner half of test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests")
-    import helpers
-    lo, hi = (int(x) for x in want.split("-"))
-    assert os.environ.get("DLV_TEST_PORT_RANGE") == want
-    assert helpers.live_ports() == range(lo, hi + 1)
+_G3_CHILD = """
+import os, sys
+sys.path[:0] = ["tests", "src"]
+import conftest  # noqa: F401  (the suite's env scrub runs at import, exactly as under pytest)
+import helpers
+want = os.environ["W22_PORT_PROBE_EXPECT"]
+lo, hi = (int(x) for x in want.split("-"))
+assert os.environ.get("DLV_TEST_PORT_RANGE") == want, os.environ.get("DLV_TEST_PORT_RANGE")
+assert helpers.live_ports() == range(lo, hi + 1), helpers.live_ports()
+print("G3-OK")
+"""
 
 
 def test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests():
     """N21-D-3: the conftest used to pop DLV_TEST_PORT_RANGE with every DLV_* setting, and the round-20 test set the
     variable itself (monkeypatch), so it passed while the operator's range never reached a live test. Here the range is
-    set from OUTSIDE, on a child pytest, and the child's test sees it."""
+    set from OUTSIDE, on a child process that loads the suite's conftest, and the child sees it. Wave 25 (scout B Low):
+    the child used to be a second test in this module that skipped itself on every ordinary run (a permanent skip in
+    every summary); it is now a plain child process."""
+    import socket
+    with socket.socket() as s:                    # wave 25 (R-HYGIENE L2): a range the OS hands out, never a literal
+        s.bind(("127.0.0.1", 0))
+        lo = min(s.getsockname()[1], 65000)
+    want = f"{lo}-{lo + 2}"
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
-    env.update({"DLV_TEST_PORT_RANGE": "18811-18813", "W22_PORT_PROBE_EXPECT": "18811-18813"})
-    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                        "tests/test_round22.py::test_g3_inner_port_range_as_the_live_tests_see_it"],
-                       cwd=SERVICE_ROOT, env=env, capture_output=True, text=True, timeout=300)
-    assert r.returncode == 0 and "1 passed" in r.stdout, r.stdout[-2000:] + r.stderr[-2000:]
+    env.update({"DLV_TEST_PORT_RANGE": want, "W22_PORT_PROBE_EXPECT": want, "PYTHONDONTWRITEBYTECODE": "1"})
+    r = subprocess.run([sys.executable, "-c", _G3_CHILD], cwd=SERVICE_ROOT, env=env, capture_output=True, text=True,
+                       timeout=300)
+    assert r.returncode == 0 and "G3-OK" in r.stdout, r.stdout[-2000:] + r.stderr[-2000:]
 
 
 # ====================================================================== G4: cancel vs an engine container starting

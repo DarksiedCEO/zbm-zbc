@@ -178,6 +178,7 @@ _MAX_BODY_BYTES = 4 * 1024 * 1024
 # see http_limits.py, which `python3 -m api` runs (main() below).
 _MAX_HEADER_BYTES = http_limits.MAX_HEADER_BYTES
 _BODY_READ_TIMEOUT_S = http_limits.load_body_read_timeout()  # refuses startup if invalid
+_SWITCH_INTERVAL_S = http_limits.load_switch_interval()  # refuses startup if invalid (fix wave 25, C5-2)
 # Fix wave 8, N7-2: the deadline alone let one byte per 20 s hold a body (and
 # whatever was buffered for it) for the whole 30 s. Now a body is answered 408
 # when (a) a single wait for its next chunk reaches _BODY_MIN_RATE_GRACE_S
@@ -301,27 +302,44 @@ class _BodyHold:
     protocol's buffer is emptied (BodySizeLimitMiddleware), so `taken` + the
     bytes the protocol buffers is every body byte that has reached the app."""
 
-    __slots__ = ("lanes", "account", "small", "shared", "taken")
+    __slots__ = ("lanes", "account", "small", "shared", "taken", "unheld")
 
     def __init__(self, lanes: "_Lanes", account: _BodyAccount) -> None:
         self.lanes, self.account = lanes, account
         self.small = 0
         self.shared = 0
         self.taken = 0
+        self.unheld = 0  # fix wave 25 (E-A): bytes counted in the shared pool's `over` by cover_now
 
     @property
     def covered(self) -> int:
         return self.small + self.shared
 
-    async def cover(self, total: int) -> None:
+    async def cover(self, total: int, *, priority: bool = False) -> None:
         small = min(total, _SMALL_BODY_BYTES)
         shared = total - small
         if small > self.small:
-            await self.lanes.small_reserve.reserve(small - self.small, in_hand=True)
+            await self.lanes.small_reserve.reserve(small - self.small, in_hand=True, priority=priority)
             self.small = small
         if shared > self.shared:
-            await self.lanes.inflight.reserve(shared - self.shared, self.account, in_hand=True)
+            await self.lanes.inflight.reserve(shared - self.shared, self.account, in_hand=True, priority=priority)
             self.shared = shared
+
+    def cover_now(self, total: int) -> None:
+        """Fix wave 25 (E-A review of H3; ADR 0002 Decision 23 — a small body never waits for in-flight bytes):
+        count `total` bytes WITHOUT waiting — what the pools have free (never ahead of a waiting body), and the rest
+        in the shared pool's `over` (memory held outside the limit, visible there) until trim / release."""
+        small = min(total, _SMALL_BODY_BYTES)
+        if small > self.small:
+            self.small += self.lanes.small_reserve.try_reserve(small - self.small)
+        need = total - self.covered - self.unheld
+        if need > 0 and self.small >= _SMALL_BODY_BYTES:
+            got = self.lanes.inflight.try_reserve(need, self.account)
+            self.shared += got
+            need -= got
+        if need > 0:
+            self.lanes.inflight.over += need
+            self.unheld += need
 
     def grant(self, target: int) -> None:
         small = min(target, _SMALL_BODY_BYTES)
@@ -334,6 +352,11 @@ class _BodyHold:
             self.shared += self.lanes.inflight.try_reserve(shared - self.shared, self.account)
 
     def trim(self, total: int) -> None:
+        if self.unheld:                                # what is outside the limit goes first
+            gone = min(self.unheld, max(0, self.covered + self.unheld - total))
+            self.lanes.inflight.over -= gone
+            self.unheld -= gone
+        total -= self.unheld                           # the covered bytes to keep
         small, shared = min(total, _SMALL_BODY_BYTES), max(0, total - _SMALL_BODY_BYTES)
         if self.shared > shared:
             self.lanes.inflight.release(self.shared - shared, self.account)
@@ -343,6 +366,9 @@ class _BodyHold:
             self.small = small
 
     def release(self) -> None:
+        if self.unheld:
+            self.lanes.inflight.over -= self.unheld
+            self.unheld = 0
         if self.shared:
             self.lanes.inflight.release(self.shared, self.account)
             self.shared = 0
@@ -1019,9 +1045,12 @@ class _InFlightBytes:
     `reserve` waits (bounded) until `n` more fit — preempting, when an
     account is given, the heaviest preemptible holder (fix wave 9);
     `release` gives them back. Fix wave 25: `try_reserve` takes what is free
-    now, never waits, and takes nothing while a reservation is waiting."""
+    now, never waits, and takes nothing while a reservation is waiting; a
+    `priority` reservation (a parsed model's cover) gets freed bytes before
+    any other waiter (E-A successor: the H3 model cover lost every race to the
+    chunk covers of slow senders and was refused 503 after a complete body)."""
 
-    __slots__ = ("limit", "used", "over", "waiters", "accounts", "blocked")
+    __slots__ = ("limit", "used", "over", "waiters", "accounts", "blocked", "priority")
 
     def __init__(self, limit: int) -> None:
         self.limit, self.used = limit, 0
@@ -1032,6 +1061,7 @@ class _InFlightBytes:
         self.waiters: list[asyncio.Future] = []
         self.accounts: set[_BodyAccount] = set()
         self.blocked = 0  # reservations waiting for bytes (fix wave 25): read-ahead grants never overtake them
+        self.priority = 0  # priority reservations waiting (fix wave 25): no other reservation overtakes them
 
     def try_reserve(self, n: int, account: _BodyAccount | None = None) -> int:
         """Fix wave 25, H1: up to `n` bytes if they are free NOW, never
@@ -1048,22 +1078,28 @@ class _InFlightBytes:
             account.held += got
         return got
 
-    async def reserve(self, n: int, account: _BodyAccount | None = None, *, in_hand: bool = False) -> None:
+    async def reserve(self, n: int, account: _BodyAccount | None = None, *, in_hand: bool = False,
+                      priority: bool = False) -> None:
         if n <= 0:
             return
         if in_hand:
             self.over += n
             try:
-                await self.reserve(n, account)
+                await self.reserve(n, account, priority=priority)
             finally:
                 self.over -= n
             return
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _INFLIGHT_WAIT_S
-        if self.used + n > self.limit:
+
+        def short() -> bool:
+            return self.used + n > self.limit or (not priority and self.priority > 0)
+
+        if short():
             self.blocked += 1
+            self.priority += priority
             try:
-                while self.used + n > self.limit:
+                while short():
                     if account is not None:
                         self._preempt_for(account, loop.time())
                     waiter = loop.create_future()
@@ -1081,6 +1117,10 @@ class _InFlightBytes:
                         raise _inflight_refused()
             finally:
                 self.blocked -= 1
+                if priority:
+                    self.priority -= 1
+                    if not self.priority:
+                        self._wake()           # the waiters it held back may take what is free now
         self.used += n
         if account is not None:
             account.held += n
@@ -1104,6 +1144,9 @@ class _InFlightBytes:
         self.used -= n
         if account is not None:
             account.held -= n
+        self._wake()
+
+    def _wake(self) -> None:
         waiters, self.waiters = self.waiters, []
         for waiter in waiters:
             if not waiter.done():
@@ -1278,11 +1321,21 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
                 # character is a 20 MiB model: CPython stores the whole string at 4
                 # bytes a character, plus its UTF-8 copy) waits for the budget like
                 # a chunk in hand — INSIDE the parse slot, so at most one model per
-                # slot is ever uncounted; 503 after _INFLIGHT_WAIT_S. Models of
-                # consecutive requests coexist while their work runs (the slot is
-                # released before it): each is counted.
+                # slot is ever uncounted (the one being parsed); 503 after
+                # _INFLIGHT_WAIT_S. A SMALL body's
+                # model never waits (Decision 23: a small body never waits for
+                # in-flight bytes — fix wave 25, E-A: as committed in cd5fb49 it
+                # waited for the shared pool, 503 under a stall flood): what the
+                # pools have free, the rest in the shared pool's `over`
+                # (_BodyHold.cover_now). Models of consecutive requests coexist while
+                # their work runs (the slot is released before it): each is counted.
                 try:
-                    await hold.cover(retained)
+                    if large:
+                        # priority (E-A successor): the model's cover gets freed bytes before the
+                        # chunk covers of bodies still arriving (fix9 Q1: it lost that race, 503)
+                        await hold.cover(retained, priority=True)
+                    else:
+                        hold.cover_now(retained)
                 except BaseException:
                     parsed = None             # dropped now, not when the refusal's traceback goes
                     raise
@@ -1961,6 +2014,8 @@ def main() -> None:
     host = os.environ.get("FULFILLMENT_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("FULFILLMENT_PORT", "8091"))
     http_limits.DeadlineH11Protocol.body_timeout_s = _BODY_READ_TIMEOUT_S
+    in_force_us = http_limits.apply_switch_interval(_SWITCH_INTERVAL_S)  # fix wave 25, C5-2 (http_limits)
+    print(f"fulfillment-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
     uvicorn.run(
         app,
         host=host,

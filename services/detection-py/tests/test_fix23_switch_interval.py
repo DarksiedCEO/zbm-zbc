@@ -120,14 +120,23 @@ def _launch(raw: str | None, timeout: float = 20.0) -> tuple[int | None, str]:
         proc = subprocess.Popen([sys.executable, "serve.py", "--host", "127.0.0.1", "--port", str(port)],
                                 cwd=SRC, env=env, stdout=subprocess.DEVNULL, stderr=err)
         status = None
+        # Fix wave 25 (E-A review of H5): an answer on the port counts only once THIS child has announced its own bind
+        # (uvicorn logs it right after binding) — a port picked free a moment earlier can be another process's.
+        announced = f"Uvicorn running on http://127.0.0.1:{port}".encode()
         try:
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline and proc.poll() is None:
+                if announced not in os.pread(err.fileno(), os.fstat(err.fileno()).st_size, 0):
+                    time.sleep(0.05)
+                    continue
                 try:
                     status = _request(port, "GET", "/health", timeout=1)[0]
-                    break
                 except OSError:
                     time.sleep(0.1)
+                    continue
+                if proc.poll() is not None:
+                    status = None
+                break
         finally:
             proc.terminate()
             try:

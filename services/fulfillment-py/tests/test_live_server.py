@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from _procinfo import NO_OVERRIDE_ADDR_REASON, can_bind, listening_addrs, override_bind_addr, port_free
+from _procinfo import NO_OVERRIDE_ADDR_REASON, listening_addrs, override_bind_addr, port_free
 from conftest import child_env
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -198,10 +198,11 @@ def test_a_server_started_here_survives_thousands_of_logged_requests(default_ser
     """Fix wave 8 (harness): 1 500 requests write ~150 KB of access log; with
     stdout on an undrained PIPE (64 KiB) the server blocked around the 500th."""
     host, port = default_server
+    # Fix wave 25 (R-HYGIENE L1): no wall-clock bound — a server blocked on its log pipe answers nothing, and the
+    # connection's 5 s timeout raises (it used to also assert < 60 s overall, which a slow box could trip without a
+    # block and a block could never reach).
     conn = http.client.HTTPConnection(host, port, timeout=5)
-    t0 = time.monotonic()
     for _ in range(1500):
         conn.request("GET", "/health")
         assert conn.getresponse().read()
-        assert time.monotonic() - t0 < 60
     conn.close()

@@ -39,7 +39,6 @@ def _prepared():
 def _writes(h):
     hold = [x for x in h.svc.holds.values() if x["status"] == "open"][0]["hold_id"]
     con = [c for c in h.svc.connections.values() if c["status"] == "active"][0]["connection_id"]
-    seed = [p for p in h.svc.proposals.values() if p["kind"] == "seed"][0]
     row = dict(h.svc.current.by_id()["VI-15c"], statement="tightened")
     return [
         ("/vi/v1/connections/start", {"request_id": rid(), "clipper_id": "c9", "platform": "tiktok",

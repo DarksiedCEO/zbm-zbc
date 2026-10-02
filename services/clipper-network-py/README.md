@@ -71,6 +71,7 @@ the hash-chained local log **before** it takes effect; otherwise 503
 |---|---|
 | `api.py` | FastAPI app: bearer, caller, Andre and delegate identities; request limits; routes; `python3 -m api` runs it |
 | `serve.py` | Hardened uvicorn launcher (copied from compliance-py) |
+| `graceful_close.py` | The shared graceful-close module `serve.py` imports (byte-identical in every Python service, pinned by `tests/test_live_graceful_close_module.py`) |
 | `config.py` | Environment; refuses to start on anything it cannot honor (incl. §H values that are rule parameters) |
 | `service.py` | State, record-first plumbing (ledger → contact store → log → apply), every operation, `PortCalls` (crossings) |
 | `rules.py` | The rule register: seed proposal, rule / counsel-memo / template proposals, weakening, versions |
@@ -81,7 +82,7 @@ the hash-chained local log **before** it takes effect; otherwise 503
 | `store.py` | Append-only JSONL log with a verified hash chain (copied) |
 | `ledger.py` | LedgerClient per BUILD_CONTRACTS §2, department `clipper_network` (copied) |
 | `founder.py`, `clock.py`, `errors.py` | Andre's token gate, clock, typed errors |
-| `textguard.py` | Control characters, injection patterns, money/earnings and contact detectors |
+| `textguard.py` | Control characters, injection patterns, money/earnings and contact detectors (how the six services' copies differ, and which differences are stated: ADR 0007, "the six `textguard.py` copies") |
 | `jurisdictions.py`, `data/iso3166.json` | ISO 3166 lists (copied) |
 | `models.py` | Request models (strict; no money field) |
 | `intelligences/i01…i10` | The ten intelligences (recruiting, admission, tiering, enrolment, kit delivery, comms, disputes, discipline, offboarding, evidence & audit) |
@@ -163,6 +164,16 @@ restate the seed value; change them through a rule proposal Andre approves.
 The seed is pinned; `CN_RULES_SEED_PATH` / `CN_RULES_SEED_SHA256` name
 another seed only with `CN_ALLOW_UNPINNED_SEED=1` (then `rules_pinned:
 false` everywhere — never in production).
+
+**Security switches of the thin clients** (wave 25: read by `src/config.py` and documented nowhere before;
+read only when that client is configured — its `_URL` and tokens set; then `0` or `1`, default `0`, anything else
+refuses to start; `tests/test_env_documented.py` holds the code to this paragraph): `CN_VI_ACCEPT_UNPINNED=1` makes the V&I client accept
+an answer that says `rules_pinned: false` (a V&I running an unpinned rules seed) instead of treating it as
+unavailable; `CN_COMPLIANCE_ACCEPT_UNPINNED=1` does the same for a Compliance answer that says `seed_pinned:
+false`. Nothing in this service's `/health` shows that either is set, so both are for a test or staging peer
+only — never in production (an unpinned peer's verdicts are not the approved rules).
+
+Server tuning, read once at start by `src/serve.py` (a non-numeric or non-positive value refuses to start): `CN_REQUEST_HEAD_TIMEOUT_SECONDS` (10: a request head must arrive within this many seconds of connect), `CN_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `CN_LIMIT_CONCURRENCY` (128 open connections; beyond it a connection is answered 503), `CN_SWITCH_INTERVAL_SECONDS` (0.001, the interpreter's thread switch interval) and `CN_DRAINS_MAX` (512 concurrent graceful-close drains; `src/graceful_close.py`).
 
 ## Reconciling the local log with the ledger
 

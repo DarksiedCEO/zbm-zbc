@@ -41,7 +41,6 @@ import os
 import select
 import signal
 import socket
-import sys
 import time
 
 import h11
@@ -363,6 +362,113 @@ def test_the_model_measure_is_not_below_what_the_model_holds(limit, events):
     assert counted <= traced * 1.25, (counted, traced)        # and not so far above that it starves the budget
 
 
+def test_a_parsed_large_models_cover_gets_freed_bytes_before_waiting_body_chunks(monkeypatch):
+    """Fix wave 25 (E-A successor; found in the py3.12 full suite: fix9 Q1 [1MiB-front-then-2KiBps], legit large
+    batches 503 in 3/6 repeated runs vs 0/6 on b51f307 — the diagnosis showed the 503 coming from the MODEL's cover in
+    _off_loop, after the whole body had been received and parsed). Bytes freed in the shared pool went to whichever
+    waiter ran first; dozens of slow senders' chunk covers are waiting there under that attack, so the one parsed
+    model (H3) lost the race and was refused after _INFLIGHT_WAIT_S. A model's cover must get freed bytes before
+    any body chunk's: its body is complete and parsed, finishing it frees everything it holds."""
+    monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 0.5)
+
+    async def scenario():
+        pool = api._InFlightBytes(100)
+        pool.used = 100                                    # the pool is full (held by slow senders)
+        chunk = asyncio.ensure_future(pool.reserve(60))    # a slow sender's chunk waits first
+        await asyncio.sleep(0)
+        model = asyncio.ensure_future(pool.reserve(60, priority=True))   # then a parsed model's cover
+        await asyncio.sleep(0)
+        pool.release(60)                                   # a holder gives 60 bytes back
+        done, _ = await asyncio.wait({chunk, model}, timeout=2.0)
+        return pool, chunk, model
+
+    pool, chunk, model = asyncio.run(scenario())
+    assert model.done() and model.exception() is None, model.exception() if model.done() else "still waiting"
+    assert chunk.done() and isinstance(chunk.exception(), api.HTTPException), "the chunk took the freed bytes"
+    assert pool.used == 100
+
+
+def test_a_small_body_never_waits_for_the_shared_budget_even_when_its_model_is_larger(monkeypatch):
+    """Fix wave 25 (E-A review of H3): ADR 0002 Decision 23 — a small body (<= 64 KiB) never waits for in-flight
+    bytes under the real launcher (its bytes come from the small reserve). H3 as first committed (cd5fb49) charged
+    every parsed model through `_BodyHold.cover`, which takes everything past 64 KiB from the SHARED pool and waits
+    for it: a 64 KiB valid body whose model is ~0.44 MB (200 transcripts ending in an astral character) waited
+    `_INFLIGHT_WAIT_S` and was answered 503 whenever the shared pool was held — e.g. by stalled senders, exactly
+    the attack the small reserve exists for. The model is still counted (what the shared pool has free, the rest
+    in the pool's `over`), but a small body never waits for it."""
+    monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 1.0)
+    body = _astral_detect_body(200, 64 * KIB)
+    assert len(body) <= api._SMALL_BODY_BYTES
+
+    async def scenario():
+        lanes = api._lanes()
+        await lanes.inflight.reserve(lanes.inflight.limit)          # every shared byte held by others
+        try:
+            c = _Client(content_length=len(body))
+            task = asyncio.ensure_future(c.run())
+            await c.feed(body, more=False)
+            await asyncio.wait_for(task, 20)
+            return c, (lanes.inflight.used - lanes.inflight.limit, lanes.inflight.over, lanes.small_reserve.used)
+        finally:
+            lanes.inflight.release(lanes.inflight.limit)
+
+    c, left = asyncio.run(scenario())
+    # the shared pool was held whole throughout: a body that waited for it would have been 503 after the wait
+    assert c.status == 200, (c.status, c.body[:200])
+    assert left == (0, 0, 0), left                                  # nothing of this request is left counted
+
+
+def _worst_bodies():
+    """The worst model per byte the E-A review found (wave 25, h3_routes probe): strings ending in an astral
+    character at their max length (CallEvents, DossierUpdate), and minimal objects at the item caps."""
+    import json
+
+    def ev(i, t):
+        e = {"call_id": f"c{i}", "phone_number": "+14155550100", "direction": "inbound", "status": "voicemail",
+             "started_at": "2026-09-01T10:00:00Z", "line_id": "l1"}
+        if t:
+            e["voicemail_transcript"] = "a" * (t - 1) + "\U0001F600"
+        return e
+
+    def appt(i):
+        return {"appointment_id": f"a{i}", "customer_id": f"k{i}", "scheduled_at": "2026-09-01T10:00:00Z",
+                "service_type": "\U0001F600", "status": "scheduled"}
+
+    enc = lambda o: json.dumps(o, ensure_ascii=False, separators=(",", ":")).encode()  # noqa: E731
+    dossier = None
+    for t in range(3800, 3700, -1):
+        b = enc({"call_events": [ev(i, t) for i in range(1000)], "appointments": [appt(i) for i in range(1000)]})
+        if len(b) <= api._MAX_BODY_BYTES:
+            dossier = b
+            break
+    return [(api.CallEventsRequest, _astral_detect_body()), (api.DossierUpdateRequest, dossier),
+            (api.AppointmentsRequest, enc({"appointments": [appt(i) for i in range(1000)]})),
+            (api.CallEventsRequest, enc({"call_events": [ev(i, 0) for i in range(1000)]})),
+            (api.DossierUpdateRequest, enc({"call_events": [ev(i, 0) for i in range(1000)],
+                                            "appointments": [appt(i) for i in range(1000)]}))]
+
+
+def test_the_model_measure_is_not_below_what_the_worst_models_of_every_shape_hold():
+    """Fix wave 25 (E-A review of H3; AEGIS N24-S-4 UNVERIFIED "only CallEventsRequest was probed"): the counted
+    measure against tracemalloc for the worst shapes found across request models — long strings ending in an
+    astral character (CallEvents, DossierUpdate: ~5.1-5.3x the body) and minimal objects at the item caps (up to
+    ~10.8x a small body)."""
+    import gc
+    import tracemalloc
+    for model, body in _worst_bodies():
+        model.model_validate_json(body)
+        gc.collect()
+        tracemalloc.start()
+        try:
+            m = model.model_validate_json(body)
+            traced, _ = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        counted = api._retained_bytes(m)
+        del m
+        assert traced * 0.97 <= counted <= traced * 1.25, (model.__name__, len(body), traced, counted)
+
+
 # --- H4: loop lag is not the client's time -------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -373,10 +479,11 @@ def server():
 
 
 def _send_paced(port: int, size: int, step: int, every: float, freeze=None, stop_after: int | None = None,
-                freeze_at: float = 1.0):
+                freeze_at: float = 1.0, answer: list | None = None):
     """Declare `size` bytes and send `step` bytes every `every` s (reading while sending); `freeze()` is called
     once, `freeze_at` s in. `stop_after`: stop sending after that many bytes (a real stall). Returns (status,
-    seconds)."""
+    seconds). `answer`: if given, the whole answer (head and body, read until the server closes or 10 s) is
+    appended to it."""
     body = b'{"call_events":[' + b" " * (size - 18) + b"]}"
     head = (f"POST {DETECT} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
             f"Content-Type: application/json\r\nContent-Length: {size}\r\n\r\n").encode()
@@ -396,7 +503,10 @@ def _send_paced(port: int, size: int, step: int, every: float, freeze=None, stop
                     return (buf[9:12].decode() or "closed"), time.monotonic() - t0
                 buf += chunk
                 if b"\r\n\r\n" in buf:
-                    return buf[9:12].decode(), time.monotonic() - t0
+                    took = time.monotonic() - t0
+                    if answer is not None:
+                        _read_rest(s, buf, answer)
+                    return buf[9:12].decode(), took
             limit = len(body) if stop_after is None else stop_after
             if sent < limit and time.monotonic() >= nxt:
                 piece = body[sent:min(sent + step, limit)]
@@ -408,6 +518,16 @@ def _send_paced(port: int, size: int, step: int, every: float, freeze=None, stop
         if timer is not None:
             timer.cancel()
         s.close()
+
+
+def _read_rest(s: socket.socket, buf: bytes, answer: list) -> None:
+    s.settimeout(10)
+    try:
+        while chunk := s.recv(65536):
+            buf += chunk
+    except OSError:
+        pass
+    answer.append(buf)
 
 
 def _stopper(pid: int, seconds: float):
@@ -473,10 +593,20 @@ def test_a_client_that_really_stalls_is_still_cut_on_the_loops_running_time(serv
     """The other side: a client that sends 64 KiB and then nothing is cut by the stall rule after the grace of
     RUNNING time — with the server stopped for 2 s on the way, at about grace + 2 s, well before the deadline."""
     proc, port = server
-    status, took = _send_paced(port, 1 * MIB, 64 * KIB, 0.1, freeze=_stopper(proc.pid, 2.0), stop_after=64 * KIB)
+    answer: list = []
+    status, took = _send_paced(port, 1 * MIB, 64 * KIB, 0.1, freeze=_stopper(proc.pid, 2.0), stop_after=64 * KIB,
+                               answer=answer)
     grace = http_limits.BODY_MIN_RATE_GRACE_S
     assert status == "408", (status, took)
-    assert grace + 1.5 <= took <= grace + 2.0 + 3.0, took
+    # the 2 s stop is not charged to the client (load can only make this later, never earlier)
+    assert took >= grace + 1.5, took
+    # fix wave 25 (E-A successor, R-HYGIENE L1): was also `took <= grace + 5.0`, a wall-clock upper bound that load
+    # can break (the cut moves later by any loop lag, by design). What it guarded — a rule that judges the CLIENT cut
+    # the body, not the 30 s deadline ("not received within") or the protocol's backstop (a close with no 408) — is
+    # read from the answer. Either client rule may fire first: the stall rule (a) "stalled for", or the arrival
+    # projection (c) "cannot complete" — after a loop stop the wait can wake with the stall clock just under the grace
+    # while the total waiting is past it (seen in a full-suite run: (c) at 6.97 s).
+    assert answer and (b"request body stalled for" in answer[0] or b"cannot complete" in answer[0]), (took, answer[:1])
 
 
 def test_loop_lag_counts_only_time_the_loop_was_behind():

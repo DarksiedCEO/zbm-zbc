@@ -17,7 +17,7 @@ import api
 import config as config_mod
 import models
 import ports as ports_mod
-from helpers import ANDRE_TOKEN, SEED_PATH, Harness, base_env, codes, rid
+from helpers import SEED_PATH, Harness, base_env, codes
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 MONEYISH = re.compile(r"(amount|price|money|payout|balance|currency|fee|earning|usd|cents|salary|wage|cost)", re.I)
@@ -105,7 +105,7 @@ def test_g4_every_adverse_item_cites_a_rule_in_force():
     assert all(u["rule_id"] != "CN-06" for u in j2["unmet"])
 
 
-def test_g5_seed_hash_pinned():
+def test_g5_seed_hash_pinned(tmp_path):
     data = SEED_PATH.read_bytes()
     assert hashlib.sha256(data).hexdigest() == config_mod.PINNED_SEED_SHA256
     adr = (SRC.parents[2] / "docs" / "adr" / "0008-clipper-network-architecture.md").read_text()
@@ -113,7 +113,7 @@ def test_g5_seed_hash_pinned():
     with pytest.raises(RuntimeError, match="differs from the pinned seed hash"):
         config_mod.load(base_env(CN_RULES_SEED_SHA256="a" * 64))
     with pytest.raises(RuntimeError, match="CN_ALLOW_UNPINNED_SEED"):
-        config_mod.load(base_env(CN_RULES_SEED_PATH="/tmp/other.json"))
+        config_mod.load(base_env(CN_RULES_SEED_PATH=str(tmp_path / "other.json")))   # wave 25: no literal /tmp path
 
 
 def test_g5_tampered_seed_refuses_start(tmp_path):
@@ -141,7 +141,9 @@ def test_g6_log_chain_tamper_refuses_start(tmp_path):
     lines = log.read_bytes().split(b"\n")
     lines[3] = lines[3].replace(b'"applicant"', b'"active"', 1) if b'"applicant"' in lines[3] else lines[3][:-5] + b'0000}'
     log.write_bytes(b"\n".join(lines))
-    with pytest.raises(Exception, match="(chain|hash|JSON|canonical)"):
+    # wave 25 (scout B Low): the store's own refusal, not any exception whose text says "hash" ("unhashable type")
+    from store import StoreCorrupt
+    with pytest.raises(StoreCorrupt, match="(chain|hash|JSON|canonical)"):
         Harness(data_dir=str(tmp_path / "d"), ledger=h.ledger)
 
 

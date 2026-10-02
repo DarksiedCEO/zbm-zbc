@@ -1264,7 +1264,6 @@ class ComplianceService:
 
     def _process_source(self, src: Source, raw: bytes, fetched_at: str, rows: list[dict], op: str,
                         events: list[str]) -> tuple[list[str], int, int]:
-        now = self._now()
         snap = i06_change_watcher.snapshot(raw)
         prev = self.snapshots.get(src.url)
         made: list[str] = []

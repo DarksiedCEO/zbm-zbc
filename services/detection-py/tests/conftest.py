@@ -11,4 +11,5 @@ if str(SRC) not in sys.path:
 # anywhere. This is a fixed test-only value, never used outside tests —
 # real deployments must set their own via the environment.
 TEST_SERVICE_TOKEN = "test-shared-secret-do-not-use-in-production"
-os.environ.setdefault("ZBM_SERVICE_TOKEN", TEST_SERVICE_TOKEN)
+# Fix wave 25 (D1): always the test token, never one the shell exports (test_fix25_test_token.py).
+os.environ["ZBM_SERVICE_TOKEN"] = TEST_SERVICE_TOKEN

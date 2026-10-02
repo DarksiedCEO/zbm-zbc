@@ -408,7 +408,7 @@ class PayoutsMixin:
                 payables = sorted((self.db["payables"][p["payable_id"]] for p in cands[pid]
                                    if self.db["payables"][p["payable_id"]]["status"] in RUNNABLE
                                    and p["payable_id"] not in live_now), key=lambda p: p["payable_id"])
-                good, per = [], []
+                good = []
                 for p in payables:
                     rs = self._payable_reasons(p, inputs)
                     if rs:

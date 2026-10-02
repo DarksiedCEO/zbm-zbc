@@ -180,18 +180,21 @@ def test_l2_reviewer_test_schema_edge(rt):
 
 def test_l4_a_test_session_leaves_no_new_directory_in_the_temp_dir(tmp_path):
     """A child pytest session (harness tests: repositories, engine trees, the git isolation dir, pytest's own
-    tmp_path) with a fresh TMPDIR leaves it empty except the deliberately shared Go build cache."""
+    tmp_path) with a fresh TMPDIR leaves it empty. Wave 25 (scout B Low; R-HYGIENE: a suite's TMPDIR is empty at
+    its end): the Go build cache the sandbox double shares used to stay behind as `dlv-test-gocache` (hundreds of MB
+    in the host /tmp, by design); it now lives in the session root unless DLV_TEST_GOCACHE names a cache to keep."""
     tmpdir = tmp_path / "t"
     tmpdir.mkdir()
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
     env["TMPDIR"] = str(tmpdir)
+    env.pop("DLV_TEST_GOCACHE", None)
     r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                         "tests/test_cert_scenarios.py::test_s1_clean_loop_reaches_awaiting_review",
                         "tests/test_round20.py::test_n20_d4_pytest_rootdir_is_the_process_working_directory"],
                        cwd=SERVICE_ROOT, env=env, capture_output=True, text=True, timeout=600)
     assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
     left = sorted(p.name for p in tmpdir.iterdir())
-    assert left in ([], ["dlv-test-gocache"]), left
+    assert left == [], left
 
 
 # ====================================================================== L3: R4 stays strict

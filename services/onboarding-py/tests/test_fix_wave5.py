@@ -32,7 +32,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -272,7 +272,10 @@ def test_new2_queue_wait_limit_is_503_not_422():
         t = time.monotonic()
         r = c.post("/onboarding/clients/client_a/intake/facts", json=MAX_FACTS)
         assert r.status_code == 503 and "Retry-After" in r.headers, r.text
-        assert 0.25 <= time.monotonic() - t < 5
+        # fix wave 25 (R-HYGIENE L1): the wall-clock upper bound (< 5 s) is gone — the 503 itself shows the wait gave
+        # up (the budget is held for the whole test, so a wait without a limit would never answer); the lower bound
+        # shows it waited its scan_wait_seconds first (load can only lengthen it)
+        assert time.monotonic() - t >= 0.25
     finally:
         gate.release_for_test()
 
@@ -306,16 +309,41 @@ def test_new2_real_uvicorn_hostile_bodies_are_still_refused_quickly(stack):
     c = httpx.Client(base_url=stack.base, headers=AUTH, timeout=60)
     assert c.post("/onboarding/clients", json=start_body("host_a")).status_code == 201
     # a max-size body whose LAST string carries a credential: refused 422
+    # Fix wave 25 (scout A O2; R-HYGIENE L1): "quickly" is the SERVER's CPU for the request (Linux /proc: utime +
+    # stime of the onboarding process), not the client's wall clock on a possibly starved box; a request that hung
+    # without using CPU raises at the client's timeout (60 s). Where /proc is not available the CPU is not asserted.
+    pid = stack.pid()
     facts = [_fact(i, BENIGN_VALUE) for i in range(199)] + [_fact(199, "the shopify password is Tangerine!42")]
-    t = time.monotonic()
+    c0 = _proc_cpu_s(pid)
     r = c.post("/onboarding/clients/host_a/intake/facts", json={"facts": facts})
-    assert r.status_code == 422 and time.monotonic() - t < 5, (r.status_code, r.text[:200])
+    cpu = _cpu_since(pid, c0)
+    print(f"credential body: {r.status_code}, server CPU {cpu}")
+    assert r.status_code == 422, (r.status_code, r.text[:200])
+    assert cpu is None or cpu < 5, cpu
     # adversarial max-size text (the round-3 pathological shapes): answered
     # quickly (credential refusal, a check, or the CPU budget), never hung
     for unit in ("a@", "login=", "user:", "eyJ-"):
-        t = time.monotonic()
+        c0 = _proc_cpu_s(pid)
         r = c.post("/onboarding/clients/host_a/access/website-scan", json={"html": unit * (499_000 // len(unit))})
-        assert r.status_code in (200, 422) and time.monotonic() - t < 10, (unit, r.status_code, r.text[:200])
+        cpu = _cpu_since(pid, c0)
+        print(f"{unit!r} x max: {r.status_code}, server CPU {cpu}")
+        assert r.status_code in (200, 422), (unit, r.status_code, r.text[:200])
+        assert cpu is None or cpu < 10, (unit, cpu)
+
+
+def _proc_cpu_s(pid: int) -> float | None:
+    """utime + stime of process `pid` in seconds (Linux /proc), None elsewhere (fix wave 25)."""
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            f = fh.read().rsplit(")", 1)[1].split()
+        return (int(f[11]) + int(f[12])) / os.sysconf("SC_CLK_TCK")
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _cpu_since(pid: int, c0: float | None) -> float | None:
+    c1 = _proc_cpu_s(pid)
+    return None if c0 is None or c1 is None else c1 - c0
 
 
 # =============================================================================
@@ -342,6 +370,30 @@ def _read_status(sock: socket.socket, timeout: float = 10) -> int:
     except (ConnectionResetError, socket.timeout):
         return 0
     return int(data.split(b" ", 2)[1]) if data.startswith(b"HTTP/") else 0
+
+
+# fix wave 25 (R-HYGIENE L1): the head-deadline tests wait at most this long for the server to close the socket and no
+# longer assert `closed <= 4.5` (a wall-clock bound). The fast stack's head deadline is 2 s; the default is 10 s and
+# uvicorn's keep-alive timer starts only after a response — so a close inside this window can only be the narrowed head
+# deadline's (a server ignoring ONBOARDING_REQUEST_HEAD_TIMEOUT_SECONDS closes at 10 s: after the window).
+_HEAD_WAIT_S = 8.0
+
+
+def _server_closed_count(socks: list[socket.socket]) -> int:
+    """How many of `socks` the server has closed (EOF / reset); the sockets are left blocking."""
+    n = 0
+    for s in socks:
+        s.setblocking(False)
+        try:
+            if s.recv(1) == b"":
+                n += 1
+        except BlockingIOError:
+            pass
+        except OSError:
+            n += 1
+        finally:
+            s.setblocking(True)
+    return n
 
 
 def _closed_within(sock: socket.socket, bound: float) -> float | None:
@@ -391,8 +443,9 @@ def test_new3_idle_and_partial_head_connections_are_closed(fast_stack, opening):
     with socket.create_connection(("127.0.0.1", fast_stack.port), timeout=10) as s:
         if opening:
             s.sendall(opening)
-        closed = _closed_within(s, 8)
-    assert closed is not None and closed <= 4.5, f"connection still open (opening={opening!r})"
+        closed = _closed_within(s, _HEAD_WAIT_S)
+    # fix wave 25 (R-HYGIENE L1): was `closed <= 4.5`; see _HEAD_WAIT_S
+    assert closed is not None, f"connection still open (opening={opening!r})"
 
 
 def test_new3_trickled_head_is_cut_off_at_the_deadline(fast_stack):
@@ -400,7 +453,7 @@ def test_new3_trickled_head_is_cut_off_at_the_deadline(fast_stack):
         s.sendall(b"GET /health HTTP/1.1\r\nHost: x\r\nX-Slow: ")
         t0 = time.monotonic()
         closed = None
-        while time.monotonic() - t0 < 10:
+        while time.monotonic() - t0 < _HEAD_WAIT_S:
             try:
                 s.sendall(b"a")
             except OSError:
@@ -415,17 +468,27 @@ def test_new3_trickled_head_is_cut_off_at_the_deadline(fast_stack):
                 except OSError:
                     closed = time.monotonic() - t0
                     break
-        assert closed is not None and closed <= 4.5, closed
+        assert closed is not None, closed  # fix wave 25 (R-HYGIENE L1): was `closed <= 4.5`; see _HEAD_WAIT_S
 
 
 def test_new3_trickled_body_is_answered_408_at_the_body_deadline(fast_stack):
     with socket.create_connection(("127.0.0.1", fast_stack.port), timeout=10) as s:
         s.sendall((f"POST /onboarding/clients/x/messages HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TEST_SERVICE_TOKEN}\r\n"
                    "Content-Type: application/json\r\nContent-Length: 1000\r\n\r\n{").encode())
-        t0 = time.monotonic()
-        status = _read_status(s, 8)
-        took = time.monotonic() - t0
-    assert status == 408 and took < 5, (status, took)
+        s.settimeout(_HEAD_WAIT_S)
+        raw = b""
+        try:
+            while b"refused" not in raw:  # the 408's detail ends "...; refused"
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                raw += chunk
+        except (ConnectionResetError, socket.timeout):
+            pass
+    # fix wave 25 (R-HYGIENE L1): was `status == 408 and took < 5`. The 408's detail names the deadline that fired:
+    # only the narrowed body deadline of this stack says "within 2s" (the default says 30s)
+    assert raw.startswith(b"HTTP/1.1 408"), raw[:200]
+    assert b"request body not received within 2s" in raw, raw[:400]
 
 
 def test_new3_keep_alive_and_pipelining_still_work_and_idle_keep_alive_closes(fast_stack):
@@ -459,9 +522,11 @@ def test_new3_health_stays_responsive_while_idle_sockets_are_held(fast_stack):
     socks = [socket.create_connection(("127.0.0.1", fast_stack.port), timeout=5) for _ in range(20)]
     try:
         for _ in range(3):
-            t = time.monotonic()
-            assert httpx.get(fast_stack.base + "/health", timeout=3).status_code == 200
-            assert time.monotonic() - t < 1
+            assert httpx.get(fast_stack.base + "/health", timeout=30).status_code == 200
+            # fix wave 25 (R-HYGIENE L1): was `time.monotonic() - t < 1`. Answered WHILE the idle sockets were held:
+            # right after the answer the server has not yet closed one of them (it closes them at its own 2 s head
+            # deadline) — an implementation that served /health only once they were gone fails here
+            assert _server_closed_count(socks) == 0
         time.sleep(3.5)
         still_open = 0
         for s in socks:

@@ -105,11 +105,11 @@ amendments".
 ```bash
 cd services/delivery-py
 uv sync --frozen                     # python 3.12 or 3.13 (pytest is in the dev group); the harness comes from the pinned deer-flow git source (uv.lock)
-.venv/bin/python -m pytest -q        # 651 tests (wave 23), no network, no Docker needed (the Docker live module skips with its reason);
+.venv/bin/python -m pytest -q        # counts: docs/test-counts.md (CI-generated); no network, no Docker needed (the Docker live module skips with its reason);
                                      # cargo, go and node must be on PATH (the toolchain module runs the toy fixtures for real);
-                                     # the live tests need a free port in 18800-18849 (DLV_TEST_PORT_RANGE=lo-hi moves them);
-                                     # passes with TMPDIR behind a symlink too (wave 21, N20-D-4); live-run logs go to the
-                                     # gitignored docs/evidence/dept28/_runs/ — no test rewrites a tracked file (N20-D-1)
+                                     # the live tests bind OS-assigned ports (DLV_TEST_PORT_RANGE=lo-hi keeps them in a range; wave 25);
+                                     # passes with TMPDIR behind a symlink too (wave 21, N20-D-4); live-run logs go to
+                                     # $TMPDIR/dlv-live-runs (DLV_LIVE_LOG_DIR moves them; wave 24) — no test writes in the tree
 ruff check src tests devtools
 
 # a clean environment: the gate refuses ANY name outside the allowlist (DLV_*, LEDGER_SERVICE_*, PATH, HOME, LANG,
@@ -130,6 +130,35 @@ Day one: with no Docker daemon `/health` says `sandbox: unavailable` and every r
 with no provider key (the vault is not wired; `env:DLV_*` references only with `DLV_NON_PRODUCTION=1`) every run
 is 503 `LLM_NOT_CONFIGURED`; with no ledger every write is 503. Nothing is queued for later.
 
+Every other variable `src/` reads (wave 25: these were named in no README or ADR; `tests/test_env_documented.py`
+now fails on any that is not):
+
+- **Refusal switches — setting any of them refuses to start**: `DLV_ALLOW_HOST_BASH`, `DLV_ALLOW_LOCAL_SANDBOX`,
+  `DLV_ALLOW_GIT_REMOTE`, `DLV_ALLOW_NETWORK`, `DLV_ALLOW_PUSH`, `DLV_ALLOW_UNSAFE` (with
+  `DLV_ALLOW_UNPINNED_CONFIG` and `DLV_DEERFLOW_CONFIG_SHA256`): no such switch exists — nothing unlocks the
+  unconditional denies or the config pin. `DLV_VAULT` also refuses (the vault is not built).
+  `DLV_ALLOW_PATH_SOURCE=1` (accept a deer-flow harness that was NOT installed from the pinned git commit — a
+  local path install, whose code the commit pin cannot vouch for) is accepted only with `DLV_NON_PRODUCTION=1`.
+- **One value accepted**: `DLV_RUNTIME` (`deerflow_embedded`), `DLV_SANDBOX` (`docker`), `DLV_MEMORY` (`off`).
+- **Paths** (defaults inside the service; every pinned file is still checked against its pin):
+  `DLV_DEERFLOW_CONFIG` (`config/deerflow.engine.yaml`), `DLV_EXTENSIONS_CONFIG` (`config/extensions_config.json`),
+  `DLV_PROMPTS_DIR` (`prompts/`), `DLV_SEED_DIR` (`seed/`).
+- **Model and egress**: `DLV_LLM_API_BASE` (an https URL with a lower-case host; required for
+  `DLV_LLM_PROVIDER=openai_compatible`), `DLV_EGRESS_EXTRA_HOSTS` (hosts besides the provider's that
+  `DLV_EGRESS_ALLOW_HOSTS` may list), `DLV_EGRESS_DEFAULT_TIMEOUT_S` (10, at most 10),
+  `DLV_EGRESS_LLM_READ_TIMEOUT_S` (60, at most 60).
+- **Run limits**: `DLV_RUN_WALL_CLOCK_S` (2700, 60..86400; `DLV_CMD_TIMEOUT_S` may not exceed it),
+  `DLV_MAX_ROUNDS_PER_FINDING` (5, 1..5), `DLV_SUBAGENT_TIMEOUT_S` (900), `DLV_SUBAGENT_MAX_TURNS` (50),
+  `DLV_RECURSION_LIMIT` (200, 10..200), `DLV_SANDBOX_MEM` (`4g`) and `DLV_SANDBOX_CPUS` (`2`) for the container.
+  `DLV_MAX_FINDINGS` (200, 1..200): the most findings a run holds — a findings document over it, or a failing review
+  whose reopened plus new findings exceed it, is a 422 schema answer and nothing is recorded (wave 25: it was parsed
+  and applied nowhere, so a lower value changed nothing and a review could open a run of up to 400).
+- **Server tuning**, read once at start by `serve.py` (a non-numeric or non-positive value refuses to start):
+  `DLV_REQUEST_HEAD_TIMEOUT_SECONDS` (10), `DLV_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `DLV_LIMIT_CONCURRENCY` (128 open
+  connections, then 503), `DLV_SWITCH_INTERVAL_SECONDS` (0.001), `DLV_DRAINS_MAX` (512 concurrent drains).
+- `DLV_LIVE_PORT_RANGE` is no longer read (wave 25: it was parsed into a setting nothing used); the live tests'
+  range is the suite's `DLV_TEST_PORT_RANGE`.
+
 ## Routes
 
 | Route | Caller | Purpose |
@@ -149,7 +178,7 @@ Headers: `Authorization: Bearer <DLV_SERVICE_TOKEN>`, `X-DLV-Caller-Token`, `X-A
 
 `src/zbm_delivery/` (see ADR 0011's module map) · `config/deerflow.engine.yaml` (pinned) · `seed/` (pinned) ·
 `prompts/` (the Superpowers forks, `CHANGES.md`) · `skills/` (empty, manifested) · `docker/` · `devtools/` ·
-`tests/` (scenarios S1-S12, attacks A1-A13, the 255-subset property, guardrails G1-G14, live L1/L2, the round-18
+`tests/` (scenarios S1-S12, attacks A1-A13, the 255-subset property, guardrails G1-G14 (G7 and G8 share `test_g7_g8_…`), live L1/L2, the round-18
 findings N18-S-1..9 / N18-E-1..7 in `test_round18.py`, the round-19 findings N19-E-1..6 / N19-A-1..13 in
 `test_round19.py` and `test_live_round19.py`) · `src/zbm_delivery/adapters/tools/` (the pinned resolver and pytest
 plugin shipped into every container) ·

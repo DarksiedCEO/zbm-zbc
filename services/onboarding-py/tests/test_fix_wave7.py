@@ -78,20 +78,18 @@ def test_new5_lanes_route_by_size_and_a_small_body_never_waits_for_the_large_lan
         with pytest.raises(ServiceBusy):
             with lanes.hold(17 * 1024):
                 pass
-        # ... and a small body is admitted at once, without waiting for it
-        t = time.monotonic()
+        # ... and a small body is admitted at once, without waiting for it. Fix wave 25 (scout A O2; R-HYGIENE L1):
+        # no wall-clock bound — with max_waiting 0 nothing can wait: the large lane (held) would have raised
+        # ServiceBusy, so being admitted IS the proof it is not behind the large lane.
         with lanes.hold(40):
             pass
-        assert time.monotonic() - t < 0.05
         # small bodies are serialized among themselves in their own lane
         s = lanes.hold(40)
         s.__enter__()
         try:
-            t = time.monotonic()
-            with pytest.raises(ServiceBusy):
-                with lanes.hold(40):  # small queue full (max_waiting 0) -> busy, not a wait on the large lane
+            with pytest.raises(ServiceBusy):  # small queue full (max_waiting 0) -> busy, not a wait on the large lane
+                with lanes.hold(40):
                     pass
-            assert time.monotonic() - t < 0.05
         finally:
             s.__exit__(None, None, None)
     finally:
@@ -213,14 +211,26 @@ def test_new5_the_large_lane_is_held_through_the_handler_and_the_service_lock_is
     t1 = threading.Thread(target=big, args=("first",))
     t1.start()
     assert inside.wait(10)  # the first large body is in its redaction (handler running, lane held)
-    t = time.monotonic()
-    r = c.post("/onboarding/clients/client_a/messages", json=SMALL_MESSAGE)
-    msg_dt = time.monotonic() - t
-    assert r.status_code == 200 and msg_dt < 1.0, (r.status_code, msg_dt)  # not behind the lock, not behind the lane
+    # Fix wave 25 (scout A O2; R-HYGIENE L1): the first large body is HELD in its redaction until `release`, so a
+    # message behind the lock or the lane could not be answered at all; it must be answered while the hold lasts
+    # (it was a 1 s wall-clock bound).
+    got: list = []
+    m = threading.Thread(target=lambda: got.append(c.post("/onboarding/clients/client_a/messages", json=SMALL_MESSAGE)))
+    m.start()
+    m.join(30)
+    assert got and got[0].status_code == 200, got  # not behind the lock, not behind the lane
     t2 = threading.Thread(target=big, args=("second",))
     t2.start()
-    time.sleep(0.3)
-    assert "second" not in results  # the second large body waits for the lane
+    # Fix wave 25 (scout A O3): wait until the second large body is QUEUED for the large lane — it used to sleep
+    # 0.3 s and assert its absence, which also held when, on a loaded box, the second request had not even reached
+    # the lane yet (nothing was measured).
+    # (the lane's `waiting` count, read under its lock — E-A review: the first draft held on to the private list,
+    # which `_grant` replaces with a new one)
+    large = c.app.state.scan_lanes.large
+    deadline = time.monotonic() + 10
+    while large.waiting == 0 and "second" not in results and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert large.waiting == 1 and "second" not in results, (large.waiting, results)  # it waits for the lane
     released_at = time.monotonic()
     release.set()
     t1.join(30)

@@ -29,7 +29,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -457,9 +456,18 @@ def test_e6_a_pending_admission_can_be_cancelled_and_frees_the_service_slot():
     the whole RED check. Now the operator cancels it (recorded first), the slot is free at once, and the review whose
     containers were still running is refused when they finish — nothing admitted, no child run."""
     h = Harness(scenario=scenario_s1() + scenario_s1())
+    in_box, gate = threading.Event(), threading.Event()
     try:
         run1 = h.submit(two_findings(h.base_sha)).json()["run_id"]
         assert h.run(run1)["status"] == "awaiting_review"
+        real = h.docker.run
+
+        def hold(argv, **kw):            # wave 25 (scout B M2): the admission's RED container is HELD, not timed
+            if [str(x) for x in argv][:1] == ["exec"] and any("-admission-" in str(x) for x in argv):
+                in_box.set()
+                gate.wait(120)
+            return real(argv, **kw)
+        h.docker.run = hold
         nf = finding("N9-1", line=15, class_hint="argument_validation",
                      reproduction=f"run {HANG_PATH}::test_clamp_hangs: clamp(5, 3, 0) answers 3", expected="ValueError",
                      observed="3", reproduction_test={"path": HANG_PATH, "content": HANG_RT})
@@ -468,17 +476,23 @@ def test_e6_a_pending_admission_can_be_cancelled_and_frees_the_service_slot():
         res = {}
         th = threading.Thread(target=lambda: res.setdefault("a", h.post(f"/dlv/v1/fix-runs/{run1}/review", body)))
         th.start()
-        t0 = time.monotonic()
-        while not h.events("reproduction_red_check_started") and time.monotonic() - t0 < 60:
-            time.sleep(0.05)
+        assert in_box.wait(60), "the admission's RED container never ran"
         adm = h.events("reproduction_red_check_started")[0]["payload"]["admission_id"]
-        t0 = time.monotonic()
-        rc = h.post(f"/dlv/v1/fix-runs/{adm}/cancel", {"request_id": rid(), "reason": "stop the pending review"},
-                    caller="andre_session")
-        took = time.monotonic() - t0
-        assert rc.status_code == 200 and took < 0.5, (rc.status_code, rc.text, took)
+        got = {}
+        ct = threading.Thread(target=lambda: got.update(rc=h.post(
+            f"/dlv/v1/fix-runs/{adm}/cancel", {"request_id": rid(), "reason": "stop the pending review"},
+            caller="andre_session")))
+        ct.start()
+        ct.join(60)                                          # a bound on a stall only
+        answered_while_running = not ct.is_alive() and not gate.is_set()
+        # the slot is free at once — while the cancelled admission's container still runs
+        rd = h.post("/dlv/v1/fix-runs", two_findings(h.base_sha)) if answered_while_running else None
+        gate.set()
+        ct.join(60)
+        rc = got["rc"]
+        assert answered_while_running, "the cancel waited for the admission's running container"
+        assert rc.status_code == 200, (rc.status_code, rc.text)
         assert h.events("admission_cancelled") and h.events("admission_cancelled")[0]["payload"]["admission_id"] == adm
-        rd = h.post("/dlv/v1/fix-runs", two_findings(h.base_sha))       # the slot is free at once
         assert rd.status_code == 202, rd.text
         th.join(120)
         a = res["a"]
@@ -492,11 +506,9 @@ def test_e6_a_pending_admission_can_be_cancelled_and_frees_the_service_slot():
         # collided with the first attempt's records. The cancel is the admission's answer: the replay gets it, with
         # nothing recorded or run again — also after a restart.
         n_events = len(h.ledger.entries())
-        t0 = time.monotonic()
         again = h.post(f"/dlv/v1/fix-runs/{run1}/review", body)
         assert again.status_code == 409 and "cancelled" in again.text, again.text
-        assert time.monotonic() - t0 < 1.0
-        assert _nothing_ran_again(h, n_events)
+        assert _nothing_ran_again(h, n_events)             # (wave 25: the proof; the old `< 1.0` s bound added nothing)
         h.close()
         h2 = Harness(tmp=h.tmp, ledger=h.ledger, clock=h.clock, scenario=[])
         try:
@@ -506,6 +518,7 @@ def test_e6_a_pending_admission_can_be_cancelled_and_frees_the_service_slot():
         finally:
             h2.close()
     finally:
+        gate.set()
         h.svc.wait_idle(240)
         h.close()
 

@@ -443,9 +443,12 @@ def test_dossier_update_cost_does_not_grow_with_the_store(monkeypatch):
     big = {f"x{i}": CustomerDossier(customer_id=f"x{i}", call_history=[f"c{j}" for j in range(50)])
            for i in range(20_000)}
     monkeypatch.setattr(api, "_dossiers", big)
-    t = time.perf_counter()
+    # fix wave 25 (scout A F3; R-HYGIENE L1): the process's CPU time, not the wall clock — the request runs in the
+    # TestClient's portal thread of this process; what grows with the store is work, and a starved box only
+    # lengthens the wall clock. Same bound.
+    t = time.process_time()
     r = client.post("/agents/customer-dossier/update", json=_calls(["new"]))
-    elapsed = time.perf_counter() - t
+    elapsed = time.process_time() - t
     assert elapsed < 0.25, elapsed
     assert r.status_code == 200 and len(r.json()["dossiers"]) == 1
     assert len(api._dossiers) == 20_001
@@ -471,9 +474,9 @@ def test_missed_call_detection_is_not_quadratic_in_calls_from_one_number():
     events = [CallEvent(call_id=f"c{i}", phone_number="+12125550101", direction="inbound", status="missed",
                         started_at=base + timedelta(minutes=i), line_id="l") for i in range(1000)]
     missed_call_detection.detect(events[:10], now=base)
-    t = time.perf_counter()
+    t = time.thread_time()                 # fix wave 25 (scout A F3; R-HYGIENE L1): this thread's CPU, not wall
     tasks = missed_call_detection.detect(events, now=base)
-    assert time.perf_counter() - t < 0.25
+    assert time.thread_time() - t < 0.25
     assert len(tasks) == 1000
 
 
@@ -511,10 +514,12 @@ def test_gate_decisions_for_a_max_batch_do_not_reread_the_tz_database():
     # otherwise stop after 100 new numbers at one instant.
     g = _gate(Clock(T0), max_tracked_keys=10_000, max_new_keys_per_hour=10_000, new_key_burst=10_000)
     _contact(g, "+12125550000")  # warm
-    t = time.perf_counter()
+    # fix wave 25 (scout A F3; R-HYGIENE L1): CPU time of this thread — re-reading tz files from disk costs CPU
+    # (open/read/parse) as well as I/O wait; with the cache the 1000 decisions are pure CPU. Same bound.
+    t = time.thread_time()
     for i in range(1, 1000):
         assert _contact(g, f"+1212{2_000_000 + i}", customer_id=f"c{i}") is None
-    assert time.perf_counter() - t < 1.0
+    assert time.thread_time() - t < 1.0
 
 
 def test_resolve_timezone_cache_is_bounded_and_still_fails_closed():

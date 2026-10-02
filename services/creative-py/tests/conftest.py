@@ -18,7 +18,8 @@ if str(TESTS) not in sys.path:
 # configured" and every test that needs a ledger injects a fake.
 TEST_SERVICE_TOKEN = "test-shared-secret-do-not-use-in-production"
 TEST_FOUNDER_TOKEN = "test-andre-approval-token-do-not-use"
-os.environ.setdefault("CREATIVE_SERVICE_TOKEN", TEST_SERVICE_TOKEN)
+# Fix wave 25 (D1): always the test token, never one the shell exports (test_fix25_test_token.py).
+os.environ["CREATIVE_SERVICE_TOKEN"] = TEST_SERVICE_TOKEN
 os.environ.pop("LEDGER_SERVICE_URL", None)
 os.environ.pop("LEDGER_SERVICE_TOKEN", None)
 
@@ -183,3 +184,63 @@ def free_port() -> int:
         _HANDED_OUT.append(port)
         return port
     raise RuntimeError(f"no free port in CREATIVE_TEST_PORTS={spec}")
+
+
+def start_serve(extra_env: dict | None = None, attempts: int = 5, timeout: float = 30.0):
+    """Fix wave 25 (scout A C5/C6; R-HYGIENE L2): `python3 serve.py` on a port from `free_port()` (OS-assigned, or
+    CREATIVE_TEST_PORTS), accepted only once THIS child has logged its own bind on it ("Uvicorn running on ..."):
+    a port picked free a moment earlier can be another process's, and its /health would answer for it. A child that
+    exits before announcing (e.g. it lost the port) is reaped and another port is tried; any other failure kills
+    and reaps the child before raising. Returns (proc, port). The child's output goes to an unlinked temp file
+    (nothing is left behind); stop it with `stop_serve`."""
+    import subprocess
+    import tempfile
+    import time
+
+    import httpx
+
+    last = None
+    for _ in range(attempts):
+        port = free_port()
+        env = {**os.environ, "CREATIVE_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "CREATIVE_PORT": str(port),
+               **(extra_env or {})}
+        env.pop("LEDGER_SERVICE_URL", None)
+        env.pop("LEDGER_SERVICE_TOKEN", None)
+        out = tempfile.TemporaryFile()
+        proc = subprocess.Popen([sys.executable, "serve.py"], cwd=SRC, env=env, stdout=out, stderr=subprocess.STDOUT)
+        proc._creative_out = out  # closed by stop_serve
+        announced = f"Uvicorn running on http://127.0.0.1:{port}".encode()
+        try:
+            deadline = time.monotonic() + timeout
+            while proc.poll() is None and announced not in os.pread(out.fileno(), os.fstat(out.fileno()).st_size, 0):
+                if time.monotonic() > deadline:
+                    raise RuntimeError("creative-py did not start: " + _tail(out))
+                time.sleep(0.05)
+            if proc.poll() is None:
+                if httpx.get(f"http://127.0.0.1:{port}/health", timeout=10).status_code != 200:
+                    raise RuntimeError("creative-py's /health did not answer 200")
+                return proc, port
+            last = _tail(out)
+        except BaseException:
+            stop_serve(proc)
+            raise
+        stop_serve(proc)
+    raise RuntimeError(f"creative-py could not bind a port in {attempts} attempts: {last}")
+
+
+def _tail(out) -> str:
+    return os.pread(out.fileno(), 4000, max(0, os.fstat(out.fileno()).st_size - 4000)).decode(errors="replace")
+
+
+def stop_serve(proc) -> None:
+    import subprocess
+
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    out = getattr(proc, "_creative_out", None)
+    if out is not None:
+        out.close()

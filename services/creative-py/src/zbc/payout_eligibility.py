@@ -19,7 +19,7 @@ blocker list is complete.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from shared.departments import Compliance38Port, GateResult, VerificationAttestation, VerificationIntegrityPort
 from zbc.clip_review import ClipReviewDecision, ClipSubmission

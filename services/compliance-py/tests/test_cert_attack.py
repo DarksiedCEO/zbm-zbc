@@ -3,10 +3,9 @@
 import httpx
 import pytest
 
-from fakes import FakeFetcher
 from fetcher import FetchRefused, HttpFeedFetcher
-from helpers import (ANDRE_TOKEN, CALLERS, SERVICE_TOKEN, Harness, brand_facts, client_facts, clip_facts, creator_facts,
-                     publish_facts, rid, unmet_codes)
+from helpers import (ANDRE_TOKEN, CALLERS, SERVICE_TOKEN, Harness, client_facts, clip_facts, creator_facts,
+                     rid, unmet_codes)
 
 
 def _seed(h):

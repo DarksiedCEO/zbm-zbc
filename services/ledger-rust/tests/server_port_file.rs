@@ -284,8 +284,15 @@ fn a_stop_signal_aimed_at_the_publish_window_leaves_neither_the_temp_file_nor_th
     const N: usize = 100;
     let mut report = Vec::new();
     for mode in ['T', 'P'] {
-        let (mut hit, mut stale) = (0usize, Vec::new());
-        for k in 0..N {
+        // Fix wave 25 (scout C2-6): the sample is N signals that landed IN the window, however many spawns that takes
+        // (at most 4N). The old `hit >= 90% of N spawns` failed a correct server whenever a loaded box made the
+        // poller miss the window, which says nothing about the server.
+        let (mut hit, mut stale, mut spawned) = (0usize, Vec::new(), 0usize);
+        for k in 0..4 * N {
+            if hit == N {
+                break;
+            }
+            spawned += 1;
             let s = scratch(&format!("aim{mode}{k}"));
             let pf = PortFile(s.0.join("x.port"));
             let mut srv = Srv(server(&s.0, &pf.0, &s.0.join("l.jsonl")).stderr(Stdio::null()).spawn().unwrap());
@@ -307,9 +314,9 @@ fn a_stop_signal_aimed_at_the_publish_window_leaves_neither_the_temp_file_nor_th
                 stale.push(format!("#{k}: {left:?}"));
             }
         }
-        report.push(format!("mode {mode}: n={N} signalled_in_window={hit} left_behind={} {:?}", stale.len(),
+        report.push(format!("mode {mode}: spawned={spawned} signalled_in_window={hit} left_behind={} {:?}", stale.len(),
                             stale.iter().take(3).collect::<Vec<_>>()));
-        assert!(hit * 10 >= N * 9, "the window was hit only {hit}/{N} times: {report:?}");
+        assert_eq!(hit, N, "only {hit} of {spawned} spawns were signalled inside the window: {report:?}");
     }
     eprintln!("{}", report.join("\n"));
     assert!(report.iter().all(|r| r.contains("left_behind=0 ")), "{report:#?}");

@@ -23,10 +23,13 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -81,6 +84,27 @@ class FakeLedgerClient:
         return [e for e in self.events if e["event_type"] == t]
 
 
+def _exited_unreaped(proc: subprocess.Popen) -> bool:
+    """True once ``proc`` has exited, WITHOUT reaping it (its pid — the group id — stays reserved). Where
+    ``waitid``/``WNOWAIT`` is missing, ``poll()`` (which reaps; the group kill that follows is then best effort)."""
+    if proc.returncode is not None:
+        return True
+    if hasattr(os, "waitid") and hasattr(os, "WNOWAIT"):
+        try:
+            return os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+        except ChildProcessError:
+            return True
+    return proc.poll() is not None
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the process group ``proc`` leads (``start_new_session``); a group already gone is not an error."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 class FakeDockerCli:
     """See the module docstring. ``daemon=False`` simulates ``Cannot connect to the Docker daemon``."""
 
@@ -94,6 +118,7 @@ class FakeDockerCli:
         self.binds: dict[str, dict[str, str]] = {}   # container name -> {dst: host src} for the read-only bind mounts
         self.killed: set[str] = set()             # containers a `docker kill` stopped (every later exec fails)
         self.procs: dict[str, list] = {}          # container name -> running Popen objects (kill terminates them)
+        self._procs_lock = threading.Lock()       # wave 25 (M1): a group is killed only while its leader is unreaped
         self.env_files: dict[str, dict] = {}      # container name -> the --env-file's variables (wave 22: CI=1 etc.)
         self.exec_fail_next: Optional[int] = None
         os.makedirs(self.root, exist_ok=True)
@@ -171,11 +196,11 @@ class FakeDockerCli:
             if name not in self.containers:
                 return ExecResult(1, b"", b"Error response from daemon: No such container\n")
             self.killed.add(name)
-            for proc in self.procs.pop(name, []):
-                try:
-                    proc.kill()
-                except OSError:
-                    pass
+            with self._procs_lock:
+                # wave 25 (scout B M1): the container stops — every process of every command it runs, not only the
+                # one the double started (a `node --test` file process, a cargo/go test binary outlived the suite)
+                for proc in self.procs.pop(name, []):
+                    _kill_group(proc)
             return ExecResult(0, (name + "\n").encode(), b"")
         if argv[0] == "rm":
             name = argv[-1]
@@ -277,27 +302,69 @@ class FakeDockerCli:
         full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": vol, "LANG": "C.UTF-8",
                     "PYTHONDONTWRITEBYTECODE": "1", **self.env_files.get(name, {}), **self.toolchain_env(), **env}
         try:
+            # wave 25 (scout B M1): its own process group (session), so the deadline and `docker kill` reach every
+            # process the command starts — as the real container's end does — never only the direct child
             proc = subprocess.Popen(cmd, cwd=local_cwd, stdin=subprocess.PIPE if interactive else subprocess.DEVNULL,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=full_env)
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=full_env, start_new_session=True)
         except OSError as exc:
             return ExecResult(127, b"", f"{type(exc).__name__}\n".encode())
-        self.procs.setdefault(name, []).append(proc)
-        try:
-            stdout, stderr = proc.communicate(input=(stdin or b"") if interactive else None, timeout=secs)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, stderr = proc.communicate()
-            return ExecResult(124, self._map_out(stdout or b"", vol), self._map_out(stderr or b"", vol), True)
-        finally:
-            try:
-                self.procs.get(name, []).remove(proc)
-            except ValueError:
-                pass
+        with self._procs_lock:
+            self.procs.setdefault(name, []).append(proc)
+        stdout, stderr, timed_out = self._finish(proc, (stdin or b"") if interactive else None, secs)
+        if timed_out:
+            return ExecResult(124, self._map_out(stdout, vol), self._map_out(stderr, vol), True)
         if name in self.killed:
             return ExecResult(137, self._map_out(stdout, vol), self._map_out(stderr, vol) + b"\n[killed]\n")
         out, err = self._map_out(stdout, vol), self._map_out(stderr, vol)
         truncated = len(out) > output_cap
         return ExecResult(proc.returncode, out[:output_cap], err[:output_cap], False, truncated)
+
+    def _finish(self, proc: subprocess.Popen, stdin: Optional[bytes], secs: float) -> tuple[bytes, bytes, bool]:
+        """Feed ``stdin``, wait for the command's own process until ``secs``, then kill its whole process group — on
+        the deadline AND after a normal exit — and only then read the pipes to their end (a left-behind process
+        holding them no longer delays the answer). Stricter than a real container after a normal exit: there a
+        process the command left in the background lives until the container stops; the double has no container
+        process to tie it to, and the engine never leaves one on purpose. The group is killed while its leader is
+        still unreaped (``waitid(WNOWAIT)``), so its id cannot have been reused by an unrelated process; ``docker
+        kill`` takes the same lock."""
+        out: list[bytes] = []
+        err: list[bytes] = []
+
+        def pump(stream, sink):
+            sink.append(stream.read())
+
+        def feed():
+            try:
+                proc.stdin.write(stdin or b"")
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except (OSError, ValueError):
+                    pass
+        threads = [threading.Thread(target=pump, args=(proc.stdout, out), daemon=True),
+                   threading.Thread(target=pump, args=(proc.stderr, err), daemon=True)]
+        if proc.stdin is not None:
+            threads.append(threading.Thread(target=feed, daemon=True))
+        for t in threads:
+            t.start()
+        deadline = time.monotonic() + secs
+        timed_out = False
+        while not _exited_unreaped(proc):
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
+            time.sleep(0.01)
+        with self._procs_lock:
+            _kill_group(proc)
+            proc.wait()
+            for procs in self.procs.values():
+                if proc in procs:
+                    procs.remove(proc)
+        for t in threads:
+            t.join()
+        return b"".join(out), b"".join(err), timed_out
 
     @staticmethod
     def toolchain_env() -> dict:
@@ -308,7 +375,9 @@ class FakeDockerCli:
         with its container; the double's processes run on the host, so their stand-in is the suite's temp root (the
         suite removes it), never the host's /tmp (a go test the double kills on its deadline left go-build* there)."""
         real_home = os.path.expanduser("~")
-        gocache = os.path.join(_tmproot.ORIG_TMP, "dlv-test-gocache")   # deliberately cross-session (L4)
+        # wave 25 (scout B Low, R-HYGIENE): the session's own cache, removed with the session root — no longer left in
+        # the host temp dir; DLV_TEST_GOCACHE names a cache an operator wants to keep across sessions (outside TMPDIR)
+        gocache = os.environ.get("DLV_TEST_GOCACHE") or os.path.join(_tmproot.SESSION_TMP, "dlv-test-gocache")
         os.makedirs(gocache, exist_ok=True)
         return {"RUSTUP_HOME": os.environ.get("RUSTUP_HOME", os.path.join(real_home, ".rustup")),
                 "CARGO_HOME": os.environ.get("CARGO_HOME", os.path.join(real_home, ".cargo")),

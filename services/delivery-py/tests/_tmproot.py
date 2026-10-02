@@ -4,7 +4,8 @@ Imported first by conftest. Everything the suite, the product under test and pyt
 ``tempfile`` (harness dirs, engine trees, gitport's per-process dir, pytest's tmp_path base, child processes that
 honour TMPDIR) lands under SESSION_TMP, which pytest_unconfigure removes — a full run leaves no new directory in the
 host temp dir. SESSION_TMP is created under the host temp dir AS GIVEN (never realpath'd), so a symlinked TMPDIR
-is still exercised as a symlink. ORIG_TMP is the host temp dir, for the few deliberate cross-session caches."""
+is still exercised as a symlink. ORIG_TMP is the host temp dir (wave 25: nothing is kept there any more; the Go
+build cache moved into the session root)."""
 import atexit
 import os
 import shutil

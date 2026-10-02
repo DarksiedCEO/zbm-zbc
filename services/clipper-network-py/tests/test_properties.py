@@ -8,10 +8,8 @@ Seeded randomness, so a failure reproduces.
 
 from __future__ import annotations
 
-import itertools
 import random
 from datetime import timedelta
-from zoneinfo import ZoneInfo
 
 import pytest
 

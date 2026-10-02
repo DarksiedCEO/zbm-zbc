@@ -29,7 +29,7 @@ The body has its own deadline and size cap in ``api.InputLimits``
 Tuning (env, read at start): COMPLIANCE_REQUEST_HEAD_TIMEOUT_SECONDS
 (default 10), COMPLIANCE_KEEP_ALIVE_TIMEOUT_SECONDS (default 5),
 COMPLIANCE_LIMIT_CONCURRENCY (default 128),
-COMPLIANCE_SWITCH_INTERVAL_SECONDS (default 0.001).
+COMPLIANCE_SWITCH_INTERVAL_SECONDS (default 0.001; only 0.0001 .. 0.05).
 
 The switch interval (fix wave 7, NEW-5): the interpreter lets a thread hold
 the GIL for ``sys.getswitchinterval()`` (5 ms by default) before another
@@ -44,6 +44,7 @@ three chatty threads beside it, nothing when it runs alone.
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 
@@ -67,7 +68,42 @@ MAX_HEADER_BYTES = 16 * 1024
 REQUEST_HEAD_TIMEOUT_S: float = _positive("COMPLIANCE_REQUEST_HEAD_TIMEOUT_SECONDS", 10.0)
 KEEP_ALIVE_TIMEOUT_S: int = _positive("COMPLIANCE_KEEP_ALIVE_TIMEOUT_SECONDS", 5, int)
 LIMIT_CONCURRENCY: int = _positive("COMPLIANCE_LIMIT_CONCURRENCY", 128, int)
-SWITCH_INTERVAL_S: float = _positive("COMPLIANCE_SWITCH_INTERVAL_SECONDS", 0.001)
+# Fix wave 25 (scout C5-3, the class of detection-py's wave-24 F3 / wave-25 H5): the
+# switch interval was any positive number — 3600 s (a thread may hold the GIL for an
+# hour: what the setting is for is gone) or 1e-9 s (a switch storm) started, and nan
+# passed the `<= 0` check. Now only 100 us .. 50 ms starts (unset or empty: 1 ms), and
+# run() checks the interval actually in force in whole microseconds (CPython keeps it
+# truncated to the microsecond: 0.0001 reads back as 9.999999999999999e-05) and prints it.
+SWITCH_INTERVAL_MIN_US = 100
+SWITCH_INTERVAL_MAX_US = 50_000
+
+
+def _switch_interval(name: str = "COMPLIANCE_SWITCH_INTERVAL_SECONDS", default: float = 0.001) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not (SWITCH_INTERVAL_MIN_US / 1e6 <= value <= SWITCH_INTERVAL_MAX_US / 1e6):  # refuses nan and inf too
+        raise RuntimeError(f"{name}={raw!r} is invalid: expected seconds, {SWITCH_INTERVAL_MIN_US / 1e6:g} <= value "
+                           f"<= {SWITCH_INTERVAL_MAX_US / 1e6:g}. This service refuses to start.")
+    return value
+
+
+def apply_switch_interval(value: float) -> int:
+    """Sets the interval; returns the one in force in whole microseconds. RuntimeError unless it is within
+    [MIN_US, MAX_US] and is `value` to within the microsecond CPython truncates."""
+    sys.setswitchinterval(value)
+    in_force_us = round(sys.getswitchinterval() * 1_000_000)
+    if not (SWITCH_INTERVAL_MIN_US <= in_force_us <= SWITCH_INTERVAL_MAX_US) or abs(in_force_us - value * 1_000_000) >= 1:
+        raise RuntimeError(f"the GIL switch interval in force is {in_force_us} us, not the {value!r} s set "
+                           f"(COMPLIANCE_SWITCH_INTERVAL_SECONDS): this service refuses to start")
+    return in_force_us
+
+
+SWITCH_INTERVAL_S: float = _switch_interval()
 
 
 # Graceful close (fix wave 21, L1) with the wave-22 bounds (G5/G6: bounded reads
@@ -135,5 +171,6 @@ def uvicorn_kwargs() -> dict:
 
 
 def run(app, host: str, port: int) -> None:
-    sys.setswitchinterval(SWITCH_INTERVAL_S)
+    in_force_us = apply_switch_interval(SWITCH_INTERVAL_S)
+    print(f"compliance-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
     uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())

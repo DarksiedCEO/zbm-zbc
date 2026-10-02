@@ -130,22 +130,30 @@ class _Drip(httpx.SyncByteStream):
 
     def __init__(self, body: bytes, gap: float):
         self.body, self.gap = body, gap
+        self.yielded = 0
 
     def __iter__(self):
         for b in self.body:
             time.sleep(self.gap)
+            self.yielded += 1
             yield bytes([b])
 
 
 def test_n14_7_total_deadline_is_wall_clock_not_per_byte():
     body = json.dumps(ALLOWED_C1).encode()
+    # Fix wave 25 (R-HYGIENE L1): no wall-clock upper bound. The drip needs len(body) x 0.05 s (sleep is a lower
+    # bound: load only lengthens it), far past the 1.0 s deadline; a per-byte timeout (each gap 0.05 s < 1.0 s) would
+    # read the whole body and allow. The client must give up mid-stream: refused, with bytes left unread.
+    assert len(body) * 0.05 > 2 * 1.0
+    drip = _Drip(body, 0.05)
     c = HttpComplianceDepartment("http://compliance.test", "svc-token", "caller-token", timeout=1.0,
-                                 transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=_Drip(body, 0.05))))
+                                 transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=drip)))
     t0 = time.monotonic()
     r = c.rule("client_1", "client", {})
     dt = time.monotonic() - t0
+    print(f"deadline call ended after {dt:.2f} s, {drip.yielded} of {len(body)} bytes read")
     assert r.allowed is False, r
-    assert dt < 2.5, f"call took {dt:.1f}s with a 1.0s deadline"
+    assert drip.yielded < len(body), (drip.yielded, len(body), dt)
 
 
 @pytest.mark.parametrize("payload", [

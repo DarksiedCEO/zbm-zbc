@@ -10,7 +10,8 @@ if str(SRC) not in sys.path:
 # isn't set, so tests need a value in place before `from api import app`
 # runs anywhere. Fixed test-only value, never used outside tests.
 TEST_SERVICE_TOKEN = "test-shared-secret-do-not-use-in-production"
-os.environ.setdefault("FULFILLMENT_SERVICE_TOKEN", TEST_SERVICE_TOKEN)
+# Fix wave 25 (D1): always the test token, never one the shell exports (test_fix25_test_token.py).
+os.environ["FULFILLMENT_SERVICE_TOKEN"] = TEST_SERVICE_TOKEN
 
 
 import pytest  # noqa: E402

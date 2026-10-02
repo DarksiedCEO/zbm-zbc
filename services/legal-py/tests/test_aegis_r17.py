@@ -342,7 +342,6 @@ def test_n17_3_malformed_port_answers_are_refused_and_recorded():
 # ================================================================== wave-17 class sweep: huge / drip / malformed thin-client answers
 
 def test_fix18_compliance_client_huge_drip_and_malformed_answers_are_never_created_or_verified():
-    import time
     import httpx
     from compliance_client import HttpCompliance
 
@@ -351,15 +350,25 @@ def test_fix18_compliance_client_huge_drip_and_malformed_answers_are_never_creat
     huge = b'{"proposal": {"proposal_id": "p"}, "pad": "' + b"x" * (1024 * 1024 + 10) + b'"}'
     assert client(lambda r: httpx.Response(201, content=huge)).create_proposal("r", {}).status == "unavailable"
 
+    # wave 25 (scout B M2): ordered by state, not by a wall-clock bound — the answer drips a byte every 0.05 s and
+    # never ends until the test ends it; the 0.5 s budget must return while it is still dripping
+    import threading
+    done = threading.Event()
+
     def drip(req):
         def gen():
-            for _ in range(40):
-                time.sleep(0.05)
+            while not done.wait(0.05):
                 yield b" "
         return httpx.Response(201, content=gen())
-    t0 = time.monotonic()
-    assert client(drip, timeout=0.5).create_proposal("r", {}).status == "unavailable"
-    assert time.monotonic() - t0 < 1.5
+    got = {}
+    t = threading.Thread(target=lambda: got.update(a=client(drip, timeout=0.5).create_proposal("r", {})))
+    t.start()
+    t.join(60)                                        # a bound on a stall, never on the answer's speed
+    returned_while_dripping = not t.is_alive() and not done.is_set()
+    done.set()
+    t.join(60)
+    assert returned_while_dripping, "the client read the dripping answer past its 0.5 s budget"
+    assert got["a"].status == "unavailable"
     for bad in ({"register_version": True, "row": {"id": "CQ-11-M", "effective_status": "verified"}},
                 {"register_version": 3, "row": {"id": "CQ-11-M", "effective_status": ["verified"]}},
                 {"register_version": 3, "row": {"id": ["CQ-11-M"], "effective_status": "verified"}},

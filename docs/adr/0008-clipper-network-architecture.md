@@ -444,3 +444,21 @@ tamper, rules register and weakening, thin clients (httpx MockTransport),
 workflows and a no-500 fuzz. A socket guard fails any test that opens a
 connection. Live run: `LEDGER_BIN=… python3 devtools/live_run.py --ports
 19350,19351,19352,19353`.
+
+## Fix wave 25 amendments (Oct 1, 2026; scout B)
+
+- `CN_VI_ACCEPT_UNPINNED` / `CN_COMPLIANCE_ACCEPT_UNPINNED` (read only when that thin client is configured; then
+  0/1, default 0, anything else refuses to start) make the V&I / Compliance thin client accept an answer that states
+  `rules_pinned: false` / `seed_pinned: false`. They were documented nowhere; the README now names them, and the
+  serve.py tuning knobs, as test/staging-only (nothing in `/health` shows them). `tests/test_env_documented.py`
+  fails on any `CN_*` variable `src/` reads that README and this ADR do not name — a switch that unlocks or weakens
+  something must be named exactly (a documented `CN_COMPLIANCE_*` glob had "covered" the Compliance switch) — and
+  holds the code to the README's description of the two switches.
+- `service.py` passed the OAuth code/state and the DOB to the V&I call through closures over names it `del`-eted
+  right after the call (ruff F821): safe only while `PortCalls.call` runs the function synchronously and once. They
+  are now bound into the call (lambda defaults); the frame's names are still deleted.
+- `tests/test_cert_attack.py` A10: the age-check replay went to an ACTIVE clipper, refused 409 CN-21 on both calls,
+  so the replay's 409 proved nothing about request-id idempotency; it now uses an applicant (200, then 409 that is
+  not CN-21). The log-tamper guardrail expects the store's `StoreCorrupt`, not any exception mentioning "hash".
+- `tests/contract_vi_runner.py` (run outside pytest, so the conftest socket guard never reached it) installs its own
+  guard, as legal-py's contract runner does; the G5 seed test no longer names a literal `/tmp` path.

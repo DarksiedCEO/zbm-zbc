@@ -145,7 +145,13 @@ Other settings (all fail closed by default): `COMPLIANCE_SANCTIONS_FRESHNESS_DAY
 (1), `COMPLIANCE_DISCLOSURE_MAX_OFFSET_S` (3), `COMPLIANCE_A11Y_MAX_AGE_DAYS`
 (30), `COMPLIANCE_WATCHER_ENABLED` (0), `COMPLIANCE_SITE_OWNER_CALLER`
 (creative_production), `COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_CYCLE` (50),
-`COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_SOURCE` (20). The seed is pinned to the
+`COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_SOURCE` (20). The launcher (`src/serve.py`; fix wave 25, scout A P4 —
+these were documented only in its docstring): `COMPLIANCE_REQUEST_HEAD_TIMEOUT_SECONDS` (10; the request head must
+arrive within it), `COMPLIANCE_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `COMPLIANCE_LIMIT_CONCURRENCY` (128; uvicorn's
+`limit_concurrency`), `COMPLIANCE_SWITCH_INTERVAL_SECONDS` (0.001; only 0.0001 .. 0.05 starts, and the interval in
+force is checked and printed before serving — fix wave 25, C5-3) and `COMPLIANCE_DRAINS_MAX` (512; graceful closes
+draining at once, ADR 0003). `COMPLIANCE_FIXTURE_DIR` is read only by `devtools/live_server.py` (the live run's
+fixture fetcher), never by the service. The seed is pinned to the
 spec's hash: `COMPLIANCE_SEED_PATH` / `COMPLIANCE_SEED_SHA256` may name
 another seed ONLY together with `COMPLIANCE_ALLOW_UNPINNED_SEED=1` (and an
 explicit `COMPLIANCE_SEED_SHA256`); the service then reports

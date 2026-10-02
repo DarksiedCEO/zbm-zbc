@@ -33,10 +33,8 @@ from __future__ import annotations
 import itertools
 import threading
 import time
-import unicodedata
 
 import pytest
-from aegis8_corpus import CAPTIONS as CORPUS8
 from aegis8_corpus import NEVER_SAY_A, NEVER_SAY_B
 from conftest import NOW
 from samples import TODAY, zbc_clip, zbc_goal
@@ -539,9 +537,21 @@ def test_n94_a_failed_first_attempt_does_not_strand_the_waiter(api, monkeypatch)
     a = threading.Thread(target=post, args=("a",))
     a.start()
     assert first_in.wait(20)
+    # Fix wave 25 (scout A C4): wait until b has looked its key up — while a still holds the key's in-flight marker
+    # (a is blocked in its review), so b has found it and waits on a — instead of sleeping 0.5 s, which on a loaded
+    # box let a fail before b arrived at all (b then simply ran fresh: the path under test was never taken).
+    import api as api_mod
+
+    looked, real_get = threading.Event(), api_mod.IdempotencyStore.get
+
+    def get(self, key):
+        looked.set()
+        return real_get(self, key)
+
+    monkeypatch.setattr(api_mod.IdempotencyStore, "get", get)
     b = threading.Thread(target=post, args=("b",))
     b.start()
-    time.sleep(0.5)
+    assert looked.wait(20)
     release.set()
     a.join(30)
     b.join(30)

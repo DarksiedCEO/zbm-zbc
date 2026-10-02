@@ -170,7 +170,7 @@ def test_f2_client_handoff_is_not_made_when_the_activation_ruling_cannot_be_reco
     c = client_for(svc)
     _ready_client(c)
     svc.ledger.fail_types = {"activation_ruling"}
-    svc.ledger.__class__ = FailOn  # noqa: keep events; fail from now on
+    svc.ledger.__class__ = FailOn  # keep events; fail from now on
     r = c.post("/onboarding/clients/client_a/activate")
     assert r.status_code == 503 and r.json()["proceeded"] is False, r.text
     assert svc.depts.handoff.received == []
@@ -741,11 +741,13 @@ def test_f10_generated_ids_never_look_like_credentials():
     runs INSIDE hex ids (~0.2% of ids), so the output scrub could redact an
     escalation id and the suite flaked. Ids and digests must never trip it."""
     import hashlib
-    import uuid
+    import random
 
     from redaction import find_credential
 
+    # fix wave 25 (scout A X10): seeded, so a failure is reproducible from the seed, not only from the printed id
+    rng = random.Random("onboarding-f10-ids")
     for _ in range(20000):
-        h = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+        h = hashlib.sha256(rng.randbytes(16)).hexdigest()
         for s in ("onb-" + h, "esc-" + h[:16], "cmt-" + h[:16], "iss-" + h[:16], "acl-" + h[:16], "trk-" + h[:12], h[:32] + "z"):
             assert find_credential(s) is None, s

@@ -121,8 +121,10 @@ def test_n19_a13_seconds_per_verdict_run_on_the_argv_double():
         released = [e["payload"]["elapsed_ms"] for e in h.events("engine_box_released")]
         assert len(released) >= 8                                 # suite ×3, red, green, verify, reverted, repro ×2, srconly
         per = sum(released) / len(released) / 1000
-        # recorded in the evidence folder by the wave's live run; asserted loosely here (the double is a subprocess)
-        assert per < 30 and wall < 600, (per, wall)
+        # recorded in the evidence folder by the wave's live run; printed here, never bounded (wave 25, scout B M2: a
+        # wall-clock bound on a starved runner measures the runner, and this one bounded nothing the suite relies on)
+        assert all(isinstance(ms, int) and ms >= 0 for ms in released), released
+        print(f"N19-A13 seconds per verdict run on the double: {per:.2f} (wall {wall:.1f} s, {len(released)} runs)")
     finally:
         h.close()
 
@@ -943,12 +945,13 @@ def test_n19_a7_tracked_gitconfig_and_hooks_never_run_on_the_engines_commit():
     sha = port.commit(repo, "engine commit", "body", "r")
     assert sha and not os.path.exists(os.path.join(repo, "hook-ran"))
     assert all("HOOK-RAN" not in r.stderr for _, r in seen)
+    home, hooks = gitport._isolation()       # wave 25 (C6-3): made on first use, not at import
     for argv, _ in seen:
-        assert argv[:5] == ["git", "-c", f"core.hooksPath={gitport._EMPTY_HOOKS}", "-c", "core.fsmonitor=false"], argv
+        assert argv[:5] == ["git", "-c", f"core.hooksPath={hooks}", "-c", "core.fsmonitor=false"], argv
     e = gitport.git_env()
-    assert e["GIT_CONFIG_GLOBAL"] == "/dev/null" and e["GIT_CONFIG_NOSYSTEM"] == "1" and e["HOME"] == gitport._PRIVATE_HOME
-    assert os.listdir(gitport._PRIVATE_HOME) == [] or set(os.listdir(gitport._PRIVATE_HOME)) <= {"xdg"}
-    assert os.listdir(gitport._EMPTY_HOOKS) == []
+    assert e["GIT_CONFIG_GLOBAL"] == "/dev/null" and e["GIT_CONFIG_NOSYSTEM"] == "1" and e["HOME"] == home
+    assert os.listdir(home) == [] or set(os.listdir(home)) <= {"xdg"}
+    assert os.listdir(hooks) == []
     # the tracked remote in .gitconfig is not a remote of the repository either
     assert port.remotes(repo, "r") == []
 

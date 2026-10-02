@@ -263,11 +263,20 @@ def test_n20_d10_live_port_range_spec_parser_and_no_hard_coded_range(monkeypatch
     to be the only evidence that the range "comes from the environment" while setting the variable itself — the
     conftest popped the operator's value before any test ran. That claim is now proven from outside the process by
     test_round22.py::test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests."""
+    import socket
+
     import helpers
     monkeypatch.delenv("DLV_TEST_PORT_RANGE", raising=False)
-    assert helpers.live_ports() == range(18800, 18850)
-    monkeypatch.setenv("DLV_TEST_PORT_RANGE", "18830-18839")
-    assert helpers.live_ports() == range(18830, 18840)
+    monkeypatch.delenv("ZBM_TEST_PORT_RANGE", raising=False)
+    assert helpers.live_ports() is None           # wave 25 (R-HYGIENE L2): no hard-coded default range; OS-assigned
+    with socket.socket() as s:                    # any valid range will do: one the OS hands out (binds nothing here)
+        s.bind(("127.0.0.1", 0))
+        lo = min(s.getsockname()[1], 65000)
+    monkeypatch.setenv("DLV_TEST_PORT_RANGE", f"{lo}-{lo + 9}")
+    assert helpers.live_ports() == range(lo, lo + 10)
+    monkeypatch.delenv("DLV_TEST_PORT_RANGE")
+    monkeypatch.setenv("ZBM_TEST_PORT_RANGE", f"{lo}-{lo}")
+    assert helpers.live_ports() == range(lo, lo + 1)
     monkeypatch.setenv("DLV_TEST_PORT_RANGE", "80-90")
     with pytest.raises(ValueError):
         helpers.live_ports()

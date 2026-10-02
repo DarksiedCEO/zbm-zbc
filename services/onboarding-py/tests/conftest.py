@@ -13,7 +13,8 @@ if str(SRC) not in sys.path:
 # api.py fails closed (raises at import) without ONBOARDING_SERVICE_TOKEN.
 # Fixed test-only value, never used outside tests.
 TEST_SERVICE_TOKEN = "test-shared-secret-do-not-use-in-production"
-os.environ.setdefault("ONBOARDING_SERVICE_TOKEN", TEST_SERVICE_TOKEN)
+# Fix wave 25 (D1): always the test token, never one the shell exports (test_fix25_test_token.py).
+os.environ["ONBOARDING_SERVICE_TOKEN"] = TEST_SERVICE_TOKEN
 # Make sure no developer environment leaks a real ledger/RR into the
 # module-level app used by the auth tests.
 for _k in ("LEDGER_SERVICE_URL", "LEDGER_SERVICE_TOKEN", "DETECTION_SERVICE_URL", "DETECTION_SERVICE_TOKEN"):
@@ -149,22 +150,36 @@ GOOD_GRANT = {
 }
 
 
+_HANDED_OUT: list[int] = []
+
+
 def free_test_port() -> int:
-    """A free port in the range this service's live tests may use
-    (ONBOARDING_TEST_PORT_RANGE, default 19920-19939: fix wave 4's assigned
-    range). Tests never bind outside it."""
+    """A free port for a live test: OS-assigned, or — with ONBOARDING_TEST_PORT_RANGE ("lo-hi") set — the next
+    free one of that range not handed out lately (two calls in a row never return the same port). Fix wave 25
+    (scout A O4; R-HYGIENE L2): the default used to be the literal range 19920-19939, and an exhausted range
+    SKIPPED the live tests; now there is no literal default and an exhausted range fails. Only a candidate:
+    another process can take it before the child binds it."""
     import socket
 
-    lo, hi = (int(x) for x in os.environ.get("ONBOARDING_TEST_PORT_RANGE", "19920-19939").split("-"))
+    spec = os.environ.get("ONBOARDING_TEST_PORT_RANGE", "").strip()
+    if not spec:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+    lo, hi = (int(x) for x in spec.split("-"))
+    recent = set(_HANDED_OUT[-((hi - lo + 1) // 2):]) if hi > lo else set()
     for port in range(lo, hi + 1):
+        if port in recent:
+            continue
         with socket.socket() as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # fix wave 22 (G3): TIME_WAIT is free
             try:
                 s.bind(("127.0.0.1", port))
-                return port
             except OSError:
                 continue
-    pytest.skip(f"no free port in {lo}-{hi}")
+        _HANDED_OUT.append(port)
+        return port
+    raise RuntimeError(f"no free port left in ONBOARDING_TEST_PORT_RANGE={spec}")
 
 
 @pytest.fixture

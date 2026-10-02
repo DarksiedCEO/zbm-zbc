@@ -1,10 +1,9 @@
 """Unit tests, one block per ZBM intelligence (1-8)."""
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 
-from conftest import NOW
 from samples import TODAY, zbm_clearance, zbm_requirements, zbm_work
 from shared.departments import NotBuiltLegal37
 from shared.errors import GuardrailViolation, PreconditionFailed

@@ -13,10 +13,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from clock import FixedClock, iso
+from clock import iso
 from fakes import FakeA11y
-from helpers import (ANDRE_TOKEN, NOW, SEED_PATH, SEED_ROWS, Harness, brand_facts, client_facts, clip_facts, creator_facts, deep,
-                     publish_facts, rid, unmet_codes, unmet_ids)
+from helpers import (ANDRE_TOKEN, NOW, SEED_PATH, SEED_ROWS, Harness, brand_facts, client_facts, clip_facts, creator_facts, publish_facts, rid, unmet_codes, unmet_ids)
 from ports import A11yAnswer
 
 UTC = timezone.utc

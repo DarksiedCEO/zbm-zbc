@@ -31,7 +31,6 @@ from __future__ import annotations
 import http.client
 import json
 import socket
-import statistics
 import threading
 import time
 
@@ -188,27 +187,38 @@ def test_small_bodies_never_wait_behind_a_held_large_lane(monkeypatch):
     here would be observed."""
     small, large = _padded_small_and_large()
     real_parse = api._parse
+    # Fix wave 25 (scout A F3/F4; R-HYGIENE L1): the large parses are HELD (not 400 ms each) until the small body has
+    # been answered; a small body queued behind the large lane could therefore never be answered — it used to sleep
+    # 0.1 s for "the first large parse is in progress" and bound the small body at 0.2 s of wall clock.
+    in_large, release = threading.Event(), threading.Event()
 
-    def slow_large_parse(model, body):
+    def held_large_parse(model, body):
         if len(body) > api._SMALL_BODY_BYTES:
-            time.sleep(0.4)
+            in_large.set()
+            assert release.wait(60)
         return real_parse(model, body)
 
-    monkeypatch.setattr(api, "_parse", slow_large_parse)
+    monkeypatch.setattr(api, "_parse", held_large_parse)
     results: list[int] = []
+    small_result: list = []
     with TestClient(api.app) as shared:
         threads = [threading.Thread(target=lambda: results.append(
             shared.post(DETECT, headers=HEADERS, content=large).status_code)) for _ in range(3)]
         for t in threads:
             t.start()
-        time.sleep(0.1)  # the first large parse is in progress, two are queued
-        t0 = time.perf_counter()
-        r = shared.post(DETECT, headers=HEADERS, content=small)
-        took = time.perf_counter() - t0
-        for t in threads:
-            t.join()
-    assert r.status_code == 200, r.text[:200]
-    assert took < 0.2, f"small body waited {took * 1000:.0f} ms behind large parses"
+        try:
+            assert in_large.wait(30)       # a large parse holds the lane; the others queue behind it
+            s = threading.Thread(target=lambda: small_result.append(shared.post(DETECT, headers=HEADERS, content=small)))
+            s.start()
+            s.join(30)
+            answered = not s.is_alive()
+        finally:
+            release.set()
+            for t in threads:
+                t.join()
+        s.join()
+    assert answered, "the small body was not answered while the large lane was held"
+    assert small_result[0].status_code == 200, small_result[0].text[:200]
     assert results == [200, 200, 200], results
 
 
@@ -261,8 +271,10 @@ def test_large_bodies_beyond_the_byte_budget_are_refused_before_being_read(monke
         t0 = time.perf_counter()
         r = shared.post(DETECT, headers=HEADERS, content=large)
         took = time.perf_counter() - t0
+        # fix wave 25 (scout A F3; R-HYGIENE L1): waiting for the refill (0.5 s) would have ended in a 200; the 503 is
+        # the proof it was refused within the 0.2 s wait. (`took < 0.35` was wall clock; printed now.)
+        print(f"budget refusal in {took * 1000:.0f} ms")
         assert r.status_code == 503, r.text[:200]
-        assert took < 0.35, f"the refusal took {took * 1000:.0f} ms"
         assert r.headers.get("Retry-After") == "1"
         assert "budget" in r.json()["detail"]
         assert shared.post(DETECT, headers=HEADERS, content=small).status_code == 200
@@ -273,9 +285,9 @@ def test_large_bodies_beyond_the_byte_budget_are_refused_before_being_read(monke
 def test_large_bodies_are_admitted_in_arrival_order(monkeypatch):
     small, large = _padded_small_and_large()
     monkeypatch.setattr(api, "_LARGE_BURST_BYTES", len(large))
-    monkeypatch.setattr(api, "_LARGE_BYTES_PER_S", len(large) * 8)  # one every 125 ms after the burst
-    monkeypatch.setattr(api, "_LARGE_WAIT_S", 5.0)
-    done: list[int] = []
+    monkeypatch.setattr(api, "_LARGE_BYTES_PER_S", len(large))  # one per second after the burst
+    monkeypatch.setattr(api, "_LARGE_WAIT_S", 10.0)
+    done: list = []
     lock = threading.Lock()
     with TestClient(api.app) as shared:
         def post(i: int):
@@ -287,13 +299,17 @@ def test_large_bodies_are_admitted_in_arrival_order(monkeypatch):
         for t in threads:
             t.start()
             time.sleep(0.04)
-        t0 = time.perf_counter()
         r = shared.post(DETECT, headers=HEADERS, content=small)  # meanwhile: not behind them
-        small_took = time.perf_counter() - t0
+        with lock:
+            done.append(("small", r.status_code))
         for t in threads:
             t.join()
-    assert r.status_code == 200 and small_took < 0.1, small_took
-    assert done == [(0, 200), (1, 200), (2, 200), (3, 200)], done
+    # fix wave 25 (scout A F3; R-HYGIENE L1): ORDER, not a 0.1 s wall-clock bound — behind the budget the small body
+    # would come after the last large one (the larges are admitted one per second); it must come before the second.
+    assert r.status_code == 200, r.text[:200]
+    larges = [d for d in done if d[0] != "small"]
+    assert larges == [(0, 200), (1, 200), (2, 200), (3, 200)], done
+    assert done.index(("small", 200)) < done.index((1, 200)), done
 
 
 def test_chunked_body_pays_the_budget_as_it_streams(monkeypatch):
