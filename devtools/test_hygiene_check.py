@@ -156,7 +156,7 @@ class Dynamic(unittest.TestCase):
         rc, out = self.r.suite("sleep 304 >/dev/null 2>&1 &")
         self.assertEqual(rc, 1, out)
         self.assertRegex(out, r"HYGIENE R4-procs go:probe: pid \d+ \(ppid \d+, pgid \d+, stat \w+\) still alive: "
-                              r"command sleep 304\n")
+                              r"command .*sleep 304")   # before its exec the child's command line is still sh's
 
     def test_r4_portable_path_a_clean_suite_passes(self):
         """W26-1: on the non-subreaper path (macOS) the checker's own `ps` helper was reported as the suite's."""
@@ -173,7 +173,7 @@ class Dynamic(unittest.TestCase):
         self.assertIn("subreaper False", out)
         self.assertEqual(rc, 1, out)
         self.assertRegex(out, r"HYGIENE R4-procs go:probe: pid \d+ \(ppid \d+, pgid \d+, stat \w+\) still alive: "
-                              r"command sleep 305\n")
+                              r"command .*sleep 305")
         self.assertNotIn("ps -axo", out)
 
     def test_r4_ps_table_with_a_subreaper_does_not_report_its_own_ps(self):
@@ -190,7 +190,7 @@ class Dynamic(unittest.TestCase):
         # a child of a background subshell: found as a descendant of the suite's process group
         rc, out = self.r.suite("( sh -c 'sleep 306' & wait ) >/dev/null 2>&1 &", portable=True)
         self.assertEqual(rc, 1, out)
-        self.assertIn("command sleep 306", out)
+        self.assertRegex(out, r"still alive: command .*sleep 306")
         self.assertNotIn("ps -axo", out)
 
     def test_r6_write_then_check(self):
@@ -199,6 +199,85 @@ class Dynamic(unittest.TestCase):
         self.assertIn("| `go:probe` | 2 | go test -v |", (self.r.root / "docs" / "test-counts.md").read_text())
         rc, out = self.r.suite(r"printf '=== RUN   TestA\n=== RUN   TestB\n'", "go")
         self.assertEqual(rc, 0, out)
+
+    def _platform_only(self, row: int, entries: list) -> None:
+        """docs row for go:probe = ``row`` (cargo-counted) and the suite's platform_only_tests = ``entries``."""
+        allow = self.r.root / "devtools" / "hygiene_allowlist.json"
+        d = json.loads(allow.read_text())
+        d["platform_only_tests"] = {"go:probe": entries}
+        allow.write_text(json.dumps(d))
+        (self.r.root / "docs" / "test-counts.md").write_text(
+            f"| Suite | Tests | Counted by |\n|---|---|---|\n| `go:probe` | {row} | cargo test |\n")
+        self.r.git("add", "-A")
+        self.r.git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "platform-only")
+
+    @staticmethod
+    def _cargo(*names: str) -> str:
+        lines = "".join(f"echo 'test {n} ... ok'; " for n in names)
+        return lines + f"echo 'test result: ok. {len(names)} passed; 0 failed; 0 ignored; 0 measured; 0 filtered out'"
+
+    LINUX_ONLY = [{"test": "f5_linux_only", "only_on": ["linux"], "why": "probe: #[cfg(target_os = \"linux\")]"}]
+
+    def test_r6_platform_only_test_absent_on_another_os_passes_and_is_stated(self):
+        """W26-5: on macOS ledger-rust counted one test fewer and R6 said nothing; now the summary names it."""
+        self._platform_only(3, self.LINUX_ONLY)
+        rc, out = self.r.suite(self._cargo("a", "b"), "cargo", "--count-os", "darwin")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("tests counted: 2 (1 platform-only test(s) not on darwin: f5_linux_only); "
+                      "docs/test-counts.md row 3", out)
+        rc, out = self.r.suite(self._cargo("a", "b", "f5_linux_only"), "cargo", "--count-os", "linux")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("tests counted: 3; skips: 0", out)
+
+    def test_r6_platform_only_test_running_where_it_should_not_fails(self):
+        """The masking case: the platform gate removed (the test runs on darwin) while another test is lost — the
+        count alone still matches the per-OS number; the name check does not."""
+        self._platform_only(3, self.LINUX_ONLY)
+        rc, out = self.r.suite(self._cargo("a", "f5_linux_only"), "cargo", "--count-os", "darwin")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("HYGIENE R6-counts go:probe: platform-only test f5_linux_only (only on linux) ran on darwin", out)
+
+    def test_r6_platform_only_test_missing_where_it_should_run_fails(self):
+        self._platform_only(3, self.LINUX_ONLY)
+        rc, out = self.r.suite(self._cargo("a", "b", "c"), "cargo", "--count-os", "linux")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("HYGIENE R6-counts go:probe: platform-only test f5_linux_only (only on linux) did not run "
+                      "on linux", out)
+
+    def test_r6_a_lost_test_on_another_os_still_fails(self):
+        self._platform_only(3, self.LINUX_ONLY)
+        rc, out = self.r.suite(self._cargo("a"), "cargo", "--count-os", "darwin")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("HYGIENE R6-counts go:probe: docs/test-counts.md says 3 (expected 2 on darwin (1 platform-only "
+                      "test(s) not on darwin: f5_linux_only)), this run counted 1", out)
+
+    def test_r6_write_on_another_os_counts_the_absent_platform_only_test(self):
+        self._platform_only(9, self.LINUX_ONLY)
+        rc, out = self.r.suite(self._cargo("a", "b"), "cargo", "--count-os", "darwin", "--counts", "write")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("| `go:probe` | 3 | cargo test | `f5_linux_only` only on linux |",
+                      (self.r.root / "docs" / "test-counts.md").read_text())
+
+    def test_r6_platform_only_entries_need_named_tests(self):
+        self._platform_only(2, self.LINUX_ONLY)
+        rc, out = self.r.suite(r"printf '# tests 2\n'", "node", "--count-os", "darwin")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("platform_only_tests are listed but a node run's output names no tests", out)
+
+    def test_counts_check_platform_column_must_match_the_allowlist(self):
+        allow = self.r.root / "devtools" / "hygiene_allowlist.json"
+        d = json.loads(allow.read_text())
+        d["platform_only_tests"] = {"rust:ledger-rust": self.LINUX_ONLY}
+        d["count_os_delta"] = {"rust:ledger-rust": {"darwin": {"delta": -1, "why": "old"}}}
+        allow.write_text(json.dumps(d))
+        (self.r.root / "docs" / "test-counts.md").write_text(
+            "| Suite | Tests | Counted by | Platform-only tests |\n|---|---|---|---|\n"
+            "| `rust:ledger-rust` | 114 | cargo test | — |\n")
+        rc, out = self.r.run("counts", "--check")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("row `rust:ledger-rust` platform-only column is '—', the allowlist says "
+                      "'`f5_linux_only` only on linux'", out)
+        self.assertIn("allowlist key count_os_delta is no longer read", out)
 
     def test_cargo_counts_and_ignored_tests(self):
         line = "test result: ok. {} passed; 0 failed; {} ignored; 0 measured; 0 filtered out"

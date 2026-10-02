@@ -178,7 +178,7 @@ and on Linux the wrapper is its child subreaper. The job fails when, for that ru
 | R3 tmp | the private TMPDIR is not empty at the end, or a new entry appeared directly in `/tmp` |
 | R4 procs | a process of the suite is still alive after its command exited (it is then listed and killed by PID) |
 | R5 skips | a test was skipped (Python), skipped (Go `--- SKIP`), ignored (cargo) or skipped (node) for a reason not on the suite's `expected_skips` list in `devtools/hygiene_allowlist.json` — scout C3-5: before, `-rs` only printed skips |
-| R6 counts | the suite's test count differs from its row in `docs/test-counts.md` (regenerate with `--counts write`) |
+| R6 counts | the suite's test count differs from its row in `docs/test-counts.md` (regenerate with `--counts write`), less the platform-only tests named for other OSes (below), which must be absent by name |
 
 `lint` (job `hygiene-static`): L1 a test asserting an upper bound on a wall-clock delta against a literal — or
 against a name bound only to a literal (`PROMPT = 1.0`, `const PROMPT: Duration = Duration::from_secs(1)`, `const
@@ -188,9 +188,15 @@ ci.yml comments, also when it is wrapped across two lines (a count tied to a res
 is history and allowed); L4 the shared files (`graceful_close.py` and its pin, the two shared graceful-close test
 files, `tests/_procinfo.py`, `tests/test_procinfo.py`, `tests/test_shared_ports.py`) differing between services.
 Exceptions need an entry with a reason in `devtools/hygiene_allowlist.json`; `--strict-allowlist` also fails an
-entry that matches nothing. `docs/test-counts.md` holds the Linux counts; a suite that compiles fewer tests on
-another OS declares it in the allowlist's `count_os_delta` with the reason (today: ledger-rust, −1 on macOS — one
-`#[cfg(target_os = "linux")]` test).
+entry that matches nothing. `docs/test-counts.md` counts every test of a suite; a test that exists on some OSes
+only is NAMED in the allowlist's `platform_only_tests` (test name, `only_on`, reason) and in the generated file's
+last column (`counts --check` fails if the two differ). On another OS, R6 expects exactly those tests absent — by
+name — and the count lower by that many, and prints that in its summary line; a listed test that runs where it
+should not, or is missing where it should run, fails the job. Today: ledger-rust's
+`f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` (`#[cfg(target_os = "linux")]`), so macOS expects
+one test fewer. (Fix wave 26a, W26-5: this replaced `count_os_delta`, an anonymous per-OS number applied without a
+word in the output — CI #2's macOS ledger-rust job counted one fewer and R6 rightly passed, but nothing said why,
+and a lost test would have been hidden had the platform gate been removed at the same time.)
 
 The test counts are a committed, generated file: after a change that adds or removes tests, run the suite under
 `hygiene_check.py run … --counts write` and commit the changed row. Every CI test job checks its row; when two
