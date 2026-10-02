@@ -34,11 +34,13 @@ def _free_port() -> int:
     return free_live_port()
 
 
-def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1"):
+def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1", drop: tuple = ()):
     port = _free_port()
     repo, _ = make_repo(tmp)
     env = base_env(tmp, repo, llm="none")
     env.update({"DLV_PORT": str(port), "DLV_BIND_ADDR": host, **(extra or {})})
+    for name in drop:
+        env.pop(name, None)
     env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
     log_path = Path(tmp) / "serve.log"
     with open(log_path, "wb") as log:     # wave 25 (scout B Low): the child holds its own descriptor; ours is closed
@@ -185,14 +187,22 @@ def test_l2_a_sigterm_stop_leaves_no_temp_dir_of_the_service(tmp_path):
     """Wave 24 (E6 sweep, found by the suite's /tmp check): uvicorn re-raises the SIGTERM it captured once its graceful
     shutdown is done; with the default disposition the process then died OF the signal (-15) and no atexit handler
     ran — every stop left the service's own temp dirs (gitport's dlv-git-*, the in-memory home, the sandbox base)
-    in TMPDIR, in production as in the suite. Now the stop is a normal exit (143): the dirs are removed."""
+    in TMPDIR, in production as in the suite. Now the stop is a normal exit (143): the dirs are removed.
+
+    Wave 25 (E-B): the precondition was "gitport's dlv-git-* dir exists at start" — true only while gitport made it at
+    import; since C6-3 (d0876fd) it is made on the first git command, which a started service with no Docker and no
+    model never runs, so this test failed on every run (found by the first full suite after d0876fd). The service now
+    runs in-memory mode (no DLV_DATA_DIR), whose harness home `dlv-mem-*` IS made at start and removed only by an exit
+    handler: that is the dir the SIGTERM stop must remove. And, live, C6-3 itself: no dlv-git-* before any git."""
     own_tmp = tmp_path / "svc-tmp"
     own_tmp.mkdir()
     (tmp_path / "w").mkdir()
-    proc, port, _, _ = _start(str(tmp_path / "w"), extra={"TMPDIR": str(own_tmp)})
+    proc, port, _, _ = _start(str(tmp_path / "w"), extra={"TMPDIR": str(own_tmp)}, drop=("DLV_DATA_DIR",))
     try:
         assert HTTP.get(f"http://127.0.0.1:{port}/health", timeout=5).status_code == 200
-        assert any(p.name.startswith("dlv-git-") for p in own_tmp.iterdir()), list(own_tmp.iterdir())
+        names = sorted(p.name for p in own_tmp.iterdir())
+        assert any(n.startswith("dlv-mem-") for n in names), names
+        assert not any(n.startswith("dlv-git-") for n in names), names
     finally:
         _stop(proc)
     assert proc.returncode == 143, proc.returncode
