@@ -18,7 +18,7 @@ from typing import Optional
 import chart as C
 import money as M
 import reasons as R
-from clock import iso, parse_iso
+from clock import iso
 from errors import Conflict, Forbidden, Invalid, NotFound
 from intelligences import i01_journal as J
 from intelligences import i06_tax as I6

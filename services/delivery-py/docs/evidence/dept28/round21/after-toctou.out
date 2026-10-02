@@ -1,0 +1,7 @@
+CONTROL 422 reproduction_not_red ['REPRODUCTION_NOT_RED'] runs 0
+.A submit 503 None
+.B submit 503 None
+.C review 422 {"detail":"finding N2-1: the reviewer-authored reproduction tests/test_review_clamp2.py::test_clamp_ok could not be run RED on the base commit (no engine or no sandbox): refused, never admitted unchecked","code":"reproduction_red_unverified","finding_id":"N2-1","target":"tests/test_review_clamp2.py:
+.
+4 passed in 16.94s
+EXIT=0

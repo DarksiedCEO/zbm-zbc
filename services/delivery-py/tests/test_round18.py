@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 from datetime import timedelta
+from typing import Optional
 
 import httpx
 import pytest
@@ -128,7 +129,7 @@ def test_n18_s2_forged_sessionfinish_is_test_infra_and_the_round_fails():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "3"})
     try:
         run, f = _one(h)
-        assert run["status"] == "failed" and f["state"] != "fixed"
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks"
         rf = [e["payload"] for e in h.events("round_failed") if e["payload"].get("why") == "test_infra_changed"]
         assert rf and "services/toy-py/tests/conftest.py" in rf[0]["paths"]
         assert run["commits"] == []
@@ -144,7 +145,7 @@ def test_n18_e3_forged_summary_line_never_becomes_the_counts():
         run, f = _one(h)
         suite_events = [e["payload"] for e in h.events("suite_run")]
         assert all(p["passed"] != 999 for p in suite_events)
-        assert f["state"] != "fixed" and run["status"] == "failed"
+        assert f["state"] != "candidate_passed_checks" and run["status"] == "failed"
         # the forged line is caught at the first engine run that sees it (the RED run's summary disagrees with junit)
         whys = {e["payload"].get("why") for e in h.events("round_failed")}
         assert whys & {"red_unknown", "suite_unknown"}, whys
@@ -193,7 +194,7 @@ def test_n18_e2_conftest_monkeypatch_is_not_a_fix():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
     try:
         run, f = _one(h)
-        assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == []
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks" and run["commits"] == []
         assert any(e["payload"].get("why") == "test_infra_changed" for e in h.events("round_failed"))
         with open(os.path.join(run["worktree_path"], "services/toy-py/src/toy/calc.py")) as fh:
             assert "return a - b" in fh.read()
@@ -215,7 +216,7 @@ def test_n18_e2_fix_that_lives_in_a_test_helper_is_fix_not_in_source():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
     try:
         run, f = _one(h)
-        assert run["status"] == "failed" and f["state"] != "fixed" and run["commits"] == []
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks" and run["commits"] == []
         whys = [e["payload"].get("why") for e in h.events("round_failed")]
         # wave 20 (R2a): the finding's file carries no hunk of the fix, refused before GREEN even runs
         assert "fix_not_in_source" in whys or "no_source_change" in whys or "finding_file_unchanged" in whys, whys
@@ -235,7 +236,7 @@ def test_n18_e4_pytest_ini_change_is_test_infra():
         h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
         try:
             run, f = _one(h)
-            assert run["status"] == "failed" and f["state"] != "fixed", ini
+            assert run["status"] == "failed" and f["state"] != "candidate_passed_checks", ini
             rf = [e["payload"] for e in h.events("round_failed") if e["payload"].get("why") == "test_infra_changed"]
             assert rf and "services/toy-py/pytest.ini" in rf[0]["paths"]
         finally:
@@ -250,7 +251,7 @@ def test_n18_e4_deleting_an_existing_test_file_fails_the_round():
     h = Harness(scenario=steps, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
     try:
         run, f = _one(h)
-        assert run["status"] == "failed" and f["state"] != "fixed"
+        assert run["status"] == "failed" and f["state"] != "candidate_passed_checks"
         assert any(e["payload"].get("why") == "test_deleted" for e in h.events("round_failed"))
     finally:
         h.close()
@@ -303,13 +304,15 @@ def test_n18_e1_disproof_after_engine_saw_red_is_refused():
         h.close()
 
 
-def test_n18_e1_finding_without_a_machine_runnable_reproduction_stays_open():
+def test_n18_e1_finding_without_a_machine_runnable_reproduction_is_refused_at_ingestion():
+    """Changed in wave 21 (R1, N20-D-3): this test used to accept a prose reproduction and assert the finding stayed
+    open after a DISPROOF — the prose route is removed; the document is refused 422 before any run exists."""
     h = Harness(scenario=[{"text": "DISPROOF: pytest -q tests/test_calc.py::test_percent_basic\n" + NONSENSE}, {"text": "BLOCKED: x"}])
     try:
-        run, f = _one(h, reproduction="percent(1, 4) answers 20.0 (no test named)")
-        assert f["state"] == "blocked" and run["status"] == "failed"
-        assert any(e["payload"].get("why") == "disproof_not_machine_runnable" for e in h.events("round_failed"))
-        assert not any(e["payload"].get("phase") == "disproof" for e in h.events("test_run"))
+        r = h.submit(findings_doc(h.base_sha, [finding("N1-1", reproduction="percent(1, 4) answers 20.0 (no test named)")]))
+        assert r.status_code == 422, r.text
+        assert r.json()["code"] == "reproduction_not_runnable" and h.svc.runs == {}
+        assert not h.events("fix_run_received") and h.events("fix_run_refused")
     finally:
         h.close()
 
@@ -321,7 +324,7 @@ def test_n18_e1_true_disproof_runs_the_findings_reproduction_on_the_base_tree():
     scenario = [write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                 FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"},
                 {"text": "DISPROOF: pytest --version\n" + statement}]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         doc = findings_doc(h.base_sha, [finding("N1-1"),
                                         finding("N1-2", line=11, reproduction="run tests/test_calc.py::test_percent_basic: percent(1, 4) answers 20.0",
@@ -393,7 +396,7 @@ def test_n18_s3_guardrail_records_opaque_and_the_report_counts_it():
                 {"tool_calls": [{"name": "bash", "args": {"command": "python -c 'print(1)'"}}]},
                 {"tool_calls": [{"name": "bash", "args": {"command": "ls"}}]},
                 FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"}]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         run, f = _one(h)
         assert run["status"] == "awaiting_review", run["reasons"]
@@ -413,31 +416,65 @@ def test_n18_s3_guardrail_records_opaque_and_the_report_counts_it():
 # ====================================================================== R6 / N18-S-4: deadlines, watchdog, cancel
 
 class _Trickle(httpx.SyncByteStream):
-    def __init__(self, period: float = 0.05, n: int = 10_000):
-        self.period, self.n = period, n
+    """A body that trickles one byte every ``period`` until the test ends it (``done``) — never on its own."""
+
+    def __init__(self, period: float, done: threading.Event, first: Optional[threading.Event] = None):
+        self.period, self.done, self.first = period, done, first
 
     def __iter__(self):
-        for _ in range(self.n):
-            time.sleep(self.period)
+        while not self.done.wait(self.period):
+            if self.first is not None:
+                self.first.set()
             yield b"{"
 
 
+def _returns_while_trickling(fn, done: threading.Event, stall_s: float = 60.0) -> dict:
+    """Run ``fn`` in a thread; report whether it returned while the body was still trickling (``done`` unset), and
+    what it raised. ``stall_s`` bounds a stall only; it never measures speed. Wave 25 (scout B M2)."""
+    out: dict = {}
+
+    def call():
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            out["exc"] = exc
+    t = threading.Thread(target=call, daemon=True)
+    t.start()
+    t.join(stall_s)
+    out["returned_while_trickling"] = not t.is_alive() and not done.is_set()
+    done.set()
+    t.join(stall_s)
+    return out
+
+
 def test_n18_s4_egress_total_deadline_is_enforced_by_the_client():
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"Content-Length": "100000"}, stream=_Trickle()))
+    """Wave 25 (scout B M2/M3): ordered by state, not by `< 5` / `< 1.5` wall-clock bounds and a `sleep(0.5)`. Each body
+    trickles a byte inside every per-read timeout and never ends until the test ends it: only a TOTAL deadline can
+    end the call while it still trickles."""
+    done = threading.Event()
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"Content-Length": "100000"},
+                                                             stream=_Trickle(0.05, done)))
     eg = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=1, llm_read_timeout_s=1,
                         transport=transport, env={})
-    t0 = time.monotonic()
-    with pytest.raises(E.EgressFailed, match="deadline"):
-        eg.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm", body=b"{}", run_id="r1")
-    assert time.monotonic() - t0 < 5
-    # a total deadline passed by the engine (the remaining wall clock) shortens it further
-    t0 = time.monotonic()
-    with pytest.raises(E.EgressFailed, match="deadline"):
-        eg.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm", body=b"{}", run_id="r1", deadline_s=0.3)
-    assert time.monotonic() - t0 < 1.5
-    # abort(run_id) interrupts an in-flight call from another thread
-    slow = httpx.MockTransport(lambda r: httpx.Response(200, stream=_Trickle(period=0.2, n=1000)))
-    eg2 = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=10, llm_read_timeout_s=60,
+    out = _returns_while_trickling(lambda: eg.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm",
+                                                      body=b"{}", run_id="r1"), done)
+    assert out["returned_while_trickling"] and isinstance(out.get("exc"), E.EgressFailed), out
+    assert "deadline" in str(out["exc"]), out
+    # a total deadline passed by the engine (the remaining wall clock) is enforced on its own: every other timeout of
+    # this client is 60 s, so only `deadline_s=0.3` can end the call while the body still trickles
+    done = threading.Event()
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"Content-Length": "100000"},
+                                                             stream=_Trickle(0.05, done)))
+    eg60 = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=60,
+                          llm_read_timeout_s=60, transport=transport, env={})
+    out = _returns_while_trickling(lambda: eg60.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm",
+                                                        body=b"{}", run_id="r1", deadline_s=0.3), done, stall_s=45)
+    assert out["returned_while_trickling"] and isinstance(out.get("exc"), E.EgressFailed), out
+    assert "deadline" in str(out["exc"]), out
+    # abort(run_id) interrupts an in-flight call from another thread — issued once the body is flowing (a state)
+    done, first = threading.Event(), threading.Event()
+    slow = httpx.MockTransport(lambda r: httpx.Response(200, stream=_Trickle(0.2, done, first)))
+    eg2 = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=60, llm_read_timeout_s=60,
                          transport=slow, env={})
     out = {}
 
@@ -448,10 +485,14 @@ def test_n18_s4_egress_total_deadline_is_enforced_by_the_client():
             out["exc"] = exc
     t = threading.Thread(target=call, daemon=True)
     t.start()
-    time.sleep(0.5)
-    assert eg2.abort("r2") >= 1
-    t.join(5)
-    assert not t.is_alive() and isinstance(out.get("exc"), E.EgressFailed)
+    try:
+        assert first.wait(60), "the call never started reading its body"
+        assert eg2.abort("r2") >= 1
+        t.join(60)                                    # a bound on a stall only
+        assert not t.is_alive() and not done.is_set() and isinstance(out.get("exc"), E.EgressFailed)
+    finally:
+        done.set()
+        t.join(60)
 
 
 def test_n18_s4_run_watchdog_fails_the_run_while_a_turn_is_stuck():
@@ -754,7 +795,7 @@ def test_n18_e5_suite_timeout_is_unknown_never_green():
     h = Harness(scenario=scenario)
     try:
         run, f = _one(h)
-        assert f["state"] != "fixed" and run["status"] == "failed"
+        assert f["state"] != "candidate_passed_checks" and run["status"] == "failed"
         assert run["reasons"][0]["code"] != "HARNESS_ERROR", run["reasons"]
         per = [e["payload"] for e in h.events("suite_run") if e["payload"]["phase"] == "per_finding"]
         assert per and per[-1]["status"] == "unknown" and "timed out" in per[-1]["why"]
@@ -769,7 +810,7 @@ def test_n18_e5_output_flood_is_unknown_never_green():
     h = Harness(scenario=scenario, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
     try:
         run, f = _one(h)
-        assert f["state"] != "fixed" and run["status"] == "failed"
+        assert f["state"] != "candidate_passed_checks" and run["status"] == "failed"
         assert run["reasons"][0]["code"] != "HARNESS_ERROR", run["reasons"]
         per = [e["payload"] for e in h.events("suite_run") if e["payload"]["phase"] == "per_finding"]
         assert per and per[-1]["status"] == "unknown" and "truncated" in per[-1]["why"]
@@ -789,7 +830,7 @@ BREAKOUT = ("from toy import calc\n\n\ndef test_add_sum():\n"
 def test_n18_e6_report_fences_are_longer_than_any_backtick_run_in_the_content():
     scenario = [write_test("test_fix_n1_1", BREAKOUT), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                 FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nFIXED"}]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         run, f = _one(h)
         assert run["status"] == "awaiting_review", run["reasons"]
@@ -807,7 +848,7 @@ def test_n18_e7_sweep_sites_are_validated_and_agent_numbers_trace_to_the_ledger(
     scenario = [write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"},
                 FIX_ADD, {"text": "SWEEP: src/toy/calc.py:6\nSWEEP: src/toy/nonexistent.py:999\nSWEEP: src/toy/calc.py:14\n"
                                   "SWEEP: tests/test_calc.py:2\nFIXED"}]
-    h = Harness(scenario=scenario)
+    h = Harness(scenario=scenario, pct_repro=False)  # wave 21: N1-1 alone (N1-2's reproduction tests/test_percent.py would be an unattributable baseline failure)
     try:
         run, f = _one(h)
         assert run["status"] == "awaiting_review", run["reasons"]

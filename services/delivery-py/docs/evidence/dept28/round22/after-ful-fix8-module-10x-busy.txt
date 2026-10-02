@@ -1,0 +1,13 @@
+busy pids: 22864 22865 22866 start 2026-09-30T13:03:42Z HEAD=c71e3630c87f4cb186c9b0ffe4200ad16c28ca46 mode=module Python 3.13.13
+mmap-threshold references in src/api.py: 0
+#1 exit=0 codes {'503': 102, '408': 26}; RSS base 55 peak 136 growth 81 MiB; settled_at 8.6 | 20 passed, 1 warning in 36.37s
+#2 exit=0 codes {'503': 100, '408': 28}; RSS base 55 peak 141 growth 86 MiB; settled_at 9.2 | 20 passed, 1 warning in 36.91s
+#3 exit=0 codes {'503': 103, '408': 25}; RSS base 55 peak 140 growth 85 MiB; settled_at 8.5 | 20 passed, 1 warning in 36.32s
+#4 exit=0 codes {'503': 101, '408': 27}; RSS base 55 peak 141 growth 86 MiB; settled_at 8.5 | 20 passed, 1 warning in 36.53s
+#5 exit=0 codes {'503': 100, '408': 28}; RSS base 55 peak 137 growth 82 MiB; settled_at 8.6 | 20 passed, 1 warning in 36.13s
+#6 exit=0 codes {'503': 100, '408': 28}; RSS base 55 peak 142 growth 87 MiB; settled_at 8.6 | 20 passed, 1 warning in 36.40s
+#7 exit=0 codes {'503': 101, '408': 27}; RSS base 55 peak 143 growth 88 MiB; settled_at 9.6 | 20 passed, 1 warning in 37.50s
+#8 exit=0 codes {'503': 99, '408': 29}; RSS base 55 peak 139 growth 84 MiB; settled_at 8.7 | 20 passed, 1 warning in 36.95s
+#9 exit=0 codes {'503': 99, '408': 29}; RSS base 55 peak 145 growth 90 MiB; settled_at 8.6 | 20 passed, 1 warning in 36.24s
+#10 exit=0 codes {'503': 100, '408': 28}; RSS base 55 peak 143 growth 88 MiB; settled_at 8.6 | 20 passed, 1 warning in 36.37s
+DONE 2026-09-30T13:10:08Z failed=0/10 tmp-left: 0

@@ -31,7 +31,6 @@ import inspect
 import os
 import random
 import re
-import socket
 import subprocess
 import sys
 import time
@@ -317,20 +316,51 @@ def _wait(url: str, headers=None) -> None:
 @pytest.fixture
 def lossy_ledger():
     """fake ledger server over real HTTP behind devtools/lossy_proxy.py."""
+    yield from _lossy_stack()
+
+
+def _lossy_stack(popen=subprocess.Popen):
     lp, pp = _free_port(), _free_port()
     env = {**os.environ, "FAKE_LEDGER_TOKEN": "lossy-test-ledger-token"}
-    procs = [subprocess.Popen([sys.executable, str(DEVTOOLS / "fake_ledger_server.py"), str(lp)], env=env,
-                              stderr=subprocess.DEVNULL),
-             subprocess.Popen([sys.executable, str(DEVTOOLS / "lossy_proxy.py"), str(pp), f"http://127.0.0.1:{lp}"],
-                              stderr=subprocess.DEVNULL)]
+    procs = []
+    # Fix wave 22 (G3, N21-C-6): every process is started INSIDE the try, so a failure to start the second one (or
+    # anything after the first) still stops the first — the ledger was left running (orphaned) before; and a
+    # process that ignores SIGTERM is killed, never left behind by a timeout in the cleanup.
     try:
+        procs.append(popen([sys.executable, str(DEVTOOLS / "fake_ledger_server.py"), str(lp)], env=env,
+                           stderr=subprocess.DEVNULL))
+        procs.append(popen([sys.executable, str(DEVTOOLS / "lossy_proxy.py"), str(pp), f"http://127.0.0.1:{lp}"],
+                           stderr=subprocess.DEVNULL))
         _wait(f"http://127.0.0.1:{lp}/ledger/entries")
         _wait(f"http://127.0.0.1:{pp}/__stats")
         yield f"http://127.0.0.1:{pp}", f"http://127.0.0.1:{lp}", "lossy-test-ledger-token"
     finally:
         for p in procs:
             p.terminate()
-            p.wait(timeout=5)
+        for p in procs:
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+
+
+def test_the_stack_never_orphans_the_ledger_when_the_proxy_fails_to_start():
+    """Fix wave 22 (G3, N21-C-6): the proxy's start fails after the ledger started — the ledger is stopped, not
+    left running (it was started outside the try and orphaned)."""
+    started = []
+
+    def popen(argv, **kw):
+        if "lossy_proxy.py" in argv[1]:
+            raise OSError("simulated: the proxy could not start")
+        p = subprocess.Popen(argv, **kw)
+        started.append(p)
+        return p
+
+    gen = _lossy_stack(popen)
+    with pytest.raises(OSError, match="simulated"):
+        next(gen)
+    assert len(started) == 1 and started[0].poll() is not None, "the ledger was left running"
 
 
 def test_lost_clip_response_over_real_http_lossy_proxy(lossy_ledger):
@@ -521,19 +551,56 @@ def _adversarial_inputs(n: int) -> list[str]:
             "".join(chr(0x41 + (i * 7919) % 0x2000) for i in range(n))]
 
 
+def regex_cpu(p: re.Pattern, s: str, runs: int = 3) -> float:
+    """Fix wave 25, H6 (AEGIS N24-S-11): the CPU the pattern spends on `s` (sub + search + fullmatch), this
+    thread's own CPU time, the cyclic GC off, best of `runs`. It was ONE wall-clock reading: under three busy
+    loops on a 2-CPU box the regexes measured 0.051-0.080 s against the 0.05 s bound while their CPU time stayed
+    10-20 ms — the test measured the scheduler."""
+    import gc
+
+    best = float("inf")
+    for _ in range(runs):
+        was = gc.isenabled()
+        gc.disable()
+        try:
+            t0 = time.thread_time()
+            p.sub(" ", s)
+            p.search(s)
+            p.fullmatch(s)
+            best = min(best, time.thread_time() - t0)
+        finally:
+            if was:
+                gc.enable()
+    return best
+
+
+# Fix wave 25, H6: the same three operations with a pattern that is linear by construction (one character class,
+# one quantifier) on the same input, measured right after the pattern under test. Their ratio is the work the
+# pattern does per character relative to a single scan, whatever the machine's speed or load. The CPU bound alone
+# could not tell a pattern three times slower: the worst pair costs 10-17 ms, three times that is 31-52 ms, and
+# 50 ms passed most of it. Measured (wave 25, 2-CPU box, 3 busy loops and a co-tenant, 3.12 and 3.13): the worst
+# pair's ratio 4.8-6.1; every operation done three times, 14.4-17.7. The bound sits between.
+LINEAR_REF = re.compile(r"[^\w#@]+")
+REGEX_RATIO_MAX = 9.0
+
+
 def test_lim_every_regex_in_text_module_is_linear_time():
     import shared.text as text
 
     patterns = [v for v in vars(text).values() if isinstance(v, re.Pattern)]
     assert len(patterns) >= 2
+    worst, worst_ratio, at = 0.0, 0.0, None
     for p in patterns:
         for s in _adversarial_inputs(100_000):
-            t0 = time.perf_counter()
-            p.sub(" ", s)
-            p.search(s)
-            p.fullmatch(s)
-            dt = time.perf_counter() - t0
+            dt = regex_cpu(p, s)
+            ref = regex_cpu(LINEAR_REF, s)
+            worst = max(worst, dt)
+            if dt / ref > worst_ratio:
+                worst_ratio, at = dt / ref, (p.pattern, s[:10])
             assert dt < 0.05, (p.pattern, s[:10], dt)
+            assert dt / ref < REGEX_RATIO_MAX, (p.pattern, s[:10], dt, ref)
+    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per 100 KB input (bound 50 ms); worst CPU ratio to a "
+          f"single linear scan {worst_ratio:.2f} (bound {REGEX_RATIO_MAX}) at {at!r}")
 
 
 def test_lim_text_scanners_are_linear_time():
@@ -541,14 +608,14 @@ def test_lim_text_scanners_are_linear_time():
 
     phrases = ["guaranteed returns", "get rich", "risk free", "double your money"]
     for s in _adversarial_inputs(50_000):
-        t0 = time.perf_counter()
+        t0 = time.thread_time()  # fix wave 25 (scout A C3; R-HYGIENE L1): this thread's CPU time, not the wall clock
         for p in phrases:
             text.match_phrase(s, p)
         text.obfuscation_signals(s)
         text.non_latin_letters(s)
         text.mixed_symbol_words(s)
         text.unfolded_latin_letters(s)
-        dt = time.perf_counter() - t0
+        dt = time.thread_time() - t0
         assert dt < 2.0, (s[:10], dt)
 
 

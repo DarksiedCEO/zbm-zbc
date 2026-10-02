@@ -53,7 +53,7 @@ from conftest import TEST_SERVICE_TOKEN, client_for, free_test_port, make_servic
 import ledger
 from ledger import HttpLedgerClient, LedgerWriteError
 from onboarding_schema import requests as rq
-from test_fix_wave5 import BENIGN_VALUE, MAX_FACTS, _fact, _stop, _wait_health
+from test_fix_wave5 import BENIGN_VALUE, _fact, _stop, _wait_health
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -196,15 +196,17 @@ def test_n4_a_waiter_is_admitted_when_budget_frees_and_times_out_otherwise():
     time.sleep(0.15)
     assert not got  # still waiting: nothing free
     first.__exit__(None, None, None)
-    th.join(2)
-    assert got and got[0] < 0.5
+    th.join(30)
+    # fix wave 25 (R-HYGIENE L1): was `got[0] < 0.5`. Admitted, not timed out: a waiter that timed out raises
+    # ServiceBusy and appends nothing; it was still waiting before the release (above)
+    assert got
     # timeout: the budget stays taken past wait_s -> busy, and the waiter count is back to 0
     with g.hold(1000):
         t = time.monotonic()
         with pytest.raises(ServiceBusy):
             with g.hold(1):
                 pass
-        assert 0.4 <= time.monotonic() - t < 2
+        assert time.monotonic() - t >= 0.4  # fix wave 25 (R-HYGIENE L1): upper bound dropped; ServiceBusy is the proof
         assert g.waiting == 0
 
 
@@ -374,28 +376,34 @@ def test_w5l_caps_are_configured_validated_and_documented():
 class RealStack:
     def __init__(self, ledger_bin: Path, ledger_env: dict | None = None, ledger_url: str | None = None):
         self.tmp = tempfile.TemporaryDirectory(prefix="onb-w6-")
-        self.lport = free_test_port()
-        lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN, LEDGER_PORT=str(self.lport),
-                    LEDGER_LOG_PATH=str(Path(self.tmp.name) / "ledger.jsonl"), **(ledger_env or {}))
-        self.ledger = subprocess.Popen([str(ledger_bin)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        _wait_health(self.lport, self.ledger, "ledger-rust")
-        self.port = free_test_port()
-        aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
-        aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(self.port),
-                     "LEDGER_SERVICE_URL": ledger_url or f"http://127.0.0.1:{self.lport}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
-                     "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
-        self.api = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=aenv, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True)
+        self.ledger = self.api = None
+        self.out = ""
+        # Fix wave 22 (G3, N21-C-6): a failure (or a skip: no free port) at ANY step after the ledger started stops
+        # what was started; before, only the API's own health wait did, and the ledger could be left running.
         try:
+            self.lport = free_test_port()
+            lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN, LEDGER_PORT=str(self.lport),
+                        LEDGER_LOG_PATH=str(Path(self.tmp.name) / "ledger.jsonl"), **(ledger_env or {}))
+            self.ledger = subprocess.Popen([str(ledger_bin)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _wait_health(self.lport, self.ledger, "ledger-rust")
+            self.port = free_test_port()
+            aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
+            aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(self.port),
+                         "LEDGER_SERVICE_URL": ledger_url or f"http://127.0.0.1:{self.lport}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
+                         "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+            self.api = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=aenv, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True)
             _wait_health(self.port, self.api, "onboarding-py")
-        except Exception:
-            _stop(self.ledger)
+        except BaseException:
+            self.close()
             raise
         self.base = f"http://127.0.0.1:{self.port}"
 
     def close(self) -> None:
-        self.out = _stop(self.api)
-        _stop(self.ledger)
+        if self.api is not None:
+            self.out = _stop(self.api)
+        if self.ledger is not None:
+            _stop(self.ledger)
         self.tmp.cleanup()
 
 
@@ -481,14 +489,27 @@ def shed_stack(ledger_bin):
     s.close()
 
 
+def _ledger_health_until(port: int, want: int, within: float = 15.0) -> httpx.Response:
+    """Fix wave 25 (scout A O1/O3): wait for the ledger's own answer to change, not a fixed sleep. ledger-rust
+    counts a connection when its accept loop takes it and frees the slot when it sees the client's EOF — on a
+    loaded box either can take longer than the 0.2 s / 0.5 s this test used to sleep (O1: the retry after the
+    release got 503 "shed" in a full-suite run under load). Polls GET /health (each probe is its own connection)
+    until it answers `want`; returns the last answer, whatever it was, after `within` s."""
+    deadline = time.monotonic() + within
+    while True:
+        r = httpx.get(f"http://127.0.0.1:{port}/health", timeout=5)
+        if r.status_code == want or time.monotonic() >= deadline:
+            return r
+        time.sleep(0.05)
+
+
 def test_n6_live_ledger_rust_shed_503_is_reported_as_not_recorded(shed_stack):
     c = httpx.Client(base_url=shed_stack.base, headers=AUTH, timeout=30)
     # the ledger's one connection slot is held by an idle socket -> every
     # further connection gets shed() : 503 + exact body, request never read
     held = _hold_ledger_connections(shed_stack.lport, 1)
     try:
-        time.sleep(0.2)
-        probe = httpx.get(f"http://127.0.0.1:{shed_stack.lport}/health", timeout=5)
+        probe = _ledger_health_until(shed_stack.lport, 503)   # the held socket has the slot
         assert probe.status_code == 503 and probe.json() == LEDGER_SHED_BODY, probe.text
         r = c.post("/onboarding/clients", json=start_body("shed_a"))
         assert r.status_code == 503, r.text
@@ -499,7 +520,7 @@ def test_n6_live_ledger_rust_shed_503_is_reported_as_not_recorded(shed_stack):
     finally:
         for s in held:
             s.close()
-    time.sleep(0.5)
+    assert _ledger_health_until(shed_stack.lport, 200).status_code == 200   # the ledger has freed the slot
     # the slot is free again: the identical retry proceeds
     r = c.post("/onboarding/clients", json=start_body("shed_a"))
     assert r.status_code == 201, r.text
@@ -560,31 +581,36 @@ class _Proxy503(threading.Thread):
 
 @pytest.fixture(scope="module")
 def proxied_stack(ledger_bin):
-    lport = free_test_port()
+    # Fix wave 22 (G3, AEGIS N21-C-6): everything is started INSIDE one try/finally. Before, the ledger was started
+    # first and the rest outside any try: the API port's free_test_port() skipped (a narrow range whose ports sat in
+    # TIME_WAIT) and left ledger-rust running for good (the round-21 review found one still up hours later).
     tmp = tempfile.TemporaryDirectory(prefix="onb-w6p-")
-    lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN, LEDGER_PORT=str(lport),
-                LEDGER_LOG_PATH=str(Path(tmp.name) / "ledger.jsonl"))
-    ledger = subprocess.Popen([str(ledger_bin)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    _wait_health(lport, ledger, "ledger-rust")
-    proxy = _Proxy503(lport)
-    proxy.start()
-    port = free_test_port()
-    aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
-    aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(port),
-                 "LEDGER_SERVICE_URL": f"http://127.0.0.1:{proxy.port}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
-                 "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
-    api = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=aenv, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, text=True)
+    ledger = api = proxy = None
     try:
+        lport = free_test_port()
+        lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN, LEDGER_PORT=str(lport),
+                    LEDGER_LOG_PATH=str(Path(tmp.name) / "ledger.jsonl"))
+        ledger = subprocess.Popen([str(ledger_bin)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _wait_health(lport, ledger, "ledger-rust")
+        proxy = _Proxy503(lport)
+        proxy.start()
+        port = free_test_port()
+        aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
+        aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(port),
+                     "LEDGER_SERVICE_URL": f"http://127.0.0.1:{proxy.port}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
+                     "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+        api = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=aenv, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True)
         _wait_health(port, api, "onboarding-py")
-    except Exception:
-        _stop(ledger)
-        raise
-    yield {"base": f"http://127.0.0.1:{port}", "lport": lport, "proxy": proxy, "log": Path(tmp.name) / "ledger.jsonl"}
-    _stop(api)
-    proxy.stop.set()
-    _stop(ledger)
-    tmp.cleanup()
+        yield {"base": f"http://127.0.0.1:{port}", "lport": lport, "proxy": proxy, "log": Path(tmp.name) / "ledger.jsonl"}
+    finally:
+        if api is not None:
+            _stop(api)
+        if proxy is not None:
+            proxy.stop.set()
+        if ledger is not None:
+            _stop(ledger)
+        tmp.cleanup()
 
 
 def test_n6_live_non_shed_503_from_an_intermediary_is_unknown_and_the_ledger_did_record(proxied_stack):

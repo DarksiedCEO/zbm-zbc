@@ -7,11 +7,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/orchestrator"
@@ -247,6 +253,57 @@ func main() {
 	orch := orchestrator.New(detectionURL, detectionToken, ledgerURL, ledgerToken)
 
 	srv := newServer(bindAddr+":"+port, newMux(orch, orchestratorToken))
-	log.Printf("orchestrator-go listening on %s:%s (detection service at %s, ledger at %s)", bindAddr, port, detectionURL, ledgerURL)
-	log.Fatal(srv.ListenAndServe())
+	// Bind first, then announce: ORCHESTRATOR_PORT=0 lets the kernel pick a free port, and ORCHESTRATOR_PORT_FILE
+	// (optional) receives the port actually bound, so a caller (the tests) never has to guess a free port and race
+	// another process for it (fix wave 25, scout C2-1 — the ledger-rust LEDGER_PORT_FILE pattern, ADR 0003 §11).
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		log.Fatalf("orchestrator-go: cannot listen on %s: %v", srv.Addr, err)
+	}
+	bound := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+	if pf := os.Getenv("ORCHESTRATOR_PORT_FILE"); pf != "" {
+		if err := publishPortFile(pf, bound); err != nil {
+			log.Fatalf("orchestrator-go: REFUSING TO START — ORCHESTRATOR_PORT_FILE=%q: %v", pf, err)
+		}
+		removeOnStop(pf)
+	}
+	log.Printf("orchestrator-go listening on %s:%s (detection service at %s, ledger at %s)", bindAddr, bound, detectionURL, ledgerURL)
+	log.Fatal(srv.Serve(ln))
+}
+
+// publishPortFile writes the bound port to path atomically (a temp file in the same directory, then rename), so a
+// reader sees either no file or the whole port. The file is a HINT, like ledger-rust's (ADR 0003 §11): a SIGKILL
+// leaves it behind, so a reader checks the port (GET /health) and, if it started the process, that the process is
+// still alive before trusting it.
+func publishPortFile(path, port string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(tmp, "%s\n", port); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return nil
+}
+
+// removeOnStop removes the port file on SIGINT/SIGTERM, then dies of the same signal (default disposition).
+func removeOnStop(path string) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-ch
+		os.Remove(path)
+		signal.Reset(sig)
+		_ = syscall.Kill(os.Getpid(), sig.(syscall.Signal))
+	}()
 }

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from decimal import Decimal
 
 import pytest
@@ -36,26 +35,47 @@ def _flows(hr, memo):
 # --- A1 ---------------------------------------------------------------------------------------------------------------
 
 def test_a1_double_release_concurrent_and_sequential_one_submission(hr):
+    """Wave 25 (scout B Low): the overlap is made, not hoped for. The first release is HELD inside the rail submit
+    until the second release has answered; the second starts only once the first is inside (0f017a7: a 0.3 s sleep
+    in the submit, and nothing showed the two calls ever overlapped — a sequential second release also gets 409)."""
     b = _approved(hr)
     orig = hr.stripe.submit
+    inside, left, second_done = threading.Event(), threading.Event(), threading.Event()
+    seen = {}
 
-    def slow(*a):
-        time.sleep(0.3)
+    def held(*a):
+        inside.set()
+        second_done.wait(60)                       # a bound on a stall only
+        left.set()
         return orig(*a)
-    hr.stripe.submit = slow
+    hr.stripe.submit = held
     out = []
 
-    def go():
+    def go(tag):
         try:
-            out.append(("ok", hr.svc.release_batch("scheduler", rid(), b["batch_id"])))
+            out.append((tag, "ok", hr.svc.release_batch("scheduler", rid(), b["batch_id"])))
         except Exception as exc:  # noqa: BLE001
-            out.append(("err", type(exc).__name__))
-    ts = [threading.Thread(target=go) for _ in range(2)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    assert sorted(o[0] for o in out) == ["err", "ok"] and ("err", "Conflict") in out
+            out.append((tag, "err", type(exc).__name__))
+        finally:
+            if tag == "second":
+                # wave 25 (E-B): the overlap is read HERE, at the moment the second answered and before it lets the
+                # first go — the E0 version read `first.is_alive()` after this release, and a first release that
+                # finished in between made a correct run fail (1 of 5 under 2 busy loops, load-new-fin-budget-a1-r1-5)
+                seen["first_still_inside"] = inside.is_set() and not left.is_set()
+                second_done.set()
+    first = threading.Thread(target=go, args=("first",))
+    first.start()
+    assert inside.wait(60), "the first release never reached the rail submit"
+    second = threading.Thread(target=go, args=("second",))
+    second.start()
+    second.join(60)
+    second_done.set()
+    first.join(60)
+    second.join(60)
+    assert not first.is_alive() and not second.is_alive(), out
+    assert seen.get("first_still_inside") is True, (seen, out)   # the second answered while the first was inside
+    assert sorted((o[0], o[1]) for o in out) == [("first", "ok"), ("second", "err")], out
+    assert ("second", "err", "Conflict") in out
     assert len(_submits(hr)) == 1 and len(hr.stripe.payouts) == 1 and len(_flows(hr, "F4d")) == 1
     r = hr.post(f"/fin/v1/payout-batches/{b['batch_id']}/release", {"request_id": rid()}, caller="scheduler")
     assert r.status_code == 409

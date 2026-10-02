@@ -175,7 +175,6 @@ def test_f9_open_job_ledger_down_no_commission_no_job(spy_api):
 
 
 def test_f9_open_job_probe_c2_outcome_record_failure_is_reported_honestly(make_api):
-    from shared.departments import Departments
     from shared.ledger import FakeLedgerClient, LedgerNotRecorded
 
     class FailType(FakeLedgerClient):
@@ -669,12 +668,13 @@ def test_f16_recorder_summary_always_acceptable_to_ledger_rust(raw):
     assert 1 <= len(s) <= 280
 
 
-def test_f16_devtools_fake_server_matches_ledger_rust():
+def test_f16_devtools_fake_server_matches_ledger_rust(monkeypatch):
     import importlib.util
-    import os
     from pathlib import Path
 
-    os.environ.setdefault("FAKE_LEDGER_TOKEN", "t")
+    # fix wave 25 (scout A C7): monkeypatch, not os.environ.setdefault — the token used to stay set for the rest of
+    # the session (the fake reads it at import and exits without it)
+    monkeypatch.setenv("FAKE_LEDGER_TOKEN", "t")
     p = Path(__file__).resolve().parents[1] / "devtools" / "fake_ledger_server.py"
     spec = importlib.util.spec_from_file_location("fake_ledger_server", p)
     mod = importlib.util.module_from_spec(spec)

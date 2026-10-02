@@ -1,0 +1,20 @@
+start 2026-09-30T16:27:43Z HEAD=c827329fa6bbb48a2d94460362092e07ad3aed33 base=540a64e (git archive) Python3.13.13
+ful-oversized-head #1 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 10.93s
+det-health-head #1 exit=0 | worst-case batches: n=40 p50=102ms max=497ms | 1 passed, 1 warning in 10.83s
+onb-linear-head #1 exit=0 |  | 78 passed, 1 warning in 17.59s
+ful-oversized-base #1 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 11.07s
+det-health-base #1 exit=1 | worst-case batches: n=42 p50=83ms max=600ms | 1 failed, 1 warning in 10.88s
+onb-linear-base #1 exit=0 |  | 78 passed, 1 warning in 17.30s
+ful-oversized-head #2 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 10.89s
+det-health-head #2 exit=1 | worst-case batches: n=36 p50=103ms max=517ms | 1 failed, 1 warning in 10.70s
+onb-linear-head #2 exit=0 |  | 78 passed, 1 warning in 17.42s
+ful-oversized-base #2 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 10.93s
+det-health-base #2 exit=0 | worst-case batches: n=41 p50=79ms max=456ms | 1 passed, 1 warning in 10.52s
+onb-linear-base #2 exit=0 |  | 78 passed, 1 warning in 17.14s
+ful-oversized-head #3 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 10.79s
+det-health-head #3 exit=0 | worst-case batches: n=40 p50=83ms max=459ms | 1 passed, 1 warning in 10.57s
+onb-linear-head #3 exit=0 |  | 78 passed, 1 warning in 17.01s
+ful-oversized-base #3 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 11.11s
+det-health-base #3 exit=0 | worst-case batches: n=39 p50=81ms max=461ms | 1 passed, 1 warning in 10.53s
+onb-linear-base #3 exit=0 |  | 78 passed, 1 warning in 17.47s
+end 2026-09-30T16:31:56Z left in TMPDIR: 

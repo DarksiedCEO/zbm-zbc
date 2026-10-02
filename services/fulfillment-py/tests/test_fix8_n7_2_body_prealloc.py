@@ -96,6 +96,20 @@ class _Client:
         return self
 
 
+async def _until(predicate, timeout: float = 10.0) -> None:
+    """Fix wave 25 (AEGIS N24-S-12): wait for a state of the app, not for a
+    wall-clock interval. These in-process tests used to `sleep(0.05)` and
+    assume the app had got there — each request crosses the thread pool (the
+    sync auth dependency) first, so on a starved box it had not, and a later
+    request took the budget the test meant for an earlier one."""
+    loop = asyncio.get_running_loop()
+    end = loop.time() + timeout
+    while not predicate():
+        if loop.time() > end:
+            raise AssertionError(f"the app did not reach the expected state within {timeout:g}s")
+        await asyncio.sleep(0.01)
+
+
 def _event() -> bytes:
     return json.dumps({"call_events": [{
         "call_id": "c1", "phone_number": "+15550100", "direction": "inbound", "status": "voicemail",
@@ -119,7 +133,10 @@ def test_declared_content_length_does_not_preallocate_the_body_buffer():
             tasks = [asyncio.ensure_future(c.run()) for c in clients]
             for c in clients:
                 await c.feed(b"{")
-            await asyncio.sleep(0.3)  # every request has read its one byte and is waiting for more
+            # fix wave 25 (scout A F4): until every request has TAKEN its one byte (its queue is empty) or been
+            # answered — it slept 0.3 s, and a request that had not read its byte yet allocated nothing for it, so
+            # the measurement could pass without measuring (the large lane admits ~8 bodies a second)
+            await _until(lambda: all(c.queue.empty() or c.status is not None for c in clients), timeout=30)
             held, _ = tracemalloc.get_traced_memory()
             for c in clients:
                 await c.disconnect()
@@ -182,15 +199,17 @@ def test_stalled_bodies_exhaust_the_inflight_budget_and_the_next_chunk_is_503_un
     monkeypatch.setattr(api, "_SMALL_BODY_BYTES", 1024)
     chunk = b" " * 16 * 1024
     tail = b'{"call_events":[]}'
-    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", 2 * (len(chunk) + len(tail)))  # exactly two whole bodies
+    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", api._SMALL_RESERVE_BYTES + 2 * (len(chunk) + len(tail)))  # shared pool: exactly two whole bodies (fix wave 24: the total includes the small reserve)
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 0.2)
 
     async def scenario():
+        lanes = api._lanes()
         stalled = [_Client(content_length=len(chunk) + 18) for _ in range(2)]
         stalled_tasks = [asyncio.ensure_future(c.run()) for c in stalled]
         for c in stalled:
             await c.feed(chunk)  # buffered; the budget is now full
-        await asyncio.sleep(0.05)
+        # fix wave 25: until both stalled bodies' bytes are counted (it was sleep(0.05): N24-S-12, module run B#9)
+        await _until(lambda: lanes.inflight.used >= 2 * (len(chunk) - api._SMALL_BODY_BYTES))
         third = _Client(content_length=len(chunk) + 18)
         third_task = asyncio.ensure_future(third.run())
         t0 = time.perf_counter()
@@ -212,7 +231,9 @@ def test_stalled_bodies_exhaust_the_inflight_budget_and_the_next_chunk_is_503_un
     assert third.status == 503, (third.status, third.body[:200])
     assert third.headers.get("retry-after") == "1"
     assert "in-flight" in third.body.decode()
-    assert 0.15 < refused_after < 0.6, refused_after
+    # fix wave 25 (scout A F3; R-HYGIENE L1): it waited for the budget before refusing (the lower bound cannot flake
+    # under load); the upper bound (< 0.6 s) measured the box, and the 503 "in-flight" above is the refusal itself.
+    assert refused_after > 0.15, refused_after
     assert [c.status for c in stalled] == [200, 200], [c.body[:100] for c in stalled]
     assert fourth.status == 200, fourth.body[:200]
 
@@ -223,7 +244,7 @@ def test_inflight_budget_is_released_when_a_sender_disconnects_mid_body(monkeypa
     # as large (past 1 KiB) so the shared budget is what is exercised here.
     monkeypatch.setattr(api, "_SMALL_BODY_BYTES", 1024)
     chunk = b" " * 8 * 1024
-    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", len(chunk) + 18)  # exactly one whole body
+    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", api._SMALL_RESERVE_BYTES + len(chunk) + 18)  # shared pool: exactly one whole body (fix wave 24: the total includes the small reserve)
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 0.2)
 
     async def scenario():
@@ -274,7 +295,10 @@ def test_trickling_body_is_408_after_the_grace_period_not_at_the_deadline(monkey
     assert done, "the trickling body was not cut"
     assert c.status == 408, (c.status, c.body[:200])
     assert "bytes/s" in c.body.decode()
-    assert 0.4 < took < 1.5, f"cut after {took:.2f}s (grace 0.5 s, deadline 6 s)"
+    # fix wave 25 (E-A successor, R-HYGIENE L1): was `0.4 < took < 1.5`. The rate rule's 408 (above) is not the 6 s
+    # deadline's ("not received within 6s"); it can fire only after the 0.5 s grace (load only delays it)
+    assert "not received within" not in c.body.decode(), c.body[:200]
+    assert took > 0.4, f"cut after {took:.2f}s (grace 0.5 s)"
 
 
 def test_front_loaded_body_that_then_stalls_is_408_after_the_grace_period(monkeypatch):
@@ -295,7 +319,9 @@ def test_front_loaded_body_that_then_stalls_is_408_after_the_grace_period(monkey
     c, took = asyncio.run(scenario())
     assert c.status == 408, (c.status, c.body[:200])
     assert "stalled" in c.body.decode()
-    assert 0.4 < took < 1.5, f"cut after {took:.2f}s (grace 0.5 s, deadline 6 s)"
+    # fix wave 25 (E-A successor, R-HYGIENE L1): was `0.4 < took < 1.5`; "stalled" is the stall rule's 408, not the
+    # 6 s deadline's, and `wait_for(task, 5.0)` above already fails a body held to the deadline
+    assert took > 0.4, f"cut after {took:.2f}s (grace 0.5 s)"
 
 
 def test_a_body_arriving_at_or_above_the_minimum_rate_is_not_cut(monkeypatch):
@@ -325,7 +351,7 @@ def test_time_spent_waiting_for_the_inflight_budget_is_not_charged_to_the_client
     # as large (past 1 KiB) so the shared budget is what is exercised here.
     monkeypatch.setattr(api, "_SMALL_BODY_BYTES", 1024)
     chunk = b" " * 8 * 1024
-    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", len(chunk) + 18)  # exactly one whole body
+    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", api._SMALL_RESERVE_BYTES + len(chunk) + 18)  # shared pool: exactly one whole body (fix wave 24: the total includes the small reserve)
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 3.0)
     monkeypatch.setattr(api, "_BODY_MIN_RATE_GRACE_S", 0.3)
     monkeypatch.setattr(api, "_BODY_MIN_BYTES_PER_S", 1024)
@@ -423,59 +449,276 @@ def test_live_trickling_body_is_cut_within_the_grace_period_not_the_30s_deadline
     assert elapsed >= http_limits.BODY_MIN_RATE_GRACE_S - 0.5, f"cut too early at {elapsed:.1f}s"
 
 
+def _send_reading(s: socket.socket, data: bytes, idle_timeout: float, answer: dict | None = None) -> str:
+    """Send ``data`` while reading; returns the answer's status code once the
+    answer is complete to its Content-Length, "closed" on EOF with no answer,
+    or the error that ended the exchange before a complete answer. After the
+    last byte is sent the client waits up to ``idle_timeout`` for the answer.
+    When ``answer`` is given, ``answer["head"]`` receives the answer's raw head
+    and ``answer["sent"]`` the bytes sent (fix wave 23: a keep-alive caller
+    decides from the head whether the connection can be reused)."""
+    import select
+    s.setblocking(False)
+    sent, buf, last = 0, b"", time.monotonic()
+    while time.monotonic() - last < idle_timeout:
+        r, w, _ = select.select([s], [s] if sent < len(data) else [], [], 0.5)
+        if r:
+            try:
+                chunk = s.recv(65536)
+            except BlockingIOError:
+                continue
+            except OSError as exc:
+                return type(exc).__name__
+            if not chunk:
+                return buf[9:12].decode() or "closed"
+            buf += chunk
+            head, sep, body = buf.partition(b"\r\n\r\n")
+            if sep:
+                cl = [int(ln.split(b":", 1)[1]) for ln in head.split(b"\r\n") if ln.lower().startswith(b"content-length:")]
+                if not cl or len(body) >= cl[0]:
+                    if answer is not None:
+                        answer["head"], answer["sent"] = head, sent
+                    return buf[9:12].decode()
+        elif w:
+            try:
+                sent += s.send(data[sent:sent + 65536])
+                last = time.monotonic()
+            except BlockingIOError:
+                pass
+            except OSError:
+                sent = len(data)              # the server stopped reading: read what it answered
+    return "timeout"
+
+
+# Fix wave 25, H2 (AEGIS N24-S-13): the settle check of the 128-sender test
+# could pass without measuring anything — "settled" was any sample after 2 s
+# under base + 24 MiB, so a run whose sender threads were slow to start (a
+# loaded box) settled at 2.6 s with growth 22 MiB, before the senders had
+# built any memory. The check now starts only once memory has reached its
+# peak phase (a sample at base + _PEAK_FLOOR_MIB or more), and a run that never
+# got there measured nothing: it fails as INVALID, never passes.
+_PEAK_FLOOR_MIB = 32   # half the 64 MiB budget the ~20 admitted 3.9 MB bodies fill
+_SETTLED_MIB = 24
+
+
+def _settled_at(samples: list[tuple[float, int]], base: int) -> tuple[float | None, bool]:
+    """(the first sample time under base + _SETTLED_MIB AFTER the first sample
+    at base + _PEAK_FLOOR_MIB or more — None if none yet; whether that floor
+    has been reached)."""
+    reached = False
+    for at, rss in samples:
+        if rss - base >= _PEAK_FLOOR_MIB:
+            reached = True
+        elif reached and rss - base < _SETTLED_MIB:
+            return at, True
+    return None, reached
+
+
+def _hwm_reset(pid: int) -> bool:
+    """Linux: reset the process's peak RSS (VmHWM) to its current RSS; False
+    where that is not available (the sampled peak is used instead)."""
+    try:
+        with open(f"/proc/{pid}/clear_refs", "w") as fh:
+            fh.write("5")
+        return True
+    except OSError:
+        return False
+
+
+def _hwm_mib(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                if line.startswith("VmHWM:"):
+                    return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return None
+
+
+def test_the_settle_check_waits_for_the_peak_phase_and_a_run_without_one_is_invalid():
+    """N24-S-13, the reviewer's run A single #5 — base 53 MiB, samples [(2.0, 71), (2.6, 75)] (its log): the old
+    check said settled_at 2.6 s with growth 22 MiB; it measured nothing. Now: no settle before the floor, and the
+    run is reported invalid."""
+    vacuous = [(2.0, 71), (2.6, 75)]
+    old = next((at for at, r in vacuous if at > 2 and r - 53 < 24), None)
+    assert old == 2.6                                         # what the old rule concluded
+    assert _settled_at(vacuous, 53) == (None, False)          # not settled, and not a valid run
+    real = [(1.0, 53 + 9), (2.0, 53 + 59), (6.0, 53 + 64), (11.1, 53 + 36), (12.2, 53 + 2)]
+    assert _settled_at(real, 53) == (12.2, True)
+    assert _settled_at(real[:3], 53) == (None, True)          # peak reached, not yet settled
+
+
+def _runqueue_wait_s(pid: int) -> float | None:
+    """Linux: seconds the process's main thread (its event loop) has spent RUNNABLE but not running — waiting for a
+    CPU (/proc/<pid>/task/<pid>/schedstat, field 2, ns). None where that is not available."""
+    try:
+        with open(f"/proc/{pid}/task/{pid}/schedstat") as fh:
+            return int(fh.read().split()[1]) / 1e9
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _senders_on_one_thread(port: int, data: bytes, n: int, idle_timeout: float, every: float, tick) -> list[dict]:
+    """Fix wave 25 (H1/H2; AEGIS N24-S-1, -13): the 128 senders of the test below, driven by ONE thread through a
+    selector — each exactly `_send_reading`'s client (sends while reading, stops sending at the answer, reads it to
+    Content-Length, waits `idle_timeout` after its last byte out) — with `tick(elapsed)` called every `every` s
+    (the RSS sampler; it returns False to stop sampling). The test used to run 128 Python threads plus a sampler
+    thread: on a loaded 2-CPU box that client process was the bottleneck — the sampler's first 0.5 s sleep came back
+    after 1.3-1.7 s typically, 2.9 s and 4.7 s at worst (wave 25, campaign B), and in exactly those runs the senders
+    got their bytes out late, so stalled bodies were cut late and the settle bound measured the CLIENT (the one
+    module failure: samples from 4.7 s, settled None). One thread with no GIL to share drives the same scenario
+    as specified. Returns per sender: code, connected, last_send (s since start; None if nothing went out) and
+    answered."""
+    import errno
+    import selectors
+
+    sel = selectors.DefaultSelector()
+    t0 = time.monotonic()
+    recs = []
+
+    def finish(rec, code):
+        rec["code"], rec["answered"] = code, time.monotonic() - t0
+        sel.unregister(rec["sock"])
+        rec["sock"].close()
+
+    for _ in range(n):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setblocking(False)
+        rec = {"sock": sock, "sent": 0, "buf": b"", "last": time.monotonic(), "code": None, "connected": None,
+               "last_send": None, "answered": None}
+        recs.append(rec)
+        err = sock.connect_ex(("127.0.0.1", port))
+        sel.register(sock, selectors.EVENT_READ | selectors.EVENT_WRITE, rec)
+        if err not in (0, errno.EINPROGRESS):
+            finish(rec, "connect:" + errno.errorcode.get(err, str(err)))
+    next_tick, sampling = t0 + every, True
+    while sampling or any(r["code"] is None for r in recs):
+        events = sel.select(max(0.0, min(next_tick - time.monotonic(), 0.1)) if sampling else 0.1)
+        now = time.monotonic()
+        for key, mask in events:
+            rec, sock = key.data, key.fileobj
+            if rec["code"] is not None:
+                continue
+            if rec["connected"] is None:
+                err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if err:
+                    finish(rec, "connect:" + errno.errorcode.get(err, str(err)))
+                    continue
+                rec["connected"], rec["last"] = now - t0, now
+            if mask & selectors.EVENT_READ:
+                try:
+                    chunk = sock.recv(65536)
+                except BlockingIOError:
+                    chunk = None
+                except OSError as exc:
+                    finish(rec, type(exc).__name__)
+                    continue
+                if chunk == b"":
+                    finish(rec, rec["buf"][9:12].decode() or "closed")
+                    continue
+                if chunk:
+                    rec["buf"] += chunk
+                    head, sep, body = rec["buf"].partition(b"\r\n\r\n")
+                    if sep:
+                        cl = [int(ln.split(b":", 1)[1]) for ln in head.split(b"\r\n") if ln.lower().startswith(b"content-length:")]
+                        if not cl or len(body) >= cl[0]:
+                            finish(rec, rec["buf"][9:12].decode())
+                            continue
+            if mask & selectors.EVENT_WRITE and rec["sent"] < len(data):
+                try:
+                    rec["sent"] += sock.send(data[rec["sent"]:rec["sent"] + 65536])
+                    rec["last"], rec["last_send"] = now, now - t0
+                except BlockingIOError:
+                    pass
+                except OSError:
+                    rec["sent"] = len(data)        # the server stopped reading: read what it answered
+                if rec["sent"] >= len(data):
+                    sel.modify(sock, selectors.EVENT_READ, rec)
+        for rec in recs:
+            if rec["code"] is None and now - rec["last"] >= idle_timeout:
+                finish(rec, "timeout")
+        if sampling and now >= next_tick:
+            next_tick += every
+            sampling = tick(now - t0)
+    sel.close()
+    return recs
+
+
 def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut(server):
     """Real bytes, then a stall: before, 128 x 4 MiB pinned for 30 s. Now at
     most _INFLIGHT_BODY_BYTES (64 MiB) is buffered (the rest 503), and the
     stalled bodies are cut by the throughput rule within the grace period, so
     RSS is back near baseline well before the 30 s deadline."""
-    import threading
     proc, port = server
     base = _rss_mib(proc.pid)
+    hwm_ok = _hwm_reset(proc.pid)
     payload = b'{"call_events":[' + b" " * (3_900_000 - 16)
-    socks, codes, lock = [], {}, threading.Lock()
-
-    def sender():
-        try:
-            s = socket.create_connection(("127.0.0.1", port), timeout=30)
-            with lock:
-                socks.append(s)
-            s.sendall(_head(4 * MIB) + payload)
-            s.settimeout(20)
-            try:
-                got = s.recv(64)[9:12].decode() or "closed"
-            except OSError as exc:
-                got = type(exc).__name__
-        except OSError as exc:
-            got = "connect:" + type(exc).__name__
-        with lock:
-            codes[got] = codes.get(got, 0) + 1
-
-    threads = [threading.Thread(target=sender) for _ in range(http_limits.LIMIT_CONCURRENCY)]
-    t0 = time.monotonic()
-    for t in threads:
-        t.start()
-    peak = base
-    samples = []
-    while any(t.is_alive() for t in threads) and time.monotonic() - t0 < 25:
-        time.sleep(0.5)
-        r = _rss_mib(proc.pid)
-        peak = max(peak, r)
-        samples.append((round(time.monotonic() - t0, 1), r))
-    for t in threads:
-        t.join(timeout=5)
-    for s in socks:
-        s.close()
-    settled_at = next((at for at, r in samples if at > 2 and r - base < 24), None)
-    print(f"codes {codes}; RSS base {base} peak {peak}; samples {samples}")
-    # the budget, plus uvicorn's own per-connection buffers (<= 64 KiB x 128) and the
-    # 503'd bodies' drains — measured +84 MiB (base 54, peak 138)
-    assert peak - base < api._INFLIGHT_BODY_BYTES // MIB + 32, f"RSS grew {peak - base} MiB"
-    assert codes.get("408", 0) + codes.get("503", 0) == len(threads), codes  # none held silently
-    assert codes.get("408", 0) > 0, codes  # the admitted, stalled ones were cut
+    # Fix wave 21 (lead ruling L1): each sender sends WHILE reading, stops
+    # sending at the answer and reads it to Content-Length (a reset after a
+    # complete answer is the server's documented behaviour: its drain after
+    # the answer is bounded, 64 KiB / 1 s). The old client wrote the whole
+    # 3.9 MB with a blocking sendall before reading anything; answered
+    # early (uvicorn's limit_concurrency 503), it could still have MBs
+    # unsent when the bounded drain ended, and was reset mid-send without
+    # ever reading the 503 (w21 logs/L1-proof-probe.log: 20/20 reset at the
+    # 64 KiB bound, 20/20 clean with an 8 MiB bound or a reading client).
+    # Fix wave 25: all 128 of them on one thread (_senders_on_one_thread).
+    n = http_limits.LIMIT_CONCURRENCY
     # admitted bodies are cut at the app's grace; the 503'd senders' unread
     # bytes go when the protocol's (grace + BODY_DEADLINE_GRACE_S) closes them
     bound = http_limits.BODY_MIN_RATE_GRACE_S + http_limits.BODY_DEADLINE_GRACE_S + 3
-    assert settled_at is not None and settled_at < bound, samples
+    peak = base
+    samples: list[tuple[float, int]] = []
+    state = {"settled_at": None, "reached": False}
+    # fix wave 25 (E-A): the server main thread's run-queue wait during the burst is PRINTED (diagnostics: a slow
+    # server and a starved one read differently); the settle bound itself is fixed and is not extended by it.
+    wait0 = _runqueue_wait_s(proc.pid)
+
+    # Fix wave 21 (AEGIS N20-M-5): sampling runs until RSS settles or the bound
+    # elapses, whatever the senders are doing (it used to stop as soon as every
+    # sender had its answer). Fix wave 25, H2: "settled" only counts after the
+    # peak phase (_settled_at). The 96 MiB growth bound below is unchanged (N20-M-4).
+    def tick(elapsed: float) -> bool:
+        nonlocal peak
+        r = _rss_mib(proc.pid)
+        peak = max(peak, r)
+        samples.append((round(elapsed, 1), r))
+        state["settled_at"], state["reached"] = _settled_at(samples, base)
+        return state["settled_at"] is None and elapsed < bound
+
+    recs = _senders_on_one_thread(port, _head(4 * MIB) + payload, n, 20, 0.5, tick)
+    settled_at, reached = state["settled_at"], state["reached"]
+    wait1 = _runqueue_wait_s(proc.pid)
+    rq = "n/a" if wait0 is None or wait1 is None else f"{wait1 - wait0:.2f} s"
+    codes: dict[str, int] = {}
+    for r in recs:
+        codes[r["code"]] = codes.get(r["code"], 0) + 1
+    hwm = _hwm_mib(proc.pid) if hwm_ok else None
+    # fix wave 25: when the clients connected, last got bytes out and were answered — a starved client (late
+    # connects / sends) and a slow server (late answers after the last byte) read differently here
+    q = lambda v: f"{min(v):.1f}/{sorted(v)[len(v) // 2]:.1f}/{max(v):.1f}" if v else "-"
+    cut = [r for r in recs if r["code"] == "408"]
+    clients = (f"connected {q([r['connected'] for r in recs if r['connected'] is not None])} s; "
+               f"408 last byte {q([r['last_send'] for r in cut if r['last_send'] is not None])} s, "
+               f"answered {q([r['answered'] for r in cut])} s; "
+               f"503 answered {q([r['answered'] for r in recs if r['code'] == '503'])} s (min/median/max)")
+    # the whole line, flushed, before any assertion: a failing run (e.g. on a Mac runner) keeps its evidence
+    line = (f"codes {codes}; RSS base {base} peak {peak} growth {peak - base} MiB; hwm_growth "
+            f"{None if hwm is None else hwm - base} MiB; peak phase reached {reached}; settled_at {settled_at} "
+            f"(bound {bound}); server main-thread run-queue wait {rq}; clients: {clients}; "
+            f"samples {samples}")
+    print(line, flush=True)
+    if not reached:
+        pytest.fail(f"INVALID run: memory never reached base + {_PEAK_FLOOR_MIB} MiB, so nothing was measured -- {line}")
+    # the budget, plus uvicorn's own per-connection buffers (<= 64 KiB x 128) and the
+    # 503'd bodies' drains — measured +84 MiB (base 54, peak 138). Fix wave 25, H2:
+    # the kernel's peak RSS where it is available (the 0.5 s sampler can miss a peak).
+    growth = (hwm if hwm is not None else peak) - base
+    assert growth < api._INFLIGHT_BODY_BYTES // MIB + 32, f"RSS grew {growth} MiB -- {line}"
+    assert codes.get("408", 0) + codes.get("503", 0) == n, line  # none held silently
+    assert codes.get("408", 0) > 0, line  # the admitted, stalled ones were cut
+    assert settled_at is not None and settled_at < bound, line
 
 
 def test_live_unread_trickling_body_is_closed_by_the_protocol_within_the_grace_period(server):

@@ -538,6 +538,301 @@ future real dialer/CRM adapter; idempotency keys for
 `resolution-writeback/resolve` across retries; per-customer time zone
 storage. (Bounded in-memory state: decided in Decision 14.)
 
+## Fix wave 21, Sep 28 2026 — a test amendment AND a product change
+
+(Corrected in fix wave 22, lead ruling G8; AEGIS round 21 N21-C-4. This heading used to say "test amendment (no
+product change)". Wave 21 did change the product: `src/http_limits.py`'s protocol gained the graceful close
+(lead ruling L1, ADR 0003 §8) — FIN after an answer, then a bounded drain of the client's remaining bytes (64 KiB /
+1 s) — and the 128-sender test's CLIENT changed with it: it now sends while it reads, stops at the answer and
+reads it to Content-Length (`_send_reading`), where it used to write 3.9 MB with a blocking `sendall` before
+reading anything. Round 21 ruled that client legitimate (not a fake green) and showed that the stale 0/10
+evidence of wave 21 predated the change; the numbers below it are from before either change. The product change
+and its bounds are in ADR 0003 §8/§9; the blocking client's residual is pinned by
+`tests/test_fix22_drain_residual.py` — see "Fix wave 22" below.)
+
+AEGIS round 20 N20-M-4 / N20-M-5, `tests/test_fix8_n7_2_body_prealloc.py::
+test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut`:
+
+- **N20-M-5 (test defect, E3).** The test sampled RSS only while its
+  sender threads were alive; under load every sender can have its answer
+  (408/503) before the server has released the bytes, so no settled
+  sample existed (`settled_at None`, 1/10 on a busy box). Sampling now
+  runs until RSS settles (a sample after 2 s within 24 MiB of the
+  baseline) or the test's own bound elapses
+  (`BODY_MIN_RATE_GRACE_S + BODY_DEADLINE_GRACE_S + 3` = 13 s),
+  whatever the senders are doing. The full line (codes, base, peak,
+  growth, `settled_at`, bound, every sample) is printed and flushed
+  before any assertion and is every assertion's message, so a failing
+  run on another OS (the Mac) yields its evidence.
+- **N20-M-4 (limit untouched).** The growth bound stays
+  `_INFLIGHT_BODY_BYTES // MiB + 32` = 96 MiB. It rests on one Linux
+  measurement (+84 MiB) plus 12 MiB; Linux growth measured 84–91 MiB.
+  Whether macOS's allocator stays under it is UNDETERMINED (the relayed
+  Mac evidence is E0); the macOS CI entry added in this wave
+  (`python-tests (fulfillment-py, 3.13, macos-14)`) is where that is
+  decided. Not raised to make a test pass.
+
+## Fix wave 22, Sep 28 2026 — what the reading client added, and the peak's variance (product changes)
+
+AEGIS round 21 N21-C-1 (lead ruling G5; the 96 MiB bound is NOT raised): the 128-sender test failed under load
+(2/10 module, 5/20 single) and the reviewer traced it to the wave-21 reading client. The lead's hypothesis — 128
+concurrent drains each allocating a read buffer of up to 64 KiB, ~8 MiB — was checked and is NOT what the
+measurements show:
+
+- *tracemalloc at the server's traced peak* (w22 `ful_attr.py`: the server under `-X tracemalloc`, the test's own
+  reading client, 128 senders): 68.4 MiB in the app's body buffers (the 64 MiB in-flight budget, bytearray
+  over-allocation included), 15.6 MiB in uvicorn's `cycle.body` across ~100 connections (~150 KiB each: uvicorn
+  buffers a request's body up to its 64 KiB high-water mark PLUS the read that crossed it — the event loop reads up
+  to 256 KiB — and ~100 of the 128 are answered 503 before their app ever runs), 7.7 MiB of receive-path copies of
+  those buffers. No drain allocation appears: drained bytes were never retained. What the reading client adds is
+  bigger reads (it sends 64 KiB at a time with the default send buffer, where the old client's `sendall` was
+  throttled by a 64 KiB `SO_SNDBUF`), so more unread body per connection before backpressure — and, with the
+  wave-21 drain, that buffered body stayed referenced until the drain ended (up to 1 s).
+- *The peak's variance* (RSS A/B under 3 busy loops, 8 runs each, the test's client): wave-21 code 87-92 MiB
+  growth (mean 89.4), with bounded reads (below) 80-89 (83.8), with bounded reads and a fixed mmap threshold
+  80-82 (81.0). The tail that crossed 96 was glibc's DYNAMIC mmap threshold: once a large body buffer is freed the
+  threshold rises to its size, later buffers come from the heap, and freed heap blocks below the top stay resident
+  (`tests/test_fix22_mmap_threshold.py`: 95 freed 512 KiB blocks under a survivor — 47 MiB resident with the
+  dynamic threshold, 0 with it fixed).
+
+Decided (product):
+- the transport (ADR 0003 §9, `src/graceful_close.py`, shared by the ten Python services): every read goes through
+  one 16 KiB buffer, so a connection's unread body is bounded by uvicorn's 64 KiB mark + 16 KiB; drained bytes are
+  discarded in that buffer; the answered request's body is released when the drain starts; the concurrency slot is
+  released before the drain; at most `FULFILLMENT_DRAINS_MAX` (512) drain at once;
+- ~~`python3 -m api` fixes `M_MMAP_THRESHOLD` at 128 KiB~~ — WITHDRAWN in fix wave 23 (see below): it contradicted
+  Decision 21, which stands as written.
+
+Kept: the reading client (ruled legitimate in round 21) and the 96 MiB bound. The blocking client's residual —
+a 3.9 MB blocking `sendall` answered 503 early is reset once the bounded drain ends and never reads the answer — is
+the design and is pinned by `tests/test_fix22_drain_residual.py` (with the reading client's clean 503 beside it).
+
+## Fix wave 23, Sep 30 2026 — the mmap-threshold call withdrawn; Decision 21 stands (AEGIS round 22 N22-C-1/C-2)
+
+Decision 21 (fix wave 7) measured a fixed 128 KiB mmap threshold and REJECTED it: every large body ~50% more CPU in
+page faults (19 vs 13 ms per 3.4 MiB); it kept glibc's dynamic threshold and returns freed heap pages with
+`malloc_trim(0)` one idle second after the last large parse. Wave 22 fixed the threshold anyway
+(`api._fix_mmap_threshold`, 1391b5c) to narrow the 128-sender test's peak variance — a product change bought to
+steady a test, and one Decision 21 had already priced: round 22 re-measured it (alloc/free of 256 KiB blocks ~15x
+slower, a growing 4 MiB bytearray ~5x, a mixed 200 KiB/1 KiB churn ~6-7x; the reviewers' `mmap_cost.log`). The call, its constant and
+`tests/test_fix22_mmap_threshold.py` (with its musl/stub-libc question, N22-C-2) are removed; `src/api.py` is
+byte-identical to its pre-1391b5c blob. **The fix of N21-C-1 is the 16 KiB bounded reads** of `src/graceful_close.py`
+(ADR 0003 §9: every read through one 16 KiB buffer, drains discard in it, the answered body released before the
+drain, the concurrency slot released before the drain, at most 512 drains). `tests/test_fix23_no_mmap_threshold.py`
+pins that the launcher leaves the threshold alone and that Decision 21's arena limit and idle trim stay.
+
+Measured with the call removed (e96bf0b and later; HEAD c71e363), Python 3.13.13, three busy loops, the test's own
+reading client, 96 MiB bound unchanged: `test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut`
+**20x alone: 0 failed**, growth 82-92 MiB (median 88); `tests/test_fix8_n7_2_body_prealloc.py` **10x as a module:
+0 failed**, growth 81-90 MiB (median 86). The margin is real but thin: the worst run is 4 MiB under the bound (wave
+22 with the fixed threshold measured 77-80; round 22's own no-threshold runs 81-94). The bound was not raised; a
+future change that adds per-connection buffering will show here first.
+
+Full suite (3.13.13 and 3.12.3): 1036 tests (recorded in a5fb681) — 1034 passed, 1 skipped, 1 failed each —
+`test_fix7_new4_parse_fairness.py::test_live_junk_flood_does_not_starve_small_legit_requests[8-oversized]`: all 192
+junk requests end `BrokenPipeError`, none reads its 413. It fails identically on 540a64e on this box (3/3 per Python,
+A/B alternating with this wave's tree: `services/delivery-py/docs/evidence/dept28/round22/ab-*`), so it is not this
+wave's change; it passed in round 22's runs on 540a64e. The test expects a blocking 4 MiB `sendall` to read an early
+413 — the residual ADR 0003 §9 accepted and `tests/test_fix22_drain_residual.py` pins for 503 (the client is reset
+once the bounded drain ends) — so whether any 413 is read depends on how much of the 4 MiB the socket buffers absorb
+before the drain ends. Reported, not changed: making the test accept zero 413s would weaken it without a ruling.
+
+**Correction (fix wave 24, AEGIS N23-S-4):** the paragraph above was true when written and then overtaken in the same
+wave. On Sep 30 the lead ruled the junk-flood client change legitimate (FIX_WAVE_23b brief: the same class as the
+fix8 128-sender test, waves 21/22 — the server answers the over-limit Content-Length at once, drains at most 64 KiB /
+1 s and closes, so a client that blocks on sending the whole 4 MiB before reading is reset by design), and commit
+1e1fc59 changed the TEST, not the product: the junk sender of `test_live_junk_flood_does_not_starve_small_legit_requests`
+now sends while reading and reads each answer to its Content-Length (`_send_reading`, reusing the connection only
+when the server kept it open), and its codes assertion no longer admits resets — every junk request must end
+413/422/503, every `oversized` one 413. The blocking client's residual is pinned live by
+`test_live_blocking_sendall_oversized_client_is_reset_before_reading_its_413` (a blocking `sendall` is reset; the same
+bytes from a reading client get their 413) beside the synthetic `tests/test_fix22_drain_residual.py`. After 1e1fc59
+the full suite had no failure on this box (the reviewers' round-23 runs: 1036 passed (recorded in 34daeeb), 1 skipped on 3.12.3 and on
+3.13.13).
+
+## Fix wave 24, Oct 1 2026 — every request-body byte inside the one 64 MiB budget, by construction (AEGIS round 23 N23-S-1)
+
+**The finding.** The 128-sender test's 96 MiB growth bound held by allocator luck: round 23 measured 84-114 MiB under
+three busy loops (6/20 single runs and 3/10 module runs failed). The in-flight budget counted only the bytes the
+app had taken past each body's first 64 KiB. Outside it were the 8 MiB small reserve (a separate pool), the body bytes
+uvicorn's protocol buffers before the app reads them (its 64 KiB high-water mark plus the read that crossed it, per
+connection — tracemalloc: 15.6 MiB in `cycle.body` across the burst), the chunk the app held while it waited to
+reserve it, and the growing body `bytearray`'s headroom and realloc copies.
+
+**Decision (Decision 21 amended; the 96 MiB bound unchanged; no fixed mmap threshold).**
+- `_INFLIGHT_BODY_BYTES` (64 MiB) is the WHOLE budget: the small reserve (`_SMALL_RESERVE_BYTES`, 8 MiB) is carved out
+  of it and the shared pool is the rest (56 MiB).
+- `BodySizeLimitMiddleware` owns each body's budget bytes (`_BodyHold`): a chunk is counted the moment the app
+  receives it — while it waits to be covered, in the pool's `over` — and the body is not read further until the
+  budget covers it (503 after `_INFLIGHT_WAIT_S`, preemption as before; the wait is the service's, not charged to
+  the client). `_off_loop` no longer reserves; it releases the hold once the parse has dropped the body.
+- Backpressure at the socket: under `python3 -m api` uvicorn's protocol (`http_limits.DeadlineH11Protocol.
+  handle_events`) pauses reading as soon as it holds any unread body, so it reads a body only when the app asks, one
+  read (`READ_BUFFER_BYTES`, 16 KiB) at a time — it used to read on to 64 KiB + a read whether or not the app asked.
+- The body is kept as the chunks received (uvicorn's `bytes` objects, exact size) and joined once inside the parse
+  slot (one body at a time in the large lane): no growth headroom, no realloc copies left in reused heap pages.
+- Decision 21's release to the OS stays as written: `malloc_trim(0)` one idle second after the last large body
+  (parsed or refused) with none in flight; the arena limit stays.
+
+**The bound, derived.** By construction, the request-body bytes the process holds are at most: 64 MiB counted
+(`used` <= each pool's limit) + `over` <= one 16 KiB chunk per body waiting for the budget (<= LIMIT_CONCURRENCY:
+2 MiB) + one unasked 16 KiB read per open connection in uvicorn's buffer (<= MAX_OPEN_CONNECTIONS: 4 MiB) = 70 MiB;
+plus, when a body is parsed, one joined copy of one body (<= 4 MiB; no parse happens in this scenario). The fixed
+term was measured, not assumed: the 128-sender scenario against `python3 -m api` started with the budget patched to
+X MiB (`probes/ful_budget_sweep.py` in the wave-24 scratch evidence), three busy loops, 3 runs per budget, X = 8.06,
+16, 32, 48, 64: growth 8-9 / 17 / 33 / 48-49 / 64-65 MiB — least squares **growth = 0.998·X + 0.86 MiB** (largest
+residual 0.28 MiB). Before the chunk change the same sweep gave 1.165·X + 0.9 (the bytearray's headroom and copies),
+and at the wave-23 code 39-43 MiB at X = 16 and 60-67 MiB at X = 32 (the small reserve and uvicorn's buffers on top
+of X). Derived bound at 64 MiB: 70 MiB by construction + 0.9 MiB measured fixed term = 71 MiB, leaving 25 MiB of
+the 96 MiB bound as stated margin for what the derivation does not count (per-connection objects beyond the sweep's
+128, allocator variance on another libc, another Python). The 96 MiB bound is reachable and was not changed.
+
+**Correction (fix wave 25; AEGIS round 24 N24-S-1, N24-S-15).** The "60/60" below was the implementing engineer's
+own run. On the same code (b51f307) AEGIS round 24 measured **7 failures in 60** under busy loops plus an uncontrolled
+co-tenant — every one on liveness (settle time, senders left unanswered within the client's 20 s), never on memory —
+and a liveness regression against 01e2851 (N24-S-2). The paragraph stands as a record of what was claimed; fix wave 25
+below is the answer. "The five in-process tests" at the end of this section was also wrong: the wave-24 commit
+(79fe238) made **six** edits to existing tests — five `_INFLIGHT_BODY_BYTES` patches
+(`test_fix10_body_clock_and_disconnect.py` one, `test_fix8_n7_2_body_prealloc.py` three, `test_fix9_inflight_fairness.py`
+one) and one `child_env()` line in `test_fix10_body_clock_and_disconnect.py`'s launcher.
+
+**Measured on the final code** (Python 3.13.13, this 2-CPU box, the test's own reading client, 96 MiB bound):
+`test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut` alone and
+`tests/test_fix8_n7_2_body_prealloc.py` as a module — (A) under three busy loops: single **20/20 passed** (recorded in 34daeeb) (growth
+64-65 MiB, median 65), module **10/10** (57-62, median 60); (B) three busy loops AND a concurrent heavy tenant
+(creative-py's full suite looping; load average up to 10.7): single **20/20** (64-67, median 65), module **10/10**
+(58-62, median 62). Every one of the 60 runs answered all 128 senders (408 or 503) and settled within 11.3 s (the
+test's bound 13 s). On the intermediate code (budget fixed, bytearray kept) the same batches gave 65-85 MiB and one
+module run failed at load 11 (the settle window and the in-process stalled-bodies test's 50 ms ordering sleep —
+neither the memory bound); that run is not on the final code.
+
+Not proven: other allocators (macOS) and other Pythons for the growth numbers (3.12 runs the suite, not the
+batches); at budgets well below 64 MiB under three busy loops some senders were answered later than the probe's 20 s
+client timeout (bounded by the 30 s body deadline + 5 s; the wave-23 code showed unanswered senders under the same
+probe too) — per-chunk budget waits of <= 2 s each can add up to the body deadline under heavy contention.
+
+Tests: `tests/test_fix24_body_memory_accounted.py` (3, all failing on 01e2851: the pools summed to 72 MiB; the chunk
+in hand was not counted; uvicorn buffered 81 733 body bytes for an app that never asked). Changed: the five
+in-process tests that patch `_INFLIGHT_BODY_BYTES` to size the SHARED pool now add `api._SMALL_RESERVE_BYTES` (the
+total includes the small reserve; their shared pool is what it was).
+
+## Fix wave 25, Oct 1 2026 — liveness restored, parsed models counted, loop lag not charged to the client (AEGIS round 24 N24-S-1..-4, -12, -13; FIX_WAVE_25 H1-H4)
+
+Ruling record: `FIX_WAVE_23b.md` (the wave-23 rulings, recorded Oct 1 because round 24 found them only in a dispatch
+prompt) and `FIX_WAVE_25.md` (H1-H4; R-LOAD: load proofs under **2** busy loops, heavier co-tenant runs informational).
+The first wave-25 commits (cd5fb49, b6790d3, cc5582e, 0c4784c) were made without a report; the E-A engineer re-verified
+them, found one regression in them and fixed it (H3 below), and ran the proofs below on the result.
+
+**H1 — liveness (N24-S-1/-2).** Wave 24 paused the protocol as soon as it buffered ANY body byte the app had not taken,
+so every 16 KiB read waited for a round trip through the app; under CPU contention bodies arrived more slowly and
+stalled bodies were cut later. Now the app reserves up to `_READ_GRANT_BYTES` (64 KiB, uvicorn's own high-water mark)
+AHEAD of what it has taken — only from free budget and never while another body waits for it
+(`_BodyHold.grant`, `_InFlightBytes.try_reserve`) — and the protocol keeps reading while the bytes it buffers plus the
+bytes the app has taken are below the bytes covered (`http_limits.DeadlineH11Protocol.handle_events`; the hold is in the
+request scope under `BODY_HOLD_SCOPE_KEY`). Covered bytes stream; at most one read past them is ever buffered (the
+wave-24 bound is unchanged); a grant past the end of a chunked body is given back when it completes (`trim`). A budget
+wait never runs past the body deadline (it is cut there, 408), so every sender is answered by the 30 s deadline +
+5 s however many budget waits it met. The launcher also sets the GIL switch interval it never set (1 ms; scout C5-2;
+`FULFILLMENT_SWITCH_INTERVAL_SECONDS`, only 100 us .. 50 ms, checked in force in whole microseconds and printed).
+
+**H2 — the test measures something (N24-S-13).** The 128-sender test's settle check starts only after the peak phase
+(a sample at base + 32 MiB); a run that never reached it is reported INVALID and fails. The senders run on one thread
+(a selector), so a starved client process no longer decides the result. The settle bound stays the fixed 13 s. (The
+stopped engineer's draft extended it by the server loop's measured run-queue wait; the E-A review reverted that — it
+raises a test bound — and the wait is only printed now, `/proc/<pid>/task/<pid>/schedstat`, so a slow server and a
+starved one read differently in the log.)
+
+**H3 — parsed models (N24-S-4).** The derivation left out the parsed model, which outlives the body's budget bytes and
+can be ~5x the body (CPython stores a string with one astral character at 4 bytes a character, plus its UTF-8 copy).
+Each model's size is measured right after the parse (`_retained_bytes`: everything reachable, each object once, +1/16;
+against tracemalloc it counts 0.98-1.06x what the model holds — large models 1.01-1.06x, small (<= 64 KiB body)
+models 0.98-1.02x, i.e. up to ~2% (~16 KB) UNDER for small ones — `tests/test_fix25_liveness.py`) and counted in the
+budget until the model is dropped (after the agent's work). Measured worst models per request model
+(E-A `h3_models` probe at e665109, Python 3.13.13 and 3.12.3 agree to 0.03 MiB; `w25-reports/E-A/logs/h3_models.e665109*.log`):
+large — CallEventsRequest 4.00 MiB body -> 20.5 MiB traced / 21.7 counted (5.1x), DossierUpdateRequest 3.91 -> 20.7 /
+22.0 (5.3x), OrchestrateRequest 2.19 -> 11.5 / 12.1; small (64 KiB body) — AppointmentsRequest 0.68-0.70 MiB traced /
+0.68 counted (10.9-11.2x), DossierUpdateRequest 0.65 / 0.64, CallEventsRequest 0.60 / 0.60. A large body's model waits for
+the budget like a chunk in hand (503 after `_INFLIGHT_WAIT_S`).
+**Regression found and fixed in review:** as first committed (cd5fb49) a SMALL body's model waited for the shared pool
+too — a 64 KiB valid body whose model is ~0.44 MB was answered 503 whenever the shared pool was held (by stalled senders,
+the very attack the small reserve exists for), breaking Decision 23 ("a small body never waits for in-flight bytes");
+on b51f307 the same request was 200 (`test_a_small_body_never_waits_for_the_shared_budget_even_when_its_model_is_larger`,
+failing on cd5fb49..da30363). A small body's model is now counted without waiting (`_BodyHold.cover_now`): what the
+pools have free, the rest in the shared pool's `over` until the model is dropped.
+**Second regression found and fixed (E-A successor, 20ab3e5):** a large body's model cover competed for freed bytes
+with every body chunk waiting for the shared pool; under the front-loaded slow-sender attack (fix9 Q1
+`[1MiB-front-then-2KiBps]`) the one model cover lost that race and the legit large batch was refused 503 AFTER its whole
+body had been received and parsed (diagnosed in a DIAG copy: `w25-reports/E-A/logs/q1-diag2/`; Q1 failed 3/6 runs on
+py3.12 vs 0/6 on b51f307). `_InFlightBytes.reserve(priority=True)`: while a priority reservation waits, no other
+reservation takes freed bytes; `_off_loop` covers a large model with it (one large parse slot: at most one priority
+wait, <= `_INFLIGHT_WAIT_S`). After: Q1 0/12 runs failed and 0 of 62 legit large batches 503 (before 10 of 53;
+`w25-reports/E-A/logs/q1-rep2/`).
+**Chosen: count, not reserve ahead.** Reserving the worst model (5.5x + up to 3 MiB) BEFORE the parse would put the
+parse in progress inside the budget too; it was built and measured and is not used: with 64 front-loaded slow
+senders holding the shared pool, every legit large batch was refused 503 (3/3, `test_live_q1_slow_senders_..._do_not_
+starve_legit_clients[1MiB-front-...]`, Decision 23's other half), because a ~1 MiB body then needs ~9 MiB of budget and
+preemption frees one holder at a time.
+
+**The bound, restated (H3).** Request memory the process holds at most:
+- counted, `used` <= the limit: **64 MiB** — body bytes, read-ahead grants, and every parsed model after its parse;
+- `over` (in memory, outside the limit): <= one 16 KiB chunk per body waiting to be covered (<= 128: **2 MiB**); a large
+  body's model while it waits to be covered (one at a time: the large lane has one slot; <= 22.0 MiB counted worst —
+  the same model as the next term, not in addition to it); small bodies' models past what the pools had free (each
+  <= ~0.7 MiB measured; how many coexist depends on how many small requests are in the agent's work at once — NOT
+  bounded structurally, see "Not proven");
+- uncounted: one unasked 16 KiB read per open connection in uvicorn's buffer (<= 256: **4 MiB**); the parse in
+  progress — per large slot (one) the joined body copy (<= **4 MiB**) and the model being built (<= **20.7 MiB** traced
+  worst), per small slot (four) <= 64 KiB + ~0.7 MiB (<= **3 MiB**);
+- the measured fixed term (wave-24 budget sweep): **0.9 MiB**.
+Sum with no parse in flight (the 128-sender scenario the 96 MiB test bound is for): 64 + 2 + 4 + 0.9 = **71 MiB**, margin
+25 MiB. With the worst large parse in flight as well: 71 + 4 + 20.7 + 3 = **99 MiB** — above 96 MiB: the 96 MiB bound is
+the 128-sender scenario's (bodies only, no parse), not a bound on every mix. Measured (E-A, Oct 1 23:04-23:17Z, head
+e665109, 2 busy loops, the reviewer's probes, VmHWM growth; `w25-reports/E-A/logs/campaign-e665109-MHA/`): the
+128-sender scenario 65-67 MiB (10 runs; derived 71); 16 clients looping valid 4 MiB astral batches (`f1_parse_live.py`,
+each model ~5x its body) 66-70 MiB, 179/179 answered 200 (01e2851: 61-75 MiB); 60 stalling attackers plus legit small,
+large-astral and /health traffic (`f1_exhaust.py stall 60 20`, `LARGE_KIND=astral`) 79-80 MiB (01e2851: 100-102 MiB),
+small 100/100 200, /health 100/100 200, but large legit astral batches 1/10 and 1/10 answered 200 (9/10 503 after the
+2 s budget wait) against 01e2851's 6/10 and 2/10 — the cost of counting the model: a ~1 MiB astral body needs ~6 MiB
+of budget that stalled senders hold. Re-measured after the priority fix (20ab3e5, 05:20-05:35Z,
+`w25-reports/E-A/logs/campaign-20ab3e5-SMHA/`): stall flood 85-86 MiB, large legit astral 4/10 and 5/10 200 (01e2851 in
+the same run 2/10 and 0/10), small and /health 100/100; astral clients 62-72 MiB, 179/179 200; 128 senders VmHWM 64-66.
+Small bodies' models (the uncounted-when-full part above) are bounded only through concurrency: at most
+`LIMIT_CONCURRENCY` (128) requests are in the app at once, so their models add at most 128 x the worst small model
+(<= ~0.7 MiB) — a loose bound well above the 96 MiB scenario bound; no probe filled it.
+
+**H4 — loop lag is not the client's time (N24-S-12).** The rules that judge a client by time (the app's stall,
+trickle and arrival rules, the preemption charge, the protocol's stall and rate rules for unread bodies) counted every
+second of wall time spent waiting for the client's bytes, including time the event loop could not run. Measured: a
+client sending 32 KiB every 0.5 s with the server process stopped (SIGSTOP) 6 s mid-body was 408 "stalled for 5s" 3/3.
+`http_limits.LoopLag` measures the time the loop was behind (a 50 ms tick; lateness past 50 ms is `lost`) and those
+rules subtract it; the hard deadlines (30 s + 5 s, the head deadline) stay wall-clock. Consequence, accepted by the
+ruling: on a starved box stalled bodies are cut later in wall-clock seconds, by about the starvation, never later than
+the hard deadline. Residual: the protocol's `_body_last_lost` is read in `data_received` before the late tick of the
+same loop pass has run, so after a freeze the protocol's own stall clock (a backstop at 10 s) can credit the freeze
+once more.
+
+**Proofs** (E-A, Oct 1 2026, 21:24-21:31Z, this 2-CPU box, Python 3.13.13, head = ef14a52; exactly 2 busy loops —
+R-LOAD — started and killed by the campaign script; a ps snapshot of other CPU users is logged per run: another
+engineer's processes ran unlocked beside some of them; logs `w25-reports/E-A/logs/campaign-ef14a52-TS/`). The draft's
+numbers were the stopped engineer's own and are not repeated here.
+- Interleaved, 5 rounds of b51f307 / head / 01e2851, the reviewer's `f1_timeline.py` unchanged: settle (< 24 MiB)
+  head 8.9-9.4 s (median 9.0), 01e2851 7.8-9.4 s (median 8.9), b51f307 7.9-9.5 s; last 408 head 7.8-8.2 s, 01e2851
+  7.7-8.3 s, b51f307 7.8-8.3 s; first 408 head 1.5-1.8 s, 01e2851 1.8-2.1 s; **no sender unanswered on any side**
+  (every one 408 or 503); sampled peak head 62-65 MiB, b51f307 63-65, 01e2851 94-114. Head is no worse than 01e2851
+  at the worst settle (9.4 vs 9.4) and its median is 0.1 s later (the sampler's step is 0.25 s).
+  **Not shown:** under these conditions (2 busy loops, no co-tenant suite) b51f307 did NOT reproduce round 24's
+  regression either (settle <= 9.5 s, nothing unanswered) — round 24 measured 3 busy loops plus an uncontrolled
+  co-tenant. So this campaign shows the head is no worse than both bases at R-LOAD; it does not show that the
+  wave-25 change is what removed a regression.
+- `test_live_128_senders_..._cut` alone, 20 runs: **20/20 passed**; growth 63-65 MiB (kernel VmHWM), settled at
+  7.5-8.5 s against the fixed 13 s bound; the server's main thread waited 0.49-0.72 s in the run queue per burst
+  (printed only); load average 2.4-3.0.
+
+**Not proven / could still be wrong.** Small-body models are counted but not bounded structurally (above). Other
+allocators and Pythons (macOS; the batches ran on 3.13). Whether a request model shape exists whose model is larger
+than the measured worst (the probe tried the long-string and many-object extremes of every request model, not every
+mix). The protocol's double credit after a freeze (above). Uncontrolled co-tenants were present for every load run.
+
 ## Verified so far (Sep 22, 2026 build session)
 
 See `services/fulfillment-py/README.md` for the actual test count, what

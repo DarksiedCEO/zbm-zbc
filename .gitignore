@@ -3,10 +3,23 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
+# virtual environments, wherever a README's `python -m venv` / `uv sync` puts them (fix wave 25, scout C5-8)
+.venv/
+venv/
+.ruff_cache/
+.mypy_cache/
 
-# Go
+# Secrets: every service refuses to start without bearer tokens, and the READMEs tell you to export them; a local
+# .env holding them must never be committed (gitleaks does not recognise arbitrary shared-secret strings).
+.env
+.env.*
+!.env.example
+
+# Go (`go build ./cmd/orchestrator` writes `orchestrator`; `go build` at the module root writes `orchestrator-go`)
 /services/orchestrator-go/orchestrator-go
+/services/orchestrator-go/orchestrator
 *.test
+coverage.out
 
 # Rust
 target/
@@ -28,6 +41,7 @@ node_modules/
 .next/
 next-env.d.ts
 npm-debug.log*
+coverage/
 
 # OS
 .DS_Store

@@ -1,0 +1,62 @@
+=================================== FAILURES ===================================
+_______ test_health_latency_bound_under_16_concurrent_worst_case_batches _______
+
+server = 18810
+
+    def test_health_latency_bound_under_16_concurrent_worst_case_batches(server):
+        from api import MAX_CONCURRENT_HEAVY, ROUTE_BODY_LIMITS
+        from test_body_limits import worst_body
+    
+        body = worst_body("orders")  # the largest legal batch of any route
+        assert len(body) > 25 * MIB and len(body) <= ROUTE_BODY_LIMITS[DETECT]
+    
+        results: list[tuple[int, bytes, float]] = []
+        lock = threading.Lock()
+        stop = threading.Event()
+    
+        def client():
+            while not stop.is_set():
+                r = _request(server, "POST", DETECT, body, timeout=120, headers={"Authorization": AUTH})
+                with lock:
+                    results.append(r)
+                if r[0] == 503:
+                    time.sleep(0.2)
+    
+        threads = [threading.Thread(target=client) for _ in range(16)]
+        for t in threads:
+            t.start()
+        health = []
+        try:
+            time.sleep(0.5)  # let all 16 get going
+            end = time.monotonic() + 8
+            while time.monotonic() < end:
+                status, _, elapsed = _request(server, "GET", "/health", timeout=10)
+                health.append((status, elapsed))
+                time.sleep(0.05)
+        finally:
+            stop.set()
+            for t in threads:
+                t.join(timeout=180)
+    
+        latencies = sorted(e for _, e in health)
+        worst = latencies[-1]
+        p50 = latencies[len(latencies) // 2]
+        print(f"\n/health under 16 concurrent worst-case batches: n={len(latencies)} "
+              f"p50={p50 * 1000:.0f}ms max={worst * 1000:.0f}ms; batches: "
+              f"{sum(r[0] == 200 for r in results)} x 200, {sum(r[0] == 503 for r in results)} x 503")
+        assert all(s == 200 for s, _ in health)
+>       assert worst < HEALTH_BOUND_S, f"/health took {worst:.3f}s (bound {HEALTH_BOUND_S}s)"
+E       AssertionError: /health took 0.509s (bound 0.5s)
+E       assert 0.5087121939995995 < 0.5
+
+tests/test_request_limits_live.py:245: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+/health under 16 concurrent worst-case batches: n=37 p50=111ms max=509ms; batches: 13 x 200, 267 x 503
+=============================== warnings summary ===============================
+../../../../../../tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/ful313/lib/python3.13/site-packages/fastapi/testclient.py:1
+  /tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/ful313/lib/python3.13/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 failed, 467 passed, 1 warning in 40.12s

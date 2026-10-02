@@ -1,9 +1,11 @@
 # ZBM/ZBC — Revenue Recovery 1A
 
 First real code in the `zbm-zbc` monorepo. Built Sep 21–22, 2026, then
-hardened Sep 22, 2026 against a real independent review. Everything below
-has been actually run and verified in this build session — not just
-written. See `docs/adr/0001-revenue-recovery-1a-architecture.md` for the
+hardened Sep 22, 2026 against a real independent review. The dated sections
+below record what was run on their date; they are history, not the current
+state. Current test counts are generated: **[docs/test-counts.md](docs/test-counts.md)**
+(fix wave 25 — every hand-written count in this file had drifted; the
+hygiene check now fails a hand-written count, see "Testing"). See `docs/adr/0001-revenue-recovery-1a-architecture.md` for the
 full architecture rationale and scope boundary (Tier 3 excluded, see that
 doc for why).
 
@@ -20,10 +22,10 @@ hash chain as findings.**
 
 | Service | Language | Tests | Status |
 |---|---|---|---|
-| `services/detection-py` | Python (FastAPI, pydantic) | 457/457 passing | Real, REST-exposed, hardened, money is exact `Decimal`; request limits (1000 items; every field bounded; per-route body limit = computed worst-case legal batch + 25%, 1–36 MiB; 1 large request at a time, else 503 + Retry-After; async `/health`; head size/deadline — ADR 0001 "Request limits"); run with `src/serve.py` |
-| `services/orchestrator-go` | Go | 59/59 passing | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money`; server timeouts, body/header caps, bounded upstream responses (ADR 0001 "Request limits") |
-| `services/ledger-rust` | Rust | 91/91 passing (60 unit + 31 real-binary integration), clippy `-D warnings` clean | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
-| `apps/dashboard-ts` | TypeScript (Next.js 16) | 27/27 `npm test` after `npm run build` (money vectors, loopback bind, error sanitizing, ledger status, load outcome → HTTP status, live status codes on the wire), build + typecheck clean, 0 npm audit vulnerabilities | Real, rendered per request (`ƒ /`), binds 127.0.0.1 by default, reads recorded findings — viewing never writes; `/` and `/healthz` answer 503 (orchestrator unreachable/timeout, token unset) or 502 (token rejected, orchestrator error, ledger does not verify), 200 only when findings loaded and the ledger verified |
+| `services/detection-py` | Python (FastAPI, pydantic) | [counts](docs/test-counts.md) | Real, REST-exposed, hardened, money is exact `Decimal`; request limits (1000 items; every field bounded; per-route body limit = computed worst-case legal batch + 25%, 1–36 MiB; 1 large request at a time, else 503 + Retry-After; async `/health`; head size/deadline — ADR 0001 "Request limits"); run with `src/serve.py` |
+| `services/orchestrator-go` | Go | [counts](docs/test-counts.md) | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money`; server timeouts, body/header caps, bounded upstream responses (ADR 0001 "Request limits") |
+| `services/ledger-rust` | Rust | [counts](docs/test-counts.md) (unit + real-binary integration), clippy `-D warnings` clean | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
+| `apps/dashboard-ts` | TypeScript (Next.js 16) | [counts](docs/test-counts.md); `npm test` after `npm run build` (money vectors, loopback bind, error sanitizing, ledger status, load outcome → HTTP status, live status codes on the wire), build + typecheck clean; `npm audit` clean since fix wave 25 moved Next.js to 16.3.8 (GHSA-vcvr-r3jv-pc5j, critical, affected >=16.2.0 <16.3.6) | Real, rendered per request (`ƒ /`), binds 127.0.0.1 by default, reads recorded findings — viewing never writes; `/` and `/healthz` answer 503 (orchestrator unreachable/timeout, token unset) or 502 (token rejected, orchestrator error, ledger does not verify), 200 only when findings loaded and the ledger verified |
 
 **Verified live, full-stack run** (Python + Go + Rust, real processes,
 real HTTP, no mocks, all three services requiring and presenting real
@@ -115,7 +117,7 @@ entry in `GET /ledger/entries` now carries `"kind": "finding"` or
 domain-separated (`event|` prefix); events and the idempotency index
 survive restart. Field rules are in ADR 0003.
 
-**Verified Sep 24 2026:**
+**Verified Sep 24 2026** (commit 2dbce4d; historical counts, superseded by docs/test-counts.md):
 - `python3 -m pytest -q` (detection-py): 138 passed.
 - `go vet ./...` clean; `go test ./...` (orchestrator-go): 21 passed.
 - `cargo test` (ledger-rust): 55 passed (39 unit, 8 `server_auth`, 8
@@ -211,7 +213,7 @@ exclusion, not an oversight.
 
 ## Running it
 
-Requires: Python 3.11+, Go 1.24+, Rust/cargo, Node 22+.
+Requires: Python 3.12+ (CI tests 3.12 and 3.13; 3.11 is not tested — fix wave 25), Go 1.24+, Rust/cargo, Node 22+.
 
 **All three backend services fail closed and refuse to start without
 their auth token set** (post-hardening, Sep 22 2026). Pick your own real
@@ -238,6 +240,9 @@ export DETECTION_SERVICE_TOKEN=<same value as ZBM_SERVICE_TOKEN above>
 export LEDGER_SERVICE_TOKEN=<same value as LEDGER_SERVICE_TOKEN above>
 export ORCHESTRATOR_SERVICE_TOKEN=<your-shared-secret, for callers of THIS service>
 go run ./cmd/orchestrator  # DETECTION_SERVICE_URL, LEDGER_SERVICE_URL, ORCHESTRATOR_PORT
+#   (ORCHESTRATOR_PORT=0 + ORCHESTRATOR_PORT_FILE=<path>: the kernel picks the port and the
+#   orchestrator writes it there, atomically; removed on SIGINT/SIGTERM, not on SIGKILL — a hint,
+#   check GET /health before trusting it, as for ledger-rust's LEDGER_PORT_FILE, ADR 0003 §11)
 
 # 4. Dashboard (TypeScript) — separate terminal
 cd apps/dashboard-ts
@@ -246,7 +251,8 @@ ORCHESTRATOR_URL=http://localhost:8080 ORCHESTRATOR_SERVICE_TOKEN=<same as above
 # `npm run build && npm start` for production. Both bind 127.0.0.1 (the
 # dashboard has no auth); DASHBOARD_BIND_ADDR overrides, PORT sets the port.
 # The page shows findings already recorded in the ledger (read-only);
-# run a scan first with the POST below. `npm test` runs the money vectors.
+# run a scan first with the POST below. `npm test` runs every dashboard test
+# (money vectors, bind, error mapping, and the live tests against the build).
 # Monitoring: GET /healthz (JSON) and GET / answer 200 only when findings
 # loaded and the ledger verified; 503/502 otherwise (ORCHESTRATOR_TIMEOUT_MS,
 # default 10000, bounds the orchestrator call).
@@ -261,24 +267,58 @@ curl -s -X POST -H "Authorization: Bearer $ORCHESTRATOR_SERVICE_TOKEN" \
 ## Testing
 
 ```bash
-# Python — 427 tests. Use `python3 -m pytest`, not the bare `pytest`
+# Test counts for every suite: docs/test-counts.md (generated; do not
+# write counts here). Python: use `python3 -m pytest`, not the bare `pytest`
 # binary, if pytest was installed as a standalone tool (e.g. via uv) —
 # it can silently run against a different interpreter than the one you
 # `pip install`ed into, and report a module-not-found collection error
 # that looks like a broken test suite rather than an environment mismatch.
 cd services/detection-py && python3 -m pytest -q
 
-# Go — 59 tests
+# Go (the binary tests start the real orchestrator with ORCHESTRATOR_PORT=0
+# and read the bound port from ORCHESTRATOR_PORT_FILE — no fixed port)
 cd services/orchestrator-go && go vet ./... && go test -count=1 ./...
 
-# Rust — 91 tests (60 unit + 31 integration; the integration tests spawn
-# the real compiled binary and talk to it over a real TCP socket — see
-# tests/server_auth.rs, tests/server_events.rs, tests/server_hardening.rs)
+# Rust (the integration tests spawn the real compiled binary and talk to it
+# over a real TCP socket — tests/server_auth.rs, server_events.rs,
+# server_hardening.rs, server_port_file.rs, server_slow_clients.rs)
 cd services/ledger-rust && cargo test && cargo clippy --all-targets -- -D warnings
 
-# Dashboard — 27 tests (3 start the built server: run `npm run build` first)
-cd apps/dashboard-ts && npm ci && npx tsc --noEmit && npm run build && npm test && npm audit
+# Dashboard (the live tests start the built server on a port it picks:
+# run `npm run build` first; without a build they SKIP, and CI fails a skip)
+cd apps/dashboard-ts && npm ci && npm run lint && npm run build && npm test && npm audit
 ```
+
+### Hygiene check (fix wave 25, founder ruling R-HYGIENE)
+
+Every suite in CI runs under `devtools/hygiene_check.py run` (standard-library
+Python; `--help` lists the rules), which fails the run when the suite:
+changes a tracked file (R1); leaves a new git-ignored file in the checkout
+(R2; a venv or a build directory the job itself makes is allowlisted by
+path); leaves anything in its private TMPDIR or creates a new entry in /tmp
+(R3); leaves a process running (R4 — found by session/process group, an
+inherited environment marker, and on Linux by being the suite's child
+subreaper, so a double-forked env-scrubbed grandchild is found too); skips a
+test for a reason not on the suite's list in `devtools/hygiene_allowlist.json`
+(R5); or runs a different number of tests than `docs/test-counts.md` says (R6).
+`devtools/hygiene_check.py lint` (CI job `hygiene-static`) fails a test that
+asserts an upper bound on wall-clock time against a literal (L1), a test that
+binds a hard-coded port (L2), a hand-written test count in the docs (L3), and
+a shared file that differs between services (L4). Python suites load
+`devtools/pytest_plugin/zbm_pytest_hygiene.py` through the wrapper (it can be
+used on its own: see its docstring). Run one suite locally exactly as CI does:
+
+```bash
+python3 devtools/hygiene_check.py run --suite python:finance-py --kind pytest \
+  --cwd services/finance-py -- python3 -m pytest -q -rs -p no:cacheprovider
+python3 devtools/hygiene_check.py lint
+```
+
+After adding or removing tests, regenerate the suite's row with
+`--counts write` (same command) and commit `docs/test-counts.md`. Open
+Medium/Low findings that a wave could not close are tracked one line each in
+[docs/findings/OPEN.md](docs/findings/OPEN.md) (founder ruling R-GATE: the next
+wave fixes them).
 
 ## Data
 
@@ -286,7 +326,8 @@ Everything runs against `fixtures/*.json` — a shared, hand-built pool of
 orders, customers, subscriptions, and Tier 2 domain data with deliberate
 leak cases AND control cases (so every agent proves it doesn't just flag
 everything). **Explicitly non-live.** No real store is connected. See
-Decision 6 in `revenue-recovery-founder-decisions.md` for why, and the
+Decision 6 in `revenue-recovery-founder-decisions.md` (a founder document that is NOT in this
+repository — a dangling reference, scout C4-5) for why, and the
 platform-agnostic design note in the ADR for how a real store's data
 attaches later without touching agent logic.
 
@@ -321,7 +362,7 @@ spec, with 15 deterministic single-task intelligences (no model calls).
 Architecture: `docs/adr/0004-onboarding-department-architecture.md`. Details
 and routes: `services/onboarding-py/README.md`.
 
-- **Status:** built and tested (663 tests, `python3 -m pytest -q`; the live
+- **Status:** built and tested (current test count: docs/test-counts.md; `python3 -m pytest -q`; the live
   ledger-rust tests build the binary with cargo and run by default). **Not
   certified for any real client, clipper or brand.** Scenario, attack and
   guardrail tests exist. The AEGIS review findings were fixed in fix waves 1–7
@@ -437,7 +478,7 @@ ids are derived, not stored, and the rulebook list is paginated; 401
 before 415.
 
 ```bash
-cd services/creative-py && python3 -m pytest -q      # 664 tests
+cd services/creative-py && python3 -m pytest -q      # count: docs/test-counts.md
 export CREATIVE_SERVICE_TOKEN=<secret> CREATIVE_ANDRE_APPROVAL_TOKEN=<other secret>
 export CREATIVE_ACTOR_TOKENS='{"<actor_id>": "<token>", ...}'   # per-actor credentials
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>
@@ -460,7 +501,7 @@ and every choice made where the spec was silent:
 `docs/adr/0006-compliance-department-architecture.md`. Routes and settings:
 `services/compliance-py/README.md`.
 
-- **Status:** built and tested (445 tests, `python3 -m pytest -q`; no network —
+- **Status:** built and tested (current test count: docs/test-counts.md; `python3 -m pytest -q`; no network —
   a socket guard fails any test that tries). **Not certified for any real
   client, clipper, payout or publish.** Verification and Integrity, Finance
   (31), Legal (37), the OFAC screening provider and the accessibility checker
@@ -488,7 +529,7 @@ and every choice made where the spec was silent:
   `GET /ledger/verify` → `{"entries":148,"valid":true}`.
 
 ```bash
-cd services/compliance-py && python3 -m pytest -q      # 445 tests
+cd services/compliance-py && python3 -m pytest -q      # count: docs/test-counts.md
 export COMPLIANCE_SERVICE_TOKEN=<secret> COMPLIANCE_ANDRE_APPROVAL_TOKEN=<Andre's secret>
 export COMPLIANCE_CALLER_TOKENS='{"onboarding": "<>=32 chars>", "creative_production": "...", "scheduler": "..."}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> COMPLIANCE_DATA_DIR=<dir>
@@ -507,7 +548,7 @@ calls. Money never touches it: no amount, rate or currency anywhere. Architectur
 made where the spec was silent are in `docs/adr/0007-verification-integrity-architecture.md`. Routes and
 settings are in `services/verification-py/README.md`.
 
-- **Status:** built and tested (245 tests, `python3 -m pytest -q`; no network). **Not certified for any
+- **Status:** built and tested (current test count: docs/test-counts.md; `python3 -m pytest -q`; no network). **Not certified for any
   real clipper, clip or payout.** The token vault, platform adapters, perceptual hasher, media intake,
   age provider, Finance (31), Legal (37), People (43) and Clipper Network are fail-closed stand-ins, so on
   day one no connection completes and nothing certifies. Even with every stand-in replaced, the spec's own
@@ -529,7 +570,7 @@ settings are in `services/verification-py/README.md`.
   and `{"entries":6802,"valid":true}`. 28/28 checks passed.
 
 ```bash
-cd services/verification-py && python3 -m pytest -q      # 245 tests
+cd services/verification-py && python3 -m pytest -q      # count: docs/test-counts.md
 export VI_SERVICE_TOKEN=<secret> VI_ANDRE_APPROVAL_TOKEN=<Andre's secret>
 export VI_CALLER_TOKENS='{"compliance_38": "<>=32 chars>", "creative_production": "...", "scheduler": "..."}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> VI_DATA_DIR=<dir>
@@ -549,7 +590,7 @@ every choice made where the spec was silent:
 `docs/adr/0008-clipper-network-architecture.md`. Routes and settings:
 `services/clipper-network-py/README.md`.
 
-- **Status:** built and tested (303 tests, `python3 -m pytest -q`; no
+- **Status:** built and tested (current test count: docs/test-counts.md; `python3 -m pytest -q`; no
   network — a socket guard fails any test that tries). **Not certified for
   any real clipper.** V&I, Compliance (38), Creative, Finance (31), Legal
   (37), People (43), the messaging provider, the hub and push are stand-ins
@@ -579,7 +620,7 @@ every choice made where the spec was silent:
   `{"entries":30,"valid":true}` and `{"entries":134,"valid":true}`.
 
 ```bash
-cd services/clipper-network-py && python3 -m pytest -q      # 303 tests
+cd services/clipper-network-py && python3 -m pytest -q      # count: docs/test-counts.md
 export CN_SERVICE_TOKEN=<secret> CN_IDENTITY_HMAC_KEY=<secret> CN_ANDRE_APPROVAL_TOKEN=<Andre's secret>
 export CN_CALLER_TOKENS='{"hub": "<>=32 chars>", "onboarding": "...", "creative_production": "...", "scheduler": "..."}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> CN_DATA_DIR=<dir>
@@ -601,7 +642,7 @@ every choice made where the spec was silent, and the unlock list:
 `docs/adr/0009-finance-department-architecture.md`. Routes and settings:
 `services/finance-py/README.md`.
 
-- **Status:** built and tested (323 tests, `python3 -m pytest -q`; no
+- **Status:** built and tested (current test count: docs/test-counts.md; `python3 -m pytest -q`; no
   network; AEGIS round 17 fixed Sep 27 -- payable identity, record-first
   sweeps, strict adapter answers, deposit returns (F1r); ADR 0009 amendment). **Not certified for any real dollar.** Rails (Stripe/Trolley),
   bank feed and transfers, tax agent, GL, vault, Clipper Network, Legal,
@@ -630,7 +671,7 @@ every choice made where the spec was silent, and the unlock list:
   `{"entries":232,"valid":true}`.
 
 ```bash
-cd services/finance-py && python3 -m pytest -q      # 323 tests
+cd services/finance-py && python3 -m pytest -q      # count: docs/test-counts.md
 export FIN_SERVICE_TOKEN=<secret> FIN_ANDRE_APPROVAL_TOKEN=<Andre's secret>
 export FIN_CALLER_TOKENS='{"scheduler": "<>=32 chars>", "creative_production": "...", "onboarding": "...", "clipper_network": "..."}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> FIN_DATA_DIR=<dir>
@@ -649,7 +690,7 @@ refuses and records any rendered text or template variable that reads as advice.
 the spec was silent: `docs/adr/0010-legal-department-architecture.md`. Routes and settings:
 `services/legal-py/README.md`.
 
-- **Status:** built and tested (276 tests, `python3 -m pytest -q`; no network; AEGIS round 17 fixed Sep 27 --
+- **Status:** built and tested (current test count: docs/test-counts.md; `python3 -m pytest -q`; no network; AEGIS round 17 fixed Sep 27 --
   party-bound acceptances, server-assigned versions, IP scan, SOW counsel gate, urn memo proposals; ADR 0010
   amendment). **Not in force for any real
   document.** No counsel is engaged and the counsel channel, e-sign provider, Cybersecurity 22 and People 43 are
@@ -675,7 +716,7 @@ the spec was silent: `docs/adr/0010-legal-department-architecture.md`. Routes an
   passed.
 
 ```bash
-cd services/legal-py && python3 -m pytest -q      # 276 tests
+cd services/legal-py && python3 -m pytest -q      # count: docs/test-counts.md
 export LEGAL_SERVICE_TOKEN=<secret> LEGAL_ANDRE_APPROVAL_TOKEN=<Andre's secret>
 export LEGAL_CALLER_TOKENS='{"compliance_38": "<>=32 chars>", "hub": "...", "scheduler": "..."}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret> LEGAL_DATA_DIR=<dir>
@@ -695,12 +736,23 @@ suite on the exact tree it commits, with its own configuration, an engine-owned 
 result it cross-checks (pytest junit + collect-only + the plugin record; `go test -json` + `-list`; `cargo test`
 lines + `-- --list`; `node --test` junit + TAP); a test that was passed/failed at baseline and is skipped or
 missing afterwards fails the run. It commits, writes the report from its records and hands the run to AEGIS
-re-review — nothing is fixed on the agent's word, nothing the agent's process prints is ever a count, and `git
+re-review — the engine never claims a finding is fixed (wave 23: its end state is `candidate_passed_checks`,
+checks passed, necessary not sufficient; only an AEGIS review with a verdict per finding makes one `accepted`, and
+every added source line that can observe the execution context is a review flag at the top of the report), nothing
+the agent's process prints is ever a count, and `git
 push`, merges, network, deletion outside the service directory, ACP/MCP and self-modification are denied
 unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 amendments and the spec defects:
 `docs/adr/0011-delivery-department-architecture.md`. Routes and settings: `services/delivery-py/README.md`.
 
-- **Status:** built and tested (489 tests: 486 passed, 3 skipped with the printed reason; `ruff` clean). The loop is
+- **Status:** built and tested (fix wave 23, c71e363: 651 tests — 647 passed, 4 skipped with the printed
+  reason — on Python 3.13.13 and on 3.12.3; a run leaves nothing in its `TMPDIR` but the shared Go build cache,
+  BUT it leaves four `dlv-git-*` isolation dirs and one `go-build*` dir in `/tmp` itself — processes started with
+  a scrubbed environment (no `TMPDIR`) and then ended by a signal, so their `atexit` cleanup never runs: known,
+  not fixed; wave 21: every finding must name a runnable reproduction — an existing test or a reviewer-authored
+  `reproduction_test` that fails on the starting tree — or is refused 422, and since wave 22 that RED check is
+  part of admission (wave 23: its containers run outside the service lock, the service's run slot reserved), and
+  the reproduction must also hold OUTSIDE the test runner — a reproduction whose TEST needs pytest ends
+  `needs_review_runner_dependent`, flagged for the reviewer). The loop is
   proven end to end with a deterministic model against the `fixtures/dlv/toy-py`, `toy-rs`, `toy-go` and `toy-ts`
   fixtures (the real `cargo`, `go` and `node`) through the REAL harness and guardrail; every round-18 attack (conftest monkeypatch, forged summary, neutered `pytest.ini`, deleted test,
   trivial `DISPROOF:`, hung or flooded suite) and every round-19 route (a fix in a new module the test imports, a
@@ -720,5 +772,5 @@ unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 a
   ledger-anchored local log line before it takes effect; an unverifiable test result is `unknown`, never green.
 
 ```bash
-cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # 489 tests (cargo, go, node on PATH)
+cd services/delivery-py && uv sync --frozen && .venv/bin/python -m pytest -q     # count: docs/test-counts.md (cargo, go, node on PATH)
 ```

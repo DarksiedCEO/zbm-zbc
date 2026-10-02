@@ -26,11 +26,20 @@ started by ``provider.start_engine_box`` from a tree the engine built on the hos
 an overlay of exactly the worktree paths that run may see) and destroyed right after; the agent's container is
 ``docker kill``ed on cancel/deadline. The RED test is tied to the finding: the finding's file must carry a hunk of
 the fix diff; a checkout with the whole fix EXCEPT that file must make the RED test fail (single-file revert); the
-finding's own reproduction, when it names a test, must pass in the verification checkout and fail in the reverted
-one; baseline failures the fix claims are re-run on base + the source changes alone. Outcome deltas are verdicts:
+finding's own reproduction must pass in the verification checkout and fail in the reverted one (wave 21: always —
+a finding without a runnable reproduction is refused at ingestion, 422 ``reproduction_not_runnable``); baseline failures the fix claims are re-run on base + the source changes alone. Outcome deltas are verdicts:
 a test that was passed/failed at baseline and is skipped/xfail/missing afterwards fails the round and the run; a
 ``CHANGED_TEST:`` naming any open finding's reproduction is denied; the reason text goes to the report verbatim.
 ``_check_live`` gates every phase and the service refuses records on a run that is not live.
+
+Wave 23 (founder design change D1-D3): the engine's end state for a finding is ``candidate_passed_checks`` — every
+check above passed, which is necessary, not sufficient; nothing here ever claims "fixed", and only an AEGIS review
+makes a finding ``accepted``. Before that end state, every line the finding's commit adds to a SOURCE file is scanned
+for constructs that can observe the execution context (``review_flags``); the flags are recorded
+(``review_flags_recorded``) and head the report. The standalone re-run is authoritative when it executed (D3): a
+``fail`` with the fix fails the round whatever conftest is on the path, and a pytest import blocked from a SOURCE
+frame fails it as ``fix_imports_test_runner``; only a test that itself cannot run outside the runner ends
+``needs_review_runner_dependent`` — and that is a flag, not a parking lot.
 """
 
 from __future__ import annotations
@@ -42,14 +51,17 @@ import re
 import shutil
 import tempfile
 import threading
+from datetime import timedelta
 from typing import Optional
 
 from zbm_delivery import fsops, registry
 from zbm_delivery import reasons as R
 from zbm_delivery.adapters.identity import assert_effective, bound_user
-from zbm_delivery.adapters.sandbox import extract_tar
+from zbm_delivery.adapters.sandbox import EngineBoxNotLive, extract_tar
 from zbm_delivery.engine import brief as B
-from zbm_delivery.engine import parsers, report
+from zbm_delivery.engine import parsers, report, states
+from zbm_delivery.engine import review_flags as RF
+from zbm_delivery.engine import srcdiff
 from zbm_delivery.errors import Unavailable
 from zbm_delivery.gitport import GitPort, GitRefused
 from zbm_delivery.policy import WORKSPACE
@@ -63,6 +75,9 @@ MIN_DISPROOF_STATEMENT = 40
 CAPTURED_BEGIN = "--- BEGIN CAPTURED OUTPUT (untrusted) ---"
 CAPTURED_END = "--- END CAPTURED OUTPUT ---"
 WATCHDOG_PERIOD_S = 0.25
+# the states a finding leaves a run in without failing it (wave 23, D1: the engine's end states — none is "fixed"; the
+# run reaches awaiting_review and only an AEGIS review accepts a finding)
+DONE_STATES = states.ENGINE_DONE_STATES
 
 
 class RunEnded(Exception):
@@ -108,16 +123,17 @@ def _hunk_lines(diff_text: str, service: str) -> dict[str, set[int]]:
     return out
 
 
-def _tree_digest(root: str) -> str:
+def _tree_digest(root: str, exclude: frozenset = frozenset()) -> str:
     """sha256 over the sorted (relative path, sha256 of content, executable bit) of every regular file under
-    ``root`` (junk excluded): two trees with the same digest hold the same files."""
+    ``root`` (junk excluded, and the relative paths in ``exclude`` — the run's reviewer-authored tests, which are
+    overlaid on every engine tree and never committed): two trees with the same digest hold the same files."""
     h = hashlib.sha256()
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in JUNK_DIRS and not os.path.islink(os.path.join(dirpath, d)))
         for name in sorted(filenames):
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, root)
-            if _junk(rel) or os.path.islink(full) or not os.path.isfile(full):
+            if _junk(rel) or rel in exclude or os.path.islink(full) or not os.path.isfile(full):
                 continue
             with open(full, "rb") as fh:
                 digest = hashlib.sha256(fh.read()).hexdigest()
@@ -136,6 +152,24 @@ def _outcome_regressions(baseline: parsers.Counts, after: parsers.Counts) -> lis
         if now is None or now == "skip":
             out.append({"test": node, "baseline": was, "after": now or "missing"})
     return out
+
+
+def _write_reviewer_test(service_dir: str, rel: str, content: str) -> None:
+    """Overlay one reviewer-authored test (L2) at ``rel`` under ``service_dir`` (the path was validated at the
+    schema edge: relative, no ``..``); a symlinked parent in the extracted tree is refused, never followed."""
+    parts = rel.split("/")
+    cur = service_dir
+    for part in parts[:-1]:
+        cur = os.path.join(cur, part)
+        if os.path.islink(cur) or (os.path.lexists(cur) and not os.path.isdir(cur)):
+            raise RunnerRefused(f"reviewer test path {rel} crosses a symlink or a file of the tree")
+        if not os.path.lexists(cur):
+            os.mkdir(cur)
+    full = os.path.join(cur, parts[-1])
+    if os.path.lexists(full):
+        raise RunnerRefused(f"reviewer test path {rel} is not a new file of the tree")
+    with open(full, "x", encoding="utf-8", newline="") as fh:
+        fh.write(content)
 
 
 def _drop_temp(root: str) -> None:
@@ -281,9 +315,9 @@ class FixEngine:
             last = run_now["commits"][-1]["sha"] if run_now.get("commits") else base_sha
             after = self._suite(ctx, "after", tree=self._base_tree(last, run["service"], run_id), commit_sha=last)
             findings = self.svc.findings_get(run_id)
-            not_done = [f["finding_id"] for f in findings if f["state"] not in ("fixed", "disproved")]
+            not_done = [f["finding_id"] for f in findings if f["state"] not in DONE_STATES]
             if not_done:
-                self._fail(run_id, R.item("BLOCKED", f"{len(not_done)} finding(s) not fixed or disproved: "
+                self._fail(run_id, R.item("BLOCKED", f"{len(not_done)} finding(s) did not reach an engine end state: "
                                                      + ", ".join(not_done[:10])))
                 raise RunEnded()
             if not after.ok:
@@ -305,7 +339,7 @@ class FixEngine:
                 raise RunEnded()
             self._check_live(run_id, interrupt)
             self.svc.run_transition(run_id, "reporting", "fix_run_reporting", {"run_id": run_id}, f"Reporting ({run_id})")
-            self._report(run_id)
+            self._report(run_id, ctx)
         except RunEnded:
             pass
         except Unavailable as exc:
@@ -403,7 +437,10 @@ class FixEngine:
         box = None
         try:
             self._check_live(run_id, ctx.interrupt)
-            box = ctx.provider.start_engine_box(ctx.binding, tag)
+            try:
+                box = ctx.provider.start_engine_box(ctx.binding, tag)
+            except EngineBoxNotLive:
+                raise RunEnded() from None        # G4: the run stopped while the box started (killed, recorded)
             ctx.provider.ship_tree(box, tree, ctx.runner.cwd)
             t = fn(box)
             if hasattr(t, "extra"):
@@ -476,7 +513,44 @@ class FixEngine:
         extract_tar(data, root)
         out = os.path.join(root, "services", service)
         os.makedirs(out, exist_ok=True)
+        for rt in self.svc.reviewer_tests(run_id):          # L2: the reviewer's RED tests are part of every engine tree
+            _write_reviewer_test(out, rt["path"], rt["content"])
         return out
+
+    def _reviewer_paths(self, run_id: str) -> frozenset:
+        return frozenset(rt["path"] for rt in self.svc.reviewer_tests(run_id))
+
+    # ================================================================ reviewer-authored reproductions (L2)
+
+    def reproduction_red(self, *, run_id: str, service: str, base_sha: str, principal_user_id: str, finding_id: str,
+                         path: str, content: str, node: str):
+        """Run a reviewer-authored reproduction on ``base_sha`` with the test overlaid, in a fresh engine container,
+        BEFORE the run exists (the service refuses the document unless the verdict is ``fail``). ``run_id`` is the
+        admission id (``dlv-run-…`` derived from the request, never the run's own id): the container's crossings
+        are recorded under it and the reaper covers it by its label."""
+        binding = registry.RunBinding(run_id=run_id, thread_id=f"dlv-{run_id[-26:]}", service=service,
+                                      principal_user_id=principal_user_id, workspace=WORKSPACE,
+                                      deadline_at=self.svc.now() + timedelta(seconds=self.settings.cmd_timeout_s * 3),
+                                      status=lambda: "preparing")
+        tree = self._base_tree(base_sha, service, run_id)
+        _write_reviewer_test(tree, path, content)
+        root = os.path.dirname(os.path.dirname(tree))
+        runner = TestRunner(self.test_seed, service, root, self.settings.cmd_timeout_s)
+        provider = self.provider_factory()
+        box = None
+        try:
+            box = provider.start_engine_box(binding, "admission")
+            provider.ship_tree(box, tree, runner.cwd)
+            t = runner.run_test(box, node)
+            t.extra["container"] = box.container
+            return t
+        finally:
+            if box is not None:
+                try:
+                    provider.destroy_box(box, run_id)
+                except Exception:  # noqa: BLE001 - recorded sandbox_release_failed; the reaper removes it later
+                    pass
+            _drop_temp(root)
 
     def _overlay(self, tree: str, worktree: str, service: str, paths: list[str]) -> None:
         """Copy the worktree's version of ``paths`` (repo-relative) onto ``tree``; a path absent in the worktree is
@@ -551,8 +625,14 @@ class FixEngine:
         run_id, fid = run["run_id"], finding["finding_id"]
         max_rounds = self.settings.max_rounds_per_finding
         doc = self.svc.finding_document(run_id, fid)
+        repro = runner.reproduction_target(doc)
+        try:
+            repro_argv = runner.test_argv(repro) if repro is not None else None
+        except RunnerRefused:
+            repro_argv = None
         brief_text = B.compile_brief(self.prompts["brief.template.md"], run=run, finding=doc, round_no=1,
-                                     max_rounds=max_rounds, test_argv=runner.example_test_argv(), suite_argv=runner.suite_argv())
+                                     max_rounds=max_rounds, test_argv=runner.example_test_argv(), suite_argv=runner.suite_argv(),
+                                     repro_argv=repro_argv)
         brief_ev = self.svc.evidence_put(run_id, "brief", brief_text.encode("utf-8"))
         hits = self.svc.injection_hits(run_id, fid)
         self.svc.finding_update(run_id, fid, "brief_written", {"run_id": run_id, "finding_id": fid,
@@ -575,7 +655,7 @@ class FixEngine:
         try:
             while True:
                 f = self.svc.findings_get_one(run_id, fid)
-                if f["state"] in ("fixed", "disproved", "blocked"):
+                if f["state"] in DONE_STATES + ("blocked",):
                     return
                 if rounds >= max_rounds:
                     self._block(run_id, fid, agent, f"no RED→GREEN or disproof within {max_rounds} rounds")
@@ -707,14 +787,27 @@ class FixEngine:
     def _green_phase(self, ctx: "_RunCtx", f, doc, reply, target, agent, rounds) -> Optional[str]:
         """Classification (R1) → GREEN → verification checkout + reverted checkout (R1) → the finding-tie checks
         (R2: file hunk, single-file revert, reproduction pass/fail) → sweep (R10) → src-only check → suite on the
-        commit tree (R3 regressions) → commit (tree digest checked) → fixed. Every run in a fresh container.
-        Returns None when fixed, else the note for the next turn."""
+        commit tree (R3 regressions) → commit (tree digest checked) → review flags → candidate_passed_checks (or
+        needs_review_runner_dependent). Every run in a fresh container. Returns None when the finding reached its
+        end state, else the note for the next turn."""
         run, runner, worktree, provider, sandbox_id = ctx.run, ctx.runner, ctx.worktree, ctx.provider, ctx.sandbox_id
         run_id, fid, service = run["run_id"], f["finding_id"], run["service"]
         head = ctx.head
         self._check_live(run_id, ctx.interrupt)
         self._sync_out(provider, sandbox_id, worktree, service)
         changed = self._changed(worktree, run_id)
+        # L2: a reviewer-authored reproduction is never the agent's to write, change or delete (it is not in the
+        # worktree; ANY diff at its path — a new file there included — is refused)
+        reviewer = {f"services/{service}/{p}" for p in self._reviewer_paths(run_id)}
+        tracked_now = set(self.git.diff_name_only(worktree, run_id=run_id))
+        hit_rt = sorted(p for p in (set(changed) | tracked_now) if p in reviewer)
+        if hit_rt:
+            self._round_failed(run_id, fid, rounds, "changed_test_denied", targets=hit_rt[:20], reviewer_authored=True)
+            self._back_to_red(run_id, fid, f)
+            return ("You wrote to the path of a reviewer-authored reproduction (" + ", ".join(hit_rt)
+                    + "). That test belongs to the reviewer: the engine adds it to every tree it builds and never "
+                    "accepts a change to it. Remove your file at that path and fix the root cause in the source; "
+                    "then reply `FIXED`.")
         classes = runner.classify_paths(changed)
         # pyproject.toml is test-infra only when its [tool.pytest*] sections changed (R1)
         for p in list(classes["test_infra"]):
@@ -744,13 +837,28 @@ class FixEngine:
                     + ", ".join(f"{p}: {rule}" for p, rule in denied)
                     + "): a test must not exit the process, define its own main/TestMain, write to the runner's "
                     "transcript or reach for pytest's plugin manager/hooks. Remove that code and reply `FIXED`.")
-        denied = self._denied_content(runner, worktree, classes["src"], runner.denied_src_content)
+        tracked_diff = self.git.diff(worktree, run_id=run_id)
+        # wave 25 (H8, N24-D-2): a binary source change cannot be shown in the diff a reviewer attests to by hash
+        binary = sorted({p.removesuffix(" (submodule)") for p in srcdiff.binary_paths(tracked_diff)} & set(classes["src"])
+                        | {p for p in classes["src"] if srcdiff.is_binary_file(os.path.join(worktree, p))})
+        if binary:
+            self._round_failed(run_id, fid, rounds, "binary_src_change", paths=binary[:20])
+            self._back_to_red(run_id, fid, f)
+            return ("You changed a binary (non-text) file under the source tree (" + ", ".join(binary[:20])
+                    + "). A reviewer must read every source change before anything is accepted, and a binary's "
+                    "content cannot be shown in the diff: the engine never accepts one. Remove it (or write it as "
+                    "text) and fix the root cause in the source; then reply `FIXED`.")
+        denied = self._denied_added_src(runner, worktree, classes["src"],
+                                        set(self.git.diff_name_only(worktree, run_id=run_id)), tracked_diff)
         if denied:
             self._round_failed(run_id, fid, rounds, "src_content_denied", paths=[f"{p} ({rule})" for p, rule in denied][:20])
             self._back_to_red(run_id, fid, f)
             return ("A source file you changed matches a content rule the engine refuses ("
                     + ", ".join(f"{p}: {rule}" for p, rule in denied)
-                    + "): source code must not reach for pytest's internals or the plugin manager. Remove that code and reply `FIXED`.")
+                    + "): source code must not reach for the test runner's internals, detect that it runs under a test "
+                    "runner or CI (runner names, sys.modules lookups of test frameworks, PYTEST_/CI/TEST env reads, "
+                    "stack/frame introspection) or read its own process environment. A fix must behave the same under "
+                    "the runner and in production. Remove that code and reply `FIXED`.")
         # §C.8.4 step 8: every EXISTING test file the engineer touched needs a CHANGED_TEST line; a deleted one is refused
         tracked_changed = [p for p in self.git.diff_name_only(worktree, run_id=run_id) if not _junk(p)]
         touched_tests = [p for p in tracked_changed if runner.is_test_path(p)]
@@ -803,7 +911,7 @@ class FixEngine:
             return (f"The engine ran the test after your fix and it {why} (exit {t.exit}). Fix the root cause and reply "
                     "`FIXED` again." + self._tail(t.output))
         if not classes["src"]:
-            ev_rc = self.svc.evidence_put(run_id, "test_output", b"(no source change: nothing was fixed)\n")
+            ev_rc = self.svc.evidence_put(run_id, "test_output", b"(no source change: the engine has nothing to check)\n")
             self._round_failed(run_id, fid, rounds, "no_source_change", evidence_id=ev_rc)
             self._back_to_red(run_id, fid, f)
             return "You replied FIXED but changed no source file: nothing was fixed. Fix the root cause and reply `FIXED`."
@@ -864,37 +972,48 @@ class FixEngine:
                     "file (the behaviour it checks lives elsewhere). The fix of THIS finding must be in that file and the test "
                     "must fail without it. Fix and reply `FIXED`." % ("still passed" if t_sf.verdict == "pass" else "could not be verified")
                     + self._tail(t_sf.output))
-        # R2(c): the finding's own reproduction must pass in the verification checkout and fail in the reverted one
+        # R2(c): the finding's own reproduction must pass in the verification checkout and fail in the reverted one —
+        # ALWAYS (wave 21, R1: ingestion refuses a finding without a runnable reproduction; one that still reaches
+        # this point fails closed here and never reaches an end state)
         repro = runner.reproduction_target(doc)
-        repro_check = None
         if repro is not None:
             try:
                 runner.check_target(repro)
             except RunnerRefused:
                 repro = None
-        if repro is not None:
-            r_ver = self._run_in_fresh(ctx, self._tree(ctx, classes["src"] + [red_file]), "reproverify", repro)
-            r_rev = self._run_in_fresh(ctx, self._tree(ctx, [red_file]), "reproreverted", repro)
-            joined_r = (r_rev.output + "\n--- reproduction in the verification checkout ---\n" + r_ver.output)
-            ev_r = self.svc.evidence_put(run_id, "test_output", joined_r.encode("utf-8", "surrogatepass"))
-            repro_check = {"target": repro, "verification": {**self._run_record(r_ver), "evidence_id": ev_r},
-                           "reverted": {**self._run_record(r_rev), "evidence_id": ev_r}}
-            self.svc.finding_update(run_id, fid, "reproduction_checked", {"run_id": run_id, "finding_id": fid, "target": repro,
-                                                                          "verification_verdict": r_ver.verdict,
-                                                                          "reverted_verdict": r_rev.verdict, "evidence_id": ev_r},
-                                    f"Reproduction check for {fid}: verification {r_ver.verdict}, reverted {r_rev.verdict} ({run_id})",
-                                    {"repro_check": repro_check})
-            if r_ver.verdict != "pass" or r_rev.verdict != "fail":
-                why = ("reproduction_not_fixed" if r_ver.verdict == "fail" else
-                       "reproduction_passes_without_fix" if r_rev.verdict == "pass" else "reproduction_unknown")
-                self._round_failed(run_id, fid, rounds, why, evidence_id=ev_r)
-                self._back_to_red(run_id, fid, f)
-                return (f"The finding's own reproduction `{repro}` %s (verification checkout: {r_ver.verdict}; reverted: "
-                        f"{r_rev.verdict}). Your source change must make that reproduction pass, and it must fail without it. "
-                        "Fix the root cause and reply `FIXED`." % ("still fails with your source changes" if r_ver.verdict == "fail" else
-                                                                    "passes even without your source changes" if r_rev.verdict == "pass" else
-                                                                    "could not be verified")
-                        + self._tail(r_ver.output if r_ver.verdict != "pass" else r_rev.output))
+        if repro is None:
+            self._round_failed(run_id, fid, rounds, "reproduction_not_runnable")
+            self._back_to_red(run_id, fid, f)
+            return ("This finding's reproduction names no test the engine can run, so the engine cannot confirm your "
+                    "fix (a finding reaches candidate_passed_checks only when its own reproduction passes with the fix and fails without "
+                    "it). Reply `BLOCKED: reproduction_not_runnable`.")
+        r_ver = self._run_in_fresh(ctx, self._tree(ctx, classes["src"] + [red_file]), "reproverify", repro)
+        r_rev = self._run_in_fresh(ctx, self._tree(ctx, [red_file]), "reproreverted", repro)
+        joined_r = (r_rev.output + "\n--- reproduction in the verification checkout ---\n" + r_ver.output)
+        ev_r = self.svc.evidence_put(run_id, "test_output", joined_r.encode("utf-8", "surrogatepass"))
+        repro_check = {"target": repro, "verification": {**self._run_record(r_ver), "evidence_id": ev_r},
+                       "reverted": {**self._run_record(r_rev), "evidence_id": ev_r}}
+        self.svc.finding_update(run_id, fid, "reproduction_checked", {"run_id": run_id, "finding_id": fid, "target": repro,
+                                                                      "verification_verdict": r_ver.verdict,
+                                                                      "reverted_verdict": r_rev.verdict, "evidence_id": ev_r},
+                                f"Reproduction check for {fid}: verification {r_ver.verdict}, reverted {r_rev.verdict} ({run_id})",
+                                {"repro_check": repro_check})
+        if r_ver.verdict != "pass" or r_rev.verdict != "fail":
+            why = ("reproduction_not_fixed" if r_ver.verdict == "fail" else
+                   "reproduction_passes_without_fix" if r_rev.verdict == "pass" else "reproduction_unknown")
+            self._round_failed(run_id, fid, rounds, why, evidence_id=ev_r)
+            self._back_to_red(run_id, fid, f)
+            return (f"The finding's own reproduction `{repro}` %s (verification checkout: {r_ver.verdict}; reverted: "
+                    f"{r_rev.verdict}). Your source change must make that reproduction pass, and it must fail without it. "
+                    "Fix the root cause and reply `FIXED`." % ("still fails with your source changes" if r_ver.verdict == "fail" else
+                                                                "passes even without your source changes" if r_rev.verdict == "pass" else
+                                                                "could not be verified")
+                    + self._tail(r_ver.output if r_ver.verdict != "pass" else r_rev.output))
+        # wave 22 (G1(b), N21-D-1): the finding's reproduction again, OUTSIDE the test runner — pass with the fix,
+        # fail on the reverted checkout — or the finding never reaches candidate_passed_checks (D3)
+        solo_note = self._standalone_phase(ctx, f, repro, classes["src"], red_file, rounds)
+        if solo_note is not None:
+            return solo_note
         green = {"test_path": f["red"]["test_path"], "test_name": f["red"]["test_name"], **self._run_record(t), "evidence_id": ev}
         if not self.svc.finding_transition(run_id, fid, "green", {"green": green}, [ev], red_test_name=f["red"]["test_name"]):
             return "The GREEN transition was refused by the engine's invariants (no matching RED)."
@@ -907,7 +1026,7 @@ class FixEngine:
         # suite on the commit tree (HEAD + everything the agent changed), in a fresh container
         self._check_live(run_id, ctx.interrupt)
         commit_tree = self._tree(ctx, changed)
-        tree_sha = _tree_digest(commit_tree)
+        tree_sha = _tree_digest(commit_tree, self._reviewer_paths(run_id))
         counts = self._suite(ctx, "per_finding", tree=commit_tree, finding_id=fid, tree_sha256=tree_sha)
         if not counts.ok:
             self._round_failed(run_id, fid, rounds, "suite_unknown", detail=counts.why[:120])
@@ -936,7 +1055,7 @@ class FixEngine:
         if remaining:
             self.svc.finding_transition(run_id, fid, "red", {}, [])
             return ("The whole suite is not green after your fix: %s. Every failure — including one you did not cause "
-                    "— blocks `fixed` until green. Fix and reply `FIXED`." % ", ".join(remaining[:20]))
+                    "— blocks `candidate_passed_checks` until green. Fix and reply `FIXED`." % ", ".join(remaining[:20]))
         # src-only check: every baseline failure this fix claims must pass on HEAD + the source changes ALONE (no test
         # file of the agent's, so an in-process patch from a test module cannot be what made it pass)
         claimed = sorted(n for n in ctx.current.failed_names if n not in allowed and counts.cases.get(n) == "pass")
@@ -977,10 +1096,11 @@ class FixEngine:
         sha = self.git.commit(worktree, subject, body, run_id)
         files = self.git.diff_name_only(worktree, run_id=run_id, commit=sha)
         message_sha = _sha_text(subject + "\n\n" + body)
-        ev_diff = self.svc.evidence_put(run_id, "diff", self._commit_diff(worktree, sha, run_id).encode("utf-8", "surrogatepass"))
+        commit_diff = self._commit_diff(worktree, sha, run_id)
+        ev_diff = self.svc.evidence_put(run_id, "diff", commit_diff.encode("utf-8", "surrogatepass"))
         committed = self._base_tree(sha, service, run_id)
         try:
-            commit_tree_sha = _tree_digest(committed)
+            commit_tree_sha = _tree_digest(committed, self._reviewer_paths(run_id))
         finally:
             _drop_temp(os.path.dirname(os.path.dirname(committed)))
         run_now = self.svc.run_get(run_id)
@@ -998,12 +1118,182 @@ class FixEngine:
         if commit_tree_sha != tree_sha:
             self._round_failed(run_id, fid, rounds, "commit_tree_mismatch", suite_tree_sha256=tree_sha, commit_tree_sha256=commit_tree_sha)
             self.svc.finding_transition(run_id, fid, "red", {}, [])
-            return "The committed tree is not the tree the suite ran on; the engine refuses `fixed`. Reply `FIXED` to retry."
-        if not self.svc.finding_transition(run_id, fid, "fixed", {}, [ev_diff]):
-            return "The fixed transition was refused."
+            return ("The committed tree is not the tree the suite ran on; the engine refuses to mark the finding "
+                    "`candidate_passed_checks`. Reply `FIXED` to retry.")
+        solo = (self.svc.findings_get_one(run_id, fid).get("standalone_check") or {})
+        final = "candidate_passed_checks" if solo.get("outcome") == "confirmed" else "needs_review_runner_dependent"
+        # D2: the review flags of the committed diff, recorded BEFORE the end state (the report and the review use them)
+        self._review_flags(ctx, f, sha, commit_diff, solo)
+        if not self.svc.finding_transition(run_id, fid, final, {}, [ev_diff]):
+            return f"The {final} transition was refused."
         ctx.head = sha
         ctx.current = counts
         return None
+
+    @staticmethod
+    def _added_lines(diff_text: str) -> dict[str, list[str]]:
+        """{repo path: the lines the diff ADDS to it} (``+`` lines of each file's hunks)."""
+        out: dict[str, list[str]] = {}
+        cur: Optional[str] = None
+        for ln in diff_text.splitlines():
+            if ln.startswith("+++ "):
+                p = ln[4:].strip()
+                cur = (p[2:] if p.startswith("b/") else p) if p != "/dev/null" else None
+                if cur is not None:
+                    out.setdefault(cur, [])
+                continue
+            if ln.startswith("--- ") or ln.startswith("diff --git "):
+                continue
+            if cur is not None and ln.startswith("+"):
+                out[cur].append(ln[1:])
+        return out
+
+    @classmethod
+    def _denied_added_src(cls, runner: TestRunner, worktree: str, paths: list[str], tracked: set,
+                          diff_text: str) -> list[tuple[str, str]]:
+        """Wave 22 (G1(a)): the ``src_content_deny`` rules over the lines a fix ADDS to each changed source file (a
+        tracked file: its diff's ``+`` lines; a new, untracked file: every line), one line at a time — so a rule
+        never fires on what the base already had, and ``^``/``$`` anchor to a line."""
+        added = cls._added_lines(diff_text)
+        out = []
+        for p in paths:
+            full = os.path.join(worktree, p)
+            if p in tracked:
+                lines = added.get(p, [])
+            else:
+                if not os.path.isfile(full) or os.path.islink(full):
+                    continue
+                try:
+                    with open(full, "r", encoding="utf-8", errors="replace") as fh:
+                        lines = fh.read().splitlines()
+                except OSError:
+                    continue
+            for line in lines:
+                rule = runner.denied_src_content(line)
+                if rule:
+                    out.append((p, rule))
+                    break
+        return out
+
+    def _review_flags(self, ctx: "_RunCtx", f: dict, sha: str, diff_text: str, solo: dict) -> list[dict]:
+        """D2 (wave 23): every line the finding's commit ADDS to a source file (``runner.classify_paths`` → ``src``;
+        tests and test infrastructure are never scanned) that carries a construct able to observe the execution
+        context, numbered ``<finding>-F001`` …; plus, D3, a ``<finding>-RD`` flag when the reproduction is
+        runner-dependent. Recorded ``review_flags_recorded`` (the ledger payload carries the first 200 and the digest
+        of all) and kept on the finding record."""
+        run, runner = ctx.run, ctx.runner
+        run_id, fid, service = run["run_id"], f["finding_id"], run["service"]
+        files = sorted(RF.added_lines(diff_text))
+        src = set(runner.classify_paths(files)["src"])
+        flags = RF.number(RF.scan(diff_text, service, is_test=lambda p: p not in src,
+                                  file_text=lambda p: self.git.show_file(sha, p, ctx.worktree, run_id)), fid)
+        if solo.get("outcome") == "runner_dependent":
+            target = solo.get("target") or ""
+            path, _, name = target.partition("::")
+            why = (solo.get("verification") or {}).get("why") or (solo.get("reverted") or {}).get("why") or "-"
+            flags.append(RF.runner_dependent_flag(fid, target, f"services/{service}/{path}",
+                                                  self._def_line(run_id, ctx.worktree, service, path, name), why))
+        digest = hashlib.sha256(repr([(x["id"], x["file"], x["line"], x["construct"]) for x in flags]).encode()).hexdigest()
+        self.svc.finding_update(run_id, fid, "review_flags_recorded",
+                                {"run_id": run_id, "finding_id": fid, "commit_sha": sha, "count": len(flags),
+                                 "flags": flags[:200], "truncated": len(flags) > 200, "flags_sha256": digest},
+                                f"Review flags for {fid}: {len(flags)} ({run_id})", {"review_flags": flags})
+        return flags
+
+    def _def_line(self, run_id: str, worktree: str, service: str, path: str, name: str) -> int:
+        """The line of ``def <name>`` in the reproduction's test file (a reviewer-authored test, or the worktree's
+        file), 1 when it cannot be found."""
+        text = next((rt["content"] for rt in self.svc.reviewer_tests(run_id) if rt["path"] == path), None)
+        if text is None:
+            try:
+                with open(os.path.join(worktree, "services", service, path), "r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:
+                return 1
+        return RF.def_line(text, name)
+
+    def _standalone_phase(self, ctx: "_RunCtx", f: dict, repro: str, src: list[str], red_file: str,
+                          rounds: int) -> Optional[str]:
+        """G1(b) / wave 23 D3: the finding's reproduction re-run OUTSIDE the test runner in two fresh engine
+        containers — the verification checkout (HEAD + the src changes + the RED test file) and the reverted one
+        (HEAD + the RED test file). pytest: the pinned standalone runner (``python -I``, pytest not importable,
+        CI/PYTEST*/TEST* scrubbed); go/cargo/node: the toolchain with the CI markers unset. Recorded
+        ``reproduction_standalone_checked`` and kept as the finding's ``standalone_check``.
+
+        D3 — a run that EXECUTED and returned a verdict is authoritative, whatever conftest.py is on the path:
+        a pytest import the runner refused from a SOURCE frame (not the test file, a conftest or a tests/ helper) in
+        the verification checkout → round failed ``fix_imports_test_runner``; verification pass + reverted fail →
+        ``confirmed``; either ``unknown`` → round failed ``standalone_unknown``; verification ``fail`` → round failed
+        ``fix_depends_on_the_test_runner``; reverted ``pass`` → round failed
+        ``reproduction_passes_without_fix_outside_the_runner``; wave 24 (E4): verification ``runner_dependent`` while
+        the reverted checkout EXECUTED (``fail``: the test runs outside the runner) → round failed
+        ``fix_depends_on_the_test_runner`` (a skip raised from a source frame is a ``fail`` in the runner itself);
+        what is left has a ``runner_dependent`` verdict on BOTH checkouts — the TEST itself cannot run outside pytest
+        (the runner only returns it for a test-side cause, classified by the engine's own ``path_class``) → outcome
+        ``runner_dependent``: the finding ends ``needs_review_runner_dependent``, flagged ``<finding>-RD``, and only a
+        review with a note per flag accepts it. Returns the note for the next turn when the round fails, else
+        None."""
+        run, runner = ctx.run, ctx.runner
+        run_id, fid = run["run_id"], f["finding_id"]
+        solo = runner.run_standalone if runner.framework == "pytest" else runner.run_scrubbed
+        how = "standalone" if runner.framework == "pytest" else "scrubbed_env"
+        s_ver = self._verdict_box(ctx, self._tree(ctx, src + [red_file]), "soloverify", lambda box: solo(box, repro))
+        s_rev = self._verdict_box(ctx, self._tree(ctx, [red_file]), "soloreverted", lambda box: solo(box, repro))
+        joined = (s_rev.output + "\n--- reproduction outside the test runner, verification checkout ---\n" + s_ver.output)
+        ev = self.svc.evidence_put(run_id, "test_output", joined.encode("utf-8", "surrogatepass"))
+        v, rv = s_ver.verdict, s_rev.verdict
+        ver_info, rev_info = s_ver.extra.get("standalone") or {}, s_rev.extra.get("standalone") or {}
+        conftest = bool(ver_info.get("conftest") or rev_info.get("conftest"))
+        src_imports = [b for b in ver_info.get("blocked_from") or [] if b.get("side") == "src"]
+        if src_imports:
+            outcome, why = "runner_detected", "fix_imports_test_runner"
+        elif v == "pass" and rv == "fail":
+            outcome, why = "confirmed", None
+        elif "unknown" in (v, rv):
+            outcome, why = "unknown", "standalone_unknown"
+        elif v == "fail":
+            outcome, why = "runner_detected", "fix_depends_on_the_test_runner"
+        elif rv == "pass":
+            outcome, why = "runner_detected", "reproduction_passes_without_fix_outside_the_runner"
+        elif v == "runner_dependent" and rv == "fail":
+            # wave 24 (E4, N23-D-3): the reverted checkout's standalone run EXECUTED the test (it returned a verdict),
+            # so the test runs outside the runner; that it cannot with the fix is the fix's doing
+            outcome, why = "runner_detected", "fix_depends_on_the_test_runner"
+        elif "runner_dependent" in (v, rv):
+            outcome, why = "runner_dependent", None
+        else:
+            outcome, why = "unknown", "standalone_unknown"
+        rec = {"how": how, "target": repro, "outcome": outcome, "conftest": conftest,
+               "verification": {**self._run_record(s_ver), "evidence_id": ev, **ver_info},
+               "reverted": {**self._run_record(s_rev), "evidence_id": ev, **rev_info}}
+        self.svc.finding_update(run_id, fid, "reproduction_standalone_checked",
+                                {"run_id": run_id, "finding_id": fid, "target": repro, "how": how, "outcome": outcome,
+                                 "verification_verdict": v, "reverted_verdict": rv, "conftest": conftest,
+                                 "src_imports_blocked": [b.get("name") for b in src_imports][:10],
+                                 "evidence_id": ev},
+                                f"Reproduction outside the runner for {fid}: verification {v}, reverted {rv} → {outcome} ({run_id})",
+                                {"standalone_check": rec})
+        if why is None:
+            return None
+        self._round_failed(run_id, fid, rounds, why, evidence_id=ev)
+        self._back_to_red(run_id, fid, f)
+        if why == "standalone_unknown":
+            return (f"The engine re-ran the finding's reproduction `{repro}` outside the test runner and could not verify "
+                    f"the result (verification checkout: {v}; reverted: {rv}). Fix the root cause in the source and reply "
+                    "`FIXED`." + self._tail(s_ver.output if v == "unknown" else s_rev.output))
+        if why == "fix_imports_test_runner":
+            return ("Outside the test runner, your source change imports the test runner ("
+                    + ", ".join(sorted({str(b.get('name')) for b in src_imports}))
+                    + " from " + ", ".join(sorted({str(b.get('file')) for b in src_imports}))
+                    + "). Production code never imports pytest; a change that behaves differently when the runner is "
+                    "present is not a fix. Fix the root cause so the code is correct whatever runs it, and reply `FIXED`."
+                    + self._tail(s_ver.output))
+        return (f"The finding's reproduction `{repro}` passes under the test runner with your change but %s when the "
+                "engine runs the same test function OUTSIDE the runner (pytest not importable, CI/PYTEST*/TEST* not set; "
+                f"verification checkout: {v}; reverted: {rv}). Your change behaves differently under test than in "
+                "production. Fix the root cause so the code is correct whatever runs it, and reply `FIXED`."
+                % ("fails" if v == "fail" else "does not fail without it")
+                + self._tail(s_ver.output if v != "pass" else s_rev.output))
 
     @staticmethod
     def _denied_content(runner: TestRunner, worktree: str, paths: list[str], rule_fn) -> list[tuple[str, str]]:
@@ -1126,11 +1416,35 @@ class FixEngine:
 
     # ================================================================ report
 
-    def _report(self, run_id: str) -> None:
+    def _report(self, run_id: str, ctx: "_RunCtx") -> None:
+        """Wave 24 (E2): the complete source diff of the run (base..last commit) is recorded first
+        (``src_diff_recorded``: its sha256 and evidence id), then the report — which embeds it — is written."""
         self._check_live(run_id)
+        run = self.svc.run_get(run_id)
+        head = run["commits"][-1]["sha"] if run.get("commits") else run["base_sha"]
+        text, paths = srcdiff.src_diff(self.git, ctx.runner.fw, run["service"], ctx.worktree, run["base_sha"], head, run_id)
+        binary = srcdiff.binary_paths(text)
+        if binary:
+            # wave 25 (H8, N24-D-2): the diff would not show these files' content — no report claims it does
+            self._fail(run_id, R.item("EVIDENCE_UNAVAILABLE", "binary_src_change: the source diff shows binary file(s) "
+                                      "whose content a reviewer cannot read: " + ", ".join(binary[:5])))
+            raise RunEnded()
+        ev_src, digest, problem = srcdiff.record(self.svc, run_id, text, paths, run["base_sha"], head, "src_diff_recorded")
+        if problem:
+            self._fail(run_id, R.item("EVIDENCE_UNAVAILABLE", problem))
+            raise RunEnded()
+        self.svc.run_update(run_id, "src_diff_recorded", {"run_id": run_id, "src_diff_sha256": digest, "evidence_id": ev_src,
+                                                          "base_sha": run["base_sha"], "head_sha": head,
+                                                          "paths": paths[:200], "path_count": len(paths)},
+                            f"Source diff recorded ({len(paths)} file(s), {run_id})",
+                            {"src_diff_sha256": digest, "src_diff_evidence_id": ev_src})
         run = self.svc.run_get(run_id)
         findings = self.svc.findings_get(run_id)
         text = report.render(run, findings, lambda ev: self.svc.evidence_text(run_id, ev))
+        if len(text.encode("utf-8", "surrogatepass")) > srcdiff.REPORT_MAX_BYTES:
+            self._fail(run_id, R.item("EVIDENCE_UNAVAILABLE", "the report with the complete source diff does not fit one "
+                                                              "evidence file: it would be cut, so it is not written"))
+            raise RunEnded()
         ev = self.svc.evidence_put(run_id, "report", text.encode("utf-8", "surrogatepass"))
         sha = _sha_text(text)
         self.svc.run_update(run_id, "report_written", {"run_id": run_id, "report_sha256": sha, "evidence_id": ev},

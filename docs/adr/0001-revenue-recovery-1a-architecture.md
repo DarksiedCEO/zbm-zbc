@@ -162,7 +162,57 @@ p50 6–17 ms, max 0.08–0.22 s (8 runs, 2-CPU host, the 16 clients on the same
 host); `tests/test_request_limits_live.py` asserts max < 0.5 s. Before this
 fix, 16 concurrent 1,000-order batches (0.61 MiB each) held `/health` at p50
 0.89 s, max 1.08 s; after it, the same load gives p50 6 ms, max 47 ms, with
-the same batch throughput (one run each).
+the same batch throughput (one run each). **Fix wave 23:** on the w23
+2-CPU box that bound failed (max 0.50–0.63 s at 5ba1eb6; 4/6 at 540a64e).
+It measured the server (time to first byte, prober in its own process) and
+the event loop was never blocked for more than 0.13 s: the time was the GIL
+convoy — `/health` re-acquires the GIL after every syscall and waited up to
+a 5 ms switch slice each time behind the ~0.5 s parse. `serve.py` now sets
+`sys.setswitchinterval(0.001)` (`DETECTION_SWITCH_INTERVAL_SECONDS`), as the
+other `serve.py` launchers have since fix wave 7 (NEW-5). The bound is
+unchanged. **Fix wave 24 (AEGIS round 23 N23-S-3/S-4):** the override is
+accepted only in 0.0001–0.05 s and `serve.py` refuses to start unless the
+interval in force (`sys.getswitchinterval()` after setting it) is the one
+set (**fix wave 25, AEGIS round 24 N24-S-6:** compared in whole microseconds,
+`round(getswitchinterval() × 1e6)` in [100, 50 000] and within the microsecond
+CPython truncates — CPython keeps the interval as an integer number of
+microseconds and read 0.0001 back as 9.999999999999999e-05, so the float check
+refused the range's own lower end; `serve.py` now prints the interval in force
+at start, and `tests/test_fix23_switch_interval.py` starts the real launcher at
+0.0001 and 0.05 — since the wave-25 E-A review it trusts an answer on the port only
+after that child has logged its own bind, as a port picked free a moment earlier can be
+another process's; the same range and in-force check now also guard creative-py's and
+fulfillment-py's launchers, which set no interval before, and onboarding-py's and
+compliance-py's, which accepted any positive value); and the numbers, now the same in `serve.py`, `api.py` and here, with
+their conditions — measured on this 2-CPU box, Python 3.13.13, the live test
+above (16 clients, ~28 MiB worst-case batches, `/health` time to first byte
+from a prober in its own process), 5 runs each: 1 ms with no other load —
+p50 11–17 ms, max 0.10–0.16 s; 1 ms with three busy loops — p50 6–8 ms, max
+0.21–0.27 s; 5 ms with three busy loops — p50 11–14 ms, max 0.23–0.45 s. The
+wave-23 notes' 0.09–0.10 s (`serve.py`) and 0.11–0.15 s (`api.py`, here) were
+single sessions under unstated load; AEGIS round 23 measured, with three busy
+loops, 1 ms max 0.11–0.17 s and 5 ms 0.12–0.24 s. The earlier "max 0.08–0.22 s
+(8 runs)" above is the wave-1 measurement at the 5 ms default.
+
+**Fix wave 25 (E-A; scout A D2, D3, D4; FIX_WAVE_23b item 2 "find what the test measures"; R-HYGIENE L1/L2).** The
+two `/health` bounds in `tests/test_request_limits_live.py` were measured by a thread of the pytest process that also
+ran the 16 sender threads, as plain wall time. The prober is now its own process, and each probe reports its wall time
+next to the time the kernel kept the prober, and the server's event-loop thread, runnable but not running
+(`/proc/<pid>/task/<tid>/schedstat`, field 2). The bounds (1 s, 0.5 s) are unchanged and apply to the wall time minus
+the LARGER of those two waits (the two can overlap; subtracting their sum would credit an overlap twice): the time
+the server had the CPU and still had not answered, its GIL waits behind the parse included. Where schedstat does
+not exist (macOS) the waits are 0 — plain wall time, as before. The 16-batch test starts measuring once a batch has
+been answered, not after a fixed 0.5 s. The live server is accepted only after it has logged its own bind on the port
+(an answer on a port picked free a moment earlier can be another process's), and ports are OS-assigned unless
+`DETECTION_LIVE_TEST_PORTS` is set (the literal default 19960-19969 is gone). `test_oversized_content_length_is_
+refused_before_the_body_is_sent` no longer bounds the wall clock: no body byte is ever sent, so a 413 at all is the
+refusal before the body. Settings (scout A D10): `DETECTION_DRAINS_MAX` (default 512) caps how many graceful-close
+drains run at once (`src/serve.py`, the shared module of ADR 0003); `DETECTION_LIVE_TEST_PORTS` (`lo-hi`, test-only)
+pins the live tests to a port range — unset, the OS assigns ports. Measured (E-A, Oct 2 01:00-01:02Z, head e665109, this 2-CPU box, Python 3.13.13,
+exactly 2 busy loops, 5 runs of the two `/health` tests, `w25-reports/E-A/logs/detload-e665109/`): 5/5 passed; beside
+large and oversized bodies the max server-side latency was 27-94 ms (wall 29-100 ms; bound 1 s); under 16 concurrent
+worst-case batches p50 3-4 ms, max 163-217 ms (wall max 169-241 ms; bound 0.5 s; largest run-queue waits subtracted:
+prober 10 ms, server loop 43 ms). The test prints every raw number.
 
 Largest detection-py *responses* at these limits: 5.3 MiB (discount-misuse on
 1,000 worst-case orders) and 8.6 MiB (`/correlation/overlaps` echoing 1,000

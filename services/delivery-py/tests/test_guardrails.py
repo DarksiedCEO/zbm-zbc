@@ -337,15 +337,19 @@ def test_g14_every_runner_argv_is_seeded_and_every_git_call_is_allowlisted():
             body = c[c.index("timeout") + 4:]
             head = body[0]
             assert head in ("pytest", "cat", "find", "grep", "mkdir", "rm", "mv", "test", "python3") or head.startswith("/bin/"), c
-            if head == "python3":                          # wave 20 R8: only the pinned resolver, in isolated mode
-                assert body[:4] == ["python3", "-I", "/mnt/dlv/resolve.py", "--"], c
+            if head == "python3":                          # wave 20 R8: only the pinned resolver, in isolated mode;
+                # wave 22 (G1): or the pinned standalone runner (its request on stdin, nothing else in argv)
+                assert body[:4] == ["python3", "-I", "/mnt/dlv/resolve.py", "--"] or \
+                    body == ["python3", "-I", "/mnt/dlv/zbm_standalone_runner.py"], c
             if head == "pytest":
                 assert any(tuple(body[:len(p)]) == p for p in allowed_prefixes), c
         git_ok = {"rev-parse", "merge-base", "for-each-ref", "worktree", "status", "diff", "log", "add", "commit", "stash",
                   "remote", "archive", "show"}                # remote (R4 listing), archive/show (R1 verification checkouts)
         for argv in h.git.calls:
-            assert argv[:2] == ["git", "-c"] and argv[2].startswith("core.hooksPath=") and argv[3:6] == ["-c", "core.fsmonitor=false", "-C"], argv
-            argv = argv[4:]                                       # wave 20 R11: the isolation -c pair precedes -C
+            # wave 20 R11: the isolation -c pairs precede -C; wave 24 (E3): rename detection off on every command
+            assert argv[:2] == ["git", "-c"] and argv[2].startswith("core.hooksPath=") and argv[3:10] == [
+                "-c", "core.fsmonitor=false", "-c", "diff.renames=false", "-c", "status.renames=false", "-C"], argv
+            argv = argv[8:]
             assert argv[3] in git_ok, argv
             if argv[3] == "stash":
                 assert argv[4] in ("push", "pop")            # the one revert-check form; never a remote push

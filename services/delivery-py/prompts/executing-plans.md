@@ -102,7 +102,8 @@ the claim. If any item is missing, the task is not complete: finish it.
 Reply `FIXED` (with the `SWEEP:` and `CHANGED_TEST:` lines). The engine runs
 the test, the revert check and the whole suite, keeps the full output as evidence,
 and records the result. A failing run records the failure and comes back to you
-with the captured output; the finding is not fixed until the engine's run is green.
+with the captured output; the finding does not reach the engine's end state (`candidate_passed_checks`) until
+the engine's run is green, and only the reviewer accepts it.
 
 ## Final Review
 
@@ -113,7 +114,8 @@ Fix the Critical and Important findings yourself — you are the
 implementer here — in ONE pass. Each fix is verified by TDD, not by a
 second reviewer: write the test that reproduces the finding, watch it
 fail, make it pass, then run the whole suite. The engine records each as
-`fixed <finding> — <test name> RED→GREEN, suite <N>/<N>`. A fix
+`candidate_passed_checks <finding> — <test name> RED→GREEN, suite <N>/<N>`
+(checks passed; the reviewer decides). A fix
 without a test that failed first is not verified; a suite that is not
 green after the pass means the pass is not over.
 

@@ -38,7 +38,7 @@ from errors import Conflict, FinError, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
 from intelligences import i08_treasury as T
 from intelligences import i10_evidence_audit as i10
-from ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id, payload_sha256
+from ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
 from models import ID_RE
 from ports import Ports
 from store import RecordLog, StoreWriteError

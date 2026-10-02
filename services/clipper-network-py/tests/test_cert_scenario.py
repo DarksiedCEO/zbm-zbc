@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from clock import iso
-from fakes import FakeMessaging, KIT_SHA
+from fakes import KIT_SHA
 from helpers import ANDRE_TOKEN, Harness, code_set, codes, rid
 from ports import Certification, Ports
 

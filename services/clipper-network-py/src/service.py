@@ -1170,8 +1170,9 @@ class CNService:
             vi = self.ports.vi
             state, code = body["state"], body["code"]
             ans = ports.call("verification_integrity", "connection_complete", (clipper_id,),
-                             lambda: vi.connection_complete(derived_id("rq", op), state, code), CompleteAnswer(False))
-            del code, state
+                             lambda state=state, code=code: vi.connection_complete(derived_id("rq", op), state, code),
+                             CompleteAnswer(False))
+            del code, state     # the frame's names; the lambda held them only for the call (wave 25: bound, never free)
             puts = []
             if ans.available and ans.connection_id:
                 accts = [({**a, "status": ans.status} if a["vi_connection_id"] == ans.connection_id else a)
@@ -1200,9 +1201,9 @@ class CNService:
             vi = self.ports.vi
             dob = body["dob"]
             ans = ports.call("verification_integrity", "age_check", (clipper_id, body["method"]),
-                             lambda: vi.age_check(derived_id("rq", op), clipper_id, dob, body["dob_field_neutral"],
-                                                  body["method"], body["provider_session_ref"]), AgeAnswer(False))
-            del dob
+                             lambda dob=dob: vi.age_check(derived_id("rq", op), clipper_id, dob, body["dob_field_neutral"],
+                                                          body["method"], body["provider_session_ref"]), AgeAnswer(False))
+            del dob     # the frame's name; the lambda held it only for the call (wave 25: bound, never free)
             age = {"vi_attestation_id": ans.attestation_id, "result": ans.status if ans.available else "unavailable",
                    "at": iso(self._now())}
             events.append(self._record(derived_id("age", op), "age_status_mirrored", i02_admission.ACTOR, clipper_id,
@@ -2340,7 +2341,7 @@ class CNService:
             c = self._clipper(clipper_id)
             if c["status"] in ("offboarding", "offboarded"):
                 raise Conflict(f"clipper is already {c['status']}")
-            oid = self._start_offboarding(clipper_id, trigger, f"{principal}|{request_id}", keep)
+            self._start_offboarding(clipper_id, trigger, f"{principal}|{request_id}", keep)
             return self._idem_store(key, h, self.offboarding_view(clipper_id))
 
     def _try_start_offboarding(self, clipper_id: str, trigger: str, op: str) -> Optional[str]:

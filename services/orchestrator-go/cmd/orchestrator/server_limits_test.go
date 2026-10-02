@@ -41,10 +41,12 @@ func startLimitedOrchestrator(t *testing.T) (port string, ledgerCalls *atomic.In
 	return port, calls
 }
 
-// healthOK fails the test unless GET /health answers 200 within 1s.
+// healthOK fails the test unless GET /health answers 200 while the slow client is connected. The client timeout is
+// a hang guard (10 s), not a latency bound: the property is "others are served", and a 1 s bound (the old value)
+// measured scheduling on a loaded box rather than the server (fix wave 25, scout C2-7).
 func healthOK(t *testing.T, port string) {
 	t.Helper()
-	c := &http.Client{Timeout: time.Second}
+	c := &http.Client{Timeout: 10 * time.Second}
 	resp, err := c.Get("http://127.0.0.1:" + port + "/health")
 	if err != nil {
 		t.Errorf("/health failed while a slow client was connected: %v", err)
@@ -95,16 +97,22 @@ func trickle(t *testing.T, port, head string, payload byte, interval, limit time
 	}
 }
 
+// Fix wave 25 (scout C2-7): the server cutting the connection is the asserted EVENT; the trickle's limit is only a
+// hang guard. The old upper bound (timeout + 2 s, under t.Parallel and -race) measured the box, not the server; the
+// configured timeouts themselves are pinned exactly by TestServerHasExplicitTimeoutsAndLimits, and a LOWER bound
+// (the cut came no earlier than the timeout, i.e. the timeout is what cut it) cannot be broken by load.
 func TestSlowlorisHeaderIsCutOffAndOthersAreServed(t *testing.T) {
 	t.Parallel()
 	port, _ := startLimitedOrchestrator(t)
-	bound := readHeaderTimeout + 2*time.Second
 	// A request head that never ends: one more header byte every 300ms.
 	open, got := trickle(t, port, "GET /health HTTP/1.1\r\nHost: t\r\nX-Slow: ", 'a',
-		300*time.Millisecond, bound+10*time.Second, func() { healthOK(t, port) })
+		300*time.Millisecond, 4*readHeaderTimeout, func() { healthOK(t, port) })
 	t.Logf("slow-header connection closed by the server after %v; it sent %q", open, got)
-	if open > bound {
-		t.Fatalf("slow-header connection stayed open %v (bound %v): %q", open, bound, got)
+	if got == "STILL OPEN" {
+		t.Fatalf("the server never cut a request head that does not end (hang guard %v)", 4*readHeaderTimeout)
+	}
+	if open < readHeaderTimeout {
+		t.Fatalf("the slow head was cut after %v, before readHeaderTimeout %v: something else closed it", open, readHeaderTimeout)
 	}
 	if strings.Contains(got, "200 OK") {
 		t.Fatalf("an unfinished request head was answered 200: %q", got)
@@ -114,13 +122,15 @@ func TestSlowlorisHeaderIsCutOffAndOthersAreServed(t *testing.T) {
 func TestSlowBodyIsCutOffBeforeAnyScanAndOthersAreServed(t *testing.T) {
 	t.Parallel()
 	port, ledgerCalls := startLimitedOrchestrator(t)
-	bound := readTimeout + 2*time.Second
 	head := "POST /revenue-recovery/scan HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer test-orchestrator-token\r\n" +
 		"Content-Type: application/json\r\nContent-Length: 4096\r\n\r\n"
-	open, got := trickle(t, port, head, ' ', 300*time.Millisecond, bound+10*time.Second, func() { healthOK(t, port) })
+	open, got := trickle(t, port, head, ' ', 300*time.Millisecond, 3*readTimeout, func() { healthOK(t, port) })
 	t.Logf("slow-body connection closed by the server after %v; it sent %q", open, firstLine(got))
-	if open > bound {
-		t.Fatalf("slow-body connection stayed open %v (bound %v): %q", open, bound, got)
+	if got == "STILL OPEN" {
+		t.Fatalf("the server never cut a body that trickles (hang guard %v)", 3*readTimeout)
+	}
+	if open < readTimeout {
+		t.Fatalf("the slow body was cut after %v, before readTimeout %v: something else closed it", open, readTimeout)
 	}
 	if n := ledgerCalls.Load(); n != 0 {
 		t.Fatalf("a scan started (%d ledger calls) before its request body had arrived", n)
@@ -199,6 +209,10 @@ func TestOversizedHeaderIsRefused(t *testing.T) {
 
 func TestServerHasExplicitTimeoutsAndLimits(t *testing.T) {
 	srv := newServer("127.0.0.1:0", http.NotFoundHandler())
+	// Exact values (fix wave 25): the live slow-client tests assert the cut as an event and a lower bound only.
+	if srv.ReadHeaderTimeout != 5*time.Second || srv.ReadTimeout != 15*time.Second || srv.MaxHeaderBytes != 16<<10 {
+		t.Fatalf("limits changed without updating ADR 0001 \"Request limits\": %+v", srv)
+	}
 	if srv.ReadHeaderTimeout <= 0 || srv.ReadTimeout <= 0 || srv.WriteTimeout <= 0 || srv.IdleTimeout <= 0 || srv.MaxHeaderBytes <= 0 {
 		t.Fatalf("server missing a timeout/limit: %+v", srv)
 	}

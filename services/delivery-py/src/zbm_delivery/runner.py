@@ -11,7 +11,7 @@ disagreement is ``unknown``; ``unknown`` is never green and never a valid RED. A
 ``verified: false`` (none shipped) stays ``unknown`` by construction.
 
 pytest detail: every invocation carries ``-c <engine ini>`` (written by the engine under
-``/mnt/user-data/workspace/.dlv-engine/``, ``addopts`` empty), ``--rootdir=<service dir>``, ``-o`` overrides for
+``/mnt/user-data/workspace/.dlv-engine/``, ``addopts`` empty), ``--rootdir=.`` (the service directory the engine runs in, as the process resolves it: the physical path; wave 21, N20-D-4), ``-o`` overrides for
 ``python_files``/``testpaths``/``pythonpath`` from the seed and ``-p no:cacheprovider``; the repository's
 ``pytest.ini``/``pyproject``/``setup.cfg``/``tox.ini`` are never read. Report files are read back with ``docker cp``
 (the daemon, not a process in the box). cargo builds into an engine-owned ``--target-dir`` under the engine directory,
@@ -34,12 +34,13 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import json
 import os
 import posixpath
 import re
 import secrets
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from zbm_delivery.engine import parsers, toolchains
 from zbm_delivery.policy import WORKSPACE
@@ -53,10 +54,48 @@ ENGINE_DIR = f"{WORKSPACE}/.dlv-engine"
 PLUGIN_NAME = "zbm_engine_plugin"
 PLUGIN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adapters", "tools", f"{PLUGIN_NAME}.py")
 PLUGIN_SHA256 = "05ab874b93ce2a69b543c580bce4efd8ffdc22622552d43ac938f5e67040d845"
+# wave 22 (G1(b), N21-D-1): the runner-independent re-execution of a finding's reproduction (read-only at /mnt/dlv)
+STANDALONE_NAME = "zbm_standalone_runner.py"
+STANDALONE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adapters", "tools", STANDALONE_NAME)
+STANDALONE_SHA256 = "ce227a83fc4b297a12cfa8e98d6510a8e04a17e70d8919362300a11ff896907d"
+STANDALONE_EXIT = {0: "pass", 1: "fail", 3: "runner_dependent"}
+
+
+def _load_path_class():
+    """Wave 24 (E4, N23-D-3): THE src/test/test-infra classification lives in the pinned standalone runner
+    (``path_class``) — the engine's ``classify_paths`` and the runner's ``side_of`` call the same function. Loaded
+    here from that file, after its pin is checked (a modified runner is never loaded)."""
+    import importlib.abc
+    import importlib.util
+    with open(STANDALONE_PATH, "rb") as fh:
+        data = fh.read()
+    if hashlib.sha256(data).hexdigest() != STANDALONE_SHA256:
+        raise RunnerRefused("adapters/tools/zbm_standalone_runner.py does not match its pinned hash (G1)")
+
+    class _Checked(importlib.abc.SourceLoader):
+        """Loads the bytes just checked against the pin — never a second read of the file (no TOCTOU)."""
+
+        def get_filename(self, fullname: str) -> str:
+            return STANDALONE_PATH
+
+        def get_data(self, path: str) -> bytes:
+            return data
+
+    spec = importlib.util.spec_from_loader("zbm_standalone_runner", _Checked(), origin=STANDALONE_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.path_class
+# the names a scrubbed-environment re-run unsets for the toolchains without a standalone runner (go, cargo, node):
+# every name the container env file can carry that says "a CI/test run", plus the common CI markers
+SCRUB_ENV_NAMES = ("CI", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER", "RUN_ID", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE",
+                   "JENKINS_URL", "TEAMCITY_VERSION", "TF_BUILD", "RUST_TEST_THREADS", "RUST_TEST_NOCAPTURE", "GOFLAGS")
 
 
 class RunnerRefused(RuntimeError):
     pass
+
+
+path_class = _load_path_class()
 
 
 @dataclass
@@ -91,6 +130,53 @@ def node_id_in_text(text: str) -> Optional[str]:
     return node
 
 
+# wave 21 (R1, N20-D-3): the source files each seeded ecosystem runs tests from (a reproduction must name one)
+REPRO_SUFFIXES = {"pytest": (".py",), "cargo": (".rs",), "go": ("_test.go",),
+                  "npm": (".ts", ".mts", ".cts", ".js", ".mjs", ".cjs")}
+
+
+def detect_framework(seed: dict, exists: Callable[[str], bool]) -> Optional[str]:
+    """The seeded framework whose marker files exist (``exists(<path relative to the service directory>)``), in
+    seed order, else None (D7). ``TestRunner.detect`` is this over the worktree's service directory."""
+    for name, fw in seed["frameworks"].items():
+        if any(exists(m) for m in fw["markers"]):
+            if all(exists(r) for r in fw.get("requires", [])):
+                return name
+    return None
+
+
+def reproduction_problem(seed: dict, text: str, exists: Callable[[str], bool],
+                         read: Callable[[str], Optional[str]]) -> tuple[Optional[str], Optional[str]]:
+    """``(node id, None)`` when the finding's ``reproduction`` text names a test the service's toolchain can run
+    on the base tree, else ``(node id or None, why not)`` (wave 21, R1: a prose reproduction is refused at
+    ingestion). ``exists``/``read`` see the BASE commit's service directory. Resolvable means: a ``<path>::<name>``
+    node id in the text; a seeded framework detected at base; the path a source file of that ecosystem's test
+    runner (``REPRO_SUFFIXES``; not test infrastructure), present at base; and the test's own name (the last ``::``
+    part, without a ``[param]``) appearing as an identifier in that file. That is what the seeded ``{target}``
+    argv selects (``engine/toolchains.py``); whether the test FAILS on base is the engine's RED/reverted runs."""
+    node = node_id_in_text(text)
+    if node is None:
+        return None, "the reproduction names no test node id (<path>::<name> relative to the service directory)"
+    if not _TARGET_RE.fullmatch(node) or ".." in node.split("/") or node.startswith("/"):
+        return node, "the node id is not a plain <path>::<name> relative to the service directory"
+    fw_name = detect_framework(seed, exists)
+    if fw_name is None:
+        return node, "no seeded test framework matches the service directory at the base commit"
+    fw = seed["frameworks"][fw_name]
+    path, _, name = node.partition("::")
+    if not path.endswith(REPRO_SUFFIXES.get(fw_name, ())):
+        return node, f"{path} is not a {fw_name} test source ({', '.join(REPRO_SUFFIXES.get(fw_name, ()))})"
+    if path_class(path, fw.get("test_file_globs", []), fw.get("test_infra_globs", [])) == "test_infra":
+        return node, f"{path} is test infrastructure, not a test"
+    body = read(path)
+    if body is None:
+        return node, f"{path} is not a file of the base commit"
+    func = name.split("[", 1)[0].rsplit("::", 1)[-1]
+    if not re.search(r"(?<![A-Za-z0-9_])" + re.escape(func) + r"(?![A-Za-z0-9_])", body):
+        return node, f"{func} does not occur in {path} at the base commit"
+    return node, None
+
+
 def same_test(failed_name: str, target: str) -> bool:
     """Whether a failure name from a verified count set names the test ``<path>::<name>`` (a finding's
     reproduction): pytest keys are the node id itself; cargo keys are the libtest name alone; go keys are
@@ -122,11 +208,10 @@ class TestRunner:  # noqa: N801
     @staticmethod
     def detect(seed: dict, service_dir: str) -> str:
         """Framework by marker file inside the service directory (D7); ``npm`` needs the lockfile."""
-        for name, fw in seed["frameworks"].items():
-            if any(os.path.exists(os.path.join(service_dir, m)) for m in fw["markers"]):
-                if all(os.path.exists(os.path.join(service_dir, r)) for r in fw.get("requires", [])):
-                    return name
-        raise RunnerRefused("no seeded test framework matches the service directory (D7: nothing else is run)")
+        name = detect_framework(seed, lambda rel: os.path.exists(os.path.join(service_dir, rel)))
+        if name is None:
+            raise RunnerRefused("no seeded test framework matches the service directory (D7: nothing else is run)")
+        return name
 
     def _toolchain(self, service_dir: str) -> Optional[toolchains.Toolchain]:
         if not self.fw.get("verified"):
@@ -181,13 +266,21 @@ class TestRunner:  # noqa: N801
         return f"{self.engine_dir}/engine-{hashlib.sha256(cwd.encode()).hexdigest()[:12]}.ini"
 
     def _ini_values(self, cwd: str) -> dict:
-        """The seed's ini values with every path made ABSOLUTE under ``cwd`` (pytest resolves ``paths``-typed ini
-        values against the ini file's directory, which is the engine directory, never the service); the engine
-        directory comes FIRST on ``pythonpath`` so ``-p zbm_engine_plugin`` can only resolve to the engine's copy (R4)."""
+        """The seed's ini values with ``pythonpath`` made ABSOLUTE under ``cwd`` (pytest resolves that ``paths``-typed
+        value against the ini file's directory, which is the engine directory, never the service); the engine
+        directory comes FIRST on ``pythonpath`` so ``-p zbm_engine_plugin`` can only resolve to the engine's copy (R4).
+        ``testpaths`` stays RELATIVE (wave 21, N20-D-4): it is an ``args``-typed value pytest globs against the
+        process's working directory — the service directory, as the process resolves it — and uses only when that
+        directory is the rootdir (``--rootdir=.``). Made absolute, a working directory reached through a symlink gave
+        collected paths outside the rootdir (``../../<link>/...`` node ids) and every suite verdict was unknown."""
         ini = dict(self.fw.get("ini") or {})
-        for k in ("pythonpath", "testpaths"):
-            if k in ini:
-                ini[k] = " ".join(posixpath.normpath(posixpath.join(cwd, part)) for part in str(ini[k]).split())
+        if "pythonpath" in ini:
+            ini["pythonpath"] = " ".join(posixpath.normpath(posixpath.join(cwd, part)) for part in str(ini["pythonpath"]).split())
+        if "testpaths" in ini:
+            parts = str(ini["testpaths"]).split()
+            if any(p.startswith("/") or ".." in p.split("/") for p in parts):
+                raise RunnerRefused("seed testpaths must be relative to the service directory")
+            ini["testpaths"] = " ".join(parts)
         ini["pythonpath"] = (self.engine_dir + " " + ini["pythonpath"]).strip() if ini.get("pythonpath") else self.engine_dir
         return ini
 
@@ -230,17 +323,17 @@ class TestRunner:  # noqa: N801
                        output_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
                        timed_out=r.timed_out, truncated=r.truncated, cwd=cwd)
 
-    def _collect(self, box, cwd: str, targets: list[str]) -> tuple[Optional[toolchains.Listing], Optional[TestRun]]:
+    def _collect(self, box, cwd: str, targets: list[str], prefix: tuple = ()) -> tuple[Optional[toolchains.Listing], Optional[TestRun]]:
         """The ecosystem's collect-only equivalent, run separately (None for an ecosystem without one)."""
         argv = self.toolchain.collect_argv(cwd, targets[0] if len(targets) == 1 else None)
         if argv is None:
             return None, None
         if len(targets) > 1:
             argv = argv + list(targets)
-        t = self._exec(box, argv, cwd)
+        t = self._exec(box, list(prefix) + argv, cwd)
         return self.toolchain.parse_listing(t.output, t.exit, t.timed_out, t.truncated), t
 
-    def _verified_run(self, box, base_argv: list[str], cwd: str, targets: list[str]) -> TestRun:
+    def _verified_run(self, box, base_argv: list[str], cwd: str, targets: list[str], prefix: tuple = ()) -> TestRun:
         """One run with the engine's configuration in ``box``; the verdict from the report + listing + transcript
         + exit (+ the plugin record for pytest). ``targets``: none for the suite, one for RED/GREEN/checkouts, several
         for the src-only check (every one gets its own verdict in ``TestRun.verdicts``)."""
@@ -251,7 +344,7 @@ class TestRunner:  # noqa: N801
         if len(targets) > 1:
             argv = argv + list(targets)
         tc.prepare(box, cwd)
-        t = self._exec(box, argv, cwd)
+        t = self._exec(box, list(prefix) + argv, cwd)
         report_text = None
         extra_text = None
         if report is not None:
@@ -264,7 +357,7 @@ class TestRunner:  # noqa: N801
                 if rec is not None:
                     extra_text = rec.decode("utf-8", "replace")
                     t.extra["plugin_record_sha256"] = hashlib.sha256(rec).hexdigest()
-        listing, ct = self._collect(box, cwd, targets)
+        listing, ct = self._collect(box, cwd, targets, prefix)
         if ct is not None:
             t.extra["collect_exit"] = ct.exit
             t.extra["collect_output_sha256"] = ct.output_sha256
@@ -304,6 +397,95 @@ class TestRunner:  # noqa: N801
         argv = self.test_argv(targets[0])
         return self._verified_run(box, argv[:-1], cwd or self.cwd, targets)
 
+    # --- runner-independent re-execution (wave 22, G1(b)) -----------------------------------------------------------
+
+    @staticmethod
+    def standalone_bytes() -> bytes:
+        """The standalone runner, verified against its pin (a modified runner never runs)."""
+        with open(STANDALONE_PATH, "rb") as fh:
+            data = fh.read()
+        if hashlib.sha256(data).hexdigest() != STANDALONE_SHA256:
+            raise RunnerRefused("adapters/tools/zbm_standalone_runner.py does not match its pinned hash (G1)")
+        return data
+
+    def _standalone_paths(self, cwd: str) -> list[str]:
+        """The seed's ``pythonpath`` entries made absolute under ``cwd`` (never the engine directory)."""
+        raw = str((self.fw.get("ini") or {}).get("pythonpath") or "")
+        return [posixpath.normpath(posixpath.join(cwd, part)) for part in raw.split()]
+
+    def run_standalone(self, box, target: str, cwd: Optional[str] = None) -> TestRun:
+        """G1(b): run the test function ``target`` OUTSIDE pytest in ``box`` (a fresh engine container): the pinned
+        standalone runner from the read-only tools mount, ``python3 -I``, pytest not importable, CI/PYTEST*/TEST*
+        scrubbed from the environment, the request (with a nonce) on stdin. The verdict comes from the runner's
+        report file (read back with ``docker cp``) and must agree with the exit code: ``pass`` / ``fail`` /
+        ``runner_dependent``; anything else is ``unknown``. pytest services only (``RunnerRefused`` otherwise)."""
+        if self.framework != "pytest" or not self.verified:
+            raise RunnerRefused("the standalone runner is built for pytest services")
+        self.check_target(target)
+        cwd = cwd or self.cwd
+        self.standalone_bytes()                                  # the pin, before anything runs
+        self.prepare_box(box, cwd)
+        from zbm_delivery.adapters.sandbox import TOOLS_MOUNT
+        script = f"{TOOLS_MOUNT}/{STANDALONE_NAME}"
+        nonce = secrets.token_hex(16)
+        report = f"{self.engine_dir}/solo-{secrets.token_hex(8)}.json"
+        path, _, name = target.partition("::")
+        request = {"nonce": nonce, "report": report, "service_dir": cwd, "paths": self._standalone_paths(cwd),
+                   "test_file": posixpath.join(cwd, path), "test": name,
+                   # wave 24 (E4): the engine's own classification globs, so side_of == classify_paths
+                   "test_file_globs": list(self.fw.get("test_file_globs", [])),
+                   "test_infra_globs": list(self.fw.get("test_infra_globs", []))}
+        argv = ["python3", "-I", script]
+        r: ExecResult = box.exec_argv(argv, cwd=cwd, env={}, timeout=self.cmd_timeout_s,
+                                      stdin=json.dumps(request).encode("utf-8"))
+        text = r.stdout.decode("utf-8", "replace") + (toolchains.STDERR_MARK + r.stderr.decode("utf-8", "replace") if r.stderr else "")
+        t = TestRun(argv=argv + [target], exit=r.exit_code, output=text,
+                    output_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
+                    timed_out=r.timed_out, truncated=r.truncated, cwd=cwd)
+        data = box.get_bytes(report) if not r.timed_out else None
+        rec: dict = {}
+        if data is not None:
+            t.output += "\n[engine: the standalone runner's report] " + data.decode("utf-8", "replace")[:4000] + "\n"
+            t.output_sha256 = hashlib.sha256(t.output.encode("utf-8", "surrogatepass")).hexdigest()
+            t.junit_sha256 = hashlib.sha256(data).hexdigest()
+            try:
+                rec = json.loads(data.decode("utf-8"))
+            except ValueError:
+                rec = {}
+        claimed = rec.get("verdict") if isinstance(rec, dict) else None
+        agree = (isinstance(rec, dict) and rec.get("nonce") == nonce and claimed in STANDALONE_EXIT.values()
+                 and STANDALONE_EXIT.get(r.exit_code) == claimed and not r.timed_out and not r.truncated)
+        t.verdict = claimed if agree else "unknown"
+        why = str(rec.get("why") or "") if isinstance(rec, dict) else ""
+        t.extra["standalone"] = {"why": (why if agree else f"no agreeing report (exit {r.exit_code}, report "
+                                                              f"{'present' if data is not None else 'missing'})")[:400],
+                                 "conftest": list(rec.get("conftest") or [])[:10] if agree else [],
+                                 "blocked_imports": list(rec.get("blocked_imports") or [])[:10] if agree else [],
+                                 # wave 23 (D3): where each refused pytest import came from (test / src / lib side)
+                                 "blocked_from": [{"name": str(b.get("name", ""))[:80], "side": str(b.get("side", "")),
+                                                   "file": str(b.get("file", ""))[:200]}
+                                                  for b in (rec.get("blocked_from") or [])[:10] if isinstance(b, dict)]
+                                                 if agree else [],
+                                 "report_sha256": t.junit_sha256}
+        return t
+
+    def run_scrubbed(self, box, target: str, cwd: Optional[str] = None) -> TestRun:
+        """G1(b) for go/cargo/node (no standalone runner exists): the seeded targeted run through the verified
+        toolchain with ``SCRUB_ENV_NAMES`` unset (``env -u``). The same test runner runs, so this defeats only an
+        environment-conditional fix; the toolchain's own detection hooks (Go ``testing.Testing()``, Node's
+        ``NODE_TEST_CONTEXT``, the libtest harness's arguments) remain — ``src_content_deny`` refuses their cheap
+        spellings (the residual, stated in ADR 0011)."""
+        if self.framework == "pytest":
+            raise RunnerRefused("pytest services use the standalone runner")
+        prefix = ["env"] + [x for n in SCRUB_ENV_NAMES for x in ("-u", n)]
+        argv = self.test_argv(target)
+        if self.verified:
+            return self._verified_run(box, argv, cwd or self.cwd, [target], prefix=prefix)
+        t = self._exec(box, prefix + argv, cwd)
+        t.counts = parsers.parse_counts(self.fw["parser"], t.output)
+        t.verdict = "unknown"
+        return t
+
     def run_suite(self, box, cwd: Optional[str] = None) -> TestRun:
         if self.verified:
             return self._verified_run(box, self.suite_argv(), cwd or self.cwd, [])
@@ -341,32 +523,22 @@ class TestRunner:  # noqa: N801
         """fnmatch where ``**/`` also matches zero directories (``tests/**/*.rs`` matches ``tests/it.rs``)."""
         return fnmatch.fnmatch(rel, g) or ("**/" in g and fnmatch.fnmatch(rel, g.replace("**/", "")))
 
+    def path_class(self, path: str) -> str:
+        """``src`` / ``test`` / ``test_infra`` for a repo or service-relative path — ``path_class`` of the pinned
+        standalone runner (wave 24, E4: the one classification the engine and the runner share)."""
+        return path_class(self._rel(path), self.fw.get("test_file_globs", []), self.fw.get("test_infra_globs", []))
+
     def is_test_infra_path(self, path: str) -> bool:
-        rel = self._rel(path)
-        for g in self.fw.get("test_infra_globs", []):
-            if self._match(rel, g) or fnmatch.fnmatch(posixpath.basename(rel), g):
-                return True
-        return False
+        return self.path_class(path) == "test_infra"
 
     def is_test_path(self, path: str) -> bool:
-        rel = self._rel(path)
-        if self.is_test_infra_path(path):
-            return False
-        for g in self.fw.get("test_file_globs", []):
-            if self._match(rel, g) or ("/" not in g and fnmatch.fnmatch(os.path.basename(rel), g)):
-                return True
-        return False
+        return self.path_class(path) == "test"
 
     def classify_paths(self, paths: list[str]) -> dict[str, list[str]]:
-        """Every changed path into ``src`` / ``test`` / ``test_infra`` (R1)."""
+        """Every changed path into ``src`` / ``test`` / ``test_infra`` (R1), by ``path_class``."""
         out: dict[str, list[str]] = {"src": [], "test": [], "test_infra": []}
         for p in sorted(set(paths)):
-            if self.is_test_infra_path(p):
-                out["test_infra"].append(p)
-            elif self.is_test_path(p):
-                out["test"].append(p)
-            else:
-                out["src"].append(p)
+            out[self.path_class(p)].append(p)
         return out
 
     def denied_src_content(self, text: str) -> Optional[str]:

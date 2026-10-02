@@ -75,8 +75,84 @@
 //!   - the ledger Mutex is taken only after the body has been fully read and
 //!     parsed, inside a bounded blocking pool, so appends stay strictly
 //!     serialized exactly as before (same chain, same idempotency rules).
+//!
+//! Fix wave 21, Sep 28 2026 (docs/adr/0003 section 8), AEGIS N20-M-1: every
+//! path that answers without reading the whole request (the 503 load shed,
+//! 401/404 before the body, 413 on the declared length, 408, a hyper-level
+//! refusal) used to close the socket with request bytes still unread, so the
+//! kernel sent RST after the response (Linux: EPIPE in SO_ERROR after EOF;
+//! macOS: ECONNRESET on the client's read, the Mac "connection reset by
+//! peer"). RFC 9112 section 9.6 graceful close now: after the response the
+//! write side is shut down (FIN), then up to DRAIN_MAX_BYTES are read and
+//! discarded for at most DRAIN_TIMEOUT, then the socket is closed. The answer
+//! still never waits for the body; only the close is deferred, and it is
+//! bounded. hyper serves without shutting the socket down itself
+//! (`poll_without_shutdown`), so the socket comes back whatever way the
+//! connection ended; no extra descriptor per connection. A connection that
+//! has been answered gives its connection slot back BEFORE it drains (the
+//! cap counts connections being served, as before); draining sockets — served
+//! and load-shed alike — have their own bound (DRAINS_MAX), past which a
+//! socket is closed at once (the old behaviour, RST included).
+//!
+//! Fix wave 21 (N20-M-3): LEDGER_PORT=0 binds an ephemeral port, and
+//! LEDGER_PORT_FILE, when set, receives the bound port so a caller never has
+//! to guess a free port and race another process for it.
+//!
+//! Fix wave 22 (AEGIS N21-C-2, lead ruling G7): the port file is written only
+//! AFTER the ledger log opened (a server that refuses to start announces no
+//! port); a target that is a symlink is refused (the server does not start);
+//! the number goes to a temp file in the target's directory created
+//! O_CREAT|O_EXCL|O_NOFOLLOW with a random suffix, mode 0600, fsynced, then
+//! renamed into place (rename never follows a link at the destination); the
+//! file is removed on SIGTERM/SIGINT and on a clean exit — only while it is
+//! still the file this server wrote (same device and inode). Before, the temp
+//! name was `<path>.tmp-<pid>` (predictable) and a link planted there was
+//! followed: the server overwrote the link's target.
+//!
+//! Fix wave 23 (AEGIS N22-C-3): the PARENT directory is never reached through
+//! a symlink either. The parent path is walked one component at a time from
+//! `/` (absolute) or the working directory (relative), each opened
+//! O_DIRECTORY|O_NOFOLLOW (O_PATH on Linux) and checked to be a directory; a
+//! symlink anywhere in it refuses the start. The temp file is created, the
+//! target checked and the rename done relative to that directory descriptor
+//! (openat / fstatat / renameat), which stays open for the life of the process,
+//! so the removal (unlinkat, after fstatat checks device and inode) acts on the
+//! directory the file was written in even if a path component is swapped later.
+//! The removal runs on SIGTERM, SIGINT, SIGHUP and SIGQUIT (the handler then
+//! restores the default disposition and re-raises: the process still dies of
+//! the signal) and on a clean exit. A caller whose temp directory sits behind
+//! a symlink (macOS `/var` -> `/private/var`) passes the canonical path.
+//!
+//! Fix wave 24 (AEGIS N23-S-2): the handlers used to be installed only after
+//! the rename, so a stop signal while the temp file existed left it behind
+//! (AEGIS, aimed SIGTERM: 297/300) and one between the rename and the
+//! handlers left the port file. Now the stop signals are blocked across the
+//! whole publish (main blocks them before the runtime starts its threads, so
+//! only the main thread ever takes one, and blocking it there blocks it for
+//! the process); the removal is armed BEFORE anything is written (directory,
+//! temp name, published name, then the temp file's device/inode before the
+//! rename); the handler removes the temp name while the publish is in
+//! progress and the published name while it is still this server's file.
+//!
+//! Fix wave 25 (AEGIS N24-S-8), the residual no handler can close: SIGKILL
+//! (and the kernel's OOM killer, which sends it) cannot be blocked, caught or
+//! handled, so a process killed that way leaves whatever it had written —
+//! the `.<name>.tmp-<hex>` temp file if it dies during the publish (AEGIS
+//! round 24: 49/50 aimed kills), the port file if it dies after (50/50). A
+//! reader of the port file must therefore treat it as a HINT: the port it
+//! names may be dead or reused, so connect and check (`GET /health`) before
+//! trusting it, and a stale `.*.tmp-*` beside it is debris to remove, never
+//! to read. The same holds for any crash that skips the handlers (an abort,
+//! a power loss).
 use std::convert::Infallible;
+use std::ffi::CString;
+use std::future::Future;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -88,7 +164,7 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use ledger_rust::{ledger_log, EventAppendOutcome, EventInput, LedgerRecordInput, PersistError, PersistentLedger};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::Semaphore;
 
@@ -122,6 +198,16 @@ const WORKER_THREADS: usize = 4;
 const MAX_BLOCKING_THREADS: usize = 16;
 /// How long a load-shed connection gets to receive its 503.
 const SHED_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+/// Graceful close (RFC 9112 section 9.6, fix wave 21): after the response and
+/// the FIN, unread request bytes are read and discarded for at most this long…
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+/// …or until this many bytes were discarded, whichever comes first; then the
+/// socket is closed (a peer still sending past this gets the kernel's RST).
+const DRAIN_MAX_BYTES: usize = 64 * 1024;
+/// At most this many answered connections (served or load-shed) drain at
+/// once; past it a socket is closed immediately. Separate from the connection
+/// cap so a peer slow to close never holds a serving slot.
+const DRAINS_MAX: usize = 512;
 
 type Body = Full<Bytes>;
 
@@ -356,43 +442,88 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
     }
 }
 
-/// Serves exactly one request on `stream` within REQUEST_DEADLINE. Dropping
-/// the connection future on timeout closes the socket; ledger work already
-/// handed to the blocking pool still completes (it is never torn halfway).
-async fn serve_connection(stream: TcpStream, app: Arc<App>) {
+/// Graceful close (fix wave 21, N20-M-1): shut the write side down (FIN after
+/// whatever response was written), then read and discard what the peer still
+/// sends — at most DRAIN_MAX_BYTES within DRAIN_TIMEOUT — and close. Closing
+/// with unread bytes in the receive queue makes the kernel send RST, which a
+/// client may see before (macOS) or after (Linux) the response it was sent.
+async fn graceful_close(mut stream: TcpStream) {
+    let _ = tokio::time::timeout(DRAIN_TIMEOUT, stream.shutdown()).await;
+    let mut buf = [0u8; 8192];
+    let mut left = DRAIN_MAX_BYTES;
+    let _ = tokio::time::timeout(DRAIN_TIMEOUT, async {
+        while left > 0 {
+            let want = left.min(buf.len());
+            match stream.read(&mut buf[..want]).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => left -= n,
+            }
+        }
+    })
+    .await;
+}
+
+/// The service future, boxed: `poll_without_shutdown` needs an `Unpin` future.
+type HandlerFuture = Pin<Box<dyn Future<Output = Result<Response<Body>, Infallible>> + Send>>;
+
+/// Serves exactly one request on `stream` within REQUEST_DEADLINE and hands the
+/// socket back for the graceful close. hyper runs WITHOUT shutting the socket
+/// down itself (`poll_without_shutdown`), so the socket comes back however the
+/// connection ended — the answer written, the deadline, or a protocol error
+/// hyper answered itself. Ledger work already handed to the blocking pool
+/// still completes (it is never torn halfway).
+async fn serve_connection(stream: TcpStream, app: Arc<App>) -> TcpStream {
     let service = service_fn(move |request| {
         let app = Arc::clone(&app);
-        async move { Ok::<_, Infallible>(json_response(handle(request, app).await)) }
+        let fut: HandlerFuture = Box::pin(async move { Ok::<_, Infallible>(json_response(handle(request, app).await)) });
+        fut
     });
-    let conn = http1::Builder::new()
+    let mut conn = http1::Builder::new()
         .timer(TokioTimer::new())
         .header_read_timeout(HEADER_READ_TIMEOUT)
         .keep_alive(false)
         .max_buf_size(MAX_READ_BUF)
         .serve_connection(TokioIo::new(stream), service);
-    // Timeout or connection error: either way the socket is closed on drop,
-    // and there is no one left to answer.
-    let _ = tokio::time::timeout(REQUEST_DEADLINE, conn).await;
+    // Done, a connection error or the deadline: in every case the socket is
+    // taken back and closed gracefully (anything hyper had not flushed by the
+    // deadline is dropped, exactly as before).
+    let _ = tokio::time::timeout(REQUEST_DEADLINE, std::future::poll_fn(|cx| conn.poll_without_shutdown(cx))).await;
+    conn.into_parts().io.into_inner()
+}
+
+/// Closes an answered socket: gracefully when a drain slot is free, else at
+/// once (FIN; the kernel resets it if request bytes are still unread).
+async fn close_answered(mut stream: TcpStream, drains: Arc<Semaphore>) {
+    match drains.try_acquire_owned() {
+        Ok(permit) => {
+            graceful_close(stream).await;
+            drop(permit);
+        }
+        Err(_) => {
+            let _ = tokio::time::timeout(SHED_WRITE_TIMEOUT, stream.shutdown()).await;
+        }
+    }
 }
 
 /// Over the connection cap: answer 503 at once (bounded by
-/// SHED_WRITE_TIMEOUT) and close, without reading the request.
-async fn shed(mut stream: TcpStream) {
+/// SHED_WRITE_TIMEOUT) without reading the request, then close gracefully
+/// (the unread request is drained, bounded) when a drain slot is free.
+async fn shed(mut stream: TcpStream, drains: Arc<Semaphore>) {
     let body = serde_json::json!({"error": "ledger-rust is at its connection limit; retry shortly"}).to_string();
     let resp = format!(
         "HTTP/1.1 503 Service Unavailable\r\n{CONTENT_TYPE}: application/json\r\n{RETRY_AFTER}: 1\r\n\
          {CONNECTION}: close\r\n{CONTENT_LENGTH}: {}\r\n\r\n{body}",
         body.len()
     );
-    let _ = tokio::time::timeout(SHED_WRITE_TIMEOUT, async {
-        stream.write_all(resp.as_bytes()).await?;
-        stream.shutdown().await
-    })
-    .await;
+    let written = tokio::time::timeout(SHED_WRITE_TIMEOUT, stream.write_all(resp.as_bytes())).await;
+    if matches!(written, Ok(Ok(()))) {
+        close_answered(stream, drains).await;
+    }
 }
 
 async fn serve(listener: TcpListener, app: Arc<App>, max_connections: usize) {
     let slots = Arc::new(Semaphore::new(max_connections));
+    let drains = Arc::new(Semaphore::new(DRAINS_MAX));
     loop {
         let stream = match listener.accept().await {
             Ok((stream, _)) => stream,
@@ -408,13 +539,15 @@ async fn serve(listener: TcpListener, app: Arc<App>, max_connections: usize) {
         match Arc::clone(&slots).try_acquire_owned() {
             Ok(slot) => {
                 let app = Arc::clone(&app);
+                let drains = Arc::clone(&drains);
                 tokio::spawn(async move {
-                    serve_connection(stream, app).await;
-                    drop(slot);
+                    let stream = serve_connection(stream, app).await;
+                    drop(slot); // answered: the slot is free before the (bounded) drain
+                    close_answered(stream, drains).await;
                 });
             }
             Err(_) => {
-                tokio::spawn(shed(stream));
+                tokio::spawn(shed(stream, Arc::clone(&drains)));
             }
         }
     }
@@ -429,6 +562,319 @@ fn bind(addr: &str) -> std::io::Result<TcpListener> {
     socket.set_reuseaddr(true)?;
     socket.bind(sock_addr)?;
     socket.listen(LISTEN_BACKLOG)
+}
+
+/// The port file this server wrote: its NAME (NUL-terminated, for the signal
+/// handler), the descriptor of the directory it was written in (walked without
+/// following any symlink; kept open), and the device/inode of the file it
+/// renamed into place. Set once.
+static PORT_FILE_NAME: AtomicPtr<libc::c_char> = AtomicPtr::new(std::ptr::null_mut());
+/// Fix wave 24 (F2): the temp name while the publish is in progress (null otherwise), so a stop signal that
+/// lands mid-publish removes it too.
+static PORT_FILE_TMP: AtomicPtr<libc::c_char> = AtomicPtr::new(std::ptr::null_mut());
+static PORT_FILE_DIR_FD: AtomicI32 = AtomicI32::new(-1);
+static PORT_FILE_DEV: AtomicU64 = AtomicU64::new(0);
+static PORT_FILE_INO: AtomicU64 = AtomicU64::new(0);
+/// The signals that remove the port file before the process dies of them.
+const STOP_SIGNALS: [libc::c_int; 4] = [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT];
+
+fn random_hex(n: usize) -> std::io::Result<String> {
+    let mut bytes = vec![0u8; n];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn invalid(msg: String) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, msg)
+}
+
+/// A directory descriptor this module owns (closed on drop unless kept).
+struct DirFd(libc::c_int);
+
+impl Drop for DirFd {
+    fn drop(&mut self) {
+        if self.0 >= 0 {
+            // SAFETY: closing a descriptor this struct owns.
+            unsafe {
+                libc::close(self.0);
+            }
+        }
+    }
+}
+
+impl DirFd {
+    fn keep(mut self) -> libc::c_int {
+        std::mem::replace(&mut self.0, -1)
+    }
+}
+
+#[cfg(target_os = "linux")]
+const DIR_OPEN_FLAGS: libc::c_int = libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+#[cfg(not(target_os = "linux"))]
+const DIR_OPEN_FLAGS: libc::c_int = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+
+fn c_name(os: &std::ffi::OsStr) -> std::io::Result<CString> {
+    use std::os::unix::ffi::OsStrExt;
+    CString::new(os.as_bytes()).map_err(|_| invalid("NUL in the port file path".to_string()))
+}
+
+fn fstat_fd(fd: libc::c_int) -> std::io::Result<libc::stat> {
+    // SAFETY: `st` is plain data; `fd` is a descriptor this module opened.
+    unsafe {
+        let mut st: libc::stat = std::mem::zeroed();
+        if libc::fstat(fd, &mut st) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(st)
+    }
+}
+
+/// Fix wave 23 (N22-C-3): opens the parent directory of the port file one
+/// component at a time, never following a symlink (O_NOFOLLOW on every
+/// component; each descriptor checked to be a directory). A symlink anywhere
+/// in the parent path is refused, naming the component.
+fn open_parent_nofollow(parent: &Path) -> std::io::Result<DirFd> {
+    use std::path::Component;
+    let start: &[u8] = if parent.is_absolute() { b"/\0" } else { b".\0" };
+    // SAFETY: a NUL-terminated literal path; the result is checked.
+    let fd = unsafe { libc::open(start.as_ptr() as *const libc::c_char, DIR_OPEN_FLAGS & !libc::O_NOFOLLOW) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut cur = DirFd(fd);
+    for comp in parent.components() {
+        let name = match comp {
+            Component::RootDir | Component::CurDir | Component::Prefix(_) => continue,
+            Component::ParentDir => std::ffi::OsStr::new(".."),
+            Component::Normal(n) => n,
+        };
+        let c = c_name(name)?;
+        // SAFETY: `cur.0` is an open directory descriptor; `c` is NUL-terminated.
+        let next = unsafe { libc::openat(cur.0, c.as_ptr(), DIR_OPEN_FLAGS) };
+        if next < 0 {
+            let e = std::io::Error::last_os_error();
+            return Err(match e.raw_os_error() {
+                Some(libc::ELOOP) | Some(libc::ENOTDIR) => invalid(format!(
+                    "the port file's parent directory {parent:?} reaches {name:?} through a symlink or a non-directory \
+                     (refused: a symlink in the parent path is never followed; pass the canonical path)"
+                )),
+                _ => e,
+            });
+        }
+        let next = DirFd(next);
+        let st = fstat_fd(next.0)?;
+        if (st.st_mode & libc::S_IFMT) != libc::S_IFDIR {
+            return Err(invalid(format!(
+                "the port file's parent directory {parent:?} reaches {name:?}, which is a symlink or not a directory \
+                 (refused: a symlink in the parent path is never followed; pass the canonical path)"
+            )));
+        }
+        cur = next;
+    }
+    Ok(cur)
+}
+
+/// The target inside `dir`: absent, or a regular file (a symlink or anything
+/// else is refused).
+fn check_target(dir: libc::c_int, name: &CString) -> std::io::Result<()> {
+    // SAFETY: `st` is plain data; `dir` is an open directory descriptor; `name` is NUL-terminated.
+    unsafe {
+        let mut st: libc::stat = std::mem::zeroed();
+        if libc::fstatat(dir, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) != 0 {
+            let e = std::io::Error::last_os_error();
+            return if e.raw_os_error() == Some(libc::ENOENT) { Ok(()) } else { Err(e) };
+        }
+        match st.st_mode & libc::S_IFMT {
+            libc::S_IFLNK => Err(invalid("the port file path is a symlink (refused: it is never followed or replaced)".to_string())),
+            libc::S_IFREG => Ok(()),
+            _ => Err(invalid("the port file path exists and is not a regular file".to_string())),
+        }
+    }
+}
+
+/// The directory descriptor (walked without following symlinks) and the file
+/// name of the port file `path`.
+fn port_file_location(path: &str) -> std::io::Result<(DirFd, CString)> {
+    let target = Path::new(path);
+    let name = target.file_name().ok_or_else(|| invalid("the port file path names no file".to_string()))?;
+    let parent = match target.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let dir = open_parent_nofollow(&parent)?;
+    let c = c_name(name)?;
+    check_target(dir.0, &c)?;
+    Ok((dir, c))
+}
+
+/// Refuses, at start-up, a port file path the server would refuse to publish
+/// (a symlinked parent component or target, a target that is not a regular file).
+fn check_port_file_path(path: &str) -> std::io::Result<()> {
+    port_file_location(path).map(|_| ())
+}
+
+/// The stop signals as a signal set.
+fn stop_signal_set() -> libc::sigset_t {
+    // SAFETY: plain data initialised by sigemptyset/sigaddset.
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        for sig in STOP_SIGNALS {
+            libc::sigaddset(&mut set, sig);
+        }
+        set
+    }
+}
+
+/// Blocks the stop signals in the calling thread; returns the mask to restore. A stop signal sent meanwhile stays
+/// pending and is delivered when the mask is restored.
+fn block_stop_signals() -> libc::sigset_t {
+    let set = stop_signal_set();
+    // SAFETY: `set` and `old` are valid sigsets; pthread_sigmask only changes this thread's mask.
+    unsafe {
+        let mut old: libc::sigset_t = std::mem::zeroed();
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, &mut old);
+        old
+    }
+}
+
+fn restore_signal_mask(old: &libc::sigset_t) {
+    // SAFETY: `old` is the mask block_stop_signals returned.
+    unsafe {
+        libc::pthread_sigmask(libc::SIG_SETMASK, old, std::ptr::null_mut());
+    }
+}
+
+/// Writes `port` to `path` (fix wave 22, G7; wave 23, N22-C-3; wave 24, F2): the parent is walked without
+/// following symlinks; a temp file in that directory, `.<name>.tmp-<16 random hex>`, is created (openat
+/// O_CREAT|O_EXCL|O_NOFOLLOW, mode 0600), written and fsynced, then renamed over `<name>` within the same
+/// directory descriptor (renameat: atomic; a reader never sees a partial number; a link at the destination is
+/// replaced, never followed).
+///
+/// Fix wave 24 (AEGIS N23-S-2): the stop signals are BLOCKED across the whole publish (so none is handled half
+/// way: one sent meanwhile stays pending and is handled once the port file is in place and armed), and the removal
+/// is armed BEFORE anything is written: the directory, the temp name and the published name are recorded first,
+/// the handlers installed, and the device/inode of the temp file recorded before the rename (the rename keeps the
+/// inode). The handler removes the temp name (while the publish is in progress) and the published name (only if
+/// it is still the file this server wrote). Before, the handlers were installed after the rename: a SIGTERM while
+/// the temp file existed left it behind (AEGIS: 297/300), one between the rename and the handlers left the port
+/// file. Worker threads never take a stop signal (main blocks them before the runtime starts its threads, which
+/// inherit the mask), so blocking them here in the main thread blocks them for the process.
+fn publish_port_file(path: &str, port: u16) -> std::io::Result<PortFileGuard> {
+    let (dir, name) = port_file_location(path)?;
+    let tmp = c_name(std::ffi::OsStr::new(&format!(".{}.tmp-{}", name.to_string_lossy(), random_hex(8)?)))?;
+    let old = block_stop_signals();
+    let dir = dir.keep();
+    PORT_FILE_DIR_FD.store(dir, Ordering::SeqCst);
+    PORT_FILE_NAME.store(name.clone().into_raw(), Ordering::SeqCst);
+    PORT_FILE_TMP.store(tmp.clone().into_raw(), Ordering::SeqCst);
+    // SAFETY: installing a handler that only calls async-signal-safe functions.
+    unsafe {
+        let handler = on_stop_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
+        for sig in STOP_SIGNALS {
+            libc::signal(sig, handler);
+        }
+    }
+    let written = write_and_rename(dir, &tmp, &name, port);
+    PORT_FILE_TMP.store(std::ptr::null_mut(), Ordering::SeqCst); // the temp name is gone (renamed or removed)
+    restore_signal_mask(&old);                                     // a pending stop signal is handled from here on
+    written.map(|_| PortFileGuard)
+}
+
+/// The write itself (stop signals blocked by the caller): temp file, fsync, device/inode recorded, rename.
+fn write_and_rename(dir: libc::c_int, tmp: &CString, name: &CString, port: u16) -> std::io::Result<()> {
+    // SAFETY: `dir` is an open directory descriptor; `tmp` is NUL-terminated; mode passed for O_CREAT.
+    let fd = unsafe {
+        libc::openat(dir, tmp.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                     0o600 as libc::c_uint)
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `fd` was just opened here and is owned by the File from now on.
+    let mut file = unsafe { <std::fs::File as std::os::unix::io::FromRawFd>::from_raw_fd(fd) };
+    let written = file.write_all(format!("{port}\n").as_bytes()).and_then(|_| file.sync_all()).and_then(|_| file.metadata());
+    drop(file);
+    let unlink_tmp = || {
+        // SAFETY: removing the temp name this function created, relative to `dir`.
+        unsafe {
+            libc::unlinkat(dir, tmp.as_ptr(), 0);
+        }
+    };
+    let meta = match written {
+        Ok(m) => m,
+        Err(e) => {
+            unlink_tmp();
+            return Err(e);
+        }
+    };
+    PORT_FILE_DEV.store(meta.dev(), Ordering::SeqCst);
+    PORT_FILE_INO.store(meta.ino(), Ordering::SeqCst);
+    let renamed = check_target(dir, name).and_then(|_| {
+        // SAFETY: both names are NUL-terminated and relative to the same open directory descriptor.
+        if unsafe { libc::renameat(dir, tmp.as_ptr(), dir, name.as_ptr()) } != 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(e) = renamed {
+        unlink_tmp();
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Removes, in the directory the port file was written in, the temp name while a publish is in progress, and the
+/// port file if it is still the one this server wrote. Called from the signal handler: only async-signal-safe
+/// calls (fstatat, unlinkat).
+fn remove_own_port_file() {
+    let dir = PORT_FILE_DIR_FD.load(Ordering::SeqCst);
+    if dir < 0 {
+        return;
+    }
+    let tmp = PORT_FILE_TMP.load(Ordering::SeqCst);
+    if !tmp.is_null() {
+        // SAFETY: `tmp` points at a leaked, NUL-terminated CString; `dir` is a descriptor kept open for the process.
+        unsafe {
+            libc::unlinkat(dir, tmp, 0);
+        }
+    }
+    let name = PORT_FILE_NAME.load(Ordering::SeqCst);
+    if name.is_null() {
+        return;
+    }
+    // SAFETY: `name` points at a leaked, NUL-terminated CString that lives for the process; `dir` is a descriptor
+    // kept open for the process; `st` is plain data.
+    unsafe {
+        let mut st: libc::stat = std::mem::zeroed();
+        if libc::fstatat(dir, name, &mut st, libc::AT_SYMLINK_NOFOLLOW) == 0
+            && (st.st_mode & libc::S_IFMT) == libc::S_IFREG
+            && st.st_dev as u64 == PORT_FILE_DEV.load(Ordering::SeqCst)
+            && st.st_ino as u64 == PORT_FILE_INO.load(Ordering::SeqCst)
+        {
+            libc::unlinkat(dir, name, 0);
+        }
+    }
+}
+
+extern "C" fn on_stop_signal(sig: libc::c_int) {
+    remove_own_port_file();
+    // SAFETY: restoring the default disposition and re-raising is async-signal-safe; the process then ends
+    // exactly as it did before a handler existed (killed by `sig`).
+    unsafe {
+        libc::signal(sig, libc::SIG_DFL);
+        libc::raise(sig);
+    }
+}
+
+/// Removes the port file when `main` returns normally.
+struct PortFileGuard;
+
+impl Drop for PortFileGuard {
+    fn drop(&mut self) {
+        remove_own_port_file();
+    }
 }
 
 fn load_required_token() -> String {
@@ -468,6 +914,10 @@ fn main() {
     let bind_host = std::env::var("LEDGER_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1".to_string());
     let addr = format!("{bind_host}:{port}");
 
+    // Fix wave 24 (F2): the runtime's threads start with the stop signals blocked (they inherit this mask), so a
+    // stop signal is only ever handled by the main thread — and blocking it there across the port file's publish
+    // blocks it for the whole process.
+    let mask = block_stop_signals();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(WORKER_THREADS)
         .max_blocking_threads(MAX_BLOCKING_THREADS)
@@ -475,7 +925,15 @@ fn main() {
         .enable_time()
         .build()
         .expect("failed to build the ledger-rust runtime");
+    restore_signal_mask(&mask);
     let listener = runtime.block_on(async { bind(&addr) }).expect("failed to bind ledger-rust HTTP server");
+    let port_file = std::env::var("LEDGER_PORT_FILE").ok();
+    if let Some(pf) = &port_file {
+        if let Err(e) = check_port_file_path(pf) {
+            ledger_log!("ledger-rust: REFUSING TO START — LEDGER_PORT_FILE={pf:?}: {e}");
+            std::process::exit(1);
+        }
+    }
 
     let ledger = match PersistentLedger::open(&log_path) {
         Ok(l) => {
@@ -503,6 +961,27 @@ fn main() {
         Ok(a) => ledger_log!("ledger-rust listening on {a} (log: {log_path})"),
         Err(_) => ledger_log!("ledger-rust listening on {addr} (log: {log_path})"),
     }
+
+    // G7: announced only now — the log opened and verified, the socket bound
+    let _port_file_guard = match &port_file {
+        Some(pf) => {
+            let port = match listener.local_addr() {
+                Ok(a) => a.port(),
+                Err(e) => {
+                    ledger_log!("ledger-rust: REFUSING TO START — the bound port cannot be read: {e}");
+                    std::process::exit(1);
+                }
+            };
+            match publish_port_file(pf, port) {
+                Ok(g) => Some(g),
+                Err(e) => {
+                    ledger_log!("ledger-rust: REFUSING TO START — LEDGER_PORT_FILE={pf:?} could not be written: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => None,
+    };
 
     let app = Arc::new(App { ledger, required_token });
     runtime.block_on(serve(listener, app, max_connections));

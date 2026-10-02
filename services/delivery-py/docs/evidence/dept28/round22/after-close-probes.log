@@ -1,0 +1,37 @@
+start 2026-09-30T16:41:22Z HEAD=a5fb681b67ebf776a68430a39b166cbbcd587741 Python 3.13.13
+== g9_scaling (onboarding)
+normalize '1 '                                gc=on  t10K    0.72ms t100K    7.34 t1M    92.85 t4M   385.09 | x10: 10.2 x10: 12.7 x4: 4.1
+normalize '1 '                                gc=off t10K    0.67ms t100K    7.09 t1M    95.42 t4M   374.06 | x10: 10.7 x10: 13.5 x4: 3.9
+unlabeled_dollar_figures '$1,' (service)      gc=on  t10K    1.52ms t100K   15.60 t1M   160.13 t4M   615.31 | x10: 10.3 x10: 10.3 x4: 3.8
+unlabeled_dollar_figures '$1,' (service)      gc=off t10K    1.41ms t100K   14.29 t1M   184.62 t4M   641.42 | x10: 10.1 x10: 12.9 x4: 3.5
+_DOLLAR spans list (old harness)              gc=on  t10K    1.30ms t100K   11.26 t1M   120.62 t4M   490.68 | x10: 8.7 x10: 10.7 x4: 4.1
+_DOLLAR spans list (old harness)              gc=off t10K    0.83ms t100K   11.02 t1M   117.68 t4M   499.50 | x10: 13.3 x10: 10.7 x4: 4.2
+== readsize (legal)
+loop=uvloop protocol=shared: {"n": 16384, "loop": "uvloop"}
+loop=uvloop protocol=plain: {"n": 256000, "loop": "uvloop"}
+loop=asyncio protocol=shared: {"n": 16384, "loop": "asyncio.unix_events"}
+loop=asyncio protocol=plain: {"n": 262144, "loop": "asyncio.unix_events"}
+== mmap_cost
+dynamic -> json.loads 3.2MB x5: best 151.0 ms | alloc/free 256KiB x20000: best 84.9 ms | grow 4MiB bytearray x50: best 12.6 ms | mixed 200KiB/1KiB churn: best 19.2 ms | RSS after 17 MiB
+fixed -> json.loads 3.2MB x5: best 151.0 ms | alloc/free 256KiB x20000: best 1876.9 ms | grow 4MiB bytearray x50: best 91.5 ms | mixed 200KiB/1KiB churn: best 214.2 ms | RSS after 18 MiB
+dynamic -> json.loads 3.2MB x5: best 153.1 ms | alloc/free 256KiB x20000: best 89.1 ms | grow 4MiB bytearray x50: best 13.0 ms | mixed 200KiB/1KiB churn: best 19.1 ms | RSS after 17 MiB
+fixed -> json.loads 3.2MB x5: best 164.7 ms | alloc/free 256KiB x20000: best 1842.4 ms | grow 4MiB bytearray x50: best 93.1 ms | mixed 200KiB/1KiB churn: best 207.2 ms | RSS after 17 MiB
+== loop_health (clipper-network)
+[w23-run1] idle: {'200': 29} n=29 p50 1.9ms p95 3.5ms max 49.8ms 
+[w23-run1] flood: {'200': 9} n=9 p50 908.4ms p95 1325.1ms max 1325.1ms server fds peak 534 median 533.0 attacker conns 10698
+[w23-run1] after: {'200': 20} n=20 p50 1.9ms p95 2.5ms max 2.5ms fds 15
+== drain_dos
+[w23] A1 after answer+FIN, 1 byte/0.1 s: send fails after (s) [1.1, 1.1, 1.1, 1.1, 1.1]
+[w23] A2 slowloris 1 byte/0.9 s: send fails after (s) [2.7, 2.7, 2.7, 2.7, 2.7]
+[w23] B flood: attacker conns {'ok': 10831}; server fds base 15 peak 534 median 533; legit /health {'200': 8} p50 0.869s max 1.517s; server-side TIME_WAIT on port after flood 0
+[w23] C after attacker close + 2.5 s: server fds 15 (base 15); alive True
+== drain_dos_slowhead
+[w23-slowhead] B flood: attacker conns {'ok': 12006}; server fds base 15 peak 12022 median 12021.0; legit /health {'200': 1, '503': 33} p50 0.001s max 1.022s; server-side TIME_WAIT on port after flood 0
+[w23-slowhead] C after attacker close + 2.5 s: server fds 15 (base 15); alive True
+== ledger_drain (release binary)
+[w23] B opened 1500 in 2.19s
+[w23] B 1500 unclosed early-answered conns: server fds base 8 peak 521 (DRAINS_MAX 512); legit /health 200 in 0.000s
+[w23] B +2.5 s: server fds 8
+[w23] B after client close: server fds 8; server-side TIME_WAIT 0
+[w23] C 2000 early answers, client closes after EOF: server-side TIME_WAIT 0 -> 2000; fds 8
+end 2026-09-30T16:43:13Z new /tmp:  TMPDIR left: 

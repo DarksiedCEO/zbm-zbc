@@ -15,7 +15,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from helpers import (Harness, brand_facts, client_facts, clip_facts, creator_facts, publish_facts, rid)
+from helpers import (Harness, client_facts, clip_facts, creator_facts, publish_facts, rid)
 from register import SHELF_LIFE_DAYS, Version, rows_sha256
 
 TRIALS = 40

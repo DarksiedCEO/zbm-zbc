@@ -519,7 +519,7 @@ The WIP commit was replaced; it doesn't remain in history.
   clipper terms are stored.
 - The proving campaign is capped at $500.00, 3 creators, 14 days (draft).
 - Payments are tracked only for a creator whose activation is complete: vetting
-  approved, gates 14 and 15 passed, payout account active (fix wave 4, owner ruling
+  approved, gates 14 and 15 both passed, payout account active (fix wave 4, owner ruling
   by the founder's operator: refuse). A W-9 alone isn't enough. Otherwise 409 with the
   reason, and nothing is recorded as a tracked payment.
 - A date of birth before 1900-01-01, or one that makes the applicant older than 120
@@ -618,6 +618,85 @@ The WIP commit was replaced; it doesn't remain in history.
 - Document-to-facts extraction needs a model. Documents are only stored and scanned.
 - There's no route to mark platform facts verified. Today that means editing
   `PLATFORM_KNOWLEDGE` under review.
+
+## Fix wave 22, Sep 28 2026 (AEGIS round 21; lead rulings G3, G6, G9) — tests and transport
+
+- **G9 (N21-C-8, the `guardrails._DOLLAR` linearity flake).** The failing assertion was the harness's 10 KB → 100 KB
+  ratio (20.2 against 20, `$1,` × N, under load). The pattern is linear (`\$\s?\d[\d,]*(?:\.\d+)?`: each match is
+  3 characters, nothing is retried). The harness timed `[m.span() for m in p.finditer(s)]`: on 100 KB that is 33,333
+  retained span tuples, which drive the interpreter's cyclic GC — 15 collections inside the timed call, each walking
+  the growing list — so the ratio measured the harness's garbage. `tests/redos_harness.py` now drains the matches
+  without keeping them (`_drain_matches`: every match produced and its span taken, as the service uses them) and
+  times each run with the cyclic GC off; the 10 KB base is best-of-5 like the 100 KB run. Measured with
+  `w22/g9_probe.py` (30 pairs each, the machine loaded): ratio median 13.0 / max 15.7 before, 9.8 / 13.5 after
+  (ideal 10); 0 collections inside a timed 100 KB run after, 15 before. The bounds (50 ms / 100 KB, ratio 20) are
+  unchanged. Honest caveat: the 30× loop of that test under three busy loops passed 30/30 on the wave-21 harness as
+  well as on this one — the flake did not reproduce on this machine; the evidence is the distribution above.
+  The same class, missed in that first sweep and caught by the 3.12 suite on 657f70e:
+  `test_r1_scanners_linear_up_to_1mb[normalize]` failed once (100 KB 0.006 s, 1 MB 0.127 s: ratio 22.2 > 20), both
+  points single samples. `normalize` is linear (20 single-sample pairs: median ratio 13.3, max 19.6; best of 3:
+  max 14.5–15.1, on 3.12 and 3.13). The ratio's 100 KB base is now best of 3 and a 1 MB sample over the bound is
+  re-measured best of 3 before it fails (bbcbbda; 48e1166 sampled every 1 MB point 3× and nearly tripled the test's
+  time under load). Limits unchanged.
+- **G3 (N21-C-6).** The round-21 review found `ledger-rust` still running hours after a suite: `proxied_stack`
+  (`tests/test_fix_wave6.py`) started the ledger and then, outside any `try`, picked the API's port — a narrow
+  `ONBOARDING_TEST_PORT_RANGE` whose ports sat in TIME_WAIT made `free_test_port()` skip, and the ledger was
+  orphaned. `proxied_stack`, `RealStack` and the wave-5 `Stack` now start everything inside one try/finally (a
+  failure or a skip at any step stops what was started), and `free_test_port()` probes with `SO_REUSEADDR`, as the
+  servers bind, so a port in TIME_WAIT is free.
+- **G6.** `serve.py`'s graceful close is the module shared by the ten Python services (`src/graceful_close.py`;
+  ADR 0003 §9): the concurrency slot is given back before the drain, at most `ONBOARDING_DRAINS_MAX` (default 512)
+  drain at once, reads are bounded to 16 KiB and drained bytes are discarded in one buffer.
+
+## Fix wave 23, Sep 30 2026 — the linearity ratio, again
+
+- `test_r1_every_pattern_linear_on_adversarial_input` failed once in the w23 3.12 suite
+  (`practices.ad_disclosure._MARKER` `'? '+'!'`: 0.62 → 14.9 ms, ratio 24.1 > 20; 0/12 in that wave's A/B). Run
+  30× per Python under three busy loops on the 2-vCPU box: 3.12 30/30, 3.13 29/30 (`redaction._URL_PART`
+  `'a;'+'@'`: 1.05 → 21.2 ms, ratio 20.2). A probe of every pattern's three worst shapes (3 rounds, 702 ratios
+  per Python, same load) measured the old ratio at median 10.1, max 11.4 / 12.3, none over 15: the excursion is
+  rare (~1 check in 14,000), and the patterns are linear.
+- The test compared a ~1 ms run with a 10–20 ms run; under load those differ in more than input length (scheduler
+  slices, cache refills that thread CPU time counts). A ratio over 20 is now re-measured, before it fails, against
+  ten 10 KB inputs timed back to back — the same work and duration as the 100 KB run
+  (`redos_harness.best_time_back_to_back`) — with the same 2× tolerance (`SAME_WORK_RATIO` = 2, floor 2 ms). That
+  ratio measured median 0.99, max 1.31 / 1.35. `test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own`
+  shows a quadratic mutant still fails it with the absolute bounds disabled. The 1 MB scanner test's re-measure got
+  the same base (ten 100 KB inputs). After: 30/30 on 3.12 and 30/30 on 3.13 under three busy loops; the 1 MB test
+  5/5 on each. Bounds unchanged. Not proven: that the slicing/cache effect is the cause (no excursion was caught
+  in the act), and a 1-in-60 flake rate is not excluded by 60 clean runs alone.
+
+## Fix wave 25, Oct 1 2026 — launcher range, the fake ledger pinned to ledger-rust, synchronised live tests
+
+- **Switch interval (scout C5-3).** `ONBOARDING_SWITCH_INTERVAL_SECONDS` accepted any positive number (3600 s, 1e-9 s;
+  `nan` passed the `<= 0` check) and the interval was never checked in force. Now only 0.0001 .. 0.05 s starts
+  (unset or empty: 1 ms), and `serve.run()` compares the interval in force in whole microseconds (CPython keeps it
+  truncated to the microsecond; detection-py's wave-25 H5) and prints it before serving.
+  `tests/test_fix25_switch_interval.py`.
+- **The fake ledger (scout A X8).** `tools/fake_ledger_server.py` said it "validates exactly like" ledger-rust and the
+  live `Stack` tests (test_fix_wave5) run against it, but nothing checked it. One set of accept and reject cases is now
+  put to the REAL ledger-rust binary (201 vs 400), the fake's `validate` and the client's own mirror
+  `ledger.ledger_rust_accepts`; all three must agree (`tests/test_fix25_fake_ledger_matches_rust.py`).
+- **Synchronisation, not sleeps (scout A O1, O3).** The shed test released the ledger's one held connection and slept
+  0.5 s before the retry; in a full-suite run under load the retry was shed (503). Both of its waits now poll the
+  ledger's own `/health` until it answers 503 (the slot is held) or 200 (the slot is free). The large-lane test waited
+  0.3 s and asserted the second large body had not finished — also true when it had not even reached the lane yet; it
+  now waits until the second body is queued on the large lane (read through the lane's own `waiting` count — the
+  stopped engineer's draft held on to the lane's private waiter list, which the lane replaces on every grant).
+- **Ports and wall clocks (scout A O2, O4; R-HYGIENE L1/L2).** `conftest.free_test_port` has no literal default range
+  any more (OS-assigned unless `ONBOARDING_TEST_PORT_RANGE` is set) and an exhausted range fails instead of skipping.
+  The hostile-body test bounds the onboarding process's CPU for each request (Linux `/proc`), not the client's wall
+  clock; the Compliance (38) client's total-deadline test checks that the client gave up with the dripping body still
+  unread (a per-read timeout would read it all). The remaining wall-clock bounds in `test_fix_wave5.py` /
+  `test_fix_wave6.py` are deadline properties (a 2 s head / body deadline, a 0.3 s queue wait) and are listed for a
+  reviewed allowlist entry (fix-wave-25 E-A report), not rewritten.
+- **Tests run with their own token (scout A O8).** `tests/conftest.py` set `ONBOARDING_SERVICE_TOKEN` with
+  `setdefault`, so a shell that exports the operator's token broke the in-process auth; it is now always the test
+  token (`tests/test_fix25_test_token.py`).
+- **Docs.** README: the hand-written test counts (a total and a per-file column that had drifted, four files missing)
+  are gone in favour of the generated `docs/test-counts.md`; "0 skipped with cargo" corrected (the IPv6 check skips
+  without `::1`); `ONBOARDING_INTAKE_CHANNEL` (read, used by nothing yet: an open item) and
+  `ONBOARDING_SPANISH_ENABLED` (refuses startup) documented.
 
 ## Contract observations (reported, not changed)
 

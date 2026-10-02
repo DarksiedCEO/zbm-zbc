@@ -37,7 +37,8 @@ thread that wants it is served. A body scan is one CPU-bound thread for up
 to ~1 s, and a light request needs the GIL several times on its way through
 (the event loop parses it, a worker checks the body, the handler runs, the
 loop writes the response), so with 5 ms slices a 40-byte message beside a
-416 KB scan was p50 49-67 ms; at 1 ms it is 12-25 ms (test_fix_wave7.py,
+416 KB scan was p50 49-67 ms; at 1 ms it is 12-25 ms (measured in onboarding-py:
+services/onboarding-py/tests/test_fix_wave7.py,
 live). The scan pays for the extra switches: measured +3-4% of CPU with
 three chatty threads beside it, nothing when it runs alone.
 """
@@ -45,10 +46,13 @@ three chatty threads beside it, nothing when it runs alone.
 from __future__ import annotations
 
 import os
+import signal
 import sys
 
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
+
+from zbm_delivery.graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 
 def _positive(name: str, default: float, conv=float):
@@ -68,11 +72,21 @@ LIMIT_CONCURRENCY: int = _positive("DLV_LIMIT_CONCURRENCY", 128, int)
 SWITCH_INTERVAL_S: float = _positive("DLV_SWITCH_INTERVAL_SECONDS", 0.001)
 
 
-class HeadDeadlineH11Protocol(H11Protocol):
+# Graceful close (fix wave 21, L1) with the wave-22 bounds (G5/G6: bounded reads
+# through one shared buffer; the concurrency slot and the answered request's
+# buffered body released before the drain; the drain discards in that buffer; at
+# most DRAINS_MAX (DLV_DRAINS_MAX, default 512) drains at once) — the module shared
+# byte-for-byte by the ten Python services (src/zbm_delivery/graceful_close.py).
+DRAINS_MAX: int = drains_max_from_env("DLV_DRAINS_MAX")
+
+
+class HeadDeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
     """uvicorn's h11 protocol plus a request-head deadline: a connection
     whose next request head has not fully arrived within
     REQUEST_HEAD_TIMEOUT_S (counted from connect, or from the end of the
     previous response) is closed."""
+
+    drains_max = DRAINS_MAX
 
     _head_timer = None
     _head_cycle = None
@@ -122,6 +136,16 @@ def uvicorn_kwargs() -> dict:
     }
 
 
+def _exit_on_sigterm(signum, frame) -> None:
+    """Wave 24 (E6 sweep): SIGTERM ends the process through a normal interpreter exit (status 143), so its exit
+    handlers run. uvicorn captures SIGTERM, shuts down gracefully and then RE-RAISES it with the disposition it found
+    at start; that disposition was the default one, so the process died of the signal and no ``atexit`` handler ran:
+    every stop left the process's own temp dirs (gitport's private git HOME, the in-memory home, the sandbox temp
+    base) behind in TMPDIR. A SIGTERM before uvicorn installs its own handler takes the same exit."""
+    raise SystemExit(128 + signum)
+
+
 def run(app, host: str, port: int) -> None:
     sys.setswitchinterval(SWITCH_INTERVAL_S)
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
     uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())

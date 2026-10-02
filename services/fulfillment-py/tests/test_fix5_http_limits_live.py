@@ -34,39 +34,62 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 
 import pytest
 
 from _procinfo import rss_kib
-from test_live_server import SRC, TOKEN, _free_port
+from test_live_server import SRC, TOKEN, _announced_bind, _free_port
 
 import http_limits
+from conftest import child_env
 
 MIB = 1024 * 1024
 BODY_TIMEOUT_UNDER_TEST = 3.0  # narrowed via FULFILLMENT_BODY_READ_TIMEOUT_S (may only narrow)
 SLACK_S = 2.5
 
 
-def _start(env_extra: dict[str, str] | None = None):
-    port = _free_port()
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
-           "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port), **(env_extra or {})}
-    # DEVNULL, not PIPE: the refused requests below each log a warning, and
-    # an unread pipe would eventually block the server.
-    proc = subprocess.Popen([sys.executable, "-m", "api"], env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.time() + 15
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            raise AssertionError("service exited early")
-        try:
-            if _health(port, timeout=0.5)[0] == 200:
-                return proc, port
-        except OSError:
-            time.sleep(0.1)
-    proc.kill()
-    raise AssertionError("service did not start within 15s")
+def _start(env_extra: dict[str, str] | None = None, _attempts: int = 5):
+    """Start the service on a free port. Fix wave 21: the output goes to a
+    temp file (not DEVNULL: an early exit is reported with it; not PIPE: an
+    unread pipe would block the server), and a start that lost the port to
+    another process between the free-port check and the bind (EADDRINUSE,
+    the N20-M-3 race) is retried on a fresh port, up to ``_attempts`` times.
+    Fix wave 25: /health answering is this child's answer only once the child
+    has announced its own bind (test_live_server._announced_bind) — the race's
+    loser used to take the winner's 200 for its own server and return a
+    process about to exit."""
+    import tempfile
+    for attempt in range(_attempts):
+        port = _free_port()
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC), **child_env(),
+               "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port), **(env_extra or {})}
+        log = tempfile.TemporaryFile(mode="w+b")
+        proc = subprocess.Popen([sys.executable, "-m", "api"], env=env, stdout=log, stderr=subprocess.STDOUT)
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                log.seek(0)
+                output = log.read().decode(errors="replace")
+                log.close()
+                if "address already in use" in output.lower() and attempt + 1 < _attempts:
+                    time.sleep(0.2)
+                    break
+                raise AssertionError(f"service exited early (port {port}): {output[-2000:]}")
+            if not _announced_bind(log):
+                time.sleep(0.05)
+                continue
+            try:
+                if _health(port, timeout=0.5)[0] == 200 and proc.poll() is None:
+                    log.close()          # the child keeps its own descriptor
+                    return proc, port
+            except OSError:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+            proc.wait()
+            log.close()
+            raise AssertionError("service did not start within 15s")
+    raise AssertionError("service could not bind a free port")
 
 
 def _stop(proc) -> None:
@@ -276,7 +299,12 @@ def test_slow_body_gets_408_and_the_connection_is_closed(server):
     finally:
         s.close()
     assert got.startswith(b"HTTP/1.1 408"), got[:80]
-    assert elapsed <= BODY_TIMEOUT_UNDER_TEST + SLACK_S, f"slow body held {elapsed:.1f}s"
+    # fix wave 25 (R-HYGIENE L1): was `elapsed <= BODY_TIMEOUT_UNDER_TEST + SLACK_S` (a wall-clock upper bound). The
+    # 408's detail names the rule that cut the body: only the narrowed body deadline (3 s) says "not received within
+    # 3s" — the 30 s default would say 30s, the min-rate rule "stalled ... slower than", the projection "cannot
+    # complete". The loop above gives up at BODY_TIMEOUT_UNDER_TEST + SLACK_S + 3 s, so a held body still fails.
+    assert f"not received within {BODY_TIMEOUT_UNDER_TEST:g}s".encode() in got, got[:400]
+    print(f"slow body cut after {elapsed:.1f}s (printed only)")
 
 
 def test_slow_body_the_app_never_reads_is_still_closed(server):
@@ -330,8 +358,8 @@ def test_connection_count_is_bounded_and_health_recovers(server):
         assert refused >= extra, f"only {refused} of {len(socks)} refused; cap {http_limits.MAX_OPEN_CONNECTIONS}"
         # while saturated, /health gets a prompt answer or refusal, never a hang
         try:
-            status, took = _health(port, timeout=3)
-            assert took < 1.0
+            status, _took = _health(port, timeout=3)  # the 3 s client timeout is the "never a hang" guard
+            # fix wave 25 (E-A successor, R-HYGIENE L1): `took < 1.0` dropped (wall clock under load)
             assert status in (200, 503, None)
         except (ConnectionResetError, BrokenPipeError):
             pass
@@ -341,14 +369,14 @@ def test_connection_count_is_bounded_and_health_recovers(server):
     finally:
         for s in socks:
             s.close()
-    status, took = _health(port)
-    assert status == 200 and took < 1.0
+    status, _took = _health(port)
+    assert status == 200  # fix wave 25 (E-A successor, R-HYGIENE L1): `took < 1.0` dropped; served after the flood
 
 
 def test_body_timeout_env_may_only_narrow():
     for bad in ("0", "-1", "31", "nan", "abc"):
         port = _free_port()
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC),
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(SRC), **child_env(),
                "FULFILLMENT_SERVICE_TOKEN": TOKEN, "FULFILLMENT_PORT": str(port),
                "FULFILLMENT_BODY_READ_TIMEOUT_S": bad}
         r = subprocess.run([sys.executable, "-m", "api"], env=env, capture_output=True, timeout=20)

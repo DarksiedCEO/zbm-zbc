@@ -97,7 +97,11 @@ def test_l1_no_external_route(live):
 
 def test_l1_deadline_kills_and_volume_is_gone(live):
     p, box, sid, b = live
-    b.deadline_at = b.deadline_at.__class__.now(b.deadline_at.tzinfo) + timedelta(seconds=2)
+    # Wave 25 (scout B H1 follow-on): the deadline is measured on the RUNTIME's clock (the harness's FixedClock,
+    # 2026-09-27 12:00 UTC), never the wall clock. The test used datetime.now() + 2 s, which that clock sees as days
+    # away, so the exec ran with the 600 s command cap and `sleep 30` finished: this test could never pass on a real
+    # daemon — unnoticed while conftest.py removed DLV_LIVE_SANDBOX_IMAGE and every case skipped.
+    b.deadline_at = registry.runtime().clock.now() + timedelta(seconds=2)
     r = box.exec_argv(["sleep", "30"])
     assert r.timed_out
     p.destroy(sid, b.run_id)

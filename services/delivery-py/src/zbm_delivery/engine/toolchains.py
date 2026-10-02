@@ -153,7 +153,12 @@ class PytestToolchain(Toolchain):
 
     def engine_options(self, cwd: str, report: Optional[str]) -> list[str]:
         ini = self._ini_values(cwd)
-        opts = ["-c", self._ini_path(cwd), f"--rootdir={cwd}", "-o", "addopts="]
+        # wave 21 (N20-D-4): ``--rootdir=.`` — the process's own working directory as pytest resolves it
+        # (``os.getcwd()``: the PHYSICAL path), never the path as spelled. The engine always runs pytest with its
+        # working directory set to ``cwd``. With the spelled path, a cwd reached through a symlink gave pytest a
+        # rootdir the collected files were not under (``../../<link>/...`` node ids in the terminal summary, other
+        # ids in junit) and every verdict was ``unknown`` (fail closed, but no run could pass on such a host).
+        opts = ["-c", self._ini_path(cwd), "--rootdir=.", "-o", "addopts="]
         for k in ("python_files", "testpaths", "pythonpath"):
             if k in ini:
                 opts += ["-o", f"{k}={ini[k]}"]

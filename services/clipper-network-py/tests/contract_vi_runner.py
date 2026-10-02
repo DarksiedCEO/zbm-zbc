@@ -14,12 +14,22 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CN_ROOT = HERE.parent
 VI_ROOT = CN_ROOT.parent / "verification-py"
+
+# wave 25 (scout B Low): this runner runs outside pytest, so the conftest socket guard does not reach it — its own
+# guard, as legal-py's contract_compliance_real.py has: the in-process transport must never open a socket
+def _refuse(*a, **k):
+    raise RuntimeError("network access attempted in the V&I contract runner (not allowed)")
+
+
+socket.socket.connect = _refuse
+socket.create_connection = _refuse
 
 for k in list(os.environ):
     if k.startswith(("VI_", "CN_")) or k in ("LEDGER_SERVICE_URL", "LEDGER_SERVICE_TOKEN"):

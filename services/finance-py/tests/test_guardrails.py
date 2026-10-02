@@ -7,7 +7,6 @@ import ast
 import hashlib
 import json
 import re
-import time
 from pathlib import Path
 
 import httpx
@@ -16,7 +15,7 @@ import pytest
 import config as config_mod
 import ports
 import reasons as R
-from helpers import ANDRE_TOKEN, Harness, base_env, rid
+from helpers import Harness, base_env, rid
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 ROOT = Path(__file__).resolve().parents[1]
@@ -264,11 +263,39 @@ def test_thin_clients_fail_negative(resp):
 
 
 def test_thin_client_wall_clock_budget():
+    """Wave 25 (scout B M2): ordered by state, not by a wall-clock bound a starved runner can break. The peer does not
+    answer until the test lets it: a 0.5 s budget must return `unavailable` while the peer is still holding the
+    request (0f017a7: a 3 s peer and `took < 2.0`)."""
+    import threading
     from clients import HttpVerification
 
+    inside, release = threading.Event(), threading.Event()
+
     def slow(req):
-        time.sleep(3)
+        inside.set()
+        release.wait(120)
         return httpx.Response(200, json={})
-    t = time.monotonic()
-    assert not _client(HttpVerification, slow, timeout=0.5).certification("s1").available
-    assert time.monotonic() - t < 2.0
+    got = {}
+    t = threading.Thread(target=lambda: got.update(a=_client(HttpVerification, slow, timeout=0.5).certification("s1")))
+    t.start()
+    t.join(60)                                        # a bound on a stall, never on the answer's speed
+    returned_while_held = not t.is_alive() and inside.is_set() and not release.is_set()
+    release.set()
+    t.join(60)
+    assert returned_while_held, "the 0.5 s budget waited for the peer's answer"
+    assert not got["a"].available
+
+
+def test_stripe_reach_seed_is_pinned_and_read_with_a_closed_handle(tmp_path):
+    """Wave 25 (scout B Low): seed/stripe_reach.json decides payout-country eligibility but, unlike
+    fin_rules_seed.json, was neither hash-pinned nor checked (and was read through a handle never closed). A changed
+    file now refuses the import that loads it."""
+    import hashlib
+    import svc_payees
+    seed = SRC.parent / "seed" / "stripe_reach.json"
+    assert hashlib.sha256(seed.read_bytes()).hexdigest() == svc_payees.PINNED_STRIPE_REACH_SHA256
+    assert svc_payees.load_stripe_reach(str(seed)) == svc_payees.STRIPE_REACH
+    bad = tmp_path / "stripe_reach.json"
+    bad.write_bytes(seed.read_bytes().replace(b'"US"', b'"KP"', 1))
+    with pytest.raises(RuntimeError, match="stripe_reach.json"):
+        svc_payees.load_stripe_reach(str(bad))

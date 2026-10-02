@@ -13,66 +13,76 @@
 //! built-in Cargo integration-test feature (stable since 1.43), not an
 //! external dependency.
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
+mod common;
+
 use std::process::{Child, Command};
 use std::time::Duration;
+
+use common::PortFile;
 
 struct ServerHandle {
     child: Child,
     port: u16,
+    _port_file: PortFile,
+    /// Fix wave 24: the scratch log, removed with the server (it was left in the temp dir, 8 files a run).
+    log_path: std::path::PathBuf,
 }
 
 impl Drop for ServerHandle {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        let _ = std::fs::remove_file(&self.log_path);
     }
 }
 
-fn free_port() -> u16 {
-    // Bind to port 0 to let the OS pick a free one, then release it
-    // immediately — small race window, acceptable for a test harness.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
-}
-
+/// Fix wave 21 (N20-M-3): the server binds port 0 itself and reports the bound
+/// port in LEDGER_PORT_FILE; there is no pick-then-release `free_port()` race.
 fn start_server(token: &str, bind_addr: Option<&str>) -> ServerHandle {
-    let port = free_port();
-    let log_path = std::env::temp_dir().join(format!("ledger_test_{port}.jsonl"));
+    let pf = PortFile::new("auth");
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let log_path = std::env::temp_dir().join(format!("ledger_test_auth_{}_{nanos}.jsonl", std::process::id()));
     let _ = std::fs::remove_file(&log_path);
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_server"));
     cmd.env("LEDGER_SERVICE_TOKEN", token)
-        .env("LEDGER_PORT", port.to_string())
         .env("LEDGER_LOG_PATH", log_path.to_str().unwrap())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    common::ephemeral(&mut cmd, &pf);
     if let Some(addr) = bind_addr {
         cmd.env("LEDGER_BIND_ADDR", addr);
     }
 
-    let child = cmd.spawn().expect("failed to spawn ledger-rust server");
-    let handle = ServerHandle { child, port };
-
-    // Poll /health until the server is accepting connections (startup
-    // does real file I/O — the persistent ledger open/verify — so this
-    // isn't instantaneous).
+    let mut child = cmd.spawn().expect("failed to spawn ledger-rust server");
+    // The port file is written after the bind and the listen; startup then does
+    // real file I/O (the persistent ledger open/verify), so /health is polled too.
+    let port = match common::wait_port(&mut child, &pf, Duration::from_secs(10)) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(&log_path);
+            panic!("{e}");
+        }
+    };
+    let handle = ServerHandle { child, port, _port_file: pf, log_path };
     let host = bind_addr.unwrap_or("127.0.0.1");
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         if raw_http_request(host, handle.port, "GET", "/health", None).is_ok() {
             break;
         }
         if std::time::Instant::now() > deadline {
-            panic!("ledger-rust server did not come up within 5s");
+            panic!("ledger-rust server did not come up within 10s");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
     handle
 }
 
-/// Sends one raw HTTP/1.1 request and returns (status_code, body).
+/// Sends one raw HTTP/1.1 request and returns (status_code, body), reading the
+/// response to its Content-Length (fix wave 21, N20-M-1: never to EOF).
 fn raw_http_request(
     host: &str,
     port: u16,
@@ -80,29 +90,13 @@ fn raw_http_request(
     path: &str,
     auth_header: Option<&str>,
 ) -> std::io::Result<(u16, String)> {
-    let mut stream = TcpStream::connect((host, port))?;
-    stream.set_read_timeout(Some(Duration::from_secs(3)))?;
-
     let auth_line = match auth_header {
         Some(v) => format!("Authorization: {v}\r\n"),
         None => String::new(),
     };
-    let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {host}\r\n{auth_line}Connection: close\r\n\r\n"
-    );
-    stream.write_all(request.as_bytes())?;
-
-    let mut response = String::new();
-    stream.read_to_string(&mut response)?;
-
-    let status_line = response.lines().next().unwrap_or("");
-    let status: u16 = status_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let body = response.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
-    Ok((status, body))
+    let request = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\n{auth_line}Connection: close\r\n\r\n");
+    let resp = common::exchange_on(host, port, request.as_bytes(), Duration::from_secs(3))?;
+    Ok((resp.status, resp.text()))
 }
 
 #[test]

@@ -68,6 +68,46 @@ CALLERS = {"aegis": AEGIS_TOKEN, "andre_session": ANDRE_SESSION_TOKEN, "schedule
 _GATE_CACHE: dict = {}
 
 
+def live_ports() -> Optional[range]:
+    """The ports the live tests may bind (wave 21, N20-D-10): ``DLV_TEST_PORT_RANGE`` ("lo-hi", inclusive) when set
+    (or the repo-wide ``ZBM_TEST_PORT_RANGE``, wave 25), so a run stays inside whatever range its operator was given;
+    else None — OS-assigned ports. Wave 25 (R-HYGIENE L2): there is no hard-coded default range any more (it was
+    18800-18849, which overlaps every other engineer's and job's assignment on a shared machine)."""
+    for name in ("DLV_TEST_PORT_RANGE", "ZBM_TEST_PORT_RANGE"):
+        spec = os.environ.get(name, "").strip()
+        if spec:
+            break
+    else:
+        return None
+    lo, _, hi = spec.partition("-")
+    lo_i, hi_i = int(lo), int(hi or lo)
+    if not (1024 <= lo_i <= hi_i <= 65535):
+        raise ValueError(f"{name}={spec!r} is not lo-hi within 1024-65535")
+    return range(lo_i, hi_i + 1)
+
+
+def free_live_port() -> int:
+    """A port a live server can bind on 127.0.0.1 now: the first of ``live_ports()`` that binds (skips with the range
+    named when none does), or one the OS assigns when no range was given. Wave 22 (G3, N21-C-6 class): the probe bind
+    sets SO_REUSEADDR, as the servers' own listeners do — a port whose earlier connections sit in TIME_WAIT is free for
+    a server, and without the option the probe skipped it (a narrow range ran out after a few live tests). Only a
+    candidate: another process can take it before the server binds (the shared owner-checked helper is E-C's
+    ``_procinfo.start_owned``, wave 25)."""
+    import socket
+
+    import pytest
+    ports = live_ports()
+    for port in ports if ports is not None else (0,):
+        with socket.socket() as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return s.getsockname()[1]
+    pytest.skip(f"no free port in {ports.start}-{ports.stop - 1} (the assigned live range; DLV_TEST_PORT_RANGE)")
+
+
 def rid() -> str:
     return "req-" + uuid.uuid4().hex[:20]
 
@@ -84,22 +124,50 @@ def git(*args, cwd: str) -> str:
     return r.stdout.strip()
 
 
-def make_repo(tmp: str, service: str = "toy-py") -> tuple[str, str]:
-    """A fresh repository with the fixture service committed on integration-2026-09-24. Returns (path, sha)."""
+PCT_REPRO = "run tests/test_percent.py::test_percent_zero_whole: percent(1, 0) raises ZeroDivisionError"
+
+
+# a reproduction of N1-1 in its own file (wave 21): a scenario that edits tests/test_calc.py under CHANGED_TEST needs
+# N1-1's reproduction elsewhere (an open finding's reproduction file is protected, R3 of round 19)
+ADD_REPRO_FILES = {"tests/test_add_repro.py": "from toy import calc\n\n\ndef test_add_two_and_three():\n    assert calc.add(2, 3) == 5\n"}
+ADD_REPRO_ELSEWHERE = "run tests/test_add_repro.py::test_add_two_and_three: add(2, 3) answers -1 (a - b)"
+
+
+def make_repo(tmp: str, service: str = "toy-py", pct_repro: bool = True, extra_files: Optional[dict] = None) -> tuple[str, str]:
+    """A fresh repository with the fixture service committed on integration-2026-09-24. Returns (path, sha).
+    ``pct_repro=False`` (toy-py) leaves N1-2's reproduction ``tests/test_percent.py`` out of the commit (wave 21:
+    a run about N1-1 alone then has no unrelated pre-existing failure; see fixtures/dlv/toy-py/README.md)."""
     repo = os.path.join(tmp, "repo")
     if os.path.isdir(repo):                     # a restart harness on the same directory (S9)
         return repo, git("rev-parse", "HEAD", cwd=repo)
     os.makedirs(repo)
     git("init", "-q", "-b", "integration-2026-09-24", cwd=repo)
     dst = os.path.join(repo, "services", service)
-    shutil.copytree(FIXTURES / service, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "target",
-                                                                           "node_modules"))
+    skip = ["__pycache__", "*.pyc", ".pytest_cache", "target", "node_modules"] + ([] if pct_repro else ["test_percent.py"])
+    shutil.copytree(FIXTURES / service, dst, ignore=shutil.ignore_patterns(*skip))
+    for rel, text in (extra_files or {}).items():            # extra files committed into the service at base
+        path = os.path.join(dst, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
     os.makedirs(os.path.join(repo, "docs", "adr"))
     with open(os.path.join(repo, "docs", "adr", "0001-toy.md"), "w") as fh:
         fh.write("# ADR 0001 toy\n")
     git("add", "-A", cwd=repo)
     git("commit", "-q", "-m", f"fixture: {service} on the integration branch", cwd=repo)
     return repo, git("rev-parse", "HEAD", cwd=repo)
+
+
+def child_python_args() -> list[str]:
+    """Wave 24 (E6, N23-D-9): the interpreter options every Python child process of the suite that runs the SERVICE
+    gets — ``-B`` (PYTHONDONTWRITEBYTECODE: a test child never writes ``__pycache__`` into the source tree) and
+    ``-X pycache_prefix=…`` when the parent has PYTHONPYCACHEPREFIX. As options, not environment variables: the
+    service refuses to start with any environment name outside DLV_ENV_ALLOWLIST (spec C.1.7), and these two are
+    not on it."""
+    args = ["-B"]
+    if os.environ.get("PYTHONPYCACHEPREFIX"):
+        args += ["-X", f"pycache_prefix={os.environ['PYTHONPYCACHEPREFIX']}"]
+    return args
 
 
 def base_env(tmp: str, repo: str, *, data_dir: bool = True, llm: str = "fake", extra: Optional[dict] = None) -> dict:
@@ -109,6 +177,9 @@ def base_env(tmp: str, repo: str, *, data_dir: bool = True, llm: str = "fake", e
         "DLV_REPO_PATH": repo, "DLV_WORKTREES_DIR": os.path.join(tmp, "worktrees"), "DLV_BASE_REF": "integration-2026-09-24",
         "DLV_RUN_WALL_CLOCK_S": "2700", "DLV_CMD_TIMEOUT_S": "600", "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": tmp, "DLV_SKILLS_ROOT": str(SERVICE_ROOT / "skills"),
+        # wave 24 (E6 sweep): the suite's temp dir (the session root, removed by the suite), never the host's — a
+        # child the suite has to SIGKILL runs no exit handler; TMPDIR is on DLV_ENV_ALLOWLIST
+        "TMPDIR": tempfile.gettempdir(),
     }
     if data_dir:
         env["DLV_DATA_DIR"] = os.path.join(tmp, "data")
@@ -140,7 +211,7 @@ def findings_doc(base_sha: str, findings: list[dict], request_id: Optional[str] 
 def two_findings(base_sha: str, request_id: Optional[str] = None) -> dict:
     return findings_doc(base_sha, [
         finding("N1-1", line=6, reproduction="run tests/test_calc.py::test_add_returns_sum: add(2, 3) answers -1 (a - b)"),
-        finding("N1-2", line=11, class_hint="division_by_zero", reproduction="percent(1, 0) raises ZeroDivisionError",
+        finding("N1-2", line=11, class_hint="division_by_zero", reproduction=PCT_REPRO,
                 expected="percent(1, 0) == 0.0", observed="ZeroDivisionError"),
     ], request_id)
 
@@ -148,6 +219,37 @@ def two_findings(base_sha: str, request_id: Optional[str] = None) -> dict:
 # --- scenarios --------------------------------------------------------------------------------------------------------
 
 WS = "/mnt/user-data/workspace/services/toy-py"
+
+
+REVIEW_DONE_STATES = ("candidate_passed_checks", "disproved", "needs_review_runner_dependent")
+RD_NOTE = "the reviewer read the diff and the runner-dependent reproduction; accepted for this test"
+
+
+def review_body(h, run_id: str, verdict: str = "pass", reopened=(), new_findings=(), notes: Optional[dict] = None,
+                flags: Optional[list] = None, request_id: Optional[str] = None) -> dict:
+    """Wave 23 (D1/D2): a review with an explicit verdict per finding (``accept`` unless reopened) and — unless
+    ``flags`` is given — every review flag of the run named in ``flags_addressed``. A runner-dependent finding's
+    accept carries ``RD_NOTE`` unless ``notes`` says otherwise."""
+    fs = h.findings(run_id)
+    notes = notes or {}
+    fv = []
+    for f in fs:
+        if f["state"] not in REVIEW_DONE_STATES:
+            continue
+        fid = f["finding_id"]
+        default = RD_NOTE if f["state"] == "needs_review_runner_dependent" else ""
+        fv.append({"finding_id": fid, "verdict": "reopen" if fid in reopened else "accept", "note": notes.get(fid, default)})
+    if flags is None:
+        # wave 24 (E2): a note per flag (distinct, >= 20 characters, saying where the reviewer looked)
+        flags = [{"flag_id": fl["id"], "note": f"the reviewer read {fl['id']} at {fl['file']}:{fl['line']} in the diff"}
+                 for f in fs for fl in (f.get("review_flags") or [])]
+    body = {"request_id": request_id or rid(), "review_ref": "review-test", "sha256": "b" * 64, "verdict": verdict,
+            "reopened": list(reopened), "new_findings": list(new_findings), "finding_verdicts": fv,
+            "flags_addressed": list(flags)}
+    src = (h.run(run_id) or {}).get("src_diff_sha256")
+    if src:
+        body["src_diff_sha256"] = src          # wave 24 (E2): the hash of the complete source diff it read
+    return body
 
 
 def write_test(name: str, body: str) -> dict:
@@ -220,14 +322,40 @@ class llm_scope:
 
 # --- the harness ------------------------------------------------------------------------------------------------------
 
+HARNESSES: list = []   # every Harness made, in order (conftest._harness_cleanup closes and removes per test; L4)
+_OWNED_TMP: list = []  # every temp dir a Harness made in this process
+
+
+def _drop_owned_tmp() -> None:
+    """Wave 24 (E6, N23-D-9): a process that imports these helpers — a reviewer's probe, run outside pytest and its
+    conftest — removes the temp dirs its harnesses made when it exits (a restart harness reuses one while the
+    process lives, so they go at exit, not at close)."""
+    for h in list(HARNESSES):
+        try:
+            h.close()
+        except Exception:  # noqa: BLE001 - already closed, or never started
+            pass
+    for d in _OWNED_TMP:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+import atexit as _atexit  # noqa: E402
+_atexit.register(_drop_owned_tmp)
+
+
 class Harness:
     def __init__(self, *, docker: bool = True, llm: str = "fake", data_dir: bool = True, ledger_ok: bool = True,
                  scenario: Optional[list] = None, extra_env: Optional[dict] = None, wire_harness: bool = True,
                  clock: Optional[FixedClock] = None, tmp: Optional[str] = None, site_packages: str = SITE_PACKAGES,
-                 gate_report=None, ledger: Optional[FakeLedgerClient] = None, service: str = "toy-py"):
+                 gate_report=None, ledger: Optional[FakeLedgerClient] = None, service: str = "toy-py",
+                 pct_repro: bool = True, extra_files: Optional[dict] = None):
+        self.owns_tmp = tmp is None
         self.tmp = tmp or tempfile.mkdtemp(prefix="dlv-test-")
+        if self.owns_tmp:
+            _OWNED_TMP.append(self.tmp)
+        HARNESSES.append(self)
         self.service = service
-        self.repo, self.base_sha = make_repo(self.tmp, service)
+        self.repo, self.base_sha = make_repo(self.tmp, service, pct_repro=pct_repro, extra_files=extra_files)
         self.env = base_env(self.tmp, self.repo, data_dir=data_dir, llm=llm, extra=extra_env)
         self.settings = config_mod.load(self.env)
         self.clock = clock or FixedClock(datetime(2026, 9, 27, 12, 0, 0, tzinfo=timezone.utc))

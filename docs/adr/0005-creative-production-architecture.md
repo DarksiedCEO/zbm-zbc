@@ -823,8 +823,8 @@ money. ZBC's unit of work is a campaign, not a clip.
     corpus caption pairs (caption + bio) flagged as a spread; the 13
     AEGIS class-C pairs are a human's call in five field arrangements.
 
-32. **Stacked respellings (fix wave 8; AEGIS round 7 class B, 9 of 30
-    passed).** "grnteed retunrs", "overnlte sccss", "lose vvait fst",
+32. **Stacked respellings (fix wave 8; AEGIS round 7 class B, 9 of the 30
+    got through).** "grnteed retunrs", "overnlte sccss", "lose vvait fst",
     "mk rnunny" — a vowel drop, a homophone and a lookalike in one
     phrase — were outside every single signal's budget. Root causes:
     (a) the skeleton signal's vowel-drop evidence skipped the very token
@@ -1272,7 +1272,7 @@ money. ZBC's unit of work is a campaign, not a clip.
     indicators and in squared letters with VS16; the ASCII "cur" passes
     too). Real flag rows (9 + 9 captions) still pass.
 48. **The regional reading gets the field joints (fix wave 11; AEGIS
-    round 10 N10-3).** Wave 10 passed the regional reading to the
+    round 10 N10-3).** Wave 10 handed the regional reading to the
     never-say signals with no field edges and no submission, so a phrase
     split over two fields in regional indicators passed. The reading now
     gets the main reading's field joints and symbol-across-fields check
@@ -1673,6 +1673,39 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     MiB. Open item: cap the versions a campaign keeps in memory, or keep
     superseded versions compactly (serialised) and load one only to
     judge a clip made under it.
+
+18. **Memory under junk floods is judged as a plateau (fix wave 21,
+    AEGIS round 20 N20-M-6).** `test_fix_wave_6.py`'s flood test asserted
+    one absolute RSS sample (`rss < 250`) after one flood, with no
+    baseline: it could neither see a leak below the ceiling nor tell a
+    plateau from a climb (with 100 KiB retained per junk request it still
+    passed). Replaced by
+    `test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb`:
+    a fresh server, the baseline before any flood, then 10 rounds of both
+    floods (20 concurrent x 3 of the 1 MiB junk, then of the 60k-keys
+    junk), RSS sampled after each flood, a round's value the larger of its
+    two samples. Asserted: (a) RSS[10] - RSS[5] < 24 MiB — the reviewer's
+    plateau data (Linux, 12 + 6 rounds) show per-round peaks moving within
+    13 MiB with no trend; this wave's 10 Linux runs gave RSS[10] - RSS[5]
+    from -7 to +14 MiB. 24 sits above that noise. What it detects is
+    MEASURED, not derived (fix wave 22, lead ruling G8; AEGIS round 21
+    N21-C-5 — the wave-21 text claimed "a retention of >= ~55 KiB per junk
+    request always fails", an arithmetic bound nobody had run): the
+    reviewer's mutation runs (a sitecustomize retaining N bytes per
+    `json.loads`, Linux) gave RSS[10] - RSS[5] = 32 and 26 MiB at 64 KiB per
+    request (detected, 2/2), 18 and 16 MiB at 32 KiB (not detected, 0/2),
+    11 and 11 MiB at 16 KiB (0/2), 2, 8 and 10 MiB with no leak. The
+    measured floor is therefore between 32 and 64 KiB retained per junk
+    request: 64 KiB was caught in both runs, 32 KiB in neither; nothing is
+    claimed about 33-63 KiB. A slower leak is this test's residual (the
+    absolute budget (b) and ceiling (c) still bound it within one run).
+    Mutation check (wave 21): 100 KiB per `json.loads` passes the old single
+    sample (RSS 93/96 MB) and fails this test (climb 86 MiB);
+    (b) plateau - baseline < 170 MiB — measured at most 135 (199 - 64),
+    plus ~25 % for allocator and scheduling variation; (c) plateau < 250
+    MiB, the absolute ceiling kept. Every sample is printed and in the
+    assertion message. Linux only so far; macOS is decided by the CI entry
+    `python-tests (creative-py, 3.13, macos-14)`.
 
 ## Verified
 

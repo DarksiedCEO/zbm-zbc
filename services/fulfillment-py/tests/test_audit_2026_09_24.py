@@ -24,7 +24,7 @@ from pydantic import ValidationError
 
 import api
 from agents import callback_orchestration, customer_dossier, missed_call_detection
-from conftest import TEST_SERVICE_TOKEN
+from conftest import TEST_SERVICE_TOKEN, child_env
 from contact_window import ContactWindow, parse_contact_window
 from fulfillment_schema import (
     CallDirection,
@@ -36,7 +36,7 @@ from fulfillment_schema import (
     TaskPurpose,
     TaskStatus,
 )
-from integrations.sip_dialer import DialAttemptResult, InMemorySipDialer
+from integrations.sip_dialer import InMemorySipDialer
 from outbound_gate import AttemptLimits, OutboundContactGate
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -88,7 +88,7 @@ def test_startup_fails_closed_without_token_in_a_real_process():
     importing api with FULFILLMENT_SERVICE_TOKEN unset must raise, in a
     fresh interpreter (the in-suite import can't test this — conftest has
     already set the token)."""
-    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(SRC)}
+    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": str(SRC), **child_env()}
     r = subprocess.run(
         [sys.executable, "-c", "import api"], env=env, capture_output=True, text=True, timeout=30
     )

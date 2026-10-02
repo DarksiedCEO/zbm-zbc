@@ -1,4 +1,5 @@
-"""L2 (spec §F Live): the hardened launcher (serve.py) started as a real process on a port from 18800-18849 with a
+"""L2 (spec §F Live): the hardened launcher (serve.py) started as a real process on an OS-assigned port (or one of
+``DLV_TEST_PORT_RANGE``) with a
 clean, allowlisted environment: loopback bind (via _procinfo), the request-head cap and deadline, the concurrency
 bound, /health shape, and the bind-address override. Skipped with the reason printed when no port is free."""
 
@@ -9,6 +10,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -16,35 +18,34 @@ import httpx
 import pytest
 
 from _procinfo import NO_OVERRIDE_ADDR_REASON, listening_addrs, override_bind_addr, rss_kib, url_host
-from helpers import SERVICE_ROOT, base_env, make_repo
+from helpers import SERVICE_ROOT, base_env, child_python_args, free_live_port, make_repo
 
 HTTP = httpx.Client(trust_env=False)          # never a proxy between the test and 127.0.0.x
 SRC = SERVICE_ROOT / "src"
-PORTS = range(18800, 18850)
-PYTHON = str(SERVICE_ROOT / ".venv" / "bin" / "python")
-LOG_DIR = SERVICE_ROOT / "docs" / "evidence" / "dept28"
+PYTHON = sys.executable      # wave 22: the interpreter running the suite (the service's venv, wherever it was built)
+# Wave 21 (N20-D-1): a live run's log never rewrites the committed docs/evidence/dept28/live-launcher-run*.log files
+# (frozen artefacts). Wave 24 (E6, N23-D-9): nor does it go anywhere in the source tree (it went to an untracked
+# docs/evidence/dept28/_runs/): it is written under the session's temp dir (DLV_LIVE_LOG_DIR to keep it elsewhere).
+LOG_DIR = Path(os.environ.get("DLV_LIVE_LOG_DIR") or os.path.join(tempfile.gettempdir(), "dlv-live-runs"))
 
 
 def _free_port() -> int:
-    for port in PORTS:
-        with socket.socket() as s:
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return port
-    pytest.skip("no free port in 18800-18849 (the assigned live range)")
+    """A port of the assigned live range (``DLV_TEST_PORT_RANGE``, wave 21), else OS-assigned (wave 25)."""
+    return free_live_port()
 
 
-def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1"):
+def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1", drop: tuple = ()):
     port = _free_port()
     repo, _ = make_repo(tmp)
     env = base_env(tmp, repo, llm="none")
     env.update({"DLV_PORT": str(port), "DLV_BIND_ADDR": host, **(extra or {})})
+    for name in drop:
+        env.pop(name, None)
     env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
     log_path = Path(tmp) / "serve.log"
-    log = open(log_path, "wb")
-    proc = subprocess.Popen([PYTHON, "-m", "zbm_delivery.api"], cwd=str(SRC), env=env, stdout=log, stderr=subprocess.STDOUT)
+    with open(log_path, "wb") as log:     # wave 25 (scout B Low): the child holds its own descriptor; ours is closed
+        proc = subprocess.Popen([PYTHON, *child_python_args(), "-m", "zbm_delivery.api"], cwd=str(SRC), env=env,
+                                stdout=log, stderr=subprocess.STDOUT)
     deadline = time.monotonic() + 150
     while True:
         try:
@@ -54,7 +55,7 @@ def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1"):
             pass
         if proc.poll() is not None or time.monotonic() > deadline:
             proc.kill()
-            log.close()
+            proc.wait()                      # wave 25: reaped, never a zombie until garbage collection
             raise RuntimeError("delivery-py did not start:\n" + log_path.read_text()[-3000:])
         time.sleep(0.2)
 
@@ -131,14 +132,14 @@ def test_l2_idle_head_is_closed_within_the_deadline(server):
     _, port, _, _ = server
     with socket.create_connection(("127.0.0.1", port), timeout=1) as s:
         s.sendall(b"GET /health HTTP/1.1\r\nHost: t\r\n")
-        t0 = time.monotonic()
         s.settimeout(14)
         try:
             data = s.recv(16)
         except socket.timeout:
             pytest.fail("half-sent head was not closed within the deadline")
         assert data == b"" or data.startswith(b"HTTP/1.1 4")
-        assert time.monotonic() - t0 <= 13
+        # wave 25 (scout B M2): the 14 s socket timeout above is the bound (a stall bound on the server's head deadline);
+        # the extra `<= 13` wall-clock assert only measured how starved the runner was
 
 
 def test_l2_bind_override(tmp_path):
@@ -157,12 +158,14 @@ def test_l2_refuses_to_start_with_a_stray_env_name(tmp_path):
     repo, _ = make_repo(str(tmp_path))
     env = base_env(str(tmp_path), repo, llm="none")
     env["OPENAI_API_KEY"] = "sk-nope"
-    r = subprocess.run([PYTHON, "-m", "zbm_delivery.api"], cwd=str(SRC), env=env, capture_output=True, text=True, timeout=120)
+    r = subprocess.run([PYTHON, *child_python_args(), "-m", "zbm_delivery.api"], cwd=str(SRC), env=env, capture_output=True, text=True, timeout=120)
     assert r.returncode != 0 and "DLV_ENV_ALLOWLIST" in r.stderr
 
 
 def test_l2_live_log_is_written(server, tmp_path):
-    """The live-run log under docs/evidence/dept28/ (spec brief): the exchange above, captured from the process."""
+    """The live-run log (spec brief): the exchange above, captured from the process, written to LOG_DIR (wave 24: the
+    session's temp dir, never the source tree). Wave 21 (N20-D-1): it used to overwrite the tracked
+    docs/evidence/dept28/live-launcher-run.log."""
     proc, port, env, log_path = server
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     out = LOG_DIR / "live-launcher-run.log"
@@ -176,4 +179,39 @@ def test_l2_live_log_is_written(server, tmp_path):
     lines.append("server stdout/stderr tail:")
     lines.append(log_path.read_text()[-2000:])
     out.write_text("\n".join(lines) + "\n")
+    print(f"live-run log: {out}")
     assert out.exists()
+
+
+def test_l2_a_sigterm_stop_leaves_no_temp_dir_of_the_service(tmp_path):
+    """Wave 24 (E6 sweep, found by the suite's /tmp check): uvicorn re-raises the SIGTERM it captured once its graceful
+    shutdown is done; with the default disposition the process then died OF the signal (-15) and no atexit handler
+    ran — every stop left the service's own temp dirs (gitport's dlv-git-*, the in-memory home, the sandbox base)
+    in TMPDIR, in production as in the suite. Now the stop is a normal exit (143): the dirs are removed.
+
+    Wave 25 (E-B): the precondition was "gitport's dlv-git-* dir exists at start" — true only while gitport made it at
+    import; since C6-3 (d0876fd) it is made on the first git command, which a started service with no Docker and no
+    model never runs, so this test failed on every run (found by the first full suite after d0876fd). The service now
+    runs in-memory mode (no DLV_DATA_DIR), whose harness home `dlv-mem-*` IS made at start and removed only by an exit
+    handler: that is the dir the SIGTERM stop must remove. And, live, C6-3 itself: no dlv-git-* before any git."""
+    own_tmp = tmp_path / "svc-tmp"
+    own_tmp.mkdir()
+    (tmp_path / "w").mkdir()
+    proc, port, _, _ = _start(str(tmp_path / "w"), extra={"TMPDIR": str(own_tmp)}, drop=("DLV_DATA_DIR",))
+    try:
+        assert HTTP.get(f"http://127.0.0.1:{port}/health", timeout=5).status_code == 200
+        names = sorted(p.name for p in own_tmp.iterdir())
+        assert any(n.startswith("dlv-mem-") for n in names), names
+        assert not any(n.startswith("dlv-git-") for n in names), names
+    finally:
+        _stop(proc)
+    assert proc.returncode == 143, proc.returncode
+    assert sorted(p.name for p in own_tmp.iterdir()) == []
+
+
+def test_l2_service_children_get_the_suites_temp_dir():
+    """The other half: a child the suite has to SIGKILL (a hung start, say) runs no exit handler at all — its temp
+    dirs must land under the session's temp root, which the suite removes, not in the host's /tmp (TMPDIR is on
+    DLV_ENV_ALLOWLIST)."""
+    env = base_env(tempfile.mkdtemp(), "/nonexistent-repo")
+    assert env.get("TMPDIR") == tempfile.gettempdir(), env.get("TMPDIR")

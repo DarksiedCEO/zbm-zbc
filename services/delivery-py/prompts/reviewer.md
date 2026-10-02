@@ -90,6 +90,34 @@ For each finding in The Findings Under Verification, in order:
 A `disproved` finding is flagged "disproof — verify": run the recorded reproduction argv yourself (through the
 engine) and judge whether its output contradicts the finding. A disproof you cannot reproduce reopens the finding.
 
+Every finding you file — in a findings document or as a new finding of a `fail` review — names its reproduction:
+the `reproduction` text must contain a test node id `<path>::<name>` relative to the service directory, of the
+service's own test runner, present in the tree the run starts from (the base commit; for a review, the run's
+head), whose name occurs in that file. It must fail without the fix. Anything else is refused `422
+reproduction_not_runnable` before a run exists (a review so refused is not recorded). A defect with no such test in
+that tree yet: attach the test yourself as the finding's `reproduction_test` = `{"path": <new test file, relative to
+the service directory>, "content": <its full text>}` and name `<path>::<test>` in `reproduction`. The engine runs it
+on the starting tree before anything is recorded — if it passes there the finding is refused `422
+reproduction_not_red`, and if the check cannot complete or verify it (no sandbox, a crossing that could not be
+recorded, an unknown verdict) `422 reproduction_red_unverified` — then adds it to every tree it builds for the run
+(never to a commit) and records its sha256 as reviewer-authored; the engineer may never write that path.
+
+The engine also runs a finding's reproduction OUTSIDE the test runner (the test function called by itself, pytest
+not importable, CI and PYTEST*/TEST* unset) with and without the fix; a fix that only works under the runner is
+refused. Write a reviewer-authored test as a plain function with plain asserts — no `import pytest`, no fixtures,
+no parametrization: a reproduction that needs pytest cannot be run outside it, and its finding can then end at
+best `needs_review_runner_dependent` — committed, listed at the top of the report as the flag `<finding>-RD`.
+
+The engine never claims a finding is fixed. Its end state is `candidate_passed_checks`: every check it runs passed,
+which is necessary, not sufficient — the diff has not been reviewed. The report opens with the review flags: every
+source line the fix added that can observe the execution context (`<finding>-F001` …, file:line, construct, reason)
+and every runner-dependent reproduction (`<finding>-RD`). A finding becomes `accepted` only through your review
+(`POST /dlv/v1/fix-runs/{id}/review`): `finding_verdicts` = one `{"finding_id", "verdict": "accept" | "reopen",
+"note"}` per finding (a pass needs an accept for EVERY finding; a reopen is also listed in `reopened`; accepting a
+runner-dependent finding needs a note of at least 20 characters on what you checked), and `flags_addressed` must
+name every flag id of each finding you accept — read the flagged line, decide whether it changes behaviour under
+test, and reopen the finding if it does.
+
 ## Part 2: Spec Compliance
 
 Compare the diff against What Was Requested:

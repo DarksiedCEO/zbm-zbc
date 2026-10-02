@@ -3,12 +3,14 @@
 //! real TCP socket — same harness style as tests/server_auth.rs (raw
 //! HTTP/1.1 over std::net::TcpStream, no HTTP client dependency).
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
+mod common;
+
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
 
+use common::PortFile;
 use serde_json::{json, Value};
 
 const TOKEN: &str = "events-test-token";
@@ -16,6 +18,7 @@ const TOKEN: &str = "events-test-token";
 struct ServerHandle {
     child: Child,
     port: u16,
+    _port_file: PortFile,
 }
 
 impl Drop for ServerHandle {
@@ -32,11 +35,6 @@ impl Drop for ScratchFile {
     }
 }
 
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
-}
-
 fn scratch_log(label: &str) -> ScratchFile {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -47,31 +45,40 @@ fn scratch_log(label: &str) -> ScratchFile {
     ScratchFile(p)
 }
 
+/// Fix wave 21 (N20-M-3): LEDGER_PORT=0 + LEDGER_PORT_FILE, no free_port() race.
 fn start_server_at(log_path: &Path) -> ServerHandle {
-    let port = free_port();
-    let child = Command::new(env!("CARGO_BIN_EXE_server"))
-        .env("LEDGER_SERVICE_TOKEN", TOKEN)
-        .env("LEDGER_PORT", port.to_string())
+    let pf = PortFile::new("events");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_server"));
+    cmd.env("LEDGER_SERVICE_TOKEN", TOKEN)
         .env("LEDGER_LOG_PATH", log_path.to_str().unwrap())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("failed to spawn ledger-rust server");
-    let handle = ServerHandle { child, port };
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        .stderr(std::process::Stdio::null());
+    common::ephemeral(&mut cmd, &pf);
+    let mut child = cmd.spawn().expect("failed to spawn ledger-rust server");
+    let port = match common::wait_port(&mut child, &pf, Duration::from_secs(10)) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{e}");
+        }
+    };
+    let handle = ServerHandle { child, port, _port_file: pf };
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         if request(handle.port, "GET", "/health", None, None).is_ok() {
             break;
         }
         if std::time::Instant::now() > deadline {
-            panic!("ledger-rust server did not come up within 5s");
+            panic!("ledger-rust server did not come up within 10s");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
     handle
 }
 
-/// Raw HTTP/1.1 request with optional Authorization header value and body.
+/// Raw HTTP/1.1 request with optional Authorization header value and body; the
+/// response is read to its Content-Length (fix wave 21, N20-M-1).
 fn request(
     port: u16,
     method: &str,
@@ -79,26 +86,9 @@ fn request(
     auth: Option<&str>,
     body: Option<&str>,
 ) -> std::io::Result<(u16, String)> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let auth_line = auth.map(|v| format!("Authorization: {v}\r\n")).unwrap_or_default();
-    let body = body.unwrap_or("");
-    let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{auth_line}Content-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(req.as_bytes())?;
-    let mut response = String::new();
-    stream.read_to_string(&mut response)?;
-    let status: u16 = response
-        .lines()
-        .next()
-        .and_then(|l| l.split_whitespace().nth(1))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let body = response.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
-    Ok((status, body))
+    let raw = common::raw_request(method, path, auth, body.unwrap_or(""));
+    let resp = common::exchange(port, &raw, Duration::from_secs(5))?;
+    Ok((resp.status, resp.text()))
 }
 
 fn authed(port: u16, method: &str, path: &str, body: Option<&str>) -> (u16, Value) {
@@ -359,10 +349,9 @@ fn tampered_event_on_disk_refuses_to_start() {
     assert_ne!(text, tampered);
     std::fs::write(&log.0, tampered).unwrap();
 
-    let port = free_port();
     let status = Command::new(env!("CARGO_BIN_EXE_server"))
         .env("LEDGER_SERVICE_TOKEN", TOKEN)
-        .env("LEDGER_PORT", port.to_string())
+        .env("LEDGER_PORT", "0")
         .env("LEDGER_LOG_PATH", log.0.to_str().unwrap())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -435,10 +424,9 @@ fn append_with_unknown_field_is_400_and_records_nothing() {
 fn injected_unknown_field_on_disk_refuses_to_start() {
     let log = scratch_log("inject_unknown");
     std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/aegis_unknown_field_injection.jsonl"), &log.0).unwrap();
-    let port = free_port();
     let mut child = Command::new(env!("CARGO_BIN_EXE_server"))
         .env("LEDGER_SERVICE_TOKEN", TOKEN)
-        .env("LEDGER_PORT", port.to_string())
+        .env("LEDGER_PORT", "0")
         .env("LEDGER_LOG_PATH", log.0.to_str().unwrap())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())

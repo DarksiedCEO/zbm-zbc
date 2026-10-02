@@ -11,7 +11,21 @@ live test now goes through this one module:
   with the OS. ``ss`` does not exist on macOS and is not used.
 
 The same file is copied into each Python service's tests/ (tests there are
-not a package; each service's suite runs on its own).
+not a package; each service's suite runs on its own). devtools/hygiene_check.py
+(rule L4) fails the build if the copies differ.
+
+Fix wave 25 (scout C5-6): the ONE port helper for live tests ("Ports" below).
+Every service used to carry its own picker (five env knobs, all
+pick-a-free-port-then-let-the-child-bind it: another process can take the port
+in between, and the test then talks to THAT process). The rule now:
+  1. prefer port 0 with the child announcing the port it bound (the ledger,
+     orchestrator and dashboard do this; a launcher that can should);
+  2. otherwise pick with ``pick_port()`` and accept the port only once
+     ``wait_owned(proc, port)`` has seen a LISTEN socket on it that belongs to
+     YOUR child (by socket inode on Linux, by lsof pid elsewhere); a child that
+     lost the race exits, and ``start_owned()`` retries on another port.
+One knob for all services: ZBM_TEST_PORT_RANGE=lo-hi (inclusive); a service's
+legacy knob is honoured when given to ``assigned_port_range()``.
 """
 
 from __future__ import annotations
@@ -22,6 +36,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Non-default addresses a test can bind to prove a *_BIND_ADDR override is
@@ -161,6 +176,20 @@ def can_bind(host: str, port: int = 0) -> bool:
         return False
 
 
+def port_free(host: str, port: int) -> bool:
+    """True when a SERVER could bind ``host``:``port`` now: the probe sets SO_REUSEADDR as the services' listeners
+    (uvicorn) do, so a port whose earlier connections sit in TIME_WAIT counts as free (fix wave 22, G3: without it
+    a narrow assigned range ran out after a few live tests and the rest were skipped). A port with a listener
+    still fails the bind on Linux and macOS alike."""
+    try:
+        with socket.socket(_family(host), socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+        return True
+    except OSError:
+        return False
+
+
 def override_bind_addr() -> str | None:
     """The first non-default address this OS can bind (see
     BIND_OVERRIDE_CANDIDATES), or None when it has neither."""
@@ -177,3 +206,120 @@ NO_OVERRIDE_ADDR_REASON = (
 def url_host(host: str) -> str:
     """``host`` as it must appear in a URL (IPv6 literals in brackets)."""
     return f"[{host}]" if ":" in host else host
+
+
+# --- ports (fix wave 25, scout C5-6) -------------------------------------------
+
+
+def assigned_port_range(*legacy_env: str) -> range | None:
+    """The operator's port range: ZBM_TEST_PORT_RANGE, else the first legacy
+    variable given that is set ("lo-hi", inclusive). None means "no range was
+    assigned: use OS-assigned ports". A malformed value raises."""
+    for name in ("ZBM_TEST_PORT_RANGE", *legacy_env):
+        spec = os.environ.get(name)
+        if spec:
+            try:
+                lo, hi = (int(x) for x in spec.split("-"))
+            except ValueError:
+                raise ValueError(f"{name}={spec!r}: expected lo-hi") from None
+            if not (1024 <= lo <= hi <= 65535):
+                raise ValueError(f"{name}={spec!r}: expected 1024 <= lo <= hi <= 65535")
+            return range(lo, hi + 1)
+    return None
+
+
+_HANDED_OUT: set[int] = set()
+
+
+def pick_port(ports: range | None = None, host: str = "127.0.0.1") -> int:
+    """A port a server could bind now: from ``ports`` (not handed out before by
+    this process), else OS-assigned. Only a CANDIDATE: confirm the child got it
+    with ``wait_owned`` (or use ``start_owned``)."""
+    if ports is None:
+        with socket.socket(_family(host), socket.SOCK_STREAM) as s:
+            s.bind((host, 0))
+            return s.getsockname()[1]
+    for p in ports:
+        if p not in _HANDED_OUT and port_free(host, p):
+            _HANDED_OUT.add(p)
+            return p
+    raise RuntimeError(f"no free port left in {ports.start}-{ports.stop - 1}")
+
+
+def _socket_inodes(pid: int) -> set[str]:
+    out = set()
+    fd_dir = Path(f"/proc/{pid}/fd")
+    try:
+        fds = list(fd_dir.iterdir())
+    except OSError:
+        return out
+    for fd in fds:
+        try:
+            target = os.readlink(fd)
+        except OSError:
+            continue
+        if target.startswith("socket:["):
+            out.add(target[8:-1])
+    return out
+
+
+def _listen_inodes_proc(port: int) -> set[str]:
+    out = set()
+    for name in ("tcp", "tcp6"):
+        table = Path("/proc/net") / name
+        if not table.exists():
+            continue
+        for line in table.read_text().splitlines()[1:]:
+            f = line.split()
+            if int(f[1].split(":")[1], 16) == port and f[3] == "0A":
+                out.add(f[9])
+    return out
+
+
+def listener_owned_by(pid: int, port: int) -> bool:
+    """True when a TCP LISTEN socket on ``port`` is held by process ``pid``."""
+    if Path("/proc/net/tcp").exists():
+        return bool(_listen_inodes_proc(port) & _socket_inodes(pid))
+    r = subprocess.run([_lsof(), "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"],
+                       capture_output=True, text=True, timeout=30)
+    return f"p{pid}" in r.stdout.split()
+
+
+def wait_owned(proc: subprocess.Popen, port: int, timeout: float = 60.0) -> None:
+    """Returns once ``proc`` holds a LISTEN socket on ``port``; raises if it
+    exits first (e.g. it lost the port to another process) or the hang guard
+    passes. Never accepts a port some other process is listening on."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if proc.poll() is not None:
+            raise ChildExited(f"the child exited ({proc.returncode}) before listening on {port}")
+        if listener_owned_by(proc.pid, port):
+            return
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"the child (pid {proc.pid}) holds no listener on {port}")
+        time.sleep(0.02)
+
+
+class ChildExited(RuntimeError):
+    pass
+
+
+def start_owned(start, ports: range | None = None, attempts: int = 5, host: str = "127.0.0.1"):
+    """``start(port) -> Popen``; returns (proc, port) once the child owns the
+    port. A child that exits before listening (lost the race) is reaped and
+    another port is tried; any other failure kills the child and re-raises."""
+    last: Exception | None = None
+    for _ in range(attempts):
+        port = pick_port(ports, host)
+        proc = start(port)
+        try:
+            wait_owned(proc, port)
+            return proc, port
+        except ChildExited as exc:
+            proc.wait()
+            last = exc
+        except BaseException:
+            proc.kill()
+            proc.wait()
+            raise
+    raise RuntimeError(f"no port could be bound by the child in {attempts} attempts: {last}")

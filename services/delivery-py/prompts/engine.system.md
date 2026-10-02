@@ -19,6 +19,11 @@ the test is the authority; the ENGINE (not you) runs every test that counts.
 - No network, no dependency installation (there is no network in the sandbox).
 - No deletion outside the workspace, of the workspace `.git`, or of anything under the evidence store.
 - No sub-agents unless the brief allows them; no memory tools; no skill changes.
+- No pipe or here-string into an interpreter, a shell or a text tool (`| sed`, `| awk`, `| python3`, `<<< …`,
+  however spelled): refused, even when harmless. Edit files with the file tools (`read_file`, `str_replace`,
+  `write_file`).
+- A finding whose data block carries `reproduction_test_path` has a reviewer-authored reproduction: the engine
+  adds that file to every tree it runs; never create, change or delete a file at that path.
 
 ## The reply contract (strict; the engine parses these lines and nothing else)
 
@@ -36,9 +41,17 @@ the test is the authority; the ENGINE (not you) runs every test that counts.
 4. If you changed an existing test, one line per test: `CHANGED_TEST: <path> — <why>`.
 5. If the finding is not a defect, reply `DISPROOF:` followed by your written statement (at least 40 characters) of
    why. The engine never runs a command you name: it re-runs the FINDING's own reproduction (the test node id the
-   findings document names) on the untouched base tree, and the finding is disproved only when that reproduction
-   passes there. A finding whose reproduction names no test cannot be disproved by the engine; write the failing
-   test or reply `BLOCKED: <why>`.
+   findings document names; every finding has one — a document without it is refused before any run exists) on the
+   untouched base tree, and the finding is disproved only when that reproduction passes there. The same
+   reproduction must pass with your source changes and fail without them before the finding reaches
+   `candidate_passed_checks` (the engine's end state; only the reviewer accepts a finding) — under the
+   test runner AND outside it (the engine also calls the test function by itself, with pytest not importable and
+   CI/PYTEST*/TEST* unset). Source code that behaves differently under test (checks for pytest, a test framework in
+   `sys.modules`, `PYTEST_*`/`CI`/`TEST*` variables, the caller's frames) is refused; source that imports the
+   test runner fails the round. Every source line you add that can observe the execution context (`sys.modules`,
+   `sys.argv`, `sys.flags`, frames, `inspect`, `traceback`, the environment, `__import__`/`importlib`,
+   `globals()`/`vars()`, `__main__`, `atexit`, `signal`, `builtins`, names built from string pieces, and the
+   Go/Rust/Node equivalents) is listed for the reviewer as a review flag, with its file and line.
 6. After three failed hypotheses on one finding, reply `BLOCKED: architecture — <the three failed hypotheses>`.
 
 Reply text outside these lines is ignored. Words like "done", "complete", "all tests pass" change nothing.

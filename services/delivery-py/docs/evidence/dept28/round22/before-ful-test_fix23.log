@@ -1,0 +1,18 @@
+2026-09-30T12:02:46Z
+540a64ec45b1455d4bfc51e89fcc0a039891c57f
+src/api.py unchanged from 540a64e: 
+____________ test_the_wave_22_threshold_test_is_gone_with_the_code _____________
+
+    def test_the_wave_22_threshold_test_is_gone_with_the_code():
+>       assert not (Path(__file__).parent / "test_fix22_mmap_threshold.py").exists()
+E       AssertionError: assert not True
+E        +  where True = exists()
+E        +    where exists = (PosixPath('/home/claude/wt/fix21/services/fulfillment-py/tests') / 'test_fix22_mmap_threshold.py').exists
+E        +      where PosixPath('/home/claude/wt/fix21/services/fulfillment-py/tests') = PosixPath('/home/claude/wt/fix21/services/fulfillment-py/tests/test_fix23_no_mmap_threshold.py').parent
+E        +        where PosixPath('/home/claude/wt/fix21/services/fulfillment-py/tests/test_fix23_no_mmap_threshold.py') = Path('/home/claude/wt/fix21/services/fulfillment-py/tests/test_fix23_no_mmap_threshold.py')
+
+tests/test_fix23_no_mmap_threshold.py:38: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_fix23_no_mmap_threshold.py::test_the_launcher_leaves_glibcs_mmap_threshold_alone
+FAILED tests/test_fix23_no_mmap_threshold.py::test_the_wave_22_threshold_test_is_gone_with_the_code
+2 failed, 1 passed in 0.90s

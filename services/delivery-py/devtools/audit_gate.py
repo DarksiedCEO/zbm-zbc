@@ -3,6 +3,12 @@ DEVTOOLS ONLY. Advisory gate (spec §C.7.3): runs ``pip-audit`` against ``uv exp
 database is reachable. Unreachable (or pip-audit absent) → ``audit: not_run`` and exit 2 — the build is NOT green
 and the report says so. Any advisory with a fix version available → exit 1. Nothing is installed by this script:
 pip-audit must already be on PATH (it is not a runtime dependency of the service).
+
+Wave 25 (scout B M5): audited the way CI's audit-python job audits the lock — the registry packages only, each
+pinned version looked up as is (``--no-deps --disable-pip``: nothing is resolved or installed); the git-sourced
+deer-flow packages have no registry version to look up and are listed under ``excluded``. Before, pip-audit resolved
+and installed the whole export in a temporary environment (it ran: re-run on 0f017a7 it reported the same oauthlib
+advisory as CI); the change is parity with CI and no install, not a repair.
 """
 
 from __future__ import annotations
@@ -12,6 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
@@ -19,13 +26,13 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 
 def main(argv: list[str]) -> int:
     out_path = os.path.join(ROOT, "docs", "evidence", "pip-audit.json")
-    result: dict = {"audit": "not_run", "why": "", "advisories": []}
+    result: dict = {"audit": "not_run", "why": "", "advisories": [], "excluded": []}
     uv = shutil.which("uv")
     if uv is None:
         result["why"] = "uv not on PATH"
     else:
-        exp = subprocess.run([uv, "export", "--frozen", "--no-dev", "--no-hashes", "--format", "requirements-txt"],
-                             cwd=ROOT, capture_output=True, text=True, timeout=120)
+        exp = subprocess.run([uv, "export", "--frozen", "--no-dev", "--no-hashes", "--no-emit-project", "--format",
+                              "requirements-txt"], cwd=ROOT, capture_output=True, text=True, timeout=120)
         if exp.returncode != 0:
             result["why"] = "uv export --frozen failed"
         else:
@@ -37,8 +44,16 @@ def main(argv: list[str]) -> int:
             if pa is None:
                 result["why"] = "pip-audit not on PATH (not a runtime dependency; install it in a tooling venv)"
             else:
-                run = subprocess.run([pa, "-r", req, "--format", "json", "--progress-spinner", "off"], cwd=ROOT,
-                                     capture_output=True, text=True, timeout=600)
+                lines = exp.stdout.splitlines(keepends=True)
+                result["excluded"] = sorted(ln.split(" @ ", 1)[0].strip() for ln in lines if "@ git+" in ln)
+                with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tf:
+                    tf.write("".join(ln for ln in lines if "@ git+" not in ln))
+                try:
+                    run = subprocess.run([pa, "-r", tf.name, "--no-deps", "--disable-pip", "--format", "json",
+                                          "--progress-spinner", "off"], cwd=ROOT, capture_output=True, text=True,
+                                         timeout=600)
+                finally:
+                    os.unlink(tf.name)
                 try:
                     data = json.loads(run.stdout or "{}")
                 except ValueError:

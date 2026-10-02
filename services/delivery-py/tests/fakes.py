@@ -23,13 +23,18 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+import _tmproot  # noqa: E402  (tests/_tmproot.py; L4)
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
@@ -79,6 +84,27 @@ class FakeLedgerClient:
         return [e for e in self.events if e["event_type"] == t]
 
 
+def _exited_unreaped(proc: subprocess.Popen) -> bool:
+    """True once ``proc`` has exited, WITHOUT reaping it (its pid — the group id — stays reserved). Where
+    ``waitid``/``WNOWAIT`` is missing, ``poll()`` (which reaps; the group kill that follows is then best effort)."""
+    if proc.returncode is not None:
+        return True
+    if hasattr(os, "waitid") and hasattr(os, "WNOWAIT"):
+        try:
+            return os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+        except ChildProcessError:
+            return True
+    return proc.poll() is not None
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the process group ``proc`` leads (``start_new_session``); a group already gone is not an error."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 class FakeDockerCli:
     """See the module docstring. ``daemon=False`` simulates ``Cannot connect to the Docker daemon``."""
 
@@ -92,6 +118,8 @@ class FakeDockerCli:
         self.binds: dict[str, dict[str, str]] = {}   # container name -> {dst: host src} for the read-only bind mounts
         self.killed: set[str] = set()             # containers a `docker kill` stopped (every later exec fails)
         self.procs: dict[str, list] = {}          # container name -> running Popen objects (kill terminates them)
+        self._procs_lock = threading.Lock()       # wave 25 (M1): a group is killed only while its leader is unreaped
+        self.env_files: dict[str, dict] = {}      # container name -> the --env-file's variables (wave 22: CI=1 etc.)
         self.exec_fail_next: Optional[int] = None
         os.makedirs(self.root, exist_ok=True)
 
@@ -107,7 +135,14 @@ class FakeDockerCli:
         return s
 
     def _map_out(self, b: bytes, vol: str) -> bytes:
-        return b.replace(vol.encode(), WORKSPACE.encode())
+        """Every host spelling of the volume back to the container path (wave 21, N20-D-4): the volume as the
+        double named it AND its realpath — a process started in a directory reached through a symlink (``TMPDIR``
+        behind a link, macOS ``/var`` → ``/private/var``) reports the physical path (``getcwd``), so mapping only
+        the spelled path handed host paths back to the engine and its containment checks."""
+        spellings = {vol, os.path.realpath(vol)}
+        for s in sorted(spellings, key=len, reverse=True):
+            b = b.replace(s.encode(), WORKSPACE.encode())
+        return b
 
     def run(self, argv, *, timeout_s: float, stdin: bytes | None = None, output_cap: int = 1024 * 1024) -> ExecResult:
         argv = [str(a) for a in argv]
@@ -124,6 +159,16 @@ class FakeDockerCli:
             self.killed.discard(name)
             if "--label" in argv:
                 self.labels[name] = argv[argv.index("--label") + 1].split("=", 1)[1]
+            if "--env-file" in argv and os.path.isfile(argv[argv.index("--env-file") + 1]):
+                # wave 22: the container's environment comes from the env file, as with the real CLI (PATH and HOME
+                # stay the double's: the host's toolchains and the volume as HOME stand in for the image's)
+                file_env = {}
+                with open(argv[argv.index("--env-file") + 1], encoding="ascii") as fh:
+                    for ln in fh.read().splitlines():
+                        k, sep, v = ln.partition("=")
+                        if sep and k not in ("PATH", "HOME"):
+                            file_env[k] = v
+                self.env_files[name] = file_env
             for a in argv:
                 if a.startswith("type=volume,"):
                     opts = dict(kv.split("=", 1) for kv in a.split(",") if "=" in kv)
@@ -151,11 +196,11 @@ class FakeDockerCli:
             if name not in self.containers:
                 return ExecResult(1, b"", b"Error response from daemon: No such container\n")
             self.killed.add(name)
-            for proc in self.procs.pop(name, []):
-                try:
-                    proc.kill()
-                except OSError:
-                    pass
+            with self._procs_lock:
+                # wave 25 (scout B M1): the container stops — every process of every command it runs, not only the
+                # one the double started (a `node --test` file process, a cargo/go test binary outlived the suite)
+                for proc in self.procs.pop(name, []):
+                    _kill_group(proc)
             return ExecResult(0, (name + "\n").encode(), b"")
         if argv[0] == "rm":
             name = argv[-1]
@@ -179,7 +224,7 @@ class FakeDockerCli:
         if argv[0] == "cp":
             return self._cp(argv, stdin)
         if argv[0] == "exec":
-            return self._exec(argv, timeout_s, output_cap)
+            return self._exec(argv, timeout_s, output_cap, stdin)
         return ExecResult(125, b"", b"unknown docker subcommand (test double)\n")
 
     def _cp(self, argv, stdin) -> ExecResult:
@@ -206,12 +251,16 @@ class FakeDockerCli:
             tar.add(local, arcname=os.path.basename(local.rstrip("/")))
         return ExecResult(0, buf.getvalue(), b"")
 
-    def _exec(self, argv, timeout_s, output_cap) -> ExecResult:
+    def _exec(self, argv, timeout_s, output_cap, stdin=None) -> ExecResult:
         i = 1
         cwd = WORKSPACE
         env = {}
+        interactive = False
         while argv[i].startswith("-"):
-            if argv[i] == "--user":
+            if argv[i] == "-i":
+                interactive = True
+                i += 1
+            elif argv[i] == "--user":
                 i += 2
             elif argv[i] == "-w":
                 cwd = argv[i + 1]
@@ -235,6 +284,9 @@ class FakeDockerCli:
             cmd = cmd[4:]
         binds = self.binds.get(name)
         cmd = [self._map_in(a, vol, binds) for a in cmd]
+        if interactive and stdin:
+            # wave 22: what the process reads on stdin names container paths, like its argv — mapped the same way
+            stdin = self._map_in(stdin.decode("utf-8", "surrogateescape"), vol, binds).encode("utf-8", "surrogateescape")
         if cmd[0] in ("pytest",):
             # the image's `pytest` script has the script's bin dir as sys.path[0], never the cwd: -P makes the
             # double's `python -m pytest` behave the same (nothing in the service directory shadows a module)
@@ -248,41 +300,88 @@ class FakeDockerCli:
             code, self.exec_fail_next = self.exec_fail_next, None
             return ExecResult(code, b"", b"simulated exec failure\n")
         full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": vol, "LANG": "C.UTF-8",
-                    "PYTHONDONTWRITEBYTECODE": "1", **self.toolchain_env(), **env}
+                    "PYTHONDONTWRITEBYTECODE": "1", **self.env_files.get(name, {}), **self.toolchain_env(), **env}
         try:
-            proc = subprocess.Popen(cmd, cwd=local_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=full_env)
+            # wave 25 (scout B M1): its own process group (session), so the deadline and `docker kill` reach every
+            # process the command starts — as the real container's end does — never only the direct child
+            proc = subprocess.Popen(cmd, cwd=local_cwd, stdin=subprocess.PIPE if interactive else subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=full_env, start_new_session=True)
         except OSError as exc:
             return ExecResult(127, b"", f"{type(exc).__name__}\n".encode())
-        self.procs.setdefault(name, []).append(proc)
-        try:
-            stdout, stderr = proc.communicate(timeout=secs)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, stderr = proc.communicate()
-            return ExecResult(124, self._map_out(stdout or b"", vol), self._map_out(stderr or b"", vol), True)
-        finally:
-            try:
-                self.procs.get(name, []).remove(proc)
-            except ValueError:
-                pass
+        with self._procs_lock:
+            self.procs.setdefault(name, []).append(proc)
+        stdout, stderr, timed_out = self._finish(proc, (stdin or b"") if interactive else None, secs)
+        if timed_out:
+            return ExecResult(124, self._map_out(stdout, vol), self._map_out(stderr, vol), True)
         if name in self.killed:
             return ExecResult(137, self._map_out(stdout, vol), self._map_out(stderr, vol) + b"\n[killed]\n")
         out, err = self._map_out(stdout, vol), self._map_out(stderr, vol)
         truncated = len(out) > output_cap
         return ExecResult(proc.returncode, out[:output_cap], err[:output_cap], False, truncated)
 
+    def _finish(self, proc: subprocess.Popen, stdin: Optional[bytes], secs: float) -> tuple[bytes, bytes, bool]:
+        """Feed ``stdin``, wait for the command's own process until ``secs``, then kill its whole process group — on
+        the deadline AND after a normal exit — and only then read the pipes to their end (a left-behind process
+        holding them no longer delays the answer). Stricter than a real container after a normal exit: there a
+        process the command left in the background lives until the container stops; the double has no container
+        process to tie it to, and the engine never leaves one on purpose. The group is killed while its leader is
+        still unreaped (``waitid(WNOWAIT)``), so its id cannot have been reused by an unrelated process; ``docker
+        kill`` takes the same lock."""
+        out: list[bytes] = []
+        err: list[bytes] = []
+
+        def pump(stream, sink):
+            sink.append(stream.read())
+
+        def feed():
+            try:
+                proc.stdin.write(stdin or b"")
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except (OSError, ValueError):
+                    pass
+        threads = [threading.Thread(target=pump, args=(proc.stdout, out), daemon=True),
+                   threading.Thread(target=pump, args=(proc.stderr, err), daemon=True)]
+        if proc.stdin is not None:
+            threads.append(threading.Thread(target=feed, daemon=True))
+        for t in threads:
+            t.start()
+        deadline = time.monotonic() + secs
+        timed_out = False
+        while not _exited_unreaped(proc):
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
+            time.sleep(0.01)
+        with self._procs_lock:
+            _kill_group(proc)
+            proc.wait()
+            for procs in self.procs.values():
+                if proc in procs:
+                    procs.remove(proc)
+        for t in threads:
+            t.join()
+        return b"".join(out), b"".join(err), timed_out
+
     @staticmethod
     def toolchain_env() -> dict:
         """What the sandbox IMAGE provides and this double must stand in for: the host's rust toolchain (rustup needs
         its home when HOME is the volume) and a Go build cache shared by every fake container of the session (the
         image's cache lives under the container HOME; a cold cache per double would rebuild the race runtime each
-        time). Nothing here reaches the engine's argv or the seed."""
+        time). Nothing here reaches the engine's argv or the seed. Wave 24 (E6 sweep): TMPDIR — the image's /tmp goes
+        with its container; the double's processes run on the host, so their stand-in is the suite's temp root (the
+        suite removes it), never the host's /tmp (a go test the double kills on its deadline left go-build* there)."""
         real_home = os.path.expanduser("~")
-        gocache = os.path.join(tempfile.gettempdir(), "dlv-test-gocache")
+        # wave 25 (scout B Low, R-HYGIENE): the session's own cache, removed with the session root — no longer left in
+        # the host temp dir; DLV_TEST_GOCACHE names a cache an operator wants to keep across sessions (outside TMPDIR)
+        gocache = os.environ.get("DLV_TEST_GOCACHE") or os.path.join(_tmproot.SESSION_TMP, "dlv-test-gocache")
         os.makedirs(gocache, exist_ok=True)
         return {"RUSTUP_HOME": os.environ.get("RUSTUP_HOME", os.path.join(real_home, ".rustup")),
                 "CARGO_HOME": os.environ.get("CARGO_HOME", os.path.join(real_home, ".cargo")),
-                "GOCACHE": gocache, "GOPATH": os.path.join(gocache, "gopath")}
+                "GOCACHE": gocache, "GOPATH": os.path.join(gocache, "gopath"), "TMPDIR": tempfile.gettempdir()}
 
     # --- inspection ---------------------------------------------------------------------------------------------------
 

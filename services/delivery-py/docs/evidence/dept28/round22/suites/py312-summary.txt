@@ -1,0 +1,14 @@
+start 2026-09-30T15:12:53Z HEAD=c827329fa6bbb48a2d94460362092e07ad3aed33 Python 3.12.3
+clipper-network-py exit=0 97s | 346 passed, 1 warning in 95.60s (0:01:35) | left in TMPDIR: pytest-of-root 
+compliance-py exit=0 91s | 610 passed, 1 warning in 87.37s (0:01:27) | left in TMPDIR: pytest-of-root 
+finance-py exit=0 157s | 334 passed, 1 warning in 155.18s (0:02:35) | left in TMPDIR: pytest-of-root 
+legal-py exit=0 61s | 287 passed, 1 warning in 58.81s | left in TMPDIR: pytest-of-root 
+verification-py exit=0 107s | 278 passed, 1 warning in 104.66s (0:01:44) | left in TMPDIR: pytest-of-root 
+detection-py exit=1 41s | 1 failed, 467 passed, 1 warning in 40.47s | left in TMPDIR: 
+fulfillment-py exit=1 263s | 1 failed, 1034 passed, 1 skipped, 1 warning in 262.89s (0:04:22) | left in TMPDIR: 
+creative-py exit=0 395s | 788 passed, 1 skipped, 1 warning in 392.89s (0:06:32) | left in TMPDIR: pytest-of-root 
+onboarding-py exit=1 261s | 1 failed, 725 passed, 1 skipped, 1 warning in 258.74s (0:04:18) | left in TMPDIR: pytest-of-root 
+delivery-py exit=0 2827s | 647 passed, 4 skipped, 1 warning in 2818.99s (0:46:58) | left in TMPDIR: dlv-test-gocache 
+tracked/untracked status: 0 lines (0 = clean); changed during the run: 
+new /tmp entries: dlv-git-_i3k9885 dlv-git-k_6xu4z4 dlv-git-nmulzuhk dlv-git-xyzf1b01 go-build302018453 
+end 2026-09-30T16:24:33Z

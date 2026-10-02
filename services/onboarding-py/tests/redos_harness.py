@@ -9,6 +9,7 @@ with a few failing tails. Shared by the test module and the live probe.
 
 from __future__ import annotations
 
+import gc
 import importlib
 import re
 import time
@@ -92,17 +93,64 @@ def use_of(name: str, p: re.Pattern) -> Callable[[str], object]:
         return p.match
     if how == "fullmatch":
         return p.fullmatch
-    return lambda s: [m.span() for m in p.finditer(s)]
+    return lambda s: _drain_matches(p.finditer(s))
+
+
+def _drain_matches(it) -> int:
+    """Run a search to the end the way the service does (every match produced and its span taken) WITHOUT keeping
+    the results: fix wave 22 (G9, AEGIS N21-C-8) — the harness used to build a list of every span, and on a 100 KB
+    input of 33,333 matches those retained tuples drove the interpreter's cyclic GC (15 collections, each walking the
+    growing list), so the 10 KB → 100 KB ratio measured the harness's garbage, not the regex (``_DOLLAR`` on
+    ``$1,`` × N: 20.2 against the bound 20 under load; the pattern itself is linear)."""
+    n = 0
+    for m in it:
+        m.span()
+        n += 1
+    return n
 
 
 def best_time(fn: Callable[[str], object], s: str, runs: int = 3) -> float:
     """Best of ``runs`` of the calling thread's OWN CPU time (fix wave 6:
     wall-clock time made the bounds depend on machine load — a 1 ms run fits
     in one scheduler quantum, a 40 ms run is pre-empted by other processes —
-    and the cost being bounded is CPU work, not waiting)."""
+    and the cost being bounded is CPU work, not waiting). Fix wave 22 (G9): the
+    cyclic GC is OFF while a run is timed, so a run measures the pattern's work,
+    not a collection the harness's (or the suite's) allocations happened to
+    trigger inside it."""
     best = float("inf")
     for _ in range(runs):
-        t = time.thread_time()
-        fn(s)
-        best = min(best, time.thread_time() - t)
+        was = gc.isenabled()
+        gc.disable()
+        try:
+            t = time.thread_time()
+            fn(s)
+            best = min(best, time.thread_time() - t)
+        finally:
+            if was:
+                gc.enable()
+    return best
+
+
+def best_time_back_to_back(fn: Callable[[str], object], items: list[str], runs: int = 3) -> float:
+    """Best of ``runs`` of the thread CPU time to run ``fn`` over every item back to back, as ONE timed block (GC off,
+    as in ``best_time``). Fix wave 23: the linearity ratios compared a short run (10 KB, ~1 ms) with a run 10x longer
+    (100 KB, ~10-20 ms), and a linear pattern occasionally measured over the bound 20 under load (w23, 3.13, three
+    busy loops: ``redaction._URL_PART`` 'a;'+'@' 1.05 ms -> 21.2 ms, ratio 20.2 — about one ratio check in 14,000;
+    3 x 234 checks per Python showed median 10.1, max 12.3). The two sides are not the same measurement under load:
+    a ~1 ms run fits in one scheduler slice with a warm cache, a 10-20 ms run is sliced and refills its cache on
+    every resume, which thread CPU time counts. That is the likely cause, not a proven one (no excursion was caught
+    in the act). Timing 10 x 10 KB back to back is the same work over the same duration as one 100 KB run, so what
+    differs between the two sides is only how the cost grows with the length of one input (median 0.99, max 1.35)."""
+    best = float("inf")
+    for _ in range(runs):
+        was = gc.isenabled()
+        gc.disable()
+        try:
+            t = time.thread_time()
+            for s in items:
+                fn(s)
+            best = min(best, time.thread_time() - t)
+        finally:
+            if was:
+                gc.enable()
     return best

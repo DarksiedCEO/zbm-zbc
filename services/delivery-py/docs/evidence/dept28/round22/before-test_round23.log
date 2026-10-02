@@ -1,0 +1,639 @@
+2026-09-30T11:48:12Z
+tree: git archive 540a64e + tests/test_round23.py + tests/helpers.py (review_body) from the wave-23 worktree
+FFFFFFFFFFFFFFFF                                                         [100%]
+=================================== FAILURES ===================================
+_ test_d1_the_engine_never_claims_fixed_and_the_report_says_so_in_plain_words __
+
+    def test_d1_the_engine_never_claims_fixed_and_the_report_says_so_in_plain_words():
+        h = Harness(scenario=scenario_s1())
+        try:
+            run_id = h.submit().json()["run_id"]
+            run = h.run(run_id)
+            assert run["status"] == "awaiting_review", run["reasons"]
+>           assert _states(h, run_id) == {"N1-1": "candidate_passed_checks", "N1-2": "candidate_passed_checks"}
+E           AssertionError: assert {'N1-1': 'fix...1-2': 'fixed'} == {'N1-1': 'can...assed_checks'}
+E             
+E             Differing items:
+E             {'N1-1': 'fixed'} != {'N1-1': 'candidate_passed_checks'}
+E             {'N1-2': 'fixed'} != {'N1-2': 'candidate_passed_checks'}
+E             Use -v to get more diff
+
+tests/test_round23.py:70: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py: No such file or directory
+_______ test_d1_only_an_aegis_review_with_a_verdict_per_finding_accepts ________
+
+    def test_d1_only_an_aegis_review_with_a_verdict_per_finding_accepts():
+        h = Harness(scenario=scenario_s1())
+        try:
+            run_id = h.submit().json()["run_id"]
+            bare = {"request_id": rid(), "review_ref": "r23-d1", "sha256": "d" * 64, "verdict": "pass"}
+            r = h.post(f"/dlv/v1/fix-runs/{run_id}/review", bare)
+>           assert r.status_code == 422, r.text                               # no per-finding verdicts: refused
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AssertionError: {"run_id":"dlv-run-7E512JJMCNAJAZ3PG7WWW7QPRE","status":"reviewed_pass","next_run_id":null,"request_id":"req-e863127a3ff44f7b9492","facts_sha256":"4b7bbacf9e5bb3a334ef9722eba8233c742395900c102cbb87c7575b9bc3b874","policy_version":1,"prompts_manifest_sha256":"263f568ec1ab8f858f3fa37e559b8e7765a0e085b1a74ce91c1bcc97b7a8599f"}
+E           assert 200 == 422
+E            +  where 200 = <Response [200 OK]>.status_code
+
+tests/test_round23.py:87: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py: No such file or directory
+_______________ test_d1_nothing_but_the_review_reaches_accepted ________________
+
+    def test_d1_nothing_but_the_review_reaches_accepted():
+        for frm in ("swept", "candidate_passed_checks", "disproved", "needs_review_runner_dependent"):
+            assert states.finding_transition_problem({"state": frm}, "accepted") is not None, frm
+>       assert "accepted" in {m.value for m in states.FindingState}
+E       AssertionError: assert 'accepted' in {'blocked', 'disproved', 'fixed', 'green', 'needs_review_runner_dependent', 'queued', ...}
+
+tests/test_round23.py:107: AssertionError
+________ test_d1_a_legacy_fixed_record_reads_as_candidate_passed_checks ________
+
+    def test_d1_a_legacy_fixed_record_reads_as_candidate_passed_checks():
+>       assert states.normalize_finding_state("fixed") == "candidate_passed_checks"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'zbm_delivery.engine.states' has no attribute 'normalize_finding_state'
+
+tests/test_round23.py:121: AttributeError
+____ test_d1_a_failing_review_accepts_what_it_accepts_and_reopens_the_rest _____
+
+    def test_d1_a_failing_review_accepts_what_it_accepts_and_reopens_the_rest():
+        h = Harness(scenario=scenario_s1() + flat([write_test("test_fix_n1_2b", TEST_PCT.replace("test_percent_zero", "test_pz")),
+                                                   {"text": "TEST: tests/test_fix_n1_2b.py::test_pz"}, {"text": "BLOCKED: stop"}]))
+        try:
+            run_id = h.submit().json()["run_id"]
+            body = review_body(h, run_id, verdict="fail", reopened=["N1-2"])
+            r = h.post(f"/dlv/v1/fix-runs/{run_id}/review", body)
+>           assert r.status_code == 200 and r.json()["next_run_id"], r.text
+E           AssertionError: {"detail":[{"loc":["body","finding_verdicts"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"},{"loc":["body","flags_addressed"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}],"errors_total":2}
+E           assert (422 == 200)
+E            +  where 422 = <Response [422 Unprocessable Content]>.status_code
+
+tests/test_round23.py:140: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py: No such file or directory
+_ test_d2_a_detector_that_passes_every_check_is_flagged_at_the_top_and_blocks_an_unaddressed_accept _
+
+    def test_d2_a_detector_that_passes_every_check_is_flagged_at_the_top_and_blocks_an_unaddressed_accept():
+        """The reviewers' B4 (round 22): a plain "a test_* module is loaded" detector passes under pytest AND in the
+        standalone run. The engine does not chase it; it flags it."""
+        h = Harness(scenario=_p1(PLAIN_DETECT), extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"}, extra_files=CONFTEST)
+        try:
+            run_id = h.submit(two_findings(h.base_sha)).json()["run_id"]
+            assert h.run(run_id)["status"] == "awaiting_review", h.run(run_id)["reasons"]
+            f = {x["finding_id"]: x for x in h.findings(run_id)}
+>           flags = f["N1-2"]["review_flags"]
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'review_flags'
+
+tests/test_round23.py:164: KeyError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py: No such file or directory
+____ test_d2_the_scanner_flags_every_listed_construct_on_source_lines_only _____
+
+    def test_d2_the_scanner_flags_every_listed_construct_on_source_lines_only():
+>       from zbm_delivery.engine import review_flags as RF
+E       ImportError: cannot import name 'review_flags' from 'zbm_delivery.engine' (/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/engine/__init__.py)
+
+tests/test_round23.py:250: ImportError
+__ test_d3_an_executed_standalone_fail_is_authoritative_even_with_a_conftest ___
+
+    def test_d3_an_executed_standalone_fail_is_authoritative_even_with_a_conftest():
+        """The reviewers' C (round 22): an env-conditional fix, a plain reviewer test, a base conftest.py — the standalone
+        run EXECUTED the test and it failed with the fix. Before: parked in needs_review_runner_dependent."""
+        scen = scenario_s1() + flat([AGENT_RED, {"text": "TEST: tests/test_fix_n2_1.py::test_clamp_inverted"},
+                                     OBF_ENV_FIX, {"text": "SWEEP: src/toy/calc.py:15\nFIXED"}, {"text": "FIXED"}])
+        h = Harness(scenario=scen, extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"}, extra_files=CONFTEST)
+        try:
+            doc = two_findings(h.base_sha)
+            doc["findings"].append(_n21(reproduction_test={"path": RT_PATH, "content": PLAIN_RT}))
+            run_id = h.submit(doc).json()["run_id"]
+            st = _states(h, run_id)
+>           assert st["N2-1"] not in DONE, st
+E           AssertionError: {'N1-1': 'fixed', 'N1-2': 'fixed', 'N2-1': 'needs_review_runner_dependent'}
+E           assert 'needs_review_runner_dependent' not in ('candidate_passed_checks', 'disproved', 'needs_review_runner_dependent')
+
+tests/test_round23.py:292: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n2_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n2_1.py: No such file or directory
+_____ test_d3_a_pytest_import_blocked_from_a_source_frame_fails_the_round ______
+
+    def test_d3_a_pytest_import_blocked_from_a_source_frame_fails_the_round():
+        """The reviewers' E (round 22): the SOURCE imports pytest on the fixed path; the standalone runner's import hook
+        refuses it. Before: classified "the test needs pytest" and parked."""
+        h = Harness(scenario=_p1(PARK_PCT_FIX), extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
+        try:
+            run_id = h.submit(two_findings(h.base_sha)).json()["run_id"]
+            st = _states(h, run_id)
+>           assert st["N1-2"] not in DONE, st
+E           AssertionError: {'N1-1': 'fixed', 'N1-2': 'needs_review_runner_dependent'}
+E           assert 'needs_review_runner_dependent' not in ('candidate_passed_checks', 'disproved', 'needs_review_runner_dependent')
+
+tests/test_round23.py:311: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py: No such file or directory
+__________ test_d3_runner_dependent_is_a_flag_and_needs_a_review_note __________
+
+    def test_d3_runner_dependent_is_a_flag_and_needs_a_review_note():
+        """A reviewer test that imports pytest (the test itself needs the runner): the finding ends
+        needs_review_runner_dependent, listed under the report's flags, and an accept without a note is refused."""
+        scen = scenario_s1() + flat([AGENT_RED, {"text": "TEST: tests/test_fix_n2_1.py::test_clamp_inverted"},
+                                     FIX_CLAMP, {"text": "SWEEP: src/toy/calc.py:15\nFIXED"}])
+        h = Harness(scenario=scen)
+        try:
+            doc = two_findings(h.base_sha)
+            doc["findings"].append(_n21())                                      # RT_CONTENT: `import pytest` in the test
+            run_id = h.submit(doc).json()["run_id"]
+            assert h.run(run_id)["status"] == "awaiting_review", h.run(run_id)["reasons"]
+            f = {x["finding_id"]: x for x in h.findings(run_id)}
+            assert f["N2-1"]["state"] == "needs_review_runner_dependent"
+>           rd = [fl for fl in f["N2-1"]["review_flags"] if fl["construct"] == "runner_dependent_reproduction"]
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'review_flags'
+
+tests/test_round23.py:332: KeyError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n2_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n2_1.py: No such file or directory
+___ test_b1_a_failing_review_while_another_run_is_in_flight_records_nothing ____
+
+    def test_b1_a_failing_review_while_another_run_is_in_flight_records_nothing():
+        """The reviewers' test_r22_lost: the review used to be recorded reviewed_fail and its findings left with no run."""
+        h = Harness(scenario=scenario_s1() + scenario_s1() + scenario_s1())
+        try:
+            run1 = h.submit(two_findings(h.base_sha)).json()["run_id"]
+            gate = threading.Event()
+            real = h.docker.run
+    
+            def slow(argv, **kw):                     # hold run2 in flight until the review has been answered
+                a = [str(x) for x in argv]
+                if a[:1] == ["run"] and "-suite-" in a[a.index("--name") + 1] and run1 not in a[a.index("--name") + 1]:
+                    gate.wait(60)
+                return real(argv, **kw)
+            h.docker.run = slow
+            run2 = h.submit(two_findings(h.base_sha), wait=False).json()["run_id"]
+            body = {"request_id": rid(), "review_ref": "r23-b1", "sha256": "e" * 64, "verdict": "fail", "reopened": ["N1-1"],
+                    "new_findings": [finding("N9-1", line=15, reproduction="run tests/test_calc.py::test_add_returns_sum: x",
+                                             expected="y", observed="z")]}
+            r = h.post(f"/dlv/v1/fix-runs/{run1}/review", body)
+            assert r.status_code == 409 and "RUN_IN_PROGRESS" in r.text, r.text
+>           assert h.run(run1)["status"] == "awaiting_review" and not h.events("fix_run_reviewed")
+E           AssertionError: assert ('reviewed_fail' == 'awaiting_review'
+E             
+E             - awaiting_review
+E             + reviewed_fail)
+
+tests/test_round23.py:367: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py: No such file or directory
+_ test_b2_the_red_admission_check_never_holds_the_service_lock_across_a_container _
+
+    def test_b2_the_red_admission_check_never_holds_the_service_lock_across_a_container():
+        h = Harness(scenario=scenario_s1())
+        try:
+            run1 = h.submit(two_findings(h.base_sha)).json()["run_id"]              # toy-py, awaiting review
+            base2 = _second_service(h)
+            held, entered = threading.Event(), threading.Event()
+            real = h.docker.run
+    
+            def hold(argv, **kw):                     # toy2-py's run waits inside its first engine container start
+                a = [str(x) for x in argv]
+                if a[:1] == ["run"] and "-suite-" in a[a.index("--name") + 1] and run1 not in a[a.index("--name") + 1]:
+                    entered.set()
+                    held.wait(90)
+                return real(argv, **kw)
+            h.docker.run = hold
+            doc2 = findings_doc(base2, [finding("N1-1", file="services/toy2-py/src/toy/calc.py")], service="toy2-py")
+            run2 = h.post("/dlv/v1/fix-runs", doc2).json()["run_id"]
+            assert entered.wait(60)
+            docA = findings_doc(h.base_sha, [finding("N2-1", line=15, class_hint="argument_validation",
+                                                      reproduction=f"run {HANG_PATH}::test_clamp_hangs: clamp(5, 3, 0) answers 3",
+                                                      expected="ValueError", observed="3",
+                                                      reproduction_test={"path": HANG_PATH, "content": HANG_RT})])
+            res = {}
+    
+            def admit():
+                res["r"], res["t"] = _timed(lambda: h.post("/dlv/v1/fix-runs", docA))
+            th = threading.Thread(target=admit)
+            th.start()
+            t_wait = time.monotonic()
+            while not any(e["event_type"] == "engine_box_started" and e["payload"].get("tag") == "admission" for e in h.ledger.events):
+                assert time.monotonic() - t_wait < 60
+                time.sleep(0.02)
+            time.sleep(1.0)                                                          # well inside the 15 s test
+            g1, t_g1 = _timed(lambda: h.get(f"/dlv/v1/fix-runs/{run1}"))
+            g2, t_g2 = _timed(lambda: h.get(f"/dlv/v1/fix-runs/{run2}"))
+            c2, t_c2 = _timed(lambda: h.post(f"/dlv/v1/fix-runs/{run2}/cancel", {"request_id": rid(), "reason": "operator stop"}))
+            c1, t_c1 = _timed(lambda: h.post(f"/dlv/v1/fix-runs/{run1}/cancel", {"request_id": rid(), "reason": "stop"}))
+            hl, t_hl = _timed(lambda: h.client.get("/health"))
+            # the pending admission is in flight for toy-py: a second document and a failing review are refused at once
+            d2, t_d2 = _timed(lambda: h.post("/dlv/v1/fix-runs", two_findings(h.base_sha)))
+            rv, t_rv = _timed(lambda: h.post(f"/dlv/v1/fix-runs/{run1}/review", {
+                "request_id": rid(), "review_ref": "r23-b2", "sha256": "f" * 64, "verdict": "fail", "reopened": ["N1-1"],
+                "new_findings": []}))
+            still_running = th.is_alive()
+            held.set()
+            th.join(120)
+            lat = {"get_run1": t_g1, "get_run2": t_g2, "cancel_run2": t_c2, "cancel_run1": t_c1, "health": t_hl,
+                   "second_doc": t_d2, "review_fail": t_rv}
+            print("B2", json.dumps({k: round(v, 3) for k, v in lat.items()}), "admit", res["r"].status_code, round(res["t"], 2))
+>           assert still_running, "the admission finished before the probes: the probes proved nothing"
+E           AssertionError: the admission finished before the probes: the probes proved nothing
+E           assert False
+
+tests/test_round23.py:454: AssertionError
+----------------------------- Captured stdout call -----------------------------
+B2 {"get_run1": 15.217, "get_run2": 0.006, "cancel_run2": 0.008, "cancel_run1": 0.005, "health": 0.003, "second_doc": 0.004, "review_fail": 0.013} admit 202 16.26
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_2.py: No such file or directory
+________ test_b3_wait_idle_returns_only_after_the_engine_thread_settled ________
+
+    def test_b3_wait_idle_returns_only_after_the_engine_thread_settled():
+        scen = flat([write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"}, FIX_ADD,
+                     {"text": "SWEEP: src/toy/calc.py:6\nFIXED"}])
+        h = Harness(scenario=scen)
+        try:
+            box, fired = {}, {"n": 0}
+            real = h.docker.run
+    
+            def run(argv, **kw):
+                a = [str(x) for x in argv]
+                if (not fired["n"] and a[:1] == ["run"] and "-verify-" in a[a.index("--name") + 1] and box.get("id")
+                        and any(e["event_type"] == "test_run" and e["payload"].get("phase") == "green" for e in h.ledger.events)):
+                    fired["n"] += 1
+                    h.svc.cancel("aegis", box["id"], {"request_id": rid(), "reason": "stop"})
+                    time.sleep(1.5)                   # the engine thread is still inside `docker run` after the status is failed
+                return real(argv, **kw)
+            h.docker.run = run
+            box["id"] = h.post("/dlv/v1/fix-runs", findings_doc(h.base_sha, [finding("N1-1")])).json()["run_id"]
+            h.svc.wait_idle(120)
+            seq = [e["event_type"] for e in h.events()]
+            assert fired["n"] == 1
+            after = seq[seq.index("fix_run_cancelled") + 1:]
+>           assert "engine_box_killed_after_cancel" in after, after
+E           AssertionError: ['local_log_appended', 'local_log_appended', 'sandbox_kill_requested', 'local_log_appended', 'run_interrupted', 'local_log_appended']
+E           assert 'engine_box_killed_after_cancel' in ['local_log_appended', 'local_log_appended', 'sandbox_kill_requested', 'local_log_appended', 'run_interrupted', 'local_log_appended']
+
+tests/test_round23.py:493: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+____ test_b4_the_kill_of_a_box_that_started_after_cancel_is_recorded_first _____
+
+    def test_b4_the_kill_of_a_box_that_started_after_cancel_is_recorded_first():
+        scen = flat([write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"}, FIX_ADD,
+                     {"text": "SWEEP: src/toy/calc.py:6\nFIXED"}])
+        h = Harness(scenario=scen)
+        try:
+            box, fired, order = {}, {"n": 0}, []
+            _cancel_at_verify_start(h, box, fired, order)
+            box["id"] = h.post("/dlv/v1/fix-runs", findings_doc(h.base_sha, [finding("N1-1")])).json()["run_id"]
+            h.svc.wait_idle(120)
+            kills = [o for o in order if o[0] == fired["name"]]
+>           assert fired["n"] == 1 and kills == [(fired["name"], ["sandbox_kill_requested"])], order
+E           AssertionError: [('dlv-dlv-run-Y5T13C6KGVW0P7N6CYBG69SQ2P', ['sandbox_kill_requested']), ('dlv-dlv-run-Y5T13C6KGVW0P7N6CYBG69SQ2P-verify-4fb86fb3', ['engine_box_killed_after_cancel'])]
+E           assert (1 == 1 and [('dlv-dlv-ru...ter_cancel'])] == [('dlv-dlv-ru..._requested'])]
+E             
+E             At index 0 diff: ('dlv-dlv-run-Y5T13C6KGVW0P7N6CYBG69SQ2P-verify-4fb86fb3', ['engine_box_killed_after_cancel']) != ('dlv-dlv-run-Y5T13C6KGVW0P7N6CYBG69SQ2P-verify-4fb86fb3', ['sandbox_kill_requested'])
+E             Use -v to get more diff)
+
+tests/test_round23.py:528: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+_ test_b4_an_unrecordable_kill_still_kills_and_marks_the_run_unrecorded_failure _
+
+    def test_b4_an_unrecordable_kill_still_kills_and_marks_the_run_unrecorded_failure():
+        scen = flat([write_test("test_fix_n1_1", TEST_ADD), {"text": "TEST: tests/test_fix_n1_1.py::test_add_sum"}, FIX_ADD,
+                     {"text": "SWEEP: src/toy/calc.py:6\nFIXED"}])
+        h = Harness(scenario=scen)
+        try:
+            box, fired, order = {}, {"n": 0}, []
+            _cancel_at_verify_start(h, box, fired, order)
+            h.ledger.fail_on_type = "sandbox_kill_requested"
+            box["id"] = h.post("/dlv/v1/fix-runs", findings_doc(h.base_sha, [finding("N1-1")])).json()["run_id"]
+            h.svc.wait_idle(120)
+            assert fired["n"] == 1 and any(o[0] == fired["name"] for o in order), order     # safety wins: killed anyway
+            assert fired["name"] not in h.docker.containers
+            run = h.svc.run_get(box["id"])
+>           assert run["status"] == "failed" and run.get("unrecorded_failure") is True, run
+E           AssertionError: {'run_id': 'dlv-run-CF39D4TMGWB9K3PA3EF7C6F5F9', 'request_id': 'req-bdd362be21a14e8fa2d1', 'facts_sha256': '853b72cbd999b05863234c0d8316d15adc2d3954b39352062133416d308103ab', 'caller': 'aegis', ...}
+E           assert ('failed' == 'failed'
+E             
+E               failed and None is True)
+E            +  where None = <built-in method get of dict object at 0x7f47061f2d00>('unrecorded_failure')
+E            +    where <built-in method get of dict object at 0x7f47061f2d00> = {'run_id': 'dlv-run-CF39D4TMGWB9K3PA3EF7C6F5F9', 'request_id': 'req-bdd362be21a14e8fa2d1', 'facts_sha256': '853b72cbd999b05863234c0d8316d15adc2d3954b39352062133416d308103ab', 'caller': 'aegis', ...}.get
+
+tests/test_round23.py:551: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  deerflow.agents.middlewares.read_before_write_middleware:read_before_write_middleware.py:304 read-before-write gate could not inspect '/mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py'; allowing the write (fail-open)
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/agents/middlewares/read_before_write_middleware.py", line 297, in _check_write_gate
+    current = self._content_reader(request.runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2502, in read_current_file_content
+    return _read_file_from_sandbox(runtime, path)
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/dlv313/lib/python3.13/site-packages/deerflow/sandbox/tools.py", line 2490, in _read_file_from_sandbox
+    return sandbox.read_file(path)
+           ~~~~~~~~~~~~~~~~~^^^^^^
+  File "/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/src/zbm_delivery/adapters/sandbox.py", line 520, in read_file
+    raise OSError(r.stderr.decode("utf-8", "replace")[:300] or "read failed")
+OSError: cat: /mnt/user-data/workspace/services/toy-py/tests/test_fix_n1_1.py: No such file or directory
+_________ test_b5_file_references_in_the_modules_name_files_that_exist _________
+
+    def test_b5_file_references_in_the_modules_name_files_that_exist():
+        src = SERVICE_ROOT / "src" / "zbm_delivery"
+        repo = SERVICE_ROOT.parent.parent
+        seen = 0
+        for mod in ("graceful_close.py", "serve.py"):
+            text = (src / mod).read_text(encoding="utf-8")
+            for svc, ref in re.findall(r"(services/[a-z0-9-]+/)?(?:tests/)?\b(test_[a-z0-9_]+\.py)\b", text):
+                seen += 1
+                where = repo / svc / "tests" / ref if svc else SERVICE_ROOT / "tests" / ref
+>               assert where.is_file(), (mod, svc, ref)
+E               AssertionError: ('graceful_close.py', '', 'test_graceful_close_module.py')
+E               assert False
+E                +  where False = is_file()
+E                +    where is_file = PosixPath('/tmp/claude-0/-home-claude/e0c1f780-1103-5cab-82bd-f319d011e92e/scratchpad/w23/base540/services/delivery-py/tests/test_graceful_close_module.py').is_file
+
+tests/test_round23.py:568: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_round23.py::test_d1_the_engine_never_claims_fixed_and_the_report_says_so_in_plain_words
+FAILED tests/test_round23.py::test_d1_only_an_aegis_review_with_a_verdict_per_finding_accepts
+FAILED tests/test_round23.py::test_d1_nothing_but_the_review_reaches_accepted
+FAILED tests/test_round23.py::test_d1_a_legacy_fixed_record_reads_as_candidate_passed_checks
+FAILED tests/test_round23.py::test_d1_a_failing_review_accepts_what_it_accepts_and_reopens_the_rest
+FAILED tests/test_round23.py::test_d2_a_detector_that_passes_every_check_is_flagged_at_the_top_and_blocks_an_unaddressed_accept
+FAILED tests/test_round23.py::test_d2_the_scanner_flags_every_listed_construct_on_source_lines_only
+FAILED tests/test_round23.py::test_d3_an_executed_standalone_fail_is_authoritative_even_with_a_conftest
+FAILED tests/test_round23.py::test_d3_a_pytest_import_blocked_from_a_source_frame_fails_the_round
+FAILED tests/test_round23.py::test_d3_runner_dependent_is_a_flag_and_needs_a_review_note
+FAILED tests/test_round23.py::test_b1_a_failing_review_while_another_run_is_in_flight_records_nothing
+FAILED tests/test_round23.py::test_b2_the_red_admission_check_never_holds_the_service_lock_across_a_container
+FAILED tests/test_round23.py::test_b3_wait_idle_returns_only_after_the_engine_thread_settled
+FAILED tests/test_round23.py::test_b4_the_kill_of_a_box_that_started_after_cancel_is_recorded_first
+FAILED tests/test_round23.py::test_b4_an_unrecordable_kill_still_kills_and_marks_the_run_unrecorded_failure
+FAILED tests/test_round23.py::test_b5_file_references_in_the_modules_name_files_that_exist
+16 failed in 300.15s (0:05:00)
+EXIT=1
+2026-09-30T11:53:17Z

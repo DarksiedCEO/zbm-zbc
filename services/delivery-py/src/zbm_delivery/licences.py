@@ -497,6 +497,10 @@ def check(site_packages: str, allowlist: dict, exceptions: dict, *, _seen: Optio
                                 "without metadata; spec C.7.2)")
     # R13: .pth path lines — outside the venv is a problem; inside it is another site directory to scan
     venv = _venv_root(site_packages)
+    # wave 21 (N20-D-4 swept): ``target`` is a realpath, so the venv is compared as a realpath too — with the venv
+    # reached through a symlink (a symlinked TMPDIR, macOS /var → /private/var) every in-venv .pth directory was
+    # reported "outside the virtual environment" (fail closed, but a false refusal) and its dists never scanned
+    venv = os.path.realpath(venv) if venv is not None else None
     for pth, target in pth_paths(site_packages):
         if venv is None or not (target == venv or target.startswith(venv.rstrip(os.sep) + os.sep)):
             rep.problems.append(f"{pth}: adds {target} to sys.path, outside the virtual environment (never scanned by this gate)")

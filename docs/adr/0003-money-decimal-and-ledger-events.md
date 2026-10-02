@@ -465,7 +465,250 @@ bad connection within its deadline. Plus the two concurrency tests above.
 Before the fix 9 of the 11 failed (the two concurrency tests passed; they
 guard against the new concurrency).
 
+## 8. Graceful close and ephemeral test ports (fix wave 21, Sep 28 2026)
+
+AEGIS round 20, N20-M-1 (E3; low-severity product defect and test defect):
+every path that answers without reading the whole request — the 503 load
+shed (`shed()`, which never reads the request), a `401`/`404` answered
+before the body, the `413` on a declared `Content-Length` over the cap, a
+`408`, a refusal hyper produces itself — closed the socket with request
+bytes still unread. The kernel then sends RST after the response: Linux
+reports it as `EPIPE` in the client's `SO_ERROR` after a clean EOF (the
+reviewer's `rst_witness.py`: 10/10 on the shed and 413 paths); macOS XNU
+checks `so_error` before `SS_CANTRCVMORE` and returns `ECONNRESET` from the
+client's read — the Mac "connection reset by peer" failures, because the
+tests read responses to EOF.
+
+Decision (RFC 9112 section 9.6, graceful close): after the response the
+server shuts its write side down (FIN), then reads and discards what the
+peer still sends — at most `DRAIN_MAX_BYTES` (64 KiB) within
+`DRAIN_TIMEOUT` (1 s) — and only then closes. The answer still never
+waits for the body (a slow-body client still gets its `401` at once); only
+the close is deferred, and it is bounded. hyper serves each connection
+without shutting the socket down itself (`poll_without_shutdown`), and the
+socket is taken back (`into_parts`) however the connection ended — answer
+written, deadline, or a protocol error hyper answered itself — so the
+graceful close covers every path with one descriptor per connection (a
+`dup(2)` kept outside hyper would have doubled the descriptors and made the
+512-connection cap unreachable under the common 1024 limit). An answered
+connection gives its connection slot back BEFORE it drains, so the cap
+still counts connections being served and a peer slow to close never holds
+a serving slot; draining sockets — served and load-shed alike — have their
+own bound, `DRAINS_MAX` (512), past which a socket is closed at once (the
+old behaviour, RST included). Descriptors are therefore bounded by the cap
+plus 512 draining plus the load-shed writes in flight. A peer that keeps
+sending past 64 KiB or 1 s still gets the kernel's RST — by design.
+
+Swept to the Python services (fix wave 21, lead ruling L1): uvicorn closes an answered connection with
+`transport.close()` at once — its own `limit_concurrency` 503, a 400 it writes itself, an app answer with
+`Connection: close`, every deadline — so bytes of a body still arriving after the answer made the kernel send RST
+(the client's `SO_ERROR` was `EPIPE`, error 32, on all three paths in every service). Each service's protocol class
+(`serve.py` of clipper-network, compliance, creative, delivery, detection, finance, legal, onboarding, verification;
+fulfillment's `http_limits.py`) now mixes in `GracefulCloseMixin`: FIN once the answer is flushed (`write_eof`),
+then at most 64 KiB / 1 s of the client's bytes read and discarded, then close. The mixin wraps the transport
+uvicorn sees, so every close uvicorn or the service makes goes through it. `tests/test_fix21_graceful_close.py`
+(delivery: `test_live_graceful_close.py`) in each service drives that service's protocol class under uvicorn.
+The bound is the ledger's and it is real: a client that writes a 3.9 MB body with a blocking `sendall` and reads
+only afterwards, answered early by uvicorn's `limit_concurrency` 503, still has MBs unsent when the 64 KiB drain
+ends and is reset without reading the answer (measured with fulfillment's protocol: 20/20 reset at 64 KiB, 20/20
+clean with the bound raised to 8 MiB, 20/20 clean at 64 KiB for a client that reads while it sends). Under uvicorn
+the only server-side remedy is reading the whole declared body (up to 4 MiB per connection, times the connection
+cap), which is the unbounded drain the ruling excludes; so fulfillment's 128-sender test client
+(`test_fix8_n7_2_body_prealloc.py::_send_reading`) now reads while it sends, stops at the answer and reads it to
+its `Content-Length` — a reset after a complete answer is the server's documented behaviour.
+
+Tests read every response to its `Content-Length` (`tests/common/mod.rs`),
+never to EOF. `server_slow_clients.rs::every_early_answer_closes_gracefully_so_error_is_clean`
+asserts, for the 413 (65 KiB body sent whole), the 401 and 404 (body sent),
+a 400 hyper answers itself (unparseable `Content-Length`, 30 KiB after the
+head) and the load-shed 503, that after the whole response and EOF the
+client's `SO_ERROR` is clean. With the old close it failed with `EPIPE` on
+the 413, 400 and shed paths (the small 401/404 bodies sat in hyper's read
+buffer, so those two were already clean).
+
+N20-M-2 (test race): `over_connection_cap_gets_prompt_503_and_recovers`
+opened its four slow-body holders right after the readiness probe, whose
+connection slot is released asynchronously; under CPU contention a holder
+was itself shed and `/health` got the free slot (200). The test now
+confirms every holder is held (nothing came back on it, non-blocking peek)
+and replaces a shed one before asserting the 503. The server was correct.
+
+N20-M-3: the tests' `free_port()` picked a port, released it and passed it
+to the server — a window in which another process can take it. The server
+now accepts `LEDGER_PORT=0` (the kernel picks) and `LEDGER_PORT_FILE`:
+after the bind it writes the bound port there atomically (temp file +
+rename); a write failure refuses to start. Every integration test starts
+the server that way and reads the port back; no test picks a port. The
+second Mac `server_events` failure in the relayed E4 summary stays
+unidentified (no log received); this removes the two candidate causes the
+reviewer named that are in the test harness (the port race; a 5 s startup
+wait, now 10 s behind the port file).
+
+## 9. LEDGER_PORT_FILE hardened; the Python drains bounded like the ledger's (fix wave 22, Sep 28 2026)
+
+**LEDGER_PORT_FILE (AEGIS round 21 N21-C-2, lead ruling G7).** Wave 21 wrote the port to `<path>.tmp-<pid>` with
+`std::fs::write` — a predictable name, followed if it was a symlink (a link planted there made the server overwrite
+the link's target with the port number: `tests/server_port_file.rs`, run on the wave-21 server through
+`sh -c 'ln -s … "$LEDGER_PORT_FILE.tmp-$$" && exec server'`, left the victim holding `36667\n`) — with the default
+mode (0644), BEFORE the ledger log was opened (a server refusing a corrupt log had already announced a port), and
+never removed it. Now (`src/bin/server.rs`, `write_port_file`/`publish_port_file`): a target that is a symlink
+(or not a regular file) is refused — the server does not start; the port is written only after the log opened and
+verified; to `.<name>.tmp-<16 hex from /dev/urandom>` in the target's directory, created
+`O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC` with mode 0600, written and fsynced, then `rename`d over the target (the
+symlink check is repeated just before; `rename` never follows a link at the destination); on SIGTERM/SIGINT an
+async-signal-safe handler `lstat`s the path and unlinks it only if it is still the regular file the server
+renamed there (same device and inode), then re-raises the signal with the default disposition (the process ends
+as before, killed by the signal); a `main` that returns removes it the same way. `libc` became a direct
+dependency for `O_NOFOLLOW`, `lstat`/`unlink`/`signal`/`raise` — it was already in the build through tokio/mio at
+the same version (Cargo.lock gains one dependency edge, no new package); tokio's `signal` feature would have
+added `signal-hook-registry`, which this offline build does not carry. Tests (`tests/server_port_file.rs`, 5):
+the planted temp-name link is never followed; a symlinked target is refused; nothing is written when the log
+fails verification; a stale file is replaced by a 0600 file and SIGTERM removes it; a file that is no longer the
+server's own is left alone. Wave-21 server: 4 of the 5 fail (the fifth, "leave someone else's file", passes
+trivially — it never removed anything).
+
+**The Python services' graceful close (AEGIS round 21 N21-C-1, N21-C-3; lead rulings G5, G6).** The ten Python
+services now share ONE module, byte-identical (`src/graceful_close.py`; delivery `src/zbm_delivery/graceful_close.py`;
+`tests/test_live_graceful_close_module.py`, itself byte-identical in every service, pins its sha256 and compares
+every copy the checkout holds). Mirroring §8: an answered connection gives its uvicorn concurrency slot back
+(`server_state.connections`) BEFORE it drains; at most `drains_max` connections of one server drain at once
+(`<PREFIX>_DRAINS_MAX`, default 512: `CN_`, `COMPLIANCE_`, `CREATIVE_`, `DETECTION_`, `DLV_`, `FIN_`,
+`FULFILLMENT_`, `LEGAL_`, `ONBOARDING_`, `VI_`; anything but a positive integer refuses startup), past which the
+socket is closed at once. Measured on the wave-21 code with the service's own protocol under uvicorn
+(`w22/g6_live.py`): a request arriving while one answered connection drains got uvicorn's 503 (limit 2: the
+draining one still counted), and three answered connections all drained with a cap of 2 configured nowhere; now
+the request is served and the third is closed at once. The body uvicorn buffered for the request a connection
+answered is released when its drain starts. Reads go through a `BufferedProtocol` in front of uvicorn's protocol
+into ONE 16 KiB buffer per event-loop thread: a read hands the parser at most 16 KiB (the loops read up to
+256 KiB, and uvicorn buffers a request's body up to its 64 KiB high-water mark PLUS the read that crossed it);
+drained bytes are counted in that buffer and discarded (no bytes object at all). The module holds no float
+literal (`DRAIN_TIMEOUT_S = 1`, seconds): it sits in every service's `src/`, and finance-py's G1 guardrail
+(`test_g1_no_float_in_money_paths`) refuses a float literal in any `src/` file outside its transport allowlist —
+the first 3.13 suite run of this wave caught `1.0` there (1 failed, finance-py); the guardrail was kept as it
+was and the module changed. The attribution behind this,
+and fulfillment's 96 MiB bound, are in ADR 0002 ("Fix wave 22").
+
+**Evidence, fix wave 22 (all runs 2026-09-29 00:00–00:05Z, against 1391b5c; the round-21 reviewers' close probes,
+paths re-pointed, ports 18840–18847).** `g6_live.py`, all ten services: the wave-21 code answers the second request
+503 and drains all three sockets; this code answers it and closes the third at once (detection and creative
+re-run with their service token, 00:03Z). `rst_probe`: shed-503, 413 and 401 each 50/50 clean EOF; `rst_witness`
+40/40; `cap_race` 100/100 under three busy loops; `l1_probe` unchanged (a blocking 3.9 MB `sendall` 20/20
+BrokenPipe — the pinned residual — and a reading client 20/20 503); `ledger_drain` (the Rust server, 1500 unclosed
+answered connections): fds peak 641 with its DRAINS_MAX 512, back to 8 after 2.5 s. `drain_dos` (Python,
+a 12k-connection flood of early-answered requests): fds peak 2284 → 534 (the cap holds), and legitimate `/health`
+went from 8×200 + 19×503 to 7×200 with no 503 — BUT its latency rose (p50 0.002 s → 1.4 s, max 1.9 s): the event
+loop is saturated by the flood either way, and the wave-21 code turned that into fast 503s where this code queues
+the request. That trade is not hidden: neither is a DoS defence; the ingress in front is. `drain_dos_slowhead`
+(connections that never finish their head) is UNCHANGED (fds peak 12022 in both): those are never answered, so
+the drain cap does not apply — a head timeout is their bound, outside this change.
+
+## 10. LEDGER_PORT_FILE's parent directory, and every stop signal (fix wave 23, Sep 30 2026)
+
+**AEGIS round 22 N22-C-3.** §9 refused a symlink AT the port file path but followed one in its PARENT: with
+`LEDGER_PORT_FILE=<dir>/linkdir/p3.port` and `linkdir -> victimdir` holding a regular `p3.port`, the server replaced
+`victimdir/p3.port` (0600, its port) and SIGTERM then deleted it; SIGHUP and SIGQUIT left the file behind (the
+reviewers' `g7_dirlink.py` / `g7_portfile.py` item 3/3b/9). Now (`src/bin/server.rs`, `open_parent_nofollow`,
+`port_file_location`, `write_port_file`): the parent path is walked one component at a time from `/` (absolute) or
+the working directory (relative), each component opened `O_DIRECTORY|O_NOFOLLOW` (`O_PATH` on Linux, so a
+search-only directory is walkable; `O_RDONLY` elsewhere) and `fstat`-checked to be a directory; a symlink anywhere
+in the parent path refuses the start, naming the component (checked before the log opens, and again when the file
+is published). The target check (`fstatat … AT_SYMLINK_NOFOLLOW`), the temp file (`openat
+O_CREAT|O_EXCL|O_NOFOLLOW`, 0600) and the rename (`renameat`) are all relative to that directory descriptor, which
+stays open for the life of the process: the removal (`fstatat` same device and inode, then `unlinkat` — both
+async-signal-safe) acts on the directory the file was written in even if a path component is swapped afterwards.
+The removal runs on SIGTERM, SIGINT, SIGHUP and SIGQUIT (the handler then restores the default disposition and
+re-raises: the process still dies of the signal) and when `main` returns. A caller whose temp directory sits behind
+a symlink (macOS `/var` -> `/private/var`) must pass the canonical path: the integration tests' port files now come
+from `common::real_temp_dir()` (the canonicalized temp dir). Tests (`tests/server_port_file.rs`, +4): a symlinked
+parent directory is refused and the file behind it untouched; a symlink deeper in the parent path is refused; a
+relative path in a real directory still works; SIGHUP and SIGQUIT remove the file. On the 540a64e server the first,
+second and fourth fail; the third passes (a regression guard). `cargo test --locked`: 60 unit + 53 integration
+tests, 0 failed; `cargo clippy --locked --all-targets -- -D warnings` clean (Linux only: the non-Linux branch —
+`O_RDONLY` instead of `O_PATH` — is not compiled on this box; a search-only ancestor directory would be refused there).
+The reviewers' `g7_portfile.py` against the release binary: 17/18, the 18th being its item 3b ("SIGTERM removes it
+through the dir link"), which now CANNOT happen — the file behind the link is never touched; `g7_dirlink.py` 3/3
+refused with the victim intact. Evidence: `services/delivery-py/docs/evidence/
+dept28/round22/` (ledger logs and the reviewers' probes re-run against the release binary).
+
+## 11. The publish window: stop signals blocked, removal armed before anything is written (fix wave 24, Oct 1 2026)
+
+**AEGIS round 23 N23-S-2.** §9/§10 installed the stop-signal handlers only AFTER the rename. The reviewers'
+`g7_publish_window.py` fired SIGTERM the moment the temp file appeared: 298/300 signals landed in the window and 297
+left `.<name>.tmp-<hex>` behind (the default disposition killed the process mid-publish); fired the moment the port
+file appeared, a signal between the rename and the handlers would leave the port file. Now (`src/bin/server.rs`,
+`publish_port_file` / `write_and_rename`): `main` blocks SIGTERM/SIGINT/SIGHUP/SIGQUIT before the tokio runtime starts
+its threads (they inherit the mask, so only the main thread ever takes a stop signal) and unblocks them in the main
+thread at once; the publish blocks them again in the main thread — so for the whole process — from before the temp
+file is created until the port file is in place and armed; the removal is armed BEFORE anything is written (the
+directory descriptor, the published name and the temp name recorded, the handlers installed; the temp file's
+device/inode recorded before the rename, which keeps the inode); the handler removes the temp name while the publish
+is in progress and the published name while it is still this server's file (same device and inode), then restores
+the default disposition and re-raises. A signal sent during the publish stays pending and is handled the moment the
+mask is restored, with the port file in place and armed. Test (`tests/server_port_file.rs`,
+`a_stop_signal_aimed_at_the_publish_window_leaves_neither_the_temp_file_nor_the_port_file`, 100 + 100 aimed
+SIGTERMs): before, temp file left 94/100 and port file left 2/100; after, 0/100 and 0/100.
+
+**Residual, stated (fix wave 25, AEGIS round 24 N24-S-8).** SIGKILL — and the kernel's OOM killer, which sends it —
+cannot be blocked, caught or handled: a server killed that way leaves what it had written. AEGIS round 24 measured it
+with aimed SIGKILLs: fired the moment the temp file appeared, 49/50 left `.<name>.tmp-<hex>`; fired the moment the
+port file appeared, 50/50 left the port file (by design: nothing runs after SIGKILL). The same holds for any death
+that skips the handlers (an abort, a power loss). So the port file is a HINT, not a promise: a reader connects to the
+port it names and checks it (`GET /health`) before trusting it — the port may be dead or already reused by another
+process — and treats a `.*.tmp-*` file beside it as debris to remove, never to read. `src/bin/server.rs`'s module
+documentation says the same.
+
+## 12. The ledger's own tests measure the server, not the box (fix wave 25, Oct 1 2026)
+
+Scout C (wave 25) found the slow-client tests (`tests/server_slow_clients.rs`) asserting latency bounds on a loaded
+machine (`/health` and an fsync'ing append within 1 s while 150 clients stall; a 401 within 3 s; cuts within the
+deadline + 2 s) and using fixed sleeps (300 ms, 1.5 s) as the "the bad client is now stalling the server" barrier —
+nothing confirmed the server had even accepted the bad connection before "others are served" was measured, so on a
+starved box the property could be measured before the stall existed (C2-4, C2-5). Under the wave-25 hygiene rule
+(R-HYGIENE, `devtools/hygiene_check.py`, rule L1) a wall-clock upper bound against a literal is not allowed. Now:
+
+- **Barrier, not sleep.** The server runs with a small `LEDGER_MAX_CONNECTIONS`; holders fill the slots the bad
+  connections do not hold; `/health` must then be SHED (503) — possible only if every bad connection holds a slot —
+  and after the holders are dropped `/health` answers 200 again. A slow reader is confirmed by at least 64 KiB of
+  its response already queued in its socket; a wrong-token client by its 401 having arrived.
+- **Ordering, not stopwatch.** Others are served (a shed caused by the test's own small cap is retried; hang guard =
+  the request deadline), and only THEN is every stalled connection checked to be still held (nothing came back on
+  it) — a server that served the others behind the stalled client could only do so after cutting it. For the slow
+  reader (whose socket always holds queued response bytes, so "nothing came back" cannot be observed) the ordering is
+  the request deadline itself: the only thing that cuts it is that 15 s deadline, which starts after the request was
+  sent, so others answered before `since + REQUEST_DEADLINE` were answered before the cut. Proof: the mutant
+  `serve_connection` awaited inline in the accept loop (one connection at a time — the wave-4 defect class) fails the
+  connection-dependent tests; the run that shows it is in the wave-25 E-C report (logs `proof-ledger_mut`), not
+  restated here as a count.
+- **Deadlines:** the cut is an event (the read ends because the server closed); a lower bound (not before the
+  deadline) stays — load cannot break it. Two upper bounds remain, each against the server's own deadline constant
+  (never a literal) and each separating two causes: the wrong-token client's EOF must come before the 5 s body
+  deadline (closed at once vs closed by the deadline; read right after the 401, so nothing else is inside the bound),
+  and the slow reader's others before the 15 s request deadline (above). Both are allowlisted with these reasons in
+  `devtools/hygiene_allowlist.json` (rule L1 flags a bound held in a constant too). The trickle test's "the
+  deadline is total, not per read" is an ordering: the server's cut reaches the trickling writer before its 20 s
+  of bytes are sent.
+- Review of the first wave-25 version of these tests (E-C, same wave): the wrong-token EOF was read only after the
+  others were served (their service time counted against the 5 s bound), and the slow-reader check drained the
+  socket until it would block — which can consume the whole multi-MB response the test then asserts was truncated.
+  Both changed as described above.
+- `tests/server_port_file.rs`, aimed-signal test (C2-6): the sample is now 100 signals that landed IN the publish
+  window, however many spawns that takes (at most 400); before, fewer than 90 hits in 100 spawns failed a correct
+  server whenever the poller missed the window.
+- `start_with` (C2-11) owns the child in a `ServerHandle` (kill + wait on drop) before anything that can panic.
+
+Residual, stated: the barrier relies on the connection cap's shed path (a 503 before the request is read), which
+these tests therefore also exercise; the integration tests still write fixed-prefix files directly in the temp
+directory (`std::env::temp_dir()`, which honours TMPDIR — under the hygiene wrapper that is the run's private TMPDIR,
+so a crashed test's leftovers fail rule R3 instead of accumulating in /tmp; the 735 `ledger_test_*` logs in this
+machine's /tmp are from earlier waves' code and are not removed by this wave — other sessions' files).
+
 ## Verification
 
-Commands, counts and a live three-process run are recorded in the README
-("Sep 24 2026 — money is exact, ledger records events").
+Current test counts: [docs/test-counts.md](../test-counts.md) (generated). The original commands and a live
+three-process run are recorded in the README ("Sep 24 2026 — money is exact, ledger records events"). Fix wave 25
+(H7, AEGIS N24-S-8) checked that §11's SIGKILL/OOM residual paragraph (commit 27d3440) and the matching module
+documentation in `src/bin/server.rs` are present and that its numbers (49/50 temp files, 50/50 port files) are the
+ones in the AEGIS round-24 services report (text only; those SIGKILL measurements were not re-run in wave 25).
+`FIX_WAVE_23b.md` — the wave-23b ruling record, which lives in the review session's scratchpad, NOT in this
+repository — concerns fulfillment, detection and onboarding tests, not the ledger; it is cited so this ADR does not
+claim a ruling it was not part of (docs/findings/OPEN.md C4-5 tracks such out-of-repo references).

@@ -1,0 +1,22 @@
+G4R {"i": 0, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 1, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 2, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 3, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 4, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 5, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 6, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 7, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 8, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 9, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 10, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 11, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 12, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 13, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 14, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 15, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 16, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 17, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 18, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.G4R {"i": 19, "fired": 1, "engine_box_started_after_cancel": false, "killed_record": true, "killed_record_visible_at_wait_idle": true, "box_left": false}
+.
+20 passed in 75.26s (0:01:15)

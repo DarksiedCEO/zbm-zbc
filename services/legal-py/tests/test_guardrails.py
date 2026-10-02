@@ -174,8 +174,10 @@ def test_g4_a_changed_seed_refuses_start(tmp_path, name):
 def test_g4_unpinned_rules_seed_runs_only_non_production_and_says_so(tmp_path):
     d = tmp_path / "seed"
     shutil.copytree(SEED, d)
-    raw = (d / "legal_rules_seed.json").read_bytes().replace(b"LG-19", b"LG-19", 1).replace(
-        b'"source": "LEGAL_SPEC.md rev 1', b'"source": "LEGAL_SPEC.md rev 1 (test copy)', 1)
+    orig = (d / "legal_rules_seed.json").read_bytes()
+    # wave 25 (scout B Low): a no-op `.replace(b"LG-19", b"LG-19", 1)` stood in front of this one tamper
+    raw = orig.replace(b'"source": "LEGAL_SPEC.md rev 1', b'"source": "LEGAL_SPEC.md rev 1 (test copy)', 1)
+    assert raw != orig
     (d / "legal_rules_seed.json").write_bytes(raw)
     h = hashlib.sha256(raw).hexdigest()
     with pytest.raises(RuntimeError):

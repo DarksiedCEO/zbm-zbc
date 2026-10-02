@@ -63,7 +63,7 @@ import pytest
 
 from test_fix4_limits import MAX_BATCHES
 from test_fix5_http_limits_live import _start as _start_quiet, _stop
-from test_fix8_n7_2_body_prealloc import DETECT, ORCHESTRATE, _Client, _event
+from test_fix8_n7_2_body_prealloc import DETECT, ORCHESTRATE, _Client, _event, _until
 from test_live_server import TOKEN
 
 import api
@@ -101,8 +101,11 @@ def test_small_body_is_not_blocked_by_an_exhausted_shared_budget(monkeypatch):
         return c, took
 
     c, took = asyncio.run(scenario())
+    # fix wave 25 (scout A F3; R-HYGIENE L1): the 200 is the proof — the shared pool is held throughout, so a small
+    # body that waited for it would have been answered 503 after _INFLIGHT_WAIT_S. (`took < 0.3` was a wall-clock
+    # bound on a starved box; printed now.)
+    print(f"small body answered in {took * 1000:.0f} ms")
     assert c.status == 200, (c.status, c.body[:200])
-    assert took < 0.3, f"small body waited {took:.2f}s for the shared budget"
 
 
 def test_first_small_body_bytes_of_a_large_body_come_from_the_reserve(monkeypatch):
@@ -113,7 +116,7 @@ def test_first_small_body_bytes_of_a_large_body_come_from_the_reserve(monkeypatc
         c = _Client(content_length=len(body))
         task = asyncio.ensure_future(c.run())
         await c.feed(body[:150 * KIB])
-        await asyncio.sleep(0.05)
+        await _until(lambda: lanes.inflight.used >= 150 * KIB - api._SMALL_BODY_BYTES)   # fix wave 25: not sleep(0.05)
         seen = (lanes.small_reserve.used, lanes.inflight.used)
         await c.feed(body[150 * KIB:], more=False)
         await task
@@ -121,7 +124,11 @@ def test_first_small_body_bytes_of_a_large_body_come_from_the_reserve(monkeypatc
 
     c, seen, after = asyncio.run(scenario())
     assert c.status == 200, c.body[:200]
-    assert seen == (api._SMALL_BODY_BYTES, 150 * KIB - api._SMALL_BODY_BYTES), seen
+    # Fix wave 25, H1: the shared pool also holds the read-ahead grant the body
+    # reserved before asking for more (<= _READ_GRANT_BYTES, never past the
+    # declared length) — reserved from the shared pool too, never the reserve.
+    assert seen[0] == api._SMALL_BODY_BYTES, seen
+    assert 150 * KIB - api._SMALL_BODY_BYTES <= seen[1] <= min(150 * KIB + api._READ_GRANT_BYTES, 200 * KIB) - api._SMALL_BODY_BYTES, seen
     assert after == (0, 0), after
 
 
@@ -133,7 +140,7 @@ def test_small_reserve_is_sized_so_the_real_launcher_cannot_exhaust_it():
 
 def _contended(monkeypatch, preempt_after_s: float):
     shared = 192 * KIB
-    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", shared)
+    monkeypatch.setattr(api, "_INFLIGHT_BODY_BYTES", api._SMALL_RESERVE_BYTES + shared)  # fix wave 24: the total includes the small reserve; `shared` is the shared pool
     monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 1.0)
     monkeypatch.setattr(api, "_PREEMPT_BYTE_SECONDS", shared * preempt_after_s)
     return shared
@@ -162,8 +169,10 @@ def test_slow_holder_of_the_shared_budget_is_preempted_for_a_newcomer(monkeypatc
         return holder, newcomer, took
 
     holder, newcomer, took = asyncio.run(scenario())
+    # fix wave 25 (scout A F3; R-HYGIENE L1): without the preemption the newcomer waits _INFLIGHT_WAIT_S (1 s) for
+    # bytes nobody gives back and is answered 503 — its 200 and the holder's "preempted" 408 are the proof.
+    print(f"newcomer answered in {took * 1000:.0f} ms")
     assert newcomer.status == 200, (newcomer.status, newcomer.body[:200])
-    assert took < 0.5, took
     assert holder.status == 408, (holder.status, holder.body[:200])
     assert "preempted" in holder.body.decode()
 
@@ -257,8 +266,9 @@ def test_projected_arrival_after_the_deadline_is_refused_at_the_grace(monkeypatc
     assert c.status == expect, (c.status, c.body[:300], took)
     if expect == 408:
         detail = json.loads(c.body)["detail"]
-        assert "split the batch" in detail and "bytes/s" in detail, detail
-        assert took < 1.2, f"refused after {took:.2f}s: should be at the 0.5 s grace, not the deadline"
+        # fix wave 25 (scout A F3; R-HYGIENE L1): the projection's own message is the proof it was the projection at
+        # the grace, not the 3 s deadline (whose 408 says "not received within 3s"); `took < 1.2` was wall clock.
+        assert "split the batch" in detail and "bytes/s" in detail, (detail, took)
 
 
 def test_projection_needs_a_declared_length():

@@ -25,13 +25,14 @@
 //! so the torn-tail fixture is now written directly (identical on every OS);
 //! the real SIGXFSZ-kill reproduction is kept as an extra Linux-only test.
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
+mod common;
+
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use common::PortFile;
 use serde_json::{json, Value};
 
 const TOKEN: &str = "hardening-test-token";
@@ -39,6 +40,12 @@ const TOKEN: &str = "hardening-test-token";
 struct ServerHandle {
     child: Child,
     port: u16,
+}
+
+/// A spawned server and the port file it reports its bound port in.
+struct Spawned {
+    child: Child,
+    port_file: PortFile,
 }
 
 impl Drop for ServerHandle {
@@ -87,11 +94,6 @@ fn side_files(log: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.local_addr().unwrap().port()
-}
-
 /// A file-size limit (RLIMIT_FSIZE) for the spawned server, in BYTES.
 #[derive(Clone, Copy)]
 struct Fsize {
@@ -121,9 +123,10 @@ mod sys {
 }
 
 /// Spawns the server binary directly (no shell), optionally under a
-/// file-size limit applied in the child between fork and exec.
-fn spawn(log: &Scratch, fsize: Option<Fsize>) -> (Child, u16) {
-    let port = free_port();
+/// file-size limit applied in the child between fork and exec. Fix wave 21
+/// (N20-M-3): the server binds port 0 and reports the port in a port file.
+fn spawn(log: &Scratch, fsize: Option<Fsize>) -> Spawned {
+    let port_file = PortFile::new("hardening");
     let bin = env!("CARGO_BIN_EXE_server");
     let mut cmd = Command::new(bin);
     if let Some(Fsize { bytes, ignore_sigxfsz }) = fsize {
@@ -146,82 +149,69 @@ fn spawn(log: &Scratch, fsize: Option<Fsize>) -> (Child, u16) {
         .append(true)
         .open(log.stderr_path())
         .unwrap();
+    common::ephemeral(&mut cmd, &port_file);
     let child = cmd
         .env("LEDGER_SERVICE_TOKEN", TOKEN)
-        .env("LEDGER_PORT", port.to_string())
         .env("LEDGER_LOG_PATH", log.0.to_str().unwrap())
         .stdout(Stdio::null())
         .stderr(Stdio::from(stderr))
         .spawn()
         .expect("failed to spawn ledger-rust server");
-    (child, port)
+    Spawned { child, port_file }
 }
 
-/// Waits for /health. Returns Err(exit status) if the process exits first.
-fn wait_up(child: &mut Child, port: u16) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+/// Waits for the bound port, then /health. Returns Err (with the exit status)
+/// if the process exits first. Ok(port).
+fn wait_up(child: &mut Child, port_file: &PortFile) -> Result<u16, String> {
+    let port = common::wait_port(child, port_file, Duration::from_secs(10))?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(st) = child.try_wait().unwrap() {
             return Err(format!("server exited before coming up: {st}"));
         }
         if let Ok((200, _)) = request(port, "GET", "/health", None, None) {
-            return Ok(());
+            return Ok(port);
         }
         if std::time::Instant::now() > deadline {
-            return Err("server did not come up within 5s".into());
+            return Err("server did not come up within 10s".into());
         }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
 
 fn start(log: &Scratch, fsize: Option<Fsize>) -> ServerHandle {
-    let (mut child, port) = spawn(log, fsize);
-    if let Err(e) = wait_up(&mut child, port) {
-        let _ = child.kill();
-        let _ = child.wait();
-        let stderr = std::fs::read_to_string(log.stderr_path()).unwrap_or_default();
-        panic!("{e}\n--- server stderr ---\n{stderr}");
+    let Spawned { mut child, port_file } = spawn(log, fsize);
+    match wait_up(&mut child, &port_file) {
+        Ok(port) => ServerHandle { child, port },
+        Err(e) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let stderr = std::fs::read_to_string(log.stderr_path()).unwrap_or_default();
+            panic!("{e}\n--- server stderr ---\n{stderr}");
+        }
     }
-    ServerHandle { child, port }
 }
 
 /// Runs the server to completion and returns (success, stderr) — for logs
 /// the server must refuse to open.
 fn run_expecting_exit(log: &Scratch) -> (bool, String) {
-    let (mut child, port) = spawn(log, None);
-    let r = wait_up(&mut child, port);
+    let Spawned { mut child, port_file } = spawn(log, None);
+    let r = wait_up(&mut child, &port_file);
     let _ = child.kill();
     let status = child.wait().unwrap();
     let stderr = std::fs::read_to_string(log.stderr_path()).unwrap_or_default();
     (r.is_ok() || status.success(), stderr)
 }
 
-fn raw(port: u16, bytes: &[u8]) -> std::io::Result<Vec<u8>> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    stream.write_all(bytes)?;
-    let mut out = Vec::new();
-    stream.read_to_end(&mut out)?;
-    Ok(out)
+/// Sends raw bytes and reads one response to its Content-Length (fix wave 21,
+/// N20-M-1: never to EOF). Returns (status, body).
+fn raw(port: u16, bytes: &[u8]) -> std::io::Result<(u16, String)> {
+    let resp = common::exchange(port, bytes, Duration::from_secs(5))?;
+    Ok((resp.status, resp.text()))
 }
 
 fn request(port: u16, method: &str, path: &str, auth: Option<&str>, body: Option<&str>) -> std::io::Result<(u16, String)> {
-    let auth_line = auth.map(|v| format!("Authorization: {v}\r\n")).unwrap_or_default();
-    let body = body.unwrap_or("");
-    let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{auth_line}Content-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    let resp = String::from_utf8_lossy(&raw(port, req.as_bytes())?).to_string();
-    let status: u16 = resp
-        .lines()
-        .next()
-        .and_then(|l| l.split_whitespace().nth(1))
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let body = resp.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
-    Ok((status, body))
+    raw(port, &common::raw_request(method, path, auth, body.unwrap_or("")))
 }
 
 fn authed(port: u16, method: &str, path: &str, body: Option<&str>) -> (u16, Value) {
@@ -584,8 +574,7 @@ fn d4_non_ascii_header_bytes_get_real_answers_and_never_bypass_auth() {
         ),
     ];
     for (i, (req, want)) in cases.iter().enumerate() {
-        let resp = String::from_utf8_lossy(&raw(s.port, req).unwrap()).to_string();
-        let status: u16 = resp.lines().next().and_then(|l| l.split_whitespace().nth(1)).and_then(|v| v.parse().ok()).unwrap_or(0);
+        let (status, resp) = raw(s.port, req).unwrap();
         assert_eq!(status, *want, "case {i}: {resp:?}");
         assert!(s.child.try_wait().unwrap().is_none(), "case {i}: process must stay up");
     }
@@ -646,16 +635,19 @@ fn unwritable_stderr_does_not_kill_the_server() {
 
     for (name, stderr) in targets {
         let log = scratch("devfull");
-        let port = free_port();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_server"))
+        // the port comes back in a file, not on stderr (which cannot be written here)
+        let port_file = PortFile::new("devfull");
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_server"));
+        common::ephemeral(&mut cmd, &port_file);
+        let mut child = cmd
             .env("LEDGER_SERVICE_TOKEN", TOKEN)
-            .env("LEDGER_PORT", port.to_string())
             .env("LEDGER_LOG_PATH", log.0.to_str().unwrap())
             .stdout(Stdio::null())
             .stderr(stderr)
             .spawn()
             .unwrap();
-        let up = wait_up(&mut child, port);
+        let up = wait_up(&mut child, &port_file);
+        let port = *up.as_ref().unwrap_or(&0);
         let mut s = ServerHandle { child, port };
         up.unwrap_or_else(|e| panic!("{name}: server must come up even though every stderr write fails: {e}"));
         assert_eq!(authed(s.port, "POST", "/ledger/events", Some(&event("e1"))).0, 201, "{name}");

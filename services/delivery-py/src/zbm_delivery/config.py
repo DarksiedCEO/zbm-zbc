@@ -35,9 +35,9 @@ DEFAULT_SEED_DIR = os.path.join(SERVICE_ROOT, "seed")
 PINNED_DEERFLOW_CONFIG_SHA256 = "e4d51379594e0f7dc2265a0fee0ff25aa7134b1e6aecabe91b291a1d18064f0e"
 PINNED_EXTENSIONS_CONFIG_SHA256 = "4875b2992e9062d6f8084ac64d543f50a29624bd0e7eb82586e31b3056563807"
 PINNED_SKILLS_MANIFEST_SHA256 = "26f51402a23232a6b3f6a5764829800c3570403e2694ee1a9f331fe23e040320"
-PINNED_PROMPTS_MANIFEST_SHA256 = "a55a2a0f6ef5979a4ff4df702b126bb3d43d05c208cbae6d10e0da8bc420ee1e"
+PINNED_PROMPTS_MANIFEST_SHA256 = "eff72a748472a4fb97f68dfc7158c41473cc00ebcf4186b04481dd9c5a7b6717"
 PINNED_TOOL_POLICY_SHA256 = "078560a463fd04a11fb3a358e8ebc5a1a782dcedfbd635192bc9a77738787f4d"
-PINNED_TEST_COMMANDS_SHA256 = "6c3a39edc981c969d1b1d538049ec097c59dd36dd51b27bc2407440568de5a30"
+PINNED_TEST_COMMANDS_SHA256 = "897b5dd2c860bc73fd56bfeccd3260f9ad38027b69209e249b7e0001a8241310"
 PINNED_LICENCE_ALLOWLIST_SHA256 = "c02f367f3e6cd02949e18dbc2eaa2ceabcb917ac4aa5fc58ad73bec4ac6dfb6e"
 PINNED_LICENCE_EXCEPTIONS_SHA256 = "e93abd348a10f89838e11a19c7f52994e18a20f4d52a6809b49a0a6fafe53606"
 POLICY_VERSION = 1
@@ -121,7 +121,6 @@ class Settings:
     evidence_retention_days: int = 2557
     # ports (D9)
     port: int = 8430
-    live_port_range: tuple = (18800, 18849)
 
 
 def _int(env, name, default, lo, hi) -> int:
@@ -346,13 +345,6 @@ def load(env: Optional[dict] = None) -> Settings:
     rec = _int(env, "DLV_RECURSION_LIMIT", 200, 10, 200)
     if cmd > wall:
         raise RuntimeError("DLV_CMD_TIMEOUT_S must not exceed DLV_RUN_WALL_CLOCK_S")
-    lo_hi = (env.get("DLV_LIVE_PORT_RANGE") or "18800-18849").split("-")
-    try:
-        lo, hi = int(lo_hi[0]), int(lo_hi[1])
-    except (ValueError, IndexError):
-        raise RuntimeError("DLV_LIVE_PORT_RANGE must be lo-hi") from None
-    if not (1024 <= lo <= hi <= 65535):
-        raise RuntimeError("DLV_LIVE_PORT_RANGE must be 1024 <= lo <= hi <= 65535")
     skills_env = env.get("DEER_FLOW_SKILLS_PATH")
     skills_root = env.get("DLV_SKILLS_ROOT") or DEFAULT_SKILLS_ROOT
     if skills_env not in (None, "") and os.path.abspath(skills_env) != os.path.abspath(skills_root):
@@ -380,5 +372,5 @@ def load(env: Optional[dict] = None) -> Settings:
         llm_provider=provider, llm_api_key_ref=key_ref, llm_api_base=api_base, llm_model=model, vault=vault,
         repo_path=repo, worktrees_dir=worktrees, base_ref=base_ref,
         evidence_retention_days=_int(env, "DLV_EVIDENCE_RETENTION_DAYS", 2557, 2557, 36500),
-        port=_int(env, "DLV_PORT", 8430, 1024, 65535), live_port_range=(lo, hi),
+        port=_int(env, "DLV_PORT", 8430, 1024, 65535),
     )

@@ -316,3 +316,29 @@ guardrails G1-G7 (`test_guardrails.py`), properties (`test_properties.py`: every
 alone and in random combinations → never certified), auth/limits/idempotency, ledger-failure-has-no-effect,
 reconcile/anchor/lease, the rule register, retention and integrity details. A socket guard fails any test
 that tries the network. Live run: `devtools/live_run.py` (real ledger-rust binaries, real processes).
+
+## Cross-service record: the six `textguard.py` copies (fix wave 25, Oct 1, 2026; scout B)
+
+Every Python service that takes caller text carries its own copy of compliance-py's `src/textguard.py` (services do
+not import each other). Scout B found six distinct files and no record of which differences are meant. This table is
+that record; it changes nothing. "Stated" means the copy's own docstring or ADR names the reason; "unexplained" means
+nothing does — those need a ruling, and no copy is unified or "fixed" toward another without one
+(`docs/findings/OPEN.md`).
+
+| Copy (sha256 prefix of `src/textguard.py`, re-computed by fix wave 25 E-B on `w25b`) | Difference from compliance-py's core | Status |
+|---|---|---|
+| compliance-py (`879f196b`) | the core: control chars, `normalize`/`tokens`, the injection family incl. `approval_forgery` and `guarantee_coercion`, the HTML helpers for its Change Watcher | reference |
+| clipper-network-py (`ad834e71`) | core identical; adds `money_or_earnings` (CN-26), `display_name_problem` (N16-11), `escape_for_channel`, phone/email helpers | additions stated (module docstring); **no** `certified`/`certify …` in `approval_forgery` — unexplained |
+| verification-py (`72da85c7`) | `approval_forgery` also matches `certified` and `certify (this|me|all|it)` | unexplained (V&I is the certifying department, which is the likely reason; not written down) |
+| finance-py (`82ea236f`) | verification's core; adds banned custody words (R5/FIN-29), fee words (FIN-21), `ip_in` (N17-6) | additions stated |
+| legal-py (`e7827859`) | verification's core; `ignore_instructions` also matches `playbooks?`; adds `acceptance_forgery`, `printable_text_problem`, `ip_in`/`ip_fields`; drops the HTML helpers | additions stated (LG-14, N17-6); the dropped helpers serve page fetching, which Legal does not do (my reading, not stated) |
+| delivery-py (`028f9c5a`) | `approval_forgery` also matches `fixed`/`done` and `skip … tests?/suite`; adds `remote_git_directive` and the secret-shape detectors `secret_shapes`/`secret_shapes_in` (G7); drops `guarantee_coercion`, `tokens()` and the HTML helpers | additions stated (module docstring, ADR 0011); the dropped helpers serve page fetching, which Delivery does not do (my reading, not stated); the dropped `guarantee_coercion` — unexplained |
+
+## Fix wave 25 amendments (Oct 1, 2026; scout B)
+
+- N16-1 tests: the certify-lock test waits until the job is INSIDE the Compliance read (an event) and asserts an
+  unrelated GET answers while that read is held open (was: `sleep(0.3)`, then `took < 1.0` — a GET issued before
+  the job got there passed for the wrong reason); the client-deadline test drips until released and asserts the
+  client returned while it was still dripping (was: `took < 1.4`).
+- README names `VI_OEMBED_MAX_RPS` and the serve.py tuning knobs; i07's docstring no longer names
+  `VI_IDENTITY_HMAC_KEY`, which nothing reads (the key comes from the vault port).

@@ -52,7 +52,7 @@ import string
 import time
 
 import pytest
-from conftest import NOW, TEST_SERVICE_TOKEN
+from conftest import NOW
 from ordinary_captions import CAPTIONS as IMPL_CAPTIONS
 from samples import TODAY, zbc_clip, zbc_goal
 from test_fix_wave_6 import AEGIS_CAPTIONS as AEGIS5_CAPTIONS
@@ -407,10 +407,10 @@ def test_n7_1_the_round7_probe_through_the_api_hal_json_is_bounded(api):
     application/hal+json is refused by the shape gate in milliseconds
     with a small body, exactly like application/json."""
     for ct in ("application/json", "application/hal+json"):
-        t0 = time.perf_counter()
+        t0 = time.process_time()  # fix wave 25 (scout A C3; R-HYGIENE L1): CPU of this process (TestClient), not wall
         r = api.client.post("/zbc/campaigns/camp_pod_01/rulebooks", content=BIG, headers={
             "Content-Type": ct, "X-Creative-Actor-Token": api.actor_tokens["zbc_rulebook_writer"]})
-        dt = time.perf_counter() - t0
+        dt = time.process_time() - t0
         assert r.status_code == 422 and r.json()["error"] == "PayloadTooManyMembers" and len(r.content) < 200
         assert dt < 0.5, (ct, dt)
 
@@ -492,7 +492,7 @@ def test_n7_3_maximal_legal_rulebook_and_200_full_churn_revisions(registry):
             cleared_asset_ids=[f"asset_{i}" for i in range(500)],
             source_asset_ids=[f"src_{i}" for i in range(200)]))
 
-    t0 = time.perf_counter()
+    t0 = time.thread_time()  # fix wave 25 (scout A C3; R-HYGIENE L1): this thread's CPU time, not the wall clock
     rb = rulebook_writer.draft(goal(0), registry, TODAY)
     assert sum(r.kind is RuleKind.NEVER_SAY for r in rb.rules) == 1000
     assert sum(r.kind is RuleKind.MUST_SAY for r in rb.rules) == 100
@@ -509,7 +509,7 @@ def test_n7_3_maximal_legal_rulebook_and_200_full_churn_revisions(registry):
     ns_max = max(int(r.rule_id[3:]) for r in rb.rules if r.kind is RuleKind.NEVER_SAY)
     assert ns_max == 201 * 1000, ns_max
     assert len(rb.retired_rule_ids) == 200 * 1100
-    dt = time.perf_counter() - t0
+    dt = time.thread_time() - t0
     print(f"\nN7-3 maximal rulebook + 200 full-churn revisions: {dt:.1f}s, NS-{ns_max}, {len(rb.retired_rule_ids)} retired")
     assert dt < 120  # measured 20-30 s: 220,000 retired ids are re-sorted and re-validated on every revision
 
@@ -757,7 +757,6 @@ def test_n7_5_cross_field_false_positives_on_corpus_pairs(registry):
     """Ordinary captions paired at random (caption + bio, bio + caption,
     on-screen + transcript): the cross-field read alone must not send
     more than 3% to a human."""
-    from zbc import clip_review
 
     rb = _rulebook(registry)
     rng = random.Random(8)

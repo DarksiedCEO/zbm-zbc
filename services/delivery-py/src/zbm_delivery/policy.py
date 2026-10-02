@@ -27,6 +27,15 @@ control character too. Destinations named by ``-t DIR`` / ``--target-directory``
 flag spelling; a ``find -exec`` command is classified like any simple command; a bash write under ``docs/adr/`` must
 be a ``00NN-*.md`` file, as for the write tool; ``mypy``/``pylint``/``black``/``isort``/``pre-commit``/``ruff``/
 ``gofmt`` are opaque.
+
+Round 20 (wave 21, R4/R5): a PIPE into any interpreter/shell of ``OPAQUE_ARGV0`` (or any ``*sh`` basename, however
+the path is spelled: ``|bash``, ``|  bash``, ``| /bin/bash``, ``| /usr/bin/python3``, ``|& sh``) is refused
+``pipe_to_interpreter`` at the token level, after shlex has normalised whitespace and quoting; so is a here-string /
+here-document fed to one (``bash <<< ...``: the program comes from the command line, like ``-c``). Running an
+interpreter directly (``python3 x.py``, ``bash x.sh``) stays ``allow_opaque``. A HARD link is write-class on both
+operands: ``ln`` without ``-s``/``--symbolic``, ``cp`` with ``-l``/``--link`` (alone or in a cluster such as
+``-al``) — every source must normalise inside the write roots too (and is re-resolved in the container by the
+guardrail), else ``destructive_outside_workspace``; ``link`` is not in the seed and stays ``unknown`` (denied).
 """
 
 from __future__ import annotations
@@ -50,6 +59,9 @@ OPAQUE_ARGV0 = ("python", "python3", "pytest", "sh", "bash", "zsh", "dash", "nod
                 "cargo", "go", "npm", "npx", "rustc", "perl", "ruby",
                 # R9: linters/formatters load plugins or configuration from the tree they are pointed at
                 "mypy", "pylint", "black", "isort", "pre-commit", "ruff", "gofmt")
+# R4 (wave 21): a pipe or here-string into one of these hands it a PROGRAM on stdin (also every *sh basename)
+PIPE_INTERPRETERS = frozenset(OPAQUE_ARGV0)
+_SHELL_NAME = re.compile(r"^[a-z]*sh$")
 WRITE_ARGV0 = ("cp", "mv", "tee", "touch", "mkdir", "sed", "chmod", "chown", "chgrp", "ln", "rm", "find", "rmdir", "install",
                "truncate", "dd")
 # R8: the resolver's caps, enforced here too (the classifier is the record and the first refusal)
@@ -193,25 +205,36 @@ def _tokenise(raw: str) -> Optional[list[tuple[list[str], list[str]]]]:
     """shlex with punctuation_chars: control operators and redirections come out as their own tokens, so quotes are
     honoured (``g''it`` → ``git``) and ``;`` inside a quoted string never splits a command. Returns
     ``[(argv, redirect_targets)]`` per simple command, or None when the string cannot be tokenised."""
+    parsed = _tokenise_meta(raw)
+    return None if parsed is None else [(argv, redirects) for argv, redirects, _ in parsed]
+
+
+def _tokenise_meta(raw: str) -> Optional[list[tuple[list[str], list[str], dict]]]:
+    """``_tokenise`` plus, per simple command, how its stdin is fed (R4, wave 21): ``piped`` when it follows ``|`` or
+    ``|&``, ``here`` when it carries a here-string / here-document (``<<<``, ``<<``)."""
     try:
         lex = shlex.shlex(raw, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
         tokens = list(lex)
     except ValueError:
         return None
-    out: list[tuple[list[str], list[str]]] = []
+    out: list[tuple[list[str], list[str], dict]] = []
     argv: list[str] = []
     redirects: list[str] = []
+    meta: dict = {"piped": False, "here": False}
     i = 0
     while i < len(tokens):
         t = tokens[i]
         if t in (";", "&&", "||", "|", "&", ";;", "|&"):
             if argv or redirects:
-                out.append((argv, redirects))
+                out.append((argv, redirects, meta))
             argv, redirects = [], []
+            meta = {"piped": t in ("|", "|&"), "here": False}
         elif t in ("(", ")"):
             return None
-        elif t in (">", ">>", "<", "<<", "<<<", ">|", "&>", ">&"):
+        elif t in (">", ">>", "<", "<<", "<<<", ">|", "&>", ">&", "<<-"):
+            if t in ("<<", "<<<", "<<-"):
+                meta["here"] = True
             if i + 1 < len(tokens):
                 if t in (">", ">>", ">|", "&>"):
                     redirects.append(tokens[i + 1])
@@ -227,8 +250,18 @@ def _tokenise(raw: str) -> Optional[list[tuple[list[str], list[str]]]]:
             argv.append(t)
         i += 1
     if argv or redirects:
-        out.append((argv, redirects))
+        out.append((argv, redirects, meta))
     return out
+
+
+def _stdin_program_target(argv: list[str]) -> Optional[str]:
+    """The interpreter/shell a command runs when its stdin is a program: argv[0]'s basename (any spelling of the
+    path) when it is in ``PIPE_INTERPRETERS`` or a ``*sh`` name, else None (R4)."""
+    words = _strip_env_assignments(argv)
+    if not words:
+        return None
+    name = _basename(words[0])
+    return name if name in PIPE_INTERPRETERS or _SHELL_NAME.fullmatch(name) else None
 
 
 def _strip_env_assignments(argv: list[str]) -> list[str]:
@@ -385,6 +418,30 @@ def _write_operands(name: str, argv: list[str], cwd: str) -> Optional[list[str]]
     return positional
 
 
+def _source_write_operands(name: str, argv: list[str]) -> list[str]:
+    """R5 (wave 21): the SOURCE operands a command writes, else []: a hard link — ``ln`` without ``-s``/
+    ``--symbolic``, ``cp`` with ``-l``/``--link`` (alone or in a short cluster: ``-al``, ``-la``, ``-rl``) — makes
+    the source file writable through the link; ``mv`` removes its sources (swept in the same wave: ``mv
+    services/other/a services/<svc>/b`` was allowed)."""
+    positional, options, values = _split_options(name, argv)
+    shorts = "".join(o[1:] for o in options if o.startswith("-") and not o.startswith("--"))
+    if name == "mv":
+        pass
+    elif name == "ln":
+        if "s" in shorts or "--symbolic" in options:
+            return []
+    elif name == "cp":
+        if "l" not in shorts and "--link" not in options:
+            return []
+    else:
+        return []
+    if _target_directory(values) is not None:
+        return positional                                   # -t DIR: every positional is a source
+    if name == "ln" and len(positional) == 1:
+        return positional                                   # ln TARGET: a link to TARGET in the cwd
+    return positional[:-1]
+
+
 def _find_subcommands(argv: list[str]) -> list[list[str]]:
     """The commands ``find -exec/-execdir/-ok/-okdir … ;|+`` would run, with ``{}`` standing for the start
     directory (a path under it resolves inside the same root)."""
@@ -415,11 +472,22 @@ def _classify_bash(seed: dict, raw: str, ctx: Context) -> tuple[str, str, bool, 
     hit = _raw_rule_hit(seed, raw)
     if hit is not None:
         return "unknown", f"raw string contains {hit!r} (indirect execution is refused)", False, []
-    cmds = _tokenise(raw)
-    if cmds is None:
+    parsed = _tokenise_meta(raw)
+    if parsed is None:
         return "unknown", "command could not be tokenised", False, []
-    if not cmds:
+    if not parsed:
         return "unknown", "empty command", False, []
+    # R4 (wave 21): a program fed to an interpreter/shell on stdin is `sh -c` by another name — refused however the
+    # pipe, the whitespace or the interpreter's path is spelled (shlex has already normalised all three)
+    for argv, _redirects, meta in parsed:
+        target = _stdin_program_target(argv)
+        if target and meta["piped"]:
+            return "unknown", (f"pipe_to_interpreter: output piped into {target} (indirect execution is refused, even when "
+                               "harmless; edit files with read_file/str_replace/write_file)"), False, []
+        if target and meta["here"]:
+            return "unknown", (f"pipe_to_interpreter: a here-string/here-document fed to {target} (indirect execution is "
+                               "refused, even when harmless; edit files with read_file/str_replace/write_file)"), False, []
+    cmds = [(argv, redirects) for argv, redirects, _ in parsed]
     worst, why, cwd = "read", "read-only command", ctx.workspace
     opaque = False
     targets: list[str] = []
@@ -510,6 +578,13 @@ def _classify_bash(seed: dict, raw: str, ctx: Context) -> tuple[str, str, bool, 
                 bad = exec_write_ok(a, ctx, cwd)
                 if bad:
                     return "destructive_outside_workspace", f"{name} refused: {bad}", False, []
+                targets.append(_norm(a, cwd))
+            # R5 (wave 21): a hard link's SOURCE is write-class too (the link shares the file); mv removes its sources
+            for a in _source_write_operands(name, argv):
+                bad = exec_write_ok(a, ctx, cwd)
+                if bad:
+                    what = "source" if name == "mv" else "hard-link source"
+                    return "destructive_outside_workspace", f"{name} refused: {what} {bad}", False, []
                 targets.append(_norm(a, cwd))
     return worst, why, opaque, targets
 

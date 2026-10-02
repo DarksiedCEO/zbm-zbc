@@ -4,7 +4,6 @@ first and failed on integration-2026-09-24 @ 923e20c (evidence in the fix17 scra
 from __future__ import annotations
 
 import threading
-import time
 from datetime import timedelta
 
 import httpx
@@ -26,56 +25,79 @@ def _new(**kw):
 # ============================================================ N16-1 wall-clock budget; no remote call under the lock
 
 class _Drip(httpx.SyncByteStream):
-    def __init__(self, gap_s: float, chunks: int):
-        self.gap, self.n = gap_s, chunks
+    """An answer that drips one byte every ``gap_s`` until the test ends it (``done``) — never on its own."""
+
+    def __init__(self, gap_s: float, done: threading.Event):
+        self.gap, self.done = gap_s, done
 
     def __iter__(self):
-        for _ in range(self.n):
-            time.sleep(self.gap)
+        while not self.done.wait(self.gap):
             yield b" "
 
 
 def test_n16_1_compliance_client_has_a_total_wall_clock_deadline_not_a_per_chunk_one():
+    """Wave 25 (scout B M2): ordered by state, not by a wall-clock bound a starved runner can break. The answer drips
+    a byte every 0.9 s (each gap inside the 1.0 s budget) and never ends until the test ends it: a TOTAL budget
+    returns `unavailable` while it is still dripping; a per-chunk deadline would read until the test gave up."""
     from compliance_client import HttpComplianceRegister
 
-    def handler(req):
-        return httpx.Response(200, stream=_Drip(0.9, 20))
-
-    c = HttpComplianceRegister("http://c.test", "svc", "caller", transport=httpx.MockTransport(handler), timeout=1.0)
-    t0 = time.monotonic()
-    row = c.row("HR-13")
-    took = time.monotonic() - t0
-    assert row.available is False
-    assert took < 1.4, f"the 1.0 s budget ran {took:.2f} s (dripping answer read chunk by chunk)"
+    done = threading.Event()
+    c = HttpComplianceRegister("http://c.test", "svc", "caller", timeout=1.0,
+                               transport=httpx.MockTransport(lambda req: httpx.Response(200, stream=_Drip(0.9, done))))
+    got = {}
+    t = threading.Thread(target=lambda: got.update(row=c.row("HR-13")))
+    t.start()
+    t.join(60)                                        # a bound on a stall, never on the answer's speed
+    returned_while_dripping = not t.is_alive() and not done.is_set()
+    done.set()
+    t.join(60)
+    assert returned_while_dripping, "the client read the dripping answer past its 1.0 s budget (a per-chunk deadline)"
+    assert got["row"].available is False
 
 
 class _SlowCompliance(FakeCompliance):
-    def __init__(self, delay: float):
+    """A Compliance read that does not return until the test releases it (``inside`` is set once a read is in it)."""
+
+    def __init__(self):
         super().__init__()
-        self.delay = delay
+        self.block = False
+        self.inside = threading.Event()
+        self.release = threading.Event()
 
     def row(self, obligation_id):
-        time.sleep(self.delay)
+        if self.block:
+            self.inside.set()
+            self.release.wait(120)
         return super().row(obligation_id)
 
 
 def test_n16_1_certify_job_does_not_hold_the_lock_while_compliance_is_slow():
-    slow = _SlowCompliance(0.0)
+    """Wave 25 (scout B M2/M3): ordered by state, not by a sleep and a wall-clock bound. The GET is issued only once
+    the certify job is INSIDE the Compliance read (0f017a7 slept 0.3 s and hoped — a GET issued before the job got
+    there was fast for the wrong reason), and it must answer while that read is still held open: a lock held across
+    the read would keep the GET waiting until the test releases it."""
+    slow = _SlowCompliance()
     h = Harness(fakes={"compliance": slow})
     h.approve_rules()
     h.clean_clip("s1")
-    slow.delay = 1.5
+    slow.block = True
     done = {}
     t = threading.Thread(target=lambda: done.update(r=h.post("/vi/v1/jobs/certify/run", {"request_id": rid()},
                                                              caller="scheduler")))
     t.start()
-    time.sleep(0.3)
-    t0 = time.monotonic()
-    r = h.get("/vi/v1/holds")
-    took = time.monotonic() - t0
-    t.join(60)
-    assert r.status_code == 200 and done["r"].status_code == 200
-    assert took < 1.0, f"an unrelated GET waited {took:.2f} s behind a slow Compliance call"
+    try:
+        assert slow.inside.wait(60), "the certify job never reached the Compliance read"
+        got = {}
+        g = threading.Thread(target=lambda: got.update(r=h.get("/vi/v1/holds")))
+        g.start()
+        g.join(60)                                    # a bound on a stall, never on the answer's speed
+        answered_while_held = not g.is_alive() and not slow.release.is_set()
+    finally:
+        slow.release.set()
+        t.join(60)
+    g.join(60)
+    assert answered_while_held, "an unrelated GET waited behind a Compliance read held open (the lock was held)"
+    assert got["r"].status_code == 200 and done["r"].status_code == 200
 
 
 def test_n16_1_hr13_is_read_once_per_certify_run_not_once_per_submission():

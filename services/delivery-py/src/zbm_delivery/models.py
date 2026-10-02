@@ -48,6 +48,34 @@ class Source(Strict):
         return _text(v, "source.ref", allow_newlines=False, max_len=128)
 
 
+REPRO_TEST_MAX = 64 * 1024
+REPRO_TEST_PATH_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._/\-]{0,399}$")
+
+
+class ReproductionTest(BaseModel):
+    """Wave 21 (L2): a RED test authored by the reviewer (AEGIS) for a finding that has no test at the base commit.
+    ``path`` is relative to the service directory and must be a NEW file there; the engine writes ``content`` onto
+    every tree it builds for the run (never into a commit), records its sha256 as reviewer-authored, and denies
+    any change of that path by the agent. The finding's ``reproduction`` must name ``<path>::<test>``."""
+    model_config = ConfigDict(extra="forbid", str_max_length=REPRO_TEST_MAX)
+    path: str = Field(min_length=1, max_length=400)
+    content: str = Field(min_length=1, max_length=REPRO_TEST_MAX)
+
+    @field_validator("path")
+    @classmethod
+    def _path(cls, v):
+        if not REPRO_TEST_PATH_RE.fullmatch(v) or ".." in v.split("/") or "//" in v or v.endswith("/"):
+            raise ValueError("reproduction_test.path must be a plain path relative to the service directory")
+        return v
+
+    @field_validator("content")
+    @classmethod
+    def _content(cls, v):
+        if "\x00" in v or has_control_chars(v.replace("\t", " ").replace("\r", ""), allow_newlines=True):
+            raise ValueError("reproduction_test.content contains control characters")
+        return v
+
+
 class Finding(Strict):
     id: str = Field(pattern=FINDING_ID_RE.pattern)
     severity: Literal["critical", "high", "medium", "low", "info"]
@@ -58,6 +86,7 @@ class Finding(Strict):
     expected: str = Field(min_length=1, max_length=FREE_TEXT_MAX)
     observed: str = Field(min_length=1, max_length=FREE_TEXT_MAX)
     class_hint: Optional[str] = Field(default=None, max_length=120)
+    reproduction_test: Optional[ReproductionTest] = None
 
     @field_validator("title")
     @classmethod
@@ -107,6 +136,51 @@ class FindingsDocument(Strict):
         return self
 
 
+FLAG_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}-(?:F[0-9]{3,4}|RD)$")
+REVIEW_NOTE_MIN = 20
+
+
+class FindingVerdict(Strict):
+    """Wave 23 (D1): the reviewer's explicit verdict on ONE finding of the run. ``accept`` is the only route to the
+    finding state ``accepted``; ``reopen`` sends it to a new run (it must also be listed in ``reopened``). A
+    runner-dependent finding's ``accept`` needs a ``note`` of at least 20 characters (D3)."""
+    finding_id: str
+    verdict: Literal["accept", "reopen"]
+    note: str = Field(default="", max_length=2000)
+
+    @field_validator("finding_id")
+    @classmethod
+    def _fid(cls, v):
+        if not FINDING_ID_RE.fullmatch(v):
+            raise ValueError("finding_id must be a finding id")
+        return v
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v):
+        return _text(v, "note", allow_newlines=True, max_len=2000)
+
+
+class FlagNote(Strict):
+    """Wave 24 (E2): the reviewer's note on ONE review flag — what was checked at that line. An accepting review
+    needs one per flag of every accepted finding: >= 20 characters, no single character over half of it, and not
+    the same text as another note of the review (checked by the service)."""
+    flag_id: str
+    note: str = Field(default="", max_length=2000)
+
+    @field_validator("flag_id")
+    @classmethod
+    def _fid(cls, v):
+        if not FLAG_ID_RE.fullmatch(v):
+            raise ValueError("flag_id must be a review flag id (<finding>-F001 / <finding>-RD)")
+        return v
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v):
+        return _text(v, "note", allow_newlines=True, max_len=2000)
+
+
 class ReviewRequest(Strict):
     request_id: str = Field(pattern=f"^{ID_RE.pattern}$")
     review_ref: str = Field(min_length=1, max_length=128)
@@ -114,6 +188,36 @@ class ReviewRequest(Strict):
     verdict: Literal["pass", "fail"]
     reopened: list[str] = Field(default_factory=list, max_length=200)
     new_findings: list[Finding] = Field(default_factory=list, max_length=200)
+    # wave 23 (D1/D2): a verdict per finding (a pass needs one for EVERY finding of the run, all accept) and every
+    # review flag id of each accepted finding
+    finding_verdicts: list[FindingVerdict] = Field(default_factory=list, max_length=200)
+    # wave 24 (E2): a note per flag (a bare flag id is read as a flag with an empty note — refused when it matters,
+    # with the reason, by the service) and the sha256 of the run's complete source diff the reviewer read
+    flags_addressed: list[FlagNote] = Field(default_factory=list, max_length=2000)
+    src_diff_sha256: Optional[str] = Field(default=None, pattern=SHA_RE.pattern)
+
+    @field_validator("finding_verdicts")
+    @classmethod
+    def _verdicts(cls, v):
+        ids = [x.finding_id for x in v]
+        if len(set(ids)) != len(ids):
+            raise ValueError("one verdict per finding")
+        return v
+
+    @field_validator("flags_addressed", mode="before")
+    @classmethod
+    def _flag_ids_alone(cls, v):
+        if isinstance(v, list):
+            return [{"flag_id": x, "note": ""} if isinstance(x, str) else x for x in v]
+        return v
+
+    @field_validator("flags_addressed")
+    @classmethod
+    def _flags(cls, v):
+        ids = [x.flag_id for x in v]
+        if len(set(ids)) != len(ids):
+            raise ValueError("flags_addressed ids must be unique")
+        return v
 
     @field_validator("review_ref")
     @classmethod
@@ -136,6 +240,13 @@ class ReviewRequest(Strict):
             raise ValueError("a pass carries no reopened or new findings")
         if self.verdict == "fail" and not (self.reopened or self.new_findings):
             raise ValueError("a fail names at least one reopened or new finding")
+        if self.verdict == "pass" and not self.finding_verdicts:
+            raise ValueError("a pass needs an explicit verdict for every finding (finding_verdicts; D1)")
+        for fv in self.finding_verdicts:
+            if fv.verdict == "reopen" and fv.finding_id not in self.reopened:
+                raise ValueError(f"finding {fv.finding_id}: a reopen verdict must also be listed in reopened")
+            if fv.verdict == "accept" and fv.finding_id in self.reopened:
+                raise ValueError(f"finding {fv.finding_id}: accepted and reopened at once")
         return self
 
 

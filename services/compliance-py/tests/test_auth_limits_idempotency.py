@@ -5,7 +5,7 @@ import json
 import pytest
 
 import api
-from helpers import ANDRE_TOKEN, CALLERS, SERVICE_TOKEN, Harness, client_facts, clip_facts, creator_facts, rid
+from helpers import ANDRE_TOKEN, CALLERS, SERVICE_TOKEN, Harness, client_facts, creator_facts, rid
 
 ROUTES = [
     ("POST", "/compliance/v1/rule"), ("POST", "/compliance/v1/review"), ("POST", "/compliance/v1/gates/activation"),

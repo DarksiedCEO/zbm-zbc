@@ -1,12 +1,11 @@
 """Certification scenarios, spec §H items 1-16 (no network; every port is a fake)."""
 
-from datetime import timedelta
 
 import pytest
 
-from fakes import FakeSanctions, PassingFinance, PassingVerification
+from fakes import PassingVerification
 from helpers import (ANDRE_TOKEN, NOW, SEED_IDS, Harness, brand_facts, client_facts, clip_facts, creator_facts,
-                     passing_ports, publish_facts, rid, unmet_codes, unmet_ids)
+                     publish_facts, rid, unmet_codes)
 from ports import NotBuiltFinance31, NotBuiltLegal37, NotWiredAccessibilityChecker, NotWiredSanctionsProvider
 
 

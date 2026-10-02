@@ -5,8 +5,6 @@ from __future__ import annotations
 import random
 from decimal import Decimal
 
-import pytest
-
 from helpers import ANDRE_TOKEN, Harness, rid
 from money import WIRE_PATTERN
 
@@ -326,7 +324,7 @@ def test_s14_ten_thousand_random_payables_sum_and_balance():
     payees = [f"clip-{i:02d}" for i in range(50)]
     for pid in payees:
         hr.payee(pid)
-    t0 = time.time()
+    c0 = time.process_time()      # wave 25 (M2): the S14 budget is CPU work, not a starved wall clock
     total_expected = Decimal("0.00")
     per_payee: dict = {}
     for n in range(10_000):
@@ -355,4 +353,4 @@ def test_s14_ten_thousand_random_payables_sum_and_balance():
         for l in e["lines"]:
             assert WIRE_PATTERN.fullmatch(l["debit"]) and WIRE_PATTERN.fullmatch(l["credit"])
     hr.assert_books_balance()
-    assert time.time() - t0 < 600
+    assert time.process_time() - c0 < 600

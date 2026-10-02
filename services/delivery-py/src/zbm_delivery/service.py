@@ -12,6 +12,15 @@ run survives a restart (S9: a run found in a live state at start-up is recorded 
 
 Runs execute one at a time on a worker thread (``_worker``) inside ``FixEngine.execute``'s exception boundary.
 
+Wave 23: a finding's engine end state is ``candidate_passed_checks`` (D1: the engine never claims "fixed"); only
+``review`` (caller ``aegis``, an explicit verdict per finding, every review flag of an accepted finding named) sets
+``accepted``. The admission RED check of reviewer-authored reproductions runs its containers OUTSIDE the service lock
+(B2, N22-D-5): a recorded ``reproduction_red_check_started`` reserves the service's run slot (a pending admission is
+in flight for the service), the lock is released while the containers run, and the result is recorded and the run
+admitted (or refused) in ONE later hold. A failing review is refused 409 before anything is recorded while another
+run (or pending admission) of the service is in flight, and its child run is created in the same critical section
+and the same local-log line as the review itself (B1, N22-D-4).
+
 Round 19 R5: ``run_update`` / ``finding_update`` / ``finding_transition`` refuse (``Conflict``) on a run that is not
 live (failed, reviewed or awaiting review) — after ``fix_run_cancelled`` or the deadline nothing is recorded on the
 run except the post-mortem events (``run_interrupted``, ``sandbox_released``, ``agent_usage``), and nothing that is
@@ -24,6 +33,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import secrets
 import threading
 from collections import OrderedDict
@@ -37,15 +47,19 @@ from zbm_delivery import textguard
 from zbm_delivery.clock import Clock, SystemClock, iso, parse_iso
 from zbm_delivery.config import POLICY_VERSION, Settings
 from zbm_delivery.engine import states
-from zbm_delivery.errors import Conflict, DlvError, Invalid, NotFound, Refused, Unavailable
+from zbm_delivery.errors import Conflict, DlvError, Forbidden, Invalid, NotFound, Refused, Unavailable
 from zbm_delivery.ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
 from zbm_delivery.models import ID_RE
 from zbm_delivery.ports import NoChatBackend
-from zbm_delivery.runner import node_id_in_text, same_test
+from zbm_delivery.gitport import GitRefused
+from zbm_delivery.runner import detect_framework, node_id_in_text, reproduction_problem, same_test
 from zbm_delivery.store import RecordLog, StoreWriteError
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
 IDEMPOTENCY_MAX = 200_000
+# Wave 25 (H8, AEGIS N24-D-1): the recorded answers of closed admissions are kept like the idempotency records — the
+# most recent CLOSED_ADMISSIONS_MAX, oldest first out (each costs a RED container run or an operator's cancel).
+CLOSED_ADMISSIONS_MAX = 20_000
 EVIDENCE = EA.ACTOR
 GATE = "intel_01_gate"
 ENGINE = "intel_08_engine"
@@ -56,6 +70,26 @@ EVIDENCE_KINDS = ("brief", "test_output", "suite_output", "diff", "report", "rev
 EVIDENCE_MAX_BYTES = 8 * 1024 * 1024
 # R5: the only run events accepted once a run is no longer live (bookkeeping of a stopped run)
 POST_MORTEM_EVENTS = ("run_interrupted", "sandbox_released", "agent_usage", "agent_usage_linked")
+# the finding states a run can end awaiting review with (wave 23, D1: the engine's end states; none is "fixed")
+DONE_STATES = states.ENGINE_DONE_STATES
+# a run in one of these holds its service's run slot (B1/B2: so does a pending admission)
+LIVE_RUN_STATES = ("received", "preparing", "running", "suite", "reporting")
+
+
+def _note_problem(note: str) -> Optional[str]:
+    """Wave 24 (E2): why a review note is not a note — shorter than REVIEW_NOTE_MIN characters, or one character
+    making up more than half of it (``xxxx…``, ``a.a.a.…``); None when it is acceptable as text. (Whether it is TRUE
+    is the reviewer's attestation, never the engine's.)"""
+    from collections import Counter
+
+    from zbm_delivery.models import REVIEW_NOTE_MIN
+    note = (note or "").strip()
+    if len(note) < REVIEW_NOTE_MIN:
+        return f"the note is shorter than {REVIEW_NOTE_MIN} characters"
+    ch, n = Counter(note).most_common(1)[0]
+    if n * 2 > len(note):
+        return f"the note is filler ({ch!r} is {n} of its {len(note)} characters)"
+    return None
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -151,6 +185,17 @@ class DeliveryService:
             fsops.protect(self.evidence_root)
             fsops.protect(os.path.join(settings.data_dir, "dlv_log.jsonl"))
         self._queue: "queue.Queue[str]" = queue.Queue()
+        # B2 (wave 23): admissions whose reviewer-test RED containers are running outside the lock — admission id ->
+        # {service, request_id, review_of}; each holds its service's run slot until it is admitted or refused
+        self._admissions: dict[str, dict] = {}
+        # wave 24 (E6, N23-D-7): admissions that ran their RED containers and ended without being admitted (refused,
+        # or cancelled by the operator while the containers ran) — admission id -> {status, reason, body}. Applied from
+        # the local log like every record: a replay of the same admission (same id: same caller, request id and body)
+        # gets this answer and runs nothing again (its crossings would collide with the first attempt's records).
+        self._closed_admissions: "OrderedDict[str, dict]" = OrderedDict()
+        # wave 25 (H8): admissions cancelled while their RED containers run — in memory only (nothing runs across a
+        # restart). The cancel is honoured from here whatever the bounded map above has forgotten meanwhile.
+        self._cancelled_running: set[str] = set()
         self._engine = None
         self._worker: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -177,7 +222,8 @@ class DeliveryService:
             settings=settings, recorder=recorder, docker=docker, chat_backend=chat_backend, egress=egress,
             policy_seed=policy_seed, test_seed=test_seed, clock=self.clock, on_ledger_failure=self._on_ledger_failure,
             record=self._record_plain, resolve_sandbox_path=self._resolve_sandbox_path,
-            resolve_sandbox_paths=self._resolve_sandbox_paths, evidence_root=self.evidence_root))
+            resolve_sandbox_paths=self._resolve_sandbox_paths, evidence_root=self.evidence_root,
+            record_if_live=self._record_if_live))
         if self.reconcile_mode:
             return
         if not self.log.in_memory and len(self.log):
@@ -186,6 +232,7 @@ class DeliveryService:
             except Unavailable as exc:
                 raise RuntimeError(f"refusing to start: the instance lease could not be recorded ({exc.reason})") from None
         self._fail_live_runs_at_start()
+        self._rescan_legacy_runs()
         self._reap("start")
         if harness_factory is not None and provider_factory is not None:
             from zbm_delivery.engine.loop import FixEngine
@@ -231,6 +278,17 @@ class DeliveryService:
             self._commit(op)
             return event_id
 
+    def _record_if_live(self, status_fn, event_id, event_type, actor, subject, payload, summary) -> bool:
+        """Wave 22 (G4, N21-D-4): ``_record_plain`` only while ``status_fn()`` is live — the status read and the record
+        under ONE hold of the service lock. Cancel and the deadline change a run's status under the same lock, so an
+        engine container is either recorded started before ``fix_run_cancelled`` (and killed by the interrupt that
+        follows it) or never recorded started at all."""
+        with self.lock:
+            if status_fn() in states.TERMINAL or status_fn() == "awaiting_review":
+                return False
+            self._record_plain(event_id, event_type, actor, subject, payload, summary)
+            return True
+
     def _commit(self, op: Op) -> None:
         if not op.ops:
             return
@@ -254,6 +312,8 @@ class DeliveryService:
         if kind == "run":
             self.runs[r["run_id"]] = r
         elif kind == "finding":
+            if r.get("state") in states.LEGACY_FINDING_STATES:       # D1 migration alias: "fixed" read as the new name
+                r = {**r, "state": states.normalize_finding_state(r["state"])}
             self.findings.setdefault(r["run_id"], {})[r["finding_id"]] = r
         elif kind == "finding_doc":
             self.finding_docs.setdefault(r["run_id"], {})[r["finding"]["id"]] = r["finding"]
@@ -265,6 +325,15 @@ class DeliveryService:
             self.idem.move_to_end(key)
             while len(self.idem) > IDEMPOTENCY_MAX:
                 self.idem.popitem(last=False)
+        elif kind == "admission_closed":
+            # wave 25 (H8, N24-D-1): bounded like `idem` — at start, the replay of the local log keeps only the most
+            # recent CLOSED_ADMISSIONS_MAX. An answer that has gone out of it is not needed for safety: a replay of
+            # that admission runs its RED check again under the same admission id and is judged on what it records
+            # then — never admitted without a RED verdict recorded for it.
+            self._closed_admissions[r["admission_id"]] = r
+            self._closed_admissions.move_to_end(r["admission_id"])
+            while len(self._closed_admissions) > CLOSED_ADMISSIONS_MAX:
+                self._closed_admissions.popitem(last=False)
         # event, lease, reconcile, founder_refused, injection, audit: evidence only
 
     def _write_evidence_file(self, r_run_id: str, evidence_id: str, content: bytes) -> None:  # noqa: N803
@@ -350,6 +419,109 @@ class DeliveryService:
                 except Unavailable:
                     self.mark_failed_unrecorded(run_id, R.item("HARNESS_ERROR", "restart; ledger unavailable"))
 
+    def _rescan_legacy_runs(self) -> None:
+        """Wave 24 (E5, N23-D-5): a run awaiting review whose records predate the review flags or the embedded source
+        diff (no ``review_flags`` on a finding, or no ``src_diff_sha256`` on the run — every record written before
+        waves 23/24) is re-scanned from its commits at load: flags recomputed per committed finding, the complete
+        source diff recorded, the report regenerated, and ONE record-first operation (``run_rescanned_for_review``
+        on the ledger, then the local-log line) puts the new records in place. Its old report (the legacy "fixed"
+        wording) is never served again. A run that cannot be re-scanned (no git, a commit or framework that cannot
+        be read) is failed — it cannot be reviewed on records nobody can check."""
+        for run_id, run in sorted(self.runs.items()):
+            if run.get("status") != "awaiting_review":
+                continue
+            recs = self.findings.get(run_id, {})
+            if run.get("src_diff_sha256") and all("review_flags" in r for r in recs.values()):
+                continue
+            try:
+                self._rescan_run(run_id)
+            except Unavailable:
+                raise RuntimeError(f"refusing to start: the legacy run {run_id} could not be re-scanned "
+                                   "(the ledger or the store is unavailable)") from None
+            except Exception as exc:  # noqa: BLE001 - any reason the records cannot be rebuilt: the run is failed
+                try:
+                    self.run_transition(run_id, "failed", "fix_run_failed",
+                                        {"run_id": run_id, "code": "EVIDENCE_UNAVAILABLE", "why": "legacy_rescan_failed",
+                                         "error": type(exc).__name__},
+                                        f"Legacy run {run_id} could not be re-scanned: failed",
+                                        {"reasons": [R.item("EVIDENCE_UNAVAILABLE",
+                                                            f"legacy run not re-scannable ({type(exc).__name__})")],
+                                         "finished_at": self.now_iso()})
+                except Unavailable:
+                    raise RuntimeError(f"refusing to start: the legacy run {run_id} could neither be re-scanned nor "
+                                       "failed (the ledger is unavailable)") from None
+
+    def _rescan_run(self, run_id: str) -> None:
+        from zbm_delivery.engine import report as report_mod
+        from zbm_delivery.engine import review_flags as RF
+        from zbm_delivery.engine import srcdiff
+        from zbm_delivery.runner import path_class
+
+        if self.git is None:
+            raise GitRefused("no git port")
+        run = json.loads(json.dumps(self.runs[run_id]))
+        service, base = run["service"], run["base_sha"]
+        head = run["commits"][-1]["sha"] if run.get("commits") else base
+        fw = srcdiff.framework_at(self.git, self.test_seed, service, head, run_id)
+        if fw is None:
+            raise GitRefused("no seeded framework at the run's head")
+        tg, ig = fw.get("test_file_globs", []), fw.get("test_infra_globs", [])
+        prefix = f"services/{service}/"
+
+        def is_src(p: str) -> bool:
+            return not p.startswith(prefix) or path_class(p[len(prefix):], tg, ig) == "src"
+
+        repo = self.git.repo
+        reviewer = {rt["path"]: rt["content"] for rt in self.reviewer_tests(run_id)}
+        findings = []
+        for fid, rec0 in sorted(self.findings.get(run_id, {}).items()):
+            rec = json.loads(json.dumps(rec0))
+            flags: list[dict] = []
+            sha = rec.get("commit_sha")
+            if sha:
+                diff = self.git.commit_diff(repo, sha, run_id)
+                flags = RF.number(RF.scan(diff, service, is_test=lambda p: not is_src(p),
+                                          file_text=lambda p, _s=sha: self.git.show_file(_s, p, repo, run_id)), fid)
+            solo = rec.get("standalone_check") or {}
+            if rec.get("state") == "needs_review_runner_dependent" or solo.get("outcome") == "runner_dependent":
+                target = solo.get("target") or ""
+                path, _, name = target.partition("::")
+                text = reviewer.get(path)
+                if text is None and path:
+                    text = self.git.show_file(head, f"{prefix}{path}", repo, run_id)
+                why = (solo.get("verification") or {}).get("why") or (solo.get("reverted") or {}).get("why") or "-"
+                flags.append(RF.runner_dependent_flag(fid, target, f"{prefix}{path}", RF.def_line(text, name), why))
+            rec["review_flags"] = flags
+            findings.append(rec)
+        text, paths = srcdiff.src_diff(self.git, fw, service, repo, base, head, run_id)
+        if srcdiff.binary_paths(text):
+            # wave 25 (H8): a legacy run whose source diff carries a binary change cannot be reviewed on that diff
+            raise ValueError("binary_src_change: the source diff shows binary file(s) whose content cannot be read")
+        ev_src, digest, problem = srcdiff.record(self, run_id, text, paths, base, head, "run_rescanned_for_review")
+        if problem:
+            raise ValueError(problem)
+        run.update(src_diff_sha256=digest, src_diff_evidence_id=ev_src)
+        body = report_mod.render(run, findings, lambda ev: self.evidence_text(run_id, ev))
+        data = body.encode("utf-8", "surrogatepass")
+        if len(data) > srcdiff.REPORT_MAX_BYTES:
+            raise ValueError("the regenerated report does not fit one evidence file")
+        ev_rep = self.evidence_put(run_id, "report", data)
+        report_sha = sha_text(body)
+        with self.lock:
+            op = Op(self, f"rescan|{run_id}|{digest}", ENGINE, run_id)
+            eid = op.record(derived_id("rsc", run_id, digest, report_sha), "run_rescanned_for_review", ENGINE, run_id,
+                            {"run_id": run_id, "src_diff_sha256": digest, "src_diff_evidence_id": ev_src,
+                             "report_sha256": report_sha, "report_evidence_id": ev_rep, "head_sha": head,
+                             "paths": paths[:200], "flags": {f["finding_id"]: len(f["review_flags"]) for f in findings},
+                             "legacy_report_evidence_id": run.get("report_evidence_id")},
+                            f"Legacy run re-scanned for review ({run_id})")
+            run.update(report_sha256=report_sha, report_evidence_id=ev_rep)
+            run["ledger_event_ids"] = list(run.get("ledger_event_ids") or []) + [eid]
+            op.add("run", run)
+            for rec in findings:
+                op.add("finding", rec)
+            self._commit(op)
+
     # ================================================================== worker
 
     def _work(self) -> None:
@@ -366,13 +538,17 @@ class DeliveryService:
                 self._queue.task_done()
 
     def wait_idle(self, timeout: float = 600.0) -> None:
-        """Tests and the live runner: block until the queue is drained."""
+        """Tests and the live runner: block until no run is live AND the engine thread has settled — every queued run's
+        ``FixEngine.execute`` has RETURNED (``task_done`` is called after it, so ``unfinished_tasks`` counts a run
+        that is still inside the engine). Wave 23 (B3, N22-D-6): a run's status turns terminal (a cancel) while the
+        engine thread may still be inside ``docker run`` and about to record what it does with that container; the
+        status alone is not the settled signal."""
         import time
         end = time.monotonic() + timeout
         while time.monotonic() < end:
             with self.lock:
-                live = [r for r in self.runs.values() if r["status"] in ("received", "preparing", "running", "suite", "reporting")]
-            if not live and self._queue.empty():
+                live = [r for r in self.runs.values() if r["status"] in LIVE_RUN_STATES]
+            if not live and self._queue.unfinished_tasks == 0:
                 return
             time.sleep(0.05)
         raise TimeoutError("engine did not go idle")
@@ -439,7 +615,261 @@ class DeliveryService:
             pass                              # a refusal stands whether or not it was recorded
         raise Refused(message, [R.item(code, message)], request_id=request_id, facts_sha256=facts, took_effect=False)
 
-    def create_fix_run(self, caller: str, body: dict, *, parent_run_id: Optional[str] = None) -> dict:
+    def _refuse_unrunnable(self, principal: str, request_id: str, facts: str, finding_id: str, node: Optional[str],
+                           why: str) -> None:
+        """Wave 21 (R1, N20-D-3): a finding whose ``reproduction`` names no test the service's toolchain can run on
+        the base tree is refused at ingestion — 422 ``reproduction_not_runnable``, nothing created. The refusal is
+        recorded when the ledger answers; it stands either way."""
+        code = "REPRODUCTION_NOT_RUNNABLE"
+        message = f"finding {finding_id}: reproduction not runnable: {why}"
+        eid = derived_id("ref", principal, request_id, facts, code, finding_id)
+        try:
+            self._record_plain(eid, "fix_run_refused", GATE, request_id, {"request_id": request_id, "facts_sha256": facts,
+                                                                          "code": code, "principal": principal,
+                                                                          "finding_id": finding_id, "target": node},
+                               f"Fix run refused: {code} ({finding_id})")
+        except Unavailable:
+            pass
+        raise Invalid(message, code="reproduction_not_runnable", finding_id=finding_id, target=node,
+                      reasons=[R.item(code, message)], request_id=request_id, facts_sha256=facts, took_effect=False)
+
+    def _check_reproductions(self, caller: str, request_id: str, facts: str, base_sha: str, service: str,
+                             findings: list[dict]) -> None:
+        """Every finding's reproduction resolves to a test of the service's toolchain AT THE BASE COMMIT (R1): the
+        engine runs it in the verification checkout (must pass) and the reverted one (must fail) before
+        ``candidate_passed_checks``,
+        and on the untouched base tree for a ``DISPROOF``. There is no prose-reproduction route."""
+        prefix = f"services/{service}/"
+
+        def exists(rel: str) -> bool:
+            return self.git.blob_exists(base_sha, prefix + rel, run_id="-")
+
+        def read(rel: str) -> Optional[str]:
+            return self.git.show_file(base_sha, prefix + rel, self.git.repo, run_id="-")
+
+        for f in findings:
+            rt = f.get("reproduction_test")
+            if rt:
+                # L2: a reviewer-authored RED test is a NEW file of the service directory, overlaid on the base;
+                # the finding's reproduction must name it, and it must pass the same content rules as any test
+                node, why = self._reviewer_test_problem(f, rt, exists, read)
+            else:
+                node, why = reproduction_problem(self.test_seed, f.get("reproduction") or "", exists, read)
+            if why is not None:
+                self._refuse_unrunnable(caller, request_id, facts, f["id"], node, why)
+
+    def _reviewer_test_problem(self, f: dict, rt: dict, exists, read) -> tuple[Optional[str], Optional[str]]:
+        """Wave 21 (L2): ``(node, why-not)`` for a finding carrying ``reproduction_test``."""
+        path, content = rt["path"], rt["content"]
+        if exists(path):
+            return None, f"reproduction_test.path {path} is already a file of the base commit (it must be a new test file)"
+        node, why = reproduction_problem(self.test_seed, f.get("reproduction") or "",
+                                         lambda rel: rel == path or exists(rel),
+                                         lambda rel: content if rel == path else read(rel))
+        if why is not None:
+            return node, why
+        if node.partition("::")[0] != path:
+            return node, f"the reproduction names {node}, not a test of reproduction_test.path {path}"
+        fw_name = detect_framework(self.test_seed, exists)
+        fw = self.test_seed["frameworks"][fw_name]
+        for rule in fw.get("test_content_deny", []):
+            if re.search(rule["pattern"], content):
+                return node, f"reproduction_test matches the test content rule {rule['name']}"
+        return node, None
+
+    def reviewer_tests(self, run_id: str) -> list[dict]:
+        """L2: the run's reviewer-authored tests, ``{finding_id, path, content, sha256}`` (service-relative path)."""
+        with self.lock:
+            out = []
+            for fid, doc in sorted(self.finding_docs.get(run_id, {}).items()):
+                rt = doc.get("reproduction_test")
+                if rt:
+                    out.append({"finding_id": fid, "path": rt["path"], "content": rt["content"],
+                                "sha256": hashlib.sha256(rt["content"].encode("utf-8", "surrogatepass")).hexdigest()})
+            return out
+
+    def _refuse_red(self, caller: str, request_id: str, facts: str, code: str, finding_id: str, node: Optional[str],
+                    message: str, extra: dict) -> None:
+        """422 for a reviewer-authored reproduction that is not verified RED; the refusal is recorded when the ledger
+        answers and stands either way (nothing was created)."""
+        eid = derived_id("ref", caller, request_id, facts, code, finding_id)
+        try:
+            self._record_plain(eid, "fix_run_refused", GATE, request_id,
+                               {"request_id": request_id, "facts_sha256": facts, "code": code, "principal": caller,
+                                "finding_id": finding_id, "target": node, **extra},
+                               f"Fix run refused: {code} ({finding_id})")
+        except Unavailable:
+            pass
+        raise Invalid(message, code=code.lower(), finding_id=finding_id, target=node, reasons=[R.item(code, message)],
+                      request_id=request_id, facts_sha256=facts, took_effect=False)
+
+    # --- admission (B2, wave 23): the reviewer-test RED containers run OUTSIDE the service lock -------------------------
+
+    def _in_flight(self, service: str) -> Optional[str]:
+        """The run — or pending admission — that holds ``service``'s run slot, or None. The caller holds the lock."""
+        for r in self.runs.values():
+            if r["service"] == service and r["status"] in LIVE_RUN_STATES:
+                return r["run_id"]
+        for adm, a in self._admissions.items():
+            if a["service"] == service:
+                return adm
+        return None
+
+    def _refuse_busy(self, service: str, request_id: str, facts: str) -> None:
+        holder = self._in_flight(service)
+        if holder is not None:
+            raise Conflict("a run for this service is in progress", reasons=[R.item("RUN_IN_PROGRESS", holder)],
+                           request_id=request_id, facts_sha256=facts)
+
+    def _red_begin(self, caller: str, request_id: str, facts: str, base_sha: str, service: str, principal,
+                   findings: list[dict], *, review_of: Optional[str] = None) -> Optional[dict]:
+        """Phase 1 of the admission RED check (the caller holds the lock and has refused a busy service). No
+        reviewer-authored reproduction → None (nothing to run). Otherwise the pending admission is RECORDED
+        (``reproduction_red_check_started``: record-first — an unrecorded reservation does not exist, ``Unavailable``)
+        and reserves the service's run slot until ``_red_finish`` admits or refuses; the lock is then released by the
+        caller while the containers run. No engine or no sandbox → 422 ``reproduction_red_unverified`` now."""
+        items = [f for f in findings if f.get("reproduction_test")]
+        if not items:
+            return None
+        adm = rid("run", "admission", caller, request_id, facts)     # its own id: never the run's event ids
+        closed = self._closed_admissions.get(adm)
+        if closed is not None:
+            raise self._closed_answer(closed)        # wave 24 (E6): its recorded answer; nothing recorded or run again
+        if adm in self._admissions:
+            raise Conflict("this admission is already in progress", reasons=[R.item("RUN_IN_PROGRESS", adm)],
+                           request_id=request_id, facts_sha256=facts)
+        if self._engine is None or not hasattr(self._engine, "reproduction_red") or not self.sandbox_available():
+            f = items[0]
+            node = node_id_in_text(f.get("reproduction") or "")
+            self._refuse_red(caller, request_id, facts, "REPRODUCTION_RED_UNVERIFIED", f["id"], node,
+                             f"finding {f['id']}: the reviewer-authored reproduction {node} could not be run RED on the "
+                             "base commit (no engine or no sandbox): refused, never admitted unchecked", {"why": "no_sandbox"})
+        self._record_plain(derived_id("rcs", adm, base_sha), "reproduction_red_check_started", GATE, request_id,
+                           {"request_id": request_id, "facts_sha256": facts, "admission_id": adm, "service": service,
+                            "base_sha": base_sha, "finding_ids": [f["id"] for f in items], "review_of": review_of},
+                           f"Admission RED check started for {service}: {len(items)} reviewer test(s)")
+        self._admissions[adm] = {"service": service, "request_id": request_id, "facts": facts, "caller": caller,
+                                 "review_of": review_of}
+        return {"adm": adm, "items": items, "caller": caller, "request_id": request_id, "facts": facts,
+                "base_sha": base_sha, "service": service, "principal": principal}
+
+    def _red_run(self, pending: dict) -> list[tuple]:
+        """Phase 2 — NO service lock held: run each reviewer-authored reproduction on the base in a fresh engine
+        container. Returns ``[(finding, node, TestRun|None, exception|None)]``; stops at the first result that can only
+        refuse the admission (an exception or a verdict other than ``fail``): no container runs for nothing."""
+        if self.lock._is_owned():
+            raise RuntimeError("B2: the admission RED containers never run under the service lock")
+        out: list[tuple] = []
+        adm = pending["adm"]
+        for f in pending["items"]:
+            node = node_id_in_text(f.get("reproduction") or "")
+            try:
+                t = self._engine.reproduction_red(run_id=adm, service=pending["service"], base_sha=pending["base_sha"],
+                                                  principal_user_id=pending["principal"].user_id(adm), finding_id=f["id"],
+                                                  path=f["reproduction_test"]["path"],
+                                                  content=f["reproduction_test"]["content"], node=node)
+            except Exception as exc:  # noqa: BLE001 - Unavailable included: the RED check did not complete → refused
+                out.append((f, node, None, exc))
+                break
+            out.append((f, node, t, None))
+            if t.verdict != "fail":
+                break
+        return out
+
+    def _red_record_locked(self, pending: dict, results: list[tuple]) -> dict[str, str]:
+        """Phase 3 (the caller holds the lock): record each verdict ``reproduction_red_checked`` and return its event
+        id per finding, or refuse. A passing test → 422 ``reproduction_not_red``; an exception, an ``unknown`` verdict
+        or a verdict that could not be recorded → 422 ``reproduction_red_unverified``; a finding with no result (a
+        container loop stopped early) cannot reach here — an earlier result already refused."""
+        caller, request_id, facts, adm = pending["caller"], pending["request_id"], pending["facts"], pending["adm"]
+        code = "REPRODUCTION_RED_UNVERIFIED"
+        out: dict[str, str] = {}
+        for f, node, t, exc in results:
+            if exc is not None:
+                self._refuse_red(caller, request_id, facts, code, f["id"], node,
+                                 f"finding {f['id']}: the RED check of the reviewer-authored reproduction {node} could not "
+                                 f"complete ({type(exc).__name__}): refused, never admitted unchecked",
+                                 {"why": type(exc).__name__[:60], "admission_id": adm})
+            if t.verdict == "pass":
+                self._refuse_red(caller, request_id, facts, "REPRODUCTION_NOT_RED", f["id"], node,
+                                 f"finding {f['id']}: the reviewer-authored reproduction {node} passes on the base commit",
+                                 {"verdict": t.verdict, "exit": t.exit, "output_sha256": t.output_sha256, "admission_id": adm})
+            if t.verdict != "fail":
+                why = (t.counts.why if t.counts else "unknown")[:120]
+                self._refuse_red(caller, request_id, facts, code, f["id"], node,
+                                 f"finding {f['id']}: the reviewer-authored reproduction {node} could not be verified RED on "
+                                 f"the base commit ({why}): refused, never admitted unchecked",
+                                 {"verdict": t.verdict, "exit": t.exit, "output_sha256": t.output_sha256, "admission_id": adm})
+            eid = derived_id("red", adm, f["id"], t.output_sha256)
+            try:
+                self._record_plain(eid, "reproduction_red_checked", GATE, request_id,
+                                   {"request_id": request_id, "facts_sha256": facts, "admission_id": adm,
+                                    "finding_id": f["id"], "target": node, "base_sha": pending["base_sha"],
+                                    "verdict": t.verdict, "exit": t.exit, "output_sha256": t.output_sha256,
+                                    "test_sha256": sha_text(f["reproduction_test"]["content"])},
+                                   f"Reviewer reproduction RED on base for {f['id']}")
+            except Unavailable:
+                self._refuse_red(caller, request_id, facts, code, f["id"], node,
+                                 f"finding {f['id']}: the RED verdict of the reviewer-authored reproduction {node} could not "
+                                 "be recorded: refused, never admitted unchecked", {"why": "record_failed", "admission_id": adm})
+            out[f["id"]] = eid
+        return out
+
+    def _red_finish(self, pending: dict, admit) -> dict:
+        """Phases 2-3: the containers without the lock, then ONE hold of the lock that releases the reservation,
+        records the verdicts and admits (``admit(red_checks)``) or refuses. The reservation is released whatever
+        happens (a refusal, an exception). A refusal (422/409) after the containers ran is recorded as the admission's
+        answer (``admission_closed``, wave 24): its replay gets it without running them again."""
+        try:
+            results = self._red_run(pending)
+            with self.lock:
+                self._admissions.pop(pending["adm"], None)
+                closed = self._closed_admissions.get(pending["adm"])
+                if closed is None and pending["adm"] in self._cancelled_running:
+                    closed = self._cancelled_answer(pending["adm"], pending["request_id"], pending["facts"])
+                if closed is not None:
+                    # wave 24 (E6): cancelled by the operator while the containers ran — nothing is recorded or
+                    # admitted from them (the cancel was recorded first, with this answer, and freed the slot)
+                    raise self._closed_answer(closed)
+                try:
+                    red = self._red_record_locked(pending, results)
+                    return admit(red)
+                except (Invalid, Conflict) as exc:
+                    self._close_admission(pending["adm"], pending["caller"], exc)
+                    raise
+        finally:
+            with self.lock:
+                self._admissions.pop(pending["adm"], None)
+                self._cancelled_running.discard(pending["adm"])
+
+    @staticmethod
+    def _cancelled_answer(adm: str, request_id: str, facts: str) -> dict:
+        return {"admission_id": adm, "status": Conflict.status_code,
+                "reason": "this admission was cancelled while its RED check ran: nothing was admitted",
+                "body": {"reasons": [R.item("CANCELLED", adm)], "request_id": request_id, "facts_sha256": facts,
+                         "admission_id": adm}}
+
+    @staticmethod
+    def _closed_answer(closed: dict) -> DlvError:
+        cls = Conflict if closed["status"] == Conflict.status_code else Invalid
+        return cls(closed["reason"], **closed["body"])
+
+    def _close_admission(self, adm: str, caller: str, exc: DlvError) -> None:
+        """Record ``exc`` as the answer of admission ``adm`` (the caller holds the lock). Best effort: when the record
+        cannot be made the refusal still stands; a replay then runs the admission again and is refused again (its
+        crossings collide with the first attempt's records: 422 ``reproduction_red_unverified``) — never admitted."""
+        op = Op(self, f"admission-closed|{adm}", caller, adm)
+        op.add("admission_closed", {"admission_id": adm, "status": exc.status_code, "reason": exc.reason,
+                                    "body": json.loads(json.dumps(exc.body, default=str))})
+        try:
+            self._commit(op)
+        except Unavailable:
+            pass
+
+    def create_fix_run(self, caller: str, body: dict) -> dict:
+        """Admission (§C.8.1). The static checks run under the service lock; a document with reviewer-authored
+        reproductions reserves the service's run slot (recorded), runs their RED check with the lock RELEASED, and
+        is admitted or refused in one later hold (B2, wave 23)."""
         from zbm_delivery.adapters.identity import PrincipalMissing, principal_for
         request_id = body["request_id"]
         facts = facts_sha256(body)
@@ -458,73 +888,108 @@ class DeliveryService:
             if self.llm_state() == "unconfigured":
                 self._refuse(caller, request_id, facts, "LLM_NOT_CONFIGURED", getattr(self.chat_backend, "why", "no model"))
             service = body["service"]
-            for r in self.runs.values():
-                if r["service"] == service and r["status"] in ("received", "preparing", "running", "suite", "reporting"):
-                    raise Conflict("a run for this service is in progress", reasons=[R.item("RUN_IN_PROGRESS", r["run_id"])],
-                                   request_id=request_id, facts_sha256=facts)
-            if parent_run_id is None:
-                try:
-                    base_sha = self.git.rev_parse(body["base_sha"], run_id="-")
-                except Unavailable:
-                    raise                                    # the git crossing could not be recorded: 503
-                except Exception:  # noqa: BLE001
-                    self._refuse(caller, request_id, facts, "GIT_REFUSED", "base_sha is not a commit of the repository")
-                if body["base_ref"] != self.cfg.base_ref:
-                    self._refuse(caller, request_id, facts, "GIT_REFUSED", "base_ref is not DLV_BASE_REF")
-                for f in body["findings"]:
-                    if not self.git.blob_exists(base_sha, f["file"], run_id="-"):
-                        self._refuse(caller, request_id, facts, "GIT_REFUSED", f"finding {f['id']}: file is not in the base commit")
-            else:
-                base_sha = body["base_sha"]
-            run_id = rid("run", "run", caller, request_id, facts)
-            if run_id in self.runs:
-                raise Conflict("run already exists")
-            injection = textguard.injection_rules_in({k: v for k, v in body.items() if k != "request_id"})
-            now = self.now()
-            run = {"run_id": run_id, "request_id": request_id, "facts_sha256": facts, "caller": caller,
-                   "principal": {"kind": principal.kind, "id": principal.id, "tenant": principal.tenant},
-                   "principal_user_id": principal.user_id(run_id), "thread_id": f"dlv-{run_id[-26:]}",
-                   "service": service, "base_ref": body["base_ref"], "base_sha": base_sha, "branch": None,
-                   "worktree_path": None, "status": "received", "finding_ids": [f["id"] for f in body["findings"]],
-                   "suite": {"before": None, "after": None}, "commits": [], "report_sha256": None,
-                   "report_evidence_id": None, "review": None, "deadline_at": iso(now + timedelta(seconds=self.cfg.run_wall_clock_s)),
-                   "llm": {"provider": getattr(self.chat_backend, "provider", "unconfigured"),
-                           "model": getattr(self.chat_backend, "model", ""), "fake": bool(getattr(self.chat_backend, "fake", False))},
-                   "sandbox": {"image_digest": None, "container_id_sha256": None}, "policy_version": POLICY_VERSION,
-                   "prompts_manifest_sha256": self.gate.prompts_manifest_sha256, "created_at": iso(now), "finished_at": None,
-                   "ledger_event_ids": [], "reasons": [], "parent_run_id": parent_run_id, "new_defects": [],
-                   "source": body["source"], "evidence": [], "injection_rules": injection}
-            if parent_run_id is not None:
-                parent = self.runs[parent_run_id]
-                run["branch"], run["worktree_path"] = parent["branch"], parent["worktree_path"]
-            op = Op(self, f"fix-run|{run_id}", caller, run_id)
-            eid = op.record(derived_id("rcv", run_id), "fix_run_received", caller, run_id,
-                            {"run_id": run_id, "request_id": request_id, "facts_sha256": facts, "service": service,
-                             "base_sha": base_sha, "finding_ids": run["finding_ids"], "parent_run_id": parent_run_id,
-                             "source_sha256": body["source"]["sha256"]},
-                            f"Fix run received for {service}: {len(body['findings'])} finding(s)")
-            run["ledger_event_ids"].append(eid)
-            if injection:
-                iid = op.record(derived_id("inj", run_id), "injection_text_ignored", GATE, run_id,
-                                {"run_id": run_id, "rules": injection, "count": len(injection)},
-                                f"Injection text in the findings document ignored ({len(injection)} rule(s))")
-                run["ledger_event_ids"].append(iid)
-            op.add("run", run)
+            self._refuse_busy(service, request_id, facts)
+            try:
+                base_sha = self.git.rev_parse(body["base_sha"], run_id="-")
+            except Unavailable:
+                raise                                    # the git crossing could not be recorded: 503
+            except Exception:  # noqa: BLE001
+                self._refuse(caller, request_id, facts, "GIT_REFUSED", "base_sha is not a commit of the repository")
+            if body["base_ref"] != self.cfg.base_ref:
+                self._refuse(caller, request_id, facts, "GIT_REFUSED", "base_ref is not DLV_BASE_REF")
             for f in body["findings"]:
-                op.add("finding_doc", {"run_id": run_id, "finding": f})
-                op.add("finding", {"run_id": run_id, "finding_id": f["id"], "severity": f["severity"],
-                                   "title_sha256": sha_text(f["title"]), "file": f["file"], "line": f["line"],
-                                   "class_hint": f.get("class_hint"), "state": "queued", "rounds": 0, "red": None,
-                                   "green": None, "revert_check": None, "sweep": None, "disproof": None,
-                                   "changed_tests": [], "commit_sha": None, "commit_files": [], "agent": None,
-                                   "reasons": [], "suite_failures": [], "brief_evidence_id": None,
-                                   "injection_rules": textguard.injection_rules_in(f)})
-            resp = self._stamp({"run_id": run_id, "status": "received", "request_id": request_id, "facts_sha256": facts,
-                                "ledger_event_id": eid})
-            self._idem_add(op, key, h, resp)
-            self._commit(op)
+                if not self.git.blob_exists(base_sha, f["file"], run_id="-"):
+                    self._refuse(caller, request_id, facts, "GIT_REFUSED", f"finding {f['id']}: file is not in the base commit")
+            try:
+                self._check_reproductions(caller, request_id, facts, base_sha, service, body["findings"])
+            except GitRefused:
+                self._refuse(caller, request_id, facts, "GIT_REFUSED", "the base commit could not be read")
+            pending = self._red_begin(caller, request_id, facts, base_sha, service, principal, body["findings"])
+            if pending is None:
+                resp, run_id, _ = self._admit_locked(caller, body, base_sha, principal, {}, key, h)
+                self._queue.put(run_id)
+                return resp
+
+        def admit(red: dict) -> dict:
+            resp, run_id, _ = self._admit_locked(caller, body, base_sha, principal, red, key, h,
+                                                 admission_id=pending["adm"])
             self._queue.put(run_id)
             return resp
+        return self._red_finish(pending, admit)
+
+    def _admit_locked(self, caller: str, body: dict, base_sha: str, principal, red_checks: dict, key: tuple, h: str, *,
+                      parent_run_id: Optional[str] = None, op: Optional[Op] = None,
+                      admission_id: Optional[str] = None) -> tuple[dict, str, Op]:
+        """Create the run (the caller holds the lock and has made every check). With ``op`` (a review's) the run's
+        records join that operation — one local-log line with the review — and the caller commits and queues;
+        otherwise the operation is committed here and the caller queues the run."""
+        request_id = body["request_id"]
+        facts = facts_sha256(body)
+        service = body["service"]
+        red_checks = dict(red_checks or {})
+        missing = [f["id"] for f in body["findings"] if f.get("reproduction_test") and not red_checks.get(f["id"])]
+        if missing:
+            self._refuse_red(caller, request_id, facts, "REPRODUCTION_RED_UNVERIFIED", missing[0], None,
+                             f"finding {missing[0]}: no admission RED check for its reviewer-authored reproduction",
+                             {"why": "no_red_check"})
+        run_id = rid("run", "run", caller, request_id, facts)
+        if run_id in self.runs:
+            raise Conflict("run already exists")
+        injection = textguard.injection_rules_in({k: v for k, v in body.items() if k != "request_id"})
+        now = self.now()
+        run = {"run_id": run_id, "request_id": request_id, "facts_sha256": facts, "caller": caller,
+               "principal": {"kind": principal.kind, "id": principal.id, "tenant": principal.tenant},
+               "principal_user_id": principal.user_id(run_id), "thread_id": f"dlv-{run_id[-26:]}",
+               "service": service, "base_ref": body["base_ref"], "base_sha": base_sha, "branch": None,
+               "worktree_path": None, "status": "received", "finding_ids": [f["id"] for f in body["findings"]],
+               "suite": {"before": None, "after": None}, "commits": [], "report_sha256": None,
+               "report_evidence_id": None, "review": None, "deadline_at": iso(now + timedelta(seconds=self.cfg.run_wall_clock_s)),
+               "llm": {"provider": getattr(self.chat_backend, "provider", "unconfigured"),
+                       "model": getattr(self.chat_backend, "model", ""), "fake": bool(getattr(self.chat_backend, "fake", False))},
+               "sandbox": {"image_digest": None, "container_id_sha256": None}, "policy_version": POLICY_VERSION,
+               "prompts_manifest_sha256": self.gate.prompts_manifest_sha256, "created_at": iso(now), "finished_at": None,
+               "ledger_event_ids": [], "reasons": [], "parent_run_id": parent_run_id, "new_defects": [],
+               "source": body["source"], "evidence": [], "injection_rules": injection}
+        if parent_run_id is not None:
+            parent = self.runs[parent_run_id]
+            run["branch"], run["worktree_path"] = parent["branch"], parent["worktree_path"]
+        own = op is None
+        if own:
+            op = Op(self, f"fix-run|{run_id}", caller, run_id)
+        eid = op.record(derived_id("rcv", run_id), "fix_run_received", caller, run_id,
+                        {"run_id": run_id, "request_id": request_id, "facts_sha256": facts, "service": service,
+                         "base_sha": base_sha, "finding_ids": run["finding_ids"], "parent_run_id": parent_run_id,
+                         "source_sha256": body["source"]["sha256"], "admission_id": admission_id,
+                         "reviewer_tests": [{"finding_id": f["id"], "path": f["reproduction_test"]["path"],
+                                             "sha256": sha_text(f["reproduction_test"]["content"]), "author": "reviewer"}
+                                            for f in body["findings"] if f.get("reproduction_test")]},
+                        f"Fix run received for {service}: {len(body['findings'])} finding(s)")
+        run["ledger_event_ids"].append(eid)
+        if injection:
+            iid = op.record(derived_id("inj", run_id), "injection_text_ignored", GATE, run_id,
+                            {"run_id": run_id, "rules": injection, "count": len(injection)},
+                            f"Injection text in the findings document ignored ({len(injection)} rule(s))")
+            run["ledger_event_ids"].append(iid)
+        op.add("run", run)
+        for f in body["findings"]:
+            op.add("finding_doc", {"run_id": run_id, "finding": f})
+            op.add("finding", {"run_id": run_id, "finding_id": f["id"], "severity": f["severity"],
+                               "title_sha256": sha_text(f["title"]), "file": f["file"], "line": f["line"],
+                               "class_hint": f.get("class_hint"), "state": "queued", "rounds": 0, "red": None,
+                               "green": None, "revert_check": None, "sweep": None, "disproof": None,
+                               "changed_tests": [], "commit_sha": None, "commit_files": [], "agent": None,
+                               "reasons": [], "suite_failures": [], "brief_evidence_id": None, "review_flags": [],
+                               "injection_rules": textguard.injection_rules_in(f),
+                               "reviewer_test": ({"path": f["reproduction_test"]["path"], "author": "reviewer",
+                                                  "sha256": sha_text(f["reproduction_test"]["content"]),
+                                                  "red_checked_event_id": red_checks[f["id"]]}
+                                                 if f.get("reproduction_test") else None)})
+        resp = self._stamp({"run_id": run_id, "status": "received", "request_id": request_id, "facts_sha256": facts,
+                            "ledger_event_id": eid})
+        self._idem_add(op, key, h, resp)
+        if own:
+            self._commit(op)
+        return resp, run_id, op
 
     # ================================================================== views (§D)
 
@@ -549,6 +1014,11 @@ class DeliveryService:
             ev = run.get("report_evidence_id")
             if not ev:
                 raise NotFound("no report for this run yet")
+            if not run.get("src_diff_sha256"):
+                # wave 24 (E5): a report written before the source diff was embedded (the legacy "fixed" wording, no
+                # spelling-list warning) is never served; an awaiting_review run is re-scanned at load instead
+                raise Conflict("this run's report predates the embedded source diff and is not served",
+                               reasons=[R.item("REVIEW_STATE", "legacy report")])
             return self.evidence_read(run_id, ev).decode("utf-8", "replace")
 
     def evidence_meta(self, run_id: str, evidence_id: str) -> dict:
@@ -614,15 +1084,16 @@ class DeliveryService:
             return list(self.findings[run_id][finding_id].get("injection_rules") or [])
 
     def attributable_failures(self, run_id: str, finding_id: str, baseline_failures: list[str]) -> set[str]:
-        """Baseline failures attributable to ANOTHER not-yet-fixed finding of this run (file match, or the node id
-        named in that finding's reproduction) may remain while this finding is fixed (§C.8.4 step 5)."""
+        """Baseline failures attributable to ANOTHER finding of this run not yet at an engine end state (file match,
+        or the node id named in that finding's reproduction) may remain while this finding is worked on (§C.8.4
+        step 5)."""
         out: set[str] = set()
         with self.lock:
             docs = self.finding_docs.get(run_id, {})
             recs = self.findings.get(run_id, {})
             service = self.runs[run_id]["service"]
             for fid, doc in docs.items():
-                if fid == finding_id or recs.get(fid, {}).get("state") in ("fixed", "disproved"):
+                if fid == finding_id or recs.get(fid, {}).get("state") in DONE_STATES:
                     continue
                 rel = doc["file"][len(f"services/{service}/"):]
                 repro = doc.get("reproduction", "")
@@ -647,7 +1118,7 @@ class DeliveryService:
             recs = self.findings.get(run_id, {})
             out = []
             for fid, doc in docs.items():
-                if recs.get(fid, {}).get("state") in ("fixed", "disproved", "reviewed"):
+                if recs.get(fid, {}).get("state") in DONE_STATES + states.REVIEW_STATES + ("reviewed",):
                     continue
                 t = node_id_in_text(doc.get("reproduction") or "")
                 if t:
@@ -769,13 +1240,17 @@ class DeliveryService:
 
     def mark_failed_unrecorded(self, run_id: str, reason: dict) -> None:
         """The ledger is down: the in-memory run is failed so the loop stops; the state is NOT persisted (a
-        restart replays the last recorded state and fails it then)."""
+        restart replays the last recorded state and fails it then). Wave 23 (B4, N22-D-7): a run that is ALREADY
+        terminal (cancelled, failed) is marked too — its status stays, ``unrecorded_failure`` and the reason say that
+        something happened on it that the ledger does not hold (e.g. a kill that could not be recorded first)."""
         with self.lock:
             run = self.runs.get(run_id)
-            if run is not None and run["status"] not in states.TERMINAL:
+            if run is None:
+                return
+            if run["status"] not in states.TERMINAL:
                 run["status"] = "failed"
-                run["reasons"] = list(run.get("reasons") or []) + [reason]
-                run["unrecorded_failure"] = True
+            run["reasons"] = list(run.get("reasons") or []) + [reason]
+            run["unrecorded_failure"] = True
 
     def _on_ledger_failure(self, run_id: str, why: str) -> None:
         self.mark_failed_unrecorded(run_id, R.item("LEDGER_UNAVAILABLE", why[:160]))
@@ -799,69 +1274,217 @@ class DeliveryService:
 
     # ================================================================== review (§C.8.7), cancel
 
+    def _review_checks(self, caller: str, run_id: str, body: dict, request_id: str, facts: str) -> dict:
+        """Everything a review is refused on before anything is recorded (the caller holds the lock): the run's state,
+        a review of the run already in progress, the reopened / new finding ids, and (wave 23, D1/D2/D3) the
+        per-finding verdicts, the runner-dependent notes and the flags each accepted finding must address; wave 24
+        (E2): the src_diff_sha256 an accept must carry and a real note per flag."""
+        run = self.runs.get(run_id)
+        if run is None:
+            raise NotFound("no such run")
+        if run["status"] != "awaiting_review":
+            raise Conflict("the run is not awaiting review", reasons=[R.item("REVIEW_STATE", run["status"])],
+                           request_id=request_id, facts_sha256=facts)
+        pending = [a for a, x in self._admissions.items() if x.get("review_of") == run_id]
+        if pending:
+            raise Conflict("a review of this run is in progress", reasons=[R.item("RUN_IN_PROGRESS", pending[0])],
+                           request_id=request_id, facts_sha256=facts)
+        known = set(run["finding_ids"])
+        unknown = [x for x in body.get("reopened", []) if x not in known]
+        if unknown:
+            raise Invalid("reopened ids must be findings of this run: " + ", ".join(unknown[:10]))
+        for f in body.get("new_findings", []):
+            if not f["file"].startswith(f"services/{run['service']}/"):
+                raise Invalid("new findings must be inside the run's service")
+            if f["id"] in known:
+                raise Invalid("a new finding id collides with a finding of this run")
+        recs = self.findings.get(run_id, {})
+        done = {fid for fid, r in recs.items() if r.get("state") in DONE_STATES}
+        verdicts = {v["finding_id"]: v for v in body.get("finding_verdicts") or []}
+        stray = sorted(fid for fid in verdicts if fid not in done)
+        if stray:
+            raise Invalid("finding_verdicts name findings that are not awaiting a verdict in this run: " + ", ".join(stray[:10]))
+        if body["verdict"] == "pass":
+            missing = sorted(done - set(verdicts))
+            if missing:
+                raise Invalid("a pass needs an explicit verdict for every finding of the run (D1); missing: "
+                              + ", ".join(missing[:20]))
+        accepted = sorted(fid for fid, v in verdicts.items() if v["verdict"] == "accept")
+        if accepted:
+            # wave 24 (E2, N23-D-1/-4): an accept binds the reviewer to the complete source diff the report embeds
+            if any("review_flags" not in recs[fid] for fid in accepted) or not run.get("src_diff_sha256"):
+                raise Conflict("this run's records predate the review flags / source diff and have not been "
+                               "re-scanned: nothing can be accepted on them", reasons=[R.item("REVIEW_STATE", "legacy run")],
+                               request_id=request_id, facts_sha256=facts)
+            if body.get("src_diff_sha256") != run["src_diff_sha256"]:
+                msg = ("an accepting review must carry the run's src_diff_sha256 — the sha256 of the complete source "
+                       "diff embedded in the report — attesting that the reviewer read it (E2)")
+                raise Invalid(msg, code="diff_not_attested", reasons=[R.item("REVIEW_STATE", "diff_not_attested")],
+                              request_id=request_id, facts_sha256=facts)
+        for fid in accepted:
+            if recs[fid]["state"] == "needs_review_runner_dependent":
+                problem = _note_problem((verdicts[fid].get("note") or "").strip())
+                if problem:
+                    raise Invalid(f"finding {fid} is runner-dependent: accepting it needs a review note saying what "
+                                  f"the reviewer checked (D3) — {problem}")
+        notes: list[tuple[str, str]] = []
+        run_flags = {fl["id"]: fid for fid, r in recs.items() for fl in (r.get("review_flags") or [])}
+        addressed = {x["flag_id"]: (x.get("note") or "").strip() for x in body.get("flags_addressed") or []}
+        strange = sorted(x for x in addressed if x not in run_flags)
+        if strange:
+            raise Invalid("flags_addressed names flag ids this run does not have: " + ", ".join(strange[:20]))
+        required = sorted(fl for fl, fid in run_flags.items() if fid in accepted)
+        unaddressed = [fl for fl in required if fl not in addressed]
+        if unaddressed:
+            raise Invalid("accepting a finding with review flags needs every flag id in flags_addressed (D2); "
+                          "not addressed: " + ", ".join(unaddressed[:40]))
+        for fl in required:
+            problem = _note_problem(addressed[fl])
+            if problem:
+                raise Invalid(f"flag {fl}: an accepting review needs a note on what the reviewer checked there (E2) — "
+                              f"{problem}")
+            notes.append((f"flag {fl}", addressed[fl]))
+        seen: dict[str, str] = {}
+        for where, note in notes:
+            if note in seen:
+                raise Invalid(f"the note on {where} is the same text as the note on {seen[note]}: each note says what "
+                              "was checked at its own flag (E2)")
+            seen[note] = where
+        return run
+
     def review(self, caller: str, run_id: str, body: dict) -> dict:
+        """§C.8.7, wave 23. A pass needs an explicit ``accept`` for every finding; a fail reopens what it lists (and
+        accepts what it accepts). A fail while another run or admission of the service is in flight is refused 409
+        BEFORE anything is recorded (B1); a fail with reviewer-authored reproductions runs their RED check with the
+        lock released (B2, the service's run slot reserved); the review, the findings' new states and the child run
+        are one operation (one local-log line) in one hold of the lock."""
+        if caller != "aegis":
+            # wave 24 (E6, N23-D-6): the route allows only aegis; the service checks it too, so no other path into
+            # review() (a future route, an internal call) can accept findings
+            raise Forbidden("only the aegis caller reviews a fix run")
         request_id = body["request_id"]
         facts = facts_sha256(body)
         with self.lock:
             key, h, ent = self._idem(caller, request_id, f"review/{run_id}", body)
             if ent is not None:
                 return ent["response"]
-            run = self.runs.get(run_id)
-            if run is None:
-                raise NotFound("no such run")
-            if run["status"] != "awaiting_review":
-                raise Conflict("the run is not awaiting review", reasons=[R.item("REVIEW_STATE", run["status"])],
-                               request_id=request_id, facts_sha256=facts)
-            known = set(run["finding_ids"])
-            unknown = [x for x in body.get("reopened", []) if x not in known]
-            if unknown:
-                raise Invalid("reopened ids must be findings of this run: " + ", ".join(unknown[:10]))
-            for f in body.get("new_findings", []):
-                if not f["file"].startswith(f"services/{run['service']}/"):
-                    raise Invalid("new findings must be inside the run's service")
-                if f["id"] in known:
-                    raise Invalid("a new finding id collides with a finding of this run")
-            to = "reviewed_pass" if body["verdict"] == "pass" else "reviewed_fail"
-            review = {"request_id": request_id, "facts_sha256": facts, "verdict": body["verdict"],
-                      "review_ref": body["review_ref"], "sha256": body["sha256"], "reopened_ids": list(body.get("reopened", [])),
-                      "new_finding_ids": [f["id"] for f in body.get("new_findings", [])], "received_at": self.now_iso(),
-                      "caller": caller}
-            new = json.loads(json.dumps(run))
-            new.update(status=to, review=review, finished_at=self.now_iso())
-            op = Op(self, f"review|{run_id}|{request_id}", caller, run_id)
-            eid = op.record(derived_id("rev", run_id, request_id, facts), "fix_run_reviewed", caller, run_id,
-                            {"run_id": run_id, "request_id": request_id, "facts_sha256": facts, "verdict": body["verdict"],
-                             "review_sha256": body["sha256"], "reopened": review["reopened_ids"],
-                             "new_findings": review["new_finding_ids"], "from": run["status"], "to": to},
-                            f"Fix run reviewed: {body['verdict']} ({run_id})")
-            new["ledger_event_ids"].append(eid)
-            for fid in review["reopened_ids"]:
-                rec = json.loads(json.dumps(self.findings[run_id][fid]))
-                rec["state"] = "reviewed" if rec["state"] in ("fixed", "disproved") else rec["state"]
-                op.add("finding", rec)
+            run = self._review_checks(caller, run_id, body, request_id, facts)
             if body["verdict"] == "pass":
-                for rec in self.findings[run_id].values():
-                    if rec["state"] in ("fixed", "disproved"):
-                        r2 = json.loads(json.dumps(rec))
-                        r2["state"] = "reviewed"
-                        op.add("finding", r2)
-            op.add("run", new)
-            resp = self._stamp({"run_id": run_id, "status": to, "next_run_id": None, "request_id": request_id, "facts_sha256": facts})
-            self._idem_add(op, key, h, resp)
-            self._commit(op)
-            if body["verdict"] == "fail":
-                docs = self.finding_docs[run_id]
-                findings = [dict(docs[fid]) for fid in review["reopened_ids"]] + [dict(f) for f in body.get("new_findings", [])]
-                head = new["commits"][-1]["sha"] if new.get("commits") else new["base_sha"]
-                child = {"request_id": f"{request_id}:rerun", "source": {"kind": "aegis_review", "ref": body["review_ref"],
-                                                                        "sha256": body["sha256"]},
-                         "base_ref": run["base_ref"], "base_sha": head, "service": run["service"], "findings": findings}
-                child_resp = self.create_fix_run(caller, child, parent_run_id=run_id)
-                resp = dict(resp, next_run_id=child_resp["run_id"])
-                ent2 = self.idem.get(key)
-                if ent2 is not None:
-                    ent2["response"] = resp
-            return resp
+                return self._record_review_locked(caller, run_id, body, request_id, facts, key, h, None, None)
+            self._refuse_busy(run["service"], request_id, facts)                 # B1: before anything is recorded
+            # wave 21 (R1): the child run's findings must each name a reproduction runnable on the child's base (this
+            # run's head) — checked BEFORE the review is recorded, so a refused review changes nothing
+            head0 = run["commits"][-1]["sha"] if run.get("commits") else run["base_sha"]
+            docs0 = self.finding_docs[run_id]
+            child_findings = ([dict(docs0[fid]) for fid in body.get("reopened", [])]
+                              + [dict(f) for f in body.get("new_findings", [])])
+            try:
+                self._check_reproductions(caller, request_id, facts, head0, run["service"], child_findings)
+            except GitRefused:
+                raise Invalid("the run's head commit could not be read") from None
+            from zbm_delivery.adapters.identity import PrincipalMissing, principal_for
+            try:
+                principal = principal_for(caller)
+            except PrincipalMissing:
+                raise Invalid("the caller maps to no principal") from None
+            pending = self._red_begin(caller, request_id, facts, head0, run["service"], principal, child_findings,
+                                      review_of=run_id)
+            if pending is None:
+                return self._record_review_locked(caller, run_id, body, request_id, facts, key, h, {}, principal)
+
+        def admit(red: dict) -> dict:
+            # the lock is held again; the containers ran without it — nothing else could admit a run of the service
+            # (its slot was reserved) or review this run (a review of it was pending), but check the state again
+            self._review_checks(caller, run_id, body, request_id, facts)
+            return self._record_review_locked(caller, run_id, body, request_id, facts, key, h, red, principal)
+        return self._red_finish(pending, admit)
+
+    def _record_review_locked(self, caller: str, run_id: str, body: dict, request_id: str, facts: str, key: tuple,
+                              h: str, child_red: Optional[dict], principal) -> dict:
+        run = self.runs[run_id]
+        to = "reviewed_pass" if body["verdict"] == "pass" else "reviewed_fail"
+        verdicts = {v["finding_id"]: v for v in body.get("finding_verdicts") or []}
+        reopened = list(body.get("reopened", []))
+        accepted = sorted(fid for fid, v in verdicts.items() if v["verdict"] == "accept")
+        review = {"request_id": request_id, "facts_sha256": facts, "verdict": body["verdict"],
+                  "review_ref": body["review_ref"], "sha256": body["sha256"], "reopened_ids": reopened,
+                  "new_finding_ids": [f["id"] for f in body.get("new_findings", [])], "received_at": self.now_iso(),
+                  "caller": caller, "accepted_ids": accepted, "src_diff_sha256": body.get("src_diff_sha256"),
+                  "flags_addressed": [{"flag_id": x["flag_id"], "note": x.get("note") or "",
+                                       "note_sha256": sha_text(x.get("note") or "")}
+                                      for x in sorted(body.get("flags_addressed") or [], key=lambda x: x["flag_id"])],
+                  "finding_verdicts": [{"finding_id": fid, "verdict": v["verdict"], "note": v.get("note") or "",
+                                        "note_sha256": sha_text(v.get("note") or "")} for fid, v in sorted(verdicts.items())]}
+        new = json.loads(json.dumps(run))
+        new.update(status=to, review=review, finished_at=self.now_iso())
+        op = Op(self, f"review|{run_id}|{request_id}", caller, run_id)
+        child_id = None
+        child = None
+        # everything that could refuse is decided BEFORE the first record: the findings' review transitions and the
+        # child run's admission (its RED checks, its id, its request id)
+        updates = []
+        for fid, rec0 in self.findings[run_id].items():
+            target = "accepted" if fid in accepted else "reopened" if fid in reopened else None
+            if target is None:
+                continue
+            problem = states.review_transition_problem(rec0, target)
+            if problem:
+                raise Invalid(f"finding {fid}: {problem}")
+            updates.append((fid, rec0, target))
+        if body["verdict"] == "fail":
+            docs = self.finding_docs[run_id]
+            findings = [dict(docs[fid]) for fid in reopened] + [dict(f) for f in body.get("new_findings", [])]
+            head = new["commits"][-1]["sha"] if new.get("commits") else new["base_sha"]
+            child = self._child_body(request_id, body, run, findings, head)
+            child_id = rid("run", "run", caller, child["request_id"], facts_sha256(child))
+            if child_id in self.runs:
+                raise Conflict("the child run already exists", request_id=request_id, facts_sha256=facts)
+            ckey, ch, cent = self._idem(caller, child["request_id"], "fix-runs", child)
+            if cent is not None:
+                raise Conflict("the child run's request id was already used", request_id=request_id, facts_sha256=facts)
+            missing = [f["id"] for f in findings if f.get("reproduction_test") and not (child_red or {}).get(f["id"])]
+            if missing:
+                self._refuse_red(caller, request_id, facts, "REPRODUCTION_RED_UNVERIFIED", missing[0], None,
+                                 f"finding {missing[0]}: no admission RED check for its reviewer-authored reproduction",
+                                 {"why": "no_red_check"})
+        eid = op.record(derived_id("rev", run_id, request_id, facts), "fix_run_reviewed", caller, run_id,
+                        {"run_id": run_id, "request_id": request_id, "facts_sha256": facts, "verdict": body["verdict"],
+                         "review_sha256": body["sha256"], "reopened": reopened, "accepted": accepted,
+                         "src_diff_sha256": review["src_diff_sha256"],
+                         "flags_addressed": [x["flag_id"] for x in review["flags_addressed"]],
+                         "flag_notes_sha256": {x["flag_id"]: x["note_sha256"] for x in review["flags_addressed"]},
+                         "notes_sha256": {fid: sha_text(v.get("note") or "") for fid, v in sorted(verdicts.items())},
+                         "new_findings": review["new_finding_ids"], "from": run["status"], "to": to,
+                         "next_run_id": child_id},
+                        f"Fix run reviewed: {body['verdict']} ({run_id})")
+        new["ledger_event_ids"].append(eid)
+        for fid, rec0, target in updates:
+            rec = json.loads(json.dumps(rec0))
+            rec["state"] = target
+            rec["review"] = {"verdict": "accept" if target == "accepted" else "reopen", "request_id": request_id,
+                             "note_sha256": sha_text((verdicts.get(fid) or {}).get("note") or ""),
+                             "flags_addressed": sorted(fl["id"] for fl in rec0.get("review_flags") or []
+                                                       if fl["id"] in {x["flag_id"] for x in review["flags_addressed"]})}
+            op.add("finding", rec)
+        op.add("run", new)
+        resp = self._stamp({"run_id": run_id, "status": to, "next_run_id": child_id, "request_id": request_id,
+                            "facts_sha256": facts})
+        if child is not None:
+            _, got, _ = self._admit_locked(caller, child, child["base_sha"], principal, child_red or {}, ckey, ch,
+                                           parent_run_id=run_id, op=op)
+            if got != child_id:
+                raise Conflict("the child run id is not the one the review recorded")
+        self._idem_add(op, key, h, resp)
+        self._commit(op)
+        if child_id is not None:
+            self._queue.put(child_id)
+        return resp
+
+    @staticmethod
+    def _child_body(request_id: str, body: dict, run: dict, findings: list[dict], head: str) -> dict:
+        return {"request_id": f"{request_id}:rerun", "source": {"kind": "aegis_review", "ref": body["review_ref"],
+                                                               "sha256": body["sha256"]},
+                "base_ref": run["base_ref"], "base_sha": head, "service": run["service"], "findings": findings}
 
     def cancel(self, caller: str, run_id: str, body: dict) -> dict:
         request_id = body["request_id"]
@@ -871,6 +1494,8 @@ class DeliveryService:
             if ent is not None:
                 return ent["response"]
             run = self.runs.get(run_id)
+            if run is None and run_id in self._admissions:
+                return self._cancel_admission_locked(caller, run_id, body, request_id, facts, key, h)
             if run is None:
                 raise NotFound("no such run")
             if run["status"] in states.TERMINAL or run["status"] == "awaiting_review":
@@ -886,6 +1511,30 @@ class DeliveryService:
             if self._engine is not None and hasattr(self._engine, "interrupt"):
                 self._engine.interrupt(run_id, "cancel")           # R6: the in-flight turn is stopped, not just flagged
             return resp
+
+    def _cancel_admission_locked(self, caller: str, adm: str, body: dict, request_id: str, facts: str, key: tuple,
+                                 h: str) -> dict:
+        """Wave 24 (E6, N23-D-7): the operator cancels a PENDING admission (its reviewer-test RED containers running
+        outside the lock). Recorded first (``admission_cancelled``, with the idempotency record in one local-log
+        line); then the service's slot is free at once, and when the containers end their results are discarded and
+        the admission (or the review that started it) is refused 409 — nothing is admitted from it."""
+        a = self._admissions[adm]
+        op = Op(self, f"admission-cancel|{adm}|{request_id}", caller, adm)
+        eid = op.record(derived_id("acx", adm, request_id), "admission_cancelled", caller, adm,
+                        {"admission_id": adm, "service": a["service"], "review_of": a.get("review_of"),
+                         "admission_request_id": a["request_id"], "request_id": request_id, "facts_sha256": facts,
+                         "reason_sha256": sha_text(body["reason"])},
+                        f"Pending admission cancelled ({a['service']})")
+        resp = self._stamp({"run_id": adm, "status": "cancelled", "request_id": request_id, "facts_sha256": facts,
+                            "ledger_event_id": eid})
+        self._idem_add(op, key, h, resp)
+        # the admission's answer, in the same local-log line: the review (or admission) that started it is refused
+        # with it when its containers end, and so is every replay of it, after a restart too
+        op.add("admission_closed", self._cancelled_answer(adm, a["request_id"], a["facts"]))
+        self._commit(op)
+        self._admissions.pop(adm, None)            # the slot is free now
+        self._cancelled_running.add(adm)           # wave 25: honoured when its containers end, bounded map or not
+        return resp
 
     # ================================================================== audit, reconcile, founder refusals
 

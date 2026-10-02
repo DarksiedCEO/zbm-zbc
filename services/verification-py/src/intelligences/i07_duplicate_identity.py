@@ -2,8 +2,9 @@
 Intelligence 7 — Duplicate Identity (spec §C.7, VI-12, VI-13): findings + evidence; an automatic hold only on
 EXACT matches, on the NEWER identity; the decision is human. Never bans anyone, never decides soft matches.
 
-Inputs are used raw in memory only and stored as HMAC-SHA256 with the identity key from the vault
-(VI_IDENTITY_HMAC_KEY): normalized email (NFKC, lowercase; no dot/plus folding — spec choice), the payout
+Inputs are used raw in memory only and stored as HMAC-SHA256 with the identity key from the vault port
+(``ports.TokenVault.identity_hmac_key``; no environment variable carries it — wave 25: this named
+VI_IDENTITY_HMAC_KEY, which nothing reads): normalized email (NFKC, lowercase; no dot/plus folding — spec choice), the payout
 identity HMAC from Finance 31 (stand-in → the check is ``incomplete``), platform account ids from
 connections. Device fingerprint and IP /24 are OFF (VI_DEVICE_SIGNALS_ENABLED=1 refuses to start: not built).
 """

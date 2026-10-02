@@ -5,6 +5,14 @@ codes, the runner's verified counts, commit shas and file lists from the diff. T
 fence longer than the longest backtick run in the content (a test's stdout cannot close the fence and inject report
 structure); sweep sites are the validated ones (dropped ones are counted with the reason); every number traces to
 a ledger event id (the agent line cites its ``agent_usage`` event).
+
+Wave 23 (founder design change D1/D2): the header says in plain words that the checks are necessary, not sufficient,
+and that the diff has not been reviewed; the engine's end state is ``candidate_passed_checks`` (never "fixed"); the
+review flags (``review_flags``: file:line, construct, reason — a runner-dependent reproduction included, D3) come
+FIRST, above every line that reports a passed check.
+
+Wave 24 (E1/E2): the flags section opens with the spelling-list warning and never says "none"; the complete source
+diff of the run follows it, with its ``src_diff_sha256`` (what an accepting review must carry).
 """
 
 from __future__ import annotations
@@ -13,6 +21,10 @@ import re
 from typing import Callable
 
 TAIL_LINES = 200
+HEADER = "Checks passed are necessary, not sufficient. This diff has not been reviewed."
+# wave 24 (E1): the flags come from a spelling list; the section says so before anything else, and never "none"
+FLAGS_OPENER = ("These flags come from a spelling list. They are an aid, not a guarantee: absence of flags proves "
+                "nothing. Read the full source diff below.")
 _BACKTICKS = re.compile(r"`+")
 
 
@@ -52,10 +64,59 @@ def _phase(name: str, rec: dict | None, read_evidence: Callable[[str], str]) -> 
     return out
 
 
+def _code(text: str) -> str:
+    """An inline code span that no backtick run in ``text`` can close (untrusted source text)."""
+    t = " ".join(str(text).split())
+    fence = fence_for(t)
+    return f"{fence} {t} {fence}" if t else ""
+
+
+def flags_section(findings: list[dict]) -> list[str]:
+    """D2: every review flag of the run, above everything else the report says. Wave 24 (E1): it opens with the
+    spelling-list warning and never says "none" — an empty list is reported as what it is, a list that matched
+    nothing, not as evidence about the diff."""
+    L = ["## Review flags (a review that accepts a finding must note each id)", "", f"**{FLAGS_OPENER}**", ""]
+    flags = [fl for f in findings for fl in (f.get("review_flags") or [])]
+    if not flags:
+        L.append("- (the spelling list matched no added source line and no reproduction is runner-dependent; that "
+                 "says nothing about what the diff does — read it)")
+    for fl in flags:
+        snip = _code(fl.get("snippet") or "")
+        L.append(f"- `{fl['id']}` · `{fl['file']}:{fl['line']}` · {fl['construct']} — {fl['reason']}"
+                 + (f" · {snip}" if snip else ""))
+    L.append("")
+    return L
+
+
+def source_diff_section(run: dict, read_evidence: Callable[[str], str]) -> list[str]:
+    """Wave 24 (E2): the COMPLETE source diff of the run (base..last commit, every changed source file, renames and
+    moves as full additions) and its sha256 — the text a review that accepts a finding attests to having read."""
+    digest, ev = run.get("src_diff_sha256"), run.get("src_diff_evidence_id")
+    L = [f"## Source diff (complete; src_diff_sha256 `{digest}`)", "",
+         "Every source file the run changed, base `" + str(run.get("base_sha")) + "` to the last commit, in full "
+         "as text (rename detection off: a moved or copied file is shown as added). A change git cannot show as "
+         "text — a binary file, a submodule pointer — fails the round and the run before a report is written "
+         "(`binary_src_change`), so nothing below stands for content you cannot read. A review that accepts any "
+         "finding must carry this `src_diff_sha256`.", ""]
+    text = read_evidence(ev) if ev else ""
+    if not text:
+        L.append("- (no source change was committed)")
+        L.append("")
+        return L
+    fence = fence_for(text)
+    L += [fence + "diff", text.rstrip("\n"), fence, ""]
+    return L
+
+
 def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str]) -> str:
     L: list[str] = []
     L.append(f"# Fix run report — {run['run_id']}")
     L.append("")
+    L.append(f"**{HEADER}** The engine's end state for a finding is `candidate_passed_checks`: every check it runs "
+             "passed. Only an AEGIS review with a verdict per finding makes a finding `accepted`.")
+    L.append("")
+    L += flags_section(findings)
+    L += source_diff_section(run, read_evidence)
     L.append(f"- Service: `{run['service']}` · Branch: `{run.get('branch')}` · Base: `{run['base_sha']}` ({run['base_ref']})")
     L.append(f"- Request: `{run['request_id']}` · facts_sha256 `{run['facts_sha256']}`")
     L.append(f"- Model: {run['llm']['provider']} / {run['llm']['model']}" + (" (FAKE, non-production)" if run['llm'].get('fake') else ""))
@@ -102,6 +163,14 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
         if rp:
             L.append(f"- finding's reproduction `{rp.get('target')}`: verification checkout {rp.get('verification', {}).get('verdict')} · "
                      f"reverted {rp.get('reverted', {}).get('verdict')} · evidence `{rp.get('verification', {}).get('evidence_id')}`")
+        sc = f.get("standalone_check")
+        if sc:
+            ver, rev = sc.get("verification") or {}, sc.get("reverted") or {}
+            L.append(f"- reproduction OUTSIDE the test runner ({sc.get('how')}; `{sc.get('target')}`): verification checkout "
+                     f"{ver.get('verdict')} · reverted {rev.get('verdict')} → outcome **{sc.get('outcome')}**"
+                     + (" · conftest on the test's path: " + ", ".join(f"`{c}`" for c in ver.get("conftest") or rev.get("conftest") or [])
+                        if sc.get("conftest") else "")
+                     + f" · evidence `{ver.get('evidence_id')}`")
         so = f.get("src_only_check")
         if so:
             L.append(f"- src-only check ({', '.join(f'`{t}`' for t in so.get('targets') or [])}): verdict {so.get('verdict')} · evidence `{so.get('evidence_id')}`")
@@ -131,7 +200,7 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
                      f"`{d.get('base_sha')}`: exit {d.get('exit')}, verdict {d.get('verdict')} · "
                      f"statement sha256 `{d.get('statement_sha256')}` · evidence `{d.get('evidence_id')}`")
         if f.get("suite_failures"):
-            L.append("- suite failures blocking `fixed`: " + ", ".join(f"`{n}`" for n in f["suite_failures"]))
+            L.append("- suite failures blocking `candidate_passed_checks`: " + ", ".join(f"`{n}`" for n in f["suite_failures"]))
         for r in f.get("reasons") or []:
             L.append(f"- reason: {r.get('code')} — {r.get('message')}")
         a = f.get("agent") or {}
@@ -139,6 +208,21 @@ def render(run: dict, findings: list[dict], read_evidence: Callable[[str], str])
             L.append(f"- agent: turns {a.get('turns', 0)} · tool calls {a.get('tool_calls', 0)} · opaque exec {a.get('opaque_execs', 0)} · "
                      f"denies {a.get('denies', 0)} · tokens in/out {a.get('tokens_in', 0)}/{a.get('tokens_out', 0)} · "
                      f"ledger event `{a.get('event_id')}`")
+    L.append("")
+    L.append("## Runner-dependent — the reproduction could not be executed outside the test runner (flagged `<id>-RD`)")
+    L.append("")
+    nr = [f for f in findings if f["state"] == "needs_review_runner_dependent"]
+    if not nr:
+        L.append("- none")
+    for f in nr:
+        sc = f.get("standalone_check") or {}
+        why = (sc.get("verification") or {}).get("why") or (sc.get("reverted") or {}).get("why") or "-"
+        L.append(f"- {f['finding_id']}: every check passed under the test runner and the change is committed "
+                 f"(`{f.get('commit_sha')}`), but the reproduction `{sc.get('target')}` cannot run outside it (\"{why}\""
+                 + ("; a conftest.py is on its path" if sc.get("conftest") else "")
+                 + "), so the engine could not rule out a change that only works under test. Flag "
+                 f"`{f['finding_id']}-RD`: an AEGIS review accepts it only with a note on what the reviewer checked; "
+                 "a review that reopens it starts a new run.")
     L.append("")
     L.append("## Blocked")
     L.append("")

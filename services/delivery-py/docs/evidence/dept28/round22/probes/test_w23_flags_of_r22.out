@@ -1,0 +1,8 @@
+2026-09-30T16:36:27Z
+HEAD c827329fa6bbb48a2d94460362092e07ad3aed33
+B {"status": "awaiting_review", "states": {"N1-1": "candidate_passed_checks", "N1-2": "candidate_passed_checks"}, "N1-2 flags": [["N1-2-F001", "calc.py:11", "__import__/importlib"], ["N1-2-F002", "calc.py:11", "globals()/vars()"], ["N1-2-F003", "calc.py:11", "string concatenation forming an identifier"]], "flags at report top": true, "accept without flags_addressed": 422}
+.B2 {"status": "awaiting_review", "states": {"N1-1": "candidate_passed_checks", "N1-2": "candidate_passed_checks"}, "N1-2 flags": [["N1-2-F001", "calc.py:11", "__import__/importlib"], ["N1-2-F002", "calc.py:11", "getattr on a module"], ["N1-2-F003", "calc.py:11", "string concatenation forming an identifier"], ["N1-2-F004", "calc.py:12", "__import__/importlib"], ["N1-2-F005", "calc.py:12", "globals()/vars()"], ["N1-2-F006", "calc.py:12", "string concatenation forming an identifier"]], "flags at report top": true, "accept without flags_addressed": 422}
+.B3 {"status": "awaiting_review", "states": {"N1-1": "candidate_passed_checks", "N1-2": "candidate_passed_checks"}, "N1-2 flags": [["N1-2-F001", "calc.py:12", "sys.modules"]], "flags at report top": true, "accept without flags_addressed": 422}
+.B4 {"status": "awaiting_review", "states": {"N1-1": "candidate_passed_checks", "N1-2": "candidate_passed_checks"}, "N1-2 flags": [["N1-2-F001", "calc.py:12", "sys.modules"]], "flags at report top": true, "accept without flags_addressed": 422}
+4 passed in 73.16s (0:01:13)
+2026-09-30T16:37:43Z

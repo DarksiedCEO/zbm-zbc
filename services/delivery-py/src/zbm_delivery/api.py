@@ -279,6 +279,16 @@ def create_app(service: DeliveryService, settings: config_mod.Settings) -> FastA
     def dump(x: BaseModel) -> dict:
         return json.loads(x.model_dump_json())
 
+    def within_max_findings(n: int, field: str) -> None:
+        """Spec D12 / §B.1 ("1..`DLV_MAX_FINDINGS` findings", strict schema → 422). Wave 25 (E-B): the setting was
+        parsed and read by nothing — the request models' fixed cap of 200 per list was the only one, so a lower
+        DLV_MAX_FINDINGS admitted more, and a failing review could open a run of up to 400 (200 reopened + 200
+        new). A run over the cap is the same 422 schema answer an over-long list gets, before anything is recorded."""
+        if n > settings.max_findings:
+            raise RequestValidationError([{
+                "loc": ("body", field), "type": "too_long",
+                "msg": f"a run holds at most {settings.max_findings} findings (DLV_MAX_FINDINGS); this request makes {n}"}])
+
     @app.exception_handler(RequestValidationError)
     def _validation(_: Request, exc: RequestValidationError):
         return JSONResponse(status_code=422, content=_sanitize(exc.errors()))
@@ -311,6 +321,7 @@ def create_app(service: DeliveryService, settings: config_mod.Settings) -> FastA
     @app.post("/dlv/v1/fix-runs", dependencies=auth, status_code=202)
     def fix_runs(who: str = Depends(caller("aegis", "andre_session")),
                  req: m.FindingsDocument = Depends(body(m.FindingsDocument))) -> dict:
+        within_max_findings(len(req.findings), "findings")
         return svc.create_fix_run(who, dump(req))
 
     @app.get("/dlv/v1/fix-runs/{run_id}", dependencies=auth)
@@ -345,6 +356,7 @@ def create_app(service: DeliveryService, settings: config_mod.Settings) -> FastA
 
     @app.post("/dlv/v1/fix-runs/{run_id}/review", dependencies=auth)
     def review(run_id: str, who: str = Depends(caller("aegis")), req: m.ReviewRequest = Depends(body(m.ReviewRequest))) -> dict:
+        within_max_findings(len(req.reopened) + len(req.new_findings), "new_findings")   # the run a fail opens
         return svc.review(who, _run_id(run_id), dump(req))
 
     @app.post("/dlv/v1/fix-runs/{run_id}/cancel", dependencies=auth)
@@ -413,7 +425,7 @@ def build_service(settings: config_mod.Settings, env: Optional[dict] = None, *, 
     log_ = RecordLog(settings.data_dir)
     if git is None:
         git = GitPort(settings.repo_path, record=lambda *a, **k: None)
-    data_dir = settings.data_dir or os.path.join(os.getcwd(), ".dlv-mem")
+    data_dir = settings.data_dir or _memory_home()
     if wire_harness:
         from zbm_delivery import harness
         harness.prepare_environment(settings, data_dir)
@@ -429,6 +441,23 @@ def build_service(settings: config_mod.Settings, env: Optional[dict] = None, *, 
     egress.record = svc._record_plain
     git.record = svc._record_plain
     return svc
+
+
+_MEMORY_HOME: list = []
+
+
+def _memory_home() -> str:
+    """Wave 24 (E6, N23-D-9): with no DLV_DATA_DIR (in-memory mode) the harness's scratch home is a private temp
+    dir of this process, removed when it exits — it used to be ``<cwd>/.dlv-mem``, i.e. the service directory
+    whenever the suite or a launcher ran from there."""
+    if not _MEMORY_HOME:
+        import atexit
+        import tempfile
+        from zbm_delivery import fsops
+        d = tempfile.mkdtemp(prefix="dlv-mem-")
+        atexit.register(fsops.drop_own_temp, d)
+        _MEMORY_HOME.append(d)
+    return _MEMORY_HOME[0]
 
 
 def _app_from_env() -> FastAPI:

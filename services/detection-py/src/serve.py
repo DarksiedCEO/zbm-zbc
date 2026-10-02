@@ -15,9 +15,14 @@ Body limits are enforced by api._BodyLimitMiddleware under any launcher.
 from __future__ import annotations
 
 import argparse
+import math
+import os
+import sys
 
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
+
+from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 from api import MAX_HEADER_BYTES
 
@@ -28,12 +33,96 @@ from api import MAX_HEADER_BYTES
 REQUEST_HEAD_TIMEOUT_S = 10.0
 
 
-class _HeadDeadlineH11Protocol(H11Protocol):
+# The switch interval (fix wave 23; the class fixed in onboarding-py and the
+# other serve.py launchers in fix wave 7, NEW-5, that detection-py missed):
+# the interpreter lets a thread hold the GIL for sys.getswitchinterval()
+# (5 ms by default) before another thread that wants it is served. A
+# worst-case ~28 MiB batch is one CPU-bound parse of ~0.5 s in the threadpool,
+# and GET /health needs the GIL on the event loop several times on its way
+# through (accept, read, route, write) — each time it gave the GIL up for a
+# syscall it waited up to a full slice to get it back, behind the parse and
+# behind the loop's other work (503 refusals and their drains). Found on the
+# w23 box: 5 ms slices -> max 0.44-0.51 s, the event loop's own lag never over
+# 0.13 s (the time was GIL re-acquisition, not one long block).
+# Measured (fix wave 24, Oct 1 2026; this 2-CPU box, Python 3.13.13; the live
+# test test_health_latency_bound_under_16_concurrent_worst_case_batches: 16
+# clients sending ~28 MiB worst-case batches, /health time to first byte from a
+# prober in its own process; 5 runs per row):
+#   1 ms, no other load ............ p50 11-17 ms, max 0.10-0.16 s
+#   1 ms, three busy loops ......... p50 6-8 ms,   max 0.21-0.27 s
+#   5 ms, three busy loops ......... p50 11-14 ms, max 0.23-0.45 s
+# (The wave-23 notes said 0.09-0.10 s here and 0.11-0.15 s in api.py: single
+# sessions under unstated load; AEGIS round 23, three busy loops: 1 ms max
+# 0.11-0.17 s, 5 ms 0.12-0.24 s.) The test's bound, 0.5 s, is unchanged.
+# DETECTION_SWITCH_INTERVAL_SECONDS overrides the interval.
+#
+# Fix wave 24, F3 (AEGIS N23-S-3): the override accepted anything in (0, 1) —
+# 0.5 s (a thread could hold the GIL for half a second: the bound this setting
+# exists for is gone) or 1e-7 s (a switch storm) started the service. Only
+# SWITCH_INTERVAL_MIN_S <= value <= SWITCH_INTERVAL_MAX_S (100 us .. 50 ms)
+# starts; and the launcher checks the interval actually in force
+# (sys.getswitchinterval() after setting it, to the microsecond CPython keeps)
+# before it serves — anything else refuses to start.
+#
+# Fix wave 25, H5 (AEGIS N24-S-6): the in-force check compared floats, and
+# CPython keeps the interval as a whole number of microseconds (it truncates
+# 1e6 x the value): 0.0001 is kept as 100 us and read back as
+# 9.999999999999999e-05, below the 0.0001 float bound — the launcher refused
+# the range's own lower end. The interval in force is now compared in integer
+# microseconds, round(getswitchinterval() x 1e6), against [100, 50000], and
+# with the value set to within the microsecond CPython truncates. The value
+# in force is printed at start (stderr) so a launcher-level check can read it.
+SWITCH_INTERVAL_MIN_US = 100
+SWITCH_INTERVAL_MAX_US = 50_000
+SWITCH_INTERVAL_MIN_S = SWITCH_INTERVAL_MIN_US / 1_000_000   # 0.0001: the env value's own range check
+SWITCH_INTERVAL_MAX_S = SWITCH_INTERVAL_MAX_US / 1_000_000   # 0.05
+
+
+def _switch_interval_from_env(name: str = "DETECTION_SWITCH_INTERVAL_SECONDS", default: float = 0.001) -> float:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not (SWITCH_INTERVAL_MIN_S <= value <= SWITCH_INTERVAL_MAX_S):  # also refuses nan and inf
+        raise RuntimeError(f"{name}={raw!r} is invalid: expected seconds, "
+                           f"{SWITCH_INTERVAL_MIN_S:g} <= value <= {SWITCH_INTERVAL_MAX_S:g}")
+    return value
+
+
+def _apply_switch_interval(value: float) -> int:
+    """Sets the interval and returns the one in force, in whole microseconds (as CPython keeps it); refuses
+    (RuntimeError) unless it is within [SWITCH_INTERVAL_MIN_US, SWITCH_INTERVAL_MAX_US] and is `value` to within the
+    microsecond CPython truncates."""
+    sys.setswitchinterval(value)
+    in_force_us = round(sys.getswitchinterval() * 1_000_000)
+    if not (SWITCH_INTERVAL_MIN_US <= in_force_us <= SWITCH_INTERVAL_MAX_US) or abs(in_force_us - value * 1_000_000) >= 1:
+        raise RuntimeError(f"the GIL switch interval in force is {in_force_us} us, not the {value!r} s set "
+                           f"(DETECTION_SWITCH_INTERVAL_SECONDS): this service refuses to start")
+    return in_force_us
+
+
+SWITCH_INTERVAL_S: float = _switch_interval_from_env()
+
+
+# Graceful close (fix wave 21, L1) with the wave-22 bounds (G5/G6: bounded reads
+# through one shared buffer; the concurrency slot and the answered request's
+# buffered body released before the drain; the drain discards in that buffer; at
+# most DRAINS_MAX (DETECTION_DRAINS_MAX, default 512) drains at once) — the module shared
+# byte-for-byte by the ten Python services (src/graceful_close.py).
+DRAINS_MAX: int = drains_max_from_env("DETECTION_DRAINS_MAX")
+
+
+class _HeadDeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
     """uvicorn's h11 protocol plus a request-head deadline: a connection
     whose next request head has not fully arrived within
     REQUEST_HEAD_TIMEOUT_S (counted from connect, or from the end of the
     previous response) is closed. The body has its own deadline
     (api.BODY_READ_TIMEOUT_S); idle keep-alive stays uvicorn's 5 s."""
+
+    drains_max = DRAINS_MAX
 
     _head_timer = None
     _head_cycle = None
@@ -79,6 +168,8 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="bind address (default: loopback only)")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
+    in_force_us = _apply_switch_interval(SWITCH_INTERVAL_S)
+    print(f"detection-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
     uvicorn.run(
         "api:app",
         host=args.host,

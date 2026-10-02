@@ -22,7 +22,7 @@ Rules enforced here, by construction rather than convention:
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime
 from enum import Enum
 from typing import Annotated, Any, ClassVar, Optional
 

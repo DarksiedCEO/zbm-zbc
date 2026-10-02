@@ -1,0 +1,3 @@
+G2B {"run2_status_at_review": "running", "review": [409, 0.03, null], "run2_events_during_5s_of_hold": 0, "cancel_run2": [409, 0.01, null], "sleep_s": 20, "hold_detected_after_s": 60.0}
+.
+1 passed in 87.08s (0:01:27)

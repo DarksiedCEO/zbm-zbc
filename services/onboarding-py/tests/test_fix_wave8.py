@@ -167,14 +167,29 @@ def test_n7_6_binary_older_than_sources_is_rebuilt(crate_copy):
 
 
 def test_n7_6_cargo_target_dir_unset_uses_the_crate_default(crate_copy):
-    """Against the REAL crate (already built by the session fixture): with
-    the variable removed the answer is services/ledger-rust/target/release/
-    server, which exists and is the ledger server."""
-    r = _resolve(LEDGER_RUST_DIR, {}, unset=("CARGO_TARGET_DIR",))
-    assert r.returncode == 0, r.stderr[-2000:]
-    p = Path(r.stdout.strip())
-    assert p == LEDGER_RUST_DIR / "target" / "release" / "server"
-    assert _is_ledger_server(p)
+    """With the variable removed the answer is the crate's own
+    target/release/server, which exists and is the ledger server.
+
+    Fix wave 24, F5 (AEGIS N23-S-9): this ran against the REAL crate, so
+    every suite run built a release ledger (~100 MB) into
+    services/ledger-rust/target inside the checkout, whatever CARGO_TARGET_DIR
+    the operator had set. It runs against the crate COPY (in pytest's temp
+    dir), its default target dir seeded from the warm one so only the crate
+    compiles; the checkout's crate is never built here."""
+    crate, ctd = crate_copy
+    real_target = LEDGER_RUST_DIR / "target"
+    real_before = real_target.exists()
+    default_target = crate / "target"
+    shutil.copytree(ctd, default_target, symlinks=True, copy_function=shutil.copy2)
+    try:
+        r = _resolve(crate, {}, unset=("CARGO_TARGET_DIR",))
+        assert r.returncode == 0, r.stderr[-2000:]
+        p = Path(r.stdout.strip())
+        assert p == default_target / "release" / "server"
+        assert _is_ledger_server(p)
+    finally:
+        shutil.rmtree(default_target, ignore_errors=True)
+    assert real_target.exists() == real_before, "the checkout's ledger-rust crate was built into its own target dir"
 
 
 # --- the failure paths say what happened ------------------------------------

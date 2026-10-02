@@ -37,10 +37,7 @@ from __future__ import annotations
 import json
 import os
 import random
-import socket
 import string
-import subprocess
-import sys
 import threading
 import time
 import zlib
@@ -52,7 +49,7 @@ import pytest
 
 from _procinfo import rss_kib
 
-from conftest import NOW, TEST_SERVICE_TOKEN, Api, port_range
+from conftest import NOW, TEST_SERVICE_TOKEN, Api, start_serve, stop_serve
 from flows import ok, zbc_open
 from ordinary_captions import CAPTIONS, NEVER_SAY_FP_LIST
 from samples import TODAY, zbc_clip, zbc_goal
@@ -448,9 +445,9 @@ def test_n1_stream_gate_is_bounded_on_100kb():
     phrases = tuple((p, False) for p in NEVER_SAY_FP_LIST)
     worst = 0.0
     for s in inputs:
-        t0 = time.perf_counter()
+        t0 = time.thread_time()  # fix wave 25 (scout A C3; R-HYGIENE L1): this thread's CPU time, not the wall clock
         visual_near_misses(s, phrases)
-        dt = time.perf_counter() - t0
+        dt = time.thread_time() - t0
         worst = max(worst, dt)
         assert dt < 8.0, (s[:20], dt)
     print(f"\nN1 stream gate, worst input: {worst:.2f}s per 100 KB, {len(phrases)} phrases")
@@ -594,49 +591,19 @@ def test_n3_fuzzy_entry_flows_through_clip_review(registry):
 # N2 — 422 amplification
 # =====================================================================================
 
-PORTS = port_range(range(20300, 20320))  # CREATIVE_TEST_PORTS overrides (fix wave 9)
 JUNK_1MIB = json.dumps({"caption": "x" * 1_000_000}).encode()          # 12 missing fields, each echoing the input
 JUNK_60K_KEYS = json.dumps({f"k{i}": "x" for i in range(60_000)}).encode()  # 60k extra_forbidden errors
 
 
-def _free_port() -> int:
-    for port in PORTS:
-        with socket.socket() as s:
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return port
-    raise RuntimeError("no free port in 20300-20319")
-
-
 def _start(extra_env: dict | None = None):
-    port = _free_port()
-    env = {**os.environ, "CREATIVE_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "CREATIVE_PORT": str(port), **(extra_env or {})}
-    env.pop("LEDGER_SERVICE_URL", None)
-    env.pop("LEDGER_SERVICE_TOKEN", None)
-    proc = subprocess.Popen([sys.executable, "serve.py"], cwd=SRC, env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.monotonic() + 20
-    while True:
-        try:
-            if httpx.get(f"http://127.0.0.1:{port}/health", timeout=1).status_code == 200:
-                return proc, port
-        except httpx.HTTPError:
-            pass
-        if proc.poll() is not None or time.monotonic() > deadline:
-            proc.kill()
-            raise RuntimeError("creative-py did not start")
-        time.sleep(0.1)
+    # Fix wave 25 (scout A C5/C6; R-HYGIENE L2): the shared launcher in conftest (a free port from conftest.free_port,
+    # OS-assigned unless CREATIVE_TEST_PORTS is set, accepted only once our own child announced its bind; a failed
+    # start is killed AND reaped). It used to be this file's own picker over a literal default range.
+    return start_serve(extra_env)
 
 
 def _stop(proc):
-    proc.terminate()
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    stop_serve(proc)
 
 
 @pytest.fixture(scope="module")
@@ -655,9 +622,11 @@ _rss_kb = rss_kib
 @pytest.mark.parametrize("name,body", [("1 MiB junk", JUNK_1MIB), ("60k unknown keys", JUNK_60K_KEYS)], ids=["1mib", "60k"])
 def test_n2_validation_error_body_is_bounded_and_never_echoes_input(api, name, body):
     assert len(body) <= 1024 * 1024
-    t0 = time.perf_counter()
+    # fix wave 25 (scout A C3; R-HYGIENE L1): the process's CPU time (the request runs in this process's TestClient
+    # portal thread), not the wall clock of a possibly starved box. Same bound.
+    t0 = time.process_time()
     r = api.client.post("/zbc/clips", content=body, headers={"Content-Type": "application/json"})
-    dt = time.perf_counter() - t0
+    dt = time.process_time() - t0
     assert r.status_code == 422, r.status_code
     assert len(r.content) < 8 * 1024, (name, len(r.content))
     assert b"xxxx" not in r.content and b"k59999" not in r.content, name  # no input echo
@@ -799,7 +768,66 @@ def test_n2_twenty_concurrent_junk_posts_keep_health_fast_and_legit_clients_serv
     assert health and health[-1] < 0.5 * slow, (health[-1], slow)
     assert health[len(health) // 2] < 0.15 * slow, (health[len(health) // 2], slow)
     assert 408 not in legit and sum(v for k, v in legit.items() if isinstance(k, int)) == 10, legit
-    assert rss < 250, rss
+    # Fix wave 21 (AEGIS N20-M-6): the single absolute RSS sample (rss < 250) that stood here was
+    # removed: one number after one flood, with no baseline, can neither see a leak below the ceiling
+    # nor tell a plateau from a climb. Memory is judged by the plateau test below. The number is
+    # still printed above.
+
+
+# Fix wave 21 (AEGIS N20-M-6): memory under repeated junk floods is judged as a plateau, not as one
+# absolute sample. Derived from the reviewer's plateau data (review20/mac/logs/cre_plateau_*.log,
+# Linux, 12 + 6 rounds of both floods on one server; baseline 62-64 MiB; per-round peak = the larger
+# of the two post-flood samples of a round):
+#   - per-round peaks from round 1 on: 179-192 MiB (default run), 192-199 MiB (second run): a
+#     round-to-round spread of at most 13 MiB with no trend; 10 runs of this test in fix wave 21 gave
+#     RSS[10] - RSS[5] from -7 to +14 MiB. PLATEAU_LEAK_DELTA_MIB = 24 sits above that noise. What (a)
+#     detects is MEASURED (fix wave 22, G8; AEGIS N21-C-5 — the wave-21 comment claimed ">= ~55 KiB per
+#     request always fails", derived, never run): the reviewer's mutation runs (retaining N bytes per
+#     json.loads) — 64 KiB/request: climb 32 and 26 MiB, detected 2/2; 32 KiB: 18 and 16, missed 0/2;
+#     16 KiB: 11 and 11, missed; no leak: 2, 8, 10. The floor lies between 32 and 64 KiB per request;
+#     a slower leak is this test's residual. The old single sample (< 250 MB after two floods) passed a
+#     100 KiB-per-request leak (RSS 93/96 MB); this test fails it (climb 86 MiB).
+#   - plateau - baseline: at most 135 MiB (199 - 64). PLATEAU_BUDGET_MIB = 170 (about 1.25 x that)
+#     for allocator and scheduling variation; with a ~64 MiB baseline that is ~234 MiB, inside the
+#     250 MB absolute ceiling, which is kept.
+PLATEAU_ROUNDS = 10
+PLATEAU_LEAK_DELTA_MIB = 24
+PLATEAU_BUDGET_MIB = 170
+PLATEAU_CEILING_MIB = 250
+
+
+def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
+    """Baseline before any flood; PLATEAU_ROUNDS rounds of both floods (20 concurrent x 3 of the
+    1 MiB junk, then of the 60k-keys junk) on one fresh server; RSS sampled after each flood.
+    (a) RSS[N] - RSS[N/2] < PLATEAU_LEAK_DELTA_MIB (no climb), (b) plateau - baseline <
+    PLATEAU_BUDGET_MIB, (c) plateau < PLATEAU_CEILING_MIB. Every sample is printed (and is in the
+    assertion message) so a failing run on another OS yields the evidence."""
+    proc, port = _start()
+    try:
+        baseline = _rss_kb(proc.pid) // 1024
+        per_round: list[int] = []
+        samples: list[tuple[int, str, int]] = []
+        for r in range(1, PLATEAU_ROUNDS + 1):
+            peak = 0
+            for name, body in (("1mib", JUNK_1MIB), ("60k", JUNK_60K_KEYS)):
+                codes, _, _, _ = _flood(port, body, nconc=20, reps=3, sample_health=False)
+                assert codes == {422: 60}, (r, name, codes)
+                rss = _rss_kb(proc.pid) // 1024
+                samples.append((r, name, rss))
+                peak = max(peak, rss)
+            per_round.append(peak)
+    finally:
+        _stop(proc)
+    half = PLATEAU_ROUNDS // 2
+    climb = per_round[-1] - per_round[half - 1]
+    plateau = max(per_round)
+    line = (f"baseline {baseline} MiB; per-round peaks {per_round}; RSS[{PLATEAU_ROUNDS}] - RSS[{half}] = {climb} MiB "
+            f"(< {PLATEAU_LEAK_DELTA_MIB}); plateau - baseline = {plateau - baseline} MiB (< {PLATEAU_BUDGET_MIB}); "
+            f"plateau {plateau} MiB (< {PLATEAU_CEILING_MIB}); samples {samples}")
+    print("\nN2 plateau: " + line, flush=True)
+    assert climb < PLATEAU_LEAK_DELTA_MIB, line
+    assert plateau - baseline < PLATEAU_BUDGET_MIB, line
+    assert plateau < PLATEAU_CEILING_MIB, line
 
 
 CALIBRATION_S = 0.12  # json.loads of JUNK_60K_KEYS x5, best of 7, on the reference 2-vCPU host, idle (fix wave 9)
@@ -818,19 +846,34 @@ def _time(fn) -> float:
     return time.perf_counter() - t0
 
 
+def _proc_cpu_s(pid: int) -> float | None:
+    """utime + stime of process `pid` in seconds (Linux /proc), None elsewhere."""
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            f = fh.read().rsplit(")", 1)[1].split()
+        return (int(f[11]) + int(f[12])) / os.sysconf("SC_CLK_TCK")
+    except (OSError, IndexError, ValueError):
+        return None
+
+
 def test_n2_single_junk_post_is_answered_in_under_100ms_on_the_socket(server):
     proc, port = server
     with httpx.Client(timeout=30) as c:
         for body in (JUNK_1MIB, JUNK_60K_KEYS):
             c.post(f"http://127.0.0.1:{port}/zbc/clips", content=body,
                    headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}", "Content-Type": "application/json"})  # warm
-            t0 = time.perf_counter()
+            # fix wave 25 (scout A C3; R-HYGIENE L1): the SERVER's CPU for the request (Linux /proc: utime+stime of
+            # the server process, 10 ms ticks), not the client's wall clock on a possibly starved box; where /proc is
+            # not available, the wall clock as before.
+            c0, t0 = _proc_cpu_s(proc.pid), time.monotonic()
             r = c.post(f"http://127.0.0.1:{port}/zbc/clips", content=body,
                        headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}", "Content-Type": "application/json"})
-            dt = time.perf_counter() - t0
-            print(f"\nN2 single {len(body) // 1024} KB junk post: {r.status_code} {len(r.content)} B in {dt * 1000:.0f} ms")
+            wall, c1 = time.monotonic() - t0, _proc_cpu_s(proc.pid)
+            cost = wall if c0 is None or c1 is None else c1 - c0
+            print(f"\nN2 single {len(body) // 1024} KB junk post: {r.status_code} {len(r.content)} B, server CPU "
+                  f"{cost * 1000:.0f} ms (wall {wall * 1000:.0f} ms)")
             assert r.status_code == 422 and len(r.content) < 8 * 1024
-            assert dt < 0.1, dt
+            assert cost < 0.1, (cost, wall)
 
 
 # =====================================================================================

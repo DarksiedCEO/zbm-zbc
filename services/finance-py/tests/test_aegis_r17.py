@@ -3,8 +3,6 @@ integration-2026-09-24 @ 680c289 (evidence in the fix-18 report) and passes afte
 
 from __future__ import annotations
 
-import hashlib
-import json
 import random
 from decimal import Decimal
 

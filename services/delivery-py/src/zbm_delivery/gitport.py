@@ -21,14 +21,17 @@ neither become git's global config nor run a hook on the engine's commit.
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import os
 import re
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
+from zbm_delivery import fsops
 from zbm_delivery.ledger import derived_id
 
 ACTOR = "intel_08_engine"
@@ -57,19 +60,40 @@ def _check_path(p: str) -> str:
     return p
 
 
-_ISOLATION_DIR = tempfile.mkdtemp(prefix="dlv-git-")          # private HOME and an EMPTY hooks dir, per process
-_PRIVATE_HOME = os.path.join(_ISOLATION_DIR, "home")
-_EMPTY_HOOKS = os.path.join(_ISOLATION_DIR, "hooks")
-os.makedirs(_PRIVATE_HOME, exist_ok=True)
-os.makedirs(_EMPTY_HOOKS, exist_ok=True)
-ISOLATION_ARGS = ("-c", f"core.hooksPath={_EMPTY_HOOKS}", "-c", "core.fsmonitor=false")
+# Wave 25 (scout C C6-3): the private HOME and EMPTY hooks dir are made on FIRST USE, once per process, never at
+# import — a process that only imported the package and was then killed by a signal (no atexit) left a `dlv-git-*`
+# dir in its temp dir. A process killed after its first git command can still leave one: atexit is the only cleanup.
+_ISOLATION: list = []                      # [(isolation dir, private home, empty hooks dir)] once made
+_ISOLATION_LOCK = threading.Lock()
+
+
+def _isolation() -> tuple[str, str]:
+    """(private HOME, EMPTY hooks dir) of this process, made on first call and removed at exit (fix wave 21, L4)."""
+    with _ISOLATION_LOCK:
+        if not _ISOLATION:
+            d = tempfile.mkdtemp(prefix="dlv-git-")
+            atexit.register(fsops.drop_own_temp, d)
+            home, hooks = os.path.join(d, "home"), os.path.join(d, "hooks")
+            os.makedirs(home, exist_ok=True)
+            os.makedirs(hooks, exist_ok=True)
+            _ISOLATION.append((d, home, hooks))
+        return _ISOLATION[0][1], _ISOLATION[0][2]
+
+
+def isolation_args() -> tuple[str, ...]:
+    """The ``-c`` options on every git argv (R11): the empty hooks dir, no fsmonitor; fix wave 24 (E3, N23-D-2):
+    rename/copy detection off for every command — a file moved or copied into src/ is a full addition (every line
+    shown, every line scanned), never a "similarity index 100%" with no + lines."""
+    return ("-c", f"core.hooksPath={_isolation()[1]}", "-c", "core.fsmonitor=false", "-c", "diff.renames=false",
+            "-c", "status.renames=false")
 
 
 def git_env() -> dict:
     """The environment of every git command (R11): a private empty HOME, no global or system config."""
-    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": _PRIVATE_HOME, "LANG": "C.UTF-8",
+    home = _isolation()[0]
+    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": home, "LANG": "C.UTF-8",
             "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
-            "XDG_CONFIG_HOME": os.path.join(_PRIVATE_HOME, "xdg"),
+            "XDG_CONFIG_HOME": os.path.join(home, "xdg"),
             "GIT_AUTHOR_NAME": "zbm-fix-engine", "GIT_AUTHOR_EMAIL": "fix-engine@zbm.invalid",
             "GIT_COMMITTER_NAME": "zbm-fix-engine", "GIT_COMMITTER_EMAIL": "fix-engine@zbm.invalid"}
 
@@ -98,7 +122,7 @@ class GitPort:
         return GitResult(r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"))
 
     def _git(self, op: str, args: list[str], cwd: str, run_id: str = "-") -> GitResult:
-        argv = ["git", *ISOLATION_ARGS, "-C", cwd, *args]
+        argv = ["git", *isolation_args(), "-C", cwd, *args]
         self._seq += 1
         self.record(derived_id("gt", run_id, self._seq, op, hashlib.sha256("\0".join(argv).encode()).hexdigest()),
                     "crossing_git_requested", ACTOR, run_id if run_id != "-" else "git",
@@ -154,15 +178,18 @@ class GitPort:
         return self._ok(self._git("status", ["status", "--porcelain=v1", "--untracked-files=all"], worktree, run_id), "status")
 
     def diff(self, worktree: str, *, staged: bool = False, run_id: str = "-") -> str:
-        args = ["diff", "--no-color", "--no-ext-diff"] + (["--cached"] if staged else [])
+        args = ["diff", "--no-renames", "--no-color", "--no-ext-diff"] + (["--cached"] if staged else [])
         return self._ok(self._git("diff", args, worktree, run_id), "diff")
 
-    def diff_name_only(self, worktree: str, pathspec: Sequence[str] = (), run_id: str = "-", commit: Optional[str] = None) -> list[str]:
-        args = ["diff", "--name-only", "--no-color"]
+    def diff_name_only(self, worktree: str, pathspec: Sequence[str] = (), run_id: str = "-", commit: Optional[str] = None,
+                       base: Optional[str] = None) -> list[str]:
+        """Changed paths: of the worktree, of one ``commit``, or between ``base`` and ``commit`` (wave 24). Renames are
+        never detected (E3): a moved file is its old path deleted and its new path added."""
+        args = ["diff", "--no-renames", "--name-only", "--no-color"]
         if commit:
-            if not _SHA_RE.fullmatch(commit):
+            if not _SHA_RE.fullmatch(commit) or (base is not None and not _SHA_RE.fullmatch(base)):
                 raise GitRefused("bad sha")
-            args = ["diff", "--name-only", "--no-color", f"{commit}^", commit]
+            args = ["diff", "--no-renames", "--name-only", "--no-color", base or f"{commit}^", commit]
         if pathspec:
             args += ["--", *[_check_path(p) for p in pathspec]]
         out = self._ok(self._git("diff", args, worktree, run_id), "diff --name-only")
@@ -171,8 +198,18 @@ class GitPort:
     def commit_diff(self, worktree: str, sha: str, run_id: str = "-") -> str:
         if not _SHA_RE.fullmatch(sha):
             raise GitRefused("bad sha")
-        r = self._git("diff", ["diff", "--no-color", "--no-ext-diff", f"{sha}^", sha], worktree, run_id)
+        r = self._git("diff", ["diff", "--no-renames", "--no-color", "--no-ext-diff", f"{sha}^", sha], worktree, run_id)
         return r.stdout if r.exit_code == 0 else ""
+
+    def range_diff(self, cwd: str, base: str, head: str, paths: Sequence[str], run_id: str = "-") -> str:
+        """Wave 24 (E2): the complete diff ``base..head`` of ``paths`` (renames off: a moved file in full). An empty
+        path list is an empty diff (never the whole tree)."""
+        if not _SHA_RE.fullmatch(base) or not _SHA_RE.fullmatch(head):
+            raise GitRefused("bad sha")
+        if not paths:
+            return ""
+        args = ["diff", "--no-renames", "--no-color", "--no-ext-diff", base, head, "--", *[_check_path(p) for p in paths]]
+        return self._ok(self._git("diff", args, cwd, run_id), "diff base..head")
 
     def changed_paths(self, worktree: str, run_id: str = "-") -> list[str]:
         """Modified, added and untracked paths of the worktree (from ``status --porcelain``)."""
@@ -203,7 +240,7 @@ class GitPort:
         if not _SHA_RE.fullmatch(sha):
             raise GitRefused("bad sha")
         _check_path(path)
-        argv = ["git", *ISOLATION_ARGS, "-C", self.repo, "archive", "--format=tar", sha, "--", path]
+        argv = ["git", *isolation_args(), "-C", self.repo, "archive", "--format=tar", sha, "--", path]
         self._seq += 1
         self.record(derived_id("gt", run_id, self._seq, "archive", hashlib.sha256("\0".join(argv).encode()).hexdigest()),
                     "crossing_git_requested", ACTOR, run_id if run_id != "-" else "git",

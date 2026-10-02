@@ -29,13 +29,10 @@ Ports: 20110-20119 (this wave's range for creative-py real-socket tests).
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 import select
 import socket
 import string
-import subprocess
-import sys
 import time
 import zlib
 from datetime import timedelta
@@ -46,7 +43,7 @@ import pytest
 
 from _procinfo import rss_kib
 
-from conftest import NOW, TEST_SERVICE_TOKEN, Api, port_range
+from conftest import NOW, Api, start_serve, stop_serve
 from flows import ok, zbc_open
 from ordinary_captions import CAPTIONS, NEVER_SAY_FP_LIST
 from samples import TODAY, zbc_clip, zbc_goal
@@ -292,14 +289,14 @@ def test_new1_visual_gate_is_linear_time_on_100kb():
     # most windows survive the filters); linear, so 200 KB takes ~2x.
     phrases = tuple((p, False) for p in NEVER_SAY_FP_LIST)
     for s in inputs:
-        t0 = time.perf_counter()
+        t0 = time.thread_time()  # fix wave 25 (scout A C3; R-HYGIENE L1): this thread's CPU time, not the wall clock
         visual_near_misses(s, phrases)
-        dt = time.perf_counter() - t0
+        dt = time.thread_time() - t0
         assert dt < 6.0, (s[:20], dt)
     s2 = inputs[-1] + " " + inputs[-1]
-    t0 = time.perf_counter()
+    t0 = time.thread_time()
     visual_near_misses(s2, phrases)
-    assert time.perf_counter() - t0 < 12.0
+    assert time.thread_time() - t0 < 12.0
 
 
 def test_new1_osa_distance_is_correct():
@@ -331,51 +328,20 @@ def test_new1_osa_distance_is_correct():
 # NEW-3 — request head limits and idle / partial-head deadlines, real socket
 # =====================================================================================
 
-PORTS = port_range(range(20110, 20120))  # CREATIVE_TEST_PORTS overrides (fix wave 9)
 # The documented bounds (serve.py; pinned by test_new3_launcher_config_is_pinned).
 REQUEST_HEAD_TIMEOUT_S = 10.0
 KEEP_ALIVE_TIMEOUT_S = 5
 
 
-def _free_port() -> int:
-    for port in PORTS:
-        with socket.socket() as s:
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return port
-    raise RuntimeError("no free port in 20110-20119")
-
-
 def _start(extra_env: dict | None = None):
-    port = _free_port()
-    env = {**os.environ, "CREATIVE_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "CREATIVE_PORT": str(port),
-           **(extra_env or {})}
-    env.pop("LEDGER_SERVICE_URL", None)
-    env.pop("LEDGER_SERVICE_TOKEN", None)
-    proc = subprocess.Popen([sys.executable, "serve.py"], cwd=SRC, env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.monotonic() + 20
-    while True:
-        try:
-            if httpx.get(f"http://127.0.0.1:{port}/health", timeout=1).status_code == 200:
-                return proc, port
-        except httpx.HTTPError:
-            pass
-        if proc.poll() is not None or time.monotonic() > deadline:
-            proc.kill()
-            raise RuntimeError("creative-py did not start")
-        time.sleep(0.1)
+    # Fix wave 25 (scout A C5/C6; R-HYGIENE L2): the shared launcher in conftest (a free port from conftest.free_port,
+    # OS-assigned unless CREATIVE_TEST_PORTS is set, accepted only once our own child announced its bind; a failed
+    # start is killed AND reaped). It used to be this file's own picker over a literal default range.
+    return start_serve(extra_env)
 
 
 def _stop(proc):
-    proc.terminate()
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    stop_serve(proc)
 
 
 @pytest.fixture(scope="module")
@@ -525,13 +491,15 @@ def test_new3_middleware_rechecks_head_size_and_bounds_body_delivery(api):
         sent.append(msg)
 
     mw = BodyLimit(app, read_timeout=0.3)
-    t0 = time.monotonic()
     # fix wave 8 (N7-1): a body under no / a non-JSON content type is 415 before it is read, so the
-    # delivery deadline is exercised on a JSON body
-    asyncio.run(mw({"type": "http", "headers": [(b"content-length", b"10"), (b"content-type", b"application/json")],
-                    "raw_path": b"/x"}, receive, send))
-    assert time.monotonic() - t0 < 2
+    # delivery deadline is exercised on a JSON body. Fix wave 25 (scout A C3; R-HYGIENE L1): no wall-clock bound —
+    # `receive` never returns, so any answer is the deadline's, and the answer names the 0.3 s it was given (not
+    # the 30 s default); the 60 s wait_for is only a hang guard.
+    asyncio.run(asyncio.wait_for(mw({"type": "http", "headers": [(b"content-length", b"10"),
+                                                                 (b"content-type", b"application/json")],
+                                     "raw_path": b"/x"}, receive, send), 60))
     assert sent and sent[0]["status"] == 408
+    assert b"not received within 0.3s" in b"".join(m.get("body", b"") for m in sent[1:]), sent
 
 
 # =====================================================================================
@@ -563,8 +531,12 @@ def test_lowd_ledger_shed_body_matches_ledger_rust_source():
     assert '"ledger-rust is at its connection limit; retry shortly"' in shed[:400]
     assert "503 Service Unavailable" in shed[:800]
     serve_fn = src[src.index("async fn serve(listener"):]
-    # the shed path answers without reading the request or touching the ledger
-    assert "tokio::spawn(shed(stream))" in serve_fn and "serve_connection" in serve_fn
+    # the shed path answers without parsing the request or touching the ledger. Fix wave 21 (ledger N20-M-1): shed()
+    # also takes the shared drain bound — after the 503 it discards (never parses) the unread request bytes, bounded,
+    # before closing — so the spawn is `shed(stream, <drains>)`, no longer `shed(stream)`.
+    shed_fn = shed[:shed.index("\nasync fn ", 10)] if "\nasync fn " in shed[10:] else shed
+    assert "tokio::spawn(shed(stream" in serve_fn and "serve_connection" in serve_fn
+    assert "on_ledger" not in shed_fn and "handle(" not in shed_fn and "serve_connection" not in shed_fn
 
 
 class LoseBeforeCommit(FakeLedgerClient):

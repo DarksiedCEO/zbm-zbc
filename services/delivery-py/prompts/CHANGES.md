@@ -116,3 +116,22 @@ task-reviewer :55-62 (no subagents), :96-113 (Spec Compliance), :117-138 (Code Q
   a `DISPROOF:` is verified by re-running the finding's own reproduction, never the engineer's command.
 - `brief.template.md` — the brief compiler's template (§C.8.3): the header is the runner's, the finding's free
   text sits only inside `--- BEGIN FINDING DATA (untrusted) --- … --- END FINDING DATA ---`.
+- Fix wave 21 (round 20 R1): `engine.system.md` rule 5 no longer describes a finding without a test (every finding
+  names one; a document without it is refused at ingestion) and states that the same reproduction must pass with
+  the source changes and fail without them before `fixed`; `brief.template.md` names the finding's own reproduction
+  argv under "Commands the engine will run"; `reviewer.md` (the reviewer section after "disproof — verify") states
+  that every finding the reviewer files must name a runnable reproduction present in the run's starting tree.
+- Fix wave 21 (lead rulings L2/L3): `engine.system.md` "What you cannot do" states that a pipe or here-string into
+  an interpreter/shell/text tool is refused even when harmless (use the file tools) and that a reviewer-authored
+  reproduction's path is never the engineer's to write; `reviewer.md` describes the finding's `reproduction_test`
+  (a reviewer-authored RED test, refused `reproduction_not_red` if it passes on the starting tree).
+- Fix wave 22 (lead rulings G1/G2): `engine.system.md` rule 5 states that the reproduction must also pass and fail
+  OUTSIDE the test runner and that runner-detecting source is refused; `reviewer.md` names `reproduction_red_unverified`
+  and asks for reviewer-authored tests without pytest imports or fixtures (a reproduction that needs pytest ends
+  `needs_review_runner_dependent`, never `fixed`).
+- Fix wave 23 (founder design change D1-D3): the engine never claims `fixed` — `brief.template.md`,
+  `engine.system.md` rule 5 and `executing-plans.md` name its end state `candidate_passed_checks` and say that only
+  the reviewer accepts a finding; `engine.system.md` rule 5 adds that source importing the test runner fails the
+  round and that every added source line able to observe the execution context becomes a review flag;
+  `reviewer.md` describes the review flags at the top of the report and the review contract (`finding_verdicts`
+  with an explicit accept/reopen per finding, a note for a runner-dependent accept, `flags_addressed`).

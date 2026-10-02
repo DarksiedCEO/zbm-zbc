@@ -34,7 +34,7 @@ from zbm_schema import (
     quantize_money,
     to_money,
 )
-from zbm_schema.money import MAX_MONEY, MONEY_CONTEXT
+from zbm_schema.money import MONEY_CONTEXT
 from zbm_schema.tier2 import ContractTerm
 
 client = TestClient(

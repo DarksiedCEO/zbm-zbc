@@ -12,7 +12,8 @@ for p in (SRC, TESTS):
 
 # api.py refuses to start without COMPLIANCE_SERVICE_TOKEN (fail closed). Test-only
 # values; the ledger env is deliberately unset (module-level app = unconfigured ledger).
-os.environ.setdefault("COMPLIANCE_SERVICE_TOKEN", "test-compliance-service-token-do-not-use")
+# Fix wave 25 (D1): always the test token, never one the shell exports (test_fix25_test_token.py).
+os.environ["COMPLIANCE_SERVICE_TOKEN"] = "test-compliance-service-token-do-not-use"
 for k in ("LEDGER_SERVICE_URL", "LEDGER_SERVICE_TOKEN", "COMPLIANCE_CALLER_TOKENS", "COMPLIANCE_ANDRE_APPROVAL_TOKEN",
           "COMPLIANCE_DATA_DIR", "COMPLIANCE_WATCHER_ENABLED"):
     os.environ.pop(k, None)

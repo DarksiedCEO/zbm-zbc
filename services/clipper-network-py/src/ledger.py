@@ -203,7 +203,8 @@ def derived_id(prefix: str, *parts: Any) -> str:
 
 
 class Recorder:
-    """Every ledger write of the service goes through here (intelligence 11).
+    """Every ledger write of the service goes through here (intelligence 10, evidence & audit; the docstring said 11,
+    copied from compliance-py, which has eleven).
     Validates the §2 field rules locally first, so a bad field is a loud
     local failure, not an opaque 400."""
 

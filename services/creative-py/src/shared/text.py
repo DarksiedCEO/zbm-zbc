@@ -193,7 +193,7 @@ CONFUSABLES: dict[str, str] = {
     # else outside the recognised set goes to a human (unfolded_latin_letters).
     "ꭇ": "r", "ꞃ": "r", "ꝛ": "r", "ᵹ": "g", "ꞅ": "s", "ꜧ": "h", "ꞇ": "t", "ꝺ": "d", "ꝼ": "f",
     # more Cyrillic / Greek from confusables.txt
-    "ԍ": "g", "ԃ": "d", "ԋ": "h", "ԏ": "t", "ӡ": "3", "ҽ": "e", "ҿ": "e", "ӏ": "l", "ᴫ": "n",
+    "ԍ": "g", "ԃ": "d", "ԋ": "h", "ԏ": "t", "ӡ": "3", "ҽ": "e", "ҿ": "e", "ᴫ": "n",
     "ϝ": "f", "ϻ": "m", "ϙ": "q", "ͱ": "h", "ͷ": "n",
     # Cherokee (after casefold Cherokee small letters U+AB70.. become U+13A0..)
     "Ꭰ": "d", "Ꭱ": "r", "Ꭲ": "t", "Ꭵ": "i", "Ꭹ": "y", "Ꭺ": "a", "Ꭻ": "j", "Ꭼ": "e", "Ꮃ": "w",
@@ -1413,7 +1413,7 @@ class _Pack:
         wanted] as masks of `bit(i)`, read at every token end, so the
         consumer can switch a pattern off while the scan runs (default:
         all, both)."""
-        W, PAT, FIRST, TOPS, LSBS, CK, CKX = self.W, self.PAT, self.FIRST, self.TOPS, self.LSBS, self.CK, self.CKX
+        W, PAT, FIRST, TOPS, CK, CKX = self.W, self.PAT, self.FIRST, self.TOPS, self.CK, self.CKX
         if live is None:
             live = [TOPS, TOPS]
         relaxable = self.relaxable

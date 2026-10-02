@@ -1,0 +1,20 @@
+start 2026-09-30T16:32:05Z HEAD=c827329fa6bbb48a2d94460362092e07ad3aed33 base=540a64e (git archive) Python3.12.3
+ful-oversized-head #1 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 11.13s
+det-health-head #1 exit=1 | worst-case batches: n=36 p50=94ms max=578ms | 1 failed, 1 warning in 10.85s
+onb-linear-head #1 exit=0 |  | 78 passed, 1 warning in 16.50s
+ful-oversized-base #1 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 11.02s
+det-health-base #1 exit=1 | worst-case batches: n=34 p50=82ms max=540ms | 1 failed, 1 warning in 10.55s
+onb-linear-base #1 exit=0 |  | 78 passed, 1 warning in 17.03s
+ful-oversized-head #2 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 11.01s
+det-health-head #2 exit=1 | worst-case batches: n=42 p50=68ms max=605ms | 1 failed, 1 warning in 11.02s
+onb-linear-head #2 exit=0 |  | 78 passed, 1 warning in 16.19s
+ful-oversized-base #2 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 11.00s
+det-health-base #2 exit=1 | worst-case batches: n=35 p50=83ms max=575ms | 1 failed, 1 warning in 10.64s
+onb-linear-base #2 exit=0 |  | 78 passed, 1 warning in 16.68s
+ful-oversized-head #3 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 11.22s
+det-health-head #3 exit=0 | worst-case batches: n=38 p50=84ms max=487ms | 1 passed, 1 warning in 10.85s
+onb-linear-head #3 exit=0 |  | 78 passed, 1 warning in 16.83s
+ful-oversized-base #3 exit=1 | oversized senders: codes={('legit', 200): 114, ('junk', 'BrokenPipeError'): 192} | 1 failed, 1 warning in 11.04s
+det-health-base #3 exit=1 | worst-case batches: n=34 p50=87ms max=592ms | 1 failed, 1 warning in 10.73s
+onb-linear-base #3 exit=0 |  | 78 passed, 1 warning in 17.02s
+end 2026-09-30T16:36:16Z left in TMPDIR: 

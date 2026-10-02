@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import http.client
 import json
-import statistics
+import socket
 import threading
 import time
 
@@ -41,6 +41,7 @@ from _procinfo import rss_mib
 from conftest import TEST_SERVICE_TOKEN
 from test_fix4_limits import MAX_BATCHES
 from test_fix5_http_limits_live import _start as _start_quiet, _stop  # DEVNULL: a PIPE fills and blocks the server
+from test_fix8_n7_2_body_prealloc import _send_reading
 from test_live_server import TOKEN
 
 import api
@@ -186,27 +187,38 @@ def test_small_bodies_never_wait_behind_a_held_large_lane(monkeypatch):
     here would be observed."""
     small, large = _padded_small_and_large()
     real_parse = api._parse
+    # Fix wave 25 (scout A F3/F4; R-HYGIENE L1): the large parses are HELD (not 400 ms each) until the small body has
+    # been answered; a small body queued behind the large lane could therefore never be answered — it used to sleep
+    # 0.1 s for "the first large parse is in progress" and bound the small body at 0.2 s of wall clock.
+    in_large, release = threading.Event(), threading.Event()
 
-    def slow_large_parse(model, body):
+    def held_large_parse(model, body):
         if len(body) > api._SMALL_BODY_BYTES:
-            time.sleep(0.4)
+            in_large.set()
+            assert release.wait(60)
         return real_parse(model, body)
 
-    monkeypatch.setattr(api, "_parse", slow_large_parse)
+    monkeypatch.setattr(api, "_parse", held_large_parse)
     results: list[int] = []
+    small_result: list = []
     with TestClient(api.app) as shared:
         threads = [threading.Thread(target=lambda: results.append(
             shared.post(DETECT, headers=HEADERS, content=large).status_code)) for _ in range(3)]
         for t in threads:
             t.start()
-        time.sleep(0.1)  # the first large parse is in progress, two are queued
-        t0 = time.perf_counter()
-        r = shared.post(DETECT, headers=HEADERS, content=small)
-        took = time.perf_counter() - t0
-        for t in threads:
-            t.join()
-    assert r.status_code == 200, r.text[:200]
-    assert took < 0.2, f"small body waited {took * 1000:.0f} ms behind large parses"
+        try:
+            assert in_large.wait(30)       # a large parse holds the lane; the others queue behind it
+            s = threading.Thread(target=lambda: small_result.append(shared.post(DETECT, headers=HEADERS, content=small)))
+            s.start()
+            s.join(30)
+            answered = not s.is_alive()
+        finally:
+            release.set()
+            for t in threads:
+                t.join()
+        s.join()
+    assert answered, "the small body was not answered while the large lane was held"
+    assert small_result[0].status_code == 200, small_result[0].text[:200]
     assert results == [200, 200, 200], results
 
 
@@ -259,8 +271,10 @@ def test_large_bodies_beyond_the_byte_budget_are_refused_before_being_read(monke
         t0 = time.perf_counter()
         r = shared.post(DETECT, headers=HEADERS, content=large)
         took = time.perf_counter() - t0
+        # fix wave 25 (scout A F3; R-HYGIENE L1): waiting for the refill (0.5 s) would have ended in a 200; the 503 is
+        # the proof it was refused within the 0.2 s wait. (`took < 0.35` was wall clock; printed now.)
+        print(f"budget refusal in {took * 1000:.0f} ms")
         assert r.status_code == 503, r.text[:200]
-        assert took < 0.35, f"the refusal took {took * 1000:.0f} ms"
         assert r.headers.get("Retry-After") == "1"
         assert "budget" in r.json()["detail"]
         assert shared.post(DETECT, headers=HEADERS, content=small).status_code == 200
@@ -271,9 +285,9 @@ def test_large_bodies_beyond_the_byte_budget_are_refused_before_being_read(monke
 def test_large_bodies_are_admitted_in_arrival_order(monkeypatch):
     small, large = _padded_small_and_large()
     monkeypatch.setattr(api, "_LARGE_BURST_BYTES", len(large))
-    monkeypatch.setattr(api, "_LARGE_BYTES_PER_S", len(large) * 8)  # one every 125 ms after the burst
-    monkeypatch.setattr(api, "_LARGE_WAIT_S", 5.0)
-    done: list[int] = []
+    monkeypatch.setattr(api, "_LARGE_BYTES_PER_S", len(large))  # one per second after the burst
+    monkeypatch.setattr(api, "_LARGE_WAIT_S", 10.0)
+    done: list = []
     lock = threading.Lock()
     with TestClient(api.app) as shared:
         def post(i: int):
@@ -285,13 +299,17 @@ def test_large_bodies_are_admitted_in_arrival_order(monkeypatch):
         for t in threads:
             t.start()
             time.sleep(0.04)
-        t0 = time.perf_counter()
         r = shared.post(DETECT, headers=HEADERS, content=small)  # meanwhile: not behind them
-        small_took = time.perf_counter() - t0
+        with lock:
+            done.append(("small", r.status_code))
         for t in threads:
             t.join()
-    assert r.status_code == 200 and small_took < 0.1, small_took
-    assert done == [(0, 200), (1, 200), (2, 200), (3, 200)], done
+    # fix wave 25 (scout A F3; R-HYGIENE L1): ORDER, not a 0.1 s wall-clock bound — behind the budget the small body
+    # would come after the last large one (the larges are admitted one per second); it must come before the second.
+    assert r.status_code == 200, r.text[:200]
+    larges = [d for d in done if d[0] != "small"]
+    assert larges == [(0, 200), (1, 200), (2, 200), (3, 200)], done
+    assert done.index(("small", 200)) < done.index((1, 200)), done
 
 
 def test_chunked_body_pays_the_budget_as_it_streams(monkeypatch):
@@ -434,18 +452,37 @@ def _flood(server, n_senders: int, seconds: float, junk: bytes):
         with lock:
             codes[key] = codes.get(key, 0) + 1
 
+    junk_request = (f"POST {DETECT} HTTP/1.1\r\nHost: {host}:{port}\r\nAuthorization: Bearer {TOKEN}\r\n"
+                    f"Content-Type: application/json\r\nContent-Length: {len(junk)}\r\n\r\n").encode() + junk
+
     def sender():
-        conn = http.client.HTTPConnection(host, port, timeout=120)
+        # Fix wave 23 (lead ruling, the wave-21/22 fix8 128-sender class): the
+        # junk client sends WHILE reading and reads the answer to its
+        # Content-Length (_send_reading). The server answers an over-limit body
+        # early (413 before auth), drains at most 64 KiB / 1 s and closes; the
+        # old client (http.client: one blocking send of the whole 4 MiB before
+        # reading anything) was reset mid-send by that design and never read
+        # its 413 (w23 logs: 192/192 BrokenPipeError, 6/6 runs). That residual
+        # is pinned by test_fix22_drain_residual and by
+        # test_live_blocking_sendall_oversized_client_is_reset_before_reading_its_413
+        # below. The connection is reused only when the server kept it open
+        # (whole request sent, no "Connection: close"), as http.client did.
+        s = None
         while time.monotonic() < stop:
-            try:
-                conn.request("POST", DETECT, body=junk, headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"})
-                r = conn.getresponse()
-                r.read()
-                count(("junk", r.status))
-            except OSError as exc:
-                count(("junk", type(exc).__name__))
-                conn = http.client.HTTPConnection(host, port, timeout=120)
-        conn.close()
+            if s is None:
+                try:
+                    s = socket.create_connection((host, port), timeout=120)
+                except OSError as exc:
+                    count(("junk", "connect:" + type(exc).__name__))
+                    continue
+            answer: dict = {}
+            got = _send_reading(s, junk_request, 120, answer)
+            count(("junk", int(got) if got.isdigit() else got))
+            if not got.isdigit() or answer["sent"] < len(junk_request) or b"connection: close" in answer["head"].lower():
+                s.close()
+                s = None
+        if s is not None:
+            s.close()
 
     def legit_client():
         conn = http.client.HTTPConnection(host, port, timeout=60)
@@ -524,9 +561,13 @@ def test_live_junk_flood_does_not_starve_small_legit_requests(server, n_senders,
                f"idle {res['idle']} MiB; large batch {res['big'][0]} in {res['big'][1]:.2f}s ({res['big'][2]} attempts)")
     print(summary)
     assert res["errors"] == [], res["errors"]
-    # A refused sender may also see a reset: a 413 closes the connection
-    # with its body unread (fix wave 4), and a client still writing gets RST.
-    assert all(k[0] != "junk" or k[1] in (413, 422, 503, "ConnectionResetError", "BrokenPipeError") for k in codes), codes
+    # Fix wave 23: the junk client reads while it sends, so EVERY junk request
+    # ends in a complete answer — no reset, no BrokenPipe, no timeout. (Before,
+    # resets were allowed here, which let the oversized case pass with zero
+    # 413s read — or fail with zero, as it did 6/6 on the w23 box.)
+    assert all(k[0] != "junk" or k[1] in (413, 422, 503) for k in codes), codes
+    if kind == "oversized":  # every one of them is refused 413 before auth
+        assert all(k[0] != "junk" or k[1] == 413 for k in codes), codes
     assert codes.get(("junk", 413 if kind == "oversized" else 422), 0) > 0, codes
     assert codes.get(("legit", 200), 0) == len(legit), codes
     assert len(legit) >= 40, summary  # 2 clients x ~10/s x 6 s when not starved
@@ -539,3 +580,30 @@ def test_live_junk_flood_does_not_starve_small_legit_requests(server, n_senders,
     # trade-off) plus one parse's worth, never a parse per sender.
     assert res["peak"] - res["base"] < n_senders * 4 + 64, summary
     assert res["idle"] - res["base"] < 64, summary
+
+
+def test_live_blocking_sendall_oversized_client_is_reset_before_reading_its_413(server):
+    """Fix wave 23: the blocking-client residual, pinned against the real
+    service (the synthetic-app version is test_fix22_drain_residual). The
+    server answers the over-limit Content-Length 413 at once, drains at most
+    64 KiB / 1 s, then closes: a client that writes the whole 4 MiB body with
+    one blocking sendall before reading anything is reset mid-send and never
+    reads its 413. By design (an unbounded drain is a resource an attacker
+    holds for free) — a change to it either way must be a visible decision.
+    The same body from a reading client gets its 413 (the flood test above)."""
+    _, host, port = server
+    junk = LIVE_JUNK["oversized"]()
+    data = (f"POST {DETECT} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\n"
+            f"Content-Length: {len(junk)}\r\n\r\n").encode() + junk
+    s = socket.create_connection((host, port), timeout=20)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+    try:
+        with pytest.raises((BrokenPipeError, ConnectionResetError)):
+            s.sendall(data)
+    finally:
+        s.close()
+    s = socket.create_connection((host, port), timeout=20)
+    try:
+        assert _send_reading(s, data, 20) == "413"
+    finally:
+        s.close()
