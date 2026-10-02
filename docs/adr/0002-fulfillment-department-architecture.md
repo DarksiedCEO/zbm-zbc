@@ -745,8 +745,13 @@ starved one read differently in the log.)
 **H3 — parsed models (N24-S-4).** The derivation left out the parsed model, which outlives the body's budget bytes and
 can be ~5x the body (CPython stores a string with one astral character at 4 bytes a character, plus its UTF-8 copy).
 Each model's size is measured right after the parse (`_retained_bytes`: everything reachable, each object once, +1/16;
-against tracemalloc it counts 1.03-1.06x what the model holds — `tests/test_fix25_liveness.py`) and counted in the
-budget until the model is dropped (after the agent's work). Measured worst models per request model: PENDING-E-A-H3 (E-A `h3_models` probe). A large body's model waits for
+against tracemalloc it counts 0.98-1.06x what the model holds — large models 1.01-1.06x, small (<= 64 KiB body)
+models 0.98-1.02x, i.e. up to ~2% (~16 KB) UNDER for small ones — `tests/test_fix25_liveness.py`) and counted in the
+budget until the model is dropped (after the agent's work). Measured worst models per request model
+(E-A `h3_models` probe at e665109, Python 3.13.13 and 3.12.3 agree to 0.03 MiB; `w25-reports/E-A/logs/h3_models.e665109*.log`):
+large — CallEventsRequest 4.00 MiB body -> 20.5 MiB traced / 21.7 counted (5.1x), DossierUpdateRequest 3.91 -> 20.7 /
+22.0 (5.3x), OrchestrateRequest 2.19 -> 11.5 / 12.1; small (64 KiB body) — AppointmentsRequest 0.68-0.70 MiB traced /
+0.68 counted (10.9-11.2x), DossierUpdateRequest 0.65 / 0.64, CallEventsRequest 0.60 / 0.60. A large body's model waits for
 the budget like a chunk in hand (503 after `_INFLIGHT_WAIT_S`).
 **Regression found and fixed in review:** as first committed (cd5fb49) a SMALL body's model waited for the shared pool
 too — a 64 KiB valid body whose model is ~0.44 MB was answered 503 whenever the shared pool was held (by stalled senders,
@@ -763,16 +768,16 @@ preemption frees one holder at a time.
 **The bound, restated (H3).** Request memory the process holds at most:
 - counted, `used` <= the limit: **64 MiB** — body bytes, read-ahead grants, and every parsed model after its parse;
 - `over` (in memory, outside the limit): <= one 16 KiB chunk per body waiting to be covered (<= 128: **2 MiB**); a large
-  body's model while it waits to be covered (one at a time: the large lane has one slot; <= 21.2 MiB measured worst —
+  body's model while it waits to be covered (one at a time: the large lane has one slot; <= 22.0 MiB counted worst —
   the same model as the next term, not in addition to it); small bodies' models past what the pools had free (each
   <= ~0.7 MiB measured; how many coexist depends on how many small requests are in the agent's work at once — NOT
   bounded structurally, see "Not proven");
 - uncounted: one unasked 16 KiB read per open connection in uvicorn's buffer (<= 256: **4 MiB**); the parse in
-  progress — per large slot (one) the joined body copy (<= **4 MiB**) and the model being built (<= **21.2 MiB** measured
+  progress — per large slot (one) the joined body copy (<= **4 MiB**) and the model being built (<= **20.7 MiB** traced
   worst), per small slot (four) <= 64 KiB + ~0.7 MiB (<= **3 MiB**);
 - the measured fixed term (wave-24 budget sweep): **0.9 MiB**.
 Sum with no parse in flight (the 128-sender scenario the 96 MiB test bound is for): 64 + 2 + 4 + 0.9 = **71 MiB**, margin
-25 MiB. With the worst large parse in flight as well: 71 + 4 + 21.2 + 3 = **99 MiB** — above 96 MiB: the 96 MiB bound is
+25 MiB. With the worst large parse in flight as well: 71 + 4 + 20.7 + 3 = **99 MiB** — above 96 MiB: the 96 MiB bound is
 the 128-sender scenario's (bodies only, no parse), not a bound on every mix. Measured (E-A, Oct 1 23:04-23:17Z, head
 e665109, 2 busy loops, the reviewer's probes, VmHWM growth; `w25-reports/E-A/logs/campaign-e665109-MHA/`): the
 128-sender scenario 65-67 MiB (10 runs; derived 71); 16 clients looping valid 4 MiB astral batches (`f1_parse_live.py`,
