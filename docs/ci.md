@@ -112,7 +112,7 @@ install stable`, which floats with the stable channel (scout C3-12; a new stable
 | `orchestrator-go` | `go vet ./...` → `go test -race -count=1 -v ./...` under the hygiene check (Go version from `go.mod`, 1.24.7; `GOTELEMETRY=off`) | the orchestrator's tests (three packages) with the race detector; no cached results; the binary tests start the real orchestrator on port 0 and read its port file. |
 | `dashboard-ts` | Node 22 → `npm ci` → `npm run lint` (`tsc --noEmit`) → `npm run build` → `npm test` under the hygiene check → `npm run check:dynamic` (job env `NODE_DISABLE_COMPILE_CACHE=1`: npm otherwise leaves `node-compile-cache` in the suite's private TMPDIR, an R3 failure; `NEXT_TELEMETRY_DISABLED=1`) | lockfile-exact install, typecheck, production build, the tests (the live ones start the built server on a port it picks; any skip fails the job; money vectors shared with the other three languages), and the package's own check that `/` and `/healthz` are dynamic routes. |
 | `live-run (<svc>, 3.12/3.13)` for compliance-py, verification-py, clipper-network-py, finance-py, legal-py | `cargo build --locked --release --bin server` in ledger-rust, then `LEDGER_BIN=<that binary> LIVE_WORK_DIR=$RUNNER_TEMP/live-work python devtools/live_run.py` under the hygiene check (`--kind none`: no test count; temp files and processes must not outlive the run), then the work dir is listed and removed | each department's own live integration run: the real ledger-rust binary and the department's production entrypoint as separate processes over real HTTP with real tokens, every narrated behaviour asserted, a restart with the ledger-anchor check, and `GET /ledger/verify` valid on every ledger at the end. Exit 0 only when every check held (each script prints its own N/N). verification-py's run also starts compliance-py's production entrypoint, so both requirement files are installed. |
-| `delivery-docker-live` | `docker buildx imagetools inspect python:3.12-slim` (base digest, unless the `DLV_SANDBOX_BASE_DIGEST` repository variable is set) → `docker run registry:2` on 127.0.0.1:5000 → `docker build -f services/delivery-py/docker/sandbox.Dockerfile --build-arg BASE_DIGEST=… -t 127.0.0.1:5000/zbm/dlv-sandbox:ci .` → `docker push` → `uv sync --frozen` → `DLV_LIVE_SANDBOX_IMAGE=127.0.0.1:5000/zbm/dlv-sandbox@sha256:<digest> .venv/bin/python -m pytest -q -rs tests/test_live_docker.py --junitxml=…` → a script that fails if any of the three tests was skipped | the sandbox properties only a Docker daemon can prove (ADR 0011 R4/R6, spec C.2): uid 65532 inside, seccomp on, `/var/run/docker.sock` absent, read-only root with `/tmp` and the workspace writable, no route out and no `curl`/`wget` in the image, no `.git` in the copied workspace, the `zbm.dlv.run` label on container and volume, the deadline kills a running process, the volume is gone after destroy. A skip is a failure here, by construction. |
+| `delivery-docker-live` | `docker buildx imagetools inspect python:3.12-slim` (base digest, unless the `DLV_SANDBOX_BASE_DIGEST` repository variable is set) → `docker run registry:2` on 127.0.0.1:5000 → `docker build -f services/delivery-py/docker/sandbox.Dockerfile --build-arg BASE_DIGEST=… --build-arg NODE_VERSION=… --build-arg NODE_SHA256=… -t 127.0.0.1:5000/zbm/dlv-sandbox:ci .` (Node pins from the job's env = ADR 0011) → `docker push` → `uv sync --frozen` → `DLV_LIVE_SANDBOX_IMAGE=127.0.0.1:5000/zbm/dlv-sandbox@sha256:<digest> .venv/bin/python -m pytest -q -rs tests/test_live_docker.py --junitxml=…` → a script that fails if any of the three tests was skipped | the sandbox properties only a Docker daemon can prove (ADR 0011 R4/R6, spec C.2): uid 65532 inside, seccomp on, `/var/run/docker.sock` absent, read-only root with `/tmp` and the workspace writable, no route out and no `curl`/`wget` in the image, no `.git` in the copied workspace, the `zbm.dlv.run` label on container and volume, the deadline kills a running process, the volume is gone after destroy. A skip is a failure here, by construction. |
 | `audit-python` | `pip-audit==2.10.1`: `pip-audit -r services/<svc>/requirements.txt --strict` for every `*-py/requirements.txt`; for delivery-py, `uv export --frozen --no-hashes --no-emit-project` then `pip-audit -r … --no-deps --disable-pip --strict` on the registry packages | no known advisory against any pinned Python dependency (the two git-sourced deer-flow packages are excluded — see below). |
 | `audit-rust` | `cargo install cargo-audit --locked --version 0.22.2` → `cargo audit` | no RustSec advisory against `Cargo.lock` (70 crates). |
 | `audit-node` | `npm audit --audit-level=high` | no high or critical advisory against `package-lock.json`. |
@@ -148,10 +148,15 @@ install stable`, which floats with the stable channel (scout C3-12; a new stable
   URL requirements, so they are filtered out of the export before the audit. Their transitive dependencies (187
   registry packages) are audited.
 - **A pinned base digest for the sandbox image.** `docker/sandbox.Dockerfile` requires `python:3.12-slim`'s digest
-  as a build argument and ADR 0011 says it is recorded at first build; nothing is recorded yet. Until the
-  `DLV_SANDBOX_BASE_DIGEST` repository variable is set, `delivery-docker-live` resolves the current digest at run
-  time and emits a workflow warning with the value — an unpinned float, stated plainly. Record it in ADR 0011 and
-  set the variable to close the gap. Likewise `registry:2` (the throwaway local registry) is pulled by tag.
+  as a build argument. ADR 0011's "Pinned hashes" records one (2026-10-02, fix wave 26a W26-3; also
+  `RECORDED_BASE_DIGEST` in the job), but the build uses the `DLV_SANDBOX_BASE_DIGEST` repository variable, which
+  only the repository owner can set. Until it is set, `delivery-docker-live` resolves the current digest at run
+  time and emits a workflow warning saying whether it equals the recorded one — an unpinned float, stated plainly.
+  Likewise `registry:2` (the throwaway local registry) is pulled by tag, and the sandbox image's Go tarball and
+  rustup installer are downloaded without a checksum (docs/findings/OPEN.md W26-3b); the Node tarball is checked
+  against its pinned sha256 (`NODE_SHA256`, a required build argument — CI #2's docker-live build failed because
+  it was not passed; `devtools/test_ci_docker_args.py` in `hygiene-static` now fails any `docker build` in this
+  workflow that omits a build argument its Dockerfile declares without a default).
 - **cargo fmt.** The ledger crate is not rustfmt-clean today and the README does not require it; adding
   `cargo fmt --check` is a formatting change first, then a CI change.
 - **Building or publishing container images** for the services (`docker/Dockerfile`), deployments, and any job
@@ -173,7 +178,7 @@ and on Linux the wrapper is its child subreaper. The job fails when, for that ru
 | R3 tmp | the private TMPDIR is not empty at the end, or a new entry appeared directly in `/tmp` |
 | R4 procs | a process of the suite is still alive after its command exited (it is then listed and killed by PID) |
 | R5 skips | a test was skipped (Python), skipped (Go `--- SKIP`), ignored (cargo) or skipped (node) for a reason not on the suite's `expected_skips` list in `devtools/hygiene_allowlist.json` — scout C3-5: before, `-rs` only printed skips |
-| R6 counts | the suite's test count differs from its row in `docs/test-counts.md` (regenerate with `--counts write`) |
+| R6 counts | the suite's test count differs from its row in `docs/test-counts.md` (regenerate with `--counts write`), less the platform-only tests named for other OSes (below), which must be absent by name |
 
 `lint` (job `hygiene-static`): L1 a test asserting an upper bound on a wall-clock delta against a literal — or
 against a name bound only to a literal (`PROMPT = 1.0`, `const PROMPT: Duration = Duration::from_secs(1)`, `const
@@ -183,9 +188,15 @@ ci.yml comments, also when it is wrapped across two lines (a count tied to a res
 is history and allowed); L4 the shared files (`graceful_close.py` and its pin, the two shared graceful-close test
 files, `tests/_procinfo.py`, `tests/test_procinfo.py`, `tests/test_shared_ports.py`) differing between services.
 Exceptions need an entry with a reason in `devtools/hygiene_allowlist.json`; `--strict-allowlist` also fails an
-entry that matches nothing. `docs/test-counts.md` holds the Linux counts; a suite that compiles fewer tests on
-another OS declares it in the allowlist's `count_os_delta` with the reason (today: ledger-rust, −1 on macOS — one
-`#[cfg(target_os = "linux")]` test).
+entry that matches nothing. `docs/test-counts.md` counts every test of a suite; a test that exists on some OSes
+only is NAMED in the allowlist's `platform_only_tests` (test name, `only_on`, reason) and in the generated file's
+last column (`counts --check` fails if the two differ). On another OS, R6 expects exactly those tests absent — by
+name — and the count lower by that many, and prints that in its summary line; a listed test that runs where it
+should not, or is missing where it should run, fails the job. Today: ledger-rust's
+`f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` (`#[cfg(target_os = "linux")]`), so macOS expects
+one test fewer. (Fix wave 26a, W26-5: this replaced `count_os_delta`, an anonymous per-OS number applied without a
+word in the output — CI #2's macOS ledger-rust job counted one fewer and R6 rightly passed, but nothing said why,
+and a lost test would have been hidden had the platform gate been removed at the same time.)
 
 The test counts are a committed, generated file: after a change that adds or removes tests, run the suite under
 `hygiene_check.py run … --counts write` and commit the changed row. Every CI test job checks its row; when two

@@ -30,9 +30,12 @@ Ports: FULFILLMENT_TEST_PORT_RANGE when set (this wave: 20720-20739).
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import http.client
 import json
+import os
 import socket
+import sys
 import time
 import tracemalloc
 
@@ -536,6 +539,104 @@ def _hwm_mib(pid: int) -> int | None:
     return None
 
 
+# Fix wave 26 (W26-2c; CI #2: this module's 128-sender test failed on macos-26 with its samples flat at
+# "... (12.5, 138), (13.0, 138)]": the bound (13 s) elapsed with RSS still at its peak, so `settled_at` was None;
+# the rest of its line was not captured). The settle check assumes that memory the server frees leaves the number
+# it reads. On Linux it does, without help: with `_malloc_trim` disabled (ADR 0002 Decision 21's glibc-only call)
+# the test still settles at 7.0-7.5 s, as with it (measured, w26-reports/E-A logs; glibc serves blocks this large
+# by mmap and unmaps them at free). What macOS's allocator does at free is the open question; the hypothesis
+# (NOT measured -- no Mac here) is that it keeps them, marked reusable (madvise MADV_FREE_REUSABLE): such pages stay in the
+# resident size `ps -o rss` reports until the kernel reclaims them, but leave the process's physical footprint,
+# the kernel's count of the memory charged to it (what jetsam limits and Activity Monitor use). On macOS the test
+# therefore reads `phys_footprint` (proc_pid_rusage, RUSAGE_INFO_V0; same user, no privilege needed) and prints the
+# `ps` RSS series beside it, so the next Mac run shows which held. The bounds are unchanged: growth <
+# _INFLIGHT_BODY_BYTES + 32 MiB and settle to base + 24 MiB within 13 s, derived from what the server holds (the
+# 64 MiB budget, uvicorn's per-connection buffers, the 503'd bodies' drains, one parse; ADR 0002) -- on macOS
+# that is its footprint, not pages it has handed back. Linux keeps VmRSS and the kernel peak (VmHWM), unchanged.
+# Elsewhere (no footprint): `ps` RSS, as before.
+
+
+class _RusageInfoV0(ctypes.Structure):
+    """`struct rusage_info_v0` of macOS <sys/resource.h> (proc_pid_rusage flavor RUSAGE_INFO_V0 = 0)."""
+
+    _fields_ = [("ri_uuid", ctypes.c_uint8 * 16)] + [(name, ctypes.c_uint64) for name in (
+        "ri_user_time", "ri_system_time", "ri_pkg_idle_wkups", "ri_interrupt_wkups", "ri_pageins", "ri_wired_size",
+        "ri_resident_size", "ri_phys_footprint", "ri_proc_start_abstime", "ri_proc_exit_abstime")]
+
+
+def _darwin_rusage(pid: int) -> _RusageInfoV0 | None:
+    """macOS: proc_pid_rusage(pid, RUSAGE_INFO_V0); None anywhere else or if the call fails."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        fn = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True).proc_pid_rusage
+    except (OSError, AttributeError):
+        return None
+    fn.argtypes, fn.restype = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p], ctypes.c_int
+    info = _RusageInfoV0()
+    return info if fn(pid, 0, ctypes.byref(info)) == 0 else None
+
+
+def _held_metric() -> str:
+    """Which memory figure `_held_mib` reads on this machine (printed with every 128-sender run)."""
+    if sys.platform.startswith("linux"):
+        return "VmRSS"
+    return "phys_footprint" if _darwin_rusage(os.getpid()) is not None else "ps rss"
+
+
+def _held_mib(pid: int) -> int:
+    """The memory the server holds, in MiB: Linux VmRSS (unchanged), macOS phys_footprint, else `ps` RSS. Where the
+    footprint is readable at all (this process), failing to read the server's is an error, never a silent RSS."""
+    if _held_metric() == "phys_footprint":
+        info = _darwin_rusage(pid)
+        assert info is not None, f"proc_pid_rusage({pid}) failed: errno {ctypes.get_errno()}"
+        return info.ri_phys_footprint // MIB
+    return _rss_mib(pid)
+
+
+def test_held_memory_metric_is_rss_on_linux_and_the_darwin_struct_matches_sys_resource_h():
+    """Fix wave 26 (W26-2c): Linux reads exactly what it read before (VmRSS); the macOS struct has the layout of
+    <sys/resource.h> (16-byte uuid, then uint64 fields; phys_footprint is the 8th, at byte 72; 96 bytes)."""
+    assert ctypes.sizeof(_RusageInfoV0) == 96 and _RusageInfoV0.ri_phys_footprint.offset == 72
+    assert _RusageInfoV0.ri_resident_size.offset == 64
+    if sys.platform.startswith("linux"):
+        assert _held_metric() == "VmRSS" and _darwin_rusage(os.getpid()) is None
+        assert abs(_held_mib(os.getpid()) - _rss_mib(os.getpid())) <= 1
+    elif sys.platform == "darwin":
+        info = _darwin_rusage(os.getpid())
+        assert info is not None and _held_metric() == "phys_footprint"
+        # sanity against ps: the resident size the struct reports is ps's RSS (same pages, same moment +- churn)
+        assert abs(info.ri_resident_size // MIB - _rss_mib(os.getpid())) <= 8, (info.ri_resident_size, _rss_mib(os.getpid()))
+        assert 0 < info.ri_phys_footprint // MIB < 4096
+
+
+def test_held_memory_on_the_darwin_path_is_the_footprint_and_a_failed_read_is_an_error(monkeypatch):
+    """Fix wave 26 (W26-2c), the macOS path driven on any OS through a stand-in libSystem: the struct is filled by
+    the same `proc_pid_rusage(pid, 0, byref(info))` call, `_held_mib` returns the footprint (not the resident
+    size), and when the server's pid cannot be read the test errors instead of falling back to RSS."""
+    calls = []
+
+    class FakeProcPidRusage:
+        def __call__(self, pid, flavor, ref):
+            calls.append((pid, flavor, self.argtypes, self.restype))
+            if pid != os.getpid() and pid != 4242:
+                return -1
+            info = ref._obj
+            info.ri_resident_size, info.ri_phys_footprint = 700 * MIB, 123 * MIB + 5
+            return 0
+
+    class FakeLib:
+        proc_pid_rusage = FakeProcPidRusage()
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(ctypes, "CDLL", lambda path, use_errno=False: FakeLib() if path == "/usr/lib/libSystem.B.dylib" else None)
+    assert _held_metric() == "phys_footprint"
+    assert _held_mib(4242) == 123
+    assert calls[-1] == (4242, 0, [ctypes.c_int, ctypes.c_int, ctypes.c_void_p], ctypes.c_int)
+    with pytest.raises(AssertionError, match="proc_pid_rusage"):
+        _held_mib(4243)
+
+
 def test_the_settle_check_waits_for_the_peak_phase_and_a_run_without_one_is_invalid():
     """N24-S-13, the reviewer's run A single #5 — base 53 MiB, samples [(2.0, 71), (2.6, 75)] (its log): the old
     check said settled_at 2.6 s with growth 22 MiB; it measured nothing. Now: no settle before the floor, and the
@@ -651,7 +752,8 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     stalled bodies are cut by the throughput rule within the grace period, so
     RSS is back near baseline well before the 30 s deadline."""
     proc, port = server
-    base = _rss_mib(proc.pid)
+    base = _held_mib(proc.pid)  # fix wave 26 (W26-2c): VmRSS on Linux (as before), phys_footprint on macOS
+    rss_base = _rss_mib(proc.pid)
     hwm_ok = _hwm_reset(proc.pid)
     payload = b'{"call_events":[' + b" " * (3_900_000 - 16)
     # Fix wave 21 (lead ruling L1): each sender sends WHILE reading, stops
@@ -670,6 +772,7 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     bound = http_limits.BODY_MIN_RATE_GRACE_S + http_limits.BODY_DEADLINE_GRACE_S + 3
     peak = base
     samples: list[tuple[float, int]] = []
+    rss_samples: list[tuple[float, int]] = []  # fix wave 26: printed where the held metric is not RSS (macOS)
     state = {"settled_at": None, "reached": False}
     # fix wave 25 (E-A): the server main thread's run-queue wait during the burst is PRINTED (diagnostics: a slow
     # server and a starved one read differently); the settle bound itself is fixed and is not extended by it.
@@ -679,11 +782,15 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     # elapses, whatever the senders are doing (it used to stop as soon as every
     # sender had its answer). Fix wave 25, H2: "settled" only counts after the
     # peak phase (_settled_at). The 96 MiB growth bound below is unchanged (N20-M-4).
+    metric = _held_metric()
+
     def tick(elapsed: float) -> bool:
         nonlocal peak
-        r = _rss_mib(proc.pid)
+        r = _held_mib(proc.pid)
         peak = max(peak, r)
         samples.append((round(elapsed, 1), r))
+        if metric != "VmRSS":
+            rss_samples.append((round(elapsed, 1), _rss_mib(proc.pid)))
         state["settled_at"], state["reached"] = _settled_at(samples, base)
         return state["settled_at"] is None and elapsed < bound
 
@@ -704,10 +811,11 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
                f"answered {q([r['answered'] for r in cut])} s; "
                f"503 answered {q([r['answered'] for r in recs if r['code'] == '503'])} s (min/median/max)")
     # the whole line, flushed, before any assertion: a failing run (e.g. on a Mac runner) keeps its evidence
-    line = (f"codes {codes}; RSS base {base} peak {peak} growth {peak - base} MiB; hwm_growth "
+    line = (f"codes {codes}; memory metric {metric}; base {base} peak {peak} growth {peak - base} MiB; hwm_growth "
             f"{None if hwm is None else hwm - base} MiB; peak phase reached {reached}; settled_at {settled_at} "
             f"(bound {bound}); server main-thread run-queue wait {rq}; clients: {clients}; "
-            f"samples {samples}")
+            f"samples {samples}"
+            + (f"; ps RSS base {rss_base}, samples {rss_samples}" if rss_samples else ""))
     print(line, flush=True)
     if not reached:
         pytest.fail(f"INVALID run: memory never reached base + {_PEAK_FLOOR_MIB} MiB, so nothing was measured -- {line}")

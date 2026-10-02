@@ -8,18 +8,24 @@ How each suite is counted: Python — tests collected by pytest (skips included)
 (passed + failed + ignored, every test binary, doc tests included); Go — top-level tests run by `go test -v`
 (`=== RUN` lines without a `/`); dashboard — `# tests` reported by `node --test`.
 
-| Suite | Tests | Counted by |
-|---|---|---|
-| `go:orchestrator-go` | 61 | go test -v |
-| `node:dashboard-ts` | 27 | node --test |
-| `python:clipper-network-py` | 349 | pytest collection |
-| `python:compliance-py` | 632 | pytest collection |
-| `python:creative-py` | 813 | pytest collection |
-| `python:delivery-py` | 712 | pytest collection |
-| `python:detection-py` | 501 | pytest collection |
-| `python:finance-py` | 337 | pytest collection |
-| `python:fulfillment-py` | 1088 | pytest collection |
-| `python:legal-py` | 289 | pytest collection |
-| `python:onboarding-py` | 756 | pytest collection |
-| `python:verification-py` | 280 | pytest collection |
-| `rust:ledger-rust` | 114 | cargo test |
+A row counts every test of the suite, including tests that exist on some operating systems only. Those are named in
+the last column (from `devtools/hygiene_allowlist.json` "platform_only_tests", with the reason there): on any other
+OS the check expects exactly those tests to be absent — by name — and the count to be lower by that many, and it
+says so in its summary line; a listed test that runs where it should not, or is missing where it should run, fails
+the check.
+
+| Suite | Tests | Counted by | Platform-only tests |
+|---|---|---|---|
+| `go:orchestrator-go` | 61 | go test -v | — |
+| `node:dashboard-ts` | 27 | node --test | — |
+| `python:clipper-network-py` | 349 | pytest collection | — |
+| `python:compliance-py` | 632 | pytest collection | — |
+| `python:creative-py` | 814 | pytest collection | — |
+| `python:delivery-py` | 712 | pytest collection | — |
+| `python:detection-py` | 501 | pytest collection | — |
+| `python:finance-py` | 337 | pytest collection | — |
+| `python:fulfillment-py` | 1090 | pytest collection | — |
+| `python:legal-py` | 289 | pytest collection | — |
+| `python:onboarding-py` | 756 | pytest collection | — |
+| `python:verification-py` | 280 | pytest collection | — |
+| `rust:ledger-rust` | 114 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |

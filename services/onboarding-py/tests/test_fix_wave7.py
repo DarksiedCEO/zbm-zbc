@@ -297,11 +297,19 @@ def _serial_scenario(base: str, nbig: int, nsmall: int, dur: float) -> dict:
     lock = threading.Lock()
     codes: Counter = Counter()
     lat: dict[str, list[float]] = defaultdict(list)
+    # Fix wave 26 (W26-2a): every request's (sent, answered) window, and the instant each large body was answered
+    # 200 (= one large scan done) — the ordering the NEW-5 property is about (see `_waited_for_a_scan`).
+    windows: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    scans_done: list[float] = []
 
     def rec(k, code, dt):
+        end = time.monotonic()
         with lock:
             codes[f"{k}_{code}"] += 1
             lat[k].append(dt)
+            windows[k].append((end - dt, end))
+            if k == "big" and code == 200:
+                scans_done.append(end)
 
     def mk(cid):
         c = httpx.Client(base_url=base, headers=AUTH, timeout=180)
@@ -355,25 +363,77 @@ def _serial_scenario(base: str, nbig: int, nsmall: int, dur: float) -> dict:
     stop.set()
     for t in ths:
         t.join(200)
-    out = {"codes": dict(codes)}
+    done = sorted(scans_done)
+    gaps = [b - a for a, b in zip(done, done[1:])]
+    out = {"codes": dict(codes), "scans_done": len(done), "scan_gap": statistics.median(gaps) if gaps else float("nan")}
     for k in ("big", "small", "health"):
         xs = lat[k]
-        out[k] = {"n": len(xs), "p50": _pct(xs, .5), "p90": _pct(xs, .9), "max": max(xs) if xs else float("nan")}
+        out[k] = {"n": len(xs), "p50": _pct(xs, .5), "p90": _pct(xs, .9), "max": max(xs) if xs else float("nan"),
+                  "waited": _waited_for_a_scan(windows[k], scans_done)}
     return out
+
+
+def _waited_for_a_scan(windows: list[tuple[float, float]], scans_done: list[float]) -> float:
+    """Fix wave 26 (W26-2a), printed as a diagnostic, not asserted: the fraction of requests during which a large
+    body was answered 200 (one large scan done). With the small lane disabled (the single budget NEW-5 was about)
+    the small messages measured 0.93-1.0; without a wait it is chance, about latency / time between two scans' ends:
+    0.00-0.12 on Linux, up to 0.29 with a 10 ms GIL switch interval, and an estimated 0.3-0.5 on the macos-26 runner
+    from CI #2's numbers (158 ms beside scans ~0.35-0.5 s apart) -- too close to any bound to assert. It also misses
+    a wait that ends before the large body's answer (an `async def` body dependency blocking the loop: /health
+    p50 429 ms, this fraction 0.00), which `scan_gap` below catches."""
+    import bisect
+
+    done = sorted(scans_done)
+    if not windows:
+        return float("nan")
+    hit = sum(1 for s, e in windows if bisect.bisect_right(done, s) < bisect.bisect_left(done, e))
+    return hit / len(windows)
+
+
+# Fix wave 26 (W26-2a; CI #2: 3 failed on macos-26 at `small p50 < 0.05`, 158 ms, every other assertion passing).
+# The wall-clock bounds (small and /health p50 < 50 ms) measured the machine: on the macOS runner every request is
+# slower beside a CPU-bound scan thread (GIL hand-offs; /health p50 42 ms there vs 4-7 ms on Linux), whether or not
+# anything waited for the large lane. Reproduced on Linux with a 10 ms switch interval
+# (ONBOARDING_SWITCH_INTERVAL_SECONDS=0.01): the fc19ce7 test fails 3/3 (small p50 106-266 ms) with no wait.
+# Both bounds are now ratios of two things measured in the same run on the same server:
+#  - a small message against /health: both pay the same machine and the same contention; only a message that
+#    waits for the large lane pays a scan on top. Measured small p50 / health p50: fixed 3.0-6.0 (Linux, idle and
+#    2 busy loops), 3.8 (macos-26, CI #2), 3.8-8.0 (10 ms switch interval); small lane disabled (= the defect)
+#    82-1724 idle, 192-2174 under 2 busy loops, 17-311 with the 10 ms switch interval.
+_SMALL_OVER_HEALTH_MAX = 12.0
+#  - /health against the time between two large scans' ends (the large lane is serial: one scan each): a /health
+#    that waits for a scan on the event loop waits half a scan on average. Measured health p50 / scan gap: fixed
+#    0.004-0.007 (Linux), 0.013-0.044 (10 ms switch interval), ~0.08-0.12 estimated on macos-26 (42 ms against
+#    ~0.35-0.5 s); the body dependency made `async def` (validation on the loop, the fix wave 4 R1 defect) 0.66.
+_HEALTH_OVER_SCAN_GAP_MAX = 0.25
+# a run with fewer large scans than this (or almost no /health answers) measured nothing
+_MIN_SCANS_DONE = 3
+_MIN_HEALTH = 10
 
 
 @pytest.mark.parametrize("nbig,nsmall", [(1, 4), (4, 4), (12, 4)])
 def test_new5_live_small_messages_stay_fast_beside_large_uploaders(real_stack7, nbig, nsmall):
     r = _serial_scenario(real_stack7.base, nbig, nsmall, 8.0)
+    small_over_health = r["small"]["p50"] / r["health"]["p50"]
+    health_over_gap = r["health"]["p50"] / r["scan_gap"]
     summary = (f"big={nbig}x{len(BIG_BODY) // 1024}KB small={nsmall}: codes={r['codes']} "
                + " ".join(f"{k}: n={r[k]['n']} p50={r[k]['p50'] * 1000:.0f}ms p90={r[k]['p90'] * 1000:.0f}ms "
-                          f"max={r[k]['max'] * 1000:.0f}ms" for k in ("big", "small", "health")))
+                          f"max={r[k]['max'] * 1000:.0f}ms waited-for-a-scan={r[k]['waited']:.2f}"
+                          for k in ("big", "small", "health"))
+               + f" scan_gap={r['scan_gap'] * 1000:.0f}ms small/health={small_over_health:.1f} "
+               f"(bound {_SMALL_OVER_HEALTH_MAX}) health/scan_gap={health_over_gap:.3f} "
+               f"(bound {_HEALTH_OVER_SCAN_GAP_MAX}) small/scan_gap={r['small']['p50'] / r['scan_gap']:.3f}")
     print(summary)
     codes = r["codes"]
-    # the finding's numbers: small p50 294 ms (1 uploader), 1.6 s (4), 6 s (12)
-    assert r["small"]["n"] >= 40 and r["small"]["p50"] < 0.05, summary
+    if r["scans_done"] < _MIN_SCANS_DONE or r["health"]["n"] < _MIN_HEALTH:
+        pytest.fail(f"INVALID run: {r['scans_done']} large scans finished (need {_MIN_SCANS_DONE}), "
+                    f"{r['health']['n']} /health answers (need {_MIN_HEALTH}), so nothing was measured -- {summary}")
+    # the finding's numbers: small p50 294 ms (1 uploader), 1.6 s (4), 6 s (12), each message waiting for the
+    # large scans ahead of it; /health 4-7 ms beside them on the same Linux box
+    assert small_over_health < _SMALL_OVER_HEALTH_MAX, summary
+    assert r["small"]["n"] >= 40, summary
     assert codes.get("small_200", 0) == r["small"]["n"], summary  # never 503, never an error
-    assert r["health"]["p50"] < 0.05, summary
+    assert health_over_gap < _HEALTH_OVER_SCAN_GAP_MAX, summary
     # large bodies are still admitted (serialized), busy ones are 503 with nothing else
     assert codes.get("big_200", 0) >= 1 and set(k for k in codes if k.startswith("big_")) <= {"big_200", "big_503"}, summary
 
