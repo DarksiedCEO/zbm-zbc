@@ -12,14 +12,14 @@ How each suite is counted: Python — tests collected by pytest (skips included)
 |---|---|---|
 | `go:orchestrator-go` | 61 | go test -v |
 | `node:dashboard-ts` | 27 | node --test |
-| `python:clipper-network-py` | 347 | pytest collection |
-| `python:compliance-py` | 611 | pytest collection |
-| `python:creative-py` | 795 | pytest collection |
-| `python:delivery-py` | 702 | pytest collection |
-| `python:detection-py` | 500 | pytest collection |
-| `python:finance-py` | 335 | pytest collection |
-| `python:fulfillment-py` | 1066 | pytest collection |
-| `python:legal-py` | 288 | pytest collection |
-| `python:onboarding-py` | 734 | pytest collection |
-| `python:verification-py` | 279 | pytest collection |
+| `python:clipper-network-py` | 349 | pytest collection |
+| `python:compliance-py` | 632 | pytest collection |
+| `python:creative-py` | 813 | pytest collection |
+| `python:delivery-py` | 712 | pytest collection |
+| `python:detection-py` | 501 | pytest collection |
+| `python:finance-py` | 337 | pytest collection |
+| `python:fulfillment-py` | 1088 | pytest collection |
+| `python:legal-py` | 289 | pytest collection |
+| `python:onboarding-py` | 756 | pytest collection |
+| `python:verification-py` | 280 | pytest collection |
 | `rust:ledger-rust` | 114 | cargo test |
