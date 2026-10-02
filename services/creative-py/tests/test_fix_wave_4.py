@@ -574,14 +574,41 @@ def regex_cpu(p: re.Pattern, s: str, runs: int = 3) -> float:
     return best
 
 
+# Fix wave 26 (W26-2b; CI #2 macos-26: `('(.)\\1+', 'éééééééééé', 0.021163, 0.001886)` = ratio 11.2 against the bound
+# 9.0, a linear pattern; OPEN.md F-4). "Linear time" is now asserted as GROWTH: the same pattern on the same
+# adversarial shape at GROWTH_SPAN x the length must cost < GROWTH_MAX x the CPU. A linear pattern costs ~16x, a
+# quadratic one ~256x, whatever the machine's speed and whatever the pattern's cost per character relative to
+# another pattern -- that relative cost is what moved on the Mac (`(.)\1+` on 'é': 1.8x the reference scan here,
+# 11.2x on macos-26). Measured (2-CPU Linux box, 3.12 and 3.13, idle and 2 busy loops, every pattern x every shape,
+# 6 250 -> 50 000): growth exponent 1.12-1.26 for the module's patterns; 1.81-2.05 for quadratic mutants (a
+# lookahead to the end after every match; `(.+)\1+`). GROWTH_MAX = 16 ** 1.5 sits between (16 ** 1.26 = 33,
+# 16 ** 1.81 = 150).
+GROWTH_SMALL, GROWTH_LARGE = 6_250, 100_000
+GROWTH_MAX = 64.0
+TIMER_FLOOR_S = 0.0001  # a small-input reading below this is the timer, not the pattern (a quadratic one is >= 2 ms)
+
+
+def regex_growth(p: re.Pattern, small: str, large: str) -> tuple[float, float, float]:
+    """(CPU on `small`, CPU on `large`, their ratio) -- `regex_cpu` both, best of 5 and 3."""
+    t_small = regex_cpu(p, small, runs=5)
+    t_large = regex_cpu(p, large)
+    return t_small, t_large, t_large / max(t_small, TIMER_FLOOR_S)
+
+
 # Fix wave 25, H6: the same three operations with a pattern that is linear by construction (one character class,
 # one quantifier) on the same input, measured right after the pattern under test. Their ratio is the work the
-# pattern does per character relative to a single scan, whatever the machine's speed or load. The CPU bound alone
-# could not tell a pattern three times slower: the worst pair costs 10-17 ms, three times that is 31-52 ms, and
-# 50 ms passed most of it. Measured (wave 25, 2-CPU box, 3 busy loops and a co-tenant, 3.12 and 3.13): the worst
-# pair's ratio 4.8-6.1; every operation done three times, 14.4-17.7. The bound sits between.
+# pattern does per character relative to a single scan. The CPU bound alone could not tell a pattern three times
+# slower: the worst pair costs 10-17 ms, three times that is 31-52 ms, and 50 ms passed most of it. Measured (wave
+# 25, 2-CPU box, 3 busy loops and a co-tenant, 3.12 and 3.13): the worst pair's ratio 4.8-6.1; every operation done
+# three times, 14.4-17.7. The bound sits between.
+# Fix wave 26 (W26-2b): that ratio is a property of the CPU and the CPython build, not of the pattern alone
+# (`(.)\1+` on 'é' 1.8 here, 11.2 on macos-26), so this constant-factor bound is asserted where it was calibrated
+# (Linux: this box and the ubuntu CI runners); elsewhere it is printed, and "linear" is the growth bound above. A
+# pattern 3x slower by a constant factor is therefore caught on Linux only (on other platforms only if it crosses
+# the 50 ms CPU bound).
 LINEAR_REF = re.compile(r"[^\w#@]+")
 REGEX_RATIO_MAX = 9.0
+REGEX_RATIO_CALIBRATED = sys.platform.startswith("linux")
 
 
 def test_lim_every_regex_in_text_module_is_linear_time():
@@ -589,18 +616,41 @@ def test_lim_every_regex_in_text_module_is_linear_time():
 
     patterns = [v for v in vars(text).values() if isinstance(v, re.Pattern)]
     assert len(patterns) >= 2
-    worst, worst_ratio, at = 0.0, 0.0, None
+    worst, worst_ratio, at, worst_growth, grew = 0.0, 0.0, None, 0.0, None
     for p in patterns:
-        for s in _adversarial_inputs(100_000):
-            dt = regex_cpu(p, s)
+        for small, s in zip(_adversarial_inputs(GROWTH_SMALL), _adversarial_inputs(GROWTH_LARGE)):
+            t_small, dt, growth = regex_growth(p, small, s)
             ref = regex_cpu(LINEAR_REF, s)
             worst = max(worst, dt)
+            if growth > worst_growth:
+                worst_growth, grew = growth, (p.pattern, s[:10])
             if dt / ref > worst_ratio:
                 worst_ratio, at = dt / ref, (p.pattern, s[:10])
+            assert growth < GROWTH_MAX, (p.pattern, s[:10], t_small, dt, growth)
             assert dt < 0.05, (p.pattern, s[:10], dt)
-            assert dt / ref < REGEX_RATIO_MAX, (p.pattern, s[:10], dt, ref)
-    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per 100 KB input (bound 50 ms); worst CPU ratio to a "
-          f"single linear scan {worst_ratio:.2f} (bound {REGEX_RATIO_MAX}) at {at!r}")
+            if REGEX_RATIO_CALIBRATED:
+                assert dt / ref < REGEX_RATIO_MAX, (p.pattern, s[:10], dt, ref)
+    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per 100 KB input (bound 50 ms); worst growth "
+          f"{GROWTH_SMALL} -> {GROWTH_LARGE} chars {worst_growth:.1f}x (bound {GROWTH_MAX}) at {grew!r}; worst CPU "
+          f"ratio to a single linear scan {worst_ratio:.2f} (bound {REGEX_RATIO_MAX}, "
+          f"{'asserted' if REGEX_RATIO_CALIBRATED else 'NOT asserted on ' + sys.platform}) at {at!r}")
+
+
+def test_lim_the_growth_bound_fails_superlinear_patterns_and_passes_a_costly_linear_one():
+    """Fix wave 26 (W26-2b): the growth bound on its own, on every platform (shorter inputs, same 16x span). Two
+    quadratic patterns fail it (a lookahead to the end of the input after every match; a backreference to an
+    unbounded group); a pattern that matches exactly what `(.)\1+` matches with ~5x its CPU per character
+    (linear: it reproduces CI #2's macOS reading on Linux, 21.2 ms and ratio 9.4 on 'é' x 100 000) passes it."""
+    span = GROWTH_LARGE // GROWTH_SMALL
+    n = 1_000
+    for quadratic, s in ((re.compile(r"[^\w#@]+(?=[\s\S]*$)"), "a!"), (re.compile(r"(.+)\1+", re.DOTALL), "ab1$")):
+        t_small, t_large, growth = regex_growth(quadratic, s * (n // len(s)), s * (n * span // len(s)))
+        assert growth >= GROWTH_MAX, (quadratic.pattern, t_small, t_large, growth)
+    costly = re.compile(r"(.)(?:(?=\1)(?=[\s\S]{1,4})\1)+", re.DOTALL)
+    assert [m.span() for m in costly.finditer("aabccc dd")] == [m.span() for m in re.finditer(r"(.)\1+", "aabccc dd")]
+    for s in ("\u00e9", "a", "a!"):
+        t_small, t_large, growth = regex_growth(costly, s * (GROWTH_SMALL // len(s)), s * (GROWTH_LARGE // len(s)))
+        assert growth < GROWTH_MAX, (costly.pattern, s, t_small, t_large, growth)
 
 
 def test_lim_text_scanners_are_linear_time():
