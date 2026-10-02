@@ -362,6 +362,32 @@ def test_the_model_measure_is_not_below_what_the_model_holds(limit, events):
     assert counted <= traced * 1.25, (counted, traced)        # and not so far above that it starves the budget
 
 
+def test_a_parsed_large_models_cover_gets_freed_bytes_before_waiting_body_chunks(monkeypatch):
+    """Fix wave 25 (E-A successor; found in the py3.12 full suite: fix9 Q1 [1MiB-front-then-2KiBps], legit large
+    batches 503 in 3/6 repeated runs vs 0/6 on b51f307 — the diagnosis showed the 503 coming from the MODEL's cover in
+    _off_loop, after the whole body had been received and parsed). Bytes freed in the shared pool went to whichever
+    waiter ran first; dozens of slow senders' chunk covers are waiting there under that attack, so the one parsed
+    model (H3) lost the race and was refused after _INFLIGHT_WAIT_S. A model's cover must get freed bytes before
+    any body chunk's: its body is complete and parsed, finishing it frees everything it holds."""
+    monkeypatch.setattr(api, "_INFLIGHT_WAIT_S", 0.5)
+
+    async def scenario():
+        pool = api._InFlightBytes(100)
+        pool.used = 100                                    # the pool is full (held by slow senders)
+        chunk = asyncio.ensure_future(pool.reserve(60))    # a slow sender's chunk waits first
+        await asyncio.sleep(0)
+        model = asyncio.ensure_future(pool.reserve(60, priority=True))   # then a parsed model's cover
+        await asyncio.sleep(0)
+        pool.release(60)                                   # a holder gives 60 bytes back
+        done, _ = await asyncio.wait({chunk, model}, timeout=2.0)
+        return pool, chunk, model
+
+    pool, chunk, model = asyncio.run(scenario())
+    assert model.done() and model.exception() is None, model.exception() if model.done() else "still waiting"
+    assert chunk.done() and isinstance(chunk.exception(), api.HTTPException), "the chunk took the freed bytes"
+    assert pool.used == 100
+
+
 def test_a_small_body_never_waits_for_the_shared_budget_even_when_its_model_is_larger(monkeypatch):
     """Fix wave 25 (E-A review of H3): ADR 0002 Decision 23 — a small body (<= 64 KiB) never waits for in-flight
     bytes under the real launcher (its bytes come from the small reserve). H3 as first committed (cd5fb49) charged

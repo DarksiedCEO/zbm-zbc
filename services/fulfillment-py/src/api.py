@@ -315,14 +315,14 @@ class _BodyHold:
     def covered(self) -> int:
         return self.small + self.shared
 
-    async def cover(self, total: int) -> None:
+    async def cover(self, total: int, *, priority: bool = False) -> None:
         small = min(total, _SMALL_BODY_BYTES)
         shared = total - small
         if small > self.small:
-            await self.lanes.small_reserve.reserve(small - self.small, in_hand=True)
+            await self.lanes.small_reserve.reserve(small - self.small, in_hand=True, priority=priority)
             self.small = small
         if shared > self.shared:
-            await self.lanes.inflight.reserve(shared - self.shared, self.account, in_hand=True)
+            await self.lanes.inflight.reserve(shared - self.shared, self.account, in_hand=True, priority=priority)
             self.shared = shared
 
     def cover_now(self, total: int) -> None:
@@ -1045,9 +1045,12 @@ class _InFlightBytes:
     `reserve` waits (bounded) until `n` more fit — preempting, when an
     account is given, the heaviest preemptible holder (fix wave 9);
     `release` gives them back. Fix wave 25: `try_reserve` takes what is free
-    now, never waits, and takes nothing while a reservation is waiting."""
+    now, never waits, and takes nothing while a reservation is waiting; a
+    `priority` reservation (a parsed model's cover) gets freed bytes before
+    any other waiter (E-A successor: the H3 model cover lost every race to the
+    chunk covers of slow senders and was refused 503 after a complete body)."""
 
-    __slots__ = ("limit", "used", "over", "waiters", "accounts", "blocked")
+    __slots__ = ("limit", "used", "over", "waiters", "accounts", "blocked", "priority")
 
     def __init__(self, limit: int) -> None:
         self.limit, self.used = limit, 0
@@ -1058,6 +1061,7 @@ class _InFlightBytes:
         self.waiters: list[asyncio.Future] = []
         self.accounts: set[_BodyAccount] = set()
         self.blocked = 0  # reservations waiting for bytes (fix wave 25): read-ahead grants never overtake them
+        self.priority = 0  # priority reservations waiting (fix wave 25): no other reservation overtakes them
 
     def try_reserve(self, n: int, account: _BodyAccount | None = None) -> int:
         """Fix wave 25, H1: up to `n` bytes if they are free NOW, never
@@ -1074,22 +1078,28 @@ class _InFlightBytes:
             account.held += got
         return got
 
-    async def reserve(self, n: int, account: _BodyAccount | None = None, *, in_hand: bool = False) -> None:
+    async def reserve(self, n: int, account: _BodyAccount | None = None, *, in_hand: bool = False,
+                      priority: bool = False) -> None:
         if n <= 0:
             return
         if in_hand:
             self.over += n
             try:
-                await self.reserve(n, account)
+                await self.reserve(n, account, priority=priority)
             finally:
                 self.over -= n
             return
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _INFLIGHT_WAIT_S
-        if self.used + n > self.limit:
+
+        def short() -> bool:
+            return self.used + n > self.limit or (not priority and self.priority > 0)
+
+        if short():
             self.blocked += 1
+            self.priority += priority
             try:
-                while self.used + n > self.limit:
+                while short():
                     if account is not None:
                         self._preempt_for(account, loop.time())
                     waiter = loop.create_future()
@@ -1107,6 +1117,10 @@ class _InFlightBytes:
                         raise _inflight_refused()
             finally:
                 self.blocked -= 1
+                if priority:
+                    self.priority -= 1
+                    if not self.priority:
+                        self._wake()           # the waiters it held back may take what is free now
         self.used += n
         if account is not None:
             account.held += n
@@ -1130,6 +1144,9 @@ class _InFlightBytes:
         self.used -= n
         if account is not None:
             account.held -= n
+        self._wake()
+
+    def _wake(self) -> None:
         waiters, self.waiters = self.waiters, []
         for waiter in waiters:
             if not waiter.done():
@@ -1314,7 +1331,9 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
                 # their work runs (the slot is released before it): each is counted.
                 try:
                     if large:
-                        await hold.cover(retained)
+                        # priority (E-A successor): the model's cover gets freed bytes before the
+                        # chunk covers of bodies still arriving (fix9 Q1: it lost that race, 503)
+                        await hold.cover(retained, priority=True)
                     else:
                         hold.cover_now(retained)
                 except BaseException:
