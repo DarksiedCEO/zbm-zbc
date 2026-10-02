@@ -26,6 +26,25 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
+# The macOS process path, forced on Linux (fix wave 26a, W26-1): no child subreaper, and the process table read with
+# `ps -axo ...` instead of /proc — what every macOS CI job does. Done by patching the checker module from outside
+# (the same two names exist in every version of the checker), so this harness also runs the pre-fix checker.
+PORTABLE_HARNESS = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import hygiene_check as h
+if sys.argv[2] != "--keep-subreaper":
+    h._set_subreaper = lambda: False
+else:
+    del sys.argv[2]
+class _P(type(Path())):
+    def exists(self, *a, **k):
+        return False if str(self) == "/proc/self/stat" else super().exists(*a, **k)
+h.Path = _P
+sys.exit(h.main(sys.argv[2:]))
+"""
+
 
 class _Repo:
     def __init__(self):
@@ -57,9 +76,16 @@ class _Repo:
                            env=dict(os.environ, RUNNER_TEMP=str(self.work)))
         return r.returncode, r.stdout + r.stderr
 
-    def suite(self, shell: str, kind: str = "none", *extra) -> tuple[int, str]:
-        return self.run("run", "--suite", "go:probe", "--kind", kind, "--work-dir", str(self.work),
-                        "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$", *extra, "--", "/bin/sh", "-c", shell)
+    def run_portable(self, *args) -> tuple[int, str]:
+        r = subprocess.run([sys.executable, "-c", PORTABLE_HARNESS, str(self.root / "devtools"), *args],
+                           cwd=self.root, capture_output=True, text=True, timeout=120,
+                           env=dict(os.environ, RUNNER_TEMP=str(self.work)))
+        return r.returncode, r.stdout + r.stderr
+
+    def suite(self, shell: str, kind: str = "none", *extra, portable: bool = False) -> tuple[int, str]:
+        return (self.run_portable if portable else self.run)(
+            "run", "--suite", "go:probe", "--kind", kind, "--work-dir", str(self.work),
+            "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$", *extra, "--", "/bin/sh", "-c", shell)
 
     def close(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -125,6 +151,47 @@ class Dynamic(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("HYGIENE R4-procs", out)
         self.assertIn("sleep 301", out)
+
+    def test_r4_report_names_pid_ppid_pgid_stat_and_the_full_command(self):
+        rc, out = self.r.suite("sleep 304 >/dev/null 2>&1 &")
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out, r"HYGIENE R4-procs go:probe: pid \d+ \(ppid \d+, pgid \d+, stat \w+\) still alive: "
+                              r"command sleep 304\n")
+
+    def test_r4_portable_path_a_clean_suite_passes(self):
+        """W26-1: on the non-subreaper path (macOS) the checker's own `ps` helper was reported as the suite's."""
+        if shutil.which("ps") is None:
+            self.fail("ps is required by this self-test")
+        rc, out = self.r.suite("true", portable=True)
+        self.assertIn("subreaper False", out)
+        self.assertNotIn("ps -axo", out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("hygiene violations: 0", out)
+
+    def test_r4_portable_path_a_real_leftover_still_fails(self):
+        rc, out = self.r.suite("sleep 305 >/dev/null 2>&1 &", portable=True)
+        self.assertIn("subreaper False", out)
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out, r"HYGIENE R4-procs go:probe: pid \d+ \(ppid \d+, pgid \d+, stat \w+\) still alive: "
+                              r"command sleep 305\n")
+        self.assertNotIn("ps -axo", out)
+
+    def test_r4_ps_table_with_a_subreaper_does_not_report_its_own_ps(self):
+        # the ps helper is excluded by its pid even where this checker's children ARE walked (a subreaper without
+        # /proc): the two guards are independent
+        rc, out = self.r.run_portable("--keep-subreaper", "run", "--suite", "go:probe", "--kind", "none",
+                                      "--work-dir", str(self.r.work), "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$",
+                                      "--", "/bin/sh", "-c", "true")
+        self.assertIn("subreaper True", out)
+        self.assertNotIn("ps -axo", out)
+        self.assertEqual(rc, 0, out)
+
+    def test_r4_portable_path_a_leftover_grandchild_still_fails(self):
+        # a child of a background subshell: found as a descendant of the suite's process group
+        rc, out = self.r.suite("( sh -c 'sleep 306' & wait ) >/dev/null 2>&1 &", portable=True)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("command sleep 306", out)
+        self.assertNotIn("ps -axo", out)
 
     def test_r6_write_then_check(self):
         rc, out = self.r.suite(r"printf '=== RUN   TestA\n=== RUN   TestB\n=== RUN   TestB/sub\n'", "go", "--counts", "write")

@@ -19,8 +19,11 @@ Two halves:
                group and session (the suite starts as its own session leader), by an environment marker every
                descendant inherits unless it scrubs its environment, and — on Linux — by being the suite's child
                subreaper (PR_SET_CHILD_SUBREAPER), so even a double-forked, setsid'd, env-scrubbed grandchild is
-               re-parented to this process and found. Leftovers are listed, then killed (by PID; they are this
-               run's own) so the next job is not poisoned;
+               re-parented to this process and found. Elsewhere (macOS: no subreaper, no readable environment,
+               table from ``ps``) only the process group and its descendants are tracked — a setsid'd orphan
+               escapes there — and the checker's own ``ps`` helper is excluded by its pid. Each leftover is printed
+               with pid, ppid, pgid, stat and its full command, then killed (by PID; they are this run's own) so
+               the next job is not poisoned;
   R5 skips     a test was skipped for a reason not on the suite's expected-skip list (devtools/hygiene_allowlist.json,
                "expected_skips"); Go and Rust suites expect no skip or ignored test, the dashboard none;
   R6 counts    the number of tests the run executed/collected differs from the suite's row in docs/test-counts.md
@@ -166,21 +169,29 @@ def _proc_table() -> list[dict]:
                     env = b""
             except (OSError, IndexError):
                 continue
-            rows.append({"pid": int(d), "state": rest[0], "ppid": int(rest[1]), "pgid": int(rest[2]),
+            rows.append({"pid": int(d), "state": rest[0], "stat": rest[0], "ppid": int(rest[1]), "pgid": int(rest[2]),
                          "sid": int(rest[3]), "cmd": cmd, "env": env})
         return rows
-    # macOS / BSD: ps (no environment; the marker check is Linux-only)
-    r = subprocess.run(["ps", "-axo", "pid=,ppid=,pgid=,stat=,command="], capture_output=True, text=True)
-    for line in r.stdout.splitlines():
+    # macOS / BSD: ps (no environment; the marker check is Linux-only). `ps -ax` lists ITSELF, as a child of this
+    # checker: that row is the checker's own helper, never the suite's, and is dropped by its pid (fix wave 26a,
+    # W26-1 — on every macOS job of CI #2 it was reported as "still alive: ps -axo pid=,ppid=,pgid=,stat=,command=").
+    helper = subprocess.Popen(["ps", "-axo", "pid=,ppid=,pgid=,stat=,command="], stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, text=True)
+    out, _ = helper.communicate()
+    for line in out.splitlines():
         f = line.split(None, 4)
-        if len(f) < 4:
+        if len(f) < 4 or not f[0].isdigit() or int(f[0]) == helper.pid:
             continue
         rows.append({"pid": int(f[0]), "ppid": int(f[1]), "pgid": int(f[2]), "sid": -1, "state": f[3][:1],
-                     "cmd": f[4] if len(f) > 4 else "", "env": b""})
+                     "stat": f[3], "cmd": f[4] if len(f) > 4 else "", "env": b""})
     return rows
 
 
-def leftover_processes(leader: int, token: str) -> list[dict]:
+def leftover_processes(leader: int, token: str, subreaper: bool) -> list[dict]:
+    """The suite's surviving processes: its process group / session (``leader``), anything carrying the run marker,
+    every descendant of those, and — ONLY when this checker is the child subreaper — this checker's own children
+    (orphans re-parented to it). Without a subreaper (macOS) a child of this checker is one of its own helpers
+    (``ps``), never the suite's, so it is not walked (fix wave 26a, W26-1)."""
     me = os.getpid()
     rows = [r for r in _proc_table() if r["pid"] != me and r["state"] != "Z"]
     by_parent: dict[int, list[dict]] = {}
@@ -191,7 +202,7 @@ def leftover_processes(leader: int, token: str) -> list[dict]:
     for r in rows:
         if r["pgid"] == leader or r["sid"] == leader or marker in r["env"].split(b"\0"):
             found[r["pid"]] = r
-    todo = [r["pid"] for r in by_parent.get(me, [])] + list(found)   # re-parented to us (subreaper), and descendants
+    todo = ([r["pid"] for r in by_parent.get(me, [])] if subreaper else []) + list(found)   # orphans + descendants
     while todo:
         pid = todo.pop()
         row = next((r for r in rows if r["pid"] == pid), None)
@@ -357,11 +368,13 @@ def cmd_run(a: argparse.Namespace) -> int:
 
     problems: list[str] = []
     # R4 first, so a leftover process cannot keep writing while the rest is checked
-    left = leftover_processes(leader, token)
+    left = leftover_processes(leader, token, subreaper)
     if left:
         for r in left:
-            problems.append(violation("R4-procs", suite, f"pid {r['pid']} (ppid {r['ppid']}, pgid {r['pgid']}) "
-                                                         f"still alive: {r['cmd'][:200]}"))
+            # every field a person needs to tell what it is, and the FULL command line (fix wave 26a, W26-1)
+            problems.append(violation("R4-procs", suite, f"pid {r['pid']} (ppid {r['ppid']}, pgid {r['pgid']}, "
+                                                         f"stat {r.get('stat', r['state'])}) still alive: "
+                                                         f"command {r['cmd'] or '<none>'}"))
         kill_pids([r["pid"] for r in left])
 
     plain_after, ignored_after = git_state()
