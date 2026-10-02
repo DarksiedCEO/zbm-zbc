@@ -208,8 +208,11 @@ been answered, not after a fixed 0.5 s. The live server is accepted only after i
 refused_before_the_body_is_sent` no longer bounds the wall clock: no body byte is ever sent, so a 413 at all is the
 refusal before the body. Settings (scout A D10): `DETECTION_DRAINS_MAX` (default 512) caps how many graceful-close
 drains run at once (`src/serve.py`, the shared module of ADR 0003); `DETECTION_LIVE_TEST_PORTS` (`lo-hi`, test-only)
-pins the live tests to a port range — unset, the OS assigns ports. Measured under 2 busy loops: see "E-A measurements" in the fix-wave-25 report
-(`w25-reports/E-A.md`); the test prints every raw number.
+pins the live tests to a port range — unset, the OS assigns ports. Measured (E-A, Oct 2 01:00-01:02Z, head e665109, this 2-CPU box, Python 3.13.13,
+exactly 2 busy loops, 5 runs of the two `/health` tests, `w25-reports/E-A/logs/detload-e665109/`): 5/5 passed; beside
+large and oversized bodies the max server-side latency was 27-94 ms (wall 29-100 ms; bound 1 s); under 16 concurrent
+worst-case batches p50 3-4 ms, max 163-217 ms (wall max 169-241 ms; bound 0.5 s; largest run-queue waits subtracted:
+prober 10 ms, server loop 43 ms). The test prints every raw number.
 
 Largest detection-py *responses* at these limits: 5.3 MiB (discount-misuse on
 1,000 worst-case orders) and 8.6 MiB (`/correlation/overlaps` echoing 1,000

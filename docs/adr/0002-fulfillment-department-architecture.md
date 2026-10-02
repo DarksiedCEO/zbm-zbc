@@ -773,7 +773,17 @@ preemption frees one holder at a time.
 - the measured fixed term (wave-24 budget sweep): **0.9 MiB**.
 Sum with no parse in flight (the 128-sender scenario the 96 MiB test bound is for): 64 + 2 + 4 + 0.9 = **71 MiB**, margin
 25 MiB. With the worst large parse in flight as well: 71 + 4 + 21.2 + 3 = **99 MiB** — above 96 MiB: the 96 MiB bound is
-the 128-sender scenario's (bodies only, no parse), not a bound on every mix. Measured (2 busy loops, the reviewer's probes): PENDING-E-A-ASTRAL.
+the 128-sender scenario's (bodies only, no parse), not a bound on every mix. Measured (E-A, Oct 1 23:04-23:17Z, head
+e665109, 2 busy loops, the reviewer's probes, VmHWM growth; `w25-reports/E-A/logs/campaign-e665109-MHA/`): the
+128-sender scenario 65-67 MiB (10 runs; derived 71); 16 clients looping valid 4 MiB astral batches (`f1_parse_live.py`,
+each model ~5x its body) 66-70 MiB, 179/179 answered 200 (01e2851: 61-75 MiB); 60 stalling attackers plus legit small,
+large-astral and /health traffic (`f1_exhaust.py stall 60 20`, `LARGE_KIND=astral`) 79-80 MiB (01e2851: 100-102 MiB),
+small 100/100 200, /health 100/100 200, but large legit astral batches 1/10 and 1/10 answered 200 (9/10 503 after the
+2 s budget wait) against 01e2851's 6/10 and 2/10 — the cost of counting the model: a ~1 MiB astral body needs ~6 MiB
+of budget that stalled senders hold.
+Small bodies' models (the uncounted-when-full part above) are bounded only through concurrency: at most
+`LIMIT_CONCURRENCY` (128) requests are in the app at once, so their models add at most 128 x the worst small model
+(<= ~0.7 MiB) — a loose bound well above the 96 MiB scenario bound; no probe filled it.
 
 **H4 — loop lag is not the client's time (N24-S-12).** The rules that judge a client by time (the app's stall,
 trickle and arrival rules, the preemption charge, the protocol's stall and rate rules for unread bodies) counted every
