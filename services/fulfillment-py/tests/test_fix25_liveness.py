@@ -453,10 +453,11 @@ def server():
 
 
 def _send_paced(port: int, size: int, step: int, every: float, freeze=None, stop_after: int | None = None,
-                freeze_at: float = 1.0):
+                freeze_at: float = 1.0, answer: list | None = None):
     """Declare `size` bytes and send `step` bytes every `every` s (reading while sending); `freeze()` is called
     once, `freeze_at` s in. `stop_after`: stop sending after that many bytes (a real stall). Returns (status,
-    seconds)."""
+    seconds). `answer`: if given, the whole answer (head and body, read until the server closes or 10 s) is
+    appended to it."""
     body = b'{"call_events":[' + b" " * (size - 18) + b"]}"
     head = (f"POST {DETECT} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\n"
             f"Content-Type: application/json\r\nContent-Length: {size}\r\n\r\n").encode()
@@ -476,7 +477,10 @@ def _send_paced(port: int, size: int, step: int, every: float, freeze=None, stop
                     return (buf[9:12].decode() or "closed"), time.monotonic() - t0
                 buf += chunk
                 if b"\r\n\r\n" in buf:
-                    return buf[9:12].decode(), time.monotonic() - t0
+                    took = time.monotonic() - t0
+                    if answer is not None:
+                        _read_rest(s, buf, answer)
+                    return buf[9:12].decode(), took
             limit = len(body) if stop_after is None else stop_after
             if sent < limit and time.monotonic() >= nxt:
                 piece = body[sent:min(sent + step, limit)]
@@ -488,6 +492,16 @@ def _send_paced(port: int, size: int, step: int, every: float, freeze=None, stop
         if timer is not None:
             timer.cancel()
         s.close()
+
+
+def _read_rest(s: socket.socket, buf: bytes, answer: list) -> None:
+    s.settimeout(10)
+    try:
+        while chunk := s.recv(65536):
+            buf += chunk
+    except OSError:
+        pass
+    answer.append(buf)
 
 
 def _stopper(pid: int, seconds: float):
@@ -553,10 +567,17 @@ def test_a_client_that_really_stalls_is_still_cut_on_the_loops_running_time(serv
     """The other side: a client that sends 64 KiB and then nothing is cut by the stall rule after the grace of
     RUNNING time — with the server stopped for 2 s on the way, at about grace + 2 s, well before the deadline."""
     proc, port = server
-    status, took = _send_paced(port, 1 * MIB, 64 * KIB, 0.1, freeze=_stopper(proc.pid, 2.0), stop_after=64 * KIB)
+    answer: list = []
+    status, took = _send_paced(port, 1 * MIB, 64 * KIB, 0.1, freeze=_stopper(proc.pid, 2.0), stop_after=64 * KIB,
+                               answer=answer)
     grace = http_limits.BODY_MIN_RATE_GRACE_S
     assert status == "408", (status, took)
-    assert grace + 1.5 <= took <= grace + 2.0 + 3.0, took
+    # the 2 s stop is not charged to the client (load can only make this later, never earlier)
+    assert took >= grace + 1.5, took
+    # fix wave 25 (E-A successor, R-HYGIENE L1): was also `took <= grace + 5.0`, a wall-clock upper bound that load
+    # can break (the cut moves later by any loop lag, by design). What it guarded — the STALL rule cut the body, not
+    # the 30 s deadline or the protocol's backstop — is read from the answer: only rule (a)/(b) says "stalled for".
+    assert answer and b"request body stalled for" in answer[0], (took, answer[:1])
 
 
 def test_loop_lag_counts_only_time_the_loop_was_behind():

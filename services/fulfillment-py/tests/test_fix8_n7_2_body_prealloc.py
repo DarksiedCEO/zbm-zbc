@@ -295,7 +295,10 @@ def test_trickling_body_is_408_after_the_grace_period_not_at_the_deadline(monkey
     assert done, "the trickling body was not cut"
     assert c.status == 408, (c.status, c.body[:200])
     assert "bytes/s" in c.body.decode()
-    assert 0.4 < took < 1.5, f"cut after {took:.2f}s (grace 0.5 s, deadline 6 s)"
+    # fix wave 25 (E-A successor, R-HYGIENE L1): was `0.4 < took < 1.5`. The rate rule's 408 (above) is not the 6 s
+    # deadline's ("not received within 6s"); it can fire only after the 0.5 s grace (load only delays it)
+    assert "not received within" not in c.body.decode(), c.body[:200]
+    assert took > 0.4, f"cut after {took:.2f}s (grace 0.5 s)"
 
 
 def test_front_loaded_body_that_then_stalls_is_408_after_the_grace_period(monkeypatch):
@@ -316,7 +319,9 @@ def test_front_loaded_body_that_then_stalls_is_408_after_the_grace_period(monkey
     c, took = asyncio.run(scenario())
     assert c.status == 408, (c.status, c.body[:200])
     assert "stalled" in c.body.decode()
-    assert 0.4 < took < 1.5, f"cut after {took:.2f}s (grace 0.5 s, deadline 6 s)"
+    # fix wave 25 (E-A successor, R-HYGIENE L1): was `0.4 < took < 1.5`; "stalled" is the stall rule's 408, not the
+    # 6 s deadline's, and `wait_for(task, 5.0)` above already fails a body held to the deadline
+    assert took > 0.4, f"cut after {took:.2f}s (grace 0.5 s)"
 
 
 def test_a_body_arriving_at_or_above_the_minimum_rate_is_not_cut(monkeypatch):

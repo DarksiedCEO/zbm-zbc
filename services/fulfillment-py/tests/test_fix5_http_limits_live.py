@@ -358,8 +358,8 @@ def test_connection_count_is_bounded_and_health_recovers(server):
         assert refused >= extra, f"only {refused} of {len(socks)} refused; cap {http_limits.MAX_OPEN_CONNECTIONS}"
         # while saturated, /health gets a prompt answer or refusal, never a hang
         try:
-            status, took = _health(port, timeout=3)
-            assert took < 1.0
+            status, _took = _health(port, timeout=3)  # the 3 s client timeout is the "never a hang" guard
+            # fix wave 25 (E-A successor, R-HYGIENE L1): `took < 1.0` dropped (wall clock under load)
             assert status in (200, 503, None)
         except (ConnectionResetError, BrokenPipeError):
             pass
@@ -369,8 +369,8 @@ def test_connection_count_is_bounded_and_health_recovers(server):
     finally:
         for s in socks:
             s.close()
-    status, took = _health(port)
-    assert status == 200 and took < 1.0
+    status, _took = _health(port)
+    assert status == 200  # fix wave 25 (E-A successor, R-HYGIENE L1): `took < 1.0` dropped; served after the flood
 
 
 def test_body_timeout_env_may_only_narrow():

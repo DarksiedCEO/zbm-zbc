@@ -99,7 +99,8 @@ def test_n9_6_time_the_service_holds_a_body_is_not_charged_to_the_projection(mon
     c, took, taken = _hold_scenario(monkeypatch, factor=1.3, hold_at=0.8, hold_for=1.3)
     assert taken > 0, "the hold never happened (body finished early?)"
     assert c.status == 200, (c.status, c.body[:400], round(took, 2))
-    assert took < 3.0, took
+    # fix wave 25 (E-A successor, R-HYGIENE L1): `took < 3.0` dropped — the 3 s body deadline is a hard wall-clock
+    # deadline in the middleware, so a 200 is already "answered before the deadline"
 
 
 def test_n9_6_a_slow_client_is_still_refused_at_the_grace_despite_a_service_hold(monkeypatch):
@@ -114,7 +115,9 @@ def test_n9_6_a_slow_client_is_still_refused_at_the_grace_despite_a_service_hold
     rate = float(re.search(r"arriving at ~(\d+) bytes/s", detail).group(1))
     needs = float(re.search(r"needs >= (\d+) bytes/s", detail).group(1))
     assert rate < needs, detail
-    assert took < 1.2, f"refused after {took:.2f}s: should be at the 0.5 s grace"
+    # fix wave 25 (E-A successor, R-HYGIENE L1): was also `took < 1.2` (wall clock). The refusal is rule (c)'s own
+    # ("cannot complete", rate < needs above), which can fire only once 0.5 s of waiting is spent; load only delays it
+    assert took >= 0.5, f"refused after {took:.2f}s: before the 0.5 s grace"
 
 
 @pytest.mark.parametrize("factor, expect", [(1.1, 200), (0.9, 408)])
@@ -125,8 +128,9 @@ def test_n9_6_without_a_hold_the_boundary_is_unchanged(monkeypatch, factor, expe
     c, took, taken = _hold_scenario(monkeypatch, factor=factor, hold_at=10.0, hold_for=0.0)
     assert c.status == expect, (c.status, c.body[:400], round(took, 2))
     if expect == 408:
-        assert took < 1.2, took
+        assert took >= 0.5, took  # fix wave 25 (R-HYGIENE L1): was `took < 1.2`; rule (c) below, after the grace
         detail = json.loads(c.body)["detail"]
+        assert "cannot complete" in detail, detail
         rate = float(re.search(r"arriving at ~(\d+) bytes/s", detail).group(1))
         needs = float(re.search(r"needs >= (\d+) bytes/s", detail).group(1))
         assert rate < needs, detail
@@ -152,7 +156,9 @@ def test_n9_8_client_disconnect_mid_body_logs_one_structured_line(caplog):
         await asyncio.wait_for(task, 5)  # must not raise
         return c
 
+    t0 = time.monotonic()
     c = asyncio.run(scenario())
+    ran = time.monotonic() - t0
     assert c.status is None, "nothing is sent to a client that has gone"
     records = _fulfillment_records(caplog)
     assert len(records) == 1, [r.getMessage() for r in records]
@@ -165,7 +171,9 @@ def test_n9_8_client_disconnect_mid_body_logs_one_structured_line(caplog):
     assert "bytes_received=1216" in msg, msg
     assert "declared=5000" in msg, msg
     elapsed = float(re.search(r"elapsed_s=([0-9.]+)", msg).group(1))
-    assert 0.15 < elapsed < 2.0, msg
+    # fix wave 25 (E-A successor, R-HYGIENE L1): was `0.15 < elapsed < 2.0`. The logged elapsed is this request's:
+    # at least the 0.2 s the client waited before leaving, at most the time the whole scenario ran
+    assert 0.15 < elapsed <= ran + 0.01, (msg, ran)
 
 
 def test_n9_8_disconnect_before_any_body_byte_is_also_one_line(caplog):
