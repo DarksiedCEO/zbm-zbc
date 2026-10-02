@@ -425,10 +425,13 @@ jobs:
   # The test wants DLV_LIVE_SANDBOX_IMAGE=<registry-host>/<path>@sha256:<digest> (a digest-pinned image; a tag-only
   # reference is refused by the adapter, ST-03) and derives DLV_IMAGE_REGISTRY from the host. A locally built image
   # has no repository digest, so the image is pushed to a registry container on 127.0.0.1:5000 and referenced by
-  # the digest that push produces. docker/sandbox.Dockerfile needs the python:3.12-slim base digest as a build
-  # argument; ADR 0011 records none yet. Set the repository variable DLV_SANDBOX_BASE_DIGEST (64 hex) once it is
-  # recorded; until then this job resolves the CURRENT digest of python:3.12-slim and prints it (an unpinned
-  # float, stated plainly in docs/ci.md).
+  # the digest that push produces. docker/sandbox.Dockerfile has two build arguments without a default, both passed
+  # below: BASE_DIGEST (python:3.12-slim) and NODE_SHA256 (the Node tarball's sha256; CI #2 failed for lack of it,
+  # fix wave 26a W26-3 — devtools/test_ci_docker_args.py in hygiene-static now checks every such argument is
+  # passed). ADR 0011's "Pinned hashes" records both values (RECORDED_BASE_DIGEST / NODE_SHA256 here must equal it).
+  # The base digest the build USES is the repository variable DLV_SANDBOX_BASE_DIGEST (64 hex); while it is unset
+  # this job resolves the CURRENT digest of python:3.12-slim, compares it with the recorded one and warns (an
+  # unpinned float, stated plainly in docs/ci.md).
   # ---------------------------------------------------------------------------------------------------------------
   delivery-docker-live:
     name: delivery-docker-live
@@ -438,6 +441,11 @@ jobs:
     timeout-minutes: 45
     env:
       SANDBOX_TAG: 127.0.0.1:5000/zbm/dlv-sandbox:ci
+      # python:3.12-slim image index digest recorded in ADR 0011 on 2026-10-02 (= the one CI #2 resolved)
+      RECORDED_BASE_DIGEST: "dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016"
+      # sha256 of node-v22.22.2-linux-x64.tar.xz, from the Node.js SHASUMS256.txt for v22.22.2 (ADR 0011)
+      NODE_VERSION: "22.22.2"
+      NODE_SHA256: "88fd1ce767091fd8d4a99fdb2356e98c819f93f3b1f8663853a2dee9b438068a"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Docker daemon present
@@ -453,8 +461,10 @@ jobs:
             digest="$PINNED"; echo "using the recorded base digest"
           else
             digest=$(docker buildx imagetools inspect python:3.12-slim --format '{{.Manifest.Digest}}' | sed 's/^sha256://')
-            echo "::warning title=unpinned base image::ADR 0011 records no python:3.12-slim digest; built from the current one: sha256:$digest. Record it and set the DLV_SANDBOX_BASE_DIGEST repository variable."
+            if [ "$digest" = "$RECORDED_BASE_DIGEST" ]; then same="equal to"; else same="DIFFERENT from"; fi
+            echo "::warning title=unpinned base image::DLV_SANDBOX_BASE_DIGEST is not set; built from the current python:3.12-slim, sha256:$digest, $same the one ADR 0011 records (sha256:$RECORDED_BASE_DIGEST). Set the DLV_SANDBOX_BASE_DIGEST repository variable to the recorded digest."
           fi
+          echo "$digest" | grep -Eq '^[0-9a-f]{64}$' || { echo "base digest is not 64 hex: $digest"; exit 1; }
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Local registry (so the image gets a repository digest)
         run: |
@@ -462,9 +472,13 @@ jobs:
           for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:5000/v2/ >/dev/null && break; sleep 1; done
           curl -fsS http://127.0.0.1:5000/v2/
       - name: Build the sandbox image
+        env:
+          BASE_DIGEST: ${{ steps.base.outputs.digest }}
         run: |
+          set -euo pipefail
           docker build -f services/delivery-py/docker/sandbox.Dockerfile \
-            --build-arg BASE_DIGEST=${{ steps.base.outputs.digest }} -t "$SANDBOX_TAG" .
+            --build-arg BASE_DIGEST="$BASE_DIGEST" --build-arg NODE_VERSION="$NODE_VERSION" \
+            --build-arg NODE_SHA256="$NODE_SHA256" -t "$SANDBOX_TAG" .
       - name: Push and pin by digest
         id: image
         run: |
@@ -626,6 +640,8 @@ jobs:
         run: python -m pip install pytest==9.1.1
       - name: The checker's own self-test (every rule fails on a planted violation; the clean probe passes)
         run: python -m unittest devtools/test_hygiene_check.py -v
+      - name: Docker builds pass every build argument their Dockerfile requires (pins = ADR 0011)
+        run: python -m unittest devtools/test_ci_docker_args.py -v
       - name: Static rules L1-L4
         run: python devtools/hygiene_check.py lint --strict-allowlist
       - name: docs/test-counts.md is present and well-formed
