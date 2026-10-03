@@ -425,6 +425,24 @@ class DocumentedCommands(unittest.TestCase):
         self.assertEqual(bad, [])
 
 
+class RepoIgnoreRules(unittest.TestCase):
+    def test_runtime_ledgers_are_ignored_and_a_jsonl_fixture_anywhere_is_not(self):
+        # C5-8b (scout C): `*.jsonl` was ignored repo-wide with one exception (ledger-rust's fixtures), so a JSONL
+        # fixture added to any other service was silently un-addable. The rule is now the names the services write.
+        root = HERE.parent
+
+        def ignored(path: str) -> bool:
+            return subprocess.run(["git", "check-ignore", "-q", "--no-index", path], cwd=root).returncode == 0
+
+        for runtime in ("services/ledger-rust/ledger_data/ledger.jsonl", "ledger.jsonl", "x/ledger.jsonl.torn-123",
+                        "data/dlv_log.jsonl", "d/fin_log.jsonl", "d/vi_log.jsonl", "d/legal_log.jsonl",
+                        "d/cn_log.jsonl", "d/compliance_log.jsonl", "d/fin_log.jsonl.torn-9"):
+            self.assertTrue(ignored(runtime), runtime)
+        for fixture in ("services/creative-py/tests/fixtures/events.jsonl", "fixtures/sample.jsonl",
+                        "services/ledger-rust/tests/fixtures/legacy_ledger_v1.jsonl"):
+            self.assertFalse(ignored(fixture), fixture)
+
+
 class Static(unittest.TestCase):
     def setUp(self):
         self.r = _Repo()
