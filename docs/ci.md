@@ -45,7 +45,9 @@ The Python services are treated as one cluster on purpose. Their tests read each
 one can break another: `finance-py/tests/test_protocol_contracts.py` and `legal-py/tests/contract_maps.py` import
 `compliance-py`, `clipper-network-py`, `verification-py`, `creative-py` and `onboarding-py` `ports.py` /
 `departments.py` by file path; `clipper-network-py/tests/test_cert_guardrail.py` compares against
-`compliance-py/requirements.txt`; `onboarding-py/tests/test_unit_clients.py` reads `detection-py/src/api.py`;
+`compliance-py/requirements.txt`; `clipper-network-py/tests/contract_vi_runner.py` imports `verification-py/src`
+and `verification-py/tests/helpers.py` (fix wave 26b, W25-EB-R2); `onboarding-py/tests/test_unit_clients.py` reads
+`detection-py/src/api.py`;
 `creative-py/tests/test_fix_wave_5.py` reads `ledger-rust/src/bin/server.rs`; `onboarding-py`'s conftest builds
 `ledger-rust` with cargo. Narrower per-service filters would have to enumerate those reads by hand and would go
 silently green the first time one was missed.
@@ -112,7 +114,7 @@ install stable`, which floats with the stable channel (scout C3-12; a new stable
 | `orchestrator-go` | `go vet ./...` → `go test -race -count=1 -v ./...` under the hygiene check (Go version from `go.mod`, 1.24.7; `GOTELEMETRY=off`) | the orchestrator's tests (three packages) with the race detector; no cached results; the binary tests start the real orchestrator on port 0 and read its port file. |
 | `dashboard-ts` | Node 22 → `npm ci` → `npm run lint` (`tsc --noEmit`) → `npm run build` → `npm test` under the hygiene check → `npm run check:dynamic` (job env `NODE_DISABLE_COMPILE_CACHE=1`: npm otherwise leaves `node-compile-cache` in the suite's private TMPDIR, an R3 failure; `NEXT_TELEMETRY_DISABLED=1`) | lockfile-exact install, typecheck, production build, the tests (the live ones start the built server on a port it picks; any skip fails the job; money vectors shared with the other three languages), and the package's own check that `/` and `/healthz` are dynamic routes. |
 | `live-run (<svc>, 3.12/3.13)` for compliance-py, verification-py, clipper-network-py, finance-py, legal-py | `cargo build --locked --release --bin server` in ledger-rust, then `LEDGER_BIN=<that binary> LIVE_WORK_DIR=$RUNNER_TEMP/live-work python devtools/live_run.py` under the hygiene check (`--kind none`: no test count; temp files and processes must not outlive the run), then the work dir is listed and removed | each department's own live integration run: the real ledger-rust binary and the department's production entrypoint as separate processes over real HTTP with real tokens, every narrated behaviour asserted, a restart with the ledger-anchor check, and `GET /ledger/verify` valid on every ledger at the end. Exit 0 only when every check held (each script prints its own N/N). verification-py's run also starts compliance-py's production entrypoint, so both requirement files are installed. |
-| `delivery-docker-live` | `docker buildx imagetools inspect python:3.12-slim` (base digest, unless the `DLV_SANDBOX_BASE_DIGEST` repository variable is set) → `docker run registry:2` on 127.0.0.1:5000 → `docker build -f services/delivery-py/docker/sandbox.Dockerfile --build-arg BASE_DIGEST=… --build-arg NODE_VERSION=… --build-arg NODE_SHA256=… -t 127.0.0.1:5000/zbm/dlv-sandbox:ci .` (Node pins from the job's env = ADR 0011) → `docker push` → `uv sync --frozen` → `DLV_LIVE_SANDBOX_IMAGE=127.0.0.1:5000/zbm/dlv-sandbox@sha256:<digest> .venv/bin/python -m pytest -q -rs tests/test_live_docker.py --junitxml=…` → a script that fails if any of the three tests was skipped | the sandbox properties only a Docker daemon can prove (ADR 0011 R4/R6, spec C.2): uid 65532 inside, seccomp on, `/var/run/docker.sock` absent, read-only root with `/tmp` and the workspace writable, no route out and no `curl`/`wget` in the image, no `.git` in the copied workspace, the `zbm.dlv.run` label on container and volume, the deadline kills a running process, the volume is gone after destroy. A skip is a failure here, by construction. |
+| `delivery-docker-live` | base digest = the job's `RECORDED_BASE_DIGEST` (= ADR 0011; the `DLV_SANDBOX_BASE_DIGEST` repository variable, if set, must equal it or the step fails; `docker buildx imagetools inspect python:3.12-slim` only reports, as a notice, when upstream has moved — fix wave 26b, R26-4) → `docker run registry:2` on 127.0.0.1:5000 → `docker build -f services/delivery-py/docker/sandbox.Dockerfile --build-arg BASE_DIGEST=… --build-arg NODE_VERSION=… --build-arg NODE_SHA256=… --build-arg GO_VERSION=… --build-arg GO_SHA256=… --build-arg RUSTUP_VERSION=… --build-arg RUSTUP_INIT_SHA256=… --build-arg RUST_TOOLCHAIN=… -t 127.0.0.1:5000/zbm/dlv-sandbox:ci .` (every pin from the job's env = ADR 0011; `devtools/test_ci_docker_args.py` checks both) → `docker push` → `uv sync --frozen` → `DLV_LIVE_SANDBOX_IMAGE=127.0.0.1:5000/zbm/dlv-sandbox@sha256:<digest> .venv/bin/python -m pytest -q -rs tests/test_live_docker.py --junitxml=…` → a script that fails if any of the three tests was skipped | the sandbox properties only a Docker daemon can prove (ADR 0011 R4/R6, spec C.2): uid 65532 inside, seccomp on, `/var/run/docker.sock` absent, read-only root with `/tmp` and the workspace writable, no route out and no `curl`/`wget` in the image, no `.git` in the copied workspace, the `zbm.dlv.run` label on container and volume, the deadline kills a running process, the volume is gone after destroy. A skip is a failure here, by construction. |
 | `audit-python` | `pip-audit==2.10.1`: `pip-audit -r services/<svc>/requirements.txt --strict` for every `*-py/requirements.txt`; for delivery-py, `uv export --frozen --no-hashes --no-emit-project` then `pip-audit -r … --no-deps --disable-pip --strict` on the registry packages | no known advisory against any pinned Python dependency (the two git-sourced deer-flow packages are excluded — see below). |
 | `audit-rust` | `cargo install cargo-audit --locked --version 0.22.2` → `cargo audit` | no RustSec advisory against `Cargo.lock` (70 crates). |
 | `audit-node` | `npm audit --audit-level=high` | no high or critical advisory against `package-lock.json`. |
@@ -219,12 +221,15 @@ department files (docs/findings/OPEN.md, C6-2).
 
 ## Known behaviours worth knowing before you debug a red run
 
-- The READMEs say `uv sync --frozen --no-dev` for delivery-py; that leaves no `pytest` in the venv (`pytest` is
-  in the `dev` dependency group in `pyproject.toml` / `uv.lock`). CI runs `uv sync --frozen` (dev group included).
-- delivery-py's `tests/test_live_launcher.py` requires the venv to be at `services/delivery-py/.venv` (it spawns
-  `.venv/bin/python`); CI uses uv's default location, so this holds. Since fix wave 21 (N20-D-1) its live log goes
-  to the gitignored `services/delivery-py/docs/evidence/dept28/_runs/`; no test rewrites a tracked file, and
-  `tests/test_live_tracked_files.py` fails if the live tests change `git status --porcelain`.
+- delivery-py's venv: the READMEs and CI both run `uv sync --frozen` (the `dev` dependency group, which holds
+  `pytest`, included); `--no-dev` would leave no `pytest` in the venv. (Fix wave 26b, W25-EB-R1: this bullet used to
+  say the READMEs had `--no-dev`.)
+- delivery-py's `tests/test_live_launcher.py` spawns the service with the interpreter running the suite
+  (`sys.executable`, since fix wave 22), so the venv may live anywhere. Its live log goes to
+  `$TMPDIR/dlv-live-runs` (fix wave 24; `DLV_LIVE_LOG_DIR` moves it) — never into the source tree; no test rewrites
+  a tracked file, and `tests/test_live_tracked_files.py` fails if the live tests change `git status --porcelain`.
+  (Fix wave 26b, W25-EB-R1: this bullet used to say it needed `services/delivery-py/.venv` and logged under
+  `docs/evidence/dept28/_runs/`.)
 - Ports. ledger-rust's integration tests and (since fix wave 25) orchestrator-go's binary tests start the server
   on port 0 and read the bound port back from `LEDGER_PORT_FILE` / `ORCHESTRATOR_PORT_FILE`; the dashboard's live
   tests start `next start -p 0` and use the port the child printed; none picks a port. The Python live tests still
