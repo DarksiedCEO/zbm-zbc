@@ -378,9 +378,23 @@ def test_time_spent_waiting_for_the_inflight_budget_is_not_charged_to_the_client
 
 # --- the real process: the AEGIS scenario, a trickle, and legit large batches -------
 
+# Fix wave 26b (CI3-6; R26-5's W26-EA-1 hypothesis, confirmed by CI #3 macos-26 and on this build box, an M4 Pro):
+# on macOS BOTH phys_footprint and `ps` RSS stayed at their peak for the whole 13 s settle bound (CI: 47 -> 123 MiB
+# and 63 -> 138; here 49 -> 128 and 64 -> 142). The cause is libmalloc's large-allocation cache: a freed 3.9 MB body
+# buffer is kept by the allocator for reuse, still charged to the process. Measured with 20 such buffers built from
+# 64 KiB chunks and freed: footprint 87 MiB held, 87 after the free, 87 after malloc_zone_pressure_relief() (it
+# released 0); with MallocLargeCache=0, 82 held and 6 after the free (MallocMediumZone=0 changes nothing). So the
+# settle check read the allocator's cache, not what the server holds. glibc unmaps blocks this large at free, which
+# is why Linux settles (W26-2c: 7.0-7.5 s, with or without _malloc_trim). The server under THIS module's memory tests
+# therefore starts with libmalloc's large cache off on macOS — read by libmalloc at process start, so it has to be in
+# the launch environment — and the footprint then measures the server's own frees, as VmRSS does on Linux. The
+# bounds are unchanged; production runs on Linux.
+_ALLOCATOR_ENV = {"MallocLargeCache": "0"} if sys.platform == "darwin" else {}
+
+
 @pytest.fixture(scope="module")
 def server():
-    proc, port = _start_quiet()
+    proc, port = _start_quiet(env_extra=_ALLOCATOR_ENV)
     yield proc, port
     _stop(proc)
 
