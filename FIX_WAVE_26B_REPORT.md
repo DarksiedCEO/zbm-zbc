@@ -245,7 +245,15 @@ Local only: `fix26b` is not pushed, so there is no CI run for it.
 8. **The AEGIS chain:** whether provenance / reliability / data / mutation-fuzz gates are required for this repo
    (the adjudicator lists them as missing), or a ruling that removes them.
 
-## Current state (2026-10-03 08:11 PT) — read this first
+## CI #5 result (2026-10-03 08:49 PT)
+
+Run 37129375575 on b24ffde finished: 51 green, 2 red — orchestrator-go (ubuntu-24.04) (CI5-1, fix 700fce6 local,
+not pushed) and the `required` roll-up. All three delivery-py legs GREEN: ubuntu 3.13 53 min, ubuntu 3.12 54 min,
+macos-26 86 min. **Closed on this run: CI3-2, CI3-3, CI4-1, CI4-3.** Detection macos-26 green, but CI4-2 stays open
+for the AEGIS ruling. Open Highs now: **CI4-2** (AEGIS ruling) and **CI5-1** (needs CI #6). The table below is the
+08:11 snapshot; OPEN.md has the closures.
+
+## Current state (2026-10-03 08:11 PT)
 
 **Commits.** Pushed: `fix26b` on origin at **b24ffde** (CI #4 fixes). Local only, NOT pushed: **a4e96a2** (OPEN.md:
 CI4-2 closes only on an AEGIS ruling; W26B-4 delivery runtime) and **700fce6** (CI5-1 fix) — plus this report commit.
