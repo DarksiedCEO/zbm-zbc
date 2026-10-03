@@ -651,9 +651,9 @@ jobs:
       - name: pytest for the self-test's pytest-plugin cases (the services' pin)
         run: python -m pip install pytest==9.1.1
       - name: The checker's own self-test (every rule fails on a planted violation; the clean probe passes)
-        run: python -m unittest devtools/test_hygiene_check.py -v
+        run: python -B -m unittest devtools/test_hygiene_check.py -v
       - name: Docker builds pass every build argument their Dockerfile requires (pins = ADR 0011)
-        run: python -m unittest devtools/test_ci_docker_args.py -v
+        run: python -B -m unittest devtools/test_ci_docker_args.py -v
       - name: Static rules L1-L4
         run: python devtools/hygiene_check.py lint --strict-allowlist
       - name: docs/test-counts.md is present and well-formed

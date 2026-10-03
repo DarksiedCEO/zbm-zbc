@@ -1,7 +1,7 @@
 """Static check of the Docker builds in .github/workflows/ci.yml (fix wave 26a, W26-3). Standard library only; CI runs
 it in the `hygiene-static` job:
 
-    python3 -m unittest devtools/test_ci_docker_args.py -v
+    python3 -B -m unittest devtools/test_ci_docker_args.py -v
 
 CI #2 (run 37043738804) failed `delivery-docker-live` at "Build the sandbox image": `docker/sandbox.Dockerfile`
 declares `ARG NODE_SHA256` with no default and requires it (`test -n "${NODE_SHA256}"`), and the workflow passed

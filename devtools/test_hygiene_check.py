@@ -1,7 +1,7 @@
 """Self-test of devtools/hygiene_check.py (fix wave 25, R-HYGIENE): every rule FAILS on a planted violation and the
 clean probe passes. Standard library only (unittest); CI runs it in the `hygiene-static` job:
 
-    python3 -m unittest devtools/test_hygiene_check.py -v
+    python3 -B -m unittest devtools/test_hygiene_check.py -v
 
 Each case copies devtools/ into a fresh throwaway git repository (in a private temp dir), plants one violation
 there, and runs the checker from THAT copy, so the real checkout is never touched. The Python-suite path (the
@@ -405,6 +405,24 @@ class Pytest(unittest.TestCase):
         rc, out = self.suite("def test_a():\n    assert 0\n\ndef test_b():\n    pass\n")
         self.assertEqual(rc, 1, out)
         self.assertIn("hygiene violations: 0", out)
+
+
+class DocumentedCommands(unittest.TestCase):
+    def test_every_documented_unittest_command_for_devtools_writes_no_bytecode(self):
+        # F-11 (AEGIS r25): the documented unittest command for this file, run without PYTHONDONTWRITEBYTECODE, left
+        # devtools/__pycache__/ in the checkout (the .pyc is written when unittest imports the module, before any of
+        # its code runs, so the module cannot prevent it). Every place that tells someone to run one says `-B`.
+        import re
+        root = HERE.parent
+        files = [root / "README.md", root / "docs" / "ci.md", root / ".github" / "workflows" / "ci.yml",
+                 *sorted(HERE.glob("test_*.py"))]
+        bad = []
+        for f in files:
+            for i, line in enumerate(f.read_text().splitlines(), 1):
+                for m in re.finditer(r"python3?((?:\s+-\S+)*)\s+-m\s+unittest\s+devtools/", line):
+                    if "-B" not in m.group(1).split():
+                        bad.append(f"{f.relative_to(root)}:{i}: {line.strip()[:120]}")
+        self.assertEqual(bad, [])
 
 
 class Static(unittest.TestCase):
