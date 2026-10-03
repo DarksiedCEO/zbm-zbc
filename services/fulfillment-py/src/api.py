@@ -30,6 +30,7 @@ deployment sets neither and gets the honest default).
 from __future__ import annotations
 
 import asyncio
+import collections
 import hmac
 import json
 import logging
@@ -261,7 +262,7 @@ class _BodyAccount:
         self.evicted: asyncio.Future = loop.create_future()
 
     def _lost(self) -> float:
-        return self.lag.lost if self.lag is not None else 0.0
+        return self.lag.settle() if self.lag is not None else 0.0
 
     def charge(self, now: float) -> float:
         if self.waiting_since is None:
@@ -303,14 +304,13 @@ class _BodyHold:
     protocol's buffer is emptied (BodySizeLimitMiddleware), so `taken` + the
     bytes the protocol buffers is every body byte that has reached the app."""
 
-    __slots__ = ("lanes", "account", "small", "shared", "taken", "unheld")
+    __slots__ = ("lanes", "account", "small", "shared", "taken")
 
     def __init__(self, lanes: "_Lanes", account: _BodyAccount) -> None:
         self.lanes, self.account = lanes, account
         self.small = 0
         self.shared = 0
         self.taken = 0
-        self.unheld = 0  # fix wave 25 (E-A): bytes counted in the shared pool's `over` by cover_now
 
     @property
     def covered(self) -> int:
@@ -326,21 +326,8 @@ class _BodyHold:
             await self.lanes.inflight.reserve(shared - self.shared, self.account, in_hand=True, priority=priority)
             self.shared = shared
 
-    def cover_now(self, total: int) -> None:
-        """Fix wave 25 (E-A review of H3; ADR 0002 Decision 23 — a small body never waits for in-flight bytes):
-        count `total` bytes WITHOUT waiting — what the pools have free (never ahead of a waiting body), and the rest
-        in the shared pool's `over` (memory held outside the limit, visible there) until trim / release."""
-        small = min(total, _SMALL_BODY_BYTES)
-        if small > self.small:
-            self.small += self.lanes.small_reserve.try_reserve(small - self.small)
-        need = total - self.covered - self.unheld
-        if need > 0 and self.small >= _SMALL_BODY_BYTES:
-            got = self.lanes.inflight.try_reserve(need, self.account)
-            self.shared += got
-            need -= got
-        if need > 0:
-            self.lanes.inflight.over += need
-            self.unheld += need
+    # (fix wave 25's `cover_now`, which counted a small body's model without waiting and the rest of it in the
+    # shared pool's `over`, is gone: fix wave 26b reserves small models before their parse, _SmallModelHold.)
 
     def grant(self, target: int) -> None:
         small = min(target, _SMALL_BODY_BYTES)
@@ -353,11 +340,6 @@ class _BodyHold:
             self.shared += self.lanes.inflight.try_reserve(shared - self.shared, self.account)
 
     def trim(self, total: int) -> None:
-        if self.unheld:                                # what is outside the limit goes first
-            gone = min(self.unheld, max(0, self.covered + self.unheld - total))
-            self.lanes.inflight.over -= gone
-            self.unheld -= gone
-        total -= self.unheld                           # the covered bytes to keep
         small, shared = min(total, _SMALL_BODY_BYTES), max(0, total - _SMALL_BODY_BYTES)
         if self.shared > shared:
             self.lanes.inflight.release(self.shared - shared, self.account)
@@ -367,9 +349,6 @@ class _BodyHold:
             self.small = small
 
     def release(self) -> None:
-        if self.unheld:
-            self.lanes.inflight.over -= self.unheld
-            self.unheld = 0
         if self.shared:
             self.lanes.inflight.release(self.shared, self.account)
             self.shared = 0
@@ -539,13 +518,13 @@ class BodySizeLimitMiddleware:
                     if pending is None:
                         pending = asyncio.ensure_future(taking_receive())
                     account.client_wait_started(now)
-                    lost0 = lag.lost
+                    lost0 = lag.settle()  # fix wave 26b (W25-EA-5): a freeze that ended before this wait is not in it
                     try:
                         done, _ = await asyncio.wait({pending, account.evicted}, return_when=asyncio.FIRST_COMPLETED,
                                                      timeout=min(deadline - now, grace - gap, due - waited))
                     finally:
                         account.client_wait_ended(loop.time())
-                    spent = max(0.0, loop.time() - now - (lag.lost - lost0))  # fix wave 25, H4: not the loop's delay
+                    spent = max(0.0, loop.time() - now - (lag.settle() - lost0))  # fix wave 25, H4: not the loop's delay
                     waited += spent
                     gap += spent
                     if pending in done:
@@ -1039,6 +1018,99 @@ _READ_GRANT_BYTES = 64 * 1024
 # uvicorn answer 503 to everyone (http_limits, fix wave 5 trade-off).
 _SMALL_RESERVE_BYTES = http_limits.LIMIT_CONCURRENCY * _SMALL_BODY_BYTES  # part of _INFLIGHT_BODY_BYTES (fix wave 24)
 _PREEMPT_BYTE_SECONDS = 4 * 1024 * 1024 * 1.0  # bytes x seconds
+# Fix wave 26b (OPEN F-6, W25-EA-3, W25-EA-4; ADR 0002 "Fix wave 26b"): a SMALL body's parsed model used to be
+# counted after its parse without waiting (_BodyHold.cover_now: what the pools had free, the rest in the shared
+# pool's `over`, OUTSIDE the limit), so with the shared pool held by stalled senders every small request in its
+# agent work kept a model of up to ~0.9 MiB outside the 64 MiB — bounded only by LIMIT_CONCURRENCY (AEGIS r25:
+# 60 stallers + 60 worst-shape small clients, 91 MiB growth against the 71 derived). Now small models have their
+# own pool, _SMALL_MODEL_BYTES, a fixed term BESIDE the 64 MiB body budget (carving it out of the shared pool was
+# measured to cost legit large batches under a stall flood; ADR 0002 "Fix wave 26b"): BEFORE its parse a small body
+# reserves _small_model_reserve(its length) there — the parse in progress and the
+# model it leaves are counted, inside a limit — and gives it back when the model is dropped (after the agent's work).
+# Only small parses and their models use this pool, never a body still arriving, so stalled senders cannot hold
+# it: a small body still never waits for in-flight BODY bytes (Decision 23); it can queue (FIFO, no refusal) behind
+# other small requests' models, as it queues for a small parse slot. The reservation is sized from the bytes
+# received (the Decision 21 rule), never from a declared size: 16 x the body + 16 KiB, at least what tracemalloc
+# showed every worst shape probed to hold (ADR 0002: OrchestrateRequest of minimal tasks 13.7-19.4x its body,
+# AppointmentsRequest 11.2-16.9x, ResolveRequest 7.9-13.6x; an empty request ~1.4 KB) — and counted at that size,
+# not at `_retained_bytes`, which under-counts small models by up to ~19% (W25-EA-4). A model measured above its
+# reservation (none found) is counted for the excess in this pool's `over`.
+_SMALL_MODEL_BYTES = 4 * 1024 * 1024
+_SMALL_MODEL_PER_BODY_BYTE = 16
+_SMALL_MODEL_BASE_BYTES = 16 * 1024
+
+
+def _small_model_reserve(body_bytes: int) -> int:
+    return min(_SMALL_MODEL_BYTES, _SMALL_MODEL_PER_BODY_BYTE * body_bytes + _SMALL_MODEL_BASE_BYTES)
+
+
+class _FifoBytes:
+    """Fix wave 26b: a byte pool granted strictly in arrival order, with no time limit and no refusal (the pool
+    of small parsed models, _SMALL_MODEL_BYTES). `over`: bytes held outside the limit (a model measured above its
+    reservation), visible beside `used` as in _InFlightBytes."""
+
+    __slots__ = ("limit", "used", "over", "queue")
+
+    def __init__(self, limit: int) -> None:
+        self.limit, self.used, self.over = limit, 0, 0
+        self.queue: collections.deque[tuple[int, asyncio.Future]] = collections.deque()
+
+    async def acquire(self, n: int) -> int:
+        n = min(n, self.limit)                 # never more than the pool: it would wait forever
+        if not self.queue and self.used + n <= self.limit:
+            self.used += n
+            return n
+        waiter = asyncio.get_running_loop().create_future()
+        entry = (n, waiter)
+        self.queue.append(entry)
+        try:
+            await waiter
+        except BaseException:
+            if waiter.done() and not waiter.cancelled():
+                self.release(n)                # granted, then cancelled before it ran: give it back
+            else:
+                self.queue.remove(entry)
+                self._grant()                  # those behind it may fit now
+            raise
+        return n
+
+    def release(self, n: int) -> None:
+        self.used -= n
+        self._grant()
+
+    def _grant(self) -> None:
+        while self.queue and self.used + self.queue[0][0] <= self.limit:
+            n, waiter = self.queue.popleft()
+            if waiter.done():
+                continue
+            self.used += n
+            waiter.set_result(None)
+
+
+class _SmallModelHold:
+    """Fix wave 26b: one small request's reservation in the small-model pool (idempotent release)."""
+
+    __slots__ = ("pool", "reserved", "excess")
+
+    def __init__(self, pool: _FifoBytes) -> None:
+        self.pool, self.reserved, self.excess = pool, 0, 0
+
+    async def reserve(self, n: int) -> None:
+        self.reserved = await self.pool.acquire(n)
+
+    def count(self, retained: int) -> None:
+        extra = retained - self.reserved - self.excess
+        if extra > 0:
+            self.pool.over += extra
+            self.excess += extra
+
+    def release(self) -> None:
+        if self.excess:
+            self.pool.over -= self.excess
+            self.excess = 0
+        if self.reserved:
+            self.pool.release(self.reserved)
+            self.reserved = 0
 
 
 class _InFlightBytes:
@@ -1196,14 +1268,18 @@ class _ByteBudget:
 
 
 class _Lanes:
-    __slots__ = ("small", "large", "budget", "inflight", "small_reserve", "large_in_flight", "trim_timer")
+    __slots__ = ("small", "large", "budget", "inflight", "small_reserve", "small_models", "large_in_flight",
+                 "trim_timer")
 
     def __init__(self) -> None:
         self.small = asyncio.Semaphore(_SMALL_LANE_SLOTS)
         self.large = asyncio.Semaphore(_LARGE_LANE_SLOTS)
         self.budget = _ByteBudget(_LARGE_BYTES_PER_S, _LARGE_BURST_BYTES)
-        # fix wave 24, F1: ONE budget — the small reserve is carved out of it
+        # fix wave 24, F1: ONE budget — the small reserve is carved out of it. Fix wave 26b: the pool of small
+        # parsed models is a fixed term BESIDE it (carving it out too cost legit large batches under a stall flood
+        # — measured, ADR 0002 "Fix wave 26b"; which of the two is a founder ruling)
         self.small_reserve = _InFlightBytes(_SMALL_RESERVE_BYTES)
+        self.small_models = _FifoBytes(_SMALL_MODEL_BYTES)
         self.inflight = _InFlightBytes(_INFLIGHT_BODY_BYTES - _SMALL_RESERVE_BYTES)
         self.large_in_flight = 0
         self.trim_timer: asyncio.TimerHandle | None = None
@@ -1270,6 +1346,7 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
     pos = 0
     chunks: list[bytes] | None = []
     parsed: Any = None
+    small_model = _SmallModelHold(lanes.small_models)  # fix wave 26b: a small body's model, reserved before its parse
     try:
         # Fix wave 8, N7-2: nothing is allocated ahead of the bytes received
         # (NEVER sized from Content-Length, see _INFLIGHT_BODY_BYTES). Fix wave
@@ -1308,13 +1385,27 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
             # whole (live: a 4 MiB body at 160 KiB/s, 503 at 26 s).
             await _within(loop.time() + _LARGE_WAIT_S, lane.acquire())
         else:
+            # Fix wave 26b (F-6, W25-EA-3): the model this body can parse to is reserved BEFORE the parse, in the
+            # small-model pool (FIFO, no refusal; stalled senders never hold it) — sized from the bytes received.
+            await small_model.reserve(_small_model_reserve(pos))
             await lane.acquire()
         try:
             body = b"".join(chunks)
             chunks = None                     # one copy from here on
             parsed, retained = await run_in_threadpool(_parse_measured, model, body)
             body = None
-            if hold is not None and retained:
+            if not large:
+                # Fix wave 26b (F-6, W25-EA-3, W25-EA-4): a SMALL body's model is counted at its reservation, made
+                # before the parse (above) — not at its measured size, which under-counts small models by up to
+                # ~19% — and the body's own bytes go back now (the joined copy is gone). It used to be counted here
+                # without waiting, the part the pools did not have free in the shared pool's `over`, outside the
+                # limit (fix wave 25, `_BodyHold.cover_now`), as many models as small requests were in their work.
+                # (Decision 23 is unchanged: as committed in cd5fb49 the model waited for the SHARED pool and was
+                # 503 under a stall flood; this pool is never held by a body still arriving.)
+                small_model.count(retained)
+                if hold is not None:
+                    hold.release()
+            elif hold is not None and retained:
                 # Fix wave 25, H3 (AEGIS N24-S-4): the parsed model is counted in
                 # the budget from here until it is dropped — its measured size, in
                 # place of the body's bytes (the joined copy is gone). A model larger
@@ -1323,20 +1414,12 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
                 # bytes a character, plus its UTF-8 copy) waits for the budget like
                 # a chunk in hand — INSIDE the parse slot, so at most one model per
                 # slot is ever uncounted (the one being parsed); 503 after
-                # _INFLIGHT_WAIT_S. A SMALL body's
-                # model never waits (Decision 23: a small body never waits for
-                # in-flight bytes — fix wave 25, E-A: as committed in cd5fb49 it
-                # waited for the shared pool, 503 under a stall flood): what the
-                # pools have free, the rest in the shared pool's `over`
-                # (_BodyHold.cover_now). Models of consecutive requests coexist while
+                # _INFLIGHT_WAIT_S. Models of consecutive requests coexist while
                 # their work runs (the slot is released before it): each is counted.
                 try:
-                    if large:
-                        # priority (E-A successor): the model's cover gets freed bytes before the
-                        # chunk covers of bodies still arriving (fix9 Q1: it lost that race, 503)
-                        await hold.cover(retained, priority=True)
-                    else:
-                        hold.cover_now(retained)
+                    # priority (E-A successor): the model's cover gets freed bytes before the
+                    # chunk covers of bodies still arriving (fix9 Q1: it lost that race, 503)
+                    await hold.cover(retained, priority=True)
                 except BaseException:
                     parsed = None             # dropped now, not when the refusal's traceback goes
                     raise
@@ -1353,8 +1436,10 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
         # references this frame (a refusal raised above keeps the frame alive
         # while the middleware answers).
         chunks = None
-        if hold is not None and not isinstance(parsed, BaseModel):
-            hold.release()                    # no model: nothing more is held (a model's bytes go after its work)
+        if not isinstance(parsed, BaseModel):
+            small_model.release()             # no model: nothing more is held (a model's bytes go after its work)
+            if hold is not None:
+                hold.release()
         if large and declared is not None and declared > _SMALL_BODY_BYTES:
             lanes.budget.refund(declared - pos)  # declared but never received (fix wave 9)
         if large:
@@ -1366,6 +1451,7 @@ async def _off_loop(request: Request, model: type[_M], work: Callable[[_M], Any]
         return await run_in_threadpool(lambda: _render(work(parsed)))
     finally:
         parsed = None                         # fix wave 25, H3: the model is dropped, then its bytes go back
+        small_model.release()
         if hold is not None:
             hold.release()
 

@@ -760,6 +760,22 @@ def _senders_on_one_thread(port: int, data: bytes, n: int, idle_timeout: float, 
     return recs
 
 
+# Fix wave 26b (OPEN F-3, AEGIS r25 `invalid_sigstop.log`): the test below ran LIMIT_CONCURRENCY (128) senders, and
+# uvicorn refuses a request head with 503 when, at the moment it parses it, `len(connections) >= limit_concurrency` --
+# the connection being parsed counts itself. Normally the heads are parsed as the connections arrive, so every sender
+# but the last finds fewer than 128 open and is admitted (the 128th gets uvicorn's 503 -- one sender of the 128 was
+# always refused that way). When the server is descheduled across the connect phase, all 128 are accepted before
+# any head is parsed: every one then finds 128 open and the WHOLE burst is 503 at once (AEGIS r25 on Linux, 128/128;
+# the same SIGSTOP experiment on macOS refused 1 of 128 -- the kernel handed the connections over in parts), no body is read, memory never
+# reaches the peak phase and the run is INVALID (it fails as such; it never passes). That is the product's behaviour
+# (pinned by tests/test_fix26b_request_memory.py::test_live_a_burst_at_uvicorns_limit_accepted_while_the_server_
+# cannot_run_is_refused_one_fewer_is_served; http_limits and ADR 0002 "Fix wave 26b"), not what this test measures.
+# So the test runs one sender fewer than uvicorn's limit: however the server is scheduled, the open connections never
+# reach it, every head reaches the app, and the in-flight budget and the large lane decide -- the scenario as
+# specified (the same load: in a normal run the 128th sender was refused before its body).
+_SENDERS = http_limits.LIMIT_CONCURRENCY - 1
+
+
 def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_budget_and_cut(server):
     """Real bytes, then a stall: before, 128 x 4 MiB pinned for 30 s. Now at
     most _INFLIGHT_BODY_BYTES (64 MiB) is buffered (the rest 503), and the
@@ -780,7 +796,8 @@ def test_live_128_senders_of_3_9mb_that_then_stall_are_bounded_by_the_inflight_b
     # ever reading the 503 (w21 logs/L1-proof-probe.log: 20/20 reset at the
     # 64 KiB bound, 20/20 clean with an 8 MiB bound or a reading client).
     # Fix wave 25: all 128 of them on one thread (_senders_on_one_thread).
-    n = http_limits.LIMIT_CONCURRENCY
+    # Fix wave 26b (OPEN F-3): 127 of them, _SENDERS -- see there.
+    n = _SENDERS
     # admitted bodies are cut at the app's grace; the 503'd senders' unread
     # bytes go when the protocol's (grace + BODY_DEADLINE_GRACE_S) closes them
     bound = http_limits.BODY_MIN_RATE_GRACE_S + http_limits.BODY_DEADLINE_GRACE_S + 3

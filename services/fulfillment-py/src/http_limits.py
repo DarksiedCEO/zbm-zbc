@@ -53,7 +53,17 @@ The limits, all enforced before routing and auth:
                                  unread bodies, which buffer nothing.)
   LIMIT_CONCURRENCY      128     uvicorn's limit: at or above this many open
                                  connections or in-flight requests, a new
-                                 request gets 503. Bounds concurrent request
+                                 request gets 503 — counted when uvicorn parses
+                                 the request's head, and the connection being
+                                 parsed counts itself, so at most 127 requests
+                                 are admitted at once, and a burst of 128
+                                 connections that are all open before the
+                                 first of their heads is parsed (the server
+                                 descheduled or starved while they connected)
+                                 is refused for every head parsed with all 128
+                                 open: AEGIS r25 measured the whole burst, 128
+                                 of 128, on Linux (fix wave 26b, OPEN F-3; ADR
+                                 0002 "Fix wave 26b"). Bounds concurrent request
                                  bodies (each <= 4 MiB, api._MAX_BODY_BYTES) to
                                  128; the bytes actually buffered by them are
                                  bounded further by api._INFLIGHT_BODY_BYTES
@@ -256,6 +266,17 @@ class LoopLag:
             self.lost += late - LOOP_LAG_SLACK_S
         self._arm()
 
+    def settle(self) -> float:
+        """`lost`, with the lateness of the tick now due credited first. Fix wave 26b (W25-EA-5): asyncio runs the
+        I/O callbacks of a loop pass before the timers that came due meanwhile, so in the first pass after a freeze
+        `lost` does not include the freeze yet — a clock that marked `lost` there (the protocol's, when body bytes
+        arrive) had the freeze credited AGAIN once the tick ran, to an interval that began after it. A late tick is
+        settled here exactly as `_tick` would settle it (and re-armed), so it is counted once, before the mark."""
+        if self._handle is not None and self.loop.time() - self._when > LOOP_LAG_SLACK_S:
+            self._handle.cancel()
+            self._tick()
+        return self.lost
+
 
 _loop_lags: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, LoopLag]" = weakref.WeakKeyDictionary()
 
@@ -332,7 +353,7 @@ class DeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
             self._body_bytes += len(data)
             self._body_last = self.loop.time()
             if self._lag is not None:
-                self._body_last_lost = self._lag.lost
+                self._body_last_lost = self._lag.settle()   # fix wave 26b (W25-EA-5): a freeze before these bytes, once
         super().data_received(data)
 
     def handle_events(self) -> None:
@@ -393,7 +414,7 @@ class DeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
             self._lag = loop_lag(self.loop)
             self._lag.hold()
             self._body_started = self._body_last = self.loop.time()
-            self._body_started_lost = self._body_last_lost = self._lag.lost
+            self._body_started_lost = self._body_last_lost = self._lag.settle()   # fix wave 26b (W25-EA-5)
             self._body_bytes = 0
             self._body_deadline = self._body_started + self.body_timeout_s + BODY_DEADLINE_GRACE_S
             self._body_check()
