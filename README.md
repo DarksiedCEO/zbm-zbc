@@ -297,8 +297,9 @@ changes a tracked file (R1); leaves a new git-ignored file in the checkout
 (R2; a venv or a build directory the job itself makes is allowlisted by
 path); leaves anything in its private TMPDIR or creates a new entry in /tmp
 (R3); leaves a process running (R4 — found by session/process group, an
-inherited environment marker, and on Linux by being the suite's child
-subreaper, so a double-forked env-scrubbed grandchild is found too); skips a
+inherited environment marker (read on macOS too since fix wave 26b), and on
+Linux by being the suite's child subreaper, so a double-forked env-scrubbed
+grandchild is found too; `docs/ci.md` states what macOS cannot see); skips a
 test for a reason not on the suite's list in `devtools/hygiene_allowlist.json`
 (R5); or runs a different number of tests than `docs/test-counts.md` says (R6).
 `devtools/hygiene_check.py lint` (CI job `hygiene-static`) fails a test that

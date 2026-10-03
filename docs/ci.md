@@ -206,8 +206,11 @@ branches that each changed tests are merged, the merge commit regenerates the ro
 number).
 
 What the dynamic rules cannot see: a file a suite writes OUTSIDE the checkout, its TMPDIR and `/tmp` (e.g. `~/.cache`,
-`~/.config/go/telemetry` — the Go job sets `GOTELEMETRY=off`); a process that left the session, scrubbed its
-environment AND runs on macOS (no subreaper there). On a shared machine another process can create `/tmp` entries
+`~/.config/go/telemetry` — the Go job sets `GOTELEMETRY=off`); on macOS (no subreaper there) a process that left
+the suite's process group AND either scrubbed its environment or is an Apple platform binary (`/bin/sleep`, `/bin/sh`,
+whose environment macOS withholds) — the marker is read from every other process of the user through sysctl
+`KERN_PROCARGS2` since fix wave 26b (R26-1; before, ANY orphan that left the group escaped on macOS, delivery-py's
+`start_new_session=True` children included). On a shared machine another process can create `/tmp` entries
 during a run; R3 prints the names (a CI runner is the job's alone).
 
 The `live-runs` job runs each department's `devtools/live_run.py` under the same wrapper (`--kind none`). Those

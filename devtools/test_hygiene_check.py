@@ -210,6 +210,19 @@ class Dynamic(unittest.TestCase):
         self.assertNotIn("ps -axo", out)
         self.assertEqual(rc, 0, out)
 
+    def test_r4_portable_path_a_new_session_child_that_keeps_the_marker_is_found(self):
+        # R26-1 (AEGIS r26): without a subreaper (macOS) an orphan that leaves the suite's process group — setsid,
+        # setpgid, a double fork; delivery-py's fakes start children with start_new_session=True — escaped, because
+        # the run marker was read from /proc only. The process table's environments are now read on that path too
+        # (macOS: sysctl KERN_PROCARGS2, this user's non-platform processes), so a child that kept its environment is
+        # found by the marker. Python, not /bin/sleep: macOS withholds a platform binary's environment.
+        child = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(306)'], "
+                 "start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)")
+        rc, out = self.r.suite(f'"{sys.executable}" -c "{child}"', portable=True)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("HYGIENE R4-procs", out)
+        self.assertIn("time.sleep(306)", out)
+
     def test_r4_portable_path_a_leftover_grandchild_still_fails(self):
         # a child of a background subshell: found as a descendant of the suite's process group
         rc, out = self.r.suite("( sh -c 'sleep 306' & wait ) >/dev/null 2>&1 &", portable=True)

@@ -19,9 +19,13 @@ Two halves:
                group and session (the suite starts as its own session leader), by an environment marker every
                descendant inherits unless it scrubs its environment, and — on Linux — by being the suite's child
                subreaper (PR_SET_CHILD_SUBREAPER), so even a double-forked, setsid'd, env-scrubbed grandchild is
-               re-parented to this process and found. Elsewhere (macOS: no subreaper, no readable environment,
-               table from ``ps``) only the process group and its descendants are tracked — a setsid'd orphan
-               escapes there — and the checker's own ``ps`` helper is excluded by its pid. Each leftover is printed
+               re-parented to this process and found. Elsewhere (macOS: no subreaper, table from ``ps``) the
+               process group and its descendants are tracked, and (fix wave 26b, R26-1) the marker is read from each
+               of this user's processes through sysctl KERN_PROCARGS2, so an orphan that left the group — setsid,
+               setpgid, a double fork — is found while it keeps its environment. What escapes on macOS: an orphan
+               that left the group AND scrubbed its environment, and one whose program is an Apple platform binary
+               (/bin/sleep, /bin/sh: macOS withholds their environment). The checker's own ``ps`` helper is excluded
+               by its pid. Each leftover is printed
                with pid, ppid, pgid, stat and its full command, then killed (by PID; they are this run's own) so
                the next job is not poisoned;
   R5 skips     a test was skipped for a reason not on the suite's expected-skip list (devtools/hygiene_allowlist.json,
@@ -174,19 +178,53 @@ def _proc_table() -> list[dict]:
             rows.append({"pid": int(d), "state": rest[0], "stat": rest[0], "ppid": int(rest[1]), "pgid": int(rest[2]),
                          "sid": int(rest[3]), "cmd": cmd, "env": env})
         return rows
-    # macOS / BSD: ps (no environment; the marker check is Linux-only). `ps -ax` lists ITSELF, as a child of this
-    # checker: that row is the checker's own helper, never the suite's, and is dropped by its pid (fix wave 26a,
-    # W26-1 — on every macOS job of CI #2 it was reported as "still alive: ps -axo pid=,ppid=,pgid=,stat=,command=").
-    helper = subprocess.Popen(["ps", "-axo", "pid=,ppid=,pgid=,stat=,command="], stdout=subprocess.PIPE,
+    # macOS / BSD: ps. `ps -ax` lists ITSELF, as a child of this checker: that row is the checker's own helper, never
+    # the suite's, and is dropped by its pid (fix wave 26a, W26-1 — on every macOS job of CI #2 it was reported as
+    # "still alive: ps -axo pid=,ppid=,pgid=,stat=,command="). Fix wave 26b (R26-1): the environment of each of this
+    # user's processes is read as well (`_environ_of`), so the run marker finds an orphan that left the suite's
+    # process group without a subreaper too — what `ps` itself no longer prints.
+    helper = subprocess.Popen(["ps", "-axo", "pid=,ppid=,pgid=,uid=,stat=,command="], stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL, text=True)
     out, _ = helper.communicate()
+    me = os.getuid()
     for line in out.splitlines():
-        f = line.split(None, 4)
-        if len(f) < 4 or not f[0].isdigit() or int(f[0]) == helper.pid:
+        f = line.split(None, 5)
+        if len(f) < 5 or not f[0].isdigit() or int(f[0]) == helper.pid:
             continue
-        rows.append({"pid": int(f[0]), "ppid": int(f[1]), "pgid": int(f[2]), "sid": -1, "state": f[3][:1],
-                     "stat": f[3], "cmd": f[4] if len(f) > 4 else "", "env": b""})
+        pid = int(f[0])
+        rows.append({"pid": pid, "ppid": int(f[1]), "pgid": int(f[2]), "sid": -1, "state": f[4][:1],
+                     "stat": f[4], "cmd": f[5] if len(f) > 5 else "",
+                     "env": _environ_of(pid) if f[3].isdigit() and int(f[3]) == me else b""})
     return rows
+
+
+def _environ_of(pid: int) -> bytes:
+    """A process's environment, NUL-separated, where the OS gives it to its owner; b"" otherwise (fix wave 26b,
+    R26-1). macOS: sysctl KERN_PROCARGS2 — the source `ps -E` printed from — which answers for this user's processes
+    and leaves the environment out for Apple's platform binaries (/bin/sleep, /bin/sh: their block ends at argv). Any
+    other system on this path (the self-test's portable mode on Linux): /proc/<pid>/environ when readable."""
+    if sys.platform != "darwin":
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as fh:
+                return fh.read()
+        except OSError:
+            return b""
+    try:
+        libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+        size = ctypes.c_size_t(0)
+        mib = (ctypes.c_int * 3)(1, 49, pid)                      # CTL_KERN, KERN_PROCARGS2
+        if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0 or size.value < 4:
+            return b""
+        buf = ctypes.create_string_buffer(size.value)
+        if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0:
+            return b""
+    except (OSError, AttributeError):
+        return b""
+    raw = buf.raw[:size.value]
+    argc = int.from_bytes(raw[:4], sys.byteorder)
+    _, _, rest = raw[4:].partition(b"\0")                        # the executable path, then NUL padding
+    parts = rest.lstrip(b"\0").split(b"\0")
+    return b"\0".join(x for x in parts[argc:] if x)
 
 
 def leftover_processes(leader: int, token: str, subreaper: bool) -> list[dict]:
