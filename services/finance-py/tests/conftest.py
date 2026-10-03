@@ -1,5 +1,10 @@
 import os
 import sys
+
+# wave 26b (E-B XS-PYC): this suite imports other services' code by file path (and their src through sys.path);
+# without PYTHONDONTWRITEBYTECODE that wrote __pycache__/ into compliance-py, creative-py, onboarding-py and
+# verification-py. No import from here on writes bytecode (the hygiene wrapper sets the variable as well).
+sys.dont_write_bytecode = True
 from pathlib import Path
 
 import pytest

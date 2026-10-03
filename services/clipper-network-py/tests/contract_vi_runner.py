@@ -16,6 +16,8 @@ import json
 import os
 import socket
 import sys
+
+sys.dont_write_bytecode = True   # wave 26b (XS-PYC): it imports verification-py; it runs outside pytest, so the suite's conftest does not reach it
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent

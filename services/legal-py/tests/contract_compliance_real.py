@@ -17,6 +17,8 @@ import json
 import os
 import socket
 import sys
+
+sys.dont_write_bytecode = True   # wave 26b (XS-PYC): it imports compliance-py; it runs outside pytest, so the suite's conftest does not reach it
 from datetime import datetime, timezone
 from pathlib import Path
 
