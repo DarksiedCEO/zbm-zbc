@@ -166,4 +166,12 @@ AEGIS r25 graded High for F-1) and closed by the commit that fixes it:
 
 ## AEGIS round 26b
 
-(filled in at the end)
+Plan (AEGIS rules): the lead implemented this wave, so the lead does not certify it. Independent read-only reviewer
+agents, given the code and OPEN.md but not the lead's conclusions, check the candidate at its exact SHA: (1) source
+and red team — falsify each wave-26b "Closed" row against its literal claim; (2) test truth — re-check failing-first
+and mutant claims; (3) security — the delivery changes (env allowlist, git isolation, cancel set, non-UTF-8 gate);
+(4) a final adjudicator renders the verdict over that evidence. Ceiling, stated in advance: `fix26b` is not pushed,
+so no CI run exists for it; every CI-dependent gate (Linux legs, macos-26 legs, docker-live) is
+INSUFFICIENT_EVIDENCE until the founder pushes, and the verdict cannot exceed CONDITIONAL.
+
+(results at the end)
