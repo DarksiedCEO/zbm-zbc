@@ -51,8 +51,12 @@ class _Repo:
         self.tmp = Path(tempfile.mkdtemp(prefix="hyg-selftest-"))
         self.root = self.tmp / "repo"
         self.work = self.tmp / "work"
+        # R3's "system temp dir" for these runs (fix wave 26b, W26-ST): a private directory, so an entry another
+        # process creates in the real /tmp during a case cannot fail it; one case still runs against the real /tmp
+        self.systmp = self.tmp / "systmp"
         self.work.mkdir()
         self.root.mkdir()
+        self.systmp.mkdir()
         shutil.copytree(HERE, self.root / "devtools", ignore=shutil.ignore_patterns("__pycache__"))
         (self.root / "README.md").write_text("probe\n")
         (self.root / ".gitignore").write_text("*.pyc\n")
@@ -82,10 +86,12 @@ class _Repo:
                            env=dict(os.environ, RUNNER_TEMP=str(self.work)))
         return r.returncode, r.stdout + r.stderr
 
-    def suite(self, shell: str, kind: str = "none", *extra, portable: bool = False) -> tuple[int, str]:
+    def suite(self, shell: str, kind: str = "none", *extra, portable: bool = False,
+              real_tmp: bool = False) -> tuple[int, str]:
+        systmp = () if real_tmp else ("--system-tmp", str(self.systmp))
         return (self.run_portable if portable else self.run)(
             "run", "--suite", "go:probe", "--kind", kind, "--work-dir", str(self.work),
-            "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$", *extra, "--", "/bin/sh", "-c", shell)
+            "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$", *systmp, *extra, "--", "/bin/sh", "-c", shell)
 
     def close(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -131,11 +137,29 @@ class Dynamic(unittest.TestCase):
         self.assertIn("private TMPDIR", out)
 
     def test_r3_new_entry_in_system_tmp(self):
+        # the real /tmp: only this case's own entry is asserted, so other processes' entries cannot fail it
+        name = f"zbm-hyg-selftest-{uuid.uuid4().hex}"
+        try:
+            rc, out = self.r.suite(f"touch /tmp/{name}", real_tmp=True)
+            self.assertEqual(rc, 1, out)
+            self.assertIn(f"HYGIENE R3-tmp go:probe: new entry in /tmp during the run: {name}", out)
+        finally:
+            Path(f"/tmp/{name}").unlink(missing_ok=True)
+
+    def test_r3_new_entry_in_the_given_system_tmp(self):
+        rc, out = self.r.suite(f'touch "{self.r.systmp}/planted"')
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"HYGIENE R3-tmp go:probe: new entry in {self.r.systmp} during the run: planted", out)
+
+    def test_r3_cases_do_not_watch_the_real_tmp(self):
+        # W26-ST (AEGIS r26, review26/logs/selftest-tmpnoise-*): any foreign /tmp entry made during a run failed the
+        # cases that expect a clean result. The cases now watch a private system tmp; an entry in the real /tmp
+        # (planted here from inside the probe, the same as another process making one) is not theirs to report.
         name = f"zbm-hyg-selftest-{uuid.uuid4().hex}"
         try:
             rc, out = self.r.suite(f"touch /tmp/{name}")
-            self.assertEqual(rc, 1, out)
-            self.assertIn(f"HYGIENE R3-tmp go:probe: new entry in /tmp during the run: {name}", out)
+            self.assertEqual(rc, 0, out)
+            self.assertIn("hygiene violations: 0", out)
         finally:
             Path(f"/tmp/{name}").unlink(missing_ok=True)
 
@@ -181,7 +205,7 @@ class Dynamic(unittest.TestCase):
         # /proc): the two guards are independent
         rc, out = self.r.run_portable("--keep-subreaper", "run", "--suite", "go:probe", "--kind", "none",
                                       "--work-dir", str(self.r.work), "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$",
-                                      "--", "/bin/sh", "-c", "true")
+                                      "--system-tmp", str(self.r.systmp), "--", "/bin/sh", "-c", "true")
         self.assertIn("subreaper True", out)
         self.assertNotIn("ps -axo", out)
         self.assertEqual(rc, 0, out)
@@ -344,7 +368,8 @@ class Pytest(unittest.TestCase):
         self.r.git("add", "-A")
         self.r.git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "probe")
         return self.r.run("run", "--suite", "python:probe-py", "--kind", "pytest", "--cwd", "services/probe-py",
-                          "--work-dir", str(self.r.work), "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$", *extra,
+                          "--work-dir", str(self.r.work), "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$",
+                          "--system-tmp", str(self.r.systmp), *extra,
                           "--", sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider")
 
     def test_clean_passes_and_tmp_path_is_not_retained(self):
@@ -485,6 +510,33 @@ class Static(unittest.TestCase):
                               text=True, check=True).stdout.strip()
         (self.r.root / "README.md").write_text(f"At {head}: `cargo test`: 84\n  passed.\n")
         self.assertEqual(self.lint()[0], 0)
+
+    def test_l3_a_count_pinned_by_an_all_digit_commit_id(self):
+        # W26-ST (AEGIS r26, review26/logs/wst.log): ids made only of digits were skipped, so ~1 commit in 27 (a
+        # 7-char short id with no a-f) could not pin a count, and the case above failed whenever HEAD was one. Make
+        # such a commit deterministically: plumbing commits until one's 7-char id is all digits (p ~ 0.037 each; a
+        # miss in 3000 tries is ~1e-49).
+        tree = subprocess.run(["git", "write-tree"], cwd=self.r.root, capture_output=True, text=True,
+                              check=True).stdout.strip()
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                   GIT_COMMITTER_EMAIL="t@t")
+        digits = None
+        for i in range(3000):
+            c = subprocess.run(["git", "commit-tree", tree, "-m", f"probe {i}"], cwd=self.r.root, env=env,
+                               capture_output=True, text=True, check=True).stdout.strip()
+            if c[:7].isdigit():
+                digits = c[:7]
+                break
+        self.assertIsNotNone(digits)
+        self.r.git("update-ref", "refs/heads/all-digit", c)                # reachable, as a real commit would be
+        (self.r.root / "README.md").write_text(f"At {digits}: `cargo test`: 84\n  passed.\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        # a digit run that is NOT a commit still pins nothing
+        (self.r.root / "README.md").write_text("At 1048576: `cargo test`: 84\n  passed.\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("L3-counts README.md:1", out)
 
     def test_l4_graceful_close_differs_from_its_pin(self):
         for svc, body in (("a-py", "X = 1\n"), ("b-py", "X = 2\n")):

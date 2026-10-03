@@ -372,7 +372,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     private_tmp.mkdir()
     results = work / "results.json"
     log_path = work / "output.log"
-    systmp = system_tmp()
+    systmp = Path(a.system_tmp) if a.system_tmp else system_tmp()
     if work_root.resolve() == systmp.resolve():
         # the private TMPDIR would itself be a new top-level entry of the directory R3 watches
         print(f"hygiene_check run: --work-dir must not be {systmp} itself (a subdirectory is fine)", file=sys.stderr)
@@ -900,7 +900,9 @@ def lint_counts(allow: dict) -> list[str]:
             block = "\n".join(lines[a:b])
             if rel.suffix in (".yml", ".yaml") and not block.lstrip().startswith("#"):
                 continue
-            pinned = any(_commit_exists(h, cache) for h in COMMIT_RE.findall(block) if not h.isdigit())
+            # an id made only of digits counts too (fix wave 26b, W26-ST): ~1 short id in 27 has no a-f, and skipping
+            # those lost the pin then; a digit run that is not a commit still resolves to nothing
+            pinned = any(_commit_exists(h, cache) for h in COMMIT_RE.findall(block))
             if pinned:
                 continue
             # matched over the whole paragraph (line breaks as spaces, offsets kept), so a count wrapped across two
@@ -1086,6 +1088,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--allow-ignored", action="append", default=[], help="git-ignored path the run may create")
     r.add_argument("--tmp-ignore", action="append", default=[],
                    help="regex of /tmp entry names another process on this machine creates (never in CI)")
+    r.add_argument("--system-tmp", help="the directory R3 watches for new entries (default /tmp; the self-test "
+                                        "points it at a private directory so other processes' /tmp entries cannot "
+                                        "fail it; never in CI)")
     r.add_argument("--counts", choices=("check", "write", "off"), default="check")
     r.add_argument("--count-os", help="OS whose platform-only tests R6 applies (default: this one; the self-test "
                                       "uses it to check another OS's rules)")
