@@ -55,6 +55,43 @@ def _resolve(crate: Path, env_over: dict[str, str], *, unset: tuple[str, ...] = 
                           capture_output=True, text=True, timeout=1200)
 
 
+# Fix wave 26b (W25-EA-8, scout O6): the seed used to be a full copy of the real target dir — ~100 MB of release
+# output on CI (and the debug profile too, ~360 MB more, wherever ledger-rust's own tests had run), copied again by
+# test_n7_6_cargo_target_dir_unset_uses_the_crate_default. Only what lets the dependencies stay fresh is seeded now:
+# release/{deps,build,.fingerprint}. In deps, rustc's .rlib/.rmeta outputs are HARD-LINKED (rustc writes them to a
+# temporary file and renames it into place, so a rebuild in the copy replaces the link and never writes through it
+# into the real file); everything else — the .d dep-info files, proc-macro dylibs, build-script outputs and the
+# fingerprints, which cargo and build scripts may rewrite in place — is copied (~15 MB). Another filesystem (no
+# hard link): copied, as before. test_n7_6_the_seed_never_writes_into_the_real_target_dir checks the hard-linked
+# files are untouched after the module's builds.
+_SEED_SUBDIRS = ("deps", "build", ".fingerprint")
+_LINKED_SUFFIXES = (".rlib", ".rmeta")
+_SEED_STATS: dict[str, int] = {"linked": 0, "copied_bytes": 0}
+_LINKED: list[tuple[Path, int, float]] = []   # (real file, size, mtime) of every hard-linked seed file
+
+
+def _link_or_copy(src: str, dst: str) -> str:
+    if src.endswith(_LINKED_SUFFIXES):
+        try:
+            os.link(src, dst)
+            st = os.stat(src)
+            _SEED_STATS["linked"] += 1
+            _LINKED.append((Path(src), st.st_size, st.st_mtime))
+            return dst
+        except OSError:
+            pass  # another filesystem, or links unsupported: copy
+    shutil.copy2(src, dst)
+    _SEED_STATS["copied_bytes"] += os.path.getsize(dst)
+    return dst
+
+
+def _seed_target(real_target: Path, ctd: Path) -> None:
+    for sub in _SEED_SUBDIRS:
+        if (real_target / "release" / sub).is_dir():
+            shutil.copytree(real_target / "release" / sub, ctd / "release" / sub, symlinks=True,
+                            copy_function=_link_or_copy)
+
+
 @pytest.fixture(scope="module")
 def crate_copy(tmp_path_factory) -> tuple[Path, Path]:
     """(copy of the ledger-rust crate, a CARGO_TARGET_DIR seeded from the real
@@ -71,8 +108,8 @@ def crate_copy(tmp_path_factory) -> tuple[Path, Path]:
     ctd = base / "ctd"
     real_target = real_bin.parents[1] if real_bin.name == "server" and real_bin.parent.name == "release" else None
     if real_target and (real_target / "release").is_dir():
-        shutil.copytree(real_target, ctd, symlinks=True, copy_function=shutil.copy2)
-        (ctd / "release" / "server").unlink(missing_ok=True)  # the artifact is what is under test
+        _seed_target(real_target, ctd)  # the artifact under test (release/server) is not seeded
+    print(f"\nN7-6 seed: {_SEED_STATS['linked']} files hard-linked, {_SEED_STATS['copied_bytes'] / 2**20:.1f} MiB copied")
     return crate, ctd
 
 
@@ -180,7 +217,10 @@ def test_n7_6_cargo_target_dir_unset_uses_the_crate_default(crate_copy):
     real_target = LEDGER_RUST_DIR / "target"
     real_before = real_target.exists()
     default_target = crate / "target"
-    shutil.copytree(ctd, default_target, symlinks=True, copy_function=shutil.copy2)
+    # Fix wave 26b (W25-EA-8): the seeded dir is MOVED into place and back (same directory tree, a rename) — it was
+    # a second full copy.
+    assert not default_target.exists()
+    ctd.rename(default_target)
     try:
         r = _resolve(crate, {}, unset=("CARGO_TARGET_DIR",))
         assert r.returncode == 0, r.stderr[-2000:]
@@ -188,7 +228,7 @@ def test_n7_6_cargo_target_dir_unset_uses_the_crate_default(crate_copy):
         assert p == default_target / "release" / "server"
         assert _is_ledger_server(p)
     finally:
-        shutil.rmtree(default_target, ignore_errors=True)
+        default_target.rename(ctd)
     assert real_target.exists() == real_before, "the checkout's ledger-rust crate was built into its own target dir"
 
 
@@ -236,3 +276,15 @@ def test_n7_6_build_failure_message_names_the_real_cause(crate_copy, tmp_path):
     assert r.returncode != 0
     assert "Failed" in r.stderr and "cargo build of ledger-rust failed" in r.stderr and "error" in r.stderr, r.stderr[-1500:]
     assert "exit 0" not in r.stderr
+
+
+def test_n7_6_the_seed_never_writes_into_the_real_target_dir(crate_copy):
+    """Fix wave 26b (W25-EA-8): runs after the module's builds (a rebuild of the copy, a broken crate, a moved target
+    dir). Every real file the seed hard-linked still has the size and mtime it had when it was linked — nothing was
+    written through a link into the real build — and the seed itself copied far less than a full target dir."""
+    crate, ctd = crate_copy
+    changed = [(str(p), size, p.stat().st_size, mtime, p.stat().st_mtime) for p, size, mtime in _LINKED
+               if not p.exists() or p.stat().st_size != size or p.stat().st_mtime != mtime]
+    assert not changed, f"a hard-linked seed file of the real target dir changed: {changed[:5]}"
+    if _SEED_STATS["linked"]:                      # same filesystem: the large files were not copied
+        assert _SEED_STATS["copied_bytes"] < 64 * 2**20, _SEED_STATS

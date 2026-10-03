@@ -382,7 +382,11 @@ def test_new3_oversized_header_is_refused_and_memory_stays_flat(server):
                 status = int(data.split(b" ", 2)[1])
         except OSError:
             pass
-    time.sleep(0.5)
+    # Fix wave 26b (W25-EA-6): was `time.sleep(0.5)` before the RSS reading. The reading is now taken once the
+    # server's event loop has answered a /health on a fresh connection, i.e. once it is serving again after the
+    # oversized head (refused or closed above), not after a guess at how long that takes. A server that buffered the
+    # head holds that memory either way.
+    assert _health_ok(port)
     after = _rss_kb(proc.pid)
     assert status in (None, 400, 431), status  # refused (or closed), never served
     assert sent < 200, f"server accepted all {sent} MB of a header"
@@ -428,6 +432,9 @@ def test_new3_idle_keep_alive_is_closed_and_keep_alive_still_works(server):
     with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
         s.sendall(req)
         assert b"200" in s.recv(4096).split(b"\r\n", 1)[0]
+        # the stimulus, not synchronisation (fix wave 26b, W25-EA-6 reviewed): an idle gap shorter than the keep-alive
+        # timeout, after which the connection must still be usable; load can only lengthen it (towards 5 s, at which
+        # point the reuse below fails loudly, never silently passes)
         time.sleep(1)
         s.sendall(req + req)  # reuse + pipelining still work
         data = b""
@@ -439,20 +446,37 @@ def test_new3_idle_keep_alive_is_closed_and_keep_alive_still_works(server):
     assert took is not None and took <= KEEP_ALIVE_TIMEOUT_S + 2, took
 
 
+def _health_until(port: int, want: int, attempts: int = 100) -> list[int]:
+    """Fix wave 26b (W25-EA-6): /health on fresh connections until it answers `want`, at most `attempts` times (each
+    attempt is a full round trip, so this ends when the server's state changes, not after a fixed sleep); returns
+    every status seen."""
+    seen = []
+    for _ in range(attempts):
+        seen.append(httpx.get(f"http://127.0.0.1:{port}/health", timeout=3).status_code)
+        if seen[-1] == want:
+            break
+        time.sleep(0.05)   # pacing between probes, not synchronisation: the loop ends on the answer
+    return seen
+
+
 def test_new3_concurrency_is_bounded():
     proc, port = _start({"CREATIVE_MAX_CONCURRENCY": "4"})
     held = []
     try:
         for _ in range(4):
             held.append(socket.create_connection(("127.0.0.1", port), timeout=2))
-        time.sleep(0.3)
-        r = httpx.get(f"http://127.0.0.1:{port}/health", timeout=3)
-        assert r.status_code == 503, r.status_code
+        # Fix wave 26b (W25-EA-6): was `time.sleep(0.3)` then ONE /health that had to be 503 — on a loaded box the
+        # server might not have accepted the 4 held connections yet. Now: /health until the server, having accepted
+        # them, refuses (503); a server that never bounds concurrency never answers 503 and fails here. Only 200
+        # (not yet at the limit) may come before it.
+        seen = _health_until(port, 503)
+        assert seen[-1] == 503 and set(seen) <= {200, 503}, seen
         for s in held:
             s.close()
         held.clear()
-        time.sleep(0.3)
-        assert _health_ok(port)
+        # was `time.sleep(0.3)` then /health 200: now /health until the server has seen the closes and serves again
+        seen = _health_until(port, 200)
+        assert seen[-1] == 200 and set(seen) <= {200, 503}, seen
     finally:
         for s in held:
             s.close()

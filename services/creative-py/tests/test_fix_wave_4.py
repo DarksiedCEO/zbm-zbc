@@ -635,12 +635,35 @@ def regex_same_work(p: re.Pattern, small: str, large: str, span: int = GROWTH_SP
 # three times, 14.4-17.7. The bound sits between.
 # Fix wave 26 (W26-2b): that ratio is a property of the CPU and the CPython build, not of the pattern alone
 # (`(.)\1+` on 'é' 1.8 here, 11.2 on macos-26), so this constant-factor bound is asserted where it was calibrated
-# (Linux: this box and the ubuntu CI runners); elsewhere it is printed, and "linear" is the growth bound above. A
-# pattern 3x slower by a constant factor is therefore caught on Linux only (on other platforms only if it crosses
-# the 50 ms CPU bound).
+# (Linux: this box and the ubuntu CI runners); elsewhere it is printed, and "linear" is the growth bound above.
+# Fix wave 26b (F-4, R26-5): this one bound over all patterns could not see a cheap pattern made 3.9x slower (its own
+# ratio ~1 becomes ~4, under 9) on any platform, and off Linux only the 50 ms bound saw constant factors at all. A
+# changed pattern is now judged against ITS OWN reviewed form, per pattern and per input, on every platform
+# (REVIEWED_PATTERNS, PIN_RATIO_MAX below); this ratio and the 50 ms bound still judge the absolute cost.
 LINEAR_REF = re.compile(r"[^\w#@]+")
 REGEX_RATIO_MAX = 9.0
 REGEX_RATIO_CALIBRATED = sys.platform.startswith("linux")
+# Fix wave 26b (AEGIS r25 F-10: the 50 ms CPU bound read 34.5 ms in 1 of 20 loaded runs, margin 1.45x). The bound is
+# unchanged; a reading over it (or over REGEX_RATIO_MAX) is read again, fresh, up to ABS_ATTEMPTS times, and only a
+# pattern over the bound on EVERY reading fails — the form R25B-1 gave onboarding's same-work check. A pattern that
+# really costs more than 50 ms per 100 000 chars costs it on every reading; a load transient does not repeat on cue
+# (test_lim_an_absolute_cpu_excursion_is_read_again_a_slow_pattern_never_passes).
+ABS_ATTEMPTS = 3
+ABS_CPU_MAX = 0.05
+
+
+def _abs_readings(p: re.Pattern, s: str, cpu=None) -> tuple[float, float, list[tuple[float, float]]]:
+    """(dt, ref, readings): the pattern's CPU on `s` and the linear reference's, read again while either is over its
+    bound (ABS_CPU_MAX; REGEX_RATIO_MAX where calibrated), up to ABS_ATTEMPTS times; the last reading is returned,
+    so it is over a bound only if every reading was."""
+    cpu = cpu or regex_cpu
+    readings: list[tuple[float, float]] = []
+    for _ in range(ABS_ATTEMPTS):
+        dt, ref = cpu(p, s), cpu(LINEAR_REF, s)
+        readings.append((round(dt, 6), round(ref, 6)))
+        if dt < ABS_CPU_MAX and not (REGEX_RATIO_CALIBRATED and dt / ref >= REGEX_RATIO_MAX):
+            break
+    return dt, ref, readings
 
 
 def test_lim_every_regex_in_text_module_is_linear_time():
@@ -653,18 +676,17 @@ def test_lim_every_regex_in_text_module_is_linear_time():
         for small, large, s in zip(_adversarial_inputs(GROWTH_SMALL), _adversarial_inputs(GROWTH_LARGE),
                                    _adversarial_inputs(ABS_N)):
             t_small, t_large, growth = regex_same_work(p, small, large)
-            dt = regex_cpu(p, s)
-            ref = regex_cpu(LINEAR_REF, s)
+            dt, ref, readings = _abs_readings(p, s)
             worst = max(worst, dt)
             if growth > worst_growth:
                 worst_growth, grew = growth, (p.pattern, s[:10])
             if dt / ref > worst_ratio:
                 worst_ratio, at = dt / ref, (p.pattern, s[:10])
             assert growth < GROWTH_RATIO_MAX, (p.pattern, s[:10], t_small, t_large, growth)
-            assert dt < 0.05, (p.pattern, s[:10], dt)
+            assert dt < ABS_CPU_MAX, (p.pattern, s[:10], "every reading (dt, ref) over the bound", readings)
             if REGEX_RATIO_CALIBRATED:
-                assert dt / ref < REGEX_RATIO_MAX, (p.pattern, s[:10], dt, ref)
-    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per {ABS_N} chars (bound 50 ms); worst same-work growth "
+                assert dt / ref < REGEX_RATIO_MAX, (p.pattern, s[:10], "every reading (dt, ref) over", readings)
+    print(f"\nLIM regex: worst CPU {worst * 1000:.1f} ms per {ABS_N} chars (bound {ABS_CPU_MAX * 1000:.0f} ms); worst same-work growth "
           f"{GROWTH_SPAN} x {GROWTH_SMALL} vs {GROWTH_LARGE} chars {worst_growth:.2f}x (bound {GROWTH_RATIO_MAX}) at "
           f"{grew!r}; worst CPU ratio to a single linear scan {worst_ratio:.2f} (bound {REGEX_RATIO_MAX}, "
           f"{'asserted' if REGEX_RATIO_CALIBRATED else 'NOT asserted on ' + sys.platform}) at {at!r}")
@@ -684,6 +706,167 @@ def test_lim_the_growth_bound_fails_superlinear_patterns_and_passes_a_costly_lin
     for s in ("\u00e9", "a", "a!", "\u0301"):
         t_small, t_large, growth = regex_same_work(costly, s * (GROWTH_SMALL // len(s)), s * (GROWTH_LARGE // len(s)))
         assert growth < GROWTH_RATIO_MAX, (costly.pattern, s, t_small, t_large, growth)
+
+
+def test_lim_an_absolute_cpu_excursion_is_read_again_a_slow_pattern_never_passes():
+    """Fix wave 26b (AEGIS r25 F-10), with scripted readings: one reading over the 50 ms bound followed by a normal
+    one passes (a load transient); a pattern over it on every reading fails."""
+    p, s = re.compile("x"), "x"
+
+    def scripted(values):
+        it = iter(values)
+        return lambda pat, inp: next(it)
+
+    dt, ref, readings = _abs_readings(p, s, scripted([0.06, 0.003, 0.02, 0.003]))
+    assert dt < ABS_CPU_MAX and len(readings) == 2, readings
+    dt, ref, readings = _abs_readings(p, s, scripted([0.06, 0.003] * ABS_ATTEMPTS))
+    assert dt >= ABS_CPU_MAX and len(readings) == ABS_ATTEMPTS, readings
+
+
+# Fix wave 26b (AEGIS r25 F-4 and r26 R26-5): per-pattern constant-factor bounds, on every platform. The ratio to
+# LINEAR_REF above is one bound over all patterns (a pattern 3.9x slower than its own form passes it when its own
+# ratio is ~1) and is asserted on Linux only; elsewhere only the 50 ms bound could see a constant-factor slowdown.
+# A per-pattern bound against a FIXED number of milliseconds is a property of the machine; against the pattern's own
+# reviewed form it is not. REVIEWED_PATTERNS holds, for every pattern of shared.text, the form reviewed (literal
+# source, or the reviewed construction for the classes built from tables), and the test compares, per pattern and per
+# adversarial input, the CPU of the module's pattern with the CPU of that reviewed form — the same work on the same
+# input on the same machine at the same moment, so the ratio is ~1 for an unchanged or equivalent pattern on any CPU
+# and under any load, and the slowdown factor for a slower one. Measured on the build box (M4 Pro, 3.13): an unchanged
+# pattern against itself 1.00-1.24 per input; `[^\w#@]+` rewritten as `(?:[^\w#@]|(?!))+` (same matches) 1.5-3.9 per
+# input, 3.9 at worst; `_ORDINARY_WORD` behind a lookahead per letter up to 3.8. PIN_RATIO_MAX = 2.0 sits between: a
+# pattern 2x slower than its reviewed form on any adversarial input fails, on every platform. A pattern that changes
+# without a slowdown passes (no pin update needed); a NEW pattern must be added here (the test fails until it is),
+# and the ratio-to-LINEAR_REF and 50 ms bounds above still judge its absolute cost.
+def _reviewed_char_class(chars) -> str:
+    """The reviewed construction of shared.text._char_class (code-point RANGES), frozen here so that a change to the
+    module's construction is timed against it rather than copied by it."""
+    cps = sorted(map(ord, chars))
+    parts, i = [], 0
+    while i < len(cps):
+        j = i
+        while j + 1 < len(cps) and cps[j + 1] == cps[j] + 1:
+            j += 1
+        parts.append(re.escape(chr(cps[i])) + ("-" + re.escape(chr(cps[j])) if j > i else ""))
+        i = j + 1
+    return "[" + "".join(parts) + "]"
+
+
+REVIEWED_PATTERNS = {
+    "_NON_WORD": (r"[^\w#@]+", re.UNICODE),
+    "_LATIN_NAME": (r"LATIN (?:SMALL CAPITAL |SMALL |CAPITAL )?LETTER (?:SMALL CAPITAL |SCRIPT |DOTLESS |LONG )?"
+                    r"([A-Z])(?: WITH .+)?", 0),
+    "_CURRENCY_MATH_RE": (lambda t: "[" + re.escape("".join(t._CM_SOURCE)) + "]", 0),
+    "_ORDINARY_WORD": (r"[^\W\d_]+(?:['’.&-][^\W\d_]+)*", 0),
+    "_TAG_WORD": (r"[#@](?:[^\W\d_]|[0-9])+(?:_(?:[^\W\d_]|[0-9])+)*", 0),
+    "_NUMBER_WORD": (r"[$€£¥]?[0-9][0-9,.]*(?:st|nd|rd|th|s|k|m|b|x|p|am|pm|h|hr|hrs|min|mins|yr|yrs|mo)?",
+                     re.IGNORECASE),
+    "_WORD_SPLIT": (r"[\s/–—…]+", 0),
+    "_LETTERLIKE_NAME": (r"(?:MATHEMATICAL|FULLWIDTH|CIRCLED|PARENTHESIZED|SQUARED|NEGATIVE|CROSSED|"
+                         r"TORTOISE SHELL BRACKETED|REGIONAL INDICATOR|DOUBLE-STRUCK|SCRIPT|BLACK-LETTER|TURNED|"
+                         r"REVERSED|ROTATED|INVERTED|MODIFIER LETTER|SUPERSCRIPT|SUBSCRIPT|LATIN)\b(?: [A-Z-]+)*? "
+                         r"(?:CAPITAL|SMALL|LETTER) ([A-Z])", 0),
+    "_LETTERLIKE_RE": (lambda t: _reviewed_char_class(t.LETTERLIKE), 0),
+    "_MAPPED_RE": (lambda t: _reviewed_char_class({*t.LETTERLIKE, t.BRAILLE_BLANK}), 0),
+    "_REGIONAL_RUN": ("[\U0001F1E6-\U0001F1FF]+", 0),
+    "_REGIONAL_STREAM": ("[\U0001F1E6-\U0001F1FF](?:[\\s\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufe00-\ufe0f"
+                         "\u20e3\ufeff]*[\U0001F1E6-\U0001F1FF])*", 0),
+    "_RUNS": (r"(.)\1+", re.DOTALL),
+    "_AZ_ONLY": (r"[^a-z]+", 0),
+    "_SYMBOL_SCAN": (r"[\w#@]+|[^\w#@\s]", 0),
+    "_TAG_RUN": (r"[#@][\w#@]*", 0),
+    "_ALNUM": (r"[^\W_]", 0),
+    "_DIVIDER": (r"([\u2500-\u25FF])\1{2,}", 0),
+    "_BAR_NAME": (r"VERTICAL (?:LINE|BAR|EM DASH|EN DASH|LOW LINE|WAVY LOW LINE)$|DANDA$|PASEQ$|^DIVIDES$", 0),
+    "_EMOJI_LETTER_WORD": (lambda t: "(?<!\\S)(?:" + _reviewed_char_class(t._ENCLOSED_LETTERS)
+                           + "\uFE0F)+(?=[\\s.,!?;:]|$)", 0),
+}
+PIN_N = GROWTH_LARGE      # 8 000 chars: the stack-safe size of the growth check (CI3-5)
+PIN_REPS = 2
+PIN_RATIO_MAX = 2.0
+PIN_ATTEMPTS = 3          # an over-bound reading is read again (fresh, both sides), as R25B-1 / F-10
+
+
+def _reviewed(text, name: str) -> re.Pattern:
+    src, flags = REVIEWED_PATTERNS[name]
+    return re.compile(src(text) if callable(src) else src, flags)
+
+
+def regex_vs_reviewed(p: re.Pattern, reviewed: re.Pattern, s: str, reps: int = PIN_REPS) -> tuple[float, float]:
+    """(CPU of `p`, CPU of `reviewed`) for reps x (sub + search + fullmatch) on `s`: this thread's CPU time, the
+    cyclic GC off, the two sides interleaved, best of 5 each."""
+    import gc
+
+    bp = br = float("inf")
+    for _ in range(5):
+        for side in (0, 1):
+            pat = p if side == 0 else reviewed
+            was = gc.isenabled()
+            gc.disable()
+            try:
+                t0 = time.thread_time()
+                for _ in range(reps):
+                    _regex_ops(pat, s)
+                t = time.thread_time() - t0
+            finally:
+                if was:
+                    gc.enable()
+            if side == 0:
+                bp = min(bp, t)
+            else:
+                br = min(br, t)
+    return bp, br
+
+
+def _slowdowns_vs_reviewed(p: re.Pattern, reviewed: re.Pattern, n: int = PIN_N) -> list[tuple]:
+    """Per adversarial input of `n` chars, the readings (CPU of p, CPU of reviewed, ratio) of the last attempt: an
+    input whose ratio is at or over PIN_RATIO_MAX is read again, up to PIN_ATTEMPTS times."""
+    out = []
+    for s in _adversarial_inputs(n):
+        for _ in range(PIN_ATTEMPTS):
+            tp, tr = regex_vs_reviewed(p, reviewed, s)
+            ratio = tp / max(tr, 1e-9)
+            if ratio < PIN_RATIO_MAX:
+                break
+        out.append((s[:6], round(tp * 1000, 3), round(tr * 1000, 3), round(ratio, 2)))
+    return out
+
+
+def test_lim_every_regex_in_text_module_costs_no_more_than_its_reviewed_form():
+    import shared.text as text
+
+    names = {k for k, v in vars(text).items() if isinstance(v, re.Pattern)}
+    assert names == set(REVIEWED_PATTERNS), ("a pattern of shared.text has no reviewed form here (add it to "
+                                             "REVIEWED_PATTERNS) or a reviewed one is gone",
+                                             sorted(names ^ set(REVIEWED_PATTERNS)))
+    worst, changed = (0.0, None), []
+    for name in sorted(names):
+        p, reviewed = getattr(text, name), _reviewed(text, name)
+        if (p.pattern, p.flags) != (reviewed.pattern, reviewed.flags):
+            changed.append(name)
+        rows = _slowdowns_vs_reviewed(p, reviewed)
+        top = max(rows, key=lambda r: r[3])
+        if top[3] > worst[0]:
+            worst = (top[3], (name, top[0]))
+        assert top[3] < PIN_RATIO_MAX, (f"{name} costs {top[3]}x its reviewed form on {top[0]!r} (bound "
+                                        f"{PIN_RATIO_MAX}, every reading over it); per input (input, ms, reviewed ms, "
+                                        f"ratio): {rows}")
+    print(f"\nLIM regex vs reviewed form: worst {worst[0]:.2f}x at {worst[1]!r} (bound {PIN_RATIO_MAX}); "
+          f"changed since review (timed, not slower): {changed or 'none'}")
+
+
+def test_lim_the_reviewed_form_bound_fails_a_slower_equivalent_pattern_and_passes_an_equal_one():
+    r"""Fix wave 26b (F-4): the per-pattern bound on its own, on every platform. `[^\w#@]+` (the module's `_NON_WORD`)
+    rewritten as `(?:[^\w#@]|(?!))+` matches exactly the same text at up to ~3.9x the CPU (AEGIS's 3.9x slower
+    `_NON_WORD`): it fails. The same pattern compiled as a distinct object (`(?:)` appended: same matches, same work)
+    passes, which is the noise floor of the comparison."""
+    base = re.compile(r"[^\w#@]+")
+    slower = re.compile(r"(?:[^\w#@]|(?!))+")
+    probe = "a!! b#@ \u200b\u200b c"
+    assert [m.span() for m in slower.finditer(probe)] == [m.span() for m in base.finditer(probe)]
+    rows = _slowdowns_vs_reviewed(slower, base)
+    assert max(r[3] for r in rows) >= PIN_RATIO_MAX, rows
+    rows = _slowdowns_vs_reviewed(re.compile(r"[^\w#@]+(?:)"), base)
+    assert max(r[3] for r in rows) < PIN_RATIO_MAX, rows
 
 
 def test_lim_text_scanners_are_linear_time():

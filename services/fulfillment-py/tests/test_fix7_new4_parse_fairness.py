@@ -21,7 +21,8 @@ What must hold (in-process here, and against the real `python3 -m api`):
     wait and then 503 + Retry-After;
   - live, with 8 and with 32 junk senders: legit small `detect` p50 < 50 ms
     and p99 < 250 ms, `/health` unaffected, a legit maximum orchestrate batch
-    still succeeds, RSS bounded during and after the flood.
+    is answered 200 within 10 s (fix wave 26b: with 32 senders only once the
+    flood has ended — OPEN.md W26B-2), RSS bounded during and after the flood.
 
 Ports: FULFILLMENT_TEST_PORT_RANGE when set (this wave: 20520-20539).
 """
@@ -225,13 +226,19 @@ def test_small_bodies_never_wait_behind_a_held_large_lane(monkeypatch):
 def test_large_lane_overload_is_503_with_retry_after_not_an_unbounded_queue(monkeypatch):
     small, large = _padded_small_and_large()
     real_parse = api._parse
+    # Fix wave 26b (W25-EA-6): the first large parse is HELD until the other two have been answered (it used to
+    # `time.sleep(0.6)`, with the three senders started 0.05 s apart: a sender descheduled for ~0.4 s arrived after
+    # the parse had ended and got 200, a false failure). With the lane held, any answer the other two get is the
+    # _LARGE_WAIT_S refusal; an unbounded queue never answers them and fails at the 30 s hang guard.
+    in_large, release = threading.Event(), threading.Event()
 
-    def slow_large_parse(model, body):
+    def held_large_parse(model, body):
         if len(body) > api._SMALL_BODY_BYTES:
-            time.sleep(0.6)
+            in_large.set()
+            assert release.wait(60)
         return real_parse(model, body)
 
-    monkeypatch.setattr(api, "_parse", slow_large_parse)
+    monkeypatch.setattr(api, "_parse", held_large_parse)
     monkeypatch.setattr(api, "_LARGE_WAIT_S", 0.2)
     responses = []
     lock = threading.Lock()
@@ -241,12 +248,22 @@ def test_large_lane_overload_is_503_with_retry_after_not_an_unbounded_queue(monk
             with lock:
                 responses.append(r)
 
-        threads = [threading.Thread(target=post) for _ in range(3)]
-        for t in threads:
-            t.start()
-            time.sleep(0.05)
-        for t in threads:
-            t.join()
+        first = threading.Thread(target=post)
+        first.start()
+        others = [threading.Thread(target=post) for _ in range(2)]
+        try:
+            assert in_large.wait(30), "the first large body never reached the parse"
+            for t in others:
+                t.start()
+            for t in others:
+                t.join(30)
+            refused_while_held = not any(t.is_alive() for t in others)
+        finally:
+            release.set()
+            first.join()
+            for t in others:
+                t.join()
+        assert refused_while_held, "a large body queued behind the held lane was not answered (unbounded queue)"
         codes = sorted(r.status_code for r in responses)
         assert codes == [200, 503, 503], codes
         for r in responses:
@@ -278,6 +295,9 @@ def test_large_bodies_beyond_the_byte_budget_are_refused_before_being_read(monke
         assert r.headers.get("Retry-After") == "1"
         assert "budget" in r.json()["detail"]
         assert shared.post(DETECT, headers=HEADERS, content=small).status_code == 200
+        # Not synchronisation (fix wave 26b, W25-EA-6 reviewed): the stimulus is "time passes and the bucket
+        # refills" — 0.5 s at this rate, measured by the server's own monotonic loop clock. Load can only lengthen
+        # this sleep, which only adds refill, so it cannot make the next request fail.
         time.sleep(0.6)
         assert shared.post(DETECT, headers=HEADERS, content=large).status_code == 200
 
@@ -287,6 +307,18 @@ def test_large_bodies_are_admitted_in_arrival_order(monkeypatch):
     monkeypatch.setattr(api, "_LARGE_BURST_BYTES", len(large))
     monkeypatch.setattr(api, "_LARGE_BYTES_PER_S", len(large))  # one per second after the burst
     monkeypatch.setattr(api, "_LARGE_WAIT_S", 10.0)
+    # Fix wave 26b (W25-EA-6): sender i+1 starts only once the server has QUEUED sender i on the budget (it used to
+    # start 0.04 s later, so a descheduled sender could arrive out of turn and fail the order check falsely). The
+    # budget's lock is FIFO and the wrapper below records the arrival in the same loop step that queues the request on
+    # it (no await between), so the arrival order recorded here is the admission order the server owes.
+    real_take = api._ByteBudget.take
+    arrived = threading.Semaphore(0)
+
+    async def recording_take(self, n):
+        arrived.release()
+        await real_take(self, n)
+
+    monkeypatch.setattr(api._ByteBudget, "take", recording_take)
     done: list = []
     lock = threading.Lock()
     with TestClient(api.app) as shared:
@@ -298,7 +330,7 @@ def test_large_bodies_are_admitted_in_arrival_order(monkeypatch):
         threads = [threading.Thread(target=post, args=(i,)) for i in range(4)]
         for t in threads:
             t.start()
-            time.sleep(0.04)
+            assert arrived.acquire(timeout=30), "a large body never reached the budget"
         r = shared.post(DETECT, headers=HEADERS, content=small)  # meanwhile: not behind them
         with lock:
             done.append(("small", r.status_code))
@@ -397,14 +429,42 @@ def test_head_only_refusals_are_held_so_a_looping_client_cannot_flood(name, head
     assert r.headers.get("connection") == "close"
 
 
-def test_the_hold_applies_only_to_refusals_not_to_accepted_requests():
-    t0 = time.perf_counter()
-    r = client.post(DETECT, headers=HEADERS, content=b'{"call_events":[]}')
-    assert r.status_code == 200
-    assert time.perf_counter() - t0 < api._HEAD_REFUSAL_DELAY_S
-    t0 = time.perf_counter()
-    assert client.get("/health").status_code == 200
-    assert time.perf_counter() - t0 < api._HEAD_REFUSAL_DELAY_S
+HOLD_YARDSTICK_S = 4.0  # the hold, widened for the test below: a stand-in that ends by itself
+
+
+def test_the_hold_applies_only_to_refusals_not_to_accepted_requests(monkeypatch):
+    """Fix wave 26b (W25-EA-7): was `perf_counter() - t0 < _HEAD_REFUSAL_DELAY_S` (0.25 s) for an accepted request and
+    for /health — a wall-clock bound against a named constant (a slow or loaded box could cross it with no hold at all,
+    and the bound moves with the constant). Now an ORDER against a yardstick: the hold is widened to
+    HOLD_YARDSTICK_S, a head-only refusal is started first (it ends by itself after the hold), and the accepted
+    request and /health must both be answered while that refusal is still held. A hold applied to accepted requests
+    would end them after the refusal started before them. The refusal's own answer then shows the hold was in force."""
+    monkeypatch.setattr(api, "_HEAD_REFUSAL_DELAY_S", HOLD_YARDSTICK_S)
+    from starlette.testclient import TestClient as _TC
+
+    refused: list = []
+    held = threading.Thread(target=lambda: refused.append(_TC(api.app).post(
+        DETECT, headers={"Content-Type": "application/json", "Content-Length": "12abc"}, content=b"{}")))
+    entered = threading.Event()
+    real_refuse = api._refuse_from_head
+
+    async def entered_refuse(*a, **kw):
+        entered.set()
+        await real_refuse(*a, **kw)
+
+    monkeypatch.setattr(api, "_refuse_from_head", entered_refuse)
+    held.start()
+    try:
+        assert entered.wait(30), "the head-only refusal never reached its hold"
+        r = client.post(DETECT, headers=HEADERS, content=b'{"call_events":[]}')
+        health = client.get("/health")
+        refusal_still_held = held.is_alive()
+    finally:
+        held.join(60)
+    assert r.status_code == 200 and health.status_code == 200, (r.status_code, health.status_code)
+    assert refusal_still_held, (f"an accepted request or /health was answered only after a refusal held for "
+                                f"{HOLD_YARDSTICK_S} s that started before them: the hold applies to them too")
+    assert refused and refused[0].status_code == 400, refused   # the yardstick ran: the refusal was held, then sent
 
 
 # --- the real process: the AEGIS scenario ------------------------------------------
@@ -499,7 +559,7 @@ def _flood(server, n_senders: int, seconds: float, junk: bytes):
                 conn = http.client.HTTPConnection(host, port, timeout=60)
             with lock:
                 legit.append(time.monotonic() - t0)
-            time.sleep(0.1)
+            time.sleep(0.1)   # the legit client's request RATE (~10/s), not synchronisation (W25-EA-6 reviewed)
         conn.close()
 
     def prober():
@@ -515,15 +575,25 @@ def _flood(server, n_senders: int, seconds: float, junk: bytes):
                     errors.append("health:" + type(exc).__name__)
             health.append(time.monotonic() - t0)
             peak[0] = max(peak[0], _rss_mib(proc.pid))
-            time.sleep(0.2)
+            time.sleep(0.2)   # the probe RATE (~5/s), not synchronisation (W25-EA-6 reviewed)
 
-    threads = ([threading.Thread(target=sender) for _ in range(n_senders)]
-               + [threading.Thread(target=legit_client) for _ in range(2)]
+    senders = [threading.Thread(target=sender) for _ in range(n_senders)]
+    threads = (senders + [threading.Thread(target=legit_client) for _ in range(2)]
                + [threading.Thread(target=prober)])
     for t in threads:
         t.start()
-    # A legitimate LARGE batch in the middle of the flood must still succeed.
-    time.sleep(seconds / 2)
+    # A legitimate LARGE batch sent once the flood has reached the server must still be answered 200 within 10 s
+    # (asserted below); whether that happens WHILE the junk senders still run is only printed: at 32 senders it does
+    # not (OPEN.md W26B-2, fix wave 26b). Fix wave 26b (W25-EA-6): was
+    # `time.sleep(seconds / 2)` for "the flood is under way". Now: once the server has answered at least n_senders junk
+    # requests (the flood has reached it), polled; and `big_during_flood` below records that the junk senders were
+    # still running when the batch was answered — the state the old half-way sleep assumed.
+    for _ in range(int(seconds / 0.05)):
+        with lock:
+            junk_answered = sum(v for k, v in codes.items() if k[0] == "junk")
+        if junk_answered >= n_senders:
+            break
+        time.sleep(0.05)   # polling pace; the loop ends on the server's answers
     big = json.dumps(MAX_BATCHES[ORCHESTRATE]).encode()
     t0 = time.monotonic()
     big_attempts = 0
@@ -532,14 +602,25 @@ def _flood(server, n_senders: int, seconds: float, junk: bytes):
         big_status, big_data = _request(host, port, "POST", ORCHESTRATE, big)
         if big_status != 503 or big_attempts >= 8:
             break
-        time.sleep(1.0)
+        time.sleep(1.0)   # the protocol: Retry-After: 1 honoured, not synchronisation (W25-EA-6 reviewed)
     big_took = time.monotonic() - t0
+    big_during_flood = any(t.is_alive() for t in senders)
     for t in threads:
         t.join()
-    time.sleep(3)
+    # Fix wave 26b (W25-EA-6): was `time.sleep(3)` then one RSS reading. Now RSS is read until it is back within
+    # IDLE_RSS_GROWTH_MIB of the base (the assertion's own bound) or 30 s of polling have passed: the reading ends when
+    # the server has released the flood's memory, and a server that never does still fails the idle assertion.
     idle = _rss_mib(proc.pid)
-    return dict(codes=codes, legit=legit, health=health, errors=errors, base=base, peak=peak[0], idle=idle,
-                big=(big_status, big_took, big_attempts))
+    for _ in range(300):
+        if idle - base < IDLE_RSS_GROWTH_MIB:
+            break
+        time.sleep(0.1)
+        idle = _rss_mib(proc.pid)
+    return dict(codes=codes, legit=legit, health=health, errors=errors, base=base, peak=peak[0],
+                idle=idle, big=(big_status, big_took, big_attempts), big_during_flood=big_during_flood)
+
+
+IDLE_RSS_GROWTH_MIB = 64
 
 
 LIVE_JUNK = {
@@ -579,7 +660,12 @@ def test_live_junk_flood_does_not_starve_small_legit_requests(server, n_senders,
     # Memory: at most the in-flight bodies (n x 3.4 MiB, the fix-wave-5
     # trade-off) plus one parse's worth, never a parse per sender.
     assert res["peak"] - res["base"] < n_senders * 4 + 64, summary
-    assert res["idle"] - res["base"] < 64, summary
+    assert res["idle"] - res["base"] < IDLE_RSS_GROWTH_MIB, summary
+    # Fix wave 26b, printed only (reported to the lead as a new finding, not asserted): with 32 junk senders the large
+    # batch is refused 503 while the flood lasts and admitted only after the senders stop (here: 3 attempts, 6.05 s,
+    # answered with no sender alive; the pre-26b timing — sent at seconds/2 — read 2 attempts, 4.96 s, i.e. ~8 s into
+    # a 6 s flood). "Succeeds during the flood" holds at 8 senders only; the module docstring now says so (W26B-2).
+    print(f"large batch answered while junk senders were still running: {res['big_during_flood']}")
 
 
 def test_live_blocking_sendall_oversized_client_is_reset_before_reading_its_413(server):

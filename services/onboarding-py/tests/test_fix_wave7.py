@@ -103,24 +103,38 @@ def test_new5_a_tiny_message_is_200_while_a_large_scan_holds_the_budget_and_its_
     # The finding's shape in-process: the large lane's budget is held (a 416
     # KB scan in progress) and its queue is full (max_waiting 0), so any
     # large body is busy. A 40-byte message must still be answered at once.
+    # Fix wave 26b (W25-EA-2): was `max(latency) < 0.25` against a 0.3 s large-lane wait — a wall-clock literal.
+    # Now an ORDER against a yardstick: the large-lane wait is widened to _LANE_WAIT_YARDSTICK_S and the large lane
+    # stays held until the five small messages have been answered (polled from a thread, hang guard 60 s). A message
+    # that waited for the large lane at all — queued (busy at once with max_waiting 0, a 503) or held for any part
+    # of the wait — could not be answered 200 before the release; only one that never touches the large lane is.
     svc = make_service(all_fakes=True)
-    svc.config = replace(svc.config, scan_max_waiting=0, scan_wait_seconds=0.3)
+    svc.config = replace(svc.config, scan_max_waiting=0, scan_wait_seconds=_LANE_WAIT_YARDSTICK_S)
     c = client_for(svc)
     assert c.post("/onboarding/clients", json=start_body()).status_code == 201
     gate = c.app.state.scan_admission  # the large lane
     assert gate.try_hold_for_test()  # the whole large budget: a large scan is in progress
+    answers: list = []
+
+    def five_small():
+        for _ in range(5):
+            answers.append(c.post("/onboarding/clients/client_a/messages", json=SMALL_MESSAGE))
+
+    t = threading.Thread(target=five_small, daemon=True)
     try:
         r = c.post("/onboarding/clients/client_a/intake/facts", content=BIG_BODY, headers={"Content-Type": "application/json"})
         assert r.status_code == 503, r.text  # large: busy, as before
-        lat = []
-        for _ in range(5):
-            t = time.monotonic()
-            r = c.post("/onboarding/clients/client_a/messages", json=SMALL_MESSAGE)
-            lat.append(time.monotonic() - t)
-            assert r.status_code == 200, r.text
-        assert max(lat) < 0.25, lat  # never waited the 0.3 s for the large lane, never 503
+        t.start()
+        t.join(60)
+        answered_while_held = not t.is_alive()
     finally:
         gate.release_for_test()
+        t.join(_LANE_WAIT_YARDSTICK_S + 60)
+    assert answered_while_held, "a small message waited for the held large lane"
+    assert [a.status_code for a in answers] == [200] * 5, [(a.status_code, a.text[:200]) for a in answers]
+
+
+_LANE_WAIT_YARDSTICK_S = 120.0   # the large-lane wait, widened: a stand-in that ends by itself, far past the guard
 
 
 def test_new5_a_flood_of_queued_large_bodies_cannot_503_small_bodies():

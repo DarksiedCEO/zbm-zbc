@@ -247,18 +247,46 @@ def test_idle_and_partial_head_sockets_are_closed_within_the_head_deadline(serve
     assert min(closed_at.values()) >= http_limits.REQUEST_HEAD_TIMEOUT_S - 1, "closed before the documented deadline"
 
 
+def _closed_before_witness(s: socket.socket, witness: socket.socket, attempts: int, poke=None) -> tuple[bool, bool]:
+    """Fix wave 26b (W25-EA-7): polls every 0.25 s (at most `attempts` times, a hang guard) until `s` or `witness` is
+    closed by the server; returns (s closed, witness still open AFTER s was seen closed). `s` is checked first and the
+    witness after it, so (True, True) proves `s` was closed while the witness was still open. `poke(s)` runs before
+    each check (a trickled byte); an OSError from it counts as `s` closed."""
+    for _ in range(attempts):
+        closed = False
+        if poke is not None:
+            try:
+                poke(s)
+            except (BrokenPipeError, ConnectionResetError):
+                closed = True
+        if closed or _closed_by_peer(s):
+            return True, not _closed_by_peer(witness)
+        if _closed_by_peer(witness):
+            return False, False
+        time.sleep(0.25)
+    return False, not _closed_by_peer(witness)
+
+
 def test_idle_keep_alive_connection_is_closed(server):
+    """Fix wave 26b (W25-EA-7): was `elapsed < KEEP_ALIVE_TIMEOUT_S + SLACK_S` — a wall-clock bound against a named
+    constant (it moves with the constant, and load can cross it). Now an ORDER: a witness socket that connects just
+    before and sends nothing can only be closed by the head deadline (REQUEST_HEAD_TIMEOUT_S, 10 s from its connect);
+    the idle keep-alive (KEEP_ALIVE_TIMEOUT_S, 5 s after its response) must be closed while the witness is still
+    open. A keep-alive not enforced is closed by nothing earlier than the head deadline, i.e. after the witness. Both
+    timers run on the server's own loop clock, so load delays them alike."""
     _, port = server
+    assert http_limits.KEEP_ALIVE_TIMEOUT_S < http_limits.REQUEST_HEAD_TIMEOUT_S   # the order the test relies on
+    witness = socket.create_connection(("127.0.0.1", port), timeout=5)
     s = socket.create_connection(("127.0.0.1", port), timeout=5)
     try:
         s.sendall(b"GET /health HTTP/1.1\r\nHost: t\r\n\r\n")
         assert _read_status(s) == 200
-        t0 = time.monotonic()
-        while not _closed_by_peer(s):
-            assert time.monotonic() - t0 < http_limits.KEEP_ALIVE_TIMEOUT_S + SLACK_S, "idle keep-alive held open"
-            time.sleep(0.1)
+        closed, witness_open = _closed_before_witness(s, witness, int((http_limits.REQUEST_HEAD_TIMEOUT_S + 20) / 0.25))
+        assert closed, "idle keep-alive held open (not even the head deadline closed it)"
+        assert witness_open, "the idle keep-alive was closed only after the head deadline closed the witness"
     finally:
         s.close()
+        witness.close()
 
 
 def _slow_body_socket(port: int, authed: bool) -> socket.socket:
@@ -311,22 +339,23 @@ def test_slow_body_the_app_never_reads_is_still_closed(server):
     """No token: the route answers 401 before reading the body. Before the
     fix, the rest of the body could then be trickled forever (each byte
     reset uvicorn's keep-alive timer)."""
+    # Fix wave 26b (W25-EA-7): was `elapsed < BODY_TIMEOUT_UNDER_TEST + BODY_DEADLINE_GRACE_S + SLACK_S` (a wall-clock
+    # bound against named constants). Now an ORDER against a witness that connects first and sends nothing — only
+    # the head deadline closes it, REQUEST_HEAD_TIMEOUT_S (10 s) from its connect; the unread body's deadline is
+    # BODY_TIMEOUT_UNDER_TEST + BODY_DEADLINE_GRACE_S (8 s) from its head. Before the fix nothing closed a trickled
+    # unread body (each byte reset uvicorn's keep-alive timer), so it would outlive the witness.
     _, port = server
+    assert BODY_TIMEOUT_UNDER_TEST + http_limits.BODY_DEADLINE_GRACE_S < http_limits.REQUEST_HEAD_TIMEOUT_S
+    witness = socket.create_connection(("127.0.0.1", port), timeout=5)
     s = _slow_body_socket(port, authed=False)
-    bound = BODY_TIMEOUT_UNDER_TEST + http_limits.BODY_DEADLINE_GRACE_S + SLACK_S
-    t0 = time.monotonic()
     try:
-        while True:
-            try:
-                s.sendall(b" ")
-            except (BrokenPipeError, ConnectionResetError):
-                break
-            if _closed_by_peer(s):
-                break
-            assert time.monotonic() - t0 < bound, f"unread slow body held open > {bound:.1f}s"
-            time.sleep(0.25)
+        closed, witness_open = _closed_before_witness(s, witness, int((http_limits.REQUEST_HEAD_TIMEOUT_S + 20) / 0.25),
+                                                      poke=lambda sock: sock.sendall(b" "))
+        assert closed, "unread slow body held open (past the head deadline and 20 s more)"
+        assert witness_open, "the unread slow body was closed only after the head deadline closed the witness"
     finally:
         s.close()
+        witness.close()
 
 
 def test_connection_count_is_bounded_and_health_recovers(server):
