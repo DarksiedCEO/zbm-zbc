@@ -920,6 +920,46 @@ def lint_counts(allow: dict) -> list[str]:
     return problems
 
 
+def _source_strings(root: Path) -> list[str]:
+    """Every string literal in the Python files under `root`, an f-string as its constant text (placeholders
+    dropped, so a reason regex anchored at the start still matches it)."""
+    import ast
+    out: list[str] = []
+    for f in sorted(root.rglob("*.py")):
+        if any(part in (".venv", "node_modules", "__pycache__") for part in f.parts):
+            continue
+        try:
+            tree = ast.parse(f.read_text(), str(f))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.JoinedStr):
+                out.append("".join(v.value for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str)))
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                out.append(node.value)
+    return out
+
+
+def lint_expected_skips(allow: dict) -> list[str]:
+    """Fix wave 26b (W25-EB-R3): an expected skip that no source of its suite can produce is stale (delivery-py kept
+    one for a test removed in d0876fd). Each `reason_regex` must match a string literal, or an f-string's constant
+    text, in that suite's directory (services/<name> or apps/<name>); with its trailing `$` dropped when matched
+    against an f-string's text, whose placeholders may have stood at the end."""
+    problems = []
+    for suite, items in sorted(allow.get("expected_skips", {}).items()):
+        name = suite.partition(":")[2]
+        root = next((REPO / d / name for d in ("services", "apps") if (REPO / d / name).is_dir()), None)
+        strings = _source_strings(root) if root else []
+        for e in items:
+            rx = e.get("reason_regex", "")
+            loose = rx[:-1] if rx.endswith("$") and not rx.endswith("\\$") else rx
+            if not any(re.search(rx, s) or re.search(loose, s) for s in strings):
+                where = root.relative_to(REPO) if root else f"<no directory for {suite}>"
+                problems.append(violation("L9-allowlist", "devtools/hygiene_allowlist.json",
+                                          f"expected skip of {suite} matches no skip reason in {where}: {rx!r}"))
+    return problems
+
+
 SHARED_TESTS = ("test_live_graceful_close_module.py", "test_fix21_graceful_close.py")
 SERVICE_CONSTANTS = re.compile(r'^(MODULE|PROTOCOL) = "[\w.]+"$', re.M)
 
@@ -1021,6 +1061,7 @@ def cmd_lint(a: argparse.Namespace) -> int:
         for e in entries:
             if e.get("rule") in ("L1-wallclock", "L2-ports") and id(e) not in used:
                 problems.append(violation("L9-allowlist", e.get("path", "?"), f"allowlist entry matches nothing: {e}"))
+        problems += lint_expected_skips(allow)
     by_service: dict[str, int] = {}
     for line in problems:
         where = line.split(" ", 3)[2]

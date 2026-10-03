@@ -538,6 +538,31 @@ class Static(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("L3-counts README.md:1", out)
 
+    def test_strict_allowlist_flags_an_expected_skip_no_source_can_produce(self):
+        # W25-EB-R3: `lint --strict-allowlist` checked only L1/L2 entries, so a stale expected-skip entry (delivery-py's
+        # "inner half of test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests", no such skip since d0876fd)
+        # stayed. An expected skip must now be producible: its reason regex matches a string literal (or an
+        # f-string's constant text) somewhere in that suite's sources.
+        allow_path = self.r.root / "devtools" / "hygiene_allowlist.json"
+        d = json.loads(allow_path.read_text())
+        d["expected_skips"] = {"python:probe-py": [{"reason_regex": "^planted reason: (?:a|b)$", "why": "t"},
+                                                   {"reason_regex": "^built at run time ", "why": "t"}]}
+        allow_path.write_text(json.dumps(d))
+        (self.t / "test_s.py").write_text("import pytest\n\ndef test_a():\n    pytest.skip('planted reason: a')\n\n"
+                                          "def test_b(x=1):\n    pytest.skip(f'built at run time {x}')\n")
+        self.r.git("add", "-A")
+        rc, out = self.r.run("lint", "--strict-allowlist")
+        self.assertEqual(rc, 0, out)
+        (self.t / "test_s.py").write_text("import pytest\n\ndef test_a():\n    pytest.skip('planted reason: a')\n")
+        self.r.git("add", "-A")
+        rc, out = self.r.run("lint", "--strict-allowlist")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("L9-allowlist devtools/hygiene_allowlist.json: expected skip of python:probe-py matches no "
+                      "skip reason in services/probe-py: '^built at run time '", out)
+        self.assertNotIn("planted reason", out)
+        rc, out = self.r.run("lint")                   # only --strict-allowlist reads them
+        self.assertEqual(rc, 0, out)
+
     def test_l4_graceful_close_differs_from_its_pin(self):
         for svc, body in (("a-py", "X = 1\n"), ("b-py", "X = 2\n")):
             (self.r.root / "services" / svc / "src").mkdir(parents=True)
