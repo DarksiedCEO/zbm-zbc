@@ -200,7 +200,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # fix wave 26b (CI #4): the suite's test step took 53-56 min on ubuntu-24.04 and was cancelled at 59% by the
+    # 60-min limit on macos-26 (no failure up to there); the limit is a hang guard, not a speed bound
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:

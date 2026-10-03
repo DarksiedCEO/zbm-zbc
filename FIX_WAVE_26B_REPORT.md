@@ -245,6 +245,30 @@ Local only: `fix26b` is not pushed, so there is no CI run for it.
 8. **The AEGIS chain:** whether provenance / reliability / data / mutation-fuzz gates are required for this repo
    (the adjudicator lists them as missing), or a ruling that removes them.
 
+## CI #4 (after the founder's push, 2026-10-03 morning)
+
+`fix26b` pushed at d40de72 (founder-approved; integration and main unchanged). The push alone does not trigger the
+workflow (it runs on main / integration-** / pull requests / by hand), so the lead started it by hand:
+run 37125312276 (workflow_dispatch, every job runs), 48 green, 3 red + `required`, 1 cancelled.
+
+| CI #3 failure | CI #4 |
+|---|---|
+| CI3-1 ledger-rust macos-26 | **green — closed** |
+| CI3-2 delivery-py ubuntu 3.12/3.13 | its causes fixed (0 hygiene violations; the Docker-"available" test passes; 723 passed) but red from one other test → CI4-1 |
+| CI3-3 delivery-py macos-26 | no failure through 59%, then cancelled by the 60-min job limit → CI4-3; unproven |
+| CI3-4 delivery-docker-live | **green — closed** (image built, 3 live tests ran) |
+| CI3-5 creative-py macos-26 | **green — closed** |
+| CI3-6 fulfillment-py macos-26 | **green — closed** |
+| (new) detection-py macos-26 | BrokenPipe in a test's send → CI4-2 |
+
+Also green in CI #4: hygiene-static on Linux (the two R4 self-tests that cannot run on a Mac included), every
+other Python leg, orchestrator-go and dashboard on both OSes, live-runs, audits, secret scan.
+
+New Highs, fixed in the next commit (local, not pushed): CI4-1 (this wave's N25-D-4 test counted events while the
+admitted run was still recording — now waits for idle; 6/6 here, mutant still caught), CI4-2 (detection's long
+query-string test handles the server's early close like its sibling test), CI4-3 (delivery-py job limit 60 → 120
+min). They close only on the next CI run.
+
 ## AEGIS round 26b
 
 Plan (AEGIS rules): the lead implemented this wave, so the lead does not certify it. Independent read-only reviewer

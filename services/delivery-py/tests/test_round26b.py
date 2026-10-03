@@ -92,6 +92,10 @@ def test_a_recorded_fix_run_replays_its_answer_after_dlv_max_findings_is_lowered
         doc = two_findings(h.base_sha)
         first = h.post("/dlv/v1/fix-runs", doc)
         assert first.status_code == 202, first.text
+        # the admitted run keeps recording in the background (its git crossings, its local log); count only once it
+        # is idle, so what follows measures the replay alone (CI #4, ubuntu: 22 == 20 — the run's own events, recorded
+        # between the count and the replay, not the replay's)
+        h.svc.wait_idle(240)
         h.settings.max_findings = 1
         n_events = len(h.events())
         again = h.post("/dlv/v1/fix-runs", doc)

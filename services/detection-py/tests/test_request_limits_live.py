@@ -438,7 +438,18 @@ def test_request_head_larger_than_the_header_cap_is_refused(server):
 
 
 def test_long_query_string_is_refused(server):
-    status, _, _ = _request(server, "GET", "/health?q=" + "a" * (1 * MIB), timeout=10)
+    # fix wave 26b (CI #4 macos-26: BrokenPipeError in sendall): the server refuses the over-cap request line and may
+    # close while the client is still writing it; that close IS the refusal. Same handling as the header-cap test
+    # above: a broken pipe on send is ignored, the answer read if any, a reset counts as refused.
+    with socket.create_connection(("127.0.0.1", server), timeout=10) as s:
+        try:
+            s.sendall(b"GET /health?q=" + b"a" * (1 * MIB) + b" HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        try:
+            status, _ = _read_response(s)
+        except ConnectionResetError:
+            status = 0  # closed without a response: refused, not served
     assert status != 200
 
 
