@@ -245,6 +245,36 @@ Local only: `fix26b` is not pushed, so there is no CI run for it.
 8. **The AEGIS chain:** whether provenance / reliability / data / mutation-fuzz gates are required for this repo
    (the adjudicator lists them as missing), or a ruling that removes them.
 
+## Current state (2026-10-03 08:11 PT) — read this first
+
+**Commits.** Pushed: `fix26b` on origin at **b24ffde** (CI #4 fixes). Local only, NOT pushed: **a4e96a2** (OPEN.md:
+CI4-2 closes only on an AEGIS ruling; W26B-4 delivery runtime) and **700fce6** (CI5-1 fix) — plus this report commit.
+`integration-2026-09-24` (a6aee4e) and `main` (9531fc2) untouched. AEGIS 26b verdict on 4c3a21a: INSUFFICIENT_EVIDENCE
+(stands until CI is green and AEGIS re-adjudicates).
+
+**CI runs** (all workflow_dispatch on `fix26b`; a push to `fix26b` alone starts nothing):
+- CI #4: run 37125312276 on d40de72 (code = 4c3a21a) — 48 green, 3 red, 1 cancelled.
+- CI #5: run 37129375575 on b24ffde — in progress: 48 green, 1 red (orchestrator-go ubuntu → CI5-1), still running:
+  delivery-py (3.12, ubuntu-24.04), delivery-py (3.13, ubuntu-24.04), delivery-py (3.13, macos-26).
+
+**High items from CI** (cause / fix / proof):
+
+| id | status | cause | fix | proving run |
+|---|---|---|---|---|
+| CI3-1 ledger-rust macos-26 | **closed** | two tests shared one port file (macOS clock = µs) so one drove the other's server; not a ledger bug, not the open-file limit | fc2613e | CI #4 37125312276 green, nothing skipped |
+| CI3-2 delivery-py ubuntu | open | runner has Docker ("available"); 7 tests made /tmp/worktrees | 6b4d5ac | CI #4: both causes gone but red from CI4-1; CI #5 delivery ubuntu legs running |
+| CI3-3 delivery-py macos-26 | open | BSD mv/find in the test double; `__CF_USER_TEXT_ENCODING` refused | 77fd749 | CI #4: no failure through 59%, cancelled by 60-min limit; CI #5 macOS leg running |
+| CI3-4 delivery-docker-live | **closed** | `apt-get purge curl wget`: wget never installed | 48d0bd7 | CI #4 green (image built, 3 live tests ran) |
+| CI3-5 creative-py macos-26 | **closed** | regex growth read through the regex engine's stack allocation on the CI VM | 67221fe | CI #4 green |
+| CI3-6 fulfillment-py macos-26 | **closed** | libmalloc large cache kept freed buffers charged to the process | 982d291 | CI #4 green |
+| CI4-1 delivery-py ubuntu | open | this wave's N25-D-4 test counted events while the admitted run still recorded (22 == 20) | b24ffde | CI #5 delivery ubuntu legs (running) |
+| CI4-2 detection-py macos-26 | open — **waits on AEGIS** | BrokenPipe: server closed early on a 1 MiB request line; the test now accepts that close as the refusal (race not reproduced here) | b24ffde | CI #5 detection macOS green, but green CI does NOT close it: AEGIS must rule whether accepting an early close weakens the test |
+| CI4-3 delivery-py macos-26 | open | job cancelled at its 60-min limit (no failure) | b24ffde (limit 120) | CI #5 delivery macOS leg (running); runtime itself tracked as W26B-4 (Medium) |
+| CI5-1 orchestrator-go ubuntu | open, fix local | the slow-client test's clock started after `Dial`, but the server's ReadTimeout runs from accept, so the cut read 0.16 ms under 15 s | 700fce6 (local, not pushed) | needs the next run (CI #6) |
+
+Next: when CI #5 finishes, report the delivery legs; then, only with the founder's approval, push a4e96a2 + 700fce6
+(+ report) and start CI #6; then AEGIS re-adjudication (and its ruling on CI4-2).
+
 ## CI #4 (after the founder's push, 2026-10-03 morning)
 
 `fix26b` pushed at d40de72 (founder-approved; integration and main unchanged). The push alone does not trigger the
