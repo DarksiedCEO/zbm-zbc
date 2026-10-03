@@ -166,7 +166,52 @@ AEGIS r25 graded High for F-1) and closed by the commit that fixes it:
 
 ## What passed / failed / could not be verified / waiting on the founder
 
-(final version at the end; the founder questions below are already firm)
+Candidate: **4c3a21abdb1e777cc6ed1f0ca8a822c4b26d2196** (code). Later commits change only this report and OPEN.md.
+Local only: `fix26b` is not pushed, so there is no CI run for it.
+
+### Passed (on this Mac — macOS 26.6, M4 Pro, Python 3.13.9 — at 4c3a21a, one sequential sweep in a clean worktree)
+
+| check | result |
+|---|---|
+| `hygiene_check.py lint --strict-allowlist` | 0 violations |
+| `hygiene_check.py counts --check` | 13 suites, one row each |
+| ledger-rust (`cargo test --locked`, hygiene wrapper) + clippy | 116 run (117 on Linux: one Linux-only test), 0 failed, 0 violations |
+| detection / fulfillment / onboarding / creative | 504 / 1104 + 1 allowlisted skip / 763 / 821 passed, 0 violations each |
+| compliance / verification / clipper-network / finance / legal | 636 / 299 / 368 / 358 / 308 passed, 0 violations each |
+| delivery-py | 723 passed, 4 allowlisted skips (3 Docker-live, 1 Linux /proc), 0 violations |
+| orchestrator-go (`go vet`, `go test -race`) | 61 passed, 0 violations |
+| dashboard-ts (npm ci, lint, build, test) | 27/27 passed; the wrapper could not count Node 24's output (W26B-3) |
+| live runs (launcher engineer, five services) | 10/10, 0 violations |
+| AEGIS 26b gates | test truth GREEN, red team GREEN, security GREEN (no Critical/High) |
+
+### Failed
+
+- `devtools/test_hygiene_check.py` on macOS: 2 of 61 fail — `test_r4_a_process_outlives_the_suite` (setsid / no
+  subreaper on macOS) and `test_r4_ps_table_with_a_subreaper_does_not_report_its_own_ps` (needs a child
+  subreaper). Both fail identically on a6aee4e here; both are Linux-only properties. No green run of this
+  self-test exists for 4c3a21a until CI's Linux `hygiene-static` runs.
+- Nothing else failed at the candidate.
+
+### Could not verify
+
+- **Any CI leg.** Linux (3.12 and 3.13), macos-26 and docker-live have not run on 4c3a21a; the six CI #3
+  failures (CI3-1..CI3-6) are fixed on this Mac only. CI3-4 (image build) and W26-3b/R26-4's pins could not
+  be built here (no Docker daemon). CI3-5 did not reproduce here at all.
+- **Python 3.12** (not installed here) and **Linux-only paths** (VmHWM, `/proc`, the subreaper, R4 on Linux,
+  the 128/128 burst F-3, AEGIS's 91 MiB F-6 scenario).
+- **Docker-live properties** (3 delivery tests skip here by design).
+- **Independence:** the implementers (lead + three engineer agents) and the gate reviewers are all AI agents
+  started from this one session — separate contexts, same model; no human or outside review.
+- AEGIS's mutation-level discrimination was sampled by the red team (`aegis26b/redteam.md`), not exhaustive.
+
+### Open after this wave (OPEN.md, tracked under R-GATE)
+
+- New Medium: W26B-2 (fix7 big batch refused during a 32-sender flood), R26B-RT-1 (fix5 keep-alive test
+  weaker than a6aee4e's), R26B-RT-2 (fix7 overload test no longer bounds the wait), R26B-RT-3 (ADR 0002
+  overclaims that the parse in progress is counted), R26B-SEC-1 (sandbox image's pip install without hashes).
+- New Low: R26B-RT-4..7, R26B-SEC-2..5, W26B-3.
+- Carried: F-2 / N25-I-2 (the 9e55931 lists not re-checked), W25-EA-2 (rest), W25-EA-3, W25-EA-9, TG-1,
+  DLV-CLAMP, W25-EA-1, C4-5, H9-R6m — rulings (below) or wave 27.
 
 ### Waiting on the founder (rulings the wave cannot make)
 
