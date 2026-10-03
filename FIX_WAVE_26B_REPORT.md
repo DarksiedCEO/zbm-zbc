@@ -295,7 +295,10 @@ unexecuted reliability surfaces run at that SHA, or a founder ruling on their sc
 re-bound at that SHA, or a founder ruling accepting the 4c3a21a report plus the no-source-change diff; (4) a founder
 statement accepting the independence limits, or an outside review.
 
-Records (outside the repo, session scratchpad `aegis26b-r2/`): `provenance.md`, `test-truth.md`, `redteam.md`,
+After the verdict (founder, 2026-10-03): the delivery-py macos-26 leg's limit raised 120 -> 180 min (RT2-3; the line
+stays open), and the round's records committed under `docs/aegis/round-26b/`.
+
+Records (`docs/aegis/round-26b/`, copied from the session scratchpad `aegis26b-r2/`): `provenance.md`, `test-truth.md`, `redteam.md`,
 `mutation-fuzz.md`, `reliability.md`, `data.md`, `security.md`, `VERDICT.md` — each the reviewer's own final report,
 extracted by the lead — and the raw CI run record.
 

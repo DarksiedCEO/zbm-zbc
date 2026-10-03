@@ -202,7 +202,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     # fix wave 26b (CI #4): the suite's test step took 53-56 min on ubuntu-24.04 and was cancelled at 59% by the
     # 60-min limit on macos-26 (no failure up to there); the limit is a hang guard, not a speed bound
-    timeout-minutes: 120
+    # RT2-3 (AEGIS r26b): the macos-26 leg's pace varied 1.8x across CI #4-#6 and CI #4's pace projects to 115-132
+    # min for the full suite, so macos-26 gets 180; ubuntu (50-56 min, stable) keeps 120
+    timeout-minutes: ${{ matrix.os == 'macos-26' && 180 || 120 }}
     strategy:
       fail-fast: false
       matrix:
