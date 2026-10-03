@@ -186,6 +186,15 @@ def free_port() -> int:
     raise RuntimeError(f"no free port in CREATIVE_TEST_PORTS={spec}")
 
 
+# Fix wave 26b (W26B-1; the class of CI3-6): on macOS, libmalloc's large-allocation cache keeps freed blocks charged
+# to the process, so a server's RSS reads the allocator's cache, not what the server holds. Measured on the build box
+# (M4 Pro, macOS 26.6, Python 3.13.9): `test_n2_repeated_junk_floods…` failed 5 of 5 runs, a6aee4e and fix26b alike
+# (RSS +107..116 MiB in one round, then flat at 331-342 MiB against the 250 MiB ceiling); with MallocLargeCache=0,
+# 3 of 3 passed flat at 208-212 MiB. libmalloc reads it at process start, so every live server this suite starts
+# runs with the cache off on macOS; elsewhere nothing changes (production runs on Linux).
+ALLOCATOR_ENV = {"MallocLargeCache": "0"} if sys.platform == "darwin" else {}
+
+
 def start_serve(extra_env: dict | None = None, attempts: int = 5, timeout: float = 30.0):
     """Fix wave 25 (scout A C5/C6; R-HYGIENE L2): `python3 serve.py` on a port from `free_port()` (OS-assigned, or
     CREATIVE_TEST_PORTS), accepted only once THIS child has logged its own bind on it ("Uvicorn running on ..."):
@@ -203,7 +212,7 @@ def start_serve(extra_env: dict | None = None, attempts: int = 5, timeout: float
     for _ in range(attempts):
         port = free_port()
         env = {**os.environ, "CREATIVE_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "CREATIVE_PORT": str(port),
-               **(extra_env or {})}
+               **ALLOCATOR_ENV, **(extra_env or {})}
         env.pop("LEDGER_SERVICE_URL", None)
         env.pop("LEDGER_SERVICE_TOKEN", None)
         out = tempfile.TemporaryFile()
