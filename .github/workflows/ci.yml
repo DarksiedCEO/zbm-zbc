@@ -446,6 +446,13 @@ jobs:
       # sha256 of node-v22.22.2-linux-x64.tar.xz, from the Node.js SHASUMS256.txt for v22.22.2 (ADR 0011)
       NODE_VERSION: "22.22.2"
       NODE_SHA256: "88fd1ce767091fd8d4a99fdb2356e98c819f93f3b1f8663853a2dee9b438068a"
+      # fix wave 26b (W26-3b): the Go tarball and the rustup installer, pinned like Node (ADR 0011 "Pinned hashes");
+      # the sandbox's Rust toolchain is a concrete version
+      GO_VERSION: "1.23.1"
+      GO_SHA256: "49bbb517cfa9eee677e1e7897f7cf9cfdbcf49e05f61984a2789136de359f9bd"
+      RUSTUP_VERSION: "1.29.1"
+      RUSTUP_INIT_SHA256: "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+      RUST_TOOLCHAIN: "1.99.0"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Docker daemon present
@@ -456,15 +463,17 @@ jobs:
           PINNED: ${{ vars.DLV_SANDBOX_BASE_DIGEST }}
         run: |
           set -euo pipefail
-          if [ -n "$PINNED" ]; then
-            echo "$PINNED" | grep -Eq '^[0-9a-f]{64}$' || { echo "DLV_SANDBOX_BASE_DIGEST is not 64 hex"; exit 1; }
-            digest="$PINNED"; echo "using the recorded base digest"
-          else
-            digest=$(docker buildx imagetools inspect python:3.12-slim --format '{{.Manifest.Digest}}' | sed 's/^sha256://')
-            if [ "$digest" = "$RECORDED_BASE_DIGEST" ]; then same="equal to"; else same="DIFFERENT from"; fi
-            echo "::warning title=unpinned base image::DLV_SANDBOX_BASE_DIGEST is not set; built from the current python:3.12-slim, sha256:$digest, $same the one ADR 0011 records (sha256:$RECORDED_BASE_DIGEST). Set the DLV_SANDBOX_BASE_DIGEST repository variable to the recorded digest."
+          # fix wave 26b (R26-4): the build ALWAYS uses the digest ADR 0011 records; the repository variable, when set,
+          # must equal it (it was used unchecked, and without it the build took whatever python:3.12-slim was current)
+          digest="$RECORDED_BASE_DIGEST"
+          echo "$digest" | grep -Eq '^[0-9a-f]{64}$' || { echo "RECORDED_BASE_DIGEST is not 64 hex: $digest"; exit 1; }
+          if [ -n "$PINNED" ] && [ "$PINNED" != "$digest" ]; then
+            echo "DLV_SANDBOX_BASE_DIGEST ($PINNED) differs from the digest ADR 0011 records ($digest)"; exit 1
           fi
-          echo "$digest" | grep -Eq '^[0-9a-f]{64}$' || { echo "base digest is not 64 hex: $digest"; exit 1; }
+          current=$(docker buildx imagetools inspect python:3.12-slim --format '{{.Manifest.Digest}}' 2>/dev/null | sed 's/^sha256://' || true)
+          if [ -n "$current" ] && [ "$current" != "$digest" ]; then
+            echo "::notice title=base image moved::python:3.12-slim is now sha256:$current; the build uses the recorded sha256:$digest (re-record in ADR 0011 to move)"
+          fi
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Local registry (so the image gets a repository digest)
         run: |
@@ -478,7 +487,10 @@ jobs:
           set -euo pipefail
           docker build -f services/delivery-py/docker/sandbox.Dockerfile \
             --build-arg BASE_DIGEST="$BASE_DIGEST" --build-arg NODE_VERSION="$NODE_VERSION" \
-            --build-arg NODE_SHA256="$NODE_SHA256" -t "$SANDBOX_TAG" .
+            --build-arg NODE_SHA256="$NODE_SHA256" --build-arg GO_VERSION="$GO_VERSION" \
+            --build-arg GO_SHA256="$GO_SHA256" --build-arg RUSTUP_VERSION="$RUSTUP_VERSION" \
+            --build-arg RUSTUP_INIT_SHA256="$RUSTUP_INIT_SHA256" --build-arg RUST_TOOLCHAIN="$RUST_TOOLCHAIN" \
+            -t "$SANDBOX_TAG" .
       - name: Push and pin by digest
         id: image
         run: |
