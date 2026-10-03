@@ -245,12 +245,66 @@ Local only: `fix26b` is not pushed, so there is no CI run for it.
 8. **The AEGIS chain:** whether provenance / reliability / data / mutation-fuzz gates are required for this repo
    (the adjudicator lists them as missing), or a ruling that removes them.
 
+## AEGIS round 26b re-adjudication — candidate d80adc5 (2026-10-03, after CI #6)
+
+**Verdict: INSUFFICIENT_EVIDENCE** (certification withheld) on d80adc5528ddad4f27427098efe2beee32ee5d6a, tree 5c059f86.
+It supersedes the verdict on 4c3a21a below. **No Critical or High finding is open** after the ruling on CI4-2; under
+R-GATE nothing blocks a merge into `integration-2026-09-24` on findings. Merging without certification is the
+founder's decision.
+
+Why not CERTIFIED (the adjudicator's reasons): the reliability gate came back YELLOW (6 of 14 surfaces executed, the
+rest read from the code); the full-wave security review is bound to 4c3a21a and only the delta was re-tested at
+d80adc5 (no product source changed in between, verified by provenance); determinism has one CI sample; independence
+is the weak form (every implementer, reviewer and the adjudicator is an AI agent started from this operator's
+sessions, the lead wrote every brief and saved the reports); and the record commit that closes CI4-2 is a new SHA the
+verdict does not cover.
+
+**CI4-2 ruling — closed as a High.** Accepting an early close does not weaken the property the test states, and a
+correct server needs the tolerance: it answers 400, sends FIN, drains at most 64 KiB or 1 s and closes, so a client
+still writing a 1 MiB line gets a reset by design. Four reviewers saw the real server answer 400 in every probe.
+Every mutant that serves the over-cap line with 200 still fails the test. What the change did remove is the previous
+body's accidental failure on a silent close, a crash and a server that refuses everything afterwards — failures it
+also raised against the correct server about half the time on this Mac. The residual is tracked: CI4-2b (Medium:
+the `!= 200` oracle pins neither the 400/431 nor that the server survives), R26B-D-SEC-1 (Medium: the parser-level
+head cap is proven by no test), CI4-2c and RT2-5 (Low). Limit: every probe ran on macOS; a Linux client losing the 400
+to the reset was not tested.
+
+| gate | result at d80adc5 |
+|---|---|
+| provenance | PASS — SHA, tree and parent agree across local git, ls-remote and the API; CI run 37135247923 is attempt 1 on that SHA, nothing re-run or skipped |
+| CI Linux / macos-26 / docker-live | PASS — every job of run 37135247923 green; counts read from raw logs |
+| test truth | PASS for accounting; INSUFFICIENT_EVIDENCE for determinism (one run) |
+| red team | PASS for the scope — 5 claims attacked, no Critical/High; 3 Medium, 4 Low |
+| mutation-fuzz | PASS for the scope — 88 mutants; survivors are test-oracle gaps (2 Medium, 9 Low), no protection bypassed |
+| reliability | INSUFFICIENT_EVIDENCE — YELLOW: no Critical/High/Medium found, 4 Low, 8 surfaces not executed |
+| data | PASS for the scope — cancelled-admission replay refused concurrently and after restart, torn logs fail closed; 4 Low |
+| security | PASS for the delta; INSUFFICIENT_EVIDENCE for the full wave at this SHA |
+
+Prior conditions: 1 (CI on the pushed commit) met; 2 (diff from 4c3a21a is records only) not met as written — four
+more files changed (ci.yml and three test files, no product source), all reviewed; 3 (mutation-fuzz) met; 4
+(provenance, reliability, data) partly — reliability YELLOW; 5 (CI3-1..CI3-6 on CI) met, the rows cited the wrong runs
+(AO-1, corrected); 6 and 7 met.
+
+Recorded in OPEN.md with this section: CI4-2 closed on the ruling; R26B-TT-1 and R26B-TT-2 closed on CI #6; the eight
+CI3/CI4 closures now cite CI #6 on d80adc5 (they cited CI #4 / CI #5, runs on other SHAs that failed overall); 23 new
+open rows (4 Medium: CI4-2b, R26B-D-SEC-1, RT2-3, MF-8; 19 Low) and RT2-4, AO-1, AO-2 fixed in the same commit.
+
+For a CERTIFIED re-adjudication the adjudicator asks for: (1) this record commit pushed, a provenance check that it
+changes only OPEN.md and this report, and a green CI run on it (also the second determinism sample); (2) the eight
+unexecuted reliability surfaces run at that SHA, or a founder ruling on their scope; (3) the security boundaries
+re-bound at that SHA, or a founder ruling accepting the 4c3a21a report plus the no-source-change diff; (4) a founder
+statement accepting the independence limits, or an outside review.
+
+Records (outside the repo, session scratchpad `aegis26b-r2/`): `provenance.md`, `test-truth.md`, `redteam.md`,
+`mutation-fuzz.md`, `reliability.md`, `data.md`, `security.md`, `VERDICT.md` — each the reviewer's own final report,
+extracted by the lead — and the raw CI run record.
+
 ## CI #6 result — first all-green run
 
 Run 37135247923 on **d80adc5** (pushed): **53/53 jobs green, `required` green**. CI5-1 closed on it (orchestrator-go
 ubuntu and macos-26 green). Every High from CI #3/#4/#5 is now closed on CI evidence except **CI4-2**, which waits for
 the AEGIS ruling (a test that now accepts an early close; green CI does not close it). The AEGIS 26b verdict
-(INSUFFICIENT_EVIDENCE on 4c3a21a) still stands until AEGIS re-adjudicates at d80adc5 — the diff 4c3a21a..d80adc5 adds
+(INSUFFICIENT_EVIDENCE on 4c3a21a) stood until the re-adjudication at d80adc5 (section above) — the diff 4c3a21a..d80adc5 adds
 the CI #4/#5 test/CI fixes, so it is a new subject, not a record-only change. Open Medium/Low: OPEN.md (wave 27).
 
 ## CI #5 result (2026-10-03 08:49 PT)
@@ -286,7 +340,7 @@ CI4-2 closes only on an AEGIS ruling; W26B-4 delivery runtime) and **700fce6** (
 | CI4-1 delivery-py ubuntu | open | this wave's N25-D-4 test counted events while the admitted run still recorded (22 == 20) | b24ffde | CI #5 delivery ubuntu legs (running) |
 | CI4-2 detection-py macos-26 | open — **waits on AEGIS** | BrokenPipe: server closed early on a 1 MiB request line; the test now accepts that close as the refusal (race not reproduced here) | b24ffde | CI #5 detection macOS green, but green CI does NOT close it: AEGIS must rule whether accepting an early close weakens the test |
 | CI4-3 delivery-py macos-26 | open | job cancelled at its 60-min limit (no failure) | b24ffde (limit 120) | CI #5 delivery macOS leg (running); runtime itself tracked as W26B-4 (Medium) |
-| CI5-1 orchestrator-go ubuntu | open, fix local | the slow-client test's clock started after `Dial`, but the server's ReadTimeout runs from accept, so the cut read 0.16 ms under 15 s | 700fce6 (local, not pushed) | needs the next run (CI #6) |
+| CI5-1 orchestrator-go ubuntu | open, fix local | the slow-client test's clock started after `Dial`, but the server's ReadTimeout runs from accept, so the cut read 0.16 ms under 15 s | 700fce6 (local at 08:11; pushed since — it is an ancestor of d80adc5, AO-2) | needs the next run (CI #6) |
 
 Next: when CI #5 finishes, report the delivery legs; then, only with the founder's approval, push a4e96a2 + 700fce6
 (+ report) and start CI #6; then AEGIS re-adjudication (and its ruling on CI4-2).
