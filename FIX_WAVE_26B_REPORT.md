@@ -45,6 +45,13 @@ Failing jobs and first-look cause (details and dispositions under "New findings"
 
 (newest first; times PT from `date`. The first entries were estimated and ran ~25 min ahead; corrected here.)
 
+- 00:35 — C1-1 committed (6276183). Three engineer agents dispatched in separate worktrees (fulfillment memory
+  model; timing tests; shared launchers/ports): they leave diffs, the lead reviews, re-runs and commits. The
+  launcher agent's first worktree was created by the tool at 9531fc2 (old main) and it was blocked; re-dispatched
+  on a worktree the lead made at 6276183.
+- 00:24 — C6-3-res (624bc03), OAUTH-4 (9a11ee2), R25B-1 + R26-2 (9f27a73: onboarding 757 passed) committed.
+- 00:05 — F-9 + H9-R3m (10b12bd), CI3-5 + W26B-1 (67221fe: creative 814 passed) committed; OPEN.md placement fix
+  (2f878b5: 19 closed rows had been inserted under the open table's header; CI3-3's row restored).
 - 00:00 — creative full suite re-running with CI3-5 + W26B-1 (run worktree). Report updated.
 - 23:58 — CI3-6 committed (982d291) after the full fulfillment suite (1089 passed, 0 violations).
 - 23:55 — new finding W26B-1 (creative N2 plateau fails 5/5 on this Mac, a6aee4e too): same allocator cause.
@@ -136,7 +143,26 @@ AEGIS r25 graded High for F-1) and closed by the commit that fixes it:
 
 ## What passed / failed / could not be verified / waiting on the founder
 
-(filled in at the end)
+(final version at the end; the founder questions below are already firm)
+
+### Waiting on the founder (rulings the wave cannot make)
+
+1. **TG-1 (textguard divergences, ADR 0007 table):** (a) should clipper-network's `approval_forgery` also match
+   `certified` / `certify (this|me|all|it)`, as verification-py and finance-py do? (b) should delivery-py keep
+   `guarantee_coercion` (it dropped it; nothing says why)? Each answer is a one-line change plus a test.
+2. **DLV-CLAMP:** a failing review whose child run would carry more than `DLV_MAX_FINDINGS` (200) findings is now a
+   422 (spec D12: 200 per run). Keep that for reviews, or allow a review's child run a different cap?
+3. **W25-EA-1 / C4-5 (documents outside the repo):** `BUILD_CONTRACTS.md` (21 files cite it),
+   `revenue-recovery-founder-decisions.md`, `revenue-recovery-roadmap.md`, `CLIPPER_NETWORK_SPEC.md`, `LEGAL_SPEC.md`,
+   `DEPT28_SPEC.md`, `FIX_WAVE_23b.md`, `FIX_WAVE_1_COMMON.md` and the reviewers' log paths live only in session
+   scratchpads (none is on this machine). Commit them under `docs/` (they must be supplied), or mark every
+   reference as external?
+4. **H9-R6m (test counts after a merge):** today the merge author regenerates `docs/test-counts.md` by hand
+   (`--counts write`). Removing that step means either a CI job that commits to `main` (a bot push — against the
+   "engineers never push" rule unless you exempt it) or a merge-time check that only fails earlier. Which, if any?
+5. **W25-EA-9:** under a stall flood, large legit astral batches are mostly 503 — the measured cost of counting the
+   model. Confirm the trade-off or ask for a different one (numbers: the fulfillment engineer's section below).
+6. **The push of `fix26b`** (and whether to merge it to `integration-2026-09-24` after AEGIS 26b).
 
 ## AEGIS round 26b
 
