@@ -45,6 +45,10 @@ Failing jobs and first-look cause (details and dispositions under "New findings"
 
 (newest first; times PT from `date`. The first entries were estimated and ran ~25 min ahead; corrected here.)
 
+- 04:00 — AEGIS 26b final adjudication: INSUFFICIENT_EVIDENCE (recorded below). CI3-1..CI3-6 moved back to the
+  open table (closure pending CI); all 18 round findings entered in OPEN.md. Wave stops here, as briefed.
+- 03:48 — three gate reports in (test truth, red team, security: no Critical/High); orchestrator-go 61/61 and
+  dashboard 27/27 run at 4c3a21a.
 - 02:28 — candidate SHA fixed at 4c3a21a; final evidence sweep running there (every Python suite, ledger-rust,
   hygiene self-test, lint, counts check), sequential, in a separate worktree. Agent worktrees and the tool-made
   branches (`worktree-agent-*`, all at 9531fc2 with no commits of their own) removed; `.claude/` no longer
@@ -206,10 +210,12 @@ Local only: `fix26b` is not pushed, so there is no CI run for it.
 
 ### Open after this wave (OPEN.md, tracked under R-GATE)
 
+- **High, fix committed but NOT proven (closure pending CI): CI3-1..CI3-6.**
 - New Medium: W26B-2 (fix7 big batch refused during a 32-sender flood), R26B-RT-1 (fix5 keep-alive test
   weaker than a6aee4e's), R26B-RT-2 (fix7 overload test no longer bounds the wait), R26B-RT-3 (ADR 0002
   overclaims that the parse in progress is counted), R26B-SEC-1 (sandbox image's pip install without hashes).
-- New Low: R26B-RT-4..7, R26B-SEC-2..5, W26B-3.
+- New Medium (test truth): R26B-TT-2, R26B-TT-3.
+- New Low: R26B-RT-4..7, R26B-SEC-2..5, R26B-TT-1, R26B-TT-4..6, W26B-3.
 - Carried: F-2 / N25-I-2 (the 9e55931 lists not re-checked), W25-EA-2 (rest), W25-EA-3, W25-EA-9, TG-1,
   DLV-CLAMP, W25-EA-1, C4-5, H9-R6m — rulings (below) or wave 27.
 
@@ -230,7 +236,14 @@ Local only: `fix26b` is not pushed, so there is no CI run for it.
    "engineers never push" rule unless you exempt it) or a merge-time check that only fails earlier. Which, if any?
 5. **W25-EA-9:** under a stall flood, large legit astral batches are mostly 503 — the measured cost of counting the
    model. Confirm the trade-off or ask for a different one (numbers: the fulfillment engineer's section below).
-6. **The push of `fix26b`** (and whether to merge it to `integration-2026-09-24` after AEGIS 26b).
+6. **The push of `fix26b`.** Nothing is pushed. AEGIS 26b says the candidate may not be merged until a CI run on the
+   pushed commit is green (it is the only way the six CI3 Highs can close). Pushing `fix26b` for that CI run is
+   your decision; its head is a report/OPEN.md-only change after the candidate 4c3a21a.
+7. **The rest of W25-EA-2:** keep fulfillment fix7/fix4_live/fix9 and detection's latency literals as documented
+   sanity bounds (L1 would need to see `_pct(...)`/`max(list)` to allowlist them) or delete them — the timing
+   engineer measured they do not discriminate the planted defects; detection's 0.5 s is an ADR 0001 product bound.
+8. **The AEGIS chain:** whether provenance / reliability / data / mutation-fuzz gates are required for this repo
+   (the adjudicator lists them as missing), or a ruling that removes them.
 
 ## AEGIS round 26b
 
@@ -242,4 +255,37 @@ and mutant claims; (3) security — the delivery changes (env allowlist, git iso
 so no CI run exists for it; every CI-dependent gate (Linux legs, macos-26 legs, docker-live) is
 INSUFFICIENT_EVIDENCE until the founder pushes, and the verdict cannot exceed CONDITIONAL.
 
-(results at the end)
+### Result — candidate 4c3a21abdb1e777cc6ed1f0ca8a822c4b26d2196 (tree d0d8e4f1)
+
+**Final adjudication: INSUFFICIENT_EVIDENCE (BLOCKED; may not be merged).** Not the CONDITIONAL the lead had
+stated as the ceiling — the adjudicator did not adopt it, and its reasons stand:
+
+| gate | result |
+|---|---|
+| test truth (accounting, removed/loosened tests, determinism) | sub-gate GREEN; gate INSUFFICIENT_EVIDENCE (no mutation-fuzz proof; self-test exit 1 on macOS; go/dashboard runs not SHA-bound) |
+| red team (claim falsification) | PASS for the scope — no Critical/High; 3 Medium, 4 Low |
+| security | PASS for the scope (SECURITY_GREEN) — 1 Medium, 4 Low; image reviewed statically |
+| CI Linux / macos-26 / docker-live | INSUFFICIENT_EVIDENCE — no run exists (not pushed) |
+| mutation-fuzz, provenance, reliability, data | INSUFFICIENT_EVIDENCE — no report |
+| closure of the six Highs CI3-1..CI3-6 | NOT_PROVEN — each closure's proof is a CI leg that has not run; under R-GATE that blocks a merge |
+
+Acted on: CI3-1..CI3-6 moved back to OPEN.md's open table as "fix committed on fix26b; closure pending CI" (they
+were wrongly moved to Closed by this wave on local evidence alone); all 18 Medium/Low findings of the round entered
+in OPEN.md (R26B-RT-1..7, R26B-TT-1..6, R26B-SEC-1..5) with the reviewers' severities.
+
+Independence, as the adjudicator states it: weak form only — implementers (the lead and three engineer agents),
+the three reviewers and the adjudicator are AI agents started from one session (likely one model family); the lead
+wrote every brief; the suite accounting is the implementer's own sweep; the red team planted mutants in the same
+worktree the sweep used (after it ended, by timestamps, but nothing binds that).
+
+Conditions for a CERTIFIED re-adjudication (all): (1) push the exact commit and get a CI run bound to it with every
+required job green — Linux hygiene-static incl. the two R4 self-tests, delivery-py ubuntu 3.12/3.13, ledger-rust
+Linux, the macos-26 legs, delivery-docker-live (build + 3 live tests); (2) if the pushed commit is not 4c3a21a,
+check that the diff from 4c3a21a touches only this report and OPEN.md, and adjudicate that commit anew; (3) a
+mutation-fuzz report bound to it; (4) provenance, reliability and data reports, or a founder ruling removing them
+from the chain; (5) CI3-1..CI3-6 confirmed by those legs; (6) the 18 findings in OPEN.md (done); (7) orchestrator-go,
+dashboard-ts (Node 22) and go vet with SHA-bound logs (a CI run does it).
+
+Records (outside the repo, session scratchpad `aegis26b/`): `redteam.md`, `test-truth.md`, `security.md`,
+`VERDICT.md` (the adjudicator could not write; the lead saved a condensed transcription, labelled as such), and the
+sweep logs `sweep-4c3a21a/`.
