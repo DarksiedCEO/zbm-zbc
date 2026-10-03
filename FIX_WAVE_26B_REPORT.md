@@ -45,6 +45,18 @@ Failing jobs and first-look cause (details and dispositions under "New findings"
 
 (newest first; times PT from `date`. The first entries were estimated and ran ~25 min ahead; corrected here.)
 
+- 02:28 — candidate SHA fixed at 4c3a21a; final evidence sweep running there (every Python suite, ledger-rust,
+  hygiene self-test, lint, counts check), sequential, in a separate worktree. Agent worktrees and the tool-made
+  branches (`worktree-agent-*`, all at 9531fc2 with no commits of their own) removed; `.claude/` no longer
+  appears in `git status`.
+- 02:20 — fulfillment memory-model batch committed (4c3a21a): full fulfillment suite on the merged tree 1104 passed.
+- 01:55 — timing-test batch committed (5d40f9a): creative 821, fulfillment 1092, onboarding 763 passed on the
+  merged tree. The engineer had made fix7's "big batch during the flood" printed-only; the lead checked that the
+  200-within-10-s assertions still stand, corrected the overclaiming docstring/comment, and opened W26B-2.
+- 01:30 — launcher/ports batch committed (8e87de2) after the lead finished delivery's C5-3/C5-6 residuals itself.
+  A tool warning flagged "security test removal": it was the shared `test_shared_ports.py` once-only test being
+  replaced by a reuse-after-exhaustion test; reviewed and accepted (every caller now owner-checks its port).
+- 00:58 — clean delivery run at e4dda30 (runwt): 721 passed, 4 skipped (allowlisted), 0 violations.
 - 00:35 — C1-1 committed (6276183). Three engineer agents dispatched in separate worktrees (fulfillment memory
   model; timing tests; shared launchers/ports): they leave diffs, the lead reviews, re-runs and commits. The
   launcher agent's first worktree was created by the tool at 9531fc2 (old main) and it was blocked; re-dispatched
@@ -95,7 +107,18 @@ box is not; `not done` = with the reason.
 | R26-1 | M | fixed | 0652bc4 | portable-path self-test | macOS | hygiene-static |
 | CI3-6 (new; R26-5's W26-EA-1) | H | fixed | 982d291 | live test failed here | fulfillment 1089 passed | fulfillment macos-26 |
 | CI3-5 (new) | H | in tree | — | not reproducible here | regex tests pass; full suite running | creative macos-26 |
-| W26B-1 (new) | M | in tree | — | plateau test 5/5 fail here | 3/3 pass | — |
+| CI3-5 / W26B-1 (fixed) | H / M | fixed | 67221fe | (not reproducible here) / 5/5 fail here | creative 814 | creative macos-26 |
+| F-9, H9-R3m | L | fixed / stated | 10b12bd | 2 self-tests | strict lint 0 | hygiene-static |
+| OAUTH-4 | L | reviewed, no change | 9a11ee2 | — | changelog read | — |
+| R25B-1, R26-2 | M | fixed | 9f27a73 | scripted timings; defect run | onboarding 757 | onboarding macos-26 |
+| C6-3-res | L | fixed | 624bc03 | SIGKILL child test | delivery files | delivery-py |
+| C1-1 | L | fixed | 6276183 | harness test | ledger-rust suite | ledger-rust |
+| C5-3, C5-4, C6-2, C5-6 | M/L | fixed | 8e87de2 | per-service tests | 9 suites + live 10/10 | all Python jobs, live-runs |
+| F-4, F-10, R26-5, W25-EA-6/7/8 | M/L | fixed | 5d40f9a | mutants | 3 suites | creative/fulfillment/onboarding |
+| W25-EA-2 | M | partly (onboarding) | 5d40f9a | mutant | — | ruling for the rest |
+| F-6, W25-EA-4/5, F-3, R26-3, F-7, F-8, F-5 | M/L | fixed / documented | 4c3a21a | 8 of 12 new tests failed first | fulfillment 1104 | fulfillment |
+| W25-EA-3, W25-EA-9 | M / Info | open — ruling | 4c3a21a | — | measured | founder |
+| W26B-2 (new) | M | open (wave 27) | — | — | measured | — |
 
 ### W26-ST (Medium) — fixed
 
