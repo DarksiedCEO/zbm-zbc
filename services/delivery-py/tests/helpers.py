@@ -171,6 +171,11 @@ def child_python_args() -> list[str]:
 
 
 def base_env(tmp: str, repo: str, *, data_dir: bool = True, llm: str = "fake", extra: Optional[dict] = None) -> dict:
+    # wave 26b (CI #3, hygiene R3 "new entry in /tmp during the run: worktrees"): the worktrees dir below is created
+    # under `tmp`, so `tmp` must be the suite's own temp space, never the host's /tmp
+    session = os.path.realpath(tempfile.gettempdir())
+    if os.path.commonpath([os.path.realpath(tmp), session]) != session:
+        raise AssertionError(f"base_env: tmp {tmp!r} is outside the suite's temp dir {session!r}; use tmp_path")
     env = {
         "DLV_SERVICE_TOKEN": SERVICE_TOKEN, "DLV_CALLER_TOKENS": json.dumps(CALLERS), "DLV_ANDRE_APPROVAL_TOKEN": ANDRE_TOKEN,
         "DLV_NON_PRODUCTION": "1", "DLV_SANDBOX_IMAGE": IMAGE, "DLV_IMAGE_REGISTRY": "registry.test",
@@ -180,6 +185,10 @@ def base_env(tmp: str, repo: str, *, data_dir: bool = True, llm: str = "fake", e
         # wave 24 (E6 sweep): the suite's temp dir (the session root, removed by the suite), never the host's — a
         # child the suite has to SIGKILL runs no exit handler; TMPDIR is on DLV_ENV_ALLOWLIST
         "TMPDIR": tempfile.gettempdir(),
+        # wave 26b (CI #3: GitHub's Ubuntu runner has a Docker daemon): the service's `docker info` probe reaches no
+        # daemon — a socket path that does not exist — so "sandbox unavailable" holds on any box. DOCKER_HOST is on
+        # DLV_ENV_ALLOWLIST; tests/test_live_docker.py builds its own environment.
+        "DOCKER_HOST": "unix://" + os.path.join(tmp, "no-docker-daemon.sock"),
     }
     if data_dir:
         env["DLV_DATA_DIR"] = os.path.join(tmp, "data")

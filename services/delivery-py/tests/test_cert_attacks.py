@@ -548,13 +548,13 @@ def test_a13_review_replay_and_wrong_state():
         h.close()
 
 
-def test_a1b_unlock_attempts_do_not_change_a_decision():
+def test_a1b_unlock_attempts_do_not_change_a_decision(tmp_path):
     """Config flags that do not exist, a bearer in the tool input and an Andre token on the run change nothing."""
     from zbm_delivery import config as C
     from helpers import base_env
     for flag in ("DLV_ALLOW_GIT_REMOTE", "DLV_ALLOW_NETWORK", "DLV_ALLOW_PUSH", "DLV_ALLOW_UNSAFE", "DLV_ALLOW_LOCAL_SANDBOX"):
         with pytest.raises(RuntimeError, match="no such switch"):
-            C.load({**base_env("/tmp", "/tmp"), flag: "1"})
+            C.load({**base_env(str(tmp_path), str(tmp_path)), flag: "1"})
     seed = json.load(open(SERVICE_ROOT / "seed" / "tool_policy_seed.json"))
     ctx = policy.Context(service="toy-py")
     v = policy.classify(seed, "bash", {"command": "git push origin HEAD", "token": "Bearer " + "x" * 40, "andre": ANDRE_TOKEN}, ctx)

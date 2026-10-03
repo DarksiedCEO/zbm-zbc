@@ -186,12 +186,12 @@ def _assert_shape(obj, where, depth=0):
         assert obj is None or isinstance(obj, (int, bool)), (where, type(obj))
 
 
-def test_g9_deerflow_pin_constant():
+def test_g9_deerflow_pin_constant(tmp_path):
     assert DEERFLOW_COMMIT == "345f08be00c8a9495079b732a39b46aa9af1584e"
     assert C.Settings.deerflow_commit == DEERFLOW_COMMIT
     with pytest.raises(RuntimeError, match="audited pin"):
         from helpers import base_env
-        C.load({**base_env("/tmp", "/tmp"), "DLV_DEERFLOW_COMMIT": "deadbeef" * 5})
+        C.load({**base_env(str(tmp_path), str(tmp_path)), "DLV_DEERFLOW_COMMIT": "deadbeef" * 5})
 
 
 MUTATIONS = [
@@ -241,9 +241,9 @@ def _mutate(doc: dict, key: str, value):
 
 
 @pytest.mark.parametrize("key,value", MUTATIONS, ids=[f"{k}={str(v)[:30]}" for k, v in MUTATIONS])
-def test_g10_config_mutation_refuses_naming_the_key(key, value):
+def test_g10_config_mutation_refuses_naming_the_key(key, value, tmp_path):
     from helpers import base_env
-    env = base_env("/tmp", "/tmp")
+    env = base_env(str(tmp_path), str(tmp_path))
     settings = C.load(env)
     doc, _ = G.load_config_doc(str(SERVICE_ROOT / "config" / "deerflow.engine.yaml"), env)
     assert G.config_problems(doc, settings) == []
@@ -254,9 +254,9 @@ def test_g10_config_mutation_refuses_naming_the_key(key, value):
     assert any(top in p for p in problems), (key, problems)
 
 
-def test_g10b_the_shipped_yaml_is_pinned_and_passes():
+def test_g10b_the_shipped_yaml_is_pinned_and_passes(tmp_path):
     from helpers import base_env
-    env = base_env("/tmp", "/tmp")
+    env = base_env(str(tmp_path), str(tmp_path))
     settings = C.load(env)
     doc, sha = G.load_config_doc(settings.deerflow_config, env)
     assert sha == C.PINNED_DEERFLOW_CONFIG_SHA256

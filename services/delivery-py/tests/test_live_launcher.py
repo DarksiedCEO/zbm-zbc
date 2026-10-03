@@ -79,6 +79,16 @@ def server(tmp_path_factory):
         _stop(proc)
 
 
+def test_l2_the_launch_environment_reaches_no_docker_daemon(tmp_path):
+    # wave 26b (CI #3: GitHub's Ubuntu runner HAS a Docker daemon, so /health said "available" and the L2 test below
+    # failed): "no daemon" is a property of the environment the tests launch with, not of the box — DOCKER_HOST (on
+    # DLV_ENV_ALLOWLIST) names a socket that does not exist. The docker-live tests use their own environment.
+    env = base_env(str(tmp_path), str(tmp_path))
+    host = env.get("DOCKER_HOST", "")
+    assert host.startswith("unix://"), host
+    assert not os.path.exists(host[len("unix://"):]), host
+
+
 def test_l2_bind_is_loopback_only_and_health_shape(server):
     proc, port, env, _ = server
     addrs = listening_addrs(port)
@@ -86,7 +96,7 @@ def test_l2_bind_is_loopback_only_and_health_shape(server):
     r = HTTP.get(f"http://127.0.0.1:{port}/health", timeout=3)
     body = r.json()
     assert body["status"] == "ok" and body["ledger"] == "unconfigured" and body["llm"] == "unconfigured"
-    assert body["sandbox"] == "unavailable"                       # this box has no Docker daemon (proven live)
+    assert body["sandbox"] == "unavailable"                       # DOCKER_HOST names no daemon (base_env, wave 26b)
     assert body["deerflow_commit"] == "345f08be00c8a9495079b732a39b46aa9af1584e" and body["in_memory"] is False
     # the ledger is unconfigured: a run is 503 with a reason; nothing is issued
     hdr = {"Authorization": f"Bearer {env['DLV_SERVICE_TOKEN']}", "X-DLV-Caller-Token": json.loads(env["DLV_CALLER_TOKENS"])["aegis"]}
