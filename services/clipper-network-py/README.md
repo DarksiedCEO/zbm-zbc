@@ -173,7 +173,7 @@ unavailable; `CN_COMPLIANCE_ACCEPT_UNPINNED=1` does the same for a Compliance an
 false`. Nothing in this service's `/health` shows that either is set, so both are for a test or staging peer
 only — never in production (an unpinned peer's verdicts are not the approved rules).
 
-Server tuning, read once at start by `src/serve.py` (a non-numeric or non-positive value refuses to start): `CN_REQUEST_HEAD_TIMEOUT_SECONDS` (10: a request head must arrive within this many seconds of connect), `CN_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `CN_LIMIT_CONCURRENCY` (128 open connections; beyond it a connection is answered 503), `CN_SWITCH_INTERVAL_SECONDS` (0.001, the interpreter's thread switch interval) and `CN_DRAINS_MAX` (512 concurrent graceful-close drains; `src/graceful_close.py`).
+Server tuning, read once at start by `src/serve.py` (a non-numeric or non-positive value refuses to start): `CN_REQUEST_HEAD_TIMEOUT_SECONDS` (10: a request head must arrive within this many seconds of connect), `CN_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `CN_LIMIT_CONCURRENCY` (128 open connections; beyond it a connection is answered 503), `CN_SWITCH_INTERVAL_SECONDS` (0.001, the interpreter's thread switch interval; only 0.0001 .. 0.05 starts, checked in force and printed: the check shared by every launcher, `src/launch_guard.py`, fix wave 26b) and `CN_DRAINS_MAX` (512 concurrent graceful-close drains; `src/graceful_close.py`).
 
 ## Reconciling the local log with the ledger
 
@@ -220,6 +220,9 @@ Live run with the real ledger binary:
 cd services/clipper-network-py && LEDGER_BIN=/path/to/ledger-rust/target/release/server \
   python3 devtools/live_run.py --ports 19350,19351,19352,19353
 ```
+
+The run's work directory (ledger and service logs) is removed when the run ends, passed or failed; set
+`LIVE_WORK_DIR=<dir>` to keep it inside `<dir>` (the run prints where; fix wave 26b, C6-2).
 
 It starts ledger A + CN through the production entrypoint (stand-ins:
 admission blocked, restart with anchor check), and ledger B + CN through

@@ -59,12 +59,6 @@ def test_refuses_to_start_without_token():
     assert p.returncode != 0 and "ONBOARDING_SERVICE_TOKEN is not set" in p.stderr
 
 
-def _free_port():
-    from conftest import free_test_port
-
-    return free_test_port()  # fix wave 4: the assigned test port range only
-
-
 # Fix wave 16: the kernel's socket table, read portably (Linux /proc/net/tcp
 # and tcp6; macOS/BSD lsof), as text addresses. This test used to be skipped
 # on macOS ("needs Linux /proc") and now runs there.
@@ -72,10 +66,18 @@ _listening = listening_addrs
 
 
 def _start(extra):
-    port = _free_port()
-    env = dict(os.environ, ONBOARDING_SERVICE_TOKEN="entrypoint-test-token", ONBOARDING_PORT=str(port), **extra)
-    proc = subprocess.Popen([sys.executable, "-m", "api"], cwd=SRC, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Fix wave 26b (scout C5-6): the child is this test's only once IT holds the port (conftest.start_live, the
+    # shared owner-checked helper); a 200 on a picked port used to be taken for its answer, whoever sent it.
+    from conftest import start_live
+
     host = extra.get("ONBOARDING_BIND_ADDR", "127.0.0.1")
+
+    def launch(port):
+        env = dict(os.environ, ONBOARDING_SERVICE_TOKEN="entrypoint-test-token", ONBOARDING_PORT=str(port), **extra)
+        return subprocess.Popen([sys.executable, "-m", "api"], cwd=SRC, env=env, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+
+    proc, port = start_live(launch, host=host)
     deadline = time.time() + 20
     while time.time() < deadline:
         try:
@@ -84,6 +86,7 @@ def _start(extra):
         except httpx.HTTPError:
             time.sleep(0.1)
     proc.kill()
+    proc.wait()
     raise AssertionError("server did not start")
 
 

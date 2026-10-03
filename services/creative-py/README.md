@@ -176,9 +176,11 @@ collected/passed/skipped numbers per Python are in `docs/test-counts.md`, genera
 One test skips by design where the machine has no IPv6 loopback: `tests/test_procinfo.py`
 (`no IPv6 loopback in this environment`; `pytest -rs` prints it) — it runs wherever `::1` exists. No test needs an
 env-provided ledger binary (the real-ledger runs are the live runs below).
-Real-socket tests bind ports from `CREATIVE_TEST_PORTS` ("lo-hi") when it
+Real-socket tests bind ports from `ZBM_TEST_PORT_RANGE`, else `CREATIVE_TEST_PORTS` ("lo-hi") when it
 is set (fix wave 9), OS-assigned ports otherwise (fix wave 25: the literal
 defaults 20110-20119 and 20300-20319 are gone); the fix-wave-9 runs used `CREATIVE_TEST_PORTS=20900-20919`.
+Since fix wave 26b (C5-6) they pick with the shared helper (`tests/_procinfo.py`) and trust a child's port only
+once that child holds it (`tests/test_fix26b_shared_port_picker.py`).
 `test_fix_wave_13.py` reproduces the AEGIS round-12 findings (fix wave 13, ADR 0005 decision 55): N12-1
 (the round-12 cases with a plain letter kept every two or three glyphs → human_review with "unreadable
 symbols"; all 1,972 masked forms of twelve short phrases raise a signal, and every mask with two or more

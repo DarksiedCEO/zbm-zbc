@@ -50,8 +50,8 @@ Two halves:
                resolvable commit id in the same paragraph) is a historical record and allowed;
   L4 shared    the shared files are byte-identical in every service that has them (graceful_close.py, the shared
                graceful-close test files modulo their two service constants, tests/_procinfo.py with the shared port
-               helper, tests/test_procinfo.py, tests/test_shared_ports.py) and graceful_close.py matches the sha256
-               the tests pin.
+               helper, tests/test_procinfo.py, tests/test_shared_ports.py, src/launch_guard.py — the launchers'
+               switch-interval check and SIGTERM handling) and graceful_close.py matches the sha256 the tests pin.
 
 ``counts`` — prints docs/test-counts.md's table, or (``--check``) verifies every suite row is well-formed.
 
@@ -1089,6 +1089,8 @@ def lint_shared() -> list[str]:
         "_procinfo.py": sorted(svc.glob("*/tests/_procinfo.py")),
         "test_procinfo.py": sorted(svc.glob("*/tests/test_procinfo.py")),
         "test_shared_ports.py": sorted(svc.glob("*/tests/test_shared_ports.py")),
+        # fix wave 26b (C5-3/C5-4): the launchers' switch-interval check and SIGTERM handling
+        "launch_guard.py": sorted(svc.glob("*/src/launch_guard.py")) + sorted(svc.glob("*/src/*/launch_guard.py")),
     }
     for name, files in groups.items():
         norm = {f: SERVICE_CONSTANTS.sub(r'\1 = "<service>"', f.read_text()) for f in files}

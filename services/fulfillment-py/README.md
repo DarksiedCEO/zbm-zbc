@@ -217,7 +217,8 @@ three strings moved to the rejection test. Four tests that reset
 `api._attempted_task_ids` to `set()` now reset it to `api._new_dedupe()`
 (same meaning, new type). No assertion was weakened.
 `tests/test_live_server.py` honors `FULFILLMENT_TEST_PORT_RANGE=LO-HI`
-for assigned port ranges.
+for assigned port ranges (since fix wave 26b, C5-6: through the shared picker in `tests/_procinfo.py`, which
+reads the repo-wide `ZBM_TEST_PORT_RANGE` first).
 
 **Suite:** 213 passed (recorded in d9f521f) before → 815 passed after
 (`FULFILLMENT_TEST_PORT_RANGE=19661-19679 python3 -m pytest`).

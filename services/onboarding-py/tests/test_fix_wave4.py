@@ -40,7 +40,7 @@ from pydantic import ValidationError
 import redaction
 import redos_harness as H
 from config import ConfigError, OnboardingConfig, load_config
-from conftest import TEST_SERVICE_TOKEN, client_for, free_test_port, make_service, start_body
+from conftest import TEST_SERVICE_TOKEN, client_for, make_service, start_body, start_live
 from ledger import FakeLedgerClient, LedgerWriteError
 from onboarding_schema import ClipperApplication
 from onboarding_schema import requests as rq
@@ -478,25 +478,30 @@ def test_r1_input_caps_are_configuration():
 # =============================================================================
 
 
-def _start_server(port: int) -> subprocess.Popen:
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
-    env.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(port), "PYTHONUNBUFFERED": "1",
-                "PYTHONDONTWRITEBYTECODE": "1"})
-    proc = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True)
+def _start_server() -> tuple[subprocess.Popen, int]:
+    """Fix wave 26b (scout C5-6): the server is this test's only once IT holds the port (conftest.start_live, the
+    shared owner-checked helper); any 200 on a picked port used to count."""
+    def launch(port):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
+        env.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(port),
+                    "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+        return subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True)
+
+    proc, port = start_live(launch)
     for _ in range(100):
         try:
             if httpx.get(f"http://127.0.0.1:{port}/health", timeout=0.5).status_code == 200:
-                return proc
+                return proc, port
         except httpx.HTTPError:
             time.sleep(0.1)
     proc.kill()
+    proc.wait()
     raise AssertionError("server did not start")
 
 
 def test_r1_real_uvicorn_health_stays_responsive_under_hostile_url_and_body():
-    port = free_test_port()
-    proc = _start_server(port)
+    proc, port = _start_server()
     base = f"http://127.0.0.1:{port}"
     auth = {"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"}
     results: dict[str, list] = {"attack": [], "health": []}

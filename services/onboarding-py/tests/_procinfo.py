@@ -232,9 +232,10 @@ _HANDED_OUT: set[int] = set()
 
 
 def pick_port(ports: range | None = None, host: str = "127.0.0.1") -> int:
-    """A port a server could bind now: from ``ports`` (not handed out before by
-    this process), else OS-assigned. Only a CANDIDATE: confirm the child got it
-    with ``wait_owned`` (or use ``start_owned``)."""
+    """A port a server could bind now: from ``ports`` (one not handed out before
+    by this process; once every port of the range has been, any that is free
+    again), else OS-assigned. Only a CANDIDATE: confirm the child got it with
+    ``wait_owned`` (or use ``start_owned``)."""
     if ports is None:
         with socket.socket(_family(host), socket.SOCK_STREAM) as s:
             s.bind((host, 0))
@@ -243,6 +244,13 @@ def pick_port(ports: range | None = None, host: str = "127.0.0.1") -> int:
         if p not in _HANDED_OUT and port_free(host, p):
             _HANDED_OUT.add(p)
             return p
+    # Fix wave 26b (C5-6): every service's live tests now pick here, and a suite starts more servers than a narrow
+    # assigned range has ports (the per-service pickers reused a port once it was free again). A reuse is safe: the
+    # caller accepts the port only once its OWN child holds it.
+    if all(p in _HANDED_OUT for p in ports):
+        for p in ports:
+            if port_free(host, p):
+                return p
     raise RuntimeError(f"no free port left in {ports.start}-{ports.stop - 1}")
 
 

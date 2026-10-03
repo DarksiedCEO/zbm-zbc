@@ -671,6 +671,19 @@ class Static(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("L4-shared services/b-py/tests/_procinfo.py", out)
 
+    def test_l4_launch_guard_planted(self):
+        """Fix wave 26b (C5-3/C5-4): src/launch_guard.py, the launchers' shared switch-interval check and SIGTERM
+        handling, is one of the shared files (delivery-py's package layout included)."""
+        for svc, rel in (("a-py", "src"), ("b-py", "src"), ("c-py", "src/zbm_c")):
+            d = self.r.root / "services" / svc / rel
+            d.mkdir(parents=True)
+            (d / "launch_guard.py").write_text("X = 2\n" if svc == "b-py" else "X = 1\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("L4-shared services/b-py/src/launch_guard.py: not identical to services/a-py/src/launch_guard.py"
+                      " (shared file launch_guard.py)", out)
+        self.assertNotIn("services/c-py/src/zbm_c/launch_guard.py", out)
+
 
 if __name__ == "__main__":
     unittest.main()

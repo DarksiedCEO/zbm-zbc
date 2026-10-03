@@ -304,3 +304,26 @@ def test_the_git_isolation_is_no_hooks_and_a_home_that_does_not_exist():
     assert (home, hooks) == ("/nonexistent", "/dev/null") and not os.path.exists(home)
     assert gitport.git_env()["HOME"] == home and gitport.git_env()["XDG_CONFIG_HOME"].startswith(home + "/")
     assert gitport.isolation_args()[:2] == ("-c", "core.hooksPath=/dev/null")
+
+
+# ====================================================================== C5-3 (delivery): the switch interval is range-checked
+def test_the_launcher_refuses_a_switch_interval_outside_the_shared_range():
+    """Scout C5-3: delivery's launcher read DLV_SWITCH_INTERVAL_SECONDS with `_positive`, so 3600 s (a thread may hold
+    the GIL for an hour), 1e-9 s and 0.5 s all started. It now uses the shared `launch_guard` check (100 us .. 50 ms,
+    blank = 1 ms; the same module, byte for byte, as the nine other launchers — lint L4). Shown by importing the
+    launcher in a child with each value."""
+    import subprocess
+    import sys
+    from helpers import SERVICE_ROOT
+    probe = "import sys; sys.path.insert(0, 'src'); import zbm_delivery.serve as s; print(s.SWITCH_INTERVAL_S)"
+    for bad in ("3600", "1e-9", "0.5", "nan", "x"):
+        env = {"PATH": "/usr/bin:/bin", "DLV_SWITCH_INTERVAL_SECONDS": bad}
+        r = subprocess.run([sys.executable, "-B", "-c", probe], cwd=SERVICE_ROOT, env=env, capture_output=True, text=True,
+                           timeout=60)
+        assert r.returncode != 0 and "DLV_SWITCH_INTERVAL_SECONDS" in r.stderr, (bad, r.stdout, r.stderr[-300:])
+    for good, want in (("", "0.001"), ("0.0001", "0.0001"), ("0.05", "0.05")):
+        env = {"PATH": "/usr/bin:/bin", "DLV_SWITCH_INTERVAL_SECONDS": good}
+        r = subprocess.run([sys.executable, "-B", "-c", probe], cwd=SERVICE_ROOT, env=env, capture_output=True, text=True,
+                           timeout=60)
+        assert r.returncode == 0 and r.stdout.strip() == want, (good, r.stdout, r.stderr[-300:])
+

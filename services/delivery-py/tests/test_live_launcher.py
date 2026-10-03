@@ -17,7 +17,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from _procinfo import NO_OVERRIDE_ADDR_REASON, listening_addrs, override_bind_addr, rss_kib, url_host
+from _procinfo import (NO_OVERRIDE_ADDR_REASON, ChildExited, assigned_port_range, listening_addrs, override_bind_addr,
+                       pick_port, rss_kib, url_host, wait_owned)
 from helpers import SERVICE_ROOT, base_env, child_python_args, free_live_port, make_repo
 
 HTTP = httpx.Client(trust_env=False)          # never a proxy between the test and 127.0.0.x
@@ -35,17 +36,35 @@ def _free_port() -> int:
 
 
 def _start(tmp: str, extra: dict | None = None, host: str = "127.0.0.1", drop: tuple = ()):
-    port = _free_port()
+    # Fix wave 26b (scout C5-6): the port is accepted only once THIS child holds its listener (the shared
+    # `_procinfo.wait_owned`); a child that lost the port to another process exits and another port is tried. It used
+    # to accept the first /health 200 on a port it had picked and released — whoever answered (a decoy shows it:
+    # `test_the_live_launcher_never_takes_another_process_answer_for_its_server`). The start deadline stays 150 s.
     repo, _ = make_repo(tmp)
-    env = base_env(tmp, repo, llm="none")
-    env.update({"DLV_PORT": str(port), "DLV_BIND_ADDR": host, **(extra or {})})
-    for name in drop:
-        env.pop(name, None)
-    env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
     log_path = Path(tmp) / "serve.log"
-    with open(log_path, "wb") as log:     # wave 25 (scout B Low): the child holds its own descriptor; ours is closed
-        proc = subprocess.Popen([PYTHON, *child_python_args(), "-m", "zbm_delivery.api"], cwd=str(SRC), env=env,
-                                stdout=log, stderr=subprocess.STDOUT)
+    last = None
+    for _attempt in range(5):
+        port = pick_port(assigned_port_range("DLV_TEST_PORT_RANGE"), host)
+        env = base_env(tmp, repo, llm="none")
+        env.update({"DLV_PORT": str(port), "DLV_BIND_ADDR": host, **(extra or {})})
+        for name in drop:
+            env.pop(name, None)
+        env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
+        with open(log_path, "wb") as log:     # wave 25 (scout B Low): the child holds its own descriptor; ours is closed
+            proc = subprocess.Popen([PYTHON, *child_python_args(), "-m", "zbm_delivery.api"], cwd=str(SRC), env=env,
+                                    stdout=log, stderr=subprocess.STDOUT)
+        try:
+            wait_owned(proc, port, timeout=150)
+            break
+        except ChildExited as exc:
+            proc.wait()
+            last = exc
+        except BaseException:
+            proc.kill()
+            proc.wait()
+            raise
+    else:
+        raise RuntimeError(f"delivery-py could not bind a port in 5 attempts: {last}\n" + log_path.read_text()[-3000:])
     deadline = time.monotonic() + 150
     while True:
         try:
@@ -225,3 +244,46 @@ def test_l2_service_children_get_the_suites_temp_dir():
     DLV_ENV_ALLOWLIST)."""
     env = base_env(tempfile.mkdtemp(), "/nonexistent-repo")
     assert env.get("TMPDIR") == tempfile.gettempdir(), env.get("TMPDIR")
+
+
+# ====================================================================== C5-6 (delivery): the live launcher owns its port
+def test_the_live_launcher_never_takes_another_process_answer_for_its_server(tmp_path, monkeypatch):
+    """Scout C5-6 (the delivery-py half; the OPEN line said delivery already used the shared helper — it did not):
+    `test_live_launcher._start` picked a port, released it, started the service on it and accepted the first /health
+    200 on that port, whoever answered. Shown with a decoy that holds the first port handed out and answers 200: the
+    launcher must start its own server elsewhere and return only once ITS child holds the listener."""
+    import http.server
+    import threading
+    import sys
+    L = sys.modules[__name__]
+    from _procinfo import listener_owned_by, pick_port
+
+    class Ok(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b'{"status": "ok"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    decoy = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Ok)
+    threading.Thread(target=decoy.serve_forever, daemon=True).start()
+    decoy_port = decoy.server_address[1]
+    handed = iter([decoy_port])
+    def first_the_decoys(ports=None, host="127.0.0.1"):
+        return next(handed, None) or pick_port(ports, host)
+    monkeypatch.setattr(L, "pick_port", first_the_decoys, raising=False)       # the launcher's picker (wave 26b)
+    monkeypatch.setattr(L, "_free_port", first_the_decoys)                     # and the one it used before
+    try:
+        proc, port, _, _ = L._start(str(tmp_path))
+        try:
+            assert port != decoy_port, "the launcher took the decoy's answer for its own server"
+            assert listener_owned_by(proc.pid, port)
+        finally:
+            L._stop(proc)
+    finally:
+        decoy.shutdown()
+        decoy.server_close()

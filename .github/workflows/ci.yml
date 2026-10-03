@@ -395,18 +395,19 @@ jobs:
           if [ "${{ matrix.service }}" = "verification-py" ]; then
             python -m pip install -r services/compliance-py/requirements.txt
           fi
-      # Scout C6-2 (fix wave 25): every live_run.py keeps its mkdtemp work dir (ledger logs, service logs — the run's
-      # evidence) and never removes it. The job asks for it explicitly in $RUNNER_TEMP/live-work (LIVE_WORK_DIR;
-      # finance-py reads FIN_LIVE_WORKDIR), outside the hygiene wrapper's private TMPDIR, so it is requested output,
-      # not a leftover; the next step prints what it holds and removes it. A temp file or process the run leaves
-      # anywhere else still fails the wrapper (R3/R4). Removing the dir inside the scripts is OPEN.md C6-2.
+      # Scout C6-2 (fix wave 25; fix wave 26b): a live_run.py removes its mkdtemp work dir (ledger logs, service
+      # logs — the run's evidence) when the run ends, unless LIVE_WORK_DIR names a directory to keep it in (every
+      # live_run.py reads that name since wave 26b; finance-py's old FIN_LIVE_WORKDIR still works, with a deprecation
+      # notice). The job keeps it in $RUNNER_TEMP/live-work, outside the hygiene wrapper's private TMPDIR, so it is
+      # requested output, not a leftover; the next step prints what it holds and removes it. A temp file or process
+      # the run leaves anywhere else still fails the wrapper (R3/R4).
       - name: Live run (under the hygiene check; no temp file or process may outlive it)
         env:
           LEDGER_BIN: ${{ github.workspace }}/services/ledger-rust/target/release/server
           SERVICE: ${{ matrix.service }}
         run: |
           mkdir -p "$RUNNER_TEMP/live-work"
-          LIVE_WORK_DIR="$RUNNER_TEMP/live-work" FIN_LIVE_WORKDIR="$RUNNER_TEMP/live-work" \
+          LIVE_WORK_DIR="$RUNNER_TEMP/live-work" \
             python devtools/hygiene_check.py run --suite "live:$SERVICE" --kind none --cwd "services/$SERVICE" \
             -- python devtools/live_run.py
       - name: Live-run work dir (listed as evidence in this log, then removed)

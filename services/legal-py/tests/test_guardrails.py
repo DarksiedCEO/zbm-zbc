@@ -305,8 +305,11 @@ def test_g8_no_float_field_anywhere_and_money_is_the_s1_string():
     for cls in _all_models():
         for name, f in cls.model_fields.items():
             assert "float" not in str(f.annotation).lower(), (cls.__name__, name)
-    src = "\n".join(p.read_text() for p in SRC.rglob("*.py"))
+    # launch_guard.py (fix wave 26b, C5-3) is the launchers' shared GIL switch-interval check, byte-identical in every
+    # service: it parses that interval (seconds) with float() and touches no money, model or record
+    src = "\n".join(p.read_text() for p in SRC.rglob("*.py") if p.name != "launch_guard.py")
     assert not re.search(r"\bfloat\(", src)
+    assert "Decimal" not in (SRC / "launch_guard.py").read_text() and "money" not in (SRC / "launch_guard.py").read_text()
     for bad in ("12.3", "12", "-1.00", "1e3", 12.3):
         with pytest.raises(Exception):
             models.ContractTermsModel.model_validate({"client_id": "a", "signed": False, "start_date": "2026-10-01",

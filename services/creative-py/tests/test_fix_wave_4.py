@@ -297,12 +297,6 @@ def test_connect_refused_is_a_certain_failure_and_timeout_is_uncertain():
         assert ei.value.took_effect == want, handler
 
 
-def _free_port() -> int:
-    from conftest import free_port
-
-    return free_port()  # CREATIVE_TEST_PORTS keeps the run inside a given range (fix wave 9)
-
-
 def _wait(url: str, headers=None) -> None:
     for _ in range(100):
         try:
@@ -320,17 +314,24 @@ def lossy_ledger():
 
 
 def _lossy_stack(popen=subprocess.Popen):
-    lp, pp = _free_port(), _free_port()
+    from _procinfo import start_owned
+    from conftest import live_ports
+
     env = {**os.environ, "FAKE_LEDGER_TOKEN": "lossy-test-ledger-token"}
     procs = []
     # Fix wave 22 (G3, N21-C-6): every process is started INSIDE the try, so a failure to start the second one (or
     # anything after the first) still stops the first — the ledger was left running (orphaned) before; and a
     # process that ignores SIGTERM is killed, never left behind by a timeout in the cleanup.
+    # Fix wave 26b (scout C5-6): each child is accepted only once IT holds its port (_procinfo.start_owned: the
+    # shared picker, the owner check, another port when the child lost the race). `_wait` alone took any answer on
+    # a picked port for the ledger's — another process's, when one held it.
     try:
-        procs.append(popen([sys.executable, str(DEVTOOLS / "fake_ledger_server.py"), str(lp)], env=env,
-                           stderr=subprocess.DEVNULL))
-        procs.append(popen([sys.executable, str(DEVTOOLS / "lossy_proxy.py"), str(pp), f"http://127.0.0.1:{lp}"],
-                           stderr=subprocess.DEVNULL))
+        ledger, lp = start_owned(lambda port: popen([sys.executable, str(DEVTOOLS / "fake_ledger_server.py"), str(port)],
+                                                    env=env, stderr=subprocess.DEVNULL), live_ports())
+        procs.append(ledger)
+        proxy, pp = start_owned(lambda port: popen([sys.executable, str(DEVTOOLS / "lossy_proxy.py"), str(port),
+                                                    f"http://127.0.0.1:{lp}"], stderr=subprocess.DEVNULL), live_ports())
+        procs.append(proxy)
         _wait(f"http://127.0.0.1:{lp}/ledger/entries")
         _wait(f"http://127.0.0.1:{pp}/__stats")
         yield f"http://127.0.0.1:{pp}", f"http://127.0.0.1:{lp}", "lossy-test-ledger-token"

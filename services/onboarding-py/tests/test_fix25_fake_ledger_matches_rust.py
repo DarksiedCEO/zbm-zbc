@@ -20,7 +20,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from conftest import free_test_port
+from conftest import start_live
 from ledger import ledger_rust_accepts
 from test_fix_wave5 import _stop, _wait_health
 
@@ -85,10 +85,11 @@ def _fake_validate():
 
 @pytest.fixture(scope="module")
 def real_ledger(ledger_bin, tmp_path_factory):
-    port = free_test_port()
-    env = dict(os.environ, LEDGER_SERVICE_TOKEN=TOKEN, LEDGER_PORT=str(port),
+    env = dict(os.environ, LEDGER_SERVICE_TOKEN=TOKEN,
                LEDGER_LOG_PATH=str(tmp_path_factory.mktemp("rust-ledger") / "ledger.jsonl"))
-    proc = subprocess.Popen([str(ledger_bin)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # fix wave 26b (scout C5-6): the ledger is this module's only once IT holds the port (conftest.start_live)
+    proc, port = start_live(lambda p: subprocess.Popen([str(ledger_bin)], env={**env, "LEDGER_PORT": str(p)},
+                                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     try:
         _wait_health(port, proc, "ledger-rust")
         yield port

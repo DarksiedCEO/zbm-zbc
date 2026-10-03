@@ -216,13 +216,15 @@ whose environment macOS withholds) — the marker is read from every other proce
 during a run; R3 prints the names (a CI runner is the job's alone).
 
 The `live-runs` job runs each department's `devtools/live_run.py` under the same wrapper (`--kind none`). Those
-scripts `mkdtemp` a work directory (ledger and service logs: the run's evidence) and never remove it (scout C6-2).
-Left in the default TMPDIR that is an R3 failure. The job therefore asks for the directory explicitly —
-`LIVE_WORK_DIR` (finance-py: `FIN_LIVE_WORKDIR`) = `$RUNNER_TEMP/live-work`, outside the wrapper's private TMPDIR
-and outside `/tmp` — and a following step (`if: always()`) lists what it holds into the log and removes it (fix
-wave 25, E-C). R3 is not relaxed: anything else the run leaves in its TMPDIR or `/tmp` still fails the job. A local
-run without the variable still leaves the directory; making each script remove it (or say it is kept) is in the
-department files (docs/findings/OPEN.md, C6-2).
+scripts `mkdtemp` a work directory (ledger and service logs: the run's evidence). Since fix wave 26b (scout C6-2) a
+script removes it when the run ends, passed or failed, unless `LIVE_WORK_DIR=<dir>` names a directory to keep it in:
+then the run's directory is made inside `<dir>`, kept, and its path printed at the end ("work dir kept
+(LIVE_WORK_DIR): …"). Every `live_run.py` reads `LIVE_WORK_DIR`; finance-py's old name `FIN_LIVE_WORKDIR` (C5-7)
+is still honoured with a deprecation notice on stderr, and ignored (with a notice) when `LIVE_WORK_DIR` is set too.
+The job keeps the directory in `LIVE_WORK_DIR=$RUNNER_TEMP/live-work`, outside the wrapper's private TMPDIR and
+outside `/tmp`, and a following step (`if: always()`) lists what it holds into the log and removes it (fix wave 25,
+E-C). R3 is not relaxed: anything else the run leaves in its TMPDIR or `/tmp` still fails the job; a local run
+without the variable leaves nothing.
 
 ## Known behaviours worth knowing before you debug a red run
 
@@ -237,11 +239,16 @@ department files (docs/findings/OPEN.md, C6-2).
   `docs/evidence/dept28/_runs/`.)
 - Ports. ledger-rust's integration tests and (since fix wave 25) orchestrator-go's binary tests start the server
   on port 0 and read the bound port back from `LEDGER_PORT_FILE` / `ORCHESTRATOR_PORT_FILE`; the dashboard's live
-  tests start `next start -p 0` and use the port the child printed; none picks a port. The Python live tests still
-  use per-service pickers and knobs (`DLV_TEST_PORT_RANGE`, `FULFILLMENT_TEST_PORT_RANGE`, `CREATIVE_TEST_PORTS`,
-  `DETECTION_LIVE_TEST_PORTS`, `ONBOARDING_TEST_PORT_RANGE`); the shared helper that replaces them is in
-  `tests/_procinfo.py` (one knob, `ZBM_TEST_PORT_RANGE`, and an owner check: a port is trusted only once the
-  test's own child is listening on it) — moving each service onto it is tracked in docs/findings/OPEN.md.
+  tests start `next start -p 0` and use the port the child printed; none picks a port. The Python live tests of
+  creative-py, detection-py, fulfillment-py and onboarding-py pick with the shared helper in `tests/_procinfo.py`
+  since fix wave 26b (C5-6): one knob, `ZBM_TEST_PORT_RANGE` ("lo-hi"; each suite's older knob —
+  `CREATIVE_TEST_PORTS`, `DETECTION_LIVE_TEST_PORTS`, `FULFILLMENT_TEST_PORT_RANGE`, `ONBOARDING_TEST_PORT_RANGE` —
+  is read when it is unset), and a child's port is trusted only once that child holds it: its own announced bind
+  ("Uvicorn running on …", creative/detection/fulfillment launchers) or the owner check of
+  `_procinfo.start_owned` (onboarding-py's launchers, creative-py's lossy-proxy stack), with a retry on another
+  port when the child lost the race. A range hands each port out once, then any port of it that is free again.
+  delivery-py's live tests still use their own picker (`DLV_TEST_PORT_RANGE`) and are not moved yet
+  (docs/findings/OPEN.md).
 - onboarding-py's suite is the slow one (~6 minutes plus a cold ledger-rust release build); the
   `test_procinfo.py` copies in creative-py, fulfillment-py and onboarding-py skip one IPv6 case on hosts without
   an IPv6 loopback and say so (an expected skip in `devtools/hygiene_allowlist.json`).

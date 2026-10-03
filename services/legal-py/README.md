@@ -44,7 +44,7 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `LEGAL_PORTAL_FAQ` | 0 | 1 refuses start (route only, CQ-15) |
 | `LEGAL_ALLOW_UNPINNED_SEED` + `LEGAL_SEED_SHA256` | unset | non-production rules seed only |
 | `LEGAL_SEED_DIR` | `seed/` | where the seven seed files are read from; each must still match its pin in `src/config.py` (the rules seed may differ only with the two settings above), else the service refuses to start |
-| `LEGAL_REQUEST_HEAD_TIMEOUT_SECONDS`, `LEGAL_KEEP_ALIVE_TIMEOUT_SECONDS`, `LEGAL_LIMIT_CONCURRENCY`, `LEGAL_SWITCH_INTERVAL_SECONDS`, `LEGAL_DRAINS_MAX` | 10, 5, 128, 0.001, 512 | server tuning read once by `src/serve.py`: request-head deadline from connect (s), keep-alive (s), open connections before a 503, the thread switch interval (s), concurrent graceful-close drains; a non-positive value refuses to start |
+| `LEGAL_REQUEST_HEAD_TIMEOUT_SECONDS`, `LEGAL_KEEP_ALIVE_TIMEOUT_SECONDS`, `LEGAL_LIMIT_CONCURRENCY`, `LEGAL_SWITCH_INTERVAL_SECONDS`, `LEGAL_DRAINS_MAX` | 10, 5, 128, 0.001, 512 | server tuning read once by `src/serve.py`: request-head deadline from connect (s), keep-alive (s), open connections before a 503, the thread switch interval (s; only 0.0001 .. 0.05 starts, checked in force and printed: `src/launch_guard.py`, shared by every launcher, fix wave 26b), concurrent graceful-close drains; a non-positive value refuses to start |
 
 ## Routes
 
@@ -119,6 +119,9 @@ reconcile/anchor/lease, a leak fuzz and details.
 LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py --ports 19500,19501,19502,19503
 python3 tests/contract_compliance_real.py      # Legal's real thin client against the REAL compliance-py app
 ```
+
+The run's work directory (ledger and service logs) is removed when the run ends, passed or failed; set
+`LIVE_WORK_DIR=<dir>` to keep it inside `<dir>` (the run prints where; fix wave 26b, C6-2).
 
 Fix 18 (Sep 27, 2026): live run 41/41 on ports 19560-19563 with the review-10 ledger binary.
 

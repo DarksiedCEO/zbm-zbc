@@ -28,7 +28,8 @@ def _src_files():
 # --- G1 no float in any money path -----------------------------------------------------------------------------------
 
 def test_g1_no_float_in_money_paths():
-    allowed = {"serve.py", "clients.py", "clock.py", "api.py", "ledger.py"}  # timeouts, switch intervals; never money
+    # timeouts, switch intervals; never money (launch_guard.py: the launchers' shared switch-interval check, wave 26b)
+    allowed = {"serve.py", "clients.py", "clock.py", "api.py", "ledger.py", "launch_guard.py"}
     for f in _src_files():
         tree = ast.parse(f.read_text())
         for node in ast.walk(tree):

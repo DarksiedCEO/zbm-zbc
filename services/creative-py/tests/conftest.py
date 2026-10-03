@@ -145,45 +145,22 @@ def api(make_api):
     return make_api()
 
 
-def port_range(default: range) -> range:
-    """The ports real-socket tests may bind: `default`, or the range in
-    CREATIVE_TEST_PORTS ("lo-hi", inclusive) so a run can stay inside the
-    port range its operator was given (fix wave 9)."""
-    spec = os.environ.get("CREATIVE_TEST_PORTS")
-    if not spec:
-        return default
-    lo, hi = (int(x) for x in spec.split("-"))
-    return range(lo, hi + 1)
+def live_ports():
+    """The ports the live tests may bind: ZBM_TEST_PORT_RANGE, else CREATIVE_TEST_PORTS (fix wave 9), "lo-hi"
+    inclusive; None: OS-assigned ports."""
+    from _procinfo import assigned_port_range
 
-
-_HANDED_OUT: list[int] = []
+    return assigned_port_range("CREATIVE_TEST_PORTS")
 
 
 def free_port() -> int:
-    """A free local port: OS-assigned, or — with CREATIVE_TEST_PORTS set —
-    the next free one of that range not handed out lately (two calls in a
-    row never return the same port)."""
-    import socket
+    """A CANDIDATE port for a live server: the shared picker (tests/_procinfo.py ``pick_port``) over ``live_ports()``.
+    Fix wave 26b (scout C5-6): this was creative-py's own pick-then-bind picker. Another process can take the port
+    before the child binds it, so a caller accepts the port only once its OWN child has announced the bind on it
+    (``start_serve``) or holds it (``_procinfo.wait_owned`` / ``start_owned``)."""
+    from _procinfo import pick_port
 
-    spec = os.environ.get("CREATIVE_TEST_PORTS")
-    if not spec:
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            return sock.getsockname()[1]
-    ports = list(port_range(range(0)))
-    recent = set(_HANDED_OUT[-(len(ports) // 2):])
-    for port in ports:
-        if port in recent:
-            continue
-        with socket.socket() as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # fix wave 22 (G3): TIME_WAIT is free
-            try:
-                sock.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-        _HANDED_OUT.append(port)
-        return port
-    raise RuntimeError(f"no free port in CREATIVE_TEST_PORTS={spec}")
+    return pick_port(live_ports())
 
 
 # Fix wave 26b (W26B-1; the class of CI3-6): on macOS, libmalloc's large-allocation cache keeps freed blocks charged

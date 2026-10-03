@@ -15,13 +15,13 @@ Body limits are enforced by api._BodyLimitMiddleware under any launcher.
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import sys
 
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
+import launch_guard
 from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 from api import MAX_HEADER_BYTES
@@ -72,36 +72,25 @@ REQUEST_HEAD_TIMEOUT_S = 10.0
 # microseconds, round(getswitchinterval() x 1e6), against [100, 50000], and
 # with the value set to within the microsecond CPython truncates. The value
 # in force is printed at start (stderr) so a launcher-level check can read it.
-SWITCH_INTERVAL_MIN_US = 100
-SWITCH_INTERVAL_MAX_US = 50_000
-SWITCH_INTERVAL_MIN_S = SWITCH_INTERVAL_MIN_US / 1_000_000   # 0.0001: the env value's own range check
-SWITCH_INTERVAL_MAX_S = SWITCH_INTERVAL_MAX_US / 1_000_000   # 0.05
+#
+# Fix wave 26b (scout C5-3): this check was not shared — four launchers carried hand copies and four others accepted
+# any positive interval. It now lives in src/launch_guard.py, byte-identical in every service; these names stay for
+# this launcher's callers and tests.
+SWITCH_INTERVAL_MIN_US = launch_guard.SWITCH_INTERVAL_MIN_US
+SWITCH_INTERVAL_MAX_US = launch_guard.SWITCH_INTERVAL_MAX_US
+SWITCH_INTERVAL_MIN_S = launch_guard.SWITCH_INTERVAL_MIN_S   # 0.0001: the env value's own range check
+SWITCH_INTERVAL_MAX_S = launch_guard.SWITCH_INTERVAL_MAX_S   # 0.05
 
 
 def _switch_interval_from_env(name: str = "DETECTION_SWITCH_INTERVAL_SECONDS", default: float = 0.001) -> float:
-    raw = os.environ.get(name)
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        value = math.nan
-    if not (SWITCH_INTERVAL_MIN_S <= value <= SWITCH_INTERVAL_MAX_S):  # also refuses nan and inf
-        raise RuntimeError(f"{name}={raw!r} is invalid: expected seconds, "
-                           f"{SWITCH_INTERVAL_MIN_S:g} <= value <= {SWITCH_INTERVAL_MAX_S:g}")
-    return value
+    return launch_guard.switch_interval_from_env(name, default)
 
 
 def _apply_switch_interval(value: float) -> int:
     """Sets the interval and returns the one in force, in whole microseconds (as CPython keeps it); refuses
     (RuntimeError) unless it is within [SWITCH_INTERVAL_MIN_US, SWITCH_INTERVAL_MAX_US] and is `value` to within the
-    microsecond CPython truncates."""
-    sys.setswitchinterval(value)
-    in_force_us = round(sys.getswitchinterval() * 1_000_000)
-    if not (SWITCH_INTERVAL_MIN_US <= in_force_us <= SWITCH_INTERVAL_MAX_US) or abs(in_force_us - value * 1_000_000) >= 1:
-        raise RuntimeError(f"the GIL switch interval in force is {in_force_us} us, not the {value!r} s set "
-                           f"(DETECTION_SWITCH_INTERVAL_SECONDS): this service refuses to start")
-    return in_force_us
+    microsecond CPython truncates (launch_guard)."""
+    return launch_guard.apply_switch_interval(value, "DETECTION_SWITCH_INTERVAL_SECONDS")
 
 
 SWITCH_INTERVAL_S: float = _switch_interval_from_env()
@@ -170,14 +159,18 @@ def main() -> None:
     args = parser.parse_args()
     in_force_us = _apply_switch_interval(SWITCH_INTERVAL_S)
     print(f"detection-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
-    uvicorn.run(
-        "api:app",
-        host=args.host,
-        port=args.port,
-        http=_HeadDeadlineH11Protocol,
-        h11_max_incomplete_event_size=MAX_HEADER_BYTES,
-        timeout_keep_alive=5,
-    )
+    # Fix wave 26b (scout C5-4): uvicorn re-raises the SIGTERM it captured after its graceful shutdown; with the
+    # default disposition the process died of it and no atexit handler ran. Inside sigterm_exits() the stop is a
+    # normal exit (status 143) and exit handlers run.
+    with launch_guard.sigterm_exits():
+        uvicorn.run(
+            "api:app",
+            host=args.host,
+            port=args.port,
+            http=_HeadDeadlineH11Protocol,
+            h11_max_incomplete_event_size=MAX_HEADER_BYTES,
+            timeout_keep_alive=5,
+        )
 
 
 if __name__ == "__main__":

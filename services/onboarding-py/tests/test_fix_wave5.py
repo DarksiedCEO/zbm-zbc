@@ -42,7 +42,7 @@ from _procinfo import rss_kib
 
 import redaction
 from config import OnboardingConfig, load_config
-from conftest import TEST_SERVICE_TOKEN, client_for, free_test_port, make_service, start_body
+from conftest import TEST_SERVICE_TOKEN, client_for, make_service, start_body, start_live
 from ledger import HttpLedgerClient, LedgerWriteError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,20 +88,22 @@ class Stack:
         self.ledger = self.api = None
         self.out = ""
         # Fix wave 22 (G3, N21-C-6): a failure or skip at any step after the ledger started stops what was started.
+        # Fix wave 26b (scout C5-6): each child is this stack's only once IT holds its port (conftest.start_live, the
+        # shared owner-checked helper); any 200 on a picked port used to count, whoever sent it.
         try:
-            self.lport = free_test_port()
             lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN)
-            self.ledger = subprocess.Popen([sys.executable, str(ROOT / "tools" / "fake_ledger_server.py"), "--port", str(self.lport)],
-                                           env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.ledger, self.lport = start_live(lambda port: subprocess.Popen(
+                [sys.executable, str(ROOT / "tools" / "fake_ledger_server.py"), "--port", str(port)],
+                env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
             # the ledger listens before the api's port is chosen, so they differ
             _wait_health(self.lport, self.ledger, "fake ledger")
-            self.port = free_test_port()
             aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
-            aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(self.port),
-                         "LEDGER_SERVICE_URL": f"http://127.0.0.1:{self.lport}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
-                         "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1", **env})
-            self.api = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=aenv, stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT, text=True)
+            aenv.update({"LEDGER_SERVICE_URL": f"http://127.0.0.1:{self.lport}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
+                         "ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "PYTHONUNBUFFERED": "1",
+                         "PYTHONDONTWRITEBYTECODE": "1", **env})
+            self.api, self.port = start_live(lambda port: subprocess.Popen(
+                [sys.executable, "-m", "api"], cwd=str(SRC), env={**aenv, "ONBOARDING_PORT": str(port)},
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True))
             _wait_health(self.port, self.api, "onboarding-py")
         except BaseException:
             self.close()

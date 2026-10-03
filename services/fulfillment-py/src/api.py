@@ -60,6 +60,7 @@ from agents import (
 )
 from bounded_state import BoundedExpiringMap
 import http_limits
+import launch_guard
 from contact_window import ContactWindow, parse_contact_window
 from fixtures_loader import load_appointments, load_call_events, load_dossiers
 from fulfillment_schema import (
@@ -2016,15 +2017,19 @@ def main() -> None:
     http_limits.DeadlineH11Protocol.body_timeout_s = _BODY_READ_TIMEOUT_S
     in_force_us = http_limits.apply_switch_interval(_SWITCH_INTERVAL_S)  # fix wave 25, C5-2 (http_limits)
     print(f"fulfillment-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        http=http_limits.DeadlineH11Protocol,
-        h11_max_incomplete_event_size=http_limits.MAX_HEADER_BYTES,
-        timeout_keep_alive=http_limits.KEEP_ALIVE_TIMEOUT_S,
-        limit_concurrency=http_limits.LIMIT_CONCURRENCY,
-    )
+    # Fix wave 26b (scout C5-4): uvicorn re-raises the SIGTERM it captured after its graceful shutdown; with the
+    # default disposition the process died of it and no atexit handler ran. Inside sigterm_exits() (the shared
+    # src/launch_guard.py) the stop is a normal exit (status 143) and exit handlers run.
+    with launch_guard.sigterm_exits():
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            http=http_limits.DeadlineH11Protocol,
+            h11_max_incomplete_event_size=http_limits.MAX_HEADER_BYTES,
+            timeout_keep_alive=http_limits.KEEP_ALIVE_TIMEOUT_S,
+            limit_concurrency=http_limits.LIMIT_CONCURRENCY,
+        )
 
 
 if __name__ == "__main__":

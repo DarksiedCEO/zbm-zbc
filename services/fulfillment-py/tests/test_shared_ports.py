@@ -105,10 +105,20 @@ def test_start_owned_retries_on_another_port_after_losing_the_race(monkeypatch):
                 p.wait()
 
 
-def test_a_range_hands_each_port_out_once(monkeypatch):
+def test_a_range_hands_each_port_out_once_then_only_a_free_one_again(monkeypatch):
+    """Fix wave 26b (C5-6): a range is handed out port by port first; once every port of it has been, a port that is
+    free again is handed out again (the callers accept a port only once their own child holds it), and a range with
+    no free port left raises."""
     monkeypatch.setattr(_procinfo, "_HANDED_OUT", set())
     lo = pick_port()                       # some currently free port; the range around it may be partly taken
     ports = range(lo, lo + 1)
     assert pick_port(ports) == lo
-    with pytest.raises(RuntimeError):
-        pick_port(ports)
+    assert pick_port(ports) == lo          # handed out before, free again
+    holder = socket.socket()
+    try:
+        holder.bind(("127.0.0.1", lo))
+        holder.listen(1)
+        with pytest.raises(RuntimeError):
+            pick_port(ports)
+    finally:
+        holder.close()

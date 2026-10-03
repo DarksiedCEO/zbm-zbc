@@ -47,11 +47,11 @@ from __future__ import annotations
 
 import os
 import signal
-import sys
 
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
+from zbm_delivery import launch_guard
 from zbm_delivery.graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 
@@ -69,7 +69,8 @@ MAX_HEADER_BYTES = 16 * 1024
 REQUEST_HEAD_TIMEOUT_S: float = _positive("DLV_REQUEST_HEAD_TIMEOUT_SECONDS", 10.0)
 KEEP_ALIVE_TIMEOUT_S: int = _positive("DLV_KEEP_ALIVE_TIMEOUT_SECONDS", 5, int)
 LIMIT_CONCURRENCY: int = _positive("DLV_LIMIT_CONCURRENCY", 128, int)
-SWITCH_INTERVAL_S: float = _positive("DLV_SWITCH_INTERVAL_SECONDS", 0.001)
+# fix wave 26b (scout C5-3): the shared range check (100 us .. 50 ms, blank = 1 ms), not "any positive number"
+SWITCH_INTERVAL_S: float = launch_guard.switch_interval_from_env("DLV_SWITCH_INTERVAL_SECONDS")
 
 
 # Graceful close (fix wave 21, L1) with the wave-22 bounds (G5/G6: bounded reads
@@ -146,6 +147,6 @@ def _exit_on_sigterm(signum, frame) -> None:
 
 
 def run(app, host: str, port: int) -> None:
-    sys.setswitchinterval(SWITCH_INTERVAL_S)
+    launch_guard.apply_switch_interval(SWITCH_INTERVAL_S, "DLV_SWITCH_INTERVAL_SECONDS")
     signal.signal(signal.SIGTERM, _exit_on_sigterm)
     uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())
