@@ -79,3 +79,176 @@ def test_env_problems_defaults_to_this_platform():
     from zbm_delivery import config as C
     assert C.env_problems({"__CF_USER_TEXT_ENCODING": "0x1F5:0x0:0x0"}) == ([] if sys.platform == "darwin" else ["__CF_USER_TEXT_ENCODING"])
 
+
+# ====================================================================== N25-D-4: a recorded request replays as recorded
+def test_a_recorded_fix_run_replays_its_answer_after_dlv_max_findings_is_lowered():
+    """AEGIS r25 N25-D-4: DLV_MAX_FINDINGS was checked in the route BEFORE the idempotency lookup, so a request that
+    was admitted and recorded, replayed identically after the cap was lowered (and the service restarted), got 422
+    instead of its recorded answer. The cap now applies to new requests only: after the lookup, before anything is
+    recorded. (The route reads the setting per request, so lowering it on the live settings object is the restart.)"""
+    from helpers import Harness, two_findings
+    h = Harness(scenario=[], extra_env={"DLV_MAX_FINDINGS": "2"})
+    try:
+        doc = two_findings(h.base_sha)
+        first = h.post("/dlv/v1/fix-runs", doc)
+        assert first.status_code == 202, first.text
+        h.settings.max_findings = 1
+        n_events = len(h.events())
+        again = h.post("/dlv/v1/fix-runs", doc)
+        assert again.status_code == 202, again.text
+        assert again.json() == first.json()
+        assert len(h.events()) == n_events                            # a replay records nothing
+        other = dict(doc, request_id=doc["request_id"] + "-new")       # a NEW request is still capped
+        r = h.post("/dlv/v1/fix-runs", other)
+        assert r.status_code == 422 and "DLV_MAX_FINDINGS" in r.text, r.text
+        assert len(h.events()) == n_events
+    finally:
+        h.svc.wait_idle(240)
+        h.close()
+
+
+# ====================================================================== N25-D-1: non-UTF-8 source is not "text in full"
+def _git_repo(tmp_path):
+    import subprocess
+
+    def git(*a, text=True):
+        return subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *a], cwd=tmp_path, check=True,
+                              capture_output=True, text=text).stdout
+    git("init", "-q")
+    return git
+
+
+def test_non_utf8_source_in_a_diff_is_named_and_utf8_text_is_not(tmp_path):
+    """AEGIS r25 N25-D-1: gitport decoded git's output with errors="replace", so a Latin-1 byte in a source file
+    reached the report as U+FFFD under the header "in full as text" — the bytes were bound only by the 7-hex index
+    line. Like a binary change (wave 25 H8), a source file whose diff is not UTF-8 cannot be shown faithfully, so it is
+    named; a UTF-8 file that legitimately contains U+FFFD is not."""
+    from zbm_delivery.engine import srcdiff
+    from zbm_delivery.gitport import GitPort
+    git = _git_repo(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("x = 1\n")
+    (tmp_path / "src" / "gone.py").write_bytes(b"N = '\xe9t\xe9'\n")          # removed below: its old lines count too
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD").strip()
+    (tmp_path / "src" / "a.py").write_text("x = '� ok'\n")             # valid UTF-8, a literal replacement char
+    (tmp_path / "src" / "latin1.py").write_bytes(b"NAME = 'caf\xe9'\n")
+    (tmp_path / "src" / "gone.py").unlink()
+    git("add", "-A")
+    git("commit", "-qm", "change")
+    head = git("rev-parse", "HEAD").strip()
+    gp = GitPort(str(tmp_path), record=lambda *a, **k: "")
+    raw = gp.range_diff_raw(str(tmp_path), base, head, ["src/a.py", "src/gone.py", "src/latin1.py"])
+    assert isinstance(raw, bytes) and b"caf\xe9" in raw
+    assert srcdiff.non_utf8_paths(raw) == ["src/gone.py", "src/latin1.py"]
+    assert srcdiff.non_utf8_paths(gp.range_diff_raw(str(tmp_path), base, head, ["src/a.py"])) == []
+    assert srcdiff.is_non_utf8_file(str(tmp_path / "src" / "latin1.py"))
+    assert not srcdiff.is_non_utf8_file(str(tmp_path / "src" / "a.py"))
+    assert not srcdiff.is_non_utf8_file(str(tmp_path / "src" / "missing.py"))
+
+
+def test_a_non_utf8_file_written_under_src_fails_the_round():
+    """The agent's way to a non-UTF-8 source file (the file tool writes UTF-8): bash. The round fails as a binary
+    change does, naming the file, and the finding is not done."""
+    from helpers import Harness, flat, two_findings
+    from test_round23 import DONE, _p1, _states, _whys
+    from test_round24 import OLD
+    from helpers import replace
+    latin1 = flat([{"tool_calls": [{"name": "bash", "args": {
+        "command": "printf 'NAME = \"caf\\351\"\\n' > /mnt/user-data/workspace/services/toy-py/src/toy/names.py"}}]},
+        replace("src/toy/calc.py", OLD, "    if whole == 0:\n        return 0.0\n" + OLD)])
+    h = Harness(scenario=_p1(latin1), extra_env={"DLV_MAX_ROUNDS_PER_FINDING": "2"})
+    try:
+        run_id = h.submit(two_findings(h.base_sha)).json()["run_id"]
+        h.svc.wait_idle(240)
+        assert "binary_src_change" in _whys(h), (_whys(h), h.run(run_id).get("reasons"))
+        assert _states(h, run_id)["N1-2"] not in DONE
+        failed = [e["payload"] for e in h.events("round_failed") if e["payload"].get("why") == "binary_src_change"]
+        assert failed and "src/toy/names.py" in " ".join(failed[0]["paths"]), failed
+    finally:
+        h.close()
+
+
+# ====================================================================== N24-D-1-res / N25-D-2: a cancel is for good
+def test_a_cancelled_admission_replayed_after_its_answer_left_the_map_is_refused_as_cancelled(monkeypatch):
+    """N24-D-1-res (E-B) and AEGIS r25 N25-D-2: the bounded map was the only memory of a cancel once its containers
+    had ended, so a cancelled review replayed after its answer left the map ran its RED containers again and was
+    judged afresh (N25-D-2: a concurrent replay even cleared the first attempt's cancel marker, and the cancelled
+    review was recorded `reviewed_fail` with a child run). Cancelled admission ids are now kept apart, never evicted
+    (one per operator cancel), and rebuilt from the local log at start: a replay gets the cancel's 409 and nothing
+    runs. Shown with the map at its extreme (keeps nothing)."""
+    import threading
+    import time
+    from helpers import Harness, finding, rid, scenario_s1, two_findings
+    from test_round24 import HANG_PATH, HANG_RT
+    from zbm_delivery import service as SV
+    monkeypatch.setattr(SV, "CLOSED_ADMISSIONS_MAX", 0, raising=False)
+    h = Harness(scenario=scenario_s1() + scenario_s1())
+    try:
+        run1 = h.submit(two_findings(h.base_sha)).json()["run_id"]
+        assert h.run(run1)["status"] == "awaiting_review"
+        nf = finding("N9-4", line=15, class_hint="argument_validation",
+                     reproduction=f"run {HANG_PATH}::test_clamp_hangs: clamp(5, 3, 0) answers 3", expected="ValueError",
+                     observed="3", reproduction_test={"path": HANG_PATH, "content": HANG_RT})
+        body = {"request_id": rid(), "review_ref": "r26b-cancel", "sha256": "f" * 64, "verdict": "fail", "reopened": [],
+                "new_findings": [nf]}
+        res = {}
+        th = threading.Thread(target=lambda: res.setdefault("a", h.post(f"/dlv/v1/fix-runs/{run1}/review", body)))
+        th.start()
+        t0 = time.monotonic()
+        while not h.events("reproduction_red_check_started") and time.monotonic() - t0 < 60:
+            time.sleep(0.05)
+        adm = h.events("reproduction_red_check_started")[0]["payload"]["admission_id"]
+        rc = h.post(f"/dlv/v1/fix-runs/{adm}/cancel", {"request_id": rid(), "reason": "stop it"}, caller="andre_session")
+        assert rc.status_code == 200, rc.text
+        th.join(120)
+        assert res["a"].status_code == 409 and "cancelled" in res["a"].text, res["a"].text
+        assert adm not in h.svc._closed_admissions                     # the map kept nothing
+        boxes = len([e for e in h.events("engine_box_started") if e["payload"].get("tag") == "admission"])
+        again = h.post(f"/dlv/v1/fix-runs/{run1}/review", body)
+        assert again.status_code == 409 and "cancelled" in again.text, again.text
+        assert len([e for e in h.events("engine_box_started") if e["payload"].get("tag") == "admission"]) == boxes
+        h.svc.wait_idle(240)
+        assert not h.events("fix_run_reviewed")
+        assert not [r for r in h.svc.runs.values() if "N9-4" in (r.get("finding_ids") or [])]
+    finally:
+        h.svc.wait_idle(240)
+        h.close()
+
+
+def test_cancelled_admission_ids_survive_the_start_up_replay_of_the_log(monkeypatch):
+    from helpers import Harness
+    from zbm_delivery import service as SV
+    monkeypatch.setattr(SV, "CLOSED_ADMISSIONS_MAX", 1, raising=False)
+    h = Harness(scenario=[])
+    try:
+        h.svc._apply("admission_closed", SV.DeliveryService._cancelled_answer("adm-c", "req-c", "f" * 64))
+        for i in range(5):
+            h.svc._apply("admission_closed", {"admission_id": f"adm-{i}", "status": 422, "reason": "r", "body": {}})
+        assert "adm-c" not in h.svc._closed_admissions and "adm-c" in h.svc._cancelled_admissions
+        assert not {f"adm-{i}" for i in range(5)} & h.svc._cancelled_admissions     # refusals are not cancels
+    finally:
+        h.close()
+
+
+# ====================================================================== DLV-HOST: the double keeps no host cargo state
+def test_the_docker_double_gives_cargo_a_session_home_not_the_hosts(monkeypatch):
+    """E-B DLV-HOST: the double ran the toy-rs suite with the host's ~/.cargo as CARGO_HOME (registry, caches, the
+    host's cargo config — host state read, and writable). CARGO_HOME is now the session's own, removed with the session
+    root like GOCACHE (DLV_TEST_CARGO_HOME keeps one elsewhere); only the toolchain itself (RUSTUP_HOME) is the host's,
+    used read-only, as the image's is."""
+    import os
+    import tempfile
+    import _tmproot
+    from fakes import FakeDockerCli
+    monkeypatch.delenv("CARGO_HOME", raising=False)
+    monkeypatch.delenv("DLV_TEST_CARGO_HOME", raising=False)
+    env = FakeDockerCli.toolchain_env()
+    session = os.path.realpath(_tmproot.SESSION_TMP)
+    assert os.path.commonpath([os.path.realpath(env["CARGO_HOME"]), session]) == session, env["CARGO_HOME"]
+    assert os.path.isdir(env["CARGO_HOME"])
+    assert env["CARGO_HOME"] != os.path.join(os.path.expanduser("~"), ".cargo")
+    keep = tempfile.mkdtemp()
+    monkeypatch.setenv("DLV_TEST_CARGO_HOME", keep)
+    assert FakeDockerCli.toolchain_env()["CARGO_HOME"] == keep

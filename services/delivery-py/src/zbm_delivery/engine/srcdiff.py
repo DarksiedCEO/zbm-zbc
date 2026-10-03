@@ -84,6 +84,45 @@ def binary_paths(diff_text: str) -> list[str]:
     return sorted(out)
 
 
+def non_utf8_paths(raw_diff: bytes) -> list[str]:
+    """Wave 26b (AEGIS r25 N25-D-1): the paths whose section of a raw git diff is not valid UTF-8, sorted. The diff's
+    text is decoded with errors="replace" for the report, so such a file would reach it as U+FFFD under the header
+    "in full as text" — bound only by its 7-hex index line. Like a binary change it cannot be shown faithfully; a
+    UTF-8 file that contains U+FFFD itself is fine."""
+    out: set[str] = set()
+    current, chunk = None, []
+
+    def close():
+        if current is not None:
+            try:
+                b"".join(chunk).decode("utf-8")
+            except UnicodeDecodeError:
+                out.add(current)
+
+    for line in (raw_diff or b"").splitlines(keepends=True):
+        if line.startswith(b"diff --git "):
+            close()
+            current = line.rstrip(b"\n").split(b" b/", 1)[-1].decode("utf-8", "replace")
+            chunk = []
+        chunk.append(line)
+    close()
+    return sorted(out)
+
+
+def is_non_utf8_file(path: str) -> bool:
+    """Wave 26b (N25-D-1): a regular file whose bytes are not UTF-8. Missing, unreadable or a link: not judged here."""
+    if not os.path.isfile(path) or os.path.islink(path):
+        return False
+    try:
+        with open(path, "rb") as fh:
+            fh.read().decode("utf-8")
+    except UnicodeDecodeError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def is_binary_file(path: str) -> bool:
     """git's rule for a file's content: a NUL byte in its first BINARY_SNIFF_BYTES. A missing or unreadable file is
     not judged here (its change, if any, shows in the diff)."""

@@ -421,8 +421,13 @@ class FakeDockerCli:
         # the host temp dir; DLV_TEST_GOCACHE names a cache an operator wants to keep across sessions (outside TMPDIR)
         gocache = os.environ.get("DLV_TEST_GOCACHE") or os.path.join(_tmproot.SESSION_TMP, "dlv-test-gocache")
         os.makedirs(gocache, exist_ok=True)
+        # wave 26b (E-B DLV-HOST): cargo's own home (registry, caches, config) is the session's too, never the host's
+        # ~/.cargo; only the toolchain (RUSTUP_HOME) is the host's, used read-only like the image's. The toy-rs fixture
+        # has no dependencies and every cargo call is --locked --offline, so an empty home is all it needs.
+        cargo_home = os.environ.get("DLV_TEST_CARGO_HOME") or os.path.join(_tmproot.SESSION_TMP, "dlv-test-cargo-home")
+        os.makedirs(cargo_home, exist_ok=True)
         return {"RUSTUP_HOME": os.environ.get("RUSTUP_HOME", os.path.join(real_home, ".rustup")),
-                "CARGO_HOME": os.environ.get("CARGO_HOME", os.path.join(real_home, ".cargo")),
+                "CARGO_HOME": cargo_home,
                 "GOCACHE": gocache, "GOPATH": os.path.join(gocache, "gopath"), "TMPDIR": tempfile.gettempdir()}
 
     # --- inspection ---------------------------------------------------------------------------------------------------

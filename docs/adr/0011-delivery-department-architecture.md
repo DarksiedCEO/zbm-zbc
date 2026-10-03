@@ -187,9 +187,6 @@ gate).
     Wave 26b: on macOS only, `__CF_USER_TEXT_ENCODING` too, and only as CoreFoundation's `0xH:0xH:0xH` value —
     CoreFoundation writes it into CPython's own environment at interpreter start (even under `env -i`), so
     without it the service refused every start on a Mac (CI #3, delivery-py macos-26).
-    Wave 26b: on macOS only, `__CF_USER_TEXT_ENCODING` too, and only as CoreFoundation's `0xH:0xH:0xH` value —
-    CoreFoundation writes it into CPython's own environment at interpreter start (even under `env -i`), so
-    without it the service refused every start on a Mac (CI #3, delivery-py macos-26).
 19. **The service sets deer-flow's environment itself** after the gate: `DEER_FLOW_EXTENSIONS_CONFIG_PATH`,
     `DEER_FLOW_HOME` (thread data under the data dir), `DEER_FLOW_CONFIG_PATH`, `DLV_SKILLS_ROOT`,
     `DLV_SANDBOX_IMAGE` (the YAML references the last two as `$NAME`; deer-flow substitutes at load).
@@ -1079,10 +1076,13 @@ is unchanged.
   verdict recorded for that admission id — the pre-wave-24 behaviour.
   Not done: the local log is not compacted — its lines are anchored in the evidence ledger (each line's sha256), so
   removing one would make the log fail its own verification; every record kind (idempotency included) grows the log
-  the same way, and each `admission_closed` line costs a RED container run or an operator's cancel. Residual (open,
-  `docs/findings/OPEN.md`): a CANCELLED admission whose answer has left the map is, if replayed identically much
-  later (20 000 closed admissions later), not refused as cancelled: it re-runs its containers and is refused by the
-  collision above or, failing that, judged afresh on its RED verdict — the operator's cancel is not what decides.
+  the same way, and each `admission_closed` line costs a RED container run or an operator's cancel. Fix wave 26b
+  (N24-D-1-res, AEGIS r25 N25-D-2): cancelled admission ids are kept apart in a set that is never evicted (one id per
+  operator cancel) and rebuilt from the cancel's `admission_closed` answer at start, so a cancelled admission
+  replayed after its answer left the map gets the cancel's 409 and nothing runs; before, it re-ran its containers and
+  was refused by the collision above or judged afresh (a concurrent replay could clear the first attempt's cancel
+  marker and be admitted — `tests/test_round26b.py`). Only a REFUSED admission whose answer left the map still re-runs
+  its containers, as described above.
 - **Nothing un-showable reaches a report (N24-D-2).** A binary file's content is not in a git diff ("Binary files … differ"),
   nor is a submodule's (a gitlink shows two commit ids), so a reviewer attesting to `src_diff_sha256` had not seen
   it, under a header that said "in full". Now a round whose source changes include a binary file (git's own rule: a
@@ -1090,7 +1090,12 @@ is unchanged.
   diff that still shows content git cannot show as text (`srcdiff.binary_paths`: binary files — a `.gitattributes`
   `binary`/`-diff` mark included — and submodule pointers) fails the run before any report is written
   (`EVIDENCE_UNAVAILABLE`, `binary_src_change`), and a legacy run re-scanned with one fails like any run that cannot
-  be re-scanned. The report header says "in full as text" and names what never appears in it.
+  be re-scanned. The report header says "in full as text" and names what never appears in it. Fix wave 26b (AEGIS
+  r25 N25-D-1): the same holds for a source file that is not UTF-8 — git's output was decoded with
+  `errors="replace"`, so its bytes reached the report as U+FFFD under that header. A round that writes one fails
+  `binary_src_change`; a source diff whose raw bytes are not UTF-8 in some file's section (`srcdiff.non_utf8_paths`
+  over `GitPort.range_diff_raw`) fails the run before the report (`EVIDENCE_UNAVAILABLE`, `non_utf8_src_change`),
+  and a re-scan with one fails. A UTF-8 file that contains U+FFFD itself is shown as it is.
 
 ## Fix wave 25, engineer E-B (Oct 1, 2026; scout B catalogue, scout C C6-3, H8 verification)
 

@@ -839,15 +839,17 @@ class FixEngine:
                     "transcript or reach for pytest's plugin manager/hooks. Remove that code and reply `FIXED`.")
         tracked_diff = self.git.diff(worktree, run_id=run_id)
         # wave 25 (H8, N24-D-2): a binary source change cannot be shown in the diff a reviewer attests to by hash
+        # wave 26b (N25-D-1): nor can a source file that is not UTF-8 (the report would show U+FFFD for its bytes)
         binary = sorted({p.removesuffix(" (submodule)") for p in srcdiff.binary_paths(tracked_diff)} & set(classes["src"])
-                        | {p for p in classes["src"] if srcdiff.is_binary_file(os.path.join(worktree, p))})
+                        | {p for p in classes["src"] if srcdiff.is_binary_file(os.path.join(worktree, p))
+                           or srcdiff.is_non_utf8_file(os.path.join(worktree, p))})
         if binary:
             self._round_failed(run_id, fid, rounds, "binary_src_change", paths=binary[:20])
             self._back_to_red(run_id, fid, f)
-            return ("You changed a binary (non-text) file under the source tree (" + ", ".join(binary[:20])
-                    + "). A reviewer must read every source change before anything is accepted, and a binary's "
-                    "content cannot be shown in the diff: the engine never accepts one. Remove it (or write it as "
-                    "text) and fix the root cause in the source; then reply `FIXED`.")
+            return ("You changed a binary (non-text) or non-UTF-8 file under the source tree (" + ", ".join(binary[:20])
+                    + "). A reviewer must read every source change before anything is accepted, and such a file's "
+                    "content cannot be shown in the diff as it is: the engine never accepts one. Remove it (or write "
+                    "it as UTF-8 text) and fix the root cause in the source; then reply `FIXED`.")
         denied = self._denied_added_src(runner, worktree, classes["src"],
                                         set(self.git.diff_name_only(worktree, run_id=run_id)), tracked_diff)
         if denied:
@@ -1428,6 +1430,13 @@ class FixEngine:
             # wave 25 (H8, N24-D-2): the diff would not show these files' content — no report claims it does
             self._fail(run_id, R.item("EVIDENCE_UNAVAILABLE", "binary_src_change: the source diff shows binary file(s) "
                                       "whose content a reviewer cannot read: " + ", ".join(binary[:5])))
+            raise RunEnded()
+        non_utf8 = srcdiff.non_utf8_paths(self.git.range_diff_raw(ctx.worktree, run["base_sha"], head, paths, run_id)) \
+            if paths else []
+        if non_utf8:
+            # wave 26b (N25-D-1): their bytes would show as U+FFFD under "in full as text"
+            self._fail(run_id, R.item("EVIDENCE_UNAVAILABLE", "non_utf8_src_change: the source diff shows file(s) that "
+                                      "are not UTF-8, which the report cannot show as they are: " + ", ".join(non_utf8[:5])))
             raise RunEnded()
         ev_src, digest, problem = srcdiff.record(self.svc, run_id, text, paths, run["base_sha"], head, "src_diff_recorded")
         if problem:

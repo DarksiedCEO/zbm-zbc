@@ -52,6 +52,9 @@ class GitResult:
     exit_code: int
     stdout: str
     stderr: str
+    # wave 26b (N25-D-1): git's output as bytes too — `stdout` is decoded with errors="replace", which turns a
+    # non-UTF-8 byte into U+FFFD; a reader that must know whether text is shown faithfully reads these
+    stdout_bytes: bytes = b""
 
 
 def _check_path(p: str) -> str:
@@ -119,7 +122,7 @@ class GitPort:
             return GitResult(124, "", "git command timed out")
         except OSError as exc:
             return GitResult(127, "", type(exc).__name__)
-        return GitResult(r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"))
+        return GitResult(r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"), r.stdout)
 
     def _git(self, op: str, args: list[str], cwd: str, run_id: str = "-") -> GitResult:
         argv = ["git", *isolation_args(), "-C", cwd, *args]
@@ -210,6 +213,18 @@ class GitPort:
             return ""
         args = ["diff", "--no-renames", "--no-color", "--no-ext-diff", base, head, "--", *[_check_path(p) for p in paths]]
         return self._ok(self._git("diff", args, cwd, run_id), "diff base..head")
+
+    def range_diff_raw(self, cwd: str, base: str, head: str, paths: Sequence[str], run_id: str = "-") -> bytes:
+        """Wave 26b (N25-D-1): ``range_diff`` as git wrote it, bytes — to tell whether its text is shown faithfully. A
+        runner that gives no bytes (a test double) gives its text, encoded."""
+        if not _SHA_RE.fullmatch(base) or not _SHA_RE.fullmatch(head):
+            raise GitRefused("bad sha")
+        if not paths:
+            return b""
+        args = ["diff", "--no-renames", "--no-color", "--no-ext-diff", base, head, "--", *[_check_path(p) for p in paths]]
+        r = self._git("diff", args, cwd, run_id)
+        self._ok(r, "diff base..head")
+        return r.stdout_bytes or r.stdout.encode("utf-8", "surrogatepass")
 
     def changed_paths(self, worktree: str, run_id: str = "-") -> list[str]:
         """Modified, added and untracked paths of the worktree (from ``status --porcelain``)."""
