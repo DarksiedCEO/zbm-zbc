@@ -416,21 +416,33 @@ def test_n18_s3_guardrail_records_opaque_and_the_report_counts_it():
 # ====================================================================== R6 / N18-S-4: deadlines, watchdog, cancel
 
 class _Trickle(httpx.SyncByteStream):
-    """A body that trickles one byte every ``period`` until the test ends it (``done``) — never on its own."""
+    """A body that trickles one byte every ``period`` until the test ends it (``done``) — or, with ``limit``, until it
+    has sent that many bytes, when it sets ``ended`` and stops. Wave 26b (AEGIS r25 N25-X-1): the state-ordered
+    rewrite bounded no budget's SIZE — a x20 deadline mutant still returned while an endless body trickled. With a
+    limit the trickle is the yardstick: the call must return before ``limit`` periods have passed."""
 
-    def __init__(self, period: float, done: threading.Event, first: Optional[threading.Event] = None):
-        self.period, self.done, self.first = period, done, first
+    def __init__(self, period: float, done: threading.Event, first: Optional[threading.Event] = None,
+                 limit: Optional[int] = None, ended: Optional[threading.Event] = None):
+        self.period, self.done, self.first, self.limit, self.ended = period, done, first, limit, ended
 
     def __iter__(self):
+        sent = 0
         while not self.done.wait(self.period):
             if self.first is not None:
                 self.first.set()
             yield b"{"
+            sent += 1
+            if self.limit is not None and sent >= self.limit:
+                if self.ended is not None:
+                    self.ended.set()
+                return
 
 
-def _returns_while_trickling(fn, done: threading.Event, stall_s: float = 60.0) -> dict:
-    """Run ``fn`` in a thread; report whether it returned while the body was still trickling (``done`` unset), and
-    what it raised. ``stall_s`` bounds a stall only; it never measures speed. Wave 25 (scout B M2)."""
+def _returns_while_trickling(fn, done: threading.Event, stall_s: float = 60.0,
+                             ended: Optional[threading.Event] = None) -> dict:
+    """Run ``fn`` in a thread; report whether it returned while the body was still trickling (``done`` unset, and the
+    body's ``ended`` unset when it has a limit), and what it raised. ``stall_s`` bounds a stall only; it never
+    measures speed. Wave 25 (scout B M2)."""
     out: dict = {}
 
     def call():
@@ -441,7 +453,7 @@ def _returns_while_trickling(fn, done: threading.Event, stall_s: float = 60.0) -
     t = threading.Thread(target=call, daemon=True)
     t.start()
     t.join(stall_s)
-    out["returned_while_trickling"] = not t.is_alive() and not done.is_set()
+    out["returned_while_trickling"] = not t.is_alive() and not done.is_set() and not (ended is not None and ended.is_set())
     done.set()
     t.join(stall_s)
     return out
@@ -451,24 +463,27 @@ def test_n18_s4_egress_total_deadline_is_enforced_by_the_client():
     """Wave 25 (scout B M2/M3): ordered by state, not by `< 5` / `< 1.5` wall-clock bounds and a `sleep(0.5)`. Each body
     trickles a byte inside every per-read timeout and never ends until the test ends it: only a TOTAL deadline can
     end the call while it still trickles."""
-    done = threading.Event()
+    # wave 26b (N25-X-1): the body ends after 80 x 50 ms (4x the 1 s deadline), so a client whose deadline is many
+    # times too long is answered in full instead of cut — the trickle bounds the budget's size, no wall-clock bound
+    done, ended = threading.Event(), threading.Event()
     transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"Content-Length": "100000"},
-                                                             stream=_Trickle(0.05, done)))
+                                                             stream=_Trickle(0.05, done, limit=80, ended=ended)))
     eg = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=1, llm_read_timeout_s=1,
                         transport=transport, env={})
     out = _returns_while_trickling(lambda: eg.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm",
-                                                      body=b"{}", run_id="r1"), done)
+                                                      body=b"{}", run_id="r1"), done, ended=ended)
     assert out["returned_while_trickling"] and isinstance(out.get("exc"), E.EgressFailed), out
     assert "deadline" in str(out["exc"]), out
     # a total deadline passed by the engine (the remaining wall clock) is enforced on its own: every other timeout of
     # this client is 60 s, so only `deadline_s=0.3` can end the call while the body still trickles
-    done = threading.Event()
+    done, ended = threading.Event(), threading.Event()     # 24 x 50 ms = 4x the 0.3 s deadline (N25-X-1)
     transport = httpx.MockTransport(lambda r: httpx.Response(200, headers={"Content-Length": "100000"},
-                                                             stream=_Trickle(0.05, done)))
+                                                             stream=_Trickle(0.05, done, limit=24, ended=ended)))
     eg60 = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", default_timeout_s=60,
                           llm_read_timeout_s=60, transport=transport, env={})
     out = _returns_while_trickling(lambda: eg60.request("POST", "https://api.anthropic.com/v1/messages", purpose="llm",
-                                                        body=b"{}", run_id="r1", deadline_s=0.3), done, stall_s=45)
+                                                        body=b"{}", run_id="r1", deadline_s=0.3), done, stall_s=45,
+                                   ended=ended)
     assert out["returned_while_trickling"] and isinstance(out.get("exc"), E.EgressFailed), out
     assert "deadline" in str(out["exc"]), out
     # abort(run_id) interrupts an in-flight call from another thread — issued once the body is flowing (a state)

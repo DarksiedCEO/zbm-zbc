@@ -352,19 +352,26 @@ def test_fix18_compliance_client_huge_drip_and_malformed_answers_are_never_creat
 
     # wave 25 (scout B M2): ordered by state, not by a wall-clock bound — the answer drips a byte every 0.05 s and
     # never ends until the test ends it; the 0.5 s budget must return while it is still dripping
+    # wave 26b (AEGIS r25 N25-X-1): the drip ends after 40 x 0.05 s (4x the budget) and says so; a budget many times
+    # too long reads it to its end instead of returning while it drips
     import threading
-    done = threading.Event()
+    done, ended = threading.Event(), threading.Event()
 
     def drip(req):
         def gen():
+            sent = 0
             while not done.wait(0.05):
                 yield b" "
+                sent += 1
+                if sent >= 40:
+                    ended.set()
+                    return
         return httpx.Response(201, content=gen())
     got = {}
     t = threading.Thread(target=lambda: got.update(a=client(drip, timeout=0.5).create_proposal("r", {})))
     t.start()
     t.join(60)                                        # a bound on a stall, never on the answer's speed
-    returned_while_dripping = not t.is_alive() and not done.is_set()
+    returned_while_dripping = not t.is_alive() and not done.is_set() and not ended.is_set()
     done.set()
     t.join(60)
     assert returned_while_dripping, "the client read the dripping answer past its 0.5 s budget"

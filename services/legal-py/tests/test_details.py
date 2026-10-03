@@ -300,17 +300,20 @@ def test_thin_client_wall_clock_deadline():
     answer until the test lets it: the 1.0 s deadline must return `unavailable` while the peer still holds the request
     (0f017a7: a 3 s peer and `< 2.0`)."""
     import threading
-    inside, release = threading.Event(), threading.Event()
+    inside, release, answered = threading.Event(), threading.Event(), threading.Event()
 
     def slow(req):
+        # wave 26b (AEGIS r25 N25-X-1): the peer answers by itself — a good answer — after 4.0 s, 4x the deadline. A
+        # held peer bounded no deadline's size (x20 / x50 mutants passed); a deadline many times too long now gets this
         inside.set()
-        release.wait(120)
+        release.wait(4.0)
+        answered.set()
         return httpx.Response(201, json={"proposal": {"proposal_id": "late"}})
     got = {}
     t = threading.Thread(target=lambda: got.update(a=_client(slow, timeout=1.0).create_proposal("r", {})))
     t.start()
     t.join(60)                                        # a bound on a stall, never on the answer's speed
-    returned_while_held = not t.is_alive() and inside.is_set() and not release.is_set()
+    returned_while_held = not t.is_alive() and inside.is_set() and not answered.is_set()
     release.set()
     t.join(60)
     assert returned_while_held, "the 1.0 s deadline waited for the peer's answer"
