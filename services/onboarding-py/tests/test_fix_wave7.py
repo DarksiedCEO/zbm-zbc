@@ -401,6 +401,14 @@ def _waited_for_a_scan(windows: list[tuple[float, float]], scans_done: list[floa
 #    2 busy loops), 3.8 (macos-26, CI #2), 3.8-8.0 (10 ms switch interval); small lane disabled (= the defect)
 #    82-1724 idle, 192-2174 under 2 busy loops, 17-311 with the 10 ms switch interval.
 _SMALL_OVER_HEALTH_MAX = 12.0
+# Fix wave 26b (AEGIS r26 R26-2: margins thin under macOS-like scheduling — fixed 9.0, defect 17.3 at a 10 ms switch
+# interval). Measured on the build box (M4 Pro, macOS 26.6, 3.13; small lane off = ONBOARDING_SCAN_SMALL_BODY_BYTES=0
+# is the defect), small p50 / health p50 for 1 / 4 / 12 uploaders: fixed 3.7 / 3.4 / 3.4 (1 ms interval) and
+# 1.5 / 3.9 / 4.8 (10 ms); defect 5.4 / 128 / 398 (1 ms) and 5.5 / 30 / 97 (10 ms). With ONE uploader the defect
+# reads under the bound (a small body waits at most for the one scan in flight, and the lane is idle while that
+# uploader sends its next 416 KB), so that case could only ever fail a correct server: the ratio is asserted where the
+# defect is visible — _RATIO_FROM_NBIG uploaders and more — and printed for fewer. Every other assertion still runs.
+_RATIO_FROM_NBIG = 4
 #  - /health against the time between two large scans' ends (the large lane is serial: one scan each): a /health
 #    that waits for a scan on the event loop waits half a scan on average. Measured health p50 / scan gap: fixed
 #    0.004-0.007 (Linux), 0.013-0.044 (10 ms switch interval), ~0.08-0.12 estimated on macos-26 (42 ms against
@@ -421,7 +429,8 @@ def test_new5_live_small_messages_stay_fast_beside_large_uploaders(real_stack7, 
                           f"max={r[k]['max'] * 1000:.0f}ms waited-for-a-scan={r[k]['waited']:.2f}"
                           for k in ("big", "small", "health"))
                + f" scan_gap={r['scan_gap'] * 1000:.0f}ms small/health={small_over_health:.1f} "
-               f"(bound {_SMALL_OVER_HEALTH_MAX}) health/scan_gap={health_over_gap:.3f} "
+               f"(bound {_SMALL_OVER_HEALTH_MAX}, {'asserted' if nbig >= _RATIO_FROM_NBIG else 'printed only'}) "
+               f"health/scan_gap={health_over_gap:.3f} "
                f"(bound {_HEALTH_OVER_SCAN_GAP_MAX}) small/scan_gap={r['small']['p50'] / r['scan_gap']:.3f}")
     print(summary)
     codes = r["codes"]
@@ -430,7 +439,8 @@ def test_new5_live_small_messages_stay_fast_beside_large_uploaders(real_stack7, 
                     f"{r['health']['n']} /health answers (need {_MIN_HEALTH}), so nothing was measured -- {summary}")
     # the finding's numbers: small p50 294 ms (1 uploader), 1.6 s (4), 6 s (12), each message waiting for the
     # large scans ahead of it; /health 4-7 ms beside them on the same Linux box
-    assert small_over_health < _SMALL_OVER_HEALTH_MAX, summary
+    if nbig >= _RATIO_FROM_NBIG:
+        assert small_over_health < _SMALL_OVER_HEALTH_MAX, summary
     assert r["small"]["n"] >= 40, summary
     assert codes.get("small_200", 0) == r["small"]["n"], summary  # never 503, never an error
     assert health_over_gap < _HEALTH_OVER_SCAN_GAP_MAX, summary

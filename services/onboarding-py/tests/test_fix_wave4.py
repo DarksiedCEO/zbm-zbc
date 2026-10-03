@@ -78,6 +78,7 @@ LINEAR_RATIO = 20.0  # 10 KB -> 100 KB, i.e. 2x the linear ideal of 10
 # pattern costs ~10x the ten 10 KB inputs
 # (test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own).
 SAME_WORK_RATIO = LINEAR_RATIO / 10
+SAME_WORK_ATTEMPTS = 3   # fix wave 26b (R25B-1): an over-bound same-work reading is measured again, up to this often
 
 
 def slowdown() -> float:
@@ -170,10 +171,41 @@ def _assert_scales_linearly(name, fn, unit, tail, slow):
     # Fix wave 23: before it fails, the ratio is re-measured against ten 10 KB inputs back to back — the same work
     # and the same duration as the 100 KB run (a single ~1 ms run measured the scheduler, not the pattern: see
     # redos_harness.best_time_back_to_back). Timer floor 2 ms (0.2 ms x 10). A quadratic pattern fails this too.
-    t10x10 = H.best_time_back_to_back(fn, [s10] * 10, runs=5)
-    assert t100 < SAME_WORK_RATIO * max(t10x10, 0.002), \
-        (f"{name}: {unit!r}+{tail!r} not linear: {t10 * 1000:.2f} ms on 10 KB, {t10x10 * 1000:.1f} ms for "
-         f"10 x 10 KB, {t100 * 1000:.1f} ms on 100 KB")
+    # Fix wave 26b (AEGIS r25b R25B-1): one over-bound reading is measured again (fresh 100 KB and 10 x 10 KB runs), up
+    # to SAME_WORK_ATTEMPTS times; only a pattern over the bound EVERY time fails. Linear patterns read ~1.0 here and
+    # the quadratic mutant 5.6-6.1, so a transient (3.07 once in 4 full runs for `_CHANGE_OBJECT`) passes on a later
+    # attempt and a quadratic pattern fails all of them.
+    attempts = []
+    for _ in range(SAME_WORK_ATTEMPTS):
+        t100 = H.best_time(fn, s100, runs=5)
+        t10x10 = H.best_time_back_to_back(fn, [s10] * 10, runs=5)
+        attempts.append((round(t100 * 1000, 2), round(t10x10 * 1000, 2), round(t100 / max(t10x10, 0.002), 2)))
+        if t100 < SAME_WORK_RATIO * max(t10x10, 0.002):
+            return
+    raise AssertionError(f"{name}: {unit!r}+{tail!r} not linear: {t10 * 1000:.2f} ms on 10 KB; every attempt over "
+                         f"{SAME_WORK_RATIO} (100 KB ms, 10 x 10 KB ms, ratio): {attempts}")
+
+
+def test_r1_a_transient_same_work_excursion_is_measured_again_a_quadratic_never_passes(monkeypatch):
+    """AEGIS r25b R25B-1: `_CHANGE_OBJECT` failed the same-work check in 1 of 4 full 3.13 runs (ratio 3.07 against 2.0)
+    while, measured alone, it scaled linearly 0/30 — and here its ratio reads 0.89-1.01, a quadratic mutant's 5.6-6.1.
+    One excursion is not a property of the pattern: an over-bound reading is now measured again, up to
+    SAME_WORK_ATTEMPTS times, and only a pattern over the bound every time fails. Shown with scripted timings: a
+    first reading of 3.07 then 1.0 passes; 6.0 every time fails "not linear"."""
+    def scripted(t10, t100s, t10x10s):
+        it100, it1010 = iter(t100s), iter(t10x10s)
+        first = {"s10": t10}
+
+        def best_time(fn, s, runs=3):
+            return first.pop("s10") if len(s) < 50_000 and "s10" in first else next(it100)
+        monkeypatch.setattr(H, "best_time", best_time)
+        monkeypatch.setattr(H, "best_time_back_to_back", lambda fn, items, runs=3: next(it1010))
+    unit, tail = "x" * 10, ""
+    scripted(1e-5, [0.0061, 0.00614, 0.002], [0.002, 0.002])        # absolute read, then ratio 3.07, then 1.0
+    _assert_scales_linearly("transient", lambda s: None, unit, tail, slow=1.0)
+    scripted(1e-5, [0.012] * (SAME_WORK_ATTEMPTS + 1), [0.002] * SAME_WORK_ATTEMPTS)      # 6.0 every time
+    with pytest.raises(AssertionError, match="not linear"):
+        _assert_scales_linearly("quadratic", lambda s: None, unit, tail, slow=1.0)
 
 
 def test_r1_the_ratio_check_fails_a_quadratic_pattern_on_its_own():

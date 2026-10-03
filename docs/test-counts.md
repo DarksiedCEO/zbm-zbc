@@ -26,6 +26,6 @@ the check.
 | `python:finance-py` | 337 | pytest collection | — |
 | `python:fulfillment-py` | 1090 | pytest collection | — |
 | `python:legal-py` | 289 | pytest collection | — |
-| `python:onboarding-py` | 756 | pytest collection | — |
+| `python:onboarding-py` | 757 | pytest collection | — |
 | `python:verification-py` | 280 | pytest collection | — |
 | `rust:ledger-rust` | 116 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |
