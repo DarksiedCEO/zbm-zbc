@@ -1135,7 +1135,11 @@ Evidence for every item below (failing-first runs on `0f017a7` / `b51f307`, muta
 - **No temp dir at import (scout C C6-3).** `gitport` made its isolation dir (`dlv-git-*`) when imported; a
   process killed by a signal left it behind whether or not it ever ran git. It is made on the first git command now
   (`gitport._isolation()`, `isolation_args()`); a process killed after its first git command can still leave one
-  (atexit is the only cleanup — residual, stated).
+  (atexit is the only cleanup — residual, stated). Fix wave 26b (C6-3-res): no directory at all — hooks are off with
+  `core.hooksPath=/dev/null` and HOME is `/nonexistent` (with `GIT_CONFIG_GLOBAL=/dev/null` and
+  `GIT_CONFIG_NOSYSTEM=1` git reads nothing there; if `/nonexistent` exists on a machine every git command is refused),
+  so nothing is made and nothing can be left (`tests/test_round26b.py`: a child SIGKILLed after a real git command
+  leaves its TMPDIR empty).
 - **Evidence regenerated on the lock it describes (scout B M5).** `docs/evidence/requirements.frozen.txt`,
   `pip-audit.json` and the licence report described the lock before `27be3ea` (speechrecognition). CI's audit of
   the lock at `0f017a7` reports `oauthlib` 3.3.1 (PYSEC-2026-4114 / CVE-2026-49265, PKCE timing; fixed only in

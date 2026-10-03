@@ -21,17 +21,13 @@ neither become git's global config nor run a hook on the engine's commit.
 
 from __future__ import annotations
 
-import atexit
 import hashlib
 import os
 import re
 import subprocess
-import tempfile
-import threading
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
-from zbm_delivery import fsops
 from zbm_delivery.ledger import derived_id
 
 ACTOR = "intel_08_engine"
@@ -63,24 +59,22 @@ def _check_path(p: str) -> str:
     return p
 
 
-# Wave 25 (scout C C6-3): the private HOME and EMPTY hooks dir are made on FIRST USE, once per process, never at
-# import — a process that only imported the package and was then killed by a signal (no atexit) left a `dlv-git-*`
-# dir in its temp dir. A process killed after its first git command can still leave one: atexit is the only cleanup.
-_ISOLATION: list = []                      # [(isolation dir, private home, empty hooks dir)] once made
-_ISOLATION_LOCK = threading.Lock()
+# Wave 25 (scout C C6-3) made the private HOME and EMPTY hooks dir (`dlv-git-*`) on first use instead of at import;
+# a process killed by a signal after its first git command still left the dir (atexit was the only cleanup, C6-3-res).
+# Wave 26b: git needs no directory of its own. Hooks are off with `core.hooksPath=/dev/null` (git's own idiom), and HOME
+# is `/nonexistent` — the conventional home that must never exist — so with GIT_CONFIG_GLOBAL=/dev/null and
+# GIT_CONFIG_NOSYSTEM=1 git reads nothing from it (its XDG files under it are absent). Nothing is made, so nothing is
+# left. Should `/nonexistent` exist on a machine, git could read attribute/ignore files there: every git command is
+# refused instead (fail closed).
+NO_HOME = "/nonexistent"
+NO_HOOKS = "/dev/null"
 
 
 def _isolation() -> tuple[str, str]:
-    """(private HOME, EMPTY hooks dir) of this process, made on first call and removed at exit (fix wave 21, L4)."""
-    with _ISOLATION_LOCK:
-        if not _ISOLATION:
-            d = tempfile.mkdtemp(prefix="dlv-git-")
-            atexit.register(fsops.drop_own_temp, d)
-            home, hooks = os.path.join(d, "home"), os.path.join(d, "hooks")
-            os.makedirs(home, exist_ok=True)
-            os.makedirs(hooks, exist_ok=True)
-            _ISOLATION.append((d, home, hooks))
-        return _ISOLATION[0][1], _ISOLATION[0][2]
+    """(HOME, hooks path) of every git command (R11): a home that does not exist and no hooks."""
+    if os.path.lexists(NO_HOME):
+        raise GitRefused(f"{NO_HOME} exists on this machine; the git isolation HOME must not exist")
+    return NO_HOME, NO_HOOKS
 
 
 def isolation_args() -> tuple[str, ...]:

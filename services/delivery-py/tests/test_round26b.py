@@ -252,3 +252,55 @@ def test_the_docker_double_gives_cargo_a_session_home_not_the_hosts(monkeypatch)
     keep = tempfile.mkdtemp()
     monkeypatch.setenv("DLV_TEST_CARGO_HOME", keep)
     assert FakeDockerCli.toolchain_env()["CARGO_HOME"] == keep
+
+
+# ====================================================================== C6-3-res: git needs no directory of its own
+_GIT_THEN_WAIT = r'''
+import subprocess, sys
+sys.path.insert(0, "src")
+from zbm_delivery.gitport import GitPort
+repo = sys.argv[1]
+sha = GitPort(repo, record=lambda *a, **k: "").rev_parse("HEAD")
+print("GIT-DONE", sha, flush=True)
+sys.stdin.read()
+'''
+
+
+def test_a_process_killed_after_its_git_commands_leaves_nothing_in_its_temp_dir(tmp_path):
+    """E-B C6-3-res: since C6-3 the isolation dir (`dlv-git-*`: a private HOME and an empty hooks dir) was made at the
+    first git command and removed only by atexit, so a process SIGKILLed after it left the dir in its TMPDIR. git
+    needs no directory for either: hooks are off with `core.hooksPath=/dev/null`, and HOME is `/nonexistent` (with
+    GIT_CONFIG_GLOBAL=/dev/null and no system config, git reads nothing there). Shown: a child runs a real git command
+    through GitPort with a private TMPDIR, is SIGKILLed, and the TMPDIR is empty."""
+    import os
+    import subprocess
+    import sys
+    from helpers import SERVICE_ROOT
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for argv in (["git", "init", "-q"], ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+                                         "--allow-empty", "-m", "base"]):
+        subprocess.run(argv, cwd=repo, check=True, capture_output=True)
+    tmpdir = tmp_path / "t"
+    tmpdir.mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
+    env.update({"TMPDIR": str(tmpdir), "PYTHONDONTWRITEBYTECODE": "1"})
+    p = subprocess.Popen([sys.executable, "-c", _GIT_THEN_WAIT, str(repo)], cwd=SERVICE_ROOT, env=env,
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        line = p.stdout.readline()
+        assert line.startswith("GIT-DONE "), line + p.stderr.read()
+        while_alive = sorted(x.name for x in tmpdir.iterdir())
+    finally:
+        p.kill()
+        p.communicate()
+    after = sorted(x.name for x in tmpdir.iterdir())
+    assert while_alive == [] and after == [], (while_alive, after)
+
+
+def test_the_git_isolation_is_no_hooks_and_a_home_that_does_not_exist():
+    from zbm_delivery import gitport
+    home, hooks = gitport._isolation()
+    assert (home, hooks) == ("/nonexistent", "/dev/null") and not os.path.exists(home)
+    assert gitport.git_env()["HOME"] == home and gitport.git_env()["XDG_CONFIG_HOME"].startswith(home + "/")
+    assert gitport.isolation_args()[:2] == ("-c", "core.hooksPath=/dev/null")

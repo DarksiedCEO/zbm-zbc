@@ -945,13 +945,12 @@ def test_n19_a7_tracked_gitconfig_and_hooks_never_run_on_the_engines_commit():
     sha = port.commit(repo, "engine commit", "body", "r")
     assert sha and not os.path.exists(os.path.join(repo, "hook-ran"))
     assert all("HOOK-RAN" not in r.stderr for _, r in seen)
-    home, hooks = gitport._isolation()       # wave 25 (C6-3): made on first use, not at import
+    home, hooks = gitport._isolation()       # wave 26b (C6-3-res): no hooks, and a HOME that does not exist
     for argv, _ in seen:
         assert argv[:5] == ["git", "-c", f"core.hooksPath={hooks}", "-c", "core.fsmonitor=false"], argv
     e = gitport.git_env()
     assert e["GIT_CONFIG_GLOBAL"] == "/dev/null" and e["GIT_CONFIG_NOSYSTEM"] == "1" and e["HOME"] == home
-    assert os.listdir(home) == [] or set(os.listdir(home)) <= {"xdg"}
-    assert os.listdir(hooks) == []
+    assert hooks == "/dev/null" and not os.path.exists(home)
     # the tracked remote in .gitconfig is not a remote of the repository either
     assert port.remotes(repo, "r") == []
 
