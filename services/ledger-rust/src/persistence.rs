@@ -405,12 +405,16 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn scratch_path(label: &str) -> PathBuf {
+        // the counter keeps two paths made in the same instant apart (fix wave 26b: macOS's clock resolves only
+        // microseconds; tests run in parallel threads)
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "zbm_ledger_test_{label}_{}_{nanos}.jsonl",
+            "zbm_ledger_test_{label}_{}_{nanos}_{n}.jsonl",
             std::process::id()
         ))
     }

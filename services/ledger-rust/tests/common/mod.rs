@@ -22,6 +22,19 @@ pub fn real_temp_dir() -> PathBuf {
     std::fs::canonicalize(&t).unwrap_or(t)
 }
 
+/// `<pid>_<nanos>_<n>` for a scratch path: unique within the process by the counter `n` (fix wave 26b, CI #3
+/// ledger-rust macos-26: macOS's clock resolves microseconds, so two tests starting together got the same name and
+/// shared a port file); pid + time keep names apart across runs.
+pub fn unique_suffix() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("{}_{nanos}_{n}", std::process::id())
+}
+
 /// A port file next to the test's scratch files; removed on drop.
 pub struct PortFile(pub PathBuf);
 
@@ -33,11 +46,7 @@ impl Drop for PortFile {
 
 impl PortFile {
     pub fn new(label: &str) -> PortFile {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let p = real_temp_dir().join(format!("ledger_port_{label}_{}_{nanos}.port", std::process::id()));
+        let p = real_temp_dir().join(format!("ledger_port_{label}_{}.port", unique_suffix()));
         let _ = std::fs::remove_file(&p);
         PortFile(p)
     }
