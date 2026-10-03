@@ -245,6 +245,14 @@ Local only: `fix26b` is not pushed, so there is no CI run for it.
 8. **The AEGIS chain:** whether provenance / reliability / data / mutation-fuzz gates are required for this repo
    (the adjudicator lists them as missing), or a ruling that removes them.
 
+## CI #6 result — first all-green run
+
+Run 37135247923 on **d80adc5** (pushed): **53/53 jobs green, `required` green**. CI5-1 closed on it (orchestrator-go
+ubuntu and macos-26 green). Every High from CI #3/#4/#5 is now closed on CI evidence except **CI4-2**, which waits for
+the AEGIS ruling (a test that now accepts an early close; green CI does not close it). The AEGIS 26b verdict
+(INSUFFICIENT_EVIDENCE on 4c3a21a) still stands until AEGIS re-adjudicates at d80adc5 — the diff 4c3a21a..d80adc5 adds
+the CI #4/#5 test/CI fixes, so it is a new subject, not a record-only change. Open Medium/Low: OPEN.md (wave 27).
+
 ## CI #5 result (2026-10-03 08:49 PT)
 
 Run 37129375575 on b24ffde finished: 51 green, 2 red — orchestrator-go (ubuntu-24.04) (CI5-1, fix 700fce6 local,
