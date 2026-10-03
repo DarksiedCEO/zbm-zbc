@@ -43,15 +43,52 @@ Failing jobs and first-look cause (details and dispositions under "New findings"
 
 ## Progress log
 
-(newest first)
+(newest first; times PT from `date`. The first entries were estimated and ran ~25 min ahead; corrected here.)
 
-- 22:45 PT — W26-ST fixed and committed (first item, as briefed).
-- 22:35 PT — branch `fix26b` created at a6aee4e; CI #3 found already complete (failure); report started.
+- 00:00 — creative full suite re-running with CI3-5 + W26B-1 (run worktree). Report updated.
+- 23:58 — CI3-6 committed (982d291) after the full fulfillment suite (1089 passed, 0 violations).
+- 23:55 — new finding W26B-1 (creative N2 plateau fails 5/5 on this Mac, a6aee4e too): same allocator cause.
+- 23:52 — R26-1 committed (0652bc4).
+- 23:49 — N25-X-1 (9f03317) and XS-PYC (02c60d0) committed after verification/finance/legal/clipper suites:
+  280/337/289/349 passed, 0 hygiene violations each.
+- 23:35 — CI3-3 (77fd749) and the delivery batch N25-D-4/N25-D-1/N25-D-2/N24-D-1-res/DLV-HOST (ab1b7a8) committed.
+- 23:29 — full delivery suite finished: 714 passed, 4 allowlisted skips, 0 failed (its hygiene line is void: this
+  wave edited tracked files and ran other suites during it — re-run clean before AEGIS).
+- 23:00-23:25 — docs/hygiene items committed: W25-EB-R1/R2 (21b6750), W25-EB-R3 + R25B-2 (140303c), F-11
+  (d03a16c), C4-4 (a8bf717), C5-8b (39f131b).
+- 22:57 — CI3-4 + W26-3b + R26-4 committed (48d0bd7).
+- 22:50 — CI3-2 committed (6b4d5ac).
+- 22:45 — CI3-1 committed (fc2613e).
+- 22:40 — W26-ST committed (2447389), first item as briefed.
+- 22:33 — branch `fix26b` created at a6aee4e; CI #3 found already complete (failure); report started.
 
 ## Items
 
-Status per OPEN.md line. `fixed` = commit on fix26b with a failing-first test where one is possible;
-`waiting` = needs a CI result, the founder, or a machine this box is not; `not done` = with the reason.
+Status per OPEN.md line. `fixed` = commit on fix26b with a failing-first test where one is possible (each closed
+row in `docs/findings/OPEN.md` carries the evidence); `waiting` = needs a CI result, the founder, or a machine this
+box is not; `not done` = with the reason.
+
+| item | sev | status | commit | failing-first | verified here | needs CI |
+|---|---|---|---|---|---|---|
+| W26-ST | M | fixed | 2447389 | 3 self-tests | macOS self-test (2 Linux-only cases as on a6aee4e) | hygiene-static (Linux) |
+| CI3-1 (new) | H | fixed | fc2613e | tests/harness_names.rs | ledger-rust suite, 5 extra runs | ledger-rust macos-26 |
+| CI3-2 (new) | H | fixed | 6b4d5ac | guard (56 cases) + env test | /tmp/worktrees reproduced, gone | delivery-py ubuntu |
+| CI3-3 (new) | H | fixed | 77fd749 | double + env tests | delivery 714 passed | delivery-py macos-26 |
+| CI3-4 (new) | H | fixed | 48d0bd7 | — (no daemon) | static tests | delivery-docker-live |
+| W26-3b | M | fixed | 48d0bd7 | 2 static tests | checksums fetched + downloaded | delivery-docker-live |
+| R26-4 | L | fixed | 48d0bd7 | 2 static tests (step shell run) | yes | — |
+| W25-EB-R1, -R2 | L | fixed | 21b6750 | — (docs) | read against the code | — |
+| W25-EB-R3, R25B-2 | L | fixed | 140303c | self-test | strict lint 0 | hygiene-static |
+| F-11 | L | fixed | d03a16c | self-test | no __pycache__ left | — |
+| C4-4 | L | fixed | a8bf717 | — (docs) | — | — |
+| C5-8b | L | fixed | 39f131b | self-test | git check-ignore | — |
+| N25-D-4, N25-D-1, N25-D-2, N24-D-1-res, DLV-HOST | L | fixed | ab1b7a8 | 6 tests | rounds 24-26b on the staged tree | delivery-py |
+| N25-X-1 | M | fixed | 9f03317 | mutants x20/x50 now fail | 4 suites | — |
+| XS-PYC | L | fixed | 02c60d0 | before/after run (not in-suite) | 3 suites | — |
+| R26-1 | M | fixed | 0652bc4 | portable-path self-test | macOS | hygiene-static |
+| CI3-6 (new; R26-5's W26-EA-1) | H | fixed | 982d291 | live test failed here | fulfillment 1089 passed | fulfillment macos-26 |
+| CI3-5 (new) | H | in tree | — | not reproducible here | regex tests pass; full suite running | creative macos-26 |
+| W26B-1 (new) | M | in tree | — | plateau test 5/5 fail here | 3/3 pass | — |
 
 ### W26-ST (Medium) — fixed
 
@@ -75,6 +112,27 @@ Status per OPEN.md line. `fixed` = commit on fix26b with a failing-first test wh
 - Not verified here: the Linux run of the self-test (CI `hygiene-static`).
 
 ## New findings
+
+CI #3 failures not in OPEN.md, each recorded there as High (each turns the merge gate `required` red — the class
+AEGIS r25 graded High for F-1) and closed by the commit that fixes it:
+
+- **CI3-1** ledger-rust macos-26 — fixed (fc2613e). Test port files collided (macOS clock = µs; same label) so
+  one test drove another's server. `common::unique_suffix()`; `tests/harness_names.rs` failed first (3511/4000
+  distinct). Also allowed clippy's macOS-only `unnecessary_cast` (the job's next step would have failed).
+- **CI3-2** delivery-py ubuntu (3.12, 3.13) — fixed (6b4d5ac). Runner has Docker → "available"; seven tests made
+  `/tmp/worktrees`. `base_env` sets an unreachable `DOCKER_HOST` and refuses a tmp outside the suite's temp dir.
+  Reproduced the `/tmp/worktrees` entry with a6aee4e's tests on this Mac; gone with the fix. Ubuntu leg: CI.
+- **CI3-3** delivery-py macos-26 — fixed in the tree, committed after the full suite. Two causes: (a) the argv
+  Docker double ran the adapter's GNU-only `mv -f -T` and `find -printf '%p\n'` with macOS's BSD tools → every
+  harness run HARNESS_ERROR "write failed (mv)" (12 adversarial tests + g14); the double now gives those two
+  spellings their GNU meaning when the host tool is not GNU (production is Debian, unchanged); (b) the service
+  refused to start on macOS: CoreFoundation writes `__CF_USER_TEXT_ENCODING` into CPython's own environment —
+  allowed on darwin only, value-checked (product change in `config.py`, ADR 0011 item 18 and README updated).
+  Four affected files on macOS: a6aee4e 14 failed + 4 errors → 0.
+- **CI3-4** delivery-docker-live — fixed (48d0bd7). `apt-get purge curl wget`: wget never installed. Build: CI.
+- **CI3-5** creative-py macos-26 — `(.)\1+` growth 98.95 ≥ 64 on combining marks (open; see the regex items).
+- **CI3-6** fulfillment-py macos-26 — fix8 128-sender: phys_footprint stays at its peak (the W26-EA-1 hypothesis
+  in R26-5 confirmed by CI); open.
 
 ## What passed / failed / could not be verified / waiting on the founder
 
