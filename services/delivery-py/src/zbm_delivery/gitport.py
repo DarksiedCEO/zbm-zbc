@@ -13,8 +13,9 @@ has nowhere to go even if the classifier is wrong; a linked worktree shares the 
 repository itself must be remote-less); ``archive`` (``git archive --format=tar <sha> -- <path>``) is the read the
 engine's split-diff verification checkout is built from (R1).
 
-Round 19 R11 (N19-A-7): every git command runs with a PRIVATE empty ``HOME`` (a temp directory the port owns),
-``GIT_CONFIG_GLOBAL=/dev/null``, ``GIT_CONFIG_NOSYSTEM=1`` and ``-c core.hooksPath=<empty engine dir>`` /
+Round 19 R11 (N19-A-7): every git command runs with a ``HOME`` holding nothing (since fix wave 26b, C6-3-res:
+``/nonexistent``, a home that does not exist; before, a temp directory the port owned),
+``GIT_CONFIG_GLOBAL=/dev/null``, ``GIT_CONFIG_NOSYSTEM=1`` and ``-c core.hooksPath=/dev/null`` (no hooks) /
 ``-c core.fsmonitor=false`` on every argv — a ``.gitconfig`` or a hooks directory tracked in the worktree can
 neither become git's global config nor run a hook on the engine's commit.
 """
@@ -78,7 +79,7 @@ def _isolation() -> tuple[str, str]:
 
 
 def isolation_args() -> tuple[str, ...]:
-    """The ``-c`` options on every git argv (R11): the empty hooks dir, no fsmonitor; fix wave 24 (E3, N23-D-2):
+    """The ``-c`` options on every git argv (R11): no hooks (/dev/null), no fsmonitor; fix wave 24 (E3, N23-D-2):
     rename/copy detection off for every command — a file moved or copied into src/ is a full addition (every line
     shown, every line scanned), never a "similarity index 100%" with no + lines."""
     return ("-c", f"core.hooksPath={_isolation()[1]}", "-c", "core.fsmonitor=false", "-c", "diff.renames=false",

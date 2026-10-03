@@ -559,9 +559,10 @@ directory with it when computing a verdict.**
   with `op: cp_in|cp_out`, `kind: sandbox_cp` BEFORE the daemon call, and a dead ledger stops it; `destroy` with a
   failing removal AND a failing ledger marks the run `unrecorded_failure` through `on_ledger_failure` instead of
   being swallowed.
-- **R11 — git isolation** (`gitport.py`). Every git command runs with a private empty `HOME` (a per-process temp
-  directory), `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `XDG_CONFIG_HOME` under that HOME, and
-  `-c core.hooksPath=<empty engine dir> -c core.fsmonitor=false` first on the argv (`git archive` included). The
+- **R11 — git isolation** (`gitport.py`). Every git command runs with a `HOME` that holds nothing (a per-process
+  temp directory until fix wave 26b; `/nonexistent` since, C6-3-res), `GIT_CONFIG_GLOBAL=/dev/null`,
+  `GIT_CONFIG_NOSYSTEM=1`, `XDG_CONFIG_HOME` under that HOME, and `-c core.hooksPath=<empty engine dir>` (since 26b
+  `/dev/null`) `-c core.fsmonitor=false` first on the argv (`git archive` included). The
   reviewer's gitchk repository (a tracked `.gitconfig` with `core.hooksPath=.hooks` and a `pre-commit` hook that
   prints `HOOK-RAN`) runs the hook under the wave-19 environment and does not under the engine's
   (`test_n19_a7_*`).
