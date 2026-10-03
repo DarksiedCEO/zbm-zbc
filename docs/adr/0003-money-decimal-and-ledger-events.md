@@ -622,8 +622,8 @@ a symlink (macOS `/var` -> `/private/var`) must pass the canonical path: the int
 from `common::real_temp_dir()` (the canonicalized temp dir). Tests (`tests/server_port_file.rs`, +4): a symlinked
 parent directory is refused and the file behind it untouched; a symlink deeper in the parent path is refused; a
 relative path in a real directory still works; SIGHUP and SIGQUIT remove the file. On the 540a64e server the first,
-second and fourth fail; the third passes (a regression guard). `cargo test --locked`: 60 unit + 53 integration
-tests, 0 failed; `cargo clippy --locked --all-targets -- -D warnings` clean (Linux only: the non-Linux branch —
+second and fourth fail; the third passes (a regression guard). `cargo test --locked` (recorded in a5fb681): 60
+unit + 53 integration tests, 0 failed; `cargo clippy --locked --all-targets -- -D warnings` clean (Linux only: the non-Linux branch —
 `O_RDONLY` instead of `O_PATH` — is not compiled on this box; a search-only ancestor directory would be refused there).
 The reviewers' `g7_portfile.py` against the release binary: 17/18, the 18th being its item 3b ("SIGTERM removes it
 through the dir link"), which now CANNOT happen — the file behind the link is never touched; `g7_dirlink.py` 3/3

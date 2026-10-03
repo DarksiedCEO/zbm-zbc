@@ -587,6 +587,36 @@ class Static(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("L3-counts README.md:1", out)
 
+    def test_f9_aliased_clocks_helper_deltas_and_a_port_in_any_name_are_caught(self):
+        # F-9 (AEGIS r25, logs/plant_lint.log): the lint read `time.monotonic()` / a bare `monotonic()` only, deltas
+        # spelled in the test itself only, and ports in PORT-named places only. Planted: an aliased module, an aliased
+        # function, a delta a helper returns, and a port held in an ordinary name.
+        (self.t / "test_evasions.py").write_text(
+            "import socket\nimport time as tm\nfrom time import monotonic as now, perf_counter as pc\n\n"
+            "def took(t0):\n    return tm.monotonic() - t0\n\n"
+            "def test_alias_module():\n    t0 = tm.monotonic()\n    assert tm.monotonic() - t0 < 1.0\n\n"
+            "def test_alias_function():\n    t0 = now()\n    d = now() - t0\n    assert d < 2.0\n\n"
+            "def test_alias_function_2():\n    t0 = pc()\n    assert pc() - t0 <= 3\n\n"
+            "def test_helper_delta():\n    t0 = tm.monotonic()\n    assert took(t0) < 4.0\n\n"
+            "def test_port_in_a_name():\n    p = 20111\n    s = socket.socket()\n    s.bind(('127.0.0.1', p))\n\n"
+            "def test_fine():\n    t0 = now()\n    assert now() - t0 >= 0\n    q = 0\n    socket.socket().bind(('127.0.0.1', q))\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for func in ("test_alias_module", "test_alias_function", "test_alias_function_2", "test_helper_delta"):
+            self.assertRegex(out, rf"L1-wallclock services/probe-py/tests/test_evasions\.py:\d+: in {func}:")
+        self.assertRegex(out, r"L2-ports services/probe-py/tests/test_evasions\.py:\d+: in test_port_in_a_name:")
+        self.assertNotIn("in test_fine", out)
+
+    def test_l3_a_commit_pins_the_counts_of_its_own_sentence_only(self):
+        # F-9: any resolvable commit id anywhere in a paragraph exempted every count in it
+        head = subprocess.run(["git", "rev-parse", "--short=7", "HEAD"], cwd=self.r.root, capture_output=True,
+                              text=True, check=True).stdout.strip()
+        (self.r.root / "README.md").write_text(f"At {head}: `cargo test`: 84 passed. The suite now has 123 tests.\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("'123 tests'", out)
+        self.assertNotIn("'84 passed'", out)
+
     def test_strict_allowlist_flags_an_expected_skip_no_source_can_produce(self):
         # W25-EB-R3: `lint --strict-allowlist` checked only L1/L2 entries, so a stale expected-skip entry (delivery-py's
         # "inner half of test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests", no such skip since d0876fd)

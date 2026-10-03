@@ -558,12 +558,43 @@ def cmd_run(a: argparse.Namespace) -> int:
 TIME_FUNCS = {"time", "perf_counter", "monotonic", "time_ns", "perf_counter_ns", "monotonic_ns"}
 
 
-def _is_clock_call(node: ast.AST) -> bool:
+def _clock_aliases(tree: ast.AST) -> tuple[frozenset[str], frozenset[str]]:
+    """(names bound to the time module, names bound to one of its clock functions) by this module's imports — fix
+    wave 26b (F-9): `import time as tm` and `from time import monotonic as now` read the same clock."""
+    modules, funcs = {"time", "_time"}, {"perf_counter", "monotonic", "perf_counter_ns", "monotonic_ns"}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name == "time":
+                    modules.add(a.asname or "time")
+        elif isinstance(n, ast.ImportFrom) and n.module == "time":
+            for a in n.names:
+                if a.name in TIME_FUNCS:
+                    funcs.add(a.asname or a.name)
+    return frozenset(modules), frozenset(funcs)
+
+
+def _delta_helpers(tree: ast.AST, modules: frozenset[str], funcs: frozenset[str]) -> frozenset[str]:
+    """Functions of this module that RETURN a clock delta (`return time.monotonic() - t0`): a call to one is a delta
+    (fix wave 26b, F-9: `assert took(t0) < 1` read as no clock at all)."""
+    out = set()
+    for f in ast.walk(tree):
+        if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for r in ast.walk(f):
+                if isinstance(r, ast.Return) and isinstance(r.value, ast.BinOp) and isinstance(r.value.op, ast.Sub) \
+                        and (_is_clock_call(r.value.left, modules, funcs) or _is_clock_call(r.value.right, modules, funcs)):
+                    out.add(f.name)
+    return frozenset(out)
+
+
+def _is_clock_call(node: ast.AST, modules: frozenset[str] = frozenset({"time", "_time"}),
+                   funcs: frozenset[str] = frozenset({"perf_counter", "monotonic", "perf_counter_ns",
+                                                      "monotonic_ns"})) -> bool:
     if isinstance(node, ast.Call):
         f = node.func
         if isinstance(f, ast.Attribute) and f.attr in TIME_FUNCS:
-            return isinstance(f.value, ast.Name) and f.value.id in ("time", "_time")
-        if isinstance(f, ast.Name) and f.id in ("perf_counter", "monotonic", "perf_counter_ns", "monotonic_ns"):
+            return isinstance(f.value, ast.Name) and f.value.id in modules
+        if isinstance(f, ast.Name) and f.id in funcs:
             return True
         if isinstance(f, ast.Attribute) and f.attr == "time" and isinstance(f.value, ast.Call):
             # loop.time() / asyncio.get_running_loop().time()
@@ -625,10 +656,14 @@ class _ClockFlow(ast.NodeVisitor):
     """Per function: names bound to clock readings (t0 = time.monotonic()) and to clock deltas
     (took = time.monotonic() - t0); then flags upper-bound assertions of a delta against a literal."""
 
-    def __init__(self, path: str, lines: list[str], module_consts: frozenset[str] = frozenset()):
+    def __init__(self, path: str, lines: list[str], module_consts: frozenset[str] = frozenset(),
+                 tree: ast.AST | None = None):
         self.path, self.lines, self.hits = path, lines, []
         self.func_stack: list[str] = []
         self.module_consts = module_consts
+        # fix wave 26b (F-9): the module's clock aliases and the helpers that return a clock delta
+        self.modules, self.funcs = _clock_aliases(tree) if tree is not None else _clock_aliases(ast.Module([], []))
+        self.helpers = _delta_helpers(tree, self.modules, self.funcs) if tree is not None else frozenset()
 
     def _scan_function(self, node):
         self.func_stack.append(node.name)
@@ -641,13 +676,18 @@ class _ClockFlow(ast.NodeVisitor):
         def lit(e: ast.AST) -> bool:
             return _numeric_literal(e, consts)
 
+        def clock(e: ast.AST) -> bool:
+            return _is_clock_call(e, self.modules, self.funcs)
+
         def is_delta(e: ast.AST) -> bool:
             if isinstance(e, ast.Name):
                 return e.id in deltas
+            if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in self.helpers:
+                return True                                          # a helper that returns a clock delta (F-9)
             if isinstance(e, ast.BinOp) and isinstance(e.op, ast.Sub):
                 lhs, rhs = e.left, e.right
-                lc = _is_clock_call(lhs) or (isinstance(lhs, ast.Name) and lhs.id in stamps)
-                rc = _is_clock_call(rhs) or (isinstance(rhs, ast.Name) and rhs.id in stamps)
+                lc = clock(lhs) or (isinstance(lhs, ast.Name) and lhs.id in stamps)
+                rc = clock(rhs) or (isinstance(rhs, ast.Name) and rhs.id in stamps)
                 return lc and rc
             if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in ("round", "abs", "float"):
                 return bool(e.args) and is_delta(e.args[0])
@@ -658,14 +698,14 @@ class _ClockFlow(ast.NodeVisitor):
         for sub in ast.walk(node):
             if isinstance(sub, ast.Assign) and len(sub.targets) == 1 and isinstance(sub.targets[0], ast.Name):
                 name = sub.targets[0].id
-                if _is_clock_call(sub.value):
+                if clock(sub.value):
                     stamps.add(name)
                 elif is_delta(sub.value):
                     deltas.add(name)
             elif isinstance(sub, ast.Assign) and len(sub.targets) == 1 and isinstance(sub.targets[0], ast.Tuple) \
                     and isinstance(sub.value, ast.Tuple):
                 for t, v in zip(sub.targets[0].elts, sub.value.elts):
-                    if isinstance(t, ast.Name) and _is_clock_call(v):
+                    if isinstance(t, ast.Name) and clock(v):
                         stamps.add(t.id)
 
         def upper_bound(cmp: ast.Compare) -> bool:
@@ -749,6 +789,16 @@ def _port_literal(node: ast.AST) -> int | None:
 
 def _py_port_hits(tree: ast.AST) -> list[tuple[int, str, str]]:
     hits = []
+    # fix wave 26b (F-9): a name bound to a port-range literal anywhere in the module, then used as the port of a
+    # bind/connect (`p = 20111; s.bind((host, p))`), is a hard-coded port whatever the name
+    held: dict[str, int] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Assign):
+            pv = _port_literal(n.value) if isinstance(n.value, ast.Constant) and isinstance(n.value.value, int) else None
+            if pv:
+                for tg in n.targets:
+                    if isinstance(tg, ast.Name):
+                        held[tg.id] = pv
     funcs: dict[int, str] = {}
     for f in ast.walk(tree):
         if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -762,7 +812,8 @@ def _py_port_hits(tree: ast.AST) -> list[tuple[int, str, str]]:
             name = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else "")
             if name in ("bind", "connect", "connect_ex", "create_connection") and node.args and \
                     isinstance(node.args[0], ast.Tuple) and len(node.args[0].elts) >= 2:
-                v = _port_literal(node.args[0].elts[1])
+                port = node.args[0].elts[1]
+                v = _port_literal(port) or (held.get(port.id) if isinstance(port, ast.Name) else None)
                 if v:
                     hits.append((node.lineno, where, f"{name}((host, {v}))"))
             for kw in node.keywords:
@@ -920,6 +971,17 @@ def _doc_files() -> list[Path]:
     return [p for p in out if (REPO / p).exists()]
 
 
+_SENTENCE_END = re.compile(r"[.!?;](?=\s)")
+
+
+def _sentence(flat: str, start: int, end: int) -> str:
+    """The sentence of `flat` around [start, end): from after the last `.`, `!`, `?` or `;` followed by white space
+    before it to the next one after it (a version number like 3.13.9 or a path like a.py is not an end)."""
+    lo = max((m.end() for m in _SENTENCE_END.finditer(flat, 0, start)), default=0)
+    nxt = _SENTENCE_END.search(flat, end)
+    return flat[lo:nxt.start() + 1 if nxt else len(flat)]
+
+
 def lint_counts(allow: dict) -> list[str]:
     problems = []
     cache: dict = {}
@@ -940,13 +1002,14 @@ def lint_counts(allow: dict) -> list[str]:
                 continue
             # an id made only of digits counts too (fix wave 26b, W26-ST): ~1 short id in 27 has no a-f, and skipping
             # those lost the pin then; a digit run that is not a commit still resolves to nothing
-            pinned = any(_commit_exists(h, cache) for h in COMMIT_RE.findall(block))
-            if pinned:
-                continue
             # matched over the whole paragraph (line breaks as spaces, offsets kept), so a count wrapped across two
             # lines ("`cargo test`: 84\n  passed") is caught too (fix wave 25, E-C); reported at its first line
             flat = block.replace("\n", " ")
             for m in COUNT_CLAIM.finditer(flat):
+                # fix wave 26b (F-9): a commit id pins the counts of ITS sentence only — any resolvable id anywhere in
+                # the paragraph used to exempt every count in it
+                if any(_commit_exists(h, cache) for h in COMMIT_RE.findall(_sentence(flat, m.start(), m.end()))):
+                    continue
                 i = a + block.count("\n", 0, m.start())
                 snippet = " ".join(m.group(0).split())
                 e = _allowed(allow.get("allow", []), "L3-counts", str(rel), "<doc>", lines[i])
@@ -1057,7 +1120,7 @@ def cmd_lint(a: argparse.Namespace) -> int:
                 problems.append(violation("L0-parse", str(rel), str(e)))
                 continue
             if "L1" in rules:
-                v = _ClockFlow(str(rel), lines, _literal_names(tree))
+                v = _ClockFlow(str(rel), lines, _literal_names(tree), tree)
                 v.visit(tree)
                 for ln, func in v.hits:
                     e = _allowed(entries, "L1-wallclock", str(rel), func, lines[ln - 1])

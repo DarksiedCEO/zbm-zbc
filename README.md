@@ -96,7 +96,7 @@ backward-compatibility proof are in
   section 1a; over `"999999999999999.99"` is a 400), checked against every
   `ledger_append_expected` verdict in `fixtures/money_vectors.json`;
   already-persisted amounts (legacy `1e20`, over-bound strings the
-  fix-wave-1 binary accepted) still load and verify. `cargo test`: 84
+  fix-wave-1 binary accepted) still load and verify. At 19f7320, `cargo test`: 84
   passed (56 unit, 8 `server_auth`, 8 `server_events`, 12
   `server_hardening`).
 - `apps/dashboard-ts`: `amount_usd: string`, displayed verbatim, never
@@ -118,9 +118,9 @@ domain-separated (`event|` prefix); events and the idempotency index
 survive restart. Field rules are in ADR 0003.
 
 **Verified Sep 24 2026** (commit 2dbce4d; historical counts, superseded by docs/test-counts.md):
-- `python3 -m pytest -q` (detection-py): 138 passed.
-- `go vet ./...` clean; `go test ./...` (orchestrator-go): 21 passed.
-- `cargo test` (ledger-rust): 55 passed (39 unit, 8 `server_auth`, 8
+- `python3 -m pytest -q` (detection-py) at 2dbce4d: 138 passed.
+- `go vet ./...` clean; `go test ./...` (orchestrator-go) at 2dbce4d: 21 passed.
+- `cargo test` (ledger-rust) at 2dbce4d: 55 passed (39 unit, 8 `server_auth`, 8
   `server_events`); `cargo clippy --all-targets`: no warnings.
 - `npm install` / `npx tsc --noEmit` / `npm run build` (dashboard-ts):
   clean; `npm audit`: 0 vulnerabilities.

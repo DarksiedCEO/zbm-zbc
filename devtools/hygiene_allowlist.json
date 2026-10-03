@@ -21,6 +21,13 @@
       "function": "slow_reader_does_not_block_others_and_is_cut_off",
       "contains": "elapsed < REQUEST_DEADLINE",
       "reason": "Ordering, not speed: the slow reader can only be cut by the 15 s request deadline, which starts after `since`; others answered before since + 15 s were answered before the cut, which a server serialising them behind the slow reader cannot do. Bound = the server's own deadline (const = server.rs REQUEST_DEADLINE); the work inside it is one /health and one append. Reviewed fix wave 25 (E-C)."
+    },
+    {
+      "rule": "L1-wallclock",
+      "path": "services/creative-py/tests/test_fix_wave_5.py",
+      "function": "test_new3_idle_keep_alive_is_closed_and_keep_alive_still_works",
+      "contains": "took <= KEEP_ALIVE_TIMEOUT_S + 2",
+      "reason": "Ordering, not speed: the idle connection must be closed BY the server's own keep-alive deadline (KEEP_ALIVE_TIMEOUT_S, pinned equal to serve.KEEP_ALIVE_TIMEOUT_S by test_new3_launcher_config_is_pinned) plus 2 s slack, not by the client's 5 s socket timeout or by the test giving up; _closed_within waits that long at most (a stall bound). Visible to L1 since fix wave 26b (F-9: a delta returned by a helper is a delta); the construct is unchanged since wave 25."
     }
   ],
   "expected_skips": {

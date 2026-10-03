@@ -824,7 +824,7 @@ numbers were the stopped engineer's own and are not repeated here.
   regression either (settle <= 9.5 s, nothing unanswered) — round 24 measured 3 busy loops plus an uncontrolled
   co-tenant. So this campaign shows the head is no worse than both bases at R-LOAD; it does not show that the
   wave-25 change is what removed a regression.
-- `test_live_128_senders_..._cut` alone, 20 runs: **20/20 passed**; growth 63-65 MiB (kernel VmHWM), settled at
+- `test_live_128_senders_..._cut` alone at head ef14a52, 20 runs: **20/20 passed**; growth 63-65 MiB (kernel VmHWM), settled at
   7.5-8.5 s against the fixed 13 s bound; the server's main thread waited 0.49-0.72 s in the run queue per burst
   (printed only); load average 2.4-3.0.
 

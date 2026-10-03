@@ -205,6 +205,8 @@ The test counts are a committed, generated file: after a change that adds or rem
 branches that each changed tests are merged, the merge commit regenerates the rows (CI says which row and the new
 number).
 
+What the static rules cannot see (fix wave 26b, H9-R3m / F-9 — stated, not fixed): L1 in Python follows clock readings through this module's imports (`import time as tm`, `from time import monotonic as now`), names, and helpers that `return` a clock delta; it does not follow a delta stored in an attribute or a container, passed to another function, or a bound held in a local name computed from a constant (`bound = TIMEOUT + 2`). L1 for Rust, Go and TypeScript is line patterns over `elapsed`, `time.Since`, `open` and `Date.now()` only — a delta in another name is not seen. L2 finds a port literal, or a name bound to one, at a bind/connect, in a PORT-named place or a literal address; a port computed at run time or passed as an argument is not seen. L3 reads English count phrases (`N tests`, `N passed`, `N unit`, `N integration`, `N/M passed`) and lets a resolvable commit id pin the counts of its own sentence only.
+
 What the dynamic rules cannot see: a file a suite writes OUTSIDE the checkout, its TMPDIR and `/tmp` (e.g. `~/.cache`,
 `~/.config/go/telemetry` — the Go job sets `GOTELEMETRY=off`); on macOS (no subreaper there) a process that left
 the suite's process group AND either scrubbed its environment or is an Apple platform binary (`/bin/sleep`, `/bin/sh`,
