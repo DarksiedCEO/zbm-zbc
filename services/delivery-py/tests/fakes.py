@@ -105,6 +105,45 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+_GNU_TOOLS: dict = {}
+
+
+def _host_tool_is_gnu(tool: str) -> bool:
+    if tool not in _GNU_TOOLS:
+        try:
+            out = subprocess.run([tool, "--version"], capture_output=True, timeout=10).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            out = b""
+        _GNU_TOOLS[tool] = b"GNU" in out
+    return _GNU_TOOLS[tool]
+
+
+def _gnu_find(cmd: list) -> list:
+    """Wave 26b (CI #3 macos-26): the sandbox image is Debian, so the adapter's ``find … -printf '%p\\n'`` is GNU
+    find; on a host whose find is not (BSD find has no -printf) the double runs ``-print``, which prints exactly
+    ``%p\\n``."""
+    if cmd[:1] != ["find"] or "-printf" not in cmd or _host_tool_is_gnu("find"):
+        return cmd
+    i = cmd.index("-printf")
+    if cmd[i + 1:i + 2] != ["%p\n"]:
+        return cmd                     # any other format: left to fail loudly, never guessed
+    return cmd[:i] + ["-print"] + cmd[i + 2:]
+
+
+def _gnu_mv_no_target_dir(src: str, dst: str) -> ExecResult:
+    """Wave 26b (CI #3 macos-26): GNU ``mv -f -T -- SRC DST`` (the adapter's ``put_bytes``, R7) on a host whose mv
+    has no -T (BSD mv). -T: DST is the name itself, never a directory to move INTO — a directory at DST is refused
+    for a non-directory SRC (an empty one is replaced by a directory SRC, as rename(2) does); a file or symlink at DST
+    is replaced in one rename(2), the link itself, never its target."""
+    try:
+        if os.path.isdir(dst) and not os.path.islink(dst) and not os.path.isdir(src):
+            return ExecResult(1, b"", f"mv: cannot overwrite directory '{dst}' with non-directory\n".encode())
+        os.replace(src, dst)
+    except OSError as exc:
+        return ExecResult(1, b"", f"mv: {exc.strerror}\n".encode())
+    return ExecResult(0, b"", b"")
+
+
 class FakeDockerCli:
     """See the module docstring. ``daemon=False`` simulates ``Cannot connect to the Docker daemon``."""
 
@@ -299,6 +338,9 @@ class FakeDockerCli:
         if self.exec_fail_next is not None:
             code, self.exec_fail_next = self.exec_fail_next, None
             return ExecResult(code, b"", b"simulated exec failure\n")
+        cmd = _gnu_find(cmd)
+        if cmd[:4] == ["mv", "-f", "-T", "--"] and len(cmd) == 6 and not _host_tool_is_gnu("mv"):
+            return _gnu_mv_no_target_dir(os.path.join(local_cwd, cmd[4]), os.path.join(local_cwd, cmd[5]))
         full_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": vol, "LANG": "C.UTF-8",
                     "PYTHONDONTWRITEBYTECODE": "1", **self.env_files.get(name, {}), **self.toolchain_env(), **env}
         try:

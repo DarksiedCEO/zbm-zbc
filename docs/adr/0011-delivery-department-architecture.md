@@ -187,6 +187,9 @@ gate).
     Wave 26b: on macOS only, `__CF_USER_TEXT_ENCODING` too, and only as CoreFoundation's `0xH:0xH:0xH` value —
     CoreFoundation writes it into CPython's own environment at interpreter start (even under `env -i`), so
     without it the service refused every start on a Mac (CI #3, delivery-py macos-26).
+    Wave 26b: on macOS only, `__CF_USER_TEXT_ENCODING` too, and only as CoreFoundation's `0xH:0xH:0xH` value —
+    CoreFoundation writes it into CPython's own environment at interpreter start (even under `env -i`), so
+    without it the service refused every start on a Mac (CI #3, delivery-py macos-26).
 19. **The service sets deer-flow's environment itself** after the gate: `DEER_FLOW_EXTENSIONS_CONFIG_PATH`,
     `DEER_FLOW_HOME` (thread data under the data dir), `DEER_FLOW_CONFIG_PATH`, `DLV_SKILLS_ROOT`,
     `DLV_SANDBOX_IMAGE` (the YAML references the last two as `$NAME`; deer-flow substitutes at load).
