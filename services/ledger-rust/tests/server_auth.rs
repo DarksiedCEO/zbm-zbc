@@ -40,7 +40,7 @@ impl Drop for ServerHandle {
 /// port in LEDGER_PORT_FILE; there is no pick-then-release `free_port()` race.
 fn start_server(token: &str, bind_addr: Option<&str>) -> ServerHandle {
     let pf = PortFile::new("auth");
-    let log_path = std::env::temp_dir().join(format!("ledger_test_auth_{}.jsonl", common::unique_suffix()));
+    let log_path = common::scratch_dir().join(format!("ledger_test_auth_{}.jsonl", common::unique_suffix()));
     let _ = std::fs::remove_file(&log_path);
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_server"));

@@ -36,7 +36,7 @@ impl Drop for ScratchFile {
 }
 
 fn scratch_log(label: &str) -> ScratchFile {
-    let p = std::env::temp_dir().join(format!("ledger_events_it_{label}_{}.jsonl", common::unique_suffix()));
+    let p = common::scratch_dir().join(format!("ledger_events_it_{label}_{}.jsonl", common::unique_suffix()));
     let _ = std::fs::remove_file(&p);
     ScratchFile(p)
 }

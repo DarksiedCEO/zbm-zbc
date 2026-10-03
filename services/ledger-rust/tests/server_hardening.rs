@@ -73,7 +73,7 @@ impl Scratch {
 }
 
 fn scratch(label: &str) -> Scratch {
-    let p = std::env::temp_dir().join(format!("ledger_hardening_{label}_{}.jsonl", common::unique_suffix()));
+    let p = common::scratch_dir().join(format!("ledger_hardening_{label}_{}.jsonl", common::unique_suffix()));
     let _ = std::fs::remove_file(&p);
     Scratch(p)
 }

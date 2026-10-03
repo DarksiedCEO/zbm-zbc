@@ -35,6 +35,32 @@ pub fn unique_suffix() -> String {
     format!("{}_{nanos}_{n}", std::process::id())
 }
 
+static SCRATCH_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+extern "C" fn remove_scratch_dir() {
+    if let Some(d) = SCRATCH_DIR.get() {
+        let _ = std::fs::remove_dir(d); // only when empty: a file left in it is a leak the hygiene check reports
+    }
+}
+
+/// This process's one scratch directory under the (canonical) temp dir, made on first use and removed at exit when
+/// empty (fix wave 26b, scout C C1-1: every port file and scratch log went straight into the temp dir, so a run killed
+/// outside the hygiene wrapper left many top-level entries; now at most this one).
+pub fn scratch_dir() -> PathBuf {
+    SCRATCH_DIR
+        .get_or_init(|| {
+            let d = real_temp_dir().join(format!("zbm-ledger-tests-{}", unique_suffix()));
+            std::fs::create_dir_all(&d).expect("scratch dir");
+            // SAFETY: registers a plain `extern "C" fn()` with the C library's exit handlers (run by
+            // std::process::exit, which the test harness ends with); it only calls remove_dir on a path set once.
+            unsafe {
+                libc::atexit(remove_scratch_dir);
+            }
+            d
+        })
+        .clone()
+}
+
 /// A port file next to the test's scratch files; removed on drop.
 pub struct PortFile(pub PathBuf);
 
@@ -46,7 +72,7 @@ impl Drop for PortFile {
 
 impl PortFile {
     pub fn new(label: &str) -> PortFile {
-        let p = real_temp_dir().join(format!("ledger_port_{label}_{}.port", unique_suffix()));
+        let p = scratch_dir().join(format!("ledger_port_{label}_{}.port", unique_suffix()));
         let _ = std::fs::remove_file(&p);
         PortFile(p)
     }

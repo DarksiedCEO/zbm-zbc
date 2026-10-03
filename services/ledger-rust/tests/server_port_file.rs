@@ -27,7 +27,7 @@ impl Drop for Scratch {
 }
 
 fn scratch(label: &str) -> Scratch {
-    let d = common::real_temp_dir().join(format!("ledger_pf_{label}_{}", common::unique_suffix()));
+    let d = common::scratch_dir().join(format!("ledger_pf_{label}_{}", common::unique_suffix()));
     std::fs::create_dir_all(&d).unwrap();
     Scratch(d)
 }
