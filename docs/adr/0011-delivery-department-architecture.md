@@ -92,8 +92,11 @@ ledger-anchored local log with the instance lease and Andre's reconcile).
 | deer-flow commit (`DLV_DEERFLOW_COMMIT`, G9) | `345f08be00c8a9495079b732a39b46aa9af1584e` |
 | service image digest | **not resolvable here** (Docker Hub is refused by this box's proxy; no daemon): the digest is a required `--build-arg BASE_DIGEST` and is recorded here at first build |
 | sandbox image digest | **not resolvable here** (same); `DLV_SANDBOX_IMAGE` must name it |
-| sandbox base `python:3.12-slim` (image index, `--build-arg BASE_DIGEST`) | `dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016` (recorded 2026-10-02, fix wave 26a W26-3: the `python:3.12-slim` entry of `docker-library/repo-info` `repos/python/remote/3.12-slim.md`, fetched 2026-10-02 11:49 PT; CI #2 (run 37043738804, 2026-10-02) resolved a digest starting `dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4` — the same as far as its annotation shows. Docker Hub itself is refused by this box's proxy. The build uses the `DLV_SANDBOX_BASE_DIGEST` repository variable; set it to this value; `ci.yml` `RECORDED_BASE_DIGEST` must equal this row) |
+| sandbox base `python:3.12-slim` (image index, `--build-arg BASE_DIGEST`) | `dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016` (recorded 2026-10-02, fix wave 26a W26-3: the `python:3.12-slim` entry of `docker-library/repo-info` `repos/python/remote/3.12-slim.md`, fetched 2026-10-02 11:49 PT; CI #2 (run 37043738804, 2026-10-02) resolved a digest starting `dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4` — the same as far as its annotation shows. Docker Hub itself is refused by this box's proxy. Fix wave 26b (R26-4): the build always uses `ci.yml` `RECORDED_BASE_DIGEST`, which must equal this row; the `DLV_SANDBOX_BASE_DIGEST` repository variable, if set, must equal it too or the step fails — before, the variable was used unchecked and, unset, the build took whatever `python:3.12-slim` was current) |
 | sandbox Node tarball `node-v22.22.2-linux-x64.tar.xz` (`--build-arg NODE_SHA256`) | `88fd1ce767091fd8d4a99fdb2356e98c819f93f3b1f8663853a2dee9b438068a` (recorded 2026-10-02, fix wave 26a W26-3: the `SHASUMS256.txt` of v22.22.2 as published in the signed release post `nodejs/nodejs.org` `apps/site/pages/en/blog/release/v22.22.2.md`; fetched 2026-10-02 11:49 PT; `gpg --verify` of that clearsigned block: good signature, key `890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4` (RafaelGSS), which `nodejs/release-keys` `keys.list` lists. `https://nodejs.org/dist/v22.22.2/SHASUMS256.txt` itself is refused by this box's proxy. `ci.yml` `NODE_VERSION` / `NODE_SHA256` must equal this row) |
+| sandbox Go tarball `go1.23.1.linux-amd64.tar.gz` (`--build-arg GO_SHA256`) | `49bbb517cfa9eee677e1e7897f7cf9cfdbcf49e05f61984a2789136de359f9bd` (recorded 2026-10-03, fix wave 26b W26-3b: the `sha256` of that file in `https://go.dev/dl/?mode=json&include=all`, fetched 2026-10-02 ~23:20 PT, and the sha256 of the tarball downloaded from `https://go.dev/dl/` at the same time — equal. `ci.yml` `GO_VERSION` / `GO_SHA256` must equal this row) |
+| sandbox rustup installer `rustup-init 1.29.1 (x86_64-unknown-linux-gnu)` (`--build-arg RUSTUP_INIT_SHA256`) | `dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71` (recorded 2026-10-03, fix wave 26b W26-3b: `https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init.sha256`, fetched 2026-10-02 ~23:20 PT, and the sha256 of the binary downloaded from the same directory — equal; 1.29.1 = `rustup/release-stable.toml` then. Replaces `curl https://sh.rustup.rs \| sh`. `ci.yml` `RUSTUP_VERSION` / `RUSTUP_INIT_SHA256` must equal this row) |
+| sandbox Rust toolchain (`--build-arg RUST_TOOLCHAIN`) | version `1.99.0`, not a hash (fix wave 26b W26-3b: was the floating `stable`; 1.99.0 = `dist/channel-rust-stable.toml` on 2026-10-02, the toolchain CI #3's ledger-rust ubuntu job built with; rustup checks each component against that release's manifest hashes. `ci.yml` `RUST_TOOLCHAIN` must equal this row) |
 
 Every prompt file's sha256 beside its original's hash: `docs/evidence/dept28/prompts-sha256.txt`.
 
@@ -181,6 +184,9 @@ gate).
     INSIDE the sandbox before the decision (a symlink escape is denied).
 18. **Env allowlist companions.** `LC_ALL` and `LC_CTYPE` are allowed beside `LANG` (CPython's PEP 538 coercion
     writes `LC_CTYPE` into a child's environment); lower-case proxy names beside the upper-case ones.
+    Wave 26b: on macOS only, `__CF_USER_TEXT_ENCODING` too, and only as CoreFoundation's `0xH:0xH:0xH` value —
+    CoreFoundation writes it into CPython's own environment at interpreter start (even under `env -i`), so
+    without it the service refused every start on a Mac (CI #3, delivery-py macos-26).
 19. **The service sets deer-flow's environment itself** after the gate: `DEER_FLOW_EXTENSIONS_CONFIG_PATH`,
     `DEER_FLOW_HOME` (thread data under the data dir), `DEER_FLOW_CONFIG_PATH`, `DLV_SKILLS_ROOT`,
     `DLV_SANDBOX_IMAGE` (the YAML references the last two as `$NAME`; deer-flow substitutes at load).
@@ -212,11 +218,15 @@ gate).
 
 ## Spec items not built, and why
 
-- **Docker live properties (§C.2 list).** No daemon on this box; `tests/test_live_docker.py` skips with the exact
-  reason and lists the seven unproven properties. Proven here only by the argv-level double.
+- **Docker live properties (§C.2 list).** No daemon on the build box; `tests/test_live_docker.py` skips there with
+  the exact reason and lists the unproven properties, and is proven only by the argv-level double. Since fix wave
+  26a the CI job `delivery-docker-live` builds the sandbox image and runs those tests against it (a skip fails the
+  job); as of CI #3 (a6aee4e) the image build itself failed (fix wave 26b, CI3-4), so no CI run has proven them yet.
 - **pip-audit (§C.7.3).** Tool absent; `audit: not_run` reported, not green.
-- **Image digests (§C.7.5).** Not resolvable (registry blocked); both Dockerfiles require the digest as a build
-  argument and fail without it.
+- **Image digests (§C.7.5).** Both Dockerfiles require the base digest as a build argument and fail without it.
+  The sandbox base digest is recorded in "Pinned hashes" (fix wave 26a) and is the only one CI builds from (26b,
+  R26-4); the service image's base digest and both resulting image digests are still not recorded (the build box
+  has no daemon; CI's sandbox image is pinned per run by its local-registry digest).
 - **A retention job (D10)** — a later scheduler job; the number is recorded (`DLV_EVIDENCE_RETENTION_DAYS=2557`).
 - **The vault (D.1)** — `NotWiredVault`; `env:` key references only with `DLV_NON_PRODUCTION=1`.
 - **A real memory adapter (§C.6)** — the `MemoryPort` seam with `MemoryOff` and the tested contract only.
@@ -549,9 +559,10 @@ directory with it when computing a verdict.**
   with `op: cp_in|cp_out`, `kind: sandbox_cp` BEFORE the daemon call, and a dead ledger stops it; `destroy` with a
   failing removal AND a failing ledger marks the run `unrecorded_failure` through `on_ledger_failure` instead of
   being swallowed.
-- **R11 — git isolation** (`gitport.py`). Every git command runs with a private empty `HOME` (a per-process temp
-  directory), `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `XDG_CONFIG_HOME` under that HOME, and
-  `-c core.hooksPath=<empty engine dir> -c core.fsmonitor=false` first on the argv (`git archive` included). The
+- **R11 — git isolation** (`gitport.py`). Every git command runs with a `HOME` that holds nothing (a per-process
+  temp directory until fix wave 26b; `/nonexistent` since, C6-3-res), `GIT_CONFIG_GLOBAL=/dev/null`,
+  `GIT_CONFIG_NOSYSTEM=1`, `XDG_CONFIG_HOME` under that HOME, and `-c core.hooksPath=<empty engine dir>` (since 26b
+  `/dev/null`) `-c core.fsmonitor=false` first on the argv (`git archive` included). The
   reviewer's gitchk repository (a tracked `.gitconfig` with `core.hooksPath=.hooks` and a `pre-commit` hook that
   prints `HOOK-RAN`) runs the hook under the wave-19 environment and does not under the engine's
   (`test_n19_a7_*`).
@@ -1066,10 +1077,13 @@ is unchanged.
   verdict recorded for that admission id — the pre-wave-24 behaviour.
   Not done: the local log is not compacted — its lines are anchored in the evidence ledger (each line's sha256), so
   removing one would make the log fail its own verification; every record kind (idempotency included) grows the log
-  the same way, and each `admission_closed` line costs a RED container run or an operator's cancel. Residual (open,
-  `docs/findings/OPEN.md`): a CANCELLED admission whose answer has left the map is, if replayed identically much
-  later (20 000 closed admissions later), not refused as cancelled: it re-runs its containers and is refused by the
-  collision above or, failing that, judged afresh on its RED verdict — the operator's cancel is not what decides.
+  the same way, and each `admission_closed` line costs a RED container run or an operator's cancel. Fix wave 26b
+  (N24-D-1-res, AEGIS r25 N25-D-2): cancelled admission ids are kept apart in a set that is never evicted (one id per
+  operator cancel) and rebuilt from the cancel's `admission_closed` answer at start, so a cancelled admission
+  replayed after its answer left the map gets the cancel's 409 and nothing runs; before, it re-ran its containers and
+  was refused by the collision above or judged afresh (a concurrent replay could clear the first attempt's cancel
+  marker and be admitted — `tests/test_round26b.py`). Only a REFUSED admission whose answer left the map still re-runs
+  its containers, as described above.
 - **Nothing un-showable reaches a report (N24-D-2).** A binary file's content is not in a git diff ("Binary files … differ"),
   nor is a submodule's (a gitlink shows two commit ids), so a reviewer attesting to `src_diff_sha256` had not seen
   it, under a header that said "in full". Now a round whose source changes include a binary file (git's own rule: a
@@ -1077,7 +1091,12 @@ is unchanged.
   diff that still shows content git cannot show as text (`srcdiff.binary_paths`: binary files — a `.gitattributes`
   `binary`/`-diff` mark included — and submodule pointers) fails the run before any report is written
   (`EVIDENCE_UNAVAILABLE`, `binary_src_change`), and a legacy run re-scanned with one fails like any run that cannot
-  be re-scanned. The report header says "in full as text" and names what never appears in it.
+  be re-scanned. The report header says "in full as text" and names what never appears in it. Fix wave 26b (AEGIS
+  r25 N25-D-1): the same holds for a source file that is not UTF-8 — git's output was decoded with
+  `errors="replace"`, so its bytes reached the report as U+FFFD under that header. A round that writes one fails
+  `binary_src_change`; a source diff whose raw bytes are not UTF-8 in some file's section (`srcdiff.non_utf8_paths`
+  over `GitPort.range_diff_raw`) fails the run before the report (`EVIDENCE_UNAVAILABLE`, `non_utf8_src_change`),
+  and a re-scan with one fails. A UTF-8 file that contains U+FFFD itself is shown as it is.
 
 ## Fix wave 25, engineer E-B (Oct 1, 2026; scout B catalogue, scout C C6-3, H8 verification)
 
@@ -1117,7 +1136,11 @@ Evidence for every item below (failing-first runs on `0f017a7` / `b51f307`, muta
 - **No temp dir at import (scout C C6-3).** `gitport` made its isolation dir (`dlv-git-*`) when imported; a
   process killed by a signal left it behind whether or not it ever ran git. It is made on the first git command now
   (`gitport._isolation()`, `isolation_args()`); a process killed after its first git command can still leave one
-  (atexit is the only cleanup — residual, stated).
+  (atexit is the only cleanup — residual, stated). Fix wave 26b (C6-3-res): no directory at all — hooks are off with
+  `core.hooksPath=/dev/null` and HOME is `/nonexistent` (with `GIT_CONFIG_GLOBAL=/dev/null` and
+  `GIT_CONFIG_NOSYSTEM=1` git reads nothing there; if `/nonexistent` exists on a machine every git command is refused),
+  so nothing is made and nothing can be left (`tests/test_round26b.py`: a child SIGKILLed after a real git command
+  leaves its TMPDIR empty).
 - **Evidence regenerated on the lock it describes (scout B M5).** `docs/evidence/requirements.frozen.txt`,
   `pip-audit.json` and the licence report described the lock before `27be3ea` (speechrecognition). CI's audit of
   the lock at `0f017a7` reports `oauthlib` 3.3.1 (PYSEC-2026-4114 / CVE-2026-49265, PKCE timing; fixed only in

@@ -23,8 +23,9 @@ What must hold:
   - a stalled large request without a valid token is answered 401 at once
     and does not hold the heavy slot.
 
-Ports: OS-assigned by default; DETECTION_LIVE_TEST_PORTS=20160-20169 (for
-example) moves them to an assigned range. Either way a server counts as this
+Ports: OS-assigned by default; ZBM_TEST_PORT_RANGE, or this suite's older
+DETECTION_LIVE_TEST_PORTS ("lo-hi"), moves them to an assigned range (the
+shared picker, tests/_procinfo.py, since fix wave 26b). Either way a server counts as this
 module's own only once its own stderr says it is running on that port (fix
 wave 25, scout A D4 / R-HYGIENE L2: the default used to be the literal range
 19960-19969, picked free and then trusted on any /health answer).
@@ -48,32 +49,18 @@ import pytest
 from conftest import TEST_SERVICE_TOKEN
 
 SRC = Path(__file__).resolve().parents[1] / "src"
-_RANGE = os.environ.get("DETECTION_LIVE_TEST_PORTS", "").strip()
-if _RANGE:
-    _lo, _, _hi = _RANGE.partition("-")
-    PORTS: range | None = range(int(_lo), int(_hi) + 1)
-else:
-    PORTS = None          # OS-assigned (fix wave 25)
 MIB = 1024 * 1024
 AUTH = f"Bearer {TEST_SERVICE_TOKEN}"
 
 
 def _free_port() -> int:
     """A CANDIDATE port (another process can take it before the server binds it): callers accept the server only
-    once it has announced its own bind on that port (`_announced`)."""
-    if PORTS is None:
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
-    for port in PORTS:
-        with socket.socket() as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # fix wave 22 (G3): TIME_WAIT is free
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return port
-    raise RuntimeError(f"no free port in {PORTS.start}-{PORTS.stop - 1}")
+    once it has announced its own bind on that port (`_announced`). Fix wave 26b (scout C5-6): the shared picker
+    (tests/_procinfo.py ``pick_port``) over ZBM_TEST_PORT_RANGE, else DETECTION_LIVE_TEST_PORTS, else OS-assigned —
+    this module carried its own pick-then-bind picker."""
+    from _procinfo import assigned_port_range, pick_port
+
+    return pick_port(assigned_port_range("DETECTION_LIVE_TEST_PORTS"))
 
 
 _SERVER_PID: dict[int, int] = {}  # port -> the pid of the server this module started on it (fix wave 25, D2)
@@ -451,7 +438,18 @@ def test_request_head_larger_than_the_header_cap_is_refused(server):
 
 
 def test_long_query_string_is_refused(server):
-    status, _, _ = _request(server, "GET", "/health?q=" + "a" * (1 * MIB), timeout=10)
+    # fix wave 26b (CI #4 macos-26: BrokenPipeError in sendall): the server refuses the over-cap request line and may
+    # close while the client is still writing it; that close IS the refusal. Same handling as the header-cap test
+    # above: a broken pipe on send is ignored, the answer read if any, a reset counts as refused.
+    with socket.create_connection(("127.0.0.1", server), timeout=10) as s:
+        try:
+            s.sendall(b"GET /health?q=" + b"a" * (1 * MIB) + b" HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        try:
+            status, _ = _read_response(s)
+        except ConnectionResetError:
+            status = 0  # closed without a response: refused, not served
     assert status != 200
 
 

@@ -79,11 +79,7 @@ impl Drop for Scratch {
 }
 
 fn scratch(label: &str) -> Scratch {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let p = std::env::temp_dir().join(format!("ledger_slow_{label}_{}_{nanos}.jsonl", std::process::id()));
+    let p = common::scratch_dir().join(format!("ledger_slow_{label}_{}.jsonl", common::unique_suffix()));
     let _ = std::fs::remove_file(&p);
     Scratch(p)
 }
@@ -178,7 +174,7 @@ fn assert_others_served_while_stalled(port: u16, label: &str, stalled: &[&TcpStr
         break;
     };
     served("GET", "/health", None, 200);
-    let id = format!("ok-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    let id = format!("ok-{}", common::unique_suffix());
     served("POST", "/ledger/events", Some(&event(&id)), 201);
     let released = stalled.iter().filter(|c| !still_held(c)).count();
     assert_eq!(released, 0, "{label}: {released} stalled connection(s) had already been answered or cut when the others were served");

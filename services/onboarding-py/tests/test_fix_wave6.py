@@ -49,7 +49,7 @@ import httpx
 import pytest
 
 from config import OnboardingConfig
-from conftest import TEST_SERVICE_TOKEN, client_for, free_test_port, make_service, start_body
+from conftest import TEST_SERVICE_TOKEN, client_for, free_test_port, make_service, start_body, start_live
 import ledger
 from ledger import HttpLedgerClient, LedgerWriteError
 from onboarding_schema import requests as rq
@@ -380,19 +380,22 @@ class RealStack:
         self.out = ""
         # Fix wave 22 (G3, N21-C-6): a failure (or a skip: no free port) at ANY step after the ledger started stops
         # what was started; before, only the API's own health wait did, and the ledger could be left running.
+        # Fix wave 26b (scout C5-6): each child is this stack's only once IT holds its port (conftest.start_live, the
+        # shared owner-checked helper); any 200 on a picked port used to count, whoever sent it.
         try:
-            self.lport = free_test_port()
-            lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN, LEDGER_PORT=str(self.lport),
+            lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN,
                         LEDGER_LOG_PATH=str(Path(self.tmp.name) / "ledger.jsonl"), **(ledger_env or {}))
-            self.ledger = subprocess.Popen([str(ledger_bin)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.ledger, self.lport = start_live(lambda port: subprocess.Popen(
+                [str(ledger_bin)], env={**lenv, "LEDGER_PORT": str(port)}, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL))
             _wait_health(self.lport, self.ledger, "ledger-rust")
-            self.port = free_test_port()
             aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
-            aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(self.port),
+            aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN,
                          "LEDGER_SERVICE_URL": ledger_url or f"http://127.0.0.1:{self.lport}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
                          "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
-            self.api = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=aenv, stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT, text=True)
+            self.api, self.port = start_live(lambda port: subprocess.Popen(
+                [sys.executable, "-m", "api"], cwd=str(SRC), env={**aenv, "ONBOARDING_PORT": str(port)},
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True))
             _wait_health(self.port, self.api, "onboarding-py")
         except BaseException:
             self.close()
@@ -586,21 +589,22 @@ def proxied_stack(ledger_bin):
     # TIME_WAIT) and left ledger-rust running for good (the round-21 review found one still up hours later).
     tmp = tempfile.TemporaryDirectory(prefix="onb-w6p-")
     ledger = api = proxy = None
+    # Fix wave 26b (scout C5-6): each child is this stack's only once IT holds its port (conftest.start_live); the
+    # proxy binds its own port in this process (a bind that fails is an error here, never another's answer).
     try:
-        lport = free_test_port()
-        lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN, LEDGER_PORT=str(lport),
-                    LEDGER_LOG_PATH=str(Path(tmp.name) / "ledger.jsonl"))
-        ledger = subprocess.Popen([str(ledger_bin)], env=lenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        lenv = dict(os.environ, LEDGER_SERVICE_TOKEN=LEDGER_TOKEN, LEDGER_LOG_PATH=str(Path(tmp.name) / "ledger.jsonl"))
+        ledger, lport = start_live(lambda p: subprocess.Popen([str(ledger_bin)], env={**lenv, "LEDGER_PORT": str(p)},
+                                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         _wait_health(lport, ledger, "ledger-rust")
         proxy = _Proxy503(lport)
         proxy.start()
-        port = free_test_port()
         aenv = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
-        aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(port),
+        aenv.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN,
                      "LEDGER_SERVICE_URL": f"http://127.0.0.1:{proxy.port}", "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN,
                      "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
-        api = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=aenv, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True)
+        api, port = start_live(lambda p: subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC),
+                                                          env={**aenv, "ONBOARDING_PORT": str(p)}, stdout=subprocess.PIPE,
+                                                          stderr=subprocess.STDOUT, text=True))
         _wait_health(port, api, "onboarding-py")
         yield {"base": f"http://127.0.0.1:{port}", "lport": lport, "proxy": proxy, "log": Path(tmp.name) / "ledger.jsonl"}
     finally:

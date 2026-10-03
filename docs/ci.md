@@ -45,7 +45,9 @@ The Python services are treated as one cluster on purpose. Their tests read each
 one can break another: `finance-py/tests/test_protocol_contracts.py` and `legal-py/tests/contract_maps.py` import
 `compliance-py`, `clipper-network-py`, `verification-py`, `creative-py` and `onboarding-py` `ports.py` /
 `departments.py` by file path; `clipper-network-py/tests/test_cert_guardrail.py` compares against
-`compliance-py/requirements.txt`; `onboarding-py/tests/test_unit_clients.py` reads `detection-py/src/api.py`;
+`compliance-py/requirements.txt`; `clipper-network-py/tests/contract_vi_runner.py` imports `verification-py/src`
+and `verification-py/tests/helpers.py` (fix wave 26b, W25-EB-R2); `onboarding-py/tests/test_unit_clients.py` reads
+`detection-py/src/api.py`;
 `creative-py/tests/test_fix_wave_5.py` reads `ledger-rust/src/bin/server.rs`; `onboarding-py`'s conftest builds
 `ledger-rust` with cargo. Narrower per-service filters would have to enumerate those reads by hand and would go
 silently green the first time one was missed.
@@ -112,12 +114,12 @@ install stable`, which floats with the stable channel (scout C3-12; a new stable
 | `orchestrator-go` | `go vet ./...` → `go test -race -count=1 -v ./...` under the hygiene check (Go version from `go.mod`, 1.24.7; `GOTELEMETRY=off`) | the orchestrator's tests (three packages) with the race detector; no cached results; the binary tests start the real orchestrator on port 0 and read its port file. |
 | `dashboard-ts` | Node 22 → `npm ci` → `npm run lint` (`tsc --noEmit`) → `npm run build` → `npm test` under the hygiene check → `npm run check:dynamic` (job env `NODE_DISABLE_COMPILE_CACHE=1`: npm otherwise leaves `node-compile-cache` in the suite's private TMPDIR, an R3 failure; `NEXT_TELEMETRY_DISABLED=1`) | lockfile-exact install, typecheck, production build, the tests (the live ones start the built server on a port it picks; any skip fails the job; money vectors shared with the other three languages), and the package's own check that `/` and `/healthz` are dynamic routes. |
 | `live-run (<svc>, 3.12/3.13)` for compliance-py, verification-py, clipper-network-py, finance-py, legal-py | `cargo build --locked --release --bin server` in ledger-rust, then `LEDGER_BIN=<that binary> LIVE_WORK_DIR=$RUNNER_TEMP/live-work python devtools/live_run.py` under the hygiene check (`--kind none`: no test count; temp files and processes must not outlive the run), then the work dir is listed and removed | each department's own live integration run: the real ledger-rust binary and the department's production entrypoint as separate processes over real HTTP with real tokens, every narrated behaviour asserted, a restart with the ledger-anchor check, and `GET /ledger/verify` valid on every ledger at the end. Exit 0 only when every check held (each script prints its own N/N). verification-py's run also starts compliance-py's production entrypoint, so both requirement files are installed. |
-| `delivery-docker-live` | `docker buildx imagetools inspect python:3.12-slim` (base digest, unless the `DLV_SANDBOX_BASE_DIGEST` repository variable is set) → `docker run registry:2` on 127.0.0.1:5000 → `docker build -f services/delivery-py/docker/sandbox.Dockerfile --build-arg BASE_DIGEST=… --build-arg NODE_VERSION=… --build-arg NODE_SHA256=… -t 127.0.0.1:5000/zbm/dlv-sandbox:ci .` (Node pins from the job's env = ADR 0011) → `docker push` → `uv sync --frozen` → `DLV_LIVE_SANDBOX_IMAGE=127.0.0.1:5000/zbm/dlv-sandbox@sha256:<digest> .venv/bin/python -m pytest -q -rs tests/test_live_docker.py --junitxml=…` → a script that fails if any of the three tests was skipped | the sandbox properties only a Docker daemon can prove (ADR 0011 R4/R6, spec C.2): uid 65532 inside, seccomp on, `/var/run/docker.sock` absent, read-only root with `/tmp` and the workspace writable, no route out and no `curl`/`wget` in the image, no `.git` in the copied workspace, the `zbm.dlv.run` label on container and volume, the deadline kills a running process, the volume is gone after destroy. A skip is a failure here, by construction. |
+| `delivery-docker-live` | base digest = the job's `RECORDED_BASE_DIGEST` (= ADR 0011; the `DLV_SANDBOX_BASE_DIGEST` repository variable, if set, must equal it or the step fails; `docker buildx imagetools inspect python:3.12-slim` only reports, as a notice, when upstream has moved — fix wave 26b, R26-4) → `docker run registry:2` on 127.0.0.1:5000 → `docker build -f services/delivery-py/docker/sandbox.Dockerfile --build-arg BASE_DIGEST=… --build-arg NODE_VERSION=… --build-arg NODE_SHA256=… --build-arg GO_VERSION=… --build-arg GO_SHA256=… --build-arg RUSTUP_VERSION=… --build-arg RUSTUP_INIT_SHA256=… --build-arg RUST_TOOLCHAIN=… -t 127.0.0.1:5000/zbm/dlv-sandbox:ci .` (every pin from the job's env = ADR 0011; `devtools/test_ci_docker_args.py` checks both) → `docker push` → `uv sync --frozen` → `DLV_LIVE_SANDBOX_IMAGE=127.0.0.1:5000/zbm/dlv-sandbox@sha256:<digest> .venv/bin/python -m pytest -q -rs tests/test_live_docker.py --junitxml=…` → a script that fails if any of the three tests was skipped | the sandbox properties only a Docker daemon can prove (ADR 0011 R4/R6, spec C.2): uid 65532 inside, seccomp on, `/var/run/docker.sock` absent, read-only root with `/tmp` and the workspace writable, no route out and no `curl`/`wget` in the image, no `.git` in the copied workspace, the `zbm.dlv.run` label on container and volume, the deadline kills a running process, the volume is gone after destroy. A skip is a failure here, by construction. |
 | `audit-python` | `pip-audit==2.10.1`: `pip-audit -r services/<svc>/requirements.txt --strict` for every `*-py/requirements.txt`; for delivery-py, `uv export --frozen --no-hashes --no-emit-project` then `pip-audit -r … --no-deps --disable-pip --strict` on the registry packages | no known advisory against any pinned Python dependency (the two git-sourced deer-flow packages are excluded — see below). |
 | `audit-rust` | `cargo install cargo-audit --locked --version 0.22.2` → `cargo audit` | no RustSec advisory against `Cargo.lock` (70 crates). |
 | `audit-node` | `npm audit --audit-level=high` | no high or critical advisory against `package-lock.json`. |
 | `secret-scan` | gitleaks 8.30.1 release binary (sha256 `551f6fc8…` verified before use) → `gitleaks git --no-banner --redact --exit-code 1 --config .gitleaks.toml .` over the full history | no secret in any commit. `.gitleaks.toml` allowlists four exact strings (two fake `AKIA…` shapes, one fake token, one fake cued password) that onboarding-py's redaction tests use as inputs; it exempts no file and no path. |
-| `hygiene-static` | Python 3.13 (setup-python) + `pip install pytest==9.1.1` (the services' pin; the self-test drives a planted pytest suite through the plugin) → `python -m unittest devtools/test_hygiene_check.py` → `python devtools/hygiene_check.py lint --strict-allowlist` → `python devtools/hygiene_check.py counts --check` | the checker's self-test (each rule fails on a planted violation in a throwaway repository, the clean probe passes), then the static hygiene rules over the whole tree (below), then one row per suite in `docs/test-counts.md`; always runs. |
+| `hygiene-static` | Python 3.13 (setup-python) + `pip install pytest==9.1.1` (the services' pin; the self-test drives a planted pytest suite through the plugin) → `python -B -m unittest devtools/test_hygiene_check.py` (and `devtools/test_ci_docker_args.py`; `-B`: no `devtools/__pycache__/` left in a developer's checkout, F-11) → `python devtools/hygiene_check.py lint --strict-allowlist` → `python devtools/hygiene_check.py counts --check` | the checker's self-test (each rule fails on a planted violation in a throwaway repository, the clean probe passes), then the static hygiene rules over the whole tree (below), then one row per suite in `docs/test-counts.md`; always runs. |
 | `required` | reads the result of every job above | one green check for branch protection; red if any job failed or was cancelled; a job skipped by the path filter is fine. |
 
 ## Pins
@@ -203,35 +205,50 @@ The test counts are a committed, generated file: after a change that adds or rem
 branches that each changed tests are merged, the merge commit regenerates the rows (CI says which row and the new
 number).
 
+What the static rules cannot see (fix wave 26b, H9-R3m / F-9 — stated, not fixed): L1 in Python follows clock readings through this module's imports (`import time as tm`, `from time import monotonic as now`), names, and helpers that `return` a clock delta; it does not follow a delta stored in an attribute or a container, passed to another function, or a bound held in a local name computed from a constant (`bound = TIMEOUT + 2`). L1 for Rust, Go and TypeScript is line patterns over `elapsed`, `time.Since`, `open` and `Date.now()` only — a delta in another name is not seen. L2 finds a port literal, or a name bound to one, at a bind/connect, in a PORT-named place or a literal address; a port computed at run time or passed as an argument is not seen. L3 reads English count phrases (`N tests`, `N passed`, `N unit`, `N integration`, `N/M passed`) and lets a resolvable commit id pin the counts of its own sentence only.
+
 What the dynamic rules cannot see: a file a suite writes OUTSIDE the checkout, its TMPDIR and `/tmp` (e.g. `~/.cache`,
-`~/.config/go/telemetry` — the Go job sets `GOTELEMETRY=off`); a process that left the session, scrubbed its
-environment AND runs on macOS (no subreaper there). On a shared machine another process can create `/tmp` entries
+`~/.config/go/telemetry` — the Go job sets `GOTELEMETRY=off`); on macOS (no subreaper there) a process that left
+the suite's process group AND either scrubbed its environment or is an Apple platform binary (`/bin/sleep`, `/bin/sh`,
+whose environment macOS withholds) — the marker is read from every other process of the user through sysctl
+`KERN_PROCARGS2` since fix wave 26b (R26-1; before, ANY orphan that left the group escaped on macOS, delivery-py's
+`start_new_session=True` children included). On a shared machine another process can create `/tmp` entries
 during a run; R3 prints the names (a CI runner is the job's alone).
 
 The `live-runs` job runs each department's `devtools/live_run.py` under the same wrapper (`--kind none`). Those
-scripts `mkdtemp` a work directory (ledger and service logs: the run's evidence) and never remove it (scout C6-2).
-Left in the default TMPDIR that is an R3 failure. The job therefore asks for the directory explicitly —
-`LIVE_WORK_DIR` (finance-py: `FIN_LIVE_WORKDIR`) = `$RUNNER_TEMP/live-work`, outside the wrapper's private TMPDIR
-and outside `/tmp` — and a following step (`if: always()`) lists what it holds into the log and removes it (fix
-wave 25, E-C). R3 is not relaxed: anything else the run leaves in its TMPDIR or `/tmp` still fails the job. A local
-run without the variable still leaves the directory; making each script remove it (or say it is kept) is in the
-department files (docs/findings/OPEN.md, C6-2).
+scripts `mkdtemp` a work directory (ledger and service logs: the run's evidence). Since fix wave 26b (scout C6-2) a
+script removes it when the run ends, passed or failed, unless `LIVE_WORK_DIR=<dir>` names a directory to keep it in:
+then the run's directory is made inside `<dir>`, kept, and its path printed at the end ("work dir kept
+(LIVE_WORK_DIR): …"). Every `live_run.py` reads `LIVE_WORK_DIR`; finance-py's old name `FIN_LIVE_WORKDIR` (C5-7)
+is still honoured with a deprecation notice on stderr, and ignored (with a notice) when `LIVE_WORK_DIR` is set too.
+The job keeps the directory in `LIVE_WORK_DIR=$RUNNER_TEMP/live-work`, outside the wrapper's private TMPDIR and
+outside `/tmp`, and a following step (`if: always()`) lists what it holds into the log and removes it (fix wave 25,
+E-C). R3 is not relaxed: anything else the run leaves in its TMPDIR or `/tmp` still fails the job; a local run
+without the variable leaves nothing.
 
 ## Known behaviours worth knowing before you debug a red run
 
-- The READMEs say `uv sync --frozen --no-dev` for delivery-py; that leaves no `pytest` in the venv (`pytest` is
-  in the `dev` dependency group in `pyproject.toml` / `uv.lock`). CI runs `uv sync --frozen` (dev group included).
-- delivery-py's `tests/test_live_launcher.py` requires the venv to be at `services/delivery-py/.venv` (it spawns
-  `.venv/bin/python`); CI uses uv's default location, so this holds. Since fix wave 21 (N20-D-1) its live log goes
-  to the gitignored `services/delivery-py/docs/evidence/dept28/_runs/`; no test rewrites a tracked file, and
-  `tests/test_live_tracked_files.py` fails if the live tests change `git status --porcelain`.
+- delivery-py's venv: the READMEs and CI both run `uv sync --frozen` (the `dev` dependency group, which holds
+  `pytest`, included); `--no-dev` would leave no `pytest` in the venv. (Fix wave 26b, W25-EB-R1: this bullet used to
+  say the READMEs had `--no-dev`.)
+- delivery-py's `tests/test_live_launcher.py` spawns the service with the interpreter running the suite
+  (`sys.executable`, since fix wave 22), so the venv may live anywhere. Its live log goes to
+  `$TMPDIR/dlv-live-runs` (fix wave 24; `DLV_LIVE_LOG_DIR` moves it) — never into the source tree; no test rewrites
+  a tracked file, and `tests/test_live_tracked_files.py` fails if the live tests change `git status --porcelain`.
+  (Fix wave 26b, W25-EB-R1: this bullet used to say it needed `services/delivery-py/.venv` and logged under
+  `docs/evidence/dept28/_runs/`.)
 - Ports. ledger-rust's integration tests and (since fix wave 25) orchestrator-go's binary tests start the server
   on port 0 and read the bound port back from `LEDGER_PORT_FILE` / `ORCHESTRATOR_PORT_FILE`; the dashboard's live
-  tests start `next start -p 0` and use the port the child printed; none picks a port. The Python live tests still
-  use per-service pickers and knobs (`DLV_TEST_PORT_RANGE`, `FULFILLMENT_TEST_PORT_RANGE`, `CREATIVE_TEST_PORTS`,
-  `DETECTION_LIVE_TEST_PORTS`, `ONBOARDING_TEST_PORT_RANGE`); the shared helper that replaces them is in
-  `tests/_procinfo.py` (one knob, `ZBM_TEST_PORT_RANGE`, and an owner check: a port is trusted only once the
-  test's own child is listening on it) — moving each service onto it is tracked in docs/findings/OPEN.md.
+  tests start `next start -p 0` and use the port the child printed; none picks a port. The Python live tests of
+  creative-py, detection-py, fulfillment-py and onboarding-py pick with the shared helper in `tests/_procinfo.py`
+  since fix wave 26b (C5-6): one knob, `ZBM_TEST_PORT_RANGE` ("lo-hi"; each suite's older knob —
+  `CREATIVE_TEST_PORTS`, `DETECTION_LIVE_TEST_PORTS`, `FULFILLMENT_TEST_PORT_RANGE`, `ONBOARDING_TEST_PORT_RANGE` —
+  is read when it is unset), and a child's port is trusted only once that child holds it: its own announced bind
+  ("Uvicorn running on …", creative/detection/fulfillment launchers) or the owner check of
+  `_procinfo.start_owned` (onboarding-py's launchers, creative-py's lossy-proxy stack), with a retry on another
+  port when the child lost the race. A range hands each port out once, then any port of it that is free again.
+  delivery-py's live tests still use their own picker (`DLV_TEST_PORT_RANGE`) and are not moved yet
+  (docs/findings/OPEN.md).
 - onboarding-py's suite is the slow one (~6 minutes plus a cold ledger-rust release build); the
   `test_procinfo.py` copies in creative-py, fulfillment-py and onboarding-py skip one IPv6 case on hosts without
   an IPv6 loopback and say so (an expected skip in `devtools/hygiene_allowlist.json`).

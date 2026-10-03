@@ -73,11 +73,7 @@ impl Scratch {
 }
 
 fn scratch(label: &str) -> Scratch {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let p = std::env::temp_dir().join(format!("ledger_hardening_{label}_{}_{nanos}.jsonl", std::process::id()));
+    let p = common::scratch_dir().join(format!("ledger_hardening_{label}_{}.jsonl", common::unique_suffix()));
     let _ = std::fs::remove_file(&p);
     Scratch(p)
 }

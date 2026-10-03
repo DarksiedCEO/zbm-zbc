@@ -399,9 +399,11 @@ hand-written column had drifted and four files were missing; `docs/test-counts.m
 No test makes a network call outside loopback. The entrypoint test spawns
 the real process on 127.0.0.1/127.0.0.2 and reads `/proc/net/tcp`. Tests
 that start a real server bind OS-assigned ports, or only ports in
-`ONBOARDING_TEST_PORT_RANGE` ("lo-hi") when it is set (fix wave 25: the
+`ZBM_TEST_PORT_RANGE`, else `ONBOARDING_TEST_PORT_RANGE` ("lo-hi"), when it is set (fix wave 25: the
 literal default 19920–19939 is gone, and an exhausted range fails instead of
-skipping).
+skipping). Since fix wave 26b (C5-6) every child is started with `conftest.start_live` (the shared
+`tests/_procinfo.start_owned`): its port is trusted only once that child holds it, and a child that lost the port
+to another process is retried on another (`tests/test_fix26b_shared_port_picker.py`).
 **Independent review (type 4) is not part of this build.**
 
 ## Known gaps and stand-ins, stated plainly

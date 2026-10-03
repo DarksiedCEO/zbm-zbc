@@ -113,7 +113,8 @@ uv sync --frozen                     # python 3.12 or 3.13 (pytest is in the dev
 ruff check src tests devtools
 
 # a clean environment: the gate refuses ANY name outside the allowlist (DLV_*, LEDGER_SERVICE_*, PATH, HOME, LANG,
-# LC_ALL, LC_CTYPE, TZ, DOCKER_HOST, HTTPS_PROXY/HTTP_PROXY/NO_PROXY, SSL_CERT_FILE, TMPDIR); DLV_REPO_PATH must be a
+# LC_ALL, LC_CTYPE, TZ, DOCKER_HOST, HTTPS_PROXY/HTTP_PROXY/NO_PROXY, SSL_CERT_FILE, TMPDIR; on macOS also
+# __CF_USER_TEXT_ENCODING, which CoreFoundation itself writes, in its 0xH:0xH:0xH shape); DLV_REPO_PATH must be a
 # local repository with NO remotes (round 18 R4: a run worktree shares its config, and `git push` must have nowhere
 # to go); DLV_SANDBOX_NETWORK is `none` (the only value) and DLV_MAX_SUBAGENTS_PER_RUN stays unset (subagents are off)
 env -i PATH="$PATH" HOME="$HOME" \

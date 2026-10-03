@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from _procinfo import NO_OVERRIDE_ADDR_REASON, listening_addrs, override_bind_addr, port_free
+from _procinfo import NO_OVERRIDE_ADDR_REASON, assigned_port_range, listening_addrs, override_bind_addr, pick_port
 from conftest import child_env
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -30,21 +30,12 @@ TOKEN = "live-test-token-not-a-secret"
 
 
 def _free_port() -> int:
-    """An OS-assigned free port, or — when FULFILLMENT_TEST_PORT_RANGE="LO-HI"
-    is set (fix wave 1: engineers run in assigned port ranges) — the first
-    free port in that range, checked on every loopback address used here
-    (127.0.0.1 plus the override address this OS supports, fix wave 16)."""
-    rng = os.environ.get("FULFILLMENT_TEST_PORT_RANGE")
-    if not rng:
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
-    lo, hi = (int(x) for x in rng.split("-"))
-    hosts = ["127.0.0.1"] + [h for h in (override_bind_addr(),) if h]
-    for port in range(lo, hi + 1):
-        if all(port_free(host, port) for host in hosts):
-            return port
-    raise AssertionError(f"no free port in FULFILLMENT_TEST_PORT_RANGE={rng}")
+    """A CANDIDATE port for a live server: the shared picker (tests/_procinfo.py ``pick_port``) over
+    ZBM_TEST_PORT_RANGE, else FULFILLMENT_TEST_PORT_RANGE ("lo-hi", fix wave 1: engineers run in assigned port
+    ranges), else OS-assigned. Fix wave 26b (scout C5-6): this was fulfillment-py's own pick-then-bind picker.
+    Another process can take the port before the child binds it: the launchers accept it only once their own child
+    has announced the bind (``_start``, ``_announced_bind``) and retry on another port when the child lost it."""
+    return pick_port(assigned_port_range("FULFILLMENT_TEST_PORT_RANGE"))
 
 
 # Fix wave 16: the kernel's socket table, read portably (Linux /proc/net/tcp

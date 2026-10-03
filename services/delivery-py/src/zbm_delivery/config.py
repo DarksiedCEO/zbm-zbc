@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -57,6 +58,11 @@ ENV_NAMES = ("PATH", "HOME", "LANG", "TZ", "DOCKER_HOST", "HTTPS_PROXY", "HTTP_P
              "http_proxy", "no_proxy", "SSL_CERT_FILE", "TMPDIR", "DEER_FLOW_SKILLS_PATH",
              # locale companions of LANG: CPython's PEP 538 coercion writes LC_CTYPE into a child's environment
              "LC_ALL", "LC_CTYPE")
+# Wave 26b (CI #3 macos-26: every start was refused): on macOS, CoreFoundation writes this into CPython's own
+# environment at interpreter start (even under `env -i`), as PEP 538 writes LC_CTYPE. Allowed on darwin only, and only
+# as the value CF writes (three hex fields, e.g. 0x1F5:0x0:0x0): a text-encoding hint, never a switch.
+MACOS_CF_ENCODING = "__CF_USER_TEXT_ENCODING"
+_CF_ENCODING_RE = re.compile(r"0x[0-9A-Fa-f]{1,8}:0x[0-9A-Fa-f]{1,8}:0x[0-9A-Fa-f]{1,8}")
 # Forbidden names (spec §0.5): gateway/tracing/MCP switches that must never reach this process.
 FORBIDDEN_ENV_EXACT = ("DEER_FLOW_AUTH_DISABLED", "DEER_FLOW_INTERNAL_AUTH_TOKEN", "AUTH_JWT_SECRET",
                        "DEER_FLOW_MCP_STDIO_COMMAND_ALLOWLIST")
@@ -202,12 +208,15 @@ def _hosts(env, name) -> tuple:
     return tuple(out)
 
 
-def env_problems(env: dict) -> list[str]:
+def env_problems(env: dict, platform: str = sys.platform) -> list[str]:
     """Names in ``env`` the allowlist does not cover, and forbidden names (spec §C.1.7, §0.5)."""
     bad = []
     for k in env:
         if k in FORBIDDEN_ENV_EXACT or any(k.startswith(p) for p in FORBIDDEN_ENV_PREFIXES):
             bad.append(f"{k} (forbidden: a gateway/tracing/MCP switch)")
+        elif k == MACOS_CF_ENCODING and platform == "darwin":
+            if not _CF_ENCODING_RE.fullmatch(env[k]):
+                bad.append(f"{k} (value is not CoreFoundation's 0xH:0xH:0xH)")
         elif not (k in ENV_NAMES or any(k.startswith(p) for p in ENV_PREFIXES)):
             bad.append(k)
     return sorted(bad)

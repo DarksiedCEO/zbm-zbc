@@ -25,14 +25,24 @@ def _new(**kw):
 # ============================================================ N16-1 wall-clock budget; no remote call under the lock
 
 class _Drip(httpx.SyncByteStream):
-    """An answer that drips one byte every ``gap_s`` until the test ends it (``done``) — never on its own."""
+    """An answer that drips one byte every ``gap_s`` until the test ends it (``done``) — or, with ``limit``, until it
+    has sent that many bytes, when it sets ``ended`` and stops. Wave 26b (AEGIS r25 N25-X-1): the state-ordered
+    rewrite bounded no budget's SIZE (a x20 budget mutant still returned while an endless answer dripped); with a limit
+    the drip is the yardstick — the client must give up before ``limit`` gaps have passed."""
 
-    def __init__(self, gap_s: float, done: threading.Event):
-        self.gap, self.done = gap_s, done
+    def __init__(self, gap_s: float, done: threading.Event, limit: int | None = None,
+                 ended: threading.Event | None = None):
+        self.gap, self.done, self.limit, self.ended = gap_s, done, limit, ended
 
     def __iter__(self):
+        sent = 0
         while not self.done.wait(self.gap):
             yield b" "
+            sent += 1
+            if self.limit is not None and sent >= self.limit:
+                if self.ended is not None:
+                    self.ended.set()
+                return
 
 
 def test_n16_1_compliance_client_has_a_total_wall_clock_deadline_not_a_per_chunk_one():
@@ -41,14 +51,17 @@ def test_n16_1_compliance_client_has_a_total_wall_clock_deadline_not_a_per_chunk
     returns `unavailable` while it is still dripping; a per-chunk deadline would read until the test gave up."""
     from compliance_client import HttpComplianceRegister
 
-    done = threading.Event()
+    # wave 26b (N25-X-1): the answer ends after 4 x 0.9 s (3.6x the 1.0 s budget): a budget many times too long reads
+    # it to its end instead of giving up while it drips
+    done, ended = threading.Event(), threading.Event()
     c = HttpComplianceRegister("http://c.test", "svc", "caller", timeout=1.0,
-                               transport=httpx.MockTransport(lambda req: httpx.Response(200, stream=_Drip(0.9, done))))
+                               transport=httpx.MockTransport(lambda req: httpx.Response(
+                                   200, stream=_Drip(0.9, done, limit=4, ended=ended))))
     got = {}
     t = threading.Thread(target=lambda: got.update(row=c.row("HR-13")))
     t.start()
     t.join(60)                                        # a bound on a stall, never on the answer's speed
-    returned_while_dripping = not t.is_alive() and not done.is_set()
+    returned_while_dripping = not t.is_alive() and not done.is_set() and not ended.is_set()
     done.set()
     t.join(60)
     assert returned_while_dripping, "the client read the dripping answer past its 1.0 s budget (a per-chunk deadline)"

@@ -321,8 +321,9 @@ def create_app(service: DeliveryService, settings: config_mod.Settings) -> FastA
     @app.post("/dlv/v1/fix-runs", dependencies=auth, status_code=202)
     def fix_runs(who: str = Depends(caller("aegis", "andre_session")),
                  req: m.FindingsDocument = Depends(body(m.FindingsDocument))) -> dict:
-        within_max_findings(len(req.findings), "findings")
-        return svc.create_fix_run(who, dump(req))
+        # wave 26b (N25-D-4): the cap applies to a NEW request only — after the idempotency lookup (a recorded request
+        # replays its recorded answer even if DLV_MAX_FINDINGS was lowered since), before anything is recorded
+        return svc.create_fix_run(who, dump(req), cap_check=lambda: within_max_findings(len(req.findings), "findings"))
 
     @app.get("/dlv/v1/fix-runs/{run_id}", dependencies=auth)
     def fix_run(run_id: str, _: str = Depends(caller())) -> dict:
@@ -356,8 +357,9 @@ def create_app(service: DeliveryService, settings: config_mod.Settings) -> FastA
 
     @app.post("/dlv/v1/fix-runs/{run_id}/review", dependencies=auth)
     def review(run_id: str, who: str = Depends(caller("aegis")), req: m.ReviewRequest = Depends(body(m.ReviewRequest))) -> dict:
-        within_max_findings(len(req.reopened) + len(req.new_findings), "new_findings")   # the run a fail opens
-        return svc.review(who, _run_id(run_id), dump(req))
+        # the run a fail opens; after the idempotency lookup, as for fix-runs (wave 26b, N25-D-4)
+        return svc.review(who, _run_id(run_id), dump(req),
+                          cap_check=lambda: within_max_findings(len(req.reopened) + len(req.new_findings), "new_findings"))
 
     @app.post("/dlv/v1/fix-runs/{run_id}/cancel", dependencies=auth)
     def cancel(run_id: str, who: str = Depends(caller("aegis", "andre_session")),

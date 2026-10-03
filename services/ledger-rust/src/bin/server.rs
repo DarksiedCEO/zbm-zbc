@@ -846,6 +846,9 @@ fn remove_own_port_file() {
     }
     // SAFETY: `name` points at a leaked, NUL-terminated CString that lives for the process; `dir` is a descriptor
     // kept open for the process; `st` is plain data.
+    // The casts are for portability: `st_ino` is `u64` on macOS and the `ino_t` alias on Linux, `st_dev` is `i32` on
+    // macOS (fix wave 26b: clippy's unnecessary_cast fired on macos-26 only).
+    #[allow(clippy::unnecessary_cast)]
     unsafe {
         let mut st: libc::stat = std::mem::zeroed();
         if libc::fstatat(dir, name, &mut st, libc::AT_SYMLINK_NOFOLLOW) == 0

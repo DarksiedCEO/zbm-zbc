@@ -103,24 +103,38 @@ def test_new5_a_tiny_message_is_200_while_a_large_scan_holds_the_budget_and_its_
     # The finding's shape in-process: the large lane's budget is held (a 416
     # KB scan in progress) and its queue is full (max_waiting 0), so any
     # large body is busy. A 40-byte message must still be answered at once.
+    # Fix wave 26b (W25-EA-2): was `max(latency) < 0.25` against a 0.3 s large-lane wait — a wall-clock literal.
+    # Now an ORDER against a yardstick: the large-lane wait is widened to _LANE_WAIT_YARDSTICK_S and the large lane
+    # stays held until the five small messages have been answered (polled from a thread, hang guard 60 s). A message
+    # that waited for the large lane at all — queued (busy at once with max_waiting 0, a 503) or held for any part
+    # of the wait — could not be answered 200 before the release; only one that never touches the large lane is.
     svc = make_service(all_fakes=True)
-    svc.config = replace(svc.config, scan_max_waiting=0, scan_wait_seconds=0.3)
+    svc.config = replace(svc.config, scan_max_waiting=0, scan_wait_seconds=_LANE_WAIT_YARDSTICK_S)
     c = client_for(svc)
     assert c.post("/onboarding/clients", json=start_body()).status_code == 201
     gate = c.app.state.scan_admission  # the large lane
     assert gate.try_hold_for_test()  # the whole large budget: a large scan is in progress
+    answers: list = []
+
+    def five_small():
+        for _ in range(5):
+            answers.append(c.post("/onboarding/clients/client_a/messages", json=SMALL_MESSAGE))
+
+    t = threading.Thread(target=five_small, daemon=True)
     try:
         r = c.post("/onboarding/clients/client_a/intake/facts", content=BIG_BODY, headers={"Content-Type": "application/json"})
         assert r.status_code == 503, r.text  # large: busy, as before
-        lat = []
-        for _ in range(5):
-            t = time.monotonic()
-            r = c.post("/onboarding/clients/client_a/messages", json=SMALL_MESSAGE)
-            lat.append(time.monotonic() - t)
-            assert r.status_code == 200, r.text
-        assert max(lat) < 0.25, lat  # never waited the 0.3 s for the large lane, never 503
+        t.start()
+        t.join(60)
+        answered_while_held = not t.is_alive()
     finally:
         gate.release_for_test()
+        t.join(_LANE_WAIT_YARDSTICK_S + 60)
+    assert answered_while_held, "a small message waited for the held large lane"
+    assert [a.status_code for a in answers] == [200] * 5, [(a.status_code, a.text[:200]) for a in answers]
+
+
+_LANE_WAIT_YARDSTICK_S = 120.0   # the large-lane wait, widened: a stand-in that ends by itself, far past the guard
 
 
 def test_new5_a_flood_of_queued_large_bodies_cannot_503_small_bodies():
@@ -401,6 +415,14 @@ def _waited_for_a_scan(windows: list[tuple[float, float]], scans_done: list[floa
 #    2 busy loops), 3.8 (macos-26, CI #2), 3.8-8.0 (10 ms switch interval); small lane disabled (= the defect)
 #    82-1724 idle, 192-2174 under 2 busy loops, 17-311 with the 10 ms switch interval.
 _SMALL_OVER_HEALTH_MAX = 12.0
+# Fix wave 26b (AEGIS r26 R26-2: margins thin under macOS-like scheduling — fixed 9.0, defect 17.3 at a 10 ms switch
+# interval). Measured on the build box (M4 Pro, macOS 26.6, 3.13; small lane off = ONBOARDING_SCAN_SMALL_BODY_BYTES=0
+# is the defect), small p50 / health p50 for 1 / 4 / 12 uploaders: fixed 3.7 / 3.4 / 3.4 (1 ms interval) and
+# 1.5 / 3.9 / 4.8 (10 ms); defect 5.4 / 128 / 398 (1 ms) and 5.5 / 30 / 97 (10 ms). With ONE uploader the defect
+# reads under the bound (a small body waits at most for the one scan in flight, and the lane is idle while that
+# uploader sends its next 416 KB), so that case could only ever fail a correct server: the ratio is asserted where the
+# defect is visible — _RATIO_FROM_NBIG uploaders and more — and printed for fewer. Every other assertion still runs.
+_RATIO_FROM_NBIG = 4
 #  - /health against the time between two large scans' ends (the large lane is serial: one scan each): a /health
 #    that waits for a scan on the event loop waits half a scan on average. Measured health p50 / scan gap: fixed
 #    0.004-0.007 (Linux), 0.013-0.044 (10 ms switch interval), ~0.08-0.12 estimated on macos-26 (42 ms against
@@ -421,7 +443,8 @@ def test_new5_live_small_messages_stay_fast_beside_large_uploaders(real_stack7, 
                           f"max={r[k]['max'] * 1000:.0f}ms waited-for-a-scan={r[k]['waited']:.2f}"
                           for k in ("big", "small", "health"))
                + f" scan_gap={r['scan_gap'] * 1000:.0f}ms small/health={small_over_health:.1f} "
-               f"(bound {_SMALL_OVER_HEALTH_MAX}) health/scan_gap={health_over_gap:.3f} "
+               f"(bound {_SMALL_OVER_HEALTH_MAX}, {'asserted' if nbig >= _RATIO_FROM_NBIG else 'printed only'}) "
+               f"health/scan_gap={health_over_gap:.3f} "
                f"(bound {_HEALTH_OVER_SCAN_GAP_MAX}) small/scan_gap={r['small']['p50'] / r['scan_gap']:.3f}")
     print(summary)
     codes = r["codes"]
@@ -430,7 +453,8 @@ def test_new5_live_small_messages_stay_fast_beside_large_uploaders(real_stack7, 
                     f"{r['health']['n']} /health answers (need {_MIN_HEALTH}), so nothing was measured -- {summary}")
     # the finding's numbers: small p50 294 ms (1 uploader), 1.6 s (4), 6 s (12), each message waiting for the
     # large scans ahead of it; /health 4-7 ms beside them on the same Linux box
-    assert small_over_health < _SMALL_OVER_HEALTH_MAX, summary
+    if nbig >= _RATIO_FROM_NBIG:
+        assert small_over_health < _SMALL_OVER_HEALTH_MAX, summary
     assert r["small"]["n"] >= 40, summary
     assert codes.get("small_200", 0) == r["small"]["n"], summary  # never 503, never an error
     assert health_over_gap < _HEALTH_OVER_SCAN_GAP_MAX, summary

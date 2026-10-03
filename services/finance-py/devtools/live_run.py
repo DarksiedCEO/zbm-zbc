@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,32 @@ def say(msg: str) -> None:
     line = f"[{time.strftime('%H:%M:%S')}] {msg}"
     LOG.append(line)
     print(line, flush=True)
+
+
+# Fix wave 26b (scout C6-2, C5-7): the run's work dir holds the ledger and service logs (the run's evidence). It was
+# made with mkdtemp and never removed, so every local run left one behind. Now LIVE_WORK_DIR=<dir> (the name every
+# live_run.py reads) KEEPS the run's dir inside <dir> and the end of the run prints where it is — CI's live-runs job
+# asks for $RUNNER_TEMP/live-work, then lists and removes it; unset, the dir is made in the temp dir and removed when
+# the run ends, passed or failed (the run's narration is on stdout either way).
+def make_work_dir(prefix: str) -> tuple[Path, bool]:
+    keep_in = os.environ.get("LIVE_WORK_DIR") or None
+    old = os.environ.get("FIN_LIVE_WORKDIR") or None       # this script's name for it before wave 26b (C5-7)
+    if old and keep_in is None:
+        print("live_run: FIN_LIVE_WORKDIR is deprecated (fix wave 26b, C5-7): use LIVE_WORK_DIR, the name every "
+              "live_run.py reads; it is honoured for now", file=sys.stderr, flush=True)
+        keep_in = old
+    elif old and old != keep_in:
+        print(f"live_run: FIN_LIVE_WORKDIR is ignored: LIVE_WORK_DIR={keep_in} is set (fix wave 26b, C5-7)",
+              file=sys.stderr, flush=True)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=keep_in)), keep_in is not None
+
+
+def finish_work_dir(work: Path, keep: bool) -> None:
+    if keep:
+        print(f"work dir kept (LIVE_WORK_DIR): {work}", flush=True)
+    else:
+        shutil.rmtree(work)
+        print(f"work dir {work} removed (set LIVE_WORK_DIR=<dir> to keep the run's logs)", flush=True)
 
 
 def check(name: str, ok: bool) -> None:
@@ -155,10 +182,9 @@ def ledger_verify(base: str) -> dict:
     return r.json() if r.status_code == 200 else {"status": r.status_code}
 
 
-def main() -> int:
+def _main(work: Path) -> int:
     ledger_bin = os.environ["LEDGER_BIN"]
     pla, pfa, plb, pfb = PORTS
-    work = Path(tempfile.mkdtemp(prefix="finlive-", dir=os.environ.get("FIN_LIVE_WORKDIR") or None))
     say(f"work dir {work}; ports {PORTS}")
     LA, LB = f"http://127.0.0.1:{pla}", f"http://127.0.0.1:{plb}"
     common = {"FIN_SERVICE_TOKEN": FIN_TOKEN, "FIN_ANDRE_APPROVAL_TOKEN": ANDRE, "FIN_CALLER_TOKENS": json.dumps(CALLERS),
@@ -362,6 +388,14 @@ def main() -> int:
     say(f"RESULT: {passed}/{len(CHECKS)} checks passed; work dir {work}")
     (work / "live_run.log").write_text("\n".join(LOG) + "\n")
     return 0 if CHECKS and passed == len(CHECKS) else 1
+
+
+def main() -> int:
+    work, keep = make_work_dir("finlive-")
+    try:
+        return _main(work)
+    finally:
+        finish_work_dir(work, keep)
 
 
 if __name__ == "__main__":

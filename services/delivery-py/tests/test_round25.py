@@ -375,14 +375,8 @@ def test_importing_the_service_creates_nothing_in_the_temp_dir(tmp_path):
     assert left_while_alive == [] and left == [], (left_while_alive, left)
 
 
-def test_the_git_isolation_dir_is_made_on_first_use_and_holds_nothing():
-    """C6-3, the other half: the first git command still runs with the private HOME and the empty hooks dir (R11)."""
-    from zbm_delivery import gitport
-    home, hooks = gitport._isolation()
-    assert os.path.isdir(home) and os.path.isdir(hooks) and os.listdir(hooks) == []
-    assert gitport.git_env()["HOME"] == home
-    assert gitport.isolation_args()[:2] == ("-c", f"core.hooksPath={hooks}")
-    assert gitport._isolation() == (home, hooks)                    # one dir per process, made once
+# (C6-3's other half, "the isolation dir is made on first use", is superseded by fix wave 26b C6-3-res: git now needs
+# no directory at all — tests/test_round26b.py `test_the_git_isolation_is_no_hooks_and_a_home_that_does_not_exist`.)
 
 
 # ====================================================================== scout B M5: the ADR's pin table is the files'

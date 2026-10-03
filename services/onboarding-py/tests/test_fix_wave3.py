@@ -591,19 +591,19 @@ def test_f15_contract_bound_is_accepted():
 # =============================================================================
 
 
-def _free_port():
-    from conftest import free_test_port
-
-    return free_test_port()  # fix wave 4: the assigned test port range only
-
-
 def test_d1_real_uvicorn_access_log_has_lines_no_logging_error_and_no_secret():
-    port = _free_port()
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
-    env.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(port), "PYTHONUNBUFFERED": "1",
-                "PYTHONDONTWRITEBYTECODE": "1"})
-    proc = subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True)
+    # Fix wave 26b (scout C5-6): the server is this test's only once IT holds the port (conftest.start_live, the
+    # shared owner-checked helper); any 200 on a picked port used to count.
+    from conftest import start_live
+
+    def launch(port):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("LEDGER_", "DETECTION_"))}
+        env.update({"ONBOARDING_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "ONBOARDING_PORT": str(port),
+                    "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+        return subprocess.Popen([sys.executable, "-m", "api"], cwd=str(SRC), env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True)
+
+    proc, port = start_live(launch)
     try:
         base = f"http://127.0.0.1:{port}"
         for _ in range(100):

@@ -96,7 +96,7 @@ backward-compatibility proof are in
   section 1a; over `"999999999999999.99"` is a 400), checked against every
   `ledger_append_expected` verdict in `fixtures/money_vectors.json`;
   already-persisted amounts (legacy `1e20`, over-bound strings the
-  fix-wave-1 binary accepted) still load and verify. `cargo test`: 84
+  fix-wave-1 binary accepted) still load and verify. At 19f7320, `cargo test`: 84
   passed (56 unit, 8 `server_auth`, 8 `server_events`, 12
   `server_hardening`).
 - `apps/dashboard-ts`: `amount_usd: string`, displayed verbatim, never
@@ -118,9 +118,9 @@ domain-separated (`event|` prefix); events and the idempotency index
 survive restart. Field rules are in ADR 0003.
 
 **Verified Sep 24 2026** (commit 2dbce4d; historical counts, superseded by docs/test-counts.md):
-- `python3 -m pytest -q` (detection-py): 138 passed.
-- `go vet ./...` clean; `go test ./...` (orchestrator-go): 21 passed.
-- `cargo test` (ledger-rust): 55 passed (39 unit, 8 `server_auth`, 8
+- `python3 -m pytest -q` (detection-py) at 2dbce4d: 138 passed.
+- `go vet ./...` clean; `go test ./...` (orchestrator-go) at 2dbce4d: 21 passed.
+- `cargo test` (ledger-rust) at 2dbce4d: 55 passed (39 unit, 8 `server_auth`, 8
   `server_events`); `cargo clippy --all-targets`: no warnings.
 - `npm install` / `npx tsc --noEmit` / `npm run build` (dashboard-ts):
   clean; `npm audit`: 0 vulnerabilities.
@@ -297,8 +297,9 @@ changes a tracked file (R1); leaves a new git-ignored file in the checkout
 (R2; a venv or a build directory the job itself makes is allowlisted by
 path); leaves anything in its private TMPDIR or creates a new entry in /tmp
 (R3); leaves a process running (R4 — found by session/process group, an
-inherited environment marker, and on Linux by being the suite's child
-subreaper, so a double-forked env-scrubbed grandchild is found too); skips a
+inherited environment marker (read on macOS too since fix wave 26b), and on
+Linux by being the suite's child subreaper, so a double-forked env-scrubbed
+grandchild is found too; `docs/ci.md` states what macOS cannot see); skips a
 test for a reason not on the suite's list in `devtools/hygiene_allowlist.json`
 (R5); or runs a different number of tests than `docs/test-counts.md` says (R6).
 `devtools/hygiene_check.py lint` (CI job `hygiene-static`) fails a test that
@@ -723,7 +724,7 @@ export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger sec
 cd src && python3 -m api   # LEGAL_BIND_ADDR (default 127.0.0.1), LEGAL_PORT (default 8420)
 ```
 
-## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026 (fix wave 20 applied)
+## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026, fix waves 20-26b applied
 
 The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;
 Superpowers `8ca22dba` prompt texts forked as ours). A findings document goes in; the ENGINE opens a
@@ -745,10 +746,13 @@ unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 a
 `docs/adr/0011-delivery-department-architecture.md`. Routes and settings: `services/delivery-py/README.md`.
 
 - **Status:** built and tested (fix wave 23, c71e363: 651 tests — 647 passed, 4 skipped with the printed
-  reason — on Python 3.13.13 and on 3.12.3; a run leaves nothing in its `TMPDIR` but the shared Go build cache,
-  BUT it leaves four `dlv-git-*` isolation dirs and one `go-build*` dir in `/tmp` itself — processes started with
-  a scrubbed environment (no `TMPDIR`) and then ended by a signal, so their `atexit` cleanup never runs: known,
-  not fixed; wave 21: every finding must name a runnable reproduction — an existing test or a reviewer-authored
+  reason — on Python 3.13.13 and on 3.12.3; at that commit a run left four `dlv-git-*` isolation dirs and one
+  `go-build*` dir in `/tmp` itself, from processes started with a scrubbed environment and ended by a signal.
+  Since then: wave 24 gives every child the suite's `TMPDIR` (on the env allowlist), so such dirs land in the
+  session's temp root, which the suite removes; wave 25 creates `dlv-git-*` at first use, not at import (C6-3);
+  a process killed by a signal after its first git command still leaves its `dlv-git-*` dir in its `TMPDIR`
+  (OPEN.md C6-3-res); the CI jobs run every suite under the hygiene check, which fails any leftover. Wave 21:
+  every finding must name a runnable reproduction — an existing test or a reviewer-authored
   `reproduction_test` that fails on the starting tree — or is refused 422, and since wave 22 that RED check is
   part of admission (wave 23: its containers run outside the service lock, the service's run slot reserved), and
   the reproduction must also hold OUTSIDE the test runner — a reproduction whose TEST needs pytest ends
@@ -758,8 +762,9 @@ unconditionally. Architecture, pins, the 28 choices, the round-18 and round-19 a
   trivial `DISPROOF:`, hung or flooded suite) and every round-19 route (a fix in a new module the test imports, a
   pytest plugin registered from inside the test, a reproduction skipped under `CHANGED_TEST:`, a cancel after the
   FIXED turn, multi-line bash, file-tool writes through symlinks) now ends the run `failed` with the defect intact
-  and uncommitted. **Docker live: not provable here** (no
-  daemon on the build box; `tests/test_live_docker.py` lists the properties only a daemon can prove). **Not
+  and uncommitted. **Docker live: not provable on the build box** (no daemon; `tests/test_live_docker.py` lists the
+  properties only a daemon can prove); the CI job `delivery-docker-live` builds the sandbox image and runs them
+  (fix wave 26a; its image build failed on CI #3 and was fixed in 26b — not yet proven green). **Not
   certified for a fix run against `main`.** pip-audit not run (tool absent); image digests are required build
   arguments. Go, Rust (stable, no nightly/nextest) and Node 22 services now have engine-owned verdicts (Node has no
   collect-only mechanism: stated in the ADR); a service outside `services/<name>/` (`apps/dashboard-ts`) is still

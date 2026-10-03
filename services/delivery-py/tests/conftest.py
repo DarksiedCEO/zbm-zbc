@@ -20,7 +20,9 @@ import _tmproot  # noqa: E402  (fix wave 21, L4: before anything imports tempfil
 # delivery-docker-live; popping it made all three Docker live tests skip "is not set" on every machine, so that job
 # (which fails on any skip) could never pass. tests/test_round25.py checks every DLV_* name a test reads is listed here.
 # DLV_TEST_GOCACHE (wave 25): a Go build cache to keep across sessions; unset, the session root holds it.
-SUITE_SETTINGS = ("DLV_TEST_PORT_RANGE", "DLV_LIVE_LOG_DIR", "DLV_LIVE_SANDBOX_IMAGE", "DLV_TEST_GOCACHE")
+# DLV_TEST_CARGO_HOME (wave 26b, DLV-HOST): the same for the double's cargo home.
+SUITE_SETTINGS = ("DLV_TEST_PORT_RANGE", "DLV_LIVE_LOG_DIR", "DLV_LIVE_SANDBOX_IMAGE", "DLV_TEST_GOCACHE",
+                  "DLV_TEST_CARGO_HOME")
 for k in list(os.environ):
     if k.startswith(("DLV_", "DEER_FLOW_", "LEDGER_SERVICE_", "LANGSMITH_", "LANGFUSE_", "GATEWAY_")) and k not in SUITE_SETTINGS:
         os.environ.pop(k, None)

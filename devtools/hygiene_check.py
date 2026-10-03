@@ -19,9 +19,13 @@ Two halves:
                group and session (the suite starts as its own session leader), by an environment marker every
                descendant inherits unless it scrubs its environment, and — on Linux — by being the suite's child
                subreaper (PR_SET_CHILD_SUBREAPER), so even a double-forked, setsid'd, env-scrubbed grandchild is
-               re-parented to this process and found. Elsewhere (macOS: no subreaper, no readable environment,
-               table from ``ps``) only the process group and its descendants are tracked — a setsid'd orphan
-               escapes there — and the checker's own ``ps`` helper is excluded by its pid. Each leftover is printed
+               re-parented to this process and found. Elsewhere (macOS: no subreaper, table from ``ps``) the
+               process group and its descendants are tracked, and (fix wave 26b, R26-1) the marker is read from each
+               of this user's processes through sysctl KERN_PROCARGS2, so an orphan that left the group — setsid,
+               setpgid, a double fork — is found while it keeps its environment. What escapes on macOS: an orphan
+               that left the group AND scrubbed its environment, and one whose program is an Apple platform binary
+               (/bin/sleep, /bin/sh: macOS withholds their environment). The checker's own ``ps`` helper is excluded
+               by its pid. Each leftover is printed
                with pid, ppid, pgid, stat and its full command, then killed (by PID; they are this run's own) so
                the next job is not poisoned;
   R5 skips     a test was skipped for a reason not on the suite's expected-skip list (devtools/hygiene_allowlist.json,
@@ -46,8 +50,8 @@ Two halves:
                resolvable commit id in the same paragraph) is a historical record and allowed;
   L4 shared    the shared files are byte-identical in every service that has them (graceful_close.py, the shared
                graceful-close test files modulo their two service constants, tests/_procinfo.py with the shared port
-               helper, tests/test_procinfo.py, tests/test_shared_ports.py) and graceful_close.py matches the sha256
-               the tests pin.
+               helper, tests/test_procinfo.py, tests/test_shared_ports.py, src/launch_guard.py — the launchers'
+               switch-interval check and SIGTERM handling) and graceful_close.py matches the sha256 the tests pin.
 
 ``counts`` — prints docs/test-counts.md's table, or (``--check``) verifies every suite row is well-formed.
 
@@ -174,19 +178,53 @@ def _proc_table() -> list[dict]:
             rows.append({"pid": int(d), "state": rest[0], "stat": rest[0], "ppid": int(rest[1]), "pgid": int(rest[2]),
                          "sid": int(rest[3]), "cmd": cmd, "env": env})
         return rows
-    # macOS / BSD: ps (no environment; the marker check is Linux-only). `ps -ax` lists ITSELF, as a child of this
-    # checker: that row is the checker's own helper, never the suite's, and is dropped by its pid (fix wave 26a,
-    # W26-1 — on every macOS job of CI #2 it was reported as "still alive: ps -axo pid=,ppid=,pgid=,stat=,command=").
-    helper = subprocess.Popen(["ps", "-axo", "pid=,ppid=,pgid=,stat=,command="], stdout=subprocess.PIPE,
+    # macOS / BSD: ps. `ps -ax` lists ITSELF, as a child of this checker: that row is the checker's own helper, never
+    # the suite's, and is dropped by its pid (fix wave 26a, W26-1 — on every macOS job of CI #2 it was reported as
+    # "still alive: ps -axo pid=,ppid=,pgid=,stat=,command="). Fix wave 26b (R26-1): the environment of each of this
+    # user's processes is read as well (`_environ_of`), so the run marker finds an orphan that left the suite's
+    # process group without a subreaper too — what `ps` itself no longer prints.
+    helper = subprocess.Popen(["ps", "-axo", "pid=,ppid=,pgid=,uid=,stat=,command="], stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL, text=True)
     out, _ = helper.communicate()
+    me = os.getuid()
     for line in out.splitlines():
-        f = line.split(None, 4)
-        if len(f) < 4 or not f[0].isdigit() or int(f[0]) == helper.pid:
+        f = line.split(None, 5)
+        if len(f) < 5 or not f[0].isdigit() or int(f[0]) == helper.pid:
             continue
-        rows.append({"pid": int(f[0]), "ppid": int(f[1]), "pgid": int(f[2]), "sid": -1, "state": f[3][:1],
-                     "stat": f[3], "cmd": f[4] if len(f) > 4 else "", "env": b""})
+        pid = int(f[0])
+        rows.append({"pid": pid, "ppid": int(f[1]), "pgid": int(f[2]), "sid": -1, "state": f[4][:1],
+                     "stat": f[4], "cmd": f[5] if len(f) > 5 else "",
+                     "env": _environ_of(pid) if f[3].isdigit() and int(f[3]) == me else b""})
     return rows
+
+
+def _environ_of(pid: int) -> bytes:
+    """A process's environment, NUL-separated, where the OS gives it to its owner; b"" otherwise (fix wave 26b,
+    R26-1). macOS: sysctl KERN_PROCARGS2 — the source `ps -E` printed from — which answers for this user's processes
+    and leaves the environment out for Apple's platform binaries (/bin/sleep, /bin/sh: their block ends at argv). Any
+    other system on this path (the self-test's portable mode on Linux): /proc/<pid>/environ when readable."""
+    if sys.platform != "darwin":
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as fh:
+                return fh.read()
+        except OSError:
+            return b""
+    try:
+        libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+        size = ctypes.c_size_t(0)
+        mib = (ctypes.c_int * 3)(1, 49, pid)                      # CTL_KERN, KERN_PROCARGS2
+        if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0 or size.value < 4:
+            return b""
+        buf = ctypes.create_string_buffer(size.value)
+        if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0:
+            return b""
+    except (OSError, AttributeError):
+        return b""
+    raw = buf.raw[:size.value]
+    argc = int.from_bytes(raw[:4], sys.byteorder)
+    _, _, rest = raw[4:].partition(b"\0")                        # the executable path, then NUL padding
+    parts = rest.lstrip(b"\0").split(b"\0")
+    return b"\0".join(x for x in parts[argc:] if x)
 
 
 def leftover_processes(leader: int, token: str, subreaper: bool) -> list[dict]:
@@ -372,7 +410,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     private_tmp.mkdir()
     results = work / "results.json"
     log_path = work / "output.log"
-    systmp = system_tmp()
+    systmp = Path(a.system_tmp) if a.system_tmp else system_tmp()
     if work_root.resolve() == systmp.resolve():
         # the private TMPDIR would itself be a new top-level entry of the directory R3 watches
         print(f"hygiene_check run: --work-dir must not be {systmp} itself (a subdirectory is fine)", file=sys.stderr)
@@ -520,12 +558,43 @@ def cmd_run(a: argparse.Namespace) -> int:
 TIME_FUNCS = {"time", "perf_counter", "monotonic", "time_ns", "perf_counter_ns", "monotonic_ns"}
 
 
-def _is_clock_call(node: ast.AST) -> bool:
+def _clock_aliases(tree: ast.AST) -> tuple[frozenset[str], frozenset[str]]:
+    """(names bound to the time module, names bound to one of its clock functions) by this module's imports — fix
+    wave 26b (F-9): `import time as tm` and `from time import monotonic as now` read the same clock."""
+    modules, funcs = {"time", "_time"}, {"perf_counter", "monotonic", "perf_counter_ns", "monotonic_ns"}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name == "time":
+                    modules.add(a.asname or "time")
+        elif isinstance(n, ast.ImportFrom) and n.module == "time":
+            for a in n.names:
+                if a.name in TIME_FUNCS:
+                    funcs.add(a.asname or a.name)
+    return frozenset(modules), frozenset(funcs)
+
+
+def _delta_helpers(tree: ast.AST, modules: frozenset[str], funcs: frozenset[str]) -> frozenset[str]:
+    """Functions of this module that RETURN a clock delta (`return time.monotonic() - t0`): a call to one is a delta
+    (fix wave 26b, F-9: `assert took(t0) < 1` read as no clock at all)."""
+    out = set()
+    for f in ast.walk(tree):
+        if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for r in ast.walk(f):
+                if isinstance(r, ast.Return) and isinstance(r.value, ast.BinOp) and isinstance(r.value.op, ast.Sub) \
+                        and (_is_clock_call(r.value.left, modules, funcs) or _is_clock_call(r.value.right, modules, funcs)):
+                    out.add(f.name)
+    return frozenset(out)
+
+
+def _is_clock_call(node: ast.AST, modules: frozenset[str] = frozenset({"time", "_time"}),
+                   funcs: frozenset[str] = frozenset({"perf_counter", "monotonic", "perf_counter_ns",
+                                                      "monotonic_ns"})) -> bool:
     if isinstance(node, ast.Call):
         f = node.func
         if isinstance(f, ast.Attribute) and f.attr in TIME_FUNCS:
-            return isinstance(f.value, ast.Name) and f.value.id in ("time", "_time")
-        if isinstance(f, ast.Name) and f.id in ("perf_counter", "monotonic", "perf_counter_ns", "monotonic_ns"):
+            return isinstance(f.value, ast.Name) and f.value.id in modules
+        if isinstance(f, ast.Name) and f.id in funcs:
             return True
         if isinstance(f, ast.Attribute) and f.attr == "time" and isinstance(f.value, ast.Call):
             # loop.time() / asyncio.get_running_loop().time()
@@ -587,10 +656,14 @@ class _ClockFlow(ast.NodeVisitor):
     """Per function: names bound to clock readings (t0 = time.monotonic()) and to clock deltas
     (took = time.monotonic() - t0); then flags upper-bound assertions of a delta against a literal."""
 
-    def __init__(self, path: str, lines: list[str], module_consts: frozenset[str] = frozenset()):
+    def __init__(self, path: str, lines: list[str], module_consts: frozenset[str] = frozenset(),
+                 tree: ast.AST | None = None):
         self.path, self.lines, self.hits = path, lines, []
         self.func_stack: list[str] = []
         self.module_consts = module_consts
+        # fix wave 26b (F-9): the module's clock aliases and the helpers that return a clock delta
+        self.modules, self.funcs = _clock_aliases(tree) if tree is not None else _clock_aliases(ast.Module([], []))
+        self.helpers = _delta_helpers(tree, self.modules, self.funcs) if tree is not None else frozenset()
 
     def _scan_function(self, node):
         self.func_stack.append(node.name)
@@ -603,13 +676,18 @@ class _ClockFlow(ast.NodeVisitor):
         def lit(e: ast.AST) -> bool:
             return _numeric_literal(e, consts)
 
+        def clock(e: ast.AST) -> bool:
+            return _is_clock_call(e, self.modules, self.funcs)
+
         def is_delta(e: ast.AST) -> bool:
             if isinstance(e, ast.Name):
                 return e.id in deltas
+            if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in self.helpers:
+                return True                                          # a helper that returns a clock delta (F-9)
             if isinstance(e, ast.BinOp) and isinstance(e.op, ast.Sub):
                 lhs, rhs = e.left, e.right
-                lc = _is_clock_call(lhs) or (isinstance(lhs, ast.Name) and lhs.id in stamps)
-                rc = _is_clock_call(rhs) or (isinstance(rhs, ast.Name) and rhs.id in stamps)
+                lc = clock(lhs) or (isinstance(lhs, ast.Name) and lhs.id in stamps)
+                rc = clock(rhs) or (isinstance(rhs, ast.Name) and rhs.id in stamps)
                 return lc and rc
             if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in ("round", "abs", "float"):
                 return bool(e.args) and is_delta(e.args[0])
@@ -620,14 +698,14 @@ class _ClockFlow(ast.NodeVisitor):
         for sub in ast.walk(node):
             if isinstance(sub, ast.Assign) and len(sub.targets) == 1 and isinstance(sub.targets[0], ast.Name):
                 name = sub.targets[0].id
-                if _is_clock_call(sub.value):
+                if clock(sub.value):
                     stamps.add(name)
                 elif is_delta(sub.value):
                     deltas.add(name)
             elif isinstance(sub, ast.Assign) and len(sub.targets) == 1 and isinstance(sub.targets[0], ast.Tuple) \
                     and isinstance(sub.value, ast.Tuple):
                 for t, v in zip(sub.targets[0].elts, sub.value.elts):
-                    if isinstance(t, ast.Name) and _is_clock_call(v):
+                    if isinstance(t, ast.Name) and clock(v):
                         stamps.add(t.id)
 
         def upper_bound(cmp: ast.Compare) -> bool:
@@ -711,6 +789,16 @@ def _port_literal(node: ast.AST) -> int | None:
 
 def _py_port_hits(tree: ast.AST) -> list[tuple[int, str, str]]:
     hits = []
+    # fix wave 26b (F-9): a name bound to a port-range literal anywhere in the module, then used as the port of a
+    # bind/connect (`p = 20111; s.bind((host, p))`), is a hard-coded port whatever the name
+    held: dict[str, int] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Assign):
+            pv = _port_literal(n.value) if isinstance(n.value, ast.Constant) and isinstance(n.value.value, int) else None
+            if pv:
+                for tg in n.targets:
+                    if isinstance(tg, ast.Name):
+                        held[tg.id] = pv
     funcs: dict[int, str] = {}
     for f in ast.walk(tree):
         if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -724,7 +812,8 @@ def _py_port_hits(tree: ast.AST) -> list[tuple[int, str, str]]:
             name = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else "")
             if name in ("bind", "connect", "connect_ex", "create_connection") and node.args and \
                     isinstance(node.args[0], ast.Tuple) and len(node.args[0].elts) >= 2:
-                v = _port_literal(node.args[0].elts[1])
+                port = node.args[0].elts[1]
+                v = _port_literal(port) or (held.get(port.id) if isinstance(port, ast.Name) else None)
                 if v:
                     hits.append((node.lineno, where, f"{name}((host, {v}))"))
             for kw in node.keywords:
@@ -882,6 +971,17 @@ def _doc_files() -> list[Path]:
     return [p for p in out if (REPO / p).exists()]
 
 
+_SENTENCE_END = re.compile(r"[.!?;](?=\s)")
+
+
+def _sentence(flat: str, start: int, end: int) -> str:
+    """The sentence of `flat` around [start, end): from after the last `.`, `!`, `?` or `;` followed by white space
+    before it to the next one after it (a version number like 3.13.9 or a path like a.py is not an end)."""
+    lo = max((m.end() for m in _SENTENCE_END.finditer(flat, 0, start)), default=0)
+    nxt = _SENTENCE_END.search(flat, end)
+    return flat[lo:nxt.start() + 1 if nxt else len(flat)]
+
+
 def lint_counts(allow: dict) -> list[str]:
     problems = []
     cache: dict = {}
@@ -900,13 +1000,16 @@ def lint_counts(allow: dict) -> list[str]:
             block = "\n".join(lines[a:b])
             if rel.suffix in (".yml", ".yaml") and not block.lstrip().startswith("#"):
                 continue
-            pinned = any(_commit_exists(h, cache) for h in COMMIT_RE.findall(block) if not h.isdigit())
-            if pinned:
-                continue
+            # an id made only of digits counts too (fix wave 26b, W26-ST): ~1 short id in 27 has no a-f, and skipping
+            # those lost the pin then; a digit run that is not a commit still resolves to nothing
             # matched over the whole paragraph (line breaks as spaces, offsets kept), so a count wrapped across two
             # lines ("`cargo test`: 84\n  passed") is caught too (fix wave 25, E-C); reported at its first line
             flat = block.replace("\n", " ")
             for m in COUNT_CLAIM.finditer(flat):
+                # fix wave 26b (F-9): a commit id pins the counts of ITS sentence only — any resolvable id anywhere in
+                # the paragraph used to exempt every count in it
+                if any(_commit_exists(h, cache) for h in COMMIT_RE.findall(_sentence(flat, m.start(), m.end()))):
+                    continue
                 i = a + block.count("\n", 0, m.start())
                 snippet = " ".join(m.group(0).split())
                 e = _allowed(allow.get("allow", []), "L3-counts", str(rel), "<doc>", lines[i])
@@ -915,6 +1018,46 @@ def lint_counts(allow: dict) -> list[str]:
                 problems.append(violation("L3-counts", f"{rel}:{i + 1}",
                                           f"hand-written test count {snippet!r} — link docs/test-counts.md, or "
                                           f"tie a historical count to its commit"))
+    return problems
+
+
+def _source_strings(root: Path) -> list[str]:
+    """Every string literal in the Python files under `root`, an f-string as its constant text (placeholders
+    dropped, so a reason regex anchored at the start still matches it)."""
+    import ast
+    out: list[str] = []
+    for f in sorted(root.rglob("*.py")):
+        if any(part in (".venv", "node_modules", "__pycache__") for part in f.parts):
+            continue
+        try:
+            tree = ast.parse(f.read_text(), str(f))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.JoinedStr):
+                out.append("".join(v.value for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str)))
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                out.append(node.value)
+    return out
+
+
+def lint_expected_skips(allow: dict) -> list[str]:
+    """Fix wave 26b (W25-EB-R3): an expected skip that no source of its suite can produce is stale (delivery-py kept
+    one for a test removed in d0876fd). Each `reason_regex` must match a string literal, or an f-string's constant
+    text, in that suite's directory (services/<name> or apps/<name>); with its trailing `$` dropped when matched
+    against an f-string's text, whose placeholders may have stood at the end."""
+    problems = []
+    for suite, items in sorted(allow.get("expected_skips", {}).items()):
+        name = suite.partition(":")[2]
+        root = next((REPO / d / name for d in ("services", "apps") if (REPO / d / name).is_dir()), None)
+        strings = _source_strings(root) if root else []
+        for e in items:
+            rx = e.get("reason_regex", "")
+            loose = rx[:-1] if rx.endswith("$") and not rx.endswith("\\$") else rx
+            if not any(re.search(rx, s) or re.search(loose, s) for s in strings):
+                where = root.relative_to(REPO) if root else f"<no directory for {suite}>"
+                problems.append(violation("L9-allowlist", "devtools/hygiene_allowlist.json",
+                                          f"expected skip of {suite} matches no skip reason in {where}: {rx!r}"))
     return problems
 
 
@@ -946,6 +1089,8 @@ def lint_shared() -> list[str]:
         "_procinfo.py": sorted(svc.glob("*/tests/_procinfo.py")),
         "test_procinfo.py": sorted(svc.glob("*/tests/test_procinfo.py")),
         "test_shared_ports.py": sorted(svc.glob("*/tests/test_shared_ports.py")),
+        # fix wave 26b (C5-3/C5-4): the launchers' switch-interval check and SIGTERM handling
+        "launch_guard.py": sorted(svc.glob("*/src/launch_guard.py")) + sorted(svc.glob("*/src/*/launch_guard.py")),
     }
     for name, files in groups.items():
         norm = {f: SERVICE_CONSTANTS.sub(r'\1 = "<service>"', f.read_text()) for f in files}
@@ -977,7 +1122,7 @@ def cmd_lint(a: argparse.Namespace) -> int:
                 problems.append(violation("L0-parse", str(rel), str(e)))
                 continue
             if "L1" in rules:
-                v = _ClockFlow(str(rel), lines, _literal_names(tree))
+                v = _ClockFlow(str(rel), lines, _literal_names(tree), tree)
                 v.visit(tree)
                 for ln, func in v.hits:
                     e = _allowed(entries, "L1-wallclock", str(rel), func, lines[ln - 1])
@@ -1019,6 +1164,7 @@ def cmd_lint(a: argparse.Namespace) -> int:
         for e in entries:
             if e.get("rule") in ("L1-wallclock", "L2-ports") and id(e) not in used:
                 problems.append(violation("L9-allowlist", e.get("path", "?"), f"allowlist entry matches nothing: {e}"))
+        problems += lint_expected_skips(allow)
     by_service: dict[str, int] = {}
     for line in problems:
         where = line.split(" ", 3)[2]
@@ -1086,6 +1232,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--allow-ignored", action="append", default=[], help="git-ignored path the run may create")
     r.add_argument("--tmp-ignore", action="append", default=[],
                    help="regex of /tmp entry names another process on this machine creates (never in CI)")
+    r.add_argument("--system-tmp", help="the directory R3 watches for new entries (default /tmp; the self-test "
+                                        "points it at a private directory so other processes' /tmp entries cannot "
+                                        "fail it; never in CI)")
     r.add_argument("--counts", choices=("check", "write", "off"), default="check")
     r.add_argument("--count-os", help="OS whose platform-only tests R6 applies (default: this one; the self-test "
                                       "uses it to check another OS's rules)")

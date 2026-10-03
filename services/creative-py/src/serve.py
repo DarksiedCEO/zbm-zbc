@@ -27,13 +27,13 @@ The body has its own limits in api.BodyLimit (1 MiB, 30 s -> 408).
 
 from __future__ import annotations
 
-import math
 import os
 import sys
 
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
+import launch_guard
 from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 from api import MAX_HEADER_BYTES
@@ -121,34 +121,23 @@ def max_concurrency() -> int:
 # to start), and the interval in force is checked in whole microseconds (CPython
 # truncates 1e6 x the value: 0.0001 reads back as 9.999999999999999e-05) and
 # printed before serving.
-SWITCH_INTERVAL_DEFAULT_S = 0.001
-SWITCH_INTERVAL_MIN_US = 100
-SWITCH_INTERVAL_MAX_US = 50_000
+SWITCH_INTERVAL_DEFAULT_S = launch_guard.SWITCH_INTERVAL_DEFAULT_S
+SWITCH_INTERVAL_MIN_US = launch_guard.SWITCH_INTERVAL_MIN_US
+SWITCH_INTERVAL_MAX_US = launch_guard.SWITCH_INTERVAL_MAX_US
+
+
+# Fix wave 26b (scout C5-3): the check itself is now the one shared by every launcher (src/launch_guard.py,
+# byte-identical in each service); these names stay for this service's callers and tests (SystemExit, as before).
 
 
 def switch_interval_from_env(name: str = "CREATIVE_SWITCH_INTERVAL_SECONDS") -> float:
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return SWITCH_INTERVAL_DEFAULT_S
-    try:
-        value = float(raw)
-    except ValueError:
-        value = math.nan
-    if not (SWITCH_INTERVAL_MIN_US / 1e6 <= value <= SWITCH_INTERVAL_MAX_US / 1e6):  # refuses nan and inf too
-        raise SystemExit(f"{name}={raw!r} is invalid: expected seconds, {SWITCH_INTERVAL_MIN_US / 1e6:g} <= value "
-                         f"<= {SWITCH_INTERVAL_MAX_US / 1e6:g}. This service refuses to start.")
-    return value
+    return launch_guard.switch_interval_from_env(name, SWITCH_INTERVAL_DEFAULT_S, error=SystemExit)
 
 
 def apply_switch_interval(value: float) -> int:
     """Sets the interval; returns the one in force in whole microseconds. SystemExit unless it is within
-    [MIN_US, MAX_US] and is `value` to within the microsecond CPython truncates."""
-    sys.setswitchinterval(value)
-    in_force_us = round(sys.getswitchinterval() * 1_000_000)
-    if not (SWITCH_INTERVAL_MIN_US <= in_force_us <= SWITCH_INTERVAL_MAX_US) or abs(in_force_us - value * 1_000_000) >= 1:
-        raise SystemExit(f"the GIL switch interval in force is {in_force_us} us, not the {value!r} s set "
-                         f"(CREATIVE_SWITCH_INTERVAL_SECONDS): this service refuses to start")
-    return in_force_us
+    [MIN_US, MAX_US] and is `value` to within the microsecond CPython truncates (launch_guard)."""
+    return launch_guard.apply_switch_interval(value, "CREATIVE_SWITCH_INTERVAL_SECONDS", error=SystemExit)
 
 
 SWITCH_INTERVAL_S: float = switch_interval_from_env()
@@ -159,16 +148,20 @@ def main() -> None:
     print(f"creative-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
     host = os.environ.get("CREATIVE_BIND_ADDR", "127.0.0.1")
     port = int(os.environ.get("CREATIVE_PORT", "8300"))
-    uvicorn.run(
-        "api:app",
-        host=host,
-        port=port,
-        log_level="info",
-        http=_HeadDeadlineH11Protocol,
-        h11_max_incomplete_event_size=MAX_HEADER_BYTES,
-        timeout_keep_alive=KEEP_ALIVE_TIMEOUT_S,
-        limit_concurrency=max_concurrency(),
-    )
+    # Fix wave 26b (scout C5-4): uvicorn re-raises the SIGTERM it captured after its graceful shutdown; with the
+    # default disposition the process died of it and no atexit handler ran. Inside sigterm_exits() the stop is a
+    # normal exit (status 143) and exit handlers run.
+    with launch_guard.sigterm_exits():
+        uvicorn.run(
+            "api:app",
+            host=host,
+            port=port,
+            log_level="info",
+            http=_HeadDeadlineH11Protocol,
+            h11_max_incomplete_event_size=MAX_HEADER_BYTES,
+            timeout_keep_alive=KEEP_ALIVE_TIMEOUT_S,
+            limit_concurrency=max_concurrency(),
+        )
 
 
 if __name__ == "__main__":

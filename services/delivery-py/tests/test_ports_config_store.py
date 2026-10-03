@@ -61,8 +61,8 @@ def test_gitport_exposes_only_the_allowlisted_subcommands(tmp_path):
 
 # --- config --------------------------------------------------------------------------------------------------------
 
-def test_config_env_allowlist_and_forbidden_names():
-    env = base_env("/tmp", "/tmp")
+def test_config_env_allowlist_and_forbidden_names(tmp_path):
+    env = base_env(str(tmp_path), str(tmp_path))
     assert C.load(env).port == 8430
     for bad in ("AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "KUBECONFIG", "NPM_TOKEN"):
         with pytest.raises(RuntimeError, match="outside DLV_ENV_ALLOWLIST"):
@@ -74,8 +74,8 @@ def test_config_env_allowlist_and_forbidden_names():
     assert C.load({**env, "HTTPS_PROXY": "http://proxy:3128", "https_proxy": "http://proxy:3128", "SSL_CERT_FILE": "/x"})
 
 
-def test_config_llm_and_egress_rules():
-    env = base_env("/tmp", "/tmp", llm="none")
+def test_config_llm_and_egress_rules(tmp_path):
+    env = base_env(str(tmp_path), str(tmp_path), llm="none")
     assert C.load(env).llm_provider is None
     with pytest.raises(RuntimeError, match="NON_PRODUCTION"):
         C.load({**env, "DLV_NON_PRODUCTION": "0", "DLV_LLM_PROVIDER": "fake"})
@@ -119,8 +119,8 @@ def test_config_llm_and_egress_rules():
 
 # --- model backends -------------------------------------------------------------------------------------------------
 
-def test_backend_from_settings_is_unconfigured_without_key_and_openai_wire_shape():
-    env = base_env("/tmp", "/tmp", llm="none")
+def test_backend_from_settings_is_unconfigured_without_key_and_openai_wire_shape(tmp_path):
+    env = base_env(str(tmp_path), str(tmp_path), llm="none")
     s = C.load(env)
     b = backend_from_settings(s, None, NotWiredVault(), env)
     assert isinstance(b, NoChatBackend)

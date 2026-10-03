@@ -138,7 +138,7 @@ provider's check time; then a re-check is required, AEGIS N16-8), `VI_MINOR_PURG
 `VI_<P>_APP_CREDENTIALS_REF` and `VI_DEVICE_SIGNALS_ENABLED=1` refuse to start: nothing is built behind them.
 The seed is pinned: `VI_SEED_PATH` / `VI_SEED_SHA256` may name another seed only with
 `VI_ALLOW_UNPINNED_SEED=1` (then `rules_pinned: false, production: false` everywhere).
-Server tuning, read once at start by `src/serve.py` (a non-numeric or non-positive value refuses to start): `VI_REQUEST_HEAD_TIMEOUT_SECONDS` (10: a request head must arrive within this many seconds of connect), `VI_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `VI_LIMIT_CONCURRENCY` (128 open connections; beyond it a connection is answered 503), `VI_SWITCH_INTERVAL_SECONDS` (0.001, the interpreter's thread switch interval) and `VI_DRAINS_MAX` (512 concurrent graceful-close drains; `src/graceful_close.py`). (Wave 25: these were documented only in `serve.py`'s docstring.)
+Server tuning, read once at start by `src/serve.py` (a non-numeric or non-positive value refuses to start): `VI_REQUEST_HEAD_TIMEOUT_SECONDS` (10: a request head must arrive within this many seconds of connect), `VI_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `VI_LIMIT_CONCURRENCY` (128 open connections; beyond it a connection is answered 503), `VI_SWITCH_INTERVAL_SECONDS` (0.001, the interpreter's thread switch interval; only 0.0001 .. 0.05 starts, checked in force and printed: the check shared by every launcher, `src/launch_guard.py`, fix wave 26b) and `VI_DRAINS_MAX` (512 concurrent graceful-close drains; `src/graceful_close.py`). (Wave 25: these were documented only in `serve.py`'s docstring.)
 
 ## Reconciling the local log with the ledger
 
@@ -177,6 +177,9 @@ Live run with the real ledger binary (ports 19300-19304; kills only the processe
 ```bash
 cd services/verification-py && LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py --ports 19300,19301,19302,19303,19304
 ```
+
+The run's work directory (ledger and service logs) is removed when the run ends, passed or failed; set
+`LIVE_WORK_DIR=<dir>` to keep it inside `<dir>` (the run prints where; fix wave 26b, C6-2).
 
 Leg A starts compliance-py and verification-py through their production entrypoints on one ledger (V&I reads
 HR-13 from compliance-py through the thin client; every other dependency is a stand-in: nothing connects or

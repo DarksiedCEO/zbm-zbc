@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,24 @@ def say(msg: str) -> None:
     print(line, flush=True)
 
 
+# Fix wave 26b (scout C6-2): the run's work dir holds the ledger and service logs (the run's evidence). It was made
+# with mkdtemp and never removed, so every local run left one behind. Now LIVE_WORK_DIR=<dir> (the name every
+# live_run.py reads) KEEPS the run's dir inside <dir> and the end of the run prints where it is — CI's live-runs job
+# asks for $RUNNER_TEMP/live-work, then lists and removes it; unset, the dir is made in the temp dir and removed when
+# the run ends, passed or failed (the run's narration is on stdout either way).
+def make_work_dir(prefix: str) -> tuple[Path, bool]:
+    keep_in = os.environ.get("LIVE_WORK_DIR") or None
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=keep_in)), keep_in is not None
+
+
+def finish_work_dir(work: Path, keep: bool) -> None:
+    if keep:
+        print(f"work dir kept (LIVE_WORK_DIR): {work}", flush=True)
+    else:
+        shutil.rmtree(work)
+        print(f"work dir {work} removed (set LIVE_WORK_DIR=<dir> to keep the run's logs)", flush=True)
+
+
 def wait_health(url: str, timeout: float = 20.0) -> dict:
     end = time.time() + timeout
     while time.time() < end:
@@ -64,9 +83,8 @@ def start(cmd, env, cwd, name, logdir) -> subprocess.Popen:
     return p
 
 
-def main() -> int:
+def _main(work: Path) -> int:
     ledger_bin = os.environ["LEDGER_BIN"]
-    work = Path(tempfile.mkdtemp(prefix="cmp-live-", dir=os.environ.get("LIVE_WORK_DIR")))
     (work / "fixtures").mkdir()
     pl, pa, pb, plb = PORTS
     L, A, B = f"http://127.0.0.1:{pl}", f"http://127.0.0.1:{pa}", f"http://127.0.0.1:{pb}"
@@ -268,7 +286,14 @@ def main() -> int:
                     p.kill()
             say(f"stopped pid={p.pid}")
         (work / "live_run.txt").write_text("\n".join(LOG) + "\n")
-        print(f"logs in {work}")
+
+
+def main() -> int:
+    work, keep = make_work_dir("cmp-live-")
+    try:
+        return _main(work)
+    finally:
+        finish_work_dir(work, keep)
 
 
 if __name__ == "__main__":

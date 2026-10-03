@@ -63,12 +63,16 @@ func healthOK(t *testing.T, port string) {
 // long the connection stayed open and whatever the server sent back.
 func trickle(t *testing.T, port, head string, payload byte, interval, limit time.Duration, onTick func()) (time.Duration, string) {
 	t.Helper()
+	// Fix wave 26b (CI #5, ubuntu: "cut after 14.9998429s, before readTimeout 15s"): the server's ReadTimeout runs from
+	// ACCEPT, which happens inside the dial; timed from after Dial returned, a cut by that very timeout could read a
+	// fraction of a millisecond short. Timed from before the dial, the server cannot have started its clock first, so
+	// the callers' lower bound (open >= the timeout) holds exactly as their comment says, whatever the load.
+	start := time.Now()
 	conn, err := net.Dial("tcp", "127.0.0.1:"+port)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	start := time.Now()
 	if _, err := conn.Write([]byte(head)); err != nil {
 		t.Fatal(err)
 	}

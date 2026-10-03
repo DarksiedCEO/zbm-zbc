@@ -150,36 +150,32 @@ GOOD_GRANT = {
 }
 
 
-_HANDED_OUT: list[int] = []
+def live_ports():
+    """The ports the live tests may bind: ZBM_TEST_PORT_RANGE, else ONBOARDING_TEST_PORT_RANGE ("lo-hi", inclusive);
+    None: OS-assigned ports."""
+    from _procinfo import assigned_port_range
+
+    return assigned_port_range("ONBOARDING_TEST_PORT_RANGE")
 
 
 def free_test_port() -> int:
-    """A free port for a live test: OS-assigned, or — with ONBOARDING_TEST_PORT_RANGE ("lo-hi") set — the next
-    free one of that range not handed out lately (two calls in a row never return the same port). Fix wave 25
-    (scout A O4; R-HYGIENE L2): the default used to be the literal range 19920-19939, and an exhausted range
-    SKIPPED the live tests; now there is no literal default and an exhausted range fails. Only a candidate:
-    another process can take it before the child binds it."""
-    import socket
+    """A CANDIDATE port: the shared picker (tests/_procinfo.py ``pick_port``) over ``live_ports()``. Fix wave 25
+    (scout A O4; R-HYGIENE L2): no literal default range. Fix wave 26b (scout C5-6): this was onboarding-py's own
+    pick-then-bind picker, and the launchers took any /health answer on the picked port for their child's. Another
+    process can take the port before the child binds it: start children with ``start_live``; use this only for a
+    socket this process binds itself."""
+    from _procinfo import pick_port
 
-    spec = os.environ.get("ONBOARDING_TEST_PORT_RANGE", "").strip()
-    if not spec:
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
-    lo, hi = (int(x) for x in spec.split("-"))
-    recent = set(_HANDED_OUT[-((hi - lo + 1) // 2):]) if hi > lo else set()
-    for port in range(lo, hi + 1):
-        if port in recent:
-            continue
-        with socket.socket() as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # fix wave 22 (G3): TIME_WAIT is free
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-        _HANDED_OUT.append(port)
-        return port
-    raise RuntimeError(f"no free port left in ONBOARDING_TEST_PORT_RANGE={spec}")
+    return pick_port(live_ports())
+
+
+def start_live(start, host: str = "127.0.0.1"):
+    """``start(port) -> Popen``; returns (proc, port) once THAT child holds a listener on the port (the shared
+    ``_procinfo.start_owned``: a child that lost the port to another process is reaped and another port tried).
+    Fix wave 26b (scout C5-6)."""
+    from _procinfo import start_owned
+
+    return start_owned(start, live_ports(), host=host)
 
 
 @pytest.fixture

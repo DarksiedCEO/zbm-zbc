@@ -746,7 +746,9 @@ starved one read differently in the log.)
 can be ~5x the body (CPython stores a string with one astral character at 4 bytes a character, plus its UTF-8 copy).
 Each model's size is measured right after the parse (`_retained_bytes`: everything reachable, each object once, +1/16;
 against tracemalloc it counts 0.98-1.06x what the model holds — large models 1.01-1.06x, small (<= 64 KiB body)
-models 0.98-1.02x, i.e. up to ~2% (~16 KB) UNDER for small ones — `tests/test_fix25_liveness.py`) and counted in the
+models 0.98-1.02x, i.e. up to ~2% (~16 KB) UNDER for small ones — `tests/test_fix25_liveness.py`; **corrected in fix
+wave 26b, OPEN W25-EA-4:** that small-model range was measured on 64 KiB bodies only — on 2-16 KiB bodies the same
+measure is 0.81-0.96x, see "Fix wave 26b") and counted in the
 budget until the model is dropped (after the agent's work). Measured worst models per request model
 (E-A `h3_models` probe at e665109, Python 3.13.13 and 3.12.3 agree to 0.03 MiB; `w25-reports/E-A/logs/h3_models.e665109*.log`):
 large — CallEventsRequest 4.00 MiB body -> 20.5 MiB traced / 21.7 counted (5.1x), DossierUpdateRequest 3.91 -> 20.7 /
@@ -758,7 +760,8 @@ too — a 64 KiB valid body whose model is ~0.44 MB was answered 503 whenever th
 the very attack the small reserve exists for), breaking Decision 23 ("a small body never waits for in-flight bytes");
 on b51f307 the same request was 200 (`test_a_small_body_never_waits_for_the_shared_budget_even_when_its_model_is_larger`,
 failing on cd5fb49..da30363). A small body's model is now counted without waiting (`_BodyHold.cover_now`): what the
-pools have free, the rest in the shared pool's `over` until the model is dropped.
+pools have free, the rest in the shared pool's `over` until the model is dropped. (Replaced in fix wave 26b: a small
+body's model is reserved before its parse in a 4 MiB pool of its own; `cover_now` is gone.)
 **Second regression found and fixed (E-A successor, 20ab3e5):** a large body's model cover competed for freed bytes
 with every body chunk waiting for the shared pool; under the front-loaded slow-sender attack (fix9 Q1
 `[1MiB-front-then-2KiBps]`) the one model cover lost that race and the legit large batch was refused 503 AFTER its whole
@@ -766,7 +769,11 @@ body had been received and parsed (diagnosed in a DIAG copy: `w25-reports/E-A/lo
 py3.12 vs 0/6 on b51f307). `_InFlightBytes.reserve(priority=True)`: while a priority reservation waits, no other
 reservation takes freed bytes; `_off_loop` covers a large model with it (one large parse slot: at most one priority
 wait, <= `_INFLIGHT_WAIT_S`). After: Q1 0/12 runs failed and 0 of 62 legit large batches 503 (before 10 of 53;
-`w25-reports/E-A/logs/q1-rep2/`).
+`w25-reports/E-A/logs/q1-rep2/`). **(Correction, fix wave 26b, OPEN F-5:** that count was one engineer's 12 runs on
+20ab3e5 and reads as an elimination; it is not one. AEGIS round 25 measured 2 of 38 legit large batches 503 under the
+same attack on 9e55931, and fix wave 26b measured 4 of 51 (macOS; "Fix wave 26b" below). What the priority cover changed is
+that a parsed large model no longer loses the race for freed bytes to every waiting chunk; a legit large batch can
+still be refused under the attack — the Q1 test admits one refusal per run.**)**
 **Chosen: count, not reserve ahead.** Reserving the worst model (5.5x + up to 3 MiB) BEFORE the parse would put the
 parse in progress inside the budget too; it was built and measured and is not used: with 64 front-loaded slow
 senders holding the shared pool, every legit large batch was refused 503 (3/3, `test_live_q1_slow_senders_..._do_not_
@@ -798,7 +805,10 @@ of budget that stalled senders hold. Re-measured after the priority fix (20ab3e5
 the same run 2/10 and 0/10), small and /health 100/100; astral clients 62-72 MiB, 179/179 200; 128 senders VmHWM 64-66.
 Small bodies' models (the uncounted-when-full part above) are bounded only through concurrency: at most
 `LIMIT_CONCURRENCY` (128) requests are in the app at once, so their models add at most 128 x the worst small model
-(<= ~0.7 MiB) — a loose bound well above the 96 MiB scenario bound; no probe filled it.
+(<= ~0.7 MiB) — a loose bound well above the 96 MiB scenario bound; no probe filled it. **(Superseded in fix wave 26b,
+OPEN F-6 / W25-EA-3:** AEGIS round 25 measured 91 MiB growth with 60 stallers and 60 worst-shape small clients
+against the 71 derived, the worst small model found is ~0.86 MiB (OrchestrateRequest of minimal tasks), and small
+models are now reserved before their parse in a 4 MiB pool of their own — see "Fix wave 26b".**)**
 
 **H4 — loop lag is not the client's time (N24-S-12).** The rules that judge a client by time (the app's stall,
 trickle and arrival rules, the preemption charge, the protocol's stall and rate rules for unread bodies) counted every
@@ -809,7 +819,7 @@ rules subtract it; the hard deadlines (30 s + 5 s, the head deadline) stay wall-
 ruling: on a starved box stalled bodies are cut later in wall-clock seconds, by about the starvation, never later than
 the hard deadline. Residual: the protocol's `_body_last_lost` is read in `data_received` before the late tick of the
 same loop pass has run, so after a freeze the protocol's own stall clock (a backstop at 10 s) can credit the freeze
-once more.
+once more. **(Fixed in fix wave 26b, OPEN W25-EA-5: `LoopLag.settle()`, see "Fix wave 26b".)**
 
 **Proofs** (E-A, Oct 1 2026, 21:24-21:31Z, this 2-CPU box, Python 3.13.13, head = ef14a52; exactly 2 busy loops —
 R-LOAD — started and killed by the campaign script; a ps snapshot of other CPU users is logged per run: another
@@ -824,7 +834,7 @@ numbers were the stopped engineer's own and are not repeated here.
   regression either (settle <= 9.5 s, nothing unanswered) — round 24 measured 3 busy loops plus an uncontrolled
   co-tenant. So this campaign shows the head is no worse than both bases at R-LOAD; it does not show that the
   wave-25 change is what removed a regression.
-- `test_live_128_senders_..._cut` alone, 20 runs: **20/20 passed**; growth 63-65 MiB (kernel VmHWM), settled at
+- `test_live_128_senders_..._cut` alone at head ef14a52, 20 runs: **20/20 passed**; growth 63-65 MiB (kernel VmHWM), settled at
   7.5-8.5 s against the fixed 13 s bound; the server's main thread waited 0.49-0.72 s in the run queue per burst
   (printed only); load average 2.4-3.0.
 
@@ -832,6 +842,153 @@ numbers were the stopped engineer's own and are not repeated here.
 allocators and Pythons (macOS; the batches ran on 3.13). Whether a request model shape exists whose model is larger
 than the measured worst (the probe tried the long-string and many-object extremes of every request model, not every
 mix). The protocol's double credit after a freeze (above). Uncontrolled co-tenants were present for every load run.
+
+## Fix wave 26b, Oct 3 2026 — small models in a bounded pool, a freeze credited once, tests that measure what they name (OPEN F-3, F-5, F-6, F-7, F-8, W25-EA-3, -4, -5, -9, R26-3)
+
+Platform for every number in this section unless stated: the build box, macOS on an Apple M4 Pro, Python 3.13 with the
+service's pinned requirements; memory is the server's `phys_footprint` (proc_pid_rusage) with libmalloc's large cache
+off (`MallocLargeCache=0`, as `tests/test_fix8_n7_2_body_prealloc.py`'s server). None of it was re-measured on Linux;
+the Linux numbers quoted are AEGIS's. "2 busy loops" is R-LOAD: two `python3 -c 'while True: pass'` processes for the
+run. Probes: the wave's scratch evidence, not in the repository (`agentA/probes/load.py`, `load2.py`, `ratios.py`, `senders128.py`).
+
+**Small parsed models (F-6, W25-EA-3; product change).** Fix wave 25 counted a small body's model after its parse
+without waiting (`_BodyHold.cover_now`); with the shared pool held by stalled senders the model went to the pool's
+`over`, OUTSIDE the limit, once per small request in its agent work — bounded only by LIMIT_CONCURRENCY (AEGIS r25,
+Linux: 60 stallers + 60 worst-shape 64 KiB AppointmentsRequest clients, 91 MiB VmHWM growth against the 71 MiB
+derived). Decided: small models get a pool of their own, `_SMALL_MODEL_BYTES` = 4 MiB, **a fixed term beside the
+64 MiB body budget** (small reserve 8 MiB + shared pool 56 MiB, unchanged; carving the 4 MiB out of the shared pool
+instead was built and measured — below — and costs legit large batches under a stall flood: a founder ruling). A small
+body reserves `_small_model_reserve(len)` = 16 x its length + 16 KiB there BEFORE its parse (FIFO, no time limit, no
+refusal), so the parse in progress and the model it leaves are counted inside a limit, and gives it back when the model is
+dropped after the agent's work; its body's own bytes go back at the end of the parse. Only small parses and models use
+that pool — never a body still arriving — so stalled senders cannot hold it and Decision 23 stands as stated ("a small
+body never waits for in-flight BODY bytes"); what is new is that a small body can queue behind other small requests'
+models (at most three 64 KiB worst-shape models at once; ~250 empty-ish requests), as it already queued for the four
+small parse slots. The reservation is sized from the bytes received (Decision 21's rule) and is at least what
+tracemalloc showed every shape probed to hold (`ratios.py`; the worst model per body byte per request model, at body
+sizes 0.3/2/16/64 KiB): OrchestrateRequest of minimal tasks 19.4/16.2/14.7/13.7x its body (0.86 MiB at 64 KiB — larger
+than the ~0.7 MiB the wave-25 text called the worst small model), AppointmentsRequest 16.9/13.9/12.3/11.2x,
+DossierUpdateRequest 15.3/12.4/11.3/10.5x, ResolveRequest 13.6/10.9/8.7/7.9x, CallEventsRequest 14.1/11.3/10.2/9.6x;
+an empty request ~1.0-1.4 KB. A model measured above its reservation (none found) is counted for the excess in the
+pool's `over`.
+
+*The bound, restated.* Counted: the body budget, `used` <= **64 MiB** — body bytes, read-ahead grants, large models
+after their parse; the small-model pool, `used` <= **4 MiB** — small parses in progress and small models (they used to
+be outside any limit). `over`: <= one 16 KiB chunk per body waiting (**2 MiB**); a large model while it waits to be
+covered (the next term's model). Uncounted: one unasked 16 KiB read per open connection (**4 MiB**); the large parse in
+progress — the joined body (<= **4 MiB**) and the model being built (<= **20.7 MiB** traced worst); the measured fixed
+term (**0.9 MiB**). With no parse in flight and no small model: 64 + 2 + 4 + 0.9 = **71 MiB** (the 128-sender
+scenario, unchanged); with the small-model pool full: **75 MiB**; with the worst large parse in flight as well: 75 + 4 +
+20.7 = **99.6 MiB** — every term now bounded (the small models were bounded only by LIMIT_CONCURRENCY), but the worst
+mix is 3.6 MiB ABOVE the 96 MiB bound by derivation, as the wave-25 worst mix (99 MiB + the unbounded small models)
+was. Carving the pool out of the shared pool makes the same sum **95.6 MiB**, inside 96 with 0.4 MiB of margin — at
+the measured cost below. The derivation rests on the measured worst models (a shape above them is counted, in `over`,
+not refused).
+
+*Measured* (`load.py --staller-kind chunked`: 60 stallers, each a chunked body of 1 MiB at once then a 2 KiB chunk a
+second until answered, then again, keeping the shared pool full; 60 keep-alive clients looping one worst-shape 64 KiB
+request from 2 s in; 15 s; 624bc03 against the pool carved out of the shared pool, 3 runs per cell, and against the
+pool beside the budget, the final tree, 2 runs per cell): AppointmentsRequest idle 61/63/66 MiB growth on 624bc03,
+53/54/54 carved, 55/58 beside; 2 busy loops 64/64/65, 54/54/56, 58/56; OrchestrateRequest tasks idle
+59/59/59, 52/53/53, 55/55; 2 busy loops 59/60/60, 53/53/53, 54/55. Every small request answered 200 on every
+tree. This probe did not reproduce AEGIS's 91 MiB on this Mac (fewer small models were in their work at once on this
+CPU); the structural part is pinned in process:
+`tests/test_fix26b_request_memory.py::test_small_bodies_models_in_flight_at_once_stay_inside_the_budget_while_stalled_senders_hold_it`
+(12 worst-shape small requests in their work with the shared pool held: 9 947 640 bytes outside every limit on
+624bc03, 0 now, all 200).
+
+**`_retained_bytes` against small models (W25-EA-4).** The wave-25 text (0.98-1.02x for small models) was measured on
+64 KiB bodies only. On smaller bodies the measure under-counts more (`ratios.py`, counted / traced): ResolveRequest
+2 KiB 0.81x, AppointmentsRequest 2 KiB 0.83-0.84x, OrchestrateRequest tasks 2 KiB 0.90x, 16 KiB bodies 0.90-0.96x,
+64 KiB 0.98-1.01x; empty requests 0.55-0.74x (under 1 KB absolute). Large models 1.01-1.06x as before. Small models
+are no longer counted at `_retained_bytes` but at their reservation (above), at least what they hold in every shape
+probed: `test_the_bytes_counted_for_a_small_model_are_not_below_what_it_holds` (five shapes; four failed on 624bc03 at
+0.81-0.98x).
+
+**The protocol's stall clock credited a freeze twice (W25-EA-5).** asyncio runs a loop pass's I/O callbacks before
+the timers that came due during it, so in the first pass after a freeze `LoopLag.lost` did not include the freeze yet;
+the protocol marked it there (`data_received`, the start of a body) and the late tick then credited the freeze to an
+interval that began after it. `LoopLag.settle()` credits a late tick at the moment it is read (as the tick would, once);
+the protocol's marks and the app's client-wait clock read it. In process (a 0.6 s freeze, bytes in the first pass
+after it): on 624bc03 the stall begun after the freeze was credited 0.558 s of a 0.558 s freeze, the body start 0.557
+of 0.557; now under half the freeze (`test_the_protocols_stall_clock_does_not_credit_a_freeze_that_ended_before_the_bytes_arrived`,
+`..._rate_clock_..._before_the_body_started`).
+
+**uvicorn's limit counts the connection being parsed (F-3; documented, test fixed).** uvicorn answers 503 when, at
+the head parse, `len(connections) >= limit_concurrency` — the connection itself included — so at most 127 requests
+are admitted at once, and a burst of 128 connections all open before the first head is parsed is refused for every
+head parsed with 128 open: AEGIS r25 measured the whole burst, 128/128, on Linux, with the server SIGSTOPped across
+the connect phase, which made the 128-sender test INVALID (it fails as such, never passes). On this Mac the same
+experiment refused 1 of 128 and served 127 (3/3; the kernel did not hand over all 128 connections before the first
+head was parsed). In a normal run of the 128-sender scenario the answers classified (`senders128.py`, 3 runs):
+20 x 408, 107 x the large lane's 503, **1 x uvicorn's 503**, 0 x the in-flight budget's 503 — one sender of the 128
+was always refused by uvicorn before its body. The test now runs `_SENDERS` = LIMIT_CONCURRENCY - 1 senders (the same
+load), so its validity does not depend on how the server is scheduled;
+`test_live_a_burst_at_uvicorns_limit_accepted_while_the_server_cannot_run_is_refused_one_fewer_is_served` pins both
+halves (a 128-connection burst accepted while the server is stopped: at least one uvicorn 503, every connection
+answered; 127: all 200 — it failed with the test's old 128). `http_limits` documents the behaviour. The 128-sender
+test with 127 senders, 4 runs (2 idle, 2 under 2 busy loops): 20 x 408 + 107 x 503 each, growth 64-68 MiB, settled
+at 6.5 s.
+
+**The 128-sender test did not measure the in-flight budget (R26-3; test added).** Its senders declare 4 MiB, so the
+large lane's byte bucket (16 MiB burst + 32 MiB/s over the 2 s admission window, ~20 bodies) decides what is admitted —
+the classification above: 0 in-flight refusals — and its bound `_INFLIGHT_BODY_BYTES // MiB + 32` moves with the
+constant. With the budget mutated to 256 MiB it passed here too (growth 87 MiB). Added:
+`test_live_chunked_senders_that_stall_are_bounded_by_the_inflight_budget_itself` — 127 chunked bodies of 1 MiB that
+then stall (chunked bodies pay the bucket per 64 KiB as they stream, so 127 MiB is admissible and the budget binds),
+bound 96 MiB as a number: growth 60-64 MiB on this tree (5 runs, idle and 2 busy loops); with the 256 MiB mutant 116 MiB, FAILED (codes 127 x 408: every
+body held to its cut). The static `== 64 MiB` assert stays.
+
+**An unsatisfiable priority model cover (F-7; measured, documented).** While a large model's priority cover waits,
+no other shared-pool reservation or read-ahead grant takes freed bytes (20ab3e5). Measured end to end through the app
+(in process, 12 MiB of the shared pool free and nobody releasing, a ~22 MB astral model): the cover waited its whole
+`_INFLIGHT_WAIT_S` and was refused 503, and a 1 MiB body that needed less than what was free was not read further
+until then — 1.99-2.01 s against 0.003-0.004 s with no priority wait (5 runs, idle and 2 busy loops) — and then completed 200
+(`test_an_unsatisfiable_priority_model_cover_holds_other_bodies_back_until_it_is_refused`). So the head-of-line
+blocking is bounded by `_INFLIGHT_WAIT_S` per priority wait, and there is at most one priority wait at a time (one
+large parse slot); NOT bounded (read from the code, not measured): back-to-back priority waits — a client that keeps
+sending valid large bodies whose models do not fit while the pool is held makes those 2 s windows follow one another,
+and other large bodies' covers then wait (and can be refused 503 after their own 2 s) for as long as it does. Not
+changed: giving the priority up
+earlier would bring back the race 20ab3e5 fixed (the parsed model losing every freed byte to waiting chunks).
+
+**Legit large bodies under a stall flood (F-8, W25-EA-9; measured, documented — a founder ruling).** AEGIS r25
+(Linux) measured, against 01e2851: 1 MiB batches at K = 60 stallers 8/16 answered 200 vs 12/16, astral 4 MiB 3/16 vs
+5/16, K = 20 p50 1.8x slower; the wave-25 text priced only the astral case. Measured here (`load2.py`: K stallers each
+declaring 4 MiB, sending 1 MiB and then nothing, reconnecting when answered, for as long as one legit client makes 16
+sequential attempts 0.5 s apart; 2 runs per cell, the trees interleaved; 200s of 16, p50 of the 200s):
+
+| cell | 01e2851 | 624bc03 | pool carved from the shared pool | this tree (pool beside) |
+|---|---|---|---|---|
+| K=20, 1 MiB, idle | 16, 16; 0.024 s | 16, 16; 0.028 s | 16, 16; 0.027-0.028 s | — |
+| K=20, 1 MiB, 2 busy loops | 16, 16; 0.024 s | 16, 16; 0.028 s | 16, 16; 0.028 s | — |
+| K=60, 1 MiB, idle | 16, 16; 0.06 s | 16, 16, 16, 16; 1.22-1.39 s | 16, 16; 1.62-1.68 s | 16, 16; 1.37-1.50 s |
+| K=60, 1 MiB, 2 busy loops | 16, 16; 0.025 s | 15, 15, 16, 16; 1.06-1.08 s | 14, 15; 1.09-1.10 s | 15, 16; 1.10 s |
+| K=60, astral 4 MiB, idle | 16, 16; 0.034-0.037 s | 10, 9, 13, 12; 1.6-2.4 s | 6, 8; 3.2-3.3 s | 9, 14; 1.6-1.7 s |
+| K=60, astral 4 MiB, 2 busy loops | 16, 16; 0.036-0.038 s | 10, 10, 14, 11; 1.6-2.2 s | 7, 6; 3.2-3.7 s | 14, 11; 1.9-2.2 s |
+
+(624bc03 has four runs per K=60 cell: two from the first campaign beside 01e2851 and the carved pool, two from the
+second beside this tree.) Every refusal of a legit batch was the in-flight budget's 503. Read: at K = 20 nothing is
+lost on any tree; at K = 60 01e2851 answered everything at once, 624bc03 (and this tree) answer 1 MiB batches ~1.1-1.5 s
+later and refuse some — astral 4 MiB batches most (9-14 of 16 answered here; AEGIS 3/16 on Linux) — because a model of
+~5x its body is counted and the stalled senders hold the bytes it needs (W25-EA-9's trade-off; F-8's 1 MiB cost is,
+by AEGIS's reading, likely wave 24's every-byte budget — not bisected here). Carving the small-model pool out of the shared pool made it
+measurably worse (astral 6-8 of 16, p50 ~3.3 s), which is why this tree keeps the pool beside the budget. No code
+change here addresses F-8: it is the price of the counted model and the structural body bound, and whether to pay it
+is the founder question below. Not shown: Linux numbers (AEGIS's stand), larger K, other body shapes.
+
+*Founder ruling requested (W25-EA-9, with F-6/W25-EA-3's placement):* under a flood of stalled senders, is it
+acceptable that legitimate large batches whose parsed model is several times their body (astral transcripts) are
+refused 503 in a minority-to-majority of attempts (here 2-7 of 16, AEGIS 13 of 16) and answered seconds later, in
+exchange for every request byte and every parsed model being counted against a fixed budget? And should the 4 MiB
+small-model pool stay beside the 64 MiB budget (worst mix derived 99.6 MiB, legit large unchanged) or be carved out of
+it (95.6 MiB, inside 96, legit astral batches 6-8 of 16 instead of 9-14 here)?
+
+**F-5 (the "0 of 62" above, corrected in place).** The Q1 live test
+(`test_live_q1_slow_senders_above_the_floor_do_not_starve_legit_clients[1MiB-front-then-2KiBps]`) on this tree, 5 runs
+idle and 5 under 2 busy loops: every run passed (the test admits one refusal per run); legit large batches refused
+503: idle 4 of 24 (one in each of four runs), 2 busy loops 0 of 27 — together 4 of 51, beside AEGIS's 2 of 38 on
+9e55931 (Linux). Refusals of a legit large batch under this attack are reduced by the priority cover, not eliminated.
 
 ## Verified so far (Sep 22, 2026 build session)
 

@@ -13,25 +13,22 @@ has nowhere to go even if the classifier is wrong; a linked worktree shares the 
 repository itself must be remote-less); ``archive`` (``git archive --format=tar <sha> -- <path>``) is the read the
 engine's split-diff verification checkout is built from (R1).
 
-Round 19 R11 (N19-A-7): every git command runs with a PRIVATE empty ``HOME`` (a temp directory the port owns),
-``GIT_CONFIG_GLOBAL=/dev/null``, ``GIT_CONFIG_NOSYSTEM=1`` and ``-c core.hooksPath=<empty engine dir>`` /
+Round 19 R11 (N19-A-7): every git command runs with a ``HOME`` holding nothing (since fix wave 26b, C6-3-res:
+``/nonexistent``, a home that does not exist; before, a temp directory the port owned),
+``GIT_CONFIG_GLOBAL=/dev/null``, ``GIT_CONFIG_NOSYSTEM=1`` and ``-c core.hooksPath=/dev/null`` (no hooks) /
 ``-c core.fsmonitor=false`` on every argv — a ``.gitconfig`` or a hooks directory tracked in the worktree can
 neither become git's global config nor run a hook on the engine's commit.
 """
 
 from __future__ import annotations
 
-import atexit
 import hashlib
 import os
 import re
 import subprocess
-import tempfile
-import threading
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
-from zbm_delivery import fsops
 from zbm_delivery.ledger import derived_id
 
 ACTOR = "intel_08_engine"
@@ -52,6 +49,9 @@ class GitResult:
     exit_code: int
     stdout: str
     stderr: str
+    # wave 26b (N25-D-1): git's output as bytes too — `stdout` is decoded with errors="replace", which turns a
+    # non-UTF-8 byte into U+FFFD; a reader that must know whether text is shown faithfully reads these
+    stdout_bytes: bytes = b""
 
 
 def _check_path(p: str) -> str:
@@ -60,28 +60,26 @@ def _check_path(p: str) -> str:
     return p
 
 
-# Wave 25 (scout C C6-3): the private HOME and EMPTY hooks dir are made on FIRST USE, once per process, never at
-# import — a process that only imported the package and was then killed by a signal (no atexit) left a `dlv-git-*`
-# dir in its temp dir. A process killed after its first git command can still leave one: atexit is the only cleanup.
-_ISOLATION: list = []                      # [(isolation dir, private home, empty hooks dir)] once made
-_ISOLATION_LOCK = threading.Lock()
+# Wave 25 (scout C C6-3) made the private HOME and EMPTY hooks dir (`dlv-git-*`) on first use instead of at import;
+# a process killed by a signal after its first git command still left the dir (atexit was the only cleanup, C6-3-res).
+# Wave 26b: git needs no directory of its own. Hooks are off with `core.hooksPath=/dev/null` (git's own idiom), and HOME
+# is `/nonexistent` — the conventional home that must never exist — so with GIT_CONFIG_GLOBAL=/dev/null and
+# GIT_CONFIG_NOSYSTEM=1 git reads nothing from it (its XDG files under it are absent). Nothing is made, so nothing is
+# left. Should `/nonexistent` exist on a machine, git could read attribute/ignore files there: every git command is
+# refused instead (fail closed).
+NO_HOME = "/nonexistent"
+NO_HOOKS = "/dev/null"
 
 
 def _isolation() -> tuple[str, str]:
-    """(private HOME, EMPTY hooks dir) of this process, made on first call and removed at exit (fix wave 21, L4)."""
-    with _ISOLATION_LOCK:
-        if not _ISOLATION:
-            d = tempfile.mkdtemp(prefix="dlv-git-")
-            atexit.register(fsops.drop_own_temp, d)
-            home, hooks = os.path.join(d, "home"), os.path.join(d, "hooks")
-            os.makedirs(home, exist_ok=True)
-            os.makedirs(hooks, exist_ok=True)
-            _ISOLATION.append((d, home, hooks))
-        return _ISOLATION[0][1], _ISOLATION[0][2]
+    """(HOME, hooks path) of every git command (R11): a home that does not exist and no hooks."""
+    if os.path.lexists(NO_HOME):
+        raise GitRefused(f"{NO_HOME} exists on this machine; the git isolation HOME must not exist")
+    return NO_HOME, NO_HOOKS
 
 
 def isolation_args() -> tuple[str, ...]:
-    """The ``-c`` options on every git argv (R11): the empty hooks dir, no fsmonitor; fix wave 24 (E3, N23-D-2):
+    """The ``-c`` options on every git argv (R11): no hooks (/dev/null), no fsmonitor; fix wave 24 (E3, N23-D-2):
     rename/copy detection off for every command — a file moved or copied into src/ is a full addition (every line
     shown, every line scanned), never a "similarity index 100%" with no + lines."""
     return ("-c", f"core.hooksPath={_isolation()[1]}", "-c", "core.fsmonitor=false", "-c", "diff.renames=false",
@@ -119,7 +117,7 @@ class GitPort:
             return GitResult(124, "", "git command timed out")
         except OSError as exc:
             return GitResult(127, "", type(exc).__name__)
-        return GitResult(r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"))
+        return GitResult(r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"), r.stdout)
 
     def _git(self, op: str, args: list[str], cwd: str, run_id: str = "-") -> GitResult:
         argv = ["git", *isolation_args(), "-C", cwd, *args]
@@ -210,6 +208,18 @@ class GitPort:
             return ""
         args = ["diff", "--no-renames", "--no-color", "--no-ext-diff", base, head, "--", *[_check_path(p) for p in paths]]
         return self._ok(self._git("diff", args, cwd, run_id), "diff base..head")
+
+    def range_diff_raw(self, cwd: str, base: str, head: str, paths: Sequence[str], run_id: str = "-") -> bytes:
+        """Wave 26b (N25-D-1): ``range_diff`` as git wrote it, bytes — to tell whether its text is shown faithfully. A
+        runner that gives no bytes (a test double) gives its text, encoded."""
+        if not _SHA_RE.fullmatch(base) or not _SHA_RE.fullmatch(head):
+            raise GitRefused("bad sha")
+        if not paths:
+            return b""
+        args = ["diff", "--no-renames", "--no-color", "--no-ext-diff", base, head, "--", *[_check_path(p) for p in paths]]
+        r = self._git("diff", args, cwd, run_id)
+        self._ok(r, "diff base..head")
+        return r.stdout_bytes or r.stdout.encode("utf-8", "surrogatepass")
 
     def changed_paths(self, worktree: str, run_id: str = "-") -> list[str]:
         """Modified, added and untracked paths of the worktree (from ``status --porcelain``)."""

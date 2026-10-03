@@ -44,13 +44,13 @@ three chatty threads beside it, nothing when it runs alone.
 
 from __future__ import annotations
 
-import math
 import os
 import sys
 
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
+import launch_guard
 from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 
@@ -74,33 +74,21 @@ LIMIT_CONCURRENCY: int = _positive("ONBOARDING_LIMIT_CONCURRENCY", 128, int)
 # passed the `<= 0` check. Now only 100 us .. 50 ms starts (unset or empty: 1 ms), and
 # run() checks the interval actually in force in whole microseconds (CPython keeps it
 # truncated to the microsecond: 0.0001 reads back as 9.999999999999999e-05) and prints it.
-SWITCH_INTERVAL_MIN_US = 100
-SWITCH_INTERVAL_MAX_US = 50_000
+# Fix wave 26b (scout C5-3): the check itself is now the one shared by every launcher (src/launch_guard.py,
+# byte-identical in each service); these names stay for this service's callers and tests.
+SWITCH_ENV = "ONBOARDING_SWITCH_INTERVAL_SECONDS"
+SWITCH_INTERVAL_MIN_US = launch_guard.SWITCH_INTERVAL_MIN_US
+SWITCH_INTERVAL_MAX_US = launch_guard.SWITCH_INTERVAL_MAX_US
 
 
-def _switch_interval(name: str = "ONBOARDING_SWITCH_INTERVAL_SECONDS", default: float = 0.001) -> float:
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        value = math.nan
-    if not (SWITCH_INTERVAL_MIN_US / 1e6 <= value <= SWITCH_INTERVAL_MAX_US / 1e6):  # refuses nan and inf too
-        raise RuntimeError(f"{name}={raw!r} is invalid: expected seconds, {SWITCH_INTERVAL_MIN_US / 1e6:g} <= value "
-                           f"<= {SWITCH_INTERVAL_MAX_US / 1e6:g}. This service refuses to start.")
-    return value
+def _switch_interval(name: str = SWITCH_ENV, default: float = launch_guard.SWITCH_INTERVAL_DEFAULT_S) -> float:
+    return launch_guard.switch_interval_from_env(name, default)
 
 
 def apply_switch_interval(value: float) -> int:
     """Sets the interval; returns the one in force in whole microseconds. RuntimeError unless it is within
-    [MIN_US, MAX_US] and is `value` to within the microsecond CPython truncates."""
-    sys.setswitchinterval(value)
-    in_force_us = round(sys.getswitchinterval() * 1_000_000)
-    if not (SWITCH_INTERVAL_MIN_US <= in_force_us <= SWITCH_INTERVAL_MAX_US) or abs(in_force_us - value * 1_000_000) >= 1:
-        raise RuntimeError(f"the GIL switch interval in force is {in_force_us} us, not the {value!r} s set "
-                           f"(ONBOARDING_SWITCH_INTERVAL_SECONDS): this service refuses to start")
-    return in_force_us
+    [MIN_US, MAX_US] and is `value` to within the microsecond CPython truncates (launch_guard)."""
+    return launch_guard.apply_switch_interval(value, SWITCH_ENV)
 
 
 SWITCH_INTERVAL_S: float = _switch_interval()
@@ -173,4 +161,8 @@ def uvicorn_kwargs() -> dict:
 def run(app, host: str, port: int) -> None:
     in_force_us = apply_switch_interval(SWITCH_INTERVAL_S)
     print(f"onboarding-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
-    uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())
+    # Fix wave 26b (scout C5-4): uvicorn re-raises the SIGTERM it captured after its graceful shutdown; with the
+    # default disposition the process died of it and no atexit handler ran. Inside sigterm_exits() the stop is a
+    # normal exit (status 143) and exit handlers run.
+    with launch_guard.sigterm_exits():
+        uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())

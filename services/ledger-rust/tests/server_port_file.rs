@@ -27,8 +27,7 @@ impl Drop for Scratch {
 }
 
 fn scratch(label: &str) -> Scratch {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let d = common::real_temp_dir().join(format!("ledger_pf_{label}_{}_{nanos}", std::process::id()));
+    let d = common::scratch_dir().join(format!("ledger_pf_{label}_{}", common::unique_suffix()));
     std::fs::create_dir_all(&d).unwrap();
     Scratch(d)
 }

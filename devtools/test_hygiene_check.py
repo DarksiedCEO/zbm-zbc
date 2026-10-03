@@ -1,7 +1,7 @@
 """Self-test of devtools/hygiene_check.py (fix wave 25, R-HYGIENE): every rule FAILS on a planted violation and the
 clean probe passes. Standard library only (unittest); CI runs it in the `hygiene-static` job:
 
-    python3 -m unittest devtools/test_hygiene_check.py -v
+    python3 -B -m unittest devtools/test_hygiene_check.py -v
 
 Each case copies devtools/ into a fresh throwaway git repository (in a private temp dir), plants one violation
 there, and runs the checker from THAT copy, so the real checkout is never touched. The Python-suite path (the
@@ -51,8 +51,12 @@ class _Repo:
         self.tmp = Path(tempfile.mkdtemp(prefix="hyg-selftest-"))
         self.root = self.tmp / "repo"
         self.work = self.tmp / "work"
+        # R3's "system temp dir" for these runs (fix wave 26b, W26-ST): a private directory, so an entry another
+        # process creates in the real /tmp during a case cannot fail it; one case still runs against the real /tmp
+        self.systmp = self.tmp / "systmp"
         self.work.mkdir()
         self.root.mkdir()
+        self.systmp.mkdir()
         shutil.copytree(HERE, self.root / "devtools", ignore=shutil.ignore_patterns("__pycache__"))
         (self.root / "README.md").write_text("probe\n")
         (self.root / ".gitignore").write_text("*.pyc\n")
@@ -82,10 +86,12 @@ class _Repo:
                            env=dict(os.environ, RUNNER_TEMP=str(self.work)))
         return r.returncode, r.stdout + r.stderr
 
-    def suite(self, shell: str, kind: str = "none", *extra, portable: bool = False) -> tuple[int, str]:
+    def suite(self, shell: str, kind: str = "none", *extra, portable: bool = False,
+              real_tmp: bool = False) -> tuple[int, str]:
+        systmp = () if real_tmp else ("--system-tmp", str(self.systmp))
         return (self.run_portable if portable else self.run)(
             "run", "--suite", "go:probe", "--kind", kind, "--work-dir", str(self.work),
-            "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$", *extra, "--", "/bin/sh", "-c", shell)
+            "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$", *systmp, *extra, "--", "/bin/sh", "-c", shell)
 
     def close(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -131,11 +137,29 @@ class Dynamic(unittest.TestCase):
         self.assertIn("private TMPDIR", out)
 
     def test_r3_new_entry_in_system_tmp(self):
+        # the real /tmp: only this case's own entry is asserted, so other processes' entries cannot fail it
+        name = f"zbm-hyg-selftest-{uuid.uuid4().hex}"
+        try:
+            rc, out = self.r.suite(f"touch /tmp/{name}", real_tmp=True)
+            self.assertEqual(rc, 1, out)
+            self.assertIn(f"HYGIENE R3-tmp go:probe: new entry in /tmp during the run: {name}", out)
+        finally:
+            Path(f"/tmp/{name}").unlink(missing_ok=True)
+
+    def test_r3_new_entry_in_the_given_system_tmp(self):
+        rc, out = self.r.suite(f'touch "{self.r.systmp}/planted"')
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"HYGIENE R3-tmp go:probe: new entry in {self.r.systmp} during the run: planted", out)
+
+    def test_r3_cases_do_not_watch_the_real_tmp(self):
+        # W26-ST (AEGIS r26, review26/logs/selftest-tmpnoise-*): any foreign /tmp entry made during a run failed the
+        # cases that expect a clean result. The cases now watch a private system tmp; an entry in the real /tmp
+        # (planted here from inside the probe, the same as another process making one) is not theirs to report.
         name = f"zbm-hyg-selftest-{uuid.uuid4().hex}"
         try:
             rc, out = self.r.suite(f"touch /tmp/{name}")
-            self.assertEqual(rc, 1, out)
-            self.assertIn(f"HYGIENE R3-tmp go:probe: new entry in /tmp during the run: {name}", out)
+            self.assertEqual(rc, 0, out)
+            self.assertIn("hygiene violations: 0", out)
         finally:
             Path(f"/tmp/{name}").unlink(missing_ok=True)
 
@@ -181,10 +205,23 @@ class Dynamic(unittest.TestCase):
         # /proc): the two guards are independent
         rc, out = self.r.run_portable("--keep-subreaper", "run", "--suite", "go:probe", "--kind", "none",
                                       "--work-dir", str(self.r.work), "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$",
-                                      "--", "/bin/sh", "-c", "true")
+                                      "--system-tmp", str(self.r.systmp), "--", "/bin/sh", "-c", "true")
         self.assertIn("subreaper True", out)
         self.assertNotIn("ps -axo", out)
         self.assertEqual(rc, 0, out)
+
+    def test_r4_portable_path_a_new_session_child_that_keeps_the_marker_is_found(self):
+        # R26-1 (AEGIS r26): without a subreaper (macOS) an orphan that leaves the suite's process group — setsid,
+        # setpgid, a double fork; delivery-py's fakes start children with start_new_session=True — escaped, because
+        # the run marker was read from /proc only. The process table's environments are now read on that path too
+        # (macOS: sysctl KERN_PROCARGS2, this user's non-platform processes), so a child that kept its environment is
+        # found by the marker. Python, not /bin/sleep: macOS withholds a platform binary's environment.
+        child = ("import subprocess, sys; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(306)'], "
+                 "start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)")
+        rc, out = self.r.suite(f'"{sys.executable}" -c "{child}"', portable=True)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("HYGIENE R4-procs", out)
+        self.assertIn("time.sleep(306)", out)
 
     def test_r4_portable_path_a_leftover_grandchild_still_fails(self):
         # a child of a background subshell: found as a descendant of the suite's process group
@@ -344,7 +381,8 @@ class Pytest(unittest.TestCase):
         self.r.git("add", "-A")
         self.r.git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "probe")
         return self.r.run("run", "--suite", "python:probe-py", "--kind", "pytest", "--cwd", "services/probe-py",
-                          "--work-dir", str(self.r.work), "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$", *extra,
+                          "--work-dir", str(self.r.work), "--tmp-ignore", r"^claude-[0-9a-f]+-cwd$",
+                          "--system-tmp", str(self.r.systmp), *extra,
                           "--", sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider")
 
     def test_clean_passes_and_tmp_path_is_not_retained(self):
@@ -380,6 +418,42 @@ class Pytest(unittest.TestCase):
         rc, out = self.suite("def test_a():\n    assert 0\n\ndef test_b():\n    pass\n")
         self.assertEqual(rc, 1, out)
         self.assertIn("hygiene violations: 0", out)
+
+
+class DocumentedCommands(unittest.TestCase):
+    def test_every_documented_unittest_command_for_devtools_writes_no_bytecode(self):
+        # F-11 (AEGIS r25): the documented unittest command for this file, run without PYTHONDONTWRITEBYTECODE, left
+        # devtools/__pycache__/ in the checkout (the .pyc is written when unittest imports the module, before any of
+        # its code runs, so the module cannot prevent it). Every place that tells someone to run one says `-B`.
+        import re
+        root = HERE.parent
+        files = [root / "README.md", root / "docs" / "ci.md", root / ".github" / "workflows" / "ci.yml",
+                 *sorted(HERE.glob("test_*.py"))]
+        bad = []
+        for f in files:
+            for i, line in enumerate(f.read_text().splitlines(), 1):
+                for m in re.finditer(r"python3?((?:\s+-\S+)*)\s+-m\s+unittest\s+devtools/", line):
+                    if "-B" not in m.group(1).split():
+                        bad.append(f"{f.relative_to(root)}:{i}: {line.strip()[:120]}")
+        self.assertEqual(bad, [])
+
+
+class RepoIgnoreRules(unittest.TestCase):
+    def test_runtime_ledgers_are_ignored_and_a_jsonl_fixture_anywhere_is_not(self):
+        # C5-8b (scout C): `*.jsonl` was ignored repo-wide with one exception (ledger-rust's fixtures), so a JSONL
+        # fixture added to any other service was silently un-addable. The rule is now the names the services write.
+        root = HERE.parent
+
+        def ignored(path: str) -> bool:
+            return subprocess.run(["git", "check-ignore", "-q", "--no-index", path], cwd=root).returncode == 0
+
+        for runtime in ("services/ledger-rust/ledger_data/ledger.jsonl", "ledger.jsonl", "x/ledger.jsonl.torn-123",
+                        "data/dlv_log.jsonl", "d/fin_log.jsonl", "d/vi_log.jsonl", "d/legal_log.jsonl",
+                        "d/cn_log.jsonl", "d/compliance_log.jsonl", "d/fin_log.jsonl.torn-9"):
+            self.assertTrue(ignored(runtime), runtime)
+        for fixture in ("services/creative-py/tests/fixtures/events.jsonl", "fixtures/sample.jsonl",
+                        "services/ledger-rust/tests/fixtures/legacy_ledger_v1.jsonl"):
+            self.assertFalse(ignored(fixture), fixture)
 
 
 class Static(unittest.TestCase):
@@ -486,6 +560,88 @@ class Static(unittest.TestCase):
         (self.r.root / "README.md").write_text(f"At {head}: `cargo test`: 84\n  passed.\n")
         self.assertEqual(self.lint()[0], 0)
 
+    def test_l3_a_count_pinned_by_an_all_digit_commit_id(self):
+        # W26-ST (AEGIS r26, review26/logs/wst.log): ids made only of digits were skipped, so ~1 commit in 27 (a
+        # 7-char short id with no a-f) could not pin a count, and the case above failed whenever HEAD was one. Make
+        # such a commit deterministically: plumbing commits until one's 7-char id is all digits (p ~ 0.037 each; a
+        # miss in 3000 tries is ~1e-49).
+        tree = subprocess.run(["git", "write-tree"], cwd=self.r.root, capture_output=True, text=True,
+                              check=True).stdout.strip()
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                   GIT_COMMITTER_EMAIL="t@t")
+        digits = None
+        for i in range(3000):
+            c = subprocess.run(["git", "commit-tree", tree, "-m", f"probe {i}"], cwd=self.r.root, env=env,
+                               capture_output=True, text=True, check=True).stdout.strip()
+            if c[:7].isdigit():
+                digits = c[:7]
+                break
+        self.assertIsNotNone(digits)
+        self.r.git("update-ref", "refs/heads/all-digit", c)                # reachable, as a real commit would be
+        (self.r.root / "README.md").write_text(f"At {digits}: `cargo test`: 84\n  passed.\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        # a digit run that is NOT a commit still pins nothing
+        (self.r.root / "README.md").write_text("At 1048576: `cargo test`: 84\n  passed.\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("L3-counts README.md:1", out)
+
+    def test_f9_aliased_clocks_helper_deltas_and_a_port_in_any_name_are_caught(self):
+        # F-9 (AEGIS r25, logs/plant_lint.log): the lint read `time.monotonic()` / a bare `monotonic()` only, deltas
+        # spelled in the test itself only, and ports in PORT-named places only. Planted: an aliased module, an aliased
+        # function, a delta a helper returns, and a port held in an ordinary name.
+        (self.t / "test_evasions.py").write_text(
+            "import socket\nimport time as tm\nfrom time import monotonic as now, perf_counter as pc\n\n"
+            "def took(t0):\n    return tm.monotonic() - t0\n\n"
+            "def test_alias_module():\n    t0 = tm.monotonic()\n    assert tm.monotonic() - t0 < 1.0\n\n"
+            "def test_alias_function():\n    t0 = now()\n    d = now() - t0\n    assert d < 2.0\n\n"
+            "def test_alias_function_2():\n    t0 = pc()\n    assert pc() - t0 <= 3\n\n"
+            "def test_helper_delta():\n    t0 = tm.monotonic()\n    assert took(t0) < 4.0\n\n"
+            "def test_port_in_a_name():\n    p = 20111\n    s = socket.socket()\n    s.bind(('127.0.0.1', p))\n\n"
+            "def test_fine():\n    t0 = now()\n    assert now() - t0 >= 0\n    q = 0\n    socket.socket().bind(('127.0.0.1', q))\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for func in ("test_alias_module", "test_alias_function", "test_alias_function_2", "test_helper_delta"):
+            self.assertRegex(out, rf"L1-wallclock services/probe-py/tests/test_evasions\.py:\d+: in {func}:")
+        self.assertRegex(out, r"L2-ports services/probe-py/tests/test_evasions\.py:\d+: in test_port_in_a_name:")
+        self.assertNotIn("in test_fine", out)
+
+    def test_l3_a_commit_pins_the_counts_of_its_own_sentence_only(self):
+        # F-9: any resolvable commit id anywhere in a paragraph exempted every count in it
+        head = subprocess.run(["git", "rev-parse", "--short=7", "HEAD"], cwd=self.r.root, capture_output=True,
+                              text=True, check=True).stdout.strip()
+        (self.r.root / "README.md").write_text(f"At {head}: `cargo test`: 84 passed. The suite now has 123 tests.\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("'123 tests'", out)
+        self.assertNotIn("'84 passed'", out)
+
+    def test_strict_allowlist_flags_an_expected_skip_no_source_can_produce(self):
+        # W25-EB-R3: `lint --strict-allowlist` checked only L1/L2 entries, so a stale expected-skip entry (delivery-py's
+        # "inner half of test_g3_dlv_test_port_range_set_outside_reaches_the_live_tests", no such skip since d0876fd)
+        # stayed. An expected skip must now be producible: its reason regex matches a string literal (or an
+        # f-string's constant text) somewhere in that suite's sources.
+        allow_path = self.r.root / "devtools" / "hygiene_allowlist.json"
+        d = json.loads(allow_path.read_text())
+        d["expected_skips"] = {"python:probe-py": [{"reason_regex": "^planted reason: (?:a|b)$", "why": "t"},
+                                                   {"reason_regex": "^built at run time ", "why": "t"}]}
+        allow_path.write_text(json.dumps(d))
+        (self.t / "test_s.py").write_text("import pytest\n\ndef test_a():\n    pytest.skip('planted reason: a')\n\n"
+                                          "def test_b(x=1):\n    pytest.skip(f'built at run time {x}')\n")
+        self.r.git("add", "-A")
+        rc, out = self.r.run("lint", "--strict-allowlist")
+        self.assertEqual(rc, 0, out)
+        (self.t / "test_s.py").write_text("import pytest\n\ndef test_a():\n    pytest.skip('planted reason: a')\n")
+        self.r.git("add", "-A")
+        rc, out = self.r.run("lint", "--strict-allowlist")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("L9-allowlist devtools/hygiene_allowlist.json: expected skip of python:probe-py matches no "
+                      "skip reason in services/probe-py: '^built at run time '", out)
+        self.assertNotIn("planted reason", out)
+        rc, out = self.r.run("lint")                   # only --strict-allowlist reads them
+        self.assertEqual(rc, 0, out)
+
     def test_l4_graceful_close_differs_from_its_pin(self):
         for svc, body in (("a-py", "X = 1\n"), ("b-py", "X = 2\n")):
             (self.r.root / "services" / svc / "src").mkdir(parents=True)
@@ -514,6 +670,19 @@ class Static(unittest.TestCase):
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertIn("L4-shared services/b-py/tests/_procinfo.py", out)
+
+    def test_l4_launch_guard_planted(self):
+        """Fix wave 26b (C5-3/C5-4): src/launch_guard.py, the launchers' shared switch-interval check and SIGTERM
+        handling, is one of the shared files (delivery-py's package layout included)."""
+        for svc, rel in (("a-py", "src"), ("b-py", "src"), ("c-py", "src/zbm_c")):
+            d = self.r.root / "services" / svc / rel
+            d.mkdir(parents=True)
+            (d / "launch_guard.py").write_text("X = 2\n" if svc == "b-py" else "X = 1\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("L4-shared services/b-py/src/launch_guard.py: not identical to services/a-py/src/launch_guard.py"
+                      " (shared file launch_guard.py)", out)
+        self.assertNotIn("services/c-py/src/zbm_c/launch_guard.py", out)
 
 
 if __name__ == "__main__":

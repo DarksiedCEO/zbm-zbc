@@ -30,7 +30,7 @@ The body has its own deadline and size cap in ``api.InputLimits``
 Tuning (env, read at start): CN_REQUEST_HEAD_TIMEOUT_SECONDS
 (default 10), CN_KEEP_ALIVE_TIMEOUT_SECONDS (default 5),
 CN_LIMIT_CONCURRENCY (default 128),
-CN_SWITCH_INTERVAL_SECONDS (default 0.001).
+CN_SWITCH_INTERVAL_SECONDS (default 0.001; only 0.0001 .. 0.05).
 
 The switch interval (fix wave 7, NEW-5): the interpreter lets a thread hold
 the GIL for ``sys.getswitchinterval()`` (5 ms by default) before another
@@ -52,6 +52,7 @@ import sys
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
+import launch_guard
 from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
 
@@ -69,7 +70,13 @@ MAX_HEADER_BYTES = 16 * 1024
 REQUEST_HEAD_TIMEOUT_S: float = _positive("CN_REQUEST_HEAD_TIMEOUT_SECONDS", 10.0)
 KEEP_ALIVE_TIMEOUT_S: int = _positive("CN_KEEP_ALIVE_TIMEOUT_SECONDS", 5, int)
 LIMIT_CONCURRENCY: int = _positive("CN_LIMIT_CONCURRENCY", 128, int)
-SWITCH_INTERVAL_S: float = _positive("CN_SWITCH_INTERVAL_SECONDS", 0.001)
+# Fix wave 26b (scout C5-3, the class of detection-py's wave-24 F3 / wave-25 H5): the switch interval was any
+# positive number — 3600 s (a thread may hold the GIL for an hour: what the setting is for is gone), 1e-9 s (a switch
+# storm), and nan passed the `<= 0` check — and was never checked in force. Now the check shared by every launcher
+# (src/launch_guard.py): only 100 us .. 50 ms starts (unset or blank: 1 ms); run() checks the interval in force in
+# whole microseconds and prints it.
+SWITCH_ENV = "CN_SWITCH_INTERVAL_SECONDS"
+SWITCH_INTERVAL_S: float = launch_guard.switch_interval_from_env(SWITCH_ENV)
 
 
 # Graceful close (fix wave 21, L1) with the wave-22 bounds (G5/G6: bounded reads
@@ -137,5 +144,10 @@ def uvicorn_kwargs() -> dict:
 
 
 def run(app, host: str, port: int) -> None:
-    sys.setswitchinterval(SWITCH_INTERVAL_S)
-    uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())
+    in_force_us = launch_guard.apply_switch_interval(SWITCH_INTERVAL_S, SWITCH_ENV)
+    print(f"clipper-network-py: GIL switch interval in force: {in_force_us} us", file=sys.stderr, flush=True)
+    # Fix wave 26b (scout C5-4): uvicorn re-raises the SIGTERM it captured after its graceful shutdown; with the
+    # default disposition the process died of it and no atexit handler ran. Inside sigterm_exits() the stop is a
+    # normal exit (status 143) and exit handlers run.
+    with launch_guard.sigterm_exits():
+        uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())

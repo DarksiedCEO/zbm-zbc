@@ -27,14 +27,20 @@ target/
 # binary (server), and binaries should commit their lockfile for
 # reproducible builds.
 
-# Ledger runtime data — the persisted hash-chain log is generated at
-# runtime, per-environment, and must never be committed (it's evidence
-# data, not source).
-services/ledger-rust/ledger_data/
-*.jsonl
-# ...except checked-in test fixtures: a legacy ledger log written by the
-# pre-Decimal server binary, used to prove old chains still verify.
-!services/ledger-rust/tests/fixtures/*.jsonl
+# Ledger and department runtime logs — generated at runtime, per environment, never committed (evidence data, not
+# source). Fix wave 26b (scout C5-8b): scoped to the names the services write — ledger-rust's default
+# ledger_data/ledger.jsonl, the departments' <dept>_log.jsonl in their data dirs, and the `.torn-*` side files the
+# torn-tail recovery writes next to a log — instead of `*.jsonl` repo-wide, which made a JSONL test fixture anywhere
+# but ledger-rust's tests/fixtures silently un-addable.
+ledger_data/
+ledger.jsonl
+cn_log.jsonl
+compliance_log.jsonl
+dlv_log.jsonl
+fin_log.jsonl
+legal_log.jsonl
+vi_log.jsonl
+*.jsonl.torn-*
 
 # Node / Next.js
 node_modules/

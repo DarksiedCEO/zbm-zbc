@@ -235,6 +235,9 @@ test that tries). Live run with the real ledger binary:
 cd services/compliance-py && LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py --ports 18950,18951,18952,18953
 ```
 
+The run's work directory (ledger and service logs) is removed when the run ends, passed or failed; set
+`LIVE_WORK_DIR=<dir>` to keep it inside `<dir>` (the run prints where; fix wave 26b, C6-2).
+
 It starts the ledger, compliance-py through its production entrypoint, a
 restart of that compliance-py against the same ledger (anchors verified),
 and a second compliance-py through `devtools/live_server.py` on its OWN

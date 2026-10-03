@@ -28,7 +28,8 @@ def _src_files():
 # --- G1 no float in any money path -----------------------------------------------------------------------------------
 
 def test_g1_no_float_in_money_paths():
-    allowed = {"serve.py", "clients.py", "clock.py", "api.py", "ledger.py"}  # timeouts, switch intervals; never money
+    # timeouts, switch intervals; never money (launch_guard.py: the launchers' shared switch-interval check, wave 26b)
+    allowed = {"serve.py", "clients.py", "clock.py", "api.py", "ledger.py", "launch_guard.py"}
     for f in _src_files():
         tree = ast.parse(f.read_text())
         for node in ast.walk(tree):
@@ -269,17 +270,24 @@ def test_thin_client_wall_clock_budget():
     import threading
     from clients import HttpVerification
 
-    inside, release = threading.Event(), threading.Event()
+    inside, release, answered = threading.Event(), threading.Event(), threading.Event()
 
     def slow(req):
+        # wave 26b (AEGIS r25 N25-X-1): the peer answers by itself — a GOOD answer — after 2.0 s, 4x the budget. A held
+        # peer bounded no budget's size (a x20 mutant still returned while it held); now a budget many times too long
+        # gets this answer, and the client reports it available
         inside.set()
-        release.wait(120)
-        return httpx.Response(200, json={})
+        release.wait(2.0)
+        answered.set()
+        return httpx.Response(200, json={"submission_id": "s1", "certification_id": "vi-cert-1", "status": "certified",
+                                         "certified_views": 100, "campaign_id": "c", "clipper_id": "k",
+                                         "platform": "tiktok", "window": {"create_time": "2026-09-20T00:00:00Z"},
+                                         "certified_at": "2026-10-01T00:00:00Z", "reasons": [], "rules_version": 1})
     got = {}
     t = threading.Thread(target=lambda: got.update(a=_client(HttpVerification, slow, timeout=0.5).certification("s1")))
     t.start()
     t.join(60)                                        # a bound on a stall, never on the answer's speed
-    returned_while_held = not t.is_alive() and inside.is_set() and not release.is_set()
+    returned_while_held = not t.is_alive() and inside.is_set() and not answered.is_set()
     release.set()
     t.join(60)
     assert returned_while_held, "the 0.5 s budget waited for the peer's answer"

@@ -404,15 +404,36 @@ mod tests {
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    static SCRATCH_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+    extern "C" fn remove_scratch_dir() {
+        if let Some(d) = SCRATCH_DIR.get() {
+            let _ = std::fs::remove_dir(d); // only when empty: a file left in it is a leak the hygiene check reports
+        }
+    }
+
     fn scratch_path(label: &str) -> PathBuf {
+        // the counter keeps two paths made in the same instant apart (fix wave 26b: macOS's clock resolves only
+        // microseconds; tests run in parallel threads)
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!(
-            "zbm_ledger_test_{label}_{}_{nanos}.jsonl",
-            std::process::id()
-        ))
+        // fix wave 26b (scout C C1-1): inside one per-process directory, not loose in the temp dir — made on first use,
+        // removed at exit when empty, so a killed run leaves at most that one entry
+        let dir = SCRATCH_DIR.get_or_init(|| {
+            let d = std::env::temp_dir().join(format!("zbm-ledger-unit-{}_{nanos}", std::process::id()));
+            std::fs::create_dir_all(&d).expect("scratch dir");
+            // SAFETY: registers a plain `extern "C" fn()` with the C library's exit handlers (std::process::exit, which
+            // the test harness ends with, runs them); it only calls remove_dir on a path set once.
+            unsafe {
+                libc::atexit(remove_scratch_dir);
+            }
+            d
+        });
+        dir.join(format!("zbm_ledger_test_{label}_{}_{nanos}_{n}.jsonl", std::process::id()))
     }
 
     fn sample_record(finding_id: &str, amount: &str) -> LedgerRecordInput {

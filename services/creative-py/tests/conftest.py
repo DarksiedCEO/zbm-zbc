@@ -145,45 +145,31 @@ def api(make_api):
     return make_api()
 
 
-def port_range(default: range) -> range:
-    """The ports real-socket tests may bind: `default`, or the range in
-    CREATIVE_TEST_PORTS ("lo-hi", inclusive) so a run can stay inside the
-    port range its operator was given (fix wave 9)."""
-    spec = os.environ.get("CREATIVE_TEST_PORTS")
-    if not spec:
-        return default
-    lo, hi = (int(x) for x in spec.split("-"))
-    return range(lo, hi + 1)
+def live_ports():
+    """The ports the live tests may bind: ZBM_TEST_PORT_RANGE, else CREATIVE_TEST_PORTS (fix wave 9), "lo-hi"
+    inclusive; None: OS-assigned ports."""
+    from _procinfo import assigned_port_range
 
-
-_HANDED_OUT: list[int] = []
+    return assigned_port_range("CREATIVE_TEST_PORTS")
 
 
 def free_port() -> int:
-    """A free local port: OS-assigned, or — with CREATIVE_TEST_PORTS set —
-    the next free one of that range not handed out lately (two calls in a
-    row never return the same port)."""
-    import socket
+    """A CANDIDATE port for a live server: the shared picker (tests/_procinfo.py ``pick_port``) over ``live_ports()``.
+    Fix wave 26b (scout C5-6): this was creative-py's own pick-then-bind picker. Another process can take the port
+    before the child binds it, so a caller accepts the port only once its OWN child has announced the bind on it
+    (``start_serve``) or holds it (``_procinfo.wait_owned`` / ``start_owned``)."""
+    from _procinfo import pick_port
 
-    spec = os.environ.get("CREATIVE_TEST_PORTS")
-    if not spec:
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            return sock.getsockname()[1]
-    ports = list(port_range(range(0)))
-    recent = set(_HANDED_OUT[-(len(ports) // 2):])
-    for port in ports:
-        if port in recent:
-            continue
-        with socket.socket() as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # fix wave 22 (G3): TIME_WAIT is free
-            try:
-                sock.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-        _HANDED_OUT.append(port)
-        return port
-    raise RuntimeError(f"no free port in CREATIVE_TEST_PORTS={spec}")
+    return pick_port(live_ports())
+
+
+# Fix wave 26b (W26B-1; the class of CI3-6): on macOS, libmalloc's large-allocation cache keeps freed blocks charged
+# to the process, so a server's RSS reads the allocator's cache, not what the server holds. Measured on the build box
+# (M4 Pro, macOS 26.6, Python 3.13.9): `test_n2_repeated_junk_floods…` failed 5 of 5 runs, a6aee4e and fix26b alike
+# (RSS +107..116 MiB in one round, then flat at 331-342 MiB against the 250 MiB ceiling); with MallocLargeCache=0,
+# 3 of 3 passed flat at 208-212 MiB. libmalloc reads it at process start, so every live server this suite starts
+# runs with the cache off on macOS; elsewhere nothing changes (production runs on Linux).
+ALLOCATOR_ENV = {"MallocLargeCache": "0"} if sys.platform == "darwin" else {}
 
 
 def start_serve(extra_env: dict | None = None, attempts: int = 5, timeout: float = 30.0):
@@ -203,7 +189,7 @@ def start_serve(extra_env: dict | None = None, attempts: int = 5, timeout: float
     for _ in range(attempts):
         port = free_port()
         env = {**os.environ, "CREATIVE_SERVICE_TOKEN": TEST_SERVICE_TOKEN, "CREATIVE_PORT": str(port),
-               **(extra_env or {})}
+               **ALLOCATOR_ENV, **(extra_env or {})}
         env.pop("LEDGER_SERVICE_URL", None)
         env.pop("LEDGER_SERVICE_TOKEN", None)
         out = tempfile.TemporaryFile()

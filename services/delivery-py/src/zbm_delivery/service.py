@@ -193,6 +193,11 @@ class DeliveryService:
         # the local log like every record: a replay of the same admission (same id: same caller, request id and body)
         # gets this answer and runs nothing again (its crossings would collide with the first attempt's records).
         self._closed_admissions: "OrderedDict[str, dict]" = OrderedDict()
+        # wave 26b (N24-D-1-res, AEGIS r25 N25-D-2): the ids of CANCELLED admissions, never evicted — one per operator
+        # cancel — and rebuilt from the local log at start (from the cancel's `admission_closed` answer). The bounded
+        # map above was the only memory of a cancel once its containers had ended, so a replay after its answer left
+        # the map ran the RED check again and was judged afresh (a concurrent one could even be admitted)
+        self._cancelled_admissions: set[str] = set()
         # wave 25 (H8): admissions cancelled while their RED containers run — in memory only (nothing runs across a
         # restart). The cancel is honoured from here whatever the bounded map above has forgotten meanwhile.
         self._cancelled_running: set[str] = set()
@@ -334,6 +339,8 @@ class DeliveryService:
             self._closed_admissions.move_to_end(r["admission_id"])
             while len(self._closed_admissions) > CLOSED_ADMISSIONS_MAX:
                 self._closed_admissions.popitem(last=False)
+            if any(x.get("code") == "CANCELLED" for x in (r.get("body") or {}).get("reasons") or []):
+                self._cancelled_admissions.add(r["admission_id"])      # wave 26b: a cancel is kept for good
         # event, lease, reconcile, founder_refused, injection, audit: evidence only
 
     def _write_evidence_file(self, r_run_id: str, evidence_id: str, content: bytes) -> None:  # noqa: N803
@@ -497,6 +504,9 @@ class DeliveryService:
         if srcdiff.binary_paths(text):
             # wave 25 (H8): a legacy run whose source diff carries a binary change cannot be reviewed on that diff
             raise ValueError("binary_src_change: the source diff shows binary file(s) whose content cannot be read")
+        if paths and srcdiff.non_utf8_paths(self.git.range_diff_raw(repo, base, head, paths, run_id)):
+            # wave 26b (N25-D-1): a non-UTF-8 source file would reach the report as U+FFFD
+            raise ValueError("non_utf8_src_change: the source diff shows file(s) that are not UTF-8")
         ev_src, digest, problem = srcdiff.record(self, run_id, text, paths, base, head, "run_rescanned_for_review")
         if problem:
             raise ValueError(problem)
@@ -733,6 +743,8 @@ class DeliveryService:
             return None
         adm = rid("run", "admission", caller, request_id, facts)     # its own id: never the run's event ids
         closed = self._closed_admissions.get(adm)
+        if closed is None and adm in self._cancelled_admissions:
+            closed = self._cancelled_answer(adm, request_id, facts)   # wave 26b: cancelled, whatever the map still keeps
         if closed is not None:
             raise self._closed_answer(closed)        # wave 24 (E6): its recorded answer; nothing recorded or run again
         if adm in self._admissions:
@@ -825,7 +837,8 @@ class DeliveryService:
             with self.lock:
                 self._admissions.pop(pending["adm"], None)
                 closed = self._closed_admissions.get(pending["adm"])
-                if closed is None and pending["adm"] in self._cancelled_running:
+                if closed is None and (pending["adm"] in self._cancelled_running
+                                       or pending["adm"] in self._cancelled_admissions):
                     closed = self._cancelled_answer(pending["adm"], pending["request_id"], pending["facts"])
                 if closed is not None:
                     # wave 24 (E6): cancelled by the operator while the containers ran — nothing is recorded or
@@ -866,7 +879,7 @@ class DeliveryService:
         except Unavailable:
             pass
 
-    def create_fix_run(self, caller: str, body: dict) -> dict:
+    def create_fix_run(self, caller: str, body: dict, cap_check: Optional[Callable[[], None]] = None) -> dict:
         """Admission (§C.8.1). The static checks run under the service lock; a document with reviewer-authored
         reproductions reserves the service's run slot (recorded), runs their RED check with the lock RELEASED, and
         is admitted or refused in one later hold (B2, wave 23)."""
@@ -881,6 +894,8 @@ class DeliveryService:
             key, h, ent = self._idem(caller, request_id, "fix-runs", body)
             if ent is not None:
                 return ent["response"]
+            if cap_check is not None:
+                cap_check()                              # DLV_MAX_FINDINGS (N25-D-4): new requests only, nothing recorded
             if self._engine is None:
                 self._refuse(caller, request_id, facts, "HARNESS_ERROR", "the engine is not wired in this process")
             if not self.sandbox_available():
@@ -1352,7 +1367,7 @@ class DeliveryService:
             seen[note] = where
         return run
 
-    def review(self, caller: str, run_id: str, body: dict) -> dict:
+    def review(self, caller: str, run_id: str, body: dict, cap_check: Optional[Callable[[], None]] = None) -> dict:
         """§C.8.7, wave 23. A pass needs an explicit ``accept`` for every finding; a fail reopens what it lists (and
         accepts what it accepts). A fail while another run or admission of the service is in flight is refused 409
         BEFORE anything is recorded (B1); a fail with reviewer-authored reproductions runs their RED check with the
@@ -1368,6 +1383,8 @@ class DeliveryService:
             key, h, ent = self._idem(caller, request_id, f"review/{run_id}", body)
             if ent is not None:
                 return ent["response"]
+            if cap_check is not None:
+                cap_check()                              # DLV_MAX_FINDINGS (N25-D-4): new requests only, nothing recorded
             run = self._review_checks(caller, run_id, body, request_id, facts)
             if body["verdict"] == "pass":
                 return self._record_review_locked(caller, run_id, body, request_id, facts, key, h, None, None)

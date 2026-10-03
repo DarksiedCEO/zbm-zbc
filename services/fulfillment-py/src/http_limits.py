@@ -53,7 +53,17 @@ The limits, all enforced before routing and auth:
                                  unread bodies, which buffer nothing.)
   LIMIT_CONCURRENCY      128     uvicorn's limit: at or above this many open
                                  connections or in-flight requests, a new
-                                 request gets 503. Bounds concurrent request
+                                 request gets 503 — counted when uvicorn parses
+                                 the request's head, and the connection being
+                                 parsed counts itself, so at most 127 requests
+                                 are admitted at once, and a burst of 128
+                                 connections that are all open before the
+                                 first of their heads is parsed (the server
+                                 descheduled or starved while they connected)
+                                 is refused for every head parsed with all 128
+                                 open: AEGIS r25 measured the whole burst, 128
+                                 of 128, on Linux (fix wave 26b, OPEN F-3; ADR
+                                 0002 "Fix wave 26b"). Bounds concurrent request
                                  bodies (each <= 4 MiB, api._MAX_BODY_BYTES) to
                                  128; the bytes actually buffered by them are
                                  bounded further by api._INFLIGHT_BODY_BYTES
@@ -115,6 +125,7 @@ import weakref
 import h11
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
+import launch_guard
 from graceful_close import (  # noqa: F401
     DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, READ_BUFFER_BYTES, GracefulCloseMixin, drains_max_from_env,
 )
@@ -177,40 +188,28 @@ def load_body_read_timeout() -> float:
 # FULFILLMENT_BODY_READ_TIMEOUT_S), and the launcher checks the interval in
 # force in whole microseconds (CPython truncates 1e6 x the value: 0.0001 reads
 # back as 9.999999999999999e-05 — detection-py's wave-25 H5) and prints it.
-SWITCH_INTERVAL_DEFAULT_S = 0.001
-SWITCH_INTERVAL_MIN_US = 100
-SWITCH_INTERVAL_MAX_US = 50_000
+SWITCH_INTERVAL_DEFAULT_S = launch_guard.SWITCH_INTERVAL_DEFAULT_S
+SWITCH_INTERVAL_MIN_US = launch_guard.SWITCH_INTERVAL_MIN_US
+SWITCH_INTERVAL_MAX_US = launch_guard.SWITCH_INTERVAL_MAX_US
 _SWITCH_ENV = "FULFILLMENT_SWITCH_INTERVAL_SECONDS"
+
+
+# Fix wave 26b (scout C5-3): the check itself is now the one shared by every launcher (src/launch_guard.py,
+# byte-identical in each service); these names stay for this service's callers and tests.
 
 
 def load_switch_interval() -> float:
     """SWITCH_INTERVAL_DEFAULT_S, or FULFILLMENT_SWITCH_INTERVAL_SECONDS
     (unset or empty: the default). Raises RuntimeError (refuse startup) unless
     100 us <= value <= 50 ms."""
-    raw = os.environ.get(_SWITCH_ENV)
-    if raw is None or not raw.strip():
-        return SWITCH_INTERVAL_DEFAULT_S
-    try:
-        value = float(raw)
-    except ValueError:
-        value = math.nan
-    if not (SWITCH_INTERVAL_MIN_US / 1e6 <= value <= SWITCH_INTERVAL_MAX_US / 1e6):  # refuses nan and inf too
-        raise RuntimeError(f"{_SWITCH_ENV}={raw!r} is invalid: expected seconds, "
-                           f"{SWITCH_INTERVAL_MIN_US / 1e6:g} <= value <= {SWITCH_INTERVAL_MAX_US / 1e6:g}. "
-                           f"This service refuses to start.")
-    return value
+    return launch_guard.switch_interval_from_env(_SWITCH_ENV, SWITCH_INTERVAL_DEFAULT_S)
 
 
 def apply_switch_interval(value: float) -> int:
     """Sets the interval and returns the one in force in whole microseconds
     (as CPython keeps it); RuntimeError unless it is within [MIN_US, MAX_US]
     and is `value` to within the microsecond CPython truncates."""
-    sys.setswitchinterval(value)
-    in_force_us = round(sys.getswitchinterval() * 1_000_000)
-    if not (SWITCH_INTERVAL_MIN_US <= in_force_us <= SWITCH_INTERVAL_MAX_US) or abs(in_force_us - value * 1_000_000) >= 1:
-        raise RuntimeError(f"the GIL switch interval in force is {in_force_us} us, not the {value!r} s set "
-                           f"({_SWITCH_ENV}): this service refuses to start")
-    return in_force_us
+    return launch_guard.apply_switch_interval(value, _SWITCH_ENV)
 
 
 # Fix wave 25, H4 (AEGIS N24-S-12): the rules that judge a CLIENT by time —
@@ -266,6 +265,17 @@ class LoopLag:
         if late > LOOP_LAG_SLACK_S:
             self.lost += late - LOOP_LAG_SLACK_S
         self._arm()
+
+    def settle(self) -> float:
+        """`lost`, with the lateness of the tick now due credited first. Fix wave 26b (W25-EA-5): asyncio runs the
+        I/O callbacks of a loop pass before the timers that came due meanwhile, so in the first pass after a freeze
+        `lost` does not include the freeze yet — a clock that marked `lost` there (the protocol's, when body bytes
+        arrive) had the freeze credited AGAIN once the tick ran, to an interval that began after it. A late tick is
+        settled here exactly as `_tick` would settle it (and re-armed), so it is counted once, before the mark."""
+        if self._handle is not None and self.loop.time() - self._when > LOOP_LAG_SLACK_S:
+            self._handle.cancel()
+            self._tick()
+        return self.lost
 
 
 _loop_lags: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, LoopLag]" = weakref.WeakKeyDictionary()
@@ -343,7 +353,7 @@ class DeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
             self._body_bytes += len(data)
             self._body_last = self.loop.time()
             if self._lag is not None:
-                self._body_last_lost = self._lag.lost
+                self._body_last_lost = self._lag.settle()   # fix wave 26b (W25-EA-5): a freeze before these bytes, once
         super().data_received(data)
 
     def handle_events(self) -> None:
@@ -404,7 +414,7 @@ class DeadlineH11Protocol(GracefulCloseMixin, H11Protocol):
             self._lag = loop_lag(self.loop)
             self._lag.hold()
             self._body_started = self._body_last = self.loop.time()
-            self._body_started_lost = self._body_last_lost = self._lag.lost
+            self._body_started_lost = self._body_last_lost = self._lag.settle()   # fix wave 26b (W25-EA-5)
             self._body_bytes = 0
             self._body_deadline = self._body_started + self.body_timeout_s + BODY_DEADLINE_GRACE_S
             self._body_check()
