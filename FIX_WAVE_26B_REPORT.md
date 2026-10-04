@@ -294,6 +294,37 @@ which already closes the response, would remove the window; that is a product ch
 Record: CI7-1 (High) in OPEN.md. The failed leg was re-run (attempt 2 of run 37145378114) as a second sample; a green
 re-run would not close CI7-1.
 
+### CI7-1 fix (2026-10-04, founder-approved; local, not pushed)
+
+`EgressClient.abort()` no longer closes a response whose socket it shut down: the reader, woken by the shutdown,
+closes it in `_stream`'s own `finally`. A response with no socket to shut down (a mock transport) is still closed by
+`abort()`, the only thing that interrupts it. One product file changed: `adapters/egress.py`.
+
+Failing first as a stress test, as the founder required — `tests/test_live_fix26b_abort.py`, 300 aborts per test
+against a TLS server that sends headers and then stays silent:
+
+| test | before the fix | after the fix |
+|---|---|---|
+| a reader asleep in its socket wait is woken by every one of 300 aborts | FAILS: 37 of 300 aborted calls stayed blocked (16 and 18 in two earlier runs) | 0 of 300, three runs in a row |
+| reader asleep: each response closed, each socket really closed exactly once, descriptor count unchanged after 300 aborts | FAILS: 32 of 300 stayed blocked | holds |
+| the same when the abort lands before the reader's first read (the reader is held until `abort()` has returned) | holds — a guard on the fix, not failing-first | holds |
+
+Two things the tests had to get right before their counts meant anything: the server must NOT close on the client's
+shutdown (a close from the peer wakes the stuck reader — against such a server 0 of 300 stuck on the unfixed code),
+and the descriptor baseline is read after one uncounted call (the process opens two descriptors of its own on its
+first connection). Closes are counted per socket object, not per `id()` (an id reused by a later socket read as a
+double close). The three tests take about 40 s together.
+
+Also changed: the wave-19 unit test that pinned "shutdown, then close" now pins "shutdown only; close when there is no
+socket"; ADR 0011 R12; `docs/test-counts.md` (three new tests).
+
+Full delivery-py suite on this Mac under the hygiene wrapper, the CI command, on the fixed tree: no failure, the 4
+allowlisted skips (3 Docker-live, 1 Linux /proc), 0 hygiene violations, 36 min. Ruff and the strict hygiene lint clean.
+
+The re-run of CI #7's failed leg (attempt 2, unfixed code) came back green: at about one failure in 16 that is the
+likely outcome and proves nothing. CI7-1 stays open until the macos-26 delivery leg is green on the pushed fix; the
+Linux legs will run the new tests for the first time there.
+
 ## AEGIS round 26b re-adjudication — candidate d80adc5 (2026-10-03, after CI #6)
 
 **Verdict: INSUFFICIENT_EVIDENCE** (certification withheld) on d80adc5528ddad4f27427098efe2beee32ee5d6a, tree 5c059f86.

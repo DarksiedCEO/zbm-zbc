@@ -570,6 +570,12 @@ directory with it when computing a verdict.**
   socket down (`SHUT_RDWR`, via httpcore's `network_stream` extension) before closing it, so a reader blocked in
   `recv` with nothing arriving returns at once. Proven live on the assigned ports with the reviewer's
   headers-then-silence TLS server (`tests/test_live_round19.py`): 18.1 s after the abort before, < 2 s now.
+  Fix wave 26b (CI7-1): `abort()` no longer closes a response whose socket it shut down — the reader, woken by the
+  shutdown, closes it in `_stream`'s own `finally`. The close from the aborting thread right behind the shutdown
+  took the descriptor away under the reader's `poll`, and on macOS that reader then slept until its read timeout
+  (about 1 abort in 16; plain sockets: shutdown only never, shutdown then close 201 of 6000). A response with no
+  socket to shut down (a mock transport) is still closed by `abort()`. `tests/test_live_fix26b_abort.py` aborts 300
+  calls per test: none stays blocked, each socket is closed once, the descriptor count is unchanged.
 - **R13 — licence gate** (`licences.py`). A `.pth` path line naming a directory outside the virtual environment
   is a problem (the gate never scans it); one inside the venv is scanned as a further site directory; a top-level
   entry is covered by a distribution only when every RECORD line under it that names a present file carries a
