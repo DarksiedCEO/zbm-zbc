@@ -112,15 +112,22 @@ class EgressClient:
         self._client.close()
 
     def abort(self, run_id: str) -> int:
-        """Close every in-flight response of ``run_id`` (R6: a cancel or the watchdog interrupts the LLM call). R12
-        (N19-A-6): the underlying socket is ``shutdown(SHUT_RDWR)`` first, so a reader blocked in ``recv`` with no
-        bytes arriving returns at once instead of after the read timeout. Returns how many were closed."""
+        """Interrupt every in-flight response of ``run_id`` (R6: a cancel or the watchdog interrupts the LLM call). R12
+        (N19-A-6): the underlying socket is ``shutdown(SHUT_RDWR)``, so a reader blocked in ``recv`` with no bytes
+        arriving returns at once instead of after the read timeout. Returns how many were interrupted.
+
+        CI7-1 (fix wave 26b): a response whose socket was shut down is NOT closed here. Its reader (``_stream``) is
+        woken by the shutdown and closes it in its own ``finally``, once. A close from this thread right behind the
+        shutdown took the descriptor away under the reader's ``poll``, and on macOS that reader then slept until its
+        read timeout (about 1 abort in 16). Only a response with no socket to shut down (a mock transport) is closed
+        here, as before — closing is the only thing that interrupts it."""
         with self._lock:
             victims = [(k, r) for k, (rid, r) in self._inflight.items() if rid == run_id]
             for k, _ in victims:
                 self._aborted.add(k)
         for _, resp in victims:
-            _shutdown_socket(resp)
+            if _shutdown_socket(resp):
+                continue
             try:
                 resp.close()
             except Exception:  # noqa: BLE001

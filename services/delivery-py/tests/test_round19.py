@@ -957,7 +957,11 @@ def test_n19_a7_tracked_gitconfig_and_hooks_never_run_on_the_engines_commit():
 
 # ====================================================================== R12 / N19-A-6: abort shuts the socket (the live module has the server); kill on cancel
 
-def test_n19_a6_abort_shuts_down_the_response_socket_before_closing():
+def test_n19_a6_abort_shuts_down_the_response_socket_and_leaves_the_close_to_its_reader():
+    # CI7-1 (fix wave 26b): abort() used to close the response right behind the shutdown; on macOS that close took the
+    # descriptor away under the reader's poll and the reader slept until its read timeout. The reader, woken by the
+    # shutdown, closes the response itself (tests/test_live_fix26b_abort.py counts it: once, no descriptor left). Only
+    # a response with no socket to shut down is closed by abort().
     calls = []
 
     class Sock:
@@ -976,8 +980,14 @@ def test_n19_a6_abort_shuts_down_the_response_socket_before_closing():
     from zbm_delivery.adapters import egress as E
     eg = E.EgressClient(("api.anthropic.com",), record=lambda *a, **k: "id", env={})
     eg._inflight[1] = ("r1", Resp())
-    assert eg.abort("r1") == 1 and calls == [("shutdown", 2), ("close",)]
+    assert eg.abort("r1") == 1 and calls == [("shutdown", 2)]
     assert E._shutdown_socket(type("R", (), {"extensions": {}})()) is False
+
+    class NoSocket(Resp):
+        extensions: dict = {}
+    del calls[:]
+    eg._inflight[2] = ("r2", NoSocket())
+    assert eg.abort("r2") == 1 and calls == [("close",)]
 
 
 def test_n19_a6_interrupt_kills_the_runs_containers():
