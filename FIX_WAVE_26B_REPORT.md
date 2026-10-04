@@ -245,6 +245,55 @@ Local only: `fix26b` is not pushed, so there is no CI run for it.
 8. **The AEGIS chain:** whether provenance / reliability / data / mutation-fuzz gates are required for this repo
    (the adjudicator lists them as missing), or a ruling that removes them.
 
+## After the merge: CI #7 red on macos-26 — CI7-1 (High, open; a defect in the abort path, NOT fixed)
+
+Merge (founder-approved, 2026-10-03): `fix26b` @ f8698e7 pushed; merged `--no-ff` into `integration-2026-09-24` as
+54eac47 and pushed; `main` untouched (9531fc2). Before it, as instructed: the delivery-py macos-26 job limit raised to
+180 min (RT2-3) and the AEGIS records committed under `docs/aegis/round-26b/`.
+
+CI #7 = run 37145378114 (the push of 54eac47): every job green except `delivery-py (3.13, macos-26)` and therefore
+`required`. One test failed: `tests/test_live_round19.py::test_abort_wakes_a_reader_blocked_in_recv_at_once` —
+`abort("r1")` returned 1, the reader thread was still alive after the 45 s bound. The leg ran about 90 min and ended
+on that failure, not on the job limit. Neither the test (last changed in wave 25) nor `adapters/egress.py` was changed
+by wave 26b; the leg was green in CI #5 and CI #6.
+
+**Cause (reproduced on the build box, macOS 26.6, M4 Pro, Python 3.13.9): a real defect in the abort path on macOS,
+not a race in the test's fallback wait.** `EgressClient.abort()` does `sock.shutdown(SHUT_RDWR)` and then at once
+`resp.close()`, which closes the file descriptor. On macOS a `poll()` sleeping on that descriptor is not reliably
+woken when the close follows the shutdown immediately: the reader stays in `poll` until its read timeout (60 s for an
+LLM call), so the abort does not interrupt the call. The reader was genuinely blocked when it happened — waiting for
+it to be blocked (what the test does on Linux) would not make the test pass.
+
+Evidence (scripts in the session scratchpad `ci71/`: `repro.py`, `kern.py`, `stress.py`, `stress2.py`):
+
+| what | result |
+|---|---|
+| the test's own body against the real `EgressClient`, abort 0.5 s after the request is in flight (the test's macOS wait) | reader still blocked 4 s after the abort in 13 of 200 runs |
+| same, abort 50 ms after | 99 of 1500 |
+| same, abort the instant the request is registered | 1 of 300 |
+| where the stuck reader is (faulthandler + `sample`) | `ssl.py` `read` -> `_ssl` `PySSL_select` -> `poll`; `_shutdown_socket` had returned True |
+| plain TCP sockets, no TLS, no httpx: a thread in `poll`, another does shutdown only | 0 of 6000 polls slept their whole timeout |
+| plain sockets: shutdown then close at once, reader racing its entry into `poll` | 201 of 6000 |
+| plain sockets: shutdown then close at once, reader already in `poll` for 20 ms | 57 of 1500 |
+| plain sockets: shutdown, 2 ms pause, close | 0 of 1500 |
+| single orderings (`kern.py`): shutdown before poll; shutdown + close before poll; blocked then shutdown; blocked then close only | immediate; immediate (POLLNVAL); woken; NOT woken (sleeps the whole timeout) |
+
+So the shutdown does wake the poller, and a close landing before the woken thread has looked again puts it back to
+sleep on a descriptor that no longer exists. With four busy threads competing for the interpreter lock the plain-socket
+case did not miss (0 of 600 and 0 of 300): the lock hand-off between the two calls acts as the pause.
+
+Not established: whether Linux has the same window (no Linux box or Docker here; the ubuntu legs of this test have
+been green, and production's service runs on Linux); why CI #5 and #6 were green (at 13 in 200 a single run of the
+test passes about 15 times in 16).
+
+Not changed, as instructed: `adapters/egress.py` (the fix is the founder's call — the measurements say a close that
+is not issued from the aborting thread right behind the shutdown, e.g. leaving the close to the reader's own `finally`,
+which already closes the response, would remove the window; that is a product change and untested here) and the test
+(it is reporting a true failure; loosening or skipping it on macOS would hide the defect). No other fix was started.
+
+Record: CI7-1 (High) in OPEN.md. The failed leg was re-run (attempt 2 of run 37145378114) as a second sample; a green
+re-run would not close CI7-1.
+
 ## AEGIS round 26b re-adjudication — candidate d80adc5 (2026-10-03, after CI #6)
 
 **Verdict: INSUFFICIENT_EVIDENCE** (certification withheld) on d80adc5528ddad4f27427098efe2beee32ee5d6a, tree 5c059f86.
