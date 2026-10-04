@@ -325,6 +325,25 @@ The re-run of CI #7's failed leg (attempt 2, unfixed code) came back green: at a
 likely outcome and proves nothing. CI7-1 stays open until the macos-26 delivery leg is green on the pushed fix; the
 Linux legs will run the new tests for the first time there.
 
+### CI #8 (run 37224177809, merge 013caff) — CI7-1 closed; a new red leg, CI8-1 (High, open)
+
+`fix26b` @ a77f629 pushed and merged `--no-ff` into `integration-2026-09-24` as 013caff (founder-approved, 2026-10-04;
+`main` untouched). CI #8 on that merge: every job green except `python-tests (detection-py, 3.13, macos-26)` and
+therefore `required`.
+
+**CI7-1 closed.** `delivery-py (3.13, macos-26)` is green on the fix, and both ubuntu legs are green with the three
+new 300-abort tests running on Linux for the first time (no failure, allowlisted skips only, 0 hygiene violations on
+each leg). The closure cites the run together with the local stress evidence, as the founder required: before the fix
+3 runs of 300 aborts left 18, 16 and 37 calls blocked; after it 4 runs left 0 of 300 each; after the fix the
+open-descriptor count was unchanged after 300 aborts in all 4 runs, every socket really closed exactly once, with the
+reader asleep and with the abort landing before the reader's first read.
+
+**CI8-1 (new High, open, not investigated).** detection-py on macos-26:
+`test_health_latency_bound_under_16_concurrent_worst_case_batches` — one of 36 `/health` probes took 0.609 s of the
+server's time against the 0.5 s bound (p50 46 ms; measured run-queue waits 0 ms). detection-py is untouched by this
+merge and the leg was green in CI #5, #6 and #7. It is the wall-clock literal already tracked as W25-EA-2 (ruling
+pending: keep as a documented bound, or replace) and the flake class of R26B-TT-5. No fix was started.
+
 ## AEGIS round 26b re-adjudication — candidate d80adc5 (2026-10-03, after CI #6)
 
 **Verdict: INSUFFICIENT_EVIDENCE** (certification withheld) on d80adc5528ddad4f27427098efe2beee32ee5d6a, tree 5c059f86.
