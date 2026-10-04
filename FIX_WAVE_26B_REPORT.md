@@ -348,7 +348,8 @@ Founder ruling (2026-10-04): CI8-1 is **Medium** — a timing flake on a loaded 
 fix. Recorded as the ruling: the wave did not investigate the cause, and the test's own measurement read 0 ms of
 run-queue wait for the slow probe. With it no High or Critical is open. The failed leg was re-run (attempt 2 of run
 37224177809). A CI change that reports missed timing bounds on macos-26 as warnings (Linux still gates) was drafted
-for the founder and is not applied.
+for the founder and is not applied: parked on the local branch `macos-timing-advisory` (commit 0a5a2b1), tracked as
+W26B-5 (Medium) in OPEN.md with the four gaps to close before it can be merged.
 
 ## AEGIS round 26b re-adjudication — candidate d80adc5 (2026-10-03, after CI #6)
 
