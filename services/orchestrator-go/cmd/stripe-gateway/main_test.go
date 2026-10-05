@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -241,6 +242,9 @@ func TestEscapedBodyOverFinanceLimitIsRefused(t *testing.T) {
 
 func TestDeliveriesBeyondTheCapAreTryAgain(t *testing.T) {
 	release := make(chan struct{})
+	var once sync.Once
+	free := func() { once.Do(func() { close(release) }) }
+	defer free() // never leave a held request blocking the test binary
 	var inFinance atomic.Int32
 	fin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		inFinance.Add(1)
@@ -249,25 +253,44 @@ func TestDeliveriesBeyondTheCapAreTryAgain(t *testing.T) {
 	defer fin.Close()
 	g := gw(t, fin.URL)
 	defer g.Close()
-	done := make(chan int, maxInFlight)
+	send := func(id string) (int, error) { // goroutine-safe: no t.Fatal off the test goroutine
+		req, _ := http.NewRequest(http.MethodPost, g.URL+"/webhooks/stripe", strings.NewReader(`{"id":"`+id+`"}`))
+		req.Header.Set("Stripe-Signature", "t=1,v1=00")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		resp.Body.Close()
+		return resp.StatusCode, nil
+	}
+	type result struct {
+		code int
+		err  error
+	}
+	done := make(chan result, maxInFlight)
 	for i := 0; i < maxInFlight; i++ {
 		go func() {
-			resp, _ := post(t, g.URL, `{"id":"evt_1"}`, "t=1,v1=00")
-			done <- resp.StatusCode
+			c, err := send("evt_held")
+			done <- result{c, err}
 		}()
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for inFinance.Load() < maxInFlight && time.Now().Before(deadline) {
+	deadline := time.Now().Add(10 * time.Second)
+	for inFinance.Load() < maxInFlight {
+		if time.Now().After(deadline) {
+			free()
+			t.Fatalf("only %d of %d deliveries reached Finance in time", inFinance.Load(), maxInFlight)
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	resp, _ := post(t, g.URL, `{"id":"evt_2"}`, "t=1,v1=00")
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("delivery beyond the cap: got %d", resp.StatusCode)
+	code, err := send("evt_over_cap")
+	if err != nil || code != http.StatusServiceUnavailable {
+		free()
+		t.Fatalf("delivery beyond the cap: got %d (%v)", code, err)
 	}
-	close(release)
+	free()
 	for i := 0; i < maxInFlight; i++ {
-		if c := <-done; c != 200 {
-			t.Fatalf("held delivery got %d", c)
+		if r := <-done; r.err != nil || r.code != 200 {
+			t.Fatalf("held delivery got %d (%v)", r.code, r.err)
 		}
 	}
 }
