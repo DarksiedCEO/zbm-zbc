@@ -611,8 +611,8 @@ jobs:
 
   # ---------------------------------------------------------------------------------------------------------------
   # Secret scan over the whole git history with the gitleaks release binary (checksum-verified download; no
-  # third-party action, no licence key). .gitleaks.toml allowlists four exact fake strings used by onboarding-py's
-  # redaction tests and nothing else.
+  # third-party action, no licence key). .gitleaks.toml allowlists exact fake strings only: four used by
+  # onboarding-py's redaction tests and two fake Stripe test-key shapes used by finance-py's simulated Stripe.
   # ---------------------------------------------------------------------------------------------------------------
   secret-scan:
     name: secret-scan (gitleaks)
