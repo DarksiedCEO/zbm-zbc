@@ -317,7 +317,8 @@ class BooksMixin:
                     problems.append(R.item("JOURNAL_INVALID" if body["entity"] == "zbm" else "ENTITY_MIX",
                                            f"line {i + 1}: {l['line_code']} is not a {body['entity']} line code"))
             if "card" in body["payment_methods"]:
-                problems += I2.card_problems([l["line_code"] for l in body["lines"]])
+                problems += I2.card_problems([l["line_code"] for l in body["lines"]], I2.lines_total(body["lines"]),
+                                             self.cfg.card_prepayments, self.cfg.card_max_invoice)
             if body["kind"] == I2.MEDIA_KIND or any(l["line_code"] in I2.MEDIA_LINE_CODES for l in body["lines"]):
                 problems.append(R.item("JOURNAL_INVALID", "media invoices are drafted from a media buy "
                                                           "(POST /fin/v1/media-buys), never by a caller"))
@@ -569,6 +570,9 @@ class BooksMixin:
             rc = self.db["receipts"].get(receipt_id)
             if rc is None:
                 raise NotFound("no such receipt")
+            if rc.get("into_account") == "1060":
+                raise Conflict("a Stripe payment is never returned by hand: a failure or dispute arrives as a Stripe "
+                               "event and is booked from there")
             inv = self.db["invoices"].get(rc.get("invoice_id") or "")
             if rc["status"] == "matched" and inv is not None and inv["kind"] == I2.MEDIA_KIND and rc["entity"] == "zbm":
                 op = Op(self, f"rret|{principal}|{request_id}", I2.ACTOR, receipt_id)
@@ -653,8 +657,9 @@ class BooksMixin:
                 return ent["response"]
             self.require_rules()
             if body["kind"] == "card_chargeback" or who == "rail_gateway":
-                raise Refused("card prepayments are off, so no card chargeback can exist here (D11); nothing recorded "
-                              "as a dispute", [R.item("CARD_DISABLED", "card acceptance is disabled (FIN-CQ-09)")])
+                raise Refused("a card chargeback is never opened by hand: it arrives as a Stripe event and is posted "
+                              "from there; nothing recorded as a dispute",
+                              [R.item("CARD_DISABLED", "card chargebacks come only from the Stripe adapter")])
             inv = self.db["invoices"].get(body["invoice_id"])
             if inv is None:
                 raise NotFound("no such invoice")

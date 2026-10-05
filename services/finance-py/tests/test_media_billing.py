@@ -66,7 +66,7 @@ def prepaid(hr, **over):
 
 
 def to_clear_day(hr):
-    hr.clock.advance(days=7)                  # Fri Oct 2 -> Fri Oct 9 (5 business days, FIN_MEDIA_RELEASE_HOLD_BD)
+    hr.clock.advance(days=7)                  # Fri Oct 2 -> Fri Oct 9: past the 2-business-day hold (clears Tue Oct 6)
 
 
 def memos(hr, entity="zbm"):
@@ -98,7 +98,7 @@ def test_full_buy_principal_prepaid_collect_before_pay_revenue_with_cost(hr):
 
     # M3: same day -> refused, nothing posted
     r = pay_vendor(hr, b["buy_id"], "10000.00", paid_on="2026-10-02")
-    assert r.status_code == 409 and "COLLECT_BEFORE_PAY" in r.text and "2026-10-09" in r.text
+    assert r.status_code == 409 and "COLLECT_BEFORE_PAY" in r.text and "2026-10-06" in r.text
     assert "record the vendor payment after that" in r.text      # the hold itself, not only the paid_on check
     assert memos(hr) == ["F12", "F11a"]
 
@@ -195,8 +195,9 @@ def test_vendor_payment_refused_on_an_unpaid_buy(hr):
 def test_vendor_paid_before_the_money_cleared_is_refused_even_when_recorded_later(hr):
     bid, _ = prepaid(hr)
     to_clear_day(hr)
-    r = pay_vendor(hr, bid, "1000.00", paid_on="2026-10-08")
+    r = pay_vendor(hr, bid, "1000.00", paid_on="2026-10-05")     # Mon: one business day, cleared Tue Oct 6
     assert r.status_code == 409 and "before the client's money cleared" in r.text
+    hr.ok(pay_vendor(hr, bid, "1000.00", paid_on="2026-10-06"))       # the clearing day itself is allowed
 
 
 def test_vendor_payment_never_above_the_vendor_cost_and_never_twice(hr):
@@ -232,9 +233,13 @@ def test_hold_is_a_setting():
     to_clear_day(x)                                                   # 5 business days: not enough at 7
     r = pay_vendor(x, bid, "1.00")
     assert r.status_code == 409 and "2026-10-13" in r.text
-    y = Harness(env={"FIN_MEDIA_RELEASE_HOLD_BD": "2"}).ready()
+    y = Harness().ready()                                             # founder M11: the default is 2
+    assert y.settings.media_release_hold_bd == 2
     bid, _ = prepaid(y)
-    y.clock.advance(days=4)                                           # Tue Oct 6 = 2 business days
+    y.clock.advance(days=3)                                           # Mon Oct 5 = 1 business day
+    r = pay_vendor(y, bid, "1.00", paid_on="2026-10-05")
+    assert r.status_code == 409 and "2026-10-06" in r.text and "2 business days" in r.text
+    y.clock.advance(days=1)                                           # Tue Oct 6 = 2 business days
     y.ok(pay_vendor(y, bid, "1.00", paid_on="2026-10-06"))
 
 
@@ -303,9 +308,9 @@ def test_cancel_a_draft_posts_nothing_and_rejecting_the_invoice_cancels_the_buy(
 
 # ------------------------------------------------------------------------------------------- card policy (FIN-31)
 
-def _zbm_invoice(hr, codes, methods):
+def _zbm_invoice(hr, codes, methods, price="500.00"):
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": "service",
-            "lines": [{"line_code": c, "quantity": 1, "unit_price": "500.00"} for c in codes],
+            "lines": [{"line_code": c, "quantity": 1, "unit_price": price} for c in codes],
             "payment_methods": methods, "legal_ref": LEGAL}
     return hr.post("/fin/v1/invoices", body, caller="onboarding")
 
@@ -317,11 +322,47 @@ def test_card_refused_permanently_on_anything_but_revenue_recovery(hr, codes):
     assert r.status_code == 422 and "CARD_NOT_ALLOWED" in r.text and "fin/FIN-31/" in r.text
 
 
-def test_card_on_revenue_recovery_only_is_still_off_until_counsel_and_an_adapter(hr):
+def test_card_on_revenue_recovery_is_off_unless_the_switch_is_on(hr):
     r = _zbm_invoice(hr, ["revenue_recovery_services"], ["card"])
     assert r.status_code == 422 and "CARD_DISABLED" in r.text and "CARD_NOT_ALLOWED" not in r.text
     ok = hr.ok(_zbm_invoice(hr, ["revenue_recovery_services"], ["ach"]), 201)["invoice"]
     assert ok["lines"][0]["line_code"] == "revenue_recovery_services"
+
+
+# Founder M10 (Oct 5 2026): card on Revenue Recovery up to $5,000, no surcharge; above it, ACH.
+
+@pytest.fixture
+def card_on():
+    return Harness(env={"FIN_CARD_PREPAYMENTS": "1"}).ready()
+
+
+def test_m10_card_accepted_on_revenue_recovery_at_the_cap(card_on):
+    inv = card_on.ok(_zbm_invoice(card_on, ["revenue_recovery_services"], ["ach", "card"], "5000.00"), 201)["invoice"]
+    assert inv["total"] == "5000.00" and "card" in inv["payment_methods"]
+    assert not any("surcharge" in (l.get("line_code") or "") for l in inv["lines"])
+    assert [l["line_code"] for l in inv["lines"]] == ["revenue_recovery_services"]   # no fee line added
+
+
+@pytest.mark.parametrize("codes,price", [(["revenue_recovery_services"], "5000.01"),
+                                         (["revenue_recovery_services", "revenue_recovery_services"], "2500.01")])
+def test_m10_card_refused_above_5000_even_across_lines(card_on, codes, price):
+    r = _zbm_invoice(card_on, codes, ["ach", "card"], price)
+    assert r.status_code == 422 and "CARD_NOT_ALLOWED" in r.text and "ACH" in r.text and "fin/FIN-31/" in r.text
+    card_on.ok(_zbm_invoice(card_on, codes, ["ach"], price), 201)            # the same invoice by ACH is fine
+
+
+def test_m10_switch_on_never_opens_card_to_other_services(card_on):
+    r = _zbm_invoice(card_on, ["creative_services"], ["card"], "100.00")
+    assert r.status_code == 422 and "CARD_NOT_ALLOWED" in r.text
+
+
+def test_m10_the_cap_can_be_lowered_but_never_raised():
+    low = Harness(env={"FIN_CARD_PREPAYMENTS": "1", "FIN_CARD_MAX_INVOICE": "1000.00"}).ready()
+    assert low.settings.card_max_invoice == Decimal("1000.00")
+    assert _zbm_invoice(low, ["revenue_recovery_services"], ["card"], "1000.01").status_code == 422
+    low.ok(_zbm_invoice(low, ["revenue_recovery_services"], ["card"], "1000.00"), 201)
+    with pytest.raises(RuntimeError):
+        Harness(env={"FIN_CARD_MAX_INVOICE": "5000.01"})
 
 
 @pytest.mark.parametrize("body_over", [{"kind": "media_prepayment"},
@@ -492,10 +533,10 @@ def test_h1_repayment_after_a_return_with_vendor_money_out_completes_the_buy(hr)
     assert b["payment_returned"] is False
     # the hold restarts from the NEW money
     r = pay_vendor(hr, bid, "7500.00", paid_on="2026-10-12", tag="r1")
-    assert r.status_code == 409 and "2026-10-19" in r.text
-    hr.clock.advance(days=7)                                          # Mon Oct 19
-    hr.ok(pay_vendor(hr, bid, "7500.00", paid_on="2026-10-19", tag="r2"))
-    hr.clock.advance(days=15)                                         # Tue Nov 3
+    assert r.status_code == 409 and "2026-10-14" in r.text           # Mon Oct 12 + 2 business days
+    hr.clock.advance(days=2)                                          # Wed Oct 14
+    hr.ok(pay_vendor(hr, bid, "7500.00", paid_on="2026-10-14", tag="r2"))
+    hr.clock.advance(days=20)                                         # Tue Nov 3
     hr.ok(deliver(hr, bid))
     assert hr.bal("2120", entity="zbm") == 0 and hr.bal("1150", entity="zbm") == 0
     assert hr.bal("4120", entity="zbm") == Decimal("11500.00") and hr.bal("5110", entity="zbm") == Decimal("10000.00")

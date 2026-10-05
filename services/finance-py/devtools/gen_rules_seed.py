@@ -147,7 +147,7 @@ RULES = [
      "builds from the buy, with the vendor cost and ZBM's markup (15% default, set per buy) stored separately; a "
      "vendor payment is recorded only after the client's prepayment has cleared and the hold has passed, never above "
      "the vendor cost; revenue and cost post together when the media has run. A card is accepted only on a Revenue "
-     "Recovery invoice.", [], [], "founder"),
+     "Recovery invoice of at most $5,000 (above it, ACH), never with a surcharge.", [], [], "founder"),
 ]
 
 # (id, question, blocks, alias_of)
@@ -160,7 +160,9 @@ COUNSEL = [
     ("FIN-CQ-06", "Year-one TIN matching route; unmatched W-9 withholding posture", "withhold_24 policy", None),
     ("FIN-CQ-07", "AB 5 classification of clippers", "nothing extra (Compliance blocks payouts)", "CQ-01"),
     ("FIN-CQ-08", "Days-in-the-US allocation for foreign clippers", "nothing extra", "CQ-04"),
-    ("FIN-CQ-09", "Civ. Code 1748.1 reach to B2B; surviving late fee", "late fees; any card acceptance", None),
+    # Founder M10 (Oct 5 2026) decided card acceptance (Revenue Recovery, <= $5,000, no surcharge); this row now
+    # blocks what is still a legal question: late fees and any card surcharge
+    ("FIN-CQ-09", "Civ. Code 1748.1 reach to B2B; surviving late fee", "late fees; any card surcharge", None),
     ("FIN-CQ-10", "ARL scope for small-business subscribers; consent/cancel artifacts", "subscription/retainer invoices", None),
     ("FIN-CQ-11", "California sales tax on ZBC/ZBM deliverables; nexus", "invoice issuance (both entities)", None),
     ("FIN-CQ-12", "UCC 4A loss allocation under the bank security procedure", "FC-12 stays red", None),

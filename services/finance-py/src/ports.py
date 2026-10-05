@@ -390,6 +390,126 @@ class NotBuiltClientMail:
         return False
 
 
+# --- Stripe incoming: ZBM client payments (founder M6/M9/M10, ADR 0009 amendment Oct 5 2026) -------------------------
+# Money is a canonical money string here (the adapter converts Stripe's integer cents exactly). Stripe ids are opaque.
+# Finance never trusts an event's body: every webhook is only a "look again" signal; the adapter re-reads the object.
+
+@dataclass(frozen=True)
+class StripeCheckout:
+    outcome: str                                # created | rejected | transport_error | unavailable
+    session_id: Optional[str] = None
+    url: Optional[str] = None
+    expires_at: Optional[str] = None            # RFC 3339
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class StripeSession:
+    available: bool
+    found: bool = False
+    session_id: Optional[str] = None
+    status: Optional[str] = None                # open | complete | expired
+    payment_intent: Optional[str] = None
+    client_reference_id: Optional[str] = None
+    livemode: bool = False
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class StripePayment:
+    available: bool
+    found: bool = False
+    payment_intent: Optional[str] = None
+    status: Optional[str] = None                # the PaymentIntent status
+    amount_received: Optional[str] = None
+    currency: Optional[str] = None
+    invoice_id: Optional[str] = None            # metadata.invoice_id (set by Finance's own checkout)
+    method: Optional[str] = None                # card | us_bank_account | other
+    charge: Optional[str] = None
+    charge_status: Optional[str] = None         # succeeded | pending | failed
+    balance_txn: Optional[str] = None
+    gross: Optional[str] = None                 # the charge's balance transaction: amount
+    fee: Optional[str] = None                   # ... and fee
+    failure_txn: Optional[str] = None           # the charge's failure balance transaction, if it failed after success
+    failure_amount: Optional[str] = None        # signed (negative)
+    failure_fee: Optional[str] = None           # signed
+    livemode: bool = False
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class StripeDispute:
+    available: bool
+    found: bool = False
+    dispute_id: Optional[str] = None
+    payment_intent: Optional[str] = None
+    status: Optional[str] = None
+    amount: Optional[str] = None
+    txns: tuple = ()                            # dicts: txn_id, amount (signed), fee (signed)
+    livemode: bool = False
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class StripePayout:
+    available: bool
+    found: bool = False
+    payout_id: Optional[str] = None
+    status: Optional[str] = None                # paid | pending | in_transit | canceled | failed
+    amount: Optional[str] = None
+    livemode: bool = False
+    reason: str = ""
+
+
+class StripeIncomingPort(Protocol):
+    """ZBM's Stripe account, incoming side only. No refund, transfer or payout-creating method exists here."""
+
+    def create_checkout(self, invoice_id: str, amount: str, methods: tuple, idempotency_key: str, expires_at: int,
+                        label: str) -> StripeCheckout: ...
+
+    def verify_event(self, payload: str, signature: str, now_epoch: int) -> bool: ...
+
+    def session(self, session_id: str) -> StripeSession: ...
+
+    def expire_session(self, session_id: str) -> StripeSession: ...
+
+    def payment(self, payment_intent: str) -> StripePayment: ...
+
+    def dispute(self, dispute_id: str) -> StripeDispute: ...
+
+    def payout(self, payout_id: str) -> StripePayout: ...
+
+    def balance(self) -> RailBalance: ...
+
+
+class NotWiredStripeIncoming:
+    REASON = f"Stripe (incoming client payments) is not wired (FIN_STRIPE_INCOMING unset): {NOT_BUILT}"
+
+    def create_checkout(self, invoice_id, amount, methods, idempotency_key, expires_at, label):
+        return StripeCheckout("unavailable", reason=self.REASON)
+
+    def verify_event(self, payload, signature, now_epoch):
+        return False
+
+    def session(self, session_id):
+        return StripeSession(False, reason=self.REASON)
+
+    def expire_session(self, session_id):
+        return StripeSession(False, reason=self.REASON)
+
+    def payment(self, payment_intent):
+        return StripePayment(False, reason=self.REASON)
+
+    def dispute(self, dispute_id):
+        return StripeDispute(False, reason=self.REASON)
+
+    def payout(self, payout_id):
+        return StripePayout(False, reason=self.REASON)
+
+    def balance(self):
+        return RailBalance(False, reason=self.REASON)
+
+
 @dataclass
 class Ports:
     vi: VerificationPort = field(default_factory=NotWiredVerification)
@@ -404,8 +524,9 @@ class Ports:
     people: People43Port = field(default_factory=NotBuiltPeople43)
     push: PushPort = field(default_factory=NotBuiltPush)
     client_mail: ClientMailPort = field(default_factory=NotBuiltClientMail)
+    stripe_in: StripeIncomingPort = field(default_factory=NotWiredStripeIncoming)
 
 
 STAND_INS = (NotWiredVerification, NotWiredCompliance, NotBuiltClipperNetwork, NotBuiltLegal37, NotWiredRail,
              NotWiredBank, NotWiredTaxAgent, NotWiredGL, NotWiredVault, NotBuiltPeople43, NotBuiltPush,
-             NotBuiltClientMail)
+             NotBuiltClientMail, NotWiredStripeIncoming)

@@ -436,6 +436,18 @@ class RailEvent(Strict):
     signature: Optional[Annotated[str, Field(max_length=256)]] = None
 
 
+class StripeCheckoutRequest(Strict):
+    request_id: Id
+
+
+class StripeEventIn(Strict):
+    """A Stripe webhook as the gateway received it: the RAW body (exactly the bytes Stripe signed, as text) and the
+    ``Stripe-Signature`` header. Finance verifies it; the gateway never parses or edits the body."""
+    request_id: Id
+    payload: Annotated[str, Field(min_length=2, max_length=256 * 1024)]
+    signature: Annotated[str, Field(min_length=1, max_length=1024)]
+
+
 class RailEvents(Strict):
     request_id: Id
     events: list[RailEvent] = Field(min_length=1, max_length=100)

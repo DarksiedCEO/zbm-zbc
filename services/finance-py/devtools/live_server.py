@@ -75,6 +75,18 @@ def main() -> None:
     ports = Ports(vi=f["vi"], compliance=f["compliance"], cn=f["cn"], legal=f["legal"], rails=f["rails"],
                   bank=f["bank"], tax=f["tax"], gl=f["gl"], vault=f["vault"], people=f["people"], push=f["push"],
                   client_mail=f["client_mail"])
+    if settings.stripe_incoming:
+        # Stripe incoming against the simulated Stripe of the tests (api.stripe.com is not reachable here); the key and
+        # webhook secret come from the configured files exactly as in production
+        from stripe_incoming import StripeIncoming
+        from stripe_sim import SimStripe
+        if "stripe_sim" not in world:
+            world["stripe_sim"] = SimStripe(clock, key=settings.stripe_secret_key.reveal(),
+                                            whsec=settings.stripe_webhook_secret.reveal())
+        sim = world["stripe_sim"]
+        ports.stripe_in = StripeIncoming(settings.stripe_secret_key.reveal(), settings.stripe_webhook_secret.reveal(),
+                                         settings.stripe_livemode, settings.stripe_success_url,
+                                         settings.stripe_cancel_url, transport=sim.transport(), clock=clock)
     svc = api.build_service(settings, clock, ports)
     app = api.create_app(svc, settings)
     auth = Depends(api.make_require_auth(settings.service_token))
@@ -121,6 +133,31 @@ def main() -> None:
     def rail_paid(b: dict = Body(...)) -> dict:
         p = f["rails"][b.get("rail", "stripe")].paid(b["idempotency_key"])
         return {"rail_ref": p["rail_ref"], "status": p["status"]}
+
+    @app.post("/devtools/stripe/pay", dependencies=[auth])
+    def stripe_pay(b: dict = Body(...)) -> dict:
+        return {"payment_intent": world["stripe_sim"].pay(b["session_id"], method=b.get("method", "us_bank_account"))}
+
+    @app.post("/devtools/stripe/dispute", dependencies=[auth])
+    def stripe_dispute(b: dict = Body(...)) -> dict:
+        sim = world["stripe_sim"]
+        if b.get("close"):
+            sim.close_dispute(b["dispute_id"], won=b["won"], fee_back=int(b.get("fee_back", 0)))
+            return {"dispute_id": b["dispute_id"]}
+        return {"dispute_id": sim.dispute(b["payment_intent"], fee=int(b.get("fee", 1500)))}
+
+    @app.post("/devtools/stripe/payout", dependencies=[auth])
+    def stripe_payout(b: dict = Body(...)) -> dict:
+        sim = world["stripe_sim"]
+        if b.get("payout_id"):
+            sim.payouts[b["payout_id"]]["status"] = b["status"]
+            return {"payout_id": b["payout_id"]}
+        return {"payout_id": sim.payout(int(b["amount_cents"]), b.get("status", "in_transit"))}
+
+    @app.post("/devtools/stripe/event", dependencies=[auth])
+    def stripe_event(b: dict = Body(...)) -> dict:
+        payload, sig = world["stripe_sim"].event(b["type"], b["object"])
+        return {"payload": payload, "signature": sig}
 
     serve.run(app, host=os.environ.get("FIN_BIND_ADDR", "127.0.0.1"), port=int(os.environ["FIN_PORT"]))
 

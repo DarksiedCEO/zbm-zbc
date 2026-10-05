@@ -152,6 +152,9 @@ class MediaMixin:
             today = self._today_la()
             clears = self._media_clears_on(buy)
             reasons = []
+            if buy.get("payment_disputed"):
+                reasons.append(R.item("COLLECT_BEFORE_PAY", "the client disputed the prepayment at Stripe; the vendor "
+                                                            "is not paid while that dispute is open (founder M3)"))
             if clears is None or today < clears:
                 reasons.append(R.item("COLLECT_BEFORE_PAY", f"the client's prepayment clears on {_d(clears)} "
                                                             f"({self.cfg.media_release_hold_bd} business days after it "
@@ -304,7 +307,6 @@ class MediaMixin:
     def _media_return(self, op: Op, rc: dict, inv: dict, body: dict) -> dict:
         """The bank returned a ZBM media prepayment (F12x, a FACT flow). The client owes again. If the vendor was
         already paid from that money, ZBM is exposed: the buy is marked and a break opens for Andre."""
-        buy = op.get("media_buys", inv["media_buy_id"])
         amt = M.D(rc["amount"])
         try:
             e = self._post(op, "zbm", [J.dr("1100", amt, f"client:{inv['client_id']}"), J.cr("1010", amt)], "F12x",
@@ -317,28 +319,40 @@ class MediaMixin:
             "return_ref_sha256": body["return_ref_sha256"], "entry_id": e["entry_id"]}})
         op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None})
         self._withdraw_client_receipt(op, rc["receipt_id"])
-        exposed = M.D(buy["vendor_paid"]) if buy else M.ZERO
-        if buy is not None:
-            if exposed > 0:
-                # a delivered buy keeps its status (its books are final); the exposure is flagged and a break opens
-                op.put("media_buys", buy["buy_id"], {**buy, "payment_returned": True} if buy["status"] == "delivered"
-                       else {**buy, "status": "payment_returned", "payment_returned": True})
-                bid = rid("brk", "media_exposure", buy["buy_id"], rc["receipt_id"])
-                op.put("breaks", bid, {"break_id": bid, "leg": "media_exposure", "subject": f"zbm:buy:{buy['buy_id']}",
-                                       "difference": M.fmt(exposed), "opened_at": iso(self._now()),
-                                       "opened_on": self._today_la().isoformat(), "owner": "andre",
-                                       "explanation_code": "unknown", "status": "open", "receipt_id": rc["receipt_id"],
-                                       "resolution": None})
-                op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
-                          {"break_id": bid, "leg": "media_exposure", "difference": M.fmt(exposed)},
-                          f"Break opened: vendor paid {M.fmt(exposed)} from a prepayment the bank returned")
-            else:
-                op.put("media_buys", buy["buy_id"], {**buy, "status": "awaiting_payment", "prepayment": None})
+        exposed = self._media_unpaid(op, inv, rc["receipt_id"], "the bank returned")
         op.record(derived_id("rctx", rc["receipt_id"]), "deposit_returned", I2.ACTOR, rc["receipt_id"],
                   {"receipt_id": rc["receipt_id"], "amount": M.fmt(amt), "entity": "zbm", "entry_id": e["entry_id"],
                    "vendor_exposure": M.fmt(exposed)},
                   f"Media prepayment returned by the bank: {M.fmt(amt)}")
         return {"receipt_id": rc["receipt_id"], "entry_id": e["entry_id"], "vendor_exposure": M.fmt(exposed)}
+
+    def _media_unpaid(self, op: Op, inv: dict, receipt_id: str, cause: str,
+                      break_key: Optional[str] = None) -> Decimal:
+        """The client's prepayment for this buy is gone (a bank return, a Stripe payment that failed after it had
+        succeeded, a lost Stripe dispute). Returns the vendor money already out: if any, ZBM is exposed, the buy is
+        marked and a ``media_exposure`` break opens for Andre; if none, the buy waits for payment again."""
+        buy = op.get("media_buys", inv["media_buy_id"])
+        exposed = M.D(buy["vendor_paid"]) if buy else M.ZERO
+        if buy is not None:
+            if exposed > 0:
+                # a delivered buy keeps its status (its books are final); the exposure is flagged and a break opens
+                op.put("media_buys", buy["buy_id"], {**buy, "payment_returned": True, "payment_disputed": False}
+                       if buy["status"] == "delivered"
+                       else {**buy, "status": "payment_returned", "payment_returned": True, "payment_disputed": False})
+                bid = rid("brk", "media_exposure", buy["buy_id"], break_key or receipt_id)
+                if op.get("breaks", bid) is None:      # one break per exposure (AEGIS L3), recorded once
+                    op.put("breaks", bid, {"break_id": bid, "leg": "media_exposure",
+                                           "subject": f"zbm:buy:{buy['buy_id']}", "difference": M.fmt(exposed), "opened_at": iso(self._now()),
+                                           "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                           "explanation_code": "unknown", "status": "open", "receipt_id": receipt_id,
+                                           "resolution": None})
+                    op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                              {"break_id": bid, "leg": "media_exposure", "difference": M.fmt(exposed)},
+                              f"Break opened: vendor paid {M.fmt(exposed)} from a prepayment {cause}"[:200])
+            else:
+                op.put("media_buys", buy["buy_id"], {**buy, "status": "awaiting_payment", "prepayment": None,
+                                                     "payment_disputed": False})
+        return exposed
 
     def _expected_media_sub(self) -> dict[str, dict[str, Decimal]]:
         """Reconciliation L4 for ZBM media: what 2120 and 1150 should hold per buy, from the buy records alone."""
@@ -353,7 +367,8 @@ class MediaMixin:
 
     # ================================================================== client receipts
 
-    def _client_receipt(self, op: Op, receipt_id: str, inv: dict, amount: str, value_date: str) -> dict:
+    def _client_receipt(self, op: Op, receipt_id: str, inv: dict, amount: str, value_date: str,
+                        method: str = "ACH or wire") -> dict:
         """What the client bought, in words, for the email receipt (founder, Oct 5 2026)."""
         crid = rid("crc", receipt_id)
         if inv.get("kind") == I2.MEDIA_KIND:
@@ -369,7 +384,7 @@ class MediaMixin:
         rec = {"client_receipt_id": crid, "receipt_id": receipt_id, "entity": inv["entity"],
                "client_id": inv["client_id"], "invoice_id": inv["invoice_id"], "invoice_kind": inv["kind"],
                "what_you_bought": what, "items": items, "period": period, "amount_paid": amount, "currency": "USD",
-               "paid_on": value_date, "method": "ACH or wire", "status": "pending_send", "attempts": 0,
+               "paid_on": value_date, "method": method, "status": "pending_send", "attempts": 0,
                "created_at": iso(self._now()), "sent_at": None}
         op.put("client_receipts", crid, rec)
         op.record(derived_id("crc", crid), "client_receipt_created", I2.ACTOR, crid,

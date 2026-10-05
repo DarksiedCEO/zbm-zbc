@@ -39,6 +39,8 @@ ZBC = {
 }
 ZBM = {
     "1010": ("Cash - Operating", "asset", None),
+    # Stripe incoming (ADR 0009 amendment, Oct 5 2026): client payments held by Stripe until paid out to 1010
+    "1060": ("Stripe balance (clearing)", "asset", None),
     "1100": ("Accounts receivable", "asset", "client"),
     # Media billing (ADR 0009 amendment, Oct 5 2026; founder decisions M1-M8): ZBM is principal on media, every buy
     # is prepaid, and the vendor is paid only from collected money. Sub-ledger ``buy`` = one media buy.

@@ -21,12 +21,14 @@ import dataclasses
 import re
 from typing import Annotated, Any, Literal, Optional
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import (AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, ValidationError,
+                      model_validator)
 
 from clock import parse_iso
 from ports import (BankBalance, BankTransfer, Certification, ClawbackPage, ComplianceRuling, GLAnswer, HoldsAnswer,
                    JurisdictionAnswer, LegalAnswer, RailAccount, RailBalance, RailLookup, RailSubmit, RegisterRow,
-                   SanctionsAnswer, TaxAgentAnswer, TierAnswer)
+                   SanctionsAnswer, StripeCheckout, StripeDispute, StripePayment, StripePayout, StripeSession,
+                   TaxAgentAnswer, TierAnswer)
 
 DEFAULT_MAX_VIEWS = 10 ** 12
 
@@ -197,15 +199,119 @@ class GLAnswerM(_S):
     reason: Reason = ""
 
 
+# --- Stripe incoming (ADR 0009 amendment, Oct 5 2026) ---
+StripeId = Annotated[str, StringConstraints(pattern=r"^[a-z]{2,8}_[A-Za-z0-9_]{1,120}$")]
+PosMoney = Annotated[str, StringConstraints(pattern=r"^(0|[1-9][0-9]{0,14})\.[0-9]{2}$")]
+CheckoutUrl = Annotated[str, StringConstraints(pattern=r"^https://checkout\.stripe\.com/[A-Za-z0-9/_.~%#=+-]{1,2000}$")]
+PI_STATUS = Literal["requires_payment_method", "requires_confirmation", "requires_action", "processing",
+                    "requires_capture", "canceled", "succeeded"]
+DISPUTE_STATUS = Literal["warning_needs_response", "warning_under_review", "warning_closed", "needs_response",
+                         "under_review", "won", "lost", "prevented"]
+
+
+class StripeCheckoutM(_S):
+    outcome: Literal["created", "rejected", "transport_error", "unavailable"]
+    session_id: Optional[StripeId] = None
+    url: Optional[CheckoutUrl] = None
+    expires_at: Optional[TS] = None
+    reason: Reason = ""
+
+
+class StripeSessionM(_S):
+    available: Literal[True]
+    found: bool
+    session_id: Optional[StripeId] = None
+    status: Optional[Literal["open", "complete", "expired"]] = None
+    payment_intent: Optional[StripeId] = None
+    client_reference_id: Optional[IdS] = None
+    livemode: bool = False
+    reason: Reason = ""
+
+    @model_validator(mode="after")
+    def _found_is_complete(self):
+        if self.found and any(getattr(self, f) is None for f in ('session_id', 'status')):
+            raise ValueError("a found Stripe object must carry session_id, status")
+        return self
+
+
+class StripePaymentM(_S):
+    available: Literal[True]
+    found: bool
+    payment_intent: Optional[StripeId] = None
+    status: Optional[PI_STATUS] = None
+    amount_received: Optional[PosMoney] = None
+    currency: Optional[Annotated[str, StringConstraints(pattern=r"^[a-z]{3}$")]] = None
+    invoice_id: Optional[IdS] = None
+    method: Optional[Literal["card", "us_bank_account", "other"]] = None
+    charge: Optional[StripeId] = None
+    charge_status: Optional[Literal["succeeded", "pending", "failed"]] = None
+    balance_txn: Optional[StripeId] = None
+    gross: Optional[Money] = None
+    fee: Optional[Money] = None
+    failure_txn: Optional[StripeId] = None
+    failure_amount: Optional[Money] = None
+    failure_fee: Optional[Money] = None
+    livemode: bool = False
+    reason: Reason = ""
+
+    @model_validator(mode="after")
+    def _found_is_complete(self):
+        if self.found and any(getattr(self, f) is None for f in ('payment_intent', 'status', 'amount_received', 'currency')):
+            raise ValueError("a found Stripe object must carry payment_intent, status, amount_received, currency")
+        return self
+
+
+class StripeTxnM(_S):
+    txn_id: StripeId
+    amount: Money
+    fee: Money
+
+
+class StripeDisputeM(_S):
+    available: Literal[True]
+    found: bool
+    dispute_id: Optional[StripeId] = None
+    payment_intent: Optional[StripeId] = None
+    status: Optional[DISPUTE_STATUS] = None
+    amount: Optional[PosMoney] = None
+    txns: tuple[StripeTxnM, ...] = Field(default=(), max_length=10)
+    livemode: bool = False
+    reason: Reason = ""
+
+    @model_validator(mode="after")
+    def _found_is_complete(self):
+        if self.found and any(getattr(self, f) is None for f in ('dispute_id', 'status', 'amount')):
+            raise ValueError("a found Stripe object must carry dispute_id, status, amount")
+        return self
+
+
+class StripePayoutM(_S):
+    available: Literal[True]
+    found: bool
+    payout_id: Optional[StripeId] = None
+    status: Optional[Literal["paid", "pending", "in_transit", "canceled", "failed"]] = None
+    amount: Optional[PosMoney] = None
+    livemode: bool = False
+    reason: Reason = ""
+
+    @model_validator(mode="after")
+    def _found_is_complete(self):
+        if self.found and any(getattr(self, f) is None for f in ('payout_id', 'status', 'amount')):
+            raise ValueError("a found Stripe object must carry payout_id, status, amount")
+        return self
+
+
 MODELS: dict[type, type[BaseModel]] = {
     Certification: CertificationM, ClawbackPage: ClawbackPageM, ComplianceRuling: ComplianceRulingM,
     HoldsAnswer: HoldsAnswerM, SanctionsAnswer: SanctionsAnswerM, RegisterRow: RegisterRowM,
     JurisdictionAnswer: JurisdictionAnswerM, TierAnswer: TierAnswerM, LegalAnswer: LegalAnswerM,
     RailAccount: RailAccountM, RailSubmit: RailSubmitM, RailLookup: RailLookupM, RailBalance: BalanceM,
     BankBalance: BalanceM, BankTransfer: BankTransferM, TaxAgentAnswer: TaxAgentAnswerM, GLAnswer: GLAnswerM,
+    StripeCheckout: StripeCheckoutM, StripeSession: StripeSessionM, StripePayment: StripePaymentM,
+    StripeDispute: StripeDisputeM, StripePayout: StripePayoutM,
 }
 # answers without an ``available`` switch: every field is always checked
-_ALWAYS = (RailSubmit, BankTransfer)
+_ALWAYS = (RailSubmit, BankTransfer, StripeCheckout)
 
 
 class Malformed(Exception):
@@ -254,6 +360,10 @@ def check(ans: Any, fallback: Any, max_views: int = DEFAULT_MAX_VIEWS) -> Any:
         return ClawbackPage(True, tuple({k: x[k] if isinstance(x, dict) else getattr(x, k)
                                          for k in ("clawback_id", "certification_id", "views_delta", "cause", "rule_id")}
                                         for x in raw["items"]), raw["next_cursor"])
+    if typ is StripeDispute:
+        # the service reads the balance transactions as plain dicts of exactly the three fields
+        return dataclasses.replace(ans, txns=tuple({k: x[k] if isinstance(x, dict) else getattr(x, k)
+                                                    for k in ("txn_id", "amount", "fee")} for x in raw["txns"]))
     return ans
 
 

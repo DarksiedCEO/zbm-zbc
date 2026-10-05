@@ -29,7 +29,8 @@ from ledger import derived_id
 from ports import BankBalance, BankTransfer, RailBalance, RailLookup
 from service import RUNNABLE, Gather, Op, PostingRefused, Refused, rid, sha
 
-JOBS = ("accrual", "clawback-sync", "tax-sync", "rail-sync")
+JOBS = ("accrual", "clawback-sync", "tax-sync", "rail-sync", "stripe-sessions")
+REPEATABLE_JOBS = ("stripe-sessions",)        # safe to run many times a day (AEGIS N2): each run is recorded
 PENDING_SWEEP = ("proposed", "approved", "executing", "bank_unknown")      # reserved when a sweep is proposed
 LIVE_SWEEP = ("approved", "executing", "bank_unknown")                     # reserved at approval and execution
 OPEN_OPS = ("proposed", "approved", "executing", "bank_unknown")
@@ -99,6 +100,8 @@ class ReconMixin:
         for r in self.cfg.rails:
             rp = rails.get(r)
             rail_obs[r] = g.call(f"rail_{r}", "balance", (), lambda x=rp: x.balance(), RailBalance(False))
+        stripe_obs = (g.call("stripe", "balance", (), lambda: self.ports.stripe_in.balance(), RailBalance(False))
+                      if self.cfg.stripe_incoming else RailBalance(False))
         for it in self.db["items"].values():
             if it["status"] == "submitted":
                 rp = rails.get(it["rail"])
@@ -128,6 +131,17 @@ class ReconMixin:
                     continue
                 legs.append(I7.leg("L3", f"zbc:{acct}", self.bal(acct), M.D(b.balance) if ok else None,
                                    b.source_sha256 if ok else None, "" if ok else f"rail {r} balance unavailable"))
+            # Stripe incoming (ADR 0009 amendment, Oct 5 2026): ZBM 1060 less payouts already on their way to the bank
+            # (they left the Stripe balance at creation; F13p posts when they arrive) vs Stripe's own balance
+            used_1060 = any(k[0] == "zbm" and k[1] == "1060" for k in self.balances)
+            ok_s = isinstance(stripe_obs, RailBalance) and stripe_obs.available and self._fresh(stripe_obs.as_of, 26)
+            if not ok_s and not used_1060 and not self.cfg.stripe_incoming:
+                legs.append(I7.not_in_use("L3", "zbm:1060"))
+            else:
+                legs.append(I7.leg("L3", "zbm:1060", self.bal("1060", entity="zbm") - self._stripe_in_transit(),
+                                   M.D(stripe_obs.balance) if ok_s else None, stripe_obs.source_sha256 if ok_s else None,
+                                   "Stripe balance (available + pending) vs 1060 less payouts in transit" if ok_s
+                                   else "Stripe balance unavailable"))
             bad_items = [i for i, lk in lookups.items() if not (isinstance(lk, RailLookup) and lk.available and lk.found
                                                                 and lk.status in ("submitted", "paid"))]
             if lookups:
@@ -646,19 +660,20 @@ class ReconMixin:
             raise NotFound("unknown job")
         self._idem(principal, request_id, f"jobs/{job}", None)
         day = self._now().date().isoformat()
-        jk = f"{job}|{day}"
+        jk = f"{job}|{day}" if job not in REPEATABLE_JOBS else f"{job}|{iso(self._now())}|{request_id}"[:200]
         prior = self.db["job_runs"].get(jk)
         if prior is not None:
             return {"job": job, "day": day, "summary": prior["summary"], "already_ran": True, "request_id": request_id}
         self.require_rules()
-        prefix = f"job|{job}|{day}"
+        prefix = f"job|{job}|{day}" if job not in REPEATABLE_JOBS else f"job|{jk}"
         fn = {"accrual": self.job_accrual, "clawback-sync": self.job_clawback_sync, "tax-sync": self.job_tax_sync,
-              "rail-sync": self.job_rail_sync}[job]
+              "rail-sync": self.job_rail_sync, "stripe-sessions": self.job_stripe_sessions}[job]
         summary = fn(prefix)
         with self.lock:
             op = Op(self, f"{prefix}|done", "intel_10_evidence_audit", job)
             op.put("job_runs", jk, {"job": job, "day": day, "at": iso(self._now()), "summary": summary})
-            op.record(derived_id("job", job, day), "control_result_recorded", "intel_10_evidence_audit", jk,
+            op.record(derived_id("job", job, day) if job not in REPEATABLE_JOBS else derived_id("job", jk),
+                      "control_result_recorded", "intel_10_evidence_audit", jk[:128],
                       {"job": job, "day": day, "summary_sha256": sha(summary)}, f"Job {job} ran")
             self._commit(op)
         return {"job": job, "day": day, "summary": summary, "already_ran": False, "request_id": request_id}

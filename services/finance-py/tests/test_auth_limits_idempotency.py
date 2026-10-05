@@ -55,7 +55,9 @@ def test_route_inventory_matches_the_spec(h):
                  # media billing (ADR 0009 amendment, Oct 5 2026)
                  "/fin/v1/media-buys", "/fin/v1/media-buys/fin-mb-X", "/fin/v1/media-buys/fin-mb-X/vendor-payments",
                  "/fin/v1/media-buys/fin-mb-X/delivery", "/fin/v1/media-buys/fin-mb-X/cancel",
-                 "/fin/v1/client-receipts/fin-crc-X", "/fin/v1/client-receipts/fin-crc-X/send"):
+                 "/fin/v1/client-receipts/fin-crc-X", "/fin/v1/client-receipts/fin-crc-X/send",
+                 # Stripe incoming (ADR 0009 amendment, Oct 5 2026)
+                 "/fin/v1/invoices/fin-inv-X/stripe-checkout", "/fin/v1/stripe/events"):
         assert need in paths, need
     assert len(all_routes(h)) >= 60
 
@@ -101,6 +103,9 @@ CALLER_ROUTES = [
     ("POST", "/fin/v1/treasury/funding", {"scheduler"}),
     ("POST", "/fin/v1/close/zbc/2026-09/tasks/preclose_review", {"scheduler"}),
     ("POST", "/fin/v1/client-receipts/fin-crc-X/send", {"scheduler"}),
+    ("POST", "/fin/v1/stripe/events", {"rail_gateway"}),
+    ("POST", "/fin/v1/invoices/fin-inv-X/stripe-checkout", {"onboarding"}),
+    ("GET", "/fin/v1/invoices/fin-inv-X/stripe-checkout", {"onboarding"}),
 ]
 
 
