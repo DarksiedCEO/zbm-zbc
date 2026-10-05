@@ -73,7 +73,8 @@ def main() -> None:
         world["f"]["rails"]["trolley"].balance_available = False
     clock, f = world["clock"], world["f"]
     ports = Ports(vi=f["vi"], compliance=f["compliance"], cn=f["cn"], legal=f["legal"], rails=f["rails"],
-                  bank=f["bank"], tax=f["tax"], gl=f["gl"], vault=f["vault"], people=f["people"], push=f["push"])
+                  bank=f["bank"], tax=f["tax"], gl=f["gl"], vault=f["vault"], people=f["people"], push=f["push"],
+                  client_mail=f["client_mail"])
     svc = api.build_service(settings, clock, ports)
     app = api.create_app(svc, settings)
     auth = Depends(api.make_require_auth(settings.service_token))

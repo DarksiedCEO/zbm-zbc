@@ -27,7 +27,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -355,6 +357,52 @@ def _main(work: Path) -> int:
         r = B.recon()
         check("B: reconciliation after both payouts: every leg matched, no break",
               r["fc01"] and not [b for b in B.get("/fin/v1/breaks")["breaks"] if b["status"] == "open"])
+        # ---- media billing (ADR 0009 amendment, Oct 5 2026): ZBM principal, prepaid, collect before pay
+        def la_today() -> str:
+            now = datetime.fromisoformat(B.get("/devtools/now")["now"].replace("Z", "+00:00"))
+            return now.astimezone(ZoneInfo("America/Los_Angeles")).date().isoformat()
+
+        day0 = la_today()
+        flight_end = (date.fromisoformat(day0) + timedelta(days=20)).isoformat()
+        io = {"doc_id": "io-1", "version": 1, "doc_sha256": "c" * 64, "acceptance_id": "acc-io-1"}
+        mb = B.post("/fin/v1/media-buys", {"request_id": rid(), "client_id": "zbm-client-1", "media_type": "radio",
+                                           "vendor_ref": "vendor-station-1", "description": "Drive-time radio, 3 weeks",
+                                           "flight_start": day0, "flight_end": flight_end, "media_cost": "4000.00",
+                                           "display": "blended", "legal_ref": io}, andre=True).json()
+        check("M: media buy 4000.00 + 15% = 4600.00, cost and fee stored, client shown one line",
+              mb["media_buy"]["total"] == "4600.00" and mb["media_buy"]["fee"] == "600.00"
+              and len(mb["invoice"]["client_lines"]) == 1 and len(mb["invoice"]["lines"]) == 2)
+        minv = B.post(f"/fin/v1/invoices/{mb['invoice']['invoice_id']}/decision",
+                      {"request_id": rid(), "content_sha256": mb["invoice"]["content_sha256"], "decision": "approve"},
+                      andre=True).json()["invoice"]
+        check("M: media prepayment invoice issued (F12)", minv["status"] == "issued")
+        B.dev("/devtools/bank/deposit", {"entity": "zbm", "account": "1010", "amount": "4600.00"})
+        mr = B.post("/fin/v1/bank/events", {"request_id": rid(), "lines": [
+            {"txn_ref_sha256": hashlib.sha256(b"live-media-1").hexdigest(), "entity": "zbm", "account": "1010",
+             "direction": "credit", "amount": "4600.00", "value_date": day0,
+             "reference_token": minv["invoice_id"]}]}, caller="bank_feed").json()
+        check("M: prepayment matched (F11a)", mr["results"][0]["status"] == "matched")
+        bid = mb["media_buy"]["buy_id"]
+        early = B.post(f"/fin/v1/media-buys/{bid}/vendor-payments",
+                       {"request_id": rid(), "amount": "4000.00", "paid_on": day0, "method": "ach",
+                        "payment_ref_sha256": hashlib.sha256(b"live-vendor-1").hexdigest()}, andre=True, ok=None)
+        check("M: vendor payment the day the money landed -> 409 COLLECT_BEFORE_PAY",
+              early.status_code == 409 and "COLLECT_BEFORE_PAY" in early.text)
+        B.dev("/devtools/advance", {"days": 7})
+        vp = B.post(f"/fin/v1/media-buys/{bid}/vendor-payments",
+                    {"request_id": rid(), "amount": "4000.00", "paid_on": la_today(), "method": "ach",
+                     "payment_ref_sha256": hashlib.sha256(b"live-vendor-1").hexdigest()}, andre=True).json()
+        B.dev("/devtools/bank/deposit", {"entity": "zbm", "account": "1010", "amount": "-4000.00"})
+        check("M: after the hold, vendor payment recorded (F12v)", vp["media_buy"]["status"] == "vendor_paid")
+        B.dev("/devtools/advance", {"days": 15})
+        dl = B.post(f"/fin/v1/media-buys/{bid}/delivery", {"request_id": rid(), "delivered_on": la_today(),
+                                                            "evidence_refs": ["affidavit-live-1"]}, andre=True).json()
+        check("M: delivery posts revenue 4600.00 and cost 4000.00 together (F12r)",
+              dl["media_buy"]["status"] == "delivered")
+        tbz = B.get("/fin/v1/journal/zbm/trial-balance")
+        check("M: ZBM trial balance difference 0.00", tbz["difference"] == "0.00")
+        r = B.recon()
+        check("M: reconciliation after the media buy: every leg matched (ZBM 1010, 2120, 1150 per buy)", r["fc01"])
         tb_before = B.get("/fin/v1/journal/zbc/trial-balance")
         check("B: ZBC trial balance difference 0.00", tb_before["difference"] == "0.00")
         integ = B.get("/fin/v1/integrity")
@@ -367,6 +415,9 @@ def _main(work: Path) -> int:
         check("B: restart on the same data dir and ledger: started (anchors verified at start)",
               B2.get("/fin/v1/rules")["rules_version"] == 3)
         check("B: restart: trial balance identical", B2.get("/fin/v1/journal/zbc/trial-balance") == tb_before)
+        check("M: restart: ZBM trial balance and the media buy survive",
+              B2.get("/fin/v1/journal/zbm/trial-balance") == tbz
+              and B2.get(f"/fin/v1/media-buys/{bid}")["status"] == "delivered")
         check("B: restart: integrity green", B2.get("/fin/v1/integrity")["status"] == "green")
         leases = [e for e in httpx.get(f"{LB}/ledger/entries", headers={"Authorization": f"Bearer {LEDGER_TOKEN}"},
                                        timeout=60).json() if e.get("event_type") == "instance_lease"]

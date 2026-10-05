@@ -299,7 +299,7 @@ def test_s13_card_fee_line_or_surcharge_text_refused(hr):
                                                                                 "doc_sha256": "b" * 64,
                                                                                 "acceptance_id": "a"}},
                 caller="onboarding")
-    assert r.status_code == 422 and "CARD_DISABLED" in r.text
+    assert r.status_code == 422 and "CARD_NOT_ALLOWED" in r.text   # media/non-RR work: ACH or wire only (FIN-31)
 
 
 def test_s14_precision_half_up_once_per_payable(hr):

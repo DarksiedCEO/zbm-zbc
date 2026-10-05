@@ -469,6 +469,41 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                        req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.decide_invoice(req.request_id, _id(invoice_id), dump(req))
 
+    # --- media buys and client receipts (ADR 0009 amendment, Oct 5 2026) ---------------------------------------------
+
+    @app.post("/fin/v1/media-buys", dependencies=auth, status_code=201)
+    def media_buy(_: str = Depends(andre("media-buys")),
+                  req: m.MediaBuyCreate = Depends(body(m.MediaBuyCreate))) -> dict:
+        return svc.create_media_buy(req.request_id, dump(req))
+
+    @app.get("/fin/v1/media-buys/{buy_id}", dependencies=auth)
+    def media_buy_get(buy_id: str, _: str = Depends(andre_or_caller("media-buys/get", "scheduler", "onboarding"))) -> dict:
+        return svc.get_media_buy(_id(buy_id))
+
+    @app.post("/fin/v1/media-buys/{buy_id}/vendor-payments", dependencies=auth)
+    def media_vendor_payment(buy_id: str, _: str = Depends(andre("media-buys/vendor-payments")),
+                             req: m.VendorPayment = Depends(body(m.VendorPayment))) -> dict:
+        return svc.record_vendor_payment(req.request_id, _id(buy_id), dump(req))
+
+    @app.post("/fin/v1/media-buys/{buy_id}/delivery", dependencies=auth)
+    def media_delivery(buy_id: str, _: str = Depends(andre("media-buys/delivery")),
+                       req: m.MediaDelivery = Depends(body(m.MediaDelivery))) -> dict:
+        return svc.record_media_delivery(req.request_id, _id(buy_id), dump(req))
+
+    @app.post("/fin/v1/media-buys/{buy_id}/cancel", dependencies=auth)
+    def media_cancel(buy_id: str, _: str = Depends(andre("media-buys/cancel")),
+                     req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        return svc.cancel_media_buy(req.request_id, _id(buy_id))
+
+    @app.get("/fin/v1/client-receipts/{client_receipt_id}", dependencies=auth)
+    def client_receipt_get(client_receipt_id: str, _: str = Depends(caller())) -> dict:
+        return svc.get_client_receipt(_id(client_receipt_id))
+
+    @app.post("/fin/v1/client-receipts/{client_receipt_id}/send", dependencies=auth)
+    def client_receipt_send(client_receipt_id: str, who: str = Depends(caller("scheduler")),
+                            req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        return svc.send_client_receipt(who, req.request_id, _id(client_receipt_id))
+
     @app.post("/fin/v1/bank/events", dependencies=auth)
     def bank_events(who: str = Depends(caller("bank_feed")), req: m.BankEvents = Depends(body(m.BankEvents))) -> dict:
         return svc.bank_events(who, req.request_id, [dump(l) for l in req.lines])

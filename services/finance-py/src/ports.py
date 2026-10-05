@@ -373,6 +373,18 @@ class NotBuiltPush:
         return False
 
 
+class ClientMailPort(Protocol):
+    """Sends a client their payment receipt (founder, Oct 5 2026: "that receipt goes out to them with the explanation
+    of what they bought via email"). True only when the mail provider accepted the message for delivery."""
+    def send_receipt(self, client_id: str, receipt: dict) -> bool: ...
+
+
+class NotBuiltClientMail:
+    """No mail provider is chosen or wired: nothing is sent; the receipt stays ``pending_send``."""
+    def send_receipt(self, client_id, receipt):
+        return False
+
+
 @dataclass
 class Ports:
     vi: VerificationPort = field(default_factory=NotWiredVerification)
@@ -386,7 +398,9 @@ class Ports:
     vault: VaultPort = field(default_factory=NotWiredVault)
     people: People43Port = field(default_factory=NotBuiltPeople43)
     push: PushPort = field(default_factory=NotBuiltPush)
+    client_mail: ClientMailPort = field(default_factory=NotBuiltClientMail)
 
 
 STAND_INS = (NotWiredVerification, NotWiredCompliance, NotBuiltClipperNetwork, NotBuiltLegal37, NotWiredRail,
-             NotWiredBank, NotWiredTaxAgent, NotWiredGL, NotWiredVault, NotBuiltPeople43, NotBuiltPush)
+             NotWiredBank, NotWiredTaxAgent, NotWiredGL, NotWiredVault, NotBuiltPeople43, NotBuiltPush,
+             NotBuiltClientMail)

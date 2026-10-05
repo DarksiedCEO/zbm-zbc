@@ -17,7 +17,8 @@ def _concrete(path: str) -> str:
                  ("{rail}", "stripe"), ("{dispute_id}", "fin-dsp-X"), ("{refund_id}", "fin-rfd-X"), ("{job}", "accrual"),
                  ("{batch_id}", "fin-bat-X"), ("{payable_id}", "fin-pay-X"), ("{exception_id}", "fin-exc-X"),
                  ("{break_id}", "fin-brk-X"), ("{op_id}", "fin-trx-X"), ("{entity}", "zbc"), ("{period}", "2026-09"),
-                 ("{task}", "preclose_review"), ("{control_id}", "FC-05"), ("{tax_year}", "2026")):
+                 ("{task}", "preclose_review"), ("{control_id}", "FC-05"), ("{tax_year}", "2026"),
+                 ("{buy_id}", "fin-mb-X"), ("{client_receipt_id}", "fin-crc-X")):
         path = path.replace(k, v)
     return path
 
@@ -50,7 +51,11 @@ def test_route_inventory_matches_the_spec(h):
                  "/fin/v1/clawbacks/clip-a/write-off", "/fin/v1/close/zbc/2026-09/tasks/preclose_review",
                  "/fin/v1/close/zbc/2026-09/approve", "/fin/v1/journal/zbc/entries", "/fin/v1/journal/zbc/trial-balance",
                  "/fin/v1/controls", "/fin/v1/controls/FC-05/results", "/fin/v1/rules", "/fin/v1/rules/proposals",
-                 "/fin/v1/rules/decisions", "/fin/v1/tax/readiness", "/fin/v1/tax/1099/2026", "/fin/v1/audit/export"):
+                 "/fin/v1/rules/decisions", "/fin/v1/tax/readiness", "/fin/v1/tax/1099/2026", "/fin/v1/audit/export",
+                 # media billing (ADR 0009 amendment, Oct 5 2026)
+                 "/fin/v1/media-buys", "/fin/v1/media-buys/fin-mb-X", "/fin/v1/media-buys/fin-mb-X/vendor-payments",
+                 "/fin/v1/media-buys/fin-mb-X/delivery", "/fin/v1/media-buys/fin-mb-X/cancel",
+                 "/fin/v1/client-receipts/fin-crc-X", "/fin/v1/client-receipts/fin-crc-X/send"):
         assert need in paths, need
     assert len(all_routes(h)) >= 60
 
@@ -95,6 +100,7 @@ CALLER_ROUTES = [
     ("POST", "/fin/v1/treasury/sweeps", {"scheduler"}),
     ("POST", "/fin/v1/treasury/funding", {"scheduler"}),
     ("POST", "/fin/v1/close/zbc/2026-09/tasks/preclose_review", {"scheduler"}),
+    ("POST", "/fin/v1/client-receipts/fin-crc-X/send", {"scheduler"}),
 ]
 
 
@@ -119,7 +125,8 @@ ANDRE_ROUTES = ["/fin/v1/payees/clip-a/callbacks", "/fin/v1/payees/clip-a/tax/b-
                 "/fin/v1/treasury/funding/fin-trx-X/decision", "/fin/v1/treasury/top-ups",
                 "/fin/v1/clawbacks/clip-a/write-off", "/fin/v1/close/zbc/2026-09/approve", "/fin/v1/journal/zbc/corrections",
                 "/fin/v1/rules/proposals", "/fin/v1/rules/decisions", "/fin/v1/tax/readiness", "/fin/v1/reconcile",
-                "/fin/v1/receipts/fin-rct-X/apply"]
+                "/fin/v1/receipts/fin-rct-X/apply", "/fin/v1/media-buys", "/fin/v1/media-buys/fin-mb-X/vendor-payments",
+                "/fin/v1/media-buys/fin-mb-X/delivery", "/fin/v1/media-buys/fin-mb-X/cancel"]
 
 
 def test_andre_routes_refuse_every_other_identity(hr):

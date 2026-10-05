@@ -15,11 +15,16 @@ from textguard import banned_words_in, fee_words_in, iter_strings
 
 NUMBER, NAME, ACTOR = 2, "Receivables & Billing", "intel_02_receivables"
 # The line-code enum has no surcharge, card_fee or convenience_fee value (FIN-21).
+# Media codes (ADR 0009 amendment, Oct 5 2026) are written by Finance itself from an Andre-approved media buy, never
+# sent by a caller: ``media_spend`` = the vendor cost, ``media_fee`` = ZBM's markup on it.
+MEDIA_LINE_CODES = ("media_spend", "media_fee")
+CARD_ELIGIBLE_CODES = ("revenue_recovery_services",)
 LINE_CODES = {"zbc": ("campaign_deposit",),
               "zbm": ("creative_services", "strategy_services", "production_services", "retainer_fee",
-                      "subscription_fee")}
-KINDS = ("campaign_deposit", "service", "retainer", "subscription")
+                      "subscription_fee", "revenue_recovery_services") + MEDIA_LINE_CODES}
+KINDS = ("campaign_deposit", "service", "retainer", "subscription", "media_prepayment")
 RECURRING_KINDS = ("retainer", "subscription")
+MEDIA_KIND = "media_prepayment"
 RECURRING_FIELDS = ("consent_artifact_ref", "cancel_medium", "annual_reminder_due", "price_change_notice_days",
                     "trial_days", "trial_reminder_days")
 PAYMENT_METHODS = ("ach", "wire")
@@ -66,6 +71,39 @@ def recurring_problems(inv: dict) -> list[dict]:
     if isinstance(t, int) and t > 31 and not (isinstance(tr, int) and 3 <= tr <= 21):
         out.append(R.item("RECURRING_INCOMPLETE", "trials over 31 days need a reminder 3-21 days before expiry"))
     return out
+
+
+def card_problems(line_codes: list[str]) -> list[dict]:
+    """Founder decision M6/M9 (Oct 5 2026): a card is accepted only on an invoice that is Revenue Recovery work and
+    nothing else, because only that work stays inside ZBM. Anything that carries third-party spend (media) or other
+    services is ACH or wire, permanently: a card can be disputed after the vendor is paid. Even an eligible invoice
+    is refused today: card acceptance waits for counsel row FIN-CQ-09 and an incoming card adapter (D11)."""
+    if any(c not in CARD_ELIGIBLE_CODES for c in line_codes):
+        return [R.item("CARD_NOT_ALLOWED", "card is accepted only for Revenue Recovery invoices; media and every other "
+                                           "service are paid by ACH or wire")]
+    return [R.item("CARD_DISABLED", "card payments are off (D11; FIN-CQ-09; no incoming card adapter)")]
+
+
+def media_fee(cost: Decimal, markup_pct: Decimal) -> Decimal:
+    """ZBM's fee on a media buy: ONE half-up quantize of cost x pct / 100 (founder M4: default 15%, set per buy)."""
+    with M.money_context():
+        return M.q(cost * markup_pct / Decimal(100))
+
+
+def media_lines(buy: dict) -> list[dict]:
+    """The invoice's true lines: the vendor cost and the fee, always both, whatever the client is shown (M4/M5)."""
+    return [{"line_code": "media_spend", "quantity": 1, "unit_price": buy["media_cost"], "amount": buy["media_cost"],
+             "description": buy["description"]},
+            {"line_code": "media_fee", "quantity": 1, "unit_price": buy["fee"], "amount": buy["fee"],
+             "description": "Media placement and management"}]
+
+
+def client_view(buy: dict) -> list[dict]:
+    """What the client sees (M5): the two lines, or one blended line for the total. Display only; the ledger is the
+    same either way."""
+    if buy["display"] == "breakout":
+        return [{"description": l["description"], "amount": l["amount"]} for l in media_lines(buy)]
+    return [{"description": buy["description"], "amount": buy["total"]}]
 
 
 def match_receipt(amount: Decimal, token: Optional[str], open_invoices: dict, entity: str) -> Optional[dict]:
