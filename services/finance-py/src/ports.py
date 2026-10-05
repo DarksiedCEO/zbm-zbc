@@ -471,6 +471,8 @@ class StripeIncomingPort(Protocol):
 
     def session(self, session_id: str) -> StripeSession: ...
 
+    def expire_session(self, session_id: str) -> StripeSession: ...
+
     def payment(self, payment_intent: str) -> StripePayment: ...
 
     def dispute(self, dispute_id: str) -> StripeDispute: ...
@@ -490,6 +492,9 @@ class NotWiredStripeIncoming:
         return False
 
     def session(self, session_id):
+        return StripeSession(False, reason=self.REASON)
+
+    def expire_session(self, session_id):
         return StripeSession(False, reason=self.REASON)
 
     def payment(self, payment_intent):

@@ -67,13 +67,23 @@ class SimStripe:
         p = url.path
         if request.method == "POST" and p == "/v1/checkout/sessions":
             return self._create_session(request, form)
+        if request.method == "POST" and p.startswith("/v1/checkout/sessions/") and p.endswith("/expire"):
+            s = self.sessions.get(p.split("/")[4])
+            if not s:
+                return self._json(404, {"error": {"code": "resource_missing"}})
+            if s["status"] != "open":
+                return self._json(400, {"error": {"type": "invalid_request_error", "code": "session_not_open"}})
+            s["status"] = "expired"
+            s["url"] = None
+            return self._json(200, {k: v for k, v in s.items() if not k.startswith("_")})
         if request.method == "GET":
             parts = p.strip("/").split("/")
             if p == "/v1/balance":
                 return self._json(200, self.balance_doc())
             if len(parts) == 4 and parts[1] == "checkout" and parts[2] == "sessions":
                 s = self.sessions.get(parts[3])
-                return self._json(200, s) if s else self._json(404, {"error": {"code": "resource_missing"}})
+                return self._json(200, {k: v for k, v in s.items() if not k.startswith("_")}) if s \
+                    else self._json(404, {"error": {"code": "resource_missing"}})
             if len(parts) == 3 and parts[1] == "payment_intents":
                 return self._pi_doc(parts[2], [v for k, v in query if k == "expand[]"])
             if len(parts) == 3 and parts[1] == "disputes":
@@ -143,9 +153,17 @@ class SimStripe:
 
     # --- what clients and banks do --------------------------------------------------------------------------------------
     def pay(self, session_id: str, method: str = "us_bank_account", fee: Optional[int] = None,
-            amount: Optional[int] = None, settle: bool = True, metadata: Optional[dict] = None) -> str:
-        """The client pays the hosted page. ACH starts ``processing``; ``settle`` makes it succeed."""
+            amount: Optional[int] = None, settle: bool = True, metadata: Optional[dict] = None,
+            force: bool = False) -> str:
+        """The client pays the hosted page. ACH starts ``processing``; ``settle`` makes it succeed. Stripe does not
+        let anyone pay an expired page, or with a method the page does not offer (``force`` skips both checks so a
+        test can model a payment made some other way, e.g. in the Dashboard)."""
         s = self.sessions[session_id]
+        if not force:
+            if s["status"] == "expired":
+                raise RuntimeError("Stripe: this Checkout page has expired")
+            if method not in s["allowed_payment_method_types"]:
+                raise RuntimeError("Stripe: this Checkout page does not offer that method")
         pi_id = f"pi_{self.next_n():04d}sim"
         amt = s["amount_total"] if amount is None else amount
         self.pis[pi_id] = {"id": pi_id, "object": "payment_intent", "amount": amt, "amount_received": 0,

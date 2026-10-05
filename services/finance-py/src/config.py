@@ -52,17 +52,27 @@ def _secret_file(env, name: str, prefixes: tuple) -> Secret:
     if not path or not os.path.isabs(path):
         raise RuntimeError(f"{name} must be an absolute path to a file holding the secret")
     try:
-        st = os.stat(path, follow_symlinks=False)
+        # AEGIS L5: open without following a symlink, then check the file that was actually opened
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
     except OSError:
-        raise RuntimeError(f"{name}: the file cannot be read") from None
-    if not stat.S_ISREG(st.st_mode):
-        raise RuntimeError(f"{name}: not a regular file (symlinks are refused)")
-    if st.st_mode & 0o077:
-        raise RuntimeError(f"{name}: the file is readable by group or others; chmod 600 it")
-    if st.st_size > 4096:
-        raise RuntimeError(f"{name}: the file is too large to be a key")
-    with open(path, "r", encoding="ascii", errors="strict") as fh:
-        value = fh.read().strip()
+        raise RuntimeError(f"{name}: the file cannot be opened (missing, unreadable, or a symlink)") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise RuntimeError(f"{name}: not a regular file")
+        if st.st_uid != os.geteuid():
+            raise RuntimeError(f"{name}: the file is not owned by the user running Finance")
+        if st.st_mode & 0o077:
+            raise RuntimeError(f"{name}: the file is readable by group or others; chmod 600 it")
+        if st.st_size > 4096:
+            raise RuntimeError(f"{name}: the file is too large to be a key")
+        raw = os.read(fd, 4097)
+    finally:
+        os.close(fd)
+    try:
+        value = raw.decode("ascii").strip()
+    except UnicodeDecodeError:
+        raise RuntimeError(f"{name}: the file does not hold a key of the expected kind") from None
     if not value.startswith(prefixes) or not re.fullmatch(r"[A-Za-z0-9_]{16,256}", value):
         raise RuntimeError(f"{name}: the file does not hold a key of the expected kind ({', '.join(prefixes)}...)")
     return Secret(value)

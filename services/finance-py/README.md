@@ -93,7 +93,10 @@ the maximum), never with a surcharge, and only when `FIN_CARD_PREPAYMENTS=1` (de
 Off unless `FIN_STRIPE_INCOMING=1`. ZBM only; ZBC deposits never go through Stripe (custody, FIN-CQ-02).
 `POST /fin/v1/invoices/{id}/stripe-checkout` (Andre or `onboarding`) makes a Stripe-hosted payment page for an issued
 invoice: ACH always when the invoice allows ACH, a card only when the card rule passes at that moment. It hands back the
-open page if one exists. `GET` on the same path lists the pages made for an invoice.
+open page if one exists; an open page that is no longer right (amount or methods changed) is closed at Stripe first,
+and if it cannot be closed no new page is made. `GET` on the same path lists the pages made for an invoice. The
+scheduler runs `POST /fin/v1/jobs/stripe-sessions/run` daily: it closes every page whose invoice is no longer issued or
+that offers a method the invoice may no longer be paid with.
 `POST /fin/v1/stripe/events` (caller `rail_gateway`) takes `{request_id, payload, signature}`: the webhook's RAW body and
 its `Stripe-Signature` header, untouched. Finance verifies the signature, then reads the payment, dispute or payout back
 from Stripe and books that (F13/F13f payment and fee into 1060 Stripe balance, F13x a payment that failed afterwards,

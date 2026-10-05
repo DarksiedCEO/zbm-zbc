@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
@@ -44,7 +45,7 @@ from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
 from ledger import derived_id
 from ports import StripeCheckout, StripeDispute, StripePayment, StripePayout, StripeSession
-from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid, sha_text
+from service import Gather, InvalidReasons, Op, PostingRefused, Refused, rid
 
 ACTOR = I2.ACTOR
 STRIPE_DEP = "DEPENDENCY_UNAVAILABLE:stripe"
@@ -117,61 +118,136 @@ class StripeMixin:
                                                      "by wire to the operating account")]
         return tuple(methods), []
 
+    def _stripe_lock(self):
+        """Every Stripe read-back and the booking that follows it run one at a time (AEGIS H1): an answer read from
+        Stripe is applied before any other Stripe answer is read, so a stale answer can never overwrite a newer one.
+        Webhook volume is small; the main service lock is NOT held while Stripe is being called."""
+        lk = self.__dict__.get("_stripe_serial")
+        if lk is None:
+            lk = self.__dict__.setdefault("_stripe_serial", threading.Lock())
+        return lk
+
+    def _expire_page(self, g: Gather, session_id: str) -> StripeSession:
+        port = self.ports.stripe_in
+        return g.call("stripe", "expire_session", (session_id,), lambda: port.expire_session(session_id),
+                      StripeSession(False))
+
     def stripe_checkout(self, principal: str, request_id: str, invoice_id: str) -> dict:
         key, h, ent = self._idem(principal, request_id, f"stripe-checkout/{invoice_id}", invoice_id)
         if ent:
             return ent["response"]
         self.require_rules()
-        now = self._now()
-        with self.lock:
-            inv = self.db["invoices"].get(invoice_id)
-            if inv is None:
-                raise NotFound("no such invoice")
-            if inv["status"] != "issued":
-                raise Conflict(f"only an issued invoice can be paid; this one is {inv['status']}")
-            methods, reasons = self._stripe_methods(inv)
-            if reasons:
-                raise Refused("no Stripe checkout for this invoice", reasons)
-            if not self.cfg.stripe_incoming:
-                raise Refused("Stripe is not wired", [R.item(STRIPE_DEP, "FIN_STRIPE_INCOMING is not set: no Stripe "
-                                                                         "account is connected")])
-            for s in self.db["stripe_sessions"].values():   # one live page per invoice: hand back the open one
-                if s["invoice_id"] == invoice_id and s["status"] == "open" and s["methods"] == list(methods) \
-                        and s["total"] == inv["total"] and s["expires_at"] > iso(now + timedelta(minutes=30)):
-                    return {"checkout": dict(s), "reused": True, "ledger_event_ids": [], "request_id": request_id}
-            attempt = sum(1 for s in self.db["stripe_sessions"].values() if s["invoice_id"] == invoice_id)
-            total = inv["total"]
-        idem_key = rid("chk", invoice_id, attempt, total, list(methods))
-        label = f"Z Best Media invoice {invoice_id}"
-        expires = int((now + CHECKOUT_TTL).timestamp())
-        port = self.ports.stripe_in
-        g = Gather(self, f"chk|{principal}|{request_id}", ACTOR, invoice_id)
-        ans = g.call("stripe", "create_checkout", (invoice_id, total, list(methods), idem_key),
-                     lambda: port.create_checkout(invoice_id, total, methods, idem_key, expires, label),
-                     StripeCheckout("unavailable"))
-        with self.lock:
-            inv = self.db["invoices"][invoice_id]
-            if inv["status"] != "issued" or inv["total"] != total:
-                raise Conflict("the invoice changed while the checkout was being made; ask again")
-            if ans.outcome != "created":
-                raise Refused("Stripe did not make the checkout page", [R.item(
-                    STRIPE_DEP, f"Stripe answered {ans.outcome}: {ans.reason}"[:200])], ledger_event_ids=g.events)
-            existing = self.db["stripe_sessions"].get(ans.session_id)
-            if existing is not None:                 # Stripe replayed the same idempotency key
-                return {"checkout": dict(existing), "reused": True, "ledger_event_ids": g.events,
-                        "request_id": request_id}
-            rec = {"session_id": ans.session_id, "invoice_id": invoice_id, "url": ans.url,
-                   "expires_at": ans.expires_at, "methods": list(methods), "total": total, "status": "open",
-                   "created_by": principal, "created_at": iso(now)}
-            op = Op(self, f"chk|{principal}|{request_id}", ACTOR, invoice_id, g)
-            op.put("stripe_sessions", ans.session_id, rec)
-            op.record(derived_id("chk", ans.session_id), "stripe_checkout_created", ACTOR, invoice_id,
-                      {"invoice_id": invoice_id, "session_id": ans.session_id, "total": total,
-                       "methods": list(methods)}, f"Stripe checkout made for an invoice ({total})")
-            resp = self._idem_add(op, key, h, {"checkout": rec, "reused": False, "ledger_event_ids": op.events,
-                                               "request_id": request_id})
-            self._commit(op)
-            return resp
+        with self._stripe_lock():
+            now = self._now()
+            with self.lock:
+                inv = self.db["invoices"].get(invoice_id)
+                if inv is None:
+                    raise NotFound("no such invoice")
+                if inv["status"] != "issued":
+                    raise Conflict(f"only an issued invoice can be paid; this one is {inv['status']}")
+                methods, reasons = self._stripe_methods(inv)
+                if reasons:
+                    raise Refused("no Stripe checkout for this invoice", reasons)
+                if not self.cfg.stripe_incoming:
+                    raise Refused("Stripe is not wired", [R.item(STRIPE_DEP, "FIN_STRIPE_INCOMING is not set: no "
+                                                                             "Stripe account is connected")])
+                mine = [dict(s) for s in self.db["stripe_sessions"].values() if s["invoice_id"] == invoice_id]
+                for s in mine:                       # one live page per invoice: hand back the open one
+                    if s["status"] == "open" and s["methods"] == list(methods) and s["total"] == inv["total"] \
+                            and s["expires_at"] > iso(now + timedelta(minutes=30)):
+                        return {"checkout": s, "reused": True, "ledger_event_ids": [], "request_id": request_id}
+                stale = [s for s in mine if s["status"] == "open"]
+                attempt = len(mine)
+                total = inv["total"]
+            g = Gather(self, f"chk|{principal}|{request_id}", ACTOR, invoice_id)
+            # AEGIS M2: a page whose methods or amount are no longer right is closed at Stripe BEFORE a new one is
+            # made, so a client can never pay on an outdated page (a card the rule no longer allows, a second payment)
+            closed = []
+            for s in stale:
+                a = self._expire_page(g, s["session_id"])
+                if not (a.available and a.found and a.status in ("expired", "complete")):
+                    raise Refused("an earlier Stripe page for this invoice could not be closed; no new page is made",
+                                  [R.item(STRIPE_DEP, "Stripe did not confirm the earlier page is closed")],
+                                  ledger_event_ids=g.events)
+                if a.status == "complete":
+                    raise Conflict("the client already paid on an earlier Stripe page; Finance books it when Stripe "
+                                   "confirms the payment")
+                closed.append(s["session_id"])
+            # AEGIS M1: every parameter sent is fixed by the key. The expiry is rounded down to the hour, so a retry
+            # after a lost answer (same hour) replays Stripe's first answer instead of failing as a changed request
+            expires = int((now + CHECKOUT_TTL).timestamp()) // 3600 * 3600
+            label = f"Z Best Media invoice {invoice_id}"
+            idem_key = rid("chk", invoice_id, attempt, total, list(methods), expires, self.cfg.stripe_success_url,
+                           self.cfg.stripe_cancel_url, label)
+            port = self.ports.stripe_in
+            ans = g.call("stripe", "create_checkout", (invoice_id, total, list(methods), idem_key),
+                         lambda: port.create_checkout(invoice_id, total, methods, idem_key, expires, label),
+                         StripeCheckout("unavailable"))
+            with self.lock:
+                op = Op(self, f"chk|{principal}|{request_id}", ACTOR, invoice_id, g)
+                for sid in closed:
+                    op.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid], "status": "expired",
+                                                    "expired_at": iso(self._now())})
+                inv = self.db["invoices"][invoice_id]
+                if ans.outcome != "created" or inv["status"] != "issued" or inv["total"] != total:
+                    if closed:
+                        self._commit(op)
+                    if ans.outcome != "created":
+                        raise Refused("Stripe did not make the checkout page", [R.item(
+                            STRIPE_DEP, f"Stripe answered {ans.outcome}: {ans.reason}"[:200])],
+                            ledger_event_ids=g.events)
+                    raise Conflict("the invoice changed while the checkout was being made; ask again")
+                existing = self.db["stripe_sessions"].get(ans.session_id)
+                if existing is not None:             # Stripe replayed the same idempotency key
+                    if closed:
+                        self._commit(op)
+                    return {"checkout": dict(existing), "reused": True, "ledger_event_ids": g.events,
+                            "request_id": request_id}
+                rec = {"session_id": ans.session_id, "invoice_id": invoice_id, "url": ans.url,
+                       "expires_at": ans.expires_at, "methods": list(methods), "total": total, "status": "open",
+                       "created_by": principal, "created_at": iso(now)}
+                op.put("stripe_sessions", ans.session_id, rec)
+                op.record(derived_id("chk", ans.session_id), "stripe_checkout_created", ACTOR, invoice_id,
+                          {"invoice_id": invoice_id, "session_id": ans.session_id, "total": total,
+                           "methods": list(methods), "closed": closed}, f"Stripe checkout made for an invoice ({total})")
+                resp = self._idem_add(op, key, h, {"checkout": rec, "reused": False, "closed": closed,
+                                                   "ledger_event_ids": op.events, "request_id": request_id})
+                self._commit(op)
+                return resp
+
+    def job_stripe_sessions(self, prefix: str) -> dict:
+        """Daily (scheduler): close every open Stripe page that should no longer take money -- its invoice is no
+        longer issued, its amount changed, or it offers a method the invoice may no longer be paid with (a card after
+        FIN_CARD_PREPAYMENTS was turned off). A page that cannot be closed stays listed for the next run."""
+        if not self.cfg.stripe_incoming:
+            return {"closed": 0, "failed": 0, "checked": 0}
+        with self._stripe_lock():
+            with self.lock:
+                todo = []
+                for s in self.db["stripe_sessions"].values():
+                    if s["status"] not in ("open", "invoice_paid"):
+                        continue
+                    inv = self.db["invoices"].get(s["invoice_id"]) or {}
+                    methods = self._stripe_methods(inv)[0] if inv.get("status") == "issued" else ()
+                    if inv.get("status") != "issued" or inv.get("total") != s["total"] \
+                            or any(m not in methods for m in s["methods"]):
+                        todo.append(dict(s))
+            g = Gather(self, f"{prefix}|stripe", ACTOR, "stripe-sessions")
+            results = {s["session_id"]: self._expire_page(g, s["session_id"]) for s in todo}
+            with self.lock:
+                op = Op(self, f"{prefix}|stripe", ACTOR, "stripe-sessions", g)
+                closed = failed = 0
+                for s in todo:
+                    a = results[s["session_id"]]
+                    cur = self.db["stripe_sessions"][s["session_id"]]
+                    if a.available and a.found and a.status in ("expired", "complete"):
+                        op.put("stripe_sessions", s["session_id"], {**cur, "status": a.status,
+                                                                    "expired_at": iso(self._now())})
+                        closed += 1
+                    else:
+                        failed += 1
+                self._commit(op)
+            return {"closed": closed, "failed": failed, "checked": len(todo)}
 
     # ================================================================== webhook events
 
@@ -182,32 +258,48 @@ class StripeMixin:
             raise Invalid("Stripe event body too large")
         self.require_rules()
         port = self.ports.stripe_in
-        now = self._now()
-        g = Gather(self, f"sev|{principal}|{request_id}", ACTOR, "stripe")
-        ok = g.call("stripe", "verify_event", (sha_text(payload), sha_text(signature or "")),
-                    lambda: port.verify_event(payload, signature, int(now.timestamp())), False) is True
+        # AEGIS L7: the signature is checked locally, before anything is written to the ledger (a junk call from the
+        # gateway leaves no trace but its 409)
+        try:
+            ok = port.verify_event(payload, signature, int(self._now().timestamp())) is True
+        except Exception:  # noqa: BLE001 - an adapter that raises has not verified anything
+            ok = False
         if not ok:
             raise Refused("Stripe event signature not verified", [R.item(
-                STRIPE_DEP, "the Stripe-Signature did not verify (wrong secret, stale or altered body)")],
-                ledger_event_ids=g.events)
+                STRIPE_DEP, "the Stripe-Signature did not verify (wrong secret, stale or altered body)")])
         ev = parse_event(payload)
+        with self._stripe_lock():
+            return self._stripe_event_serial(principal, request_id, ev)
+
+    def _stripe_event_serial(self, principal: str, request_id: str, ev: dict) -> dict:
+        port = self.ports.stripe_in
         with self.lock:
             if ev["event_id"] in self.db["stripe_events"]:
-                return {"event_id": ev["event_id"], "status": "duplicate", "ledger_event_ids": g.events}
+                return {"event_id": ev["event_id"], "status": "duplicate", "ledger_event_ids": []}
+        g = Gather(self, f"sev|{principal}|{request_id}", ACTOR, ev["event_id"])
         kind = event_kind(ev["type"]) if ev["livemode"] == self.cfg.stripe_livemode else None
+
+        def read_payment(pi: str) -> StripePayment:
+            return g.call("stripe", "payment", (pi,), lambda: port.payment(pi), StripePayment(False))
+
         truth: dict = {}
         if kind == "session":
             truth["session"] = s = g.call("stripe", "session", (ev["object_id"],),
                                           lambda: port.session(ev["object_id"]), StripeSession(False))
             if s.available and s.found and s.payment_intent:
-                truth["payment"] = g.call("stripe", "payment", (s.payment_intent,),
-                                          lambda: port.payment(s.payment_intent), StripePayment(False))
+                truth["payment"] = read_payment(s.payment_intent)
         elif kind == "payment" or (kind == "charge" and ev["payment_intent"]):
-            pi = ev["object_id"] if kind == "payment" else ev["payment_intent"]
-            truth["payment"] = g.call("stripe", "payment", (pi,), lambda: port.payment(pi), StripePayment(False))
+            truth["payment"] = read_payment(ev["object_id"] if kind == "payment" else ev["payment_intent"])
         elif kind == "dispute":
-            truth["dispute"] = g.call("stripe", "dispute", (ev["object_id"],),
-                                      lambda: port.dispute(ev["object_id"]), StripeDispute(False))
+            truth["dispute"] = d = g.call("stripe", "dispute", (ev["object_id"],),
+                                          lambda: port.dispute(ev["object_id"]), StripeDispute(False))
+            # AEGIS H2: a dispute is never applied before its payment is booked -- the payment is read and booked
+            # first, in the same step, so the media buy is flagged whatever order Stripe's events arrive in
+            if d.available and d.found and d.payment_intent:
+                with self.lock:
+                    booked = rid("rct", "stripe", d.payment_intent) in self.db["receipts"]
+                if not booked:
+                    truth["payment"] = read_payment(d.payment_intent)
         elif kind == "payout":
             truth["payout"] = g.call("stripe", "payout", (ev["object_id"],),
                                      lambda: port.payout(ev["object_id"]), StripePayout(False))
@@ -227,10 +319,12 @@ class StripeMixin:
                     status = "ignored_type"
                 elif kind == "session":
                     status = self._stripe_session(op, truth["session"], truth.get("payment"))
+                elif kind == "dispute":
+                    if "payment" in truth:
+                        self._stripe_payment(op, truth["payment"])
+                    status = self._stripe_dispute(op, truth["dispute"])
                 elif "payment" in truth:
                     status = self._stripe_payment(op, truth["payment"])
-                elif kind == "dispute":
-                    status = self._stripe_dispute(op, truth["dispute"])
                 elif kind == "payout":
                     status = self._stripe_payout(op, truth["payout"])
                 else:
@@ -243,9 +337,22 @@ class StripeMixin:
             op.record(derived_id("sev", ev["event_id"]), "stripe_event_applied", ACTOR, ev["event_id"],
                       {"event_id": ev["event_id"], "type": ev["type"], "object_id": ev["object_id"],
                        "status": status}, f"Stripe event {ev['type']}: {status}"[:200])
+            to_close = [sid for sid, rec in op.staged.get("stripe_sessions", {}).items()
+                        if rec["status"] == "invoice_paid"]
             resp = {"event_id": ev["event_id"], "status": status, "ledger_event_ids": op.events}
             self._commit(op)
-            return resp
+        if to_close:
+            # the invoice is paid: its other open pages are closed at Stripe now (the daily job retries a failure)
+            g2 = Gather(self, f"sev|{ev['event_id']}|close", ACTOR, ev["event_id"])
+            res = {sid: self._expire_page(g2, sid) for sid in to_close}
+            with self.lock:
+                op2 = Op(self, f"sev|{ev['event_id']}|close", ACTOR, ev["event_id"], g2)
+                for sid, a in res.items():
+                    if a.available and a.found and a.status in ("expired", "complete"):
+                        op2.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid], "status": a.status,
+                                                         "expired_at": iso(self._now())})
+                self._commit(op2)
+        return resp
 
     # --- sessions ------------------------------------------------------------------------------------------------------
 
@@ -311,6 +418,11 @@ class StripeMixin:
             op.put("invoices", inv["invoice_id"], {**inv, "status": "paid", "paid_at": iso(self._now())})
             if inv["kind"] == I2.MEDIA_KIND:
                 self._media_prepaid(op, inv, rct, value_date, M.fmt(gross))
+                if any(d.get("payment_intent") == p.payment_intent and M.D(d["held"]) > 0
+                       for d in self.db["stripe_disputes"].values()):
+                    buy = op.get("media_buys", inv["media_buy_id"])
+                    if buy is not None:
+                        op.put("media_buys", buy["buy_id"], {**buy, "payment_disputed": True})
             status = "matched"
         else:
             e = self._post(op, "zbm", [J.dr("1060", gross), J.cr("2070", gross)], "F13", src,
@@ -332,12 +444,12 @@ class StripeMixin:
                                  "into_account": "1060", "value_date": value_date, "matched_at": iso(self._now()),
                                  "status": status, "entry_id": e["entry_id"],
                                  "stripe": {"payment_intent": p.payment_intent, "charge": p.charge,
-                                            "balance_txn": p.balance_txn, "fee": M.fmt(fee),
+                                            "balance_txn": p.balance_txn, "fee": M.sfmt(fee),
                                             "fee_entry_id": fee_entry["entry_id"] if fee_entry else None}})
         op.record(derived_id("rct", rct), "receipt_matched" if ok else "receipt_unapplied", ACTOR, rct,
                   {"receipt_id": rct, "entity": "zbm", "account": "1060", "amount": M.fmt(gross),
-                   "invoice_id": inv["invoice_id"] if ok else None, "fee": M.fmt(fee)},
-                  f"Stripe payment {status}: {M.fmt(gross)} (fee {M.fmt(fee)})")
+                   "invoice_id": inv["invoice_id"] if ok else None, "fee": M.sfmt(fee)},
+                  f"Stripe payment {status}: {M.fmt(gross)} (fee {M.sfmt(fee)})")
         if ok:
             for s in self.db["stripe_sessions"].values():
                 if s["invoice_id"] == inv["invoice_id"] and s["status"] == "open":
@@ -421,9 +533,9 @@ class StripeMixin:
         first_seen = not rec.get("recorded")
         rec = {**rec, "posted_txns": posted, "held": M.fmt(held), "status": d.status, "amount": d.amount,
                "receipt_id": rct if rc else None}
-        if held > 0 and not rec["flagged"]:
+        if held > 0 and not rec["flagged"] and matched:
             rec["flagged"] = True
-            if matched and inv["kind"] == I2.MEDIA_KIND:
+            if inv["kind"] == I2.MEDIA_KIND:
                 buy = op.get("media_buys", inv["media_buy_id"])
                 if buy is not None:
                     op.put("media_buys", buy["buy_id"], {**buy, "payment_disputed": True})
@@ -438,7 +550,9 @@ class StripeMixin:
                                   {"break_id": bid, "leg": "media_exposure", "difference": buy["vendor_paid"]},
                                   f"Break opened: vendor paid {buy['vendor_paid']} from a prepayment now disputed")
         status = f"dispute_{d.status}"
-        closing = d.status in DONE_DISPUTE and not rec["finalized"]
+        # AEGIS L1: "won" (or a closed inquiry) is final only once Stripe has given the money back (held 0); a loss is
+        # final at once
+        closing = d.status in DONE_DISPUTE and not rec["finalized"] and (d.status == "lost" or held == 0)
         if closing:
             rec["finalized"] = True
             if d.status == "lost" and held > 0:
@@ -456,10 +570,20 @@ class StripeMixin:
                         op.put("receipts", rct, {**rc, "status": "charged_back"})
                         self._withdraw_client_receipt(op, rct)
                         if inv["kind"] == I2.MEDIA_KIND:
-                            self._media_unpaid(op, inv, rct, "the client took back through a Stripe dispute")
+                            self._media_unpaid(op, inv, rct, "the client took back through a Stripe dispute",
+                                               break_key=did)
                     else:
-                        self._unapplied_break(op, rct, held, "partial dispute lost: the invoice is part paid; Andre "
-                                                             "re-bills", key=f"{rct}|{did}")
+                        op.put("invoices", inv["invoice_id"], {**inv, "charged_back": M.fmt(held)})
+                        bid = rid("brk", "dispute_receivable", did)
+                        op.put("breaks", bid, {"break_id": bid, "leg": "dispute_receivable",
+                                               "subject": f"zbm:1100:client:{inv['client_id']}"[:160],
+                                               "difference": M.fmt(held), "opened_at": iso(self._now()),
+                                               "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                               "explanation_code": "partial_chargeback", "status": "open",
+                                               "receipt_id": rct, "resolution": None})
+                        op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                                  {"break_id": bid, "leg": "dispute_receivable", "difference": M.fmt(held)},
+                                  f"Break opened: client owes {M.fmt(held)} after a partly lost Stripe dispute")
             elif matched and inv["kind"] == I2.MEDIA_KIND and held == 0:
                 buy = op.get("media_buys", inv["media_buy_id"])
                 if buy is not None and buy.get("payment_disputed"):

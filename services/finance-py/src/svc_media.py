@@ -326,7 +326,8 @@ class MediaMixin:
                   f"Media prepayment returned by the bank: {M.fmt(amt)}")
         return {"receipt_id": rc["receipt_id"], "entry_id": e["entry_id"], "vendor_exposure": M.fmt(exposed)}
 
-    def _media_unpaid(self, op: Op, inv: dict, receipt_id: str, cause: str) -> Decimal:
+    def _media_unpaid(self, op: Op, inv: dict, receipt_id: str, cause: str,
+                      break_key: Optional[str] = None) -> Decimal:
         """The client's prepayment for this buy is gone (a bank return, a Stripe payment that failed after it had
         succeeded, a lost Stripe dispute). Returns the vendor money already out: if any, ZBM is exposed, the buy is
         marked and a ``media_exposure`` break opens for Andre; if none, the buy waits for payment again."""
@@ -338,15 +339,16 @@ class MediaMixin:
                 op.put("media_buys", buy["buy_id"], {**buy, "payment_returned": True, "payment_disputed": False}
                        if buy["status"] == "delivered"
                        else {**buy, "status": "payment_returned", "payment_returned": True, "payment_disputed": False})
-                bid = rid("brk", "media_exposure", buy["buy_id"], receipt_id)
-                op.put("breaks", bid, {"break_id": bid, "leg": "media_exposure", "subject": f"zbm:buy:{buy['buy_id']}",
-                                       "difference": M.fmt(exposed), "opened_at": iso(self._now()),
-                                       "opened_on": self._today_la().isoformat(), "owner": "andre",
-                                       "explanation_code": "unknown", "status": "open", "receipt_id": receipt_id,
-                                       "resolution": None})
-                op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
-                          {"break_id": bid, "leg": "media_exposure", "difference": M.fmt(exposed)},
-                          f"Break opened: vendor paid {M.fmt(exposed)} from a prepayment {cause}"[:200])
+                bid = rid("brk", "media_exposure", buy["buy_id"], break_key or receipt_id)
+                if op.get("breaks", bid) is None:      # one break per exposure (AEGIS L3), recorded once
+                    op.put("breaks", bid, {"break_id": bid, "leg": "media_exposure",
+                                           "subject": f"zbm:buy:{buy['buy_id']}", "difference": M.fmt(exposed), "opened_at": iso(self._now()),
+                                           "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                           "explanation_code": "unknown", "status": "open", "receipt_id": receipt_id,
+                                           "resolution": None})
+                    op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                              {"break_id": bid, "leg": "media_exposure", "difference": M.fmt(exposed)},
+                              f"Break opened: vendor paid {M.fmt(exposed)} from a prepayment {cause}"[:200])
             else:
                 op.put("media_buys", buy["buy_id"], {**buy, "status": "awaiting_payment", "prepayment": None,
                                                      "payment_disputed": False})

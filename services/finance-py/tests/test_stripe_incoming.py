@@ -257,7 +257,7 @@ def test_a_payment_finance_cannot_match_is_unapplied_and_opens_a_break(st):
 
 def test_a_second_payment_of_a_paid_invoice_is_unapplied(st):
     inv, cs, pi, _ = paid_rr(st)
-    pi2 = st.sim.pay(cs["session_id"])
+    pi2 = st.sim.pay(cs["session_id"], force=True)                      # e.g. a second payment made elsewhere
     assert sent(st, "payment_intent.succeeded", {"id": pi2})["status"] == "unapplied"
     assert bal(st, "2070") == Decimal("1200.00")
 
@@ -546,3 +546,245 @@ def test_config_stripe_settings_fail_closed(tmp_path, keys):
 
 def test_health_reports_stripe_wiring(st):
     assert st.ok(st.get("/health", caller=None))["stripe_incoming"] == {"wired": True, "livemode": False}
+
+
+# --------------------------------------------------------------------------------------------- AEGIS review of 0265a45
+
+def _events(hr, typ, obj):
+    payload, sig = hr.sim.event(typ, obj)
+    return payload, sig
+
+
+def test_aegis_h1_a_stale_read_never_overwrites_a_newer_one(st):
+    """Two deliveries race: A reads 'succeeded', then the charge fails and B arrives. B must wait for A, read the
+    failure, and reverse it -- never A's stale success applied after B."""
+    import threading
+
+    import httpx
+    inv = rr_invoice(st)
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    pi = st.sim.pay(cs["session_id"])
+    port = st.svc.ports.stripe_in
+    orig = st.sim.handle
+    entered, release = threading.Event(), threading.Event()
+
+    def slow(req):
+        resp = orig(req)
+        if req.method == "GET" and "/payment_intents/" in req.url.path and not entered.is_set():
+            entered.set()
+            release.wait(10)
+        return resp
+    port._transport = httpx.MockTransport(slow)
+    out = {}
+    pa, sa = _events(st, "payment_intent.succeeded", {"id": pi})
+    ta = threading.Thread(target=lambda: out.setdefault("a", st.svc.stripe_event("rail_gateway", rid(), pa, sa)))
+    ta.start()
+    assert entered.wait(10)
+    st.sim.fail_after_success(pi, fee_back=500)
+    pb, sb = _events(st, "charge.failed", {"id": "ch_x", "payment_intent": pi})
+    tb = threading.Thread(target=lambda: out.setdefault("b", st.svc.stripe_event("rail_gateway", rid(), pb, sb)))
+    tb.start()
+    tb.join(0.5)
+    assert tb.is_alive()                                                  # B waits for A
+    release.set()
+    ta.join(10)
+    tb.join(10)
+    assert out["a"]["status"] == "matched" and out["b"]["status"] == "payment_failed_after_success"
+    assert st.svc.db["invoices"][inv["invoice_id"]]["status"] == "issued"
+    assert bal(st, "1060") == 0 and bal(st, "1100", "client:zbm-client-7") == Decimal("1200.00")
+
+
+def test_aegis_h2_a_dispute_seen_before_its_payment_still_blocks_the_vendor(st):
+    m = create(st)
+    inv = issue(st, m["invoice"])
+    bid = m["media_buy"]["buy_id"]
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    pi = st.sim.pay(cs["session_id"])                                   # the payment event is delayed / lost
+    du = st.sim.dispute(pi)
+    assert sent(st, "charge.dispute.created", {"id": du})["status"] == "dispute_needs_response"
+    assert "F13" in memos(st) and buy(st, bid)["payment_disputed"] is True
+    st.clock.advance(days=4)
+    r = pay_vendor(st, bid, "10000.00", paid_on="2026-10-06")
+    assert r.status_code == 409 and "disputed the prepayment" in r.text
+
+
+def test_aegis_m1_a_retry_after_a_lost_answer_gets_the_same_page(st):
+    import httpx
+    inv = rr_invoice(st)
+    port = st.svc.ports.stripe_in
+    orig = st.sim.handle
+    lost = {"n": 0}
+
+    def lose_first_answer(req):
+        resp = orig(req)
+        if req.method == "POST" and lost["n"] == 0:
+            lost["n"] = 1
+            raise httpx.ReadTimeout("answer lost after Stripe made the session")
+        return resp
+    port._transport = httpx.MockTransport(lose_first_answer)
+    assert checkout(st, inv["invoice_id"]).status_code == 409
+    assert len(st.sim.sessions) == 1                                     # Stripe DID make it
+    st.clock.advance(minutes=5)
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    assert cs["session_id"] in st.sim.sessions and len(st.sim.sessions) == 1
+
+
+def test_aegis_m2_an_outdated_page_is_closed_before_a_new_one_is_made(st):
+    inv = rr_invoice(st, "1000.00")
+    old = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    assert old["methods"] == ["us_bank_account", "card"]
+    st.svc.cfg.card_prepayments = False                                  # Andre turns card off
+    new = st.ok(checkout(st, inv["invoice_id"]))
+    assert new["closed"] == [old["session_id"]] and new["checkout"]["methods"] == ["us_bank_account"]
+    assert st.sim.sessions[old["session_id"]]["status"] == "expired"
+    assert st.svc.db["stripe_sessions"][old["session_id"]]["status"] == "expired"
+    with pytest.raises(RuntimeError):
+        st.sim.pay(old["session_id"], method="card")                     # Stripe refuses an expired page
+
+
+def test_aegis_m2_a_page_that_cannot_be_closed_blocks_a_new_one(st):
+    inv = rr_invoice(st, "1000.00")
+    st.ok(checkout(st, inv["invoice_id"]))
+    st.svc.cfg.card_prepayments = False
+    st.sim.fail_next = [503]
+    r = checkout(st, inv["invoice_id"])
+    assert r.status_code == 409 and "could not be closed" in r.text and len(st.sim.sessions) == 1
+
+
+def test_aegis_m2_daily_job_closes_pages_that_should_no_longer_take_money(st):
+    a = rr_invoice(st, "1000.00")
+    pa = st.ok(checkout(st, a["invoice_id"]))["checkout"]
+    st.receive("zbm", "1010", "1000.00", a["invoice_id"])                # paid by wire instead
+    b = rr_invoice(st, "900.00")
+    pb = st.ok(checkout(st, b["invoice_id"]))["checkout"]
+    st.svc.cfg.card_prepayments = False                                  # b's page offers a card it may not
+    c = rr_invoice(st, "800.00", methods=("ach",))
+    pc = st.ok(checkout(st, c["invoice_id"]))["checkout"]                # still right: stays open
+    out = st.ok(st.post("/fin/v1/jobs/stripe-sessions/run", {"request_id": rid()}, caller="scheduler"))
+    assert out["summary"] == {"closed": 2, "failed": 0, "checked": 2}
+    assert st.sim.sessions[pa["session_id"]]["status"] == "expired"
+    assert st.sim.sessions[pb["session_id"]]["status"] == "expired"
+    assert st.sim.sessions[pc["session_id"]]["status"] == "open"
+
+
+def test_aegis_m3_answers_from_the_other_mode_are_refused(st):
+    inv = rr_invoice(st)
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    pi = st.sim.pay(cs["session_id"])
+    st.sim.pis[pi]["livemode"] = True
+    r = send(st, "payment_intent.succeeded", {"id": pi})
+    assert r.status_code == 422 and "F13" not in memos(st) and not st.svc.db["stripe_events"]
+
+
+def test_aegis_m3_more_reinstated_than_withdrawn_is_refused_whole(st):
+    inv, cs, pi, _ = paid_rr(st, "1000.00", method="card")
+    du = st.sim.dispute(pi)
+    sent(st, "charge.dispute.created", {"id": du})
+    st.sim.disputes[du]["_txns"].append(st.sim._txn(100001, 0, du, "adjustment"))
+    n = len(st.svc.entries)
+    posted = sum(e["event_type"] == "journal_entry_posted" for e in st.ledger.events)
+    r = send(st, "charge.dispute.funds_reinstated", {"id": du})
+    assert r.status_code == 422 and "reinstated more" in r.text and len(st.svc.entries) == n
+    # refused BEFORE anything posted: no journal event reached the ledger without its local record
+    assert sum(e["event_type"] == "journal_entry_posted" for e in st.ledger.events) == posted
+
+
+def test_aegis_m3_card_is_rechecked_when_the_money_arrives(st):
+    inv = rr_invoice(st, "1000.00")
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    st.svc.cfg.card_prepayments = False                                  # turned off; page not yet closed by the job
+    pi = st.sim.pay(cs["session_id"], method="card")
+    assert sent(st, "payment_intent.succeeded", {"id": pi})["status"] == "unapplied"
+    assert st.svc.db["invoices"][inv["invoice_id"]]["status"] == "issued"
+
+
+def test_aegis_m3_partly_lost_dispute_is_a_receivable_with_its_own_break(st):
+    inv, cs, pi, _ = paid_rr(st, "1000.00", method="card")
+    du = st.sim.dispute(pi, amount=40000)
+    sent(st, "charge.dispute.created", {"id": du})
+    st.sim.close_dispute(du, won=False)
+    sent(st, "charge.dispute.closed", {"id": du})
+    i = st.svc.db["invoices"][inv["invoice_id"]]
+    assert i["status"] == "paid" and i["charged_back"] == "400.00"
+    assert bal(st, "1100", "client:zbm-client-7") == Decimal("400.00") and bal(st, "1300") == 0
+    brk = [b for b in st.svc.db["breaks"].values() if b["leg"] == "dispute_receivable"]
+    assert len(brk) == 1 and brk[0]["difference"] == "400.00" and brk[0]["explanation_code"] == "partial_chargeback"
+
+
+def test_aegis_m3_a_failure_that_costs_a_fee_books_it(st):
+    inv, cs, pi, _ = paid_rr(st, "1200.00")                              # fee 5.00
+    st.sim.fail_after_success(pi, fee_back=-200)                         # Stripe keeps its fee and charges 2.00 more
+    sent(st, "charge.failed", {"id": "ch_x", "payment_intent": pi})
+    assert bal(st, "5020") == Decimal("7.00") and bal(st, "1060") == Decimal("-7.00")
+
+
+def test_aegis_m3_gross_must_equal_the_amount_received(st):
+    inv = rr_invoice(st, "1200.00")
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    pi = st.sim.pay(cs["session_id"])
+    st.sim.pis[pi]["amount_received"] = 100000
+    assert sent(st, "payment_intent.succeeded", {"id": pi})["status"] == "unapplied"
+
+
+def test_aegis_m3_a_zbc_invoice_is_never_applied_from_stripe(st):
+    doc = st.rate_card("camp-8")
+    st.profile("camp-8", "client-8", "1200.00", "4.00", doc)
+    zbc = st.deposit_invoice("camp-8", "client-8", "1200.00")
+    inv = rr_invoice(st, "1200.00")
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    st.svc.db["stripe_sessions"]["cs_test_forged"] = {**st.svc.db["stripe_sessions"][cs["session_id"]],
+                                                      "session_id": "cs_test_forged", "invoice_id": zbc["invoice_id"]}
+    pi = st.sim.pay(cs["session_id"], metadata={"invoice_id": zbc["invoice_id"]})
+    assert sent(st, "payment_intent.succeeded", {"id": pi})["status"] == "unapplied"
+    assert st.svc.db["invoices"][zbc["invoice_id"]]["status"] == "issued"
+    assert not [e for e in st.svc.entries if e["entity"] == "zbc" and e["memo_code"].startswith("F13")]
+
+
+def test_aegis_m3_a_payout_whose_amount_changed_is_refused(st):
+    paid_rr(st)
+    po = st.sim.payout(50000, "in_transit")
+    sent(st, "payout.created", {"id": po})
+    st.sim.payouts[po].update(amount=60000, status="paid")
+    r = send(st, "payout.paid", {"id": po})
+    assert r.status_code == 422 and "F13p" not in memos(st)
+
+
+def test_aegis_l1_won_before_the_money_is_back_keeps_the_vendor_blocked_until_it_is(st):
+    bid, inv, pi = media_paid_by_stripe(st)
+    du = st.sim.dispute(pi)
+    sent(st, "charge.dispute.created", {"id": du})
+    st.sim.disputes[du]["status"] = "won"                                # status first, money later
+    sent(st, "charge.dispute.closed", {"id": du})
+    assert buy(st, bid)["payment_disputed"] is True and st.svc.db["stripe_disputes"][du]["finalized"] is False
+    st.sim.disputes[du]["_txns"].append(st.sim._txn(st.sim.disputes[du]["amount"], 0, du, "adjustment"))
+    sent(st, "charge.dispute.funds_reinstated", {"id": du})
+    assert buy(st, bid)["payment_disputed"] is False and st.svc.db["stripe_disputes"][du]["finalized"] is True
+
+
+def test_aegis_l3_a_lost_dispute_after_the_vendor_was_paid_opens_one_exposure_break(st):
+    bid, inv, pi = media_paid_by_stripe(st)
+    st.clock.advance(days=4)
+    st.ok(pay_vendor(st, bid, "10000.00", paid_on="2026-10-06"))
+    du = st.sim.dispute(pi)
+    sent(st, "charge.dispute.created", {"id": du})
+    st.sim.close_dispute(du, won=False)
+    sent(st, "charge.dispute.closed", {"id": du})
+    assert len([b for b in st.svc.db["breaks"].values() if b["leg"] == "media_exposure"]) == 1
+    assert buy(st, bid)["status"] == "payment_returned"
+
+
+def test_aegis_l7_an_unsigned_call_writes_nothing_to_the_ledger(st):
+    before = len(st.ledger.events) if hasattr(st.ledger, "events") else None
+    r = st.post("/fin/v1/stripe/events", {"request_id": rid(), "payload": '{"id":"evt_1"}', "signature": "t=1,v1=0"},
+                caller="rail_gateway")
+    assert r.status_code == 409
+    if before is not None:
+        assert len(st.ledger.events) == before
+
+
+def test_a_fee_credit_from_stripe_is_booked_not_crashed_on(st):
+    inv = rr_invoice(st, "1200.00")
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    pi = st.sim.pay(cs["session_id"], fee=-100)                          # e.g. a promotional fee credit
+    assert sent(st, "payment_intent.succeeded", {"id": pi})["status"] == "matched"
+    assert bal(st, "1060") == Decimal("1201.00") and bal(st, "5020") == Decimal("-1.00")

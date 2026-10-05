@@ -616,3 +616,44 @@ need it." Card is allowed only for Revenue Recovery, at most $5,000 (M10). Media
 - ZBC on Stripe (FIN-CQ-02);
 - Stripe Connect payouts to clippers (`FIN_RAIL_STRIPE` still refuses to start);
 - partial-dispute re-billing (it opens a break for Andre).
+
+**AEGIS review of 0265a45** (independent, read-only): **BLOCKING**, with 2 High, 3 Medium and 8 Low. Every finding was
+fixed in the follow-up commit except L6, L7 (pruning) and L8, which are documented below.
+- **H1. A stale Stripe answer could be applied after a newer one.** Example: a failed payment booked as paid, or a
+  failed payout booked as cash.
+  - Fix: every Stripe read-back and the booking that follows it now run one at a time, under a lock held only for
+    Stripe work (`_stripe_lock`). The main lock is never held across the network.
+  - Regression test: a real two-thread race.
+- **H2. A dispute processed before its payment left the media buy unflagged,** so the vendor could be paid during an
+  open dispute.
+  - Fix: a dispute event now reads and books its payment first, in the same step.
+  - `flagged` is set only when the flag was really applied.
+  - A payment booked after a known dispute also flags the buy.
+- **M1. A lost answer on checkout blocked the invoice for 24 hours.** Same idempotency key, different `expires_at`.
+  - Fix: the expiry is rounded to the hour and every sent parameter is part of the key. A retry in the same hour
+    replays Stripe's first answer.
+- **M2. Outdated pages stayed payable.** This allowed a card outside M10, and a client could pay twice.
+  - New port call `expire_session` (POST `/v1/checkout/sessions/{id}/expire`, which reads back when Stripe refuses).
+  - A stale page is closed before a new one is made. If it cannot be closed, no new page is made.
+  - The other pages of an invoice are closed when it is paid.
+  - A daily `stripe-sessions` job closes pages whose invoice is no longer issued, or which offer a method no longer
+    allowed.
+  - The card rule is still re-checked when the money arrives: unapplied, plus a break.
+- **M3. Eight guards had no killing test.** Tests were added. A 14-mutant run over the fixed code killed all 14.
+- **L1. A dispute "won" before its reinstatement left the vendor blocked.** Fix: a win is final only once nothing is
+  held.
+- **L2. A partially lost dispute was mislabelled.** It now sets `charged_back` on the invoice and opens a
+  `dispute_receivable` break (`partial_chargeback`). The media buy stays blocked until Andre resolves it; there is no
+  resolution route.
+- **L3. Two exposure breaks for one exposure.** Fixed: one break per exposure, recorded once.
+- **L4.** Fixed by the H1 fix.
+- **L5. The secret file is now opened safely.** It is opened with `O_NOFOLLOW` and checked through `fstat`: regular
+  file, owned by the effective user, no group or other bits.
+- **L7. A signature check no longer writes to the ledger before it passes.**
+- **Also found while fixing:** a negative Stripe fee (a credit) would have crashed after posting. It is now booked
+  with signed formatting, and a test covers it.
+
+Not changed:
+- **L6.** The 2-day hold counts weekends but not bank holidays. This is Andre's call.
+- **L7 (pruning).** `stripe_events` grows without bound.
+- **L8.** L3's freshness check uses Finance's own clock, so it is not a real check.

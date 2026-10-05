@@ -240,6 +240,23 @@ class StripeIncoming:
             return StripeSession(True, found=False)
         if kind != "ok":
             return StripeSession(False, reason="stripe unavailable")
+        return self._session_answer(doc)
+
+    def expire_session(self, session_id: str) -> StripeSession:
+        """Close a Checkout page so nobody can pay on it. Stripe refuses to expire a page that is no longer open; the
+        page is then read back, so the answer always says what the page IS now (expired, or complete = paid)."""
+        if not _SID.fullmatch(session_id or ""):
+            return StripeSession(True, found=False)
+        kind, status, doc = self._call("POST", f"/v1/checkout/sessions/{session_id}/expire", form=[],
+                                       idem=f"fin-exp-{session_id}")
+        if kind == "ok" and isinstance(doc, dict) and doc.get("id") == session_id \
+                and doc.get("object") == "checkout.session":
+            return self._session_answer(doc)
+        if kind == "http" and status in (400, 404):
+            return self.session(session_id)
+        return StripeSession(False, reason="stripe unavailable")
+
+    def _session_answer(self, doc: dict) -> StripeSession:
         pi = doc.get("payment_intent")
         pi = pi.get("id") if isinstance(pi, dict) else pi
         return StripeSession(True, found=True, session_id=doc.get("id"), status=doc.get("status"),

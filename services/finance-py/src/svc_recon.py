@@ -29,7 +29,7 @@ from ledger import derived_id
 from ports import BankBalance, BankTransfer, RailBalance, RailLookup
 from service import RUNNABLE, Gather, Op, PostingRefused, Refused, rid, sha
 
-JOBS = ("accrual", "clawback-sync", "tax-sync", "rail-sync")
+JOBS = ("accrual", "clawback-sync", "tax-sync", "rail-sync", "stripe-sessions")
 PENDING_SWEEP = ("proposed", "approved", "executing", "bank_unknown")      # reserved when a sweep is proposed
 LIVE_SWEEP = ("approved", "executing", "bank_unknown")                     # reserved at approval and execution
 OPEN_OPS = ("proposed", "approved", "executing", "bank_unknown")
@@ -666,7 +666,7 @@ class ReconMixin:
         self.require_rules()
         prefix = f"job|{job}|{day}"
         fn = {"accrual": self.job_accrual, "clawback-sync": self.job_clawback_sync, "tax-sync": self.job_tax_sync,
-              "rail-sync": self.job_rail_sync}[job]
+              "rail-sync": self.job_rail_sync, "stripe-sessions": self.job_stripe_sessions}[job]
         summary = fn(prefix)
         with self.lock:
             op = Op(self, f"{prefix}|done", "intel_10_evidence_audit", job)
