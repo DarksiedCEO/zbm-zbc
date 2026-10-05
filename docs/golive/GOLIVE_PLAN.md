@@ -1,5 +1,14 @@
 # Go-live plan: first paying Shopify Revenue Recovery client
 
+> **Scope note, added Oct 5, 2026.** The founder ruled on Oct 4 that ZBM is a full-service agency and must be ready
+> for every client from day one: billboards, TV, radio, social, creative, influencer, websites, Revenue Recovery
+> and ZBC clipping. There is no "customer #1" to pick. This document is now the **Revenue Recovery track** of
+> that go-live, not the whole plan.
+>
+> - The cross-service order lives in `SUMMARY.md` ("Full-service order").
+> - The intake, routing and billing design is in `FULL_SERVICE_DESIGN.md`.
+> - Shopify remains the first connector for the RR track. It is no longer a bet on who the first client is.
+
 Status: **DRAFT for founder review.** Written Oct 4–5, 2026 from a read-only survey of `integration-2026-09-24` @ 013caff.
 Sources: `_SURVEY.md` (per-service facts, file:line cited), `API_SURFACE.md`, `COUNSEL_PACKET.md`, `REPO_CHECK.md`.
 Every size below is an **estimate** in focused build days (agent-assisted build plus AEGIS review), not a commitment.
@@ -117,7 +126,7 @@ Legend: **A** = needed for Track A, **B** = needed for Track B. Order is the bui
 
 ---
 
-## 5. Out of scope for customer #1 (explicitly)
+## 5. Out of scope for this RR track (explicitly)
 - ZBC clipping money flows (verification, clipper-network, payouts). Separate track; counsel group B.
 - Fulfillment (phone callbacks) and creative production.
 - Departments 11+ of the 45-department roster.

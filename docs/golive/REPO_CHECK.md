@@ -9,7 +9,7 @@ Checked Oct 4, 2026 from a cloud session via `git` and the GitHub REST API. Fact
 | `DarksiedCEO/zbm-zbc` | **public** (`"private": false`) | 2026-09-22 | 2026-10-04 |
 | `DarksiedCEO/zbestmedia` | **public** (served by anonymous git read) | earlier | 2026-08-09 (`codex/bt-1`) |
 
-Everything in `zbm-zbc` can be read by anyone: the full source of all departments, the security hardening and its known gaps (`docs/findings/OPEN.md`), the AEGIS review reports, the finance and legal rules, and the 51 open counsel questions. Making it private is a one-click, reversible change in GitHub → Settings → General → Danger Zone → Change visibility. **This is the founder's call; nothing was changed.** Note: GitHub Actions minutes for private repos are metered (macOS minutes are billed at a multiple of Linux), so check the plan's included minutes before switching. CI here runs ~55 macOS-heavy jobs per run.
+Everything in `zbm-zbc` can be read by anyone: the full source of all departments, the security hardening and its known gaps (`docs/findings/OPEN.md`), the AEGIS review reports, the finance and legal rules, and the 57 open counsel questions. Making it private is a one-click, reversible change in GitHub → Settings → General → Danger Zone → Change visibility. **This is the founder's call; nothing was changed.** Note: GitHub Actions minutes for private repos are metered (macOS minutes are billed at a multiple of Linux), so check the plan's included minutes before switching. CI here runs ~55 macOS-heavy jobs per run.
 
 ## What `zbm-zbc` is
 

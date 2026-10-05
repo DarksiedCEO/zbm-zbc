@@ -2,12 +2,37 @@
 
 Branch `golive-plan` (from `integration-2026-09-24` @ 013caff). **Docs only, no code changed.** Not merged anywhere.
 
-## Update after checking the real UI (`zbest-sites`), read this first
+## Full-service order (Oct 5, 2026). Read this first
+Founder ruling, Oct 4: ZBM is a full-service agency; every client is the first client; the site shows everything from
+day one. The "who is customer #1" question (D0) is **withdrawn**.
+
+What was built overnight:
+- `zbest-sites` branch **`full-service-v1`** (pushed, not merged):
+  - a Services menu and 6 new service pages (TV & Streaming, Radio & Audio, Social Media, Creative & Production,
+    Influencer & Creator Partnerships, Websites & Landing Pages);
+  - a `/services` hub;
+  - a `/start` intake that takes any request. Campaign links pre-tick the service and tag the source.
+  - Independent AEGIS review: 0 Critical/High; all 8 Medium/Low fixed.
+- Records: `docs/BRIEF-AMENDMENT-2026-10-04-full-service.md` and `docs/FULL-SERVICE-DESIGN.md` there; a copy of the
+  design is in `FULL_SERVICE_DESIGN.md` here.
+
+Order across all services (each item unblocks every service, not one):
+1. **Wire the site's lead route** (store + email + rate limit). Every service's leads depend on it. ~1–2 days.
+2. **Engage counsel (A1), then the MSA + per-service SOW addenda (A2/E2).** This gates the first signed job of any kind.
+3. **CPA/counsel on media pass-through (E1),** then a `media_spend` line code in finance-py. Until then, clients pay
+   media vendors directly.
+4. **Revenue Recovery track:** `GOLIVE_PLAN.md` (Shopify path), plus the written funnel audit for service businesses.
+5. **ZBC track:** counsel group B, then clipper payouts.
+
+Services with no backend code (Paid Media, OOH, Social, Influencer, Web) are sold now and delivered by people and
+vendors through that same intake → quote → contract → invoice path. That is the honest launch state.
+
+## Update after checking the real UI (`zbest-sites`)
 See `FRONTEND_ALIGNMENT.md`. Three things change the plan:
 - **The new site's lead form is a stub that stores and sends nothing.** Not losing leads today (the old `zbestmedia-ui`
   site is still the live one), but it blocks the cutover. ~1–2 days; item 0.
 - **The site sells to service businesses** (home services, HVAC, roofing, restoration, med spas, legal, auto), not
-  Shopify stores. Decide who customer #1 really is (new decision D0) before building a Shopify connector.
+  only Shopify stores. *(D0 withdrawn Oct 4: serve all of them; see above.)*
 - **The site promises a written audit report.** That's the pilot, and it can be sold before any store connector exists.
 
 ## The short version
@@ -31,7 +56,8 @@ See `FRONTEND_ALIGNMENT.md`. Three things change the plan:
 |---|---|
 | `GOLIVE_PLAN.md` | 17 work items with what exists (cited), what's missing, estimates, order; two tracks; decisions |
 | `ADR-draft-persistence.md` | Storage decision draft: extend the existing hash-chained logs now, add Postgres as a read model later |
-| `COUNSEL_PACKET.md` | 51 counsel/CPA questions, deduplicated, grouped by what blocks the first payment; hand to a lawyer cold |
+| `COUNSEL_PACKET.md` | 57 counsel/CPA questions, deduplicated, grouped by what blocks the first payment (group E added Oct 5 for full service); hand to a lawyer cold |
+| `FULL_SERVICE_DESIGN.md` | One intake for every client; routing to departments; capture → quote → contract → deliver → report → bill; gaps |
 | `API_SURFACE.md` | All 364 endpoints across 13 services with request/response shapes, for the frontend |
 | `REPO_CHECK.md` | `zbm-zbc` vs `zbestmedia` (old Aug TypeScript brand platform, unrelated code); live site is in a third repo, `zbestmedia-ui` |
 | `_SURVEY.md` | Raw per-service fact survey behind the plan |

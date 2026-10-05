@@ -610,6 +610,64 @@ They are not repeated here.
 - **Build default:** Filings are not `ready`.
 - **Raised at:** `counsel_questions.json:408`
 
+### (E) Full-service agency: blocks the first non-RR job (added Oct 5, 2026)
+
+On Oct 4, 2026 the founder directed that ZBM sell every service from day one. The new services are TV and
+streaming, radio and audio, social media, creative production, influencer partnerships and websites, alongside
+digital, out-of-home, Revenue Recovery and ZBC. The public site now offers all of them (branch
+`full-service-v1` of `zbest-sites`; `docs/FULL-SERVICE-DESIGN.md` there). None of the questions below appears
+in the repo's register.
+
+**E1. Media spend: principal or agent, and how it is billed** — To: **BOTH**
+- **Q:** When ZBM places TV, radio, out-of-home or paid digital media for a client, should the media cost be
+  - billed gross (ZBM as principal),
+  - billed net (ZBM as agent), or
+  - paid by the client directly to the vendor?
+
+  What revenue-recognition (ASC 606 principal-vs-agent), sales-tax and prepayment terms follow from each? Who
+  is liable to the vendor if the client does not pay ("sequential liability")?
+- **Build default:** No finance line code exists for media spend. `campaign_deposit` is refused for entity
+  `zbm` (`services/finance-py/src/svc_books.py:323`; codes at `services/finance-py/src/models.py:349-350`). The
+  site says only that payment for media "is written into your agreement".
+
+**E2. Client MSA and SOW addenda covering every service** — To: **COUNSEL**
+- **Q:** Can one client MSA plus per-service SOW addenda cover all ten services? The addenda would cover:
+  - usage rights and talent/music licenses (creative, influencer),
+  - media insertion terms and cancellation windows (TV, radio, OOH),
+  - account access and posting approval (social),
+  - IP transfer and hosting (websites).
+- **Build default:** No MSA or SOW draft exists (§3 table). This is the same document as A2, widened.
+
+**E3. Influencer disclosure and agency liability** — To: **COUNSEL**
+- **Q:** Does the influencer page's disclosure answer meet 16 CFR 255 and the FTC's guidance? It says any
+  material connection is disclosed "clearly and up front: '#ad' or 'Sponsored' where people will see it,
+  alongside the platform's paid-partnership label." What monitoring program does ZBM need as the agency under
+  §255.1(f), and what goes in the creator contract?
+- **Build default:** Copy only; there is no influencer code. This is related to A3 and C21 (the clipper lane).
+
+**E4. Broadcast and podcast sponsorship identification** — To: **COUNSEL**
+- **Q:** For host-read and sponsored spots, what is ZBM's duty versus the station's duty under 47 CFR 73.1212,
+  and the podcast network's duty under the FTC guides? What should the insertion order require?
+- **Build default:** The site says host reads "must be identified as a paid message".
+
+**E5. Regulated verticals listed on the site** — To: **COUNSEL**
+- **Q:** The `/services` page lists "Med spas, clinics, and wellness" and "Legal and professional services".
+  Before ZBM targets those verticals, what applies to:
+  - tracking pixels and ad targeting for healthcare clients (HIPAA, and the FTC Health Breach Notification
+    Rule where relevant),
+  - claims in med-spa advertising,
+  - state bar attorney-advertising rules for legal clients?
+- **Build default:** Industries are listed and no client names appear. The founder is asked whether to keep
+  them listed.
+
+**E6. Political advertising (not offered)** — To: **COUNSEL**
+- **Q:** If ZBM later offers political advertising (roster department 14), what does it need? This includes:
+  - FEC and state "paid for by" disclaimers,
+  - the broadcast political-file and lowest-unit-charge rules,
+  - platform political-ad authorization,
+  - state laws on AI-generated content in political ads.
+- **Build default:** No page, deliberately (`docs/BRIEF-AMENDMENT-2026-10-04-full-service.md` in `zbest-sites`).
+
 ### Founder decisions with legal or financial effect (not counted as questions)
 
 - **Name a second human approver for payouts.** Until one is named, the build provides "compensating dual
@@ -661,7 +719,8 @@ disclosure message (A3).
 | B — blocks ZBC campaigns taking money | 6 | 0 |
 | C — needed before scale | 23 | 1 (C23) |
 | D — nice to know or scope-dependent | 13 | 0 |
-| **Total distinct questions** | **51** | **4** |
+| E — full-service agency (added Oct 5) | 6 | 6 |
+| **Total distinct questions** | **57** | **10** |
 
 How the total is reached:
 
@@ -678,13 +737,14 @@ How the total is reached:
   deadlines) and C21 (P9, caption disclosure). P1, P23 and the ADR 0010 confirmation items are merged into A3,
   A2 and C11, so they add no new questions.
 - **4 questions not raised in the repo:** A7, A8, A9 and C23.
-- **Total:** 44 + 3 + 4 = **51**.
+- **6 questions added Oct 5 for the full-service direction:** E1–E6.
+- **Total:** 44 + 3 + 4 + 6 = **57**.
 
 | Addressee | Count | Questions |
 |---|---|---|
-| COUNSEL | 40 | All not listed below |
+| COUNSEL | 45 | All not listed below |
 | CPA | 7 | A5, C1–C6 |
-| BOTH | 4 | A9, C7, C17, D3 |
+| BOTH | 5 | A9, C7, C17, D3, E1 |
 
 ---
 

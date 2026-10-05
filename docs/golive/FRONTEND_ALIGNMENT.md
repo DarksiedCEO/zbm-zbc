@@ -29,8 +29,10 @@ as-is would drop every lead. Wiring storage + an email notification is roughly 1
 - `detection-py`'s 8 agents work on orders, carts, discounts and products (e-commerce data; `_SURVEY.md`).
 - `fulfillment-py` (missed-call → callback) matches the site's #1 vertical ("Home Services: Follow-Up Leak") better than
   detection does. The go-live plan marked it NOT NEEDED because customer #1 was assumed to be a Shopify store.
-- **Decision for the founder:** customer #1 is a Shopify store (chat, Oct 2) *or* the service businesses the site is
-  built to sell to. These lead to different builds.
+- **Resolved Oct 4, 2026 (founder):** no single customer #1. ZBM serves every client type: e-commerce stores and
+  service businesses alike, across every service. Revenue Recovery keeps both paths:
+  - the Shopify connector for stores (`GOLIVE_PLAN.md`);
+  - the written funnel audit plus fulfillment's follow-up path for service businesses (below).
 
 ### 3. What the site promises to deliver is a written audit report
 The site's "Audit Deliverable" (`apps/zbm/content/revenue-recovery.ts`, `AUDIT_DELIVERABLE`): executive summary, leak
@@ -47,6 +49,6 @@ headers and use service tokens; `API_SURFACE.md` summary).
 
 ## Effect on the plan
 - **New item 0 (do first): wire the lead form** so inbound leads are kept and Andre is notified. ~1–2 days, site repo.
-- **New decision D0:** who is customer #1: Shopify e-commerce, or the service businesses the site markets to? If service
-  businesses: the pilot is a written funnel audit (largely deliverable now, with the conversion-audit tooling) and the
-  first backend work is fulfillment's follow-up path plus a website/ads intake, not a Shopify connector.
+- **D0 withdrawn (Oct 4, 2026).** The founder's answer was "all of them". The site now shows every service and takes
+  every request through one intake (`zbest-sites` branch `full-service-v1`, `/start`). See `FULL_SERVICE_DESIGN.md`.
+  The written funnel audit is the RR offer for service businesses; the Shopify path is the RR offer for stores.
