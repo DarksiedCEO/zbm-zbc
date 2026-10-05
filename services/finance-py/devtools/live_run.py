@@ -430,10 +430,38 @@ def _main(work: Path) -> int:
         check("S: Stripe checkout for a 2500.00 Revenue Recovery invoice offers ACH and card",
               co["methods"] == ["us_bank_account", "card"] and co["url"].startswith("https://checkout.stripe.com/"))
         pi = B.dev("/devtools/stripe/pay", {"session_id": co["session_id"], "method": "card"})["payment_intent"]
-        ev = stripe_event("checkout.session.completed", {"id": co["session_id"], "object": "checkout.session"})
-        check("S: signed webhook verified, payment read back from Stripe and matched (F13 + F13f card fee 72.80)",
-              ev["status"] == "matched"
-              and B.get(f"/fin/v1/invoices/{rr['invoice_id']}")["status"] == "paid")
+        # the public entry point: the stripe-gateway binary (services/orchestrator-go/cmd/stripe-gateway), built here
+        gw_port = pfb + 10
+        gw_bin = work / "stripe-gateway"
+        go_dir = SVC.parent / "orchestrator-go"
+        built = shutil.which("go") and subprocess.run(["go", "build", "-o", str(gw_bin), "./cmd/stripe-gateway"],
+                                                      cwd=str(go_dir), capture_output=True).returncode == 0
+        ev = B.dev("/devtools/stripe/event", {"type": "checkout.session.completed",
+                                              "object": {"id": co["session_id"], "object": "checkout.session"}})
+        if built:
+            start([str(gw_bin)], {"STRIPE_GATEWAY_FINANCE_URL": f"http://127.0.0.1:{pfb}",
+                                  "STRIPE_GATEWAY_FINANCE_TOKEN": FIN_TOKEN,
+                                  "STRIPE_GATEWAY_CALLER_TOKEN": CALLERS["rail_gateway"],
+                                  "STRIPE_GATEWAY_PORT": str(gw_port)}, str(work), "stripe_gateway", work)
+            wait_up(f"http://127.0.0.1:{gw_port}/health")
+            gurl = f"http://127.0.0.1:{gw_port}/webhooks/stripe"
+            forged = httpx.post(gurl, content=ev["payload"].replace("checkout.session", "checkout.sessionX").encode(),
+                                headers={"Stripe-Signature": ev["signature"]}, timeout=60)
+            check("S: an altered body through the gateway -> 400, nothing booked",
+                  forged.status_code == 400 and B.get(f"/fin/v1/invoices/{rr['invoice_id']}")["status"] == "issued")
+            g1 = httpx.post(gurl, content=ev["payload"].encode(), headers={"Stripe-Signature": ev["signature"]},
+                            timeout=60)
+            g2 = httpx.post(gurl, content=ev["payload"].encode(), headers={"Stripe-Signature": ev["signature"]},
+                            timeout=60)
+            check("S: Stripe's delivery through the stripe-gateway binary -> 200, payment read back and matched "
+                  "(F13 + F13f card fee 72.80); the redelivery -> 200, booked once",
+                  g1.status_code == 200 and g2.status_code == 200
+                  and B.get(f"/fin/v1/invoices/{rr['invoice_id']}")["status"] == "paid")
+        else:
+            say("S: go toolchain not available: the event goes to Finance directly (gateway leg not run)")
+            r0 = B.post("/fin/v1/stripe/events", {"request_id": rid(), **ev}, caller="rail_gateway").json()
+            check("S: signed webhook verified, payment read back from Stripe and matched (F13 + F13f card fee 72.80)",
+                  r0["status"] == "matched" and B.get(f"/fin/v1/invoices/{rr['invoice_id']}")["status"] == "paid")
         dup = stripe_event("payment_intent.succeeded", {"id": pi, "object": "payment_intent"})
         check("S: the same payment announced again books nothing", dup["status"] == "payment_already_booked")
         du = B.dev("/devtools/stripe/dispute", {"payment_intent": pi})["dispute_id"]

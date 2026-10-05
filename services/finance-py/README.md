@@ -103,7 +103,7 @@ open page if one exists; an open page that is no longer right (amount or methods
 and if it cannot be closed no new page is made. `GET` on the same path lists the pages made for an invoice. The
 scheduler runs `POST /fin/v1/jobs/stripe-sessions/run` daily: it closes every page whose invoice is no longer issued or
 that offers a method the invoice may no longer be paid with.
-`POST /fin/v1/stripe/events` (caller `rail_gateway`) takes `{request_id, payload, signature}`: the webhook's RAW body and
+`POST /fin/v1/stripe/events` (caller `rail_gateway`; in production the `stripe-gateway` binary in `services/orchestrator-go`, which is what Stripe calls) takes `{request_id, payload, signature}`: the webhook's RAW body and
 its `Stripe-Signature` header, untouched. Finance verifies the signature, then reads the payment, dispute or payout back
 from Stripe and books that (F13/F13f payment and fee into 1060 Stripe balance, F13x a payment that failed afterwards,
 F7/F7a/F7l disputes, F13p/F13q payouts to 1010). A 503 means "Stripe could not be read; send it again". Reconciliation
