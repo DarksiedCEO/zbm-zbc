@@ -42,7 +42,7 @@ def ref(tag="x"):
     return hashlib.sha256(f"vendor-pay-{tag}-{rid()}".encode()).hexdigest()
 
 
-def pay_vendor(hr, buy_id, amount, paid_on="2026-10-07", tag="x"):
+def pay_vendor(hr, buy_id, amount, paid_on="2026-10-09", tag="x"):
     return hr.post(f"/fin/v1/media-buys/{buy_id}/vendor-payments",
                    {"request_id": rid(), "amount": amount, "paid_on": paid_on, "method": "ach",
                     "payment_ref_sha256": ref(tag)}, andre=ANDRE_TOKEN)
@@ -66,7 +66,7 @@ def prepaid(hr, **over):
 
 
 def to_clear_day(hr):
-    hr.clock.advance(days=5)                  # Fri Oct 2 -> Wed Oct 7 (3 business days, FIN_MEDIA_RELEASE_HOLD_BD)
+    hr.clock.advance(days=7)                  # Fri Oct 2 -> Fri Oct 9 (5 business days, FIN_MEDIA_RELEASE_HOLD_BD)
 
 
 def memos(hr, entity="zbm"):
@@ -98,7 +98,7 @@ def test_full_buy_principal_prepaid_collect_before_pay_revenue_with_cost(hr):
 
     # M3: same day -> refused, nothing posted
     r = pay_vendor(hr, b["buy_id"], "10000.00", paid_on="2026-10-02")
-    assert r.status_code == 409 and "COLLECT_BEFORE_PAY" in r.text and "2026-10-07" in r.text
+    assert r.status_code == 409 and "COLLECT_BEFORE_PAY" in r.text and "2026-10-09" in r.text
     assert "record the vendor payment after that" in r.text      # the hold itself, not only the paid_on check
     assert memos(hr) == ["F12", "F11a"]
 
@@ -108,9 +108,9 @@ def test_full_buy_principal_prepaid_collect_before_pay_revenue_with_cost(hr):
     assert hr.bal("1150", f"buy:{b['buy_id']}", "zbm") == Decimal("10000.00")
 
     # revenue only once the flight has run
-    r = deliver(hr, b["buy_id"], on="2026-10-07")
+    r = deliver(hr, b["buy_id"], on="2026-10-09")
     assert r.status_code == 409 and "flight runs until 2026-11-01" in r.text
-    hr.clock.advance(days=27)                                                           # Tue Nov 3
+    hr.clock.advance(days=25)                                                           # Tue Nov 3
     done = hr.ok(deliver(hr, b["buy_id"]))["media_buy"]
     assert done["status"] == "delivered" and done["delivered"]["evidence_refs"] == ["pop-affidavit-1"]
     assert memos(hr) == ["F12", "F11a", "F12v", "F12r"]
@@ -195,7 +195,7 @@ def test_vendor_payment_refused_on_an_unpaid_buy(hr):
 def test_vendor_paid_before_the_money_cleared_is_refused_even_when_recorded_later(hr):
     bid, _ = prepaid(hr)
     to_clear_day(hr)
-    r = pay_vendor(hr, bid, "1000.00", paid_on="2026-10-06")
+    r = pay_vendor(hr, bid, "1000.00", paid_on="2026-10-08")
     assert r.status_code == 409 and "before the client's money cleared" in r.text
 
 
@@ -203,14 +203,14 @@ def test_vendor_payment_never_above_the_vendor_cost_and_never_twice(hr):
     bid, _ = prepaid(hr)
     to_clear_day(hr)
     assert pay_vendor(hr, bid, "10000.01").status_code == 409
-    body = {"request_id": rid(), "amount": "4000.00", "paid_on": "2026-10-07", "method": "check",
+    body = {"request_id": rid(), "amount": "4000.00", "paid_on": "2026-10-09", "method": "check",
             "payment_ref_sha256": ref("a")}
     hr.ok(hr.post(f"/fin/v1/media-buys/{bid}/vendor-payments", body, andre=ANDRE_TOKEN))
     assert buy(hr, bid)["status"] == "vendor_partially_paid"
     dup = hr.post(f"/fin/v1/media-buys/{bid}/vendor-payments", {**body, "request_id": rid()}, andre=ANDRE_TOKEN)
     assert dup.status_code == 409
     assert pay_vendor(hr, bid, "6000.01").status_code == 409
-    hr.clock.advance(days=27)                                        # the flight has ended (Nov 3)
+    hr.clock.advance(days=25)                                        # the flight has ended (Nov 3)
     r = deliver(hr, bid)
     assert r.status_code == 409 and "vendor is paid in full" in r.text   # not delivered until paid in full
     assert hr.bal("4120", entity="zbm") == 0
@@ -222,16 +222,20 @@ def test_vendor_payment_never_above_the_vendor_cost_and_never_twice(hr):
 def test_future_paid_on_is_refused(hr):
     bid, _ = prepaid(hr)
     to_clear_day(hr)
-    r = pay_vendor(hr, bid, "1.00", paid_on="2026-10-08")
+    r = pay_vendor(hr, bid, "1.00", paid_on="2026-10-10")
     assert r.status_code == 409 and "future" in r.text
 
 
 def test_hold_is_a_setting():
-    x = Harness(env={"FIN_MEDIA_RELEASE_HOLD_BD": "5"}).ready()
+    x = Harness(env={"FIN_MEDIA_RELEASE_HOLD_BD": "7"}).ready()
     bid, _ = prepaid(x)
-    to_clear_day(x)                                                   # 3 business days: not enough at 5
+    to_clear_day(x)                                                   # 5 business days: not enough at 7
     r = pay_vendor(x, bid, "1.00")
-    assert r.status_code == 409 and "2026-10-09" in r.text
+    assert r.status_code == 409 and "2026-10-13" in r.text
+    y = Harness(env={"FIN_MEDIA_RELEASE_HOLD_BD": "2"}).ready()
+    bid, _ = prepaid(y)
+    y.clock.advance(days=4)                                           # Tue Oct 6 = 2 business days
+    y.ok(pay_vendor(y, bid, "1.00", paid_on="2026-10-06"))
 
 
 # ------------------------------------------------------------------------------------------- returns, cancel, reject
@@ -261,7 +265,7 @@ def test_ach_return_after_the_vendor_was_paid_flags_exposure_and_stops_further_v
     rct = [r for r in hr.svc.db["receipts"].values() if r["invoice_id"] == inv["invoice_id"]][0]["receipt_id"]
     out = hr.ok(hr.post(f"/fin/v1/receipts/{rct}/return",
                         {"request_id": rid(), "return_ref_sha256": "e" * 64, "return_code": "R10",
-                         "value_date": "2026-10-07"}, andre=ANDRE_TOKEN))
+                         "value_date": "2026-10-09"}, andre=ANDRE_TOKEN))
     assert out["vendor_exposure"] == "2500.00"
     assert buy(hr, bid)["status"] == "payment_returned"
     brk = [b for b in hr.svc.db["breaks"].values() if b["leg"] == "media_exposure"]
@@ -342,7 +346,7 @@ def test_media_accounts_post_only_from_media_flows_and_only_for_zbm():
     bad = _entry("zbm", "F11", [J.dr("1100", amt, "client:c"), J.cr("4120", amt)])
     assert any("media flow" in x["message"] for x in J.validate(bad, set(), {}))
     corr = _entry("zbm", "correction", [J.dr("5110", amt), J.cr("1010", amt)])
-    assert J.validate(corr, set(), {})
+    assert any("media accounts" in x["message"] for x in J.validate(corr, set(), {}))
     zbc = _entry("zbc", "F12", [J.dr("1100", amt, "client:c"), J.cr("1010", amt)])
     assert any(x["code"] == "ENTITY_MIX" for x in J.validate(zbc, set(), {}))
     no_sub = _entry("zbm", "F12", [J.dr("1100", amt, "client:c"), J.cr("2120", amt)])
@@ -460,3 +464,177 @@ def test_media_state_survives_a_restart(tmp_path):
     assert _receipt_for(y, inv["invoice_id"])["status"] == "pending_send"
     y.ok(pay_vendor(y, bid, "7000.00", tag="z"))
     assert buy(y, bid)["status"] == "vendor_paid"
+
+
+# ------------------------------------------------------------------------------------------- AEGIS review (dc57776) regressions
+
+def _return(hr, inv, code="R01", value_date="2026-10-09"):
+    rct = [r for r in hr.svc.db["receipts"].values() if r["invoice_id"] == inv["invoice_id"]
+           and r["status"] == "matched"][0]["receipt_id"]
+    return hr.ok(hr.post(f"/fin/v1/receipts/{rct}/return",
+                         {"request_id": rid(), "return_ref_sha256": hashlib.sha256(rid().encode()).hexdigest(),
+                          "return_code": code, "value_date": value_date}, caller="bank_feed"))
+
+
+def test_h1_repayment_after_a_return_with_vendor_money_out_completes_the_buy(hr):
+    bid, inv = prepaid(hr)
+    to_clear_day(hr)                                                  # Fri Oct 9
+    hr.ok(pay_vendor(hr, bid, "2500.00", paid_on="2026-10-09"))
+    _return(hr, inv)
+    assert buy(hr, bid)["status"] == "payment_returned"
+    hr.clock.advance(days=3)                                          # Mon Oct 12: the client pays again
+    line = {"txn_ref_sha256": hashlib.sha256(b"repay").hexdigest(), "entity": "zbm", "account": "1010",
+            "direction": "credit", "amount": "11500.00", "value_date": "2026-10-12", "reference_token": inv["invoice_id"]}
+    hr.bank.deposit("zbm", "1010", "11500.00")
+    hr.ok(hr.post("/fin/v1/bank/events", {"request_id": rid(), "lines": [line]}, caller="bank_feed"))
+    b = buy(hr, bid)
+    assert b["status"] == "vendor_partially_paid" and b["prepayment"]["value_date"] == "2026-10-12"
+    assert b["payment_returned"] is False
+    # the hold restarts from the NEW money
+    r = pay_vendor(hr, bid, "7500.00", paid_on="2026-10-12", tag="r1")
+    assert r.status_code == 409 and "2026-10-19" in r.text
+    hr.clock.advance(days=7)                                          # Mon Oct 19
+    hr.ok(pay_vendor(hr, bid, "7500.00", paid_on="2026-10-19", tag="r2"))
+    hr.clock.advance(days=15)                                         # Tue Nov 3
+    hr.ok(deliver(hr, bid))
+    assert hr.bal("2120", entity="zbm") == 0 and hr.bal("1150", entity="zbm") == 0
+    assert hr.bal("4120", entity="zbm") == Decimal("11500.00") and hr.bal("5110", entity="zbm") == Decimal("10000.00")
+    # the exposure break is Andre's to resolve, citing the re-payment's entry (posted after it opened)
+    brk = [b for b in hr.svc.db["breaks"].values() if b["leg"] == "media_exposure"][0]
+    f11a = [e for e in hr.svc.entries if e["memo_code"] == "F11a"][-1]
+    hr.ok(hr.post(f"/fin/v1/breaks/{brk['break_id']}/resolution",
+                  {"request_id": rid(), "explanation_code": "rail_return", "entry_id": f11a["entry_id"]},
+                  andre=ANDRE_TOKEN))
+    legs = [l for l in hr.recon()["recon"]["legs"] if l["subject"].startswith("zbm:2120") or
+            l["subject"].startswith("zbm:1150")]
+    assert legs and all(l["status"] == "matched" for l in legs)
+
+
+def test_h1_return_after_delivery_then_repayment_clears_the_flag(hr):
+    bid, inv = prepaid(hr)
+    to_clear_day(hr)
+    hr.ok(pay_vendor(hr, bid, "10000.00", paid_on="2026-10-09"))
+    hr.clock.advance(days=25)                                         # Tue Nov 3
+    hr.ok(deliver(hr, bid))
+    _return(hr, inv, value_date="2026-11-03")
+    b = buy(hr, bid)
+    assert b["status"] == "delivered" and b["payment_returned"] is True
+    hr.receive("zbm", "1010", "11500.00", inv["invoice_id"])
+    b = buy(hr, bid)
+    assert b["status"] == "delivered" and b["payment_returned"] is False
+    assert all(l["status"] == "matched" for l in hr.recon()["recon"]["legs"]
+               if l["subject"].startswith(("zbm:2120", "zbm:1150")))
+
+
+def test_m1_a_returned_payment_never_gets_a_thank_you_receipt(hr):
+    _, inv = prepaid(hr)
+    crid = _receipt_for(hr, inv["invoice_id"])["client_receipt_id"]
+    _return(hr, inv, value_date="2026-10-05")
+    out = hr.ok(hr.post(f"/fin/v1/client-receipts/{crid}/send", {"request_id": rid()}, caller="scheduler"))
+    assert out["sent"] is False and "withdrawn" in out["detail"] and hr.f["client_mail"].sent == []
+    assert hr.ok(hr.get(f"/fin/v1/client-receipts/{crid}"))["status"] == "withdrawn"
+
+
+def test_m1_zbc_deposit_return_withdraws_its_receipt_and_a_sent_one_is_marked(hr):
+    inv = hr.fund_campaign()
+    rec = _receipt_for(hr, inv["invoice_id"])
+    hr.ok(hr.post(f"/fin/v1/client-receipts/{rec['client_receipt_id']}/send", {"request_id": rid()}, caller="scheduler"))
+    rct = rec["receipt_id"]
+    hr.ok(hr.post(f"/fin/v1/receipts/{rct}/return", {"request_id": rid(), "return_ref_sha256": "f" * 64,
+                                                     "return_code": "R01", "value_date": "2026-10-05"},
+                  caller="bank_feed"))
+    assert hr.ok(hr.get(f"/fin/v1/client-receipts/{rec['client_receipt_id']}"))["status"] == "withdrawn_after_send"
+
+
+def test_m2_concurrent_sends_email_the_client_once(hr):
+    import threading
+    _, inv = prepaid(hr)
+    crid = _receipt_for(hr, inv["invoice_id"])["client_receipt_id"]
+    mail = hr.f["client_mail"]
+    inside, release = threading.Event(), threading.Event()
+    real = mail.send_receipt
+
+    def slow(client_id, receipt):
+        inside.set()
+        release.wait(5)
+        return real(client_id, receipt)
+    mail.send_receipt = slow
+    results = []
+    t = threading.Thread(target=lambda: results.append(
+        hr.post(f"/fin/v1/client-receipts/{crid}/send", {"request_id": rid()}, caller="scheduler").json()))
+    t.start()
+    assert inside.wait(5)
+    second = hr.ok(hr.post(f"/fin/v1/client-receipts/{crid}/send", {"request_id": rid()}, caller="scheduler"))
+    assert second["sent"] is False and "in progress" in second["detail"]      # answered while the first was inside
+    release.set()
+    t.join(5)
+    assert results[0]["sent"] is True and len(mail.sent) == 1
+
+
+def test_m2_failed_send_backs_off_and_a_stale_claim_can_be_retried(hr):
+    _, inv = prepaid(hr)
+    crid = _receipt_for(hr, inv["invoice_id"])["client_receipt_id"]
+    hr.f["client_mail"].accept = False
+    hr.ok(hr.post(f"/fin/v1/client-receipts/{crid}/send", {"request_id": rid()}, caller="scheduler"))
+    n_events = len(hr.ledger.events)
+    again = hr.ok(hr.post(f"/fin/v1/client-receipts/{crid}/send", {"request_id": rid()}, caller="scheduler"))
+    assert again["sent"] is False and "backoff" in again["detail"] and len(hr.ledger.events) == n_events
+    hr.clock.advance(minutes=16)
+    hr.f["client_mail"].accept = True
+    assert hr.ok(hr.post(f"/fin/v1/client-receipts/{crid}/send", {"request_id": rid()}, caller="scheduler"))["sent"]
+
+
+def test_m3_delivery_cannot_be_dated_before_the_money_moved_and_flights_cannot_start_in_the_past(hr):
+    r = hr.post("/fin/v1/media-buys", buy_body(flight_start="2026-09-01", flight_end="2026-09-30"), andre=ANDRE_TOKEN)
+    assert r.status_code == 422 and "COLLECT_BEFORE_PAY" in r.text
+    bid, _ = prepaid(hr, flight_start="2026-10-02", flight_end="2026-10-09")
+    to_clear_day(hr)
+    hr.ok(pay_vendor(hr, bid, "10000.00", paid_on="2026-10-09"))
+    r = deliver(hr, bid, on="2026-10-08")                              # after the flight, before the vendor was paid
+    assert r.status_code == 409 and "before the prepayment or a vendor payment" in r.text
+    hr.ok(deliver(hr, bid, on="2026-10-09"))
+
+
+def test_l4_matches_for_every_buy_status_at_once(hr):
+    statuses = {}
+    r = create(hr)                                                     # draft
+    statuses["draft"] = r["media_buy"]["buy_id"]
+    r = create(hr)
+    issue(hr, r["invoice"])                                            # issued, unpaid
+    statuses["issued"] = r["media_buy"]["buy_id"]
+    r = create(hr)
+    hr.ok(hr.post(f"/fin/v1/media-buys/{r['media_buy']['buy_id']}/cancel", {"request_id": rid()}, andre=ANDRE_TOKEN))
+    statuses["cancelled_draft"] = r["media_buy"]["buy_id"]
+    r = create(hr)
+    issue(hr, r["invoice"])
+    hr.ok(hr.post(f"/fin/v1/media-buys/{r['media_buy']['buy_id']}/cancel", {"request_id": rid()}, andre=ANDRE_TOKEN))
+    statuses["cancelled_issued"] = r["media_buy"]["buy_id"]
+    statuses["prepaid"], _ = prepaid(hr, media_cost="100.00")
+    statuses["partial"], _ = prepaid(hr, media_cost="200.00")
+    statuses["full"], _ = prepaid(hr, media_cost="300.00")
+    statuses["returned_unpaid"], inv_ru = prepaid(hr, media_cost="400.00")
+    statuses["returned_exposed"], inv_re = prepaid(hr, media_cost="500.00")
+    _return(hr, inv_ru, value_date="2026-10-05")
+    to_clear_day(hr)
+    hr.ok(pay_vendor(hr, statuses["partial"], "50.00", paid_on="2026-10-09"))
+    hr.ok(pay_vendor(hr, statuses["full"], "300.00", paid_on="2026-10-09"))
+    hr.ok(pay_vendor(hr, statuses["returned_exposed"], "125.00", paid_on="2026-10-09"))
+    _return(hr, inv_re)
+    got = {k: buy(hr, v)["status"] for k, v in statuses.items()}
+    assert got == {"draft": "awaiting_payment", "issued": "awaiting_payment", "cancelled_draft": "cancelled",
+                   "cancelled_issued": "cancelled", "prepaid": "prepaid", "partial": "vendor_partially_paid",
+                   "full": "vendor_paid", "returned_unpaid": "awaiting_payment", "returned_exposed": "payment_returned"}
+    legs = [l for l in hr.recon()["recon"]["legs"] if l["subject"].startswith(("zbm:2120", "zbm:1150"))]
+    assert len(legs) > 2 and all(l["status"] == "matched" for l in legs), [l for l in legs if l["status"] != "matched"]
+
+
+def test_m1_send_checks_the_underlying_payment_even_if_the_receipt_was_not_withdrawn(hr):
+    # defence in depth: the send itself re-reads the bank receipt, independent of the withdrawal bookkeeping
+    _, inv = prepaid(hr)
+    rec = _receipt_for(hr, inv["invoice_id"])
+    rc = hr.svc.db["receipts"][rec["receipt_id"]]
+    hr.svc.db["receipts"][rec["receipt_id"]] = {**rc, "status": "returned"}
+    out = hr.ok(hr.post(f"/fin/v1/client-receipts/{rec['client_receipt_id']}/send", {"request_id": rid()},
+                        caller="scheduler"))
+    assert out["sent"] is False and "not a matched receipt" in out["detail"] and hr.f["client_mail"].sent == []
+    hr.svc.db["receipts"][rec["receipt_id"]] = rc

@@ -84,7 +84,7 @@ in full and the flight has run, `POST /fin/v1/media-buys/{id}/delivery` posts re
 Every matched payment makes a client receipt; the scheduler sends it with
 `POST /fin/v1/client-receipts/{id}/send` (client-mail stand-in: nothing is sent, it stays `pending_send`).
 Settings: `FIN_MEDIA_DEFAULT_MARKUP_PCT` (`"15.00"`), `FIN_MEDIA_MAX_MARKUP_PCT` (`"100.00"`, at most `"500.00"`),
-`FIN_MEDIA_RELEASE_HOLD_BD` (3 business days, 2..10). Card: only on a Revenue Recovery-only invoice, and still off
+`FIN_MEDIA_RELEASE_HOLD_BD` (5 business days, 2..10: the Nacha window for reversing an erroneous ACH credit). Card: only on a Revenue Recovery-only invoice, and still off
 (D11).
 
 ## Reconciling the local log with the ledger

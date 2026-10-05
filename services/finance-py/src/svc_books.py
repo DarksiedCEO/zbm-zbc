@@ -601,6 +601,7 @@ class BooksMixin:
                    "value_date": str(body["value_date"]), "recorded_by": principal, "at": iso(self._now())}
             op.put("receipts", receipt_id, {**rc, "status": "returned", "return": ret})
             op.put("invoices", inv["invoice_id"], {**inv, "status": "returned", "returned_at": iso(self._now())})
+            self._withdraw_client_receipt(op, receipt_id)        # AEGIS M1: never "thank you" for bounced money
             sf_id = None
             prof = self.db["profiles"].get(camp)
             if shortfall > 0:

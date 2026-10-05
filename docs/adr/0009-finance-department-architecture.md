@@ -434,8 +434,9 @@ line code; ZBM may not issue a deposit invoice).
    `prepaid` with the receipt's value date.
 3. **`POST /fin/v1/media-buys/{id}/vendor-payments` (Andre).** Refused 409 `COLLECT_BEFORE_PAY` unless:
    - the buy is prepaid,
-   - `FIN_MEDIA_RELEASE_HOLD_BD` business days (default 3, floor 2) have passed since the prepayment's value date,
-     the window in which a business ACH debit can still come back,
+   - `FIN_MEDIA_RELEASE_HOLD_BD` business days (default 5, floor 2) have passed since the prepayment's value date.
+     Nacha lets the sending bank reverse an erroneous ACH credit within five banking days of settlement (AEGIS L1).
+     A wire is final sooner, but Finance cannot tell the two apart,
    - `paid_on` is not before that clearing day.
 
    A payment above the remaining vendor cost is refused, and a reference already recorded is refused. Otherwise
@@ -462,6 +463,32 @@ line code; ZBM may not issue a deposit invoice).
    - Reading a receipt: `GET /fin/v1/client-receipts/{id}`.
 9. **Reconciliation L4.** It now compares ZBM 2120 and 1150, in total and per buy, with the media buy records.
 10. **Ghost-effect types** gain `media_vendor_payment_recorded` and `media_buy_delivered`.
+
+**AEGIS review of dc57776** (independent, read-only): 1 High, 3 Medium, 6 Low. All fixed in the follow-up commit except
+L2 and L3, which are documented here.
+- **H1. Re-payment after a return could not clear the buy.** A buy that was `payment_returned`, or delivered with
+  its payment returned, stayed stuck after the client paid again.
+  - Fix: `_media_prepaid` now restores the buy to where its vendor payments left it, with the hold restarting from
+    the new money.
+  - The `media_exposure` break stays for Andre, who resolves it citing the re-payment's entry.
+- **M1. A receipt could be emailed for money the bank returned.** Fixes:
+  - Every return, ZBC F1r and ZBM F12x, withdraws the client receipt: it becomes `withdrawn`, or
+    `withdrawn_after_send` if it already went out.
+  - The send refuses unless the bank receipt is still `matched`.
+- **M2. Two concurrent sends could email the client twice.** Fixes:
+  - The send claims the receipt (`sending`, recorded and committed) BEFORE the port call. A claim older than 15
+    minutes is stale.
+  - A failed send backs off for 15 minutes, so retries do not each write the ledger (also fixes L4).
+- **M3. Delivery could be back-dated.** Fixes:
+  - `delivered_on` may not be before the prepayment or any vendor payment.
+  - A buy whose flight starts before today is refused: media is prepaid, so the buy is recorded before it runs.
+- **L1.** The hold now defaults to 5 business days (floor 2), the Nacha window in which a sending bank can reverse an
+  erroneous ACH credit.
+- **L2. Not changed.** `GET /fin/v1/invoices/{id}` shows a blended invoice's true lines to internal callers.
+  **Clients must only ever be shown `client_lines`**; the receipt uses only those.
+- **L3. Not changed.** A `media_exposure` break, like every open break, blocks payout runs and close for both
+  entities. This is the existing reconcile-to-zero rule.
+- **L5, L6.** The tests were tightened, and the regressions for every finding above were added.
 
 **Founder decision recorded but NOT built: passing the card fee to the client (surcharging).**
 - It conflicts with FIN-21 ("No surcharge; no card-fee line"), a lead-default rule only Andre can amend.

@@ -75,7 +75,7 @@ class Settings:
     # media billing (ADR 0009 amendment, Oct 5 2026; founder M4, M3)
     media_default_markup_pct: Decimal = Decimal("15.00")
     media_max_markup_pct: Decimal = Decimal("100.00")
-    media_release_hold_bd: int = 3
+    media_release_hold_bd: int = 5
 
 
 def _int(env, name, default, lo, hi) -> int:
@@ -270,7 +270,8 @@ def load(env: Optional[dict] = None) -> Settings:
                                 "spec C.6; FIN-CQ-16 (CPA) decides whether netting reduces the basis"),
         # Founder M4: 15% default markup on media, overridden per buy up to the cap. Founder M3: a vendor payment is
         # recorded only after the client's prepayment has cleared AND this many business days have passed since its
-        # value date (the window in which a business ACH debit can still come back; 2 is the floor).
+        # value date. Default 5: Nacha lets the sending bank reverse an erroneous ACH credit within five banking days
+        # of settlement (AEGIS L1); a wire is final sooner, but Finance cannot tell them apart. Floor 2.
         media_default_markup_pct=media_default, media_max_markup_pct=media_max,
-        media_release_hold_bd=_int(env, "FIN_MEDIA_RELEASE_HOLD_BD", 3, 2, 10),
+        media_release_hold_bd=_int(env, "FIN_MEDIA_RELEASE_HOLD_BD", 5, 2, 10),
     )

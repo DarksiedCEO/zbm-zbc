@@ -33,7 +33,7 @@ from typing import Optional
 
 import money as M
 import reasons as R
-from clock import iso
+from clock import iso, parse_iso
 from errors import Conflict, NotFound
 from intelligences import i01_journal as J
 from intelligences import i02_receivables as I2
@@ -70,6 +70,9 @@ class MediaMixin:
             problems = I2.text_problems({"description": body["description"], "vendor_ref": body["vendor_ref"]})
             if body["flight_end"] < body["flight_start"]:
                 problems.append(R.item("JOURNAL_INVALID", "flight_end is before flight_start"))
+            if body["flight_start"] < self._today_la():
+                problems.append(R.item("COLLECT_BEFORE_PAY", "the flight starts before today: media is prepaid, so a "
+                                                             "buy is recorded before it runs (founder M2)"))
             pct = body.get("markup_pct")
             pct = self.cfg.media_default_markup_pct if pct is None else M.D(pct)
             if pct < 0 or pct > self.cfg.media_max_markup_pct:
@@ -210,6 +213,11 @@ class MediaMixin:
                                                             "client has paid and the vendor is paid in full"))
             if body["delivered_on"] > self._today_la():
                 reasons.append(R.item("JOURNAL_INVALID", "delivered_on is in the future"))
+            floor = max([(buy.get("prepayment") or {}).get("value_date") or ""] +
+                        [p["paid_on"] for p in buy["vendor_payments"]])
+            if floor and _d(body["delivered_on"]) < floor:
+                reasons.append(R.item("JOURNAL_INVALID", f"delivered_on is before the prepayment or a vendor payment "
+                                                         f"({floor}): delivery is dated after the money moved"))
             if _d(body["delivered_on"]) < buy["flight_end"]:
                 reasons.append(R.item("JOURNAL_INVALID", f"the flight runs until {buy['flight_end']}: revenue is "
                                                          "recognised once it has run (FIN-CQ-11 decides any other "
@@ -278,11 +286,20 @@ class MediaMixin:
     # --- hooks called from the receivables code (svc_books) -----------------------------------------------------------
 
     def _media_prepaid(self, op: Op, inv: dict, receipt_id: str, value_date: str, amount: str) -> None:
+        """The client's prepayment matched. A first payment makes the buy ``prepaid``. A payment AFTER a bank
+        return (AEGIS H1) restores the buy to where its vendor payments left it, with the hold restarting from the
+        new money; the ``media_exposure`` break stays for Andre, who resolves it citing this receipt's entry."""
         buy = op.get("media_buys", inv["media_buy_id"])
-        if buy is None or buy["status"] != "awaiting_payment":
+        if buy is None or not (buy["status"] in ("awaiting_payment", "payment_returned") or buy.get("payment_returned")):
             return
-        op.put("media_buys", buy["buy_id"], {**buy, "status": "prepaid", "prepayment": {
-            "receipt_id": receipt_id, "value_date": value_date, "amount": amount, "matched_at": iso(self._now())}})
+        pre = {"receipt_id": receipt_id, "value_date": value_date, "amount": amount, "matched_at": iso(self._now())}
+        if buy["status"] == "delivered":
+            status = "delivered"
+        elif buy["status"] == "awaiting_payment" or M.D(buy["vendor_paid"]) == 0:
+            status = "prepaid"
+        else:
+            status = "vendor_paid" if M.D(buy["vendor_paid"]) == M.D(buy["media_cost"]) else "vendor_partially_paid"
+        op.put("media_buys", buy["buy_id"], {**buy, "status": status, "prepayment": pre, "payment_returned": False})
 
     def _media_return(self, op: Op, rc: dict, inv: dict, body: dict) -> dict:
         """The bank returned a ZBM media prepayment (F12x, a FACT flow). The client owes again. If the vendor was
@@ -299,6 +316,7 @@ class MediaMixin:
             "return_code": body["return_code"], "value_date": _d(body["value_date"]),
             "return_ref_sha256": body["return_ref_sha256"], "entry_id": e["entry_id"]}})
         op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None})
+        self._withdraw_client_receipt(op, rc["receipt_id"])
         exposed = M.D(buy["vendor_paid"]) if buy else M.ZERO
         if buy is not None:
             if exposed > 0:
@@ -359,12 +377,45 @@ class MediaMixin:
                    "amount": amount, "entity": inv["entity"]}, f"Client receipt prepared: {amount}")
         return rec
 
+    def _withdraw_client_receipt(self, op: Op, receipt_id: str) -> None:
+        """The bank returned the payment (AEGIS M1): its receipt is never sent; one already sent is marked so."""
+        for crid, rec in self.db["client_receipts"].items():
+            if rec["receipt_id"] != receipt_id or rec["status"] in ("withdrawn", "withdrawn_after_send"):
+                continue
+            status = "withdrawn_after_send" if rec["status"] == "sent" else "withdrawn"
+            op.put("client_receipts", crid, {**rec, "status": status, "withdrawn_at": iso(self._now())})
+            op.record(derived_id("crcw", crid), "client_receipt_withdrawn", I2.ACTOR, crid,
+                      {"client_receipt_id": crid, "receipt_id": receipt_id, "status": status},
+                      "Client receipt withdrawn: the bank returned the payment")
+
     def get_client_receipt(self, crid: str) -> dict:
         with self.lock:
             rec = self.db["client_receipts"].get(crid)
             if rec is None:
                 raise NotFound("no such client receipt")
             return dict(rec)
+
+    SEND_CLAIM_STALE_MIN = 15
+    SEND_BACKOFF_MIN = 15
+
+    def _send_refusal(self, rec: dict) -> Optional[str]:
+        """Why this receipt must not be sent now (None = send it)."""
+        if rec["status"] == "sent":
+            return "already sent"
+        if rec["status"] in ("withdrawn", "withdrawn_after_send"):
+            return "withdrawn: the bank returned this payment"
+        rc = self.db["receipts"].get(rec["receipt_id"]) or {}
+        if rc.get("status") != "matched":
+            return "the payment is not a matched receipt any more"
+        now = self._now()
+        if rec["status"] == "sending" and rec.get("claimed_at") and \
+                (now - parse_iso(rec["claimed_at"])).total_seconds() < self.SEND_CLAIM_STALE_MIN * 60:
+            return "a send is already in progress"
+        last = rec.get("last_attempt_at")
+        if rec["status"] == "pending_send" and last and \
+                (now - parse_iso(last)).total_seconds() < self.SEND_BACKOFF_MIN * 60:
+            return f"backoff: the last attempt failed less than {self.SEND_BACKOFF_MIN} minutes ago"
+        return None
 
     def send_client_receipt(self, principal: str, request_id: str, crid: str) -> dict:
         """The scheduler asks the client-mail port to send one receipt. The port call happens outside the lock and
@@ -377,21 +428,33 @@ class MediaMixin:
             rec = self.db["client_receipts"].get(crid)
             if rec is None:
                 raise NotFound("no such client receipt")
-            if rec["status"] == "sent":
-                return {"client_receipt": dict(rec), "sent": False, "detail": "already sent", "request_id": request_id}
+            refusal = self._send_refusal(rec)
+            if refusal:
+                return {"client_receipt": dict(rec), "sent": False, "detail": refusal, "request_id": request_id}
             view = {k: rec[k] for k in ("client_receipt_id", "entity", "invoice_id", "what_you_bought", "items",
                                         "period", "amount_paid", "currency", "paid_on", "method")}
+            # AEGIS M2: claim the send (recorded and committed) BEFORE the port call, so a concurrent sender sees
+            # ``sending`` and never emails the client a second time
+            claim = Op(self, f"crcc|{principal}|{request_id}", I2.ACTOR, crid)
+            claim.record(derived_id("crcc", crid, request_id), "client_receipt_send_claimed", I2.ACTOR, crid,
+                         {"client_receipt_id": crid, "attempt": rec["attempts"] + 1}, "Client receipt send started")
+            claim.put("client_receipts", crid, {**rec, "status": "sending", "claimed_at": iso(self._now()),
+                                                "claimed_by": request_id})
+            self._commit(claim)
         mail = self.ports.client_mail
         g = Gather(self, f"crcs|{principal}|{request_id}", I2.ACTOR, crid)
         sent = g.call("client_mail", "send_receipt", (rec["client_id"], crid),
                       lambda: mail.send_receipt(rec["client_id"], view), False)
         with self.lock:
             rec = self.db["client_receipts"][crid]
-            if rec["status"] == "sent":
-                return {"client_receipt": dict(rec), "sent": False, "detail": "already sent", "request_id": request_id}
             now = iso(self._now())
-            new = {**rec, "attempts": rec["attempts"] + 1, "last_attempt_at": now,
-                   **({"status": "sent", "sent_at": now} if sent is True else {})}
+            withdrawn = rec["status"] in ("withdrawn", "withdrawn_after_send")
+            if sent is True:
+                status = "withdrawn_after_send" if withdrawn else "sent"
+            else:
+                status = rec["status"] if withdrawn else "pending_send"
+            new = {**rec, "attempts": rec["attempts"] + 1, "last_attempt_at": now, "status": status,
+                   "claimed_at": None, "claimed_by": None, **({"sent_at": now} if sent is True else {})}
             op = Op(self, f"crcs|{principal}|{request_id}", I2.ACTOR, crid, g)
             op.record(derived_id("crcs", crid, request_id), "client_receipt_sent" if sent is True
                       else "client_receipt_send_failed", I2.ACTOR, crid,
