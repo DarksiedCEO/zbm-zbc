@@ -27,6 +27,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -48,6 +49,8 @@ const (
 	financePath     = "/fin/v1/stripe/events"
 	minTokenLen     = 32
 	defaultPort     = "8470"
+	// Finance's route limit for /fin/v1/stripe/events is 300 KiB; a little is kept back
+	maxForwardBytes = 300<<10 - 1024
 )
 
 type config struct {
@@ -63,8 +66,17 @@ func loadConfig(getenv func(string) string) (config, error) {
 		serviceToken: getenv("STRIPE_GATEWAY_FINANCE_TOKEN"),
 		callerToken:  getenv("STRIPE_GATEWAY_CALLER_TOKEN"),
 	}
-	if c.financeURL == "" || !(strings.HasPrefix(c.financeURL, "http://") || strings.HasPrefix(c.financeURL, "https://")) {
+	u, err := url.Parse(c.financeURL)
+	if c.financeURL == "" || err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return c, errors.New("STRIPE_GATEWAY_FINANCE_URL must be Finance's base URL (http:// or https://)")
+	}
+	// The Finance tokens and Stripe's body (it can carry client names and emails) never cross a network in clear
+	// text: plain http is accepted only to a loopback Finance (AEGIS launch-hardening L8).
+	if u.Scheme == "http" {
+		ip := net.ParseIP(u.Hostname())
+		if !(u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())) {
+			return c, errors.New("STRIPE_GATEWAY_FINANCE_URL: plain http only to a loopback Finance; use https")
+		}
 	}
 	for name, v := range map[string]string{"STRIPE_GATEWAY_FINANCE_TOKEN": c.serviceToken,
 		"STRIPE_GATEWAY_CALLER_TOKEN": c.callerToken} {
@@ -140,6 +152,12 @@ func (g *gateway) handle(w http.ResponseWriter, r *http.Request) {
 		"payload":    string(body),
 		"signature":  sig,
 	})
+	// JSON escaping can grow the body; past Finance's route limit Finance would answer 413 for ever (AEGIS L7)
+	if len(fwd) > maxForwardBytes {
+		log.Printf("correlation_id=%s delivery too large once escaped (%d bytes)", correlationID(), len(fwd))
+		answer(w, http.StatusRequestEntityTooLarge, "body too large")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), upstreamTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.financeURL+financePath, bytes.NewReader(fwd))
@@ -182,6 +200,10 @@ func newMux(g *gateway) *http.ServeMux {
 func newGateway(cfg config) *gateway {
 	return &gateway{cfg: cfg, client: &http.Client{
 		Timeout: upstreamTimeout,
+		// no HTTP(S)_PROXY: the Finance tokens go straight to Finance and nowhere else (AEGIS L8)
+		Transport: &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, MaxIdleConns: 16,
+			IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 10 * time.Second,
+			ResponseHeaderTimeout: upstreamTimeout},
 		// never follow a redirect with the Finance tokens attached
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}

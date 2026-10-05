@@ -728,3 +728,28 @@ Lows, listed and not fixed:
    with no delete. At about 50 Stripe events a day, growth is about 18k small records a year plus 8.8k job records.
    Adding a delete primitive to the evidence log is more risk than the space it saves. Revisit if volume grows by
    orders of magnitude.
+
+**AEGIS review of da054ef: BLOCKING** on two Highs, both in the payout matching. They were fixed in the follow-up
+commit, along with the cheap Mediums and Lows.
+- **H1.** A line refused later in a bank batch could leave an earlier line's F13p on the ledger without its local
+  record, which would also block Stripe's `payout.paid` (same key).
+  - Fix: every refusal a line can draw is now checked before anything posts.
+- **H2.** A bank line that arrived before Stripe ever mentioned the payout was booked as unapplied cash, and the
+  later `payout.paid` posted 1010 a second time.
+  - Fix: `payout.paid` now finds that unapplied receipt and reclassifies it (Dr 2070 / Cr 1060). It matches either by
+    the payout id, or, with no reference at all, by the oldest receipt of exactly that amount dated from 10 days
+    before to 2 days after the payout was first seen. The receipt's break is resolved.
+  - Receipts now keep the line's reference token.
+- **M1.** A payout record with no first-seen date is matched by its id only.
+- **M2.** A line carrying any reference is matched to a payout only by that payout's id, never by amount.
+- **L1.** A payout that failed after the bank showed it arriving opens a `stripe_payout` break.
+- **L6.** `DocRef.version` is strict: no bool, numeric-string or padded coercion.
+- **L7.** stripe-gateway refuses (413) a body that would exceed Finance's route limit once JSON-escaped.
+- **L8.** stripe-gateway uses no HTTP proxy, and talks plain http only to a loopback Finance; anywhere else needs https.
+- **L2, L4.** The HttpLegal docstring now says what the code does: in force per version; a 404 counts as unavailable.
+- **Mutation check:** all 5 new guards were killed by their tests.
+
+Lows documented, not changed:
+- **L3.** An executed MSA stops supporting invoices at its Legal `review_by` until Legal renews it. This fails closed.
+- **L5.** Client ids with `:` or over 100 characters can never match Legal's party_ref, so they are refused.
+- **L9.** There is no in-flight cap on the gateway; it binds to loopback behind the proxy.

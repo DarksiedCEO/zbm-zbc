@@ -702,16 +702,65 @@ class StripeMixin:
         if rec.get("amount") not in (None, po.amount):
             raise Invalid("Stripe reported a different amount for a payout already recorded")
         if po.status == "paid" and not rec["posted"]:
-            self._post(op, "zbm", [J.dr("1010", amt), J.cr("1060", amt)], "F13p", src, f"F13p|{po.payout_id}",
-                       actor=ACTOR, fact=True)
-            rec = {**rec, "posted": True}
+            banked = self._unapplied_payout_receipt(op, po.payout_id, amt, rec)
+            if banked is not None:
+                # AEGIS (launch hardening) H2: the bank showed this payout before Stripe said so and it was booked as
+                # unapplied cash; it is reclassified (Dr 2070 / Cr 1060), never posted to 1010 a second time
+                e = self._post(op, "zbm", [J.dr("2070", amt), J.cr("1060", amt)], "F13p", src,
+                               f"F13p|{po.payout_id}", actor=ACTOR, fact=True)
+                op.put("receipts", banked["receipt_id"], {**banked, "status": "stripe_payout",
+                                                          "stripe_payout_id": po.payout_id,
+                                                          "reclassified_entry_id": e["entry_id"]})
+                bid = rid("brk", "unapplied", banked["receipt_id"])
+                brk = op.get("breaks", bid)
+                if brk is not None and brk["status"] == "open":
+                    op.put("breaks", bid, {**brk, "status": "resolved", "resolution": {
+                        "entry_id": e["entry_id"], "approved_by": "intel_02_receivables", "at": iso(self._now()),
+                        "why": f"the unapplied credit was Stripe payout {po.payout_id}"}})
+                rec = {**rec, "posted": True, "bank_receipt_id": banked["receipt_id"]}
+            else:
+                self._post(op, "zbm", [J.dr("1010", amt), J.cr("1060", amt)], "F13p", src, f"F13p|{po.payout_id}",
+                           actor=ACTOR, fact=True)
+                rec = {**rec, "posted": True}
         elif po.status == "failed" and rec["posted"] and not rec["reversed"]:
             self._post(op, "zbm", [J.dr("1060", amt), J.cr("1010", amt)], "F13q", src, f"F13q|{po.payout_id}",
                        actor=ACTOR, fact=True)
             rec = {**rec, "reversed": True}
+            if rec.get("bank_receipt_id"):
+                # AEGIS L1: the bank showed this money arriving; Stripe now says the payout failed -- Andre checks
+                bid = rid("brk", "stripe_payout_failed", po.payout_id)
+                if op.get("breaks", bid) is None:
+                    op.put("breaks", bid, {"break_id": bid, "leg": "stripe_payout",
+                                           "subject": f"zbm:1010:{po.payout_id}", "difference": po.amount, "opened_at": iso(self._now()),
+                                           "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                           "explanation_code": "unknown", "status": "open",
+                                           "receipt_id": rec["bank_receipt_id"], "resolution": None})
+                    op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                              {"break_id": bid, "leg": "stripe_payout", "difference": po.amount},
+                              f"Break opened: Stripe payout {po.amount} failed after the bank showed it arriving")
         rec = {**rec, "status": po.status, "amount": po.amount, "seen_at": iso(self._now())}
         op.put("stripe_payouts", po.payout_id, rec)
         return f"payout_{po.status}"
+
+    def _unapplied_payout_receipt(self, op: Op, payout_id: str, amt: Decimal, rec: dict) -> Optional[dict]:
+        """An unapplied ZBM operating-account receipt that is this payout: the line carried the payout id, or (no
+        reference at all) it is the oldest of exactly this amount dated from 2 days before to 10 days after the day
+        Finance first saw the payout."""
+        seen = date.fromisoformat(rec["first_seen_on"]) if rec.get("first_seen_on") else None
+        cands = []
+        for r in self.db["receipts"].values():
+            r = op.get("receipts", r["receipt_id"])
+            if r["status"] != "unapplied" or r["entity"] != "zbm" or r.get("into_account") != "1010" \
+                    or M.D(r["amount"]) != amt:
+                continue
+            token = r.get("reference_token")
+            if token:
+                if token == payout_id:
+                    cands.append(r)
+            elif seen is not None and seen - timedelta(days=10) <= date.fromisoformat(r["value_date"]) \
+                    <= seen + timedelta(days=2):
+                cands.append(r)
+        return min(cands, key=lambda r: (r["value_date"], r["receipt_id"])) if cands else None
 
     def _bank_stripe_payout(self, op: Op, ln: dict, amt: Decimal, rct: str) -> Optional[dict]:
         """A ZBM operating-account credit that IS a Stripe payout (launch hardening): matched to the payout instead of
@@ -726,11 +775,14 @@ class StripeMixin:
             p = op.get("stripe_payouts", p["payout_id"])
             if p.get("bank_receipt_id") or p["status"] in ("failed", "canceled") or M.D(p["amount"]) != amt:
                 continue
-            if token.startswith("po_"):
+            if token:
+                # AEGIS M2: a line carrying any reference is matched to a payout only by that payout's own id
                 if p["payout_id"] == token:
                     cands.append(p)
                 continue
-            seen = date.fromisoformat(p.get("first_seen_on") or vd.isoformat())
+            if not p.get("first_seen_on"):
+                continue                                 # AEGIS M1: no first-seen date, no matching by amount
+            seen = date.fromisoformat(p["first_seen_on"])
             if seen - timedelta(days=2) <= vd <= seen + timedelta(days=10):
                 cands.append(p)
         if not cands:

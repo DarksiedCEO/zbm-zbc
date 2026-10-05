@@ -956,3 +956,68 @@ def test_an_invoice_reference_still_wins_over_a_payout_of_the_same_amount(st):
     st.bank.deposit("zbm", "1010", "1195.00")
     assert bank_line(st, "1195.00", token=inv["invoice_id"])["results"][0]["status"] == "matched"
     assert not st.svc.db["stripe_payouts"][po]["bank_receipt_id"]
+
+
+# --------------------------------------------------------------------------------------------- AEGIS review of da054ef
+
+def test_aegis_lh_h1_a_bad_line_refuses_the_batch_before_anything_posts(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "in_transit")
+    sent(st, "payout.created", {"id": po})
+    posted = sum(e["event_type"] == "journal_entry_posted" for e in st.ledger.events)
+    good = {"txn_ref_sha256": "a" * 64, "entity": "zbm", "account": "1010", "direction": "credit",
+            "amount": "1195.00", "value_date": "2026-10-03"}
+    bad = {**good, "txn_ref_sha256": "b" * 64, "account": "1020"}
+    r = st.post("/fin/v1/bank/events", {"request_id": rid(), "lines": [good, bad]}, caller="bank_feed")
+    assert r.status_code == 422
+    assert sum(e["event_type"] == "journal_entry_posted" for e in st.ledger.events) == posted
+    st.sim.payouts[po]["status"] = "paid"
+    assert sent(st, "payout.paid", {"id": po})["status"] == "payout_paid"      # Stripe ingestion not blocked
+    assert bank_line(st, "1195.00", tag="retry")["results"][0]["status"] == "stripe_payout"
+    assert bal(st, "1010") == Decimal("1195.00") and memos(st).count("F13p") == 1
+
+
+@pytest.mark.parametrize("token", [True, False])
+def test_aegis_lh_h2_bank_before_stripe_ever_mentions_the_payout_is_never_booked_twice(st, token):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")                                    # payout.created never delivered
+    r = bank_line(st, "1195.00", token=po if token else None)
+    assert r["results"][0]["status"] == "unapplied" and bal(st, "2070") == Decimal("1195.00")
+    sent(st, "payout.paid", {"id": po})
+    assert bal(st, "1010") == Decimal("1195.00") and bal(st, "2070") == 0 and bal(st, "1060") == 0
+    rc = st.svc.db["receipts"][r["results"][0]["receipt_id"]]
+    assert rc["status"] == "stripe_payout" and rc["stripe_payout_id"] == po
+    brk = [b for b in st.svc.db["breaks"].values() if b.get("receipt_id") == rc["receipt_id"]]
+    assert brk and brk[0]["status"] == "resolved"
+
+
+def test_aegis_lh_m1_m2_amount_matching_needs_no_reference_and_a_first_seen_date(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(50000, "in_transit")
+    sent(st, "payout.created", {"id": po})
+    assert bank_line(st, "500.00", token="fin-inv-TYPO")["results"][0]["status"] == "unapplied"   # M2
+    st.svc.db["stripe_payouts"][po] = {k: v for k, v in st.svc.db["stripe_payouts"][po].items()
+                                       if k != "first_seen_on"}                                  # a legacy record
+    assert bank_line(st, "500.00", value_date="2027-06-01")["results"][0]["status"] == "unapplied"  # M1
+    assert bank_line(st, "500.00", token=po)["results"][0]["status"] == "stripe_payout"           # exact id still
+
+
+def test_aegis_lh_l1_a_payout_failed_after_the_bank_showed_it_opens_a_break(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")
+    sent(st, "payout.paid", {"id": po})
+    bank_line(st, "1195.00")
+    st.sim.payouts[po]["status"] = "failed"
+    sent(st, "payout.failed", {"id": po})
+    assert [b for b in st.svc.db["breaks"].values() if b["leg"] == "stripe_payout" and b["status"] == "open"]
+
+
+@pytest.mark.parametrize("bad", [True, "1", " 1.0", 1.0])
+def test_aegis_lh_l6_contract_versions_are_never_coerced(bad):
+    import models as m
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        m.DocRef.model_validate({"doc_id": "client_msa", "version": bad, "doc_sha256": "c" * 64,
+                                 "acceptance_id": "a1"})
+    assert m.DocRef.model_validate({"doc_id": "x", "version": "1.1", "doc_sha256": "c" * 64,
+                                    "acceptance_id": "a1"}).version == "1.1"

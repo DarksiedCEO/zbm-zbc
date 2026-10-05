@@ -183,11 +183,13 @@ func TestConfigFailsClosed(t *testing.T) {
 		t.Fatalf("defaults: %v %q", err, c.addr)
 	}
 	for name, over := range map[string]map[string]string{
-		"no url":      {"STRIPE_GATEWAY_FINANCE_URL": ""},
-		"bad scheme":  {"STRIPE_GATEWAY_FINANCE_URL": "ftp://x"},
-		"short token": {"STRIPE_GATEWAY_FINANCE_TOKEN": "short"},
-		"no caller":   {"STRIPE_GATEWAY_CALLER_TOKEN": ""},
-		"same tokens": {"STRIPE_GATEWAY_CALLER_TOKEN": svcTok},
+		"no url":       {"STRIPE_GATEWAY_FINANCE_URL": ""},
+		"bad scheme":   {"STRIPE_GATEWAY_FINANCE_URL": "ftp://x"},
+		"short token":  {"STRIPE_GATEWAY_FINANCE_TOKEN": "short"},
+		"no caller":    {"STRIPE_GATEWAY_CALLER_TOKEN": ""},
+		"same tokens":  {"STRIPE_GATEWAY_CALLER_TOKEN": svcTok},
+		"http off-box": {"STRIPE_GATEWAY_FINANCE_URL": "http://finance.internal"},
+		"no host":      {"STRIPE_GATEWAY_FINANCE_URL": "https://"},
 	} {
 		env := map[string]string{}
 		for k, v := range ok {
@@ -207,5 +209,32 @@ func TestServerLimits(t *testing.T) {
 	if s.ReadHeaderTimeout != 5*time.Second || s.ReadTimeout == 0 || s.WriteTimeout <= upstreamTimeout ||
 		s.MaxHeaderBytes != maxHeaderBytes {
 		t.Fatalf("limits not set: %+v", s)
+	}
+}
+
+func TestHTTPSOffBoxAndNoProxy(t *testing.T) {
+	for _, u := range []string{"https://finance.internal", "http://localhost", "http://[::1]:9"} {
+		env := map[string]string{"STRIPE_GATEWAY_FINANCE_URL": u, "STRIPE_GATEWAY_FINANCE_TOKEN": svcTok,
+			"STRIPE_GATEWAY_CALLER_TOKEN": callerTok}
+		c, err := loadConfig(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("%s refused: %v", u, err)
+		}
+		if tr, ok := newGateway(c).client.Transport.(*http.Transport); !ok || tr.Proxy != nil {
+			t.Fatalf("the Finance client must not use an HTTP proxy")
+		}
+	}
+}
+
+func TestEscapedBodyOverFinanceLimitIsRefused(t *testing.T) {
+	var s seen
+	fin := financeStub(t, 200, &s)
+	defer fin.Close()
+	g := gw(t, fin.URL)
+	defer g.Close()
+	// ~200 KiB of escaped quotes: under the 256 KiB body cap, about 400 KiB once JSON-escaped
+	resp, _ := post(t, g.URL, `{"x":"`+strings.Repeat(`\"`, 100<<10)+`"}`, "t=1,v1=00")
+	if resp.StatusCode != http.StatusRequestEntityTooLarge || s.calls.Load() != 0 {
+		t.Fatalf("got %d, finance calls %d", resp.StatusCode, s.calls.Load())
 	}
 }

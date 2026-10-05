@@ -213,10 +213,14 @@ class HttpCompliance(_Base):
 class HttpLegal(_Base):
     """Legal (37) reads for caller ``finance_31``: the contract version and the client's acceptance of it.
 
-    Legal's own rule for "in force" (legal-py ``i01_documents.current``) is applied to the version Legal returns:
-    status ``approved`` and ``effective_at <= now < review_by``. Anything Legal does not confirm -- a different hash,
+    Legal's acceptance rule for "in force" (legal-py ``_in_force``) is applied to the version Legal returns: status
+    ``approved`` and ``effective_at <= now < review_by``. That is per version, not Legal's "current" (the highest in
+    force): per-party fills share a doc_id, so an older version a client accepted stays valid until Legal retires it or
+    its ``review_by`` passes -- retiring is the control, and after ``review_by`` invoices under it are refused until
+    Legal renews it. Anything Legal does not confirm -- a different hash,
     another entity's document, an acceptance by another party, insufficient evidence, a Legal instance running on an
-    unpinned (non-production) rules seed, a 404 -- is a NO; a Legal that cannot be read is "unavailable"."""
+    unpinned (non-production) rules seed -- is a NO; a Legal that cannot be read, or that answers 404 (a document or
+    acceptance it does not hold), is "unavailable" (reason DEPENDENCY_UNAVAILABLE:legal_37). Either way: refused."""
 
     CALLER_HEADER = "X-LEGAL-Caller-Token"
 

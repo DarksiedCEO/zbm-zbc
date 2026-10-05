@@ -447,6 +447,10 @@ class BooksMixin:
             if ent:
                 return ent["response"]
             self.require_rules()
+            # AEGIS (launch hardening) H1: every refusal a line can draw is checked BEFORE anything is posted, so a
+            # bad line can never leave an earlier line's ledger events without their local record
+            if any(ln["entity"] == "zbm" and ln["account"] == "1020" for ln in lines):
+                raise Invalid("ZBM has no restricted deposits account (1020 is ZBC's)")
             op = Op(self, f"bank|{request_id}", "intel_02_receivables", "bank_feed")
             results = []
             for ln in lines:
@@ -518,7 +522,8 @@ class BooksMixin:
                                          "bank_txn_ref_sha256": ln["txn_ref_sha256"], "into_account": acct,
                                          "value_date": ln["value_date"].isoformat() if isinstance(ln["value_date"], date)
                                          else str(ln["value_date"]), "matched_at": iso(self._now()),
-                                         "status": status, "entry_id": e["entry_id"]})
+                                         "status": status, "entry_id": e["entry_id"],
+                                         "reference_token": ln.get("reference_token")})
                 if status == "matched":
                     self._client_receipt(op, rct, inv, M.fmt(amt), str(ln["value_date"]))
                 results.append({"receipt_id": rct, "status": status, "entry_id": e["entry_id"]})
