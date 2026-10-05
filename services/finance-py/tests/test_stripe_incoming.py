@@ -8,6 +8,7 @@ reachable from the build sandbox.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from decimal import Decimal
@@ -895,3 +896,63 @@ def test_aegis_r1_a_dispute_finance_cannot_book_still_blocks_the_vendor(st):
     assert r.status_code == 409 and "disputed the prepayment" in r.text
     posted = [e["payload"]["entry_id"] for e in st.ledger.events if e["event_type"] == "journal_entry_posted"]
     assert sorted(posted) == sorted(st.svc.entries_by_id)
+
+
+# --------------------------------------------------------------------------------------------- bank feed x Stripe payouts
+
+def bank_line(hr, amount, token=None, value_date="2026-10-03", tag=None):
+    line = {"txn_ref_sha256": hashlib.sha256((tag or rid("bk")).encode()).hexdigest(), "entity": "zbm",
+            "account": "1010", "direction": "credit", "amount": amount, "value_date": value_date}
+    if token:
+        line["reference_token"] = token
+    return hr.ok(hr.post("/fin/v1/bank/events", {"request_id": rid(), "lines": [line]}, caller="bank_feed"))
+
+
+def test_a_stripe_payout_on_the_bank_statement_is_matched_not_booked_twice(st):
+    paid_rr(st, "1200.00")                                               # 1060 = 1195.00
+    po = st.sim.payout(119500, "paid")
+    sent(st, "payout.paid", {"id": po})
+    assert bal(st, "1010") == Decimal("1195.00")
+    r = bank_line(st, "1195.00")
+    assert r["results"][0]["status"] == "stripe_payout"
+    assert bal(st, "1010") == Decimal("1195.00") and bal(st, "2070") == 0       # not counted twice
+    assert not [b for b in st.svc.db["breaks"].values() if b["leg"] == "unapplied_cash"]
+    assert st.svc.db["stripe_payouts"][po]["bank_receipt_id"] == r["results"][0]["receipt_id"]
+    assert bank_line(st, "1195.00")["results"][0]["status"] == "unapplied"    # a second, different credit is not it
+
+
+def test_the_bank_can_arrive_before_stripes_paid_event(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "in_transit")
+    sent(st, "payout.created", {"id": po})
+    r = bank_line(st, "1195.00")
+    assert r["results"][0]["status"] == "stripe_payout"
+    assert bal(st, "1010") == Decimal("1195.00") and bal(st, "1060") == 0
+    st.sim.payouts[po]["status"] = "paid"
+    sent(st, "payout.paid", {"id": po})
+    assert bal(st, "1010") == Decimal("1195.00") and memos(st).count("F13p") == 1
+
+
+def test_payout_matching_by_id_amount_and_window(st):
+    paid_rr(st, "1200.00")
+    a = st.sim.payout(50000, "in_transit")
+    b = st.sim.payout(50000, "in_transit")
+    sent(st, "payout.created", {"id": a})
+    sent(st, "payout.created", {"id": b})
+    assert bank_line(st, "500.00", token=b)["results"][0]["status"] == "stripe_payout"   # exact by payout id
+    assert st.svc.db["stripe_payouts"][b]["bank_receipt_id"] and not st.svc.db["stripe_payouts"][a]["bank_receipt_id"]
+    assert bank_line(st, "500.00", token="po_0000nosuch")["results"][0]["status"] == "unapplied"
+    assert bank_line(st, "500.01")["results"][0]["status"] == "unapplied"                 # amount must match
+    assert bank_line(st, "500.00", value_date="2026-10-20")["results"][0]["status"] == "unapplied"   # outside window
+    assert bank_line(st, "500.00")["results"][0]["status"] == "stripe_payout"             # a, by amount and window
+    assert memos(st).count("F13p") == 2
+
+
+def test_an_invoice_reference_still_wins_over_a_payout_of_the_same_amount(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "in_transit")
+    sent(st, "payout.created", {"id": po})
+    inv = rr_invoice(st, "1195.00", methods=("ach", "wire"))
+    st.bank.deposit("zbm", "1010", "1195.00")
+    assert bank_line(st, "1195.00", token=inv["invoice_id"])["results"][0]["status"] == "matched"
+    assert not st.svc.db["stripe_payouts"][po]["bank_receipt_id"]

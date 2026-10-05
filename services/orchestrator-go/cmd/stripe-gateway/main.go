@@ -47,6 +47,7 @@ const (
 	maxHeaderBytes  = 16 << 10
 	financePath     = "/fin/v1/stripe/events"
 	minTokenLen     = 32
+	defaultPort     = "8470"
 )
 
 type config struct {
@@ -80,7 +81,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 	}
 	port := getenv("STRIPE_GATEWAY_PORT")
 	if port == "" {
-		port = "8470"
+		port = defaultPort
 	}
 	c.addr = net.JoinHostPort(bind, port)
 	return c, nil

@@ -690,3 +690,41 @@ Lows, listed and not fixed:
 - `job_runs` grows by one record each time the repeatable job runs.
 - Webhooks waiting their turn still hold a worker thread for up to 30 s.
 - A receipt withdrawn under R1 stays withdrawn even if the dispute is later won.
+
+## Amendment: launch hardening (Oct 5 2026, branch `fin-launch-hardening`)
+
+**Founder rulings.**
+- **M12. No card surcharge, ever.** The card fee is built into the price. That price must be the same for every
+  payment method; a higher price for card would be a surcharge under another name. The code still has no fee line
+  (FIN-21), and nothing about prices changes in code.
+- **Banks.** ZBM banks with Bank of America. ZBC has no bank yet (Chase or Wells Fargo). Clipper payouts and 1099s
+  go through Stripe Connect when that is built; ZBC is the 1099 filer. There are no employees, so no payroll.
+
+**What was built.**
+1. **Legal (37) wired** (`clients.HttpLegal`, `FIN_LEGAL_URL` / `FIN_LEGAL_TOKEN` / `FIN_LEGAL_CALLER_TOKEN`).
+   Before this, every invoice approval, MSA billing-readiness check and ZBC funding check failed closed in
+   production, because Legal was a stand-in.
+   - **When a contract counts.** Legal's own in-force rule applies (approved, `effective_at <= now < review_by`).
+     The contract must also:
+     - carry the stated hash;
+     - belong to the invoicing entity;
+     - have been accepted with sufficient evidence by THAT client (`party_ref client:<id>`).
+   - An unpinned (non-production) Legal, a 404, or an answer Finance cannot read is never a pass.
+   - **Bug fixed.** `DocRef.version` was an integer, but Legal numbers versions `major.minor`, so no contract could
+     ever have matched. It now takes Legal's format. A legacy integer `n` means `"n.0"`, and Legal confirms or
+     refuses it.
+   - **Proven against a live legal-py:** the cross-service check in legal-py `devtools/live_run.py` passes 43/43.
+2. **`stripe-gateway` (services/orchestrator-go/cmd/stripe-gateway).** This is the public Stripe webhook entry
+   point; see its README. Finance's live run sends Stripe's delivery through the built binary.
+3. **The bank feed recognises Stripe payouts.** A ZBM 1010 credit that is not an invoice payment is matched to an
+   unmatched Stripe payout, either:
+   - exactly, by a `po_` reference; or
+   - by the oldest payout of that exact amount first seen between 10 days before and 2 days after the line's value
+     date.
+
+   If Stripe's paid event has not arrived yet, the bank line is the proof: F13p posts from it under the same key, so
+   it never posts twice. An invoice reference always wins over a payout.
+4. **Not built, by decision: pruning `stripe_events` and repeatable `job_runs`.** The store is an append-only log
+   with no delete. At about 50 Stripe events a day, growth is about 18k small records a year plus 8.8k job records.
+   Adding a delete primitive to the evidence log is more risk than the space it saves. Revisit if volume grows by
+   orders of magnitude.

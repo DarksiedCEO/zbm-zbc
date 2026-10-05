@@ -464,6 +464,21 @@ class BooksMixin:
                 ok_zbm = inv is not None and entity == "zbm" and acct == "1010"
                 src = {"kind": "receipt", "id": rct}
                 try:
+                    po = self._bank_stripe_payout(op, ln, amt, rct) if (inv is None and entity == "zbm"
+                                                                         and acct == "1010") else None
+                except PostingRefused as exc:
+                    raise InvalidReasons("statement line could not be posted", exc.reasons) from None
+                if po is not None:
+                    # a Stripe payout already in the books (F13p): matched, never booked again as unapplied cash
+                    op.put("receipts", rct, {"receipt_id": rct, "invoice_id": None, "entity": entity,
+                                             "amount": M.fmt(amt), "method": "stripe_payout",
+                                             "bank_txn_ref_sha256": ln["txn_ref_sha256"], "into_account": acct,
+                                             "value_date": str(ln["value_date"]), "matched_at": iso(self._now()),
+                                             "status": "stripe_payout", "entry_id": po["entry_id"],
+                                             "stripe_payout_id": po["payout_id"]})
+                    results.append({"receipt_id": rct, "status": "stripe_payout", "entry_id": po["entry_id"]})
+                    continue
+                try:
                     if ok_zbc:
                         e = self._post(op, "zbc", [J.dr("1020", amt), J.cr("2010", amt, f"campaign:{inv['campaign_id']}")],
                                        "F1", src, f"F1|{rct}")

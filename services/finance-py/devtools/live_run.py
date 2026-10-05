@@ -481,6 +481,11 @@ def _main(work: Path) -> int:
         check("S: payout paid to the operating account (F13p); ZBM trial balance difference 0.00",
               p1["status"] == "payout_paid" and tbz["difference"] == "0.00")
         B.dev("/devtools/bank/deposit", {"entity": "zbm", "account": "1010", "amount": "2427.20"})   # the bank shows it
+        bl = B.post("/fin/v1/bank/events", {"request_id": rid(), "lines": [
+            {"txn_ref_sha256": hashlib.sha256(b"live-stripe-payout-1").hexdigest(), "entity": "zbm", "account": "1010",
+             "direction": "credit", "amount": "2427.20", "value_date": la_today()}]}, caller="bank_feed").json()
+        check("S: the payout on the bank statement is matched to the Stripe payout, not booked again",
+              bl["results"][0]["status"] == "stripe_payout")
         rs = B.recon()
         check("S: reconciliation after Stripe: every leg matched", rs["fc01"])
         tb_before = B.get("/fin/v1/journal/zbc/trial-balance")

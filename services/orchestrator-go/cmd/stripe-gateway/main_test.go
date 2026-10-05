@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -178,7 +179,7 @@ func TestConfigFailsClosed(t *testing.T) {
 	ok := map[string]string{"STRIPE_GATEWAY_FINANCE_URL": "http://127.0.0.1:8410", "STRIPE_GATEWAY_FINANCE_TOKEN": svcTok,
 		"STRIPE_GATEWAY_CALLER_TOKEN": callerTok}
 	c, err := loadConfig(func(k string) string { return ok[k] })
-	if err != nil || c.addr != "127.0.0.1:8470" {
+	if err != nil || c.addr != net.JoinHostPort("127.0.0.1", defaultPort) {
 		t.Fatalf("defaults: %v %q", err, c.addr)
 	}
 	for name, over := range map[string]map[string]string{

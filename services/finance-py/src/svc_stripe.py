@@ -34,7 +34,7 @@ import json
 import re
 import threading
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -695,7 +695,8 @@ class StripeMixin:
         if not po.found:
             return "unknown_payout"
         rec = op.get("stripe_payouts", po.payout_id) or {"payout_id": po.payout_id, "posted": False,
-                                                         "reversed": False}
+                                                         "reversed": False, "bank_receipt_id": None,
+                                                         "first_seen_on": self._today_la().isoformat()}
         amt = M.D(po.amount)
         src = {"kind": "stripe_payout", "id": po.payout_id}
         if rec.get("amount") not in (None, po.amount):
@@ -711,6 +712,38 @@ class StripeMixin:
         rec = {**rec, "status": po.status, "amount": po.amount, "seen_at": iso(self._now())}
         op.put("stripe_payouts", po.payout_id, rec)
         return f"payout_{po.status}"
+
+    def _bank_stripe_payout(self, op: Op, ln: dict, amt: Decimal, rct: str) -> Optional[dict]:
+        """A ZBM operating-account credit that IS a Stripe payout (launch hardening): matched to the payout instead of
+        being booked again as unapplied cash. Exact when the bank line carries the payout id as its reference;
+        otherwise the oldest unmatched payout of exactly that amount first seen from 2 days before to 10 days before
+        the line's value date. If the payout's paid event has not arrived yet, the bank is the proof: F13p posts now
+        (the same idempotency key the event uses, so it never posts twice)."""
+        token = ln.get("reference_token") or ""
+        vd = ln["value_date"] if isinstance(ln["value_date"], date) else date.fromisoformat(str(ln["value_date"]))
+        cands = []
+        for p in self.db["stripe_payouts"].values():
+            p = op.get("stripe_payouts", p["payout_id"])
+            if p.get("bank_receipt_id") or p["status"] in ("failed", "canceled") or M.D(p["amount"]) != amt:
+                continue
+            if token.startswith("po_"):
+                if p["payout_id"] == token:
+                    cands.append(p)
+                continue
+            seen = date.fromisoformat(p.get("first_seen_on") or vd.isoformat())
+            if seen - timedelta(days=2) <= vd <= seen + timedelta(days=10):
+                cands.append(p)
+        if not cands:
+            return None
+        p = min(cands, key=lambda x: (x.get("first_seen_on") or "", x["payout_id"]))
+        src = {"kind": "stripe_payout", "id": p["payout_id"]}
+        e = self._post(op, "zbm", [J.dr("1010", amt), J.cr("1060", amt)], "F13p", src, f"F13p|{p['payout_id']}",
+                       actor=ACTOR, fact=True)
+        op.put("stripe_payouts", p["payout_id"], {**p, "posted": True, "bank_receipt_id": rct})
+        op.record(derived_id("spb", p["payout_id"]), "stripe_payout_banked", ACTOR, p["payout_id"],
+                  {"payout_id": p["payout_id"], "receipt_id": rct, "amount": M.fmt(amt), "entry_id": e["entry_id"]},
+                  f"Stripe payout {M.fmt(amt)} reached the operating account")
+        return {"payout_id": p["payout_id"], "entry_id": e["entry_id"]}
 
     def _stripe_in_transit(self) -> Decimal:
         """Payouts that already left the Stripe balance but have not reached the bank (not yet posted)."""
