@@ -16,9 +16,11 @@ Added Oct 4, 2026 after the founder confirmed the UI being built is **`DarksiedC
 
 ### 1. The lead form drops every lead (fastest fix in the whole plan)
 `apps/zbm/app/api/lead/route.ts` is a marked **STUB**: "Nothing is stored, sent or logged." No Postgres row, no Resend
-email, no rate limit (all deferred to Phase 5 §3.5 of the site's brief). If the site is live, every contact and
-assessment submission is lost. Wiring storage + an email notification is roughly 1–2 days and independent of the
-`zbm-zbc` backend.
+email, no rate limit (all deferred to Phase 5 §3.5 of the site's brief). **The new sites are not live yet**: the current
+zbestmedia.com is the Vite/React SPA in Vercel project `zbestmedia-ui`, which stays live and untouched until V2 replaces
+it by canary migration, and no build phase changes DNS (`zbest-sites/PRODUCT.md:69-70,106-108`;
+`docs/ZBM-ZBC-Build-Brief-v2.md:39`). So no lead is being lost today, but the stub **blocks the cutover**: launching V2
+as-is would drop every lead. Wiring storage + an email notification is roughly 1–2 days, independent of `zbm-zbc`.
 
 ### 2. The site sells to service businesses; the backend's detection is built for e-commerce order data
 - Site audience for ZBM (`PRODUCT.md`): home services (HVAC, roofing, restoration), med spas, legal/professional services,
