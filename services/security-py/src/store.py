@@ -73,7 +73,7 @@ class RecordLog:
         self.path: Optional[str] = None
         self.fail_next_append = False  # tests: simulate a disk failure
         if data_dir:
-            os.makedirs(data_dir, exist_ok=True)
+            os.makedirs(data_dir, mode=0o700, exist_ok=True)
             self.path = os.path.join(data_dir, LOG_NAME)
             if os.path.exists(self.path):
                 with open(self.path, "rb") as fh:

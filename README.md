@@ -724,6 +724,32 @@ export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger sec
 cd src && python3 -m api   # LEGAL_BIND_ADDR (default 127.0.0.1), LEGAL_PORT (default 8420)
 ```
 
+## Cybersecurity (22) (`services/security-py`) — Oct 5, 2026
+
+The vault for every department's secrets, Andre's passkey approvals, short-lived service credentials, the freeze
+switch (a caller, a secret, or everything), Legal's preservation holds, incidents with text/email/push alerts, and
+vulnerability findings tracked to their deadlines. Founder decisions (Oct 5 Q&A), architecture and the unlock list:
+`docs/adr/0012-cybersecurity-department-architecture.md`. Routes and settings: `services/security-py/README.md`.
+
+- **Status:** built and tested (count: docs/test-counts.md). **Not in force.** No production key service is wired
+  (hosting not chosen: `SEC_KMS=aws|gcp` refuses to start), no alert provider is chosen (`SEC_ALERT_*` refuses to
+  start), and no department calls it yet; each consumer's port is listed in ADR 0012 with what it maps to.
+- **Andre approves with a passkey or security key, nothing else.** Each approval is a WebAuthn assertion over a
+  single-use challenge bound to exactly one action and body; clone detection by signature counter; first passkey
+  by a one-time enroll token, every later one approved by an existing one; a recovery procedure for lost keys.
+- **Fails closed.** Envelope encryption (AES-256-GCM per secret, data key wrapped by the key service, context-bound);
+  every log line anchored on the ledger before it is written, every release recorded before it is returned; a
+  truncated, rolled-back or replaced log stops all releases. No value ever reaches the log, the ledger, an error,
+  an alert or the audit export.
+- **Live run** (`devtools/live_run.py`: real ledger-rust binary, production entrypoint, software passkeys): enrol
+  two passkeys → store, use, rotate → refusals → service credential verified → freeze and lift → Legal hold →
+  restart → truncated log detected → `GET /ledger/verify` valid.
+
+```bash
+cd services/security-py && python3 -m pytest -q   # count: docs/test-counts.md
+LEDGER_BIN=services/ledger-rust/target/release/server python3 services/security-py/devtools/live_run.py
+```
+
 ## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026, fix waves 20-26b applied
 
 The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;

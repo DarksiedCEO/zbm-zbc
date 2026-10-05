@@ -1,6 +1,6 @@
 # zbm-zbc continuous integration.
 #
-# One job per service (the nine pip-managed Python services share one matrix definition and report as separate
+# One job per service (the ten pip-managed Python services share one matrix definition and report as separate
 # checks, e.g. "python-tests (finance-py, 3.13)"), the uv-managed delivery-py, ledger-rust, orchestrator-go, the
 # dashboard, the five self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
 # delivery-py, dependency and secret scans, and one `required` job that needs every other job so branch protection
@@ -24,7 +24,7 @@
 #
 # Path filtering is done by the `changes` job (a plain `git diff`, no third-party action) so an unrelated change
 # does not run every suite. Shared files (root README.md, docs/**, fixtures/**, devtools/**, .github/**) run
-# everything. The ten Python services are one cluster: their tests read each other's sources (ports.py,
+# everything. The eleven Python services are one cluster: their tests read each other's sources (ports.py,
 # requirements.txt, api.py, ledger-rust's server.rs), so a change to any of them, or to ledger-rust, runs all of
 # them. A path no rule knows about runs everything (fail safe).
 
@@ -149,6 +149,7 @@ jobs:
           - clipper-network-py
           - finance-py
           - legal-py
+          - security-py
         # macOS (Apple Silicon): every service once, on Python 3.13
         include:
           - {os: macos-26, python: "3.13", service: detection-py}
@@ -160,6 +161,7 @@ jobs:
           - {os: macos-26, python: "3.13", service: clipper-network-py}
           - {os: macos-26, python: "3.13", service: finance-py}
           - {os: macos-26, python: "3.13", service: legal-py}
+          - {os: macos-26, python: "3.13", service: security-py}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -373,7 +375,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
-        service: [compliance-py, verification-py, clipper-network-py, finance-py, legal-py]
+        service: [compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
