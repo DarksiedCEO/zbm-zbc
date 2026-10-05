@@ -34,5 +34,6 @@ Everything in `zbm-zbc` can be read by anyone: the full source of all department
 ## Implication for the frontend handoff
 
 - Backend = **`DarksiedCEO/zbm-zbc`**, branch `integration-2026-09-24`. Not `zbestmedia`.
+- The UI being built is **`DarksiedCEO/zbest-sites`** (private; two Vercel marketing sites, `apps/zbm` + `apps/zbc`). See `FRONTEND_ALIGNMENT.md`.
 - Any project doc that names `zbestmedia` as the canonical backend (e.g. `CURRENT_STATE_AND_AUTHORITY.md` mentioned by the frontend project) is stale on that point.
 - The public website lives in `zbestmedia-ui`, which is a third, separate repo.

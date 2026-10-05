@@ -2,6 +2,14 @@
 
 Branch `golive-plan` (from `integration-2026-09-24` @ 013caff). **Docs only, no code changed.** Not merged anywhere.
 
+## Update after checking the real UI (`zbest-sites`), read this first
+See `FRONTEND_ALIGNMENT.md`. Three things change the plan:
+- **The site's lead form is a stub that stores and sends nothing.** Every inbound lead and assessment is lost. Fixing it
+  is ~1–2 days and is now item 0.
+- **The site sells to service businesses** (home services, HVAC, roofing, restoration, med spas, legal, auto), not
+  Shopify stores. Decide who customer #1 really is (new decision D0) before building a Shopify connector.
+- **The site promises a written audit report.** That's the pilot, and it can be sold before any store connector exists.
+
 ## The short version
 
 1. **You can't fix a client's store today, and nothing is close to it.** The "fix engine" (Dept 28, delivery-py) fixes
