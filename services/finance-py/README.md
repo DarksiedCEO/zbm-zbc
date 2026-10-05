@@ -72,6 +72,21 @@ caller token can approve.
 - New settings: `FIN_MAX_RATE_PER_1000` (`"1000.00"`), `FIN_MAX_CERTIFIED_VIEWS` (10^12), `FIN_WITHHOLDING_BASIS`
   (`gross`; `gross_minus_netting` only with CPA row FIN-CQ-16 verified).
 
+## Media buys and client receipts (ADR 0009 amendment, Oct 5 2026)
+
+ZBM buys media as principal, prepaid, ACH or wire only; the vendor is paid only from cleared money (FIN-31).
+`POST /fin/v1/media-buys` (Andre: client, media type, vendor ref, description, flight, vendor cost, optional
+`markup_pct`, `display` breakout|blended, `legal_ref`) → Finance drafts the prepayment invoice → Andre issues it
+(`/fin/v1/invoices/{id}/decision`, F12) → the bank feed matches the payment (F11a; buy `prepaid`) → after the hold,
+Andre records what he paid the vendor (`POST /fin/v1/media-buys/{id}/vendor-payments`, F12v) → once the vendor is paid
+in full and the flight has run, `POST /fin/v1/media-buys/{id}/delivery` posts revenue and cost together (F12r).
+`POST /fin/v1/media-buys/{id}/cancel` voids an UNPAID buy (F12c); `GET /fin/v1/media-buys/{id}` reads one.
+Every matched payment makes a client receipt; the scheduler sends it with
+`POST /fin/v1/client-receipts/{id}/send` (client-mail stand-in: nothing is sent, it stays `pending_send`).
+Settings: `FIN_MEDIA_DEFAULT_MARKUP_PCT` (`"15.00"`), `FIN_MEDIA_MAX_MARKUP_PCT` (`"100.00"`, at most `"500.00"`),
+`FIN_MEDIA_RELEASE_HOLD_BD` (5 business days, 2..10: the Nacha window for reversing an erroneous ACH credit). Card: only on a Revenue Recovery-only invoice, and still off
+(D11).
+
 ## Reconciling the local log with the ledger
 
 Identical to compliance-py / verification-py. If start-up refuses with a VOIDABLE problem (a commit that failed

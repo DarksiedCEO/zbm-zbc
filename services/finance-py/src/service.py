@@ -53,7 +53,7 @@ _SUBJECT_BAD = __import__("re").compile(r"[^A-Za-z0-9._:-]")
 COLLECTIONS = ("rc_proposals", "rate_cards", "profiles", "client_profiles", "payees", "callbacks", "tax", "handoffs",
                "payables", "batches", "items", "exceptions", "recon_runs", "breaks", "invoices", "receipts", "disputes",
                "refunds", "treasury_ops", "controls", "close", "locks", "tax_readiness", "job_runs", "rail_events",
-               "integrity_checks", "clawbacks", "offboarding", "shortfalls")
+               "integrity_checks", "clawbacks", "offboarding", "shortfalls", "media_buys", "client_receipts")
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -885,11 +885,12 @@ class FinanceService:
 
 
 from svc_books import BooksMixin  # noqa: E402
+from svc_media import MediaMixin  # noqa: E402
 from svc_payables import PayablesMixin  # noqa: E402
 from svc_payees import PayeesMixin  # noqa: E402
 from svc_payouts import PayoutsMixin  # noqa: E402
 from svc_recon import ReconMixin  # noqa: E402
 
 
-class Service(BooksMixin, PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin, FinanceService):
+class Service(BooksMixin, MediaMixin, PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin, FinanceService):
     """The assembled Finance service."""

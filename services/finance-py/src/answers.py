@@ -261,6 +261,7 @@ _PRIMITIVE = {
     "identity_hmac_key": lambda v: v is None or (type(v) in (bytes, bytearray) and 16 <= len(v) <= 4096),
     "contact_ref_valid": lambda v: v is None or type(v) is bool,
     "verify_event": lambda v: type(v) is bool,
+    "send_receipt": lambda v: type(v) is bool,
 }
 
 

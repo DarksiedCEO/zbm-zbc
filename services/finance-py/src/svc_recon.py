@@ -147,6 +147,18 @@ class ReconMixin:
                         continue
                     legs.append(I7.leg("L4", f"zbc:{acct}:{s}"[:160], j, e, sha({"records": acct, "sub": s}),
                                        "sub-ledger vs the operational records"))
+            # ZBM media (ADR 0009 amendment, Oct 5 2026): 2120 and 1150 per buy vs the media buy records
+            msub = self._expected_media_sub()
+            for acct in ("2120", "1150"):
+                legs.append(I7.leg("L4", f"zbm:{acct}", self.bal(acct, entity="zbm"), M.total(msub[acct].values()),
+                                   sha({"records": f"zbm:{acct}"}), "media control balance vs the media buy records"))
+                journal = J.subledgers(self.balances, "zbm", acct)
+                for s in sorted(set(journal) | set(msub[acct])):
+                    j, e = journal.get(s, M.ZERO), msub[acct].get(s, M.ZERO)
+                    if j == 0 and e == 0:
+                        continue
+                    legs.append(I7.leg("L4", f"zbm:{acct}:{s}"[:160], j, e, sha({"records": f"zbm:{acct}", "sub": s}),
+                                       "media sub-ledger vs the media buy records"))
             ind = T.independent(M.D(obs[("zbc", "1020")].balance) if legs[0]["status"] != "source_unavailable" else None,
                                 {r: M.D(rail_obs[r].balance) for r in self.cfg.rails
                                  if isinstance(rail_obs[r], RailBalance) and rail_obs[r].available}, self.balances)

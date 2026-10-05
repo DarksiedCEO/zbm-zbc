@@ -343,6 +343,18 @@ class FakePeople:
         return None
 
 
+class FakeClientMail:
+    def __init__(self):
+        self.sent: list = []
+        self.accept = True
+
+    def send_receipt(self, client_id, receipt):
+        if not self.accept:
+            return False
+        self.sent.append((client_id, receipt))
+        return True
+
+
 class FakePush:
     def __init__(self):
         self.pushed: list = []

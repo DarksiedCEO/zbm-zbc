@@ -346,8 +346,9 @@ class BNotice(Strict):
 # --- receivables ----------------------------------------------------------------------------------------------------
 
 class InvoiceLine(Strict):
+    # media_spend / media_fee are not here: Finance writes them itself from a media buy (POST /fin/v1/media-buys).
     line_code: Literal["campaign_deposit", "creative_services", "strategy_services", "production_services",
-                       "retainer_fee", "subscription_fee"]
+                       "retainer_fee", "subscription_fee", "revenue_recovery_services"]
     quantity: int = Field(ge=1, le=1_000_000)
     unit_price: PositiveMoney
     description: Optional[Short] = None
@@ -375,6 +376,40 @@ class InvoiceDraft(Strict):
     recurring: Optional[Recurring] = None
     notes: Optional[Note] = None
     template_vars: Optional[dict[Annotated[str, Field(max_length=40)], Short]] = Field(default=None, max_length=20)
+
+
+# --- media buys (ADR 0009 amendment, Oct 5 2026; founder decisions M1-M8) ------------------------------------------
+
+class MediaBuyCreate(Strict):
+    """Andre records a media buy; Finance computes the fee and drafts its prepayment invoice from it."""
+    request_id: Id
+    client_id: Id
+    media_type: Literal["broadcast_tv", "cable_tv", "streaming_tv", "radio", "streaming_audio", "podcast",
+                        "out_of_home", "digital", "print", "other"]
+    vendor_ref: Id                                   # an opaque vendor id/name slug; never bank details (FIN-28)
+    description: Short                               # client-facing: what they are buying
+    flight_start: date
+    flight_end: date
+    media_cost: PositiveMoney                        # what ZBM pays the vendor
+    markup_pct: Optional[Money] = None               # None = FIN_MEDIA_DEFAULT_MARKUP_PCT (founder M4: 15.00)
+    display: Literal["breakout", "blended"]          # what the client's invoice shows (M5)
+    due_days: int = Field(default=0, ge=0, le=60)    # prepaid: due on receipt by default
+    legal_ref: DocRef                                # the signed media agreement / insertion order
+
+
+class VendorPayment(Strict):
+    """Andre records a payment HE made to the media vendor (M7): Finance never initiates it."""
+    request_id: Id
+    amount: PositiveMoney
+    paid_on: date
+    method: Literal["ach", "wire", "check"]
+    payment_ref_sha256: Sha                          # hash of the bank/check reference, never the reference itself
+
+
+class MediaDelivery(Strict):
+    request_id: Id
+    delivered_on: date
+    evidence_refs: list[Id] = Field(min_length=1, max_length=20)     # proof of performance / affidavit refs
 
 
 class StatementLine(Strict):

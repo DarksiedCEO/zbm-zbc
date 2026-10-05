@@ -7,7 +7,8 @@ Invariants checked on every append (violation -> 422, nothing written):
   sum(debits) == sum(credits) > 0; two or more lines; one entity; every account in that entity's chart with the
   sub-ledger kind the chart names; each line exactly one of debit/credit > 0.00, both canonical money strings; no
   posting into a locked period; the restricted-cash rule (FIN-01); nothing posts to 4010/5010 except the
-  certification flows (F2/F3/F5/F5a); a manual correction either exactly reverses an existing entry or touches none
+  certification flows (F2/F3/F5/F5a); nothing posts to ZBM's media accounts (1150/2120/4120/5110) except the
+  media flows (F12, F12c, F12v, F12r, F12x); a manual correction either exactly reverses an existing entry or touches none
   of the restricted, liability-sub-ledger, receivable-sub-ledger or verified-view revenue/cost accounts.
 """
 
@@ -25,7 +26,12 @@ import reasons as R
 
 NUMBER, NAME, ACTOR = 1, "Journal Keeper", "intel_01_journal"
 FLOWS = ("F1", "F1a", "F1r", "F2", "F3", "F4a", "F4b", "F4c", "F4d", "F4e", "F4f", "F4g", "F5", "F5a", "F5b", "F5c",
-         "F6", "F6p", "F7", "F7a", "F8", "F9", "F10", "F11", "F11a", "correction")
+         "F6", "F6p", "F7", "F7a", "F8", "F9", "F10", "F11", "F11a", "F12", "F12c", "F12v", "F12r", "F12x",
+         "correction")
+# Media flows (ADR 0009 amendment, Oct 5 2026): F12 prepayment invoice issued, F12c issued invoice cancelled before
+# payment, F12v vendor paid from collected money, F12r media delivered (revenue and cost together), F12x the bank
+# returned the client's prepayment.
+MEDIA_FLOWS = ("F12", "F12c", "F12v", "F12r", "F12x")
 # a credit to restricted cash is only ever one of these flows (FIN-01): rail funding, rail paid, refund paid, chargeback,
 # sweep of earned margin, Form 945 deposit, rail fees, a client deposit the bank returned (F1r, AEGIS N17-9), and an
 # exact reversal
@@ -33,8 +39,8 @@ RESTRICTED_CREDIT_FLOWS = ("F1r", "F4a", "F4e", "F6p", "F7", "F8", "F9", "F10")
 CERT_ONLY = ("4010", "5010")
 CERT_FLOWS = ("F2", "F3", "F5", "F5a", "F5b")
 MANUAL_FORBIDDEN = set(C.RESTRICTED_POOL) | {"1200", "1210", "2010", "2020", "2030", "2040", "2050", "2070", "4010",
-                                              "5010", "5040"}
-_SUB_RE = re.compile(r"(campaign|payee|item|client):[A-Za-z0-9._:-]{1,120}")
+                                              "5010", "5040"} | set(C.MEDIA_ACCOUNTS)
+_SUB_RE = re.compile(r"(campaign|payee|item|client|buy):[A-Za-z0-9._:-]{1,120}")
 
 
 def canonical(obj) -> str:
@@ -144,10 +150,14 @@ def validate(entry: dict, locked: set, entries_by_id: dict) -> list[dict]:
         out.append(R.item("RESTRICTED_CASH_MISUSE", "a margin sweep moves 1020 to 1010 only"))
     if accounts & set(CERT_ONLY) and memo not in CERT_FLOWS and not exact_reversal:
         out.append(R.item("NOT_CERTIFIED", "4010/5010 post only from a V&I certification flow", rule="FIN-04"))
+    if ent == "zbm" and accounts & set(C.MEDIA_ACCOUNTS) and memo not in MEDIA_FLOWS and not exact_reversal:
+        out.append(R.item("JOURNAL_INVALID", "the media accounts (1150/2120/4120/5110) post only from a media flow"))
+    if memo in MEDIA_FLOWS and ent != "zbm":
+        out.append(R.item("ENTITY_MIX", "media flows are ZBM's; ZBC never buys media"))
     if memo == "correction" and not exact_reversal and accounts & MANUAL_FORBIDDEN:
         out.append(R.item("RESTRICTED_CASH_MISUSE" if accounts & set(C.RESTRICTED_POOL) else "JOURNAL_INVALID",
                           "a manual correction that is not an exact reversal may not touch restricted cash, creator/"
-                          "client liabilities, clawback receivables or verified-view revenue/cost"))
+                          "client liabilities, clawback receivables, verified-view revenue/cost or the media accounts"))
     if memo == "correction" and rev is not None and not exact_reversal and entries_by_id.get(rev) is not None:
         out.append(R.item("JOURNAL_INVALID", "a correction naming reverses_entry_id must mirror that entry exactly"))
     return out

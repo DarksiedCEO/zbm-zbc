@@ -317,7 +317,10 @@ class BooksMixin:
                     problems.append(R.item("JOURNAL_INVALID" if body["entity"] == "zbm" else "ENTITY_MIX",
                                            f"line {i + 1}: {l['line_code']} is not a {body['entity']} line code"))
             if "card" in body["payment_methods"]:
-                problems.append(R.item("CARD_DISABLED", "card payments are off (D11; FIN-CQ-09)"))
+                problems += I2.card_problems([l["line_code"] for l in body["lines"]])
+            if body["kind"] == I2.MEDIA_KIND or any(l["line_code"] in I2.MEDIA_LINE_CODES for l in body["lines"]):
+                problems.append(R.item("JOURNAL_INVALID", "media invoices are drafted from a media buy "
+                                                          "(POST /fin/v1/media-buys), never by a caller"))
             if body["entity"] == "zbc" and (body["kind"] != "campaign_deposit" or not body.get("campaign_id")):
                 problems.append(R.item("ENTITY_MIX", "a ZBC invoice is a campaign deposit invoice naming its campaign"))
             if body["entity"] == "zbm" and body["kind"] == "campaign_deposit":
@@ -385,6 +388,9 @@ class BooksMixin:
                 new = {**inv, "status": "void", "decided_at": iso(now)}
                 op.record(derived_id("invr", invoice_id), "invoice_approved", "andre", invoice_id,
                           {"invoice_id": invoice_id, "decision": "reject"}, "Andre rejected an invoice draft")
+                if inv["kind"] == I2.MEDIA_KIND:
+                    buy = self.db["media_buys"][inv["media_buy_id"]]
+                    op.put("media_buys", buy["buy_id"], {**buy, "status": "cancelled", "cancelled_at": iso(now)})
             else:
                 due = (now.date() + timedelta(days=inv["due_days"])).isoformat()
                 new = {**inv, "status": "issued", "approved_by": "andre", "issued_at": iso(now), "due_at": due}
@@ -393,7 +399,16 @@ class BooksMixin:
                 op.record(derived_id("invi", invoice_id), "invoice_issued", "intel_02_receivables", invoice_id,
                           {"invoice_id": invoice_id, "entity": inv["entity"], "total": inv["total"]},
                           f"Invoice issued: {inv['total']} ({inv['entity']})")
-                if inv["entity"] == "zbm":
+                if inv["entity"] == "zbm" and inv["kind"] == I2.MEDIA_KIND:
+                    # F12: a media prepayment is a liability until the media runs (M2), per buy
+                    amt = M.D(inv["total"])
+                    try:
+                        self._post(op, "zbm", [J.dr("1100", amt, f"client:{inv['client_id']}"),
+                                               J.cr("2120", amt, f"buy:{inv['media_buy_id']}")],
+                                   "F12", {"kind": "invoice", "id": invoice_id}, f"F12|{invoice_id}", approval_ref=request_id)
+                    except PostingRefused as exc:
+                        raise InvalidReasons("invoice posting refused", exc.reasons) from None
+                elif inv["entity"] == "zbm":
                     credit = "2110" if inv["kind"] in ("retainer",) else "4110"
                     amt = M.D(inv["total"])
                     try:
@@ -451,6 +466,8 @@ class BooksMixin:
                         e = self._post(op, "zbm", [J.dr("1010", amt), J.cr("1100", amt, f"client:{inv['client_id']}")],
                                        "F11a", src, f"F11a|{rct}")
                         op.put("invoices", inv["invoice_id"], {**inv, "status": "paid", "paid_at": iso(self._now())})
+                        if inv["kind"] == I2.MEDIA_KIND:
+                            self._media_prepaid(op, inv, rct, str(ln["value_date"]), M.fmt(amt))
                         status, etype = "matched", "receipt_matched"
                     else:
                         memo = "F1a" if (entity == "zbc" and acct == "1010") else "F1"
@@ -477,6 +494,8 @@ class BooksMixin:
                                          "value_date": ln["value_date"].isoformat() if isinstance(ln["value_date"], date)
                                          else str(ln["value_date"]), "matched_at": iso(self._now()),
                                          "status": status, "entry_id": e["entry_id"]})
+                if status == "matched":
+                    self._client_receipt(op, rct, inv, M.fmt(amt), str(ln["value_date"]))
                 results.append({"receipt_id": rct, "status": status, "entry_id": e["entry_id"]})
             resp = self._idem_add(op, key, h, {"results": results, "ledger_event_ids": op.events,
                                                "request_id": request_id})
@@ -521,6 +540,7 @@ class BooksMixin:
             op.record(derived_id("rcta", receipt_id), "receipt_matched", "andre", receipt_id,
                       {"receipt_id": receipt_id, "invoice_id": invoice_id, "amount": M.fmt(amt)},
                       "Andre applied an unapplied receipt")
+            self._client_receipt(op, receipt_id, inv, M.fmt(amt), rc["value_date"])
             resp = self._idem_add(op, key, h, {"receipt_id": receipt_id, "entry_id": e["entry_id"],
                                                "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
@@ -550,6 +570,12 @@ class BooksMixin:
             if rc is None:
                 raise NotFound("no such receipt")
             inv = self.db["invoices"].get(rc.get("invoice_id") or "")
+            if rc["status"] == "matched" and inv is not None and inv["kind"] == I2.MEDIA_KIND and rc["entity"] == "zbm":
+                op = Op(self, f"rret|{principal}|{request_id}", I2.ACTOR, receipt_id)
+                out = self._media_return(op, rc, inv, body)
+                resp = self._idem_add(op, key, h, {**out, "ledger_event_ids": op.events, "request_id": request_id})
+                self._commit(op)
+                return resp
             if rc["status"] != "matched" or inv is None or inv["kind"] != "campaign_deposit" or \
                     rc["entity"] != "zbc" or rc["into_account"] != "1020":
                 raise Conflict("only a matched campaign deposit in the deposits account can be returned")
@@ -575,6 +601,7 @@ class BooksMixin:
                    "value_date": str(body["value_date"]), "recorded_by": principal, "at": iso(self._now())}
             op.put("receipts", receipt_id, {**rc, "status": "returned", "return": ret})
             op.put("invoices", inv["invoice_id"], {**inv, "status": "returned", "returned_at": iso(self._now())})
+            self._withdraw_client_receipt(op, receipt_id)        # AEGIS M1: never "thank you" for bounced money
             sf_id = None
             prof = self.db["profiles"].get(camp)
             if shortfall > 0:

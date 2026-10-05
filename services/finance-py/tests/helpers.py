@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 import api
 import config as config_mod
 from clock import FixedClock
-from fakes import (RAIL_SIG, FakeBank, FakeCN, FakeCompliance, FakeGL, FakeLedgerClient, FakeLegal, FakePeople,
-                   FakePush, FakeRail, FakeTax, FakeVI, FakeVault)
+from fakes import (RAIL_SIG, FakeBank, FakeClientMail, FakeCN, FakeCompliance, FakeGL, FakeLedgerClient, FakeLegal,
+                   FakePeople, FakePush, FakeRail, FakeTax, FakeVI, FakeVault)
 from intelligences import i01_journal as J
 from ports import Ports
 
@@ -43,7 +43,7 @@ def make_fakes(clock) -> dict:
     rails["trolley"].balance_available = False                 # dormant, like the stand-in (R8)
     return {"vi": FakeVI(), "compliance": FakeCompliance(clock), "cn": FakeCN(), "legal": FakeLegal(), "rails": rails,
             "bank": FakeBank(clock, rails), "tax": FakeTax(), "gl": FakeGL(), "vault": FakeVault(),
-            "people": FakePeople(), "push": FakePush()}
+            "people": FakePeople(), "push": FakePush(), "client_mail": FakeClientMail()}
 
 
 class Harness:
@@ -55,7 +55,8 @@ class Harness:
         self.f = fakes or make_fakes(self.clock)
         ports = Ports(vi=self.f["vi"], compliance=self.f["compliance"], cn=self.f["cn"], legal=self.f["legal"],
                       rails=self.f["rails"], bank=self.f["bank"], tax=self.f["tax"], gl=self.f["gl"],
-                      vault=self.f["vault"], people=self.f["people"], push=self.f["push"]) if passing else Ports()
+                      vault=self.f["vault"], people=self.f["people"], push=self.f["push"],
+                      client_mail=self.f["client_mail"]) if passing else Ports()
         e = base_env(**(env or {}))
         if data_dir:
             e["FIN_DATA_DIR"] = data_dir
