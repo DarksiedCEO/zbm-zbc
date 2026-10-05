@@ -8,6 +8,7 @@ reachable from the build sandbox.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from decimal import Decimal
@@ -895,3 +896,167 @@ def test_aegis_r1_a_dispute_finance_cannot_book_still_blocks_the_vendor(st):
     assert r.status_code == 409 and "disputed the prepayment" in r.text
     posted = [e["payload"]["entry_id"] for e in st.ledger.events if e["event_type"] == "journal_entry_posted"]
     assert sorted(posted) == sorted(st.svc.entries_by_id)
+
+
+# --------------------------------------------------------------------------------------------- bank feed x Stripe payouts
+
+def bank_line(hr, amount, token=None, value_date="2026-10-03", tag=None):
+    line = {"txn_ref_sha256": hashlib.sha256((tag or rid("bk")).encode()).hexdigest(), "entity": "zbm",
+            "account": "1010", "direction": "credit", "amount": amount, "value_date": value_date}
+    if token:
+        line["reference_token"] = token
+    return hr.ok(hr.post("/fin/v1/bank/events", {"request_id": rid(), "lines": [line]}, caller="bank_feed"))
+
+
+def test_a_stripe_payout_on_the_bank_statement_is_matched_not_booked_twice(st):
+    paid_rr(st, "1200.00")                                               # 1060 = 1195.00
+    po = st.sim.payout(119500, "paid")
+    sent(st, "payout.paid", {"id": po})
+    assert bal(st, "1010") == Decimal("1195.00")
+    r = bank_line(st, "1195.00")
+    assert r["results"][0]["status"] == "stripe_payout"
+    assert bal(st, "1010") == Decimal("1195.00") and bal(st, "2070") == 0       # not counted twice
+    assert not [b for b in st.svc.db["breaks"].values() if b["leg"] == "unapplied_cash"]
+    assert st.svc.db["stripe_payouts"][po]["bank_receipt_id"] == r["results"][0]["receipt_id"]
+    assert bank_line(st, "1195.00")["results"][0]["status"] == "unapplied"    # a second, different credit is not it
+
+
+def test_the_bank_can_arrive_before_stripes_paid_event(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "in_transit")
+    sent(st, "payout.created", {"id": po})
+    r = bank_line(st, "1195.00")
+    assert r["results"][0]["status"] == "stripe_payout"
+    assert bal(st, "1010") == Decimal("1195.00") and bal(st, "1060") == 0
+    st.sim.payouts[po]["status"] = "paid"
+    sent(st, "payout.paid", {"id": po})
+    assert bal(st, "1010") == Decimal("1195.00") and memos(st).count("F13p") == 1
+
+
+def test_payout_matching_by_id_amount_and_window(st):
+    paid_rr(st, "1200.00")
+    a = st.sim.payout(50000, "in_transit")
+    b = st.sim.payout(50000, "in_transit")
+    sent(st, "payout.created", {"id": a})
+    sent(st, "payout.created", {"id": b})
+    assert bank_line(st, "500.00", token=b)["results"][0]["status"] == "stripe_payout"   # exact by payout id
+    assert st.svc.db["stripe_payouts"][b]["bank_receipt_id"] and not st.svc.db["stripe_payouts"][a]["bank_receipt_id"]
+    assert bank_line(st, "500.00", token="po_0000nosuch")["results"][0]["status"] == "unapplied"
+    assert bank_line(st, "500.01")["results"][0]["status"] == "unapplied"                 # amount must match
+    assert bank_line(st, "500.00", value_date="2026-10-20")["results"][0]["status"] == "unapplied"   # outside window
+    assert bank_line(st, "500.00")["results"][0]["status"] == "stripe_payout"             # a, by amount and window
+    assert memos(st).count("F13p") == 2
+
+
+def test_an_invoice_reference_still_wins_over_a_payout_of_the_same_amount(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "in_transit")
+    sent(st, "payout.created", {"id": po})
+    inv = rr_invoice(st, "1195.00", methods=("ach", "wire"))
+    st.bank.deposit("zbm", "1010", "1195.00")
+    assert bank_line(st, "1195.00", token=inv["invoice_id"])["results"][0]["status"] == "matched"
+    assert not st.svc.db["stripe_payouts"][po]["bank_receipt_id"]
+
+
+# --------------------------------------------------------------------------------------------- AEGIS review of da054ef
+
+def test_aegis_lh_h1_a_bad_line_refuses_the_batch_before_anything_posts(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "in_transit")
+    sent(st, "payout.created", {"id": po})
+    posted = sum(e["event_type"] == "journal_entry_posted" for e in st.ledger.events)
+    good = {"txn_ref_sha256": "a" * 64, "entity": "zbm", "account": "1010", "direction": "credit",
+            "amount": "1195.00", "value_date": "2026-10-03"}
+    bad = {**good, "txn_ref_sha256": "b" * 64, "account": "1020"}
+    r = st.post("/fin/v1/bank/events", {"request_id": rid(), "lines": [good, bad]}, caller="bank_feed")
+    assert r.status_code == 422
+    assert sum(e["event_type"] == "journal_entry_posted" for e in st.ledger.events) == posted
+    st.sim.payouts[po]["status"] = "paid"
+    assert sent(st, "payout.paid", {"id": po})["status"] == "payout_paid"      # Stripe ingestion not blocked
+    assert bank_line(st, "1195.00", tag="retry")["results"][0]["status"] == "stripe_payout"
+    assert bal(st, "1010") == Decimal("1195.00") and memos(st).count("F13p") == 1
+
+
+def test_aegis_lh_h2_bank_before_stripe_ever_mentions_the_payout_is_never_booked_twice(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")                                    # payout.created never delivered
+    r = bank_line(st, "1195.00", token=po)
+    assert r["results"][0]["status"] == "unapplied" and bal(st, "2070") == Decimal("1195.00")
+    sent(st, "payout.paid", {"id": po})
+    assert bal(st, "1010") == Decimal("1195.00") and bal(st, "2070") == 0 and bal(st, "1060") == 0
+    rc = st.svc.db["receipts"][r["results"][0]["receipt_id"]]
+    assert rc["status"] == "stripe_payout" and rc["stripe_payout_id"] == po
+    brk = [b for b in st.svc.db["breaks"].values() if b.get("receipt_id") == rc["receipt_id"]]
+    assert brk and brk[0]["status"] == "resolved"
+
+
+def test_aegis_lh_m1_m2_amount_matching_needs_no_reference_and_a_first_seen_date(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(50000, "in_transit")
+    sent(st, "payout.created", {"id": po})
+    assert bank_line(st, "500.00", token="fin-inv-TYPO")["results"][0]["status"] == "unapplied"   # M2
+    st.svc.db["stripe_payouts"][po] = {k: v for k, v in st.svc.db["stripe_payouts"][po].items()
+                                       if k != "first_seen_on"}                                  # a legacy record
+    assert bank_line(st, "500.00", value_date="2027-06-01")["results"][0]["status"] == "unapplied"  # M1
+    assert bank_line(st, "500.00", token=po)["results"][0]["status"] == "stripe_payout"           # exact id still
+
+
+def test_aegis_lh_l1_a_payout_failed_after_the_bank_showed_it_opens_a_break(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")
+    sent(st, "payout.paid", {"id": po})
+    bank_line(st, "1195.00")
+    st.sim.payouts[po]["status"] = "failed"
+    sent(st, "payout.failed", {"id": po})
+    assert [b for b in st.svc.db["breaks"].values() if b["leg"] == "stripe_payout" and b["status"] == "open"]
+
+
+@pytest.mark.parametrize("bad", [True, "1", " 1.0", 1.0])
+def test_aegis_lh_l6_contract_versions_are_never_coerced(bad):
+    import models as m
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        m.DocRef.model_validate({"doc_id": "client_msa", "version": bad, "doc_sha256": "c" * 64,
+                                 "acceptance_id": "a1"})
+    assert m.DocRef.model_validate({"doc_id": "x", "version": "1.1", "doc_sha256": "c" * 64,
+                                    "acceptance_id": "a1"}).version == "1.1"
+
+
+
+# --------------------------------------------------------------------------------------------- AEGIS re-review of d1b2afe
+
+def test_aegis_lh_n2_an_amount_match_is_only_suggested_never_relabelled(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")
+    r = bank_line(st, "1195.00")                                          # a client ACH with no reference, or the payout
+    rct = r["results"][0]["receipt_id"]
+    sent(st, "payout.paid", {"id": po})
+    rc = st.svc.db["receipts"][rct]
+    assert rc["status"] == "unapplied"                                    # not relabelled
+    brk = st.svc.db["breaks"][[k for k, b in st.svc.db["breaks"].items() if b.get("receipt_id") == rct][0]]
+    assert brk["status"] == "open" and brk["suggested_stripe_payout_id"] == po
+    assert bal(st, "1010") == Decimal("2390.00") and bal(st, "1060") == 0  # visible to L2 against the bank
+
+
+def test_aegis_lh_n1_a_receipt_andre_already_reversed_is_never_reclassified(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")
+    r = bank_line(st, "1195.00", token=po)
+    rct = r["results"][0]["receipt_id"]
+    entry = st.svc.entries_by_id[st.svc.db["receipts"][rct]["entry_id"]]
+    st.ok(st.post("/fin/v1/journal/zbm/corrections", {"request_id": rid(), "effective_date": "2026-10-02",
+                                                        "reverses_entry_id": entry["entry_id"]}, andre=ANDRE_TOKEN), 201)
+    sent(st, "payout.paid", {"id": po})
+    assert bal(st, "2070") == 0 and bal(st, "1010") == Decimal("1195.00")
+    assert st.svc.db["receipts"][rct]["status"] == "unapplied"
+
+
+def test_aegis_lh_n4_an_explained_break_is_also_closed_on_an_exact_match(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")
+    r = bank_line(st, "1195.00", token=po)
+    rct = r["results"][0]["receipt_id"]
+    bid = [k for k, b in st.svc.db["breaks"].items() if b.get("receipt_id") == rct][0]
+    st.svc.db["breaks"][bid] = {**st.svc.db["breaks"][bid], "status": "explained"}
+    sent(st, "payout.paid", {"id": po})
+    assert st.svc.db["breaks"][bid]["status"] == "resolved"

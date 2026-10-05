@@ -27,6 +27,11 @@ CLOSE_TASKS = ("preclose_review", "subledgers_closed", "balance_sheet_recs", "re
                "exception_aging", "rollforward_2020_1200")
 
 
+def legal_version(v) -> str:
+    """Legal (37) numbers versions ``major.minor``; a whole number recorded before Legal was wired means ``n.0``."""
+    return f"{v}.0" if isinstance(v, int) else str(v)
+
+
 class BooksMixin:
     # ================================================================== rate cards (§B.3)
 
@@ -231,21 +236,24 @@ class BooksMixin:
             self._commit(op)
             return resp
 
-    def _legal(self, g: Gather, ref: dict) -> LegalAnswer:
+    def _legal(self, g: Gather, ref: dict, client_id: str, entity: str) -> LegalAnswer:
+        """Legal (37) confirms the contract: in force, this hash, this entity's, and accepted by THIS client."""
         legal = self.ports.legal
-        args = (ref["doc_id"], ref["version"], ref["doc_sha256"], ref["acceptance_id"])
+        args = (ref["doc_id"], legal_version(ref["version"]), ref["doc_sha256"], ref["acceptance_id"],
+                f"client:{client_id}", entity)
         ans = g.call("legal_37", "document_status", args, lambda: legal.document_status(*args), LegalAnswer(False))
         return ans if isinstance(ans, LegalAnswer) else LegalAnswer(False)
 
-    def _legal_reasons(self, g: Gather, ref: dict, what: str) -> list[dict]:
-        ans = self._legal(g, ref)
+    def _legal_reasons(self, g: Gather, ref: dict, what: str, client_id: str, entity: str) -> list[dict]:
+        ans = self._legal(g, ref, client_id, entity)
         if not ans.available:
             return [R.item("DEPENDENCY_UNAVAILABLE:legal_37", f"Legal (37) cannot confirm the {what}", rule="FIN-29")]
         out = []
         if not ans.current:
             out.append(R.item("LEGAL_NOT_CURRENT", f"the {what} version is not current at Legal"))
         if not ans.acceptance_matches:
-            out.append(R.item("LEGAL_NOT_CURRENT", f"the {what} acceptance record does not match its sha256"))
+            out.append(R.item("LEGAL_NOT_CURRENT", f"the {what} acceptance does not match this document, hash and "
+                                                   "client"))
         return out
 
     def _fundable_reasons(self, g: Gather, campaign_id: str) -> list[dict]:
@@ -253,7 +261,7 @@ class BooksMixin:
         if prof is None:
             return [R.item("CAMPAIGN_NOT_FUNDED", "no Andre-approved commercial profile for this campaign")]
         out = self._counsel_reasons("FIN-CQ-01")
-        out += self._legal_reasons(g, prof["order_form"], "order form")
+        out += self._legal_reasons(g, prof["order_form"], "order form", prof["client_id"], "zbc")
         if prof["status"] in ("paused", "closing", "closed"):
             out.append(R.item("CAMPAIGN_NOT_FUNDED", f"campaign is {prof['status']}"))
         return out
@@ -266,7 +274,7 @@ class BooksMixin:
             unmet.append(R.item("LEGAL_NOT_CURRENT", "no Andre-approved client billing profile (entity, payment method, "
                                                      "MSA)"))
         else:
-            unmet += self._legal_reasons(g, prof["msa"], "MSA")
+            unmet += self._legal_reasons(g, prof["msa"], "MSA", client_id, prof["entity"])
             if prof["payment_method"] not in I2.PAYMENT_METHODS:
                 unmet.append(R.item("CARD_DISABLED", "payment method must be ACH or wire"))
             if prof["entity"] == "zbc":
@@ -366,7 +374,8 @@ class BooksMixin:
         g = Gather(self, f"invdec|{request_id}", "intel_02_receivables", invoice_id)
         reasons = list(self._rules_reasons())
         if body["decision"] == "approve" and not reasons:
-            reasons += self._legal_reasons(g, inv["legal_ref"], "contract (MSA/order form/SOW)")
+            reasons += self._legal_reasons(g, inv["legal_ref"], "contract (MSA/order form/SOW)", inv["client_id"],
+                                           inv["entity"])
             reasons += [R.item("TAX_TREATMENT_UNVERIFIED", "sales-tax treatment (FIN-CQ-11) is unverified",
                                obligation_id="FIN-CQ-11")] if not self.counsel_verified("FIN-CQ-11") else []
             if inv["kind"] == "campaign_deposit":
@@ -438,6 +447,10 @@ class BooksMixin:
             if ent:
                 return ent["response"]
             self.require_rules()
+            # AEGIS (launch hardening) H1: every refusal a line can draw is checked BEFORE anything is posted, so a
+            # bad line can never leave an earlier line's ledger events without their local record
+            if any(ln["entity"] == "zbm" and ln["account"] == "1020" for ln in lines):
+                raise Invalid("ZBM has no restricted deposits account (1020 is ZBC's)")
             op = Op(self, f"bank|{request_id}", "intel_02_receivables", "bank_feed")
             results = []
             for ln in lines:
@@ -454,6 +467,21 @@ class BooksMixin:
                 ok_zbc = inv is not None and entity == "zbc" and acct == "1020" and inv["kind"] == "campaign_deposit"
                 ok_zbm = inv is not None and entity == "zbm" and acct == "1010"
                 src = {"kind": "receipt", "id": rct}
+                try:
+                    po = self._bank_stripe_payout(op, ln, amt, rct) if (inv is None and entity == "zbm"
+                                                                         and acct == "1010") else None
+                except PostingRefused as exc:
+                    raise InvalidReasons("statement line could not be posted", exc.reasons) from None
+                if po is not None:
+                    # a Stripe payout already in the books (F13p): matched, never booked again as unapplied cash
+                    op.put("receipts", rct, {"receipt_id": rct, "invoice_id": None, "entity": entity,
+                                             "amount": M.fmt(amt), "method": "stripe_payout",
+                                             "bank_txn_ref_sha256": ln["txn_ref_sha256"], "into_account": acct,
+                                             "value_date": str(ln["value_date"]), "matched_at": iso(self._now()),
+                                             "status": "stripe_payout", "entry_id": po["entry_id"],
+                                             "stripe_payout_id": po["payout_id"]})
+                    results.append({"receipt_id": rct, "status": "stripe_payout", "entry_id": po["entry_id"]})
+                    continue
                 try:
                     if ok_zbc:
                         e = self._post(op, "zbc", [J.dr("1020", amt), J.cr("2010", amt, f"campaign:{inv['campaign_id']}")],
@@ -494,7 +522,8 @@ class BooksMixin:
                                          "bank_txn_ref_sha256": ln["txn_ref_sha256"], "into_account": acct,
                                          "value_date": ln["value_date"].isoformat() if isinstance(ln["value_date"], date)
                                          else str(ln["value_date"]), "matched_at": iso(self._now()),
-                                         "status": status, "entry_id": e["entry_id"]})
+                                         "status": status, "entry_id": e["entry_id"],
+                                         "reference_token": ln.get("reference_token")})
                 if status == "matched":
                     self._client_receipt(op, rct, inv, M.fmt(amt), str(ln["value_date"]))
                 results.append({"receipt_id": rct, "status": status, "entry_id": e["entry_id"]})

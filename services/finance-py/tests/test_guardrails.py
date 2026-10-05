@@ -186,7 +186,8 @@ def test_g9_the_balance_check_fixture_is_armed():
     {"FIN_RELEASE_DELAY_H": "48", "FIN_APPROVAL_TTL_H": "24"}, {"FIN_MIN_PAYOUT": "10"}, {"FIN_MIN_PAYOUT": "0.00"},
     {"FIN_ACCESS_REVIEW_DAYS": "365"}, {"FIN_CLAWBACK_WRITEOFF_MIN_DAYS": "30"}, {"FIN_IDENTITY_HMAC_KEY": "k"},
     {"FIN_VI_URL": "http://127.0.0.1:1"}, {"FIN_COMPLIANCE_URL": "http://x", "FIN_COMPLIANCE_TOKEN": "t"},
-    {"FIN_CN_URL": "http://x"}, {"FIN_LEGAL_URL": "http://x"}, {"FIN_UNMATCHED_TIN_POLICY": "pay"},
+    {"FIN_CN_URL": "http://x"}, {"FIN_LEGAL_URL": "http://x"}, {"FIN_LEGAL_URL": "http://x", "FIN_LEGAL_TOKEN": "t"},
+    {"FIN_UNMATCHED_TIN_POLICY": "pay"},
     {"FIN_PAYEE_CHANGE_COOLING_OFF_H": "1"}, {"FIN_RUN_WEEKDAY": "FUNDAY"}, {"FIN_EVIDENCE_RETENTION_DAYS": "30"},
 ])
 def test_config_refuses_what_it_cannot_honour(over):

@@ -690,3 +690,84 @@ Lows, listed and not fixed:
 - `job_runs` grows by one record each time the repeatable job runs.
 - Webhooks waiting their turn still hold a worker thread for up to 30 s.
 - A receipt withdrawn under R1 stays withdrawn even if the dispute is later won.
+
+## Amendment: launch hardening (Oct 5 2026, branch `fin-launch-hardening`)
+
+**Founder rulings.**
+- **M12. No card surcharge, ever.** The card fee is built into the price. That price must be the same for every
+  payment method; a higher price for card would be a surcharge under another name. The code still has no fee line
+  (FIN-21), and nothing about prices changes in code.
+- **Banks.** ZBM banks with Bank of America. ZBC has no bank yet (Chase or Wells Fargo). Clipper payouts and 1099s
+  go through Stripe Connect when that is built; ZBC is the 1099 filer. There are no employees, so no payroll.
+
+**What was built.**
+1. **Legal (37) wired** (`clients.HttpLegal`, `FIN_LEGAL_URL` / `FIN_LEGAL_TOKEN` / `FIN_LEGAL_CALLER_TOKEN`).
+   Before this, every invoice approval, MSA billing-readiness check and ZBC funding check failed closed in
+   production, because Legal was a stand-in.
+   - **When a contract counts.** Legal's own in-force rule applies (approved, `effective_at <= now < review_by`).
+     The contract must also:
+     - carry the stated hash;
+     - belong to the invoicing entity;
+     - have been accepted with sufficient evidence by THAT client (`party_ref client:<id>`).
+   - An unpinned (non-production) Legal, a 404, or an answer Finance cannot read is never a pass.
+   - **Bug fixed.** `DocRef.version` was an integer, but Legal numbers versions `major.minor`, so no contract could
+     ever have matched. It now takes Legal's format. A legacy integer `n` means `"n.0"`, and Legal confirms or
+     refuses it.
+   - **Proven against a live legal-py:** the cross-service check in legal-py `devtools/live_run.py` passes 43/43.
+2. **`stripe-gateway` (services/orchestrator-go/cmd/stripe-gateway).** This is the public Stripe webhook entry
+   point; see its README. Finance's live run sends Stripe's delivery through the built binary.
+3. **The bank feed recognises Stripe payouts.** A ZBM 1010 credit that is not an invoice payment is matched to an
+   unmatched Stripe payout, either:
+   - exactly, by a `po_` reference; or
+   - by the oldest payout of that exact amount first seen between 10 days before and 2 days after the line's value
+     date.
+
+   If Stripe's paid event has not arrived yet, the bank line is the proof: F13p posts from it under the same key, so
+   it never posts twice. An invoice reference always wins over a payout.
+4. **Not built, by decision: pruning `stripe_events` and repeatable `job_runs`.** The store is an append-only log
+   with no delete. At about 50 Stripe events a day, growth is about 18k small records a year plus 8.8k job records.
+   Adding a delete primitive to the evidence log is more risk than the space it saves. Revisit if volume grows by
+   orders of magnitude.
+
+**AEGIS review of da054ef: BLOCKING** on two Highs, both in the payout matching. They were fixed in the follow-up
+commit, along with the cheap Mediums and Lows.
+- **H1.** A line refused later in a bank batch could leave an earlier line's F13p on the ledger without its local
+  record, which would also block Stripe's `payout.paid` (same key).
+  - Fix: every refusal a line can draw is now checked before anything posts.
+- **H2.** A bank line that arrived before Stripe ever mentioned the payout was booked as unapplied cash, and the
+  later `payout.paid` posted 1010 a second time.
+  - Fix: `payout.paid` now finds that unapplied receipt and reclassifies it (Dr 2070 / Cr 1060). It matches either by
+    the payout id, or, with no reference at all, by the oldest receipt of exactly that amount dated from 10 days
+    before to 2 days after the payout was first seen. The receipt's break is resolved.
+  - Receipts now keep the line's reference token.
+- **M1.** A payout record with no first-seen date is matched by its id only.
+- **M2.** A line carrying any reference is matched to a payout only by that payout's id, never by amount.
+- **L1.** A payout that failed after the bank showed it arriving opens a `stripe_payout` break.
+- **L6.** `DocRef.version` is strict: no bool, numeric-string or padded coercion.
+- **L7.** stripe-gateway refuses (413) a body that would exceed Finance's route limit once JSON-escaped.
+- **L8.** stripe-gateway uses no HTTP proxy, and talks plain http only to a loopback Finance; anywhere else needs https.
+- **L2, L4.** The HttpLegal docstring now says what the code does: in force per version; a 404 counts as unavailable.
+- **Mutation check:** all 5 new guards were killed by their tests.
+
+Lows documented, not changed:
+- **L3.** An executed MSA stops supporting invoices at its Legal `review_by` until Legal renews it. This fails closed.
+- **L5.** Client ids with `:` or over 100 characters can never match Legal's party_ref, so they are refused.
+- **L9.** There is no in-flight cap on the gateway; it binds to loopback behind the proxy.
+
+**AEGIS re-review of d1b2afe: NOT BLOCKING.** All eight earlier fixes are confirmed. The two recommended Mediums and
+two Lows were fixed in the follow-up commit:
+- **N1.** A receipt Andre already reversed (exact-reversal correction) could have been reclassified.
+  - Fix: only a live receipt counts: its unapplied break is open or explained, and its entry is not reversed.
+- **N2.** A client payment of the same amount could have been relabelled as a payout automatically.
+  - Fix: automatic reclassification now happens ONLY when the bank line carried the payout's own id.
+  - An amount match is written on the break as a suggestion (`suggested_stripe_payout_id`), and F13p posts to 1010 as
+    normal.
+  - Reconciliation L2 then shows 1010 above the bank by that amount until Andre exact-reverses the unapplied
+    receipt's entry.
+- **N4.** An "explained" break is closed too on an exact match.
+- **N5.** The gateway dial now has a 10 s connect timeout and a 30 s keep-alive.
+- **Mutation check:** all 7 guards were killed.
+
+Not changed:
+- **N3 (Low).** A mid-batch `PERIOD_LOCKED` refusal is still possible after an earlier line posted. That needs a
+  locked current period while bank lines for today arrive; close locks only past periods.

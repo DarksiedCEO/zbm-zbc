@@ -15,3 +15,11 @@ regexes = [
   '''^FAKEsecret9Zq7Hunter2Xy81Lp$''',
   '''^tangerine-walrus-42$''',
 ]
+
+[[allowlists]]
+description = "Deliberately fake Stripe test-key shapes used by finance-py's simulated Stripe (tests/stripe_sim.py) and its live run (devtools/live_run.py); invented, not issued by Stripe. Exact strings, matched against the detected secret."
+regexTarget = "secret"
+regexes = [
+  '''^sk_test_51FinanceSimulatedKey000000000000$''',
+  '''^sk_test_51LiveRunSimulatedKey0000000000$''',
+]

@@ -106,6 +106,9 @@ class Settings:
     compliance_url: Optional[str] = None
     compliance_token: Optional[str] = None
     compliance_caller_token: Optional[str] = None
+    legal_url: Optional[str] = None
+    legal_token: Optional[str] = None
+    legal_caller_token: Optional[str] = None
     rails: tuple = RAILS
     run_weekday: str = "FRI"
     run_local_time: str = "10:00"
@@ -252,7 +255,7 @@ def load(env: Optional[dict] = None) -> Settings:
                        ("FIN_BANK_FEED", "a bank feed / bank transfer adapter (bank not chosen)"),
                        ("FIN_TAX_AGENT", "a tax agent adapter (TIN matching route, FIN-CQ-06)"),
                        ("FIN_VAULT", "the Cybersecurity 22 vault"),
-                       ("FIN_CN_URL", "a Clipper Network thin client"), ("FIN_LEGAL_URL", "a Legal 37 thin client"),
+                       ("FIN_CN_URL", "a Clipper Network thin client"),
                        ("FIN_PEOPLE_URL", "a People 43 thin client"), ("FIN_PUSH_URL", "a push channel to Andre"),
                        ("FIN_IDENTITY_HMAC_KEY", "an identity HMAC key outside the vault (it lives only in the vault)")):
         _off(env, name, what)
@@ -292,6 +295,7 @@ def load(env: Optional[dict] = None) -> Settings:
         raise RuntimeError("FIN_ALLOW_UNPINNED_SEED=1 needs FIN_SEED_SHA256 (the unpinned seed's own hash, stated)")
     vi = _thin(env, "FIN_VI", "Verification and Integrity")
     cmp_ = _thin(env, "FIN_COMPLIANCE", "Compliance (38)")
+    legal = _thin(env, "FIN_LEGAL", "Legal (37)")
     second_threshold = _money(env, "FIN_DUAL_HUMAN_THRESHOLD", "0.00")
     # Founder M10 (Oct 5 2026): card is accepted for Revenue Recovery invoices up to $5,000 "like 99% of companies
     # with internet services"; above that, ACH. The cap may be set lower, never higher. No surcharge (FIN-21 stays).
@@ -314,6 +318,7 @@ def load(env: Optional[dict] = None) -> Settings:
         reconcile_mode=_flag(env, "FIN_RECONCILE_MODE", False),
         vi_url=vi[0], vi_token=vi[1], vi_caller_token=vi[2],
         compliance_url=cmp_[0], compliance_token=cmp_[1], compliance_caller_token=cmp_[2],
+        legal_url=legal[0], legal_token=legal[1], legal_caller_token=legal[2],
         rails=rails, run_weekday=weekday,
         run_local_time=(env.get("FIN_RUN_LOCAL_TIME") or "10:00").strip(),
         recon_local_time=(env.get("FIN_RECON_LOCAL_TIME") or "07:00").strip(),
