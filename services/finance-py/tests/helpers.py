@@ -49,7 +49,7 @@ def make_fakes(clock) -> dict:
 class Harness:
     def __init__(self, env: Optional[dict] = None, data_dir: Optional[str] = None, clock: Optional[FixedClock] = None,
                  ledger: Optional[FakeLedgerClient] = None, passing: bool = True, fakes: Optional[dict] = None,
-                 log=None):
+                 log=None, stripe_in=None):
         self.clock = clock or FixedClock(NOW)
         self.ledger = ledger if ledger is not None else FakeLedgerClient()
         self.f = fakes or make_fakes(self.clock)
@@ -57,6 +57,8 @@ class Harness:
                       rails=self.f["rails"], bank=self.f["bank"], tax=self.f["tax"], gl=self.f["gl"],
                       vault=self.f["vault"], people=self.f["people"], push=self.f["push"],
                       client_mail=self.f["client_mail"]) if passing else Ports()
+        if stripe_in is not None:
+            ports.stripe_in = stripe_in
         e = base_env(**(env or {}))
         if data_dir:
             e["FIN_DATA_DIR"] = data_dir

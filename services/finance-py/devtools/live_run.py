@@ -230,8 +230,18 @@ def _main(work: Path) -> int:
         start([ledger_bin], {"LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEDGER_PORT": str(plb),
                              "LEDGER_LOG_PATH": str(work / "lb" / "ledger.jsonl")}, str(work / "lb"), "ledger_b", work)
         wait_up(f"{LB}/health")
+        keydir = work / "stripe-keys"
+        keydir.mkdir(mode=0o700)
+        for name, val in (("sk", "sk_test_51LiveRunSimulatedKey0000000000"), ("wh", "whsec_LiveRunSimulatedSecret00000")):
+            (keydir / name).write_text(val)
+            os.chmod(keydir / name, 0o600)
         envb = {**common, "LEDGER_SERVICE_URL": LB, "FIN_PORT": str(pfb), "FIN_DATA_DIR": str(work / "fb"),
-                "FIN_DEVTOOLS_STATE_FILE": str(work / "fb_world.pkl")}
+                "FIN_DEVTOOLS_STATE_FILE": str(work / "fb_world.pkl"),
+                # Stripe incoming against the simulated Stripe (ADR 0009 amendment, Oct 5 2026)
+                "FIN_STRIPE_INCOMING": "1", "FIN_STRIPE_SECRET_KEY_FILE": str(keydir / "sk"),
+                "FIN_STRIPE_WEBHOOK_SECRET_FILE": str(keydir / "wh"),
+                "FIN_STRIPE_SUCCESS_URL": "https://zbestmedia.com/pay/thanks",
+                "FIN_STRIPE_CANCEL_URL": "https://zbestmedia.com/pay/cancelled", "FIN_CARD_PREPAYMENTS": "1"}
         fb = start([sys.executable, str(SVC / "devtools" / "live_server.py")], envb, str(SVC), "finance_b", work)
         wait_up(f"http://127.0.0.1:{pfb}/health")
         B = Fin(f"http://127.0.0.1:{pfb}")
@@ -403,6 +413,48 @@ def _main(work: Path) -> int:
         check("M: ZBM trial balance difference 0.00", tbz["difference"] == "0.00")
         r = B.recon()
         check("M: reconciliation after the media buy: every leg matched (ZBM 1010, 2120, 1150 per buy)", r["fc01"])
+        # ---- Stripe incoming (ADR 0009 amendment, Oct 5 2026): checkout, signed webhooks, fees, dispute, payout
+        def stripe_event(typ, obj):
+            ev = B.dev("/devtools/stripe/event", {"type": typ, "object": obj})
+            return B.post("/fin/v1/stripe/events", {"request_id": rid(), **ev}, caller="rail_gateway").json()
+
+        rr = B.post("/fin/v1/invoices", {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-rr",
+                                         "kind": "service", "payment_methods": ["ach", "card"], "legal_ref": io,
+                                         "lines": [{"line_code": "revenue_recovery_services", "quantity": 1,
+                                                    "unit_price": "2500.00"}]}, caller="onboarding").json()["invoice"]
+        rr = B.post(f"/fin/v1/invoices/{rr['invoice_id']}/decision",
+                    {"request_id": rid(), "content_sha256": rr["content_sha256"], "decision": "approve"},
+                    andre=True).json()["invoice"]
+        co = B.post(f"/fin/v1/invoices/{rr['invoice_id']}/stripe-checkout", {"request_id": rid()},
+                    caller="onboarding").json()["checkout"]
+        check("S: Stripe checkout for a 2500.00 Revenue Recovery invoice offers ACH and card",
+              co["methods"] == ["us_bank_account", "card"] and co["url"].startswith("https://checkout.stripe.com/"))
+        pi = B.dev("/devtools/stripe/pay", {"session_id": co["session_id"], "method": "card"})["payment_intent"]
+        ev = stripe_event("checkout.session.completed", {"id": co["session_id"], "object": "checkout.session"})
+        check("S: signed webhook verified, payment read back from Stripe and matched (F13 + F13f card fee 72.80)",
+              ev["status"] == "matched"
+              and B.get(f"/fin/v1/invoices/{rr['invoice_id']}")["status"] == "paid")
+        dup = stripe_event("payment_intent.succeeded", {"id": pi, "object": "payment_intent"})
+        check("S: the same payment announced again books nothing", dup["status"] == "payment_already_booked")
+        du = B.dev("/devtools/stripe/dispute", {"payment_intent": pi})["dispute_id"]
+        d1 = stripe_event("charge.dispute.created", {"id": du, "object": "dispute"})
+        B.dev("/devtools/stripe/dispute", {"close": True, "dispute_id": du, "won": True, "fee_back": 1500})
+        d2 = stripe_event("charge.dispute.closed", {"id": du, "object": "dispute"})
+        check("S: card dispute withdrawn (F7) then won and reinstated (F7a)",
+              d1["status"] == "dispute_needs_response" and d2["status"] == "dispute_won")
+        po = B.dev("/devtools/stripe/payout", {"amount_cents": 242720, "status": "in_transit"})["payout_id"]
+        stripe_event("payout.created", {"id": po, "object": "payout"})
+        rs = B.recon()
+        l3 = [x for x in rs["recon"]["legs"] if x["subject"] == "zbm:1060"]
+        check("S: L3 Stripe balance vs 1060 (payout in transit counted) matched", l3 and l3[0]["status"] == "matched")
+        B.dev("/devtools/stripe/payout", {"payout_id": po, "status": "paid"})
+        p1 = stripe_event("payout.paid", {"id": po, "object": "payout"})
+        tbz = B.get("/fin/v1/journal/zbm/trial-balance")
+        check("S: payout paid to the operating account (F13p); ZBM trial balance difference 0.00",
+              p1["status"] == "payout_paid" and tbz["difference"] == "0.00")
+        B.dev("/devtools/bank/deposit", {"entity": "zbm", "account": "1010", "amount": "2427.20"})   # the bank shows it
+        rs = B.recon()
+        check("S: reconciliation after Stripe: every leg matched", rs["fc01"])
         tb_before = B.get("/fin/v1/journal/zbc/trial-balance")
         check("B: ZBC trial balance difference 0.00", tb_before["difference"] == "0.00")
         integ = B.get("/fin/v1/integrity")
@@ -418,6 +470,9 @@ def _main(work: Path) -> int:
         check("M: restart: ZBM trial balance and the media buy survive",
               B2.get("/fin/v1/journal/zbm/trial-balance") == tbz
               and B2.get(f"/fin/v1/media-buys/{bid}")["status"] == "delivered")
+        check("S: restart: the Stripe checkout and the paid invoice survive",
+              B2.get(f"/fin/v1/invoices/{rr['invoice_id']}/stripe-checkout", caller="onboarding")["sessions"][0]
+              ["session_id"] == co["session_id"] and B2.get(f"/fin/v1/invoices/{rr['invoice_id']}")["status"] == "paid")
         check("B: restart: integrity green", B2.get("/fin/v1/integrity")["status"] == "green")
         leases = [e for e in httpx.get(f"{LB}/ledger/entries", headers={"Authorization": f"Bearer {LEDGER_TOKEN}"},
                                        timeout=60).json() if e.get("event_type") == "instance_lease"]

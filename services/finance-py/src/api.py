@@ -70,6 +70,7 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/fin/v1/rate-cards/decisions$"), 64 * 1024),
     (re.compile(r"^/fin/v1/bank/events$"), 128 * 1024),
     (re.compile(r"^/fin/v1/rails/[a-z]+/events$"), 64 * 1024),
+    (re.compile(r"^/fin/v1/stripe/events$"), 300 * 1024),          # a raw Stripe event (<= 256 KiB) in JSON
     (re.compile(r"^/fin/v1/invoices$"), 64 * 1024),
     (re.compile(r"^/fin/v1/payout-handoffs$"), 32 * 1024),
     (re.compile(r"^/fin/v1/journal/[a-z]+/corrections$"), 32 * 1024),
@@ -523,6 +524,33 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                     req: m.RailEvents = Depends(body(m.RailEvents))) -> dict:
         return svc.rail_events(who, req.request_id, _id(rail), [e.model_dump(mode="python") for e in req.events])
 
+    # --- Stripe incoming (ADR 0009 amendment, Oct 5 2026) -----------------------------------------------------------
+
+    @app.post("/fin/v1/invoices/{invoice_id}/stripe-checkout", dependencies=auth)
+    def stripe_checkout(invoice_id: str, who: str = Depends(andre_or_caller("stripe/checkout", "onboarding")),
+                        req: m.StripeCheckoutRequest = Depends(body(m.StripeCheckoutRequest))) -> dict:
+        return svc.stripe_checkout(who, req.request_id, _id(invoice_id))
+
+    @app.get("/fin/v1/invoices/{invoice_id}/stripe-checkout", dependencies=auth)
+    def stripe_checkout_view(invoice_id: str, _: str = Depends(andre_or_caller("stripe/checkout", "onboarding"))) -> dict:
+        return svc.get_stripe_checkout(_id(invoice_id))
+
+    def stripe_body(payload: Any = Body(default=None)) -> m.StripeEventIn:
+        # NOT body(): Stripe's raw event legitimately carries bank last-4s, emails and names, which the sensitive-data
+        # scan refuses. Finance verifies the signature, reads only ids from it, and never stores or logs the body.
+        if payload is None:
+            raise RequestValidationError([{"loc": ("body",), "msg": "a JSON body is required", "type": "missing"}])
+        try:
+            return m.StripeEventIn.model_validate(payload)
+        except ValidationError as exc:
+            raise RequestValidationError(
+                [{**e, "loc": ("body", *e.get("loc", ()))} for e in exc.errors(include_url=False, include_input=False)]
+            ) from None
+
+    @app.post("/fin/v1/stripe/events", dependencies=auth)
+    def stripe_events(who: str = Depends(caller("rail_gateway")), req: m.StripeEventIn = Depends(stripe_body)) -> dict:
+        return svc.stripe_event(who, req.request_id, req.payload, req.signature)
+
     @app.post("/fin/v1/disputes", dependencies=auth, status_code=201)
     def dispute(who: str = Depends(andre_or_caller("disputes", "rail_gateway")),
                 req: m.DisputeOpen = Depends(body(m.DisputeOpen))) -> dict:
@@ -743,6 +771,11 @@ def build_ports(settings: config_mod.Settings) -> Ports:
         from clients import HttpCompliance
         ports.compliance = HttpCompliance(settings.compliance_url, settings.compliance_token,
                                           settings.compliance_caller_token)
+    if settings.stripe_incoming:
+        from stripe_incoming import StripeIncoming
+        ports.stripe_in = StripeIncoming(settings.stripe_secret_key.reveal(), settings.stripe_webhook_secret.reveal(),
+                                         settings.stripe_livemode, settings.stripe_success_url,
+                                         settings.stripe_cancel_url)
     return ports
 
 

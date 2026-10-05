@@ -539,3 +539,80 @@ L2 and L3, which are documented here.
 - For an ACH **credit** the client pushes, Nacha still lets the client's bank reverse an erroneous entry within 5
   banking days. A reversal on day 3 to 5, after the vendor is paid, opens the existing `media_exposure` break.
   ZBM would then carry the loss until the client pays again.
+
+## Amendment: Stripe incoming for ZBM (Oct 5 2026, branch `fin-stripe-wiring`)
+
+**Founder decisions.** Stripe is the only processor (M6). The founder said "We'll wire Stripe in because we're going to
+need it." Card is allowed only for Revenue Recovery, at most $5,000 (M10). Media and everything else go by ACH (M9).
+
+**What was built.** It is off unless `FIN_STRIPE_INCOMING=1`, and it is ZBM only.
+- **Checkout: `POST /fin/v1/invoices/{id}/stripe-checkout`** (Andre or `onboarding`).
+  - Makes a Stripe-hosted Checkout Session for an ISSUED ZBM invoice.
+  - `allowed_payment_method_types` is `us_bank_account` when the invoice allows ACH.
+  - `card` is added only when the invoice allows card AND `I2.card_problems` passes at that moment. If the switch was
+    turned off after the invoice was drafted, the card is dropped.
+  - The idempotency key is derived from invoice, attempt, total and methods, so a retry never makes a second page.
+  - An open page is handed back instead of making a new one.
+  - ZBC is refused (FIN-CQ-02 custody; ZBC also needs its own Stripe account under its own EIN).
+  - Wire-only invoices, totals outside 0.50 to 999,999.99, and unissued invoices are refused.
+- **Webhooks: `POST /fin/v1/stripe/events`** (caller `rail_gateway`, the raw body plus `Stripe-Signature`).
+  - The signature is checked first: v1 HMAC-SHA256 over `"{t}.{body}"`, 300 s tolerance either side, every `v1`
+    candidate compared in constant time.
+  - Only the event id, type, mode and object id are read from the body. The body is never stored or logged, and it
+    skips the sensitive-data scan because it legitimately carries bank last-4s and emails.
+  - The named object is then READ BACK from Stripe, and only that answer is booked. Each read-back must be the object
+    asked for (same `id` and `object`), and the found answer must carry its status and amounts. Anything else is
+    "unavailable".
+  - Unavailable gives a 503 with nothing recorded, so Stripe retries. Events are deduplicated by id. Every apply step
+    is idempotent per Stripe object, so ordering does not matter.
+  - Events from the other mode, and unknown types, are recorded as ignored.
+- **Flows.** These are ZBM only. i01 refuses `F13*` to ZBC, and refuses 1060 to every flow but these and a correction.
+  - **F13:** Dr 1060 Stripe balance / Cr 1100[client]. If the payment does not match an issued invoice of that exact
+    amount and allowed method that Finance made a checkout for, it credits 2070 instead and opens an
+    `unapplied_cash` break.
+  - **F13f:** Stripe's fee. Dr 5020 / Cr 1060.
+  - **F13x:** a payment that failed after it succeeded. It reverses to 1100 (or 2070), and the invoice is owed again.
+  - **F7:** dispute funds withdrawn (to 1300) and the dispute fee (to 5030).
+  - **F7a:** the same reinstated.
+  - **F7l:** a lost dispute. Dr 1100[client] / Cr 1300; the invoice is owed again and the client receipt is withdrawn.
+  - **F13p:** a payout reached 1010.
+  - **F13q:** a paid payout that failed.
+  - Dispute and failure amounts come from Stripe's own balance transactions, never from an assumed fee policy.
+- **Media.**
+  - A Stripe ACH prepayment starts the 2-business-day hold. The money date is the day Finance first sees the payment
+    succeeded, never earlier than Stripe's.
+  - An open dispute blocks vendor payments (`COLLECT_BEFORE_PAY`).
+  - A dispute after the vendor was paid opens `media_exposure`.
+  - A loss or failure sends the buy back to `awaiting_payment`, or to `payment_returned` with an exposure break if the
+    vendor was already paid. This is the same helper as the bank-return path.
+- **Reconciliation L3 `zbm:1060`.** 1060, less payouts in transit, vs Stripe available + pending (USD). A Stripe
+  charge Finance never saw (a monthly fee, a Dashboard refund) shows as a break for Andre to book by correction.
+- **Secrets.** `FIN_STRIPE_SECRET_KEY_FILE` and `FIN_STRIPE_WEBHOOK_SECRET_FILE` must be regular files, mode 600
+  or 400, not symlinks, with the right prefix. Live keys need `FIN_STRIPE_LIVE=1`, and that switch refuses a test key.
+  The values sit in a `Secret` whose repr is redacted. This is an INTERIM measure until the Cybersecurity 22 vault
+  exists.
+- **Pinned API version** `2026-09-30.endive` (`Stripe-Version` header), read from docs.stripe.com on Oct 5 2026.
+
+**Tested** against a simulated Stripe (`tests/stripe_sim.py`) through the real adapter over an httpx transport.
+- 33 service tests and 16 adapter tests.
+- The live run's leg S runs on the real ledger, including a restart.
+
+**NOT verified against Stripe itself:** api.stripe.com is unreachable from the build sandbox.
+
+**Go-live preconditions (Andre):**
+1. Run this with Stripe TEST keys and the Stripe CLI (`stripe listen --forward-to` the gateway), paying with
+   Stripe's test bank accounts and test cards. Confirm:
+   - the session shapes, the `payment_intent.succeeded` timing for ACH, and the dispute balance transactions;
+   - that a restricted `rk_` key with the permissions listed in the README is enough.
+2. Build the gateway route that forwards Stripe's raw body and signature header to `/fin/v1/stripe/events`. The
+   gateway must answer Stripe with Finance's status: non-2xx makes Stripe retry.
+3. Enable ACH Direct Debit (and card, if wanted) in the Stripe Dashboard. A filter cannot offer a method the account
+   lacks.
+4. **Bank feed (when wired):** a Stripe payout arriving in 1010 is ALREADY booked by F13p. The bank-feed matcher must
+   recognise it, or it will post a second time as unapplied cash. Not built, because no bank feed is chosen.
+
+**Not built:**
+- refunds initiated by Finance;
+- ZBC on Stripe (FIN-CQ-02);
+- Stripe Connect payouts to clippers (`FIN_RAIL_STRIPE` still refuses to start);
+- partial-dispute re-billing (it opens a break for Andre).

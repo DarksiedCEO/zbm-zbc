@@ -99,6 +99,8 @@ class ReconMixin:
         for r in self.cfg.rails:
             rp = rails.get(r)
             rail_obs[r] = g.call(f"rail_{r}", "balance", (), lambda x=rp: x.balance(), RailBalance(False))
+        stripe_obs = (g.call("stripe", "balance", (), lambda: self.ports.stripe_in.balance(), RailBalance(False))
+                      if self.cfg.stripe_incoming else RailBalance(False))
         for it in self.db["items"].values():
             if it["status"] == "submitted":
                 rp = rails.get(it["rail"])
@@ -128,6 +130,17 @@ class ReconMixin:
                     continue
                 legs.append(I7.leg("L3", f"zbc:{acct}", self.bal(acct), M.D(b.balance) if ok else None,
                                    b.source_sha256 if ok else None, "" if ok else f"rail {r} balance unavailable"))
+            # Stripe incoming (ADR 0009 amendment, Oct 5 2026): ZBM 1060 less payouts already on their way to the bank
+            # (they left the Stripe balance at creation; F13p posts when they arrive) vs Stripe's own balance
+            used_1060 = any(k[0] == "zbm" and k[1] == "1060" for k in self.balances)
+            ok_s = isinstance(stripe_obs, RailBalance) and stripe_obs.available and self._fresh(stripe_obs.as_of, 26)
+            if not ok_s and not used_1060 and not self.cfg.stripe_incoming:
+                legs.append(I7.not_in_use("L3", "zbm:1060"))
+            else:
+                legs.append(I7.leg("L3", "zbm:1060", self.bal("1060", entity="zbm") - self._stripe_in_transit(),
+                                   M.D(stripe_obs.balance) if ok_s else None, stripe_obs.source_sha256 if ok_s else None,
+                                   "Stripe balance (available + pending) vs 1060 less payouts in transit" if ok_s
+                                   else "Stripe balance unavailable"))
             bad_items = [i for i, lk in lookups.items() if not (isinstance(lk, RailLookup) and lk.available and lk.found
                                                                 and lk.status in ("submitted", "paid"))]
             if lookups:

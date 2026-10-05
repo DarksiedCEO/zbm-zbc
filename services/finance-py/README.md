@@ -86,8 +86,31 @@ Every matched payment makes a client receipt; the scheduler sends it with
 Settings: `FIN_MEDIA_DEFAULT_MARKUP_PCT` (`"15.00"`), `FIN_MEDIA_MAX_MARKUP_PCT` (`"100.00"`, at most `"500.00"`),
 `FIN_MEDIA_RELEASE_HOLD_BD` (2 business days, 2..10; founder M11, the business-account ACH dispute window).
 Card (founder M10): only on a Revenue Recovery-only invoice of at most `FIN_CARD_MAX_INVOICE` (`"5000.00"`, which is also
-the maximum), never with a surcharge, and only when `FIN_CARD_PREPAYMENTS=1` (default off). No incoming card adapter
-exists yet, so nothing can collect a card invoice.
+the maximum), never with a surcharge, and only when `FIN_CARD_PREPAYMENTS=1` (default off).
+
+## Stripe: ZBM client payments (ADR 0009 amendment, Oct 5 2026)
+
+Off unless `FIN_STRIPE_INCOMING=1`. ZBM only; ZBC deposits never go through Stripe (custody, FIN-CQ-02).
+`POST /fin/v1/invoices/{id}/stripe-checkout` (Andre or `onboarding`) makes a Stripe-hosted payment page for an issued
+invoice: ACH always when the invoice allows ACH, a card only when the card rule passes at that moment. It hands back the
+open page if one exists. `GET` on the same path lists the pages made for an invoice.
+`POST /fin/v1/stripe/events` (caller `rail_gateway`) takes `{request_id, payload, signature}`: the webhook's RAW body and
+its `Stripe-Signature` header, untouched. Finance verifies the signature, then reads the payment, dispute or payout back
+from Stripe and books that (F13/F13f payment and fee into 1060 Stripe balance, F13x a payment that failed afterwards,
+F7/F7a/F7l disputes, F13p/F13q payouts to 1010). A 503 means "Stripe could not be read; send it again". Reconciliation
+L3 compares 1060 (less payouts in transit) with Stripe's balance.
+Settings (all required when on; refuses to start otherwise):
+- `FIN_STRIPE_SECRET_KEY_FILE`: absolute path to a file, mode 600, holding a `sk_test_`/`rk_test_` key (or
+  `sk_live_`/`rk_live_` with `FIN_STRIPE_LIVE=1`; a restricted `rk_` key needs write on Checkout Sessions and read on
+  PaymentIntents, Charges, Disputes, Payouts and Balance). Interim until the vault exists.
+- `FIN_STRIPE_WEBHOOK_SECRET_FILE`: the endpoint's `whsec_` secret, same file rules.
+- `FIN_STRIPE_SUCCESS_URL`, `FIN_STRIPE_CANCEL_URL`: https pages Stripe sends the client back to.
+- `FIN_STRIPE_LIVE`: `1` only for live keys.
+Webhook events to subscribe: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`checkout.session.async_payment_failed`, `checkout.session.expired`, `payment_intent.succeeded`,
+`payment_intent.payment_failed`, `charge.failed`, `charge.dispute.created`, `charge.dispute.updated`,
+`charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`, `charge.dispute.closed`, `payout.created`,
+`payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled`.
 
 ## Reconciling the local log with the ledger
 

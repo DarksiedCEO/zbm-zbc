@@ -570,6 +570,9 @@ class BooksMixin:
             rc = self.db["receipts"].get(receipt_id)
             if rc is None:
                 raise NotFound("no such receipt")
+            if rc.get("into_account") == "1060":
+                raise Conflict("a Stripe payment is never returned by hand: a failure or dispute arrives as a Stripe "
+                               "event and is booked from there")
             inv = self.db["invoices"].get(rc.get("invoice_id") or "")
             if rc["status"] == "matched" and inv is not None and inv["kind"] == I2.MEDIA_KIND and rc["entity"] == "zbm":
                 op = Op(self, f"rret|{principal}|{request_id}", I2.ACTOR, receipt_id)

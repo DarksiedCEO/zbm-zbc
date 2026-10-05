@@ -26,12 +26,19 @@ import reasons as R
 
 NUMBER, NAME, ACTOR = 1, "Journal Keeper", "intel_01_journal"
 FLOWS = ("F1", "F1a", "F1r", "F2", "F3", "F4a", "F4b", "F4c", "F4d", "F4e", "F4f", "F4g", "F5", "F5a", "F5b", "F5c",
-         "F6", "F6p", "F7", "F7a", "F8", "F9", "F10", "F11", "F11a", "F12", "F12c", "F12v", "F12r", "F12x",
-         "correction")
+         "F6", "F6p", "F7", "F7a", "F7l", "F8", "F9", "F10", "F11", "F11a", "F12", "F12c", "F12v", "F12r", "F12x",
+         "F13", "F13f", "F13x", "F13p", "F13q", "correction")
 # Media flows (ADR 0009 amendment, Oct 5 2026): F12 prepayment invoice issued, F12c issued invoice cancelled before
 # payment, F12v vendor paid from collected money, F12r media delivered (revenue and cost together), F12x the bank
 # returned the client's prepayment.
 MEDIA_FLOWS = ("F12", "F12c", "F12v", "F12r", "F12x")
+# Stripe incoming (ADR 0009 amendment, Oct 5 2026), ZBM only: F13 a client payment landed in the Stripe balance, F13f
+# Stripe's processing fee on it, F13x the payment failed after it had succeeded, F13p a Stripe payout reached the
+# operating account, F13q a payout failed after it was paid; F7 dispute funds (and fee) withdrawn, F7a reinstated,
+# F7l a lost dispute (the client owes again). 1060 posts only from these flows or a manual correction (a Stripe fee
+# that belongs to no payment, e.g. a monthly fee, shows as an L3 break and is booked by Andre).
+STRIPE_FLOWS = ("F13", "F13f", "F13x", "F13p", "F13q", "F7", "F7a", "F7l")
+STRIPE_ACCOUNT = "1060"
 # a credit to restricted cash is only ever one of these flows (FIN-01): rail funding, rail paid, refund paid, chargeback,
 # sweep of earned margin, Form 945 deposit, rail fees, a client deposit the bank returned (F1r, AEGIS N17-9), and an
 # exact reversal
@@ -154,6 +161,11 @@ def validate(entry: dict, locked: set, entries_by_id: dict) -> list[dict]:
         out.append(R.item("JOURNAL_INVALID", "the media accounts (1150/2120/4120/5110) post only from a media flow"))
     if memo in MEDIA_FLOWS and ent != "zbm":
         out.append(R.item("ENTITY_MIX", "media flows are ZBM's; ZBC never buys media"))
+    if ent == "zbm" and STRIPE_ACCOUNT in accounts and memo not in STRIPE_FLOWS + ("correction",) \
+            and not exact_reversal:
+        out.append(R.item("JOURNAL_INVALID", "the Stripe balance (1060) posts only from a Stripe flow or a correction"))
+    if memo.startswith("F13") and ent != "zbm":
+        out.append(R.item("ENTITY_MIX", "Stripe incoming is ZBM's Stripe account; ZBC has none yet (FIN-CQ-02)"))
     if memo == "correction" and not exact_reversal and accounts & MANUAL_FORBIDDEN:
         out.append(R.item("RESTRICTED_CASH_MISUSE" if accounts & set(C.RESTRICTED_POOL) else "JOURNAL_INVALID",
                           "a manual correction that is not an exact reversal may not touch restricted cash, creator/"

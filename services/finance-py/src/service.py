@@ -53,7 +53,8 @@ _SUBJECT_BAD = __import__("re").compile(r"[^A-Za-z0-9._:-]")
 COLLECTIONS = ("rc_proposals", "rate_cards", "profiles", "client_profiles", "payees", "callbacks", "tax", "handoffs",
                "payables", "batches", "items", "exceptions", "recon_runs", "breaks", "invoices", "receipts", "disputes",
                "refunds", "treasury_ops", "controls", "close", "locks", "tax_readiness", "job_runs", "rail_events",
-               "integrity_checks", "clawbacks", "offboarding", "shortfalls", "media_buys", "client_receipts")
+               "integrity_checks", "clawbacks", "offboarding", "shortfalls", "media_buys", "client_receipts",
+               "stripe_sessions", "stripe_events", "stripe_disputes", "stripe_payouts")
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -881,7 +882,8 @@ class FinanceService:
         return {"status": "ok", "service": "finance-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "entities": list(C.ENTITIES), "reconcile_mode": self.reconcile_mode,
-                "reconcile_required": bool(self.reconcile_required)}
+                "reconcile_required": bool(self.reconcile_required),
+                "stripe_incoming": {"wired": self.cfg.stripe_incoming, "livemode": self.cfg.stripe_livemode}}
 
 
 from svc_books import BooksMixin  # noqa: E402
@@ -890,7 +892,9 @@ from svc_payables import PayablesMixin  # noqa: E402
 from svc_payees import PayeesMixin  # noqa: E402
 from svc_payouts import PayoutsMixin  # noqa: E402
 from svc_recon import ReconMixin  # noqa: E402
+from svc_stripe import StripeMixin  # noqa: E402
 
 
-class Service(BooksMixin, MediaMixin, PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin, FinanceService):
+class Service(BooksMixin, MediaMixin, StripeMixin, PayablesMixin, PayeesMixin, PayoutsMixin, ReconMixin,
+              FinanceService):
     """The assembled Finance service."""

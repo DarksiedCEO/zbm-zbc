@@ -1,9 +1,9 @@
 """
 Environment configuration (Finance spec §0.2, §D, §G). Every rule fails closed: a configuration the service cannot
 honor refuses start-up with a plain message. Every option that would need something this build does not have (a
-wired rail, bank, tax agent, vault, GL, Clipper Network / Legal / People / push client, direct ACH, card
-prepayments, late fees, a refund fee, a reserve, rail reversals, a custody model other than ZBC's own deposit)
-refuses to start rather than pretend.
+wired rail, bank, tax agent, vault, GL, Clipper Network / Legal / People / push client, direct ACH, late fees,
+a refund fee, a reserve, rail reversals, a custody model other than ZBC's own deposit) refuses to start rather than
+pretend. Stripe incoming (FIN_STRIPE_INCOMING) is built and off by default.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
@@ -25,6 +26,53 @@ PINNED_SEED_SHA256 = "3543dfe2d684047debad8fab19165e28957044281ef5e9da25cee5a8f3
 DEFAULT_SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "seed", "fin_rules_seed.json")
 WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 RAILS = ("stripe", "trolley")
+
+
+class Secret:
+    """A secret read from a file. ``repr``/``str`` never show it; ``reveal()`` is the one way to read it."""
+
+    __slots__ = ("_v",)
+
+    def __init__(self, value: str):
+        self._v = value
+
+    def reveal(self) -> str:
+        return self._v
+
+    def __repr__(self) -> str:
+        return "Secret(***)"
+
+    __str__ = __repr__
+
+
+def _secret_file(env, name: str, prefixes: tuple) -> Secret:
+    """Interim secret handling until the Cybersecurity 22 vault exists: a regular file, readable by its owner only
+    (mode 0600 or 0400), at most 4 KiB, whose content starts with one of ``prefixes``. Anything else refuses start."""
+    path = (env.get(name) or "").strip()
+    if not path or not os.path.isabs(path):
+        raise RuntimeError(f"{name} must be an absolute path to a file holding the secret")
+    try:
+        st = os.stat(path, follow_symlinks=False)
+    except OSError:
+        raise RuntimeError(f"{name}: the file cannot be read") from None
+    if not stat.S_ISREG(st.st_mode):
+        raise RuntimeError(f"{name}: not a regular file (symlinks are refused)")
+    if st.st_mode & 0o077:
+        raise RuntimeError(f"{name}: the file is readable by group or others; chmod 600 it")
+    if st.st_size > 4096:
+        raise RuntimeError(f"{name}: the file is too large to be a key")
+    with open(path, "r", encoding="ascii", errors="strict") as fh:
+        value = fh.read().strip()
+    if not value.startswith(prefixes) or not re.fullmatch(r"[A-Za-z0-9_]{16,256}", value):
+        raise RuntimeError(f"{name}: the file does not hold a key of the expected kind ({', '.join(prefixes)}...)")
+    return Secret(value)
+
+
+def _https_url(env, name: str) -> str:
+    v = (env.get(name) or "").strip()
+    if not re.fullmatch(r"https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?(/[A-Za-z0-9/_.~%?=&+-]{0,400})?", v):
+        raise RuntimeError(f"{name} must be an https:// URL (the page Stripe sends the client back to)")
+    return v
 
 
 @dataclass
@@ -77,6 +125,12 @@ class Settings:
     media_max_markup_pct: Decimal = Decimal("100.00")
     media_release_hold_bd: int = 2
     card_prepayments: bool = False
+    stripe_incoming: bool = False
+    stripe_secret_key: Optional[Secret] = None
+    stripe_webhook_secret: Optional[Secret] = None
+    stripe_livemode: bool = False
+    stripe_success_url: Optional[str] = None
+    stripe_cancel_url: Optional[str] = None
     card_max_invoice: Decimal = Decimal("5000.00")
 
 
@@ -236,6 +290,7 @@ def load(env: Optional[dict] = None) -> Settings:
     media_max = _money(env, "FIN_MEDIA_MAX_MARKUP_PCT", "100.00", positive=True)
     if media_max > Decimal("500.00"):
         raise RuntimeError("FIN_MEDIA_MAX_MARKUP_PCT must be at most 500.00 (a typo guard on the fee)")
+    stripe = _stripe(env)
     media_default = _money(env, "FIN_MEDIA_DEFAULT_MARKUP_PCT", "15.00")
     if media_default > media_max:
         raise RuntimeError("FIN_MEDIA_DEFAULT_MARKUP_PCT must not exceed FIN_MEDIA_MAX_MARKUP_PCT")
@@ -282,4 +337,26 @@ def load(env: Optional[dict] = None) -> Settings:
         media_default_markup_pct=media_default, media_max_markup_pct=media_max,
         media_release_hold_bd=_int(env, "FIN_MEDIA_RELEASE_HOLD_BD", 2, 2, 10),
         card_prepayments=_flag(env, "FIN_CARD_PREPAYMENTS", False), card_max_invoice=card_cap,
+        **stripe,
     )
+
+
+STRIPE_SETTINGS = ("FIN_STRIPE_SECRET_KEY_FILE", "FIN_STRIPE_WEBHOOK_SECRET_FILE", "FIN_STRIPE_SUCCESS_URL",
+                   "FIN_STRIPE_CANCEL_URL", "FIN_STRIPE_LIVE")
+
+
+def _stripe(env) -> dict:
+    """Stripe incoming (ZBM client payments). Off unless FIN_STRIPE_INCOMING=1; when on, every setting is required
+    and checked; live keys need the explicit FIN_STRIPE_LIVE=1 (and a test key with it refuses). This is NOT the
+    Stripe Connect payout rail (FIN_RAIL_STRIPE), which stays not built."""
+    if not _flag(env, "FIN_STRIPE_INCOMING", False):
+        stray = [n for n in STRIPE_SETTINGS if (env.get(n) or "").strip()]
+        if stray:
+            raise RuntimeError(f"{stray[0]} is set but FIN_STRIPE_INCOMING is not 1; set both or neither")
+        return {}
+    live = _flag(env, "FIN_STRIPE_LIVE", False)
+    key = _secret_file(env, "FIN_STRIPE_SECRET_KEY_FILE", ("sk_live_", "rk_live_") if live else ("sk_test_", "rk_test_"))
+    whsec = _secret_file(env, "FIN_STRIPE_WEBHOOK_SECRET_FILE", ("whsec_",))
+    return {"stripe_incoming": True, "stripe_secret_key": key, "stripe_webhook_secret": whsec,
+            "stripe_livemode": live, "stripe_success_url": _https_url(env, "FIN_STRIPE_SUCCESS_URL"),
+            "stripe_cancel_url": _https_url(env, "FIN_STRIPE_CANCEL_URL")}
