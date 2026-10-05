@@ -448,6 +448,9 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     @app.put("/fin/v1/clients/{client_id}/billing-profile", dependencies=auth)
     def billing_profile(client_id: str, _: str = Depends(andre("billing-profile")),
                         req: m.BillingProfile = Depends(body(m.BillingProfile))) -> dict:
+        if not m.CLIENT_ID_RE.fullmatch(client_id or ""):
+            raise Invalid("client id must be 1-100 characters of [A-Za-z0-9._-] (it is the client's party reference "
+                          "at Legal)")
         return svc.put_billing_profile(req.request_id, _id(client_id), dump(req))
 
     @app.get("/fin/v1/clients/{client_id}/billing-readiness", dependencies=auth)

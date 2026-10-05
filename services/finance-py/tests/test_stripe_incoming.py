@@ -1060,3 +1060,30 @@ def test_aegis_lh_n4_an_explained_break_is_also_closed_on_an_exact_match(st):
     st.svc.db["breaks"][bid] = {**st.svc.db["breaks"][bid], "status": "explained"}
     sent(st, "payout.paid", {"id": po})
     assert st.svc.db["breaks"][bid]["status"] == "resolved"
+
+
+# --------------------------------------------------------------------------------------------- remaining Lows (N3, L5)
+
+def test_lows_n3_a_locked_period_refuses_the_whole_batch_before_anything_posts(st):
+    st.svc.db["locks"]["zbc|2026-10"] = {"locked": True}
+    posted = sum(e["event_type"] == "journal_entry_posted" for e in st.ledger.events)
+    good = {"txn_ref_sha256": "e" * 64, "entity": "zbm", "account": "1010", "direction": "credit",
+            "amount": "10.00", "value_date": "2026-10-02"}
+    zbc = {**good, "txn_ref_sha256": "f" * 64, "entity": "zbc", "account": "1020"}
+    r = st.post("/fin/v1/bank/events", {"request_id": rid(), "lines": [good, zbc]}, caller="bank_feed")
+    assert r.status_code == 422 and "PERIOD_LOCKED" in r.text
+    assert sum(e["event_type"] == "journal_entry_posted" for e in st.ledger.events) == posted
+
+
+@pytest.mark.parametrize("bad", ["client:acme", "a" * 101, "acme corp"])
+def test_lows_l5_a_client_id_legal_could_never_match_is_refused_at_the_door(st, bad):
+    body = {"request_id": rid(), "entity": "zbm", "client_id": bad, "kind": "service",
+            "lines": [{"line_code": "creative_services", "quantity": 1, "unit_price": "10.00"}],
+            "payment_methods": ["ach"], "legal_ref": {"doc_id": "client_msa", "version": "1.1",
+                                                      "doc_sha256": "c" * 64, "acceptance_id": "a1"}}
+    assert st.post("/fin/v1/invoices", body, caller="onboarding").status_code == 422
+    r = st.client.put(f"/fin/v1/clients/{bad}/billing-profile", json={
+        "request_id": rid(), "entity": "zbm", "payment_method": "ach",
+        "msa": {"doc_id": "client_msa", "version": "1.1", "doc_sha256": "c" * 64, "acceptance_id": "a1"}},
+        headers=st.headers(None, ANDRE_TOKEN))
+    assert r.status_code in (404, 422)

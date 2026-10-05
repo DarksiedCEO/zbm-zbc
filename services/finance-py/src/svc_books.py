@@ -451,6 +451,12 @@ class BooksMixin:
             # bad line can never leave an earlier line's ledger events without their local record
             if any(ln["entity"] == "zbm" and ln["account"] == "1020" for ln in lines):
                 raise Invalid("ZBM has no restricted deposits account (1020 is ZBC's)")
+            period = self._today_la().isoformat()[:7]
+            locked = {e for e in ("zbc", "zbm") if (e, period) in self._locked_periods()}
+            if any(ln["entity"] in locked for ln in lines):           # AEGIS launch-hardening N3
+                raise InvalidReasons("statement lines refused", [R.item(
+                    "PERIOD_LOCKED", f"period {period} of {', '.join(sorted(locked))} is locked: nothing in this "
+                    "batch was posted")])
             op = Op(self, f"bank|{request_id}", "intel_02_receivables", "bank_feed")
             results = []
             for ln in lines:
