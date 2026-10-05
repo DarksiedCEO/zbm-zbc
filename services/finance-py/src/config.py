@@ -53,7 +53,8 @@ def _secret_file(env, name: str, prefixes: tuple) -> Secret:
         raise RuntimeError(f"{name} must be an absolute path to a file holding the secret")
     try:
         # AEGIS L5: open without following a symlink, then check the file that was actually opened
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+        # O_NONBLOCK: a FIFO or device at the path must not hang start-up (AEGIS N5); it is refused below
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
     except OSError:
         raise RuntimeError(f"{name}: the file cannot be opened (missing, unreadable, or a symlink)") from None
     try:

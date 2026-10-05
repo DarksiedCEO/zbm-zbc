@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from contextlib import contextmanager
 from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
@@ -53,6 +54,8 @@ CHECKOUT_TTL = timedelta(hours=23)                # Stripe allows 30 min .. 24 h
 MIN_CHARGE = Decimal("0.50")                      # Stripe's USD minimum
 MAX_CHARGE = Decimal("999999.99")                 # eight digits of cents
 MAX_PAYLOAD = 256 * 1024
+STRIPE_WAIT_S = 30                                # longest a Stripe request waits for its turn before a 503 (AEGIS N3)
+MAX_JOB_CLOSES = 25                               # pages one job run closes (bounds how long it holds the turn)
 _SID = re.compile(r"[a-z]{2,8}_[A-Za-z0-9_]{1,120}")
 METHOD_LABEL = {"card": "card (Stripe)", "us_bank_account": "ACH bank debit (Stripe)"}
 DONE_DISPUTE = ("won", "lost", "warning_closed", "prevented")
@@ -127,6 +130,18 @@ class StripeMixin:
             lk = self.__dict__.setdefault("_stripe_serial", threading.Lock())
         return lk
 
+    @contextmanager
+    def _stripe_turn(self, what: str):
+        """Take the Stripe turn, waiting at most STRIPE_WAIT_S (AEGIS N3): when Stripe is slow, requests answer 503
+        (Stripe redelivers webhooks; a caller retries) instead of piling up on the shared worker pool."""
+        lk = self._stripe_lock()
+        if not lk.acquire(timeout=STRIPE_WAIT_S):
+            raise Unavailable(f"Stripe work is busy ({what}); nothing was done, try again")
+        try:
+            yield
+        finally:
+            lk.release()
+
     def _expire_page(self, g: Gather, session_id: str) -> StripeSession:
         port = self.ports.stripe_in
         return g.call("stripe", "expire_session", (session_id,), lambda: port.expire_session(session_id),
@@ -137,7 +152,7 @@ class StripeMixin:
         if ent:
             return ent["response"]
         self.require_rules()
-        with self._stripe_lock():
+        with self._stripe_turn("checkout"):
             now = self._now()
             with self.lock:
                 inv = self.db["invoices"].get(invoice_id)
@@ -160,16 +175,46 @@ class StripeMixin:
                 attempt = len(mine)
                 total = inv["total"]
             g = Gather(self, f"chk|{principal}|{request_id}", ACTOR, invoice_id)
+            port = self.ports.stripe_in
             # AEGIS M2: a page whose methods or amount are no longer right is closed at Stripe BEFORE a new one is
             # made, so a client can never pay on an outdated page (a card the rule no longer allows, a second payment)
-            closed = []
+            closed: list = []
+            dead: list = []
+
+            def keep_closed() -> None:
+                # AEGIS N4: pages already closed at Stripe are recorded even when this request then refuses
+                if closed or dead:
+                    with self.lock:
+                        op0 = Op(self, f"chk|{principal}|{request_id}|closed", ACTOR, invoice_id, g)
+                        for sid in closed:
+                            op0.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid], "status": "expired",
+                                                             "expired_at": iso(self._now())})
+                        for sid in dead:
+                            op0.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid],
+                                                             "status": "payment_failed"})
+                        self._commit(op0)
+                    closed.clear()
+                    dead.clear()
+
             for s in stale:
                 a = self._expire_page(g, s["session_id"])
                 if not (a.available and a.found and a.status in ("expired", "complete")):
+                    keep_closed()
                     raise Refused("an earlier Stripe page for this invoice could not be closed; no new page is made",
                                   [R.item(STRIPE_DEP, "Stripe did not confirm the earlier page is closed")],
                                   ledger_event_ids=g.events)
                 if a.status == "complete":
+                    # AEGIS N6: a page that was paid on, but whose payment then failed, no longer blocks a new page
+                    p = g.call("stripe", "payment", (a.payment_intent,), lambda pi=a.payment_intent:
+                               port.payment(pi), StripePayment(False)) if a.payment_intent else StripePayment(False)
+                    if p.available and p.found and p.status in ("requires_payment_method", "canceled"):
+                        dead.append(s["session_id"])
+                        continue
+                    keep_closed()
+                    if not p.available:
+                        raise Refused("Stripe could not say whether the earlier page was paid", [R.item(
+                            STRIPE_DEP, "the earlier page is complete and its payment could not be read")],
+                            ledger_event_ids=g.events)
                     raise Conflict("the client already paid on an earlier Stripe page; Finance books it when Stripe "
                                    "confirms the payment")
                 closed.append(s["session_id"])
@@ -179,7 +224,6 @@ class StripeMixin:
             label = f"Z Best Media invoice {invoice_id}"
             idem_key = rid("chk", invoice_id, attempt, total, list(methods), expires, self.cfg.stripe_success_url,
                            self.cfg.stripe_cancel_url, label)
-            port = self.ports.stripe_in
             ans = g.call("stripe", "create_checkout", (invoice_id, total, list(methods), idem_key),
                          lambda: port.create_checkout(invoice_id, total, methods, idem_key, expires, label),
                          StripeCheckout("unavailable"))
@@ -188,9 +232,11 @@ class StripeMixin:
                 for sid in closed:
                     op.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid], "status": "expired",
                                                     "expired_at": iso(self._now())})
+                for sid in dead:
+                    op.put("stripe_sessions", sid, {**self.db["stripe_sessions"][sid], "status": "payment_failed"})
                 inv = self.db["invoices"][invoice_id]
                 if ans.outcome != "created" or inv["status"] != "issued" or inv["total"] != total:
-                    if closed:
+                    if closed or dead:
                         self._commit(op)
                     if ans.outcome != "created":
                         raise Refused("Stripe did not make the checkout page", [R.item(
@@ -199,7 +245,7 @@ class StripeMixin:
                     raise Conflict("the invoice changed while the checkout was being made; ask again")
                 existing = self.db["stripe_sessions"].get(ans.session_id)
                 if existing is not None:             # Stripe replayed the same idempotency key
-                    if closed:
+                    if closed or dead:
                         self._commit(op)
                     return {"checkout": dict(existing), "reused": True, "ledger_event_ids": g.events,
                             "request_id": request_id}
@@ -216,12 +262,14 @@ class StripeMixin:
                 return resp
 
     def job_stripe_sessions(self, prefix: str) -> dict:
-        """Daily (scheduler): close every open Stripe page that should no longer take money -- its invoice is no
-        longer issued, its amount changed, or it offers a method the invoice may no longer be paid with (a card after
-        FIN_CARD_PREPAYMENTS was turned off). A page that cannot be closed stays listed for the next run."""
+        """Scheduler, hourly (it may run any number of times a day, AEGIS N2): close every open Stripe page that should
+        no longer take money -- its invoice is no longer issued, its amount changed, or it offers a method the invoice
+        may no longer be paid with (a card after FIN_CARD_PREPAYMENTS was turned off). At most MAX_JOB_CLOSES pages a
+        run; a page that cannot be closed is tried again on the next run. A card payment that still lands on such a
+        page is re-checked when it arrives (unapplied + a break, never applied)."""
         if not self.cfg.stripe_incoming:
             return {"closed": 0, "failed": 0, "checked": 0}
-        with self._stripe_lock():
+        with self._stripe_turn("stripe-sessions job"):
             with self.lock:
                 todo = []
                 for s in self.db["stripe_sessions"].values():
@@ -232,6 +280,7 @@ class StripeMixin:
                     if inv.get("status") != "issued" or inv.get("total") != s["total"] \
                             or any(m not in methods for m in s["methods"]):
                         todo.append(dict(s))
+                todo = sorted(todo, key=lambda s: s["created_at"])[:MAX_JOB_CLOSES]
             g = Gather(self, f"{prefix}|stripe", ACTOR, "stripe-sessions")
             results = {s["session_id"]: self._expire_page(g, s["session_id"]) for s in todo}
             with self.lock:
@@ -268,7 +317,7 @@ class StripeMixin:
             raise Refused("Stripe event signature not verified", [R.item(
                 STRIPE_DEP, "the Stripe-Signature did not verify (wrong secret, stale or altered body)")])
         ev = parse_event(payload)
-        with self._stripe_lock():
+        with self._stripe_turn("webhook"):
             return self._stripe_event_serial(principal, request_id, ev)
 
     def _stripe_event_serial(self, principal: str, request_id: str, ev: dict) -> dict:
@@ -311,6 +360,18 @@ class StripeMixin:
         with self.lock:
             if ev["event_id"] in self.db["stripe_events"]:
                 return {"event_id": ev["event_id"], "status": "duplicate", "ledger_event_ids": g.events}
+            to_close: list = []
+            if kind == "dispute" and "payment" in truth:
+                # AEGIS N1: the payment is booked and COMMITTED on its own first; a dispute step that then refuses can
+                # never leave the payment's ledger events without their local record
+                op_p = Op(self, f"sev|{ev['event_id']}|payment", ACTOR, ev["event_id"], g)
+                try:
+                    self._stripe_payment(op_p, truth["payment"])
+                except PostingRefused as exc:
+                    raise InvalidReasons("the Stripe event could not be posted", exc.reasons) from None
+                to_close += [sid for sid, rec in op_p.staged.get("stripe_sessions", {}).items()
+                             if rec["status"] == "invoice_paid"]
+                self._commit(op_p)
             op = Op(self, f"sev|{ev['event_id']}", ACTOR, ev["event_id"], g)
             try:
                 if ev["livemode"] != self.cfg.stripe_livemode:
@@ -320,8 +381,6 @@ class StripeMixin:
                 elif kind == "session":
                     status = self._stripe_session(op, truth["session"], truth.get("payment"))
                 elif kind == "dispute":
-                    if "payment" in truth:
-                        self._stripe_payment(op, truth["payment"])
                     status = self._stripe_dispute(op, truth["dispute"])
                 elif "payment" in truth:
                     status = self._stripe_payment(op, truth["payment"])
@@ -337,8 +396,8 @@ class StripeMixin:
             op.record(derived_id("sev", ev["event_id"]), "stripe_event_applied", ACTOR, ev["event_id"],
                       {"event_id": ev["event_id"], "type": ev["type"], "object_id": ev["object_id"],
                        "status": status}, f"Stripe event {ev['type']}: {status}"[:200])
-            to_close = [sid for sid, rec in op.staged.get("stripe_sessions", {}).items()
-                        if rec["status"] == "invoice_paid"]
+            to_close += [sid for sid, rec in op.staged.get("stripe_sessions", {}).items()
+                         if rec["status"] == "invoice_paid"]
             resp = {"event_id": ev["event_id"], "status": status, "ledger_event_ids": op.events}
             self._commit(op)
         if to_close:

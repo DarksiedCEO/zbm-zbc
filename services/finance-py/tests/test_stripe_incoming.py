@@ -788,3 +788,89 @@ def test_a_fee_credit_from_stripe_is_booked_not_crashed_on(st):
     pi = st.sim.pay(cs["session_id"], fee=-100)                          # e.g. a promotional fee credit
     assert sent(st, "payment_intent.succeeded", {"id": pi})["status"] == "matched"
     assert bal(st, "1060") == Decimal("1201.00") and bal(st, "5020") == Decimal("-1.00")
+
+
+# --------------------------------------------------------------------------------------------- AEGIS re-verification of d372d2b
+
+def test_aegis_n1_a_refused_dispute_never_leaves_its_payment_half_written(st):
+    inv = rr_invoice(st, "1000.00")
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    pi = st.sim.pay(cs["session_id"], method="card")                     # its payment event never arrived
+    du = st.sim.dispute(pi)
+    st.sim.disputes[du]["_txns"].append(st.sim._txn(100001, 0, du, "adjustment"))   # an impossible reinstatement
+    r = send(st, "charge.dispute.created", {"id": du})
+    assert r.status_code == 422
+    assert st.svc.db["invoices"][inv["invoice_id"]]["status"] == "paid" and "F13" in memos(st)
+    posted = [e["payload"]["entry_id"] for e in st.ledger.events if e["event_type"] == "journal_entry_posted"]
+    assert sorted(posted) == sorted(st.svc.entries_by_id)                # every ledger journal event is local
+
+
+def test_aegis_n2_the_page_job_can_run_again_the_same_day(st):
+    inv = rr_invoice(st, "1000.00")
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    st.svc.cfg.card_prepayments = False
+    st.sim.fail_next = [503]
+    first = st.ok(st.post("/fin/v1/jobs/stripe-sessions/run", {"request_id": rid()}, caller="scheduler"))
+    assert first["summary"]["failed"] == 1 and st.sim.sessions[cs["session_id"]]["status"] == "open"
+    st.sim.fail_next = []
+    second = st.ok(st.post("/fin/v1/jobs/stripe-sessions/run", {"request_id": rid()}, caller="scheduler"))
+    assert second["already_ran"] is False and second["summary"]["closed"] == 1
+    assert st.sim.sessions[cs["session_id"]]["status"] == "expired"
+
+
+def test_aegis_n3_a_busy_stripe_turn_answers_503_instead_of_queueing(st, monkeypatch):
+    import svc_stripe
+    monkeypatch.setattr(svc_stripe, "STRIPE_WAIT_S", 0.2)
+    inv = rr_invoice(st)
+    lk = st.svc._stripe_lock()
+    lk.acquire()
+    try:
+        r = checkout(st, inv["invoice_id"])
+        assert r.status_code == 503 and "busy" in r.text and r.json()["took_effect"] is False
+        payload, sig = st.sim.event("customer.created", {"id": "cus_1"})
+        r = st.post("/fin/v1/stripe/events", {"request_id": rid(), "payload": payload, "signature": sig},
+                    caller="rail_gateway")
+        assert r.status_code == 503
+    finally:
+        lk.release()
+    assert st.ok(checkout(st, inv["invoice_id"]))["checkout"]["status"] == "open"
+
+
+def test_aegis_n4_pages_closed_before_a_refusal_are_remembered(st):
+    inv = rr_invoice(st, "1000.00")
+    a = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    ghost = {**a, "session_id": "cs_test_9999gone", "created_at": "2026-10-02T17:00:01+00:00"}
+    st.svc.db["stripe_sessions"]["cs_test_9999gone"] = ghost             # a page Stripe no longer knows
+    st.svc.cfg.card_prepayments = False
+    r = checkout(st, inv["invoice_id"])
+    assert r.status_code == 409 and "could not be closed" in r.text
+    assert st.sim.sessions[a["session_id"]]["status"] == "expired"
+    assert st.svc.db["stripe_sessions"][a["session_id"]]["status"] == "expired"
+
+
+def test_aegis_n5_a_fifo_at_the_secret_path_is_refused_not_waited_on(tmp_path, keys):
+    import threading
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo, 0o600)
+    out = {}
+
+    def load():
+        try:
+            config_mod.load({**Harness().env, **keys, "FIN_STRIPE_SECRET_KEY_FILE": str(fifo)})
+        except RuntimeError as exc:
+            out["err"] = str(exc)
+    t = threading.Thread(target=load, daemon=True)
+    t.start()
+    t.join(5)
+    assert not t.is_alive() and "not a regular file" in out["err"]
+
+
+def test_aegis_n6_a_paid_page_whose_payment_failed_does_not_block_a_new_page(st):
+    inv = rr_invoice(st, "1000.00")
+    a = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    pi = st.sim.pay(a["session_id"], settle=False)                       # ACH started ...
+    st.sim.pis[pi]["status"] = "requires_payment_method"                 # ... and failed before it succeeded
+    st.svc.cfg.card_prepayments = False
+    b = st.ok(checkout(st, inv["invoice_id"]))
+    assert b["checkout"]["session_id"] != a["session_id"] and b["checkout"]["methods"] == ["us_bank_account"]
+    assert st.svc.db["stripe_sessions"][a["session_id"]]["status"] == "payment_failed"

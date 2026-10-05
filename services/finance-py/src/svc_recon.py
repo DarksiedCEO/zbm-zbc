@@ -30,6 +30,7 @@ from ports import BankBalance, BankTransfer, RailBalance, RailLookup
 from service import RUNNABLE, Gather, Op, PostingRefused, Refused, rid, sha
 
 JOBS = ("accrual", "clawback-sync", "tax-sync", "rail-sync", "stripe-sessions")
+REPEATABLE_JOBS = ("stripe-sessions",)        # safe to run many times a day (AEGIS N2): each run is recorded
 PENDING_SWEEP = ("proposed", "approved", "executing", "bank_unknown")      # reserved when a sweep is proposed
 LIVE_SWEEP = ("approved", "executing", "bank_unknown")                     # reserved at approval and execution
 OPEN_OPS = ("proposed", "approved", "executing", "bank_unknown")
@@ -659,19 +660,20 @@ class ReconMixin:
             raise NotFound("unknown job")
         self._idem(principal, request_id, f"jobs/{job}", None)
         day = self._now().date().isoformat()
-        jk = f"{job}|{day}"
+        jk = f"{job}|{day}" if job not in REPEATABLE_JOBS else f"{job}|{iso(self._now())}|{request_id}"[:200]
         prior = self.db["job_runs"].get(jk)
         if prior is not None:
             return {"job": job, "day": day, "summary": prior["summary"], "already_ran": True, "request_id": request_id}
         self.require_rules()
-        prefix = f"job|{job}|{day}"
+        prefix = f"job|{job}|{day}" if job not in REPEATABLE_JOBS else f"job|{jk}"
         fn = {"accrual": self.job_accrual, "clawback-sync": self.job_clawback_sync, "tax-sync": self.job_tax_sync,
               "rail-sync": self.job_rail_sync, "stripe-sessions": self.job_stripe_sessions}[job]
         summary = fn(prefix)
         with self.lock:
             op = Op(self, f"{prefix}|done", "intel_10_evidence_audit", job)
             op.put("job_runs", jk, {"job": job, "day": day, "at": iso(self._now()), "summary": summary})
-            op.record(derived_id("job", job, day), "control_result_recorded", "intel_10_evidence_audit", jk,
+            op.record(derived_id("job", job, day) if job not in REPEATABLE_JOBS else derived_id("job", jk),
+                      "control_result_recorded", "intel_10_evidence_audit", jk[:128],
                       {"job": job, "day": day, "summary_sha256": sha(summary)}, f"Job {job} ran")
             self._commit(op)
         return {"job": job, "day": day, "summary": summary, "already_ran": False, "request_id": request_id}

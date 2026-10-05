@@ -657,3 +657,21 @@ Not changed:
 - **L6.** The 2-day hold counts weekends but not bank holidays. This is Andre's call.
 - **L7 (pruning).** `stripe_events` grows without bound.
 - **L8.** L3's freshness check uses Finance's own clock, so it is not a real check.
+
+**AEGIS re-verification of d372d2b:** all ten earlier findings FIXED. It raised 3 new Medium and 3 new Low findings, all
+fixed in the follow-up commit.
+- **N1 (Medium). A dispute that refused after its payment was booked in the same step left that payment's ledger
+  events without local records, so Finance would refuse to restart.**
+  - Fix: the payment is now booked and committed on its own first.
+- **N2 (Medium). The page-closing job ran only once a day.**
+  - Fix: `stripe-sessions` may now run any number of times a day; each run is recorded under its own id. The
+    scheduler runs it hourly. A card that still lands on an outdated page is re-checked when the money arrives.
+- **N3 (Medium). Requests could pile up behind slow Stripe calls.**
+  - Fix: a request now waits at most `STRIPE_WAIT_S` (30 s) for its turn, then answers 503. Stripe retries webhooks.
+  - One job run closes at most 25 pages.
+- **N4 (Low). Pages already closed at Stripe were forgotten when the request was then refused.**
+  - Fix: they are now recorded first.
+- **N5 (Low). A FIFO at a secret path could hang start-up.**
+  - Fix: the file is opened with `O_NONBLOCK` and refused because it is not a regular file.
+- **N6 (Low). An earlier page that was paid on, but whose payment then failed, blocked every new page.**
+  - Fix: Finance now reads the payment. If it failed, the page is marked `payment_failed` and a new page is made.
