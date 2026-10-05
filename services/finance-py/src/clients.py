@@ -21,17 +21,24 @@ import json
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
 
-from ports import (Certification, ClawbackPage, ComplianceRuling, HoldsAnswer, JurisdictionAnswer, RegisterRow,
-                   SanctionsAnswer)
+from clock import parse_iso
+
+from ports import (Certification, ClawbackPage, ComplianceRuling, HoldsAnswer, JurisdictionAnswer, LegalAnswer,
+                   RegisterRow, SanctionsAnswer)
 
 TIMEOUT_S = 10.0
 MAX_RESPONSE_BYTES = 1024 * 1024
 _ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 _OID = re.compile(r"[A-Z0-9][A-Z0-9-]{1,39}")
+_LEGAL_DOC = re.compile(r"[a-z][a-z0-9_]{0,63}")
+_LEGAL_VERSION = re.compile(r"[0-9]{1,4}\.[0-9]{1,4}")
+_LEGAL_ACC = re.compile(r"lg-[a-z]{3}-[0-9A-Z]{26}")
+_SHA = re.compile(r"[0-9a-f]{64}")
 
 
 def _run_bounded(fn, seconds: float):
@@ -201,3 +208,51 @@ class HttpCompliance(_Base):
 
     def jurisdiction(self, country: str, region: Optional[str]) -> JurisdictionAnswer:
         return JurisdictionAnswer(False, reason="Compliance's resolve route is not open to finance_31 yet")
+
+
+class HttpLegal(_Base):
+    """Legal (37) reads for caller ``finance_31``: the contract version and the client's acceptance of it.
+
+    Legal's own rule for "in force" (legal-py ``i01_documents.current``) is applied to the version Legal returns:
+    status ``approved`` and ``effective_at <= now < review_by``. Anything Legal does not confirm -- a different hash,
+    another entity's document, an acceptance by another party, insufficient evidence, a Legal instance running on an
+    unpinned (non-production) rules seed, a 404 -- is a NO; a Legal that cannot be read is "unavailable"."""
+
+    CALLER_HEADER = "X-LEGAL-Caller-Token"
+
+    def __init__(self, base_url: str, service_token: str, caller_token: str,
+                 transport: Optional[httpx.BaseTransport] = None, timeout: float = TIMEOUT_S, now=None):
+        super().__init__(base_url, service_token, caller_token, transport, timeout)
+        self._now = now or (lambda: datetime.now(timezone.utc))
+
+    def document_status(self, doc_id, version, doc_sha256, acceptance_id, party_ref=None, entity=None):
+        ver = f"{version}.0" if isinstance(version, int) and not isinstance(version, bool) else version
+        if not (isinstance(doc_id, str) and _LEGAL_DOC.fullmatch(doc_id) and isinstance(ver, str)
+                and _LEGAL_VERSION.fullmatch(ver) and isinstance(doc_sha256, str) and _SHA.fullmatch(doc_sha256)):
+            return LegalAnswer(True, False, False, reason="not a Legal document reference")
+        v = self._get(f"/legal/v1/documents/{doc_id}/versions/{ver}")
+        if not isinstance(v, dict):
+            return LegalAnswer(False, reason="Legal could not be read (or has no such version)")
+        try:
+            now = self._now()
+            current = (v["doc_id"] == doc_id and v["version"] == ver and v["sha256"] == doc_sha256
+                       and v["status"] == "approved" and isinstance(v.get("effective_at"), str)
+                       and isinstance(v.get("review_by"), str)
+                       and parse_iso(v["effective_at"]) <= now < parse_iso(v["review_by"])
+                       and (entity is None or v["entity"] == entity))
+        except (KeyError, TypeError, ValueError):
+            return LegalAnswer(False, reason="Legal's version answer was not understood")
+        if not (isinstance(acceptance_id, str) and _LEGAL_ACC.fullmatch(acceptance_id)):
+            return LegalAnswer(True, current, False, reason="not a Legal acceptance id")
+        a = self._get(f"/legal/v1/acceptances/{acceptance_id}")
+        if not isinstance(a, dict):
+            return LegalAnswer(False, reason="Legal could not be read (or has no such acceptance)")
+        try:
+            if a["rules_pinned"] is not True:
+                return LegalAnswer(False, reason="Legal is running on an unpinned (non-production) rules seed")
+            accepted = (a["acceptance_id"] == acceptance_id and a["doc_id"] == doc_id and a["version"] == ver
+                        and a["doc_sha256"] == doc_sha256 and a["evidence_sufficient"] is True
+                        and (party_ref is None or a["party_ref"] == party_ref))
+        except (KeyError, TypeError):
+            return LegalAnswer(False, reason="Legal's acceptance answer was not understood")
+        return LegalAnswer(True, current, accepted)

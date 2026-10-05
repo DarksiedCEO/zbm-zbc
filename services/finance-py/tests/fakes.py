@@ -191,7 +191,8 @@ class FakeLegal:
         self.current = True
         self.acceptance = True
 
-    def document_status(self, doc_id, version, doc_sha256, acceptance_id):
+    def document_status(self, doc_id, version, doc_sha256, acceptance_id, party_ref=None, entity=None):
+        self.last = (doc_id, version, doc_sha256, acceptance_id, party_ref, entity)
         if not self.available:
             return LegalAnswer(False)
         return LegalAnswer(True, self.current, self.acceptance)

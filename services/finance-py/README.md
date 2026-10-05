@@ -4,8 +4,8 @@ ZBC's and ZBM's books, ZBC's segregated client deposits, creator payables from V
 under maker-checker, clawback netting, tax records, daily reconciliation to zero and the month-end close.
 Architecture and every choice the spec left open: `docs/adr/0009-finance-department-architecture.md`.
 
-**Not live.** Rails, bank, tax agent, GL, vault, Clipper Network, Legal, People and push are fail-closed stand-ins;
-the V&I and Compliance thin clients are unwired unless configured. On day one nothing accrues, activates, issues,
+**Not live.** Rails, bank, tax agent, GL, vault, Clipper Network, People and push are fail-closed stand-ins;
+the V&I, Compliance and Legal (37) thin clients and Stripe incoming are unwired unless configured. On day one nothing accrues, activates, issues,
 reconciles or pays. The unlock list is in ADR 0009.
 
 ## Run
@@ -21,18 +21,24 @@ python3 -m api                                   # 127.0.0.1:8410 (FIN_BIND_ADDR
 
 Every token ≥ 32 printable ASCII characters and all distinct, or the service refuses to start. Without
 `FIN_DATA_DIR` the log is in memory (`/health` says `in_memory: true`) and nothing survives a restart. Options it
-cannot honour (a custody model other than `own_deposit`, card prepayments, late fees, a refund fee, a reserve, rail
-reversals, direct ACH, any rail/bank/tax/vault/GL/CN/Legal wiring) refuse to start. The full list is `src/config.py`;
+cannot honour (a custody model other than `own_deposit`, late fees, a refund fee, a reserve, rail reversals, direct
+ACH, any rail/bank/tax/vault/GL/CN wiring) refuse to start. The full list is `src/config.py`;
 every variable it reads is also named here (wave 25: 35 were not, `tests/test_env_documented.py` now fails on any):
 
 - Founder-locked, one value accepted (anything else refuses to start): `FIN_REVENUE_MODEL` (`principal`),
   `FIN_CUSTODY_MODEL` (`own_deposit`), `FIN_STRIPE_LOSSES` (`stripe`); `FIN_UNMATCHED_TIN_POLICY` (`block`, or
   `withhold_24`); `FIN_GL` (`qbo`, or `none`; the QBO adapter is a stand-in).
 - Not built, so setting them refuses to start: `FIN_RAIL_STRIPE`, `FIN_RAIL_TROLLEY`, `FIN_BANK_FEED`,
-  `FIN_TAX_AGENT`, `FIN_VAULT`, `FIN_CN_URL`, `FIN_LEGAL_URL`, `FIN_PEOPLE_URL`, `FIN_PUSH_URL`,
+  `FIN_TAX_AGENT`, `FIN_VAULT`, `FIN_CN_URL`, `FIN_PEOPLE_URL`, `FIN_PUSH_URL`,
   `FIN_IDENTITY_HMAC_KEY`; `=1` refuses for `FIN_RAIL_REVERSAL_ENABLED`, `FIN_LATE_FEES`;
   `FIN_REFUND_ADMIN_FEE_PCT` and `FIN_RESERVE_PCT` must stay 0. `FIN_RAILS` (`stripe,trolley`) may only name a
   subset of those two.
+- Thin clients, each wired only when all three are set (two of three refuses to start): `FIN_VI_URL` /
+  `FIN_VI_TOKEN` / `FIN_VI_CALLER_TOKEN`, `FIN_COMPLIANCE_URL` / `FIN_COMPLIANCE_TOKEN` /
+  `FIN_COMPLIANCE_CALLER_TOKEN`, and `FIN_LEGAL_URL` / `FIN_LEGAL_TOKEN` (Legal's service token) /
+  `FIN_LEGAL_CALLER_TOKEN` (Finance's `finance_31` caller token at Legal). Without Legal, no invoice issues: every
+  approval needs Legal to confirm the client's contract is in force, carries the stated hash, is the right entity's,
+  and was accepted by that client. Contract versions are Legal's `major.minor` (`"1.1"`).
 - Schedule: `FIN_RUN_WEEKDAY` (`FRI`), `FIN_RUN_LOCAL_TIME` (`10:00`), `FIN_RECON_LOCAL_TIME` (`07:00`),
   `FIN_CLOSE_WORKDAYS` (5, 1..10).
 - Money limits (money strings): `FIN_LIMIT_PAYEE_RUN` (2500.00), `FIN_LIMIT_PAYEE_30D` (10000.00),

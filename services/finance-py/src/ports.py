@@ -175,13 +175,18 @@ class LegalAnswer:
 
 
 class LegalPort(Protocol):
-    def document_status(self, doc_id: str, version: int, doc_sha256: str, acceptance_id: str) -> LegalAnswer: ...
+    """``current``: the version is approved and in force at Legal, carries ``doc_sha256``, and belongs to ``entity``.
+    ``acceptance_matches``: the acceptance is for exactly that document, version and hash, its evidence is sufficient,
+    and it was given by ``party_ref`` (``client:<client_id>``). ``version`` is Legal's ``major.minor`` text."""
+
+    def document_status(self, doc_id: str, version: str, doc_sha256: str, acceptance_id: str,
+                        party_ref: Optional[str] = None, entity: Optional[str] = None) -> LegalAnswer: ...
 
 
 class NotBuiltLegal37:
-    REASON = f"Legal (37) is {NOT_BUILT}"
+    REASON = f"Legal (37) is not wired to Finance (FIN_LEGAL_URL unset): {NOT_BUILT}"
 
-    def document_status(self, doc_id, version, doc_sha256, acceptance_id):
+    def document_status(self, doc_id, version, doc_sha256, acceptance_id, party_ref=None, entity=None):
         return LegalAnswer(False, reason=self.REASON)
 
 

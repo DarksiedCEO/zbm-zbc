@@ -15,9 +15,9 @@ from __future__ import annotations
 import re
 from datetime import date
 from decimal import Decimal
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, StringConstraints
 
 import money as M
 from textguard import has_control_chars, ip_in, iter_strings
@@ -256,8 +256,11 @@ class Decision(Strict):
 
 
 class DocRef(Strict):
+    """A contract held by Legal (37). ``version`` is Legal's ``major.minor`` text (``"1.1"``); a whole number is
+    accepted for records written before Legal was wired and means ``"<n>.0"`` -- Legal then confirms it or refuses."""
     doc_id: Id
-    version: int = Field(ge=1, le=10**6)
+    version: Union[Annotated[str, StringConstraints(pattern=r"^[0-9]{1,4}\.[0-9]{1,4}$")],
+                   Annotated[int, Field(ge=1, le=9999)]]
     doc_sha256: Sha
     acceptance_id: Id
 

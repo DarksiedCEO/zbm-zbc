@@ -761,8 +761,9 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
 
 
 def build_ports(settings: config_mod.Settings) -> Ports:
-    """Production wiring: every port is its fail-closed stand-in except the V&I and Compliance thin clients, each
-    wired only when all three of its FIN_VI_* / FIN_COMPLIANCE_* settings are present."""
+    """Production wiring: every port is its fail-closed stand-in except the V&I, Compliance and Legal thin clients,
+    each wired only when all three of its FIN_VI_* / FIN_COMPLIANCE_* / FIN_LEGAL_* settings are present, and Stripe
+    incoming when FIN_STRIPE_INCOMING=1."""
     ports = Ports()
     if settings.vi_url:
         from clients import HttpVerification
@@ -771,6 +772,9 @@ def build_ports(settings: config_mod.Settings) -> Ports:
         from clients import HttpCompliance
         ports.compliance = HttpCompliance(settings.compliance_url, settings.compliance_token,
                                           settings.compliance_caller_token)
+    if settings.legal_url:
+        from clients import HttpLegal
+        ports.legal = HttpLegal(settings.legal_url, settings.legal_token, settings.legal_caller_token)
     if settings.stripe_incoming:
         from stripe_incoming import StripeIncoming
         ports.stripe_in = StripeIncoming(settings.stripe_secret_key.reveal(), settings.stripe_webhook_secret.reveal(),

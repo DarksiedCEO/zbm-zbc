@@ -325,6 +325,32 @@ def _main(work: Path) -> int:
             f"obligations={len(ab.get('obligation_ids', []))}")
         check("acceptance record: doc id + version + sha256 + timestamp + method, evidence sufficient (CQ-19 memo)",
               acc.status_code == 201 and ab["evidence_sufficient"] is True and ab["doc_sha256"] == f["sha256"])
+        # --- cross-service contract: Finance (31)'s Legal thin client against THIS live Legal (launch hardening) ---
+        probe = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from clients import HttpLegal
+base, tok, ctok, sha, acc = sys.argv[2:7]
+c = HttpLegal(base, tok, ctok, timeout=10)
+out = {}
+for name, args in {"ok": ("client:acme", "zbm"), "other_client": ("client:globex", "zbm"),
+                   "other_entity": ("client:acme", "zbc")}.items():
+    a = c.document_status("client_msa", "1.1", sha, acc, *args)
+    out[name] = [a.available, a.current, a.acceptance_matches]
+a = c.document_status("client_msa", "1.1", "0" * 64, acc, "client:acme", "zbm")
+out["other_hash"] = [a.available, a.current, a.acceptance_matches]
+print(json.dumps(out))
+"""
+        fin_src = str(SVC.parent / "finance-py" / "src")
+        res = subprocess.run([sys.executable, "-c", probe, fin_src, LG, TOKEN, CALLERS["finance_31"], f["sha256"],
+                              ab["acceptance_id"]], capture_output=True, text=True, timeout=60)
+        fin = json.loads(res.stdout.strip().splitlines()[-1]) if res.returncode == 0 else {}
+        say(f"Finance's Legal client -> {fin or res.stderr[-400:]}")
+        check("Finance (31) confirms the live contract: in force, this hash, ZBM's, accepted by client:acme",
+              fin.get("ok") == [True, True, True])
+        check("Finance refuses it for another client, another entity or another hash",
+              fin.get("other_client") == [True, True, False] and fin.get("other_entity") == [True, False, True]
+              and fin.get("other_hash") == [True, False, False])
         r = a.post("/legal/v1/acceptances", {"request_id": a.rid(), "party_ref": "client:acme",
                    "signer_identity_ref": "x", "doc_id": "client_msa", "version": "1.1", "doc_sha256": f["sha256"],
                    "presented_sha256": f["sha256"], "method": "clickwrap_unticked_box", "presentation": "link",
