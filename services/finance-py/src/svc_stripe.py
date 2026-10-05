@@ -389,7 +389,13 @@ class StripeMixin:
                 else:
                     status = "ignored_no_payment"
             except PostingRefused as exc:
+                if kind == "dispute":
+                    self._stripe_dispute_refused(ev, truth["dispute"])
                 raise InvalidReasons("the Stripe event could not be posted", exc.reasons) from None
+            except Invalid:
+                if kind == "dispute":
+                    self._stripe_dispute_refused(ev, truth["dispute"])
+                raise
             op.put("stripe_events", ev["event_id"], {"event_id": ev["event_id"], "type": ev["type"],
                                                     "object_id": ev["object_id"], "status": status,
                                                     "at": iso(self._now())})
@@ -412,6 +418,32 @@ class StripeMixin:
                                                          "expired_at": iso(self._now())})
                 self._commit(op2)
         return resp
+
+    def _stripe_dispute_refused(self, ev: dict, d: StripeDispute) -> None:
+        """AEGIS R1: Finance could not book a dispute Stripe reports (anomalous data, a refused posting). Fail closed
+        while it is refused: the media buy behind the payment is blocked from vendor payments, the client receipt is
+        held back, and a break tells Andre. Committed on its own (the caller re-raises; Stripe redelivers)."""
+        rct = rid("rct", "stripe", d.payment_intent) if d.payment_intent else None
+        rc = self.db["receipts"].get(rct) if rct else None
+        inv = self.db["invoices"].get(rc["invoice_id"]) if rc and rc.get("invoice_id") else None
+        op = Op(self, f"sev|{ev['event_id']}|refused", ACTOR, ev["event_id"])
+        if inv is not None and inv["kind"] == I2.MEDIA_KIND:
+            buy = self.db["media_buys"].get(inv["media_buy_id"])
+            if buy is not None and not buy.get("payment_disputed"):
+                op.put("media_buys", buy["buy_id"], {**buy, "payment_disputed": True})
+        if rc is not None:
+            self._withdraw_client_receipt(op, rct)
+        bid = rid("brk", "stripe_dispute_refused", d.dispute_id)
+        if bid not in self.db["breaks"]:
+            op.put("breaks", bid, {"break_id": bid, "leg": "stripe_dispute", "subject": f"zbm:dispute:{d.dispute_id}",
+                                   "difference": d.amount, "opened_at": iso(self._now()),
+                                   "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                   "explanation_code": "unknown", "status": "open", "receipt_id": rct,
+                                   "resolution": None})
+            op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                      {"break_id": bid, "leg": "stripe_dispute", "difference": d.amount},
+                      f"Break opened: a Stripe dispute ({d.amount}) Finance could not book")
+        self._commit(op)
 
     # --- sessions ------------------------------------------------------------------------------------------------------
 

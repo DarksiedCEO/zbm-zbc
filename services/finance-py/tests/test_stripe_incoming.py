@@ -874,3 +874,24 @@ def test_aegis_n6_a_paid_page_whose_payment_failed_does_not_block_a_new_page(st)
     b = st.ok(checkout(st, inv["invoice_id"]))
     assert b["checkout"]["session_id"] != a["session_id"] and b["checkout"]["methods"] == ["us_bank_account"]
     assert st.svc.db["stripe_sessions"][a["session_id"]]["status"] == "payment_failed"
+
+
+def test_aegis_r1_a_dispute_finance_cannot_book_still_blocks_the_vendor(st):
+    m = create(st)
+    inv = issue(st, m["invoice"])
+    bid = m["media_buy"]["buy_id"]
+    cs = st.ok(checkout(st, inv["invoice_id"]))["checkout"]
+    pi = st.sim.pay(cs["session_id"])
+    du = st.sim.dispute(pi)
+    st.sim.disputes[du]["_txns"].append(st.sim._txn(1150001, 0, du, "adjustment"))   # anomalous: refused
+    for _ in range(3):
+        assert send(st, "charge.dispute.created", {"id": du}).status_code == 422
+    assert buy(st, bid)["payment_disputed"] is True
+    assert len([b for b in st.svc.db["breaks"].values() if b["leg"] == "stripe_dispute"]) == 1
+    crc = [c for c in st.svc.db["client_receipts"].values() if c["invoice_id"] == inv["invoice_id"]][0]
+    assert crc["status"].startswith("withdrawn")
+    st.clock.advance(days=4)
+    r = pay_vendor(st, bid, "10000.00", paid_on="2026-10-06")
+    assert r.status_code == 409 and "disputed the prepayment" in r.text
+    posted = [e["payload"]["entry_id"] for e in st.ledger.events if e["event_type"] == "journal_entry_posted"]
+    assert sorted(posted) == sorted(st.svc.entries_by_id)

@@ -675,3 +675,18 @@ fixed in the follow-up commit.
   - Fix: the file is opened with `O_NONBLOCK` and refused because it is not a regular file.
 - **N6 (Low). An earlier page that was paid on, but whose payment then failed, blocked every new page.**
   - Fix: Finance now reads the payment. If it failed, the page is marked `payment_failed` and a new page is made.
+
+**AEGIS re-verification of fdeb160: NOT BLOCKING.** N1 to N6 are all FIXED. One new Medium came out of it, fixed in
+the follow-up commit:
+- **R1. When the dispute step kept refusing, the payment stood committed alone and the media vendor gate opened.**
+  - Fix: a refused dispute now commits a small fail-closed op of its own:
+    - the media buy is marked `payment_disputed`;
+    - the client receipt is withdrawn;
+    - one `stripe_dispute` break is opened for Andre.
+  - The webhook keeps answering 422, so Stripe keeps redelivering.
+  - A regression test covers it, and the mutant is killed.
+
+Lows, listed and not fixed:
+- `job_runs` grows by one record each time the repeatable job runs.
+- Webhooks waiting their turn still hold a worker thread for up to 30 s.
+- A receipt withdrawn under R1 stays withdrawn even if the dispute is later won.
