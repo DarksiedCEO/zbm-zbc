@@ -30,7 +30,7 @@ every variable it reads is also named here (wave 25: 35 were not, `tests/test_en
   `withhold_24`); `FIN_GL` (`qbo`, or `none`; the QBO adapter is a stand-in).
 - Not built, so setting them refuses to start: `FIN_RAIL_STRIPE`, `FIN_RAIL_TROLLEY`, `FIN_BANK_FEED`,
   `FIN_TAX_AGENT`, `FIN_VAULT`, `FIN_CN_URL`, `FIN_LEGAL_URL`, `FIN_PEOPLE_URL`, `FIN_PUSH_URL`,
-  `FIN_IDENTITY_HMAC_KEY`; `=1` refuses for `FIN_RAIL_REVERSAL_ENABLED`, `FIN_CARD_PREPAYMENTS`, `FIN_LATE_FEES`;
+  `FIN_IDENTITY_HMAC_KEY`; `=1` refuses for `FIN_RAIL_REVERSAL_ENABLED`, `FIN_LATE_FEES`;
   `FIN_REFUND_ADMIN_FEE_PCT` and `FIN_RESERVE_PCT` must stay 0. `FIN_RAILS` (`stripe,trolley`) may only name a
   subset of those two.
 - Schedule: `FIN_RUN_WEEKDAY` (`FRI`), `FIN_RUN_LOCAL_TIME` (`10:00`), `FIN_RECON_LOCAL_TIME` (`07:00`),
@@ -84,8 +84,10 @@ in full and the flight has run, `POST /fin/v1/media-buys/{id}/delivery` posts re
 Every matched payment makes a client receipt; the scheduler sends it with
 `POST /fin/v1/client-receipts/{id}/send` (client-mail stand-in: nothing is sent, it stays `pending_send`).
 Settings: `FIN_MEDIA_DEFAULT_MARKUP_PCT` (`"15.00"`), `FIN_MEDIA_MAX_MARKUP_PCT` (`"100.00"`, at most `"500.00"`),
-`FIN_MEDIA_RELEASE_HOLD_BD` (5 business days, 2..10: the Nacha window for reversing an erroneous ACH credit). Card: only on a Revenue Recovery-only invoice, and still off
-(D11).
+`FIN_MEDIA_RELEASE_HOLD_BD` (2 business days, 2..10; founder M11, the business-account ACH dispute window).
+Card (founder M10): only on a Revenue Recovery-only invoice of at most `FIN_CARD_MAX_INVOICE` (`"5000.00"`, which is also
+the maximum), never with a surcharge, and only when `FIN_CARD_PREPAYMENTS=1` (default off). No incoming card adapter
+exists yet, so nothing can collect a card invoice.
 
 ## Reconciling the local log with the ledger
 

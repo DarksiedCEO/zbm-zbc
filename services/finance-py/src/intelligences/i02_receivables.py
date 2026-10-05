@@ -73,15 +73,21 @@ def recurring_problems(inv: dict) -> list[dict]:
     return out
 
 
-def card_problems(line_codes: list[str]) -> list[dict]:
-    """Founder decision M6/M9 (Oct 5 2026): a card is accepted only on an invoice that is Revenue Recovery work and
-    nothing else, because only that work stays inside ZBM. Anything that carries third-party spend (media) or other
-    services is ACH or wire, permanently: a card can be disputed after the vendor is paid. Even an eligible invoice
-    is refused today: card acceptance waits for counsel row FIN-CQ-09 and an incoming card adapter (D11)."""
+def card_problems(line_codes: list[str], total: Decimal, enabled: bool, cap: Decimal) -> list[dict]:
+    """Founder decisions M6/M9/M10 (Oct 5 2026): a card is accepted only on an invoice that is Revenue Recovery work
+    and nothing else (only that work stays inside ZBM), and only up to ``cap`` ($5,000; above it, ACH). Anything that
+    carries third-party spend (media) or other services is ACH or wire, permanently: a card can be disputed after the
+    vendor is paid. Card acceptance itself is switched on with FIN_CARD_PREPAYMENTS=1; there is never a surcharge or
+    card-fee line (FIN-21)."""
     if any(c not in CARD_ELIGIBLE_CODES for c in line_codes):
         return [R.item("CARD_NOT_ALLOWED", "card is accepted only for Revenue Recovery invoices; media and every other "
                                            "service are paid by ACH or wire")]
-    return [R.item("CARD_DISABLED", "card payments are off (D11; FIN-CQ-09; no incoming card adapter)")]
+    if total > cap:
+        return [R.item("CARD_NOT_ALLOWED", f"card is accepted only up to {M.fmt(cap)}; this invoice is {M.fmt(total)}: "
+                                           "ACH or wire")]
+    if not enabled:
+        return [R.item("CARD_DISABLED", "card payments are off (FIN_CARD_PREPAYMENTS is not set)")]
+    return []
 
 
 def media_fee(cost: Decimal, markup_pct: Decimal) -> Decimal:

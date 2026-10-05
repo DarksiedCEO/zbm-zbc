@@ -387,7 +387,7 @@
    "parameters": {},
    "rule_id": "FIN-31",
    "source_urls": [],
-   "statement": "ZBM buys media as principal: every media buy is prepaid by ACH or wire (never card) on an invoice Finance builds from the buy, with the vendor cost and ZBM's markup (15% default, set per buy) stored separately; a vendor payment is recorded only after the client's prepayment has cleared and the hold has passed, never above the vendor cost; revenue and cost post together when the media has run. A card is accepted only on a Revenue Recovery invoice.",
+   "statement": "ZBM buys media as principal: every media buy is prepaid by ACH or wire (never card) on an invoice Finance builds from the buy, with the vendor cost and ZBM's markup (15% default, set per buy) stored separately; a vendor payment is recorded only after the client's prepayment has cleared and the hold has passed, never above the vendor cost; revenue and cost post together when the media has run. A card is accepted only on a Revenue Recovery invoice of at most $5,000 (above it, ACH), never with a surcharge.",
    "status": "verified",
    "title": "Media billing: principal, prepaid, collect before pay, ACH or wire"
   },
@@ -509,13 +509,13 @@
    "basis_obligation_ids": [],
    "kind": "counsel",
    "parameters": {
-    "blocks": "late fees; any card acceptance",
+    "blocks": "late fees; any card surcharge",
     "check": "counsel_memo",
     "memo_ref": null
    },
    "rule_id": "FIN-CQ-09",
    "source_urls": [],
-   "statement": "Counsel/CPA question (spec \u00a7H): Civ. Code 1748.1 reach to B2B; surviving late fee. Blocks: late fees; any card acceptance.",
+   "statement": "Counsel/CPA question (spec \u00a7H): Civ. Code 1748.1 reach to B2B; surviving late fee. Blocks: late fees; any card surcharge.",
    "status": "unverified",
    "title": "Civ. Code 1748.1 reach to B2B; surviving late fee"
   },
