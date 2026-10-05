@@ -638,3 +638,36 @@ def test_m1_send_checks_the_underlying_payment_even_if_the_receipt_was_not_withd
                         caller="scheduler"))
     assert out["sent"] is False and "not a matched receipt" in out["detail"] and hr.f["client_mail"].sent == []
     hr.svc.db["receipts"][rec["receipt_id"]] = rc
+
+
+def test_n1_a_late_failure_never_undoes_a_send_that_took_over_a_stale_claim(hr):
+    import threading
+    _, inv = prepaid(hr)
+    crid = _receipt_for(hr, inv["invoice_id"])["client_receipt_id"]
+    mail = hr.f["client_mail"]
+    inside, release = threading.Event(), threading.Event()
+    real = mail.send_receipt
+    calls = {"n": 0}
+
+    def first_hangs_then_fails(client_id, receipt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            inside.set()
+            release.wait(5)
+            return False
+        return real(client_id, receipt)
+    mail.send_receipt = first_hangs_then_fails
+    t = threading.Thread(target=lambda: hr.post(f"/fin/v1/client-receipts/{crid}/send", {"request_id": "send-a"},
+                                                caller="scheduler"))
+    t.start()
+    assert inside.wait(5)
+    hr.clock.advance(minutes=16)                                      # A's claim is stale; B takes over and sends
+    b = hr.ok(hr.post(f"/fin/v1/client-receipts/{crid}/send", {"request_id": "send-b"}, caller="scheduler"))
+    assert b["sent"] is True
+    release.set()                                                     # A's call finally fails
+    t.join(5)
+    rec = hr.ok(hr.get(f"/fin/v1/client-receipts/{crid}"))
+    assert rec["status"] == "sent" and len(mail.sent) == 1
+    hr.clock.advance(minutes=30)
+    c = hr.ok(hr.post(f"/fin/v1/client-receipts/{crid}/send", {"request_id": "send-c"}, caller="scheduler"))
+    assert c["sent"] is False and c["detail"] == "already sent" and len(mail.sent) == 1

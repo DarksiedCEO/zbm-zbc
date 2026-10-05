@@ -449,12 +449,19 @@ class MediaMixin:
             rec = self.db["client_receipts"][crid]
             now = iso(self._now())
             withdrawn = rec["status"] in ("withdrawn", "withdrawn_after_send")
+            mine = rec["status"] == "sending" and rec.get("claimed_by") == request_id
             if sent is True:
                 status = "withdrawn_after_send" if withdrawn else "sent"
+            elif mine:
+                status = "pending_send"
             else:
-                status = rec["status"] if withdrawn else "pending_send"
+                # AEGIS N1: a late failure never undoes another request's outcome (a stale claim taken over and
+                # sent, or a withdrawal) -- it is recorded as an attempt only
+                status = rec["status"]
+            keep_claim = not mine and rec["status"] == "sending" and sent is not True
             new = {**rec, "attempts": rec["attempts"] + 1, "last_attempt_at": now, "status": status,
-                   "claimed_at": None, "claimed_by": None, **({"sent_at": now} if sent is True else {})}
+                   **({} if keep_claim else {"claimed_at": None, "claimed_by": None}),
+                   **({"sent_at": now} if sent is True else {})}
             op = Op(self, f"crcs|{principal}|{request_id}", I2.ACTOR, crid, g)
             op.record(derived_id("crcs", crid, request_id), "client_receipt_sent" if sent is True
                       else "client_receipt_send_failed", I2.ACTOR, crid,

@@ -375,7 +375,12 @@ class NotBuiltPush:
 
 class ClientMailPort(Protocol):
     """Sends a client their payment receipt (founder, Oct 5 2026: "that receipt goes out to them with the explanation
-    of what they bought via email"). True only when the mail provider accepted the message for delivery."""
+    of what they bought via email"). True only when the mail provider accepted the message for delivery.
+
+    Contract for a real adapter (AEGIS N1/N2): delivery is at-least-once -- a crash after the provider accepted the
+    message, or a call that outlives Finance's 15-minute stale-claim window, is retried. The adapter MUST pass
+    ``receipt["client_receipt_id"]`` to the provider as its idempotency / de-duplication key, and MUST time out well
+    inside 15 minutes, so a retry never reaches the client as a second email."""
     def send_receipt(self, client_id: str, receipt: dict) -> bool: ...
 
 

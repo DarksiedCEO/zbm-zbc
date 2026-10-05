@@ -489,6 +489,17 @@ L2 and L3, which are documented here.
 - **L3. Not changed.** A `media_exposure` break, like every open break, blocks payout runs and close for both
   entities. This is the existing reconcile-to-zero rule.
 - **L5, L6.** The tests were tightened, and the regressions for every finding above were added.
+- **AEGIS re-verification of 060dc0a: NOT BLOCKING.** Every finding above is confirmed fixed. Two new findings
+  came out of it:
+  - **N1 (Medium).** A send whose claim had gone stale could fail late and overwrite a later successful send,
+    which led to a second email.
+    - Fix: a failure now changes the status only when the request still owns the claim.
+    - Regression test and mutation test added.
+  - **N2 (Low).** A crash after the provider accepted a message leads to a resend after 15 minutes. Delivery is
+    at-least-once by design.
+    - The `ClientMailPort` contract now REQUIRES a real adapter to pass `client_receipt_id` to the provider as
+      the de-duplication key.
+    - The adapter must also time out well inside 15 minutes.
 
 **Founder decision recorded but NOT built: passing the card fee to the client (surcharging).**
 - It conflicts with FIN-21 ("No surcharge; no card-fee line"), a lead-default rule only Andre can amend.
