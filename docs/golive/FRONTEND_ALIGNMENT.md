@@ -14,7 +14,7 @@ Added Oct 4, 2026 after the founder confirmed the UI being built is **`DarksiedC
 
 ## Three mismatches that matter for go-live
 
-### 1. The lead form drops every lead (fastest fix in the whole plan)
+### 1. The new lead form stores nothing (blocks cutover; fastest fix in the plan)
 `apps/zbm/app/api/lead/route.ts` is a marked **STUB**: "Nothing is stored, sent or logged." No Postgres row, no Resend
 email, no rate limit (all deferred to Phase 5 §3.5 of the site's brief). **The new sites are not live yet**: the current
 zbestmedia.com is the Vite/React SPA in Vercel project `zbestmedia-ui`, which stays live and untouched until V2 replaces
