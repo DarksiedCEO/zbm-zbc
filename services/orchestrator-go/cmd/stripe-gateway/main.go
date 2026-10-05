@@ -49,6 +49,7 @@ const (
 	financePath     = "/fin/v1/stripe/events"
 	minTokenLen     = 32
 	defaultPort     = "8470"
+	maxInFlight     = 32
 	// Finance's route limit for /fin/v1/stripe/events is 300 KiB; a little is kept back
 	maxForwardBytes = 300<<10 - 1024
 )
@@ -102,6 +103,9 @@ func loadConfig(getenv func(string) string) (config, error) {
 type gateway struct {
 	cfg    config
 	client *http.Client
+	// slots bounds the deliveries in flight at once (AEGIS launch-hardening L9): past it a delivery is answered 503
+	// at once (Stripe retries) instead of holding a connection while Finance is slow
+	slots chan struct{}
 }
 
 func correlationID() string {
@@ -119,6 +123,13 @@ func answer(w http.ResponseWriter, status int, msg string) {
 }
 
 func (g *gateway) handle(w http.ResponseWriter, r *http.Request) {
+	select {
+	case g.slots <- struct{}{}:
+		defer func() { <-g.slots }()
+	default:
+		answer(w, http.StatusServiceUnavailable, "try again")
+		return
+	}
 	sig := r.Header.Get("Stripe-Signature")
 	if sig == "" || len(sig) > maxSignatureLen {
 		answer(w, http.StatusBadRequest, "missing or oversized Stripe-Signature")
@@ -198,7 +209,7 @@ func newMux(g *gateway) *http.ServeMux {
 }
 
 func newGateway(cfg config) *gateway {
-	return &gateway{cfg: cfg, client: &http.Client{
+	return &gateway{cfg: cfg, slots: make(chan struct{}, maxInFlight), client: &http.Client{
 		Timeout: upstreamTimeout,
 		// no HTTP(S)_PROXY: the Finance tokens go straight to Finance and nowhere else (AEGIS L8)
 		Transport: &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, MaxIdleConns: 16,

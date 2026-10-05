@@ -238,3 +238,36 @@ func TestEscapedBodyOverFinanceLimitIsRefused(t *testing.T) {
 		t.Fatalf("got %d, finance calls %d", resp.StatusCode, s.calls.Load())
 	}
 }
+
+func TestDeliveriesBeyondTheCapAreTryAgain(t *testing.T) {
+	release := make(chan struct{})
+	var inFinance atomic.Int32
+	fin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inFinance.Add(1)
+		<-release
+	}))
+	defer fin.Close()
+	g := gw(t, fin.URL)
+	defer g.Close()
+	done := make(chan int, maxInFlight)
+	for i := 0; i < maxInFlight; i++ {
+		go func() {
+			resp, _ := post(t, g.URL, `{"id":"evt_1"}`, "t=1,v1=00")
+			done <- resp.StatusCode
+		}()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for inFinance.Load() < maxInFlight && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	resp, _ := post(t, g.URL, `{"id":"evt_2"}`, "t=1,v1=00")
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("delivery beyond the cap: got %d", resp.StatusCode)
+	}
+	close(release)
+	for i := 0; i < maxInFlight; i++ {
+		if c := <-done; c != 200 {
+			t.Fatalf("held delivery got %d", c)
+		}
+	}
+}

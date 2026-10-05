@@ -38,7 +38,7 @@ every variable it reads is also named here (wave 25: 35 were not, `tests/test_en
   `FIN_COMPLIANCE_CALLER_TOKEN`, and `FIN_LEGAL_URL` / `FIN_LEGAL_TOKEN` (Legal's service token) /
   `FIN_LEGAL_CALLER_TOKEN` (Finance's `finance_31` caller token at Legal). Without Legal, no invoice issues: every
   approval needs Legal to confirm the client's contract is in force, carries the stated hash, is the right entity's,
-  and was accepted by that client. Contract versions are Legal's `major.minor` (`"1.1"`).
+  and was accepted by that client. Contract versions are Legal's `major.minor` (`"1.1"`). Client ids are 1-100 characters of `[A-Za-z0-9._-]` (they are the client's party reference at Legal).
 - Schedule: `FIN_RUN_WEEKDAY` (`FRI`), `FIN_RUN_LOCAL_TIME` (`10:00`), `FIN_RECON_LOCAL_TIME` (`07:00`),
   `FIN_CLOSE_WORKDAYS` (5, 1..10).
 - Money limits (money strings): `FIN_LIMIT_PAYEE_RUN` (2500.00), `FIN_LIMIT_PAYEE_30D` (10000.00),

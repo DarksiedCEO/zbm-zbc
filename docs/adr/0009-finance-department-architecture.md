@@ -771,3 +771,11 @@ two Lows were fixed in the follow-up commit:
 Not changed:
 - **N3 (Low).** A mid-batch `PERIOD_LOCKED` refusal is still possible after an earlier line posted. That needs a
   locked current period while bank lines for today arrive; close locks only past periods.
+
+**Remaining Lows closed (Oct 5 2026, branch `fin-lows-cleanup`).**
+- **N3.** A bank batch touching an entity whose current period is locked is refused whole before anything posts
+  (`PERIOD_LOCKED`).
+- **L5.** A client id must be 1-100 characters of `[A-Za-z0-9._-]`, Legal's party-reference format. It is refused at
+  the door on invoices, ZBC commercial profiles, media buys and billing profiles, instead of failing every contract
+  check later.
+- **L9.** stripe-gateway caps deliveries in flight at 32. The next one is answered 503 at once, and Stripe retries.

@@ -191,6 +191,10 @@ def _iso_check(v: str) -> str:
 
 
 Id = Annotated[str, AfterValidator(_id_check)]
+# A client id is also the client's party reference at Legal (37): ``client:<id>`` must fit legal-py's PartyRef
+# (``[A-Za-z0-9._-]{1,100}``), or no contract could ever match it (AEGIS launch-hardening L5). Refused at the door.
+CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+ClientId = Annotated[Id, StringConstraints(pattern=CLIENT_ID_RE.pattern)]
 Sha = Annotated[str, AfterValidator(_sha_check)]
 Money = Annotated[Decimal, BeforeValidator(_money_in), PlainSerializer(M.fmt, return_type=str, when_used="json")]
 PositiveMoney = Annotated[Decimal, BeforeValidator(_money_in), AfterValidator(_pos), PlainSerializer(M.fmt, return_type=str, when_used="json")]
@@ -267,7 +271,7 @@ class DocRef(Strict):
 
 class CommercialProfile(Strict):
     request_id: Id
-    client_id: Id
+    client_id: ClientId
     order_form: DocRef
     budget: PositiveMoney
     client_rate_per_1000: PositiveMoney
@@ -369,7 +373,7 @@ class Recurring(Strict):
 class InvoiceDraft(Strict):
     request_id: Id
     entity: Literal["zbc", "zbm"]
-    client_id: Id
+    client_id: ClientId
     campaign_id: Optional[Id] = None
     kind: Literal["campaign_deposit", "service", "retainer", "subscription"]
     lines: list[InvoiceLine] = Field(min_length=1, max_length=50)
@@ -386,7 +390,7 @@ class InvoiceDraft(Strict):
 class MediaBuyCreate(Strict):
     """Andre records a media buy; Finance computes the fee and drafts its prepayment invoice from it."""
     request_id: Id
-    client_id: Id
+    client_id: ClientId
     media_type: Literal["broadcast_tv", "cable_tv", "streaming_tv", "radio", "streaming_audio", "podcast",
                         "out_of_home", "digital", "print", "other"]
     vendor_ref: Id                                   # an opaque vendor id/name slug; never bank details (FIN-28)
