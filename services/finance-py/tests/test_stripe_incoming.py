@@ -977,11 +977,10 @@ def test_aegis_lh_h1_a_bad_line_refuses_the_batch_before_anything_posts(st):
     assert bal(st, "1010") == Decimal("1195.00") and memos(st).count("F13p") == 1
 
 
-@pytest.mark.parametrize("token", [True, False])
-def test_aegis_lh_h2_bank_before_stripe_ever_mentions_the_payout_is_never_booked_twice(st, token):
+def test_aegis_lh_h2_bank_before_stripe_ever_mentions_the_payout_is_never_booked_twice(st):
     paid_rr(st, "1200.00")
     po = st.sim.payout(119500, "paid")                                    # payout.created never delivered
-    r = bank_line(st, "1195.00", token=po if token else None)
+    r = bank_line(st, "1195.00", token=po)
     assert r["results"][0]["status"] == "unapplied" and bal(st, "2070") == Decimal("1195.00")
     sent(st, "payout.paid", {"id": po})
     assert bal(st, "1010") == Decimal("1195.00") and bal(st, "2070") == 0 and bal(st, "1060") == 0
@@ -1021,3 +1020,43 @@ def test_aegis_lh_l6_contract_versions_are_never_coerced(bad):
                                  "acceptance_id": "a1"})
     assert m.DocRef.model_validate({"doc_id": "x", "version": "1.1", "doc_sha256": "c" * 64,
                                     "acceptance_id": "a1"}).version == "1.1"
+
+
+
+# --------------------------------------------------------------------------------------------- AEGIS re-review of d1b2afe
+
+def test_aegis_lh_n2_an_amount_match_is_only_suggested_never_relabelled(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")
+    r = bank_line(st, "1195.00")                                          # a client ACH with no reference, or the payout
+    rct = r["results"][0]["receipt_id"]
+    sent(st, "payout.paid", {"id": po})
+    rc = st.svc.db["receipts"][rct]
+    assert rc["status"] == "unapplied"                                    # not relabelled
+    brk = st.svc.db["breaks"][[k for k, b in st.svc.db["breaks"].items() if b.get("receipt_id") == rct][0]]
+    assert brk["status"] == "open" and brk["suggested_stripe_payout_id"] == po
+    assert bal(st, "1010") == Decimal("2390.00") and bal(st, "1060") == 0  # visible to L2 against the bank
+
+
+def test_aegis_lh_n1_a_receipt_andre_already_reversed_is_never_reclassified(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")
+    r = bank_line(st, "1195.00", token=po)
+    rct = r["results"][0]["receipt_id"]
+    entry = st.svc.entries_by_id[st.svc.db["receipts"][rct]["entry_id"]]
+    st.ok(st.post("/fin/v1/journal/zbm/corrections", {"request_id": rid(), "effective_date": "2026-10-02",
+                                                        "reverses_entry_id": entry["entry_id"]}, andre=ANDRE_TOKEN), 201)
+    sent(st, "payout.paid", {"id": po})
+    assert bal(st, "2070") == 0 and bal(st, "1010") == Decimal("1195.00")
+    assert st.svc.db["receipts"][rct]["status"] == "unapplied"
+
+
+def test_aegis_lh_n4_an_explained_break_is_also_closed_on_an_exact_match(st):
+    paid_rr(st, "1200.00")
+    po = st.sim.payout(119500, "paid")
+    r = bank_line(st, "1195.00", token=po)
+    rct = r["results"][0]["receipt_id"]
+    bid = [k for k, b in st.svc.db["breaks"].items() if b.get("receipt_id") == rct][0]
+    st.svc.db["breaks"][bid] = {**st.svc.db["breaks"][bid], "status": "explained"}
+    sent(st, "payout.paid", {"id": po})
+    assert st.svc.db["breaks"][bid]["status"] == "resolved"

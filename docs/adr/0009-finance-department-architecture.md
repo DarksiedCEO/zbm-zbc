@@ -753,3 +753,21 @@ Lows documented, not changed:
 - **L3.** An executed MSA stops supporting invoices at its Legal `review_by` until Legal renews it. This fails closed.
 - **L5.** Client ids with `:` or over 100 characters can never match Legal's party_ref, so they are refused.
 - **L9.** There is no in-flight cap on the gateway; it binds to loopback behind the proxy.
+
+**AEGIS re-review of d1b2afe: NOT BLOCKING.** All eight earlier fixes are confirmed. The two recommended Mediums and
+two Lows were fixed in the follow-up commit:
+- **N1.** A receipt Andre already reversed (exact-reversal correction) could have been reclassified.
+  - Fix: only a live receipt counts: its unapplied break is open or explained, and its entry is not reversed.
+- **N2.** A client payment of the same amount could have been relabelled as a payout automatically.
+  - Fix: automatic reclassification now happens ONLY when the bank line carried the payout's own id.
+  - An amount match is written on the break as a suggestion (`suggested_stripe_payout_id`), and F13p posts to 1010 as
+    normal.
+  - Reconciliation L2 then shows 1010 above the bank by that amount until Andre exact-reverses the unapplied
+    receipt's entry.
+- **N4.** An "explained" break is closed too on an exact match.
+- **N5.** The gateway dial now has a 10 s connect timeout and a 30 s keep-alive.
+- **Mutation check:** all 7 guards were killed.
+
+Not changed:
+- **N3 (Low).** A mid-batch `PERIOD_LOCKED` refusal is still possible after an earlier line posted. That needs a
+  locked current period while bank lines for today arrive; close locks only past periods.

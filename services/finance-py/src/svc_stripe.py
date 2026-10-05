@@ -702,7 +702,7 @@ class StripeMixin:
         if rec.get("amount") not in (None, po.amount):
             raise Invalid("Stripe reported a different amount for a payout already recorded")
         if po.status == "paid" and not rec["posted"]:
-            banked = self._unapplied_payout_receipt(op, po.payout_id, amt, rec)
+            banked, suggested = self._unapplied_payout_receipt(op, po.payout_id, amt, rec)
             if banked is not None:
                 # AEGIS (launch hardening) H2: the bank showed this payout before Stripe said so and it was booked as
                 # unapplied cash; it is reclassified (Dr 2070 / Cr 1060), never posted to 1010 a second time
@@ -713,15 +713,25 @@ class StripeMixin:
                                                           "reclassified_entry_id": e["entry_id"]})
                 bid = rid("brk", "unapplied", banked["receipt_id"])
                 brk = op.get("breaks", bid)
-                if brk is not None and brk["status"] == "open":
+                if brk is not None and brk["status"] in ("open", "explained"):         # AEGIS N4: explained too
                     op.put("breaks", bid, {**brk, "status": "resolved", "resolution": {
-                        "entry_id": e["entry_id"], "approved_by": "intel_02_receivables", "at": iso(self._now()),
-                        "why": f"the unapplied credit was Stripe payout {po.payout_id}"}})
+                        "entry_id": e["entry_id"], "approved_by": "auto_exact_payout_id", "at": iso(self._now()),
+                        "why": f"the bank line carried Stripe payout id {po.payout_id}"}})
                 rec = {**rec, "posted": True, "bank_receipt_id": banked["receipt_id"]}
             else:
                 self._post(op, "zbm", [J.dr("1010", amt), J.cr("1060", amt)], "F13p", src, f"F13p|{po.payout_id}",
                            actor=ACTOR, fact=True)
                 rec = {**rec, "posted": True}
+                if suggested is not None:
+                    # AEGIS N2: an amount match is a suggestion for Andre, never an automatic relabel. Until he acts,
+                    # reconciliation L2 shows 1010 above the bank by this amount (the payout and the unapplied credit
+                    # are the same money); he exact-reverses the unapplied receipt's entry if the suggestion is right.
+                    sbid = rid("brk", "unapplied", suggested["receipt_id"])
+                    sbrk = op.get("breaks", sbid)
+                    if sbrk is not None and sbrk["status"] in ("open", "explained"):
+                        op.put("breaks", sbid, {**sbrk, "suggested_stripe_payout_id": po.payout_id,
+                                                "note": f"may be Stripe payout {po.payout_id} (same amount, no "
+                                                        "reference): if so, reverse this receipt's entry"[:200]})
         elif po.status == "failed" and rec["posted"] and not rec["reversed"]:
             self._post(op, "zbm", [J.dr("1060", amt), J.cr("1010", amt)], "F13q", src, f"F13q|{po.payout_id}",
                        actor=ACTOR, fact=True)
@@ -742,25 +752,32 @@ class StripeMixin:
         op.put("stripe_payouts", po.payout_id, rec)
         return f"payout_{po.status}"
 
-    def _unapplied_payout_receipt(self, op: Op, payout_id: str, amt: Decimal, rec: dict) -> Optional[dict]:
-        """An unapplied ZBM operating-account receipt that is this payout: the line carried the payout id, or (no
-        reference at all) it is the oldest of exactly this amount dated from 2 days before to 10 days after the day
-        Finance first saw the payout."""
+    def _unapplied_payout_receipt(self, op: Op, payout_id: str, amt: Decimal,
+                                  rec: dict) -> tuple[Optional[dict], Optional[dict]]:
+        """(exact, suggested) unapplied ZBM operating-account receipts for this payout. Only a receipt still live --
+        its unapplied break open or explained and its entry not reversed by Andre (AEGIS N1) -- counts.
+        ``exact``: the bank line carried this payout's id; it is reclassified automatically. ``suggested``: no
+        reference, same amount, dated from 10 days before to 2 days after the payout was first seen; only flagged."""
         seen = date.fromisoformat(rec["first_seen_on"]) if rec.get("first_seen_on") else None
-        cands = []
+        reversed_ids = {e.get("reverses_entry_id") for e in self.entries_by_id.values() if e.get("reverses_entry_id")}
+        exact, near = [], []
         for r in self.db["receipts"].values():
             r = op.get("receipts", r["receipt_id"])
             if r["status"] != "unapplied" or r["entity"] != "zbm" or r.get("into_account") != "1010" \
-                    or M.D(r["amount"]) != amt:
+                    or M.D(r["amount"]) != amt or r.get("entry_id") in reversed_ids:
+                continue
+            brk = op.get("breaks", rid("brk", "unapplied", r["receipt_id"]))
+            if brk is None or brk["status"] not in ("open", "explained"):
                 continue
             token = r.get("reference_token")
             if token:
                 if token == payout_id:
-                    cands.append(r)
+                    exact.append(r)
             elif seen is not None and seen - timedelta(days=10) <= date.fromisoformat(r["value_date"]) \
                     <= seen + timedelta(days=2):
-                cands.append(r)
-        return min(cands, key=lambda r: (r["value_date"], r["receipt_id"])) if cands else None
+                near.append(r)
+        first = (lambda xs: min(xs, key=lambda r: (r["value_date"], r["receipt_id"])) if xs else None)
+        return first(exact), first(near)
 
     def _bank_stripe_payout(self, op: Op, ln: dict, amt: Decimal, rct: str) -> Optional[dict]:
         """A ZBM operating-account credit that IS a Stripe payout (launch hardening): matched to the payout instead of

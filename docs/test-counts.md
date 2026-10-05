@@ -23,7 +23,7 @@ the check.
 | `python:creative-py` | 821 | pytest collection | — |
 | `python:delivery-py` | 730 | pytest collection | — |
 | `python:detection-py` | 504 | pytest collection | — |
-| `python:finance-py` | 532 | pytest collection | — |
+| `python:finance-py` | 534 | pytest collection | — |
 | `python:fulfillment-py` | 1105 | pytest collection | — |
 | `python:legal-py` | 308 | pytest collection | — |
 | `python:onboarding-py` | 763 | pytest collection | — |

@@ -202,6 +202,7 @@ func newGateway(cfg config) *gateway {
 		Timeout: upstreamTimeout,
 		// no HTTP(S)_PROXY: the Finance tokens go straight to Finance and nowhere else (AEGIS L8)
 		Transport: &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, MaxIdleConns: 16,
+			DialContext:     (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 			IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 10 * time.Second,
 			ResponseHeaderTimeout: upstreamTimeout},
 		// never follow a redirect with the Finance tokens attached
