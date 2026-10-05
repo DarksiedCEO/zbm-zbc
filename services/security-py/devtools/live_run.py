@@ -39,7 +39,7 @@ LEDGER_TOKEN = "live-ledger-token-" + "l" * 24
 TOKEN = "live-sec-service-token-" + "s" * 20
 CALLERS = {c: f"live-sec-caller-{c}-" + "c" * 24 for c in ("finance_31", "legal_37", "dashboard", "scheduler",
                                                            "onboarding")}
-ENROLL = "live-enroll-token-" + "e" * 30
+ENROLL = __import__("secrets").token_urlsafe(48)
 RP_ID, ORIGIN = "zbm.test", "https://console.zbm.test"
 LOG: list[str] = []
 PROCS: list[subprocess.Popen] = []
@@ -141,11 +141,13 @@ def _main(work: Path) -> int:
               work)
         say(f"ledger health: {wait_health(L + '/health')}")
         sp = start([sys.executable, "-m", "api"], env, str(SVC / "src"), "security", work)
-        hs = wait_health(S + "/health")
-        say(f"security-py health: {hs}")
-        check("durable, integrity verified against the real ledger, vault available",
-              hs["in_memory"] is False and hs["integrity_ok"] is True and hs["vault_available"] is True)
+        wait_health(S + "/health")
         a = Api(S)
+        hs = a.get("/sec/v1/status").json()
+        say(f"security-py status: integrity={hs['integrity']['ok']} in_memory={hs['in_memory']} "
+            f"vault={hs['vault_available']}")
+        check("durable, integrity verified against the real ledger, vault available",
+              hs["in_memory"] is False and hs["integrity"]["ok"] is True and hs["vault_available"] is True)
 
         # --- Andre's passkeys ------------------------------------------------------------------------------------
         k1 = Authenticator(-7, rp_id=RP_ID, origin=ORIGIN)
@@ -207,8 +209,9 @@ def _main(work: Path) -> int:
         # --- restart ----------------------------------------------------------------------------------------------
         stop(sp, "security")
         sp = start([sys.executable, "-m", "api"], env, str(SVC / "src"), "security", work)
-        hs = wait_health(S + "/health")
-        check("after a restart the log re-verifies against the ledger", hs["integrity_ok"] is True)
+        wait_health(S + "/health")
+        check("after a restart the log re-verifies against the ledger",
+              a.get("/sec/v1/status").json()["integrity"]["ok"] is True)
         r = a.post(f"/sec/v1/secrets/{ref}/use", {"purpose": "stripe_api"}, caller="finance_31")
         check("the rotated key survives the restart", r.json().get("value") == "sk_test_LIVE_RUN_VALUE_0002")
         r = a.post(f"/sec/v1/secrets/{ref}/rotate",
@@ -224,7 +227,7 @@ def _main(work: Path) -> int:
         hs = wait_health(S + "/health")
         r = a.post(f"/sec/v1/secrets/{ref}/use", {"purpose": "stripe_api"}, caller="finance_31")
         check("a truncated log is detected against the ledger and nothing is released",
-              hs["integrity_ok"] is False and r.status_code == 503)
+              hs["status"] == "degraded" and r.status_code == 503)
         stop(sp, "security")
 
         # --- the ledger ---------------------------------------------------------------------------------------------

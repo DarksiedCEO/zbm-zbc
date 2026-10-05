@@ -118,3 +118,31 @@ wired (hosting not chosen), no alert provider is chosen, no department calls it 
 ## Settings
 
 All settings are in `services/security-py/README.md`.
+
+## Amendment — AEGIS round 1 (Oct 5 2026): BLOCKING, every finding fixed
+
+Round 1 found no path to a secret value for anyone not entitled and no approval bypass. It blocked on one High.
+
+| Id | Finding | Fix |
+|---|---|---|
+| H1 | A lost ledger answer (the ledger may have recorded the anchor) dropped the pending line: the ledger then held an anchor the log never would, and every later check failed for ever | The same anchor is retried once (the ledger is idempotent on identical content); if the answer is still unknown, the pending line is KEPT and writes stop until the next integrity check appends it (anchor present) or discards it (absent). In memory too. |
+| M1 | A retried clean exit skipped a secret (sub-requests were keyed by list position) | Keyed by the secret id; the answer counts every secret the request destroyed |
+| M2 | A department could see and destroy its own canary | A department's status, rotate or destroy on a canary is D3 (caller frozen, sev1), answered 404 |
+| M3 | Holds, scans and jobs ignored freezes | Every non-dashboard caller is checked; the `integrity` job stays available in a lockdown |
+| M4 | 64 open challenges blocked every approval | FREEZE and LIFT_FREEZE have their own pool; a full pool is refused `APPROVAL_CHALLENGES_EXHAUSTED` and opens a sev2 |
+| M5 | A chosen recovery token could be guessed from its exported hash | Tokens must be generated (43+ characters, 20+ different); token hashes never appear in the audit export |
+| M6 | Rotating a held secret destroyed the preserved version | Refused `PRESERVATION_HOLD` |
+| L1, L2 | Request ids were shared across targets and actions | Request keys are operation + target + request id |
+| L3 | A mismatched approval did not burn its challenge | Any presented challenge is burnt |
+| L4 | Alerts could be sent with the lock held | Detections only queue; a middleware sends after every request, outside the lock |
+| L5 | A pending line over 1 MiB could not be read back | Read cap 16 MiB |
+| L6 | Any caller could mint any scope; verify ignored a lockdown | Scopes refused until a registry exists; `verify(..., lockdown=True)` refuses every token |
+| L7 | Forced integrity checks could be triggered without limit | At most one full ledger read per 10 s |
+| L8 | `/health` disclosed internals unauthenticated | `/health` answers `status` only; detail is `/sec/v1/status` (dashboard) |
+| L9 | A failed route lost the passkey counter it had verified | The counter is kept in memory at once |
+| T1 | No test presented a spent enroll token | Added |
+
+Known and accepted: ledger-rust has no filtered read, so every integrity check reads the whole shared ledger (the
+256 MiB read cap is shared with the other services; a filtered read is a ledger-rust change). A WebAuthn assertion
+does not show Andre what he signs: the dashboard must display the action before the ceremony, and a compromised
+dashboard can still ask him to sign the wrong thing (design limit, ADR unlock item 7).

@@ -31,16 +31,30 @@ def freeze(hk, kind, target, code="TEST_FREEZE"):
 # ------------------------------------------------------------------------------------------------ identity
 
 def test_mint_and_verify_a_service_token(hk):
-    t = hk.ok(hk.post("/sec/v1/identity/tokens", {"audience": "legal_37", "scope": ["read"]}, caller="finance_31"),
-              201)
+    t = hk.ok(hk.post("/sec/v1/identity/tokens", {"audience": "legal_37"}, caller="finance_31"), 201)
     jwks = tokens.jwks_map(hk.ok(hk.get("/sec/v1/identity/jwks", caller="legal_37"))["keys"])
     v = tokens.verify(t["token"], jwks, "legal_37", int(datetime.now(timezone.utc).timestamp()))
-    assert v.subject == "finance_31" and v.scope == ("read",)
+    assert v.subject == "finance_31" and v.scope == ()
     assert t["expires_at"] - int(datetime.now(timezone.utc).timestamp()) <= tokens.MAX_TTL_S
     assert hk.ledger.of_type("credential_issued")
     with pytest.raises(tokens.TokenInvalid) as e:
         tokens.verify(t["token"], jwks, "compliance_38", int(datetime.now(timezone.utc).timestamp()))
     assert e.value.code == "TOKEN_AUDIENCE_REFUSED"
+
+
+def test_a_caller_cannot_name_its_own_scope(hk):
+    """AEGIS L6: no scope registry exists yet, so a minted credential carries none."""
+    r = hk.post("/sec/v1/identity/tokens", {"audience": "legal_37", "scope": ["admin"]}, caller="finance_31")
+    assert r.status_code == 422 and r.json()["detail"] == "SCOPE_NOT_ALLOWED"
+
+
+def test_lockdown_fails_every_token_verification():
+    k = tokens.new_private_key()
+    kid = tokens.kid_for(k)
+    t = tokens.mint(kid, k, "finance_31", "legal_37", (), 1000, 600, "a" * 16)
+    with pytest.raises(tokens.TokenInvalid) as e:
+        tokens.verify(t, tokens.jwks_map([tokens.public_jwk(kid, k)]), "legal_37", 1100, lockdown=True)
+    assert e.value.code == "TOKEN_LOCKDOWN"
 
 
 def test_token_for_oneself_refused(hk):
@@ -369,7 +383,7 @@ def test_state_survives_restart(tmp_path):
     h2 = h.restart()
     assert h2.ok(h2.use("finance_31", REF, "stripe_api"))["value"] == "sk_value_123"
     assert h2.svc._frozen("caller", "legal_37")
-    assert h2.ok(h2.get("/health"))["integrity_ok"] is True
+    assert h2.ok(h2.get("/sec/v1/status"))["integrity"]["ok"] is True
 
 
 def test_edited_log_refuses_start(tmp_path):
@@ -394,7 +408,7 @@ def test_truncated_log_is_caught_against_the_ledger(tmp_path):
     lines = open(path, "rb").read().splitlines(keepends=True)
     open(path, "wb").write(b"".join(lines[:-1]))
     h2 = h.restart()
-    assert h2.ok(h2.get("/health"))["integrity_ok"] is False
+    assert h2.ok(h2.get("/sec/v1/status"))["integrity"]["ok"] is False
     r = h2.use("finance_31", REF, "stripe_api")
     assert r.status_code == 503 and r.json()["detail"] == "INTEGRITY_UNVERIFIED"
 
@@ -405,7 +419,7 @@ def test_replaced_log_is_caught(tmp_path):
     h.enroll()
     os.unlink(os.path.join(d, "security_log.jsonl"))
     h2 = h.restart()
-    assert h2.ok(h2.get("/health"))["integrity_ok"] is False
+    assert h2.ok(h2.get("/sec/v1/status"))["integrity"]["ok"] is False
 
 
 def test_crash_between_anchor_and_append_is_completed_at_start(tmp_path):
@@ -417,7 +431,7 @@ def test_crash_between_anchor_and_append_is_completed_at_start(tmp_path):
     assert h.post("/sec/v1/secrets", body, caller="onboarding").status_code == 503
     assert os.path.exists(os.path.join(d, "pending.line"))
     h2 = h.restart()
-    assert h2.ok(h2.get("/health"))["integrity_ok"] is True
+    assert h2.ok(h2.get("/sec/v1/status"))["integrity"]["ok"] is True
     assert "vault:onboarding.k" in h2.svc.by_ref
     assert not os.path.exists(os.path.join(d, "pending.line"))
 
@@ -431,7 +445,7 @@ def test_pending_line_without_anchor_is_discarded(tmp_path):
     assert h.post("/sec/v1/secrets", body, caller="onboarding").status_code == 503
     h.ledger.fail = False
     h2 = h.restart()
-    assert h2.ok(h2.get("/health"))["integrity_ok"] is True and "vault:onboarding.k" not in h2.svc.by_ref
+    assert h2.ok(h2.get("/sec/v1/status"))["integrity"]["ok"] is True and "vault:onboarding.k" not in h2.svc.by_ref
 
 
 def test_unreadable_ledger_at_start_means_nothing_works_until_it_is(tmp_path):
@@ -477,8 +491,19 @@ def test_integrity_job_alerts_on_failure(tmp_path):
     h = Harness(tmp_path, data_dir=d)
     h.enroll()
     h.ledger.fail_reads = True
+    h.svc._last_integrity_try = 0          # past the forced-check interval
     r = h.ok(h.post("/sec/v1/jobs/integrity/run", {"request_id": rid()}, caller="scheduler"))
     assert r["integrity"]["ok"] is False
+
+
+def test_forced_integrity_checks_are_rate_limited(hk):
+    """AEGIS L7: a caller cannot make the service re-read the whole ledger on every request."""
+    reads = []
+    real = hk.ledger.entries
+    hk.ledger.entries = lambda: reads.append(1) or real()
+    for _ in range(5):
+        hk.ok(hk.get("/sec/v1/audit/integrity"))
+    assert len(reads) <= 1
 
 
 def test_rotation_due_job(tmp_path):

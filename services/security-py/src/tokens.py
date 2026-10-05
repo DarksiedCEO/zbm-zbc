@@ -99,8 +99,10 @@ class Verified:
 
 
 def verify(token: str, jwks: Mapping[str, dict], audience: str, now: int,
-           denied_subjects: frozenset = frozenset()) -> Verified:
+           denied_subjects: frozenset = frozenset(), lockdown: bool = False) -> Verified:
     """Raises TokenInvalid(code) on any failure; never a partial answer."""
+    if lockdown:
+        raise TokenInvalid("TOKEN_LOCKDOWN")      # the deny list says every caller is frozen (AEGIS L6)
     if not isinstance(token, str) or len(token) > MAX_TOKEN_CHARS or token.count(".") != 2:
         raise TokenInvalid("TOKEN_MALFORMED")
     h_seg, c_seg, s_seg = token.split(".")

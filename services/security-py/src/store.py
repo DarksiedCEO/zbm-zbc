@@ -166,13 +166,17 @@ class RecordLog:
     def pending_path(self) -> Optional[str]:
         return os.path.join(self.data_dir, PENDING_NAME) if self.data_dir else None
 
+    _mem_pending: Optional[bytes] = None
+
     def write_pending(self, line: bytes) -> None:
         """Fsync the exact next line aside before its ledger anchor is recorded."""
         if not self.data_dir:
+            self._mem_pending = line
             return
         _write_file(self.pending_path, line, "pending line")
 
     def clear_pending(self) -> None:
+        self._mem_pending = None
         if self.data_dir:
             try:
                 os.unlink(self.pending_path)
@@ -183,16 +187,17 @@ class RecordLog:
 
     def read_pending(self) -> Optional[bytes]:
         if not self.data_dir:
-            return None
+            return self._mem_pending
         try:
             with open(self.pending_path, "rb") as fh:
-                data = fh.read(1 << 20)
+                data = fh.read(PENDING_MAX_BYTES)
         except FileNotFoundError:
             return None
         return data or None
 
 
 PENDING_NAME = "pending.line"
+PENDING_MAX_BYTES = 16 * 1024 * 1024    # above the largest line a route can produce (AEGIS L5: a scan line is ~1.4 MiB)
 
 
 def _write_file(path: str, data: bytes, what: str) -> None:

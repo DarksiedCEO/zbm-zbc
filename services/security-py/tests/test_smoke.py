@@ -3,7 +3,7 @@ from helpers import rid
 
 def test_health_open(h):
     r = h.client.get("/health")
-    assert r.status_code == 200 and r.json()["integrity_ok"] is True
+    assert r.status_code == 200 and r.json() == {"status": "ok"}      # nothing else unauthenticated (AEGIS L8)
     assert r.headers["cache-control"] == "no-store"
 
 

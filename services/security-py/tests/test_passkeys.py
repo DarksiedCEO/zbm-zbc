@@ -239,7 +239,7 @@ def test_recovery_revokes_every_passkey_and_reopens_enrolment(tmp_path):
     h = Harness(tmp_path, data_dir=d)
     h.enroll()
     h.enroll()
-    new_token = "recovery-token-0123456789abcdefghijklmnopq"
+    new_token = "recovery-token-0123456789abcdefghijklmnopqrstuvwxyz"
     from helpers import secret_file
     f = secret_file(tmp_path, "recovery.token", new_token.encode())
     h2 = h.restart(SEC_ANDRE_ENROLL_TOKEN_FILE=f, SEC_PASSKEY_RECOVERY="1")

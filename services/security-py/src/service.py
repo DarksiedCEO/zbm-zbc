@@ -30,7 +30,7 @@ import webauthn
 from clock import Clock, SystemClock, iso, parse_iso
 from config import KNOWN_CALLERS, Settings
 from errors import ApprovalRefused, Conflict, Forbidden, Invalid, NotFound, Throttled, Unavailable
-from ledger import DEPARTMENT, LedgerQueryFailed, LedgerRecordError, Recorder, derived_id, payload_sha256
+from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, derived_id, payload_sha256
 from ports import AlertMessage, Ports
 from reasons import R
 from store import RecordLog, SealedStore, StoreCorrupt, StoreWriteError, verify_lines
@@ -40,6 +40,9 @@ DETECTOR = "sec22_detector"
 CHALLENGE_TTL_S = 300
 MAX_CHALLENGES = 64
 INTEGRITY_RETRY_S = 15
+FORCED_MIN_S = 10
+EMERGENCY_ACTIONS = ("FREEZE", "LIFT_FREEZE")
+MAX_EMERGENCY_CHALLENGES = 8
 SIGNING_KEY_ROTATE_DAYS = 30
 SIGNING_KEY_OVERLAP_S = 24 * 3600
 SLA_DAYS = {"critical": 7, "high": 30, "unknown": 30, "medium": 90, "low": 180}
@@ -162,9 +165,15 @@ class SecurityService:
             except StoreWriteError:
                 raise Unavailable(R("STORE_UNAVAILABLE")) from None
             try:
-                self.rec.record(eid, "log_anchor", actor, f"log:{epoch}", payload, f"{kind} #{rec['seq']}")
-            except LedgerRecordError:
-                self._drop_pending()
+                self._anchor(eid, actor, epoch, payload, kind, rec["seq"])
+            except LedgerRecordError as exc:
+                if exc.took_effect is False:
+                    self._drop_pending()
+                else:
+                    # AEGIS H1: the ledger may hold this anchor. Keep the pending line and stop writing; the next
+                    # integrity check appends it if the anchor is there and discards it if not.
+                    self.integrity = {"ok": False, "checked_at": at, "problem": "a ledger answer was lost; the "
+                                      "pending line is settled at the next integrity check"}
                 raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
             try:
                 self.log.append_prepared(rec, line)
@@ -176,6 +185,16 @@ class SecurityService:
             self._drop_pending()
             self._apply(kind, data, at)
             return rec
+
+    def _anchor(self, eid: str, actor: str, epoch: str, payload: dict, kind: str, seq: int) -> None:
+        """Record the anchor; one retry of the SAME event when the answer was lost (the ledger is idempotent on
+        identical content, so the retry either records it or confirms it is there)."""
+        try:
+            self.rec.record(eid, "log_anchor", actor, f"log:{epoch}", payload, f"{kind} #{seq}")
+        except LedgerRecordError as exc:
+            if exc.took_effect is False or isinstance(exc, LedgerConflict):
+                raise
+            self.rec.record(eid, "log_anchor", actor, f"log:{epoch}", payload, f"{kind} #{seq}")
 
     def _drop_pending(self) -> None:
         try:
@@ -346,7 +365,9 @@ class SecurityService:
         with self.lock:
             mono = time.monotonic()
             if not force and (self.integrity["ok"] or mono - self._last_integrity_try < INTEGRITY_RETRY_S):
-                return self.integrity
+                return dict(self.integrity)
+            if force and mono - self._last_integrity_try < FORCED_MIN_S and self._last_integrity_try:
+                return dict(self.integrity)     # AEGIS L7: a full ledger read at most every FORCED_MIN_S
             self._last_integrity_try = mono
             at = iso(self.now())
             try:
@@ -360,9 +381,9 @@ class SecurityService:
             if problem is None:
                 problem = self._anchor_problem(mine, by_id)
             self.integrity = {"ok": problem is None, "checked_at": at, "problem": problem}
-        if problem is None:
-            self._after_integrity()
-        return self.integrity
+            if problem is None:
+                self._after_integrity()     # under the lock (no double reset or key); alerts are only QUEUED here
+            return dict(self.integrity)
 
     def _settle_pending(self, by_id: dict) -> Optional[str]:
         raw = self.log.read_pending()
@@ -427,7 +448,6 @@ class SecurityService:
             self._ensure_signing_key()
         except (Unavailable, crypto.KeyServiceUnavailable):
             pass
-        self.flush_alerts()
 
     # ================================================================================================ health
 
@@ -482,7 +502,8 @@ class SecurityService:
     def freeze(self, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem("andre", body["request_id"], body)
+            rk = f"freeze|{body['request_id']}"
+            prev = self._idem("andre", rk, body)
             if prev:
                 return self.freezes[prev[1]]
             kind, target = body["target_kind"], body["target_id"]
@@ -499,7 +520,7 @@ class SecurityService:
             fid = derived_id("frz", "andre", body["request_id"])
             self._commit("freeze_applied", {"freeze_id": fid, "target_kind": kind, "target_id": target,
                                             "reason_code": body["reason_code"], "actor": "andre",
-                                            "request_id": body["request_id"], "request_sha": request_sha(body),
+                                            "request_id": rk, "request_sha": request_sha(body),
                                             "_obj": fid, "approval": appr}, "andre")
             self._open_incident("sev2" if kind != "all" else "sev1", "FREEZE_APPLIED", f"{kind}:{target}"[:140],
                                 "andre")
@@ -510,7 +531,8 @@ class SecurityService:
     def lift(self, freeze_id: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem("andre", body["request_id"], body)
+            rk = f"lift|{freeze_id}|{body['request_id']}"
+            prev = self._idem("andre", rk, body)
             if prev:
                 return self.freezes[prev[1]]
             f = self.freezes.get(freeze_id)
@@ -519,7 +541,7 @@ class SecurityService:
             if f["status"] != "active":
                 raise Conflict(R("FREEZE_LIFTED"))
             appr = self._approve("LIFT_FREEZE", freeze_id, body)
-            self._commit("freeze_lifted", {"freeze_id": freeze_id, "actor": "andre", "request_id": body["request_id"],
+            self._commit("freeze_lifted", {"freeze_id": freeze_id, "actor": "andre", "request_id": rk,
                                            "request_sha": request_sha(body), "_obj": freeze_id, "approval": appr},
                          "andre")
             return dict(self.freezes[freeze_id])
@@ -536,12 +558,18 @@ class SecurityService:
 
     # ================================================================================================ approvals
 
-    def _challenge(self, kind: str, action_sha: str, extra: Optional[dict] = None) -> tuple[str, bytes]:
+    def _challenge(self, kind: str, action_sha: str, extra: Optional[dict] = None,
+                   pool: str = "general") -> tuple[str, bytes]:
+        """AEGIS M4: the freeze switch has its own small pool, so a flood of other challenges (a stolen dashboard
+        token) cannot stop Andre freezing; a full pool raises a sev2 incident (the token is being abused)."""
         now = time.monotonic()
         for cid in [c for c, v in self.challenges.items() if v["expires"] <= now or v["used"]]:
             del self.challenges[cid]
-        if len(self.challenges) >= MAX_CHALLENGES:
-            raise Throttled(R("APPROVAL_CHALLENGE_UNKNOWN"))
+        cap = MAX_EMERGENCY_CHALLENGES if pool == "emergency" else MAX_CHALLENGES
+        if sum(1 for v in self.challenges.values() if v.get("pool", "general") == pool) >= cap:
+            self._open_incident("sev2", "APPROVAL_CHALLENGES_EXHAUSTED", f"pool:{pool}", DETECTOR)
+            raise Throttled(R("APPROVAL_CHALLENGES_EXHAUSTED"))
+        extra = {**(extra or {}), "pool": pool}
         raw = os.urandom(32)
         cid = "ch-" + base64.urlsafe_b64encode(os.urandom(18)).decode("ascii")
         self.challenges[cid] = {"challenge": raw, "action_sha": action_sha, "kind": kind,
@@ -557,7 +585,8 @@ class SecurityService:
         with self.lock:
             if not self.rp.configured:
                 raise Unavailable(R("PASSKEYS_NOT_CONFIGURED"))
-            cid, raw = self._challenge("get", self.action_sha(action, target, body))
+            cid, raw = self._challenge("get", self.action_sha(action, target, body),
+                                       pool="emergency" if action in EMERGENCY_ACTIONS else "general")
             creds = [c for c, p in self.passkeys.items() if p["status"] == "active"]
             return {"challenge_id": cid, "challenge": webauthn.b64url_encode(raw), "rp_id": self.rp.rp_id,
                     "allow_credentials": creds, "user_verification": "required",
@@ -578,16 +607,18 @@ class SecurityService:
             raise ApprovalRefused(R("PASSKEYS_NOT_CONFIGURED"))
         ch = self.challenges.get(appr["challenge_id"])
         code = None
+        was_used = bool(ch and ch["used"])
+        if ch is not None and ch["kind"] == "get":
+            ch["used"] = True       # single use, whatever happens next (AEGIS L3: a mismatch burns it too)
         if ch is None or ch["kind"] != "get":
             code = "APPROVAL_CHALLENGE_UNKNOWN"
-        elif ch["used"]:
+        elif was_used:
             code = "APPROVAL_CHALLENGE_USED"
         elif ch["expires"] <= time.monotonic():
             code = "APPROVAL_CHALLENGE_EXPIRED"
         elif ch["action_sha"] != self.action_sha(action, target, body):
             code = "APPROVAL_ACTION_MISMATCH"
         if code is None:
-            ch["used"] = True       # single use, whatever happens next
             pk = self.passkeys.get(appr["credential_id"])
             if pk is None or pk["status"] == "revoked":
                 code = "APPROVAL_CREDENTIAL_UNKNOWN"
@@ -599,6 +630,7 @@ class SecurityService:
                 try:
                     count = webauthn.verify_assertion(cred, appr["client_data_json"], appr["authenticator_data"],
                                                       appr["signature"], ch["challenge"], self.rp)
+                    pk["sign_count"] = max(pk["sign_count"], count)   # AEGIS L9: even if the route fails later
                     return {"credential_id": pk["credential_id"], "sign_count": count,
                             "challenge_id": appr["challenge_id"]}
                 except webauthn.CounterRegression:
@@ -699,7 +731,8 @@ class SecurityService:
     def revoke_passkey(self, credential_id: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem("andre", body["request_id"], body)
+            rk = f"revoke|{credential_id}|{body['request_id']}"
+            prev = self._idem("andre", rk, body)
             if prev:
                 return self._passkey_view(self.passkeys[prev[1]])
             pk = self.passkeys.get(credential_id)
@@ -709,7 +742,7 @@ class SecurityService:
                 raise Conflict(R("LAST_PASSKEY"))
             appr = self._approve("PASSKEY_REVOKE", credential_id, body)
             self._commit("passkey_revoked", {"credential_id": credential_id, "actor": "andre",
-                                             "request_id": body["request_id"], "request_sha": request_sha(body),
+                                             "request_id": rk, "request_sha": request_sha(body),
                                              "_obj": credential_id, "approval": appr}, "andre")
             self._open_incident("sev3", "PASSKEY_REVOKED", "passkey:" + credential_id[:60], "andre")
             out = self._passkey_view(self.passkeys[credential_id])
@@ -765,7 +798,7 @@ class SecurityService:
                 "updated_at": s["updated_at"]}
 
     def _new_secret(self, actor: str, owner: str, body: dict, value: bytes, encoding: str, readers: list,
-                    purposes: list, approval: Optional[dict]) -> dict:
+                    purposes: list, approval: Optional[dict], rk: Optional[str] = None) -> dict:
         name = body["name"]
         ref = ref_of(owner, name)
         if ref in self.by_ref:
@@ -777,7 +810,7 @@ class SecurityService:
                 "kind": body["kind"], "encoding": encoding, "client_id": body.get("client_id"),
                 "subject_refs": sorted(set(body.get("subject_refs") or [])), "readers": sorted(set(readers)),
                 "purposes": sorted(set(purposes)), "rotate_by": body.get("rotate_by"), "version": 1, **sealed,
-                "actor": actor, "request_id": body["request_id"], "request_sha": request_sha(body), "_obj": sid}
+                "actor": actor, "request_id": rk or body["request_id"], "request_sha": request_sha(body), "_obj": sid}
         if approval:
             data["approval"] = approval
         try:
@@ -793,7 +826,8 @@ class SecurityService:
         with self.lock:
             self._gate()
             self._check_caller(caller)
-            prev = self._idem(caller, body["request_id"], body)
+            rk = f"store|{body['request_id']}"
+            prev = self._idem(caller, rk, body)
             if prev:
                 return self._view(self.secrets[prev[1]])
             readers = body.get("readers") or []
@@ -803,12 +837,13 @@ class SecurityService:
                 raise Invalid(R("PURPOSE_NOT_ALLOWED"))
             value = self._value_bytes(body["value"], body.get("encoding", "utf8"))
             return self._new_secret(caller, caller, body, value, body.get("encoding", "utf8"), readers,
-                                    body.get("purposes") or [], None)
+                                    body.get("purposes") or [], None, rk)
 
     def andre_store(self, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem("andre", body["request_id"], body)
+            rk = f"andre_store|{body['request_id']}"
+            prev = self._idem("andre", rk, body)
             if prev:
                 return self._view(self.secrets[prev[1]])
             kind = body["kind"]
@@ -830,7 +865,7 @@ class SecurityService:
                 encoding = body.get("encoding", "utf8")
                 value = self._value_bytes(body["value"], encoding)
             out = self._new_secret("andre", body["owner"], body, value, encoding, readers,
-                                   body.get("purposes") or [], appr)
+                                   body.get("purposes") or [], appr, rk)
         self.flush_alerts()
         return out
 
@@ -845,11 +880,23 @@ class SecurityService:
         return caller in ("dashboard",) or caller == s["owner"] or caller in s["readers"]
 
     def status(self, caller: str, raw_ref: str) -> dict:
-        with self.lock:
-            s = self._find(raw_ref)
-            if not self._visible(caller, s):
-                raise NotFound(R("SECRET_NOT_FOUND"))     # never confirm a secret exists to a stranger
-            return self._view(s)
+        try:
+            with self.lock:
+                if caller != "dashboard":
+                    self._check_caller(caller)
+                s = self._find(raw_ref)
+                if not self._visible(caller, s):
+                    raise NotFound(R("SECRET_NOT_FOUND"))     # never confirm a secret exists to a stranger
+                if caller != "dashboard" and s["kind"] == "canary":
+                    self._canary_touched(caller)          # AEGIS M2: a department looking at a canary is D3
+                return self._view(s)
+        finally:
+            self.flush_alerts()
+
+    def _canary_touched(self, caller: str) -> None:
+        self._auto_freeze("caller", caller, "CANARY_TOUCHED")
+        self._open_incident("sev1", "CANARY_TOUCHED", f"caller:{caller}", DETECTOR)
+        raise NotFound(R("SECRET_NOT_FOUND"))
 
     def list_secrets(self) -> list[dict]:
         with self.lock:
@@ -876,9 +923,7 @@ class SecurityService:
                     self._deny(caller, None, "SECRET_NOT_FOUND")
                     raise
                 if s["kind"] == "canary":
-                    self._auto_freeze("caller", caller, "CANARY_TOUCHED")
-                    self._open_incident("sev1", "CANARY_TOUCHED", f"caller:{caller}", DETECTOR)
-                    raise NotFound(R("SECRET_NOT_FOUND"))
+                    self._canary_touched(caller)
                 if s["owner"] == INTERNAL or caller not in s["readers"]:
                     self._deny(caller, s, "NOT_A_READER")
                     raise NotFound(R("SECRET_NOT_FOUND"))
@@ -916,14 +961,19 @@ class SecurityService:
             self._gate()
             if actor != "andre":
                 self._check_caller(actor)
-            prev = self._idem(actor, body["request_id"], body)
+            rk = f"rotate|{ref_of(*parse_ref(raw_ref))}|{body['request_id']}"
+            prev = self._idem(actor, rk, body)
             if prev:
                 return self._view(self.secrets[prev[1]])
             s = self._find(raw_ref)
             if actor != "andre" and actor != s["owner"]:
                 raise NotFound(R("SECRET_NOT_FOUND"))
-            if s["kind"] in ("canary",):
+            if s["kind"] == "canary":
+                if actor != "andre":
+                    self._canary_touched(actor)
                 raise Invalid(R("INVALID"))
+            if self._held(s):
+                raise Conflict(R("PRESERVATION_HOLD"))    # AEGIS M6: rotating would destroy the preserved version
             generate = body.get("generate") or s["kind"] == "hmac_key"
             if generate and s["encoding"] != "base64":
                 raise Invalid(R("VALUE_ENCODING"))
@@ -941,7 +991,7 @@ class SecurityService:
             old, new = s["version"], s["version"] + 1
             sealed = self._seal(s["secret_id"], new, s["owner"], s["kind"], value)
             data = {"secret_id": s["secret_id"], "version": new, "prev_version": old, **sealed,
-                    "rotate_by": body.get("rotate_by"), "actor": actor, "request_id": body["request_id"],
+                    "rotate_by": body.get("rotate_by"), "actor": actor, "request_id": rk,
                     "request_sha": request_sha(body), "_obj": s["secret_id"]}
             if appr:
                 data["approval"] = appr
@@ -961,9 +1011,9 @@ class SecurityService:
         keys = set(s["subject_refs"]) | ({f"client:{s['client_id']}"} if s["client_id"] else set())
         return bool(keys & held)
 
-    def _destroy(self, actor: str, s: dict, body: dict, appr: Optional[dict]) -> None:
+    def _destroy(self, actor: str, s: dict, body: dict, appr: Optional[dict], rk: Optional[str] = None) -> None:
         versions = sorted(int(v) for v in s["versions"])
-        data = {"secret_id": s["secret_id"], "versions": versions, "actor": actor, "request_id": body["request_id"],
+        data = {"secret_id": s["secret_id"], "versions": versions, "actor": actor, "request_id": rk or body["request_id"],
                 "request_sha": request_sha(body), "_obj": s["secret_id"]}
         if appr:
             data["approval"] = appr
@@ -979,17 +1029,22 @@ class SecurityService:
             self._gate()
             if actor != "andre":
                 self._check_caller(actor)
-            prev = self._idem(actor, body["request_id"], body)
+            rk = f"destroy|{ref_of(*parse_ref(raw_ref))}|{body['request_id']}"
+            prev = self._idem(actor, rk, body)
             if prev:
                 return self._view(self.secrets[prev[1]])
             s = self._find(raw_ref)
             if actor != "andre" and actor != s["owner"]:
                 raise NotFound(R("SECRET_NOT_FOUND"))
+            if actor != "andre" and s["kind"] == "canary":
+                self._canary_touched(actor)
             if self._held(s):
                 raise Conflict(R("PRESERVATION_HOLD"))
             appr = self._approve("SECRET_DESTROY", s["ref"], body) if actor == "andre" else None
-            self._destroy(actor, s, body, appr)
-            return self._view(s)
+            self._destroy(actor, s, body, appr, rk)
+            out = self._view(s)
+        self.flush_alerts()
+        return out
 
     def destroy_client(self, caller: str, client_id: str, body: dict) -> dict:
         """Onboarding's clean exit: every secret of this client that the caller owns."""
@@ -998,22 +1053,25 @@ class SecurityService:
             self._check_caller(caller)
             targets = [s for s in self.secrets.values()
                        if s["owner"] == caller and s["client_id"] == client_id and s["status"] == "active"]
-            destroyed, held = 0, 0
-            for i, s in enumerate(sorted(targets, key=lambda x: x["ref"])):
+            held = 0
+            for s in sorted(targets, key=lambda x: x["ref"]):
+                if s["kind"] == "canary":
+                    continue
                 if self._held(s):
                     held += 1
                     continue
-                sub = {"request_id": f"{body['request_id']}:{i}", "client_id": client_id}
-                if self._idem(caller, sub["request_id"], sub):
-                    continue
-                self._destroy(caller, s, sub, None)
-                destroyed += 1
+                # keyed by the secret, not its position: a retry after a partial failure finishes the rest (AEGIS M1)
+                sub = {"request_id": body["request_id"], "client_id": client_id, "secret_id": s["secret_id"]}
+                self._destroy(caller, s, sub, None, f"destroy_client|{client_id}|{body['request_id']}|{s['secret_id']}")
+            prefix = f"destroy_client|{client_id}|{body['request_id']}|"
+            destroyed = sum(1 for (a, k) in self.requests if a == caller and k.startswith(prefix))
             return {"client_id": client_id, "destroyed": destroyed, "held": held}
 
     def set_access(self, raw_ref: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem("andre", body["request_id"], body)
+            rk = f"access|{ref_of(*parse_ref(raw_ref))}|{body['request_id']}"
+            prev = self._idem("andre", rk, body)
             if prev:
                 return self._view(self.secrets[prev[1]])
             s = self._find(raw_ref)
@@ -1024,7 +1082,7 @@ class SecurityService:
             appr = self._approve("SECRET_ACCESS", s["ref"], body)
             self._commit("access_set", {"secret_id": s["secret_id"], "readers": sorted(set(body["readers"])),
                                         "purposes": sorted(set(body["purposes"])), "actor": "andre",
-                                        "request_id": body["request_id"], "request_sha": request_sha(body),
+                                        "request_id": rk, "request_sha": request_sha(body),
                                         "_obj": s["secret_id"], "approval": appr}, "andre")
             return self._view(s)
 
@@ -1061,6 +1119,8 @@ class SecurityService:
             self._check_caller(caller)
             if audience == caller:
                 raise Invalid(R("AUDIENCE_REFUSED"))
+            if scope:
+                raise Invalid(R("SCOPE_NOT_ALLOWED"))    # AEGIS L6: no scope registry yet; a caller names none
             key = next((k for k in self.signing_keys.values() if k["status"] == "active"), None)
             if key is None:
                 raise Unavailable(R("VAULT_UNAVAILABLE"))
@@ -1102,7 +1162,9 @@ class SecurityService:
     def preserve(self, caller: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem(caller, body["request_id"], body)
+            self._check_caller(caller)
+            rk = f"preserve|{body['request_id']}"
+            prev = self._idem(caller, rk, body)
             if prev:
                 return self._hold_answer(self.holds[prev[1]])
             if body["hold_id"] in self.holds and self.holds[body["hold_id"]]["status"] == "active":
@@ -1115,7 +1177,7 @@ class SecurityService:
                     body["hold_id"], body["subject_refs"]) else "not_connected"
             self._commit("hold_recorded", {"hold_id": body["hold_id"], "systems": systems,
                                            "subject_refs": sorted(set(body["subject_refs"])), "outcome": outcome,
-                                           "actor": caller, "request_id": body["request_id"],
+                                           "actor": caller, "request_id": rk,
                                            "request_sha": request_sha(body), "_obj": body["hold_id"]}, caller)
             if any(v != "preserved" for v in outcome.values()):
                 self._open_incident("sev3", "PRESERVATION_NOT_CONNECTED", f"hold:{body['hold_id']}"[:140], DETECTOR)
@@ -1133,7 +1195,9 @@ class SecurityService:
     def release_hold(self, caller: str, hold_id: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem(caller, body["request_id"], body)
+            self._check_caller(caller)
+            rk = f"release_hold|{hold_id}|{body['request_id']}"
+            prev = self._idem(caller, rk, body)
             if prev:
                 return self._hold_answer(self.holds[prev[1]])
             h = self.holds.get(hold_id)
@@ -1144,7 +1208,7 @@ class SecurityService:
             for sysname, adapter in self.ports.preservation.items():
                 if h["outcome"].get(sysname) == "preserved":
                     adapter.release(hold_id)
-            self._commit("hold_released", {"hold_id": hold_id, "actor": caller, "request_id": body["request_id"],
+            self._commit("hold_released", {"hold_id": hold_id, "actor": caller, "request_id": rk,
                                            "request_sha": request_sha(body), "_obj": hold_id}, caller)
             return self._hold_answer(h)
 
@@ -1202,13 +1266,14 @@ class SecurityService:
     def open_incident(self, caller: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem(caller, body["request_id"], body)
+            rk = f"open_incident|{body['request_id']}"
+            prev = self._idem(caller, rk, body)
             if prev:
                 return self.incident(prev[1])
             iid = derived_id("inc", caller, body["request_id"])
             self._commit("incident_opened", {"incident_id": iid, "severity": body["severity"], "code": body["code"],
                                              "subject": body["subject"], "actor": caller,
-                                             "request_id": body["request_id"], "request_sha": request_sha(body),
+                                             "request_id": rk, "request_sha": request_sha(body),
                                              "_obj": iid}, caller)
             self._queue_alerts(self.incidents[iid])
             out = self.incident(iid)
@@ -1232,7 +1297,8 @@ class SecurityService:
     def note_incident(self, caller: str, iid: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem(caller, body["request_id"], body)
+            rk = f"note|{iid}|{body['request_id']}"
+            prev = self._idem(caller, rk, body)
             if prev:
                 return self.incident(iid)
             inc = self.incidents.get(iid)
@@ -1241,14 +1307,15 @@ class SecurityService:
             if inc["status"] != "open":
                 raise Conflict(R("INCIDENT_CLOSED"))
             self._commit("incident_event", {"incident_id": iid, "event": "note", "note": body["note"],
-                                            "actor": caller, "request_id": body["request_id"],
+                                            "actor": caller, "request_id": rk,
                                             "request_sha": request_sha(body), "_obj": iid}, caller)
             return self.incident(iid)
 
     def close_incident(self, iid: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem("andre", body["request_id"], body)
+            rk = f"close|{iid}|{body['request_id']}"
+            prev = self._idem("andre", rk, body)
             if prev:
                 return self.incident(iid)
             inc = self.incidents.get(iid)
@@ -1258,7 +1325,7 @@ class SecurityService:
                 raise Conflict(R("INCIDENT_CLOSED"))
             appr = self._approve("INCIDENT_CLOSE", iid, body)
             self._commit("incident_closed", {"incident_id": iid, "root_cause_code": body["root_cause_code"],
-                                             "note": body["note"], "actor": "andre", "request_id": body["request_id"],
+                                             "note": body["note"], "actor": "andre", "request_id": rk,
                                              "request_sha": request_sha(body), "_obj": iid, "approval": appr}, "andre")
             return self.incident(iid)
 
@@ -1275,7 +1342,10 @@ class SecurityService:
     def ingest_scan(self, caller: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem(caller, body["request_id"], body)
+            if caller != "dashboard":
+                self._check_caller(caller)
+            rk = f"scan|{body['request_id']}"
+            prev = self._idem(caller, rk, body)
             if prev:
                 return self.scans[prev[1]]
             try:
@@ -1306,7 +1376,7 @@ class SecurityService:
             scan_id = derived_id("scn", caller, body["request_id"])
             self._commit("scan_ingested", {"scan_id": scan_id, "source": source, "tool": body["tool"],
                                            "scanned_at": iso(scanned), "opened": opened, "fixed": fixed, "seen": seen,
-                                           "actor": caller, "request_id": body["request_id"],
+                                           "actor": caller, "request_id": rk,
                                            "request_sha": request_sha(body), "_obj": source}, caller)
             if any(f["severity"] == "critical" for f in opened):
                 self._open_incident("sev2", "CRITICAL_VULNERABILITY", f"scan:{source}", DETECTOR)
@@ -1321,7 +1391,8 @@ class SecurityService:
     def accept_risk(self, finding_id: str, body: dict) -> dict:
         with self.lock:
             self._gate()
-            prev = self._idem("andre", body["request_id"], body)
+            rk = f"accept|{finding_id}|{body['request_id']}"
+            prev = self._idem("andre", rk, body)
             if prev:
                 return dict(self.findings[prev[1]])
             f = self.findings.get(finding_id)
@@ -1336,7 +1407,7 @@ class SecurityService:
             appr = self._approve("RISK_ACCEPT", finding_id, body)
             self._commit("risk_accepted", {"finding_id": finding_id, "until": body["until"],
                                            "reason_code": body["reason_code"], "actor": "andre",
-                                           "request_id": body["request_id"], "request_sha": request_sha(body),
+                                           "request_id": rk, "request_sha": request_sha(body),
                                            "_obj": finding_id, "approval": appr}, "andre")
             return dict(self.findings[finding_id])
 
@@ -1354,6 +1425,9 @@ class SecurityService:
     def run_job(self, name: str, body: dict) -> dict:
         if name not in JOBS:
             raise NotFound(R("JOB_UNKNOWN"))
+        if name != "integrity":            # the integrity check stays available during a lockdown (read-only)
+            with self.lock:
+                self._check_caller("scheduler")
         if name == "integrity":
             res = self.verify_integrity(force=True)
             ledger_ok = self.rec.client.verify()
@@ -1439,7 +1513,7 @@ class SecurityService:
         """The local log, metadata only (the log never holds a value), notes reduced to their SHA-256."""
         out = []
         for r in self.log.iter_records(max(1, since_seq)):
-            d = {k: v for k, v in r["data"].items() if k not in ("approval",)}
+            d = {k: v for k, v in r["data"].items() if k not in ("approval", "token_sha256")}
             if "note" in d:
                 d["note_sha256"] = sha256_hex(d.pop("note").encode("utf-8"))
             if "credential" in d:

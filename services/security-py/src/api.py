@@ -318,9 +318,15 @@ def create_app(service: SecurityService, settings: config_mod.Settings) -> FastA
 
     @app.get("/health")
     def health() -> dict:
-        h = svc.health()
-        return {"status": h["status"], "vault_available": h["vault_available"], "in_memory": h["in_memory"],
-                "integrity_ok": h["integrity"]["ok"]}
+        # unauthenticated: up or degraded, nothing more (AEGIS L8); the detail is /sec/v1/status (dashboard)
+        return {"status": svc.health()["status"]}
+
+    @app.middleware("http")
+    async def flush_alerts_after(request: Request, call_next):
+        # AEGIS L4: alerts queued while the lock was held (detections, integrity) are sent here, outside the lock
+        response = await call_next(request)
+        await run_in_threadpool(svc.flush_alerts)
+        return response
 
     @app.get("/sec/v1/status", dependencies=auth)
     def full_status(who: str = Depends(dashboard)) -> dict:

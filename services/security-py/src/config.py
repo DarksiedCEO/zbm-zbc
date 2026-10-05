@@ -224,8 +224,10 @@ def load(env: Optional[dict] = None) -> Settings:
             value = raw.decode("ascii")
         except UnicodeDecodeError:
             value = ""
-        if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", value):
-            raise RuntimeError("SEC_ANDRE_ENROLL_TOKEN_FILE must hold 32..256 characters of [A-Za-z0-9_-]")
+        # AEGIS M5: a generated token, not a chosen one (python3 -c "import secrets; print(secrets.token_urlsafe(48))")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{43,256}", value) or len(set(value)) < 20:
+            raise RuntimeError("SEC_ANDRE_ENROLL_TOKEN_FILE must hold a GENERATED token: 43..256 characters of "
+                               "[A-Za-z0-9_-] with at least 20 different characters (secrets.token_urlsafe(48))")
         if value == service_token or value in s.caller_tokens.values():
             raise RuntimeError("SEC_ANDRE_ENROLL_TOKEN_FILE must not hold the service token or a caller token")
         s.enroll_token = Secret(value)

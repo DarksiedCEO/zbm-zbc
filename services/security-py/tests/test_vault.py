@@ -241,7 +241,7 @@ def test_no_key_service_means_vault_unavailable(tmp_path):
     body = {"request_id": rid(), "owner": "finance_31", "name": "k", "kind": "api_key", "value": "v"}
     r = h.post("/sec/v1/secrets/andre", h.approved("SECRET_STORE", "vault:finance_31.k", body))
     assert r.status_code == 503 and r.json()["detail"] == "VAULT_UNAVAILABLE"
-    assert h.ok(h.get("/health"))["vault_available"] is False
+    assert h.ok(h.get("/sec/v1/status"))["vault_available"] is False
 
 
 def test_ledger_down_means_no_value_is_released(hk):
