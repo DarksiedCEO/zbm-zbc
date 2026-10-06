@@ -171,3 +171,20 @@ Round 3 confirmed N1, N2 (maybe path), N4–N6 and T1 closed.
 | R3-3 (High, present since round 1) | An fsync error after the write left the line in the file but not in memory; the roll-forward wrote it twice and the next start refused | The log file must equal memory before a write (else refused); a failed write is cut back; a line already on disk is adopted, never written twice |
 | R3-2 (Medium; N3 not closed) | A flooder evicted Andre's FREEZE challenge in about a second | FREEZE and LIFT_FREEZE challenges hold no server state: nonce, expiry and an HMAC (per-process key) over the action hash. Nothing to fill or evict; single use is kept by remembering only challenges that approved something, until they expire |
 | R3-4 (Low) | A failed integrity alert was never sent again while the log was unhealthy | Deduplicated only after a channel reports `delivered` |
+
+## Amendment — AEGIS round 4 (Oct 5 2026): BLOCKING, every finding fixed
+
+Round 4 confirmed R3-1 (a and b), R3-2, R3-3 and R3-4 closed.
+
+| Id | Finding | Fix |
+|---|---|---|
+| R4-1 (High, since round 2) | A forged `pending.line` (write access to the data directory only) was anchored by the service itself and applied: e.g. an attacker's passkey enrolled | Only a line THIS process wrote is anchored by it, and the trusted copy is the one kept in memory, never the file. A line found on disk at start is appended only if the ledger ALREADY holds its anchor (decision 7 restored); otherwise it is set aside (`pending.discarded`), inert, and appended later only if its anchor appears (it was in flight when the process stopped); it is dropped once the log has moved past it |
+| R4-2 (Medium, from R3-3) | A blank line in the log stopped every write, restart included | A blank line refuses start with a message naming it; `verify()` reports it |
+| R4-3 (Low) | A failed FREEZE attempt did not use its challenge up | A MAC-valid attempt uses it up, whatever happens next |
+| Info | A failed delete of the old version after a recorded rotation answered 500 | Guarded: the rotation stands; the orphan is removed at the next start |
+
+Residual (accepted, fail-closed): if the process stops while an anchor is in flight AND a new line is committed
+before that anchor lands, the ledger then holds two anchors for one sequence number; the integrity check reports it
+(sev1, writes stop) and an operator reconciles. The ledger's `department` field is self-declared by any holder of the
+ledger token, so a service holding that token could forge a `cybersecurity` anchor; per-department ledger tokens are
+a ledger-rust change (unlock list).

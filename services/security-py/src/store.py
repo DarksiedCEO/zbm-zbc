@@ -80,7 +80,11 @@ class RecordLog:
                     raw = fh.read()
                 if raw and not raw.endswith(b"\n"):
                     raise StoreCorrupt("log ends with a torn line; refusing to start (inspect the file)")
-                self._lines = [ln for ln in raw.split(b"\n") if ln] if raw else []
+                parts = raw.split(b"\n")[:-1] if raw else []
+                if any(not ln for ln in parts):
+                    raise StoreCorrupt(f"log has an empty line (line {parts.index(b'') + 1}); refusing to start: "
+                                       "remove it (the service never writes one)")
+                self._lines = parts
                 verify_lines(self._lines)
 
     @property
@@ -170,8 +174,8 @@ class RecordLog:
                         raw = fh.read()
                     if raw and not raw.endswith(b"\n"):
                         return False
-                    lines = [ln for ln in raw.split(b"\n") if ln]
-                    if len(lines) != len(self._lines):
+                    lines = raw.split(b"\n")[:-1] if raw else []
+                    if len(lines) != len(self._lines) or any(not ln for ln in lines):   # R4-2: no empty line
                         return False
                 else:
                     lines = self._lines
@@ -206,6 +210,36 @@ class RecordLog:
             except OSError as exc:
                 raise StoreWriteError(f"pending line could not be removed: {type(exc).__name__}") from exc
 
+    # a pending line found at start whose anchor is not on the ledger is kept aside, not trusted (AEGIS R4-1):
+    # if the ledger later shows its anchor (it was in flight when the process stopped), it is appended then
+
+    _mem_discarded: Optional[bytes] = None
+
+    def write_discarded(self, line: bytes) -> None:
+        if not self.data_dir:
+            self._mem_discarded = line
+            return
+        _write_file(os.path.join(self.data_dir, DISCARDED_NAME), line, "discarded line")
+
+    def read_discarded(self) -> Optional[bytes]:
+        if not self.data_dir:
+            return self._mem_discarded
+        try:
+            with open(os.path.join(self.data_dir, DISCARDED_NAME), "rb") as fh:
+                return fh.read(PENDING_MAX_BYTES) or None
+        except FileNotFoundError:
+            return None
+
+    def clear_discarded(self) -> None:
+        self._mem_discarded = None
+        if self.data_dir:
+            try:
+                os.unlink(os.path.join(self.data_dir, DISCARDED_NAME))
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise StoreWriteError(f"discarded line could not be removed: {type(exc).__name__}") from exc
+
     def read_pending(self) -> Optional[bytes]:
         if not self.data_dir:
             return self._mem_pending
@@ -218,6 +252,7 @@ class RecordLog:
 
 
 PENDING_NAME = "pending.line"
+DISCARDED_NAME = "pending.discarded"
 PENDING_MAX_BYTES = 16 * 1024 * 1024    # above the largest line a route can produce (AEGIS L5: a scan line is ~1.4 MiB)
 
 

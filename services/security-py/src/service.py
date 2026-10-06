@@ -141,9 +141,10 @@ class SecurityService:
         self._em_key = os.urandom(32)
         self._em_used: dict[str, int] = {}
         self._deferred_incidents: list[tuple] = []
+        self._own_pending: Optional[bytes] = None
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
-        if self.log.read_pending() is None:
+        if self.log.read_pending() is None and self.log.read_discarded() is None:
             self._remove_orphans()      # never while a pending line may still refer to a sealed file (round 2 N2)
         self.verify_integrity(force=True)
 
@@ -174,6 +175,7 @@ class SecurityService:
             line_sha = sha256_hex(line)
             epoch = self.log.epoch or line_sha[:16]
             eid, payload = self._anchor_ids(epoch, rec["seq"], line_sha)
+            self._own_pending = line                  # R4-1: only a line THIS process wrote is anchored by it
             try:
                 self.log.write_pending(line)
             except StoreWriteError:
@@ -217,6 +219,7 @@ class SecurityService:
         """True when the pending line is certainly gone. Otherwise writes stop until the next integrity check."""
         try:
             self.log.clear_pending()
+            self._own_pending = None
             return True
         except StoreWriteError:
             self.integrity = {"ok": False, "checked_at": iso(self.now()),
@@ -403,8 +406,9 @@ class SecurityService:
             except LedgerQueryFailed:
                 self.integrity = {"ok": False, "checked_at": at, "problem": "the ledger cannot be read"}
                 return self.integrity
-            problem, rolled = self._settle_pending()
-            if rolled and self.log.read_pending() is None:
+            mine = [e for e in entries if e.get("department") == DEPARTMENT and e.get("event_type") == "log_anchor"]
+            problem, rolled = self._settle_pending({e.get("event_id"): e for e in mine})
+            if rolled and self.log.read_pending() is None and self.log.read_discarded() is None:
                 self._remove_orphans()                      # e.g. the old version a rolled-forward rotation replaced
             if problem is None and rolled:
                 try:
@@ -420,13 +424,53 @@ class SecurityService:
                 self._after_integrity()     # under the lock (no double reset or key); alerts are only QUEUED here
             return dict(self.integrity)
 
-    def _settle_pending(self) -> tuple[Optional[str], bool]:
-        """Roll the pending line forward if it is the exact next line of this log: re-record its anchor (identical
-        content, so the ledger answers 200 whether it already held it or not), then append it. Otherwise it is
-        stale and discarded, with any sealed file only it referred to. Returns (problem, rolled_forward)."""
+    def _settle_pending(self, by_id: dict) -> tuple[Optional[str], bool]:
+        """Settle a line that was prepared but may not have reached the log. Returns (problem, appended).
+
+        - A line THIS process wrote (``_own_pending``, kept in memory) is rolled forward: its identical anchor is
+          re-recorded (the ledger answers 200 whether or not it already held it), then it is appended. The file
+          copy is never what is trusted (AEGIS R4-1).
+        - A line found on disk at start (this process did not write it) is appended only if the ledger ALREADY holds
+          its anchor: the ledger vouches for it. Otherwise it is kept aside (``pending.discarded``), never anchored by
+          us: a forged line stays inert. If its anchor appears later (it was in flight when the process stopped),
+          the next check appends it.
+        """
+        own = self._own_pending
+        if own is not None:
+            problem, appended = self._roll_forward(own, by_id, rerecord=True)
+            if problem is not None:
+                return problem, False
+            self._own_pending = None
+            try:
+                self.log.clear_pending()
+            except StoreWriteError:
+                return "the pending line could not be removed", appended
+            return None, appended
+        appended_any = False
         raw = self.log.read_pending()
-        if raw is None:
-            return None, False
+        if raw is not None:
+            problem, appended = self._roll_forward(raw, by_id, rerecord=False)
+            if problem is not None and not problem.startswith("not vouched"):
+                return problem, False
+            try:
+                if not appended:
+                    self.log.write_discarded(raw)
+                self.log.clear_pending()
+            except StoreWriteError:
+                return "the pending line could not be set aside", appended
+            appended_any |= appended
+        aside = self.log.read_discarded()
+        if aside is not None:
+            problem, appended = self._roll_forward(aside, by_id, rerecord=False)
+            if appended or problem == "not vouched: stale":
+                try:
+                    self.log.clear_discarded()
+                except StoreWriteError:
+                    pass
+            appended_any |= appended
+        return None, appended_any
+
+    def _roll_forward(self, raw: bytes, by_id: dict, rerecord: bool) -> tuple[Optional[str], bool]:
         try:
             rec = json.loads(raw)
             seq, kind, data = rec["seq"], rec["kind"], rec["data"]
@@ -434,14 +478,21 @@ class SecurityService:
             if not isinstance(data.get("actor"), str) or not re.fullmatch(r"[a-z0-9_]{1,64}", data["actor"]):
                 raise ValueError("no ledger-valid actor")
         except (ValueError, KeyError, TypeError, AttributeError, StoreCorrupt):
-            return self._discard_pending(), False
+            return "not vouched: stale", False
         line_sha = sha256_hex(raw)
         epoch = self.log.epoch or line_sha[:16]
         eid, payload = self._anchor_ids(epoch, seq, line_sha)
-        try:
-            self._anchor(eid, data["actor"], epoch, payload, kind, seq)
-        except LedgerRecordError:
-            return "the pending line could not be anchored yet (ledger unavailable); kept for the next check", False
+        if rerecord:
+            try:
+                self._anchor(eid, data["actor"], epoch, payload, kind, seq)
+            except LedgerRecordError:
+                return "the pending line could not be anchored yet (ledger unavailable); kept for the next check", \
+                    False
+        else:
+            e = by_id.get(eid)
+            if e is None or e.get("payload_sha256") != payload_sha256(payload) \
+                    or e.get("subject_id") != f"log:{epoch}":
+                return "not vouched: no anchor on the ledger", False
         try:
             self.log.append_prepared(rec, raw)
         except StoreWriteError:
@@ -453,10 +504,6 @@ class SecurityService:
             # previous version's file is kept by _remove_orphans for a manual recovery.
             self._deferred_incidents.append(("sev1", "SEALED_SECRET_TAMPERED",
                                              self.secrets[data["secret_id"]]["ref"]))   # opened once verified
-        try:
-            self.log.clear_pending()
-        except StoreWriteError:
-            return "the pending line could not be removed", True
         return None, True
 
     def _sealed_present(self, kind: str, data: dict) -> bool:
@@ -465,14 +512,6 @@ class SecurityService:
             return True
         raw = self.sealed.get(data["secret_id"], data["version"])
         return raw is not None and sha256_hex(raw) == data["envelope_sha256"]
-
-    def _discard_pending(self) -> Optional[str]:
-        try:
-            self.log.clear_pending()
-        except StoreWriteError:
-            return "the pending line could not be removed"
-        self._remove_orphans()                              # a sealed file only the discarded line referred to
-        return None
 
     def _raw_lines(self) -> list[bytes]:
         return list(self.log._lines)
@@ -705,6 +744,8 @@ class SecurityService:
                 code, raw = "APPROVAL_CHALLENGE_UNKNOWN", None
             else:
                 code, raw = self._em_check(appr["challenge_id"], self.action_sha(action, target, body))
+            if code is None:     # R4-3: a MAC-valid attempt uses the challenge up, whatever happens next
+                self._em_used[appr["challenge_id"]] = int(time.time()) + CHALLENGE_TTL_S + 60
             ch = None if code else {"challenge": raw, "kind": "get", "used": False, "expires": float("inf"),
                                     "action_sha": self.action_sha(action, target, body), "em": appr["challenge_id"]}
             if code:
@@ -737,8 +778,6 @@ class SecurityService:
                     count = webauthn.verify_assertion(cred, appr["client_data_json"], appr["authenticator_data"],
                                                       appr["signature"], ch["challenge"], self.rp)
                     pk["sign_count"] = max(pk["sign_count"], count)   # AEGIS L9: even if the route fails later
-                    if ch.get("em"):
-                        self._em_used[ch["em"]] = int(time.time()) + CHALLENGE_TTL_S + 60
                     return {"credential_id": pk["credential_id"], "sign_count": count,
                             "challenge_id": appr["challenge_id"]}
                 except webauthn.CounterRegression:
@@ -1110,7 +1149,10 @@ class SecurityService:
                 if not getattr(exc, "maybe", False):
                     self.sealed.delete(s["secret_id"], new)
                 raise
-            self.sealed.delete(s["secret_id"], old)
+            try:
+                self.sealed.delete(s["secret_id"], old)
+            except StoreWriteError:
+                pass        # the rotation stands; the old file is an orphan removed at the next start
             return self._view(s)
 
     def _held(self, s: dict) -> bool:
