@@ -889,8 +889,9 @@ work and public affairs are department 14. Founder decisions (Oct 6 Q&A), archit
 - **Andre decides.** The AI drafts; every response and pitch is assembled only from approved boilerplate plus
   approved custom text and needs Andre's approval of its exact hash. The `bid` decision, deadline moves, wins,
   partner rates, payees and hold decisions are his alone. Any pursuit or partner deal over $10,000 goes to him,
-  aggregated over every deal sharing a counterparty ref, registrable domain or normalised name, so a split deal
-  cannot get under the threshold.
+  aggregated over every deal sharing a counterparty ref, registrable domain or normalised name: every live deal
+  counts, and closed deals count within `NBD_AGGREGATION_WINDOW_DAYS` (default 365), so a split deal cannot get
+  under the threshold inside that window.
 - **Fails closed.** A submission past its stored deadline is refused (judged on the service's injected clock, never
   the wall clock); an outcome that is not known stays `sending` and is never resent. Government bids carry required
   certifications that only Andre attests, one item at a time by hash; conflict-of-interest, gift, lobbying and

@@ -3,6 +3,8 @@
 Status: accepted for build, Oct 6 2026 (founder Q&A the same day). Not in force: no email or submission provider,
 no bid source, and no Onboarding, Finance (31) or Legal (37) client is built, so outreach, submissions and payouts
 stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `LEGAL_UNAVAILABLE`.
+Wired into CI (python-tests, macOS, live runs), the hygiene check and docs/test-counts.md on branch
+`wire-influencer-bizdev-11-12`.
 
 ## Founder decisions (Q&A, Oct 6 2026; binding)
 
