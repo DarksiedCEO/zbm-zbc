@@ -64,7 +64,7 @@ a date of birth, government id, card or bank account number, IP address or devic
 | `GET /svc/v1/status` | dashboard | integrity, wired ports, queues, SLA targets, Andre gate configured |
 | `POST /svc/v1/contacts`; `GET /contacts/{id}` | hub, onboarding; dashboard | the minimum about a person: ref, email, phone, time zone, display name |
 | `POST /svc/v1/consents`; `POST /consents/revoke`; `GET /contacts/{id}/consents` | hub, onboarding; hub, dashboard; dashboard, hub, compliance_38 | consent registry (express only; names the address it is for; text stored once by keyed hash) |
-| `POST /svc/v1/contacts/{id}/sms-pause/clear` | Andre | lift the pause an unclear inbound SMS put on proactive SMS (never restores a revoked consent) |
+| `POST /svc/v1/contacts/{id}/sms-pause/clear` | Andre | lift the pause an unanswered inbound message put on proactive SMS to the contact's current number (pauses belong to the number; never restores a revoked consent) |
 | `POST /svc/v1/chat/messages`; `GET /chat/threads/{ticket_id}?contact_ref=&brand=` | hub | inbound chat (answered inline when an approved answer matches); the thread as the contact sees it |
 | `POST /svc/v1/inbound/email` | email_gateway | inbound email to a brand's support identity |
 | `POST /svc/v1/inbound/sms` | sms_gateway | inbound SMS; a bare STOP / UNSUBSCRIBE / CANCEL / END / QUIT revokes SMS consent at once |

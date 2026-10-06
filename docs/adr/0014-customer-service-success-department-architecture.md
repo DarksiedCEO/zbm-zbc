@@ -235,3 +235,16 @@ SMS; the round-2 corpus stays in `test_aegis_r2.py`); each new guard mutation-ch
 | Info | "shop" is one typo from "stop": a chat or email typo revoked consent permanently | Opt-outs have two levels: `exact` (a listed word or phrase, also with repeated letters collapsed or digits read as letters, a stop-sign emoji, a short ambiguous message) revokes on every channel; `suspected` (a one-typo stop / unsubscribe, a negation near a channel word) revokes on SMS but on chat and email only pauses proactive SMS and alerts Andre to confirm |
 
 Unlock list addition: 9. HMAC key rotation (recompute every stored digest and address revocation under a new key).
+
+## Amendment — AEGIS round 4 (Oct 5 2026): NOT BLOCKING, every finding fixed
+
+Regressions: `services/service-py/tests/test_aegis_r4.py` (the reviewer's 38 questions verbatim); each new guard
+mutation-checked.
+
+| Id | Finding | Fix |
+|---|---|---|
+| V4-M1 (Medium) | Andre could approve example questions that carry money, privacy, account-closure, security or opt-out meaning without a lexicon word ("can i get my funds back", "do you sell my info", "how do i shut down my account") | At approval an example question is refused 422 `QUESTION_DENIED` when it has more than 12 words, a second clause (`triage.single_intent`), any opt-out wording (`channels.opt_out_level`), a negation near a channel word, any category, stem or typo, or an approval-only deny term: funds, back, rebate, deposit, waive, renew, credit, card, wire, sell, share, rid, forget, leave, out, off, offline, dump, safe, problem, broken, shut, close, stuff, return, money back, get rid, have on me, shut down, close my account, close out, out of, take off / down, got into, end things, free month, auto renew, my info / data / information / account. These terms refuse questions only; they do not label inbound messages |
+| V4-M2 (Medium) | `bound_to` (the STOP number) appeared in the audit export and in the `answer_queued` ledger payload | `bound_to` is a personal key: hashed (per-export HMAC) in the export, left out of every typed-event payload. A regression scans the whole export and every ledger payload for any E.164 number or email address |
+| V4-L1 (Low) | A pause was keyed by contact: moving the number to a new contact dropped it | Pauses are keyed by (brand, HMAC of the number), like revocations, and checked for whichever contact holds the number now |
+| V4-L2 (Low) | The generated key file was written in place: a crash could leave it empty, and the error did not say what to do | Written to a 0600 temporary file, fsynced, linked into place (`os.link`, which never replaces an existing file) and the directory fsynced; a leftover temporary file is removed. An empty or invalid key file stops the start with the remedy: delete it only if the log is absent or empty, otherwise restore it from backup; a permissions problem is reported as such |
+| V4-L3 (Low) | A changed generated key was reported as `SVC_HMAC_KEY_FILE` | The mismatch error names the actual key source: the generated key file's path, or `SVC_HMAC_KEY_FILE` with its path |

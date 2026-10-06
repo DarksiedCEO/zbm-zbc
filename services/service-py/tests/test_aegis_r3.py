@@ -239,7 +239,7 @@ def test_v3_c1_an_unanswered_chat_or_email_pauses_proactive_sms(tmp_path, channe
          else h.chat(text, ref="client:acme"), 201)
     assert _survey(h).status_code == 409
     h.ok(h.job("outbound-tick"))
-    assert not s.sent and (cid, "+13105551234") in h.svc.sms_paused
+    assert not s.sent and h.svc.sms_paused_for(h.svc.contacts[cid])
 
 
 @pytest.mark.parametrize("text", ["when you open can you let me be", "what hours should i tell you to let me be",
@@ -343,7 +343,7 @@ def test_v3_m2_an_opt_out_from_an_unknown_address_naming_the_contact_pauses_it(t
     h, s, cid = _world(tmp_path)
     r = h.ok(h.email("STOP texting me at 310-555-1234", frm="personal@other.test", subject="stop"), 201)
     assert r["opted_out"] is True and r["action"] in ("queued_for_human", "escalated")
-    assert (cid, "+13105551234") in h.svc.sms_paused
+    assert h.svc.sms_paused_for(h.svc.contacts[cid])
     assert _survey(h).json()["detail"] == "SMS_PAUSED"
     assert "OPT_OUT_UNKNOWN_SENDER" in [a["code"] for a in h.ok(h.get("/svc/v1/alerts"))]
 

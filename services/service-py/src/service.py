@@ -68,7 +68,7 @@ NEUTRAL_SUBJECTS = frozenset({"question", "quick question", "hello", "hi", "hey"
 SENSITIVE = frozenset({"money", "contract", "complaint", "security", "privacy"})
 CATALOGS = ("kb", "template", "offer")
 PERSONAL_KEYS = ("email", "phone", "display_name", "contact_ref", "timezone", "to", "from_number", "from_address",
-                 "address")
+                 "address", "bound_to")
 # typed ledger events: effect op -> event type (recorded BEFORE the line that carries the effect)
 EVENTS = {"consent_granted": "consent_changed", "consent_revoked": "consent_changed",
           "handoff_new": "escalation_opened", "ticket_escalated": "escalation_opened",
@@ -115,7 +115,8 @@ class SupportService:
         self.consents: dict[tuple, dict] = {}
         # V3-C2: revocations belong to the ADDRESS: (brand, channel, HMAC of the address) -> when last revoked
         self.addr_revocations: dict[tuple, str] = {}
-        self.sms_paused: dict[tuple, str] = {}        # (contact, phone) -> when proactive SMS was paused (V2-H3)
+        # V2-H3 / V4-L1: pauses belong to the NUMBER: (brand, HMAC of the phone) -> when proactive SMS was paused
+        self.sms_paused: dict[tuple, str] = {}
         self.address_changed_at: dict[tuple, str] = {}   # (contact, "phone" | "email") -> when it last changed
         self.tickets: dict[str, dict] = {}
         self.messages: dict[str, dict] = {}
@@ -140,8 +141,8 @@ class SupportService:
             self._apply(r["kind"], r["data"], r["at"])
         if self.key_fingerprint is not None and not hmac.compare_digest(self.key_fingerprint, self._key_fp()):
             # V2-M1: another key would make every stored body unreadable (and new ones unjoinable): refuse
-            raise StoreCorrupt("SVC_HMAC_KEY_FILE is not the key this log was written with (fingerprint mismatch); "
-                               "refusing to start")
+            raise StoreCorrupt(f"{self.settings.key_source} is not the key this log was written with (fingerprint "
+                               "mismatch); refusing to start: restore the key the log was written with")
         if self.key_fingerprint is None and len(self.log):
             # V3-L2: a log from before the fingerprint existed: adopt this key only if every stored body the log cites
             # verifies with it (a wrong key would make them all unreadable); otherwise refuse
@@ -329,10 +330,12 @@ class SupportService:
                 m.update(status="cancelled", reason=R("CONSENT_REVOKED"), updated_at=at)
 
     def _e_sms_paused(self, e, at):
-        self.sms_paused.setdefault((e["contact_id"], e["phone"]), at)
+        brand = self.contacts[e["contact_id"]]["brand"]
+        self.sms_paused.setdefault((brand, self._addr_key("sms", e["phone"])), at)
 
     def _e_sms_pause_cleared(self, e, at):
-        self.sms_paused.pop((e["contact_id"], e["phone"]), None)
+        brand = self.contacts[e["contact_id"]]["brand"]
+        self.sms_paused.pop((brand, self._addr_key("sms", e["phone"])), None)
 
     def _e_ticket_new(self, e, at):
         self.tickets[e["ticket_id"]] = {
@@ -754,7 +757,12 @@ class SupportService:
 
     def _channel_check(self, channel: str, contact: dict, proactive: bool, opt_out: bool = False) -> Optional[str]:
         return channels.check(channel, contact, lambda ch: self._live_consent(contact, ch), proactive,
-                              self.now(), opt_out, (contact["contact_id"], contact.get("phone")) in self.sms_paused)
+                              self.now(), opt_out, self.sms_paused_for(contact))
+
+    def sms_paused_for(self, contact: dict) -> bool:
+        """Proactive SMS to this contact's CURRENT number is paused, whichever contact the pause was recorded on."""
+        phone = contact.get("phone")
+        return bool(phone) and (contact["brand"], self._addr_key("sms", phone)) in self.sms_paused
 
     def _named_contacts(self, brand: str, text: str, exclude: str) -> list[dict]:
         """Contacts of this brand a message names by phone number or email address (V3-M2)."""
@@ -792,7 +800,7 @@ class SupportService:
             c = self.contacts.get(contact_id)
             if c is None:
                 raise NotFound(R("CONTACT_NOT_FOUND"))
-            if (contact_id, c.get("phone")) not in self.sms_paused:
+            if not self.sms_paused_for(c):
                 raise Conflict(R("NOT_PAUSED"))
             resp = {"contact_id": contact_id, "sms_paused": False,
                     "sms_consent": (self.consents.get((contact_id, "sms")) or {}).get("status")}
@@ -900,7 +908,7 @@ class SupportService:
             if c is None:
                 raise NotFound(R("CONTACT_NOT_FOUND"))
             return {**c, "consents": self._consents_of(contact_id),
-                    "sms_paused": (contact_id, c.get("phone")) in self.sms_paused}
+                    "sms_paused": self.sms_paused_for(c)}
 
     def _consents_of(self, contact_id: str) -> list[dict]:
         return [dict(v) for (cid, _), v in sorted(self.consents.items()) if cid == contact_id]
@@ -1323,7 +1331,7 @@ class SupportService:
                 if content["purpose"] == "offer" and "{offer_terms}" not in content["text"]:
                     raise Invalid(R("TEMPLATE_PLACEHOLDER"))
             if catalog == "kb":
-                if any(triage_mod.denied_question(q) for q in content["questions"]):
+                if any(question_denied(q) for q in content["questions"]):
                     raise Invalid(R("QUESTION_DENIED"))     # V3-M1: an example question never carries a category
                 if len({kb.exact_form(q) for q in content["questions"]}) != len(content["questions"]) \
                         or not all(kb.exact_form(q) for q in content["questions"]):
@@ -2105,6 +2113,29 @@ CATALOG_CONTENT = {
 
 def catalog_sha(catalog: str, content: dict) -> str:
     return payload_sha256({"catalog": catalog, **{k: content[k] for k in CATALOG_CONTENT[catalog]}})
+
+
+# V4-M1: words and phrases an approved example question may never hold (approval time only; they do not label inbound
+# messages). A question is also refused when it has more than QUESTION_MAX_WORDS words, a second clause
+# (triage.single_intent), any opt-out wording or a negation near a channel word.
+QUESTION_DENY_WORDS = frozenset("""
+fund funds back rebate rebates deposit deposits waive waived renew renewal renews credit credits card wire sell sells
+selling share shares sharing rid forget leave leaving out off offline dump safe problem problems broken shut close
+closing closure unsubscribe stuff refundable owed return returned returns
+""".split())
+QUESTION_DENY_PHRASES = ("money back", "get rid", "have on me", "know about me", "shut down", "close my account",
+                         "close out", "out of", "take off", "take down", "taken offline", "got into", "end things",
+                         "free month", "auto renew", "my info", "my data", "my information", "my account")
+QUESTION_MAX_WORDS = 12
+
+
+def question_denied(q: str) -> bool:
+    norm = triage_mod.normalise(q)
+    words = norm.split()
+    return (len(words) > QUESTION_MAX_WORDS or triage_mod.denied_question(q) or triage_mod.single_intent(q) is not None
+            or channels.opt_out_level(q) is not None or channels.negated_channel(norm)
+            or any(w in QUESTION_DENY_WORDS for w in words)
+            or any(f" {p} " in norm for p in QUESTION_DENY_PHRASES))
 
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")

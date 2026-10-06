@@ -59,6 +59,7 @@ def _secret_file_bytes(env, name: str, max_bytes: int = 4096) -> bytes:
 
 
 KEY_NAME = "hmac.key"
+LOG_FILE_NAME = "service_log.jsonl"
 
 
 def weak_key(key: bytes) -> bool:
@@ -70,26 +71,54 @@ def weak_key(key: bytes) -> bool:
 
 
 def _generated_key(data_dir: str) -> bytes:
-    """The service's own key: read from SVC_DATA_DIR/hmac.key, or created there (0600, O_EXCL) on the first start."""
+    """The service's own key: read from SVC_DATA_DIR/hmac.key, or created there on the first start ATOMICALLY (V4-L2):
+    32 random bytes written to a 0600 temporary file, fsynced, linked into place (``os.link`` refuses to replace an
+    existing file, so two first starts cannot both win) and the directory fsynced. A crash leaves either no key file
+    (the next start generates one) or a complete one; a leftover temporary file is removed. A key file that is
+    present but empty or invalid stops the start with the exact remedy."""
     os.makedirs(data_dir, mode=0o700, exist_ok=True)
     path = os.path.join(data_dir, KEY_NAME)
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    except FileExistsError:
-        fd = None
-    if fd is not None:
+    tmp = path + ".tmp"
+    if not os.path.lexists(path):
+        try:
+            os.unlink(tmp)                                   # a crash between write and link
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         try:
             os.write(fd, base64.b64encode(os.urandom(32)))
             os.fsync(fd)
         finally:
             os.close(fd)
-    raw = _secret_file_bytes({"KEY_FILE": path}, "KEY_FILE")
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            pass                                             # another first start won; use its key
+        finally:
+            os.unlink(tmp)
+        dfd = os.open(data_dir, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    label = f"the generated key file {path}"
+    remedy = (f"{label} is empty, unreadable or not a valid key. If {LOG_FILE_NAME} in that directory is absent or "
+              f"empty (a first start that crashed), delete {path} and start again: a new key is generated. Otherwise "
+              f"restore {path} from the backup taken with the data directory; never delete it while the log has lines "
+              "(every stored body is keyed with it)")
+    try:
+        raw = _secret_file_bytes({"KEY_FILE": path}, "KEY_FILE")
+    except RuntimeError as exc:
+        detail = str(exc).replace("KEY_FILE: ", "")
+        if "readable by group" in detail or "not owned" in detail:
+            raise RuntimeError(f"{label}: {detail}") from None          # a permissions problem: fix, do not delete
+        raise RuntimeError(f"{remedy} ({detail})") from None
     try:
         key = base64.b64decode(raw, validate=True)
     except ValueError:
-        key = b""
+        raise RuntimeError(remedy) from None
     if len(key) < 32 or weak_key(key):
-        raise RuntimeError(f"{KEY_NAME} in SVC_DATA_DIR is not a valid generated key; refusing to start")
+        raise RuntimeError(remedy)
     return key
 
 
@@ -150,6 +179,7 @@ class Settings:
     renewal_window_days: int = 60
     hmac_key: bytes = b""                                  # keys every stored digest (bodies, consent texts)
     nonprod_outbox: Optional[str] = None                   # SVC_SMS_PROVIDER=nonprod_file (non-production only)
+    key_source: str = "the non-production test key"         # named in a key-mismatch error (V4-L3)
     bind_addr: str = "127.0.0.1"
     port: int = 8460
 
@@ -269,8 +299,10 @@ def load(env: Optional[dict] = None) -> Settings:
             raise RuntimeError("SVC_HMAC_KEY_FILE holds a weak key (all zeros, fewer than 16 distinct bytes, a repeated "
                                "block or only printable characters): leave it unset and the service generates one")
         s.hmac_key = key
+        s.key_source = f"SVC_HMAC_KEY_FILE ({(env.get('SVC_HMAC_KEY_FILE') or '').strip()})"
     elif s.data_dir:
         s.hmac_key = _generated_key(s.data_dir)
+        s.key_source = f"the generated key file {os.path.join(s.data_dir, KEY_NAME)}"
     elif non_production:
         s.hmac_key = NON_PRODUCTION_HMAC_KEY
     else:
