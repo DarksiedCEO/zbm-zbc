@@ -258,3 +258,38 @@ def test_an_answer_whose_article_was_edited_before_sending_is_cancelled(tmp_path
                                         "rules": {"any": ["hours"]}}), 201)
     assert h.ok(h.job("outbound-tick"))["cancelled"] == 1 and not senders["email"].sent
     assert h.ok(h.get(f"/svc/v1/tickets/{r['ticket_id']}"))["queue"] == "andre"
+
+
+def test_a_send_whose_result_could_not_be_recorded_is_never_sent_twice(tmp_path):
+    h, senders = _wired(tmp_path)
+    r = h.ok(h.email("I need help"), 201)
+    h.ok(h.post(f"/svc/v1/tickets/{r['ticket_id']}/reply", {"request_id": rid(), "text": "ok"}, andre=True), 201)
+    real = h.svc._commit
+
+    def fail_result(kind, data, actor):
+        if kind == "outbound_result":
+            raise __import__("errors").Unavailable("LEDGER_UNAVAILABLE")
+        return real(kind, data, actor)
+    h.svc._commit = fail_result
+    assert h.job("outbound-tick").status_code == 503
+    h.svc._commit = real
+    assert h.ok(h.job("outbound-tick"))["sent"] == 1
+    assert len(senders["email"].sent) == 1
+    assert h.ok(h.get("/svc/v1/outbound"))[-1]["status"] == "sent"
+
+
+def test_a_message_whose_body_is_gone_is_cancelled_not_stuck(tmp_path):
+    h, senders = _wired(tmp_path)
+    r = h.ok(h.email("I need help"), 201)
+    rep = h.ok(h.post(f"/svc/v1/tickets/{r['ticket_id']}/reply", {"request_id": rid(), "text": "a unique reply"},
+                      andre=True), 201)
+    h.svc.bodies._mem.pop(h.svc.messages[rep["message_id"]]["body_sha256"])
+    assert h.ok(h.job("outbound-tick"))["cancelled"] == 1 and not senders["email"].sent
+
+
+def test_a_changed_phone_number_no_longer_finds_the_old_contact(h):
+    cid = h.contact(phone="+13105551234")
+    h.ok(h.post("/svc/v1/contacts", {"request_id": rid(), "brand": "zbm", "contact_ref": "client:acme",
+                                     "phone": "+13105559876"}, caller="hub"), 201)
+    assert h.ok(h.sms("hello", frm="+13105559876"), 201)["contact_id"] == cid
+    assert h.ok(h.sms("hello", frm="+13105551234"), 201)["contact_id"] != cid

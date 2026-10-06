@@ -119,6 +119,7 @@ class SupportService:
         self._own_pending: Optional[bytes] = None
         self._deferred_alerts: list[tuple] = []
         self._in_flight: set = set()
+        self._unconfirmed: dict[str, dict] = {}     # sent by the provider, result not yet committed: never resent
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
         if self.log.read_pending() is None and self.log.read_discarded() is None:
@@ -257,6 +258,8 @@ class SupportService:
     def _e_contact_update(self, e, at):
         c = self.contacts[e["contact_id"]]
         for k, v in e["fields"].items():
+            if k in ("email", "phone", "contact_ref") and c.get(k) and c[k] != v:
+                self.contact_index.pop((c["brand"], k, c[k]), None)      # the old address no longer finds them
             c[k] = v
         c["updated_at"] = at
         self._index_contact(c)
@@ -1251,13 +1254,19 @@ class SupportService:
                                            "response": resp}, actor)
             return resp
 
+    def _ticket_account(self, t: dict) -> Optional[str]:
+        """A ticket counts for the account it was opened under, or (opened before the contact was linked to an
+        account) for the contact's account now."""
+        return t["account_id"] or (self.contacts.get(t["contact_id"]) or {}).get("account_id")
+
     def _complaints_30d(self, account_id: str) -> int:
         since = iso(self.now() - timedelta(days=30))
-        return sum(1 for t in self.tickets.values() if t["account_id"] == account_id
+        return sum(1 for t in self.tickets.values() if self._ticket_account(t) == account_id
                    for at in t["complaint_at"] if at >= since)
 
     def _open_escalations(self, account_id: str) -> int:
-        return sum(1 for t in self.tickets.values() if t["account_id"] == account_id and t["status"] == "escalated")
+        return sum(1 for t in self.tickets.values() if self._ticket_account(t) == account_id
+                   and t["status"] == "escalated")
 
     def _latest_nps(self, account_id: str) -> Optional[int]:
         answered = [s for s in self.surveys.values() if s["account_id"] == account_id and s["score"] is not None]
@@ -1681,6 +1690,13 @@ class SupportService:
             for m in sorted(self.messages.values(), key=lambda x: (x["at"], x["message_id"])):
                 if m["dir"] != "out" or m["status"] != "queued" or m["message_id"] in self._in_flight:
                     continue
+                if m["message_id"] in self._unconfirmed:          # already taken by the provider: only record it
+                    ready.append(m)
+                    continue
+                if self.bodies.get(m["body_sha256"]) is None:
+                    cancels.append({"op": "message_status", "message_id": m["message_id"], "status": "cancelled",
+                                    "reason": R("BODY_MISSING")})
+                    continue
                 contact = self.contacts[m["contact_id"]]
                 reason = self._channel_check(m["channel"], contact, bool(m["proactive"]))
                 ref = m.get("ref") or {}
@@ -1718,11 +1734,14 @@ class SupportService:
                 self._in_flight.add(m["message_id"])
         try:
             for m in ready:
+                if m["message_id"] in self._unconfirmed:            # the provider already took it: record, never resend
+                    self._commit("outbound_result", {"effects": [self._unconfirmed[m["message_id"]]]}, INTERNAL)
+                    del self._unconfirmed[m["message_id"]]
+                    result["sent" if self.messages[m["message_id"]]["status"] == "sent" else "failed"] += 1
+                    continue
                 with self.lock:
                     contact = self.contacts[m["contact_id"]]
-                    text = self.bodies.get(m["body_sha256"])
-                    if text is None:
-                        continue
+                    text = self.bodies.get(m["body_sha256"]) or ""
                     attempt = m["attempts"] + 1
                     payload = {"message_id": m["message_id"], "channel": m["channel"], "brand": m["brand"],
                                "body_sha256": m["body_sha256"], "attempt": attempt, "origin": m["origin"]}
@@ -1739,11 +1758,13 @@ class SupportService:
                                    text)
                 res = _safe(lambda: self.ports.senders[m["channel"]].send(msg))
                 status = "sent" if res == "sent" else "failed"
-                self._commit("outbound_result", {"effects": [{"op": "message_status", "message_id": m["message_id"],
-                                                              "status": "sent" if status == "sent" else "queued",
-                                                              "reason": None if status == "sent"
-                                                              else R("PROVIDER_FAILED"), "attempted": True}]},
-                             INTERNAL)
+                effect = {"op": "message_status", "message_id": m["message_id"],
+                          "status": "sent" if status == "sent" else "queued",
+                          "reason": None if status == "sent" else R("PROVIDER_FAILED"), "attempted": True}
+                if status == "sent":
+                    self._unconfirmed[m["message_id"]] = effect
+                self._commit("outbound_result", {"effects": [effect]}, INTERNAL)
+                self._unconfirmed.pop(m["message_id"], None)
                 result[status] += 1
         finally:
             with self.lock:

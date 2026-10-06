@@ -293,3 +293,14 @@ def test_account_brand_cannot_change_and_contact_must_match(h):
     r = h.post("/svc/v1/accounts", {"request_id": rid(), "account_id": "acct-8", "brand": "zbm",
                                     "primary_contact_id": cid}, caller="onboarding")
     assert r.json()["detail"] == "CONTACT_NOT_FOUND"
+
+
+def test_tickets_opened_before_the_account_link_still_count(tmp_path):
+    ports, _ = _ports("up", "current")
+    h = Harness(tmp_path, ports=ports)
+    cid = h.contact(display_name="Dana Rivera")
+    h.ok(h.chat("I want to make a complaint"), 201)                 # before the contact has an account
+    h.account("acct-1", contact_id=cid)
+    h.ok(h.job("health-recompute"))
+    sig = {s["signal"]: s["points"] for s in h.ok(h.get("/svc/v1/accounts/acct-1/health"))["health"]["signals"]}
+    assert sig["complaints_30d"] == -10 and sig["open_escalations"] == -5
