@@ -188,3 +188,14 @@ before that anchor lands, the ledger then holds two anchors for one sequence num
 (sev1, writes stop) and an operator reconciles. The ledger's `department` field is self-declared by any holder of the
 ledger token, so a service holding that token could forge a `cybersecurity` anchor; per-department ledger tokens are
 a ledger-rust change (unlock list).
+
+## Amendment — AEGIS round 5 (Oct 5 2026): NOT BLOCKING
+
+Round 5 confirmed R4-1, R4-2 and R4-3 closed and found no Critical or High. One Medium, fixed before merge:
+
+| Id | Finding | Fix |
+|---|---|---|
+| R5-1 (Medium, from R4-1) | A failed unlink after a successful commit left the in-memory own line set, and every later check failed on it until a restart | The own line is cleared as soon as it is in the log; an own line that is no longer the next line falls through to the file path (set aside as stale) |
+
+Accepted trade-off (Info): anyone who sees a freeze challenge id on the request path can use it up with a bad
+signature; Andre asks for a new one. Ids are HMAC-protected and cannot be guessed.

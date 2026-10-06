@@ -201,6 +201,7 @@ class SecurityService:
                 self.integrity = {"ok": False, "checked_at": at, "problem": "a log line was anchored but not written; "
                                   "it is rolled forward at the next integrity check"}
                 raise _maybe(Unavailable(R("STORE_UNAVAILABLE"))) from None
+            self._own_pending = None   # R5-1: in the log now; a leftover file copy is stale and set aside next check
             self._drop_pending()    # if it fails, the stale copy is discarded at the next check (it is not the next line)
             self._apply(kind, data, at)
             return rec
@@ -438,6 +439,9 @@ class SecurityService:
         own = self._own_pending
         if own is not None:
             problem, appended = self._roll_forward(own, by_id, rerecord=True)
+            if problem == "not vouched: stale":
+                self._own_pending = None            # no longer the next line: fall through to the file path
+                return self._settle_pending(by_id)
             if problem is not None:
                 return problem, False
             self._own_pending = None

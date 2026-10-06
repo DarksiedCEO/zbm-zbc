@@ -141,3 +141,23 @@ def test_r4_3_a_failed_freeze_attempt_uses_the_challenge_up(hk):
     assert hk.post("/sec/v1/freezes", {**body, "approval": bad}).json()["detail"] == "PASSKEY_SIGNATURE_INVALID"
     r = hk.post("/sec/v1/freezes", {**body, "approval": hk.keys[0].assert_(ch)})
     assert r.status_code == 403 and r.json()["detail"] == "APPROVAL_CHALLENGE_USED"
+
+
+def test_r5_1_a_failed_unlink_after_a_successful_commit_does_not_stop_writes(tmp_path, monkeypatch):
+    d = str(tmp_path / "d")
+    h = Harness(tmp_path, data_dir=d)
+    h.enroll()
+    real, calls = store_mod.RecordLog.clear_pending, {"n": 0}
+
+    def fails_once(self):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise store_mod.StoreWriteError("EIO")
+        return real(self)
+    monkeypatch.setattr(store_mod.RecordLog, "clear_pending", fails_once)
+    assert h.post("/sec/v1/secrets", {"request_id": rid(), "name": "k", "kind": "api_key", "value": "v"},
+                  caller="finance_31").status_code == 201
+    h.svc._last_integrity_try = 0
+    assert h.svc.verify_integrity(force=True, always=True)["ok"] is True
+    assert h.post("/sec/v1/secrets", {"request_id": rid(), "name": "k2", "kind": "api_key", "value": "v"},
+                  caller="finance_31").status_code == 201
