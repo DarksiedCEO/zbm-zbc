@@ -1,0 +1,43 @@
+"""The closed catalogue of reason codes Customer Service / Client Success answers and records with. An error body
+carries one of these and nothing from the request (no text, no address, no token). ``R(code)`` refuses a code not
+listed here, so a new code is always a reviewed change."""
+
+from __future__ import annotations
+
+CODES = frozenset({
+    # callers and Andre
+    "CALLER_UNKNOWN", "CALLER_NOT_ALLOWED", "ANDRE_NOT_CONFIGURED", "ANDRE_APPROVAL_REQUIRED", "ANDRE_APPROVAL_INVALID",
+    # contacts and consent
+    "CONTACT_NOT_FOUND", "CONTACT_ADDRESS_TAKEN", "CONSENT_IN_FUTURE", "CONSENT_REVOKED", "NO_ADDRESS",
+    "CONSENT_PREDATES_REVOCATION", "CONSENT_PREDATES_CONTACT", "ADDRESS_CHANGED", "QUESTION_DENIED",
+    "SMS_OPT_OUT_SUSPECTED", "OPT_OUT_UNKNOWN_SENDER", "CONSENT_ADDRESS_MISMATCH", "CONSENT_PREDATES_ADDRESS",
+    "TIMEZONE_UNKNOWN", "FORBIDDEN_FIELD",
+    # channel rules (channels.check)
+    "SMS_CONSENT_REQUIRED", "SMS_PAUSED", "NOT_PAUSED", "QUIET_HOURS", "EMAIL_CONSENT_REQUIRED", "EMAIL_CONSENT_REVOKED", "CHANNEL_NOT_OUTBOUND",
+    "BRAND_EMAIL_NOT_CONFIGURED", "BRAND_SMS_NOT_CONFIGURED", "WRONG_BRAND_IDENTITY",
+    # tickets
+    "TICKET_NOT_FOUND", "TICKET_CLOSED", "TRANSITION_NOT_ALLOWED",
+    # catalogue (KB articles, templates, offers)
+    "ITEM_NOT_FOUND", "ITEM_RETIRED", "ITEM_UNCHANGED", "APPROVAL_STALE", "TEMPLATE_PLACEHOLDER",
+    "ARTICLE_NOT_APPROVED", "VOCABULARY_DENIED", "TEMPLATE_NOT_APPROVED", "OFFER_NOT_APPROVED", "NO_APPROVED_TEMPLATE",
+    # client success
+    "ACCOUNT_NOT_FOUND", "ACCOUNT_BRAND_MISMATCH", "EVENT_IN_FUTURE", "NO_PRIMARY_CONTACT", "PLAN_NOT_FOUND",
+    "PLAN_CLOSED", "STEP_NOT_FOUND", "STEP_NOT_OPEN", "SURVEY_NOT_FOUND", "SURVEY_ANSWERED",
+    # phone
+    "CALL_NOT_FOUND",
+    # sending
+    "PROVIDER_FAILED", "NOT_HELD", "CANCELLED_BY_ANDRE",
+    # alerts to Andre (codes only)
+    "ESCALATION_MONEY", "ESCALATION_CONTRACT", "ESCALATION_COMPLAINT", "ESCALATION_SECURITY", "ESCALATION_PRIVACY",
+    "SLA_FIRST_RESPONSE_BREACHED", "SLA_RESOLUTION_BREACHED", "ACCOUNT_AT_RISK", "RENEWAL_DUE", "NPS_DETRACTOR",
+    "VOICEMAIL_RECEIVED", "MISSED_CALL", "CALL_HANDOFF", "BODY_MISSING",
+    # generic
+    "REQUEST_ID_REUSED", "LEDGER_UNAVAILABLE", "STORE_UNAVAILABLE", "INTEGRITY_UNVERIFIED", "JOB_UNKNOWN",
+    "JOB_RUNNING", "INVALID", "NOT_FOUND", "SERVICE_CLOSED",
+})
+
+
+def R(code: str) -> str:
+    if code not in CODES:
+        raise AssertionError(f"reason code not in the catalogue: {code}")
+    return code
