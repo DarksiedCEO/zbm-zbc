@@ -750,6 +750,77 @@ cd services/security-py && python3 -m pytest -q   # count: docs/test-counts.md
 LEDGER_BIN=services/ledger-rust/target/release/server python3 services/security-py/devtools/live_run.py
 ```
 
+## Lead Generation (26) + Sales (27) (`services/sales-py`) — Oct 5, 2026
+
+One service for both brands, ZBM and ZBC: leads from four sources (inbound, referral / partner, public data, paid
+provider) deduped, scored and routed; the pipeline (accounts, contacts, leads, opportunities, activities, tasks) on
+the ledger with no external CRM; cold email under CAN-SPAM from a separate outreach domain; texts and calls only with
+recorded consent inside TCPA quiet hours; the two price books; proposals; won deals handed to Onboarding and Finance.
+Recruiting clippers is not here (Clipper Network). Founder decisions (Oct 5 Q&A), architecture and the unlock list:
+`docs/adr/0013-sales-leadgen-department-architecture.md`. Routes and settings: `services/sales-py/README.md`.
+
+- **Status:** built and tested (count: docs/test-counts.md). **Not in force.** No send provider, lead source or
+  department client is wired: email, SMS and voice stay queued, imports answer `SOURCE_NOT_WIRED`, proposals cannot
+  be sent (`LEGAL_UNAVAILABLE`) and won hand-offs stay `pending_delivery`. Setting any unbuilt provider or client
+  switch refuses start.
+- **Andre approves** template versions and proposals by content hash, and every price (each price-book line exists
+  with no price until he approves one). Agents send a proposal on their own only at approved list prices, with no
+  media buy, discount or custom term, and only while it and the opportunity's other live proposals stay within
+  $10,000; everything else waits for him.
+- **Outreach fails closed.** Cold email only from an Andre-approved template whose hash still matches, with the
+  postal address and a one-click unsubscribe added by the service, at a warm-up pace per outreach domain. One
+  suppression list across both brands with no removal path. Texts and calls only to +1 numbers with express consent
+  for that phone, channel and brand, 08:00-21:00 in the recorded zone and every zone of the area code; any inbound
+  reply holds phone outreach to the contact until Andre decides it. Emails and phones are keyed hashes in dedupe,
+  suppression and the audit export.
+- **Record-first log** (security-py's design as fixed in ADR 0012): every send, consent change, suppression and
+  approval is a typed ledger event before its log line, and each line is anchored before it takes effect; ledger
+  down = nothing happens; a truncated, replaced or edited log stops all writes.
+- **Live run** (`devtools/live_run.py`: real ledger-rust binary, production entrypoint): inbound, referral and
+  duplicate leads → imports refused → template approval → cold email queued, not sent → SMS refused without consent
+  and in quiet hours → opt-out suppressing across both brands → quote and approval rules → send refused while Legal
+  is a stand-in → restart → forged pending line inert → second process refused → truncated log detected →
+  `GET /ledger/verify` valid.
+
+```bash
+cd services/sales-py && python3 -m pytest -q   # count: docs/test-counts.md
+LEDGER_BIN=services/ledger-rust/target/release/server python3 services/sales-py/devtools/live_run.py
+```
+
+## Customer Service (30) + Client Success (29) (`services/service-py`) — Oct 5, 2026
+
+One desk for both brands, ZBM and ZBC: one conversation per client across email, chat, SMS and phone; routine
+questions answered right away, but only with answers Andre approved; money, contracts and complaints sent to Andre
+(and Legal, Finance, Cybersecurity, Compliance where they apply); the consent registry; SLA timers; a health score per
+account and a save plan for an account at risk. Founder decisions (Oct 5 Q&A), architecture and the unlock list:
+`docs/adr/0014-customer-service-success-department-architecture.md`. Routes and settings:
+`services/service-py/README.md`.
+
+- **Status:** built and tested (count: docs/test-counts.md). **Not in force.** No email, SMS, chat-push, voice or
+  alert provider is chosen, so outbound messages stay queued (visibly) and alerts are recorded, not sent
+  (`SVC_VOICE_PROVIDER` refuses start). Only the Legal (37) handoff has a client; Finance (31), Cybersecurity (22),
+  Compliance (38), the results-trend source and contract end dates are ports with fail-closed stand-ins.
+- **Nothing generated.** No model calls: deterministic single-task intelligences (triage, approved answers, health
+  score). The bot sends only a knowledge-base article Andre approved, byte for byte, re-hashed at match time; an
+  ambiguous match goes to Andre. Privacy, security, contract, money and complaint messages (one keyword is enough)
+  are never answered by the bot. Save-plan offers come only from Andre's approved catalogue, by id.
+- **Consent and channels.** SMS outbound only with recorded express consent, 08:00-21:00 in the recipient's zone; a
+  STOP revokes at once and START does not restore it. Proactive email needs email consent. Phone is never an
+  outbound channel; no bot answers a call.
+- **Record-first log** (security-py's design as fixed in ADR 0012): each answer, escalation, consent change,
+  approval, alert and SLA breach is a typed ledger event (ids, codes and hashes only) before its log line; message
+  bodies are stored once by content hash and never reach the log line, the ledger, an alert or an error; a
+  truncated, replaced or edited log stops every write.
+- **Live run** (`devtools/live_run.py`: real ledger-rust binary, production entrypoint): an approved answer sent and
+  an unapproved one never → a refund, a lawyer and a privacy request escalated → SMS refused without consent, STOP
+  revoking it → an at-risk account alerted with a save plan that accepts only an approved offer → restart →
+  truncated log detected → nothing personal on the ledger → `GET /ledger/verify` valid.
+
+```bash
+cd services/service-py && python3 -m pytest -q   # count: docs/test-counts.md
+LEDGER_BIN=services/ledger-rust/target/release/server python3 services/service-py/devtools/live_run.py
+```
+
 ## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026, fix waves 20-26b applied
 
 The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;
