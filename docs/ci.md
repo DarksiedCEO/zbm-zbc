@@ -76,7 +76,7 @@ a deliberate change. Its image README (`images/macos/macos-26-arm64-Readme.md`, 
 
 | Job | macOS entries |
 |---|---|
-| `python-tests` | one per service (all nine) on Python 3.13, next to the 18 Linux entries (3.12 + 3.13) |
+| `python-tests` | one per service (all twelve) on Python 3.13, next to the 24 Linux entries (3.12 + 3.13) |
 | `delivery-py` | one entry, Python 3.13, with the same Node 22 / Go / Rust / uv steps as on Linux |
 | `ledger-rust` | `cargo test --locked` + clippy, same as Linux |
 | `orchestrator-go` | `go vet` + `go test -race`, same as Linux |

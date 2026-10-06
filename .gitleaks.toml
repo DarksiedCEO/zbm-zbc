@@ -26,7 +26,7 @@ regexes = [
 
 # Test-only key: the fixed PII hash key sales-py's tests used (services/sales-py/tests/helpers.py:29, PII_KEY_HEX),
 # first committed in ee0703a. It was never a production key; it was replaced in 6072160 by a key the tests derive at
-# run time, so it now exists only in history. Exact string, matched against the detected secret.
+# import time, so it now exists only in history. Exact string, matched against the detected secret.
 [[allowlists]]
 description = "Retired test-only PII hash key from sales-py's tests (tests/helpers.py PII_KEY_HEX in history; replaced in 6072160). Exact string, matched against the detected secret."
 regexTarget = "secret"

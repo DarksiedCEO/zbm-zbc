@@ -771,15 +771,15 @@ Recruiting clippers is not here (Clipper Network). Founder decisions (Oct 5 Q&A)
   postal address and a one-click unsubscribe added by the service, at a warm-up pace per outreach domain. One
   suppression list across both brands with no removal path. Texts and calls only to +1 numbers with express consent
   for that phone, channel and brand, 08:00-21:00 in the recorded zone and every zone of the area code; any inbound
-  reply holds phone outreach to the contact until Andre decides it. Emails and phones are keyed hashes in dedupe,
+  reply (except an exact machine auto-reply) holds texts and calls to the contact until Andre decides it. Emails and phones are keyed hashes in dedupe,
   suppression and the audit export.
 - **Record-first log** (security-py's design as fixed in ADR 0012): every send, consent change, suppression and
   approval is a typed ledger event before its log line, and each line is anchored before it takes effect; ledger
   down = nothing happens; a truncated, replaced or edited log stops all writes.
-- **Live run** (`devtools/live_run.py`: real ledger-rust binary, production entrypoint): inbound, referral and
-  duplicate leads → imports refused → template approval → cold email queued, not sent → SMS refused without consent
+- **Live run** (`devtools/live_run.py`: real ledger-rust binary, production entrypoint): second process on the same data
+  directory refused → inbound, referral and duplicate leads → imports refused → template approval → cold email queued, not sent → SMS refused without consent
   and in quiet hours → opt-out suppressing across both brands → quote and approval rules → send refused while Legal
-  is a stand-in → restart → forged pending line inert → second process refused → truncated log detected →
+  is a stand-in → restart → forged pending line inert → truncated log detected →
   `GET /ledger/verify` valid.
 
 ```bash
