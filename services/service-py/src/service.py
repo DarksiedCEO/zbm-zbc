@@ -1,0 +1,1885 @@
+"""
+Customer Service (30) + Client Success (29) — the core (ADR 0014).
+
+One lock guards all state. Every state change is one ``_commit``: the typed ledger events the change carries
+(answer, escalation, consent change, approval, alert, ...) are recorded first, then the exact log line is prepared,
+fsynced aside (pending line), anchored on the evidence ledger, appended to the local log, and only then applied to
+memory — by the same ``_apply`` that rebuilds state from the log at start, so live state and replayed state cannot
+diverge. The plumbing (``_commit``, ``_anchor``, ``_drop_pending``, ``verify_integrity``, ``_settle_pending``,
+``_roll_forward``, ``_anchor_problem``) is security-py's as fixed in AEGIS rounds 1-5 (ADR 0012 amendments).
+
+A line holds a list of EFFECTS (``{"op": ..., ...}``), applied in order by ``_e_<op>``; one API operation is one
+line, so an inbound message, its ticket, its triage, its answer or escalation and its alerts take effect together
+or not at all. Message bodies are never in a line (BodyStore, by SHA-256) and never on the ledger.
+
+Nothing is sent with the lock held: handoffs, alerts and outbound messages go out after the line that decided them
+is committed, and an outbound message is recorded on the ledger (``message_sent``) BEFORE its provider is called.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import threading
+import time
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from typing import Optional
+
+import channels
+import health as health_mod
+import kb
+import triage as triage_mod
+from clock import Clock, SystemClock, iso, parse_iso
+from config import BRAND_NAMES, PRIORITIES, Settings
+from errors import Conflict, Invalid, NotFound, Unavailable
+from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, derived_id, payload_sha256
+from ports import NOT_WIRED, Alert, HandoffRequest, Outbound, Ports
+from reasons import R
+from store import BodyStore, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
+
+INTERNAL = "service_desk"
+INTEGRITY_RETRY_S = 15
+FORCED_MIN_S = 10
+JOBS = ("sla-sweep", "health-recompute", "save-plan-tick", "outbound-tick", "handoff-retries", "integrity")
+TICKET_STATUSES = ("open", "pending_customer", "escalated", "resolved", "closed")
+TRANSITIONS = {
+    "open": ("pending_customer", "escalated", "resolved"),
+    "pending_customer": ("open", "escalated", "resolved"),
+    "escalated": ("open", "pending_customer", "resolved"),
+    "resolved": ("open", "closed"),
+    "closed": (),
+}
+ALERT_CATEGORIES = {"money": "ESCALATION_MONEY", "contract": "ESCALATION_CONTRACT", "complaint": "ESCALATION_COMPLAINT",
+                    "security": "ESCALATION_SECURITY", "privacy": "ESCALATION_PRIVACY"}
+PLACEHOLDERS = ("first_name", "brand_name", "offer_title", "offer_terms", "offer_price", "survey_id")
+TEMPLATE_PURPOSES = ("check_in", "nps_survey", "offer")
+SMS_FOOTER = "\nReply STOP to opt out."
+MAX_SEND_ATTEMPTS = 5
+CATALOGS = ("kb", "template", "offer")
+PERSONAL_KEYS = ("email", "phone", "display_name", "contact_ref", "timezone", "to", "from_number", "from_address")
+# typed ledger events: effect op -> event type (recorded BEFORE the line that carries the effect)
+EVENTS = {"consent_granted": "consent_changed", "consent_revoked": "consent_changed",
+          "handoff_new": "escalation_opened", "ticket_escalated": "escalation_opened",
+          "catalog_approved": "approval_recorded", "catalog_retired": "approval_recorded",
+          "alert_new": "alert_raised", "sla_breach": "sla_breached", "plan_new": "save_plan_started",
+          "plan_offer": "offer_selected", "routing_set": "approval_recorded"}
+
+
+def _maybe(exc: Unavailable) -> Unavailable:
+    """Mark an outcome as unknown: the line is pending and may still take effect (security-py round 2 N2)."""
+    exc.maybe = True
+    return exc
+
+
+def sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def body_sha(body: dict) -> str:
+    return payload_sha256(body)
+
+
+def money_str(v: str) -> str:
+    """A price string, Decimal-checked, rendered with a dollar sign. Never a float."""
+    d = Decimal(v)
+    return f"${d:,.2f}"
+
+
+class SupportService:
+    def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, bodies: BodyStore,
+                 ports: Optional[Ports] = None, clock: Optional[Clock] = None):
+        self.settings = settings
+        self.rec = recorder
+        self.log = log
+        self.bodies = bodies
+        self.ports = ports or Ports.default()
+        self.clock = clock or SystemClock()
+        self.lock = threading.RLock()
+        self._tick_lock = threading.Lock()
+        # state rebuilt from the log
+        self.contacts: dict[str, dict] = {}
+        self.contact_index: dict[tuple, str] = {}
+        self.consents: dict[tuple, dict] = {}
+        self.tickets: dict[str, dict] = {}
+        self.messages: dict[str, dict] = {}
+        self.handoffs: dict[str, dict] = {}
+        self.alerts: dict[str, dict] = {}
+        self.catalog: dict[str, dict] = {c: {} for c in CATALOGS}
+        self.accounts: dict[str, dict] = {}
+        self.plans: dict[str, dict] = {}
+        self.surveys: dict[str, dict] = {}
+        self.calls: dict[str, dict] = {}
+        self.routing: dict[str, dict] = {}
+        self.requests: dict[tuple, tuple] = {}
+        # memory only
+        self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
+        self._last_integrity_try = 0
+        self._own_pending: Optional[bytes] = None
+        self._deferred_alerts: list[tuple] = []
+        self._in_flight: set = set()
+        for r in self.log.iter_records():
+            self._apply(r["kind"], r["data"], r["at"])
+        if self.log.read_pending() is None and self.log.read_discarded() is None:
+            self._remove_orphans()
+        self.verify_integrity(force=True)
+
+    # ============================================================================================ plumbing
+
+    def now(self) -> datetime:
+        return self.clock.now()
+
+    def _anchor_ids(self, epoch: str, seq: int, line_sha: str) -> tuple[str, dict]:
+        payload = {"epoch": epoch, "seq": seq, "line_sha256": line_sha}
+        return derived_id("anc", epoch, seq, line_sha), payload
+
+    def _events_for(self, kind: str, data: dict) -> list[tuple]:
+        """(event_id, event_type, subject_id, payload, summary) for each effect that is recorded as its own typed
+        event. The payload holds ids, codes and hashes only: no body, no address, no name."""
+        out = []
+        for e in data.get("effects", ()):
+            et = EVENTS.get(e["op"])
+            if e["op"] == "message_out" and e.get("origin") in ("kb", "human", "template", "offer"):
+                et = "message_sent" if e["status"] == "sent" else "answer_queued"
+            if et is None:
+                continue
+            core = {k: v for k, v in e.items() if k not in PERSONAL_KEYS and not k.endswith("_due")
+                    and k not in ("content", "signals_detail")}
+            subject = next((e[k] for k in ("ticket_id", "message_id", "handoff_id", "alert_id", "plan_id",
+                                           "contact_id", "item_id", "brand") if e.get(k)), INTERNAL)
+            eid = derived_id("evt", kind, (data.get("request") or {}).get("key"), e["op"], payload_sha256(core))
+            out.append((eid, et, str(subject)[:128], core, f"{kind}: {e['op']}"))
+        return out
+
+    def _commit(self, kind: str, data: dict, actor: str) -> dict:
+        """Typed events, then ledger anchor, then the local log, then memory (fail closed at every step)."""
+        with self.lock:
+            if not self.integrity["ok"]:
+                raise Unavailable(R("INTEGRITY_UNVERIFIED"))
+            at = iso(self.now())
+            data = {**data, "actor": data.get("actor", actor)}
+            actor = data["actor"]
+            for eid, et, subject, payload, summary in self._events_for(kind, data):
+                try:
+                    self._record_twice(eid, et, actor, subject, payload, summary)
+                except LedgerRecordError:
+                    raise Unavailable(R("LEDGER_UNAVAILABLE")) from None   # the line was not written: no effect
+            rec, line = self.log.prepare(kind, at, data)
+            line_sha = sha256_hex(line)
+            epoch = self.log.epoch or line_sha[:16]
+            eid, payload = self._anchor_ids(epoch, rec["seq"], line_sha)
+            self._own_pending = line                  # R4-1: only a line THIS process wrote is anchored by it
+            try:
+                self.log.write_pending(line)
+            except StoreWriteError:
+                if not self._drop_pending():
+                    raise _maybe(Unavailable(R("STORE_UNAVAILABLE"))) from None
+                raise Unavailable(R("STORE_UNAVAILABLE")) from None
+            try:
+                self._anchor(eid, actor, epoch, payload, kind, rec["seq"])
+            except LedgerRecordError as exc:
+                if exc.took_effect is False and self._drop_pending():
+                    raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+                self.integrity = {"ok": False, "checked_at": at, "problem": "a ledger answer was lost; the "
+                                  "pending line is rolled forward at the next integrity check"}
+                raise _maybe(Unavailable(R("LEDGER_UNAVAILABLE"))) from None
+            try:
+                self.log.append_prepared(rec, line)
+            except StoreWriteError:
+                self.integrity = {"ok": False, "checked_at": at, "problem": "a log line was anchored but not written; "
+                                  "it is rolled forward at the next integrity check"}
+                raise _maybe(Unavailable(R("STORE_UNAVAILABLE"))) from None
+            self._own_pending = None   # R5-1
+            self._drop_pending()
+            self._apply(kind, data, at)
+            return rec
+
+    def _record_twice(self, eid, event_type, actor, subject, payload, summary) -> None:
+        """One retry of the SAME event when the answer was lost (the ledger is idempotent on identical content)."""
+        try:
+            self.rec.record(eid, event_type, actor, subject, payload, summary)
+        except LedgerRecordError as exc:
+            if exc.took_effect is False or isinstance(exc, LedgerConflict):
+                raise
+            self.rec.record(eid, event_type, actor, subject, payload, summary)
+
+    def _anchor(self, eid: str, actor: str, epoch: str, payload: dict, kind: str, seq: int) -> None:
+        self._record_twice(eid, "log_anchor", actor, f"log:{epoch}", payload, f"{kind} #{seq}")
+
+    def _drop_pending(self) -> bool:
+        try:
+            self.log.clear_pending()
+            self._own_pending = None
+            return True
+        except StoreWriteError:
+            self.integrity = {"ok": False, "checked_at": iso(self.now()),
+                              "problem": "the pending line could not be removed"}
+            return False
+
+    # --- idempotency: (actor, operation, target, request_id) with the body's hash -----------------------------------
+
+    def _idem(self, actor: str, op: str, target: str, body: dict) -> Optional[dict]:
+        key = (actor, op, target, body["request_id"])
+        prev = self.requests.get(key)
+        if prev is None:
+            return None
+        if prev[0] != body_sha(body):
+            raise Conflict(R("REQUEST_ID_REUSED"))
+        return prev[1]
+
+    @staticmethod
+    def _req(actor: str, op: str, target: str, body: dict) -> dict:
+        return {"key": [actor, op, target, body["request_id"]], "sha": body_sha(body)}
+
+    def _did(self, abbr: str, actor: str, op: str, target: str, request_id: str, *extra) -> str:
+        return derived_id(abbr, actor, op, target, request_id, *extra)
+
+    # ============================================================================================ replay
+
+    def _apply(self, kind: str, d: dict, at: str) -> None:
+        for e in d.get("effects", ()):
+            handler = getattr(self, f"_e_{e.get('op')}", None)
+            if handler is None:
+                raise StoreCorrupt(f"log record carries an unknown effect {str(e.get('op'))[:40]!r}")
+            handler(e, at)
+        req = d.get("request")
+        if req:
+            self.requests[tuple(req["key"])] = (req["sha"], d.get("response"))
+
+    def _e_contact_new(self, e, at):
+        c = {k: e.get(k) for k in ("contact_id", "brand", "contact_ref", "account_id", "email", "phone", "timezone",
+                                   "display_name")}
+        c.update(created_at=at, updated_at=at)
+        self.contacts[e["contact_id"]] = c
+        self._index_contact(c)
+
+    def _e_contact_update(self, e, at):
+        c = self.contacts[e["contact_id"]]
+        for k, v in e["fields"].items():
+            c[k] = v
+        c["updated_at"] = at
+        self._index_contact(c)
+
+    def _index_contact(self, c: dict) -> None:
+        for kind in ("contact_ref", "email", "phone"):
+            if c.get(kind):
+                self.contact_index[(c["brand"], kind, c[kind])] = c["contact_id"]
+
+    def _e_consent_granted(self, e, at):
+        self.consents[(e["contact_id"], e["channel"])] = {
+            "consent_id": e["consent_id"], "contact_id": e["contact_id"], "channel": e["channel"],
+            "status": "active", "source": e["source"], "consent_text_sha256": e["text_sha256"],
+            "captured_at": e["captured_at"], "recorded_at": at, "revoked_at": None, "revoked_via": None,
+            "express": e["express"]}
+
+    def _e_consent_revoked(self, e, at):
+        key = (e["contact_id"], e["channel"])
+        c = self.consents.get(key) or {"consent_id": None, "contact_id": e["contact_id"], "channel": e["channel"],
+                                       "source": None, "consent_text_sha256": None, "captured_at": None,
+                                       "recorded_at": None, "express": False}
+        c.update(status="revoked", revoked_at=at, revoked_via=e["via"])
+        self.consents[key] = c
+        for m in self.messages.values():
+            if m["dir"] == "out" and m["contact_id"] == e["contact_id"] and m["channel"] == e["channel"] \
+                    and m["status"] == "queued":
+                m.update(status="cancelled", reason=R("CONSENT_REVOKED"), updated_at=at)
+
+    def _e_ticket_new(self, e, at):
+        self.tickets[e["ticket_id"]] = {
+            "ticket_id": e["ticket_id"], "brand": e["brand"], "contact_id": e["contact_id"],
+            "account_id": e.get("account_id"), "channel": e["channel"], "priority": e["priority"], "status": "open",
+            "queue": "bot", "categories": [], "created_at": at, "updated_at": at, "first_response_at": None,
+            "first_due": e["first_due"], "resolution_due": e["resolution_due"], "resolved_at": None,
+            "closed_at": None, "reopened": 0, "breaches": [], "messages": [], "handoffs": [], "answered_by": None,
+            "complaint_at": []}
+
+    def _e_ticket_status(self, e, at):
+        t = self.tickets[e["ticket_id"]]
+        if e["status"] == "open" and t["status"] == "resolved":
+            t["reopened"] += 1
+            t["resolved_at"] = None
+        t["status"] = e["status"]
+        t["updated_at"] = at
+        if e["status"] == "resolved":
+            t["resolved_at"] = at
+        if e["status"] == "closed":
+            t["closed_at"] = at
+        if e.get("queue"):
+            t["queue"] = e["queue"]
+        if e.get("answered_by"):
+            t["answered_by"] = e["answered_by"]
+
+    def _e_ticket_escalated(self, e, at):
+        t = self.tickets[e["ticket_id"]]
+        t.update(status="escalated", queue="andre", updated_at=at)
+        for c in e["categories"]:
+            if c not in t["categories"]:
+                t["categories"].append(c)
+
+    def _e_ticket_priority(self, e, at):
+        t = self.tickets[e["ticket_id"]]
+        t.update(priority=e["priority"], first_due=e["first_due"], resolution_due=e["resolution_due"], updated_at=at)
+
+    def _e_message_in(self, e, at):
+        m = {k: e.get(k) for k in ("message_id", "ticket_id", "contact_id", "brand", "channel", "body_sha256",
+                                   "subject_sha256", "triage", "refs")}
+        m.update(dir="in", at=at)
+        self.messages[e["message_id"]] = m
+        t = self.tickets[e["ticket_id"]]
+        t["messages"].append(e["message_id"])
+        if e.get("triage") and "complaint" in e["triage"]["categories"]:
+            t["complaint_at"].append(at)
+
+    def _e_message_out(self, e, at):
+        m = {k: e.get(k) for k in ("message_id", "ticket_id", "contact_id", "brand", "channel", "origin", "ref",
+                                   "body_sha256", "subject", "proactive", "status", "plan_id", "step_id",
+                                   "survey_id")}
+        m.update(dir="out", at=at, updated_at=at, attempts=0, reason=e.get("reason"))
+        self.messages[e["message_id"]] = m
+        if e.get("ticket_id"):
+            self.tickets[e["ticket_id"]]["messages"].append(e["message_id"])
+
+    def _e_message_status(self, e, at):
+        m = self.messages[e["message_id"]]
+        m.update(status=e["status"], reason=e.get("reason"), updated_at=at)
+        if e.get("attempted"):
+            m["attempts"] += 1
+
+    def _e_first_response(self, e, at):
+        t = self.tickets[e["ticket_id"]]
+        if t["first_response_at"] is None:
+            t["first_response_at"] = at
+
+    def _e_handoff_new(self, e, at):
+        self.handoffs[e["handoff_id"]] = {
+            "handoff_id": e["handoff_id"], "ticket_id": e["ticket_id"], "department": e["department"],
+            "category": e["category"], "kind": e["kind"], "status": "pending", "reference": None, "attempts": 0,
+            "created_at": at, "updated_at": at}
+        self.tickets[e["ticket_id"]]["handoffs"].append(e["handoff_id"])
+
+    def _e_handoff_result(self, e, at):
+        h = self.handoffs[e["handoff_id"]]
+        h.update(status=e["status"], reference=e.get("reference"), updated_at=at)
+        h["attempts"] += 1
+
+    def _e_alert_new(self, e, at):
+        self.alerts[e["alert_id"]] = {"alert_id": e["alert_id"], "code": e["code"], "subject": e["subject"],
+                                      "status": "recorded", "created_at": at, "delivered_at": None, "attempts": 0}
+
+    def _e_alert_result(self, e, at):
+        a = self.alerts[e["alert_id"]]
+        a["attempts"] += 1
+        a["status"] = e["status"]
+        if e["status"] == "delivered":
+            a["delivered_at"] = at
+
+    def _e_sla_breach(self, e, at):
+        t = self.tickets[e["ticket_id"]]
+        if e["which"] not in t["breaches"]:
+            t["breaches"].append(e["which"])
+
+    def _e_catalog_saved(self, e, at):
+        cat = self.catalog[e["catalog"]]
+        prev = cat.get(e["item_id"])
+        item = {"item_id": e["item_id"], "version": e["version"], **e["content"], "content_sha256": e["content_sha256"],
+                "status": "active", "approved": None, "created_at": prev["created_at"] if prev else at,
+                "updated_at": at}
+        if e["catalog"] == "kb":
+            item["article_id"] = e["item_id"]
+        cat[e["item_id"]] = item
+
+    def _e_catalog_approved(self, e, at):
+        item = self.catalog[e["catalog"]][e["item_id"]]
+        item["approved"] = {"version": e["version"], "content_sha256": e["content_sha256"], "at": at, "by": "andre"}
+
+    def _e_catalog_retired(self, e, at):
+        item = self.catalog[e["catalog"]][e["item_id"]]
+        item.update(status="retired", updated_at=at)
+
+    def _e_account_saved(self, e, at):
+        a = self.accounts.get(e["account_id"])
+        if a is None:
+            a = self.accounts[e["account_id"]] = {
+                "account_id": e["account_id"], "brand": e["brand"], "primary_contact_id": None, "contract_end": None,
+                "contract_source": None, "last_login": None, "health": None, "at_risk": False, "plan_id": None,
+                "renewal_flagged": [], "created_at": at}
+        for k in ("primary_contact_id", "contract_end", "contract_source"):
+            if e.get(k) is not None:
+                a[k] = e[k]
+        a["updated_at"] = at
+
+    def _e_login_event(self, e, at):
+        a = self.accounts[e["account_id"]]
+        if a["last_login"] is None or e["occurred_at"] > a["last_login"]:
+            a["last_login"] = e["occurred_at"]
+
+    def _e_health_scored(self, e, at):
+        a = self.accounts[e["account_id"]]
+        a["health"] = {"score": e["score"], "signals": e["signals"], "threshold": e["threshold"], "at": at}
+        a["at_risk"] = e["at_risk"]
+
+    def _e_renewal_flagged(self, e, at):
+        self.accounts[e["account_id"]]["renewal_flagged"].append(e["contract_end"])
+
+    def _e_plan_new(self, e, at):
+        self.plans[e["plan_id"]] = {"plan_id": e["plan_id"], "account_id": e["account_id"], "status": "active",
+                                    "score": e["score"], "created_at": at, "closed_at": None, "outcome": None,
+                                    "steps": [dict(s) for s in e["steps"]]}
+        self.accounts[e["account_id"]]["plan_id"] = e["plan_id"]
+
+    def _step(self, plan_id: str, step_id: str) -> dict:
+        return next(s for s in self.plans[plan_id]["steps"] if s["step_id"] == step_id)
+
+    def _e_plan_step(self, e, at):
+        s = self._step(e["plan_id"], e["step_id"])
+        s.update({k: e[k] for k in ("status", "reason", "message_id") if k in e}, updated_at=at)
+
+    def _e_plan_offer(self, e, at):
+        s = self._step(e["plan_id"], e["step_id"])
+        s.update(status="selected", offer_id=e["offer_id"], offer_version=e["version"],
+                 offer_sha256=e["content_sha256"], updated_at=at)
+
+    def _e_plan_closed(self, e, at):
+        p = self.plans[e["plan_id"]]
+        p.update(status="closed", outcome=e["outcome"], closed_at=at)
+        a = self.accounts[p["account_id"]]
+        if a["plan_id"] == e["plan_id"]:
+            a["plan_id"] = None
+
+    def _e_survey_new(self, e, at):
+        self.surveys[e["survey_id"]] = {"survey_id": e["survey_id"], "account_id": e["account_id"],
+                                        "contact_id": e["contact_id"], "message_id": e["message_id"],
+                                        "sent_at": at, "score": None, "answered_at": None, "comment_sha256": None}
+
+    def _e_nps_response(self, e, at):
+        s = self.surveys[e["survey_id"]]
+        s.update(score=e["score"], answered_at=at, comment_sha256=e.get("comment_sha256"))
+
+    def _e_call_new(self, e, at):
+        self.calls[e["call_id"]] = {k: e.get(k) for k in ("call_id", "brand", "contact_id", "ticket_id", "direction",
+                                                          "started_at", "duration_seconds", "outcome",
+                                                          "voicemail_ref", "transcript_ref")}
+        self.calls[e["call_id"]].update(recorded_at=at, handed_off=False)
+
+    def _e_call_handoff(self, e, at):
+        self.calls[e["call_id"]]["handed_off"] = True
+
+    def _e_routing_set(self, e, at):
+        self.routing[e["brand"]] = {**e["rules"], "updated_at": at}
+
+    def _e_job_ran(self, e, at):
+        pass
+
+    def _remove_orphans(self) -> None:
+        """Remove stored bodies no record cites (a body is written before its line; a failed line leaves one)."""
+        live = set()
+        for m in self.messages.values():
+            for k in ("body_sha256", "subject_sha256"):
+                if m.get(k):
+                    live.add(m[k])
+        for c in self.consents.values():
+            if c.get("consent_text_sha256"):
+                live.add(c["consent_text_sha256"])
+        for s in self.surveys.values():
+            if s.get("comment_sha256"):
+                live.add(s["comment_sha256"])
+        for name in self.bodies.names() - live:
+            try:
+                self.bodies.delete(name)
+            except StoreWriteError:
+                pass
+
+    # ============================================================================================ integrity
+
+    def verify_integrity(self, force: bool = False, always: bool = False) -> dict:
+        """Complete or set aside the pending line, then check every local line's anchor on the ledger, and that
+        the ledger holds no anchor this log lacks (a truncated, rolled back, deleted or replaced log)."""
+        with self.lock:
+            mono = time.monotonic()
+            if not force and (self.integrity["ok"] or mono - self._last_integrity_try < INTEGRITY_RETRY_S):
+                return dict(self.integrity)
+            if force and not always and mono - self._last_integrity_try < FORCED_MIN_S and self._last_integrity_try:
+                return dict(self.integrity)
+            self._last_integrity_try = mono
+            at = iso(self.now())
+            try:
+                entries = self.rec.client.entries()
+            except LedgerQueryFailed:
+                self.integrity = {"ok": False, "checked_at": at, "problem": "the ledger cannot be read"}
+                return dict(self.integrity)
+            mine = [e for e in entries if e.get("department") == DEPARTMENT and e.get("event_type") == "log_anchor"]
+            problem, rolled = self._settle_pending({e.get("event_id"): e for e in mine})
+            if rolled and self.log.read_pending() is None and self.log.read_discarded() is None:
+                self._remove_orphans()
+            if problem is None and rolled:
+                try:
+                    entries = self.rec.client.entries()
+                except LedgerQueryFailed:
+                    problem = "the ledger cannot be read"
+            if problem is None:
+                mine = [e for e in entries if e.get("department") == DEPARTMENT and e.get("event_type") == "log_anchor"]
+                problem = self._anchor_problem(mine, {e.get("event_id"): e for e in mine})
+            self.integrity = {"ok": problem is None, "checked_at": at, "problem": problem}
+            if problem is None:
+                self._after_integrity()
+            return dict(self.integrity)
+
+    def _settle_pending(self, by_id: dict) -> tuple[Optional[str], bool]:
+        """security-py's (AEGIS R4-1 / R5-1): our own line (kept in memory) is rolled forward; a line found on disk
+        is appended only if the ledger ALREADY holds its anchor, else set aside (``pending.discarded``), inert."""
+        own = self._own_pending
+        if own is not None:
+            problem, appended = self._roll_forward(own, by_id, rerecord=True)
+            if problem == "not vouched: stale":
+                self._own_pending = None
+                return self._settle_pending(by_id)
+            if problem is not None:
+                return problem, False
+            self._own_pending = None
+            try:
+                self.log.clear_pending()
+            except StoreWriteError:
+                return "the pending line could not be removed", appended
+            return None, appended
+        appended_any = False
+        raw = self.log.read_pending()
+        if raw is not None:
+            problem, appended = self._roll_forward(raw, by_id, rerecord=False)
+            if problem is not None and not problem.startswith("not vouched"):
+                return problem, False
+            try:
+                if not appended:
+                    self.log.write_discarded(raw)
+                self.log.clear_pending()
+            except StoreWriteError:
+                return "the pending line could not be set aside", appended
+            appended_any |= appended
+        aside = self.log.read_discarded()
+        if aside is not None:
+            problem, appended = self._roll_forward(aside, by_id, rerecord=False)
+            if appended or problem == "not vouched: stale":
+                try:
+                    self.log.clear_discarded()
+                except StoreWriteError:
+                    pass
+            appended_any |= appended
+        return None, appended_any
+
+    def _roll_forward(self, raw: bytes, by_id: dict, rerecord: bool) -> tuple[Optional[str], bool]:
+        try:
+            rec = json.loads(raw)
+            seq, kind, data = rec["seq"], rec["kind"], rec["data"]
+            verify_lines(self._raw_lines() + [raw])
+            if not isinstance(data.get("actor"), str) or not re.fullmatch(r"[a-z0-9_]{1,64}", data["actor"]):
+                raise ValueError("no ledger-valid actor")
+        except (ValueError, KeyError, TypeError, AttributeError, StoreCorrupt):
+            return "not vouched: stale", False
+        line_sha = sha256_hex(raw)
+        epoch = self.log.epoch or line_sha[:16]
+        eid, payload = self._anchor_ids(epoch, seq, line_sha)
+        if rerecord:
+            try:
+                self._anchor(eid, data["actor"], epoch, payload, kind, seq)
+            except LedgerRecordError:
+                return "the pending line could not be anchored yet (ledger unavailable); kept for the next check", \
+                    False
+        else:
+            e = by_id.get(eid)
+            if e is None or e.get("payload_sha256") != payload_sha256(payload) \
+                    or e.get("subject_id") != f"log:{epoch}":
+                return "not vouched: no anchor on the ledger", False
+        try:
+            self.log.append_prepared(rec, raw)
+        except StoreWriteError:
+            return "the pending line is anchored on the ledger but cannot be written here", False
+        try:
+            self._apply(kind, data, rec["at"])
+        except (KeyError, TypeError, StoreCorrupt):
+            return "an anchored pending line could not be applied; an operator must inspect the log", True
+        for sha in self._cited_bodies(data):
+            if self.bodies.get(sha) is None:
+                self._deferred_alerts.append(("BODY_MISSING", sha[:16]))
+        return None, True
+
+    @staticmethod
+    def _cited_bodies(data: dict) -> list[str]:
+        out = []
+        for e in data.get("effects", ()):
+            for k in ("body_sha256", "subject_sha256", "text_sha256", "comment_sha256"):
+                if e.get(k):
+                    out.append(e[k])
+        return out
+
+    def _raw_lines(self) -> list[bytes]:
+        return list(self.log._lines)
+
+    def _anchor_problem(self, mine: list, by_id: dict) -> Optional[str]:
+        shas = self.log.line_shas()
+        epoch = self.log.epoch
+        epochs = {e.get("subject_id") for e in mine}
+        if epochs - ({f"log:{epoch}"} if epoch else set()):
+            return "the ledger holds anchors of another service log: this log was deleted or replaced"
+        for seq, line_sha in enumerate(shas, start=1):
+            eid, payload = self._anchor_ids(epoch, seq, line_sha)
+            e = by_id.get(eid)
+            if e is None or e.get("payload_sha256") != payload_sha256(payload) or e.get("subject_id") != f"log:{epoch}":
+                return f"local log line {seq} has no matching anchor on the ledger"
+        if len(mine) > len(shas):
+            return "the ledger holds anchors beyond the local log: the log was truncated or rolled back"
+        return None
+
+    def _gate(self) -> None:
+        if not self.verify_integrity()["ok"]:
+            raise Unavailable(R("INTEGRITY_UNVERIFIED"))
+
+    def _after_integrity(self) -> None:
+        pending, self._deferred_alerts = self._deferred_alerts, []
+        if pending:
+            effects = [self._alert_effect(code, subject, f"deferred:{code}:{subject}") for code, subject in pending]
+            try:
+                self._commit("alerts_raised", {"effects": effects}, INTERNAL)
+            except Unavailable:
+                self._deferred_alerts = pending
+
+    # ============================================================================================ status
+
+    def health(self) -> dict:
+        with self.lock:
+            return {
+                "status": "ok" if self.integrity["ok"] else "degraded",
+                "integrity": dict(self.integrity),
+                "in_memory": self.log.in_memory,
+                "non_production": self.settings.non_production,
+                "andre_approvals_configured": None,          # filled by the API (the gate lives there)
+                "support_email": {b: bool(self.settings.support_email.get(b)) for b in BRAND_NAMES},
+                "sms_number": {b: bool(self.settings.sms_number.get(b)) for b in BRAND_NAMES},
+                "wired": self.ports.wired(),
+                "open_tickets": sum(1 for t in self.tickets.values() if t["status"] not in ("resolved", "closed")),
+                "queued_outbound": sum(1 for m in self.messages.values() if m["dir"] == "out"
+                                       and m["status"] == "queued"),
+                "alerts_undelivered": sum(1 for a in self.alerts.values() if a["status"] != "delivered"),
+                "at_risk_accounts": sum(1 for a in self.accounts.values() if a["at_risk"]),
+                "sla": {"first_response_minutes": dict(self.settings.sla_first),
+                        "resolution_minutes": dict(self.settings.sla_resolution)},
+                "at_risk_threshold": self.settings.at_risk_threshold,
+                "log_length": len(self.log),
+            }
+
+    # ============================================================================================ helpers
+
+    def _alert_effect(self, code: str, subject: str, ident: str) -> dict:
+        return {"op": "alert_new", "alert_id": derived_id("alr", code, subject, ident), "code": R(code),
+                "subject": subject}
+
+    def _consent_active(self, contact_id: str, channel: str) -> bool:
+        c = self.consents.get((contact_id, channel))
+        return bool(c and c["status"] == "active")
+
+    def _contact_view_for_rules(self, contact: dict) -> dict:
+        c = dict(contact)
+        ec = self.consents.get((contact["contact_id"], "email"))
+        c["email_revoked"] = bool(ec and ec["status"] == "revoked")
+        return c
+
+    def _channel_check(self, channel: str, contact: dict, proactive: bool) -> Optional[str]:
+        return channels.check(channel, self._contact_view_for_rules(contact),
+                              lambda ch: self._consent_active(contact["contact_id"], ch), proactive, self.now())
+
+    def _put_body(self, text: str) -> str:
+        try:
+            return self.bodies.put(text)
+        except StoreWriteError:
+            raise Unavailable(R("STORE_UNAVAILABLE")) from None
+
+    def _due(self, created: datetime, priority: str) -> tuple[str, str]:
+        return (iso(created + timedelta(minutes=self.settings.sla_first[priority])),
+                iso(created + timedelta(minutes=self.settings.sla_resolution[priority])))
+
+    def _usable(self, catalog: str, item_id: Optional[str], version=None, sha=None) -> Optional[dict]:
+        """The item when it is active, its CURRENT version approved, and that approval bound to exactly its content
+        (recomputed here: an edit is a new, unapproved version; a tampered record never matches) — and, when given,
+        still the version and content the caller relied on."""
+        item = self.catalog[catalog].get(item_id or "")
+        if item is None or item["status"] != "active":
+            return None
+        appr = item["approved"]
+        content = {k: item[k] for k in CATALOG_CONTENT[catalog]}
+        if not appr or appr["version"] != item["version"] or appr["content_sha256"] != item["content_sha256"] \
+                or catalog_sha(catalog, content) != item["content_sha256"]:
+            return None
+        if version is not None and (item["version"] != version or item["content_sha256"] != sha):
+            return None
+        return item
+
+    def _template(self, purpose: str, brand: str, channel: str) -> Optional[dict]:
+        cands = [t for t in self.catalog["template"].values() if t["purpose"] == purpose and t["brand"] == brand
+                 and channel in t["channels"] and self._usable("template", t["item_id"])]
+        return sorted(cands, key=lambda t: t["item_id"])[0] if cands else None
+
+    def _render(self, template: dict, contact: dict, extra: dict) -> str:
+        first = (contact.get("display_name") or "").split(" ")[0] or "there"
+        values = {"first_name": first, "brand_name": BRAND_NAMES[template["brand"]], **extra}
+        out = template["text"]
+        for k in PLACEHOLDERS:
+            out = out.replace("{" + k + "}", str(values.get(k, "")))
+        return out
+
+    def _out_effect(self, message_id: str, contact: dict, brand: str, channel: str, origin: str, text: str,
+                    proactive: bool, status: str = "queued", ticket_id: Optional[str] = None,
+                    ref: Optional[dict] = None, subject: Optional[str] = None, **extra) -> dict:
+        if channel == "sms":
+            text = text + SMS_FOOTER
+        sha = self._put_body(text)
+        return {"op": "message_out", "message_id": message_id, "ticket_id": ticket_id,
+                "contact_id": contact["contact_id"], "brand": brand, "channel": channel, "origin": origin,
+                "ref": ref, "body_sha256": sha, "subject": subject, "proactive": proactive, "status": status, **extra}
+
+    def _pick_proactive_channel(self, contact: dict) -> str:
+        for ch in ("email", "sms"):
+            reason = self._channel_check(ch, contact, proactive=True)
+            if reason in (None, "QUIET_HOURS"):
+                return ch
+        return "chat"
+
+    # ============================================================================================ contacts, consent
+
+    def save_contact(self, actor: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            target = f"{body['brand']}:{body['contact_ref']}"
+            prev = self._idem(actor, "contact", target, body)
+            if prev is not None:
+                return prev
+            fields = {k: body.get(k) for k in ("account_id", "email", "phone", "timezone", "display_name")}
+            if fields["timezone"] is not None and channels.zone(fields["timezone"]) is None:
+                raise Invalid(R("TIMEZONE_UNKNOWN"))
+            cid = self.contact_index.get((body["brand"], "contact_ref", body["contact_ref"]))
+            for kind in ("email", "phone"):
+                other = fields[kind] and self.contact_index.get((body["brand"], kind, fields[kind]))
+                if other and other != cid:
+                    raise Conflict(R("CONTACT_ADDRESS_TAKEN"))
+            if cid is None:
+                cid = self._did("con", actor, "contact", target, body["request_id"])
+                effect = {"op": "contact_new", "contact_id": cid, "brand": body["brand"],
+                          "contact_ref": body["contact_ref"], **fields}
+            else:
+                effect = {"op": "contact_update", "contact_id": cid,
+                          "fields": {k: v for k, v in fields.items() if v is not None}}
+            resp = {"contact_id": cid, "brand": body["brand"]}
+            self._commit("contact_saved", {"effects": [effect], "request": self._req(actor, "contact", target, body),
+                                           "response": resp}, actor)
+            return resp
+
+    def contact_view(self, contact_id: str) -> dict:
+        with self.lock:
+            c = self.contacts.get(contact_id)
+            if c is None:
+                raise NotFound(R("CONTACT_NOT_FOUND"))
+            return {**c, "consents": self._consents_of(contact_id)}
+
+    def _consents_of(self, contact_id: str) -> list[dict]:
+        return [dict(v) for (cid, _), v in sorted(self.consents.items()) if cid == contact_id]
+
+    def consents_view(self, contact_id: str) -> list[dict]:
+        with self.lock:
+            if contact_id not in self.contacts:
+                raise NotFound(R("CONTACT_NOT_FOUND"))
+            return self._consents_of(contact_id)
+
+    def record_consent(self, actor: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            target = f"{body['contact_id']}:{body['channel']}"
+            prev = self._idem(actor, "consent", target, body)
+            if prev is not None:
+                return prev
+            contact = self.contacts.get(body["contact_id"])
+            if contact is None:
+                raise NotFound(R("CONTACT_NOT_FOUND"))
+            if body["channel"] == "sms" and not contact.get("phone"):
+                raise Invalid(R("NO_ADDRESS"))
+            if body["channel"] == "email" and not contact.get("email"):
+                raise Invalid(R("NO_ADDRESS"))
+            captured = parse_iso(body["captured_at"])
+            if captured > self.now() + timedelta(minutes=5):
+                raise Invalid(R("CONSENT_IN_FUTURE"))
+            text_sha = self._put_body(body["consent_text"])
+            cid = self._did("cns", actor, "consent", target, body["request_id"])
+            effect = {"op": "consent_granted", "consent_id": cid, "contact_id": contact["contact_id"],
+                      "channel": body["channel"], "source": body["source"], "text_sha256": text_sha,
+                      "captured_at": iso(captured), "express": True}
+            resp = {"consent_id": cid, "contact_id": contact["contact_id"], "channel": body["channel"],
+                    "status": "active", "consent_text_sha256": text_sha}
+            self._commit("consent_granted", {"effects": [effect], "request": self._req(actor, "consent", target, body),
+                                             "response": resp}, actor)
+            return resp
+
+    def revoke_consent(self, actor: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            target = f"{body['contact_id']}:{body['channel']}"
+            prev = self._idem(actor, "revoke", target, body)
+            if prev is not None:
+                return prev
+            if body["contact_id"] not in self.contacts:
+                raise NotFound(R("CONTACT_NOT_FOUND"))
+            via = "andre" if actor == "dashboard" else "contact_request"
+            effect = {"op": "consent_revoked", "contact_id": body["contact_id"], "channel": body["channel"],
+                      "via": via, "request_id": body["request_id"]}
+            resp = {"contact_id": body["contact_id"], "channel": body["channel"], "status": "revoked"}
+            self._commit("consent_revoked", {"effects": [effect], "request": self._req(actor, "revoke", target, body),
+                                             "response": resp}, actor)
+            return resp
+
+    # ============================================================================================ inbound
+
+    def _find_or_new_contact(self, actor: str, brand: str, kind: str, value: str, request_id: str,
+                             effects: list, extra: Optional[dict] = None) -> dict:
+        cid = self.contact_index.get((brand, kind, value))
+        if cid is not None:
+            return self.contacts[cid]
+        cid = self._did("con", actor, "inbound-contact", f"{brand}:{kind}", request_id)
+        c = {"contact_id": cid, "brand": brand, "contact_ref": None, "account_id": None, "email": None,
+             "phone": None, "timezone": None, "display_name": None, **(extra or {})}
+        c[kind] = value
+        effects.append({"op": "contact_new", **c})
+        return c
+
+    def _ticket_for(self, actor: str, contact: dict, brand: str, channel: str, ticket_id: Optional[str],
+                    request_id: str, effects: list, new_contact: bool) -> tuple[dict, bool]:
+        """The ticket this message belongs to: the one named (it must be this contact's, same brand), else the
+        contact's latest ticket in this brand that is not closed, else a new one. Returns (ticket, is_new)."""
+        t = None
+        if ticket_id is not None:
+            t = self.tickets.get(ticket_id)
+            if t is None or t["contact_id"] != contact["contact_id"] or t["brand"] != brand:
+                raise NotFound(R("TICKET_NOT_FOUND"))
+            if t["status"] == "closed":
+                t = None
+        elif not new_contact:
+            open_t = [x for x in self.tickets.values() if x["contact_id"] == contact["contact_id"]
+                      and x["brand"] == brand and x["status"] != "closed"]
+            t = max(open_t, key=lambda x: (x["created_at"], x["ticket_id"])) if open_t else None
+        if t is not None:
+            return t, False
+        tid = self._did("tkt", actor, "ticket", f"{brand}:{channel}", request_id)
+        first_due, res_due = self._due(self.now(), "p3")
+        t = {"ticket_id": tid, "brand": brand, "contact_id": contact["contact_id"],
+             "account_id": contact.get("account_id"), "channel": channel, "priority": "p3", "status": "open",
+             "queue": "bot", "reopened": 0, "first_response_at": None, "created_at": iso(self.now())}
+        effects.append({"op": "ticket_new", "ticket_id": tid, "brand": brand, "contact_id": contact["contact_id"],
+                        "account_id": contact.get("account_id"), "channel": channel, "priority": "p3",
+                        "first_due": first_due, "resolution_due": res_due})
+        return t, True
+
+    def _recent_inbound(self, contact_id: str) -> int:
+        since = iso(self.now() - timedelta(hours=24))
+        return sum(1 for m in self.messages.values() if m["dir"] == "in" and m["contact_id"] == contact_id
+                   and m["at"] >= since)
+
+    def inbound(self, actor: str, channel: str, body: dict) -> dict:
+        """One inbound chat / email / SMS message: contact, ticket, triage, then an approved answer or an
+        escalation — one line. Handoffs and alerts are sent after the line, outside the lock."""
+        with self.lock:
+            self._gate()
+            brand = body["brand"]
+            target = f"{brand}:{channel}"
+            prev = self._idem(actor, f"inbound_{channel}", target, body)
+            if prev is not None:
+                return prev
+            effects: list = []
+            rid = body["request_id"]
+            if channel == "email":
+                identity = self.settings.support_email.get(brand)
+                if not identity:
+                    raise Unavailable(R("BRAND_EMAIL_NOT_CONFIGURED"))
+                if body["to_address"] != identity:
+                    raise Invalid(R("WRONG_BRAND_IDENTITY"))
+                contact = self._find_or_new_contact(actor, brand, "email", body["from_address"], rid, effects)
+            elif channel == "sms":
+                number = self.settings.sms_number.get(brand)
+                if not number:
+                    raise Unavailable(R("BRAND_SMS_NOT_CONFIGURED"))
+                if body["to_number"] != number:
+                    raise Invalid(R("WRONG_BRAND_IDENTITY"))
+                contact = self._find_or_new_contact(actor, brand, "phone", body["from_number"], rid, effects)
+            else:
+                contact = self._find_or_new_contact(actor, brand, "contact_ref", body["contact_ref"], rid, effects)
+            new_contact = bool(effects)
+            text = body["text"]
+            if channel == "sms" and channels.is_stop(text):
+                # STOP / UNSUBSCRIBE: consent revoked at once (every queued SMS to them cancelled); no ticket
+                effects.append({"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "sms",
+                                "via": "stop_keyword", "request_id": rid})
+                resp = {"action": "opted_out", "contact_id": contact["contact_id"]}
+                self._commit("sms_opt_out", {"effects": effects, "request": self._req(actor, f"inbound_{channel}",
+                                                                                      target, body),
+                                             "response": resp}, actor)
+                return resp
+            ticket, is_new = self._ticket_for(actor, contact, brand, channel, body.get("ticket_id"), rid, effects,
+                                              new_contact)
+            if not is_new and ticket["status"] in ("pending_customer", "resolved"):
+                effects.append({"op": "ticket_status", "ticket_id": ticket["ticket_id"], "status": "open"})
+                if ticket["status"] == "resolved":
+                    ticket = {**ticket, "reopened": ticket["reopened"] + 1}
+            tri = triage_mod.classify(text, self._recent_inbound(contact["contact_id"]), ticket["reopened"])
+            body_sha_ = self._put_body(text)
+            subject_sha = self._put_body(body["subject"]) if body.get("subject") else None
+            mid = self._did("msg", actor, f"inbound_{channel}", target, rid)
+            effects.append({"op": "message_in", "message_id": mid, "ticket_id": ticket["ticket_id"],
+                            "contact_id": contact["contact_id"], "brand": brand, "channel": channel,
+                            "body_sha256": body_sha_, "subject_sha256": subject_sha,
+                            "triage": {"primary": tri.primary, "categories": list(tri.categories),
+                                       "signals": list(tri.signals)}})
+            resp = {"ticket_id": ticket["ticket_id"], "message_id": mid, "contact_id": contact["contact_id"]}
+            answered = False
+            if tri.routine_candidate and ticket["queue"] != "bot":
+                # the ticket is with Andre: a follow-up is his to answer, never the bot's (fail toward the human)
+                tri = triage_mod.Triage("no_answer", (), tri.signals + ("kb:ticket_with_human",), False,
+                                        tri.question_count)
+            if tri.routine_candidate:
+                article, why = kb.match(list(self.catalog["kb"].values()), text, brand, channel)
+                reason = self._channel_check(channel, contact, proactive=False) if article else None
+                if article is not None and reason in (None, "QUIET_HOURS"):
+                    answered = True
+                    out_id = self._did("msg", actor, f"answer_{channel}", target, rid)
+                    status = "sent" if channel == "chat" else "queued"     # chat: answered inline, right away
+                    subj = f"Re: your message to {BRAND_NAMES[brand]}" if channel == "email" else None
+                    effects.append(self._out_effect(out_id, contact, brand, channel, "kb", article["answer"], False,
+                                                    status, ticket["ticket_id"],
+                                                    {"catalog": "kb", "item_id": article["article_id"],
+                                                     "version": article["version"],
+                                                     "content_sha256": article["content_sha256"]}, subj))
+                    effects.append({"op": "first_response", "ticket_id": ticket["ticket_id"]})
+                    effects.append({"op": "ticket_status", "ticket_id": ticket["ticket_id"],
+                                    "status": "pending_customer", "answered_by": "kb", "queue": "bot"})
+                    resp.update(action="answered", answer_message_id=out_id)
+                    if channel == "chat":
+                        resp["answer"] = {"text": article["answer"], "article_id": article["article_id"]}
+                else:
+                    tri = triage_mod.Triage("no_answer", (), tri.signals + (f"kb:{why if not article else reason}",),
+                                            False, tri.question_count)
+            if not answered:
+                effects += self._escalate_effects(actor, ticket, tri, target, rid)
+                resp["action"] = "escalated" if tri.categories else "queued_for_human"
+            priority = triage_mod.PRIORITY.get(tri.primary, "p3")
+            if PRIORITIES.index(priority) < PRIORITIES.index(ticket["priority"]):
+                created = parse_iso(ticket["created_at"])
+                fd, rd = self._due(created, priority)
+                effects.append({"op": "ticket_priority", "ticket_id": ticket["ticket_id"], "priority": priority,
+                                "first_due": fd, "resolution_due": rd})
+            self._commit(f"inbound_{channel}", {"effects": effects,
+                                                "request": self._req(actor, f"inbound_{channel}", target, body),
+                                                "response": resp}, actor)
+        self.dispatch_side_effects()
+        return resp
+
+    def _escalate_effects(self, actor: str, ticket: dict, tri, target: str, rid: str) -> list:
+        """Every category routes (triage.routes_for); Andre's queue always; one alert per category to Andre."""
+        effects: list = []
+        routes = triage_mod.routes_for(tri)
+        if tri.categories:
+            effects.append({"op": "ticket_escalated", "ticket_id": ticket["ticket_id"],
+                            "categories": list(tri.categories)})
+        elif ticket["status"] != "escalated":          # never demote an escalated ticket
+            effects.append({"op": "ticket_status", "ticket_id": ticket["ticket_id"], "status": "open",
+                            "queue": "andre"})
+        for dept in routes:
+            if dept == "andre":
+                continue
+            cat = next(c for c in tri.categories if dept in triage_mod.ROUTES[c])
+            kind = triage_mod.legal_kind(tri) if dept == "legal_37" else cat
+            effects.append({"op": "handoff_new", "handoff_id": self._did("hof", actor, "handoff", target, rid, dept),
+                            "ticket_id": ticket["ticket_id"], "department": dept, "category": cat, "kind": kind})
+        for cat in tri.categories:
+            effects.append(self._alert_effect(ALERT_CATEGORIES[cat], ticket["ticket_id"], f"{target}:{rid}"))
+        return effects
+
+    def thread(self, ticket_id: str, contact_ref: str, brand: str) -> dict:
+        """The chat thread as the hub shows it to the contact: their messages and ours (queued ones marked)."""
+        with self.lock:
+            t = self.tickets.get(ticket_id)
+            c = self.contacts.get(t["contact_id"]) if t else None
+            if t is None or c is None or c.get("contact_ref") != contact_ref or t["brand"] != brand:
+                raise NotFound(R("TICKET_NOT_FOUND"))
+            out = []
+            for mid in t["messages"]:
+                m = self.messages[mid]
+                if m["dir"] == "out" and m["status"] == "cancelled":
+                    continue
+                out.append({"message_id": mid, "from": "contact" if m["dir"] == "in" else "team", "at": m["at"],
+                            "channel": m["channel"], "status": m.get("status", "received"),
+                            "text": self.bodies.get(m["body_sha256"]) if m.get("body_sha256") else None})
+            return {"ticket_id": ticket_id, "status": t["status"], "messages": out}
+
+    # ============================================================================================ tickets (Andre)
+
+    def tickets_view(self, status: Optional[str], brand: Optional[str], queue: Optional[str]) -> list[dict]:
+        with self.lock:
+            out = [self._ticket_summary(t) for t in self.tickets.values()
+                   if (status is None or t["status"] == status) and (brand is None or t["brand"] == brand)
+                   and (queue is None or t["queue"] == queue)]
+            return sorted(out, key=lambda t: (t["priority"], t["created_at"], t["ticket_id"]))
+
+    def _ticket_summary(self, t: dict) -> dict:
+        return {k: t[k] for k in ("ticket_id", "brand", "contact_id", "account_id", "channel", "priority", "status",
+                                  "queue", "categories", "created_at", "updated_at", "first_response_at",
+                                  "first_due", "resolution_due", "resolved_at", "breaches", "answered_by",
+                                  "reopened")}
+
+    def ticket_view(self, ticket_id: str) -> dict:
+        with self.lock:
+            t = self.tickets.get(ticket_id)
+            if t is None:
+                raise NotFound(R("TICKET_NOT_FOUND"))
+            msgs = []
+            for mid in t["messages"]:
+                m = self.messages[mid]
+                v = {k: m.get(k) for k in ("message_id", "dir", "channel", "at", "status", "origin", "ref", "reason",
+                                           "triage", "proactive")}
+                v["text"] = self.bodies.get(m["body_sha256"]) if m.get("body_sha256") else None
+                msgs.append(v)
+            return {**self._ticket_summary(t), "messages": msgs,
+                    "handoffs": [self._handoff_view(self.handoffs[h]) for h in t["handoffs"]]}
+
+    def _handoff_view(self, h: dict) -> dict:
+        port = self.ports.handoffs.get(h["department"])
+        status = h["status"]
+        if status == "pending" and not getattr(port, "wired", False):
+            status = NOT_WIRED
+        return {**h, "status": status}
+
+    def reply(self, ticket_id: str, body: dict) -> dict:
+        """Andre's own reply (a human answer; the only free text that leaves this service)."""
+        with self.lock:
+            self._gate()
+            prev = self._idem("andre", "reply", ticket_id, body)
+            if prev is not None:
+                return prev
+            t = self.tickets.get(ticket_id)
+            if t is None:
+                raise NotFound(R("TICKET_NOT_FOUND"))
+            if t["status"] == "closed":
+                raise Conflict(R("TICKET_CLOSED"))
+            channel = body.get("channel") or t["channel"]
+            if channel == "phone":
+                raise Invalid(R("CHANNEL_NOT_OUTBOUND"))
+            contact = self.contacts[t["contact_id"]]
+            reason = self._channel_check(channel, contact, proactive=False)
+            if reason not in (None, "QUIET_HOURS"):
+                raise Conflict(R(reason))
+            mid = self._did("msg", "andre", "reply", ticket_id, body["request_id"])
+            subj = f"Re: your message to {BRAND_NAMES[t['brand']]}" if channel == "email" else None
+            effects = [self._out_effect(mid, contact, t["brand"], channel, "human", body["text"], False, "queued",
+                                        ticket_id, None, subj),
+                       {"op": "first_response", "ticket_id": ticket_id},
+                       {"op": "ticket_status", "ticket_id": ticket_id, "status": "pending_customer",
+                        "answered_by": "andre"}]
+            resp = {"ticket_id": ticket_id, "message_id": mid, "status": "queued", "waiting_for":
+                    "quiet_hours" if reason == "QUIET_HOURS" else None}
+            self._commit("reply", {"effects": effects, "request": self._req("andre", "reply", ticket_id, body),
+                                   "response": resp}, "andre")
+        self.dispatch_side_effects()
+        return resp
+
+    def set_status(self, actor: str, ticket_id: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            prev = self._idem(actor, "status", ticket_id, body)
+            if prev is not None:
+                return prev
+            t = self.tickets.get(ticket_id)
+            if t is None:
+                raise NotFound(R("TICKET_NOT_FOUND"))
+            if body["status"] not in TRANSITIONS[t["status"]]:
+                raise Conflict(R("TRANSITION_NOT_ALLOWED"))
+            effect = {"op": "ticket_status", "ticket_id": ticket_id, "status": body["status"]}
+            if body["status"] == "escalated":
+                effect = {"op": "ticket_escalated", "ticket_id": ticket_id, "categories": []}
+            resp = {"ticket_id": ticket_id, "status": body["status"]}
+            self._commit("ticket_status", {"effects": [effect], "request": self._req(actor, "status", ticket_id, body),
+                                           "response": resp}, actor)
+            return resp
+
+    def set_priority(self, actor: str, ticket_id: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            prev = self._idem(actor, "priority", ticket_id, body)
+            if prev is not None:
+                return prev
+            t = self.tickets.get(ticket_id)
+            if t is None:
+                raise NotFound(R("TICKET_NOT_FOUND"))
+            if t["status"] == "closed":
+                raise Conflict(R("TICKET_CLOSED"))
+            fd, rd = self._due(parse_iso(t["created_at"]), body["priority"])
+            resp = {"ticket_id": ticket_id, "priority": body["priority"], "first_due": fd, "resolution_due": rd}
+            self._commit("ticket_priority", {"effects": [{"op": "ticket_priority", "ticket_id": ticket_id,
+                                                          "priority": body["priority"], "first_due": fd,
+                                                          "resolution_due": rd}],
+                                             "request": self._req(actor, "priority", ticket_id, body),
+                                             "response": resp}, actor)
+            return resp
+
+    # ============================================================================================ catalog
+
+    def save_item(self, catalog: str, body: dict) -> dict:
+        """A new version of a KB article, template or offer. Always unapproved: editing un-approves."""
+        with self.lock:
+            self._gate()
+            item_id = body["item_id"]
+            prev = self._idem("dashboard", f"{catalog}_save", item_id, body)
+            if prev is not None:
+                return prev
+            content = {k: body[k] for k in CATALOG_CONTENT[catalog]}
+            if catalog == "template":
+                bad = set(re.findall(r"\{([^{}]*)\}", content["text"])) - set(PLACEHOLDERS)
+                if bad or content["text"].count("{") != content["text"].count("}"):
+                    raise Invalid(R("TEMPLATE_PLACEHOLDER"))
+                if content["purpose"] == "offer" and "{offer_terms}" not in content["text"]:
+                    raise Invalid(R("TEMPLATE_PLACEHOLDER"))
+            if catalog == "offer":
+                Decimal(content["price"])                      # the model already pins the format
+            cur = self.catalog[catalog].get(item_id)
+            if cur is not None and cur["status"] == "retired":
+                raise Conflict(R("ITEM_RETIRED"))
+            sha = catalog_sha(catalog, content)
+            if cur is not None and cur["content_sha256"] == sha:
+                raise Conflict(R("ITEM_UNCHANGED"))
+            version = (cur["version"] + 1) if cur else 1
+            resp = {"item_id": item_id, "version": version, "content_sha256": sha, "approved": False}
+            self._commit(f"{catalog}_saved", {"effects": [{"op": "catalog_saved", "catalog": catalog,
+                                                           "item_id": item_id, "version": version,
+                                                           "content": content, "content_sha256": sha}],
+                                              "request": self._req("dashboard", f"{catalog}_save", item_id, body),
+                                              "response": resp}, "dashboard")
+            return resp
+
+    def approve_item(self, catalog: str, item_id: str, body: dict) -> dict:
+        """Andre approves exactly one version, named by its content hash (what he read is what is approved)."""
+        with self.lock:
+            self._gate()
+            prev = self._idem("andre", f"{catalog}_approve", item_id, body)
+            if prev is not None:
+                return prev
+            item = self.catalog[catalog].get(item_id)
+            if item is None:
+                raise NotFound(R("ITEM_NOT_FOUND"))
+            if item["status"] == "retired":
+                raise Conflict(R("ITEM_RETIRED"))
+            if body["version"] != item["version"] or body["content_sha256"] != item["content_sha256"]:
+                raise Conflict(R("APPROVAL_STALE"))
+            resp = {"item_id": item_id, "version": item["version"], "content_sha256": item["content_sha256"],
+                    "approved": True}
+            self._commit(f"{catalog}_approved", {"effects": [{"op": "catalog_approved", "catalog": catalog,
+                                                              "item_id": item_id, "version": item["version"],
+                                                              "content_sha256": item["content_sha256"]}],
+                                                 "request": self._req("andre", f"{catalog}_approve", item_id, body),
+                                                 "response": resp}, "andre")
+            return resp
+
+    def retire_item(self, catalog: str, item_id: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            prev = self._idem("andre", f"{catalog}_retire", item_id, body)
+            if prev is not None:
+                return prev
+            item = self.catalog[catalog].get(item_id)
+            if item is None:
+                raise NotFound(R("ITEM_NOT_FOUND"))
+            if item["status"] == "retired":
+                raise Conflict(R("ITEM_RETIRED"))
+            resp = {"item_id": item_id, "status": "retired"}
+            self._commit(f"{catalog}_retired", {"effects": [{"op": "catalog_retired", "catalog": catalog,
+                                                             "item_id": item_id}],
+                                                "request": self._req("andre", f"{catalog}_retire", item_id, body),
+                                                "response": resp}, "andre")
+            return resp
+
+    def catalog_view(self, catalog: str) -> list[dict]:
+        with self.lock:
+            out = []
+            for item in sorted(self.catalog[catalog].values(), key=lambda i: i["item_id"]):
+                v = dict(item)
+                v["usable"] = self._usable(catalog, item["item_id"]) is not None
+                out.append(v)
+            return out
+
+    # ============================================================================================ accounts, health
+
+    def save_account(self, actor: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            aid = body["account_id"]
+            prev = self._idem(actor, "account", aid, body)
+            if prev is not None:
+                return prev
+            a = self.accounts.get(aid)
+            if a is not None and a["brand"] != body["brand"]:
+                raise Conflict(R("ACCOUNT_BRAND_MISMATCH"))
+            pc = body.get("primary_contact_id")
+            if pc is not None:
+                c = self.contacts.get(pc)
+                if c is None or c["brand"] != body["brand"]:
+                    raise NotFound(R("CONTACT_NOT_FOUND"))
+            effects = [{"op": "account_saved", "account_id": aid, "brand": body["brand"], "primary_contact_id": pc,
+                        "contract_end": body.get("contract_end"),
+                        "contract_source": "onboarding" if body.get("contract_end") else None}]
+            if pc is not None and self.contacts[pc].get("account_id") != aid:
+                effects.append({"op": "contact_update", "contact_id": pc, "fields": {"account_id": aid}})
+            resp = {"account_id": aid, "brand": body["brand"]}
+            self._commit("account_saved", {"effects": effects, "request": self._req(actor, "account", aid, body),
+                                           "response": resp}, actor)
+            return resp
+
+    def account_event(self, actor: str, account_id: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            prev = self._idem(actor, "account_event", account_id, body)
+            if prev is not None:
+                return prev
+            if account_id not in self.accounts:
+                raise NotFound(R("ACCOUNT_NOT_FOUND"))
+            occurred = parse_iso(body["occurred_at"])
+            if occurred > self.now() + timedelta(minutes=5):
+                raise Invalid(R("EVENT_IN_FUTURE"))
+            resp = {"account_id": account_id, "kind": body["kind"], "recorded": True}
+            self._commit("account_event", {"effects": [{"op": "login_event", "account_id": account_id,
+                                                        "occurred_at": iso(occurred)}],
+                                           "request": self._req(actor, "account_event", account_id, body),
+                                           "response": resp}, actor)
+            return resp
+
+    def _complaints_30d(self, account_id: str) -> int:
+        since = iso(self.now() - timedelta(days=30))
+        return sum(1 for t in self.tickets.values() if t["account_id"] == account_id
+                   for at in t["complaint_at"] if at >= since)
+
+    def _open_escalations(self, account_id: str) -> int:
+        return sum(1 for t in self.tickets.values() if t["account_id"] == account_id and t["status"] == "escalated")
+
+    def _latest_nps(self, account_id: str) -> Optional[int]:
+        answered = [s for s in self.surveys.values() if s["account_id"] == account_id and s["score"] is not None]
+        return max(answered, key=lambda s: (s["answered_at"], s["survey_id"]))["score"] if answered else None
+
+    def account_health(self, account_id: str) -> dict:
+        with self.lock:
+            a = self.accounts.get(account_id)
+            if a is None:
+                raise NotFound(R("ACCOUNT_NOT_FOUND"))
+            plan = self.plans.get(a["plan_id"]) if a["plan_id"] else None
+            return {"account_id": account_id, "brand": a["brand"], "health": a["health"], "at_risk": a["at_risk"],
+                    "contract_end": a["contract_end"], "contract_source": a["contract_source"],
+                    "last_login": a["last_login"], "save_plan": plan}
+
+    def accounts_view(self) -> list[dict]:
+        with self.lock:
+            return [{"account_id": a["account_id"], "brand": a["brand"],
+                     "score": a["health"]["score"] if a["health"] else None, "at_risk": a["at_risk"],
+                     "plan_id": a["plan_id"], "contract_end": a["contract_end"]}
+                    for a in sorted(self.accounts.values(), key=lambda x: x["account_id"])]
+
+    def renewals_view(self) -> list[dict]:
+        with self.lock:
+            today = self.now().date()
+            out = []
+            for a in self.accounts.values():
+                if a["contract_end"]:
+                    days = (date.fromisoformat(a["contract_end"]) - today).days
+                    if days <= self.settings.renewal_window_days:
+                        out.append({"account_id": a["account_id"], "brand": a["brand"],
+                                    "contract_end": a["contract_end"], "days_left": days,
+                                    "source": a["contract_source"], "at_risk": a["at_risk"]})
+            return sorted(out, key=lambda r: (r["days_left"], r["account_id"]))
+
+    def _read_signals(self) -> dict:
+        """Port reads for every account, outside the lock; a raising port is unknown (None)."""
+        with self.lock:
+            snapshot = sorted(self.accounts)
+        signals = {}
+        for aid in snapshot:
+            signals[aid] = (_safe(lambda: self.ports.results.trend(aid)),
+                            _safe(lambda: self.ports.finance.payment_status(aid)),
+                            [_safe(lambda p=p: p.contract_end(aid)) for _, p in sorted(self.ports.contracts.items())])
+        return signals
+
+    def _health_compute(self, run_key: str, signals: dict) -> dict:
+        """Called with the lock held. Accounts added since the port reads are scored at the next run."""
+        snapshot = sorted(signals)
+        now = self.now()
+        effects: list = []
+        started, flagged = [], []
+        for aid in snapshot:
+            a = self.accounts[aid]
+            trend, pay, ends = signals[aid]
+            end = next((e for e in ends if e is not None and e.available and _is_date(e.end_date)), None)
+            if end is not None and end.end_date != a["contract_end"]:
+                effects.append({"op": "account_saved", "account_id": aid, "brand": a["brand"],
+                                "contract_end": end.end_date, "contract_source": "port"})
+            contract_end = end.end_date if end is not None else a["contract_end"]
+            last = parse_iso(a["last_login"]) if a["last_login"] else None
+            res = health_mod.compute(now, trend.direction if trend is not None and trend.available else None,
+                                     pay.status if pay is not None and pay.available else None, last,
+                                     self._complaints_30d(aid), self._open_escalations(aid),
+                                     self._latest_nps(aid))
+            at_risk = res["score"] < self.settings.at_risk_threshold
+            if a["health"] is None or a["health"]["score"] != res["score"] or a["at_risk"] != at_risk \
+                    or a["health"]["signals"] != res["signals"]:
+                effects.append({"op": "health_scored", "account_id": aid, "score": res["score"],
+                                "signals": res["signals"], "at_risk": at_risk,
+                                "threshold": self.settings.at_risk_threshold})
+            if at_risk and a["plan_id"] is None:
+                pid = derived_id("pln", aid, run_key)
+                steps = [{"step_id": derived_id("stp", pid, k), "kind": k, "status": "pending"}
+                         for k in ("check_in", "results_review", "offer")]
+                steps[2]["status"] = "awaiting_selection"
+                effects.append({"op": "plan_new", "plan_id": pid, "account_id": aid, "score": res["score"],
+                                "steps": steps})
+                effects.append(self._alert_effect("ACCOUNT_AT_RISK", aid, run_key))
+                started.append(aid)
+            if contract_end and contract_end not in a["renewal_flagged"]:
+                days = (date.fromisoformat(contract_end) - now.date()).days
+                if 0 <= days <= self.settings.renewal_window_days:
+                    effects.append({"op": "renewal_flagged", "account_id": aid, "contract_end": contract_end})
+                    effects.append(self._alert_effect("RENEWAL_DUE", aid, contract_end))
+                    flagged.append(aid)
+        return {"effects": effects, "save_plans_started": started, "renewals_flagged": flagged,
+                "scored": len(snapshot)}
+
+    # ============================================================================================ save plans
+
+    def plans_view(self, status: Optional[str]) -> list[dict]:
+        with self.lock:
+            return [dict(p) for p in sorted(self.plans.values(), key=lambda p: p["plan_id"])
+                    if status is None or p["status"] == status]
+
+    def select_offer(self, plan_id: str, body: dict) -> dict:
+        """Andre picks an offer for the plan's offer step: an approved catalogue offer by id, nothing else."""
+        with self.lock:
+            self._gate()
+            prev = self._idem("andre", "plan_offer", plan_id, body)
+            if prev is not None:
+                return prev
+            p = self.plans.get(plan_id)
+            if p is None:
+                raise NotFound(R("PLAN_NOT_FOUND"))
+            if p["status"] != "active":
+                raise Conflict(R("PLAN_CLOSED"))
+            step = next(s for s in p["steps"] if s["kind"] == "offer")
+            if step["status"] not in ("awaiting_selection",):
+                raise Conflict(R("STEP_NOT_OPEN"))
+            offer = self._usable("offer", body["offer_id"])
+            brand = self.accounts[p["account_id"]]["brand"]
+            if offer is None or offer["brand"] != brand:
+                raise Conflict(R("OFFER_NOT_APPROVED"))
+            resp = {"plan_id": plan_id, "step_id": step["step_id"], "offer_id": offer["item_id"],
+                    "version": offer["version"], "status": "selected"}
+            self._commit("plan_offer", {"effects": [{"op": "plan_offer", "plan_id": plan_id,
+                                                     "step_id": step["step_id"], "offer_id": offer["item_id"],
+                                                     "version": offer["version"],
+                                                     "content_sha256": offer["content_sha256"]}],
+                                        "request": self._req("andre", "plan_offer", plan_id, body), "response": resp},
+                         "andre")
+            return resp
+
+    def complete_step(self, plan_id: str, step_id: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            prev = self._idem("dashboard", "plan_step", f"{plan_id}:{step_id}", body)
+            if prev is not None:
+                return prev
+            p = self.plans.get(plan_id)
+            if p is None:
+                raise NotFound(R("PLAN_NOT_FOUND"))
+            step = next((s for s in p["steps"] if s["step_id"] == step_id), None)
+            if step is None:
+                raise NotFound(R("STEP_NOT_FOUND"))
+            if p["status"] != "active" or step["kind"] != "results_review" or step["status"] != "open":
+                raise Conflict(R("STEP_NOT_OPEN"))
+            resp = {"plan_id": plan_id, "step_id": step_id, "status": "done"}
+            self._commit("plan_step", {"effects": [{"op": "plan_step", "plan_id": plan_id, "step_id": step_id,
+                                                    "status": "done"}],
+                                       "request": self._req("dashboard", "plan_step", f"{plan_id}:{step_id}", body),
+                                       "response": resp}, "dashboard")
+            return resp
+
+    def close_plan(self, plan_id: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            prev = self._idem("andre", "plan_close", plan_id, body)
+            if prev is not None:
+                return prev
+            p = self.plans.get(plan_id)
+            if p is None:
+                raise NotFound(R("PLAN_NOT_FOUND"))
+            if p["status"] != "active":
+                raise Conflict(R("PLAN_CLOSED"))
+            resp = {"plan_id": plan_id, "status": "closed", "outcome": body["outcome"]}
+            self._commit("plan_closed", {"effects": [{"op": "plan_closed", "plan_id": plan_id,
+                                                      "outcome": body["outcome"]}],
+                                         "request": self._req("andre", "plan_close", plan_id, body),
+                                         "response": resp}, "andre")
+            return resp
+
+    def _save_plan_tick(self, run_key: str) -> dict:
+        """Advance every active plan: queue the check-in (approved template), open the results-review task, queue
+        the selected offer (re-checked: still approved, same version and content). Every step change recorded."""
+        effects: list = []
+        done = {"check_ins": 0, "tasks": 0, "offers": 0, "blocked": 0}
+        for p in sorted(self.plans.values(), key=lambda x: x["plan_id"]):
+            if p["status"] != "active":
+                continue
+            a = self.accounts[p["account_id"]]
+            contact = self.contacts.get(a["primary_contact_id"] or "")
+            for s in p["steps"]:
+                if s["kind"] == "results_review" and s["status"] == "pending":
+                    effects.append({"op": "plan_step", "plan_id": p["plan_id"], "step_id": s["step_id"],
+                                    "status": "open"})
+                    done["tasks"] += 1
+                    continue
+                if not ((s["kind"] == "check_in" and s["status"] in ("pending", "blocked"))
+                        or (s["kind"] == "offer" and s["status"] == "selected")):
+                    continue
+                if contact is None:
+                    if s["status"] != "blocked":
+                        effects.append({"op": "plan_step", "plan_id": p["plan_id"], "step_id": s["step_id"],
+                                        "status": "blocked", "reason": R("NO_PRIMARY_CONTACT")})
+                    done["blocked"] += 1
+                    continue
+                channel = self._pick_proactive_channel(contact)
+                purpose = "check_in" if s["kind"] == "check_in" else "offer"
+                tpl = self._template(purpose, a["brand"], channel)
+                extra: dict = {}
+                ref: dict = {}
+                if s["kind"] == "offer":
+                    offer = self._usable("offer", s["offer_id"], s["offer_version"], s["offer_sha256"])
+                    if offer is None:
+                        effects.append({"op": "plan_step", "plan_id": p["plan_id"], "step_id": s["step_id"],
+                                        "status": "awaiting_selection", "reason": R("OFFER_NOT_APPROVED")})
+                        done["blocked"] += 1
+                        continue
+                    extra = {"offer_title": offer["title"], "offer_terms": offer["terms"],
+                             "offer_price": money_str(offer["price"])}
+                    ref["offer"] = {"item_id": offer["item_id"], "version": offer["version"],
+                                    "content_sha256": offer["content_sha256"]}
+                if tpl is None:
+                    if s.get("reason") != "NO_APPROVED_TEMPLATE":
+                        effects.append({"op": "plan_step", "plan_id": p["plan_id"], "step_id": s["step_id"],
+                                        "status": "blocked" if s["kind"] == "check_in" else s["status"],
+                                        "reason": R("NO_APPROVED_TEMPLATE")})
+                    done["blocked"] += 1
+                    continue
+                ref["template"] = {"item_id": tpl["item_id"], "version": tpl["version"],
+                                   "content_sha256": tpl["content_sha256"]}
+                mid = derived_id("msg", p["plan_id"], s["step_id"], run_key)
+                subj = f"{BRAND_NAMES[a['brand']]}: checking in" if channel == "email" else None
+                effects.append(self._out_effect(mid, contact, a["brand"], channel,
+                                                "offer" if s["kind"] == "offer" else "template",
+                                                self._render(tpl, contact, extra), True, "queued", None, ref, subj,
+                                                plan_id=p["plan_id"], step_id=s["step_id"]))
+                effects.append({"op": "plan_step", "plan_id": p["plan_id"], "step_id": s["step_id"],
+                                "status": "queued", "message_id": mid, "reason": None})
+                done["check_ins" if s["kind"] == "check_in" else "offers"] += 1
+        return {"effects": effects, **done}
+
+    # ============================================================================================ NPS
+
+    def send_survey(self, actor: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            aid = body["account_id"]
+            prev = self._idem(actor, "survey", aid, body)
+            if prev is not None:
+                return prev
+            a = self.accounts.get(aid)
+            if a is None:
+                raise NotFound(R("ACCOUNT_NOT_FOUND"))
+            contact = self.contacts.get(a["primary_contact_id"] or "")
+            if contact is None:
+                raise Conflict(R("NO_PRIMARY_CONTACT"))
+            channel = body["channel"]
+            reason = self._channel_check(channel, contact, proactive=True)
+            if reason not in (None, "QUIET_HOURS"):
+                raise Conflict(R(reason))
+            tpl = self._template("nps_survey", a["brand"], channel)
+            if tpl is None:
+                raise Conflict(R("NO_APPROVED_TEMPLATE"))
+            sid = self._did("nps", actor, "survey", aid, body["request_id"])
+            mid = self._did("msg", actor, "survey", aid, body["request_id"])
+            ref = {"template": {"item_id": tpl["item_id"], "version": tpl["version"],
+                                "content_sha256": tpl["content_sha256"]}}
+            subj = f"{BRAND_NAMES[a['brand']]}: a quick question" if channel == "email" else None
+            effects = [self._out_effect(mid, contact, a["brand"], channel, "template",
+                                        self._render(tpl, contact, {"survey_id": sid}), True, "queued", None, ref,
+                                        subj, survey_id=sid),
+                       {"op": "survey_new", "survey_id": sid, "account_id": aid, "contact_id": contact["contact_id"],
+                        "message_id": mid}]
+            resp = {"survey_id": sid, "message_id": mid, "channel": channel, "status": "queued",
+                    "waiting_for": "quiet_hours" if reason == "QUIET_HOURS" else None}
+            self._commit("survey_sent", {"effects": effects, "request": self._req(actor, "survey", aid, body),
+                                         "response": resp}, actor)
+            return resp
+
+    def nps_response(self, actor: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            sid = body["survey_id"]
+            prev = self._idem(actor, "nps", sid, body)
+            if prev is not None:
+                return prev
+            s = self.surveys.get(sid)
+            if s is None:
+                raise NotFound(R("SURVEY_NOT_FOUND"))
+            if s["score"] is not None:
+                raise Conflict(R("SURVEY_ANSWERED"))
+            comment_sha = self._put_body(body["comment"]) if body.get("comment") else None
+            effects = [{"op": "nps_response", "survey_id": sid, "score": body["score"], "comment_sha256": comment_sha}]
+            band = health_mod.nps_band(body["score"])
+            if band == "detractor":
+                effects.append(self._alert_effect("NPS_DETRACTOR", s["account_id"], sid))
+            resp = {"survey_id": sid, "score": body["score"], "band": band}
+            self._commit("nps_response", {"effects": effects, "request": self._req(actor, "nps", sid, body),
+                                          "response": resp}, actor)
+        self.dispatch_side_effects()
+        return resp
+
+    # ============================================================================================ phone
+
+    def record_call(self, actor: str, body: dict) -> dict:
+        """A call record from the voice gateway (refs only: no audio, no transcript text). The call becomes a
+        phone ticket in Andre's queue; a voicemail alerts him. No bot answers a call."""
+        with self.lock:
+            self._gate()
+            brand = body["brand"]
+            target = f"{brand}:phone"
+            prev = self._idem(actor, "call", target, body)
+            if prev is not None:
+                return prev
+            rid = body["request_id"]
+            effects: list = []
+            contact = self._find_or_new_contact(actor, brand, "phone", body["from_number"], rid, effects)
+            ticket, _ = self._ticket_for(actor, contact, brand, "phone", None, rid, effects, bool(effects))
+            cid = self._did("cal", actor, "call", target, rid)
+            effects.append({"op": "call_new", "call_id": cid, "brand": brand, "contact_id": contact["contact_id"],
+                            "ticket_id": ticket["ticket_id"], "direction": "inbound", "started_at": body["started_at"],
+                            "duration_seconds": body["duration_seconds"], "outcome": body["outcome"],
+                            "voicemail_ref": body.get("voicemail_ref"), "transcript_ref": body.get("transcript_ref")})
+            if ticket["status"] != "escalated":
+                effects.append({"op": "ticket_status", "ticket_id": ticket["ticket_id"], "status": "open",
+                                "queue": "andre"})
+            if body["outcome"] in ("voicemail", "missed"):
+                effects.append(self._alert_effect("VOICEMAIL_RECEIVED" if body["outcome"] == "voicemail"
+                                                  else "MISSED_CALL", ticket["ticket_id"], cid))
+            resp = {"call_id": cid, "ticket_id": ticket["ticket_id"], "contact_id": contact["contact_id"]}
+            self._commit("call_recorded", {"effects": effects, "request": self._req(actor, "call", target, body),
+                                           "response": resp}, actor)
+        self.dispatch_side_effects()
+        return resp
+
+    def call_handoff(self, actor: str, call_id: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            prev = self._idem(actor, "call_handoff", call_id, body)
+            if prev is not None:
+                return prev
+            c = self.calls.get(call_id)
+            if c is None:
+                raise NotFound(R("CALL_NOT_FOUND"))
+            effects = [{"op": "call_handoff", "call_id": call_id},
+                       {"op": "ticket_escalated", "ticket_id": c["ticket_id"], "categories": []},
+                       self._alert_effect("CALL_HANDOFF", c["ticket_id"], f"{call_id}:{body['request_id']}")]
+            resp = {"call_id": call_id, "ticket_id": c["ticket_id"], "handed_to": "andre"}
+            self._commit("call_handoff", {"effects": effects, "request": self._req(actor, "call_handoff", call_id, body),
+                                          "response": resp}, actor)
+        self.dispatch_side_effects()
+        return resp
+
+    def route_call(self, brand: str) -> dict:
+        """Where an incoming call goes now (advisory: no voice provider is wired). No rules: voicemail."""
+        with self.lock:
+            rules = self.routing.get(brand)
+            now = self.now()
+            decision, reason = "voicemail", "NO_ROUTING_RULES"
+            if rules:
+                local = now.astimezone(channels.zone(rules["timezone"]))
+                open_ = local.strftime("%a").lower()[:3] in rules["days"] and \
+                    rules["open_hour"] <= local.hour < rules["close_hour"]
+                decision = rules["in_hours"] if open_ else "voicemail"
+                reason = "IN_HOURS" if open_ else "AFTER_HOURS"
+            return {"brand": brand, "action": decision, "reason": reason, "voice_provider_wired": False}
+
+    def set_routing(self, brand: str, body: dict) -> dict:
+        with self.lock:
+            self._gate()
+            prev = self._idem("andre", "routing", brand, body)
+            if prev is not None:
+                return prev
+            if channels.zone(body["timezone"]) is None:
+                raise Invalid(R("TIMEZONE_UNKNOWN"))
+            if body["open_hour"] >= body["close_hour"]:
+                raise Invalid(R("INVALID"))
+            rules = {k: body[k] for k in ("timezone", "days", "open_hour", "close_hour", "in_hours")}
+            resp = {"brand": brand, **rules}
+            self._commit("routing_set", {"effects": [{"op": "routing_set", "brand": brand, "rules": rules}],
+                                         "request": self._req("andre", "routing", brand, body), "response": resp},
+                         "andre")
+            return resp
+
+    # ============================================================================================ side effects
+
+    def dispatch_side_effects(self) -> None:
+        """Send what committed lines decided and the ports can carry: handoffs and alerts on wired ports. Called
+        after a request (outside the lock) and by the handoff-retries job. A not-wired port is never called and
+        nothing is recorded for it (the view shows ``not_wired``)."""
+        with self.lock:
+            hofs = [dict(h) for h in self.handoffs.values() if h["status"] in ("pending", "unavailable", "failed")
+                    and getattr(self.ports.handoffs.get(h["department"]), "wired", False)
+                    and h["handoff_id"] not in self._in_flight]
+            alerts = [dict(a) for a in self.alerts.values() if a["status"] in ("recorded", "failed")
+                      and getattr(self.ports.alerts, "wired", False) and a["alert_id"] not in self._in_flight]
+            if not self.integrity["ok"]:
+                return
+            self._in_flight |= {h["handoff_id"] for h in hofs} | {a["alert_id"] for a in alerts}
+        try:
+            for h in hofs:
+                t = self.tickets[h["ticket_id"]]
+                req = HandoffRequest(h["handoff_id"], h["ticket_id"], t["brand"], h["category"], h["kind"],
+                                     t["account_id"])
+                res = _safe(lambda: self.ports.handoffs[h["department"]].handoff(req))
+                status = res.status if res is not None and res.status in ("delivered", "refused", "unavailable") \
+                    else "unavailable"
+                try:
+                    self._commit("handoff_result", {"effects": [{"op": "handoff_result", "handoff_id": h["handoff_id"],
+                                                                 "status": status,
+                                                                 "reference": res.reference if res else None}]},
+                                 INTERNAL)
+                except Unavailable:
+                    break
+            for a in alerts:
+                res = _safe(lambda: self.ports.alerts.send(Alert(a["alert_id"], a["code"], a["subject"])))
+                status = res if res in ("delivered", "failed") else "failed"
+                try:
+                    self._commit("alert_result", {"effects": [{"op": "alert_result", "alert_id": a["alert_id"],
+                                                               "status": status}]}, INTERNAL)
+                except Unavailable:
+                    break
+        finally:
+            with self.lock:
+                self._in_flight -= {h["handoff_id"] for h in hofs} | {a["alert_id"] for a in alerts}
+
+    def _outbound_tick(self) -> dict:
+        """Send what may be sent now. For each queued message: re-check its channel rules (consent may have been
+        revoked, the hour may be quiet) and that the template / offer it carries is still approved as it was; a
+        message that may never go is cancelled with a reason, one that must wait stays queued. Then, per message:
+        ``message_sent`` recorded on the ledger FIRST (ledger down: nothing is sent and the tick stops), the
+        provider called outside the lock, the result committed."""
+        result = {"sent": 0, "failed": 0, "cancelled": 0, "waiting": 0, "not_wired": 0}
+        with self.lock:
+            self._gate()
+            cancels, ready = [], []
+            for m in sorted(self.messages.values(), key=lambda x: (x["at"], x["message_id"])):
+                if m["dir"] != "out" or m["status"] != "queued" or m["message_id"] in self._in_flight:
+                    continue
+                contact = self.contacts[m["contact_id"]]
+                reason = self._channel_check(m["channel"], contact, bool(m["proactive"]))
+                ref = m.get("ref") or {}
+                if reason is None:
+                    for key in ("template", "offer"):
+                        r = ref.get(key)
+                        if r and self._usable(key, r["item_id"], r["version"], r["content_sha256"]) is None:
+                            reason = "OFFER_NOT_APPROVED" if key == "offer" else "TEMPLATE_NOT_APPROVED"
+                    if ref.get("catalog") == "kb" and self._usable("kb", ref["item_id"], ref["version"],
+                                                                   ref["content_sha256"]) is None:
+                        reason = "ARTICLE_NOT_APPROVED"
+                if reason == "QUIET_HOURS":
+                    result["waiting"] += 1
+                    continue
+                if reason is None and m["attempts"] >= MAX_SEND_ATTEMPTS:
+                    reason = "PROVIDER_FAILED"
+                if reason is not None:
+                    cancels.append({"op": "message_status", "message_id": m["message_id"], "status": "cancelled",
+                                    "reason": R(reason)})
+                    t = self.tickets.get(m.get("ticket_id") or "")
+                    if t is not None and t["status"] == "pending_customer":
+                        # the answer will not go: the ticket goes back to Andre's queue
+                        cancels.append({"op": "ticket_status", "ticket_id": t["ticket_id"], "status": "open",
+                                        "queue": "andre"})
+                    continue
+                sender = self.ports.senders.get(m["channel"])
+                if not getattr(sender, "wired", False):
+                    result["not_wired"] += 1
+                    continue
+                ready.append(m)
+            if cancels:
+                self._commit("outbound_cancelled", {"effects": cancels}, INTERNAL)
+                result["cancelled"] = sum(1 for c in cancels if c["op"] == "message_status")
+            for m in ready:
+                self._in_flight.add(m["message_id"])
+        try:
+            for m in ready:
+                with self.lock:
+                    contact = self.contacts[m["contact_id"]]
+                    text = self.bodies.get(m["body_sha256"])
+                    if text is None:
+                        continue
+                    attempt = m["attempts"] + 1
+                    payload = {"message_id": m["message_id"], "channel": m["channel"], "brand": m["brand"],
+                               "body_sha256": m["body_sha256"], "attempt": attempt, "origin": m["origin"]}
+                    try:          # recorded BEFORE the provider is called: ledger down -> nothing sent
+                        self._record_twice(derived_id("snd", m["message_id"], attempt), "message_sent", INTERNAL,
+                                           m["message_id"], payload, f"{m['channel']} message attempt {attempt}")
+                    except LedgerRecordError:
+                        raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+                    to = contact["email"] if m["channel"] == "email" else (
+                        contact["phone"] if m["channel"] == "sms" else contact["contact_id"])
+                    sender_id = self.settings.support_email.get(m["brand"]) if m["channel"] == "email" else (
+                        self.settings.sms_number.get(m["brand"]) if m["channel"] == "sms" else m["brand"])
+                    msg = Outbound(m["message_id"], m["brand"], m["channel"], to, sender_id or "", m.get("subject"),
+                                   text)
+                res = _safe(lambda: self.ports.senders[m["channel"]].send(msg))
+                status = "sent" if res == "sent" else "failed"
+                self._commit("outbound_result", {"effects": [{"op": "message_status", "message_id": m["message_id"],
+                                                              "status": "sent" if status == "sent" else "queued",
+                                                              "reason": None if status == "sent"
+                                                              else R("PROVIDER_FAILED"), "attempted": True}]},
+                             INTERNAL)
+                result[status] += 1
+        finally:
+            with self.lock:
+                self._in_flight -= {m["message_id"] for m in ready}
+        return result
+
+    # ============================================================================================ jobs
+
+    def run_job(self, name: str, body: dict) -> dict:
+        if name not in JOBS:
+            raise NotFound(R("JOB_UNKNOWN"))
+        if name == "integrity":
+            res = self.verify_integrity(force=True, always=True)
+            ledger_ok = self.rec.client.verify()
+            return {"job": name, "integrity": res, "ledger_valid": ledger_ok}
+        if not self._tick_lock.acquire(blocking=False):
+            raise Conflict(R("JOB_RUNNING"))
+        try:
+            with self.lock:
+                self._gate()
+                prev = self._idem("scheduler", "job", name, body)
+                if prev is not None:
+                    return {**prev, "already_ran": True}
+            run_key = f"{name}:{body['request_id']}"
+            result: dict = {}
+            signals = None
+            if name == "outbound-tick":
+                result = self._outbound_tick()
+            elif name == "handoff-retries":
+                self.dispatch_side_effects()
+            elif name == "health-recompute":
+                signals = self._read_signals()
+            with self.lock:
+                self._gate()
+                effects: list = []
+                if name == "sla-sweep":
+                    result = self._sla_sweep(run_key)
+                elif name == "save-plan-tick":
+                    result = self._save_plan_tick(run_key)
+                elif name == "health-recompute":
+                    result = self._health_compute(run_key, signals)
+                elif name == "handoff-retries":
+                    result = {"handoffs_open": sum(1 for h in self.handoffs.values()
+                                                   if h["status"] not in ("delivered", "refused")),
+                              "alerts_undelivered": sum(1 for a in self.alerts.values() if a["status"] != "delivered")}
+                effects = result.pop("effects", [])
+                resp = {"job": name, **result}
+                self._commit("job_ran", {"effects": effects + [{"op": "job_ran", "job": name}],
+                                         "request": self._req("scheduler", "job", name, body), "response": resp},
+                             "scheduler")
+        finally:
+            self._tick_lock.release()
+        self.dispatch_side_effects()
+        return resp
+
+    def _sla_sweep(self, run_key: str) -> dict:
+        now = iso(self.now())
+        effects: list = []
+        breached = []
+        for t in sorted(self.tickets.values(), key=lambda x: x["ticket_id"]):
+            if t["status"] in ("resolved", "closed"):
+                continue
+            if t["first_response_at"] is None and t["first_due"] < now and "first_response" not in t["breaches"]:
+                effects.append({"op": "sla_breach", "ticket_id": t["ticket_id"], "which": "first_response"})
+                effects.append(self._alert_effect("SLA_FIRST_RESPONSE_BREACHED", t["ticket_id"], "first"))
+                breached.append(t["ticket_id"])
+            if t["resolution_due"] < now and "resolution" not in t["breaches"]:
+                effects.append({"op": "sla_breach", "ticket_id": t["ticket_id"], "which": "resolution"})
+                effects.append(self._alert_effect("SLA_RESOLUTION_BREACHED", t["ticket_id"], "resolution"))
+                breached.append(t["ticket_id"])
+        return {"effects": effects, "breaches": len(breached)}
+
+    # ============================================================================================ views, audit
+
+    def alerts_view(self) -> list[dict]:
+        with self.lock:
+            wired = getattr(self.ports.alerts, "wired", False)
+            return [{**a, "delivery": a["status"] if wired or a["status"] == "delivered" else NOT_WIRED}
+                    for a in sorted(self.alerts.values(), key=lambda x: (x["created_at"], x["alert_id"]))]
+
+    def outbound_view(self, status: Optional[str]) -> list[dict]:
+        with self.lock:
+            return [{k: m.get(k) for k in ("message_id", "ticket_id", "contact_id", "brand", "channel", "origin",
+                                           "status", "reason", "proactive", "at", "attempts", "plan_id", "survey_id")}
+                    for m in sorted(self.messages.values(), key=lambda x: (x["at"], x["message_id"]))
+                    if m["dir"] == "out" and (status is None or m["status"] == status)]
+
+    def audit_events(self, since_seq: int, limit: int) -> dict:
+        """The local log with personal data minimised: addresses, names, refs and time zones reduced to their
+        SHA-256, stored answers dropped. Bodies are never in the log (only their hashes)."""
+        out = []
+        for r in self.log.iter_records(max(1, since_seq)):
+            d = _minimise({k: v for k, v in r["data"].items() if k not in ("response", "request")})
+            if r["data"].get("request"):            # the key names a contact ref or address: hashed
+                d["request_sha256"] = payload_sha256(r["data"]["request"])
+            out.append({"seq": r["seq"], "kind": r["kind"], "at": r["at"], "data": d})
+            if len(out) >= limit:
+                break
+        return {"events": out, "log_length": len(self.log)}
+
+
+CATALOG_CONTENT = {
+    "kb": ("brands", "channels", "title", "answer", "rules"),
+    "template": ("purpose", "brand", "channels", "text"),
+    "offer": ("brand", "title", "terms", "price", "currency"),
+}
+
+
+def catalog_sha(catalog: str, content: dict) -> str:
+    return payload_sha256({"catalog": catalog, **{k: content[k] for k in CATALOG_CONTENT[catalog]}})
+
+
+def _safe(fn):
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001 - a port that raises is unavailable; its text is dropped
+        return None
+
+
+def _is_date(v) -> bool:
+    try:
+        date.fromisoformat(v)
+        return isinstance(v, str) and len(v) == 10
+    except (TypeError, ValueError):
+        return False
+
+
+def _minimise(obj):
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k in PERSONAL_KEYS and isinstance(v, str):
+                out[k + "_sha256"] = sha256_hex(v.encode("utf-8"))
+            else:
+                out[k] = _minimise(v)
+        return out
+    if isinstance(obj, list):
+        return [_minimise(x) for x in obj]
+    return obj
