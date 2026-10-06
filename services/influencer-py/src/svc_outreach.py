@@ -74,7 +74,7 @@ class OutreachMixin:
         self.messages[d["message_id"]] = {**{k: d.get(k) for k in (
             "message_id", "channel", "platform", "influencer_id", "to_hash", "brand", "template_id", "version",
             "template_sha256", "draft_id", "content_sha256", "rendered_sha256", "from_domain", "purpose",
-            "confirmation_id", "existing_record", "requester", "reasked")},
+            "confirmation_id", "existing_record", "requester", "reasked", "evicted_rank")},
             "status": "queued", "reason": None, "queued_at": at, "updated_at": at, "sent_on": None,
             "provider_ref": None, "events": [], "queued_by": d["actor"]}
 
@@ -85,6 +85,9 @@ class OutreachMixin:
             self._stats(d["date"], self._cap_key(msg))["sent"] += 1
         if msg.get("purpose") == "confirmation":
             self.conf_mail_at[msg["to_hash"]] = at          # R3-M1: the 24-hour rule counts from SEND time
+            c = self.confirmations.get(msg.get("confirmation_id") or "")
+            if c is not None:
+                c["reask_spent"] = False                     # R7-L2: a mail of this link went: a new cycle
             if msg.get("existing_record"):
                 self._stats(d["date"], "known|" + self._cap_key(msg))["sent"] += 1
 

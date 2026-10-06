@@ -94,6 +94,7 @@ class InfluencerService(PeopleMixin, ConfirmMixin, OutreachMixin, DealsMixin, Pa
         self.confirmations: dict[str, dict] = {}
         self.conf_mail_at: dict[str, str] = {}       # canonical address hash -> last link mail SENT
         self.sessions: dict[str, dict] = {}          # creator sessions (AEGIS round 4); tokens are never stored
+        self.eviction_seq = 0                        # R7-L2: order of links' first eviction (rebuilt from the log)
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}

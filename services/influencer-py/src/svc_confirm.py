@@ -71,8 +71,18 @@ class ConfirmMixin:
         self._queue_confirmation_mail(d["message"], d["actor"], at, d.get("evict"))
 
     def _queue_confirmation_mail(self, msg: dict, actor: str, at: str, evict: Optional[str] = None) -> None:
-        if evict:                                    # AEGIS R5-M2: the oldest new-address link mail makes room
-            self.messages[evict].update(status="cancelled", reason="QUEUE_EVICTED", updated_at=at)
+        if evict:                                    # AEGIS R5-M2: a new-address link mail makes room
+            old = self.messages[evict]
+            old.update(status="cancelled", reason="QUEUE_EVICTED", updated_at=at)
+            oc = self.confirmations.get(old.get("confirmation_id") or "")
+            if oc is not None and oc.get("first_evicted") is None:
+                oc["first_evicted"] = self.eviction_seq      # R7-L2: the order in which links were FIRST evicted
+                self.eviction_seq += 1
+        c = self.confirmations.get(msg["confirmation_id"])
+        if c is not None:
+            c["mails"] = c.get("mails", 0) + 1                # R7-L3: the per-link mail counter
+            if msg.get("reasked"):
+                c["reask_spent"] = True                      # R7-L2: one re-ask priority per eviction cycle
         self._a_message_queued({**msg, "actor": actor}, at)
 
     def _reviews_today(self) -> int:
@@ -181,22 +191,30 @@ class ConfirmMixin:
 
         A link mail is never refused (AEGIS R5-M2). ``INF_CONFIRMATION_QUEUE_MAX`` bounds NEW-address link mails only;
         mail for an address we already hold a record for has its own share, bounded by the records themselves (one
-        open link and one queued mail per address). Room in the new-address pool is shared FAIRLY between requesters
-        (AEGIS R6-L1), so a sustained flood cannot keep one creator's mail evicted:
+        open link and one queued mail per address). Room in the new-address pool is shared between requesters (AEGIS
+        R6-L1, R7-L1/L2):
 
         - a requester (the hub's ``requester_key``) has at most ``INF_CONFIRMATION_PER_REQUESTER`` new-address mails
-          queued: past it, ITS OWN oldest mail makes room;
-        - when the pool is full, the requester with the MOST mail queued gives up its oldest (a keyless request may
-          only evict keyless mail: the keyless bucket is its own requester and can never push out a keyed one);
-        - within a bucket a re-asked mail (one whose earlier mail was evicted) goes last, and the send-queue job sends
-          re-asked mail before first-time mail (the fallback when the hub sends no key).
+          queued: past it, ITS OWN oldest first-time mail makes room;
+        - when the pool is full, the bucket is chosen by its FIRST-TIME mail only: the requester with the most
+          first-time mail queued gives up its oldest one. Re-asked mail is not counted and not evicted while any
+          first-time mail is queued in the buckets the request may evict from; only when all of it is re-asked does a
+          re-asked mail go — the one whose link was FIRST evicted most recently (the oldest-evicted is kept longest);
+        - a keyless request may only evict keyless mail: the keyless bucket can never push out a keyed one;
+        - a link earns a re-ask (``reasked``) when it is mailed again after its mail was evicted, ONCE per eviction
+          cycle: it earns it again only after one of its mails was actually sent (or with a new link, after expiry).
+          The send-queue job sends re-asked mail before first-time mail.
 
         An eviction is recorded on the ledger and anchored with the line that queues the new mail; the evicted link
-        stays valid and a repeat request mails it again. Returns (message, [evidence])."""
-        msg = {"message_id": derived_id("msg", "confirm", cid, self.now().isoformat()), "channel": "email",
-               "purpose": "confirmation", "confirmation_id": cid, "influencer_id": iid, "to_hash": eh, "brand": None,
-               "from_domain": self.settings.outreach_domain, "existing_record": existing_record,
-               "requester": None if existing_record else requester, "reasked": bool(reasked and not existing_record)}
+        stays valid and a repeat request mails it again. The message id carries the link's own mail counter (R7-L3),
+        so a re-send never reuses an id, whatever the clock says. Returns (message, [evidence])."""
+        conf = self.confirmations.get(cid) or {}
+        msg = {"message_id": derived_id("msg", "confirm", cid, conf.get("mails", 0), self.now().isoformat()),
+               "channel": "email", "purpose": "confirmation", "confirmation_id": cid, "influencer_id": iid,
+               "to_hash": eh, "brand": None, "from_domain": self.settings.outreach_domain,
+               "existing_record": existing_record, "requester": None if existing_record else requester,
+               "reasked": bool(reasked and not existing_record),
+               "evicted_rank": conf.get("first_evicted") if reasked and not existing_record else None}
         if existing_record:
             return msg, []
         new = [m for m in self.messages.values() if m["status"] == "queued"            # queue order (the log's)
@@ -204,18 +222,27 @@ class ConfirmMixin:
         buckets: dict = {}
         for m in new:
             buckets.setdefault(m.get("requester"), []).append(m)
+
+        def first_time(ms):
+            return [m for m in ms if not m.get("reasked")]
+
+        def latest_evicted(ms):                      # among re-asked mail: the most recently first-evicted link goes
+            return max(ms, key=lambda m: (m.get("evicted_rank") if m.get("evicted_rank") is not None else -1))
+
         own = buckets.get(requester, [])
-        victims = None
+        old = None
         if requester is not None and len(own) >= self.settings.confirmation_per_requester:
-            victims = own
+            old = (first_time(own) or [None])[0] or latest_evicted(own)
         elif len(new) >= self.settings.confirmation_queue_max:
             allowed = [k for k in buckets if requester is not None or k is None]
-            if allowed:
-                biggest = max(allowed, key=lambda k: (len(buckets[k]), -new.index(buckets[k][0])))
-                victims = buckets[biggest]
-        if not victims:
+            fresh = [k for k in allowed if first_time(buckets[k])]
+            if fresh:
+                pick = max(fresh, key=lambda k: (len(first_time(buckets[k])), -new.index(first_time(buckets[k])[0])))
+                old = first_time(buckets[pick])[0]
+            elif allowed:
+                old = latest_evicted([m for k in allowed for m in buckets[k]])
+        if old is None:
             return msg, []
-        old = next((m for m in victims if not m.get("reasked")), victims[0])
         msg["evict"] = old["message_id"]
         return msg, [("confirmation_mail_evicted", f"msg:{old['message_id']}",
                       {"message_id": old["message_id"], "conf_id": old["confirmation_id"],
@@ -255,7 +282,7 @@ class ConfirmMixin:
                 if c["status"] == "pending" and deliverable and (m is None or m["status"] != "queued"):
                     msg, evicted = self._confirmation_mail(
                         c["conf_id"], existing_id, eh, existing is not None, self._requester(body),
-                        reasked=bool(m and m.get("reason") == "QUEUE_EVICTED"))
+                        reasked=bool(m and m.get("reason") == "QUEUE_EVICTED" and not c.get("reask_spent")))
                     evict = msg.pop("evict", None)
                     self._commit("confirmation_remailed", self._req({"conf_id": c["conf_id"], "message": msg,
                                                                      "evict": evict}, caller, rk, body, c["conf_id"]),

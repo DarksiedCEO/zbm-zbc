@@ -259,8 +259,9 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
   press, never on a GET, so mail scanners and prefetchers cannot use up the single-use link; the hub derives the
   `request_id` of the click from the token so repeat clicks and retries return the same session (R5-L1). Both are in
   `services/influencer-py/README.md`, "Contract with the hub".
-- *(AEGIS round 6.)* Every public application carries `requester_key`: the hub's HMAC-SHA-256 (under a key only the
-  hub holds) of the requester's IP or portal session, 64 lowercase hex. The service validates its shape, keeps only
+- *(AEGIS rounds 6-7.)* Every public application carries `requester_key`: the hub's HMAC-SHA-256 (under a secret only
+  the hub holds) of the requester's IP or portal session, 64 lowercase hex, computed by the hub itself — never a value
+  the client controls passed through. Users behind one shared IP (NAT) share a bucket when the key is IP-based. The service validates its shape, keeps only
   its own keyed hash of it, and shares the new-address link-mail queue fairly between requesters (R6-L1). Without it a
   request falls in the keyless bucket, which never displaces keyed mail.
 
@@ -378,8 +379,18 @@ Regressions: `services/influencer-py/tests/test_aegis_r6.py` (each fails on cd64
 
 | Id | Finding | Fix |
 |---|---|---|
-| R6-L1 | A sustained flood could keep one new creator's link mail evicted for ever: eviction took the oldest mail and sending also went oldest first | **Per-requester fairness** (the reviewer's preferred option). The hub sends an opaque `requester_key` (its keyed hash of the IP or session; 64 lowercase hex, validated; kept only as our own keyed hash of it). A requester has at most `INF_CONFIRMATION_PER_REQUESTER` (default 3) new-address mails queued — past it its OWN oldest is evicted; a full pool evicts the oldest mail of the requester with the MOST queued; requests without a key form their own bucket, which may evict only keyless mail (with none queued, one keyless mail may stand over the pool). Fallback for keyless traffic: a re-ask after an eviction is marked `reasked`, is evicted last within its bucket, and is sent ahead of first-time mail. Within a priority the send order is the queue order (a stable sort; no tie broken by message id). Every eviction stays recorded and anchored (`confirmation_mail_evicted`) and the evicted link stays valid |
+| R6-L1 | A sustained flood could keep one new creator's link mail evicted for ever: eviction took the oldest mail and sending also went oldest first | **Per-requester fairness** (the reviewer's preferred option). The hub sends an opaque `requester_key` (its keyed hash of the IP or session; 64 lowercase hex, validated; kept only as our own keyed hash of it). A requester has at most `INF_CONFIRMATION_PER_REQUESTER` (default 3) new-address mails queued — past it its OWN oldest is evicted; a full pool evicts the oldest mail of the requester with the MOST queued; requests without a key form their own bucket, which may evict only keyless mail (with none queued, one keyless mail may stand over the pool). Fallback for keyless traffic: a re-ask after an eviction is marked `reasked`, is evicted last within its bucket, and is sent ahead of first-time mail. *(Round 7 corrected this: the bucket itself was still chosen by ALL its mail, so re-asked mail was not protected across buckets — see R7-L1.)* Within a priority the send order is the queue order (a stable sort; no tie broken by message id). Every eviction stays recorded and anchored (`confirmation_mail_evicted`) and the evicted link stays valid |
 
 Accepted: a flooder who rotates many requester keys (many IPs or sessions) still competes for the pool; bounding that
 is the hub's per-IP / per-session limits and CAPTCHA, and the re-ask fallback keeps a creator who asks again ahead of
 first-time mail.
+
+## Amendment — AEGIS round 7 (Oct 6 2026, on 27bcd16): NOT BLOCKING, cleared for wiring; the three Lows closed
+
+Regressions: `services/influencer-py/tests/test_aegis_r7.py` (each fails on 27bcd16 and passes after the fix).
+
+| Id | Finding | Fix |
+|---|---|---|
+| R7-L1 | The bucket to evict from was chosen by ALL its mail, so a flooder rotating keys made one-mail buckets and a re-asked creator's mail was evicted anyway; round 6's wording claimed more than the code did | The bucket is chosen by FIRST-TIME mail only (the requester with the most first-time mail gives up its oldest first-time mail). Re-asked mail is neither counted nor evicted while any first-time mail is queued in the buckets the request may evict from; only when all of it is re-asked does a re-asked mail go. The per-requester cap evicts the requester's own oldest first-time mail first. README and this ADR now say exactly that |
+| R7-L2 | Re-asking could be farmed (every evicted junk address re-asked over and over), and re-asked mail was evicted oldest first | A link earns ONE re-ask priority per eviction cycle: after its re-asked mail is queued it earns none again until one of its mails is actually SENT (or, after expiry, as a new link). Among re-asked mail, the link FIRST evicted most recently goes first: the oldest-evicted is kept longest (an order counter, rebuilt from the log, not the clock). Hub contract: the key is the hub's own HMAC under a hub-only secret, never a client-controlled value passed through; shared-IP (NAT) users share a bucket when the key is IP-based |
+| R7-L3 | A re-send of the same link at the same instant reused the message id (derived from the link and the clock), overwriting the evicted mail | The id also carries the link's own mail counter: every mail of a link has a distinct id whatever the clock says |

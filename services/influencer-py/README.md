@@ -60,7 +60,7 @@ ledger as `founder_approval_refused`).
 | `INF_CONFIRMATION_NEW_ADDRESS_PERCENT` | 25 | share of the daily confirmation cap reserved for NEW addresses (0..90); records we hold use the rest |
 | `INF_ANDRE_REVIEW_DAILY_CAP` | 20 | new items a day in Andre's review queue (1..1000); past it they wait in his digest (`awaiting_andre_digest`), never dropped |
 | `INF_UNRESOLVED_HOLD_DAYS` | 30 | days an unresolved reply hold (one that names nobody) lasts before `hold-expiry` closes it (1..365); one classified `unsubscribe` or `review` goes into Andre's digest at that age instead and is closed 7 days later if he has not decided it |
-| `INF_CONFIRMATION_PER_REQUESTER` | 3 | new-address link mails one requester (the hub's `requester_key`) may have queued at once (1..1000); past it that requester's own oldest mail is evicted. A full pool evicts from the requester with the most queued; requests without a key share one bucket that never evicts keyed mail |
+| `INF_CONFIRMATION_PER_REQUESTER` | 3 | new-address link mails one requester (the hub's `requester_key`) may have queued at once (1..1000); past it that requester's own oldest first-time mail is evicted. A full pool evicts the oldest first-time mail of the requester with the most FIRST-TIME mail queued (re-asked mail is not counted and goes only when all of it is re-asked: then the link first evicted most recently goes); requests without a key share one bucket that never evicts keyed mail. A link earns one re-ask priority per eviction cycle (again only after one of its mails was sent) |
 | `INF_CREATOR_SESSION_MINUTES` | 60 | how long a creator session opened by the address link lasts (5..1440), on the service clock |
 | `INF_AUTO_APPROVE_MAX` | `5000.00` | largest deal total (and influencer and campaign aggregate) approved without Andre; at most 5000.00 |
 | `INF_EMAIL_PROVIDER`, `INF_DM_PROVIDER`, `INF_PUBLIC_PROFILE_PROVIDER`, `INF_PAID_DATABASE_PROVIDER`, `INF_FINANCE_URL`, `INF_LEGAL_URL`, `INF_DEAL_AGGREGATE_WINDOW_DAYS` | unset | not built: setting one (other than `none`/`0`) refuses start (the $5,000 per-person total is lifetime) |
@@ -129,8 +129,11 @@ tripped it, never the value: a key naming one, or a value shaped like one) or a 
   back instead of `409 CONFIRMATION_USED`.
 - **The session token** stays in the page's memory for the session's forms only (never in a URL, a cookie readable by
   scripts of other origins, a log or analytics) and is sent as `session_token` with the application and tax forms.
-- **`requester_key` on every public application** (AEGIS R6-L1): the hub's keyed hash (HMAC-SHA-256 under a key only
-  the hub holds) of the requester's IP or portal session, as 64 lowercase hex. It is opaque here: validated, then kept
+- **`requester_key` on every public application** (AEGIS R6-L1, R7-L2): the hub's keyed hash (HMAC-SHA-256 under a
+  secret only the hub holds, never shared with clients) of the requester's IP or portal session, as 64 lowercase hex.
+  The hub computes it itself and NEVER passes through a key, header or value the client controls (a client that can
+  choose its key can be every requester). People behind one shared IP (carrier NAT, an office, a campus) share one
+  bucket when the key is IP-based; a portal-session key separates them. It is opaque here: validated, then kept
   only as this service's own keyed hash of it, and used for fairness in the link-mail queue (a requester has at most
   `INF_CONFIRMATION_PER_REQUESTER` mails queued; a full pool evicts from the requester with the most). Requests
   without it share one bucket, which can never push out mail of requesters that sent a key — so the hub should always
