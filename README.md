@@ -942,7 +942,8 @@ Env prefix `CFX_`, default port 8500.
   every `before` value from the platform itself and treats the change set as untrusted data.
 - **The client approves, code applies.** Official OAuth app connections only: a password field or token-shaped value
   is refused, the token stays in the Cybersecurity (22) vault, and revoking a connection halts that client's in-flight
-  work and cancels every not-yet-applied item planned on that connection. No work before Finance confirms payment of exactly the quoted amount. The
+  work and cancels every not-yet-applied item planned on that connection. No work before Finance confirms payment of
+  exactly the quoted amount. The
   client approves the exact plan by its hash; deterministic code (`src/executor.py`) snapshots, dry-runs where the
   platform can, applies, reads back, and rolls back from the snapshot on any mismatch, freezing the resource for Andre
   when a rollback cannot be proven. Only a re-detection by Revenue Recovery makes an item `fixed_proven`; every other
@@ -958,7 +959,8 @@ Env prefix `CFX_`, default port 8500.
   client-fix refund, and a `payment_confirmed` sender); the hub client session (the client login behind
   `POST /client-sessions`, the OAuth flows, the revocation relay); the vault client and connector transport; a
   re-detection route in Revenue Recovery; the automation routes in service-py and sales-py; passkey approvals and
-  minted caller tokens through Cybersecurity (22); the console pages.
+  minted caller tokens through Cybersecurity (22); the third-party CRM connectors (`CFX_CRM_PROVIDER`) and the
+  WooCommerce decision (`CFX_WOOCOMMERCE`), both NOT_BUILT; the console pages.
 - **Live run** (`devtools/live_run.py`: real ledger-rust binary, production entrypoint, every port a stand-in): the
   Anthropic key setting refuses start → start-up integrity → second process refused → password and token values
   refused, vault reference accepted → tenant mismatch refused → quote accepted in a client session, no plan before

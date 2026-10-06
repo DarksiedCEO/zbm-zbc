@@ -4,7 +4,8 @@ Status: accepted for build, Oct 6 2026 (founder Q&A the same day). Built and tes
 (from integration `5d49ee9`); **not in force**: no connector transport, vault client, OAuth app, model key,
 re-detection client or Finance refund contract exists, so every apply answers `CONNECTOR_NOT_WIRED` before anything
 is touched, the fire teams answer `MODEL_NOT_WIRED`, nothing is ever counted fixed, and approved refunds stay
-`queued`. Wired into CI, `PY_SERVICES` and `docs/test-counts.md` on branch `wire-clientfix-28` at f0a9fc7. AEGIS: four rounds (R1-R2 BLOCKING, R3-R4 NOT BLOCKING); cleared for wiring at b75a77b, R4 Lows closed at fb9de63.
+`queued`. Wired into CI, `PY_SERVICES` and `docs/test-counts.md` on branch `wire-clientfix-28` at f0a9fc7. AEGIS: four
+rounds (R1-R2 BLOCKING, R3-R4 NOT BLOCKING); cleared for wiring at b75a77b, R4 Lows closed at fb9de63.
 
 Context: department 28 already has `services/delivery-py` (ADR 0011), the AEGIS fix engine for OUR code. This ADR adds
 the lane that fixes CLIENT systems. Inputs: the founder Q&A below; the Sep 27 2026 AEGIS verdict on deer-flow v2.1.0 /
