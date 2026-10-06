@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, Literal, Optional
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
 from clock import parse_iso
 
@@ -120,6 +120,47 @@ class ChatIn(Strict):
     text: Text
 
 
+# Sweep A: an inbound message from the email / SMS gateway is never refused for its shape (an opt-out in it would be
+# lost). Before the strict checks, ``_lenient_inbound`` lowercases the addresses (and reads ``Name <addr>`` as
+# ``addr``), replaces control characters in the subject with spaces (a folded header carries a tab) and drops a
+# subject that is then blank, removes control characters other than newline / tab from the text and truncates it,
+# and accepts an empty text (a subject-only or media-only message).
+INBOUND_EMAIL_TEXT_MAX = 20000
+INBOUND_SMS_TEXT_MAX = 1600
+SUBJECT_MAX = 300
+_NAMED = __import__("re").compile(r"^[^<>]{0,200}<\s*([^<>\s]{3,254})\s*>\s*$")
+
+
+def _bad_char(c: str, keep: str) -> bool:
+    o = ord(c)
+    return (o < 0x20 and c not in keep) or 0x7F <= o <= 0x9F or 0xD800 <= o <= 0xDFFF
+
+
+def _lenient_inbound(d, text_max: int, addresses: tuple = (), subject: bool = False):
+    if not isinstance(d, dict):
+        return d
+    d = dict(d)
+    for k in addresses:
+        v = d.get(k)
+        if isinstance(v, str):
+            v = v.strip()
+            m = _NAMED.fullmatch(v)
+            d[k] = (m.group(1) if m else v).lower()
+    if subject and isinstance(d.get("subject"), str):
+        v = " ".join("".join(" " if _bad_char(c, "") else c for c in d["subject"]).split())[:SUBJECT_MAX].strip()
+        if v:
+            d["subject"] = v
+        else:
+            d.pop("subject")
+    if isinstance(d.get("text"), str):
+        d["text"] = "".join(" " if _bad_char(c, "\n\r\t") else c for c in d["text"])[:text_max]
+    return d
+
+
+InboundEmailText = Annotated[StrictStr, Field(max_length=INBOUND_EMAIL_TEXT_MAX)]
+InboundSmsText = Annotated[StrictStr, Field(max_length=INBOUND_SMS_TEXT_MAX)]
+
+
 class EmailIn(Strict):
     request_id: Id
     brand: Brand
@@ -127,7 +168,12 @@ class EmailIn(Strict):
     from_address: Email
     subject: Optional[Subject] = None
     ticket_id: Optional[SvId] = None
-    text: Text
+    text: InboundEmailText
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lenient(cls, d):
+        return _lenient_inbound(d, INBOUND_EMAIL_TEXT_MAX, ("to_address", "from_address"), subject=True)
 
 
 class SmsIn(Strict):
@@ -135,7 +181,12 @@ class SmsIn(Strict):
     brand: Brand
     to_number: Phone
     from_number: Phone
-    text: SmsText
+    text: InboundSmsText
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lenient(cls, d):
+        return _lenient_inbound(d, INBOUND_SMS_TEXT_MAX)
 
 
 class CallIn(Strict):

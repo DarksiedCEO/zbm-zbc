@@ -35,6 +35,9 @@ OPT_OUT_TERMS = ("stop", "stopall", "unsubscribe", "unsub", "cancel", "cancelled
                  "remove my number", "my number off", "lose my number", "take my number", "delete my number",
                  "didnt sign up", "did not sign up", "never signed up", "who is this", "wrong number", "wrong person",
                  "not interested",
+                 # sweep A: email wording ("do not email me" was not an opt-out at all)
+                 "dont email", "do not email", "dont e mail", "do not e mail", "never email", "stop emailing",
+                 "quit emailing", "stop sending emails", "remove my email", "take my email", "delete my email",
                  "alto", "parar", "pare", "cancelar", "baja", "darme de baja", "no me escriban", "no mas mensajes",
                  "numero equivocado", "arrete", "arreter", "desabonner", "sair", "cancele", "descadastrar",
                  "parem", "nao quero")
@@ -106,6 +109,24 @@ def opt_out_level(text: str) -> Optional[str]:
                 suspected = True
         suspected = suspected or negated_channel(norm)
     return "suspected" if suspected else None
+
+
+SMS_ONLY_WORDS = ("text", "texts", "texting", "txt", "txts", "txting", "sms", "number", "cell", "mobile", "phone")
+EMAIL_WORDS = ("email", "emails", "emailing", "emailed", "mail", "mails", "mailing", "newsletter", "newsletters")
+
+
+def email_opt_out(*texts: Optional[str]) -> bool:
+    """Sweep A (High): an ``exact`` opt-out received BY EMAIL also revokes the contact's EMAIL consent — unless its
+    words name only the phone ("stop texting me", "remove my number"): that one stays an SMS opt-out (the existing
+    rule) and the person's ticket can still be answered by email. "UNSUBSCRIBE", "STOP", "do not email me" and
+    anything that names email, or no channel at all, revoke email."""
+    if not any(t and opt_out_level(t) == "exact" for t in texts):
+        return False
+    toks = set()
+    for t in texts:
+        if t:
+            toks |= set(normalise(t).split()) | {_collapse(w) for w in normalise(t).split()}
+    return bool(toks & set(EMAIL_WORDS)) or not (toks & set(SMS_ONLY_WORDS))
 
 
 def is_opt_out(text: str) -> bool:

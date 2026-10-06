@@ -101,6 +101,11 @@ class RecordLog:
     def __len__(self) -> int:
         return len(self._lines)
 
+    def raw_lines(self, start: int = 0) -> list[bytes]:
+        """The raw lines from index ``start`` on (no parsing: cheap enough to take under the service lock)."""
+        with self.lock:
+            return list(self._lines[start:])
+
     def iter_records(self, start_seq: int = 1) -> Iterator[dict]:
         with self.lock:
             lines = list(self._lines[max(0, start_seq - 1):])

@@ -136,6 +136,10 @@ class SupportService:
         self._deferred_alerts: list[tuple] = []
         self._in_flight: set = set()
         self._unconfirmed: dict[str, dict] = {}     # sent by the provider, result not yet committed: never resent
+        # /audit/evidence cache (bizdev-py AEGIS round 7): lines parsed so far, keyed by log length; never touched
+        # under self.lock
+        self._evidence_lock = threading.Lock()
+        self._evidence_cache: dict = {"n": 0, "epoch": None, "lines": []}
         self.key_fingerprint: Optional[str] = None
         # V5-L1: one service instance per data directory, also within one process (config.load caches the flock)
         # V5r-L1: api.build claims BEFORE the log and the body store are built and passes the claim's token; the
@@ -206,9 +210,26 @@ class SupportService:
         payload = {"epoch": epoch, "seq": seq, "line_sha256": line_sha}
         return derived_id("anc", epoch, seq, line_sha), payload
 
-    def _events_for(self, kind: str, data: dict) -> list[tuple]:
+    def _rk(self, kind: str, data: dict) -> str:
+        """The request key named in a typed evidence payload (sweep A R6-M1). A request key can name a contact ref or
+        an address, so the ledger gets its keyed HMAC (never enumerable without the service's key); a line with no
+        request is ``service_desk|<kind>``."""
+        req = (data.get("request") or {}).get("key")
+        if not req:
+            return f"{INTERNAL}|{kind}"
+        return "rk-" + hmac.new(self.settings.hmac_key, b"evidence rk\x00" + json.dumps(req, sort_keys=True).encode(
+            "utf-8", "surrogatepass"), hashlib.sha256).hexdigest()[:40]
+
+    def _events_for(self, kind: str, data: dict, seq: int) -> list[tuple]:
         """(event_id, event_type, subject_id, payload, summary) for each effect that is recorded as its own typed
-        event. The payload holds ids, codes and hashes only: no body, no address, no name."""
+        event. The payload holds ids, codes and hashes only: no body, no address, no name.
+
+        Sweep A R6-M1 (bizdev-py's round-6 pattern): every payload also carries ``rk`` (the line's request key, keyed
+        HMAC) and ``seq`` (the log seq it is meant for), and the id includes that payload's hash. The line names its
+        events (``ledger_evidence``), so /audit/evidence tells the one ``committed`` event of a logical action from
+        the ``attempted`` ones a refused or failed commit left behind (record-first: a retry after the state changed
+        records another event; it is never a lasting 409, and never counted twice)."""
+        rk = self._rk(kind, data)
         out = []
         for e in data.get("effects", ()):
             et = EVENTS.get(e["op"])
@@ -220,6 +241,7 @@ class SupportService:
                 continue
             core = {k: v for k, v in e.items() if k not in PERSONAL_KEYS and not k.endswith("_due")
                     and k not in ("content", "signals_detail")}
+            core = {**core, "rk": rk, "seq": seq}
             subject = next((e[k] for k in ("ticket_id", "message_id", "handoff_id", "alert_id", "plan_id",
                                            "contact_id", "item_id", "brand") if e.get(k)), INTERNAL)
             eid = derived_id("evt", kind, (data.get("request") or {}).get("key"), e["op"], payload_sha256(core))
@@ -236,12 +258,20 @@ class SupportService:
             at = iso(self.now())
             data = {**data, "actor": data.get("actor", actor)}
             actor = data["actor"]
-            for eid, et, subject, payload, summary in self._events_for(kind, data):
+            seq = len(self.log) + 1
+            named = []
+            for eid, et, subject, payload, summary in self._events_for(kind, data, seq):
                 try:
                     self._record_twice(eid, et, actor, subject, payload, summary)
                 except LedgerRecordError:
                     raise Unavailable(R("LEDGER_UNAVAILABLE")) from None   # the line was not written: no effect
+                if all(n["event_id"] != eid for n in named):
+                    named.append({"event_id": eid, "event_type": et, "subject_id": subject, "payload": payload})
+            if named:
+                data["ledger_evidence"] = named
             rec, line = self.log.prepare(kind, at, data)
+            if rec["seq"] != seq:                           # the log moved under us: never anchor a mislabelled line
+                raise Unavailable(R("STORE_UNAVAILABLE"))
             line_sha = sha256_hex(line)
             epoch = self.log.epoch or line_sha[:16]
             eid, payload = self._anchor_ids(epoch, rec["seq"], line_sha)
@@ -1146,6 +1176,12 @@ class SupportService:
                 effects.append({"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "sms",
                                 "via": "stop_keyword" if channel == "sms" else f"stop_by_{channel}",
                                 "request_id": rid, "address": sms_number})
+                if channel == "email" and contact.get("email") and channels.email_opt_out(text, body.get("subject")):
+                    # sweep A (High): an opt-out received BY EMAIL revokes EMAIL consent too (it only revoked SMS:
+                    # proactive email — NPS surveys, check-ins, offers — still went out after "UNSUBSCRIBE")
+                    effects.append({"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "email",
+                                    "via": "stop_by_email", "request_id": rid, "address": contact["email"]})
+                    resp["email_opted_out"] = True
                 resp["action"] = "opted_out"
                 if had:     # V3-C3: the one confirmation goes ONLY to the number that sent the STOP
                     conf = channels.OPT_OUT_CONFIRMATION.replace("{brand_name}", BRAND_NAMES[brand])
@@ -1535,18 +1571,32 @@ class SupportService:
         account) for the contact's account now."""
         return t["account_id"] or (self.contacts.get(t["contact_id"]) or {}).get("account_id")
 
-    def _complaints_30d(self, account_id: str) -> int:
+    def _health_aggregates(self) -> tuple[dict, dict, dict]:
+        """Sweep A: the per-account inputs of a health run, pre-aggregated in ONE pass over the tickets and ONE over
+        the surveys — (complaints in the last 30 days, open escalations, latest answered NPS score), each keyed by
+        account id. The run used to rescan every ticket (twice) and every survey for EACH account, with the service
+        lock held: O(accounts x tickets)."""
         since = iso(self.now() - timedelta(days=30))
-        return sum(1 for t in self.tickets.values() if self._ticket_account(t) == account_id
-                   for at in t["complaint_at"] if at >= since)
-
-    def _open_escalations(self, account_id: str) -> int:
-        return sum(1 for t in self.tickets.values() if self._ticket_account(t) == account_id
-                   and t["status"] == "escalated")
-
-    def _latest_nps(self, account_id: str) -> Optional[int]:
-        answered = [s for s in self.surveys.values() if s["account_id"] == account_id and s["score"] is not None]
-        return max(answered, key=lambda s: (s["answered_at"], s["survey_id"]))["score"] if answered else None
+        complaints: dict[str, int] = {}
+        escalations: dict[str, int] = {}
+        for t in self.tickets.values():
+            aid = self._ticket_account(t)
+            if aid is None:
+                continue
+            n = sum(1 for at in t["complaint_at"] if at >= since)
+            if n:
+                complaints[aid] = complaints.get(aid, 0) + n
+            if t["status"] == "escalated":
+                escalations[aid] = escalations.get(aid, 0) + 1
+        latest: dict[str, tuple] = {}
+        for sv in self.surveys.values():
+            if sv["score"] is None:
+                continue
+            k = (sv["answered_at"], sv["survey_id"])
+            cur = latest.get(sv["account_id"])
+            if cur is None or k > cur[0]:
+                latest[sv["account_id"]] = (k, sv["score"])
+        return complaints, escalations, {aid: v[1] for aid, v in latest.items()}
 
     def account_health(self, account_id: str) -> dict:
         with self.lock:
@@ -1593,6 +1643,7 @@ class SupportService:
         """Called with the lock held. Accounts added since the port reads are scored at the next run."""
         snapshot = sorted(signals)
         now = self.now()
+        complaints, escalations, nps = self._health_aggregates()
         effects: list = []
         started, flagged = [], []
         for aid in snapshot:
@@ -1606,8 +1657,7 @@ class SupportService:
             last = parse_iso(a["last_login"]) if a["last_login"] else None
             res = health_mod.compute(now, trend.direction if trend is not None and trend.available else None,
                                      pay.status if pay is not None and pay.available else None, last,
-                                     self._complaints_30d(aid), self._open_escalations(aid),
-                                     self._latest_nps(aid))
+                                     complaints.get(aid, 0), escalations.get(aid, 0), nps.get(aid))
             at_risk = res["score"] < self.settings.at_risk_threshold
             if a["health"] is None or a["health"]["score"] != res["score"] or a["at_risk"] != at_risk \
                     or a["health"]["signals"] != res["signals"]:
@@ -1916,8 +1966,14 @@ class SupportService:
     def dispatch_side_effects(self) -> None:
         """Send what committed lines decided and the ports can carry: handoffs and alerts on wired ports. Called
         after a request (outside the lock) and by the handoff-retries job. A not-wired port is never called and
-        nothing is recorded for it (the view shows ``not_wired``)."""
+        nothing is recorded for it (the view shows ``not_wired``).
+
+        Sweep A: a CLOSED instance dispatches nothing — ``_closed`` is checked at the snapshot and again, under the
+        lock, right before each port call. Before, it called the ports and only the result commit was refused, so the
+        instance that now owns the data directory sent the same alert or handoff again."""
         with self.lock:
+            if self._closed:
+                return
             hofs = [dict(h) for h in self.handoffs.values() if h["status"] in ("pending", "unavailable", "failed")
                     and getattr(self.ports.handoffs.get(h["department"]), "wired", False)
                     and h["handoff_id"] not in self._in_flight]
@@ -1928,6 +1984,8 @@ class SupportService:
             self._in_flight |= {h["handoff_id"] for h in hofs} | {a["alert_id"] for a in alerts}
         try:
             for h in hofs:
+                if not self._still_open():
+                    return
                 t = self.tickets[h["ticket_id"]]
                 req = HandoffRequest(h["handoff_id"], h["ticket_id"], t["brand"], h["category"], h["kind"],
                                      t["account_id"])
@@ -1942,6 +2000,8 @@ class SupportService:
                 except Unavailable:
                     break
             for a in alerts:
+                if not self._still_open():
+                    return
                 res = _safe(lambda: self.ports.alerts.send(Alert(a["alert_id"], a["code"], a["subject"])))
                 status = res if res in ("delivered", "failed") else "failed"
                 try:
@@ -1952,6 +2012,10 @@ class SupportService:
         finally:
             with self.lock:
                 self._in_flight -= {h["handoff_id"] for h in hofs} | {a["alert_id"] for a in alerts}
+
+    def _still_open(self) -> bool:
+        with self.lock:
+            return not self._closed
 
     def _send_block(self, m: dict) -> Optional[str]:
         """Why this message may not go NOW (None: it may). Run when the tick picks it AND again under the lock right
@@ -2166,6 +2230,71 @@ class SupportService:
                                            "status", "reason", "proactive", "at", "attempts", "plan_id", "survey_id")}
                     for m in sorted(self.messages.values(), key=lambda x: (x["at"], x["message_id"]))
                     if m["dir"] == "out" and (status is None or m["status"] == status)]
+
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+        """``/svc/v1/audit/evidence`` (sweep A R6-M1, bizdev-py's round-6 view) — every typed evidence event this
+        department holds on the ledger, each marked:
+
+        * ``committed`` — a local log line with seq ``s`` names the event (``data.ledger_evidence``), the ledger holds
+          that line's anchor (``log_anchor`` for epoch, ``s`` and the line's SHA-256), the event's payload carries
+          ``rk`` = the line's request key and ``seq`` = ``s``, and the ledger's ``payload_sha256`` is that payload's;
+        * ``attempted`` — anything else: recorded first (record-first commit), but its state change never reached the
+          anchored log (a refused or failed commit, or a retry that was later committed under another seq).
+
+        Unanchored evidence = attempted, not done. Events recorded before this change carry no rk/seq and are
+        ``attempted`` by this rule (their lines name nothing). Under the service lock only the raw lines not yet seen
+        are copied; they are parsed and hashed outside it and cached by log length. Eventually consistent."""
+        with self._evidence_lock:
+            with self.lock:
+                if self._closed:
+                    raise Unavailable(R("SERVICE_CLOSED"))
+                cache = self._evidence_cache
+                n = len(self.log)
+                if n < cache["n"]:
+                    cache = self._evidence_cache = {"n": 0, "epoch": None, "lines": []}
+                new = self.log.raw_lines(cache["n"])
+            for raw in new:                              # outside the service lock: parse and hash only new lines
+                r = json.loads(raw)
+                line_sha = sha256_hex(raw)
+                if cache["epoch"] is None:
+                    cache["epoch"] = line_sha[:16]
+                evs = r["data"].get("ledger_evidence")
+                if evs:
+                    cache["lines"].append((r["seq"], line_sha, self._rk(r["kind"], r["data"]), r["kind"], evs))
+                cache["n"] += 1
+            epoch, lines, n_lines = cache["epoch"], list(cache["lines"]), cache["n"]
+        try:
+            entries = self.rec.client.entries()
+        except LedgerQueryFailed:
+            raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+        mine = [e for e in entries if e.get("department") == DEPARTMENT]
+        anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == "log_anchor"}
+        named: dict[str, tuple] = {}
+        for seq, line_sha, line_rk, kind, evs in lines:
+            aid, apayload = self._anchor_ids(epoch, seq, line_sha)
+            a = anchors.get(aid)
+            if a is None or a.get("payload_sha256") != payload_sha256(apayload) or a.get("subject_id") != f"log:{epoch}":
+                continue
+            for ev in evs:
+                named[ev["event_id"]] = (seq, line_rk, ev.get("payload") or {}, kind)
+        out, counts = [], {"committed": 0, "attempted": 0}
+        for e in mine:
+            if e.get("event_type") == "log_anchor" or (event_type is not None and e.get("event_type") != event_type):
+                continue
+            row = {"event_id": e.get("event_id"), "event_type": e.get("event_type"), "subject_id": e.get("subject_id"),
+                   "ledger_seq": e.get("seq"), "payload_sha256": e.get("payload_sha256"), "status": "attempted",
+                   "seq": None, "rk": None, "log_kind": None}
+            hit = named.get(e.get("event_id"))
+            if hit is not None:
+                seq, line_rk, payload, log_kind = hit
+                if payload.get("seq") == seq and payload.get("rk") == line_rk \
+                        and payload_sha256(payload) == e.get("payload_sha256"):
+                    row.update(status="committed", seq=seq, rk=line_rk, log_kind=log_kind)
+            counts[row["status"]] += 1
+            out.append(row)
+        return {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle",
+                "total": len(out), **counts, "limit": limit, "offset": offset,
+                "evidence": out[offset:offset + limit], "log_length": n_lines}
 
     def audit_events(self, since_seq: int, limit: int) -> dict:
         """The local log with personal data minimised: addresses, names, refs, time zones and request keys replaced by

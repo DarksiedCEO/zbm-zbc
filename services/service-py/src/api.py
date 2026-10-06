@@ -575,6 +575,13 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
                      who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
         return svc.audit_events(since, limit)
 
+    @app.get("/svc/v1/audit/evidence", dependencies=auth)
+    def audit_evidence(limit: int = Query(default=200, ge=1, le=1000), offset: int = Query(default=0, ge=0, le=10_000_000),
+                       event_type: Optional[str] = Query(default=None, pattern=r"^[a-z_]{1,64}$"),
+                       who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
+        """Sweep A R6-M1: the evidence view Compliance (38) and auditors use; unanchored evidence = attempted."""
+        return svc.audit_evidence(limit, offset, event_type)
+
     return app
 
 
