@@ -82,6 +82,11 @@ OAuth app flow: `connector`, `account_ref` (a `*.myshopify.com` shop, `propertie
 credential-shaped value anywhere (`shpat_…`, `ya29.…`, `1//…`, `sk-ant-…`, a JWT, a PEM key, `Bearer …`, a URL with
 user:password), is refused 422 (`SECRET_REFUSED`). Yelp takes no `token_ref` at all.
 
+**Change sets** are bound to their finding: every op targets the finding's resource and uses only the ops and fields
+its check allows (`catalogue.CHECK_OPS`). Rich text is accepted only in the allowlist's canonical form
+(`connectors/richtext.py`: `sanitize(value) == value`). GTM targets are `accounts/A/containers/C/tags/T`; GTM runs lease
+the whole container. A rollback never overwrites a value it did not write (`conflict`: frozen, Andre alerted).
+
 **Revocation is never refused.** `POST /connections/{id}/revoke` (hub or dashboard) sets the kill switch first: a
 running apply for that client stops at its next request (the client's revocation epoch moved), even if the commit
 fails (503 with `work_stopped: true`; retry). Planned items on the connection become `cancelled_revoked`.
@@ -113,7 +118,7 @@ anchored log line with matching `rk` and `seq` are `committed` in `GET /cfx/v1/a
 | `GET /jobs/{id}` | dashboard, clientfix_agent, compliance_38; hub inside the client's session | one job: items, quote, plan, results, report |
 | `POST /jobs/{id}/quote/accept` | hub + client session | accept the quote by hash; asks Finance for the up-front invoice (not wired) |
 | `POST /finance/events` | finance_31 | `payment_confirmed` for exactly the quote's amount and hash |
-| `GET /jobs/{id}/brief` | fire_team, dashboard | the fire team's brief (no credential, no snapshot) — paid jobs only |
+| `GET /jobs/{id}/brief` | fire_team, dashboard | the fire team's brief with each item's current values (read-only; secret-shaped values withheld; never a credential) — paid jobs only |
 | `POST /jobs/{id}/engage` | clientfix_agent, dashboard, scheduler | run the fire team (503 `MODEL_NOT_WIRED` today) |
 | `POST /jobs/{id}/plan` | fire_team, dashboard | submit the change sets (validated; paid jobs only) |
 | `POST /jobs/{id}/plan/approve` | hub + client session | approve the exact plan hash |
@@ -134,5 +139,6 @@ anchored log line with matching `rk` and `seq` are `committed` in `GET /cfx/v1/a
 `open` → `planned` → apply → `applied_verified` | `awaiting_manual` → `manual_reported` → `manual_verified`, then
 re-detection → `fixed_proven` (payment kept) | `not_cleared`. Unfixed terminal states (refundable once paid):
 `not_cleared`, `drifted`, `snapshot_unknown`, `dry_run_refused`, `dry_run_unknown`, `rolled_back`, `rollback_failed`
-(resource frozen, Andre alerted), `halted_revoked` (frozen when something was written), `halted_frozen`,
+(resource frozen, Andre alerted), `halted_revoked` (frozen when a write was sent), `halted_frozen` (a guarded
+rollback is attempted; frozen and Andre alerted when a write was sent),
 `interrupted` (frozen), `cancelled`, `cancelled_revoked`, `abandoned`.

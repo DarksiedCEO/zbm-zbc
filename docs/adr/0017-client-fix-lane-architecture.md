@@ -166,9 +166,9 @@ reference pages.
 
 | Connector | Status | Operations (allowlist) | Dry run | Doc citations |
 |---|---|---|---|---|
-| `shopify` | **verified** | `shopify.product.update` (title, descriptionHtml, seo.title, seo.description); `shopify.page.update` (title, body); `shopify.redirect.set` (create / update a redirect to a same-store relative path); `shopify.metafield.set` (product metafield, simple types, compare-and-swap via `compareDigest`) | none (offline validation) | https://shopify.dev/docs/api/admin-graphql/2026-10 ; …/mutations/productUpdate ; …/mutations/pageUpdate ; …/objects/UrlRedirect ; …/queries/urlRedirects ; …/mutations/metafieldsSet ; https://shopify.dev/docs/apps/build/authentication-authorization/authenticate-standalone-apps ; https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens |
+| `shopify` | **verified** | `shopify.product.update` (title, descriptionHtml, seo.title, seo.description — the two seo fields always travel together); `shopify.page.update` (title, body); `shopify.redirect.set` (create / update a redirect to a same-store relative path); `shopify.metafield.set` (product metafield, simple types, compare-and-swap via `compareDigest`) | none (offline validation) | https://shopify.dev/docs/api/admin-graphql/2026-10 ; …/mutations/productUpdate ; …/mutations/pageUpdate ; …/objects/UrlRedirect ; …/queries/urlRedirects ; …/mutations/metafieldsSet ; https://shopify.dev/docs/apps/build/authentication-authorization/authenticate-standalone-apps ; https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens |
 | `ga4` | **verified** | `ga4.key_event.set` (mark / unmark an event as a key event; create or delete only; delete only when `deletable`) | none (offline) | https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents (+ `/list`, `/create`, `/delete`) ; https://developers.google.com/identity/protocols/oauth2/web-server |
-| `gtm` | **verified** | `gtm.tag.update` (`paused`, `firingTriggerId` only — never a tag's code, type or parameters); fingerprint compare-and-swap; publish | `quick_preview` must compile | https://developers.google.com/tag-platform/tag-manager/api/reference/rest/v2/accounts.containers.workspaces.tags (`/get`, `/create`, `/update`) ; …/accounts.containers.workspaces/quick_preview ; …/accounts.containers.workspaces/create_version ; …/accounts.containers.versions (`/live`, `/publish`) |
+| `gtm` | **verified** | `gtm.tag.update` (`paused`, `firingTriggerId` only — never a tag's code, type or parameters) in a dedicated run workspace; fingerprint compare-and-swap; `getStatus` must show only the plan's changes; publish; container lease (round 1 H3) | `quick_preview` must compile | https://developers.google.com/tag-platform/tag-manager/api/reference/rest/v2/accounts.containers.workspaces.tags (`/get`, `/create`, `/update`) ; …/accounts.containers.workspaces/quick_preview ; …/accounts.containers.workspaces/create_version ; …/accounts.containers.versions (`/live`, `/publish`) |
 | `gbp` | **verified, gated** (Google must approve the Cloud project: 0 QPM until approved) | `gbp.location.patch` (`phoneNumbers.primaryPhone`, `websiteUri` https only, `storefrontAddress` listed subfields) | `PATCH …?validateOnly=true` | https://developers.google.com/my-business/reference/businessinformation/rest/v1/locations/patch ; …/locations/get ; …/accounts.locations ; https://developers.google.com/my-business/content/prereqs |
 | `yelp` | **guided manual** — no usable write API: Fusion Business Details is read-only; the Data Ingestion API that can write phone / address "is reserved for contracted Yelp partners" and "disabled by default" | `yelp.business.set` (`phone` E.164, `location` all seven fields): exact instructions, never a write; verified by a Fusion read with OUR app key | n/a | https://docs.developer.yelp.com/reference/v3_business_info ; https://docs.developer.yelp.com/docs/data-ingestion-api |
 | `woocommerce` | NOT_BUILT | — | — | its app flow (`/wc-auth/v1/authorize`) issues long-lived REST API keys, not OAuth tokens (https://woocommerce.github.io/woocommerce-rest-api-docs/#authentication-endpoint); decision 4 says OAuth only |
@@ -272,3 +272,56 @@ All settings, routes and contracts are in `services/clientfix-py/README.md`: `CF
 `CFX_CALLER_TOKENS`, `CFX_NON_PRODUCTION`, `CFX_DATA_DIR`, `CFX_ANDRE_APPROVAL_TOKEN`, `CFX_CLIENT_SESSION_MINUTES`,
 `CFX_UNKNOWN_TICKS_BEFORE_TASK`, `CFX_MAX_ITEMS_PER_JOB`, `CFX_MAX_OPS_PER_ITEM`, `CFX_BIND_ADDR`, `CFX_PORT`, the
 launcher tuning and the NOT_BUILT switches.
+
+## Amendment — AEGIS round 1 (Oct 6 2026, on f9e3a3f): BLOCKING (three Highs), every finding fixed
+
+Regression tests: `services/clientfix-py/tests/test_aegis_r1.py` (every finding-specific test fails on f9e3a3f; the
+corpus and safe-text cases are coverage — the vectors round 0's denylist already caught pass there too).
+
+- **H1 stored XSS through the rich-text denylist** (`<svg/onload>`, `<img src=x/onerror>`, entity- or
+  whitespace-encoded `javascript:`). Replaced by an ALLOWLIST rebuild (`src/connectors/richtext.py`, standard library
+  `html.parser`; `nh3` was not added: it is not installed for the interpreters this repo tests on and the canonical
+  rebuild is stricter): fixed tags and attributes, href / src only `https://` or a same-site relative path (or a
+  fragment for href), no character reference but the serialiser's own, a strict content model, and a value is accepted
+  only when `sanitize(value) == value`. Only AFTER values are held to it; a BEFORE value is the client's own current
+  content (bounded string), so a store whose markup is outside the allowlist can still be fixed. Tested against an
+  OWASP cheat-sheet cut, mXSS misnesting, SVG / MathML, `data:` URLs and obfuscated schemes. Metafield values are now
+  typed (plain text, canonical integer / boolean, safe URL).
+- **H2 an `seo.title` fix nulled `seo.description`** (Shopify's `seo` is one SEOInput object). Connectors now declare
+  COMPANION keys (`Connector.companions`): a write of one SEO field snapshots both, sends the untouched one with its
+  snapshot value, verifies it unchanged and reports it. Rollback re-reads companions and is `conflict` (nothing
+  written) when one changed. The audit of every other op: Shopify product title / description, page and redirect
+  inputs are partial updates of scalars (safe); metafieldsSet carries the whole value (safe); GA4 delete-then-restore
+  dropped `defaultValue` — the whole key-event snapshot is now kept and restored; GTM PUTs the whole tag read from
+  the run workspace (safe); GBP `storefrontAddress` replaced the whole address — M3.
+- **H3 GTM publish shipped unapproved workspace edits.** Each run creates its OWN workspace (`workspaces.create`) and
+  deletes it after; it refuses unless the latest version IS the live one (the base of a new workspace is not
+  documented), checks `workspaces.getStatus` before `create_version` and refuses unless the only changes are the
+  plan's own tags as `updated` with no merge conflict, re-checks the latest version, and verifies after publishing that
+  every OTHER entity of the container equals the snapshot's live version (else the previous live version is
+  re-published). The lease is the whole CONTAINER (`Connector.lease_key`). A refused run deletes its workspace through
+  the recorded, anchored request path. Target shape is now `accounts/A/containers/C/tags/T`; the connection needs the
+  `tagmanager.delete.containers` scope too. Calls verified (Oct 6 2026): workspaces/create, workspaces/getStatus and
+  the Entity change statuses (none / added / deleted / updated), workspaces/delete, version_headers/latest and
+  ContainerVersionHeader, versions/live, create_version (syncStatus), all under
+  https://developers.google.com/tag-platform/tag-manager/api/reference/rest/v2/.
+- **M1** a change set is bound to its finding: every op's target must be the finding's resource
+  (`RESOURCE_MISMATCH`) and each check has an allowlist of ops and fields (`catalogue.CHECK_OPS`, `OP_NOT_FOR_CHECK`).
+- **M2** redirects: no backslash, no `%2f` / `%5c` / control escape in any case, nothing a browser resolves off the
+  store, no redirect to itself; chains and loops across the plan are refused (`REDIRECT_CHAIN`), and at apply time a
+  chain with the store's existing redirects (read through `urlRedirects(query: "path:…" / "target:…")`) refuses the
+  item before any write.
+- **M3** GBP address: the subfields outside the allowlist are a companion snapshot, merged into every address write
+  and verified unchanged. The other masks (`phoneNumbers.primaryPhone`, `websiteUri`) name one scalar each.
+- **M4** a per-client kill switch (`revoked_clients_now`) is set BEFORE the revocation commit and checked by `live()`
+  for every connection of that client and by apply's preflight; it is cleared once the revocation is committed (from
+  then on the revocation epoch stops runs that started earlier).
+- **M5** Shopify (every connector on the default rollback): a key is written back only when it still holds OUR value;
+  any other value is left alone and the rollback is `conflict` — not proven, resource frozen, Andre alerted.
+- **M6** proto3 JSON: a missing `compilerError`, `syncError`, `deleted` or `paused` is false and a missing list empty
+  (https://protobuf.dev/programming-guides/json/).
+- **Lows.** A freeze in the middle of a write now triggers a guarded rollback (revocation still stops it), freezes the
+  resource and opens `FROZEN_MID_APPLY`; a halt freezes only when a write was actually sent. A payment for a job
+  already closed unpaid is recorded and becomes a full refund proposal with an `ORPHANED_PAYMENT` task for Andre. The
+  fire-team brief carries each item's current values (read-only through the connector; any value the secrets scan
+  flags is withheld). Unsalted hashes stay (house pattern).
