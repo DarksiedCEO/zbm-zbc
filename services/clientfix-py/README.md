@@ -53,6 +53,7 @@ Live run against the real ledger binary and this production entrypoint:
 | `CFX_UNKNOWN_TICKS_BEFORE_TASK` | `6` (1..1000) | re-detection / manual-verify runs that answer unknown before ONE task for Andre (counted in runs, never wall hours) |
 | `CFX_MAX_ITEMS_PER_JOB` | `50` (1..200) | items in one job |
 | `CFX_MAX_OPS_PER_ITEM` | `20` (1..50) | operations in one item's change set |
+| `CFX_BRIEF_READ_INTERVAL_SECONDS` | `300` (0..86400) | a brief reads an item's store content live at most once per interval (service clock); otherwise the cached read is reused |
 | `CFX_BIND_ADDR` / `CFX_PORT` | `127.0.0.1` / `8500` | listen address |
 | `CFX_REQUEST_HEAD_TIMEOUT_SECONDS`, `CFX_KEEP_ALIVE_TIMEOUT_SECONDS`, `CFX_LIMIT_CONCURRENCY`, `CFX_SWITCH_INTERVAL_SECONDS`, `CFX_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`serve.py`, shared with every Python service) |
 | `LEDGER_SERVICE_URL` / `LEDGER_SERVICE_TOKEN` | unset | ledger-rust; unset = nothing can take effect |
@@ -81,6 +82,10 @@ OAuth app flow: `connector`, `account_ref` (a `*.myshopify.com` shop, `propertie
 (`has_token_ref`). A body naming a password, secret, token or personal-data key anywhere, or carrying a
 credential-shaped value anywhere (`shpat_…`, `ya29.…`, `1//…`, `sk-ant-…`, a JWT, a PEM key, `Bearer …`, a URL with
 user:password), is refused 422 (`SECRET_REFUSED`). Yelp takes no `token_ref` at all.
+
+**Plans carry no `before`.** The service reads each current value from the platform at plan submission; the plan
+records `before_read_at`, and every new external link host is listed in `new_external_hosts` (item and job) for the
+client's and Andre's approval. Findings for a GA4 key event or a metafield name the exact field (`resource.field`).
 
 **Change sets** are bound to their finding: every op targets the finding's resource and uses only the ops and fields
 its check allows (`catalogue.CHECK_OPS`). Rich text is accepted only in the allowlist's canonical form
@@ -118,9 +123,9 @@ anchored log line with matching `rk` and `seq` are `committed` in `GET /cfx/v1/a
 | `GET /jobs/{id}` | dashboard, clientfix_agent, compliance_38; hub inside the client's session | one job: items, quote, plan, results, report |
 | `POST /jobs/{id}/quote/accept` | hub + client session | accept the quote by hash; asks Finance for the up-front invoice (not wired) |
 | `POST /finance/events` | finance_31 | `payment_confirmed` for exactly the quote's amount and hash |
-| `GET /jobs/{id}/brief` | fire_team, dashboard | the fire team's brief with each item's current values (read-only; secret-shaped values withheld; never a credential) — paid jobs only |
+| `GET /jobs/{id}/brief` | fire_team, dashboard | the fire team's brief; only content checks carry the client's text, as `untrusted_client_content` (read-only, secret-shaped values withheld, at most one live read per item per interval) — paid jobs only |
 | `POST /jobs/{id}/engage` | clientfix_agent, dashboard, scheduler | run the fire team (503 `MODEL_NOT_WIRED` today) |
-| `POST /jobs/{id}/plan` | fire_team, dashboard | submit the change sets (validated; paid jobs only) |
+| `POST /jobs/{id}/plan` | fire_team, dashboard | submit the change sets: `{op, target, field, after}` only — the service reads every `before` from the store itself (503 `CONNECTOR_NOT_WIRED` today); paid jobs only |
 | `POST /jobs/{id}/plan/approve` | hub + client session | approve the exact plan hash |
 | `POST /jobs/{id}/apply` | scheduler, dashboard | run the deterministic executor (503 `CONNECTOR_NOT_WIRED` today) |
 | `POST /jobs/{id}/manual-done` | hub + client session, dashboard | a guided manual fix was made on the platform |

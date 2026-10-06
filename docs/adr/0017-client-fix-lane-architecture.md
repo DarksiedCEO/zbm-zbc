@@ -63,10 +63,18 @@ weakened.
    its `ZbmDockerSandboxProvider` (non-root, default seccomp, digest-pinned image, egress allowlist),
    `ZbmGuardrailProvider` (every tool call a ledger-recorded decision) and `EgressChatModel` with the hand-written
    Anthropic Messages backend. Those adapters are reused, not duplicated: nothing under `clientfix-py/src` imports
-   deer-flow or a model SDK (tested). This service gives the team a BRIEF (findings, checks, lanes, connector,
-   account, target, the allowlisted op names — never a token, a vault reference or a snapshot of client data) and
-   receives CHANGE SETS, which are untrusted data: the same secrets scan, strict model and allowlist validation as a
-   hand-submitted plan. The engineers never hold client credentials and never call a client platform.
+   deer-flow or a model SDK (tested). This service gives the team a BRIEF — findings, checks, lanes, connector,
+   account, target, the allowlisted op names, never a token or a vault reference — and receives CHANGE SETS, which are
+   untrusted data: the same secrets scan, strict model and allowlist validation as a hand-submitted plan. The engineers
+   never hold client credentials and never call a client platform. (Amended by AEGIS round 2 R2-4.) A change set
+   carries only `{op, target, field, after}`: `before` is never accepted from a model (or anyone) — the service reads
+   it from the platform at plan submission, so the model can neither echo nor steer it. The client's own content
+   reaches the model only for the checks that cannot be fixed without it (`CONTENT_CHECKS`: a product description, a
+   page body), read-only, wrapped as `untrusted_client_content` and labelled UNTRUSTED CLIENT DATA (never
+   instructions), secret-shaped values withheld, and read live at most once per item per
+   `CFX_BRIEF_READ_INTERVAL_SECONDS` on the service clock. Every link host an op's `after` adds that its `before` did
+   not hold is listed in `new_external_hosts` on the item and the job — the client's and Andre's approval screen data
+   — and bound into the plan hash.
 5. **Connections** (founder decision 4). The hub registers a connection after the client finished an official OAuth
    flow: connector, platform account, granted scopes (the connector's required scopes must all be granted) and a
    `vault:<owner>.<name>` reference (security-py's shape) to the token the hub stored in the vault. No model has a
@@ -325,3 +333,43 @@ corpus and safe-text cases are coverage — the vectors round 0's denylist alrea
   already closed unpaid is recorded and becomes a full refund proposal with an `ORPHANED_PAYMENT` task for Andre. The
   fire-team brief carries each item's current values (read-only through the connector; any value the secrets scan
   flags is withheld). Unsalted hashes stay (house pattern).
+
+## Amendment — AEGIS round 2 (Oct 6 2026, on 05cb5e6): BLOCKING (one High), every item fixed
+
+Regression tests: `services/clientfix-py/tests/test_aegis_r2.py` (17 of 18 fail on 05cb5e6; the 18th checks the test
+transport's own delete guard).
+
+- **R2-1 (High) a GTM rollback after publishing left our version as the container's latest**, so the next workspace
+  (based on the latest version; workspaces/sync "syncs a workspace to the latest container version") carried the
+  rolled-back change and later runs were refused `base_not_live`. `create_version` "sets the base container version to
+  the newly created version" (workspaces/create_version) and the latest header stays ours after re-publishing the old
+  version (version_headers/latest). The rollback now builds a REVERT version through a fresh run workspace (the planned
+  fields back to their snapshot values, `getStatus` showing only those, `create_version`, `publish`) and proves
+  latest == live and the live content == the snapshot's (versions/live, version_headers/latest). A lost
+  `create_version` answer is resolved by reading the latest version (versions/get: ours only if it is exactly the
+  snapshot plus the planned values). If the end state cannot be reached the item is `rollback_failed`, the container
+  is frozen and a `GTM_VERSION_POISONED` task names our version (`ref`).
+- **R2-2** the rollback re-publishes the snapshot version only when the live version is OUR created version; anyone
+  else's release (or newer draft) is a `conflict` — `rollback_failed`, container frozen, task.
+- **R2-3** the per-client kill switch is a SET of pending revocation ids per client (`pending_revocations`); it clears
+  for a connection only when that revocation is committed (live, replayed or rolled forward) and for the client only
+  when the set is empty; the repeat and replay paths never clear another revocation's entry.
+- **R2-4** prompt injection through `before` values: decision 4 above. Plans with a `before` are refused 422 (from the
+  hub, the dashboard and an engineer proposal alike); with no transport a plan cannot be submitted at all
+  (`CONNECTOR_NOT_WIRED`); an `after` equal to the store's current value is `OP_NO_CHANGE`; unreadable state is
+  `503 STATE_UNREADABLE`.
+- **R2-5** run workspaces have unique names (`zbm-clientfix-run-<role>-<item>-<random>`); a lost `workspaces.create`
+  answer lists the container's workspaces (workspaces/list) and deletes ours by exact name; the `recover` tick (run first
+  inside every `apply-queue`; the scheduler also runs it once after each start — start-up itself does no platform I/O)
+  reaps orphaned run workspaces of every unleased,
+  unfrozen GTM container, every DELETE recorded on the ledger before it leaves.
+- **R2-6** every payment a job cannot take (closed unpaid, or already paid) is recorded and gets its own refund proposal
+  (`kind: orphaned_payment`, one per Finance event) and an `ORPHANED_PAYMENT` task; such a refund never closes the job.
+- **R2-7** checks whose fields are named (a GA4 key event, a Shopify metafield) bind the finding to ONE exact field
+  (`resource.field`, required for them and refused for the others); a plan may only touch that field.
+- **Accepted risk: the `tagmanager.delete.containers` scope.** The client's vault token for GTM holds it (Google
+  grants no narrower scope for deleting a workspace). The code sends exactly one kind of DELETE: a workspace of the
+  connected container that a run created (`TagManagerConnector._delete` refuses any other path; the reaper selects by
+  the `zbm-clientfix-run-` name prefix only). The test transport refuses any GTM DELETE that is not a run workspace,
+  so every test that sent one would fail; a direct test proves the guard fires.
+- **`/brief` rate limit:** decision 4 above (per item, configurable, on the injected clock; memory only).
