@@ -16,8 +16,10 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import hmac
 import json
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -42,7 +44,6 @@ MAX_CHALLENGES = 64
 INTEGRITY_RETRY_S = 15
 FORCED_MIN_S = 10
 EMERGENCY_ACTIONS = ("FREEZE", "LIFT_FREEZE")
-MAX_EMERGENCY_CHALLENGES = 256
 SIGNING_KEY_ROTATE_DAYS = 30
 SIGNING_KEY_OVERLAP_S = 24 * 3600
 SLA_DAYS = {"critical": 7, "high": 30, "unknown": 30, "medium": 90, "low": 180}
@@ -137,6 +138,9 @@ class SecurityService:
         self._last_integrity_try = 0.0
         self._outbox: list[AlertMessage] = []
         self._unrecorded_alerted: set = set()
+        self._em_key = os.urandom(32)
+        self._em_used: dict[str, int] = {}
+        self._deferred_incidents: list[tuple] = []
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
         if self.log.read_pending() is None:
@@ -173,12 +177,14 @@ class SecurityService:
             try:
                 self.log.write_pending(line)
             except StoreWriteError:
+                # R3-1: a "certain" failure only when the pending file is certainly gone
+                if not self._drop_pending():
+                    raise _maybe(Unavailable(R("STORE_UNAVAILABLE"))) from None
                 raise Unavailable(R("STORE_UNAVAILABLE")) from None
             try:
                 self._anchor(eid, actor, epoch, payload, kind, rec["seq"])
             except LedgerRecordError as exc:
-                if exc.took_effect is False:
-                    self._drop_pending()
+                if exc.took_effect is False and self._drop_pending():
                     raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
                 # AEGIS H1 / round 2 N1: the ledger may hold this anchor, or record it late. The pending line is
                 # kept and writes stop; the next integrity check ROLLS IT FORWARD (re-records the identical anchor,
@@ -193,7 +199,7 @@ class SecurityService:
                 self.integrity = {"ok": False, "checked_at": at, "problem": "a log line was anchored but not written; "
                                   "it is rolled forward at the next integrity check"}
                 raise _maybe(Unavailable(R("STORE_UNAVAILABLE"))) from None
-            self._drop_pending()
+            self._drop_pending()    # if it fails, the stale copy is discarded at the next check (it is not the next line)
             self._apply(kind, data, at)
             return rec
 
@@ -207,12 +213,15 @@ class SecurityService:
                 raise
             self.rec.record(eid, "log_anchor", actor, f"log:{epoch}", payload, f"{kind} #{seq}")
 
-    def _drop_pending(self) -> None:
+    def _drop_pending(self) -> bool:
+        """True when the pending line is certainly gone. Otherwise writes stop until the next integrity check."""
         try:
             self.log.clear_pending()
+            return True
         except StoreWriteError:
             self.integrity = {"ok": False, "checked_at": iso(self.now()),
                               "problem": "the pending line could not be removed"}
+            return False
 
     def _idem(self, actor: str, request_id: str, body: dict) -> Optional[tuple]:
         prev = self.requests.get((actor, request_id))
@@ -363,11 +372,16 @@ class SecurityService:
         pass
 
     def _remove_orphans(self) -> None:
+        """Remove sealed files no record refers to. A secret whose current version file is missing keeps every
+        other version's file (manual recovery after tampering or disk loss)."""
+        present = self.sealed.names()
         live = set()
         for s in self.secrets.values():
-            for v in s["versions"]:
-                live.add(SealedStore.name(s["secret_id"], int(v)))
-        for name in self.sealed.names() - live:
+            names = {SealedStore.name(s["secret_id"], int(v)) for v in s["versions"]}
+            live |= names
+            if s["status"] == "active" and not names <= present:
+                live |= {n for n in present if n.startswith(s["secret_id"] + ".v")}
+        for name in present - live:
             sid, v = name.rsplit(".v", 1)
             self.sealed.delete(sid, int(v))
 
@@ -417,7 +431,9 @@ class SecurityService:
             rec = json.loads(raw)
             seq, kind, data = rec["seq"], rec["kind"], rec["data"]
             verify_lines(self._raw_lines() + [raw])        # the exact next line, chained to this log
-        except (ValueError, KeyError, TypeError, StoreCorrupt):
+            if not isinstance(data.get("actor"), str) or not re.fullmatch(r"[a-z0-9_]{1,64}", data["actor"]):
+                raise ValueError("no ledger-valid actor")
+        except (ValueError, KeyError, TypeError, AttributeError, StoreCorrupt):
             return self._discard_pending(), False
         line_sha = sha256_hex(raw)
         epoch = self.log.epoch or line_sha[:16]
@@ -431,11 +447,24 @@ class SecurityService:
         except StoreWriteError:
             return "the pending line is anchored on the ledger but cannot be written here", False
         self._apply(kind, data, rec["at"])
+        if not self._sealed_present(kind, data):
+            # anchored lines are always rolled forward (discarding one would leave the ledger ahead of the log);
+            # a sealed file that is missing here was removed from outside: tampering or disk loss (sev1). The
+            # previous version's file is kept by _remove_orphans for a manual recovery.
+            self._deferred_incidents.append(("sev1", "SEALED_SECRET_TAMPERED",
+                                             self.secrets[data["secret_id"]]["ref"]))   # opened once verified
         try:
             self.log.clear_pending()
         except StoreWriteError:
             return "the pending line could not be removed", True
         return None, True
+
+    def _sealed_present(self, kind: str, data: dict) -> bool:
+        """A secret_stored / secret_rotated line is rolled forward only if its sealed file is here, intact."""
+        if kind not in ("secret_stored", "secret_rotated"):
+            return True
+        raw = self.sealed.get(data["secret_id"], data["version"])
+        return raw is not None and sha256_hex(raw) == data["envelope_sha256"]
 
     def _discard_pending(self) -> Optional[str]:
         try:
@@ -468,7 +497,11 @@ class SecurityService:
             raise Unavailable(R("INTEGRITY_UNVERIFIED"))
 
     def _after_integrity(self) -> None:
-        """Start-up duties that need a verified log: the passkey recovery reset, the first signing key."""
+        """Duties that need a verified log: incidents found while settling, the passkey recovery reset, the first
+        signing key."""
+        pending, self._deferred_incidents = self._deferred_incidents, []
+        for sev, code, subject in pending:
+            self._open_incident(sev, code, subject, DETECTOR)
         try:
             if self.settings.passkey_recovery and self.settings.enroll_token is not None:
                 tsha = sha256_hex(self.settings.enroll_token.reveal().encode("ascii"))
@@ -590,29 +623,50 @@ class SecurityService:
 
     # ================================================================================================ approvals
 
-    def _challenge(self, kind: str, action_sha: str, extra: Optional[dict] = None,
-                   pool: str = "general") -> tuple[str, bytes]:
-        """AEGIS M4: the freeze switch has its own small pool, so a flood of other challenges (a stolen dashboard
-        token) cannot stop Andre freezing; a full pool raises a sev2 incident (the token is being abused)."""
+    def _challenge(self, kind: str, action_sha: str, extra: Optional[dict] = None) -> tuple[str, bytes]:
         now = time.monotonic()
         for cid in [c for c, v in self.challenges.items() if v["expires"] <= now or v["used"]]:
             del self.challenges[cid]
-        cap = MAX_EMERGENCY_CHALLENGES if pool == "emergency" else MAX_CHALLENGES
-        in_pool = [c for c, v in self.challenges.items() if v.get("pool", "general") == pool]
-        if len(in_pool) >= cap:
-            self._open_incident("sev2", "APPROVAL_CHALLENGES_EXHAUSTED", f"pool:{pool}", DETECTOR)
-            if pool != "emergency":
-                raise Throttled(R("APPROVAL_CHALLENGES_EXHAUSTED"))
-            # round 2 N3: the freeze switch is never refused; the oldest emergency challenge makes room (a flooder
-            # must out-pace Andre's few-second ceremony across MAX_EMERGENCY_CHALLENGES slots, and is reported)
-            oldest = min(in_pool, key=lambda c: self.challenges[c]["expires"])
-            del self.challenges[oldest]
-        extra = {**(extra or {}), "pool": pool}
+        if len(self.challenges) >= MAX_CHALLENGES:
+            self._open_incident("sev2", "APPROVAL_CHALLENGES_EXHAUSTED", "pool:general", DETECTOR)
+            raise Throttled(R("APPROVAL_CHALLENGES_EXHAUSTED"))
         raw = os.urandom(32)
         cid = "ch-" + base64.urlsafe_b64encode(os.urandom(18)).decode("ascii")
         self.challenges[cid] = {"challenge": raw, "action_sha": action_sha, "kind": kind,
                                 "expires": now + CHALLENGE_TTL_S, "used": False, **(extra or {})}
         return cid, raw
+
+    # --- the freeze switch's challenges hold no server state (AEGIS round 3, R3-2): nothing to fill, nothing to
+    #     evict. challenge = nonce(16) | expires(8) | HMAC(per-process key, action_sha | nonce | expires); single use
+    #     is enforced by remembering only the challenges that APPROVED something, until they expire.
+
+    def _em_mac(self, action_sha: str, nonce: bytes, expires: int) -> bytes:
+        return hmac.new(self._em_key, b"sec22-em1|" + action_sha.encode("ascii") + nonce
+                        + expires.to_bytes(8, "big"), hashlib.sha256).digest()
+
+    def _em_challenge(self, action_sha: str) -> tuple[str, bytes]:
+        nonce, expires = os.urandom(16), int(time.time()) + CHALLENGE_TTL_S
+        raw = nonce + expires.to_bytes(8, "big") + self._em_mac(action_sha, nonce, expires)
+        return "em-" + webauthn.b64url_encode(raw), raw
+
+    def _em_check(self, cid: str, action_sha: str) -> tuple[Optional[str], Optional[bytes]]:
+        try:
+            raw = webauthn.b64url_decode(cid[3:], 56, "CHALLENGE")
+        except webauthn.WebAuthnError:
+            return "APPROVAL_CHALLENGE_UNKNOWN", None
+        if len(raw) != 56:
+            return "APPROVAL_CHALLENGE_UNKNOWN", None
+        nonce, expires, mac = raw[:16], int.from_bytes(raw[16:24], "big"), raw[24:]
+        if not hmac.compare_digest(mac, self._em_mac(action_sha, nonce, expires)):
+            return "APPROVAL_ACTION_MISMATCH", None      # forged, or issued for another action/body
+        now = int(time.time())
+        for k in [k for k, exp in self._em_used.items() if exp <= now]:
+            del self._em_used[k]
+        if expires <= now:
+            return "APPROVAL_CHALLENGE_EXPIRED", None
+        if cid in self._em_used:
+            return "APPROVAL_CHALLENGE_USED", None
+        return None, raw
 
     @staticmethod
     def action_sha(action: str, target: str, body: dict) -> str:
@@ -623,8 +677,11 @@ class SecurityService:
         with self.lock:
             if not self.rp.configured:
                 raise Unavailable(R("PASSKEYS_NOT_CONFIGURED"))
-            cid, raw = self._challenge("get", self.action_sha(action, target, body),
-                                       pool="emergency" if action in EMERGENCY_ACTIONS else "general")
+            sha = self.action_sha(action, target, body)
+            if action in EMERGENCY_ACTIONS:
+                cid, raw = self._em_challenge(sha)
+            else:
+                cid, raw = self._challenge("get", sha)
             creds = [c for c, p in self.passkeys.items() if p["status"] == "active"]
             return {"challenge_id": cid, "challenge": webauthn.b64url_encode(raw), "rp_id": self.rp.rp_id,
                     "allow_credentials": creds, "user_verification": "required",
@@ -643,7 +700,18 @@ class SecurityService:
             raise ApprovalRefused(R("APPROVAL_REQUIRED"))
         if not self.rp.configured:
             raise ApprovalRefused(R("PASSKEYS_NOT_CONFIGURED"))
-        ch = self.challenges.get(appr["challenge_id"])
+        if appr["challenge_id"].startswith("em-"):
+            if action not in EMERGENCY_ACTIONS:
+                code, raw = "APPROVAL_CHALLENGE_UNKNOWN", None
+            else:
+                code, raw = self._em_check(appr["challenge_id"], self.action_sha(action, target, body))
+            ch = None if code else {"challenge": raw, "kind": "get", "used": False, "expires": float("inf"),
+                                    "action_sha": self.action_sha(action, target, body), "em": appr["challenge_id"]}
+            if code:
+                self._approval_failed(code)
+                raise ApprovalRefused(R(code))
+        else:
+            ch = self.challenges.get(appr["challenge_id"])
         code = None
         was_used = bool(ch and ch["used"])
         if ch is not None and ch["kind"] == "get":
@@ -669,6 +737,8 @@ class SecurityService:
                     count = webauthn.verify_assertion(cred, appr["client_data_json"], appr["authenticator_data"],
                                                       appr["signature"], ch["challenge"], self.rp)
                     pk["sign_count"] = max(pk["sign_count"], count)   # AEGIS L9: even if the route fails later
+                    if ch.get("em"):
+                        self._em_used[ch["em"]] = int(time.time()) + CHALLENGE_TTL_S + 60
                     return {"credential_id": pk["credential_id"], "sign_count": count,
                             "challenge_id": appr["challenge_id"]}
                 except webauthn.CounterRegression:
@@ -1285,22 +1355,23 @@ class SecurityService:
             # the log cannot take the record (e.g. its integrity is what failed): Andre is alerted anyway, and the
             # ledger gets a best-effort record; the incident itself is opened by hand once the log is healthy
             if (code, subject) in self._unrecorded_alerted:
-                return None                     # alerted once already while the log is unhealthy
-            self._unrecorded_alerted.add((code, subject))
+                return None     # DELIVERED once already while the log is unhealthy (R3-4: a failed send retries)
             self.rec.try_record(derived_id("inu", iid), "incident_unrecorded", DETECTOR, iid,
                                 {"severity": severity, "code": code}, f"unrecorded {severity} {code}")
-            self._queue_alerts({"incident_id": iid, "severity": severity, "code": code, "subject": subject})
+            self._queue_alerts({"incident_id": iid, "severity": severity, "code": code, "subject": subject},
+                               unrecorded=(code, subject))
             return None
         self._queue_alerts(self.incidents[iid])
         return iid
 
-    def _queue_alerts(self, inc: dict) -> None:
+    def _queue_alerts(self, inc: dict, unrecorded: Optional[tuple] = None) -> None:
         channels = CHANNELS_BY_SEVERITY[inc["severity"]]
         if not channels:
             return
         aid = derived_id("alr", inc["incident_id"])
         self.alert_status[aid] = {"alert_id": aid, "incident_id": inc["incident_id"], "severity": inc["severity"],
-                                  "code": inc["code"], "channels": {c: "queued" for c in channels}}
+                                  "code": inc["code"], "channels": {c: "queued" for c in channels},
+                                  "unrecorded": unrecorded}
         self._outbox.append(AlertMessage(aid, inc["severity"], inc["code"], inc["incident_id"], inc["subject"]))
 
     def flush_alerts(self) -> None:
@@ -1317,7 +1388,10 @@ class SecurityService:
                 if result not in ("delivered", "failed", "not_wired"):
                     result = "failed"
                 with self.lock:
-                    self.alert_status[msg.alert_id]["channels"][ch_name] = result
+                    entry = self.alert_status[msg.alert_id]
+                    entry["channels"][ch_name] = result
+                    if result == "delivered" and entry.get("unrecorded"):
+                        self._unrecorded_alerted.add(entry["unrecorded"])
             self.rec.try_record(derived_id("alt", msg.alert_id, os.urandom(4).hex()), "alert_dispatched", DETECTOR,
                                 msg.incident_id, dict(self.alert_status[msg.alert_id]["channels"]),
                                 f"alert {msg.severity} {msg.code}")

@@ -160,3 +160,14 @@ Round 2 confirmed M1–M3, M5, M6 and L1–L9 closed, and found that the round-1
 | N5 (Low) | A replayed clean exit destroyed a secret stored after it | The first execution records the plan (which secrets); a replay finishes only those |
 | N6 (Low) | An unparsable pending line; the alert middleware skipped on an unhandled error | Discarded through the guarded path; the middleware flushes in `finally` |
 | T1 (round 2) | The consumed-token guard inside `enroll()` had no test | Added |
+
+## Amendment — AEGIS round 3 (Oct 5 2026): BLOCKING, every finding fixed
+
+Round 3 confirmed N1, N2 (maybe path), N4–N6 and T1 closed.
+
+| Id | Finding | Fix |
+|---|---|---|
+| R3-1 (High, from the round-2 roll-forward) | A failure reported as certain (pending file placed but its write unconfirmed; or the anchor refused but the pending file not removable) let the caller delete the new sealed file, and the roll-forward then pointed the secret at it | A failure is "certain" only when the pending file is certainly gone; otherwise it is "maybe" and the sealed file is kept. An anchored line is always rolled forward (discarding it would leave the ledger ahead of the log); if its sealed file is missing anyway (removed from outside), a sev1 `SEALED_SECRET_TAMPERED` is opened once the log is verified and the secret's other versions are kept for a manual recovery |
+| R3-3 (High, present since round 1) | An fsync error after the write left the line in the file but not in memory; the roll-forward wrote it twice and the next start refused | The log file must equal memory before a write (else refused); a failed write is cut back; a line already on disk is adopted, never written twice |
+| R3-2 (Medium; N3 not closed) | A flooder evicted Andre's FREEZE challenge in about a second | FREEZE and LIFT_FREEZE challenges hold no server state: nonce, expiry and an HMAC (per-process key) over the action hash. Nothing to fill or evict; single use is kept by remembering only challenges that approved something, until they expire |
+| R3-4 (Low) | A failed integrity alert was never sent again while the log was unhealthy | Deduplicated only after a channel reports `delivered` |

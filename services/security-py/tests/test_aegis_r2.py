@@ -119,12 +119,13 @@ def test_n2_restart_with_a_pending_line_keeps_its_sealed_file(tmp_path):
 
 
 def test_n3_a_freeze_challenge_flood_cannot_block_the_freeze_switch(hk):
+    body = {"request_id": rid(), "target_kind": "all", "target_id": "all", "reason_code": "TEST"}
+    mine = hk.challenge("FREEZE", "all:all", body)              # Andre's, issued BEFORE the flood (R3-2)
     for _ in range(300):
         hk.challenge("FREEZE", "caller:legal_37", {"request_id": rid(), "target_kind": "caller",
                                                    "target_id": "legal_37", "reason_code": "TEST"})
-    body = {"request_id": rid(), "target_kind": "all", "target_id": "all", "reason_code": "TEST"}
-    hk.ok(hk.post("/sec/v1/freezes", hk.approved("FREEZE", "all:all", body)), 201)
-    assert any(i["code"] == "APPROVAL_CHALLENGES_EXHAUSTED" for i in hk.svc.incidents.values())
+    hk.ok(hk.post("/sec/v1/freezes", {**body, "approval": hk.keys[0].assert_(mine)}), 201)
+    assert not [c for c in hk.svc.challenges.values() if c["kind"] == "get"]   # the freeze switch keeps no state
 
 
 def test_n4_the_integrity_job_always_reads_the_ledger(tmp_path):
@@ -149,7 +150,7 @@ def test_n5_a_replayed_clean_exit_never_reaches_a_newer_secret(h):
                                     "client_id": "c1"}, caller="onboarding"), 201)
     assert h.ok(h.post("/sec/v1/clients/c1/destroy", {"request_id": R}, caller="onboarding"))["destroyed"] == 2
     assert h.svc.secrets[h.svc.by_ref["vault:onboarding.new"]]["status"] == "active"
-    # a NEW request does reach it, and the plan survives a restart
+    # a NEW request does reach it
     assert h.ok(h.post("/sec/v1/clients/c1/destroy", {"request_id": rid()}, caller="onboarding"))["destroyed"] == 1
 
 

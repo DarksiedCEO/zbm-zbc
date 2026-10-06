@@ -121,6 +121,10 @@ class RecordLog:
         return self.append_prepared(rec, line)
 
     def append_prepared(self, rec: dict, line: bytes) -> dict:
+        """Append one line. The file must be exactly the in-memory lines before the write (else refused); a
+        failed write is cut back to that size, so a line is never half in (AEGIS round 3, R3-3). If the file
+        already ends with exactly this line (a write that reached the disk before an fsync error), it is adopted
+        instead of written twice."""
         with self.lock:
             if self.fail_next_append:
                 self.fail_next_append = False
@@ -128,15 +132,32 @@ class RecordLog:
             if rec["seq"] != len(self._lines) + 1:
                 raise StoreWriteError("log moved on since the line was prepared")
             if self.path:
+                expected = sum(len(ln) + 1 for ln in self._lines)
                 try:
-                    fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-                    try:
-                        os.write(fd, line + b"\n")
-                        os.fsync(fd)
-                    finally:
-                        os.close(fd)
+                    fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+                except OSError as exc:
+                    raise StoreWriteError(f"local log open failed: {type(exc).__name__}") from exc
+                try:
+                    size = os.fstat(fd).st_size
+                    if size == expected + len(line) + 1 and os.pread(fd, len(line) + 1, expected) == line + b"\n":
+                        os.fsync(fd)                  # already on disk: adopt it
+                    elif size != expected:
+                        raise StoreWriteError("the log file and memory disagree; refusing to write")
+                    else:
+                        try:
+                            os.pwrite(fd, line + b"\n", expected)
+                            os.fsync(fd)
+                        except OSError as exc:
+                            try:
+                                os.ftruncate(fd, expected)
+                                os.fsync(fd)
+                            except OSError:
+                                pass
+                            raise StoreWriteError(f"local log write failed: {type(exc).__name__}") from exc
                 except OSError as exc:
                     raise StoreWriteError(f"local log write failed: {type(exc).__name__}") from exc
+                finally:
+                    os.close(fd)
             self._lines.append(line)
             return rec
 
