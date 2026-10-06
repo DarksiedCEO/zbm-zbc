@@ -265,3 +265,9 @@ def test_task_close(h):
               "TASK_CLOSED")
     assert lead
 
+
+
+def test_evidence_from_the_future_refused(h):
+    body = {"request_id": rid(), "source": "inbound", "contact": {"name": "A", "email": "a@b.test"},
+            "evidence": {"kind": "site_form", "ref": "x", "captured_at": "2027-01-01T00:00:00Z"}}
+    h.refused(h.post("/sales/v1/leads", body, "hub"), 422, "INVALID")

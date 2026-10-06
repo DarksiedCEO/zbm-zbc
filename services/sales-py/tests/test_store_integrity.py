@@ -202,3 +202,14 @@ def test_audit_export_minimises_personal_data(tmp_path):
     assert "email_hash" in blob and "name_sha256" in blob
     raw = (tmp_path / "d" / "sales_log.jsonl").read_text()
     assert "jane@acme-shop.test" in raw          # the local log is the system of record; only the export is minimised
+
+
+def test_nothing_is_written_before_the_pii_key_is_bound(tmp_path):
+    led = FakeLedger()
+    led.fail = True                                   # reads work, writes fail: the binding cannot be recorded
+    h = durable(tmp_path, ledger=led)
+    assert h.svc.integrity["ok"] is False and "fingerprint" in h.svc.integrity["problem"]
+    led.fail = False
+    h.svc._last_integrity_try = 0
+    assert h.svc.verify_integrity(force=True, always=True)["ok"] is True
+    assert h.svc.log.records[0]["kind"] == "pii_key_bound"

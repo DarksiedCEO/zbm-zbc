@@ -198,9 +198,11 @@ class LeadsMixin:
     def _ingest(self, actor: str, source: str, lead_in: dict, rk: str, body: dict) -> dict:
         ev = dict(lead_in["evidence"])
         try:
-            parse_iso(ev["captured_at"])
+            captured = parse_iso(ev["captured_at"])
         except ValueError:
             raise Invalid(R("INVALID"), field="evidence.captured_at") from None
+        if captured > self.now() + timedelta(minutes=5):
+            raise Invalid(R("INVALID"), field="evidence.captured_at")
         routed, problem = i04_routing.route(lead_in.get("brand"), list(lead_in.get("product_interest") or []),
                                             ev["kind"])
         if problem:

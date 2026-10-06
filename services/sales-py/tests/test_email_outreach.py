@@ -147,7 +147,7 @@ def test_one_click_unsubscribe_then_resend_refused_across_both_brands(w):
     token = w.ports.email.sent[0][2]["headers"]["List-Unsubscribe"].rsplit("/", 1)[1].rstrip(">")
     queued_zbc = w.ok(queue(w, lead["contact_id"], zbc), 201)
     w.ok(w.post("/sales/v1/unsubscribe", {"request_id": rid(), "token": token}, "hub"))
-    assert w.ok(w.get(f"/sales/v1/outreach/messages?status=cancelled"))[0]["message_id"] == queued_zbc["message_id"]
+    assert w.ok(w.get("/sales/v1/outreach/messages?status=cancelled"))[0]["message_id"] == queued_zbc["message_id"]
     w.refused(queue(w, lead["contact_id"], zbm), 403, "SUPPRESSED")
     w.refused(queue(w, lead["contact_id"], zbc), 403, "SUPPRESSED")
     assert w.ledger.of_type("suppression_added")

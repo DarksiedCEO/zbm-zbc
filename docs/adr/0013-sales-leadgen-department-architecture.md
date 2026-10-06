@@ -79,8 +79,9 @@ agent calls this service yet.
     consent text version and SHA-256); consent to ZBM is not consent to ZBC. 08:00–21:00 in the recipient's IANA time
     zone; no time zone = refused. A revocation (form, call, STOP) revokes every channel for both brands and suppresses
     the number; a later grant cannot undo it. Re-checked at send time; a text outside the window waits in the queue.
-13. **Replies** (i10): unsubscribe words and declines → suppressed now; out-of-office → a reschedule task a week
-    out; interested → a book-a-call task; anything else → human review. The text is never stored, only its SHA-256.
+13. **Replies** (i10): unsubscribe words and declines → suppressed now, on every channel: every address and number
+    tied to the sender is suppressed and any phone's consents revoked; out-of-office → a reschedule task a week out;
+    interested → a book-a-call task; anything else → human review. The text is never stored, only its SHA-256.
 14. **Price books.** Every line of both books (`i11_pricing.CATALOG`) exists with no price. Andre approves version
     n+1 of a line with a price (service lines) or a markup percentage (media-buy lines); the record binds line id,
     version and price. A withdrawn price makes the line unquotable.

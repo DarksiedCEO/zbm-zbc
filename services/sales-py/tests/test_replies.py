@@ -99,3 +99,11 @@ def test_reply_ledger_down_nothing_recorded(tmp_path):
     h.refused(h.post("/sales/v1/replies", {"request_id": rid(), "channel": "email", "message_id": mid,
                                            "text": "STOP"}, "provider_events"), 503, "LEDGER_UNAVAILABLE")
     assert not h.svc.suppression
+
+
+def test_an_opt_out_on_email_also_stops_texts_and_calls(tmp_path):
+    h, lead, _, mid = setup(tmp_path)
+    h.ok(h.consent(lead["contact_id"]), 201)
+    reply(h, mid, "unsubscribe")
+    c = h.ok(h.get(f"/sales/v1/contacts/{lead['contact_id']}"))
+    assert c["email_suppressed"] and c["phone_suppressed"] and not c["consent"]["sms:zbm"]

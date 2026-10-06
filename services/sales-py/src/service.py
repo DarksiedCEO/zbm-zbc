@@ -357,7 +357,9 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
             try:
                 self._commit("pii_key_bound", {"fingerprint": self.pii_fp}, "sales")
             except Unavailable:
-                pass
+                # nothing else may be written before the key is bound (a later start with another key must refuse)
+                self.integrity = {"ok": False, "checked_at": iso(self.now()),
+                                  "problem": "the PII hash key fingerprint could not be bound in the log yet"}
 
     # ================================================================================================ status
 

@@ -681,16 +681,13 @@ class OutreachMixin:
                     "contact_id": contact_id, "class": cls, "text_sha256": text_sha}
             ev = None
             if cls == "unsubscribe":
-                hashes = set()
-                if body["channel"] == "email":
-                    msg_h = msg["to_hash"] if msg and msg["channel"] == "email" else None
-                    hashes |= {h for h in (email_h, msg_h, c.get("email_hash") if c else None) if h}
-                else:
-                    ph = phone_h or (msg["to_hash"] if msg and msg["channel"] != "email" else None) or \
-                        (c.get("phone_hash") if c else None)
-                    if ph:
-                        hashes.add(ph)
-                        data["revoke_keys"] = self._all_consent_keys(ph)
+                # an opt-out on any channel is honoured everywhere: every address and number we can tie to the sender
+                # is suppressed, and any phone's consents are revoked (ADR 0013 decision 13)
+                hashes = {h for h in (email_h, phone_h, msg["to_hash"] if msg else None,
+                                      c.get("email_hash") if c else None, c.get("phone_hash") if c else None) if h}
+                phones = sorted(h for h in hashes if h.startswith("phone:"))
+                if phones:
+                    data["revoke_keys"] = [k for ph in phones for k in self._all_consent_keys(ph)]
                 if not hashes:
                     raise Invalid(R("REPLY_SENDER_REQUIRED"))
                 data.update(hashes=sorted(hashes), reason="stop_reply")

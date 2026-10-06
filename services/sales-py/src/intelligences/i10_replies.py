@@ -2,8 +2,8 @@
 
 1. ``unsubscribe`` — STOP, STOPALL, UNSUBSCRIBE, CANCEL, END, QUIT, REVOKE, OPT OUT / OPTOUT, "remove me",
    "take me off", "do not contact", "don't contact", "stop texting/emailing/calling", and declines ("not
-   interested", "no thanks", "no thank you"): suppressed at once, everywhere (a decline is honoured as an opt-out,
-   the conservative reading). For a text, a message that is ONLY one of the carrier keywords counts too.
+   interested", "no thanks", "no thank you"): suppressed at once, everywhere — every address and number tied to
+   the sender, whatever channel the reply came on (a decline is honoured as an opt-out, the conservative reading). For a text, a message that is ONLY one of the carrier keywords counts too.
 2. ``out_of_office`` — auto-replies ("out of office", "OOO", "automatic reply", "auto-reply", "on vacation",
    "away until", "on leave", "currently away"): a reschedule task.
 3. ``interested`` — "interested", "let's talk", "lets talk", "book", "schedule", "set up a call", "call me",
