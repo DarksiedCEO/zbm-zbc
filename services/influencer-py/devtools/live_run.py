@@ -147,13 +147,24 @@ def token(key: bytes, conf_id: str) -> str:
     return f"{conf_id}." + hmac.new(key, f"confirm\x00{conf_id}".encode(), hashlib.sha256).hexdigest()[:32]
 
 
-def application(email, handle, adult=True, **extra):
-    body = {"request_id": rid(), "display_name": "Live Creator", "email": email,
+def application(session_token, handle, adult=True, **extra):
+    """The application, submitted inside a creator session (AEGIS round 4)."""
+    body = {"request_id": rid(), "session_token": session_token, "display_name": "Live Creator",
             "handles": [{"platform": "instagram", "handle": handle}], "niches": ["gaming"], "follower_band": "mid",
             "country": "US", "attestation_text_version": "age-v1", "attestation_text_sha256": ATTEST_SHA, **extra}
     if adult is not None:
         body["adult_18_plus"] = adult
     return body
+
+
+def session(a, pii: bytes, email: str) -> dict:
+    """The public form (an address only), then the click on the mailed link: a creator session."""
+    link = a.post("/applications", {"request_id": rid(), "email": email}, "hub").json()
+    return a.post("/confirmations", {"request_id": rid(), "token": token(pii, link["confirmation_id"])}, "hub").json()
+
+
+def apply(a, pii: bytes, email: str, handle: str, **kw):
+    return a.post("/sessions/application", application(session(a, pii, email)["session_token"], handle, **kw), "hub")
 
 
 def _main(work: Path) -> int:
@@ -196,34 +207,44 @@ def _main(work: Path) -> int:
         check("a second process on the same data directory refuses to start", code not in (None, 0))
 
         # --- creators and the 18+ rule ----------------------------------------------------------------------------
-        r = a.post("/applications", application("creator@live-creator.example", "@live.creator"), "hub")
+        r = a.post("/applications", {"request_id": rid(), "email": "creator@live-creator.example"}, "hub")
         app = r.json()
-        check("an application changes nothing about identity until the address is confirmed (AEGIS R1-M1/M2)",
-              r.status_code == 201 and app["adult_attested"] is False and app["handles"] == []
-              and app["confirmation_status"] == "pending")
+        r0 = a.post("/applications", {"request_id": rid(), "email": "creator@live-creator.example",
+                                      "handles": [{"platform": "x", "handle": "@stranger"}], "adult_18_plus": True},
+                    "hub")
+        check("the public form takes an address only and changes nothing about identity (AEGIS R4-M1')",
+              r.status_code == 201 and app["confirmation_status"] == "pending" and r0.status_code == 422
+              and a.get("/influencers").json() == [])
         r = a.post("/confirmations", {"request_id": rid(), "token": token(pii, app["confirmation_id"])[:-1] + "x"},
                    "hub")
         r2 = a.post("/confirmations", {"request_id": rid(), "token": token(pii, app["confirmation_id"])}, "hub")
-        inf = a.get(f"/influencers/{app['influencer_id']}").json()
-        check("a wrong token is refused; the right one attests the creator with the flag only",
-              r.status_code == 404 and r2.status_code == 200 and inf["adult_attested"] is True
+        ses = r2.json()
+        r3 = a.post("/sessions/application", application(ses["session_token"], "@live.creator"), "hub")
+        inf = a.get(f"/influencers/{ses['influencer_id']}").json()
+        check("a wrong link is refused; the right one opens a session where the creator attests with the flag only",
+              r.status_code == 404 and r2.status_code == 200 and r3.status_code == 201 and inf["adult_attested"] is True
               and inf["email_confirmed"] is True and [h["handle"] for h in inf["handles"]] == ["live.creator"])
-        r = a.post("/applications", application("Creator@live-creator.example", "@stranger"), "hub")
+        for _ in range(3):
+            r = a.post("/applications", {"request_id": rid(), "email": "Creator@live-creator.example"}, "hub")
         inf2 = a.get(f"/influencers/{inf['influencer_id']}").json()
-        check("a stranger's application with the creator's address attaches no handle",
-              r.status_code == 201 and [h["handle"] for h in inf2["handles"]] == ["live.creator"])
-        r = a.post("/applications", application("kid@live-creator.example", "@kid", adult=False), "hub")
-        r2 = a.post("/applications", application("none@live-creator.example", "@none", adult=None), "hub")
+        r4 = a.post("/sessions/application", application(ses["session_token"], "@again"), "hub")
+        check("repeat requests for the creator's address are never refused and attach nothing; one application a "
+              "session", r.status_code == 201 and [h["handle"] for h in inf2["handles"]] == ["live.creator"]
+              and r4.status_code == 409 and detail(r4) == "SESSION_ACTION_USED")
+        r = apply(a, pii, "kid@live-creator.example", "@kid", adult=False)
+        r2 = apply(a, pii, "none@live-creator.example", "@none", adult=None)
         n_inf = len(a.get("/influencers").json())
         check("a declared minor and a missing attestation are refused and nothing is kept",
               r.status_code == 422 and detail(r) == "MINOR_REFUSED" and r2.status_code == 422
               and detail(r2) == "AGE_ATTESTATION_REQUIRED" and n_inf == 1)
-        r = a.post("/applications", application("dob@live-creator.example", "@dob", date_of_birth="2001-01-01"), "hub")
+        r = apply(a, pii, "dob@live-creator.example", "@dob", date_of_birth="2001-01-01")
         check("a date of birth is refused", r.status_code == 422 and detail(r) == "FORBIDDEN_FIELD")
-        r = a.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"], "tax_form": "w9",
-                                     "tax_ref": "stripe:acct_LIVEabcdefghijklmn", "legal_form": "individual",
-                                     "country": "US", "ssn": "000-00-0000"}, "hub")
-        r2 = a.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"], "tax_form": "w9",
+        tax_ses = session(a, pii, "creator@live-creator.example")["session_token"]
+        r = a.post("/tax-profiles", {"request_id": rid(), "session_token": tax_ses, "influencer_id": inf["influencer_id"],
+                                     "tax_form": "w9", "tax_ref": "stripe:acct_LIVEabcdefghijklmn",
+                                     "legal_form": "individual", "country": "US", "ssn": "000-00-0000"}, "hub")
+        r2 = a.post("/tax-profiles", {"request_id": rid(), "session_token": tax_ses,
+                                      "influencer_id": inf["influencer_id"], "tax_form": "w9",
                                       "tax_ref": "vault:123-45-6789", "legal_form": "individual", "country": "US"},
                     "hub")
         check("a raw TIN is refused by key and by shape (422 TAX_ID_REFUSED)",
@@ -291,8 +312,7 @@ def _main(work: Path) -> int:
                    ANDRE)
         r2 = a.post("/outreach/email", {**email_body, "request_id": rid()}, "influencer_agent")
         check("Andre's decision lifts the hold", r.status_code == 200 and r2.status_code == 201)
-        other = a.post("/applications", application("other@live-creator.example", "@other.creator"), "hub").json()
-        a.post("/confirmations", {"request_id": rid(), "token": token(pii, other["confirmation_id"])}, "hub")
+        other = apply(a, pii, "other@live-creator.example", "@other.creator").json()
         a.post(f"/influencers/{other['influencer_id']}/first-name", {"request_id": rid(), "first_name": "Other"})
         rep = a.post("/replies", {"request_id": rid(), "channel": "email", "from_email": "other@live-creator.example",
                                   "text": "Please unsubscribe me"}, "provider_events").json()
@@ -358,14 +378,17 @@ def _main(work: Path) -> int:
         r = a.post(f"/deals/{d1['deal_id']}/contract", {"request_id": rid()}, "influencer_agent")
         check("sending a contract is refused while Legal is a stand-in",
               r.status_code == 503 and detail(r) == "LEGAL_UNAVAILABLE")
-        r = a.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"], "tax_form": "w9",
-                                     "tax_ref": "stripe:acct_LIVEabcdefghijklmn", "legal_form": "individual",
-                                     "country": "US"}, "hub")
         before = a.get(f"/influencers/{inf['influencer_id']}").json()["tax_profile"]
-        r1 = a.post("/confirmations", {"request_id": rid(), "token": token(pii, r.json()["conf_id"])}, "hub")
+        tax = {"influencer_id": inf["influencer_id"], "tax_form": "w9", "tax_ref": "stripe:acct_LIVEabcdefghijklmn",
+               "legal_form": "individual", "country": "US"}
+        r0 = a.post("/tax-profiles", {**tax, "request_id": rid(), "session_token": tax_ses[:-1] + "x"}, "hub")
+        r = a.post("/tax-profiles", {**tax, "request_id": rid(), "session_token": tax_ses}, "hub")
+        r1 = a.post("/tax-profiles", {**tax, "request_id": rid(), "session_token": tax_ses,
+                                      "tax_ref": "stripe:acct_LIVEsecondchangexx"}, "hub")
         after = a.get(f"/influencers/{inf['influencer_id']}").json()["tax_profile"]
-        check("a tax REFERENCE takes effect only once confirmed from the address on record",
-              r.status_code == 201 and before is None and r1.status_code == 200 and after["tax_form"] == "w9")
+        check("a tax REFERENCE is given only inside a session from the address on record, once per session",
+              r0.status_code == 403 and detail(r0) == "SESSION_INVALID" and r.status_code == 201 and before is None
+              and after["tax_form"] == "w9" and r1.status_code == 409 and detail(r1) == "SESSION_ACTION_USED")
         r2 = a.post(f"/payees/{inf['influencer_id']}/verify", {"request_id": rid()}, "influencer_agent")
         r3 = a.post("/payouts", {"request_id": rid(), "deal_id": d1["deal_id"], "amount": "100.00",
                                  "content_ids": [content["content_id"]]}, "influencer_agent")
@@ -380,20 +403,22 @@ def _main(work: Path) -> int:
         r3 = a.post("/replies", {"channel": "email", "message_id": "<123456789@mail.example>",
                                  "from_email": "other@live-creator.example", "text": "STOP\n" + "> quoted\n" * 3000,
                                  "provider_extra": True}, "provider_events")
-        reps = [a.post("/applications", application("flood@live-creator.example", "@flood"), "hub").json()
-                for _ in range(3)]
-        more = [a.post("/applications", application("flood@live-creator.example", "@flood"), "hub") for _ in range(3)]
-        check("AEGIS R2: a long, oddly shaped reply lands; one open confirmation per address; applications rate-limited",
-              r3.status_code == 201 and len({x["confirmation_id"] for x in reps}) == 1
-              and [x.status_code for x in more] == [201, 201, 429] and detail(more[2]) == "APPLICATION_RATE_LIMITED")
-        other_app = a.post("/applications", application("flood2@live-creator.example", "@flood2"), "hub").json()
-        stranger = a.post("/applications", application("flood2@live-creator.example", "@stranger2"), "hub")
-        r5 = a.post("/confirmations", {"request_id": rid(), "token": token(pii, other_app["confirmation_id"])}, "hub")
-        flood2 = a.get(f"/influencers/{other_app['influencer_id']}").json()
+        reps = [a.post("/applications", {"request_id": rid(), "email": "flood@live-creator.example"}, "hub")
+                for _ in range(8)]
+        check("AEGIS R2/R4: a long, oddly shaped reply lands; one open link per address, repeats never refused",
+              r3.status_code == 201 and {x.status_code for x in reps} == {201}
+              and len({x.json()["confirmation_id"] for x in reps}) == 1)
+        link2 = a.post("/applications", {"request_id": rid(), "email": "flood2@live-creator.example"}, "hub").json()
+        stranger = [a.post("/applications", {"request_id": rid(), "email": "flood2@live-creator.example"}, "hub")
+                    for _ in range(3)]
+        s5 = a.post("/confirmations", {"request_id": rid(), "token": token(pii, link2["confirmation_id"])}, "hub")
+        r5 = a.post("/sessions/application", application(s5.json()["session_token"], "@flood2"), "hub")
+        flood2 = a.get(f"/influencers/{s5.json()['influencer_id']}").json()
         r6 = a.post("/jobs/hold-expiry/run", {"request_id": rid()}, "scheduler")
-        check("AEGIS R3: a stranger's application never invalidates the creator's open link; hold expiry runs",
-              stranger.status_code == 201 and r5.status_code == 200
-              and [h["handle"] for h in flood2["handles"]] == ["flood2"] and r6.status_code == 200)
+        check("AEGIS R4: three stranger requests and the creator still completes; hold expiry runs",
+              {x.status_code for x in stranger} == {201} and r5.status_code == 201
+              and [h["handle"] for h in flood2["handles"]] == ["flood2"] and r6.status_code == 200
+              and set(r6.json()) >= {"expired", "digested"})
         check("a reply is never refused for its sender fields; one that resolves nothing is kept for Andre",
               r.status_code == 201 and r.json()["suppressed"] is True and r2.status_code == 201
               and r2.json()["held"] is True and r2.json()["influencer_id"] is None)
@@ -450,11 +475,13 @@ def _main(work: Path) -> int:
             "outreach_hold_applied", "hold_decided", "suppression_added", "brief_approved", "deal_recorded",
             "deal_approved", "material_connection_recorded", "content_approved", "tax_profile_recorded",
             "founder_approval_refused", "first_name_verified", "confirmation_requested",
-            "email_confirmed"} <= set(types))
+            "email_confirmed", "creator_session_opened", "creator_session_used"} <= set(types))
         blob = json.dumps(ents)
-        check("nothing personal on the ledger (no email, handle, name or tax reference)",
-              "live-creator.example" not in blob and "live.creator" not in blob and "Live Creator" not in blob
-              and "acct_LIVE" not in blob)
+        mac = tax_ses.split(".")[1]
+        check("nothing personal on the ledger (no email, handle, name or tax reference); no session token on the "
+              "ledger or in the log", "live-creator.example" not in blob and "live.creator" not in blob
+              and "Live Creator" not in blob and "acct_LIVE" not in blob and mac not in blob
+              and mac.encode() not in (data / "influencer_log.jsonl").read_bytes())
         v = httpx.get(L + "/ledger/verify", headers=lh, timeout=120)
         check("ledger verifies valid", v.status_code == 200 and v.json().get("valid") is True)
         failed = [n for n, ok in CHECKS if not ok]

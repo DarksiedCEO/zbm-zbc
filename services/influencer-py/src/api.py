@@ -360,8 +360,12 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
     # ------------------------------------------------------------------ influencers
 
     @app.post(P + "/applications", dependencies=auth, status_code=201)
-    def application(req: dict = Depends(body(m.ApplicationIn)), who: str = Depends(caller("hub"))) -> dict:
-        return svc.apply(who, req)
+    def application(req: dict = Depends(body(m.LinkRequest)), who: str = Depends(caller("hub"))) -> dict:
+        return svc.request_link(who, req)
+
+    @app.post(P + "/sessions/application", dependencies=auth, status_code=201)
+    def session_application(req: dict = Depends(body(m.ApplicationIn)), who: str = Depends(caller("hub"))) -> dict:
+        return svc.submit_application(who, req)
 
     @app.post(P + "/influencers", dependencies=auth, status_code=201)
     def prospect(req: dict = Depends(body(m.ProspectIn)), who: str = Depends(dashboard)) -> dict:
@@ -390,7 +394,7 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
                      who: str = Depends(andre("influencers/minor-review"))) -> dict:
         return svc.decide_minor_review(_id(iid), req)
 
-    # ------------------------------------------------------------------ email confirmation (AEGIS R1-M1/M2)
+    # ------------------------------------------------------------------ the address link and creator sessions (AEGIS round 4)
 
     @app.post(P + "/confirmations", dependencies=auth)
     def confirm(req: dict = Depends(body(m.Confirm)), who: str = Depends(caller("hub"))) -> dict:
@@ -398,7 +402,7 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
 
     @app.get(P + "/confirmations", dependencies=auth)
     def confirmations(status_: Optional[str] = Query(default=None, alias="status",
-                                                     pattern="^(pending|undeliverable|pending_andre|awaiting_andre|awaiting_andre_digest|applied|rejected|superseded)$"),
+                                                     pattern="^(pending|undeliverable|pending_andre|awaiting_andre|awaiting_andre_digest|used|applied|rejected)$"),
                       who: str = Depends(dashboard)) -> list:
         return svc.confirmations_view(status_)
 
@@ -502,7 +506,7 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
         return svc.reply(who, m.ReplyIn.model_validate(raw).model_dump(mode="python"), raw)
 
     @app.get(P + "/holds", dependencies=auth)
-    def holds(status_: Optional[str] = Query(default=None, alias="status", pattern="^(active|lifted|opted_out|expired)$"),
+    def holds(status_: Optional[str] = Query(default=None, alias="status", pattern="^(active|digest|lifted|opted_out|expired)$"),
               who: str = Depends(worker)) -> list:
         return svc.holds_view(status_)
 
@@ -619,7 +623,7 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
     # ------------------------------------------------------------------ payees and payouts
 
     @app.post(P + "/tax-profiles", dependencies=auth, status_code=201)
-    def tax_profile(req: dict = Depends(body(m.TaxProfile)), who: str = Depends(caller("hub", "dashboard"))) -> dict:
+    def tax_profile(req: dict = Depends(body(m.TaxProfile)), who: str = Depends(caller("hub"))) -> dict:
         return svc.record_tax_profile(who, req)
 
     @app.post(P + "/payees/{iid}/verify", dependencies=auth)

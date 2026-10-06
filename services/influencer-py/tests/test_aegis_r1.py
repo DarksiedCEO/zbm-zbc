@@ -57,8 +57,9 @@ def test_h1_a_window_is_not_built_the_total_is_lifetime():
 
 def test_m1_a_stranger_cannot_attach_a_handle_and_opt_the_creator_out(w):
     victim = w.creator(email="victim@example.test", handles=(("instagram", "victim"),))
-    # the stranger submits the public form with the victim's address and the stranger's own TikTok handle
-    app = w.ok(w.application("victim@example.test", handles=(("tiktok", "stranger"),)), 201)
+    # the stranger submits the public form with the victim's address: it takes an address only (round 4)
+    assert w.link("victim@example.test", handles=[{"platform": "tiktok", "handle": "stranger"}]).status_code == 422
+    app = w.ok(w.link("victim@example.test"), 201)
     assert app["confirmation_status"] == "pending"
     assert [h["platform"] for h in w.svc.influencers[victim["influencer_id"]]["handles"]] == ["instagram"]
     # ... and "stop" from their own TikTok resolves to no one: a review entry, nothing suppressed
@@ -71,7 +72,7 @@ def test_m1_a_stranger_cannot_attach_a_handle_and_opt_the_creator_out(w):
 
 def test_m1_the_confirmation_mail_goes_to_the_address_on_record_and_only_its_token_works(w):
     victim = w.creator(email="victim@example.test", handles=(("instagram", "victim"),))
-    app = w.ok(w.application("victim@example.test", handles=(("tiktok", "stranger"),)), 201)
+    app = w.ok(w.link("victim@example.test"), 201)
     w.clock.advance(hours=25)                    # R2-N1: one confirmation mail per address per day
     w.ok(w.job("send-queue"))
     mid, to, msg = w.ports.email.sent[-1]
@@ -81,31 +82,31 @@ def test_m1_the_confirmation_mail_goes_to_the_address_on_record_and_only_its_tok
                   caller="hub"), 404, "CONFIRMATION_UNKNOWN")
     w.code(w.post("/confirmations", {"request_id": rid(), "token": token}, caller="influencer_agent"), 403,
            "CALLER_NOT_ALLOWED")
-    w.ok(w.confirm(app["confirmation_id"]))                       # the real owner clicked: the handle is theirs
+    s = w.ok(w.confirm(app["confirmation_id"]))                  # the real owner clicked: a session opens
+    assert s["influencer_id"] == victim["influencer_id"]
     w.code(w.confirm(app["confirmation_id"]), 409, "CONFIRMATION_USED")
+    w.ok(w.submit(s, handles=(("tiktok", "mine"),)), 201)          # the handle the OWNER names is theirs
     assert {h["platform"] for h in w.svc.influencers[victim["influencer_id"]]["handles"]} == {"instagram", "tiktok"}
 
 
 def test_m1_a_confirmation_expires(w):
-    app = w.ok(w.application(), 201)
+    app = w.ok(w.link(), 201)
     w.clock.advance(days=8)
     w.code(w.confirm(app["confirmation_id"]), 409, "CONFIRMATION_EXPIRED")
-    assert w.svc.influencers[app["influencer_id"]]["adult_attested"] is False
+    assert not w.svc.influencers and not w.svc.sessions
 
 
 def test_m2_a_stranger_cannot_attest_for_a_prospect(w):
     p = w.prospect(email="found@example.test")
-    w.ok(w.application("found@example.test", handles=()), 201)
+    w.ok(w.link("found@example.test"), 201)
     assert w.svc.influencers[p["influencer_id"]]["adult_attested"] is False   # a58e633: True at once
 
 
 def test_m2_the_hub_cannot_replace_a_verified_creators_tax_reference(w):
     inf, d, ct = w.paid_ready()
     conf = w.ok(w.tax(inf, ref="stripe:acct_ATTACKERreference00"), 201)
-    assert conf["status"] == "pending"
+    assert conf["status"] == "pending_andre"                     # verified payee: Andre approves the change by hash
     assert w.svc.influencers[inf["influencer_id"]]["payee"]["status"] == "verified"   # nothing changed yet
-    out = w.ok(w.confirm(conf["conf_id"]))
-    assert out["status"] == "pending_andre"                       # verified payee: Andre approves the change by hash
     assert w.svc.influencers[inf["influencer_id"]]["tax"]["tax_ref"] != "stripe:acct_ATTACKERreference00"
     w.code(w.post(f"/confirmations/{conf['conf_id']}/approve", {"request_id": rid(), "content_sha256": "0" * 64},
                   andre=True), 409, "CONTENT_HASH_MISMATCH")
@@ -120,9 +121,11 @@ def test_m2_finance_gets_the_confirmed_identity_to_match(w):
     assert identity == f"{inf['influencer_id']}:" + hashlib.sha256(b"creator@example.test").hexdigest()
 
 
-def test_m2_no_tax_reference_before_the_address_is_confirmed(w):
-    app = w.ok(w.application(), 201)                                # applied, not yet confirmed
-    w.code(w.tax({"influencer_id": app["influencer_id"]}), 403, "AGE_ATTESTATION_REQUIRED")
+def test_m2_no_tax_reference_before_the_application(w):
+    s = w.session("fresh@example.test")                            # the mailbox proven, no application yet
+    w.code(w.tax({"influencer_id": s["influencer_id"]}, session=s), 404, "INFLUENCER_NOT_FOUND")
+    p = w.prospect(email="found@example.test")
+    w.code(w.tax(p), 403, "AGE_ATTESTATION_REQUIRED")
 
 
 # ------------------------------------------------------------------------------------------------ M3

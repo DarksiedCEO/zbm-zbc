@@ -251,28 +251,40 @@ class Harness:
         return self.post(f"/jobs/{name}/run", {"request_id": rid()}, caller="scheduler")
 
     # --- builders
-    def application(self, email: str = "creator@example.test", handles=(("instagram", "@creator.one"),),
-                    adult=True, **extra) -> dict:
-        body = {"request_id": rid(), "display_name": "Creator One", "email": email,
+    def link(self, email: str = "creator@example.test", **extra):
+        """The public apply step (AEGIS round 4): an address only."""
+        return self.post("/applications", {"request_id": rid(), "email": email, **extra}, caller="hub")
+
+    def confirm(self, conf_id: str):
+        """The link came back (the mailbox is proven): opens a creator session."""
+        return self.post("/confirmations", {"request_id": rid(), "token": self.svc.confirmation_token(conf_id)},
+                         caller="hub")
+
+    def session(self, email: str = "creator@example.test") -> dict:
+        """A creator session for that mailbox: the link requested, then clicked."""
+        conf = self.ok(self.link(email), 201)
+        return self.ok(self.confirm(conf["confirmation_id"]))
+
+    def submit(self, session: dict, handles=(("instagram", "@creator.one"),), adult=True, **extra):
+        body = {"request_id": rid(), "session_token": session["session_token"], "display_name": "Creator One",
                 "handles": [{"platform": p, "handle": hd} for p, hd in handles], "niches": ["gaming", "comedy"],
                 "follower_band": "mid", "engagement_band": "high", "country": "US",
                 "attestation_text_version": "age-v1", "attestation_text_sha256": ATTEST_SHA, **extra}
         if adult is not None:
             body["adult_18_plus"] = adult
-        return self.post("/applications", body, caller="hub")
+        return self.post("/sessions/application", body, caller="hub")
 
-    def confirm(self, conf_id: str):
-        return self.post("/confirmations", {"request_id": rid(), "token": self.svc.confirmation_token(conf_id)},
-                         caller="hub")
+    def application(self, email: str = "creator@example.test", handles=(("instagram", "@creator.one"),),
+                    adult=True, **extra):
+        """The whole creator path: the link, the click, the application inside the session."""
+        return self.submit(self.session(email), handles, adult, **extra)
 
     def creator(self, email: str = "creator@example.test", handles=(("instagram", "@creator.one"),),
                 first_name: Optional[str] = "Casey") -> dict:
-        app = self.ok(self.application(email, handles), 201)
-        self.ok(self.confirm(app["confirmation_id"]))
-        inf = self.ok(self.get(f"/influencers/{app['influencer_id']}"))
+        inf = self.ok(self.application(email, handles), 201)
         if first_name:
-            self.ok(self.post(f"/influencers/{inf['influencer_id']}/first-name",
-                              {"request_id": rid(), "first_name": first_name}))
+            inf = self.ok(self.post(f"/influencers/{inf['influencer_id']}/first-name",
+                                    {"request_id": rid(), "first_name": first_name}))
         return inf
 
     def prospect(self, handles=(("tiktok", "@found.one"),), email: Optional[str] = "found@example.test") -> dict:
@@ -348,15 +360,16 @@ class Harness:
                                                                "content_sha256": c["content_sha256"],
                                                                "post_ref": "post-1"}, caller="influencer_agent")
 
-    def tax(self, inf: dict, ref=TAX_REF, form="w9", country="US", legal="individual"):
-        """Asks for the change; it takes effect only once confirmed (``tax_confirmed``)."""
-        return self.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"],
-                                           "tax_form": form, "tax_ref": ref, "legal_form": legal,
-                                           "country": country}, caller="hub")
+    def tax(self, inf: dict, ref=TAX_REF, form="w9", country="US", legal="individual", session: Optional[dict] = None):
+        """A tax-reference change inside a creator session (a new one for the record's mailbox unless given)."""
+        if session is None:
+            session = self.session(self.svc.influencers[inf["influencer_id"]]["email"])
+        return self.post("/tax-profiles", {"request_id": rid(), "session_token": session["session_token"],
+                                           "influencer_id": inf["influencer_id"], "tax_form": form, "tax_ref": ref,
+                                           "legal_form": legal, "country": country}, caller="hub")
 
     def tax_confirmed(self, inf: dict, ref=TAX_REF, **kw) -> dict:
-        conf = self.ok(self.tax(inf, ref=ref, **kw), 201)
-        return self.ok(self.confirm(conf["conf_id"]))
+        return self.ok(self.tax(inf, ref=ref, **kw), 201)
 
     def verify(self, inf: dict):
         return self.post(f"/payees/{inf['influencer_id']}/verify", {"request_id": rid()}, caller="influencer_agent")

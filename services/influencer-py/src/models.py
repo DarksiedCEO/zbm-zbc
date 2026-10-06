@@ -50,12 +50,22 @@ class HandleIn(Strict):
     handle: Annotated[StrictStr, Field(min_length=1, max_length=64)]
 
 
-class ApplicationIn(Strict):
-    """The creator application form (hub). ``adult_18_plus`` must be exactly true (checked by the service, so a
-    missing or false value gets its own code)."""
+SessionToken = Annotated[StrictStr, Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9._:-]+$")]
+
+
+class LinkRequest(Strict):
+    """The public apply step (hub), AEGIS round 4: an address and optionally the brand, nothing else."""
     request_id: Id
-    display_name: Name
     email: Email
+    brand: Optional[Brand] = None
+
+
+class ApplicationIn(Strict):
+    """The application, submitted INSIDE a creator session (hub). ``adult_18_plus`` must be exactly true (checked by
+    the service, so a missing or false value gets its own code)."""
+    request_id: Id
+    session_token: SessionToken
+    display_name: Name
     handles: Annotated[list[HandleIn], Field(max_length=8)] = []
     niches: Annotated[list[Niche], Field(max_length=6)] = []
     follower_band: Optional[FollowerBand] = None
@@ -243,6 +253,7 @@ class ContentLive(Strict):
 class TaxProfile(Strict):
     """A REFERENCE to tax information held at Finance / Stripe / the vault — never the number itself."""
     request_id: Id
+    session_token: SessionToken
     influencer_id: Id
     tax_form: Literal["w9", "w8ben", "w8bene"]
     # AEGIS R1-M3 / R2-L-b: provider formats only — a Stripe connected account, or a vault reference in an alphabet

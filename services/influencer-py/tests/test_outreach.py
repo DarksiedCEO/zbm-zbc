@@ -96,7 +96,7 @@ def test_email_is_can_spam_complete_and_from_the_outreach_domain(w):
 
 def test_outreach_not_configured_refuses(tmp_path):
     h = Harness(tmp_path, INF_OUTREACH_DOMAIN=None, INF_POSTAL_ADDRESS=None)
-    app = h.ok(h.application(), 201)
+    app = h.ok(h.link(), 201)
     assert app["confirmation_status"] == "undeliverable" and not h.svc.messages     # nothing can be confirmed
     h.code(h.confirm(app["confirmation_id"]), 409, "CONFIRMATION_USED")
     p = h.prospect()
@@ -149,7 +149,7 @@ def test_the_one_click_link_suppresses_every_channel_for_both_brands(w):
     zbc = w.template(brand="zbc", name="clips")
     m = w.ok(w.email(inf, t), 201)
     token = w.svc.unsubscribe_token(m["message_id"])
-    w.code(w.post("/unsubscribe", {"request_id": rid(), "token": token[:-1] + "0"}, caller="hub"), 404,
+    w.code(w.post("/unsubscribe", {"request_id": rid(), "token": token[:-1] + ("1" if token[-1] == "0" else "0")}, caller="hub"), 404,
            "UNSUBSCRIBE_TOKEN_UNKNOWN")
     w.ok(w.post("/unsubscribe", {"request_id": rid(), "token": token}, caller="hub"))
     assert w.svc.messages[m["message_id"]]["status"] == "cancelled"

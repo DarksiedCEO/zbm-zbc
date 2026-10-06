@@ -4,8 +4,8 @@ InfluencerService.
 - **Tax information is a reference, never a number.** The creator's tax form is collected by Finance (31) / Stripe
   (or the vault); this service stores only the form kind, legal form, country and a provider reference
   (``stripe:acct_...`` or ``vault:<uuid>``) and its SHA-256. A raw TIN, SSN or EIN anywhere in a request is refused
-  422 ``TAX_ID_REFUSED`` (textguard.py). A reference takes effect only once the creator confirms it from the address
-  on record, and for a creator whose payee is already verified only once Andre approves it (AEGIS R1-M2); a new
+  422 ``TAX_ID_REFUSED`` (textguard.py). A reference is given only inside a creator session (the mailbox proven, AEGIS
+  round 4), and for a creator whose payee is already verified takes effect only once Andre approves it (R1-M2); a new
   reference resets the payee: verification starts again.
 - **Verified before paid.** ``POST /inf/v1/payees/{influencer_id}/verify`` registers the payee at Finance (from the
   reference) and reads its verification (KYC and TIN match happen at Finance and Stripe, never here); only Finance's
@@ -94,28 +94,18 @@ class PayoutsMixin:
     # ------------------------------------------------------------------------------------------------ tax profile
 
     def record_tax_profile(self, caller: str, body: dict) -> dict:
-        """A tax REFERENCE never takes effect on the caller's word (AEGIS R1-M2): it is mailed for confirmation to the
-        address on the record, and a change for a creator whose payee is already verified then also needs Andre's
-        approval of its hash. Answers the pending confirmation."""
+        """A tax REFERENCE never takes effect on the caller's word: only inside a creator session (the mailbox proven,
+        AEGIS round 4), for that session's own record, once per session; for a creator whose payee is already verified
+        it then waits for Andre's approval of its hash (AEGIS R1-M2). No per-address cap applies."""
         with self.lock:
             self._gate()
-            rk = self._rk("tax_profile", body["influencer_id"], body)
-            prev = self._idem(caller, rk, body)
-            if prev:
-                return self.confirmation_view(self.confirmations[prev[1]["confirmation_id"]])
-            inf = self._get(self.influencers, body["influencer_id"], "INFLUENCER_NOT_FOUND")
-            problem = i01_intake.contractable(inf)
-            if problem:
-                raise Forbidden(R(problem))
             # W-9 for a US person; W-8BEN for a foreign individual; W-8BEN-E for a foreign entity
             us, w9 = body["country"] == "US", body["tax_form"] == "w9"
             if us != w9 or (not w9 and (body["tax_form"] == "w8bene") != (body["legal_form"] == "entity")):
                 raise Invalid(R("TAX_FORM_MISMATCH"))
             payload = {"tax_form": body["tax_form"], "tax_ref": body["tax_ref"], "tax_ref_sha256": _rsha(body["tax_ref"]),
                        "legal_form": body["legal_form"], "country": body["country"]}
-            conf = self._request_confirmation(caller, rk, body, inf["influencer_id"], "tax_profile", inf["email"],
-                                              inf["email_hash"], payload)
-            return self.confirmation_view(conf)
+            return self.tax_in_session(caller, body, payload)
 
     # ------------------------------------------------------------------------------------------------ verification
 

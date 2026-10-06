@@ -11,14 +11,15 @@ from helpers import FakeSource, rid, wired_ports
 # ------------------------------------------------------------------------------------------------ 18+ attestation
 
 def test_an_adult_application_is_recorded_with_the_flag_only(h):
-    app = h.ok(h.application(), 201)
-    assert app["adult_attested"] is False and app["handles"] == [] and app["email_confirmed"] is False
-    h.ok(h.confirm(app["confirmation_id"]))
-    inf = h.ok(h.get(f"/influencers/{app['influencer_id']}"))
+    link = h.ok(h.link(), 201)
+    assert set(link) == {"confirmation_id", "confirmation_status"} and not h.svc.influencers   # an address only
+    s = h.ok(h.confirm(link["confirmation_id"]))
+    assert s["record_exists"] is False and not h.svc.influencers
+    inf = h.ok(h.submit(s), 201)
     assert inf["adult_attested"] is True and inf["source"] == "inbound_application" and inf["email_confirmed"]
     assert inf["attestation"] == {"text_version": "age-v1", "text_sha256": inf["attestation"]["text_sha256"],
                                   "source": "creator_form"}
-    assert inf["fit"]["zbc"]["tier"] == "A"
+    assert inf["fit"]["zbc"]["tier"] == "A" and [x["handle"] for x in inf["handles"]] == ["creator.one"]
     raw = str(h.svc.log.records)
     assert "birth" not in raw and '"age"' not in raw
     ev = h.ledger.of_type("age_attestation_recorded")[0]["_payload"]
@@ -28,13 +29,21 @@ def test_an_adult_application_is_recorded_with_the_flag_only(h):
 @pytest.mark.parametrize("adult,code", [(False, "MINOR_REFUSED"), (None, "AGE_ATTESTATION_REQUIRED")])
 def test_a_minor_or_no_attestation_is_refused_and_nothing_kept(h, adult, code):
     h.code(h.application(adult=adult), 422, code)
-    assert not h.svc.influencers and len(h.svc.log) == 1     # only the key binding
+    assert not h.svc.influencers
+    assert {r["kind"] for r in h.svc.log.records} == {"pii_key_bound", "confirmation_requested", "session_opened"}
 
 
 @pytest.mark.parametrize("value", ["true", 1, "yes"])
 def test_only_a_literal_true_attests(h, value):
     assert h.application(adult=value).status_code == 422
     assert not h.svc.influencers
+
+
+def test_the_public_form_takes_an_address_only(h):
+    for extra in ({"adult_18_plus": True}, {"handles": [{"platform": "x", "handle": "@a"}]}, {"display_name": "A"},
+                  {"attestation_text_version": "v1"}):
+        assert h.link(**extra).status_code == 422
+    assert not h.svc.confirmations
 
 
 def test_a_declared_minor_freezes_the_record_we_hold_until_andre_reviews(w):
@@ -45,10 +54,10 @@ def test_a_declared_minor_freezes_the_record_we_hold_until_andre_reviews(w):
     w.code(w.application(email="Young+x@example.test", adult=False), 422, "MINOR_REFUSED")
     inf = w.ok(w.get(f"/influencers/{p['influencer_id']}"))
     assert inf["blocked"] == "MINOR_DECLARED" and inf["adult_attested"] is False
-    assert inf["suppressed"] is False            # a stranger can freeze a record, never opt a creator out for good
+    assert inf["suppressed"] is False            # frozen for Andre's review, never opted out for good on its own
     assert w.svc.messages[queued["message_id"]]["reason"] == "INFLUENCER_BLOCKED"
     w.code(w.email(inf, t), 403, "INFLUENCER_BLOCKED")
-    w.code(w.application(email="young@example.test", adult=True), 403, "INFLUENCER_BLOCKED")
+    w.code(w.link(email="young@example.test"), 403, "INFLUENCER_BLOCKED")
     ev = w.ledger.of_type("influencer_blocked")[0]["_payload"]
     assert ev == {"influencer_id": p["influencer_id"], "reason": "MINOR_DECLARED"}
 
@@ -67,7 +76,7 @@ def test_andre_releases_a_false_declaration_and_the_prior_attestation_returns(w)
     inf = w.creator(email="real@example.test", handles=(("x", "@real"),))
     c = w.campaign()
     b = w.brief(c)
-    w.code(w.application(email="real@example.test", adult=False), 422, "MINOR_REFUSED")   # someone else typed it
+    w.code(w.application(email="real@example.test", adult=False), 422, "MINOR_REFUSED")   # a slip of the mouse
     w.code(w.deal(inf, c, b), 403, "INFLUENCER_BLOCKED")
     out = w.ok(w.post(f"/influencers/{inf['influencer_id']}/minor-review",
                       {"request_id": rid(), "decision": "not_a_minor"}, andre=True))
@@ -86,39 +95,38 @@ def test_a_released_record_that_never_attested_stays_unattested(w):
 
 def test_the_minor_refusal_replays_as_a_refusal(h):
     p = h.prospect(email="young@example.test")
-    body = {"request_id": rid(), "display_name": "Y", "email": "young@example.test", "adult_18_plus": False,
+    s = h.session("young@example.test")
+    body = {"request_id": rid(), "session_token": s["session_token"], "display_name": "Y", "adult_18_plus": False,
             "attestation_text_version": "v1", "attestation_text_sha256": "a" * 64}
-    h.code(h.post("/applications", body, caller="hub"), 422, "MINOR_REFUSED")
-    h.code(h.post("/applications", body, caller="hub"), 422, "MINOR_REFUSED")
+    h.code(h.post("/sessions/application", body, caller="hub"), 422, "MINOR_REFUSED")
+    h.code(h.post("/sessions/application", body, caller="hub"), 422, "MINOR_REFUSED")
     assert len(h.ledger.of_type("influencer_blocked")) == 1 and h.svc.influencers[p["influencer_id"]]["blocked"]
 
 
 def test_only_the_creator_form_attests(h):
-    body = {"request_id": rid(), "display_name": "A", "email": "a@b.test", "adult_18_plus": True,
+    s = h.session("a@b.test")
+    body = {"request_id": rid(), "session_token": s["session_token"], "display_name": "A", "adult_18_plus": True,
             "attestation_text_version": "v1", "attestation_text_sha256": "a" * 64}
     for caller in ("dashboard", "influencer_agent", "provider_events"):
-        h.code(h.post("/applications", body, caller=caller), 403, "CALLER_NOT_ALLOWED")
+        h.code(h.post("/sessions/application", body, caller=caller), 403, "CALLER_NOT_ALLOWED")
+        h.code(h.post("/applications", {"request_id": rid(), "email": "a@b.test"}, caller=caller), 403,
+               "CALLER_NOT_ALLOWED")
 
 
-def test_a_confirmed_application_with_a_prospects_address_attests_that_prospect(h):
+def test_an_application_with_a_prospects_address_attests_that_prospect(h):
     p = h.prospect(email="found@example.test", handles=(("tiktok", "@found.one"),))
     assert p["adult_attested"] is False
-    app = h.ok(h.application(email="found@example.test", handles=(("tiktok", "@other"), ("x", "@found_x"),
-                                                                  ("instagram", "@creator.one"))), 201)
-    assert app["influencer_id"] == p["influencer_id"] and app["adult_attested"] is False   # not before confirmation
-    assert len(app["handles"]) == 1
-    h.ok(h.confirm(app["confirmation_id"]))
-    inf = h.ok(h.get(f"/influencers/{p['influencer_id']}"))
-    assert inf["adult_attested"] is True
+    s = h.session("found@example.test")
+    assert s["influencer_id"] == p["influencer_id"] and s["record_exists"] is True
+    inf = h.ok(h.submit(s, handles=(("tiktok", "@other"), ("x", "@found_x"), ("instagram", "@creator.one"))), 201)
+    assert inf["influencer_id"] == p["influencer_id"] and inf["adult_attested"] is True
     plats = {x["platform"]: x["handle"] for x in inf["handles"]}
     assert plats == {"tiktok": "found.one", "x": "found_x", "instagram": "creator.one"}   # tiktok kept, never moved
 
 
 def test_a_handle_held_by_another_record_is_not_moved_by_an_application(h):
     p = h.prospect(email=None, handles=(("tiktok", "@famous"),))
-    app = h.ok(h.application(email="impostor@example.test", handles=(("tiktok", "@famous"),)), 201)
-    h.ok(h.confirm(app["confirmation_id"]))
-    inf = h.ok(h.get(f"/influencers/{app['influencer_id']}"))
+    inf = h.ok(h.application(email="impostor@example.test", handles=(("tiktok", "@famous"),)), 201)
     assert inf["influencer_id"] != p["influencer_id"] and inf["handles"] == []
     assert h.svc.handle_index[h.svc.influencers[p["influencer_id"]]["handles"][0]["handle_hash"]] == p["influencer_id"]
 

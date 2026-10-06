@@ -25,8 +25,8 @@ def test_n1_a_confirmation_flood_does_not_starve_a_real_creator_or_outreach(w):
     w.ok(w.email(known, t), 201)
     w.clock.advance(hours=25)
     for i in range(50):
-        w.ok(w.application(f"junk{i}@example.test", handles=()), 201)
-    legit = w.ok(w.application("real@example.test", handles=()), 201)
+        w.ok(w.link(f"junk{i}@example.test"), 201)
+    legit = w.ok(w.link("real@example.test"), 201)
     out = w.ok(w.job("send-queue"))
     sent_to = [x[1] for x in w.ports.email.sent]
     assert "real@example.test" in sent_to                          # 50312db: the 51st mail was over the cap
@@ -37,45 +37,46 @@ def test_n1_a_confirmation_flood_does_not_starve_a_real_creator_or_outreach(w):
 
 def test_n1_a_known_creators_confirmation_goes_before_new_addresses(tmp_path):
     h = Harness(tmp_path, ports=wired_ports(), INF_CONFIRMATION_DAILY_CAP="3")
-    known = h.creator(email="known@example.test", handles=(("x", "kn"),))
+    h.creator(email="known@example.test", handles=(("x", "kn"),))
     h.clock.advance(hours=25)
     h.ok(h.job("send-queue"))
     for i in range(5):
-        h.ok(h.application(f"junk{i}@example.test", handles=()), 201)
-    conf = h.ok(h.tax(known), 201)                                 # a real creator, queued last
+        h.ok(h.link(f"junk{i}@example.test"), 201)
+    conf = h.ok(h.link("known@example.test"), 201)                 # a real creator, queued last
+    n = len(h.ports.email.sent)
     h.ok(h.job("send-queue"))
-    assert [x[1] for x in h.ports.email.sent][0] == "known@example.test"
-    assert h.svc.messages[h.svc.confirmations[conf["conf_id"]]["message_id"]]["status"] == "sent"
+    assert [x[1] for x in h.ports.email.sent][n] == "known@example.test"
+    assert h.svc.messages[h.svc.confirmations[conf["confirmation_id"]]["message_id"]]["status"] == "sent"
 
 
-def test_n1_one_address_gets_one_mail_a_day_and_one_open_confirmation(w):
-    first = w.ok(w.application("victim2@example.test", handles=()), 201)
-    for _ in range(4):
-        again = w.ok(w.application("victim2@example.test", handles=()), 201)
-        assert again["confirmation_id"] == first["confirmation_id"]   # the same request reuses it
-    w.code(w.application("victim2@example.test", handles=()), 429, "APPLICATION_RATE_LIMITED")
+def test_n1_one_address_gets_one_mail_a_day_and_one_open_link(w):
+    # amended in round 4 (R4-M1'): repeats are never refused (no 5-a-day limit); they reuse the one open link
+    first = w.ok(w.link("victim2@example.test"), 201)
+    for _ in range(9):
+        again = w.ok(w.link("victim2@example.test"), 201)
+        assert again["confirmation_id"] == first["confirmation_id"]   # every request reuses it
     w.ok(w.job("send-queue"))
     assert sum(1 for x in w.ports.email.sent if x[1] == "victim2@example.test") == 1   # 50312db: 20 mails
 
 
-def test_n1_a_different_request_waits_a_day_for_its_mail(w):
-    # amended in round 3 (R3-M1): a different request no longer supersedes the first; both stay valid
-    a = w.ok(w.application("someone@example.test", handles=(("x", "one"),)), 201)
+def test_n1_a_repeat_request_waits_a_day_for_its_mail(w):
+    # amended in round 3 (R3-M1: no superseding) and round 4 (R4-M1': the one link is reused and mailed again)
+    a = w.ok(w.link("someone@example.test"), 201)
     w.ok(w.job("send-queue"))
-    b = w.ok(w.application("someone@example.test", handles=(("x", "two"),)), 201)
-    assert b["confirmation_id"] != a["confirmation_id"]
+    b = w.ok(w.link("someone@example.test"), 201)
+    assert b["confirmation_id"] == a["confirmation_id"]
     assert w.svc.confirmations[a["confirmation_id"]]["status"] == "pending"
     assert w.ok(w.job("send-queue"))["deferred"] == 1
     w.clock.advance(hours=24, seconds=1)
     assert w.ok(w.job("send-queue"))["confirmations_sent"] == 1
-    assert "x @two" in w.ports.email.sent[-1][2]["body"]           # the mail says what it would attach
+    assert w.svc.confirmation_token(a["confirmation_id"]) in w.ports.email.sent[-1][2]["body"]
 
 
 def test_n1_the_confirmation_queue_is_bounded(tmp_path):
     h = Harness(tmp_path, ports=wired_ports(), INF_CONFIRMATION_QUEUE_MAX="2")
-    h.ok(h.application("a1@example.test", handles=()), 201)
-    h.ok(h.application("a2@example.test", handles=()), 201)
-    h.code(h.application("a3@example.test", handles=()), 429, "QUEUE_FULL")
+    h.ok(h.link("a1@example.test"), 201)
+    h.ok(h.link("a2@example.test"), 201)
+    h.code(h.link("a3@example.test"), 429, "QUEUE_FULL")
 
 
 # ------------------------------------------------------------------------------------------------ N2
@@ -173,7 +174,7 @@ def test_n3_the_same_body_without_a_request_id_is_the_same_reply(w):
 
 def test_la_the_confirmation_goes_to_the_address_on_the_record(w):
     w.creator(email="owner@corp.test", handles=(("instagram", "own"),))
-    w.ok(w.application("owner+evil@corp.test", handles=(("tiktok", "evil"),)), 201)
+    w.ok(w.link("owner+evil@corp.test"), 201)
     w.clock.advance(hours=25)
     w.ok(w.job("send-queue"))
     assert w.ports.email.sent[-1][1] == "owner@corp.test"         # 50312db: owner+evil@corp.test
@@ -206,7 +207,7 @@ def test_lc_a_tax_id_refusal_names_the_field_never_the_value(w):
 def test_ld_a_suppressed_creator_can_apply_once_andre_approves_that_mail(w):
     p = w.prospect(email="back@example.test")
     w.ok(_reply(w, channel="email", from_email="back@example.test", text="no thanks"), 201)
-    app = w.ok(w.application("back@example.test", handles=()), 201)
+    app = w.ok(w.link("back@example.test"), 201)
     assert app["confirmation_status"] == "awaiting_andre"          # 50312db: undeliverable, for ever
     conf = w.svc.confirmations[app["confirmation_id"]]
     url = f"/confirmations/{app['confirmation_id']}/approve"
@@ -217,7 +218,7 @@ def test_ld_a_suppressed_creator_can_apply_once_andre_approves_that_mail(w):
     w.clock.advance(hours=25)
     w.ok(w.job("send-queue"))
     assert w.ports.email.sent[-1][1] == "back@example.test"
-    w.ok(w.confirm(app["confirmation_id"]))
+    w.ok(w.submit(w.ok(w.confirm(app["confirmation_id"])), handles=()), 201)
     inf = w.ok(w.get(f"/influencers/{p['influencer_id']}"))
     assert inf["adult_attested"] is True and inf["suppressed"] is True   # outreach stays suppressed
     t = w.template()

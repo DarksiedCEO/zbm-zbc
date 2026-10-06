@@ -176,6 +176,7 @@ class Settings:
     confirmation_new_address_percent: int = 25
     andre_review_daily_cap: int = 20
     unresolved_hold_days: int = 30
+    creator_session_minutes: int = 60
     bind_addr: str = "127.0.0.1"
     port: int = 8480
 
@@ -326,6 +327,8 @@ def load(env: Optional[dict] = None) -> Settings:
     s.confirmation_new_address_percent = _int(env, "INF_CONFIRMATION_NEW_ADDRESS_PERCENT", 25, 0, 90)
     s.andre_review_daily_cap = _int(env, "INF_ANDRE_REVIEW_DAILY_CAP", 20, 1, 1000)
     s.unresolved_hold_days = _int(env, "INF_UNRESOLVED_HOLD_DAYS", 30, 1, 365)
+    # AEGIS round 4: how long a creator session opened by the address link lasts (on the service clock)
+    s.creator_session_minutes = _int(env, "INF_CREATOR_SESSION_MINUTES", 60, 5, 1440)
     raw_max = (env.get("INF_AUTO_APPROVE_MAX") or "5000.00").strip()
     try:
         auto_max = money.parse(raw_max)

@@ -63,7 +63,7 @@ def test_every_log_line_is_anchored(tmp_path):
 def test_ledger_down_nothing_takes_effect(tmp_path):
     h = durable(tmp_path)
     h.ledger.fail = True
-    h.code(h.application(), 503, "LEDGER_UNAVAILABLE")
+    h.code(h.link(), 503, "LEDGER_UNAVAILABLE")
     assert not h.svc.influencers
 
 
@@ -226,7 +226,7 @@ def test_a_closed_instance_never_writes(tmp_path):
     populate(h)
     n, events = len(h.svc.log), len(h.ledger.events)
     h.svc.close()
-    h.code(h.application(email="new@example.test"), 503, "SERVICE_CLOSED")
+    h.code(h.link(email="new@example.test"), 503, "SERVICE_CLOSED")
     with pytest.raises(Unavailable) as e:
         h.svc._commit("job_ran", {"job": "x"}, "scheduler")
     assert e.value.reason == "SERVICE_CLOSED"

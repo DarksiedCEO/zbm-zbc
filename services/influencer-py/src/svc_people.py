@@ -38,8 +38,8 @@ class PeopleMixin:
             self.handle_index.setdefault(h["handle_hash"], inf["influencer_id"])
 
     def _apply_application(self, inf: dict, d: dict, at: str) -> None:
-        """A confirmed application (the token came back from the address): the 18+ attestation and the handles that
-        no other record holds take effect, and the address is confirmed."""
+        """An application submitted inside a creator session (the mailbox is proven): the 18+ attestation and the
+        handles that no other record holds take effect, and the address is confirmed."""
         inf.update(adult_attested=True, attestation=d["attestation"], attested_at=at, email_confirmed=True,
                    updated_at=at)
         have = {h["platform"] for h in inf["handles"]}
@@ -54,6 +54,7 @@ class PeopleMixin:
         inf = self.influencers[d["influencer_id"]]
         inf["blocked_prior"] = {k: inf.get(k) for k in ("adult_attested", "attestation", "attested_at")}
         inf.update(blocked=d["reason"], adult_attested=False, updated_at=at)
+        self._use_session(d)
         self._cancel_queued(set(), at, "INFLUENCER_BLOCKED", inf["influencer_id"])
         for dr in self.dm_drafts.values():
             if dr["influencer_id"] == inf["influencer_id"] and dr["status"] == "draft":
@@ -121,67 +122,8 @@ class PeopleMixin:
                                                               "adult_attested": False}, (actor, rk))]
 
     # ------------------------------------------------------------------------------------------------ applications
-
-    def apply(self, caller: str, body: dict) -> dict:
-        """The creator application form. Only the creator's own form attests (i01), and only once the creator proves
-        the address (AEGIS R1-M1/M2): an application changes NO identity field of any record — no attestation, no
-        handle — until the confirmation token mailed to that address comes back (``POST /inf/v1/confirmations``). A
-        new address gets a bare record (no handle, not attested, address unconfirmed).
-
-        A declared minor is refused and nothing about them is kept; when the address matches a record we already hold,
-        that record is FROZEN at once (a flag only: no age, no date of birth) and waits for Andre's minor review. It is
-        not suppressed: anyone can type anyone's address into a public form, so a stranger can freeze a record but
-        never permanently opt a creator out (sales-py S5-L2's reasoning)."""
-        problem = i01_intake.source_problem("inbound_application", caller)
-        if problem:
-            raise Forbidden(R(problem))
-        with self.lock:
-            self._gate()
-            email, eh = self._email(body["email"])
-            rk = self._rk("apply", eh, body)
-            prev = self._idem(caller, rk, body)
-            if prev:
-                if (prev[1] or {}).get("refused"):
-                    raise Invalid(R(prev[1]["refused"]))
-                return self._application_answer(prev[1]["influencer_id"], prev[1]["confirmation_id"])
-            existing_id = self.email_index.get(eh)
-            existing = self.influencers.get(existing_id) if existing_id else None
-            age = i01_intake.attestation_problem(body.get("adult_18_plus"))
-            if age == "MINOR_REFUSED":
-                if existing is not None and not existing.get("blocked"):
-                    iid = existing["influencer_id"]
-                    self._commit("influencer_blocked", self._req(
-                        {"influencer_id": iid, "reason": "MINOR_DECLARED"}, caller, rk, body,
-                        {"refused": "MINOR_REFUSED"}), caller,
-                        evidence=("influencer_blocked", f"influencer:{iid}",
-                                  {"influencer_id": iid, "reason": "MINOR_DECLARED"}, (caller, rk)))
-                raise Invalid(R("MINOR_REFUSED"))
-            if age:
-                raise Invalid(R(age))
-            if existing is not None and existing.get("blocked"):
-                raise Forbidden(R("INFLUENCER_BLOCKED"))
-            self._application_rate_problem(eh)
-            handles = self._handles(body.get("handles") or [])
-            payload = {"attestation": {"text_version": body["attestation_text_version"],
-                                       "text_sha256": body["attestation_text_sha256"], "source": "creator_form"},
-                       "add_handles": handles}
-            record = None
-            ev = []
-            if existing is None:
-                iid = derived_id("inf", caller, rk)
-                record = {"influencer_id": iid, **self._record("inbound_application", body, email, eh, [])}
-                ev += self._created_events(iid, "inbound_application", caller, rk)
-                to = email
-            else:
-                iid = existing["influencer_id"]
-                to = existing["email"]          # AEGIS R2-L-a: the address ON THE RECORD, never the one typed
-            conf = self._request_confirmation(caller, rk, body, iid, "application", to, eh, payload, record=record,
-                                              ev=ev, application_hash=eh)
-            return self._application_answer(iid, conf["conf_id"])
-
-    def _application_answer(self, iid: str, conf_id: str) -> dict:
-        return {**self.influencer_view(self.influencers[iid]), "confirmation_id": conf_id,
-                "confirmation_status": self.confirmations[conf_id]["status"]}
+    # The public form takes an address only and the application is submitted inside a creator session once the
+    # mailbox is proven (AEGIS round 4): svc_confirm.py ``request_link`` / ``confirm`` / ``submit_application``.
 
     def create_prospect(self, caller: str, body: dict) -> dict:
         """A profile a person at Andre's console researched. Not attested: it can be contacted (email under the

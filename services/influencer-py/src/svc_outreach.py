@@ -25,6 +25,8 @@ from reasons import R
 
 REPLY_TEXT_MAX = 20_000
 REPLY_CHANNELS = ("email", "instagram", "tiktok", "x", "youtube")
+DIGEST_CLASSES = ("unsubscribe", "review")   # AEGIS R4-L5': never expired before they were in Andre's digest
+HOLD_DIGEST_DAYS = 7                         # how long such a hold stays in the digest before hold-expiry closes it
 
 
 def _set_sha(hashes) -> str:
@@ -126,8 +128,11 @@ class OutreachMixin:
             self._a_suppression_added({"hashes": d["hashes"], "reason": d["reason"], "actor": d["actor"]}, at)
         if d.get("hold"):
             h = d["hold"]
-            self.holds[h["hold_id"]] = {**h, "status": "active", "at": at, "decided_at": None, "decision": None}
+            self.holds[h["hold_id"]] = {**h, "reply_ids": [h["reply_id"]], "status": "active", "at": at,
+                                        "decided_at": None, "decision": None, "digest_at": None}
             self._cancel_queued(set(h["hashes"]), at, "REPLY_HOLD", h.get("influencer_id"))
+        if d.get("attach"):
+            self.holds[d["attach"]]["reply_ids"].append(d["reply_id"])      # AEGIS R4-L1': the same hold
 
     def _a_hold_decided(self, d, at):
         h = self.holds[d["hold_id"]]
@@ -576,7 +581,7 @@ class OutreachMixin:
                 if not port.wired:
                     summary["not_wired"] += 1           # stays queued, visibly; nothing is recorded as sent
                     continue
-                inf = self.influencers[msg["influencer_id"]]
+                inf = self.influencers.get(msg["influencer_id"]) or {}
                 try:
                     self._commit("message_sending", {"message_id": mid, "date": today}, "scheduler",
                                  evidence=("outreach_send", f"msg:{mid}",
@@ -717,47 +722,71 @@ class OutreachMixin:
                 data.update(hashes=sorted(named), reason="opt_out_reply")
                 evidence.append(self._suppression_evidence(named, "opt_out_reply", caller, rk))
             # nothing resolved: still a hold (a review entry for Andre), even for an exact auto-reply
+            hold_id = None
             if not auto or not named:
-                hold_id = derived_id("hld", reply_id)
-                data["hold"] = {"hold_id": hold_id, "influencer_id": iid, "hashes": sorted(named),
-                                "reply_id": reply_id, "class": cls, "unresolved": not named}
-                evidence.append(("outreach_hold_applied", f"hold:{hold_id}",
-                                 {"hold_id": hold_id, "influencer_id": iid, "hashes": sorted(named),
-                                  "reply_id": reply_id, "class": cls, "unresolved": not named}, (caller, rk)))
+                # AEGIS R4-L1': a reply with the same target and the same text as an ACTIVE hold attaches to that hold
+                # (one decision lifts it) instead of opening a duplicate that would keep holding after Andre decides
+                same = next((h for h in self.holds.values() if h["status"] == "active"
+                             and h.get("influencer_id") == iid and h["hashes"] == sorted(named)
+                             and h.get("text_sha256") == data["text_sha256"]), None)
+                if same is not None:
+                    hold_id = data["attach"] = same["hold_id"]
+                    evidence.append(("outreach_hold_reply_attached", f"hold:{hold_id}",
+                                     {"hold_id": hold_id, "reply_id": reply_id}, (caller, rk)))
+                else:
+                    hold_id = derived_id("hld", reply_id)
+                    data["hold"] = {"hold_id": hold_id, "influencer_id": iid, "hashes": sorted(named),
+                                    "reply_id": reply_id, "class": cls, "unresolved": not named,
+                                    "text_sha256": data["text_sha256"]}
+                    evidence.append(("outreach_hold_applied", f"hold:{hold_id}",
+                                     {"hold_id": hold_id, "influencer_id": iid, "hashes": sorted(named),
+                                      "reply_id": reply_id, "class": cls, "unresolved": not named}, (caller, rk)))
             answer = {"reply_id": reply_id, "class": cls, "influencer_id": iid,
-                      "suppressed": bool(data.get("hashes")), "held": bool(data.get("hold")),
-                      "hold_id": (data.get("hold") or {}).get("hold_id"), "ignored": ignored}
+                      "suppressed": bool(data.get("hashes")), "held": hold_id is not None,
+                      "hold_id": hold_id, "ignored": ignored}
             self._commit("reply_received", self._req(data, caller, rk, idem_body, answer), caller,
                          evidence=evidence or None)
             return answer
 
     def _a_holds_expired(self, d, at):
+        for hid in d.get("digest_ids") or ():
+            self.holds[hid]["digest_at"] = at
         for hid in d["hold_ids"]:
             self.holds[hid].update(status="expired", decided_at=at, decision="expired")
 
     def expire_holds(self, body: dict) -> dict:
-        """The ``hold-expiry`` job (AEGIS R3-L5): an UNRESOLVED hold — a reply that named no influencer, address or
-        handle we could read, so it holds nobody — is closed after INF_UNRESOLVED_HOLD_DAYS on the service clock,
-        recorded and anchored like any other change. Holds with a target are never expired: only Andre lifts them."""
+        """The ``hold-expiry`` job (AEGIS R3-L5, R4-L5'): an UNRESOLVED hold — a reply that named no influencer,
+        address or handle we could read, so it holds nobody — is closed after INF_UNRESOLVED_HOLD_DAYS on the service
+        clock, recorded and anchored like any other change. One classified ``unsubscribe`` or ``review`` is never
+        closed silently: at that age it goes into Andre's digest (``GET /holds?status=digest``) and is closed only
+        HOLD_DIGEST_DAYS later if he has not decided it. Holds with a target are never expired: only Andre lifts them."""
         with self.lock:
             self._gate()
             rk = self._rk("job", "hold-expiry", body)
             prev = self._idem("scheduler", rk, body)
             if prev:
                 return {"job": "hold-expiry", "already_ran": True, **(prev[1] or {})}
-            cutoff = self.now() - timedelta(days=self.settings.unresolved_hold_days)
-            ids = sorted(h["hold_id"] for h in self.holds.values()
-                         if h["status"] == "active" and h.get("influencer_id") is None and not h["hashes"]
-                         and parse_iso(h["at"]) <= cutoff)
-            out = {"expired": len(ids)}
-            ev = [("holds_expired", f"job:{body['request_id']}"[:128], {"hold_ids": ids}, ("scheduler", rk))] \
-                if ids else None
-            self._commit("holds_expired", self._req({"hold_ids": ids}, "scheduler", rk, body, out), "scheduler",
-                         evidence=ev)
+            now = self.now()
+            cutoff = now - timedelta(days=self.settings.unresolved_hold_days)
+            due = [h for h in self.holds.values() if h["status"] == "active" and h.get("influencer_id") is None
+                   and not h["hashes"] and parse_iso(h["at"]) <= cutoff]
+            digest = sorted(h["hold_id"] for h in due if h.get("class") in DIGEST_CLASSES and not h.get("digest_at"))
+            ids = sorted(h["hold_id"] for h in due if h.get("class") not in DIGEST_CLASSES or (
+                h.get("digest_at") and parse_iso(h["digest_at"]) <= now - timedelta(days=HOLD_DIGEST_DAYS)))
+            out = {"expired": len(ids), "digested": len(digest)}
+            ev = []
+            if digest:
+                ev.append(("holds_digested", f"job:{body['request_id']}"[:128], {"hold_ids": digest}, ("scheduler", rk)))
+            if ids:
+                ev.append(("holds_expired", f"job:{body['request_id']}"[:128], {"hold_ids": ids}, ("scheduler", rk)))
+            self._commit("holds_expired", self._req({"hold_ids": ids, "digest_ids": digest}, "scheduler", rk, body,
+                                                    out), "scheduler", evidence=ev or None)
             return {"job": "hold-expiry", **out}
 
     def holds_view(self, status: Optional[str]) -> list[dict]:
         with self.lock:
+            if status == "digest":                    # AEGIS R4-L5': Andre's digest of unresolved opt-outs and reviews
+                return [dict(h) for h in self.holds.values() if h["status"] == "active" and h.get("digest_at")][:1000]
             return [dict(h) for h in self.holds.values() if status is None or h["status"] == status][:1000]
 
     def decide_hold(self, hold_id: str, body: dict) -> dict:

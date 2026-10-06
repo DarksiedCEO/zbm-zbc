@@ -17,41 +17,44 @@ def w(tmp_path):
 
 # ------------------------------------------------------------------------------------------------ M1
 
+# amended in round 4 (R4-M1'): the public form takes an address only, so a stranger's request carries nothing to bind;
+# the per-address open cap these tests once met is gone (any such cap was a lockout)
+
 def test_m1_a_stranger_never_invalidates_a_creators_open_confirmation(w):
-    app = w.ok(w.application("newbie@example.test", handles=(("instagram", "newbie"),)), 201)
+    app = w.ok(w.link("newbie@example.test"), 201)
     w.ok(w.job("send-queue"))                                      # the creator's mail goes out
-    w.ok(w.application("newbie@example.test", handles=(("tiktok", "stranger"),)), 201)   # a stranger
-    w.ok(w.confirm(app["confirmation_id"]))                        # fa0c091: 409 CONFIRMATION_USED (superseded)
-    inf = w.svc.influencers[app["influencer_id"]]
+    again = w.ok(w.link("newbie@example.test"), 201)               # a stranger
+    assert again["confirmation_id"] == app["confirmation_id"]
+    s = w.ok(w.confirm(app["confirmation_id"]))                    # fa0c091: 409 CONFIRMATION_USED (superseded)
+    inf = w.ok(w.submit(s, handles=(("instagram", "newbie"),)), 201)
     assert inf["adult_attested"] is True
-    assert [h["handle"] for h in inf["handles"]] == ["newbie"]    # only ITS payload: the stranger's handle is not added
+    assert [h["handle"] for h in inf["handles"]] == ["newbie"]     # only what the mailbox owner submitted
 
 
 def test_m1_daily_superseding_cannot_lock_a_creator_out(w):
-    app = w.ok(w.application("newbie2@example.test", handles=(("instagram", "n2"),)), 201)
+    app = w.ok(w.link("newbie2@example.test"), 201)
     w.ok(w.job("send-queue"))
-    w.ok(w.application("newbie2@example.test", handles=(("tiktok", "s0"),)), 201)
-    w.ok(w.application("newbie2@example.test", handles=(("tiktok", "s1"),)), 201)
-    w.code(w.application("newbie2@example.test", handles=(("tiktok", "s2"),)), 429, "CONFIRMATIONS_OPEN_LIMIT")
+    for _ in range(3):
+        assert w.ok(w.link("newbie2@example.test"), 201)["confirmation_id"] == app["confirmation_id"]
     assert w.svc.confirmations[app["confirmation_id"]]["status"] == "pending"
     w.clock.advance(hours=12)
-    w.ok(w.confirm(app["confirmation_id"]))
-    assert w.svc.influencers[app["influencer_id"]]["adult_attested"] is True
+    s = w.ok(w.confirm(app["confirmation_id"]))
+    assert w.ok(w.submit(s, handles=(("instagram", "n2"),)), 201)["adult_attested"] is True
 
 
 def test_m1_a_cancelled_mail_does_not_delay_the_next(w):
-    a = w.ok(w.application("quick@example.test", handles=()), 201)
-    w.ok(w.confirm(a["confirmation_id"]))                          # confirmed from the portal before the job ran
-    w.ok(w.tax(w.svc.influencers[a["influencer_id"]]), 201)
+    a = w.ok(w.link("quick@example.test"), 201)
+    w.ok(w.confirm(a["confirmation_id"]))                          # clicked from a mail sent before; this one cancelled
+    w.ok(w.link("quick@example.test"), 201)                        # a new link later the same day
     out = w.ok(w.job("send-queue"))
     assert out["confirmations_sent"] == 1 and out["deferred"] == 0   # fa0c091: deferred (counted from queue time)
 
 
 def test_m1_the_daily_rule_counts_from_send_time(w):
-    w.ok(w.application("slow@example.test", handles=(("x", "one"),)), 201)
+    w.ok(w.link("slow@example.test"), 201)
     w.clock.advance(hours=20)
     w.ok(w.job("send-queue"))                                      # sent at hour 20
-    w.ok(w.application("slow@example.test", handles=(("x", "two"),)), 201)
+    w.ok(w.link("slow@example.test"), 201)                         # mailed again: queued now
     w.clock.advance(hours=10)                                      # 30 h after queueing, 10 h after sending
     assert w.ok(w.job("send-queue"))["deferred"] == 1
     w.clock.advance(hours=15)
@@ -81,7 +84,7 @@ def _self_suppressed(w, n):
         a = f"spam{i}@example.test"
         w.ok(w.post("/replies", {"request_id": rid(), "channel": "email", "from_email": a, "text": "STOP"},
                     caller="provider_events"), 201)
-        out.append(w.ok(w.application(a, handles=()), 201))
+        out.append(w.ok(w.link(a), 201))
     return out
 
 
@@ -118,13 +121,14 @@ def test_l2_andre_bulk_rejects_by_the_hash_of_the_exact_list(w):
 
 def test_l3_new_addresses_keep_their_share_of_the_confirmation_cap(tmp_path):
     h = Harness(tmp_path, ports=wired_ports(), INF_CONFIRMATION_DAILY_CAP="4")
-    known = [h.creator(email=f"k{i}@example.test", handles=(("x", f"k{i}"),)) for i in range(6)]
+    for i in range(6):
+        h.creator(email=f"k{i}@example.test", handles=(("x", f"k{i}"),))
     h.clock.advance(hours=25)
     h.ok(h.job("send-queue"))
     h.clock.advance(hours=25)
-    for k in known:
-        h.ok(h.tax(k), 201)                                       # six known creators ask first
-    h.ok(h.application("fresh@example.test", handles=()), 201)
+    for i in range(6):
+        h.ok(h.link(f"k{i}@example.test"), 201)                    # six known creators ask first
+    h.ok(h.link("fresh@example.test"), 201)
     h.ok(h.job("send-queue"))
     sent = [x[1] for x in h.ports.email.sent[-4:]]
     assert "fresh@example.test" in sent                            # fa0c091: known creators took the whole cap
@@ -134,17 +138,17 @@ def test_l3_new_addresses_keep_their_share_of_the_confirmation_cap(tmp_path):
 # ------------------------------------------------------------------------------------------------ L5
 
 def test_l5_rate_state_older_than_a_day_is_pruned(w):
-    w.ok(w.application("p1@example.test", handles=()), 201)
+    w.ok(w.link("p1@example.test"), 201)
     w.ok(w.job("send-queue"))
-    assert w.svc.app_times and w.svc.conf_mail_at
+    assert w.svc.conf_mail_at                                      # (round 4: no per-address application times)
     w.clock.advance(hours=25)
     w.ok(w.job("send-queue"))
-    assert not w.svc.app_times and not w.svc.conf_mail_at
+    assert not w.svc.conf_mail_at
 
 
 def test_l5_unresolved_holds_expire_recorded_and_anchored(w):
-    r = w.ok(w.post("/replies", {"request_id": rid(), "channel": "email", "text": "who?"}, caller="provider_events"),
-             201)
+    r = w.ok(w.post("/replies", {"request_id": rid(), "channel": "email", "text": "sounds good"},
+                    caller="provider_events"), 201)       # interested (an opt-out or a review goes to the digest: R4)
     inf = w.creator()
     t = w.template()
     targeted = w.ok(w.post("/replies", {"request_id": rid(), "channel": "email", "from_email": "creator@example.test",
@@ -162,6 +166,6 @@ def test_l5_unresolved_holds_expire_recorded_and_anchored(w):
 
 def test_l5_hold_expiry_days_is_a_setting(tmp_path):
     h = Harness(tmp_path, ports=wired_ports(), INF_UNRESOLVED_HOLD_DAYS="2")
-    r = h.ok(h.post("/replies", {"request_id": rid(), "channel": "email", "text": "?"}, caller="provider_events"), 201)
+    r = h.ok(h.post("/replies", {"request_id": rid(), "channel": "email", "text": "sounds good"}, caller="provider_events"), 201)
     h.clock.advance(days=2, seconds=1)
     assert h.ok(h.job("hold-expiry"))["expired"] == 1 and h.svc.holds[r["hold_id"]]["status"] == "expired"

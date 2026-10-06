@@ -11,10 +11,8 @@ from helpers import FakeFinance, Harness, rid, wired_ports
 
 def test_tax_profile_holds_a_reference_and_its_hash_only(w):
     inf = w.creator()
-    conf = w.ok(w.tax(inf), 201)
-    assert conf["status"] == "pending" and "payload" not in conf and "email" not in conf
-    assert w.svc.influencers[inf["influencer_id"]]["tax"] is None             # nothing before the confirmation
-    w.ok(w.confirm(conf["conf_id"]))
+    conf = w.ok(w.tax(inf), 201)                     # inside a creator session (the mailbox proven): at once
+    assert conf["status"] == "applied" and "acct_" not in str(conf) and "email" not in conf
     out = w.ok(w.get(f"/influencers/{inf['influencer_id']}"))
     assert out["tax_profile"]["tax_form"] == "w9" and "tax_ref" not in out["tax_profile"]
     ev = w.ledger.of_type("tax_profile_recorded")[0]["_payload"]
@@ -45,12 +43,15 @@ def test_tax_form_matches_country_and_legal_form(w, form, country, legal, ok):
     assert (r.status_code == 201) is ok, r.text
 
 
-def test_only_the_creator_portal_or_console_records_a_tax_reference(w):
+def test_only_the_creator_portal_records_a_tax_reference(w):
     inf = w.creator()
-    r = w.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"], "tax_form": "w9",
-                                 "tax_ref": "stripe:acct_TESTabcdefghijklmnop", "legal_form": "individual", "country": "US"},
-               caller="influencer_agent")
-    w.code(r, 403, "CALLER_NOT_ALLOWED")
+    s = w.session()
+    for caller in ("influencer_agent", "dashboard"):
+        r = w.post("/tax-profiles", {"request_id": rid(), "session_token": s["session_token"],
+                                     "influencer_id": inf["influencer_id"], "tax_form": "w9",
+                                     "tax_ref": "stripe:acct_TESTabcdefghijklmnop", "legal_form": "individual",
+                                     "country": "US"}, caller=caller)
+        w.code(r, 403, "CALLER_NOT_ALLOWED")
 
 
 def test_finance_stand_in_nothing_is_verified_or_paid(h):

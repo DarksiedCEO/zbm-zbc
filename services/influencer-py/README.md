@@ -59,7 +59,8 @@ ledger as `founder_approval_refused`).
 | `INF_CONFIRMATION_QUEUE_MAX` | 2000 | confirmation mails waiting at once (1..20000); past it `429 QUEUE_FULL` |
 | `INF_CONFIRMATION_NEW_ADDRESS_PERCENT` | 25 | share of the daily confirmation cap reserved for NEW addresses (0..90); records we hold use the rest |
 | `INF_ANDRE_REVIEW_DAILY_CAP` | 20 | new items a day in Andre's review queue (1..1000); past it they wait in his digest (`awaiting_andre_digest`), never dropped |
-| `INF_UNRESOLVED_HOLD_DAYS` | 30 | days an unresolved reply hold (one that names nobody) lasts before `hold-expiry` closes it (1..365) |
+| `INF_UNRESOLVED_HOLD_DAYS` | 30 | days an unresolved reply hold (one that names nobody) lasts before `hold-expiry` closes it (1..365); one classified `unsubscribe` or `review` goes into Andre's digest at that age instead and is closed 7 days later if he has not decided it |
+| `INF_CREATOR_SESSION_MINUTES` | 60 | how long a creator session opened by the address link lasts (5..1440), on the service clock |
 | `INF_AUTO_APPROVE_MAX` | `5000.00` | largest deal total (and influencer and campaign aggregate) approved without Andre; at most 5000.00 |
 | `INF_EMAIL_PROVIDER`, `INF_DM_PROVIDER`, `INF_PUBLIC_PROFILE_PROVIDER`, `INF_PAID_DATABASE_PROVIDER`, `INF_FINANCE_URL`, `INF_LEGAL_URL`, `INF_DEAL_AGGREGATE_WINDOW_DAYS` | unset | not built: setting one (other than `none`/`0`) refuses start (the $5,000 per-person total is lifetime) |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | — | unset = every write refused (fail closed) |
@@ -76,9 +77,10 @@ All under `/inf/v1` except `/health`. "worker" = `dashboard` or `influencer_agen
 | `GET /health` | open | `ok`, `degraded` or (503) `closed`, nothing else |
 | `GET /status` | dashboard | integrity, ports wired, send pace, queue, holds, pending approvals |
 | `GET /intelligences` | worker | the eleven single-task components |
-| `POST /applications` | hub | the creator application form: `adult_18_plus` must be exactly `true` (false: 422 `MINOR_REFUSED`, nothing kept; missing: 422 `AGE_ATTESTATION_REQUIRED`); nothing about identity takes effect until confirmed |
-| `POST /confirmations` | hub | the token mailed to the address on record: that confirmation's own application (attestation, handles) or tax-reference change takes effect. No request invalidates another's open confirmation; at most three open per address (429 `CONFIRMATIONS_OPEN_LIMIT`), one mail sent per address per day, five applications per address per day (429) |
-| `GET /confirmations`; `POST /confirmations/{id}/approve`, `/reject` | dashboard; Andre | by hash: a confirmed tax-reference change for an already verified payee, or mailing a confirmation to a suppressed creator who applied |
+| `POST /applications` | hub | the public apply step: `{request_id, email, brand?}` only (AEGIS R4). Each address has ONE open address link, reused by every repeat request (never refused for being a repeat); mailed at most once a day from send time to the address on the record; it carries no handle, attestation or payload |
+| `POST /confirmations` | hub | the link came back (the mailbox is proven): opens a creator session for `INF_CREATOR_SESSION_MINUTES` (default 60), bound to the record; answers `session_token` (256 bits, re-derived, never logged or on the ledger). The link is single use |
+| `POST /sessions/application` | hub | inside a session: the application (`adult_18_plus` exactly `true` — false: 422 `MINOR_REFUSED`, nothing kept and a record we hold is frozen for Andre's review; missing: 422 `AGE_ATTESTATION_REQUIRED`), handles and details, applied at once; once per session (409 `SESSION_ACTION_USED`); an expired session 403 `SESSION_EXPIRED`, a wrong token 403 `SESSION_INVALID` |
+| `GET /confirmations`; `POST /confirmations/{id}/approve`, `/reject` | dashboard; Andre | by hash: a tax-reference change for an already verified payee, or mailing the address link to a suppressed address |
 | `POST /confirmations/bulk-reject` | Andre | rejects every listed item, bound to `ids_sha256` = SHA-256 of `"\n".join(conf_ids)` in his order; all or nothing |
 | `POST /influencers` | dashboard | a prospect a person researched (never attested: no deal until the creator applies) |
 | `POST /discovery/import` | influencer_agent, scheduler | public-profile / paid-database discovery through the ports (stand-ins: 503 `SOURCE_NOT_WIRED`) |
@@ -94,7 +96,7 @@ All under `/inf/v1` except `/health`. "worker" = `dashboard` or `influencer_agen
 | `POST /dm-drafts`; `GET /dm-drafts` | influencer_agent; worker | the agent drafts a platform DM |
 | `POST /dm-drafts/{id}/approve`, `/reject` | Andre | approve binds the hash and queues the DM (no DM provider: it stays queued) |
 | `POST /events/email`; `POST /replies` | provider_events | bounces and complaints; replies on any channel (any reply holds; never refused for anything a provider sends: lenient fields, text truncated, up to 512 KiB) |
-| `GET /holds`; `POST /holds/{id}/decision` | worker; Andre | `continue` lifts the hold; `opt_out` suppresses |
+| `GET /holds`; `POST /holds/{id}/decision` | worker; Andre | `continue` lifts the hold; `opt_out` suppresses. A reply with the same target and text as an active hold attaches to it (one decision). `?status=digest`: Andre's digest of unresolved opt-outs and reviews |
 | `POST /campaigns`, `/campaigns/{id}/close`; `GET /campaigns`, `/campaigns/{id}` | worker | influencer or `co_marketing` (with its partner); live-content count |
 | `POST /briefs`; `GET /briefs`, `/briefs/{id}` | worker (`GET /briefs/{id}` also hub) | a brief with its required disclosure and the fixed FTC section |
 | `POST /briefs/{id}/approve` | Andre | binds the hash of the brief as issued |
@@ -105,7 +107,7 @@ All under `/inf/v1` except `/health`. "worker" = `dashboard` or `influencer_agen
 | `POST /contents/{id}/approve`, `/reject` | Andre | the final content, by hash |
 | `POST /contents/{id}/live` | worker | counts live only when approved (hash named again) and contracted |
 | `GET /material-connections` | auditor | FTC material-connection records |
-| `POST /tax-profiles` | hub, dashboard | a tax REFERENCE (`stripe:acct_...` or `vault:` + 26 lowercase letters), never a number; takes effect only once confirmed by email (and, for a verified payee, approved by Andre) |
+| `POST /tax-profiles` | hub | inside a creator session (`session_token`), for the session's own record (403 `SESSION_RECORD_MISMATCH`), once per session: a tax REFERENCE (`stripe:acct_...` or `vault:` + 26 lowercase letters), never a number; applied at once, or for a verified payee approved by Andre by hash. No per-address cap |
 | `POST /payees/{influencer_id}/verify` | dashboard, influencer_agent, scheduler | register at Finance and read the verification (stand-in: 503 `FINANCE_UNAVAILABLE`) |
 | `POST /payouts`; `GET /payouts`, `/payouts/{id}` | worker | a payout request handed to Finance (31) for a verified payee (`pending_andre` when the person's lifetime deals exceed the limit and Andre did not approve the deal) |
 | `POST /payouts/{id}/approve`, `/reject` | Andre | a payout held by the per-person rule, by hash |

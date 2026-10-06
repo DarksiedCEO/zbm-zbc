@@ -10,7 +10,8 @@ state from the log at start, so live state and replayed state cannot diverge. Th
 fixed in its AEGIS rounds 1-5 (ADR 0012), and the closed-instance, claim / adopt and unlocked-``verify()`` rules are
 service-py's (ADR 0014 rounds 5-5e).
 
-The department's work is in four mixins: svc_people.py (applications, prospects, discovery, attestation),
+The department's work is in five mixins: svc_people.py (records, prospects, discovery, attestation), svc_confirm.py
+(the address link, creator sessions, the application and tax changes inside them),
 svc_outreach.py (suppression, templates, email, DM drafts, replies and holds), svc_deals.py (campaigns, briefs, deals,
 contracts, content, material connections) and svc_payouts.py (tax references, payee verification, payout requests).
 The deciding rules are in intelligences/ (deterministic, one job each). No port is ever called with the lock held.
@@ -91,8 +92,8 @@ class InfluencerService(PeopleMixin, ConfirmMixin, OutreachMixin, DealsMixin, Pa
         self.contents: dict[str, dict] = {}
         self.payouts: dict[str, dict] = {}
         self.confirmations: dict[str, dict] = {}
-        self.conf_mail_at: dict[str, str] = {}       # canonical address hash -> last confirmation mail queued
-        self.app_times: dict[str, list] = {}         # canonical address hash -> application times
+        self.conf_mail_at: dict[str, str] = {}       # canonical address hash -> last link mail SENT
+        self.sessions: dict[str, dict] = {}          # creator sessions (AEGIS round 4); tokens are never stored
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}

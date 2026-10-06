@@ -67,16 +67,19 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
 8. **Minors and confirmation.** An application must carry `adult_18_plus: true` exactly (a string, number or missing value is not an
    attestation) with the attestation text's version and SHA-256; only the creator's own form (`hub`) attests. `false`
    is refused 422 `MINOR_REFUSED` and nothing about the applicant is kept; missing is 422 `AGE_ATTESTATION_REQUIRED`.
-   No date of birth, age or birth year is accepted anywhere (`FORBIDDEN_FIELD`). *AEGIS round 1 (M1/M2):* an
-   application changes no identity field of any record — no attestation, no handle — until the creator confirms the
-   address: a one-time token (HMAC under the PII key, never stored, single use, 7 days) is mailed through the email port
-   as a fixed service text to the address on the record, and comes back through `POST /inf/v1/confirmations` (`hub`).
-   A new address gets a bare record (no handle, unattested, unconfirmed); no confirmation mail goes to a suppressed
-   address or a blocked record (a reply hold does not stop it: it answers the creator's own request). A researched or
+   No date of birth, age or birth year is accepted anywhere (`FORBIDDEN_FIELD`). *AEGIS round 4 (M1′; replaces the
+   round 1-3 payload-bound confirmations):* the mailbox is verified FIRST and the application is taken after. The public
+   form (`POST /inf/v1/applications`) takes an address only; each canonical address has one open address link (HMAC
+   under the PII key, never stored, single use, 7 days), reused by every repeat request and mailed at most once a day
+   (from send time) as a fixed service text to the address on the record. The click (`POST /inf/v1/confirmations`,
+   `hub`) opens a creator session (`INF_CREATOR_SESSION_MINUTES`, default 60) bound to the record, and the attestation,
+   handles and details (`POST /inf/v1/sessions/application`) apply at once inside it; a record is created only then.
+   No link mail goes to a suppressed address (until Andre approves that mail by hash) or a blocked record (a reply hold
+   does not stop it: it answers the creator's own request). A researched or
    imported prospect is
    never attested: it may be contacted under the outreach rules but gets no brief-based deal, contract, content,
-   tax reference or payout until the creator applies with the same address. When a declared-minor application names
-   the address of a record we hold, that record is **frozen at once** (`blocked: MINOR_DECLARED`: no outreach, deal,
+   tax reference or payout until the creator applies with the same address. When a declared-minor application is
+   submitted in a session for the address of a record we hold, that record is **frozen at once** (`blocked: MINOR_DECLARED`: no outreach, deal,
    contract, content or payout; queued messages cancelled) and waits for Andre's minor review: `confirm_minor` keeps it
    blocked for good and suppresses every address and handle; `not_a_minor` releases it with the attestation the
    creator had made before the declaration, if any (AEGIS R1-L4; a record that never attested stays unattested).
@@ -116,7 +119,8 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
     only the form kind (W-9 for a US person, W-8BEN for a foreign individual, W-8BEN-E for a foreign entity), the legal
     form, the country and a provider reference — `stripe:acct_` + 16..64 letters and digits, or `vault:` + exactly 26
     lowercase letters (the vault's reference alphabet has NO digits, so a reference's shape can never hide a tax id;
-    AEGIS R2-L-b) — (its SHA-256 on the ledger). Whether a reference EXISTS is Finance's to confirm (unlock item 5). Every tax-reference change goes through the email confirmation (decision 8);
+    AEGIS R2-L-b) — (its SHA-256 on the ledger). Whether a reference EXISTS is Finance's to confirm (unlock item 5). Every tax-reference change is made inside a
+    creator session (decision 8, AEGIS round 4), for that session's record, once per session, with no per-address cap;
     for a creator whose payee is already verified it then also waits for Andre's approval of its hash
     (`POST /inf/v1/confirmations/{id}/approve`).
 14. **FTC Endorsement Guides, fail closed** (i08). A brief's disclosure comes from a closed list (`#ad`, `#sponsored`,
@@ -233,12 +237,14 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
 ## Hub requirements (the creator portal / public forms)
 
 - **Per-IP rate limiting and a CAPTCHA (or equivalent) on the creator application form and the tax-reference form**
-  (AEGIS R2-N1). This service bounds what it can see — at most three open confirmations per address (round 3), at most one confirmation
-  mail per address per day, five applications per address per day, its own confirmation queue and daily cap, apart
-  from outreach — but it never sees the caller's IP, so stopping a flood of distinct junk addresses is the hub's job.
-- The one-click unsubscribe page (`/u/<token>`) and the confirmation page (`/c/<token>`) on the outreach domain relay
-  the token to this service.
-- The hub submits content and tax references only for the creator signed in to the portal.
+  (AEGIS R2-N1). This service bounds what it can see — one open address link per address, mailed at most once a day,
+  its own confirmation queue and daily cap, apart from outreach — and never refuses a repeat request for the same
+  address (round 4: any per-address limit before the click is a lockout of the real creator); it never sees the
+  caller's IP, so stopping a flood of distinct junk addresses is the hub's job.
+- The one-click unsubscribe page (`/u/<token>`) and the link page (`/c/<token>`) on the outreach domain relay the token
+  to this service; the link page receives the creator session token and keeps it for the session's forms only (never
+  in a URL, a log or analytics), and sends it with the application and tax-reference forms.
+- The hub submits content only for the creator signed in to the portal.
 
 ## Settings
 
@@ -275,7 +281,7 @@ after the fix).
 
 | Id | Finding | Fix |
 |---|---|---|
-| R2-N1 | Junk applications flooded confirmation mail: one address could be mailed twenty times, and fifty junk addresses used up the outreach cap so a real creator's confirmation did not go | One OPEN confirmation per record and kind: the same request reuses it, a different one supersedes it (the old token dies) *(superseding replaced in round 3, R3-M1)*; at most one confirmation mail per address per 24 hours *(from send time since round 3)*; five applications per address per 24 hours (429 `APPLICATION_RATE_LIMITED`); confirmation mails have their own queue (`INF_CONFIRMATION_QUEUE_MAX`, default 2000) and daily cap (`INF_CONFIRMATION_DAILY_CAP`, default 200), apart from outreach, and are sent before outreach with records we already hold first. Per-IP limits and a CAPTCHA are a hub requirement (above) |
+| R2-N1 | Junk applications flooded confirmation mail: one address could be mailed twenty times, and fifty junk addresses used up the outreach cap so a real creator's confirmation did not go | One OPEN confirmation per record and kind: the same request reuses it, a different one supersedes it (the old token dies) *(superseding replaced in round 3, R3-M1)*; at most one confirmation mail per address per 24 hours *(from send time since round 3)*; five applications per address per 24 hours (429 `APPLICATION_RATE_LIMITED`) *(removed in round 4)*; confirmation mails have their own queue (`INF_CONFIRMATION_QUEUE_MAX`, default 2000) and daily cap (`INF_CONFIRMATION_DAILY_CAP`, default 200), apart from outreach, and are sent before outreach with records we already hold first. Per-IP limits and a CAPTCHA are a hub requirement (above) |
 | R2-N2 | Two tax references of one person were two people | Finance's per-person key (an opaque keyed hash of the matched TIN, returned by `register_payee` / `payee_status`; the stand-in returns none) ties records together for D2/D3, and is read again at payout. A payout with NO person key yet, on a deal Andre did not approve himself, waits for Andre (`PERSON_KEY_MISSING`) — read as "fail closed while the person cannot be proven under the limit" |
 | R2-N3 | A long reply text (422), a message id shaped like a tax id (422), or any other provider field could refuse a reply | The reply route reads every field leniently: any JSON type, unknown fields ignored and never stored, no tax-id scan (nothing raw is stored), text cut to 20,000 characters before it is classified and hashed, an unknown channel is `other` (the lower opt-out bar), a missing request id replaced by the body's SHA-256, a body that is not an object read as empty; the route accepts up to 512 KiB (the relay truncates beyond that) |
 | R2-L-a | The confirmation for an existing record went to the address typed into the form (`owner+evil@...`) | It goes to the address ON THE RECORD |
@@ -293,12 +299,44 @@ Regressions: `services/influencer-py/tests/test_aegis_r3.py` (each fails on fa0c
 
 | Id | Finding | Fix |
 |---|---|---|
-| R3-M1 | A stranger could supersede a creator's open confirmation again and again (and the 24-hour rule counted from queue time, so a cancelled mail delayed the next) | No request invalidates another's open confirmation: each stays valid until it expires and applies only its own payload. At most three open confirmations per address (429 `CONFIRMATIONS_OPEN_LIMIT`, the open ones untouched). The one-mail-a-day rule counts from SEND time; a cancelled mail never delays the next. *(Replaces round 2's supersede rule.)* |
+| R3-M1 | A stranger could supersede a creator's open confirmation again and again (and the 24-hour rule counted from queue time, so a cancelled mail delayed the next) | No request invalidates another's open confirmation: each stays valid until it expires and applies only its own payload. At most three open confirmations per address (429 `CONFIRMATIONS_OPEN_LIMIT`, the open ones untouched). The one-mail-a-day rule counts from SEND time; a cancelled mail never delays the next. *(Replaces round 2's supersede rule; itself replaced in round 4, R4-M1′: an address-only link, then a session.)* |
 | R3-L1 | `/replies` was idempotent on the request id alone: the same id with another body was a 409 that dropped an opt-out | The key is the request id AND the body's hash; the README states the remaining transport limits (413/415/400/422/408) as the contract with the relay |
 | R3-L2 | Self-suppressed junk addresses could flood Andre's review queue | `INF_ANDRE_REVIEW_DAILY_CAP` (default 20) new review items a day; past it the item is kept as `awaiting_andre_digest` (approvable the same way, never dropped). Andre bulk-rejects with `POST /inf/v1/confirmations/bulk-reject`, bound to the SHA-256 of the exact id list, all or nothing |
 | R3-L3 | Known creators could use the whole confirmation cap | `INF_CONFIRMATION_NEW_ADDRESS_PERCENT` (default 25%, rounded up) of the daily confirmation cap is reserved for new addresses |
 | R3-L4 | A letter-only vault reference can still encode digits | Unlock item 5: Finance must confirm a vault reference exists before anything ships (no code change) |
 | R3-L5 | In-memory rate state and target-less holds grew for ever | Rate state older than 24 hours is pruned (memory only, rebuilt from the log); the `hold-expiry` job closes an unresolved hold (no influencer, no address or handle) after `INF_UNRESOLVED_HOLD_DAYS` (default 30) on the service clock, recorded on the ledger (`holds_expired`) and anchored like any other change. A hold with a target is never expired: only Andre lifts it |
 
-Accepted: with several open confirmations a creator could click a stranger's link by mistake; the mail lists exactly
-the accounts that confirmation would attach and says to ignore it if anything is wrong.
+Accepted (until round 4, which removed payload-bound confirmations): with several open confirmations a creator could
+click a stranger's link by mistake; the mail listed exactly the accounts that confirmation would attach.
+
+## Amendment — AEGIS round 4 (Oct 6 2026, on 9170c01): NOT BLOCKING, redesigned
+
+Regressions: `services/influencer-py/tests/test_aegis_r4.py` (each fails on 9170c01 and passes after the change).
+Tests of rounds 1-3 that exercised the payload-bound confirmation were amended to the new flow (their intent kept:
+nothing a stranger types binds to a record; the mail goes to the address on the record; a verified payee's tax
+change waits for Andre).
+
+| Id | Finding | Change |
+|---|---|---|
+| R4-M1′ | Per-address caps still let a stranger lock the creator out: before the click the service cannot tell the creator from a stranger, so any limit on payload-bound confirmations (three open, five a day) was a lockout, and it also blocked the creator's own tax change | **Verify the address first, then take the application.** The public form takes `{email, brand?}` only. One open address link per canonical address, reused by every repeat (never refused for being a repeat) and mailed at most once per 24 hours from send time; it carries no handle, attestation or payload, so a flood yields at most one harmless email a day. The 429 `CONFIRMATIONS_OPEN_LIMIT` and `APPLICATION_RATE_LIMITED` are removed. The click opens a creator session (`INF_CREATOR_SESSION_MINUTES`, default 60, service clock) bound to the record; inside it the 18+ attestation, handles and details (`POST /inf/v1/sessions/application`) and a tax-reference change (`POST /inf/v1/tax-profiles` with `session_token`) apply at once, with no per-address cap. A verified payee's tax change still waits for Andre's approval by hash; a suppressed address still waits for Andre (daily cap and digest); the mail always goes to the address on the record |
+| R4-L1′ | A reply with the same body under a new request id opened a second hold, which kept holding after Andre lifted the first | A reply with the same target (influencer, address and handle hashes) and the same text hash as an ACTIVE hold attaches to it (`reply_ids`, ledger `outreach_hold_reply_attached`); one decision lifts it |
+| R4-L5′ | `hold-expiry` closed an unresolved opt-out silently | An unresolved hold classified `unsubscribe` or `review` goes into Andre's digest (`GET /holds?status=digest`, ledger `holds_digested`, anchored) when it reaches `INF_UNRESOLVED_HOLD_DAYS`, and is closed only 7 days later if he has not decided it; other unresolved holds expire as in round 3 |
+
+**The session token.** `<session id>.<HMAC-SHA-256 under the PII key of the session id>` — 256 bits, the house pattern
+of the confirmation and unsubscribe tokens: never stored, re-derived to check, so it is in neither the log (which holds
+only the session id) nor the ledger (which holds ids only). Deriving rather than drawing it at random lets a retried
+click (same request id) answer the same session after a lost response or a restart, without the token ever being
+written down. Its strength rests on the PII key (a 32-byte generated secret, mode 0600), which already guards every
+confirmation and unsubscribe token.
+
+**Single use per action (the choice).** A session may submit ONE application and make ONE tax-reference change; a
+second of the same kind is 409 `SESSION_ACTION_USED` and needs a new click (a new link mail at most once a day, or the
+open link if unused). Why: a session token can leak within its hour (a shared device, a browser extension, a proxy
+log at the hub); single use per action bounds what such a leak can do to one change of each kind, each recorded on the
+ledger (`creator_session_used`) and visible to the creator, and for a verified payee the tax change still waits for
+Andre. A creator who mistypes a reference opens a new session; that cost is small next to a token that could rewrite
+the payout destination repeatedly for an hour.
+
+Accepted: a global flood of distinct junk addresses can fill the confirmation queue (429 `QUEUE_FULL`) or use the
+day's new-address share; that delays, never binds, and per-IP limits are the hub's (above). The link proves control of
+the mailbox, not identity; identity remains Finance's KYC, matched against the confirmed address.
