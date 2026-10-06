@@ -80,8 +80,8 @@ class FakeShopify:
             return HttpAnswer(200, {"data": {"pageUpdate": {"page": {k: p[k] for k in (
                 "id", "title", "handle", "body", "isPublished")}, "userErrors": []}}})
         if q == shp.REDIRECT_BY_PATH:
-            path = v["q"].removeprefix("path:")
-            nodes = [dict(r) for r in self.redirects.values() if r["path"] == path]
+            field, _, val = v["q"].partition(":")
+            nodes = [dict(r) for r in self.redirects.values() if field in ("path", "target") and r[field] == val]
             return HttpAnswer(200, {"data": {"urlRedirects": {"nodes": nodes}}})
         if q == shp.REDIRECT_CREATE:
             self.next_id += 1
@@ -155,6 +155,8 @@ class FakeGA4:
             self.n += 1
             ke = {"name": f"{m.group(1)}/keyEvents/{self.n}", "eventName": name, "createTime": "2026-10-06T18:00:00Z",
                   "deletable": True, "custom": True, "countingMethod": req.body["countingMethod"]}
+            if "defaultValue" in req.body:
+                ke["defaultValue"] = dict(req.body["defaultValue"])
             evs[name] = ke
             return HttpAnswer(200, dict(ke))
         m = re.fullmatch(r"(properties/[0-9]+)/keyEvents/([0-9]+)", path)
@@ -169,44 +171,76 @@ class FakeGA4:
 
 
 class FakeGTM:
-    """One container: a workspace of tags, numbered versions, a live version."""
+    """One container: numbered versions (a live one and a latest one), workspaces (the client's default one, number 3,
+    plus any a run creates, each based on the latest version), tags. Answers follow proto3 JSON: a false boolean and
+    an empty list are OMITTED (AEGIS round 1 M6)."""
 
     def __init__(self, container: str = "accounts/1/containers/2"):
         self.c = container
-        self.ws = 3
-        self.tags: dict = {}
         self.versions: dict = {}
-        self.live: Optional[str] = None
+        self.workspaces: dict = {}
         self.n = 0
         self.fp = 0
+        self.next_ws = 3
         self.compile_error = False
-        self._version("initial")
+        self.live: Optional[str] = None
+        self.latest: Optional[str] = None
+        self.default_ws = self._new_ws("Default Workspace", {})
+        self._version("initial", {})
+        self.live = self.latest
 
     def _fp(self) -> str:
         self.fp += 1
         return f"fp{self.fp}"
 
-    def tag(self, tag_id: str, paused=True, triggers=("7",), ttype="gaawe") -> str:
-        path = f"{self.c}/workspaces/{self.ws}/tags/{tag_id}"
-        self.tags[tag_id] = {"path": path, "tagId": tag_id, "name": f"Purchase {tag_id}", "type": ttype,
-                             "parameter": [{"type": "template", "key": "eventName", "value": "purchase"}],
-                             "firingTriggerId": list(triggers), "paused": paused, "fingerprint": self._fp()}
-        return path
+    def ws_path(self, ws: int) -> str:
+        return f"{self.c}/workspaces/{ws}"
 
-    def _version(self, name: str) -> str:
+    def _new_ws(self, name: str, tags: dict) -> int:
+        ws = self.next_ws
+        self.next_ws += 1
+        self.workspaces[ws] = {"name": name, "base": self.latest, "tags": {}}
+        for tid, t in tags.items():
+            self.workspaces[ws]["tags"][tid] = {**copy.deepcopy(t), "path": f"{self.ws_path(ws)}/tags/{tid}",
+                                                "fingerprint": self._fp()}
+        return ws
+
+    @property
+    def tags(self) -> dict:
+        """The client's DEFAULT workspace (where its staff edit)."""
+        return self.workspaces[self.default_ws]["tags"]
+
+    def tag(self, tag_id: str, paused=True, triggers=("7",), ttype="gaawe") -> str:
+        """A tag in the default workspace; returns the plan's container-level target."""
+        self.tags[tag_id] = {"path": f"{self.ws_path(self.default_ws)}/tags/{tag_id}", "tagId": tag_id,
+                             "name": f"Purchase {tag_id}", "type": ttype,
+                             "parameter": [{"type": "template", "key": "eventName", "value": "purchase"}],
+                             "firingTriggerId": list(triggers), "fingerprint": self._fp()}
+        if paused:
+            self.tags[tag_id]["paused"] = True
+        return f"{self.c}/tags/{tag_id}"
+
+    @staticmethod
+    def _strip(t: dict) -> dict:
+        return {k: copy.deepcopy(v) for k, v in t.items() if k not in ("path", "fingerprint")}
+
+    def _version(self, name: str, tags: dict) -> str:
         self.n += 1
         path = f"{self.c}/versions/{self.n}"
-        tags = []
-        for t in self.tags.values():
-            tags.append({k: copy.deepcopy(v) for k, v in t.items() if k != "path"})
-        self.versions[path] = {"path": path, "containerVersionId": str(self.n), "name": name, "tag": tags,
-                               "fingerprint": self._fp()}
-        if self.live is None:
-            self.live = path
+        v = {"path": path, "containerVersionId": str(self.n), "name": name, "fingerprint": self._fp()}
+        if tags:
+            v["tag"] = [self._strip(t) for _, t in sorted(tags.items())]
+        self.versions[path] = v
+        self.latest = path
         return path
 
     def publish_initial(self) -> None:
-        self.live = self._version("baseline")
+        self.live = self._version("baseline", self.tags)
+        self.workspaces[self.default_ws]["base"] = self.live
+
+    def _base_tags(self, ws: int) -> dict:
+        v = self.versions.get(self.workspaces[ws]["base"]) or {}
+        return {t["tagId"]: t for t in v.get("tag", [])}
 
     def handle(self, req: HttpRequest) -> HttpAnswer:
         u = urlsplit(req.url)
@@ -214,45 +248,74 @@ class FakeGTM:
         qs = parse_qs(u.query)
         if req.method == "GET" and path == f"{self.c}/versions:live":
             return HttpAnswer(200, copy.deepcopy(self.versions[self.live]))
-        m = re.fullmatch(re.escape(self.c) + r"/workspaces/([0-9]+)/tags/([0-9]+)", path)
-        if m and int(m.group(1)) != self.ws:
-            return HttpAnswer(404, {"error": {"code": 404}})
-        if m and req.method == "GET":
-            t = self.tags.get(m.group(2))
-            return HttpAnswer(200, copy.deepcopy(t)) if t else HttpAnswer(404, {"error": {"code": 404}})
-        if m and req.method == "PUT":
-            t = self.tags.get(m.group(2))
-            if t is None:
-                return HttpAnswer(404, {"error": {"code": 404}})
-            if qs.get("fingerprint", [None])[0] not in (None, t["fingerprint"]):
-                return HttpAnswer(412, {"error": {"code": 412, "status": "FAILED_PRECONDITION"}})
-            new = {k: copy.deepcopy(v) for k, v in req.body.items() if k not in ("fingerprint", "path", "tagId")}
-            t.update(new)
-            t["fingerprint"] = self._fp()
-            return HttpAnswer(200, copy.deepcopy(t))
-        if req.method == "POST" and path == f"{self.c}/workspaces/{self.ws}:quick_preview":
-            return HttpAnswer(200, {"compilerError": self.compile_error, "containerVersion": {"name": "preview"},
-                                    "syncStatus": {"mergeConflict": False, "syncError": False}})
-        if req.method == "POST" and path == f"{self.c}/workspaces/{self.ws}:create_version":
+        if req.method == "GET" and path == f"{self.c}/version_headers:latest":
+            v = self.versions[self.latest]
+            return HttpAnswer(200, {"path": v["path"], "containerVersionId": v["containerVersionId"], "name": v["name"]})
+        if req.method == "POST" and path == f"{self.c}/workspaces":
+            ws = self._new_ws(req.body.get("name", ""), self._base_tags_of_latest())
+            return HttpAnswer(200, {"path": self.ws_path(ws), "workspaceId": str(ws), "name": req.body.get("name"),
+                                    "fingerprint": self._fp()})
+        m = re.fullmatch(re.escape(self.c) + r"/workspaces/([0-9]+)(.*)", path)
+        if not m or int(m.group(1)) not in self.workspaces:
+            m2 = re.fullmatch(re.escape(self.c) + r"/versions/([0-9]+):publish", path)
+            if m2 and req.method == "POST":
+                vp = f"{self.c}/versions/{m2.group(1)}"
+                if vp not in self.versions:
+                    return HttpAnswer(404, {"error": {"code": 404}})
+                fp = qs.get("fingerprint", [None])[0]
+                if fp is not None and fp != self.versions[vp]["fingerprint"]:
+                    return HttpAnswer(412, {"error": {"code": 412}})
+                self.live = vp
+                return HttpAnswer(200, {"containerVersion": copy.deepcopy(self.versions[vp])})
+            return HttpAnswer(404, {"error": {"code": 404}}) if m else UNDOCUMENTED
+        ws, rest = int(m.group(1)), m.group(2)
+        w = self.workspaces[ws]
+        if rest == "" and req.method == "DELETE":
+            del self.workspaces[ws]
+            return HttpAnswer(200, {})
+        if rest == "/status" and req.method == "GET":
+            base = self._base_tags(ws)
+            changes = []
+            for tid, t in sorted(w["tags"].items()):
+                if tid not in base:
+                    changes.append({"tag": self._strip(t), "changeStatus": "added"})
+                elif self._strip(t) != base[tid]:
+                    changes.append({"tag": self._strip(t), "changeStatus": "updated"})
+            for tid in sorted(set(base) - set(w["tags"])):
+                changes.append({"tag": base[tid], "changeStatus": "deleted"})
+            return HttpAnswer(200, {"workspaceChange": changes} if changes else {})
+        if rest == ":quick_preview" and req.method == "POST":
+            body = {"containerVersion": {"name": "preview"}}
+            if self.compile_error:
+                body["compilerError"] = True
+            return HttpAnswer(200, body)
+        if rest == ":create_version" and req.method == "POST":
             if self.compile_error:
                 return HttpAnswer(200, {"compilerError": True})
-            v = self._version(req.body.get("name", ""))
-            self.ws += 1                                   # "deletes the workspace"
-            for t in self.tags.values():
-                t["path"] = f"{self.c}/workspaces/{self.ws}/tags/{t['tagId']}"
-            return HttpAnswer(200, {"containerVersion": copy.deepcopy(self.versions[v]), "compilerError": False,
-                                    "newWorkspacePath": f"{self.c}/workspaces/{self.ws}"})
-        m = re.fullmatch(re.escape(self.c) + r"/versions/([0-9]+):publish", path)
-        if m and req.method == "POST":
-            vp = f"{self.c}/versions/{m.group(1)}"
-            if vp not in self.versions:
+            vp = self._version(req.body.get("name", ""), w["tags"])
+            del self.workspaces[ws]                                  # "deletes the workspace"
+            return HttpAnswer(200, {"containerVersion": copy.deepcopy(self.versions[vp])})
+        t_m = re.fullmatch(r"/tags/([0-9]+)", rest)
+        if t_m:
+            t = w["tags"].get(t_m.group(1))
+            if t is None:
                 return HttpAnswer(404, {"error": {"code": 404}})
-            fp = qs.get("fingerprint", [None])[0]
-            if fp is not None and fp != self.versions[vp]["fingerprint"]:
-                return HttpAnswer(412, {"error": {"code": 412}})
-            self.live = vp
-            return HttpAnswer(200, {"containerVersion": copy.deepcopy(self.versions[vp]), "compilerError": False})
+            if req.method == "GET":
+                return HttpAnswer(200, copy.deepcopy(t))
+            if req.method == "PUT":
+                if qs.get("fingerprint", [None])[0] not in (None, t["fingerprint"]):
+                    return HttpAnswer(412, {"error": {"code": 412, "status": "FAILED_PRECONDITION"}})
+                new = {k: copy.deepcopy(v) for k, v in req.body.items() if k not in ("fingerprint", "path", "tagId")}
+                t.update(new)
+                if t.get("paused") is False:
+                    t.pop("paused")                                  # proto3: a false bool is not stored / shown
+                t["fingerprint"] = self._fp()
+                return HttpAnswer(200, copy.deepcopy(t))
         return UNDOCUMENTED
+
+    def _base_tags_of_latest(self) -> dict:
+        v = self.versions.get(self.latest) or {}
+        return {t["tagId"]: t for t in v.get("tag", [])}
 
 
 class FakeGBP:

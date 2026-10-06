@@ -9,6 +9,9 @@ import threading
 from connectors.base import HttpAnswer
 from helpers import (ANDRE, CLIENT_A, CLIENT_B, PRODUCT, PRODUCT2, SHOP_A, SHOP_B, FakeDetection, FakeFinance,
                      Harness, rid, wired_ports)
+import json
+
+from connectors import shopify as shp
 from platforms import shopify_op
 
 SEO = "Blue Hoodie | Warm Winter Wear"
@@ -152,13 +155,22 @@ def test_apply_then_mismatch_rolls_back_from_the_snapshot(h):
     conn, j, item = _paid_job(h)
     shop = h.t.shop(SHOP_A)
     shop.products[PRODUCT]["seo"]["title"] = "Original"
+    seen = {"wrote": False, "lied": False}
 
-    def lie(conn_, req, real):                    # the platform says yes but stores something else
+    def lie_once(conn_, req, real):               # the verify read after our write shows a wrong value, once
         ans = real()
-        shop.products[PRODUCT]["seo"]["title"] = "Mangled"
-        h.t.rules.clear()
+        if seen["wrote"] and not seen["lied"]:
+            seen["lied"] = True
+            body = json.loads(json.dumps(ans.body))
+            body["data"]["product"]["seo"]["title"] = "Mangled"
+            return HttpAnswer(200, body)
         return ans
-    h.t.rules.append((shopify_op("productUpdate"), lie))
+
+    def mark(conn_, req):
+        if req.is_write:
+            seen["wrote"] = True
+    h.t.before = mark
+    h.t.rules.append((lambda c, r: isinstance(r.body, dict) and r.body.get("query") == shp.PRODUCT_READ, lie_once))
     h.ok(h.plan(j, _plan_item(conn, item, [_seo_op(before="Original")])))
     h.ok(h.approve(j["job_id"]))
     out = h.ok(h.apply(j["job_id"]))
@@ -169,6 +181,28 @@ def test_apply_then_mismatch_rolls_back_from_the_snapshot(h):
     assert h.ok(h.get("/frozen"))["resources"] == []
     refunds = h.ok(h.get("/refunds"))
     assert refunds[0]["amount"] == "150.00" and refunds[0]["status"] == "proposed"
+
+
+def test_a_value_nobody_planned_is_never_overwritten_by_a_rollback(h):
+    """M5: the platform (or the merchant) holds a value that is neither the snapshot nor ours: it is left alone, the
+    rollback is not proven, the resource frozen and Andre alerted."""
+    conn, j, item = _paid_job(h)
+    shop = h.t.shop(SHOP_A)
+    shop.products[PRODUCT]["seo"]["title"] = "Original"
+
+    def lie(conn_, req, real):
+        ans = real()
+        shop.products[PRODUCT]["seo"]["title"] = "Someone else's"
+        h.t.rules.clear()
+        return ans
+    h.t.rules.append((shopify_op("productUpdate"), lie))
+    h.ok(h.plan(j, _plan_item(conn, item, [_seo_op(before="Original")])))
+    h.ok(h.approve(j["job_id"]))
+    it = h.ok(h.apply(j["job_id"]))["items"][0]
+    assert it["status"] == "rollback_failed" and it["result"]["rollback"] == {"outcome": "conflict", "proven": False}
+    assert shop.products[PRODUCT]["seo"]["title"] == "Someone else's"
+    assert h.ok(h.get("/frozen"))["resources"]
+    assert any(t["code"] == "ROLLBACK_FAILED" for t in h.ok(h.get("/tasks")))
 
 
 def test_an_unknown_answer_is_never_success_and_is_rolled_back(h):
@@ -197,19 +231,24 @@ def test_an_undocumented_success_shape_counts_as_unknown(h):
 
 
 def test_a_failed_second_write_rolls_back_the_first_in_reverse_order(h):
-    conn, j, item = _paid_job(h)
+    conn, j, item = _paid_job(h, check="product_content_error")
     shop = h.t.shop(SHOP_A)
-    shop.page("gid://shopify/Page/77")
-    h.t.rules.append((shopify_op("pageUpdate"), HttpAnswer(200, {"data": {"pageUpdate": {
-        "page": None, "userErrors": [{"field": ["body"], "message": "nope"}]}}})))
+    n = {"w": 0}
+
+    def second_refused(conn_, req, real):
+        n["w"] += 1
+        if n["w"] == 2:
+            return HttpAnswer(200, {"data": {"productUpdate": {"product": None,
+                                                               "userErrors": [{"field": ["x"], "message": "nope"}]}}})
+        return real()
+    h.t.rules.append((shopify_op("productUpdate"), second_refused))
     h.ok(h.plan(j, _plan_item(conn, item, [
-        _seo_op(),
-        {"op": "shopify.page.update", "target": "gid://shopify/Page/77", "field": "body", "before": "<p>Old text.</p>",
-         "after": "<p>New</p>"}])))
+        _seo_op(field="title", before="Blue Hoodie", after="Blue Hoodie 2"),
+        _seo_op(field="descriptionHtml", before="<p>Warm.</p>", after="<p>Warmer.</p>")])))
     h.ok(h.approve(j["job_id"]))
     it = h.ok(h.apply(j["job_id"]))["items"][0]
     assert it["status"] == "rolled_back" and it["result"]["failure"] == "write_refused"
-    assert shop.products[PRODUCT]["seo"]["title"] is None
+    assert shop.products[PRODUCT]["title"] == "Blue Hoodie"
 
 
 def test_gtm_failure_after_publish_republishes_the_previous_live_version(h):
@@ -288,19 +327,20 @@ def test_rollback_failure_freezes_the_resource_and_alerts_andre(h):
 
 def test_andre_freezes_a_client_and_a_running_apply_stops(h):
     conn, j, item = _paid_job(h)
-    h.t.shop(SHOP_A).page("gid://shopify/Page/77")
+    shop = h.t.shop(SHOP_A)
 
     def freeze_on_first_write(conn_, req):
         if req.is_write and not h.svc.frozen_clients:
             h.ok(h.post("/clients/freeze", {"request_id": rid(), "client_id": CLIENT_A}, andre=True))
     h.t.before = freeze_on_first_write
-    h.ok(h.plan(j, _plan_item(conn, item, [
-        _seo_op(), {"op": "shopify.page.update", "target": "gid://shopify/Page/77", "field": "title",
-                    "before": "About", "after": "About us"}])))
+    h.ok(h.plan(j, _plan_item(conn, item, [_seo_op(), _seo_op(field="seo.description", after="Cosy.")])))
     h.ok(h.approve(j["job_id"]))
     it = h.ok(h.apply(j["job_id"]))["items"][0]
-    assert it["status"] == "halted_frozen"
-    assert h.t.shop(SHOP_A).pages["gid://shopify/Page/77"]["title"] == "About"
+    # Low (round 1): the first write had landed — a guarded rollback undoes it, the resource is frozen, Andre told
+    assert it["status"] == "halted_frozen" and it["result"]["rollback"] == {"outcome": "applied", "proven": True}
+    assert shop.products[PRODUCT]["seo"] == {"title": None, "description": None}
+    assert h.ok(h.get("/frozen"))["resources"]
+    assert any(t["code"] == "FROZEN_MID_APPLY" for t in h.ok(h.get("/tasks")))
 
 
 # ------------------------------------------------------------------------------------------- 5. revocation
@@ -308,21 +348,18 @@ def test_andre_freezes_a_client_and_a_running_apply_stops(h):
 def test_revocation_mid_run_stops_all_work_for_the_client_at_once(h):
     conn, j, item = _paid_job(h)
     shop = h.t.shop(SHOP_A)
-    shop.page("gid://shopify/Page/77")
 
     def revoke_after_first_write(conn_, req):
         if req.is_write and conn["connection_id"] not in h.svc.revoked_now:
             h.ok(h.post(f"/connections/{conn['connection_id']}/revoke", {"request_id": rid()}, caller="hub"))
     h.t.before = revoke_after_first_write
-    h.ok(h.plan(j, _plan_item(conn, item, [
-        _seo_op(), {"op": "shopify.page.update", "target": "gid://shopify/Page/77", "field": "title",
-                    "before": "About", "after": "About us"}])))
+    h.ok(h.plan(j, _plan_item(conn, item, [_seo_op(), _seo_op(field="seo.description", after="Cosy.")])))
     h.ok(h.approve(j["job_id"]))
     it = h.ok(h.apply(j["job_id"]))["items"][0]
     assert it["status"] == "halted_revoked" and it["result"]["failure"] == "CONNECTION_REVOKED"
     writes = h.t.writes()
     assert len(writes) == 1                                   # the second op was never sent, nor any rollback
-    assert shop.pages["gid://shopify/Page/77"]["title"] == "About"
+    assert shop.products[PRODUCT]["seo"]["description"] is None
     assert any(t["code"] == "REVOKED_MID_APPLY" for t in h.ok(h.get("/tasks")))
     assert h.ok(h.get(f"/connections/{conn['connection_id']}"))["status"] == "revoked"
     # a revoked connection takes no new work
@@ -395,7 +432,7 @@ def test_tenant_crossover_is_refused_everywhere(h):
 
 def test_a_gtm_or_ga4_target_outside_the_connected_account_is_a_tenant_mismatch(h):
     conn = h.connection(connector="gtm", account="accounts/1/containers/2")
-    other = "accounts/9/containers/9/workspaces/1/tags/1"
+    other = "accounts/9/containers/9/tags/1"
     f = h.finding(conn, check="gtm_tag_paused", target=h.t.gtm.tag("12"))
     j = h.job([f])
     h.ok(h.accept(j))
@@ -661,4 +698,4 @@ def test_a_malicious_engineer_proposal_is_validated_like_any_plan(tmp_path):
     eng.items = [{"item_id": item["item_id"], "connection_id": conn["connection_id"],
                   "ops": [_seo_op()], "password": "x"}]
     h.refused(h.post(f"/jobs/{j['job_id']}/engage", {"request_id": rid()}, caller="clientfix_agent"), 422)
-    assert not h.t.calls
+    assert not h.t.writes()                                   # the brief READ the store; nothing was written

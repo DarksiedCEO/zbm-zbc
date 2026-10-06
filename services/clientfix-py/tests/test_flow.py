@@ -22,8 +22,9 @@ def test_shopify_seo_fix_end_to_end_is_proven_and_nothing_refunded(h):
     assert it["status"] == "applied_verified", it
     shop = h.t.shop(SHOP_A)
     assert shop.products[PRODUCT]["seo"]["title"] == "Blue Hoodie | Warm Winter Wear"
-    assert it["result"]["snapshot"] == [[PRODUCT, "seo.title", None]]
-    assert it["result"]["readback"] == [[PRODUCT, "seo.title", "Blue Hoodie | Warm Winter Wear"]]
+    assert it["result"]["snapshot"] == [[PRODUCT, "seo.description", None], [PRODUCT, "seo.title", None]]
+    assert it["result"]["readback"] == [[PRODUCT, "seo.description", None],
+                                        [PRODUCT, "seo.title", "Blue Hoodie | Warm Winter Wear"]]
     assert it["result"]["dry_run"] == {"outcome": "applied", "mode": "offline"}
     assert out["status"] == "applied"
     # applied and verified is NOT fixed: only re-detection clears it
@@ -33,33 +34,38 @@ def test_shopify_seo_fix_end_to_end_is_proven_and_nothing_refunded(h):
     assert j["status"] == "closed"                              # nothing unfixed: payment kept, no refund
     rep = j["report"]
     assert rep["issued_at"] == "2026-10-06T18:00:00Z" and rep["items"][0]["fixed"] is True
-    assert rep["items"][0]["before"] == [[PRODUCT, "seo.title", None]]
-    assert rep["items"][0]["after"] == [[PRODUCT, "seo.title", "Blue Hoodie | Warm Winter Wear"]]
+    assert rep["items"][0]["before"] == [[PRODUCT, "seo.description", None], [PRODUCT, "seo.title", None]]
+    assert rep["items"][0]["after"] == [[PRODUCT, "seo.description", None],
+                                        [PRODUCT, "seo.title", "Blue Hoodie | Warm Winter Wear"]]
     assert rep["items"][0]["evidence"] and all(e["seq"] for e in rep["items"][0]["evidence"])
     assert not h.ok(h.get("/refunds"))
     assert h.ok(h.get("/leases", params={"status": "active"})) == []
 
 
-def test_shopify_page_redirect_and_metafield_in_one_item(h):
+def test_shopify_page_redirect_and_metafield_each_bound_to_its_finding(h):
     conn = h.connection()
     shop = h.t.shop(SHOP_A)
     shop.product(PRODUCT)
     shop.page("gid://shopify/Page/77")
-    f = h.finding(conn, check="broken_link", target="redirect:/old-hoodie")
-    j = h.job([f])
+    fr = h.finding(conn, check="broken_link", target="redirect:/old-hoodie")
+    fp = h.finding(conn, check="page_content_error", target="gid://shopify/Page/77")
+    fm = h.finding(conn, check="product_metafield_wrong", target=PRODUCT)
+    j = h.job([fr, fp, fm])
     h.ok(h.accept(j))
     h.ok(h.pay(j))
-    item = h.item(j["job_id"])
-    ops = [{"op": "shopify.redirect.set", "target": "redirect:/old-hoodie", "field": "target", "before": None,
-            "after": "/products/blue-hoodie"},
-           {"op": "shopify.page.update", "target": "gid://shopify/Page/77", "field": "body",
-            "before": "<p>Old text.</p>", "after": "<p>New <a href=\"/products/blue-hoodie\">link</a>.</p>"},
-           {"op": "shopify.metafield.set", "target": PRODUCT, "field": "metafield:custom.care", "before": None,
-            "after": {"type": "single_line_text_field", "value": "Machine wash cold"}}]
-    h.ok(h.plan(j, [{"item_id": item["item_id"], "connection_id": conn["connection_id"], "ops": ops}]))
+    items = {i["finding_id"]: i["item_id"] for i in h.ok(h.get(f"/jobs/{j['job_id']}"))["items"]}
+    ops = {fr["finding_id"]: {"op": "shopify.redirect.set", "target": "redirect:/old-hoodie", "field": "target",
+                              "before": None, "after": "/products/blue-hoodie"},
+           fp["finding_id"]: {"op": "shopify.page.update", "target": "gid://shopify/Page/77", "field": "body",
+                              "before": "<p>Old text.</p>",
+                              "after": "<p>New <a href=\"/products/blue-hoodie\">link</a>.</p>"},
+           fm["finding_id"]: {"op": "shopify.metafield.set", "target": PRODUCT, "field": "metafield:custom.care",
+                              "before": None, "after": {"type": "single_line_text_field", "value": "Machine wash cold"}}}
+    h.ok(h.plan(j, [{"item_id": items[f], "connection_id": conn["connection_id"], "ops": [op]}
+                    for f, op in ops.items()]))
     h.ok(h.approve(j["job_id"]))
     out = h.ok(h.apply(j["job_id"]))
-    assert out["items"][0]["status"] == "applied_verified", out["items"][0]
+    assert {i["status"] for i in out["items"]} == {"applied_verified"}, out["items"]
     assert [r for r in shop.redirects.values()][0]["target"] == "/products/blue-hoodie"
     assert shop.pages["gid://shopify/Page/77"]["body"].startswith("<p>New")
     assert shop.products[PRODUCT]["metafields"][("custom", "care")]["value"] == "Machine wash cold"
@@ -101,10 +107,12 @@ def test_gtm_tag_unpaused_previewed_published_and_verified_live(h):
     out = h.ok(h.apply(j["job_id"]))
     assert out["items"][0]["status"] == "applied_verified", out["items"][0]
     assert gtm.live != before_live
-    assert gtm.versions[gtm.live]["tag"][0]["paused"] is False
+    assert gtm.versions[gtm.live]["tag"][0].get("paused", False) is False      # proto3: false is omitted
     urls = [r.url for _, r in h.t.calls]
     assert any(u.endswith(":quick_preview") for u in urls) and any(":publish?fingerprint=" in u for u in urls)
     assert any("?fingerprint=" in u and "/tags/12" in u for u in urls)          # the tag write is compare-and-swap
+    assert any(u.endswith("/workspaces") for u in urls) and any(u.endswith("/status") for u in urls)
+    assert len(gtm.workspaces) == 1                    # only the client's own default workspace is left
 
 
 def test_gbp_phone_fixed_with_validate_only_dry_run(h):

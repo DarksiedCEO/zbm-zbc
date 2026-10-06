@@ -42,7 +42,8 @@ SHOPIFY_SCOPES = ["read_products", "write_products", "read_content", "write_cont
 GOOGLE_SCOPES = {"ga4": ["https://www.googleapis.com/auth/analytics.edit"],
                  "gtm": ["https://www.googleapis.com/auth/tagmanager.edit.containers",
                          "https://www.googleapis.com/auth/tagmanager.edit.containerversions",
-                         "https://www.googleapis.com/auth/tagmanager.publish"],
+                         "https://www.googleapis.com/auth/tagmanager.publish",
+                         "https://www.googleapis.com/auth/tagmanager.delete.containers"],
                  "gbp": ["https://www.googleapis.com/auth/business.manage"]}
 
 

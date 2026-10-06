@@ -131,28 +131,37 @@ def test_ga4_create_or_delete_only_and_non_deletable_is_refused():
     assert c.dry_run("properties/1", [op], {"ke_deletable": {}}, lambda r: None) == (REFUSED, "offline")
 
 
-def test_gtm_update_carries_the_fingerprint_and_publish_needs_a_clean_preview():
+def test_gtm_run_uses_its_own_workspace_with_fingerprint_writes_and_a_clean_preview():
     t = FakeTransport()
-    path = t.gtm.tag("12")
+    target = t.gtm.tag("12")
     t.gtm.publish_initial()
     log: list = []
     c = TagManagerConnector()
+    acct = "accounts/1/containers/2"
     ctx: dict = {"item_id": "i"}
     call = caller(t.gtm.handle, log)
-    snap = c.read("accounts/1/containers/2", [(path, "paused")], ctx, call)
-    assert snap == {(path, "paused"): True} and ctx["live_before"].endswith("/versions/2")
-    assert c.write("accounts/1/containers/2", (path, "paused"), False, ctx, call)[0] == APPLIED
+    op = {"op": "gtm.tag.update", "target": target, "field": "paused", "before": True, "after": False}
+    snap = c.read(acct, [(target, "paused")], ctx, call)
+    assert snap == {(target, "paused"): True} and ctx["live_before"].endswith("/versions/2")
+    assert c.prepare(acct, [op], ctx, call) == (APPLIED, "run_workspace")
+    ws = ctx["workspace"]
+    assert ws == "accounts/1/containers/2/workspaces/4"           # a NEW workspace, never the client's (3)
+    assert c.write(acct, (target, "paused"), False, ctx, call)[0] == APPLIED
     put = [r for r in log if r.method == "PUT"][0]
-    assert put.url.startswith(f"https://tagmanager.googleapis.com/tagmanager/v2/{path}?fingerprint=fp")
+    assert put.url.startswith(f"https://tagmanager.googleapis.com/tagmanager/v2/{ws}/tags/12?fingerprint=fp")
     t.gtm.compile_error = True
-    assert c.stage_check("accounts/1/containers/2", ctx, call) == REFUSED
+    assert c.stage_check(acct, ctx, call) == REFUSED
     t.gtm.compile_error = False
-    assert c.stage_check("accounts/1/containers/2", ctx, call) == APPLIED
-    assert c.finalize("accounts/1/containers/2", ctx, call) == APPLIED
+    assert c.stage_check(acct, ctx, call) == APPLIED                # compilerError omitted (proto3) = false
+    assert c.finalize(acct, ctx, call) == APPLIED
     assert ctx["published"] and t.gtm.live == ctx["published_path"]
-    urls = [r.url for r in log]
-    assert any(u.endswith("/workspaces/3:quick_preview") for u in urls)
-    assert any(u.endswith("/workspaces/3:create_version") for u in urls)
+    assert c.read(acct, [(target, "paused")], ctx, call) == {(target, "paused"): False}
+    urls = [(r.method, r.url.split("?")[0]) for r in log]
+    base = "https://tagmanager.googleapis.com/tagmanager/v2/"
+    assert ("GET", base + acct + "/version_headers:latest") in urls
+    assert ("POST", base + acct + "/workspaces") in urls and ("GET", base + ws + "/status") in urls
+    assert ("POST", base + ws + ":quick_preview") in urls and ("POST", base + ws + ":create_version") in urls
+    assert c.lease_key(acct, target) == "gtm|accounts/1/containers/2|container"
 
 
 def test_gbp_dry_run_is_validate_only_and_writes_name_their_update_mask():
