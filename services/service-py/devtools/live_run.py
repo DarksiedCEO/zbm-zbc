@@ -14,6 +14,7 @@ Exit 0 only if every check holds. Kills only the PIDs it started. Ports are free
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -113,7 +114,13 @@ def _main(work: Path) -> int:
     L, S = f"http://127.0.0.1:{pl}", f"http://127.0.0.1:{ps}"
     lh = {"Authorization": f"Bearer {LEDGER_TOKEN}"}
     data = work / "service"
-    env = {"SVC_SERVICE_TOKEN": TOKEN, "SVC_CALLER_TOKENS": json.dumps(CALLERS), "SVC_ANDRE_APPROVAL_TOKEN": ANDRE,
+    etc = work / "etc"
+    etc.mkdir(mode=0o700)
+    key_file = etc / "hmac.key"
+    fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.write(fd, base64.b64encode(os.urandom(32)))
+    os.close(fd)
+    env = {"SVC_HMAC_KEY_FILE": str(key_file),"SVC_SERVICE_TOKEN": TOKEN, "SVC_CALLER_TOKENS": json.dumps(CALLERS), "SVC_ANDRE_APPROVAL_TOKEN": ANDRE,
            "SVC_DATA_DIR": str(data), "SVC_PORT": str(ps), "SVC_SUPPORT_EMAIL_ZBM": "support@zbestmedia.test",
            "SVC_SUPPORT_EMAIL_ZBC": "support@zbestclips.test", "SVC_SMS_NUMBER_ZBM": "+13105550100",
            "SVC_SMS_NUMBER_ZBC": "+13105550200", "LEDGER_SERVICE_URL": L, "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN}
@@ -186,9 +193,15 @@ def _main(work: Path) -> int:
                                     "consent_text": "I agree to receive texts.", "captured_at": "2026-10-01T10:00:00Z",
                                     "express": True}, caller="hub")
         r = a.post("/svc/v1/inbound/sms", {"request_id": rid(), "brand": "zbm", "to_number": "+13105550100",
-                                           "from_number": "+13105551234", "text": "STOP"}, caller="sms_gateway").json()
+                                           "from_number": "+13105551234", "text": "Please stop texting me"},
+                   caller="sms_gateway").json()
         cons = a.get(f"/svc/v1/contacts/{cid}/consents", caller="hub").json()
-        check("STOP revokes SMS consent immediately", r["action"] == "opted_out" and cons[0]["status"] == "revoked")
+        check("an opt-out phrase revokes SMS consent immediately and queues one confirmation",
+              r["action"] == "opted_out" and cons[0]["status"] == "revoked" and r.get("confirmation_message_id"))
+        r = a.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid, "channel": "sms",
+                                        "source": "portal_form", "consent_text": "I agree to receive texts.",
+                                        "captured_at": "2026-10-01T10:00:00Z", "express": True}, caller="hub")
+        check("a consent captured before the STOP cannot bring it back", r.status_code == 409)
 
         # --- client success -------------------------------------------------------------------------------------
         a.post("/svc/v1/accounts", {"request_id": rid(), "account_id": "acct-live", "brand": "zbm",

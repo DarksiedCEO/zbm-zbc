@@ -321,6 +321,14 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
         gate.verify(request.headers.get(FOUNDER_HEADER))
         return "andre"
 
+    def andre_if_presented(request: Request) -> bool:
+        """True only for a VERIFIED Andre token; a presented but wrong token is refused (403), never ignored."""
+        supplied = request.headers.get(FOUNDER_HEADER)
+        if supplied is None:
+            return False
+        gate.verify(supplied)
+        return True
+
     def body(model: type[BaseModel]) -> Callable:
         def parse(payload: Any = Body(default=None)) -> dict:
             if payload is None:
@@ -381,8 +389,9 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
         return svc.record_consent(who, req)
 
     @app.post("/svc/v1/consents/revoke", dependencies=auth)
-    def revoke(req: dict = Depends(body(m.ConsentRevoke)), who: str = Depends(caller("hub", "dashboard"))) -> dict:
-        return svc.revoke_consent(who, req)
+    def revoke(request: Request, req: dict = Depends(body(m.ConsentRevoke)),
+               who: str = Depends(caller("hub", "dashboard"))) -> dict:
+        return svc.revoke_consent(who, req, andre=who == "dashboard" and andre_if_presented(request))
 
     # ------------------------------------------------------------------ inbound
 
@@ -441,8 +450,9 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
         return svc.reply(_id(ticket_id, SV_ID), req)
 
     @app.post("/svc/v1/tickets/{ticket_id}/status", dependencies=auth)
-    def set_status(ticket_id: str, req: dict = Depends(body(m.StatusSet)), who: str = Depends(dashboard)) -> dict:
-        return svc.set_status(who, _id(ticket_id, SV_ID), req)
+    def set_status(request: Request, ticket_id: str, req: dict = Depends(body(m.StatusSet)),
+                   who: str = Depends(dashboard)) -> dict:
+        return svc.set_status(who, _id(ticket_id, SV_ID), req, andre=andre_if_presented(request))
 
     @app.post("/svc/v1/tickets/{ticket_id}/priority", dependencies=auth)
     def set_priority(ticket_id: str, req: dict = Depends(body(m.PrioritySet)), who: str = Depends(dashboard)) -> dict:
@@ -530,9 +540,13 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
 
     @app.get("/svc/v1/outbound", dependencies=auth)
     def outbound(status_: Optional[str] = Query(default=None, alias="status",
-                                                pattern="^(queued|sent|cancelled)$"),
+                                                pattern="^(queued|sending|sent|cancelled)$"),
                  who: str = Depends(dashboard)) -> list:
         return svc.outbound_view(status_)
+
+    @app.post("/svc/v1/outbound/{message_id}/resolve", dependencies=auth)
+    def resolve_held(message_id: str, req: dict = Depends(body(m.ResolveHeld)), who: str = Depends(andre)) -> dict:
+        return svc.resolve_held(_id(message_id, SV_ID), req)
 
     @app.post("/svc/v1/jobs/{name}/run", dependencies=auth)
     def run_job(name: str, req: dict = Depends(body(m.RequestOnly)), who: str = Depends(caller("scheduler"))) -> dict:
@@ -572,7 +586,7 @@ def build(env: Optional[dict] = None):
         ledger = HttpLedgerClient(settings.ledger_url, settings.ledger_token)
     else:
         ledger = UnconfiguredLedgerClient()
-    svc = SupportService(settings, Recorder(ledger), RecordLog(settings.data_dir), BodyStore(settings.data_dir),
+    svc = SupportService(settings, Recorder(ledger), RecordLog(settings.data_dir), BodyStore(settings.data_dir, settings.hmac_key),
                          build_ports(settings))
     svc.data_dir_lock = lock
     return _wrap(create_app(svc, settings)), svc

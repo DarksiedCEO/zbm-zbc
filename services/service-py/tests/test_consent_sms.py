@@ -104,10 +104,13 @@ def test_stop_revokes_immediately_and_cancels_queued_sms(tmp_path):
     r = h.ok(h.sms("STOP"), 201)
     assert r["action"] == "opted_out"
     assert h.ok(h.get(f"/svc/v1/contacts/{cid}/consents", caller="hub"))[0]["status"] == "revoked"
-    out = h.ok(h.get("/svc/v1/outbound"))
+    out = [m for m in h.ok(h.get("/svc/v1/outbound")) if m["origin"] == "kb"]
     assert out[0]["status"] == "cancelled" and out[0]["reason"] == "CONSENT_REVOKED"
+    assert r["confirmation_message_id"]
     h.clock.at = T0
-    assert h.ok(h.job("outbound-tick"))["sent"] == 0 and not senders["sms"].sent
+    assert h.ok(h.job("outbound-tick"))["sent"] == 1                 # only the one opt-out confirmation
+    assert len(senders["sms"].sent) == 1 and senders["sms"].sent[0].message_id == r["confirmation_message_id"]
+    assert "unsubscribed" in senders["sms"].sent[0].text and "Reply STOP" not in senders["sms"].sent[0].text
 
 
 @pytest.mark.parametrize("word", ["stop", "Stop.", "UNSUBSCRIBE", "cancel", "quit", "End", "STOPALL"])
@@ -115,9 +118,10 @@ def test_stop_keywords(word):
     assert channels.is_stop(word)
 
 
-@pytest.mark.parametrize("text", ["stop sending me invoices", "please don't stop", "cancel my contract"])
-def test_not_a_bare_stop_keyword(text):
-    assert not channels.is_stop(text)
+@pytest.mark.parametrize("text", ["what are your hours", "I need help with my campaign", "yes please",
+                                  "send me the report", "thanks!"])
+def test_not_an_opt_out(text):
+    assert not channels.is_opt_out(text)
 
 
 def test_stop_from_an_unknown_number_records_a_revocation(h):
@@ -134,7 +138,8 @@ def test_a_new_consent_after_stop_is_needed_to_text_again(tmp_path):
     tid = _sms_ticket(h, "I need help")
     assert h.post(f"/svc/v1/tickets/{tid}/reply", {"request_id": rid(), "text": "hi"},
                   andre=True).json()["detail"] == "SMS_CONSENT_REQUIRED"
-    h.ok(h.consent(cid), 201)
+    h.clock.advance(minutes=5)
+    h.ok(h.consent(cid, captured_at="2026-10-06T18:03:00Z"), 201)     # captured after the STOP
     h.ok(h.post(f"/svc/v1/tickets/{tid}/reply", {"request_id": rid(), "text": "hi"}, andre=True), 201)
 
 
@@ -176,7 +181,7 @@ def test_consent_revoked_by_dashboard(tmp_path):
     cid = h.contact(phone="+13105551234", timezone="America/Los_Angeles")
     h.ok(h.consent(cid), 201)
     h.ok(h.post("/svc/v1/consents/revoke", {"request_id": rid(), "contact_id": cid, "channel": "sms"}))
-    assert h.ok(h.get(f"/svc/v1/contacts/{cid}/consents", caller="hub"))[0]["revoked_via"] == "andre"
+    assert h.ok(h.get(f"/svc/v1/contacts/{cid}/consents", caller="hub"))[0]["revoked_via"] == "dashboard"
 
 
 # --------------------------------------------------------------------------------------------------- email, chat
@@ -217,7 +222,7 @@ def test_ledger_down_nothing_is_sent(tmp_path):
     h, senders = _wired(tmp_path)
     r = h.ok(h.email("I need help"), 201)
     h.ok(h.post(f"/svc/v1/tickets/{r['ticket_id']}/reply", {"request_id": rid(), "text": "ok"}, andre=True), 201)
-    h.ledger.fail_types = {"message_sent"}
+    h.ledger.fail_types = {"message_sending"}
     assert h.job("outbound-tick").status_code == 503
     assert not senders["email"].sent
     assert h.ok(h.get("/svc/v1/outbound?status=queued"))

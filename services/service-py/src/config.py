@@ -6,6 +6,7 @@ weaker.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -25,9 +26,36 @@ SLA_FIRST_DEFAULT = {"p1": 60, "p2": 240, "p3": 480, "p4": 1440}
 SLA_RESOLUTION_DEFAULT = {"p1": 480, "p2": 1440, "p3": 4320, "p4": 10080}
 SLA_FIRST_BOUNDS = (5, 2880)
 SLA_RESOLUTION_BOUNDS = (60, 20160)
+NON_PRODUCTION_HMAC_KEY = b"service-py non-production digest key, tests only!"
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 _EMAIL = re.compile(r"[a-z0-9._%+-]{1,64}@[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63}){1,8}")
 _E164 = re.compile(r"\+[1-9][0-9]{7,14}")
+
+
+def _secret_file_bytes(env, name: str, max_bytes: int = 4096) -> bytes:
+    """A regular file, owned by this user, mode 0600/0400, opened without following a symlink and without
+    blocking on a FIFO (finance-py's _secret_file rules, AEGIS L5/N5). Returns its stripped bytes."""
+    path = (env.get(name) or "").strip()
+    if not path or not os.path.isabs(path):
+        raise RuntimeError(f"{name} must be an absolute path to a file holding the secret")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        raise RuntimeError(f"{name}: the file cannot be opened (missing, unreadable, or a symlink)") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise RuntimeError(f"{name}: not a regular file")
+        if st.st_uid != os.geteuid():
+            raise RuntimeError(f"{name}: the file is not owned by the user running this service")
+        if st.st_mode & 0o077:
+            raise RuntimeError(f"{name}: the file is readable by group or others; chmod 600 it")
+        if st.st_size > max_bytes:
+            raise RuntimeError(f"{name}: the file is too large")
+        raw = os.read(fd, max_bytes + 1)
+    finally:
+        os.close(fd)
+    return raw.strip()
 
 
 def _flag(env, name: str) -> bool:
@@ -85,6 +113,7 @@ class Settings:
     sla_resolution: dict = field(default_factory=lambda: dict(SLA_RESOLUTION_DEFAULT))
     at_risk_threshold: int = 60
     renewal_window_days: int = 60
+    hmac_key: bytes = b""                                  # keys every stored digest (bodies, consent texts)
     bind_addr: str = "127.0.0.1"
     port: int = 8460
 
@@ -176,6 +205,22 @@ def load(env: Optional[dict] = None) -> Settings:
     for a, b in zip(PRIORITIES, PRIORITIES[1:]):
         if s.sla_first[a] > s.sla_first[b] or s.sla_resolution[a] > s.sla_resolution[b]:
             raise RuntimeError(f"SLA targets must not be looser for {a} than for {b}")
+    # AEGIS round 1 (V1-M2): stored digests of message bodies and consent texts are HMAC-SHA-256 under this key, so
+    # a short text (a phone number, "yes") cannot be confirmed by hashing guesses
+    if (env.get("SVC_HMAC_KEY_FILE") or "").strip():
+        raw = _secret_file_bytes(env, "SVC_HMAC_KEY_FILE")
+        try:
+            key = base64.b64decode(raw, validate=True)
+        except ValueError:
+            key = b""
+        if len(key) < 32:
+            raise RuntimeError("SVC_HMAC_KEY_FILE must hold at least 32 random bytes, base64-encoded")
+        s.hmac_key = key
+    elif non_production:
+        s.hmac_key = NON_PRODUCTION_HMAC_KEY
+    else:
+        raise RuntimeError("SVC_HMAC_KEY_FILE is required: stored digests are keyed (SVC_NON_PRODUCTION=1 uses a fixed "
+                           "test key)")
     s.at_risk_threshold = _int(env, "SVC_AT_RISK_THRESHOLD", 60, 1, 99)
     s.renewal_window_days = _int(env, "SVC_RENEWAL_WINDOW_DAYS", 60, 7, 180)
     s.bind_addr = (env.get("SVC_BIND_ADDR") or "127.0.0.1").strip()

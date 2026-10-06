@@ -248,3 +248,8 @@ class NpsResponse(Strict):
     survey_id: SvId
     score: Annotated[StrictInt, Field(ge=0, le=10)]
     comment: Optional[ShortText] = None
+
+
+class ResolveHeld(Strict):
+    request_id: Id
+    outcome: Literal["sent", "requeue", "cancel"]

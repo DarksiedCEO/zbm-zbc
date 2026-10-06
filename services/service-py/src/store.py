@@ -22,6 +22,7 @@ The record log never holds a message body: bodies are stored once, content-addre
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import threading
@@ -284,14 +285,18 @@ _BODY_NAME = __import__("re").compile(r"[0-9a-f]{64}")
 
 
 class BodyStore:
-    """Message bodies (and consent texts), stored once each under the SHA-256 of their exact UTF-8 bytes. A body is
+    """Message bodies (and consent texts), stored once each under the HMAC-SHA-256 (keyed: SVC_HMAC_KEY_FILE,
+    AEGIS round 1 V1-M2) of their exact UTF-8 bytes; fields citing them keep the ``*_sha256`` names. A body is
     written BEFORE the log line that cites it; at start a body no live log record cites is an orphan of a failed
     write and is removed (never while a pending line may still cite it). Reading checks the hash, so an edited body
     file is never returned. Bodies never leave this service except to the caller entitled to the ticket."""
 
     MAX_BYTES = 64 * 1024
 
-    def __init__(self, data_dir: Optional[str]):
+    def __init__(self, data_dir: Optional[str], key: bytes):
+        if len(key) < 32:
+            raise ValueError("BodyStore needs a key of at least 32 bytes")
+        self._key = key
         self.lock = threading.RLock()
         self.dir = os.path.join(data_dir, BODIES_DIR) if data_dir else None
         self._mem: dict[str, bytes] = {}
@@ -304,15 +309,14 @@ class BodyStore:
                 elif not _BODY_NAME.fullmatch(name):
                     raise StoreCorrupt(f"body store holds a file that is not a body: {name[:40]}")
 
-    @staticmethod
-    def sha(text: str) -> str:
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    def digest(self, data: bytes) -> str:
+        return hmac.new(self._key, data, hashlib.sha256).hexdigest()
 
     def put(self, text: str) -> str:
         data = text.encode("utf-8")
         if len(data) > self.MAX_BYTES:
             raise StoreWriteError("body larger than 64 KiB")
-        digest = hashlib.sha256(data).hexdigest()
+        digest = self.digest(data)
         with self.lock:
             if self.fail_next_put:
                 self.fail_next_put = False
@@ -342,7 +346,7 @@ class BodyStore:
             return None
         with self.lock:
             data = self._mem.get(digest) if not self.dir else self._read(os.path.join(self.dir, digest))
-        if data is None or hashlib.sha256(data).hexdigest() != digest:
+        if data is None or not hmac.compare_digest(self.digest(data), digest):
             return None
         return data.decode("utf-8")
 

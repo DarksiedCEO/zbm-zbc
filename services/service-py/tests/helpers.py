@@ -140,7 +140,7 @@ class Harness:
         self.clock = clock or FixedClock(T0)
         self.ports = ports or Ports.default()
         self.svc = SupportService(self.settings, Recorder(self.ledger), RecordLog(self.settings.data_dir),
-                                  BodyStore(self.settings.data_dir), self.ports, self.clock)
+                                  BodyStore(self.settings.data_dir, self.settings.hmac_key), self.ports, self.clock)
         self.client = TestClient(api._wrap(api.create_app(self.svc, self.settings)), raise_server_exceptions=False)
 
     def restart(self, **env_over) -> "Harness":
@@ -215,11 +215,11 @@ class Harness:
         body = {"request_id": rid(), "brand": brand, "contact_ref": ref, **fields}
         return self.ok(self.post("/svc/v1/contacts", body, caller="hub"), 201)["contact_id"]
 
-    def consent(self, contact_id: str, channel: str = "sms"):
+    def consent(self, contact_id: str, channel: str = "sms", captured_at: str = "2026-10-01T10:00:00Z",
+                text: str = "I agree to receive account texts from Z Best Media."):
         return self.post("/svc/v1/consents", {"request_id": rid(), "contact_id": contact_id, "channel": channel,
-                                              "source": "portal_form", "consent_text":
-                                              "I agree to receive account texts from Z Best Media.",
-                                              "captured_at": "2026-10-01T10:00:00Z", "express": True}, caller="hub")
+                                              "source": "portal_form", "consent_text": text,
+                                              "captured_at": captured_at, "express": True}, caller="hub")
 
     def chat(self, text: str, ref: str = "client:acme", brand: str = "zbm", ticket_id: Optional[str] = None,
              request_id: Optional[str] = None):

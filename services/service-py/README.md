@@ -39,6 +39,7 @@ else; Andre's actions go through the `dashboard` caller AND carry `X-Andre-Appro
 | `SVC_ANDRE_APPROVAL_TOKEN` | unset | Andre's approvals (FounderGate); equal to the service token or any caller token = not configured |
 | `SVC_NON_PRODUCTION` | 0 | 1 allows the in-memory store (tests only). Never in production |
 | `SVC_DATA_DIR` | — | required in production; a directory owned by the service user, mode 0700 |
+| `SVC_HMAC_KEY_FILE` | — | required in production: a 0600 file holding 32+ random bytes, base64; keys the digests of stored bodies and consent texts (HMAC-SHA-256). `SVC_NON_PRODUCTION=1` without it uses a fixed test key |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | unset = every write refused (fail closed) |
 | `SVC_SUPPORT_EMAIL_ZBM`, `SVC_SUPPORT_EMAIL_ZBC` | unset | the support identity per brand (inbound must be addressed to it; outbound is sent from it); must differ; unset = that brand's email refused |
 | `SVC_SMS_NUMBER_ZBM`, `SVC_SMS_NUMBER_ZBC` | unset | the brand's SMS number, E.164; must differ; unset = that brand's SMS refused |
@@ -70,7 +71,7 @@ a date of birth, government id, card or bank account number, IP address or devic
 | `PUT /svc/v1/phone/routing/{brand}` | Andre | business hours and in-hours action |
 | `GET /svc/v1/tickets?status=&brand=&queue=`; `GET /tickets/{id}` | dashboard | queues and a ticket with its messages and handoffs |
 | `POST /svc/v1/tickets/{id}/reply` | Andre | his reply (channel rules apply) |
-| `POST /svc/v1/tickets/{id}/status`, `/priority` | dashboard | status machine; priority (SLA targets recomputed) |
+| `POST /svc/v1/tickets/{id}/status`, `/priority` | dashboard (resolving or closing a money, legal, complaint, security or privacy ticket: Andre) | status machine; priority (SLA targets recomputed) |
 | `POST /svc/v1/kb/articles`, `/templates`, `/offers`; `GET` the same | dashboard | a new version (always unapproved) |
 | `POST .../{id}/approve`, `.../{id}/retire` | Andre | approve exactly one version by its content hash; retire |
 | `POST /svc/v1/accounts`; `GET /accounts`; `GET /accounts/{id}/health` | onboarding; dashboard; dashboard | accounts, contract end, the explainable score |
@@ -79,8 +80,9 @@ a date of birth, government id, card or bank account number, IP address or devic
 | `GET /svc/v1/save-plans`; `POST /save-plans/{id}/offer`, `/close`; `POST /save-plans/{id}/steps/{step}/done` | dashboard; Andre; dashboard | save plans |
 | `POST /svc/v1/nps/surveys`; `POST /nps/responses` | dashboard, scheduler; hub | NPS |
 | `GET /svc/v1/alerts`, `/outbound?status=` | dashboard | alerts to Andre (delivery `not_wired` until a provider is chosen), outbound queue |
+| `POST /svc/v1/outbound/{message_id}/resolve` | Andre | a message held as `sending` (send outcome unknown after a restart): `sent`, `requeue` or `cancel` |
 | `POST /svc/v1/jobs/{sla-sweep,health-recompute,save-plan-tick,outbound-tick,handoff-retries,integrity}/run` | scheduler | the jobs (idempotent per request id) |
-| `GET /svc/v1/audit/integrity`, `/audit/events` | dashboard, compliance_38 | integrity against the ledger; the log with personal data hashed |
+| `GET /svc/v1/audit/integrity`, `/audit/events` | dashboard, compliance_38 | integrity against the ledger; the log with personal data replaced by HMAC under a key made for that export (returned once with it) |
 
 ## Live run
 

@@ -48,7 +48,7 @@ def test_reopened_twice_is_a_complaint(h):
     for _ in range(2):
         h.ok(_status(h, tid, "resolved"))
         h.clock.advance(days=2)
-        r = h.ok(h.chat("still not working for me"), 201)
+        r = h.ok(h.chat("following up on this"), 201)
     assert r["action"] == "escalated"
 
 

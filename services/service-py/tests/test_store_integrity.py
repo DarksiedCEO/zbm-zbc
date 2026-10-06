@@ -99,7 +99,8 @@ def test_audit_export_minimises_personal_data(hd):
     assert "dana@acme.test" not in text and "Dana" not in text and "+13105551234" not in text
     assert "client:acme" not in text and "America/Los_Angeles" not in text
     first = ev["events"][0]["data"]["effects"][0]
-    assert len(first["email_sha256"]) == 64 and "response" not in ev["events"][0]["data"]
+    assert len(first["email_hmac"]) == 64 and "response" not in ev["events"][0]["data"]
+    assert len(__import__("base64").b64decode(ev["hmac_key"])) == 32
 
 
 def test_every_line_is_anchored_and_typed_events_come_first(h):

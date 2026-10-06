@@ -18,8 +18,11 @@ is committed, and an outbound message is recorded on the ledger (``message_sent`
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import json
+import os
 import re
 import threading
 import time
@@ -33,7 +36,7 @@ import kb
 import triage as triage_mod
 from clock import Clock, SystemClock, iso, parse_iso
 from config import BRAND_NAMES, PRIORITIES, Settings
-from errors import Conflict, Invalid, NotFound, Unavailable
+from errors import Conflict, FounderRefused, Invalid, NotFound, Unavailable
 from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, derived_id, payload_sha256
 from ports import NOT_WIRED, Alert, HandoffRequest, Outbound, Ports
 from reasons import R
@@ -56,15 +59,18 @@ ALERT_CATEGORIES = {"money": "ESCALATION_MONEY", "contract": "ESCALATION_CONTRAC
 PLACEHOLDERS = ("first_name", "brand_name", "offer_title", "offer_terms", "offer_price", "survey_id")
 TEMPLATE_PURPOSES = ("check_in", "nps_survey", "offer")
 SMS_FOOTER = "\nReply STOP to opt out."
+OPT_OUT_ONLY_WORDS = 4          # an opt-out of at most this many words is only that: no ticket
 MAX_SEND_ATTEMPTS = 5
+SENSITIVE = frozenset({"money", "contract", "complaint", "security", "privacy"})
 CATALOGS = ("kb", "template", "offer")
-PERSONAL_KEYS = ("email", "phone", "display_name", "contact_ref", "timezone", "to", "from_number", "from_address")
+PERSONAL_KEYS = ("email", "phone", "display_name", "contact_ref", "timezone", "to", "from_number", "from_address",
+                 "address")
 # typed ledger events: effect op -> event type (recorded BEFORE the line that carries the effect)
 EVENTS = {"consent_granted": "consent_changed", "consent_revoked": "consent_changed",
           "handoff_new": "escalation_opened", "ticket_escalated": "escalation_opened",
           "catalog_approved": "approval_recorded", "catalog_retired": "approval_recorded",
           "alert_new": "alert_raised", "sla_breach": "sla_breached", "plan_new": "save_plan_started",
-          "plan_offer": "offer_selected", "routing_set": "approval_recorded"}
+          "plan_offer": "offer_selected", "routing_set": "approval_recorded", "message_sending": "message_sending"}
 
 
 def _maybe(exc: Unavailable) -> Unavailable:
@@ -102,6 +108,7 @@ class SupportService:
         self.contacts: dict[str, dict] = {}
         self.contact_index: dict[tuple, str] = {}
         self.consents: dict[tuple, dict] = {}
+        self.revocations: dict[tuple, str] = {}       # (contact, channel, address) -> when it was last revoked
         self.tickets: dict[str, dict] = {}
         self.messages: dict[str, dict] = {}
         self.handoffs: dict[str, dict] = {}
@@ -141,8 +148,10 @@ class SupportService:
         out = []
         for e in data.get("effects", ()):
             et = EVENTS.get(e["op"])
-            if e["op"] == "message_out" and e.get("origin") in ("kb", "human", "template", "offer"):
+            if e["op"] == "message_out" and e.get("origin") in ("kb", "human", "template", "offer", "opt_out"):
                 et = "message_sent" if e["status"] == "sent" else "answer_queued"
+            if e["op"] == "message_status" and e.get("status") == "sent":
+                et = "message_sent"
             if et is None:
                 continue
             core = {k: v for k, v in e.items() if k not in PERSONAL_KEYS and not k.endswith("_due")
@@ -274,18 +283,22 @@ class SupportService:
             "consent_id": e["consent_id"], "contact_id": e["contact_id"], "channel": e["channel"],
             "status": "active", "source": e["source"], "consent_text_sha256": e["text_sha256"],
             "captured_at": e["captured_at"], "recorded_at": at, "revoked_at": None, "revoked_via": None,
-            "express": e["express"]}
+            "express": e["express"], "address": e.get("address")}
 
     def _e_consent_revoked(self, e, at):
         key = (e["contact_id"], e["channel"])
         c = self.consents.get(key) or {"consent_id": None, "contact_id": e["contact_id"], "channel": e["channel"],
                                        "source": None, "consent_text_sha256": None, "captured_at": None,
-                                       "recorded_at": None, "express": False}
-        c.update(status="revoked", revoked_at=at, revoked_via=e["via"])
+                                       "recorded_at": None, "express": False, "address": e.get("address")}
+        if c.get("status") == "active" and e.get("address") and c.get("address") not in (None, e["address"]):
+            pass            # a revocation for another address leaves this one's consent alone (it is not theirs)
+        else:
+            c.update(status="revoked", revoked_at=at, revoked_via=e["via"])
         self.consents[key] = c
+        self.revocations[(e["contact_id"], e["channel"], e.get("address"))] = at
         for m in self.messages.values():
             if m["dir"] == "out" and m["contact_id"] == e["contact_id"] and m["channel"] == e["channel"] \
-                    and m["status"] == "queued":
+                    and m["status"] == "queued" and m.get("origin") != "opt_out":
                 m.update(status="cancelled", reason=R("CONSENT_REVOKED"), updated_at=at)
 
     def _e_ticket_new(self, e, at):
@@ -338,16 +351,24 @@ class SupportService:
         m = {k: e.get(k) for k in ("message_id", "ticket_id", "contact_id", "brand", "channel", "origin", "ref",
                                    "body_sha256", "subject", "proactive", "status", "plan_id", "step_id",
                                    "survey_id")}
-        m.update(dir="out", at=at, updated_at=at, attempts=0, reason=e.get("reason"))
+        m.update(dir="out", at=at, updated_at=at, attempts=0, reason=e.get("reason"), provider_accepted=False)
         self.messages[e["message_id"]] = m
         if e.get("ticket_id"):
             self.tickets[e["ticket_id"]]["messages"].append(e["message_id"])
 
     def _e_message_status(self, e, at):
         m = self.messages[e["message_id"]]
+        if m["status"] == "cancelled" and e["status"] == "sent":
+            m.update(provider_accepted=True, updated_at=at)        # V1-C2: a cancelled message never flips to sent
+            return
         m.update(status=e["status"], reason=e.get("reason"), updated_at=at)
-        if e.get("attempted"):
-            m["attempts"] += 1
+
+    def _e_message_sending(self, e, at):
+        """The send intent, durable BEFORE the provider is called. A message still ``sending`` after a restart is
+        held for Andre's review (``/outbound/{id}/resolve``), never re-sent automatically."""
+        m = self.messages[e["message_id"]]
+        m.update(status="sending", reason=None, updated_at=at)
+        m["attempts"] += 1
 
     def _e_first_response(self, e, at):
         t = self.tickets[e["ticket_id"]]
@@ -475,18 +496,12 @@ class SupportService:
         pass
 
     def _remove_orphans(self) -> None:
-        """Remove stored bodies no record cites (a body is written before its line; a failed line leaves one)."""
-        live = set()
-        for m in self.messages.values():
-            for k in ("body_sha256", "subject_sha256"):
-                if m.get(k):
-                    live.add(m[k])
-        for c in self.consents.values():
-            if c.get("consent_text_sha256"):
-                live.add(c["consent_text_sha256"])
-        for s in self.surveys.values():
-            if s.get("comment_sha256"):
-                live.add(s["comment_sha256"])
+        """Remove stored bodies no log line cites (a body is written before its line; a failed line leaves one).
+        V1-M1: the keep-set is every digest cited ANYWHERE in the log, not what memory still points at (a replaced
+        consent's text is evidence and is kept)."""
+        live: set = set()
+        for r in self.log.iter_records():
+            _digests(r["data"], live)
         for name in self.bodies.names() - live:
             try:
                 self.bodies.delete(name)
@@ -675,19 +690,9 @@ class SupportService:
         return {"op": "alert_new", "alert_id": derived_id("alr", code, subject, ident), "code": R(code),
                 "subject": subject}
 
-    def _consent_active(self, contact_id: str, channel: str) -> bool:
-        c = self.consents.get((contact_id, channel))
-        return bool(c and c["status"] == "active")
-
-    def _contact_view_for_rules(self, contact: dict) -> dict:
-        c = dict(contact)
-        ec = self.consents.get((contact["contact_id"], "email"))
-        c["email_revoked"] = bool(ec and ec["status"] == "revoked")
-        return c
-
-    def _channel_check(self, channel: str, contact: dict, proactive: bool) -> Optional[str]:
-        return channels.check(channel, self._contact_view_for_rules(contact),
-                              lambda ch: self._consent_active(contact["contact_id"], ch), proactive, self.now())
+    def _channel_check(self, channel: str, contact: dict, proactive: bool, opt_out: bool = False) -> Optional[str]:
+        return channels.check(channel, contact, lambda ch: self.consents.get((contact["contact_id"], ch)), proactive,
+                              self.now(), opt_out)
 
     def _put_body(self, text: str) -> str:
         try:
@@ -731,7 +736,7 @@ class SupportService:
     def _out_effect(self, message_id: str, contact: dict, brand: str, channel: str, origin: str, text: str,
                     proactive: bool, status: str = "queued", ticket_id: Optional[str] = None,
                     ref: Optional[dict] = None, subject: Optional[str] = None, **extra) -> dict:
-        if channel == "sms":
+        if channel == "sms" and origin != "opt_out":
             text = text + SMS_FOOTER
         sha = self._put_body(text)
         return {"op": "message_out", "message_id": message_id, "ticket_id": ticket_id,
@@ -769,8 +774,17 @@ class SupportService:
             else:
                 effect = {"op": "contact_update", "contact_id": cid,
                           "fields": {k: v for k, v in fields.items() if v is not None}}
+            effects = [effect]
+            old = self.contacts.get(cid) or {}
+            for kind, ch in (("phone", "sms"), ("email", "email")):
+                if fields[kind] and old.get(kind) and old[kind] != fields[kind]:
+                    c = self.consents.get((cid, ch))
+                    if c and c["status"] == "active":          # V1-C1: a new address ends the old address's consent
+                        effects.insert(0, {"op": "consent_revoked", "contact_id": cid, "channel": ch,
+                                           "via": "address_changed", "address": old[kind],
+                                           "request_id": body["request_id"]})
             resp = {"contact_id": cid, "brand": body["brand"]}
-            self._commit("contact_saved", {"effects": [effect], "request": self._req(actor, "contact", target, body),
+            self._commit("contact_saved", {"effects": effects, "request": self._req(actor, "contact", target, body),
                                            "response": resp}, actor)
             return resp
 
@@ -807,18 +821,22 @@ class SupportService:
             captured = parse_iso(body["captured_at"])
             if captured > self.now() + timedelta(minutes=5):
                 raise Invalid(R("CONSENT_IN_FUTURE"))
+            address = contact["phone"] if body["channel"] == "sms" else contact["email"]
+            revoked = self.revocations.get((contact["contact_id"], body["channel"], address))
+            if revoked is not None and captured <= parse_iso(revoked):
+                raise Conflict(R("CONSENT_PREDATES_REVOCATION"))      # V1-H4: an old capture never undoes a STOP
             text_sha = self._put_body(body["consent_text"])
             cid = self._did("cns", actor, "consent", target, body["request_id"])
             effect = {"op": "consent_granted", "consent_id": cid, "contact_id": contact["contact_id"],
                       "channel": body["channel"], "source": body["source"], "text_sha256": text_sha,
-                      "captured_at": iso(captured), "express": True}
+                      "captured_at": iso(captured), "express": True, "address": address}
             resp = {"consent_id": cid, "contact_id": contact["contact_id"], "channel": body["channel"],
                     "status": "active", "consent_text_sha256": text_sha}
             self._commit("consent_granted", {"effects": [effect], "request": self._req(actor, "consent", target, body),
                                              "response": resp}, actor)
             return resp
 
-    def revoke_consent(self, actor: str, body: dict) -> dict:
+    def revoke_consent(self, actor: str, body: dict, andre: bool = False) -> dict:
         with self.lock:
             self._gate()
             target = f"{body['contact_id']}:{body['channel']}"
@@ -827,9 +845,12 @@ class SupportService:
                 return prev
             if body["contact_id"] not in self.contacts:
                 raise NotFound(R("CONTACT_NOT_FOUND"))
-            via = "andre" if actor == "dashboard" else "contact_request"
+            # V1-L1: "andre" only with his verified token; the dashboard alone is "dashboard"
+            via = ("andre" if andre else "dashboard") if actor == "dashboard" else "contact_request"
+            c = self.contacts[body["contact_id"]]
             effect = {"op": "consent_revoked", "contact_id": body["contact_id"], "channel": body["channel"],
-                      "via": via, "request_id": body["request_id"]}
+                      "via": via, "request_id": body["request_id"],
+                      "address": c.get("phone") if body["channel"] == "sms" else c.get("email")}
             resp = {"contact_id": body["contact_id"], "channel": body["channel"], "status": "revoked"}
             self._commit("consent_revoked", {"effects": [effect], "request": self._req(actor, "revoke", target, body),
                                              "response": resp}, actor)
@@ -911,22 +932,34 @@ class SupportService:
                 contact = self._find_or_new_contact(actor, brand, "contact_ref", body["contact_ref"], rid, effects)
             new_contact = bool(effects)
             text = body["text"]
-            if channel == "sms" and channels.is_stop(text):
-                # STOP / UNSUBSCRIBE: consent revoked at once (every queued SMS to them cancelled); no ticket
+            opted_out = channel == "sms" and channels.is_opt_out(text)
+            if opted_out:
+                # V1-H3: an opt-out word or phrase anywhere revokes SMS consent at once (every queued SMS to them
+                # cancelled); the one permitted confirmation goes if they had consent for this number
+                had = channels.consent_matches(self.consents.get((contact["contact_id"], "sms")), body["from_number"])
                 effects.append({"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "sms",
-                                "via": "stop_keyword", "request_id": rid})
+                                "via": "stop_keyword", "request_id": rid, "address": body["from_number"]})
                 resp = {"action": "opted_out", "contact_id": contact["contact_id"]}
-                self._commit("sms_opt_out", {"effects": effects, "request": self._req(actor, f"inbound_{channel}",
-                                                                                      target, body),
-                                             "response": resp}, actor)
-                return resp
+                if had:
+                    conf = channels.OPT_OUT_CONFIRMATION.replace("{brand_name}", BRAND_NAMES[brand])
+                    cmid = self._did("msg", actor, "opt_out_confirmation", target, rid)
+                    effects.append(self._out_effect(cmid, contact, brand, "sms", "opt_out", conf, False))
+                    resp["confirmation_message_id"] = cmid
+                if len(triage_mod.normalise(text).split()) <= OPT_OUT_ONLY_WORDS:
+                    self._commit("sms_opt_out", {"effects": effects,
+                                                 "request": self._req(actor, f"inbound_{channel}", target, body),
+                                                 "response": resp}, actor)
+                    return resp
             ticket, is_new = self._ticket_for(actor, contact, brand, channel, body.get("ticket_id"), rid, effects,
                                               new_contact)
             if not is_new and ticket["status"] in ("pending_customer", "resolved"):
                 effects.append({"op": "ticket_status", "ticket_id": ticket["ticket_id"], "status": "open"})
                 if ticket["status"] == "resolved":
                     ticket = {**ticket, "reopened": ticket["reopened"] + 1}
-            tri = triage_mod.classify(text, self._recent_inbound(contact["contact_id"]), ticket["reopened"])
+            tri = triage_mod.classify(text, self._recent_inbound(contact["contact_id"]), ticket["reopened"],
+                                      body.get("subject"))
+            if opted_out and tri.routine_candidate:
+                tri = triage_mod.Triage("no_answer", (), tri.signals + ("sms:opted_out",), False, tri.question_count)
             body_sha_ = self._put_body(text)
             subject_sha = self._put_body(body["subject"]) if body.get("subject") else None
             mid = self._did("msg", actor, f"inbound_{channel}", target, rid)
@@ -935,7 +968,8 @@ class SupportService:
                             "body_sha256": body_sha_, "subject_sha256": subject_sha,
                             "triage": {"primary": tri.primary, "categories": list(tri.categories),
                                        "signals": list(tri.signals)}})
-            resp = {"ticket_id": ticket["ticket_id"], "message_id": mid, "contact_id": contact["contact_id"]}
+            resp = {"ticket_id": ticket["ticket_id"], "message_id": mid, "contact_id": contact["contact_id"],
+                    **({"opted_out": True} if opted_out else {})}
             answered = False
             if tri.routine_candidate and ticket["queue"] != "bot":
                 # the ticket is with Andre: a follow-up is his to answer, never the bot's (fail toward the human)
@@ -1086,7 +1120,7 @@ class SupportService:
         self.dispatch_side_effects()
         return resp
 
-    def set_status(self, actor: str, ticket_id: str, body: dict) -> dict:
+    def set_status(self, actor: str, ticket_id: str, body: dict, andre: bool = False) -> dict:
         with self.lock:
             self._gate()
             prev = self._idem(actor, "status", ticket_id, body)
@@ -1097,6 +1131,8 @@ class SupportService:
                 raise NotFound(R("TICKET_NOT_FOUND"))
             if body["status"] not in TRANSITIONS[t["status"]]:
                 raise Conflict(R("TRANSITION_NOT_ALLOWED"))
+            if body["status"] in ("resolved", "closed") and set(t["categories"]) & SENSITIVE and not andre:
+                raise FounderRefused(R("ANDRE_APPROVAL_REQUIRED"))   # V1-L2: Andre closes money/legal/complaints
             effect = {"op": "ticket_status", "ticket_id": ticket_id, "status": body["status"]}
             if body["status"] == "escalated":
                 effect = {"op": "ticket_escalated", "ticket_id": ticket_id, "categories": []}
@@ -1677,99 +1713,137 @@ class SupportService:
             with self.lock:
                 self._in_flight -= {h["handoff_id"] for h in hofs} | {a["alert_id"] for a in alerts}
 
+    def _send_block(self, m: dict) -> Optional[str]:
+        """Why this message may not go NOW (None: it may). Run when the tick picks it AND again under the lock right
+        before its send intent is recorded (V1-C2: a STOP, a revoked consent, an edited article, template or offer
+        that lands mid-tick is honoured)."""
+        if m["status"] != "queued":
+            return "NOT_QUEUED"
+        if self.bodies.get(m["body_sha256"]) is None:
+            return "BODY_MISSING"
+        contact = self.contacts[m["contact_id"]]
+        reason = self._channel_check(m["channel"], contact, bool(m["proactive"]), m.get("origin") == "opt_out")
+        if reason is not None:
+            return reason
+        ref = m.get("ref") or {}
+        for key in ("template", "offer"):
+            r = ref.get(key)
+            if r and self._usable(key, r["item_id"], r["version"], r["content_sha256"]) is None:
+                return "OFFER_NOT_APPROVED" if key == "offer" else "TEMPLATE_NOT_APPROVED"
+        if ref.get("catalog") == "kb" and self._usable("kb", ref["item_id"], ref["version"],
+                                                       ref["content_sha256"]) is None:
+            return "ARTICLE_NOT_APPROVED"
+        if m["attempts"] >= MAX_SEND_ATTEMPTS:
+            return "PROVIDER_FAILED"
+        return None
+
+    def _cancel_effects(self, m: dict, reason: str) -> list:
+        out = [{"op": "message_status", "message_id": m["message_id"], "status": "cancelled", "reason": R(reason)}]
+        t = self.tickets.get(m.get("ticket_id") or "")
+        if t is not None and t["status"] == "pending_customer":
+            # the answer will not go: the ticket goes back to Andre's queue
+            out.append({"op": "ticket_status", "ticket_id": t["ticket_id"], "status": "open", "queue": "andre"})
+        return out
+
     def _outbound_tick(self) -> dict:
-        """Send what may be sent now. For each queued message: re-check its channel rules (consent may have been
-        revoked, the hour may be quiet) and that the template / offer it carries is still approved as it was; a
-        message that may never go is cancelled with a reason, one that must wait stays queued. Then, per message:
-        ``message_sent`` recorded on the ledger FIRST (ledger down: nothing is sent and the tick stops), the
-        provider called outside the lock, the result committed."""
-        result = {"sent": 0, "failed": 0, "cancelled": 0, "waiting": 0, "not_wired": 0}
+        """Send what may be sent now. Every queued message is checked (``_send_block``): one that may never go is
+        cancelled with a reason, one that must wait (quiet hours) stays queued. Then, per message, under the lock:
+        checked AGAIN, then the send intent committed (``message_sending``, its typed ledger event first: ledger down
+        = nothing is sent and the tick stops); the provider called outside the lock with the message id as its
+        idempotency key; the result committed. A result that could not be committed is committed at the next tick
+        by this process; after a restart a message still ``sending`` is held for Andre, never re-sent."""
+        result = {"sent": 0, "failed": 0, "cancelled": 0, "waiting": 0, "not_wired": 0, "held": 0}
         with self.lock:
             self._gate()
+            for mid, effect in list(self._unconfirmed.items()):          # results this process could not record
+                self._commit("outbound_result", {"effects": [effect]}, INTERNAL)
+                del self._unconfirmed[mid]
+                result["sent" if effect["status"] == "sent" else "failed"] += 1
             cancels, ready = [], []
             for m in sorted(self.messages.values(), key=lambda x: (x["at"], x["message_id"])):
-                if m["dir"] != "out" or m["status"] != "queued" or m["message_id"] in self._in_flight:
+                if m["dir"] != "out" or m["message_id"] in self._in_flight:
                     continue
-                if m["message_id"] in self._unconfirmed:          # already taken by the provider: only record it
-                    ready.append(m)
+                if m["status"] == "sending":
+                    result["held"] += 1
                     continue
-                if self.bodies.get(m["body_sha256"]) is None:
-                    cancels.append({"op": "message_status", "message_id": m["message_id"], "status": "cancelled",
-                                    "reason": R("BODY_MISSING")})
+                if m["status"] != "queued":
                     continue
-                contact = self.contacts[m["contact_id"]]
-                reason = self._channel_check(m["channel"], contact, bool(m["proactive"]))
-                ref = m.get("ref") or {}
-                if reason is None:
-                    for key in ("template", "offer"):
-                        r = ref.get(key)
-                        if r and self._usable(key, r["item_id"], r["version"], r["content_sha256"]) is None:
-                            reason = "OFFER_NOT_APPROVED" if key == "offer" else "TEMPLATE_NOT_APPROVED"
-                    if ref.get("catalog") == "kb" and self._usable("kb", ref["item_id"], ref["version"],
-                                                                   ref["content_sha256"]) is None:
-                        reason = "ARTICLE_NOT_APPROVED"
+                reason = self._send_block(m)
                 if reason == "QUIET_HOURS":
                     result["waiting"] += 1
                     continue
-                if reason is None and m["attempts"] >= MAX_SEND_ATTEMPTS:
-                    reason = "PROVIDER_FAILED"
                 if reason is not None:
-                    cancels.append({"op": "message_status", "message_id": m["message_id"], "status": "cancelled",
-                                    "reason": R(reason)})
-                    t = self.tickets.get(m.get("ticket_id") or "")
-                    if t is not None and t["status"] == "pending_customer":
-                        # the answer will not go: the ticket goes back to Andre's queue
-                        cancels.append({"op": "ticket_status", "ticket_id": t["ticket_id"], "status": "open",
-                                        "queue": "andre"})
+                    cancels += self._cancel_effects(m, reason)
                     continue
-                sender = self.ports.senders.get(m["channel"])
-                if not getattr(sender, "wired", False):
+                if not getattr(self.ports.senders.get(m["channel"]), "wired", False):
                     result["not_wired"] += 1
                     continue
-                ready.append(m)
+                ready.append(m["message_id"])
             if cancels:
                 self._commit("outbound_cancelled", {"effects": cancels}, INTERNAL)
-                result["cancelled"] = sum(1 for c in cancels if c["op"] == "message_status")
-            for m in ready:
-                self._in_flight.add(m["message_id"])
+                result["cancelled"] += sum(1 for c in cancels if c["op"] == "message_status")
+            self._in_flight |= set(ready)
         try:
-            for m in ready:
-                if m["message_id"] in self._unconfirmed:            # the provider already took it: record, never resend
-                    self._commit("outbound_result", {"effects": [self._unconfirmed[m["message_id"]]]}, INTERNAL)
-                    del self._unconfirmed[m["message_id"]]
-                    result["sent" if self.messages[m["message_id"]]["status"] == "sent" else "failed"] += 1
-                    continue
+            for mid in ready:
                 with self.lock:
+                    m = self.messages[mid]
+                    reason = self._send_block(m)                        # V1-C2: re-checked right before sending
+                    if reason == "QUIET_HOURS":
+                        result["waiting"] += 1
+                        continue
+                    if reason == "NOT_QUEUED":
+                        continue
+                    if reason is not None:
+                        self._commit("outbound_cancelled", {"effects": self._cancel_effects(m, reason)}, INTERNAL)
+                        result["cancelled"] += 1
+                        continue
                     contact = self.contacts[m["contact_id"]]
-                    text = self.bodies.get(m["body_sha256"]) or ""
                     attempt = m["attempts"] + 1
-                    payload = {"message_id": m["message_id"], "channel": m["channel"], "brand": m["brand"],
-                               "body_sha256": m["body_sha256"], "attempt": attempt, "origin": m["origin"]}
-                    try:          # recorded BEFORE the provider is called: ledger down -> nothing sent
-                        self._record_twice(derived_id("snd", m["message_id"], attempt), "message_sent", INTERNAL,
-                                           m["message_id"], payload, f"{m['channel']} message attempt {attempt}")
-                    except LedgerRecordError:
-                        raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+                    self._commit("outbound_sending", {"effects": [{
+                        "op": "message_sending", "message_id": mid, "channel": m["channel"], "brand": m["brand"],
+                        "body_sha256": m["body_sha256"], "attempt": attempt, "origin": m["origin"]}]}, INTERNAL)
                     to = contact["email"] if m["channel"] == "email" else (
                         contact["phone"] if m["channel"] == "sms" else contact["contact_id"])
                     sender_id = self.settings.support_email.get(m["brand"]) if m["channel"] == "email" else (
                         self.settings.sms_number.get(m["brand"]) if m["channel"] == "sms" else m["brand"])
-                    msg = Outbound(m["message_id"], m["brand"], m["channel"], to, sender_id or "", m.get("subject"),
-                                   text)
-                res = _safe(lambda: self.ports.senders[m["channel"]].send(msg))
+                    msg = Outbound(mid, m["brand"], m["channel"], to, sender_id or "", m.get("subject"),
+                                   self.bodies.get(m["body_sha256"]) or "")
+                    channel = m["channel"]
+                res = _safe(lambda: self.ports.senders[channel].send(msg))
                 status = "sent" if res == "sent" else "failed"
-                effect = {"op": "message_status", "message_id": m["message_id"],
-                          "status": "sent" if status == "sent" else "queued",
-                          "reason": None if status == "sent" else R("PROVIDER_FAILED"), "attempted": True}
-                if status == "sent":
-                    self._unconfirmed[m["message_id"]] = effect
+                effect = {"op": "message_status", "message_id": mid, "status": "sent" if status == "sent" else "queued",
+                          "reason": None if status == "sent" else R("PROVIDER_FAILED")}
+                self._unconfirmed[mid] = effect
                 self._commit("outbound_result", {"effects": [effect]}, INTERNAL)
-                self._unconfirmed.pop(m["message_id"], None)
+                self._unconfirmed.pop(mid, None)
                 result[status] += 1
         finally:
             with self.lock:
-                self._in_flight -= {m["message_id"] for m in ready}
+                self._in_flight -= set(ready)
         return result
+
+    def resolve_held(self, message_id: str, body: dict) -> dict:
+        """Andre decides a message whose send outcome is unknown (still ``sending`` after a restart): ``sent`` (the
+        provider took it), ``requeue`` (it did not: send again; the provider sees the same message id) or
+        ``cancel``."""
+        with self.lock:
+            self._gate()
+            prev = self._idem("andre", "resolve_held", message_id, body)
+            if prev is not None:
+                return prev
+            m = self.messages.get(message_id)
+            if m is None or m["dir"] != "out":
+                raise NotFound(R("NOT_FOUND"))
+            if m["status"] != "sending" or message_id in self._in_flight or message_id in self._unconfirmed:
+                raise Conflict(R("NOT_HELD"))
+            status = {"sent": "sent", "requeue": "queued", "cancel": "cancelled"}[body["outcome"]]
+            resp = {"message_id": message_id, "status": status}
+            self._commit("outbound_resolved", {"effects": [{"op": "message_status", "message_id": message_id,
+                                                            "status": status, "reason": None if status != "cancelled"
+                                                            else R("CANCELLED_BY_ANDRE")}],
+                                               "request": self._req("andre", "resolve_held", message_id, body),
+                                               "response": resp}, "andre")
+            return resp
 
     # ============================================================================================ jobs
 
@@ -1853,17 +1927,21 @@ class SupportService:
                     if m["dir"] == "out" and (status is None or m["status"] == status)]
 
     def audit_events(self, since_seq: int, limit: int) -> dict:
-        """The local log with personal data minimised: addresses, names, refs and time zones reduced to their
-        SHA-256, stored answers dropped. Bodies are never in the log (only their hashes)."""
+        """The local log with personal data minimised: addresses, names, refs, time zones and request keys replaced by
+        HMAC-SHA-256 under a key made for THIS export and returned once with it (V1-M2: an unsalted hash of a phone
+        number is reversible by enumeration; two exports cannot be joined without both keys). Stored answers are
+        dropped. Bodies are never in the log (only their keyed digests)."""
+        key = os.urandom(32)
         out = []
         for r in self.log.iter_records(max(1, since_seq)):
-            d = _minimise({k: v for k, v in r["data"].items() if k not in ("response", "request")})
-            if r["data"].get("request"):            # the key names a contact ref or address: hashed
-                d["request_sha256"] = payload_sha256(r["data"]["request"])
+            d = _minimise({k: v for k, v in r["data"].items() if k not in ("response", "request")}, key)
+            if r["data"].get("request"):            # the key names a contact ref or address
+                d["request_hmac"] = _hmac(key, json.dumps(r["data"]["request"], sort_keys=True))
             out.append({"seq": r["seq"], "kind": r["kind"], "at": r["at"], "data": d})
             if len(out) >= limit:
                 break
-        return {"events": out, "log_length": len(self.log)}
+        return {"events": out, "log_length": len(self.log), "hmac": "HMAC-SHA-256",
+                "hmac_key": base64.b64encode(key).decode("ascii")}
 
 
 CATALOG_CONTENT = {
@@ -1875,6 +1953,21 @@ CATALOG_CONTENT = {
 
 def catalog_sha(catalog: str, content: dict) -> str:
     return payload_sha256({"catalog": catalog, **{k: content[k] for k in CATALOG_CONTENT[catalog]}})
+
+
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def _digests(obj, out: set) -> None:
+    """Every 64-hex value anywhere in a log line's data (the body digests it cites)."""
+    if isinstance(obj, dict):
+        for v in obj.values():
+            _digests(v, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            _digests(v, out)
+    elif isinstance(obj, str) and _HEX64.fullmatch(obj):
+        out.add(obj)
 
 
 def _safe(fn):
@@ -1892,15 +1985,19 @@ def _is_date(v) -> bool:
         return False
 
 
-def _minimise(obj):
+def _hmac(key: bytes, value: str) -> str:
+    return hmac.new(key, value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _minimise(obj, key: bytes):
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
             if k in PERSONAL_KEYS and isinstance(v, str):
-                out[k + "_sha256"] = sha256_hex(v.encode("utf-8"))
+                out[k + "_hmac"] = _hmac(key, v)
             else:
-                out[k] = _minimise(v)
+                out[k] = _minimise(v, key)
         return out
     if isinstance(obj, list):
-        return [_minimise(x) for x in obj]
+        return [_minimise(x, key) for x in obj]
     return obj
