@@ -77,6 +77,8 @@ class SessionOpen(Strict):
 class Resource(Strict):
     connection_id: CfxId
     target: Target
+    # the exact field, for checks whose fields are named (a key event, a metafield): AEGIS round 2 R2-7
+    field: Optional[Annotated[StrictStr, Field(min_length=3, max_length=330, pattern=r"^[A-Za-z0-9._:-]{3,330}$")]] = None
 
 
 class FindingIn(Strict):
@@ -123,10 +125,11 @@ class PaymentEvent(Strict):
 # --------------------------------------------------------------------------------------------------- plans
 
 class Op(Strict):
+    """No ``before``: the service reads it from the platform at plan submission (AEGIS round 2 R2-4); a plan that
+    carries one is refused 422 (unknown field)."""
     op: OpName
     target: Target
     field: FieldName
-    before: OpValue
     after: OpValue
 
 

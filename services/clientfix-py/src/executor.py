@@ -216,6 +216,8 @@ def _rollback(connector, conn, snap, ctx, call, step, out) -> None:
         rb, proven = UNKNOWN, False
     ok = rb == APPLIED and proven is True
     out["rollback"] = {"outcome": rb, "proven": bool(proven)}
+    if ctx.get("poisoned_version"):                 # GTM: our version is still the container's latest (R2-1)
+        out["poisoned_version"] = ctx["poisoned_version"]
     step("rollback_result", {"outcome": rb, "proven": bool(proven)})
     out["status"] = "rolled_back" if ok else "rollback_failed"
 

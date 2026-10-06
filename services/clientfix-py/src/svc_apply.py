@@ -35,6 +35,7 @@ import money
 from catalogue import CHECKS
 from errors import Conflict, Forbidden, NotFound, Unavailable
 from ledger import derived_id
+from connectors.base import HttpAnswer, UnknownState
 from ports import ConnView
 from reasons import R
 from svc_jobs import TERMINAL, UNFIXED, sha
@@ -206,9 +207,15 @@ class ApplyMixin:
             code = {"rollback_failed": "ROLLBACK_FAILED", "interrupted": "APPLY_INTERRUPTED",
                     "halted_revoked": "REVOKED_MID_APPLY", "halted_frozen": "FROZEN_MID_APPLY"}[status]
             tasks.append(self._task("alert", item_id, code, code))
+        if result.get("poisoned_version"):
+            # AEGIS round 2 R2-1: name the version a future run would otherwise build on
+            t = self._task("alert", item_id, "GTM_VERSION_POISONED", "GTM_VERSION_POISONED")
+            t["ref"] = result["poisoned_version"]
+            tasks.append(t)
         data = {"job_id": job_id, "item_id": item_id, "status": status, "failure": result.get("failure"),
                 "written": result["written"], "snapshot": result["snapshot"], "readback": result["readback"],
                 "rollback": result["rollback"], "dry_run": result["dry_run"], "instructions": result["instructions"],
+                "poisoned_version": result.get("poisoned_version"),
                 "freeze": keys if freeze else [], "tasks": tasks}
         evidence = [("item_settled", f"item:{item_id}", {"job_id": job_id, "item_id": item_id, "status": status,
                                                          "failure": result.get("failure"), "frozen": len(data["freeze"])},
@@ -263,7 +270,57 @@ class ApplyMixin:
                     n += 1
                 self._finish(job_id, "recovered")
                 self._settle_if_done(job_id)
-        return {"interrupted": n}
+        return {"interrupted": n, "workspaces_reaped": self.reap_run_workspaces()}
+
+    def reap_run_workspaces(self) -> int:
+        """AEGIS round 2 R2-5: delete orphaned GTM run workspaces (name prefix ``RUN_PREFIX``) of every active GTM
+        connection whose container is not leased or frozen. Every DELETE is recorded on the ledger before it leaves,
+        and its answer after; nothing but a run workspace of that container is ever deleted (connector._delete)."""
+        if not self.ports.transport.wired:
+            return 0
+        with self.lock:
+            todo = []
+            for c in sorted(self.connections.values(), key=lambda x: x["connection_id"]):
+                key = self.connectors["gtm"].lease_key(c["account_ref"], "") if c["connector"] == "gtm" else None
+                if key and c["status"] == "active" and c["connection_id"] not in self.revoked_now \
+                        and c["client_id"] not in self.revoked_clients_now and key not in self.lease_by_resource \
+                        and key not in self.frozen and c["client_id"] not in self.frozen_clients:
+                    todo.append(ConnView(c["connection_id"], c["client_id"], c["connector"], c["account_ref"],
+                                         c["token_ref"]))
+        n = 0
+        for conn in todo:
+            counter = {"n": 0}
+
+            def call(req, conn=conn, counter=counter):
+                with self.lock:
+                    if conn.connection_id in self.revoked_now or conn.client_id in self.revoked_clients_now:
+                        raise executor.Halt("CONNECTION_REVOKED")
+                if req.is_write:
+                    counter["n"] += 1
+                    self._reaper_step(conn, "request_sending", {"n": counter["n"], "request": req.describe()})
+                try:
+                    ans = self.ports.transport.call(conn, req)
+                except Exception:                              # noqa: BLE001
+                    ans = None
+                ans = ans if isinstance(ans, HttpAnswer) else HttpAnswer(0, None)
+                if req.is_write:
+                    self._reaper_step(conn, "request_answered", {"n": counter["n"], "status": ans.status})
+                return ans
+            try:
+                n += self.connectors["gtm"].reap(conn.account_ref, call)
+            except (UnknownState, executor.Halt, Unavailable):
+                continue
+        return n
+
+    def _reaper_step(self, conn, kind: str, facts: dict) -> None:
+        with self.lock:
+            self._commit("reaper_step", {"connection_id": conn.connection_id, "step": kind, "facts": facts}, ACTOR,
+                         evidence=(f"reaper_{kind}", f"connection:{conn.connection_id}",
+                                   {"connection_id": conn.connection_id, "step": kind, "facts_sha256": sha(facts)},
+                                   (conn.connection_id, kind, facts.get("n"), len(self.log))))
+
+    def _a_reaper_step(self, d, at):
+        pass
 
     def apply_queue(self) -> dict:
         out = {"recovered": self.recover_interrupted()["interrupted"], "applied": 0, "not_wired": 0, "refused": 0}
@@ -462,7 +519,8 @@ class ApplyMixin:
         amount = money.fmt(money.total(j["items"][i]["price"] for i in unfixed)) if unfixed else "0.00"
         if j.get("payment") and money.parse(amount) > 0:
             refund_id = derived_id("rfd", job_id)
-            terms = {"refund_id": refund_id, "job_id": job_id, "client_id": j["client_id"], "items": unfixed,
+            terms = {"refund_id": refund_id, "kind": "unfixed", "job_id": job_id, "client_id": j["client_id"],
+                     "items": unfixed,
                      "amount": amount, "currency": j["quote"]["currency"],
                      "finance_event_id": j["payment"]["finance_event_id"], "report_sha256": report_sha}
             rsha = sha(terms)
@@ -581,8 +639,8 @@ class ApplyMixin:
     def _a_refund_with_finance(self, d, at):
         r = self.refunds[d["refund_id"]]
         r.update(status="with_finance", finance_ref=d["finance_ref"])
-        j = self.jobs[r["job_id"]]
-        j.update(status="closed", closed_at=at)
+        if r.get("kind") != "orphaned_payment":          # an orphaned payment's refund never closes a running job
+            self.jobs[r["job_id"]].update(status="closed", closed_at=at)
 
     def refunds_view(self, status: Optional[str]) -> list:
         with self.lock:

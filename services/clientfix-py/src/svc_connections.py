@@ -108,12 +108,13 @@ class ConnectionsMixin:
         with self.lock:
             c = self._get(self.connections, cid, "CONNECTION_NOT_FOUND")
             self.revoked_now.add(cid)                     # the kill switch first: running work stops now
-            # AEGIS round 1 M4: and for EVERY connection of this client, until the revocation is committed (from
-            # then on the client's revocation epoch stops every run that started before it)
-            self.revoked_clients_now.add(c["client_id"])
+            # AEGIS round 1 M4 / round 2 R2-3: and for EVERY connection of this client while ANY of its revocations
+            # is not yet committed (a set per client: one committed revocation never clears another's switch; from
+            # the commit on, the client's revocation epoch stops every run that started before it)
             if c["status"] == "revoked":
-                self.revoked_clients_now.discard(c["client_id"])
+                self._revocation_settled(c["client_id"], cid)
                 return self.connection_view(cid)
+            self.pending_revocations.setdefault(c["client_id"], set()).add(cid)
             rk = self.rk("revoke", cid, body)
             if self._idem(actor, rk, body):
                 return self.connection_view(cid)
@@ -136,13 +137,25 @@ class ConnectionsMixin:
             except Unavailable as exc:
                 exc.body = {**exc.body, "work_stopped": True}    # the kill switch holds in this process regardless
                 raise
-            self.revoked_clients_now.discard(c["client_id"])
             for job_id in sorted({x[0] for x in cancelled}):     # a job left with nothing to do settles now
                 self._settle_if_done(job_id)
             return self.connection_view(cid)
 
+    @property
+    def revoked_clients_now(self) -> set:
+        """Clients with at least one revocation not yet committed: all their work stops."""
+        return {k for k, v in self.pending_revocations.items() if v}
+
+    def _revocation_settled(self, client_id: str, cid: str) -> None:
+        pend = self.pending_revocations.get(client_id)
+        if pend is not None:
+            pend.discard(cid)
+            if not pend:
+                del self.pending_revocations[client_id]
+
     def _a_connection_revoked(self, d, at):
         c = self.connections[d["connection_id"]]
+        self._revocation_settled(c["client_id"], d["connection_id"])    # committed (live, replay or roll-forward)
         c.update(status="revoked", revoked_at=at, revoked_by=d.get("origin"))
         if self.account_index.get((c["connector"], c["account_ref"])) == c["connection_id"]:
             del self.account_index[(c["connector"], c["account_ref"])]

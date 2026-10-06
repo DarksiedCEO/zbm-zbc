@@ -60,6 +60,10 @@ CHECK_OPS: dict[str, dict[str, tuple[str, ...]]] = {
 }
 
 
+# checks whose fix needs the client's own text in the fire team's brief (AEGIS round 2 R2-4): nothing else is sent
+CONTENT_CHECKS = frozenset({"product_content_error", "page_content_error"})
+
+
 def op_allowed_for(check: str, op: str, field: str) -> bool:
     fields = CHECK_OPS.get(check, {}).get(op, ())
     return any(field == f or (f.endswith(":") and field.startswith(f)) for f in fields)

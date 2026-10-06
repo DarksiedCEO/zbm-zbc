@@ -9,9 +9,9 @@ Proves, with every port a stand-in (nothing is wired, so no client system can be
 the real ledger; a NOT_BUILT setting (the Anthropic key) refuses start; a second process on the data directory
 refuses; a connection takes a vault reference only (a password field and a token-shaped value are refused); the flow
 finding -> quote -> client acceptance in a hub session -> Finance payment of exactly the quote; no plan before
-payment; engaging the fire team answers MODEL_NOT_WIRED; an out-of-allowlist operation is refused; the client
-approves the exact plan hash (a wrong hash is refused); apply answers CONNECTOR_NOT_WIRED and records nothing; a
-tenant crossover is refused; revoking the connection cancels the planned item and the job settles into a dated
+payment; engaging the fire team answers MODEL_NOT_WIRED; an out-of-allowlist operation and a model-typed ``before``
+are refused; a plan needs the store's own values, so with no transport it is refused CONNECTOR_NOT_WIRED and nothing
+is recorded or applied; a tenant crossover is refused; revoking the connection cancels the open item and the job settles into a dated
 report and a refund proposal; the refund needs Andre's token and exact hash and then stays queued (Finance not
 wired); a restart keeps everything; a truncated log is detected; no client value, vault reference or amount reaches
 the ledger; GET /ledger/verify valid.
@@ -200,7 +200,7 @@ def _main(work: Path) -> int:
         plan = {"request_id": rid(), "team": j["team"],
                 "items": [{"item_id": item["item_id"], "connection_id": cid,
                            "ops": [{"op": "shopify.product.update", "target": PRODUCT, "field": "seo.title",
-                                    "before": None, "after": TITLE}]}]}
+                                    "after": TITLE}]}]}
         early = a.post(f"/jobs/{jid}/plan", plan, caller="fire_team")
         fev = "fin-evt-" + derived("finance event")[:40]
         wrong = a.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin-evt-" + derived("x")[:40],
@@ -220,25 +220,25 @@ def _main(work: Path) -> int:
         bad_op = dict(plan, request_id=rid(), items=[dict(plan["items"][0], ops=[dict(plan["items"][0]["ops"][0],
                                                                                     op="shopify.theme.write")])])
         refused_op = a.post(f"/jobs/{jid}/plan", bad_op, caller="fire_team")
-        planned = a.post(f"/jobs/{jid}/plan", {**plan, "request_id": rid()}, caller="fire_team")
-        psha = planned.json()["plan_sha256"]
-        tamper = a.post(f"/jobs/{jid}/plan/approve", {"request_id": rid(), "sha256": "0" * 64}, caller="hub",
-                        session=sess["session_token"])
-        appr = a.post(f"/jobs/{jid}/plan/approve", {"request_id": rid(), "sha256": psha}, caller="hub",
-                      session=sess["session_token"])
-        check("an out-of-allowlist op is refused; the client approves only the exact plan hash",
-              refused_op.status_code == 422 and refused_op.json()["detail"] == "OP_NOT_ALLOWED"
-              and tamper.status_code == 409 and appr.status_code == 200 and appr.json()["status"] == "approved")
+        with_before = dict(plan, request_id=rid(), items=[dict(plan["items"][0], ops=[dict(plan["items"][0]["ops"][0],
+                                                                                         before="model-typed")])])
+        typed_before = a.post(f"/jobs/{jid}/plan", with_before, caller="fire_team")
         n_before = len(httpx.get(L + "/ledger/entries", headers=lh, timeout=60).json())
+        planned = a.post(f"/jobs/{jid}/plan", {**plan, "request_id": rid()}, caller="fire_team")
         ap = a.post(f"/jobs/{jid}/apply", {"request_id": rid()}, caller="scheduler")
         n_after = len(httpx.get(L + "/ledger/entries", headers=lh, timeout=60).json())
-        check("apply answers CONNECTOR_NOT_WIRED and records nothing (no client system can be touched)",
-              ap.status_code == 503 and ap.json()["detail"] == "CONNECTOR_NOT_WIRED" and n_before == n_after)
+        check("an out-of-allowlist op is refused; a plan carrying a model-typed before value is refused",
+              refused_op.status_code == 422 and refused_op.json()["detail"] == "OP_NOT_ALLOWED"
+              and typed_before.status_code == 422)
+        check("a plan needs the store's own current values: with no transport it is refused CONNECTOR_NOT_WIRED, "
+              "nothing can be approved or applied, and nothing is recorded",
+              planned.status_code == 503 and planned.json()["detail"] == "CONNECTOR_NOT_WIRED"
+              and ap.status_code == 409 and ap.json()["detail"] == "PLAN_REQUIRED" and n_before == n_after)
 
         # --- revocation, report, refund -----------------------------------------------------------------------------
         rv = a.post(f"/connections/{cid}/revoke", {"request_id": rid()}, caller="hub")
         job = a.get(f"/jobs/{jid}").json()
-        check("revoking the connection cancels the planned item; the job settles into a dated report and a refund",
+        check("revoking the connection cancels the open item; the job settles into a dated report and a refund",
               rv.status_code == 200 and rv.json()["status"] == "revoked"
               and job["items"][0]["status"] == "cancelled_revoked" and job["report"] is not None
               and job["status"] == "refund_pending")
@@ -281,10 +281,10 @@ def _main(work: Path) -> int:
         mine = [x for x in ents if x.get("department") == "clientfix"]
         types = sorted({x["event_type"] for x in mine})
         say(f"ledger: {len(ents)} entries, {len(mine)} from clientfix; types: {', '.join(types)}")
-        check("connections, findings, quotes, payments, plans, approvals, revocations, reports and refunds are typed "
+        check("connections, findings, quotes, payments, revocations, reports and refunds are typed "
               "events on the ledger",
               {"log_anchor", "connection_registered", "finding_added", "job_created", "quote_accepted",
-               "payment_confirmed", "plan_submitted", "plan_approved", "connection_revoked", "report_issued",
+               "payment_confirmed", "connection_revoked", "report_issued",
                "refund_proposed", "refund_approved", "session_opened"} <= set(types))
         blob = json.dumps(ents)
         check("no client value, shop, vault reference, session token or amount on the ledger",

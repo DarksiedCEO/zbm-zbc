@@ -51,7 +51,11 @@ from __future__ import annotations
 
 import re
 
-from connectors.base import (APPLIED, REFUSED, UNKNOWN, Call, Connector, HttpAnswer, HttpRequest, OpSpec,
+import secrets
+from typing import Optional
+from urllib.parse import quote
+
+from connectors.base import (APPLIED, CONFLICT, REFUSED, UNKNOWN, Call, Connector, HttpAnswer, HttpRequest, OpSpec,
                              UnknownState, boolean, canonical, same)
 
 BASE = "https://tagmanager.googleapis.com/tagmanager/v2"
@@ -63,6 +67,8 @@ ENTITY_LISTS = {"tag": "tagId", "trigger": "triggerId", "variable": "variableId"
                 "builtInVariable": "type", "zone": "zoneId", "customTemplate": "templateId", "client": "clientId",
                 "gtagConfig": "gtagConfigId", "transformation": "transformationId"}
 VOLATILE = ("fingerprint", "path", "workspaceId", "tagManagerUrl", "containerVersionId")
+RUN_PREFIX = "zbm-clientfix-run-"        # every workspace a run creates; the ONLY workspaces this code deletes
+MAX_PAGES = 20
 
 
 def _triggers(v) -> bool:
@@ -177,13 +183,139 @@ class TagManagerConnector(Connector):
                         for f in planned.get(e.get("tagId"), ()):
                             e.pop(f, None)
                         e.setdefault("paused", False)
-                        e.setdefault("firingTriggerId", [])
+                        e["firingTriggerId"] = sorted(set(e.get("firingTriggerId", [])))
                     out[canonical(e.get(idf))] = canonical(e)
                 return out
             a, b = norm(before), norm(after)
             if a is None or b is None or a != b:
                 diffs.append(name)
         return diffs
+
+    # ---------------------------------------------------------------- the run
+
+    # ---------------------------------------------------------------- run workspaces (named, found, deleted)
+
+    def _new_workspace(self, account: str, ctx: dict, call: Call, role: str) -> tuple[str, Optional[str]]:
+        """Create a run workspace with a UNIQUE name (AEGIS round 2 R2-5). When the answer is lost the workspace may
+        exist: the container's workspaces are listed and ours is found by its exact name, so cleanup deletes it."""
+        name = f"{RUN_PREFIX}{role}-{str(ctx.get('item_id', ''))[-12:]}-{secrets.token_hex(6)}"
+        ctx.setdefault("ws_names", {})[role] = name
+        ans = call(HttpRequest("POST", f"{BASE}/{account}/workspaces",
+                               {"name": name, "description": "Client-approved fix (ZBM client fix lane); deleted after "
+                                                             "the run."}))
+        b = ans.body if isinstance(ans, HttpAnswer) else None
+        if _ok(ans) and isinstance(b.get("path"), str) and WORKSPACE.fullmatch(b["path"]) \
+                and b["path"].startswith(account + "/workspaces/"):
+            ctx.setdefault("workspaces", {})[role] = b["path"]
+            return APPLIED, b["path"]
+        if _refused(ans):
+            return REFUSED, None
+        try:
+            found = [w for w in self.list_workspaces(account, call) if w.get("name") == name]
+        except UnknownState:
+            found = []
+        if len(found) == 1:
+            ctx.setdefault("workspaces", {})[role] = found[0]["path"]   # cleanup deletes it
+        return UNKNOWN, None
+
+    def list_workspaces(self, account: str, call: Call) -> list:
+        out, token = [], None
+        for _ in range(MAX_PAGES):
+            url = f"{BASE}/{account}/workspaces" + (f"?pageToken={quote(token, safe='')}" if token else "")
+            ans = call(HttpRequest("GET", url, None))
+            b = ans.body if isinstance(ans, HttpAnswer) else None
+            if not _ok(ans) or not isinstance(b.get("workspace", []), list):
+                raise UnknownState("workspaces.list answer")
+            for w in b.get("workspace", []):
+                if not isinstance(w, dict) or not isinstance(w.get("path"), str) \
+                        or not WORKSPACE.fullmatch(w["path"]) or not w["path"].startswith(account + "/workspaces/"):
+                    raise UnknownState("workspace shape")
+                out.append(w)
+            token = b.get("nextPageToken")
+            if not token:
+                return out
+        raise UnknownState("too many workspaces")
+
+    def _delete(self, account: str, path: str, call: Call) -> str:
+        """The ONLY delete this connector sends: a workspace of this container that a run created (RUN_PREFIX)."""
+        if not (WORKSPACE.fullmatch(path) and path.startswith(account + "/workspaces/")):
+            raise UnknownState("refusing to delete outside this container's workspaces")
+        ans = call(HttpRequest("DELETE", f"{BASE}/{path}", None))
+        if isinstance(ans, HttpAnswer) and ans.status == 200 and ans.body in ({}, None):
+            return APPLIED
+        return REFUSED if _refused(ans) else UNKNOWN
+
+    def reap(self, account: str, call: Call) -> int:
+        """Delete orphaned run workspaces (name starts with RUN_PREFIX) — the recover tick's reaper (R2-5)."""
+        n = 0
+        for w in self.list_workspaces(account, call):
+            if isinstance(w.get("name"), str) and w["name"].startswith(RUN_PREFIX):
+                if self._delete(account, w["path"], call) == APPLIED:
+                    n += 1
+        return n
+
+    def _load_tags(self, ws: str, planned: dict, call: Call) -> Optional[dict]:
+        raw = {}
+        for tag_id in sorted(planned):
+            path = f"{ws}/tags/{tag_id}"
+            got = call(HttpRequest("GET", f"{BASE}/{path}", None))
+            t = got.body if isinstance(got, HttpAnswer) else None
+            if not _ok(got) or t.get("path") != path or not isinstance(t.get("fingerprint"), str):
+                return None
+            raw[tag_id] = t
+        return raw
+
+    def _put(self, tag: dict, fld: str, value, call: Call) -> tuple[str, Optional[dict]]:
+        body = dict(tag)
+        body[fld] = value
+        ans = call(HttpRequest("PUT", f"{BASE}/{tag['path']}?fingerprint={tag['fingerprint']}", body))
+        b = ans.body if isinstance(ans, HttpAnswer) else None
+        if _ok(ans) and b.get("path") == tag["path"] and isinstance(b.get("fingerprint"), str):
+            try:
+                return (APPLIED, b) if same(_value(b, fld), value) else (UNKNOWN, None)
+            except UnknownState:
+                return UNKNOWN, None
+        return (REFUSED if _refused(ans) else UNKNOWN), None
+
+    def _only_planned_changes(self, ws: str, planned: dict, call: Call, ctx: dict) -> str:
+        ans = call(HttpRequest("GET", f"{BASE}/{ws}/status", None))
+        b = ans.body if isinstance(ans, HttpAnswer) else None
+        if not _ok(ans):
+            return UNKNOWN
+        changes, conflicts = b.get("workspaceChange", []), b.get("mergeConflict", [])
+        if not isinstance(changes, list) or not isinstance(conflicts, list):
+            return UNKNOWN
+        if conflicts:
+            return REFUSED
+        for ch in changes:
+            entity = {k: v for k, v in ch.items() if k != "changeStatus"} if isinstance(ch, dict) else {}
+            tag = entity.get("tag")
+            if set(entity) != {"tag"} or not isinstance(tag, dict) or tag.get("tagId") not in planned \
+                    or ch.get("changeStatus") != "updated":
+                ctx["unplanned_change"] = True
+                return REFUSED                            # H3: only the plan's own changes may be versioned
+        return APPLIED
+
+    def _version_and_publish(self, ws: str, name: str, call: Call) -> tuple[str, Optional[str], Optional[str]]:
+        """create_version then publish. Returns (outcome, created version path or None, published path or None)."""
+        ans = call(HttpRequest("POST", f"{BASE}/{ws}:create_version",
+                               {"name": name[:100], "notes": "ZBM client fix lane."}))
+        b = ans.body if isinstance(ans, HttpAnswer) else None
+        if not _ok(ans):
+            return (REFUSED if _refused(ans) else UNKNOWN), None, None
+        sync = b.get("syncStatus", {})
+        cv = b.get("containerVersion")
+        if not isinstance(sync, dict) or _flag(sync, "syncError") is not False or sync.get("mergeConflict", []) \
+                or _flag(b, "compilerError") is not False or not isinstance(cv, dict) \
+                or not isinstance(cv.get("path"), str) or not VERSION_PATH.fullmatch(cv["path"]):
+            return UNKNOWN, (cv.get("path") if isinstance(cv, dict) and isinstance(cv.get("path"), str) else None), None
+        fp = f"?fingerprint={cv['fingerprint']}" if isinstance(cv.get("fingerprint"), str) else ""
+        ans = call(HttpRequest("POST", f"{BASE}/{cv['path']}:publish{fp}", None))
+        b = ans.body if isinstance(ans, HttpAnswer) else None
+        pv = b.get("containerVersion") if isinstance(b, dict) else None
+        if _ok(ans) and _flag(b, "compilerError") is False and isinstance(pv, dict) and pv.get("path") == cv["path"]:
+            return APPLIED, cv["path"], cv["path"]
+        return (REFUSED if _refused(ans) else UNKNOWN), cv["path"], None
 
     # ---------------------------------------------------------------- the run
 
@@ -194,29 +326,22 @@ class TagManagerConnector(Connector):
         ctx["planned"] = planned
         if ctx.get("latest_id") != ctx.get("live_before_id"):
             return REFUSED, "base_not_live"               # an unpublished version would ride along with ours
-        ans = call(HttpRequest("POST", f"{BASE}/{account}/workspaces",
-                               {"name": f"zbm-clientfix {ctx.get('item_id', '')}"[:100],
-                                "description": "Client-approved fix (ZBM client fix lane); deleted after the run."}))
-        b = ans.body if isinstance(ans, HttpAnswer) else None
-        if not (_ok(ans) and isinstance(b.get("path"), str) and WORKSPACE.fullmatch(b["path"])
-                and b["path"].startswith(account + "/workspaces/")):
-            return (REFUSED if _refused(ans) else UNKNOWN), "run_workspace"
-        ctx["workspace"] = b["path"]
+        outcome, ws = self._new_workspace(account, ctx, call, "fix")
+        if outcome != APPLIED:
+            return outcome, "run_workspace"
+        ctx["workspace"] = ws
+        raw = self._load_tags(ws, planned, call)
+        if raw is None:
+            return UNKNOWN, "run_workspace"
         live_tags = self._tags_by_id(ctx["live_before_version"])
-        raw = ctx.setdefault("tag", {})
-        for tag_id in sorted(planned):
-            path = f"{ctx['workspace']}/tags/{tag_id}"
-            got = call(HttpRequest("GET", f"{BASE}/{path}", None))
-            t = got.body if isinstance(got, HttpAnswer) else None
-            if not _ok(got) or t.get("path") != path or not isinstance(t.get("fingerprint"), str):
-                return UNKNOWN, "run_workspace"
-            for f in planned[tag_id]:
+        for tag_id, fields in planned.items():
+            for f in fields:
                 try:
-                    if not same(_value(t, f), _value(live_tags[tag_id], f)):
+                    if not same(_value(raw[tag_id], f), _value(live_tags[tag_id], f)):
                         return REFUSED, "run_workspace_not_live"     # the workspace base is not the live version
                 except (UnknownState, KeyError):
                     return UNKNOWN, "run_workspace"
-            raw[tag_id] = t
+        ctx["tag"] = raw
         return APPLIED, "run_workspace"
 
     def write(self, account: str, key, value, ctx: dict, call: Call) -> tuple[str, dict]:
@@ -225,41 +350,18 @@ class TagManagerConnector(Connector):
         tag = ctx.get("tag", {}).get(tag_id)
         if tag is None or ctx.get("workspace_consumed"):
             return UNKNOWN, {}
-        body = dict(tag)
-        body[fld] = value
-        ans = call(HttpRequest("PUT", f"{BASE}/{tag['path']}?fingerprint={tag['fingerprint']}", body))
-        b = ans.body if isinstance(ans, HttpAnswer) else None
-        if _ok(ans) and b.get("path") == tag["path"] and isinstance(b.get("fingerprint"), str):
-            try:
-                if not same(_value(b, fld), value):
-                    return UNKNOWN, {}
-            except UnknownState:
-                return UNKNOWN, {}
+        outcome, b = self._put(tag, fld, value, call)
+        if outcome == APPLIED:
             ctx["tag"][tag_id] = b
-            return APPLIED, {}
-        return (REFUSED if _refused(ans) else UNKNOWN), {}
+        return outcome, {}
 
     def stage_check(self, account: str, ctx: dict, call: Call) -> str:
         ws = ctx.get("workspace")
         if ws is None:
             return UNKNOWN
-        ans = call(HttpRequest("GET", f"{BASE}/{ws}/status", None))
-        b = ans.body if isinstance(ans, HttpAnswer) else None
-        if not _ok(ans):
-            return UNKNOWN
-        changes, conflicts = b.get("workspaceChange", []), b.get("mergeConflict", [])
-        if not isinstance(changes, list) or not isinstance(conflicts, list):
-            return UNKNOWN
-        if conflicts:
-            return REFUSED
-        planned = ctx.get("planned", {})
-        for ch in changes:
-            entity = {k: v for k, v in ch.items() if k != "changeStatus"} if isinstance(ch, dict) else {}
-            tag = entity.get("tag")
-            if set(entity) != {"tag"} or not isinstance(tag, dict) or tag.get("tagId") not in planned \
-                    or ch.get("changeStatus") != "updated":
-                ctx["unplanned_change"] = True
-                return REFUSED                            # H3: only the plan's own changes may be versioned
+        st = self._only_planned_changes(ws, ctx.get("planned", {}), call, ctx)
+        if st != APPLIED:
+            return st
         try:
             if self._latest_id(account, call) != ctx.get("live_before_id"):
                 return REFUSED
@@ -273,71 +375,136 @@ class TagManagerConnector(Connector):
         return APPLIED if err is False else REFUSED if err is True else UNKNOWN
 
     def finalize(self, account: str, ctx: dict, call: Call) -> str:
-        ws = ctx.get("workspace")
-        ans = call(HttpRequest("POST", f"{BASE}/{ws}:create_version",
-                               {"name": f"zbm-clientfix {ctx.get('item_id', '')}"[:100],
-                                "notes": "Client-approved fix (ZBM client fix lane)."}))
-        b = ans.body if isinstance(ans, HttpAnswer) else None
         ctx["workspace_consumed"] = True                  # create_version "deletes the workspace" (or may have)
-        if not _ok(ans):
-            ctx["finalize_maybe"] = True
-            return REFUSED if _refused(ans) else UNKNOWN
-        sync = b.get("syncStatus", {})
-        cv = b.get("containerVersion")
-        if not isinstance(sync, dict) or _flag(sync, "syncError") is not False or sync.get("mergeConflict", []) \
-                or _flag(b, "compilerError") is not False or not isinstance(cv, dict) \
-                or not isinstance(cv.get("path"), str) or not VERSION_PATH.fullmatch(cv["path"]):
-            ctx["finalize_maybe"] = True
-            return UNKNOWN
-        ctx["version_created"] = cv["path"]
-        fp = f"?fingerprint={cv['fingerprint']}" if isinstance(cv.get("fingerprint"), str) else ""
-        ans = call(HttpRequest("POST", f"{BASE}/{cv['path']}:publish{fp}", None))
-        b = ans.body if isinstance(ans, HttpAnswer) else None
-        pv = b.get("containerVersion") if isinstance(b, dict) else None
-        if _ok(ans) and _flag(b, "compilerError") is False and isinstance(pv, dict) and pv.get("path") == cv["path"]:
+        ctx["finalize_maybe"] = True
+        outcome, created, published = self._version_and_publish(
+            ctx["workspace"], f"zbm-clientfix {ctx.get('item_id', '')}", call)
+        if created:
+            ctx["version_created"] = created
+        if published:
             ctx["published"] = True
-            ctx["published_path"] = cv["path"]
-            return APPLIED
-        ctx["publish_maybe"] = True
-        return REFUSED if _refused(ans) else UNKNOWN
+            ctx["published_path"] = published
+        return outcome
+
+    # ---------------------------------------------------------------- rollback (AEGIS round 2 R2-1 / R2-2)
 
     def rollback(self, account: str, written: list, ctx: dict, call: Call) -> str:
-        prev = ctx.get("live_before")
+        """Before any version was attempted: delete the run workspace — nothing went anywhere — and prove the live
+        version is still the snapshot's. Once a version may exist, ``create_version`` "sets the base container
+        version to the newly created version" (workspaces/create_version) and the latest version header
+        (version_headers/latest) would stay OURS even after the old version is re-published, so the next workspace
+        (workspaces/create; workspaces/sync "syncs a workspace to the latest container version") would carry the
+        rolled-back change. So: (1) re-publish the snapshot version ONLY when the live version is our own (R2-2:
+        never over someone else's newer release), then (2) when the latest version is ours, build a REVERT version
+        through a fresh run workspace — the planned fields back to their snapshot values, getStatus showing only
+        those, create_version, publish — and (3) prove latest == live and the live content == the snapshot's.
+        Anything else is CONFLICT / UNKNOWN with ``poisoned_version`` naming our version (frozen, Andre tasked)."""
+        prev, prev_id = ctx.get("live_before"), ctx.get("live_before_id")
         if not prev:
             return UNKNOWN
-        if ctx.get("published") or ctx.get("publish_maybe"):
+        if not ctx.get("finalize_maybe"):
+            self._delete_workspace(ctx, call)
             try:
                 live = self._live(account, call)
             except UnknownState:
                 return UNKNOWN
-            if live["path"] != prev:
+            ctx["restored_live"] = live["path"] if live["path"] == prev else None
+            return APPLIED if ctx["restored_live"] else CONFLICT
+        try:
+            created = ctx.get("version_created") or self._identify_ours(account, ctx, call)
+            live = self._live(account, call)
+            if created is None:                           # nothing of ours exists: the live state must be untouched
+                ctx["restored_live"] = live["path"] if live["path"] == prev else None
+                return APPLIED if ctx["restored_live"] else CONFLICT
+            ctx["poisoned_version"] = created
+            if live["path"] == created:
                 ans = call(HttpRequest("POST", f"{BASE}/{prev}:publish", None))
                 b = ans.body if isinstance(ans, HttpAnswer) else None
                 pv = b.get("containerVersion") if isinstance(b, dict) else None
                 if not (_ok(ans) and isinstance(pv, dict) and pv.get("path") == prev):
                     return UNKNOWN
                 ctx["published"] = False
-        else:
-            self._delete_workspace(ctx, call)             # nothing went live: dropping the run workspace undoes it
-        try:
+            elif live["path"] != prev:
+                return CONFLICT                           # someone else published after us: never un-publish them
+            latest = self._latest_id(account, call)
+            created_id = created.rsplit("/", 1)[1]
+            if latest == prev_id:
+                ctx["poisoned_version"] = None
+            elif latest != created_id:
+                return CONFLICT                           # someone else's newer draft sits on top of ours
+            elif self._build_revert(account, ctx, call) != APPLIED:
+                return UNKNOWN
             live = self._live(account, call)
+            if self._latest_id(account, call) != live["containerVersionId"] \
+                    or self._unplanned_differences(ctx["live_before_version"], live, {}):
+                return UNKNOWN
+            ctx["restored_live"] = live["path"]
+            ctx["poisoned_version"] = None
+            return APPLIED
         except UnknownState:
             return UNKNOWN
-        ctx["restored_live"] = live["path"] if live["path"] == prev else None
-        return APPLIED if ctx["restored_live"] else UNKNOWN
+
+    def _identify_ours(self, account: str, ctx: dict, call: Call) -> Optional[str]:
+        """The create_version answer was lost: the latest version is ours only when it is exactly the snapshot plus
+        the planned values (versions/get)."""
+        latest = self._latest_id(account, call)
+        if latest == ctx.get("live_before_id"):
+            return None
+        path = f"{account}/versions/{latest}"
+        ans = call(HttpRequest("GET", f"{BASE}/{path}", None))
+        v = ans.body if isinstance(ans, HttpAnswer) else None
+        if not _ok(ans) or v.get("path") != path:
+            raise UnknownState("versions.get answer")
+        if self._unplanned_differences(ctx["live_before_version"], v, ctx.get("planned", {})):
+            raise UnknownState("the latest version is not ours")
+        return path
+
+    def _build_revert(self, account: str, ctx: dict, call: Call) -> str:
+        planned = ctx.get("planned", {})
+        outcome, ws = self._new_workspace(account, ctx, call, "revert")
+        if outcome != APPLIED:
+            return outcome
+        ctx["revert_workspace"] = ws
+        raw = self._load_tags(ws, planned, call)
+        if raw is None:
+            return UNKNOWN
+        snap_tags = self._tags_by_id(ctx["live_before_version"])
+        for tag_id, fields in sorted(planned.items()):
+            for f in sorted(fields):
+                want = _value(snap_tags[tag_id], f)
+                if same(_value(raw[tag_id], f), want):
+                    continue
+                o, b = self._put(raw[tag_id], f, want, call)
+                if o != APPLIED:
+                    return o
+                raw[tag_id] = b
+        if self._only_planned_changes(ws, planned, call, ctx) != APPLIED:
+            return REFUSED
+        ctx["revert_consumed"] = True
+        outcome, _, published = self._version_and_publish(ws, f"zbm-clientfix revert {ctx.get('item_id', '')}", call)
+        return APPLIED if outcome == APPLIED and published else outcome
 
     def rollback_keys(self, keys: list, ctx: dict) -> list:
-        return [] if ctx.get("restored_live") else keys     # proof: the live version path is the snapshot's
+        return [] if ctx.get("restored_live") else keys     # proof: the live version is the snapshot's content
 
     def _delete_workspace(self, ctx: dict, call: Call):
-        ws = ctx.get("workspace")
-        if ws is None or ctx.get("workspace_consumed") or ctx.get("workspace_deleted"):
-            return None
-        ans = call(HttpRequest("DELETE", f"{BASE}/{ws}", None))
-        if isinstance(ans, HttpAnswer) and ans.status == 200 and ans.body in ({}, None):
-            ctx["workspace_deleted"] = True
-            return APPLIED
-        return REFUSED if _refused(ans) else UNKNOWN
+        """Delete what this run created and has not consumed: the fix workspace and a revert workspace."""
+        worst = None
+        for role, consumed in (("fix", "workspace_consumed"), ("revert", "revert_consumed")):
+            path = ctx.get("workspaces", {}).get(role)
+            if path is None or ctx.get(consumed) or ctx.get(f"{role}_deleted"):
+                continue
+            account = path.rsplit("/workspaces/", 1)[0]
+            try:
+                out = self._delete(account, path, call)
+            except UnknownState:
+                out = UNKNOWN
+            if out == APPLIED:
+                ctx[f"{role}_deleted"] = True
+                if role == "fix":
+                    ctx["workspace_deleted"] = True
+            worst = out if worst in (None, APPLIED) else worst
+        return worst
 
     def cleanup(self, account: str, ctx: dict, call: Call):
         return self._delete_workspace(ctx, call)

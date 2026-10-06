@@ -100,7 +100,8 @@ class ClientFixService(ConnectionsMixin, JobsMixin, ApplyMixin):
         self._last_integrity_try = 0
         self._own_pending: Optional[bytes] = None
         self.revoked_now: set = set()                  # kill switch: set BEFORE a revocation is committed
-        self.revoked_clients_now: set = set()          # per-client kill switch until that commit lands (AEGIS R1 M4)
+        self._brief_cache: dict = {}                   # item id -> (read at, rows, status): memory only (R2-4)
+        self.pending_revocations: dict = {}            # client -> connection ids whose revocation is not yet committed
         self._running: set = set()                     # jobs whose apply runs in THIS process
         # /audit/evidence cache (AEGIS round 7): lines parsed so far, keyed by log length; never touched under self.lock
         self._evidence_lock = threading.Lock()

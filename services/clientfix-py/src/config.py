@@ -104,6 +104,7 @@ class Settings:
     unknown_ticks_before_task: int = 6
     max_items_per_job: int = 50
     max_ops_per_item: int = 20
+    brief_read_interval_s: int = 300
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -183,6 +184,7 @@ def load(env: Optional[dict] = None) -> Settings:
     s.unknown_ticks_before_task = _int(env, "CFX_UNKNOWN_TICKS_BEFORE_TASK", 6, 1, 1000)
     s.max_items_per_job = _int(env, "CFX_MAX_ITEMS_PER_JOB", 50, 1, 200)
     s.max_ops_per_item = _int(env, "CFX_MAX_OPS_PER_ITEM", 20, 1, 50)
+    s.brief_read_interval_s = _int(env, "CFX_BRIEF_READ_INTERVAL_SECONDS", 300, 0, 86400)
     s.bind_addr = (env.get("CFX_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "CFX_PORT", 8500, 1024, 65535)
     # the flock last: every other refusal above leaves the directory untouched

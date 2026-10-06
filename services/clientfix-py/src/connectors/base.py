@@ -151,8 +151,8 @@ class Connector:
 
     # ---------------------------------------------------------------- validation (pure)
 
-    def validate(self, account: str, op: dict) -> OpSpec:
-        """Refuse anything outside the allowlist, with a reason code. Pure: no I/O."""
+    def validate_after(self, account: str, op: dict) -> OpSpec:
+        """Everything that needs no platform data: the op, target, field and the AFTER value. Pure."""
         spec = self.ops.get(op.get("op"))
         if spec is None:
             raise OpRefused("OP_NOT_ALLOWED" if self.status != "not_built" else "CONNECTOR_NOT_BUILT")
@@ -164,12 +164,20 @@ class Connector:
         check = spec.validator(fld) if isinstance(fld, str) else None
         if check is None:
             raise OpRefused("OP_FIELD_NOT_ALLOWED")
-        before, after = op.get("before"), op.get("after")
-        if before is None and not spec.create:
-            raise OpRefused("OP_VALUE_INVALID")
+        after = op.get("after")
         if after is None and not spec.remove:
             raise OpRefused("OP_VALUE_INVALID")
         if after is not None and not check(after):
+            raise OpRefused("OP_VALUE_INVALID")
+        return spec
+
+    def validate(self, account: str, op: dict) -> OpSpec:
+        """The full check, once ``before`` is known — read from the platform by the service at plan submission (AEGIS
+        round 2 R2-4: never supplied by the model). Pure."""
+        spec = self.validate_after(account, op)
+        check = spec.validator(op["field"])
+        before, after = op.get("before"), op.get("after")
+        if before is None and not spec.create:
             raise OpRefused("OP_VALUE_INVALID")
         if before is not None and not getattr(check, "before", check)(before):
             raise OpRefused("OP_VALUE_INVALID")
