@@ -210,7 +210,8 @@ class OutreachMixin:
             self._commit("merge_fields_verified", self._req(data, "dashboard", rk, body, cid), "dashboard",
                          evidence=("merge_fields_verified", f"contact:{cid}",
                                    {"contact_id": cid, "fields": sorted(fields),
-                                    "values_sha256": hashlib.sha256(repr(sorted(fields.items())).encode()).hexdigest()},
+                                    "values_hash": i02_identity.keyed(self.pii_key, "merge",
+                                                                      repr(sorted(fields.items())))},
                                    ("dashboard", rk)))
             return self.contact_view(c)
 

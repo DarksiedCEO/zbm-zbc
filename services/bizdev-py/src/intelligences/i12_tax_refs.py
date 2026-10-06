@@ -28,15 +28,33 @@ SKIP_KEYS = frozenset({"request_id", "rate_pct", "deal_value", "amount", "value"
                        "occurred_at", "finance_event_id"})
 
 
-def ref_ok(ref: str) -> bool:
-    if not isinstance(ref, str) or not REF.fullmatch(ref):
+PAYEE_REF = re.compile(r"fin:[A-Za-z0-9._-]{4,120}")
+MAX_REF_DIGITS = 8
+
+
+def ref_ok(ref: str, rx: re.Pattern = REF) -> bool:
+    """The exact shape, and fewer than nine digits IN TOTAL: no arrangement of a nine-digit id fits in a reference
+    (a token that happens to hold more digits is refused; the issuer re-mints it)."""
+    if not isinstance(ref, str) or not rx.fullmatch(ref):
         return False
-    return not re.search(r"\d{9,}", re.sub(r"[-_\s]", "", ref))
+    return sum(c.isdigit() for c in ref) <= MAX_REF_DIGITS
+
+
+def payee_ref_ok(ref: str) -> bool:
+    return ref_ok(ref, PAYEE_REF)
+
+
+_GROUPS = re.compile(r"\d+(?:[^\w]{1,3}\d+)*")
+_SHAPES = ((3, 2, 4), (2, 7), (9,))
 
 
 def raw_tax_id(text: str) -> bool:
     if any(rx.search(text) for rx in _RAW):
         return True
+    # digit groups joined by ANY one to three non-word characters ("123|45|6789", "12 : 3456789")
+    for m in _GROUPS.finditer(text):
+        if tuple(len(g) for g in re.findall(r"\d+", m.group())) in _SHAPES:
+            return True
     # a tax-id label followed, within 40 characters, by nine digits however they are spaced ("taxpayer id 1 23 45 6789")
     return any(len(re.sub(r"\D", "", text[m.end():m.end() + 40])) >= 9 for m in _LABEL.finditer(text))
 

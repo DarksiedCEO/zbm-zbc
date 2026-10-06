@@ -62,7 +62,8 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     the service's injected clock (`i03_deadline.passed(deadline, service.now())`; `now >= deadline` is late), never
     on request data or the wall clock. A submission is queued (typed `submission_queued` event); the
     `submission-queue` job re-checks every gate from current state, cancels on a hard failure (deadline passed,
-    superseded, hash mismatch, closed), holds while only the deal gate is open, and — the port not being wired —
+    superseded, hash mismatch, a block retired, an addendum item not yet attested, closed), holds while only the
+    deal gate is open, and — the port not being wired —
     leaves it `queued`. With a port, `submission_sending` is recorded before the call, the outcome after; an outcome
     that cannot be recorded leaves it `sending`, never resent. `deadline-sweep` cancels late queued submissions and
     opens one task per pursuit whose deadline passed.
@@ -87,12 +88,16 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     against a counterparty and goes through the deal gate (decision 18). Only Andre marks a partner deal won, and only
     with an approved rate (snapshotted into the deal: later rate changes do not touch it) and an agreement Legal (37)
     shows in force (asked outside the lock; the stand-in answers `unavailable`: `503 LEGAL_UNAVAILABLE`).
-16. **Tax information** is a reference only: `vault:tax:<16..64>` or `tok:<16..64>`, with no run of nine digits once
-    `-`, `_` and spaces are dropped (i12). Any string in a partner body holding an SSN / ITIN or EIN shape (any of
-    `-`, `_`, `.`, `/`, space as separators), nine digits in a row, or a tax-id label followed by digits is refused
-    `422 TAX_ID_RAW_REFUSED`, without echoing it; keys named `tin`, `ssn`, `ein`, `itin`, `tax_id`, `taxpayer_id`
-    (and the other spellings in `api.FORBIDDEN_KEYS`) are refused 422 in every body. The payee (Finance payee ref
-    and tax reference) is set by Andre only (payout redirection is the classic fraud) and never shown back.
+16. **Tax information** is a reference only, by structure first and by scanning second. (1) Partner records carry
+    NO free text (no notes field on a partner or a partner deal; unknown fields are 422). (2) Every name and domain
+    in the service holds at most six digits in total, so no nine-digit id fits however it is spaced. (3) A tax
+    reference is exactly `vault:tax:<16..64>` or `tok:<16..64>` and the Finance payee reference `fin:<4..120>`, each
+    with at most eight digits IN TOTAL (a token that happens to hold more is refused; the issuer re-mints it). (4)
+    As a second layer, i12 scans every string of a partner body for an SSN / ITIN or EIN shape (digit groups 3-2-4,
+    2-7 or 9 joined by any one to three non-word characters, fullwidth digits included) or a tax-id label followed
+    by digits: `422 TAX_ID_RAW_REFUSED`, without echoing it. Keys named `tin`, `ssn`, `ein`, `itin`, `tax_id`,
+    `taxpayer_id` (and the other spellings in `api.FORBIDDEN_KEYS`) are refused 422 in every body. The payee is set
+    by Andre only (payout redirection is the classic fraud), never shown back, and digested in the audit export.
 17. **Commissions, clawbacks, payouts.** Commission accrues only on money Finance (31) reports as actually paid by the
     client (`POST /finance/events`, caller `finance_31`, kinds `payment`, `refund`, `chargeback`, USD), on a won
     deal. The commissionable base is net client money, floored at 0.00 and capped at the won value. Accrued =
@@ -203,6 +208,11 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
   limit is kept). `verify_integrity` still reads `entries()` under the lock (service-py's accepted stall).
 - The ledger's `department` field is self-declared by any holder of the ledger token.
 - A send, submission or payout whose outcome cannot be recorded stays `sending` and is never retried on its own.
+- A deal value is what the agent records; the threshold cannot see a price written only into a response's text.
+  Andre's approval of every response and pitch (its exact text) and of every win is the control for that.
+- The sensitivity flags (i06), the deceptive-subject rules (i08) and the raw-tax-id scan (i12) are word and shape
+  rules, so they can be evaded by deliberate obfuscation. None of them is the guarantee: every response, pitch and
+  template is approved by Andre on its exact text, and partner tax data is kept out structurally (decision 16).
 - A process that stops with an anchor in flight AND commits a new line before that anchor lands leaves two anchors
   for one sequence number; the integrity check reports it and writes stop until an operator reconciles
   (security-py's accepted residual, ADR 0012 round 4).

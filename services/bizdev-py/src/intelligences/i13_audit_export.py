@@ -1,7 +1,7 @@
 """Audit export with personal data minimised (ADR 0016 decision 24). Copied from sales-py's i12_audit_export.
 
 Decides: what an exported log record shows. Emails are replaced by their keyed hashes (a raw value with no stored
-hash is dropped), names, notes, labels and free text by their SHA-256. Nothing else personal is in the log to begin
+hash is dropped), names, notes, labels, free text and payee / tax references by their SHA-256. Nothing else personal is in the log to begin
 with. Never: exports a raw email, name, note or text."""
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ DECIDES = "the minimised form of each exported record"
 
 HASHED = {"email": "email_hash"}
 DIGESTED = ("name", "note", "notes", "title", "label", "text", "custom", "subject", "body", "first_name",
-            "counterparty_name", "company")
+            "counterparty_name", "company", "tax_info_ref", "finance_payee_ref")
 
 
 def _sha(v: str) -> str:

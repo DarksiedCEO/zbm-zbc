@@ -38,6 +38,14 @@ def _multiline(v: str) -> str:
     return v
 
 
+def _few_digits(v: str) -> str:
+    """At most six digits in total: a name or domain can never hold a nine-digit taxpayer id, however it is spaced
+    (an exact, structural rule; the raw-id scan in i12 is only a second layer)."""
+    if sum(c.isdigit() for c in v) > 6:
+        raise ValueError("at most six digits")
+    return v
+
+
 def _ts(v: str) -> str:
     parse_iso(v)
     return v
@@ -55,9 +63,11 @@ Brand = Literal["zbm", "zbc"]
 Slug = Annotated[StrictStr, Field(pattern=r"^[a-z][a-z0-9-]{2,59}$")]
 Ref = Annotated[StrictStr, Field(pattern=r"^[a-z_]{1,20}:[A-Za-z0-9._-]{1,100}$")]
 Domain = Annotated[StrictStr, Field(max_length=253,
-                                    pattern=r"^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")]
+                                    pattern=r"^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$"),
+                   AfterValidator(_few_digits)]
 Email = Annotated[StrictStr, Field(min_length=3, max_length=254)]
-Name = Annotated[StrictStr, Field(min_length=1, max_length=120), AfterValidator(_printable), AfterValidator(_no_braces)]
+Name = Annotated[StrictStr, Field(min_length=1, max_length=120), AfterValidator(_printable), AfterValidator(_no_braces),
+                 AfterValidator(_few_digits)]
 MergeName = Annotated[StrictStr, Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9 .'&-]{1,40}$")]
 Title = Annotated[StrictStr, Field(min_length=1, max_length=200), AfterValidator(_printable)]
 Text = Annotated[StrictStr, Field(min_length=1, max_length=20000), AfterValidator(_multiline)]
@@ -226,6 +236,7 @@ class ResponseSubmit(Strict):
 
 # --------------------------------------------------------------------------------------------------- partners
 
+# Partner records carry NO free text (no notes field): tax information can only ever arrive as a reference
 class PartnerCreate(Strict):
     request_id: Id
     partner_key: Slug
@@ -233,7 +244,6 @@ class PartnerCreate(Strict):
     brands: Annotated[list[Brand], AfterValidator(_unique)] = Field(min_length=1, max_length=2)
     name: Name
     domain: Domain
-    notes: Optional[ShortText] = None
 
 
 class RatePropose(Strict):
@@ -260,7 +270,6 @@ class PartnerDealCreate(Strict):
     brand: Brand
     counterparty: Counterparty
     deal_value: Money
-    notes: Optional[ShortText] = None
 
 
 class DealValueSet(Strict):

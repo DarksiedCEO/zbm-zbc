@@ -41,11 +41,13 @@ def test_raw_tax_ids_refused_everywhere_in_partner_bodies(h):
     for ref in ("vault:tax:123-45-6789-abcdefgh", "vault:tax:123456789abcdefgh", "vault:tax:12-3456789abcdefghij",
                 "tok:ab_123_45_6789_cdefghij"):
         h.refused(h.payee(p["partner_id"], ref), 422, "TAX_ID_RAW_REFUSED")
-    for notes in ("SSN 123-45-6789", "EIN: 12-3456789", "tin 987654321", "taxpayer id 1 23 45 6789"):
+    for name in ("SSN 123-45-6789", "EIN: 12-3456789", "Co 987654321", "taxpayer id 1 23 45 6789", "A 123|45|6789"):
         r = h.post("/partners", {"request_id": rid(), "partner_key": "p-" + rid()[2:12], "kind": "referral",
-                                 "brands": ["zbm"], "name": "N", "domain": "n.test", "notes": notes})
-        h.refused(r, 422, "TAX_ID_RAW_REFUSED")
-        assert "6789" not in r.text and "3456789" not in r.text
+                                 "brands": ["zbm"], "name": name, "domain": "n.test"})
+        assert r.status_code == 422 and "6789" not in r.text and "3456789" not in r.text, name
+    r = h.post("/partners", {"request_id": rid(), "partner_key": "p-notes", "kind": "referral", "brands": ["zbm"],
+                             "name": "N", "domain": "n.test", "notes": "anything"})
+    assert r.status_code == 422                               # partner records carry no free text at all
     for key in ("tin", "ssn", "ein", "itin", "tax_id", "taxpayer_id", "social_security_number"):
         r = h.post(f"/partners/{p['partner_id']}/payee", {"request_id": rid(), "finance_payee_ref": "fin:payee-1",
                                                           "tax_info_ref": "vault:tax:abcdefghijklmnop", key: "x"},
@@ -55,11 +57,19 @@ def test_raw_tax_ids_refused_everywhere_in_partner_bodies(h):
 
 def test_tax_ref_shape(h):
     p = h.partner()
-    for ref in ("123-45-6789", "vault:abc", "vault:tax:short", "https://vault/x", "tok:" + "a" * 65):
+    for ref in ("123-45-6789", "vault:abc", "vault:tax:short", "https://vault/x", "tok:" + "a" * 65,
+                "vault:tax:1a2b3c4d5e6f7g8h9i", "tok:12345678abcdefgh9"):
         r = h.payee(p["partner_id"], ref)
         assert r.status_code == 422, ref
     p2 = h.ok(h.payee(p["partner_id"], "tok:Ab_cd-EF_gh-IJ_kl12"))
     assert p2["payee"]["set"] is True and "tax_info_ref" not in str(p2)
+
+
+def test_payee_ref_digit_rule(h):
+    p = h.partner()
+    r = h.post(f"/partners/{p['partner_id']}/payee", {"request_id": rid(), "finance_payee_ref": "fin:p1a2b3c4d5e6f7g8h9",
+                                                      "tax_info_ref": "vault:tax:abcdefghijklmnop"}, andre=True)
+    h.refused(r, 422, "PAYEE_REF_INVALID")
 
 
 def test_payee_is_andre_only(h):

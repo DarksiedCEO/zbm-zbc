@@ -73,12 +73,16 @@ def test_money_parse_refuses_floats_and_noncanonical():
 
 def test_raw_tax_id_shapes():
     for raw in ("123-45-6789", "123 45 6789", "123456789", "12-3456789", "SSN: 1", "EIN 9", "ein#12",
-                "taxpayer id 1 23 45 6789", "123_45_6789", "12/3456789"):
+                "taxpayer id 1 23 45 6789", "123_45_6789", "12/3456789", "123|45|6789", "12 : 3456789",
+                "１２３-４５-６７８９"):
         assert i12_tax_refs.raw_tax_id(raw), raw
-    for ok in ("Suite 400, Los Angeles 90001", "+1 310 555 0100", "partner since 2019", "12345678", "1234567890"):
+    for ok in ("Suite 400, Los Angeles 90001", "+1 310 555 0100", "partner since 2019", "12345678", "1234567890",
+               "310-555-0100"):
         assert not i12_tax_refs.raw_tax_id(ok), ok
     assert i12_tax_refs.ref_ok("vault:tax:AbCdEf_123-45-xyz") is True
     assert i12_tax_refs.ref_ok("vault:tax:12345678901234567") is False
+    assert i12_tax_refs.ref_ok("vault:tax:1a2b3c4d5e6f7g8h9i") is False          # nine digits however arranged
+    assert i12_tax_refs.ref_ok("vault:tax:1a2b3c4d5e6f7g8hij") is True
 
 
 def test_reply_classification_never_needed_for_the_hold():

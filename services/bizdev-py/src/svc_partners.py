@@ -213,6 +213,8 @@ class PartnersMixin:
         _no_raw_tax_id(body)
         if not i12_tax_refs.ref_ok(body["tax_info_ref"]):
             raise Invalid(R("TAX_REF_INVALID"))
+        if not i12_tax_refs.payee_ref_ok(body["finance_payee_ref"]):
+            raise Invalid(R("PAYEE_REF_INVALID"))
         with self.lock:
             self._gate()
             rk = self.rk("payee_set", pid, body)
