@@ -324,9 +324,10 @@ def create_app(service: SecurityService, settings: config_mod.Settings) -> FastA
     @app.middleware("http")
     async def flush_alerts_after(request: Request, call_next):
         # AEGIS L4: alerts queued while the lock was held (detections, integrity) are sent here, outside the lock
-        response = await call_next(request)
-        await run_in_threadpool(svc.flush_alerts)
-        return response
+        try:
+            return await call_next(request)
+        finally:
+            await run_in_threadpool(svc.flush_alerts)    # also after an unhandled error (round 2 N6)
 
     @app.get("/sec/v1/status", dependencies=auth)
     def full_status(who: str = Depends(dashboard)) -> dict:

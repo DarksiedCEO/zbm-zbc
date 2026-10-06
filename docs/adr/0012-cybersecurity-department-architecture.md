@@ -146,3 +146,17 @@ Known and accepted: ledger-rust has no filtered read, so every integrity check r
 256 MiB read cap is shared with the other services; a filtered read is a ledger-rust change). A WebAuthn assertion
 does not show Andre what he signs: the dashboard must display the action before the ceremony, and a compromised
 dashboard can still ask him to sign the wrong thing (design limit, ADR unlock item 7).
+
+## Amendment — AEGIS round 2 (Oct 5 2026): BLOCKING, every finding fixed
+
+Round 2 confirmed M1–M3, M5, M6 and L1–L9 closed, and found that the round-1 H1 fix itself introduced a High.
+
+| Id | Finding | Fix |
+|---|---|---|
+| N2 (High, introduced by the H1 fix) | On an unknown outcome the caller deleted the new sealed file, then the roll-forward recorded a secret whose value no longer existed (a rotation could destroy a live credential) | An unknown outcome is marked `maybe`; the sealed file is kept, and removed only if the line is discarded. Orphan removal never runs while a pending line exists. |
+| N1 (High) | An anchor still in flight could land after the pending line was discarded and its seq reused | The pending line is never discarded when it is the exact next line: its identical anchor is re-recorded (the ledger answers 200 whether or not it already holds it) and the line appended. Only a stale or unparsable line is discarded. |
+| N3 (Medium; M4 not closed) | 8 FREEZE challenges blocked the freeze switch | The emergency pool (FREEZE, LIFT_FREEZE) never refuses: 256 slots, the oldest evicted, a sev2 opened |
+| N4 (Low) | The integrity job could report a stale OK inside the rate-limit window | The scheduler's job always reads the ledger. An integrity failure cannot be logged as an incident (the log is what failed), so Andre is alerted directly, once until the log is healthy, with a best-effort ledger record |
+| N5 (Low) | A replayed clean exit destroyed a secret stored after it | The first execution records the plan (which secrets); a replay finishes only those |
+| N6 (Low) | An unparsable pending line; the alert middleware skipped on an unhandled error | Discarded through the guarded path; the middleware flushes in `finally` |
+| T1 (round 2) | The consumed-token guard inside `enroll()` had no test | Added |

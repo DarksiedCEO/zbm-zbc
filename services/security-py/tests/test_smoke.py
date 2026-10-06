@@ -1,4 +1,3 @@
-from helpers import rid
 
 
 def test_health_open(h):

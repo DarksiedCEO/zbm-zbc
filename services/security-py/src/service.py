@@ -42,7 +42,7 @@ MAX_CHALLENGES = 64
 INTEGRITY_RETRY_S = 15
 FORCED_MIN_S = 10
 EMERGENCY_ACTIONS = ("FREEZE", "LIFT_FREEZE")
-MAX_EMERGENCY_CHALLENGES = 8
+MAX_EMERGENCY_CHALLENGES = 256
 SIGNING_KEY_ROTATE_DAYS = 30
 SIGNING_KEY_OVERLAP_S = 24 * 3600
 SLA_DAYS = {"critical": 7, "high": 30, "unknown": 30, "medium": 90, "low": 180}
@@ -56,6 +56,12 @@ APPROVAL_FAIL_LIMIT, APPROVAL_FAIL_WINDOW_S = 3, 600
 RECENT_ACCESS = 1000
 ALL = "all"
 JOBS = ("rotate-signing-key", "compliance-report", "rotation-due", "findings-due", "alerts-retry", "integrity")
+
+
+def _maybe(exc: Unavailable) -> Unavailable:
+    """Mark an outcome as unknown: the line is pending and may still take effect (round 2 N2)."""
+    exc.maybe = True
+    return exc
 
 
 def sha256_hex(data: bytes) -> str:
@@ -130,9 +136,11 @@ class SecurityService:
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
         self._last_integrity_try = 0.0
         self._outbox: list[AlertMessage] = []
+        self._unrecorded_alerted: set = set()
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
-        self._remove_orphans()
+        if self.log.read_pending() is None:
+            self._remove_orphans()      # never while a pending line may still refer to a sealed file (round 2 N2)
         self.verify_integrity(force=True)
 
     # ================================================================================================ plumbing
@@ -156,6 +164,8 @@ class SecurityService:
             if not self.integrity["ok"]:
                 raise Unavailable(R("INTEGRITY_UNVERIFIED"))
             at = iso(self.now())
+            data = {**data, "actor": data.get("actor", actor)}   # the anchor's actor is read back from the line
+            actor = data["actor"]
             rec, line = self.log.prepare(kind, at, data)
             line_sha = sha256_hex(line)
             epoch = self.log.epoch or line_sha[:16]
@@ -169,19 +179,20 @@ class SecurityService:
             except LedgerRecordError as exc:
                 if exc.took_effect is False:
                     self._drop_pending()
-                else:
-                    # AEGIS H1: the ledger may hold this anchor. Keep the pending line and stop writing; the next
-                    # integrity check appends it if the anchor is there and discards it if not.
-                    self.integrity = {"ok": False, "checked_at": at, "problem": "a ledger answer was lost; the "
-                                      "pending line is settled at the next integrity check"}
-                raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+                    raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+                # AEGIS H1 / round 2 N1: the ledger may hold this anchor, or record it late. The pending line is
+                # kept and writes stop; the next integrity check ROLLS IT FORWARD (re-records the identical anchor,
+                # then appends). The outcome is "maybe": callers keep what the line refers to (round 2 N2).
+                self.integrity = {"ok": False, "checked_at": at, "problem": "a ledger answer was lost; the "
+                                  "pending line is rolled forward at the next integrity check"}
+                raise _maybe(Unavailable(R("LEDGER_UNAVAILABLE"))) from None
             try:
                 self.log.append_prepared(rec, line)
             except StoreWriteError:
                 # anchored but not written: the pending line completes it at the next start; stop writing now
                 self.integrity = {"ok": False, "checked_at": at, "problem": "a log line was anchored but not written; "
-                                  "restart to complete it from the pending line"}
-                raise Unavailable(R("STORE_UNAVAILABLE")) from None
+                                  "it is rolled forward at the next integrity check"}
+                raise _maybe(Unavailable(R("STORE_UNAVAILABLE"))) from None
             self._drop_pending()
             self._apply(kind, data, at)
             return rec
@@ -342,6 +353,9 @@ class SecurityService:
         self.reports.append({"at": at, "result": d["result"], "delivery": d["delivery"], "tested_at": d["tested_at"]})
         self.reports = self.reports[-50:]
 
+    def _a_clean_exit_planned(self, d, at):
+        pass                    # the plan lives in self.requests (its _obj), rebuilt by _record_request
+
     def _a_job_ran(self, d, at):
         pass
 
@@ -359,14 +373,14 @@ class SecurityService:
 
     # ================================================================================================ integrity
 
-    def verify_integrity(self, force: bool = False) -> dict:
+    def verify_integrity(self, force: bool = False, always: bool = False) -> dict:
         """Complete or discard the pending line, then check every local line's anchor on the ledger, and that
         the ledger holds no anchor this log lacks (a truncated, rolled back, deleted or replaced log)."""
         with self.lock:
             mono = time.monotonic()
             if not force and (self.integrity["ok"] or mono - self._last_integrity_try < INTEGRITY_RETRY_S):
                 return dict(self.integrity)
-            if force and mono - self._last_integrity_try < FORCED_MIN_S and self._last_integrity_try:
+            if force and not always and mono - self._last_integrity_try < FORCED_MIN_S and self._last_integrity_try:
                 return dict(self.integrity)     # AEGIS L7: a full ledger read at most every FORCED_MIN_S
             self._last_integrity_try = mono
             at = iso(self.now())
@@ -375,42 +389,60 @@ class SecurityService:
             except LedgerQueryFailed:
                 self.integrity = {"ok": False, "checked_at": at, "problem": "the ledger cannot be read"}
                 return self.integrity
-            mine = [e for e in entries if e.get("department") == DEPARTMENT and e.get("event_type") == "log_anchor"]
-            by_id = {e.get("event_id"): e for e in mine}
-            problem = self._settle_pending(by_id)
+            problem, rolled = self._settle_pending()
+            if rolled and self.log.read_pending() is None:
+                self._remove_orphans()                      # e.g. the old version a rolled-forward rotation replaced
+            if problem is None and rolled:
+                try:
+                    entries = self.rec.client.entries()     # the roll-forward may have just recorded an anchor
+                except LedgerQueryFailed:
+                    problem = "the ledger cannot be read"
             if problem is None:
-                problem = self._anchor_problem(mine, by_id)
+                mine = [e for e in entries if e.get("department") == DEPARTMENT and e.get("event_type") == "log_anchor"]
+                problem = self._anchor_problem(mine, {e.get("event_id"): e for e in mine})
             self.integrity = {"ok": problem is None, "checked_at": at, "problem": problem}
             if problem is None:
+                self._unrecorded_alerted.clear()
                 self._after_integrity()     # under the lock (no double reset or key); alerts are only QUEUED here
             return dict(self.integrity)
 
-    def _settle_pending(self, by_id: dict) -> Optional[str]:
+    def _settle_pending(self) -> tuple[Optional[str], bool]:
+        """Roll the pending line forward if it is the exact next line of this log: re-record its anchor (identical
+        content, so the ledger answers 200 whether it already held it or not), then append it. Otherwise it is
+        stale and discarded, with any sealed file only it referred to. Returns (problem, rolled_forward)."""
         raw = self.log.read_pending()
         if raw is None:
-            return None
+            return None, False
         try:
             rec = json.loads(raw)
-            seq = rec["seq"]
-        except (ValueError, KeyError, TypeError):
-            self.log.clear_pending()
-            return None
+            seq, kind, data = rec["seq"], rec["kind"], rec["data"]
+            verify_lines(self._raw_lines() + [raw])        # the exact next line, chained to this log
+        except (ValueError, KeyError, TypeError, StoreCorrupt):
+            return self._discard_pending(), False
         line_sha = sha256_hex(raw)
         epoch = self.log.epoch or line_sha[:16]
-        eid, payload = self._anchor_ids(epoch, seq, line_sha) if isinstance(seq, int) else (None, None)
-        e = by_id.get(eid)
-        if seq == len(self.log) + 1 and e is not None and e.get("payload_sha256") == payload_sha256(payload):
-            try:
-                lines = [ln.encode("ascii") if isinstance(ln, str) else ln for ln in self._raw_lines()] + [raw]
-                verify_lines(lines)
-                self.log.append_prepared(rec, raw)
-                self._apply(rec["kind"], rec["data"], rec["at"])
-            except (StoreCorrupt, StoreWriteError, KeyError):
-                return "the pending line is anchored on the ledger but cannot be written here"
+        eid, payload = self._anchor_ids(epoch, seq, line_sha)
+        try:
+            self._anchor(eid, data["actor"], epoch, payload, kind, seq)
+        except LedgerRecordError:
+            return "the pending line could not be anchored yet (ledger unavailable); kept for the next check", False
+        try:
+            self.log.append_prepared(rec, raw)
+        except StoreWriteError:
+            return "the pending line is anchored on the ledger but cannot be written here", False
+        self._apply(kind, data, rec["at"])
+        try:
+            self.log.clear_pending()
+        except StoreWriteError:
+            return "the pending line could not be removed", True
+        return None, True
+
+    def _discard_pending(self) -> Optional[str]:
         try:
             self.log.clear_pending()
         except StoreWriteError:
             return "the pending line could not be removed"
+        self._remove_orphans()                              # a sealed file only the discarded line referred to
         return None
 
     def _raw_lines(self) -> list[bytes]:
@@ -566,9 +598,15 @@ class SecurityService:
         for cid in [c for c, v in self.challenges.items() if v["expires"] <= now or v["used"]]:
             del self.challenges[cid]
         cap = MAX_EMERGENCY_CHALLENGES if pool == "emergency" else MAX_CHALLENGES
-        if sum(1 for v in self.challenges.values() if v.get("pool", "general") == pool) >= cap:
+        in_pool = [c for c, v in self.challenges.items() if v.get("pool", "general") == pool]
+        if len(in_pool) >= cap:
             self._open_incident("sev2", "APPROVAL_CHALLENGES_EXHAUSTED", f"pool:{pool}", DETECTOR)
-            raise Throttled(R("APPROVAL_CHALLENGES_EXHAUSTED"))
+            if pool != "emergency":
+                raise Throttled(R("APPROVAL_CHALLENGES_EXHAUSTED"))
+            # round 2 N3: the freeze switch is never refused; the oldest emergency challenge makes room (a flooder
+            # must out-pace Andre's few-second ceremony across MAX_EMERGENCY_CHALLENGES slots, and is reported)
+            oldest = min(in_pool, key=lambda c: self.challenges[c]["expires"])
+            del self.challenges[oldest]
         extra = {**(extra or {}), "pool": pool}
         raw = os.urandom(32)
         cid = "ch-" + base64.urlsafe_b64encode(os.urandom(18)).decode("ascii")
@@ -815,8 +853,9 @@ class SecurityService:
             data["approval"] = approval
         try:
             self._commit("secret_stored", data, actor)
-        except Unavailable:
-            self.sealed.delete(sid, 1)
+        except Unavailable as exc:
+            if not getattr(exc, "maybe", False):      # certainly not recorded: the sealed file is an orphan now
+                self.sealed.delete(sid, 1)
             raise
         return self._view(self.secrets[sid])
 
@@ -997,8 +1036,9 @@ class SecurityService:
                 data["approval"] = appr
             try:
                 self._commit("secret_rotated", data, actor)
-            except Unavailable:
-                self.sealed.delete(s["secret_id"], new)
+            except Unavailable as exc:
+                if not getattr(exc, "maybe", False):
+                    self.sealed.delete(s["secret_id"], new)
                 raise
             self.sealed.delete(s["secret_id"], old)
             return self._view(s)
@@ -1051,8 +1091,20 @@ class SecurityService:
         with self.lock:
             self._gate()
             self._check_caller(caller)
-            targets = [s for s in self.secrets.values()
-                       if s["owner"] == caller and s["client_id"] == client_id and s["status"] == "active"]
+            # round 2 N5: the first execution records WHICH secrets this request covers; a replay of the same
+            # request finishes those and never reaches a secret stored afterwards
+            rk = f"clean_exit|{client_id}|{body['request_id']}"
+            if (caller, rk) not in self.requests:
+                ids = sorted(s["secret_id"] for s in self.secrets.values()
+                             if s["owner"] == caller and s["client_id"] == client_id and s["status"] == "active"
+                             and s["kind"] != "canary")
+                self._commit("clean_exit_planned", {"client_id": client_id, "secret_ids": ids, "actor": caller,
+                                                    "request_id": rk, "request_sha": request_sha(body),
+                                                    "_obj": ids}, caller)
+            elif self.requests[(caller, rk)][0] != request_sha(body):
+                raise Conflict(R("REQUEST_ID_REUSED"))
+            planned = self.requests[(caller, rk)][1]
+            targets = [self.secrets[i] for i in planned if self.secrets[i]["status"] == "active"]
             held = 0
             for s in sorted(targets, key=lambda x: x["ref"]):
                 if s["kind"] == "canary":
@@ -1063,8 +1115,7 @@ class SecurityService:
                 # keyed by the secret, not its position: a retry after a partial failure finishes the rest (AEGIS M1)
                 sub = {"request_id": body["request_id"], "client_id": client_id, "secret_id": s["secret_id"]}
                 self._destroy(caller, s, sub, None, f"destroy_client|{client_id}|{body['request_id']}|{s['secret_id']}")
-            prefix = f"destroy_client|{client_id}|{body['request_id']}|"
-            destroyed = sum(1 for (a, k) in self.requests if a == caller and k.startswith(prefix))
+            destroyed = sum(1 for i in planned if self.secrets[i]["status"] == "destroyed")
             return {"client_id": client_id, "destroyed": destroyed, "held": held}
 
     def set_access(self, raw_ref: str, body: dict) -> dict:
@@ -1231,6 +1282,14 @@ class SecurityService:
             self._commit("incident_opened", {"incident_id": iid, "severity": severity, "code": code,
                                              "subject": subject, "actor": actor}, actor)
         except Unavailable:
+            # the log cannot take the record (e.g. its integrity is what failed): Andre is alerted anyway, and the
+            # ledger gets a best-effort record; the incident itself is opened by hand once the log is healthy
+            if (code, subject) in self._unrecorded_alerted:
+                return None                     # alerted once already while the log is unhealthy
+            self._unrecorded_alerted.add((code, subject))
+            self.rec.try_record(derived_id("inu", iid), "incident_unrecorded", DETECTOR, iid,
+                                {"severity": severity, "code": code}, f"unrecorded {severity} {code}")
+            self._queue_alerts({"incident_id": iid, "severity": severity, "code": code, "subject": subject})
             return None
         self._queue_alerts(self.incidents[iid])
         return iid
@@ -1429,7 +1488,7 @@ class SecurityService:
             with self.lock:
                 self._check_caller("scheduler")
         if name == "integrity":
-            res = self.verify_integrity(force=True)
+            res = self.verify_integrity(force=True, always=True)   # round 2 N4: the job always reads the ledger
             ledger_ok = self.rec.client.verify()
             if not res["ok"] or not ledger_ok:
                 with self.lock:

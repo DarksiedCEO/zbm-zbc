@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 
 import api
 import config as config_mod
-import crypto
 from clock import FixedClock
 from ledger import LedgerConflict, LedgerNotRecorded, LedgerQueryFailed, Recorder, payload_sha256
 from ports import Ports
