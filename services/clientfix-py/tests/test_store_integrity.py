@@ -60,10 +60,10 @@ def test_every_line_is_anchored_and_no_client_value_reaches_the_ledger(h):
 
 
 def test_audit_export_replaces_every_client_value_by_its_hash(hd):
-    conn, j = hd.seo_job(title="Exported Title Text")
+    conn, j = hd.seo_job(title="Exported Title Text", before="Original Title Text")
     hd.ok(hd.apply(j["job_id"]))
     out = json.dumps(hd.ok(hd.get("/audit/export", params={"limit": 1000}, caller="compliance_38")))
-    assert "Exported Title Text" not in out and '"sha256"' in out
+    assert "Exported Title Text" not in out and "Original Title Text" not in out and '"sha256"' in out
 
 
 def test_ledger_down_nothing_applied(h):

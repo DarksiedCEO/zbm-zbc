@@ -637,7 +637,8 @@ def _count(values) -> dict:
     return out
 
 
-VALUE_KEYS = frozenset({"snapshot", "readback", "before", "after", "value", "instructions", "current", "required"})
+VALUE_KEYS = frozenset({"snapshot", "readback", "before", "after", "value", "instructions", "current", "required",
+                        "written"})
 
 
 def minimise(obj, depth: int = 0):
