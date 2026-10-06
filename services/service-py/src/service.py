@@ -146,14 +146,15 @@ class SupportService:
         self._lock_token: Optional[str] = None
         if self._dir_lock is not None:
             if lock_token is None:
-                self._lock_token = self._dir_lock.claim()
-            elif self._dir_lock.holds(lock_token):
+                lock_token = self._dir_lock.claim()
+            if self._dir_lock.adopt(lock_token):          # single use (AEGIS a5dd261 L4)
                 self._lock_token = lock_token
             else:
                 self._dir_lock = None
                 raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
-                                  "stale or another instance's); refusing to start")
+                                  "stale, another instance's, or already adopted); refusing to start")
         try:
+            self.bodies.sweep_tmp()                       # only after the claim is verified (AEGIS a5dd261 I5)
             self._start()
         except BaseException:
             self.close()
@@ -597,6 +598,8 @@ class SupportService:
         """Complete or set aside the pending line, then check every local line's anchor on the ledger, and that
         the ledger holds no anchor this log lacks (a truncated, rolled back, deleted or replaced log)."""
         with self.lock:
+            if self._closed:                              # AEGIS a5dd261 M1: no ledger I/O from a closed instance
+                return self._closed_integrity()
             mono = time.monotonic()
             if not force and (self.integrity["ok"] or mono - self._last_integrity_try < INTEGRITY_RETRY_S):
                 return dict(self.integrity)
@@ -625,6 +628,17 @@ class SupportService:
             if problem is None:
                 self._after_integrity()
             return dict(self.integrity)
+
+    def _closed_integrity(self) -> dict:
+        return {"ok": False, "checked_at": self.integrity.get("checked_at"), "problem": "this service instance is closed"}
+
+    def audit_integrity(self) -> dict:
+        """``/svc/v1/audit/integrity``: a closed instance refuses 503 SERVICE_CLOSED (AEGIS a5dd261 M1 / L2)."""
+        with self.lock:
+            if self._closed:
+                raise Unavailable(R("SERVICE_CLOSED"))
+            res = self.verify_integrity(force=True)
+            return {"integrity": res, "ledger_valid": self.rec.client.verify(), "log_length": len(self.log)}
 
     def _settle_pending(self, by_id: dict) -> tuple[Optional[str], bool]:
         """security-py's (AEGIS R4-1 / R5-1): our own line (kept in memory) is rolled forward; a line found on disk
@@ -759,8 +773,7 @@ class SupportService:
             return {
                 "status": "closed" if closed else ("ok" if self.integrity["ok"] else "degraded"),
                 "closed": closed,
-                "integrity": {"ok": False, "checked_at": self.integrity.get("checked_at"),
-                              "problem": "this service instance is closed"} if closed else dict(self.integrity),
+                "integrity": self._closed_integrity() if closed else dict(self.integrity),
                 "in_memory": self.log.in_memory,
                 "non_production": self.settings.non_production,
                 "andre_approvals_configured": None,          # filled by the API (the gate lives there)
@@ -2066,8 +2079,11 @@ class SupportService:
         if name not in JOBS:
             raise NotFound(R("JOB_UNKNOWN"))
         if name == "integrity":
-            res = self.verify_integrity(force=True, always=True)
-            ledger_ok = self.rec.client.verify()
+            with self.lock:
+                if self._closed:                          # AEGIS a5dd261 M1: a closed instance runs no job
+                    raise Unavailable(R("SERVICE_CLOSED"))
+                res = self.verify_integrity(force=True, always=True)
+                ledger_ok = self.rec.client.verify()
             return {"job": name, "integrity": res, "ledger_valid": ledger_ok}
         if not self._tick_lock.acquire(blocking=False):
             raise Conflict(R("JOB_RUNNING"))

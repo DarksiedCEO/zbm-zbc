@@ -95,6 +95,7 @@ def test_item2_close_waits_for_a_commit_in_progress(tmp_path):
 def test_item2_the_closed_check_is_inside_the_log_lock(tmp_path):
     h = Harness(tmp_path, data_dir=str(tmp_path / "d"))
     rec, line = h.svc.log.prepare("job_ran", "2026-10-06T18:00:00Z", {"effects": [], "actor": "scheduler"})
+    before = len(h.svc.log)
     result = {}
 
     def append():
@@ -110,7 +111,8 @@ def test_item2_the_closed_check_is_inside_the_log_lock(tmp_path):
     h.svc.log.closed = True                                        # ... while the instance is closed
     h.svc.log.lock.release()
     t.join(timeout=10)
-    assert result["r"] == "refused" and len(h.svc.log) == 0 or result["r"] == "refused"
+    assert result["r"] == "refused"
+    assert len(h.svc.log) == before                                # nothing was written (AEGIS a5dd261 I6)
 
 
 # --------------------------------------------------------------------------------------------------- item 3

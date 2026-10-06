@@ -363,8 +363,11 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
     # ------------------------------------------------------------------ health and status
 
     @app.get("/health")
-    def health() -> dict:
-        return {"status": svc.health()["status"]}          # unauthenticated: up or degraded, nothing more
+    def health():
+        status = svc.health()["status"]                    # unauthenticated: ok, degraded or closed, nothing more
+        if status == "closed":                             # AEGIS a5dd261 I7: a closed instance is not serving
+            return JSONResponse(status_code=503, content={"status": status})
+        return {"status": status}
 
     @app.get("/svc/v1/status", dependencies=auth)
     def full_status(who: str = Depends(dashboard)) -> dict:
@@ -565,8 +568,7 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
 
     @app.get("/svc/v1/audit/integrity", dependencies=auth)
     def integrity(who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
-        res = svc.verify_integrity(force=True)
-        return {"integrity": res, "ledger_valid": svc.rec.client.verify(), "log_length": len(svc.log)}
+        return svc.audit_integrity()
 
     @app.get("/svc/v1/audit/events", dependencies=auth)
     def audit_events(since: int = Query(default=1, ge=1, le=10_000_000), limit: int = Query(default=200, ge=1, le=1000),

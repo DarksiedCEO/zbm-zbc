@@ -321,10 +321,22 @@ class BodyStore:
         if self.dir:
             os.makedirs(self.dir, mode=0o700, exist_ok=True)
             for name in os.listdir(self.dir):
-                if name.endswith(".tmp"):
-                    os.unlink(os.path.join(self.dir, name))
-                elif not _BODY_NAME.fullmatch(name):
+                if not name.endswith(".tmp") and not _BODY_NAME.fullmatch(name):
                     raise StoreCorrupt(f"body store holds a file that is not a body: {name[:40]}")
+
+    def sweep_tmp(self) -> None:
+        """Remove half-written ``*.tmp`` bodies. Called by the service only AFTER it has verified and adopted the
+        data-directory claim (AEGIS a5dd261 I5): constructing a body store never deletes anything, so a refused
+        construction cannot remove a live instance's in-flight body."""
+        with self.lock:
+            if self.closed or not self.dir:
+                return
+            for name in os.listdir(self.dir):
+                if name.endswith(".tmp"):
+                    try:
+                        os.unlink(os.path.join(self.dir, name))
+                    except FileNotFoundError:
+                        pass
 
     def digest(self, data: bytes) -> str:
         return hmac.new(self._key, data, hashlib.sha256).hexdigest()
@@ -412,6 +424,9 @@ class DataDirLock:
     def __init__(self, data_dir: Optional[str]):
         self._fd = None
         self.claimed = False
+        self._token: Optional[str] = None
+        self._adopted = False
+        self._mutex = threading.Lock()   # AEGIS a5dd261 L3: claim / holds / adopt / release_claim are atomic
         if not data_dir:
             return
         import fcntl
@@ -445,28 +460,45 @@ class DataDirLock:
         data directory). Only the holder of the token can release the claim or hand it to a service."""
         if self._fd is None:
             return None
-        if self.claimed:
-            raise DataDirBusy("another service instance in this process already holds this data directory; refusing "
-                              "to start (close the first instance)")
         import secrets
-        self._token = secrets.token_hex(16)
-        self.claimed = True
-        return self._token
+        with self._mutex:
+            if self.claimed:
+                raise DataDirBusy("another service instance in this process already holds this data directory; "
+                                  "refusing to start (close the first instance)")
+            self._token = secrets.token_hex(16)
+            self._adopted = False
+            self.claimed = True
+            return self._token
+
+    def _holds(self, token: Optional[str]) -> bool:
+        import hmac as hmac_mod
+        current = self._token
+        return bool(self.claimed and token and current and hmac_mod.compare_digest(token, current))
 
     def holds(self, token: Optional[str]) -> bool:
         """True only for the token of the CURRENT claim (AEGIS round 5c item 1)."""
-        import hmac as hmac_mod
-        current = getattr(self, "_token", None)
-        return bool(self.claimed and token and current and hmac_mod.compare_digest(token, current))
+        with self._mutex:
+            return self._holds(token)
+
+    def adopt(self, token: Optional[str]) -> bool:
+        """Hand the current claim to ONE service instance: true only for the current claim's token, and only once
+        (AEGIS a5dd261 L4: a second service handed the same token is refused)."""
+        with self._mutex:
+            if self._adopted or not self._holds(token):
+                return False
+            self._adopted = True
+            return True
 
     def release_claim(self, token: Optional[str] = None) -> bool:
         """Give the claim back. Only the current claim's token releases it: a stale or wrong token is a no-op (it
         never releases another instance's claim). Returns whether it released."""
-        if not self.holds(token):
-            return False
-        self.claimed = False
-        self._token = None
-        return True
+        with self._mutex:
+            if not self._holds(token):
+                return False
+            self.claimed = False
+            self._token = None
+            self._adopted = False
+            return True
 
     def release(self) -> None:
         if self._fd is not None:
