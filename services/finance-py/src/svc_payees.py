@@ -21,12 +21,14 @@ import chart as C
 import money as M
 import reasons as R
 from clock import iso, parse_iso
-from errors import Conflict, NotFound
+from errors import Conflict, NotFound, Unavailable
 from intelligences import i01_journal as J
 from intelligences import i06_tax as I6
 from ledger import derived_id
 from ports import RailAccount, TaxAgentAnswer
 from service import Gather, InvalidReasons, Op, PostingRefused, Refused, facts_sha256, rid, sha, sha_text, unbatched
+
+HELD = "held_submitting"
 
 # Wave 25 (scout B Low): the payout-country list is a pinned seed like fin_rules_seed.json — a changed file refuses
 # the import (and so the start) instead of silently changing who can be paid; read through a closed handle.
@@ -446,12 +448,17 @@ class PayeesMixin:
             results = []
             for ev in events:
                 k = f"{rail_name}|{ev['event_id']}"
-                if op.get("rail_events", k):
+                prior = op.get("rail_events", k)
+                if prior and not prior.get("held"):
                     results.append({"event_id": ev["event_id"], "status": "duplicate"})
                     continue
                 status = self._rail_event(op, rail_name, ev)
+                # sweep B-F2: a paid/failed event for an item still ``submitting`` (its acceptance not booked yet) is
+                # HELD, never acked-and-ignored: a redelivery of the same event re-applies it, and so does Finance
+                # itself as soon as the item's acceptance is booked (``replay_held_rail_events``)
                 op.put("rail_events", k, {"event_id": ev["event_id"], "rail": rail_name, "type": ev["type"],
-                                          "item_id": ev.get("item_id"), "status": status, "at": iso(self._now())})
+                                          "item_id": ev.get("item_id"), "status": status,
+                                          "held": status == HELD, "at": (prior or {}).get("at") or iso(self._now())})
                 results.append({"event_id": ev["event_id"], "status": status})
             resp = {"results": results, "ledger_event_ids": op.events, "request_id": request_id}
             self._idem_add(op, key, h, resp)
@@ -481,6 +488,11 @@ class PayeesMixin:
             item = op.get("items", ev.get("item_id") or "")
             if item is None:
                 return "unknown_item"
+            if t in ("paid", "failed") and item["status"] == "submitting":
+                op.record(derived_id("rhold", rail_name, ev["event_id"]), "rail_event_held", "intel_04_payout_run",
+                          item["item_id"], {"item_id": item["item_id"], "event_id": ev["event_id"], "type": t},
+                          f"Rail {t} event held: the item's acceptance is not booked yet (applied once it is)")
+                return HELD
             net = M.D(item["net"])
             payee = op.get("payees", item["payee_id"])
             try:
@@ -559,6 +571,28 @@ class PayeesMixin:
             return "hold_opened"
         return "recorded"
 
+    def replay_held_rail_events(self, op_prefix: str, item_id: Optional[str] = None) -> int:
+        """Apply the rail events held for items no longer ``submitting`` (sweep B-F2): each in its own operation (a
+        refused posting leaves only that event held). Called once an item's acceptance is booked and by the rail-sync
+        job. Returns how many were applied; an unavailable ledger stops the pass (the rest stay held)."""
+        n = 0
+        with self.lock:
+            held = sorted((k, dict(r)) for k, r in self.db["rail_events"].items() if r.get("held")
+                          and (item_id is None or r.get("item_id") == item_id)
+                          and (self.db["items"].get(r.get("item_id") or "") or {}).get("status") != "submitting")
+            for k, r in held:
+                op = Op(self, f"{op_prefix}|held|{k}|{len(self.log)}", "intel_04_payout_run", f"rail:{r['rail']}")
+                try:
+                    status = self._rail_event(op, r["rail"], {"event_id": r["event_id"], "type": r["type"],
+                                                              "item_id": r["item_id"]})
+                except InvalidReasons:
+                    continue
+                op.put("rail_events", k, {**r, "status": status, "held": status == HELD,
+                                          "released_from_hold_at": iso(self._now())})
+                self._commit(op)
+                n += 1
+        return n
+
     # --- jobs ----------------------------------------------------------------------------------------------------------
 
     def job_tax_sync(self, op_prefix: str) -> dict:
@@ -601,5 +635,10 @@ class PayeesMixin:
                     activated += 1
             self._commit(op)
         drove = self.drive_open_items(op_prefix)
+        try:
+            held = self.replay_held_rail_events(op_prefix)
+        except Unavailable:
+            held = 0
         transfers = self.retry_transfers()
-        return {"pending_payees": len(pending), "activated": activated, **drove, "transfers": transfers}
+        return {"pending_payees": len(pending), "activated": activated, **drove, "held_events_applied": held,
+                "transfers": transfers}

@@ -17,6 +17,7 @@ from decimal import Decimal
 from typing import Optional
 
 import money
+from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 
 CALLER_NAMES = ("compliance_38", "clipper_network", "verification_integrity", "creative_production", "onboarding",
                 "legal_37", "scheduler", "rail_gateway", "bank_feed")
@@ -88,27 +89,29 @@ def _https_url(env, name: str) -> str:
 
 @dataclass
 class Settings:
-    service_token: str
-    caller_tokens: dict = field(default_factory=dict)
-    andre_token: Optional[str] = None
-    second_approver_token: Optional[str] = None
+    # sweep X-8: every token and key is repr=False -- repr(settings) (a log line, a traceback) never prints one
+    service_token: str = field(repr=False)
+    caller_tokens: dict = field(default_factory=dict, repr=False)
+    andre_token: Optional[str] = field(default=None, repr=False)
+    second_approver_token: Optional[str] = field(default=None, repr=False)
     dual_human_threshold: Decimal = Decimal("0.00")
     seed_path: str = DEFAULT_SEED_PATH
     seed_sha256: Optional[str] = None
     allow_unpinned_seed: bool = False
     data_dir: Optional[str] = None
+    data_dir_lock: Optional[object] = field(default=None, repr=False)   # store.DataDirLock (config.load takes it)
     ledger_url: Optional[str] = None
-    ledger_token: Optional[str] = None
+    ledger_token: Optional[str] = field(default=None, repr=False)
     reconcile_mode: bool = False
     vi_url: Optional[str] = None
-    vi_token: Optional[str] = None
-    vi_caller_token: Optional[str] = None
+    vi_token: Optional[str] = field(default=None, repr=False)
+    vi_caller_token: Optional[str] = field(default=None, repr=False)
     compliance_url: Optional[str] = None
-    compliance_token: Optional[str] = None
-    compliance_caller_token: Optional[str] = None
+    compliance_token: Optional[str] = field(default=None, repr=False)
+    compliance_caller_token: Optional[str] = field(default=None, repr=False)
     legal_url: Optional[str] = None
-    legal_token: Optional[str] = None
-    legal_caller_token: Optional[str] = None
+    legal_token: Optional[str] = field(default=None, repr=False)
+    legal_caller_token: Optional[str] = field(default=None, repr=False)
     rails: tuple = RAILS
     run_weekday: str = "FRI"
     run_local_time: str = "10:00"
@@ -140,12 +143,34 @@ class Settings:
     media_release_hold_bd: int = 2
     card_prepayments: bool = False
     stripe_incoming: bool = False
-    stripe_secret_key: Optional[Secret] = None
-    stripe_webhook_secret: Optional[Secret] = None
+    stripe_secret_key: Optional[Secret] = field(default=None, repr=False)
+    stripe_webhook_secret: Optional[Secret] = field(default=None, repr=False)
     stripe_livemode: bool = False
     stripe_success_url: Optional[str] = None
     stripe_cancel_url: Optional[str] = None
     card_max_invoice: Decimal = Decimal("5000.00")
+
+
+_HELD: dict = {}
+
+
+def hold_data_dir(data_dir: str) -> DataDirLock:
+    """The exclusive flock on FIN_DATA_DIR (clientfix-py's ``hold_data_dir``; sweep F-3/E-5 backport), taken once per
+    process at start-up, before the log is opened, and held for the life of the process. A second process on the same
+    directory refuses to start; a second service instance in this process must win the single claim (store.DataDirLock)."""
+    key = os.path.realpath(data_dir)
+    lock = _HELD.get(key)
+    if lock is None:
+        try:
+            lock = DataDirLock(data_dir)
+        except DataDirBusy:
+            raise RuntimeError(f"{data_dir}: another finance-py process holds this data directory (flock on "
+                               f"{LOCK_NAME}); refusing to start. Stop the other process first: two writers would "
+                               "fork the log") from None
+        except StoreCorrupt as exc:
+            raise RuntimeError(f"{data_dir}: {exc}") from None
+        _HELD[key] = lock
+    return lock
 
 
 def _int(env, name, default, lo, hi) -> int:
@@ -309,11 +334,12 @@ def load(env: Optional[dict] = None) -> Settings:
     media_default = _money(env, "FIN_MEDIA_DEFAULT_MARKUP_PCT", "15.00")
     if media_default > media_max:
         raise RuntimeError("FIN_MEDIA_DEFAULT_MARKUP_PCT must not exceed FIN_MEDIA_MAX_MARKUP_PCT")
-    return Settings(
+    data_dir = env.get("FIN_DATA_DIR") or None
+    s = Settings(
         service_token=token, caller_tokens=callers, andre_token=andre, second_approver_token=second,
         dual_human_threshold=second_threshold,
         seed_path=env.get("FIN_SEED_PATH") or DEFAULT_SEED_PATH, seed_sha256=seed_sha, allow_unpinned_seed=unpinned,
-        data_dir=env.get("FIN_DATA_DIR") or None,
+        data_dir=data_dir,
         ledger_url=env.get("LEDGER_SERVICE_URL") or None, ledger_token=env.get("LEDGER_SERVICE_TOKEN") or None,
         reconcile_mode=_flag(env, "FIN_RECONCILE_MODE", False),
         vi_url=vi[0], vi_token=vi[1], vi_caller_token=vi[2],
@@ -355,6 +381,9 @@ def load(env: Optional[dict] = None) -> Settings:
         card_prepayments=_flag(env, "FIN_CARD_PREPAYMENTS", False), card_max_invoice=card_cap,
         **stripe,
     )
+    # the flock last: every other refusal above leaves the directory untouched
+    s.data_dir_lock = hold_data_dir(data_dir) if data_dir else None
+    return s
 
 
 STRIPE_SETTINGS = ("FIN_STRIPE_SECRET_KEY_FILE", "FIN_STRIPE_WEBHOOK_SECRET_FILE", "FIN_STRIPE_SUCCESS_URL",

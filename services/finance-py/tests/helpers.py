@@ -63,6 +63,15 @@ class Harness:
         if data_dir:
             e["FIN_DATA_DIR"] = data_dir
         self.env = e
+        if data_dir:
+            # a new harness on a data directory is a restart: the old instance stops first (the single-writer claim,
+            # sweep F-3/E-5 backport, refuses a second live instance on one directory)
+            import os
+            for old in list(HARNESSES):
+                svc = getattr(old, "svc", None)
+                if svc is not None and old.settings.data_dir and \
+                        os.path.realpath(old.settings.data_dir) == os.path.realpath(data_dir):
+                    svc.close()
         self.settings = config_mod.load(e)
         if log is not None:
             from service import Service

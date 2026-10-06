@@ -174,7 +174,7 @@ class SimStripe:
         self.charges[ch_id] = {"id": ch_id, "object": "charge", "amount": amt, "currency": "usd",
                                "status": "pending", "payment_intent": pi_id, "balance_transaction": None,
                                "failure_balance_transaction": None, "livemode": self.livemode,
-                               "payment_method_details": {"type": method}}
+                               "payment_method_details": {"type": method}, "amount_refunded": 0, "refunded": False}
         self.pis[pi_id]["latest_charge"] = ch_id
         s.update(status="complete", payment_intent=pi_id)
         if settle:
@@ -203,6 +203,16 @@ class SimStripe:
         ch.update(status="failed", failure_balance_transaction=self._txn(-pi["amount"], -fee_back, ch["id"],
                                                                           "payment_failure_refund"))
         pi.update(status="requires_payment_method")
+
+    def refund(self, pi_id: str, amount: Optional[int] = None) -> None:
+        """A refund made at Stripe (the Dashboard, not Finance): the charge's ``amount_refunded`` grows and the money
+        leaves the balance (Stripe keeps its processing fee)."""
+        pi = self.pis[pi_id]
+        ch = self.charges[pi["latest_charge"]]
+        amt = ch["amount"] - ch["amount_refunded"] if amount is None else amount
+        ch["amount_refunded"] += amt
+        ch["refunded"] = ch["amount_refunded"] == ch["amount"]
+        self._txn(-amt, 0, ch["id"], "refund")
 
     def dispute(self, pi_id: str, fee: int = 1500, amount: Optional[int] = None) -> str:
         pi = self.pis[pi_id]

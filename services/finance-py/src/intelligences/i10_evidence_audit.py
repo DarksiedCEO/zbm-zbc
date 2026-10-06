@@ -59,6 +59,17 @@ _VERSION_RE = re.compile(r"fin-ver-([0-9a-f]{16})-([0-9]{1,9})-[0-9a-f]{32}")
 _LEASE_RE = re.compile(r"fin-lse-([0-9a-f]{16})-([0-9a-f]{16})-([0-9]{1,12})-[0-9a-f]{16}")
 
 
+def evidence_id(rk: str, event_type: str, payload_sha: str) -> str:
+    """The id of one typed evidence event (sweep B-F1..F3; bizdev-py R5/R6): ``fin-<abbrev>-<40 hex>`` over the action's
+    key ``rk`` (itself ``fin-<abbrev>-...``, derived from the action's identity), its type and its payload's SHA-256.
+    The payload carries ``rk`` and ``seq`` and never the wall clock: the same action, same content, same line is the
+    same id (the ledger answers 200); anything else is a new id, never a lasting 409. Given a ledger entry (id, type,
+    payload_sha256) and a candidate ``rk`` the id is checkable without the payload."""
+    parts = rk.split("-")
+    abbrev = parts[1] if len(parts) >= 3 and parts[0] == "fin" and re.fullmatch(r"[a-z0-9]{1,12}", parts[1]) else "evd"
+    return f"fin-{abbrev}-{sha256_text(rk + '|' + event_type + '|' + payload_sha)[:40]}"
+
+
 def anchor_id(epoch: str, seq: int, line_sha: str) -> str:
     return f"fin-log-{epoch}-{seq}-{line_sha[:40]}"
 
@@ -97,19 +108,24 @@ class Assessment:
 def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int, str, bool]],
            referenced_ids: set[str], local_version: int, strict: bool, *, local_rulings: set[str] = frozenset(),
            local_leases: list[tuple[int, str, str]] = (), reconciles: list[tuple[int, dict, str, Optional[int]]] = (),
-           local_versions: Optional[dict[str, str]] = None) -> Assessment:
+           local_versions: Optional[dict[str, str]] = None,
+           committed_actions: Iterable[tuple[str, str]] = ()) -> Assessment:
     """``lines``: (seq, line_sha256, anchored) per local line (``anchored`` False only for lines written before
     anchoring existed). ``local_leases``: (seq, instance_id, event_id) of the local lease lines.
     ``reconciles``: (seq, payload, event_id, rules_version of that line) of the local reconcile lines.
     ``strict`` (a disk log): another log's anchors on this ledger, or an empty local log while the ledger
     anchors one, are fatal too. ``local_versions``: version event id -> payload SHA-256 of every version the
     LOCAL log's decision records published (``local_version_events``); a version event on the ledger that matches
-    none of them is voidable, never honoured on its own (AEGIS N16-7)."""
+    none of them is voidable, never honoured on its own (AEGIS N16-7). ``committed_actions``: (rk, event type) of
+    every typed evidence event a local line names (``data.evidence``). A ruling on the ledger that no line cites is
+    not a ghost when its id is ``evidence_id(rk, type, its payload_sha256)`` for one of them: it is an earlier
+    ATTEMPT at an action the log committed (a commit that failed, then retried under another seq; sweep B-F2) --
+    shown as ``attempted`` by GET /fin/v1/audit/evidence, never as a second effect."""
     out = Assessment()
     anchors: dict[str, dict[tuple[int, str], str]] = {}
     versions: dict[str, list[tuple[str, int, str]]] = {}   # epoch -> [(event id, version, payload_sha256)]
     leases: list[tuple[int, str, str]] = []          # (ledger index, event id, instance) for this epoch
-    rulings: list[tuple[int, str]] = []
+    rulings: list[tuple[int, str, str, str]] = []
     recs: dict[str, str] = {}                        # reconcile event id -> payload_sha256
     held: set[str] = set()
     first_anchor: Optional[int] = None
@@ -132,7 +148,7 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
             if m.group(1) == epoch:
                 leases.append((i, eid, m.group(2)))
         elif et in RULING_TYPES:
-            rulings.append((i, eid))
+            rulings.append((i, eid, et, str(e.get("payload_sha256"))))
         elif et == RECONCILE_TYPE:
             recs[eid] = str(e.get("payload_sha256"))
     if epoch is None:
@@ -194,8 +210,17 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
         out.void_lines.add(seq)
         out.void_event_ids.add(eid)
     # N15-2: rulings of this department on the ledger (since this log's first anchor) that the local log lacks
-    ghost = [eid for i, eid in rulings if first_anchor is not None and i > first_anchor
-             and eid not in local_rulings and eid not in referenced_ids and eid not in voided]
+    by_kind: dict[tuple[str, str], list[str]] = {}
+    for rk, et in committed_actions:
+        if isinstance(rk, str) and isinstance(et, str):
+            by_kind.setdefault((evidence_id(rk, et, "").rsplit("-", 1)[0], et), []).append(rk)
+
+    def attempted(eid: str, et: str, psha: str) -> bool:
+        return any(evidence_id(rk, et, psha) == eid for rk in by_kind.get((eid.rsplit("-", 1)[0], et), ()))
+
+    ghost = [eid for i, eid, et, psha in rulings if first_anchor is not None and i > first_anchor
+             and eid not in local_rulings and eid not in referenced_ids and eid not in voided
+             and not attempted(eid, et, psha)]
     if ghost:
         out.voidable.append(f"{len(ghost)} ruling(s) on the ledger since this log's first anchor are not in the "
                             f"local log (first: {ghost[0]}): a second instance, or a ruling whose commit failed")

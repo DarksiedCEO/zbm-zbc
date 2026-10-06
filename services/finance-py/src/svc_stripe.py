@@ -21,6 +21,7 @@ Flows (ZBM only):
   F7    dispute withdrawn     Dr 1300 Disputed funds               Cr 1060   (+ Dr 5030 / Cr 1060 for the fee)
   F7a   dispute reinstated    Dr 1060                              Cr 1300   (+ any fee given back)
   F7l   dispute lost          Dr 1100 A/R[client] (2070 / 5030)    Cr 1300   the client owes the invoice again
+  F7r   refunded at Stripe    Dr 1100 A/R[client] (2070 / 5030)    Cr 1060   (sweep X-6: a Dashboard refund; break for Andre)
   F13p  payout paid           Dr 1010 Cash - Operating             Cr 1060
   F13q  payout failed         Dr 1060                              Cr 1010
 
@@ -492,7 +493,8 @@ class StripeMixin:
         if p.status != "succeeded" or p.charge_status != "succeeded":
             return f"payment_{p.status}"
         if rc is not None:
-            return "payment_already_booked"
+            # sweep X-6: a refund made at Stripe (``charge.refunded``) is booked from the charge's amount_refunded
+            return self._stripe_refund(op, rct, p) or "payment_already_booked"
         if p.currency != "usd" or p.balance_txn is None or p.gross is None or p.fee is None:
             # succeeded but Stripe has not exposed its balance transaction yet: let Stripe send the event again
             raise Unavailable("the payment's Stripe balance transaction is not readable yet; retried later")
@@ -546,7 +548,66 @@ class StripeMixin:
                 if s["invoice_id"] == inv["invoice_id"] and s["status"] == "open":
                     op.put("stripe_sessions", s["session_id"], {**s, "status": "invoice_paid"})
             self._client_receipt(op, rct, inv, M.fmt(gross), value_date, METHOD_LABEL.get(p.method, "Stripe"))
-        return status
+        return self._stripe_refund(op, rct, p) or status
+
+    def _stripe_refund(self, op: Op, rct: str, p: StripePayment) -> Optional[str]:
+        """Sweep X-6: money refunded at Stripe (the Dashboard, or any refund Finance did not make) left the Stripe
+        balance. The increase of the charge's ``amount_refunded`` over what Finance booked is posted once (F7r, keyed
+        by the new cumulative total), like a lost dispute: the client owes it again until Andre settles it (a break
+        tells him). Any refund on a media prepayment blocks vendor payments on that buy."""
+        if p.amount_refunded is None:
+            return None
+        rc = op.get("receipts", rct)
+        if rc is None:
+            return None
+        total = M.D(p.amount_refunded)
+        done = M.D((rc.get("stripe") or {}).get("refunded") or "0.00")
+        if total == done:
+            return None
+        if total < done:
+            raise Invalid("Stripe reported less refunded on a payment than Finance already booked")
+        if total > M.D(rc["amount"]):
+            raise Invalid("Stripe reported a refund above the payment")
+        if rc["status"] not in ("matched", "unapplied", "refunded"):
+            raise Invalid(f"Stripe reported a refund on a payment Finance holds as {rc['status']}")
+        delta = M.q(total - done)
+        inv = op.get("invoices", rc["invoice_id"]) if rc.get("invoice_id") else None
+        matched = rc["status"] in ("matched", "refunded") and inv is not None
+        debit = J.dr("1100", delta, f"client:{inv['client_id']}") if matched else J.dr("2070", delta)
+        e = self._post(op, "zbm", [debit, J.cr("1060", delta)], "F7r", {"kind": "stripe_refund", "id": rct},
+                       f"F7r|{p.payment_intent}|{M.fmt(total)}", actor=ACTOR, fact=True)
+        full = total == M.D(rc["amount"])
+        st = dict(rc.get("stripe") or {})
+        st.update(refunded=M.fmt(total), refund_entry_ids=list(st.get("refund_entry_ids") or []) + [e["entry_id"]])
+        op.put("receipts", rct, {**rc, "stripe": st, **({"status": "refunded"} if full and matched else {})})
+        if matched and inv["status"] == "paid":
+            if full:
+                op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None,
+                                                       "refunded": M.fmt(total)})
+                self._withdraw_client_receipt(op, rct)
+                if inv["kind"] == I2.MEDIA_KIND:
+                    self._media_unpaid(op, inv, rct, "the client was refunded at Stripe", break_key=f"refund:{rct}")
+            else:
+                op.put("invoices", inv["invoice_id"], {**inv, "refunded": M.fmt(total)})
+        if inv is not None and inv["kind"] == I2.MEDIA_KIND:
+            buy = op.get("media_buys", inv["media_buy_id"])
+            if buy is not None:
+                op.put("media_buys", buy["buy_id"], {**buy, "payment_refunded": True})
+        bid = rid("brk", "stripe_refund", rct, M.fmt(total))
+        if op.get("breaks", bid) is None:
+            op.put("breaks", bid, {"break_id": bid, "leg": "stripe_refund", "subject": f"zbm:1060:{rct}"[:160],
+                                   "difference": M.fmt(delta), "opened_at": iso(self._now()),
+                                   "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                   "explanation_code": "unknown", "status": "open", "receipt_id": rct,
+                                   "resolution": None})
+            op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                      {"break_id": bid, "leg": "stripe_refund", "difference": M.fmt(delta)},
+                      f"Break opened: {M.fmt(delta)} refunded at Stripe outside Finance")
+        op.record(derived_id("rfds", rct, M.fmt(total)), "stripe_refund_booked", ACTOR, rct,
+                  {"receipt_id": rct, "amount": M.fmt(delta), "refunded_total": M.fmt(total), "entry_id": e["entry_id"],
+                   "invoice_id": inv["invoice_id"] if inv else None},
+                  f"Stripe refund booked: {M.fmt(delta)} (total refunded {M.fmt(total)})")
+        return "refund_booked"
 
     def _stripe_payment_failed(self, op: Op, rc: dict, p: StripePayment) -> str:
         """A payment Finance booked as succeeded failed afterwards (an ACH debit can): the money left the Stripe

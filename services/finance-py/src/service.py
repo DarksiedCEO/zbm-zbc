@@ -38,10 +38,11 @@ from errors import Conflict, FinError, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
 from intelligences import i08_treasury as T
 from intelligences import i10_evidence_audit as i10
-from ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
+from ledger import (LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id,
+                    payload_sha256)
 from models import ID_RE
 from ports import Ports
-from store import RecordLog, StoreWriteError
+from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
@@ -197,12 +198,26 @@ class Op:
         self.ops: list[tuple[str, dict]] = []
         self.staged_entries: list[dict] = []
         self.staged: dict[str, dict[str, dict]] = {}
+        self.named: list[dict] = []          # typed evidence this operation recorded (named by its log line)
 
-    def record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str) -> str:
-        self.svc._record(event_id, event_type, actor, subject[:128], payload, summary)
-        if event_id not in self.events:
-            self.events.append(event_id)
-        return event_id
+    def record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str,
+               raw: bool = False) -> str:
+        """Record one typed evidence event FIRST (record-first). ``event_id`` is the logical action's key (``rk``,
+        derived from its identity); the id actually recorded is ``i10.evidence_id(rk, type, payload_sha256)`` over a
+        payload that carries ``rk`` and ``seq`` (the log line it is meant for) and never the wall clock (sweep B-F1..F3,
+        the bizdev R6 pattern). The same action with the same content is the same id and the same payload: the
+        ledger answers 200 to a retry. A retry after the log moved, or with other content, is a NEW id (never a lasting
+        409); the earlier one stays on the ledger as ``attempted`` (GET /fin/v1/audit/evidence). ``raw``: the id and
+        payload are recorded exactly as given (instance leases and reconciles, whose ids i10 parses)."""
+        if raw:
+            eid = self.svc._record(event_id, event_type, actor, subject[:128], payload, summary)
+        else:
+            eid, payload = self.svc._evidence(event_id, event_type, payload)
+            self.svc._record(eid, event_type, actor, subject[:128], payload, summary)
+            self.named.append({"event_id": eid, "event_type": event_type, "payload": payload})
+        if eid not in self.events:
+            self.events.append(eid)
+        return eid
 
     def put(self, coll: str, key: str, rec: dict) -> dict:
         assert coll in COLLECTIONS, coll
@@ -226,7 +241,7 @@ class Op:
 class FinanceService:
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, seed_bytes: bytes,
                  expected_seed_sha256: str, ports: Optional[Ports] = None, clock: Optional[Clock] = None,
-                 pinned_sha256: Optional[str] = None):
+                 pinned_sha256: Optional[str] = None, lock_token: Optional[str] = None):
         self.cfg = settings
         self.recorder = recorder
         self.log = log
@@ -235,6 +250,48 @@ class FinanceService:
         self.lock = threading.RLock()
         self._xlock = threading.Lock()
         self.release_locks: dict[str, threading.Lock] = {}
+        # sweep F-3/E-5 (clientfix-py's single writer): one service instance per data directory, also within one
+        # process. ``api.build_service`` claims the flock BEFORE the log is built and passes the claim's token; this
+        # instance adopts that claim only if the token IS the current claim (single use) and gives it back on close()
+        # or a failed start.
+        self._closed = False
+        self._dir_lock = getattr(settings, "data_dir_lock", None)
+        self._lock_token: Optional[str] = None
+        if self._dir_lock is not None:
+            if lock_token is None:
+                lock_token = self._dir_lock.claim()
+            adopted = self._dir_lock.adopt(lock_token)
+            if adopted is None:
+                self._dir_lock = None
+                raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
+                                  "stale, another instance's, or already adopted); refusing to start")
+            self._lock_token = adopted
+        try:
+            self._start(settings, seed_bytes, expected_seed_sha256, pinned_sha256)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Give the data directory back (a restart in the same process closes the old instance first). A closed
+        instance is inert: its log refuses every write and every ledger record is refused (503 SERVICE_CLOSED), so
+        it can never write over the instance that now owns the directory. Taken under the service lock: it never
+        interleaves with a commit."""
+        with self.lock:
+            self._closed = True
+            with self.log.lock:
+                self.log.closed = True
+            if self._dir_lock is not None:
+                self._dir_lock.release_claim(self._lock_token)
+                self._dir_lock = None
+                self._lock_token = None
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _start(self, settings: Settings, seed_bytes: bytes, expected_seed_sha256: str,
+               pinned_sha256: Optional[str]) -> None:
         seed_sha = hashlib.sha256(seed_bytes).hexdigest()
         if seed_sha != expected_seed_sha256:
             raise RuntimeError(f"rules seed SHA-256 {seed_sha} does not match the expected {expected_seed_sha256}; "
@@ -307,6 +364,9 @@ class FinanceService:
 
     def _record(self, event_id, event_type, actor, subject, payload, summary) -> str:
         self._ledger_conflict = False
+        if self._closed:
+            raise Unavailable("SERVICE_CLOSED: this Finance instance is closed; nothing was recorded",
+                              ledger_write="not_recorded")
         if self.reconcile_mode and not self._reconciling:
             raise Unavailable("reconcile mode (FIN_RECONCILE_MODE=1): only Andre's POST /fin/v1/reconcile is answered; "
                               "restart without it once the log is reconciled", ledger_write="not_recorded")
@@ -318,12 +378,37 @@ class FinanceService:
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing took effect",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
 
+    def _evidence(self, rk: str, event_type: str, payload: dict) -> tuple[str, dict]:
+        """The id and payload of one typed evidence event (``Op.record``): ``rk`` and ``seq`` inside the payload, the
+        payload's SHA-256 inside the id (bizdev-py ``_commit``, AEGIS round 5/6 M1)."""
+        p = {**payload, "rk": rk, "seq": len(self.log) + 1}
+        return i10.evidence_id(rk, event_type, payload_sha256(p)), p
+
+    def _money_unknown(self, exc: Unavailable, what: str) -> Unavailable:
+        """Sweep B-F2: once a rail or the bank may have moved money, a 503 never says ``took_effect: false``. The
+        state is recorded as far as it got; the rest is reconciled (the rail-sync job, the rail's / Stripe's
+        redelivery, the same idempotency key)."""
+        return Unavailable(f"{what} may already have moved money; its booking could not be recorded now "
+                           f"({exc.reason[:200]}). Outcome unknown: reconciling (retried with the same idempotency key "
+                           "and booked once)", **{**exc.body, "took_effect": "unknown", "outcome": "unknown_reconciling"})
+
     def _commit(self, op: Op, after_anchor: Optional[Callable] = None) -> None:
         if not op.ops:
             return
+        if self._closed:
+            raise Unavailable("SERVICE_CLOSED: this Finance instance is closed; nothing took effect")
+        seq = len(self.log) + 1
+        if any(n["payload"]["seq"] != seq for n in op.named):
+            # the log moved between this operation's evidence and its commit: never anchor a mislabelled line
+            raise Unavailable("the local log moved under this operation; nothing took effect (retry)")
         data = {"ops": [[k, r] for k, r in op.ops], "ledger_event_ids": list(op.events),
                 "rules_version": self.rules_version, "anchored": True}
+        if op.named:
+            data["evidence"] = [{"event_id": n["event_id"], "event_type": n["event_type"], "rk": n["payload"]["rk"],
+                                 "payload_sha256": payload_sha256(n["payload"])} for n in op.named]
         rec, line = self.log.prepare(op.ops[0][0], iso(self._now()), data)
+        if rec["seq"] != seq:
+            raise Unavailable("the local log moved under this operation; nothing took effect (retry)")
         line_sha = hashlib.sha256(line).hexdigest()
         epoch = self.log.epoch or line_sha[:16]
         self._record(i10.anchor_id(epoch, rec["seq"], line_sha), i10.ANCHOR_TYPE, EVIDENCE, i10.LOG_SUBJECT,
@@ -467,8 +552,8 @@ class FinanceService:
         entry_id = rid("je", entity, key)
         heads = [e["entry_sha256"] for e in op.staged_entries if e["entity"] == entity]
         head = heads[-1] if heads else self.heads.get(entity)
-        eid = derived_id("je", entity, key)
-        entry = J.build(entry_id, entity, eff, iso(self._now()), lines, memo, source, key, head, eid, reverses,
+        rk = derived_id("je", entity, key)
+        entry = J.build(entry_id, entity, eff, iso(self._now()), lines, memo, source, key, head, rk, reverses,
                         approval_ref)
         by_id = dict(self.entries_by_id)
         by_id.update({e["entry_id"]: e for e in op.staged_entries})
@@ -481,11 +566,18 @@ class FinanceService:
                                                                  f"{M.sfmt(after['gap'])} short of creator/client "
                                                                  "liabilities")])
         d_tot, _ = J.totals(entry)
-        op.record(eid, "journal_entry_posted", actor, entry_id,
-                  {"entry_id": entry_id, "entity": entity, "flow": memo, "total": M.fmt(d_tot),
-                   "entry_sha256": entry["entry_sha256"], "lines": len(entry["lines"]),
-                   "source_kind": source.get("kind"), "source_id": source.get("id")},
-                  f"Journal {entity} {memo}: {M.fmt(d_tot)} ({len(entry['lines'])} lines)")
+        # sweep B-F1..F3: the evidence binds WHAT is posted (lines, flow, source, key, reversal, approval), never when
+        # (posted_at), the chain head (prev_entry_sha256) or the effective date -- each moves on a retry and made the
+        # deterministic id a permanent 409. The full entry, entry_sha256 included, is in the anchored log line.
+        content = sha({k: entry[k] for k in ("entity", "lines", "memo_code", "source", "idempotency_key",
+                                             "reverses_entry_id", "approval_ref")})
+        eid = op.record(rk, "journal_entry_posted", actor, entry_id,
+                        {"entry_id": entry_id, "entity": entity, "flow": memo, "total": M.fmt(d_tot),
+                         "content_sha256": content, "lines": len(entry["lines"]),
+                         "source_kind": source.get("kind"), "source_id": source.get("id")},
+                        f"Journal {entity} {memo}: {M.fmt(d_tot)} ({len(entry['lines'])} lines)")
+        entry = J.build(entry_id, entity, eff, entry["posted_at"], lines, memo, source, key, head, eid, reverses,
+                        approval_ref)
         if entity == "zbc" and after["gap"] < 0 and (memo in T.FACT_FLOWS or fact):
             op.record(derived_id("tb", entry_id), "treasury_breach", T.ACTOR, entry_id,
                       {"entry_id": entry_id, "gap": M.sfmt(after["gap"]), "flow": memo},
@@ -511,11 +603,12 @@ class FinanceService:
             raise LedgerQueryFailed("this ledger client cannot read entries")
         entries = client.entries()
         shas = self.log.line_shas()
-        lines, referenced, leases, reconciles, metas = [], set(), [], [], []
+        lines, referenced, leases, reconciles, metas, named = [], set(), [], [], [], set()
         for rec, s in zip(self.log.iter_records(), shas):
             d = rec["data"]
             lines.append((rec["seq"], s, bool(d.get("anchored"))))
             referenced.update(d.get("ledger_event_ids") or [])
+            named.update((n.get("rk"), n.get("event_type")) for n in d.get("evidence") or [])
             for kind, r in d.get("ops", []):
                 if kind == "lease":
                     leases.append((rec["seq"], r.get("instance_id"), r.get("lease_event_id")))
@@ -525,11 +618,17 @@ class FinanceService:
                     metas.append(r["version"])
         return i10.assess(entries, self.log.epoch, lines, referenced, self.rules_version or 0,
                           strict=not self.log.in_memory, local_rulings=set(), local_leases=leases, reconciles=reconciles,
-                          local_versions=i10.local_version_events(self.log.epoch, metas))
+                          local_versions=i10.local_version_events(self.log.epoch, metas), committed_actions=named)
 
     def integrity(self, record: bool = False) -> dict:
         """FC-04: the local chain verifies, the journal chain verifies, every local line is anchored, and the ledger's
-        own /ledger/verify passes."""
+        own /ledger/verify passes. The ledger's chain ``verify()`` (an HTTP call, up to the client timeout) runs
+        OUTSIDE the service lock (sweep: bizdev-py ``_integrity_and_ledger``); it checks the ledger's own chain,
+        independent of the local log, so its verdict is reported as returned."""
+        try:
+            ledger_ok = self.recorder.client.verify() is True
+        except Exception:  # noqa: BLE001
+            ledger_ok = None
         with self.lock:
             problems: list[str] = []
             try:
@@ -544,11 +643,10 @@ class FinanceService:
                 problems.append(jp)
             problems += self.integrity_findings[:50]
             problems += self._payable_invariant_problems()[:50]
-            try:
-                if not self.recorder.client.verify():
-                    problems.append("GET /ledger/verify is not valid")
-            except Exception:  # noqa: BLE001
+            if ledger_ok is None:
                 problems.append("GET /ledger/verify could not be read")
+            elif not ledger_ok:
+                problems.append("GET /ledger/verify is not valid")
             out = {"status": "red" if problems else "green", "problems": problems, "log_lines": len(self.log),
                    "journal_entries": len(self.entries), "rules_version": self.rules_version,
                    "checked_at": iso(self._now()),
@@ -617,7 +715,7 @@ class FinanceService:
             op = Op(self, f"lease|{self.instance_id}", EVIDENCE, i10.LOG_SUBJECT)
             op.record(eid, i10.LEASE_TYPE, EVIDENCE, i10.LOG_SUBJECT,
                       {"instance_id": self.instance_id, "epoch": self.log.epoch, "head_seq": n, "head_sha256": head},
-                      f"Finance instance lease at log line {n}")
+                      f"Finance instance lease at log line {n}", raw=True)
             op.add("lease", {"instance_id": self.instance_id, "lease_event_id": eid, "head_seq": n, "head_sha256": head})
             self._commit(op)
 
@@ -655,7 +753,7 @@ class FinanceService:
                 op = Op(self, f"reconcile|{eid}", "andre", i10.LOG_SUBJECT)
                 op.record(eid, i10.RECONCILE_TYPE, "andre", i10.LOG_SUBJECT, payload,
                           f"Andre reconciled the local log at line {plan['head_seq']}: "
-                          f"{len(payload['void_event_ids'])} ledger event(s) declared void")
+                          f"{len(payload['void_event_ids'])} ledger event(s) declared void", raw=True)
                 op.add("reconcile", {"payload": payload, "reconcile_event_id": eid, "request_id": request_id})
                 self._commit(op)
             finally:
@@ -877,6 +975,68 @@ class FinanceService:
                                f"Audit export page served ({len(out)} records)")
             return {"records": out, "next_cursor": last if more else None, "ledger_event_id": eid,
                     "rules_version": self.rules_version}
+
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+        """``GET /fin/v1/audit/evidence`` (sweep B-F2; bizdev-py ``audit_evidence``, AEGIS round 6 M1). Every Finance
+        event on the ledger except the log anchors, each marked:
+
+        * ``committed`` -- a local log line with seq ``s`` names it (``data.evidence``), the ledger holds that line's
+          anchor (``local_log_appended`` for the epoch, ``s`` and the line's SHA-256, with the anchor payload's hash),
+          and the ledger's ``payload_sha256`` is the named payload's (which carries ``rk`` and ``seq`` = ``s``);
+        * ``cited`` -- not typed evidence, but listed by an anchored line (a port crossing, an instance lease, a rules
+          version, a reconcile);
+        * ``attempted`` -- anything else: recorded first (record-first), its state change never reached the anchored
+          log under this id (a refused or failed commit, or a retry later committed under another seq).
+
+        Unanchored evidence = attempted, not done; at most one ``committed`` event exists per action and line. Only the
+        raw lines are copied under the service lock; parsing, hashing and the ledger read happen outside it. The view
+        is eventually consistent: a commit in flight while it is read may show as ``attempted``; re-read to settle."""
+        with self.lock:
+            if self._closed:
+                raise Unavailable("SERVICE_CLOSED: this Finance instance is closed")
+            raw = self.log.raw_lines()
+        try:
+            entries = self.recorder.client.entries()
+        except LedgerQueryFailed:
+            raise Unavailable("the evidence ledger could not be read") from None
+        except Exception:  # noqa: BLE001 - a client without entries() cannot be audited
+            raise Unavailable("the evidence ledger could not be read") from None
+        epoch = hashlib.sha256(raw[0]).hexdigest()[:16] if raw else None
+        mine = [e for e in entries if isinstance(e, dict) and e.get("department") == "finance"]
+        anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == i10.ANCHOR_TYPE}
+        named: dict[str, tuple] = {}
+        cited: dict[str, int] = {}
+        for ln in raw:
+            r = json.loads(ln)
+            line_sha = hashlib.sha256(ln).hexdigest()
+            aid = i10.anchor_id(epoch, r["seq"], line_sha)
+            a = anchors.get(aid)
+            want = payload_sha256({"epoch": epoch, "seq": r["seq"], "line_sha256": line_sha, "kind": r["kind"]})
+            if a is None or a.get("payload_sha256") != want:
+                continue
+            for n in r["data"].get("evidence") or []:
+                named[n["event_id"]] = (r["seq"], n.get("rk"), n.get("payload_sha256"))
+            for eid in r["data"].get("ledger_event_ids") or []:
+                cited.setdefault(eid, r["seq"])
+        rows, counts = [], {"committed": 0, "cited": 0, "attempted": 0}
+        for e in mine:
+            et = e.get("event_type")
+            if et == i10.ANCHOR_TYPE or (event_type is not None and et != event_type):
+                continue
+            eid = e.get("event_id")
+            n = named.get(eid)
+            if n is not None and n[2] == e.get("payload_sha256") \
+                    and eid == i10.evidence_id(n[1] or "", et, e.get("payload_sha256") or ""):
+                status, seq, rk = "committed", n[0], n[1]
+            elif n is None and eid in cited:
+                status, seq, rk = "cited", cited[eid], None
+            else:
+                status, seq, rk = "attempted", None, None
+            counts[status] += 1
+            rows.append({"event_id": eid, "event_type": et, "subject_id": e.get("subject_id"), "status": status,
+                         "seq": seq, "rk": rk, "payload_sha256": e.get("payload_sha256")})
+        return {"events": rows[offset:offset + limit], "total": len(rows), "counts": counts, "limit": limit,
+                "offset": offset, "log_lines": len(raw), "epoch": epoch}
 
     def health(self) -> dict:
         return {"status": "ok", "service": "finance-py", "rules_version": self.rules_version,

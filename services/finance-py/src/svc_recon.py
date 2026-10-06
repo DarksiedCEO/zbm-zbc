@@ -19,7 +19,7 @@ import chart as C
 import money as M
 import reasons as R
 from clock import iso
-from errors import Conflict, Forbidden, Invalid, NotFound
+from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
 from intelligences import i06_tax as I6
 from intelligences import i07_reconciliation as I7
@@ -27,7 +27,7 @@ from intelligences import i08_treasury as T
 from intelligences import i09_controls as I9
 from ledger import derived_id
 from ports import BankBalance, BankTransfer, RailBalance, RailLookup
-from service import RUNNABLE, Gather, Op, PostingRefused, Refused, rid, sha
+from service import RUNNABLE, Gather, IntegrityRefused, Op, PostingRefused, Refused, rid, sha
 
 JOBS = ("accrual", "clawback-sync", "tax-sync", "rail-sync", "stripe-sessions")
 REPEATABLE_JOBS = ("stripe-sessions",)        # safe to run many times a day (AEGIS N2): each run is recorded
@@ -395,6 +395,11 @@ class ReconMixin:
 
     def _new_treasury_op(self, op: Op, kind: str, amount, ref_id: Optional[str], by: str, request_id: str) -> dict:
         tid = rid("trx", kind, by, request_id)
+        if op.get("treasury_ops", tid) is not None:
+            # sweep B-F4: an existing operation is never rebuilt (that reset ``attempts`` and re-used a posting key
+            # whose entry was already reversed: the bank moved the money while the journal netted to zero)
+            raise Conflict(f"treasury operation {tid} already exists ({op.get('treasury_ops', tid)['status']}); it is "
+                           "never re-created")
         t = {"op_id": tid, "kind": kind, "entity": "zbc", "amount": M.fmt(amount), "ref_id": ref_id,
              "status": "proposed", "proposed_by": by, "proposed_at": iso(self._now()), "attempts": 0}
         t["content_sha256"] = sha({k: t[k] for k in ("op_id", "kind", "entity", "amount", "ref_id")})
@@ -449,11 +454,23 @@ class ReconMixin:
             self._commit(op)
             return resp
 
+    def _treasury_replay(self, ent_response: Optional[dict], tid: str, request_id: str) -> dict:
+        """Sweep B-F4: a replayed treasury request answers the operation's CURRENT state, never a rebuilt one."""
+        t = self.db["treasury_ops"][tid]
+        base = dict(ent_response or {})
+        return {**base, "operation": t,
+                "transfer": base.get("transfer") or {"op_id": tid, "status": t["status"]},
+                "ledger_event_ids": base.get("ledger_event_ids", []), "request_id": request_id, "replayed": True}
+
     def top_up(self, request_id: str, body: dict) -> dict:
         with self.lock:
             key, h, ent = self._idem("andre", request_id, "top-ups", {k: str(v) for k, v in body.items()})
+            tid = rid("trx", "top_up", "andre", request_id)
             if ent:
-                return ent["response"]
+                return self._treasury_replay(ent["response"], tid, request_id) if tid in self.db["treasury_ops"] \
+                    else ent["response"]
+            if tid in self.db["treasury_ops"]:
+                return self._treasury_replay(None, tid, request_id)
             self.require_rules()
             sf_id = body.get("shortfall_id")
             if sf_id is not None:
@@ -472,6 +489,9 @@ class ReconMixin:
             op.record(derived_id("tup", t["op_id"]), "top_up_approved", "andre", t["op_id"],
                       {"op_id": t["op_id"], "amount": t["amount"], "reason_code": body.get("reason_code")},
                       f"Andre approved an operating top-up of restricted cash: {t['amount']}")
+            # sweep B-F4: the answer is persisted WITH the approval (a replay after a restart finds it)
+            self._idem_add(op, key, h, {"operation": t, "transfer": None, "ledger_event_ids": op.events,
+                                        "request_id": request_id})
             self._commit(op)
         res = self._execute_transfer(t["op_id"])
         with self.lock:
@@ -481,7 +501,9 @@ class ReconMixin:
     def decide_treasury(self, request_id: str, kind: str, op_id: str, body: dict) -> dict:
         key, h, ent = self._idem("andre", request_id, f"treasury/{op_id}", body)
         if ent:
-            return ent["response"]
+            with self.lock:
+                return self._treasury_replay(ent["response"], op_id, request_id) \
+                    if op_id in self.db["treasury_ops"] else ent["response"]
         with self.lock:
             self.require_rules()
             t = self.db["treasury_ops"].get(op_id)
@@ -516,6 +538,8 @@ class ReconMixin:
             op.record(derived_id("tra", op_id), "sweep_approved" if kind == "sweep" else "funding_approved", "andre",
                       op_id, {"op_id": op_id, "amount": t["amount"], "ref_id": t.get("ref_id")},
                       f"Andre approved a {kind} of {t['amount']}")
+            self._idem_add(op, key, h, {"operation": op.get("treasury_ops", op_id), "transfer": None,
+                                        "request_id": request_id})
             self._commit(op)
         res = self._execute_transfer(op_id)
         resp = {"operation": self.db["treasury_ops"][op_id], "transfer": res, "request_id": request_id}
@@ -558,7 +582,9 @@ class ReconMixin:
         the journal has not recorded."""
         with self.lock:
             t = self.db["treasury_ops"].get(tid)
-            if t is None or t["status"] not in ("approved", "bank_unknown"):
+            # sweep B-F2: ``executing`` too -- an operation whose bank answer could not be booked (a 503 after the bank
+            # call) is asked again with the SAME key, never left stuck
+            if t is None or t["status"] not in ("approved", "bank_unknown", "executing"):
                 return {"op_id": tid, "status": t["status"] if t else "unknown"}
             memo, lines, (src, dst) = self._transfer_lines(t)
             if t["status"] == "approved":
@@ -585,6 +611,10 @@ class ReconMixin:
                                            "explanation_code": "unknown", "status": "open", "resolution": None})
                     self._commit(op)
                     return {"op_id": tid, "status": "posting_refused", "reasons": exc.reasons}
+                if e["entry_id"] in (t.get("reversed_entry_ids") or []):
+                    # sweep B-F4 guard: a posting already reversed is never the one a new bank instruction relies on
+                    raise IntegrityRefused(f"treasury operation {tid}: attempt {n} would re-use a reversed posting; "
+                                           "nothing was sent to the bank")
                 t = {**t, "status": "executing", "attempts": n, "entry_id": e["entry_id"],
                      "posted_at": iso(self._now())}
                 op.put("treasury_ops", tid, t)
@@ -598,6 +628,14 @@ class ReconMixin:
         ans = g.call("bank_feed", "transfer", ("zbc", src, dst, t["amount"], tid),
                      lambda: bank.transfer("zbc", src, dst, t["amount"], tid), BankTransfer("unknown"))
         outcome = ans.outcome if isinstance(ans, BankTransfer) else "unknown"
+        try:
+            return self._transfer_outcome(tid, n, t, g, ans, outcome, memo)
+        except Unavailable as exc:
+            if outcome in ("refused", "unavailable"):
+                raise
+            raise self._money_unknown(exc, f"bank transfer {tid}") from None
+
+    def _transfer_outcome(self, tid: str, n: int, t: dict, g: Gather, ans, outcome: str, memo: str) -> dict:
         with self.lock:
             t = self.db["treasury_ops"][tid]
             if t["status"] not in ("executing", "bank_unknown"):
@@ -648,8 +686,11 @@ class ReconMixin:
     def retry_transfers(self) -> int:
         n = 0
         for tid, t in list(self.db["treasury_ops"].items()):
-            if t["status"] in ("approved", "bank_unknown"):
-                self._execute_transfer(tid)
+            if t["status"] in ("approved", "bank_unknown", "executing"):
+                try:
+                    self._execute_transfer(tid)
+                except (Unavailable, IntegrityRefused):
+                    continue            # sweep B-F2: one stuck operation never blocks the others
                 n += 1
         return n
 

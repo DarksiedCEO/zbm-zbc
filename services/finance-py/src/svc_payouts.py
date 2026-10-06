@@ -30,7 +30,7 @@ import chart as C
 import money as M
 import reasons as R
 from clock import iso, parse_iso
-from errors import Conflict, Invalid, NotFound
+from errors import Conflict, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
 from intelligences import i04_payout_run as I4
 from intelligences import i05_clawback as I5
@@ -41,6 +41,9 @@ from ledger import derived_id
 from ports import (BankBalance, Certification, ComplianceRuling, HoldsAnswer, JurisdictionAnswer, RailAccount,
                    RailBalance, RailLookup, RailSubmit, SanctionsAnswer, TaxAgentAnswer)
 from service import RUNNABLE, Gather, Op, PostingRefused, Refused, rid, sha, unbatched
+
+# sweep X-10: a batch in one of these states is never released again (its release mutex is dropped)
+TERMINAL_BATCH = ("settled", "failed", "expired", "rejected")
 
 OFAC_ROWS = ("US-OFAC-01", "US-OFAC-02", "US-OFAC-03")
 CERT_ROWS = ("HR-12", "HR-13")
@@ -662,6 +665,17 @@ class PayoutsMixin:
         with self._xlock:
             return self.release_locks.setdefault(bid, threading.Lock())
 
+    def _drop_batch_lock(self, bid: str, lk: threading.Lock) -> None:
+        """Sweep X-10: the per-batch release mutex is dropped once the batch can never be released again (it does
+        not exist, or it reached a terminal state), so ``release_locks`` stays bounded by the live batches. Only the
+        mutex this call held is dropped (a newer one is never touched)."""
+        b = self.db["batches"].get(bid)
+        if b is not None and b["status"] not in TERMINAL_BATCH:
+            return
+        with self._xlock:
+            if self.release_locks.get(bid) is lk:
+                del self.release_locks[bid]
+
     def release_batch(self, principal: str, request_id: str, batch_id: str) -> dict:
         self._idem(principal, request_id, f"release/{batch_id}", None)
         lk = self._batch_lock(batch_id)
@@ -671,6 +685,7 @@ class PayoutsMixin:
             return self._release(principal, request_id, batch_id)
         finally:
             lk.release()
+            self._drop_batch_lock(batch_id, lk)
 
     def _release(self, principal: str, request_id: str, batch_id: str) -> dict:
         with self.lock:
@@ -766,14 +781,47 @@ class PayoutsMixin:
                           {"batch_id": batch_id, "items": len(passing)}, f"Release started: {len(passing)} item(s)")
             self._settle_batch(op, batch_id)
             self._commit(op)
+        # sweep B-F2: from the first rail call on, money may move. One item whose booking cannot be recorded now never
+        # blocks the others (it stays ``submitting`` and is driven again below, by the rail-sync job, or booked by the
+        # rail's ``paid`` event held for it), and a failure here is never reported as "nothing took effect".
+        moved = False
         for iid in passing:
-            results.append(self._submit_item(iid, principal))
-        results += self.drive_open_items(f"rel|{request_id}", batch_id=batch_id)["items"]
+            try:
+                res = self._submit_item(iid, principal)
+            except Unavailable as exc:
+                with self.lock:
+                    st = self.db["items"][iid]["status"]
+                if st == "approved":             # its record-first commit failed: nothing reached the rail for it
+                    if not moved:
+                        raise                    # nothing in this release moved money: a plain 503 is the truth
+                    results.append({"item_id": iid, "status": st, "outcome": "not_submitted",
+                                    "detail": f"not submitted ({exc.reason[:160]}); the next release submits it"})
+                    continue
+                moved = True
+                results.append(self._item_unknown(iid, exc))
+                continue
+            moved = moved or res.get("status") not in ("approved", "excluded_at_release", "netted")
+            results.append(res)
+        drove = self.drive_open_items(f"rel|{request_id}", batch_id=batch_id)["items"]
+        moved = moved or bool(drove)
+        results += drove
+        try:
+            with self.lock:
+                op = Op(self, f"relend|{principal}|{request_id}", I4.ACTOR, batch_id)
+                self._settle_batch(op, batch_id)
+                self._commit(op)
+                return {"batch": self._batch_view(batch_id), "results": results, "request_id": request_id}
+        except Unavailable as exc:
+            if moved:
+                raise self._money_unknown(exc, "this release") from None
+            raise
+
+    def _item_unknown(self, iid: str, exc: Unavailable) -> dict:
+        """An item whose outcome could not be recorded after the rail may have taken it (sweep B-F2)."""
         with self.lock:
-            op = Op(self, f"relend|{principal}|{request_id}", I4.ACTOR, batch_id)
-            self._settle_batch(op, batch_id)
-            self._commit(op)
-            return {"batch": self._batch_view(batch_id), "results": results, "request_id": request_id}
+            st = (self.db["items"].get(iid) or {}).get("status")
+        return {"item_id": iid, "status": st, "outcome": "unknown_reconciling", "took_effect": "unknown",
+                "detail": f"booking not recorded now ({exc.reason[:160]}); driven again with the same idempotency key"}
 
     def _submit_item(self, iid: str, principal: str) -> dict:
         """Record first (F4b/F4c + intent + crossing), submit to the rail with the item's idempotency key OUTSIDE the
@@ -869,7 +917,11 @@ class PayoutsMixin:
                     op.put("payables", pid, {**p, "status": "released"})
                 self._settle_batch(op, it["batch_id"])
                 self._commit(op)
-                return {"item_id": iid, "status": "submitted", "rail_ref": ans.rail_ref}
+                try:      # sweep B-F2: a paid/failed event that arrived while the item was submitting is applied now
+                    self.replay_held_rail_events(f"out|{iid}", iid)
+                except Unavailable:
+                    pass  # it stays held: the rail's redelivery or the rail-sync job applies it
+                return {"item_id": iid, "status": self.db["items"][iid]["status"], "rail_ref": ans.rail_ref}
             if ans.outcome == "rejected":
                 self._reverse_item_entries(op, it, "rejected")
                 op.put("items", iid, {**it, "status": "failed", "failed_at": iso(self._now())})
@@ -894,59 +946,66 @@ class PayoutsMixin:
             stuck = [dict(i) for i in self.db["items"].values() if i["status"] == "submitting"
                      and (batch_id is None or i["batch_id"] == batch_id)]
         for it in stuck:
-            iid = it["item_id"]
-            rail = self._rail(it["rail"])
-            ref = (self.db["payees"].get(it["payee_id"]) or {}).get("rail_account_ref")
-            age = self._now() - parse_iso(it["first_submitted_at"])
-            lookup_mode = it["rail"] == "trolley" or age >= timedelta(hours=I4.RETRY_WINDOW_H)
-            with self.lock:
-                n = it.get("attempts", 1) + 1
-                op = Op(self, f"{op_prefix}|drive|{iid}|{n}", I4.ACTOR, iid)
-                op.record(derived_id("x", iid, "lookup" if lookup_mode else "submit", n),
-                          f"crossing_rail_{it['rail']}_requested", I4.ACTOR, iid,
-                          {"port": f"rail_{it['rail']}", "action": "lookup" if lookup_mode else "submit",
-                           "item_id": iid, "idempotency_key": it["idempotency_key"]},
-                          f"{'Look up' if lookup_mode else 'Retry (same key)'} item at rail {it['rail']}")
-                op.put("items", iid, {**self.db["items"][iid], "attempts": n})
-                self._commit(op)
-            if not lookup_mode:
-                out.append(self._record_outcome(iid, self._rail_submit(it, ref)))
-                continue
             try:
-                lk = rail.lookup(it["idempotency_key"], iid)
-            except Exception:  # noqa: BLE001
-                lk = RailLookup(False)
-            else:
-                lk = self._checked_answer(None, f"rail_{it['rail']}", "lookup", (iid, it["idempotency_key"]), lk,
-                                          RailLookup(False), actor=I4.ACTOR, subject=iid)
-            if lk.available and lk.found:
-                out.append(self._record_outcome(iid, RailSubmit("accepted", lk.rail_ref)))
-            elif lk.available and not lk.found and it.get("resubmits", 0) == 0:
-                with self.lock:
-                    op = Op(self, f"{op_prefix}|resub|{iid}", I4.ACTOR, iid)
-                    op.put("items", iid, {**self.db["items"][iid], "resubmits": 1})
-                    op.record(derived_id("x", iid, "resubmit"), f"crossing_rail_{it['rail']}_requested", I4.ACTOR, iid,
-                              {"port": f"rail_{it['rail']}", "action": "submit", "item_id": iid,
-                               "idempotency_key": it["idempotency_key"], "resubmit": True},
-                              "Item not found at the rail after lookup: submitted exactly once more")
-                    self._commit(op)
-                out.append(self._record_outcome(iid, self._rail_submit(it, ref)))
-            else:
-                with self.lock:
-                    bid = rid("brk", "rsu", iid)
-                    if bid not in self.db["breaks"]:
-                        op = Op(self, f"{op_prefix}|rsu|{iid}", I4.ACTOR, iid)
-                        op.put("breaks", bid, {"break_id": bid, "leg": "L3", "subject": f"item:{iid}",
-                                               "difference": it["net"], "opened_at": iso(self._now()),
-                                               "opened_on": self._today_la().isoformat(), "owner": "andre",
-                                               "explanation_code": "unknown", "status": "open", "resolution": None,
-                                               "kind": "rail_state_unknown"})
-                        op.record(derived_id("rsu", iid), "rail_state_unknown", I4.ACTOR, iid,
-                                  {"item_id": iid, "break_id": bid}, "Rail state of an item unknown: break opened, the "
-                                                                     "item stays submitted-unknown")
-                        self._commit(op)
-                out.append({"item_id": iid, "status": "submitting", "break": "rail_state_unknown"})
+                out.append(self._drive_item(op_prefix, it))
+            except Unavailable as exc:
+                # sweep B-F2: one stuck item never blocks the others; it is driven again next time
+                out.append(self._item_unknown(it["item_id"], exc))
         return {"items": out}
+
+    def _drive_item(self, op_prefix: str, it: dict) -> dict:
+        """One stuck item (``drive_open_items``)."""
+        iid = it["item_id"]
+        rail = self._rail(it["rail"])
+        ref = (self.db["payees"].get(it["payee_id"]) or {}).get("rail_account_ref")
+        age = self._now() - parse_iso(it["first_submitted_at"])
+        lookup_mode = it["rail"] == "trolley" or age >= timedelta(hours=I4.RETRY_WINDOW_H)
+        with self.lock:
+            n = it.get("attempts", 1) + 1
+            op = Op(self, f"{op_prefix}|drive|{iid}|{n}", I4.ACTOR, iid)
+            op.record(derived_id("x", iid, "lookup" if lookup_mode else "submit", n),
+                      f"crossing_rail_{it['rail']}_requested", I4.ACTOR, iid,
+                      {"port": f"rail_{it['rail']}", "action": "lookup" if lookup_mode else "submit",
+                       "item_id": iid, "idempotency_key": it["idempotency_key"]},
+                      f"{'Look up' if lookup_mode else 'Retry (same key)'} item at rail {it['rail']}")
+            op.put("items", iid, {**self.db["items"][iid], "attempts": n})
+            self._commit(op)
+        if not lookup_mode:
+            return self._record_outcome(iid, self._rail_submit(it, ref))
+        try:
+            lk = rail.lookup(it["idempotency_key"], iid)
+        except Exception:  # noqa: BLE001
+            lk = RailLookup(False)
+        else:
+            lk = self._checked_answer(None, f"rail_{it['rail']}", "lookup", (iid, it["idempotency_key"]), lk,
+                                      RailLookup(False), actor=I4.ACTOR, subject=iid)
+        if lk.available and lk.found:
+            return self._record_outcome(iid, RailSubmit("accepted", lk.rail_ref))
+        elif lk.available and not lk.found and it.get("resubmits", 0) == 0:
+            with self.lock:
+                op = Op(self, f"{op_prefix}|resub|{iid}", I4.ACTOR, iid)
+                op.put("items", iid, {**self.db["items"][iid], "resubmits": 1})
+                op.record(derived_id("x", iid, "resubmit"), f"crossing_rail_{it['rail']}_requested", I4.ACTOR, iid,
+                          {"port": f"rail_{it['rail']}", "action": "submit", "item_id": iid,
+                           "idempotency_key": it["idempotency_key"], "resubmit": True},
+                          "Item not found at the rail after lookup: submitted exactly once more")
+                self._commit(op)
+            return self._record_outcome(iid, self._rail_submit(it, ref))
+        else:
+            with self.lock:
+                bid = rid("brk", "rsu", iid)
+                if bid not in self.db["breaks"]:
+                    op = Op(self, f"{op_prefix}|rsu|{iid}", I4.ACTOR, iid)
+                    op.put("breaks", bid, {"break_id": bid, "leg": "L3", "subject": f"item:{iid}",
+                                           "difference": it["net"], "opened_at": iso(self._now()),
+                                           "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                           "explanation_code": "unknown", "status": "open", "resolution": None,
+                                           "kind": "rail_state_unknown"})
+                    op.record(derived_id("rsu", iid), "rail_state_unknown", I4.ACTOR, iid,
+                              {"item_id": iid, "break_id": bid}, "Rail state of an item unknown: break opened, the "
+                                                                 "item stays submitted-unknown")
+                    self._commit(op)
+            return {"item_id": iid, "status": "submitting", "break": "rail_state_unknown"}
 
     def _settle_batch(self, op: Op, batch_id: str) -> None:
         b = op.get("batches", batch_id)
