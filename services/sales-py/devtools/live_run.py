@@ -27,9 +27,8 @@ import sys
 import tempfile
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -38,6 +37,7 @@ SVC = HERE.parents[1]
 sys.path[:0] = [str(SVC / "src")]
 
 import store as store_mod  # noqa: E402
+from intelligences import i07_quiet_hours as quiet  # noqa: E402
 
 LEDGER_TOKEN = "live-ledger-token-" + "l" * 24
 TOKEN = "live-sales-service-token-" + "s" * 20
@@ -107,15 +107,37 @@ def secret_file(path: Path, content: bytes) -> str:
     return str(path)
 
 
-def zone_where(inside: bool) -> str:
+# A zone is only picked if the service's own rule gives the same answer for this long (the SMS checks run within
+# seconds of the pick).
+ZONE_MARGIN = timedelta(minutes=3)
+# A valid zone for contacts whose phone the window checks do not depend on.
+NEUTRAL_ZONE = "America/New_York"
+# Window checks that the real clock cannot exercise at this moment (reported, never counted as passed).
+NOT_EXERCISABLE: list[str] = []
+
+
+def _zone_holds(z: str, inside: bool, at: datetime) -> bool:
+    """The service's own quiet-hours rule (i07.allowed, with the number this run will use), at ``at`` and for the
+    whole margin after it. Never a copy of the window: the run tests what the service decides."""
+    phone = phone_for(z, "0000")
+    return all(quiet.allowed(at + timedelta(minutes=m), z, phone) is inside
+               for m in range(0, int(ZONE_MARGIN.total_seconds() // 60) + 1))
+
+
+def zones_for_now() -> tuple[str | None, str | None]:
+    """A zone inside 08:00-21:00 and one outside it, each stable for ZONE_MARGIN, or None. NANP has daily gaps with
+    neither: about 11:00-11:30 UTC on standard time no zone is inside (Guam past 21:00, Newfoundland before 08:00),
+    and about 22:00-23:30 UTC (to 00:30 on standard time) every zone is inside. The live run uses the real clock, so
+    in a gap the matching check is reported as not exercisable; pytest covers the window on a fixed clock."""
     now = datetime.now(timezone.utc)
-    for z in ZONES:
-        h = now.astimezone(ZoneInfo(z)).hour
-        if inside and 9 <= h <= 19:
-            return z
-        if not inside and (h >= 22 or h <= 6):
-            return z
-    raise RuntimeError("no zone found")
+    day = next((z for z in ZONES if _zone_holds(z, True, now)), None)
+    night = next((z for z in ZONES if _zone_holds(z, False, now)), None)
+    return day, night
+
+
+def not_exercisable(name: str, why: str) -> None:
+    NOT_EXERCISABLE.append(name)
+    say(f"  NOT EXERCISABLE NOW: {name} ({why}; covered by pytest on a fixed clock)")
 
 
 class Api:
@@ -202,22 +224,24 @@ def _main(work: Path) -> int:
         check("a second process on the same data directory refuses to start", code not in (None, 0))
 
         # --- leads ------------------------------------------------------------------------------------------------
-        day_zone, night_zone = zone_where(True), zone_where(False)
+        day_zone, night_zone = zones_for_now()
         say(f"recipient zones: daytime {day_zone}, night {night_zone}")
-        r = a.post("/leads", lead_body("buyer@live-shop.example", phone_for(day_zone, "0123"), day_zone), "hub")
+        lead_zone = day_zone or NEUTRAL_ZONE
+        night_lead_zone = night_zone or NEUTRAL_ZONE
+        r = a.post("/leads", lead_body("buyer@live-shop.example", phone_for(lead_zone, "0123"), lead_zone), "hub")
         lead = r.json()
         check("an inbound site-form lead is scored and routed", r.status_code == 201 and lead["brand"] == "zbm"
               and lead["status"] == "qualified")
-        r = a.post("/leads", lead_body("Buyer+x@live-shop.example", None, day_zone, kind="rr_scan"), "detection")
+        r = a.post("/leads", lead_body("Buyer+x@live-shop.example", None, lead_zone, kind="rr_scan"), "detection")
         check("a scan for the same person is merged into the open lead",
               r.status_code == 201 and r.json().get("duplicate") is True and r.json()["lead_id"] == lead["lead_id"])
-        r = a.post("/leads", lead_body("ref@other.example", None, day_zone, source="referral", kind="referral_note",
+        r = a.post("/leads", lead_body("ref@other.example", None, lead_zone, source="referral", kind="referral_note",
                                        referrer={"name": "Partner P", "ref": "p-1"}), "dashboard")
         check("a referral keeps its referrer", r.status_code == 201 and r.json()["referrer"]["ref"] == "p-1")
         r = a.post("/leads/import", {"request_id": rid(), "source": "paid_provider"}, "sales_agent")
         check("paid-provider import refused while not wired",
               r.status_code == 503 and r.json()["detail"] == "SOURCE_NOT_WIRED")
-        r = a.post("/leads", {**lead_body("x@y.example", None, day_zone), "contact": {"name": "X", "email":
+        r = a.post("/leads", {**lead_body("x@y.example", None, lead_zone), "contact": {"name": "X", "email":
                                                                                        "x@y.example",
                                                                                        "dob": "1990-01-01"}}, "hub")
         check("a date of birth is refused", r.status_code == 422)
@@ -263,22 +287,31 @@ def _main(work: Path) -> int:
                                  "captured_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                                  "consent_text_version": "sms-v1", "consent_text_sha256": "c" * 64}, "hub")
         check("express consent recorded", r.status_code == 201)
-        r = a.post("/outreach/sms", {**sms, "request_id": rid()}, "sales_agent")
-        check("with consent, inside the recipient's window, the text is queued", r.status_code == 201)
-        if r.status_code != 201:
-            say(f"    answer: {r.status_code} {r.text[:120]}")
-        night = a.post("/leads", lead_body("night@night-shop.example", phone_for(night_zone, "0199"), night_zone),
-                       "hub").json()
+        if day_zone:
+            r = a.post("/outreach/sms", {**sms, "request_id": rid()}, "sales_agent")
+            check("with consent, inside the recipient's window, the text is queued", r.status_code == 201)
+            if r.status_code != 201:
+                say(f"    answer: {r.status_code} {r.text[:120]}")
+        else:
+            not_exercisable("with consent, inside the recipient's window, the text is queued",
+                            "no NANP zone is inside 08:00-21:00 right now")
+        night = a.post("/leads", lead_body("night@night-shop.example", phone_for(night_lead_zone, "0199"),
+                                           night_lead_zone), "hub").json()
         verify(a, night)
         a.post("/consents", {"request_id": rid(), "contact_id": night["contact_id"], "channel": "sms", "brand": "zbm",
                              "source": "web_form",
                              "captured_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                              "consent_text_version": "sms-v1", "consent_text_sha256": "c" * 64}, "hub")
-        r = a.post("/outreach/sms", {**sms, "request_id": rid(), "contact_id": night["contact_id"]}, "sales_agent")
-        check("a text at night in the recipient's zone is refused",
-              r.status_code == 403 and r.json()["detail"] == "QUIET_HOURS")
+        if night_zone:
+            r = a.post("/outreach/sms", {**sms, "request_id": rid(), "contact_id": night["contact_id"]},
+                       "sales_agent")
+            check("a text at night in the recipient's zone is refused",
+                  r.status_code == 403 and r.json()["detail"] == "QUIET_HOURS")
+        else:
+            not_exercisable("a text at night in the recipient's zone is refused",
+                            "every NANP zone is inside 08:00-21:00 right now")
 
-        r = a.post("/replies", {"request_id": rid(), "channel": "sms", "from_phone": phone_for(night_zone, "0199"),
+        r = a.post("/replies", {"request_id": rid(), "channel": "sms", "from_phone": phone_for(night_lead_zone, "0199"),
                                 "text": "Opt me out"}, "provider_events").json()
         r2 = a.post("/outreach/sms", {**sms, "request_id": rid(), "contact_id": night["contact_id"]}, "sales_agent")
         check("any SMS reply holds the number until Andre releases it (S2-C1, S3-C1)",
@@ -319,7 +352,7 @@ def _main(work: Path) -> int:
                                       "lines": [{"line_id": line, "quantity": 1}]}, "sales_agent").json()
         check("a deal split into pieces under $10,000 still waits for Andre (S1-H2)",
               third["status"] == "pending_andre" and third["needs_andre"] == ["OPPORTUNITY_TOTAL_OVER_MAX"])
-        r = a.post(f"/contacts/{lead['contact_id']}/time-zone", {"request_id": rid(), "time_zone": night_zone},
+        r = a.post(f"/contacts/{lead['contact_id']}/time-zone", {"request_id": rid(), "time_zone": "America/Denver"},
                    "sales_agent")
         check("the agent cannot change a recipient's time zone (S1-M1)",
               r.status_code == 403 and r.json()["detail"] == "CALLER_NOT_ALLOWED")
@@ -390,7 +423,8 @@ def _main(work: Path) -> int:
         v = httpx.get(L + "/ledger/verify", headers=lh, timeout=120)
         check("ledger verifies valid", v.status_code == 200 and v.json().get("valid") is True)
         failed = [n for n, ok in CHECKS if not ok]
-        say(f"{len(CHECKS) - len(failed)}/{len(CHECKS)} checks passed" + (f"; FAILED: {failed}" if failed else ""))
+        say(f"{len(CHECKS) - len(failed)}/{len(CHECKS)} checks passed" + (f"; FAILED: {failed}" if failed else "")
+            + (f"; not exercisable at this hour: {NOT_EXERCISABLE}" if NOT_EXERCISABLE else ""))
         return 0 if not failed else 1
     finally:
         for p in PROCS:
