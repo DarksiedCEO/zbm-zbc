@@ -144,15 +144,14 @@ class Harness:
         self.clock = clock or FixedClock(T0)
         self.ports = ports or Ports.default()
         lock = self.settings.data_dir_lock
-        if lock is not None:
-            lock.claim()                               # as api.build: claimed before the log and the body store
+        token = lock.claim() if lock is not None else None   # as api.build: before the log and the body store
         try:
             self.svc = SupportService(self.settings, Recorder(self.ledger), RecordLog(self.settings.data_dir),
                                       BodyStore(self.settings.data_dir, self.settings.hmac_key), self.ports,
-                                      self.clock, lock_claimed=True)
+                                      self.clock, lock_token=token)
         except BaseException:
             if lock is not None:
-                lock.release_claim()
+                lock.release_claim(token)
             raise
         self.client = TestClient(api._wrap(api.create_app(self.svc, self.settings)), raise_server_exceptions=False)
 

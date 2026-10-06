@@ -40,7 +40,7 @@ from errors import Conflict, FounderRefused, Invalid, NotFound, Unavailable
 from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, derived_id, payload_sha256
 from ports import NOT_WIRED, Alert, HandoffRequest, Outbound, Ports
 from reasons import R
-from store import BodyStore, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
+from store import BodyStore, DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 
 INTERNAL = "service_desk"
 INTEGRITY_RETRY_S = 15
@@ -100,7 +100,7 @@ def money_str(v: str) -> str:
 
 class SupportService:
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, bodies: BodyStore,
-                 ports: Optional[Ports] = None, clock: Optional[Clock] = None, lock_claimed: bool = False):
+                 ports: Optional[Ports] = None, clock: Optional[Clock] = None, lock_token: Optional[str] = None):
         self.settings = settings
         self.rec = recorder
         self.log = log
@@ -138,12 +138,21 @@ class SupportService:
         self._unconfirmed: dict[str, dict] = {}     # sent by the provider, result not yet committed: never resent
         self.key_fingerprint: Optional[str] = None
         # V5-L1: one service instance per data directory, also within one process (config.load caches the flock)
-        # V5r-L1: api.build claims BEFORE the log and the body store are built and passes lock_claimed=True; the
-        # service adopts that claim (and gives it back on close or a failed start)
+        # V5r-L1: api.build claims BEFORE the log and the body store are built and passes the claim's token; the
+        # service adopts that claim only if the token IS the current claim (round 5c item 1), and gives it back on
+        # close or a failed start
         self._closed = False
         self._dir_lock = getattr(settings, "data_dir_lock", None)
-        if self._dir_lock is not None and not lock_claimed:
-            self._dir_lock.claim()
+        self._lock_token: Optional[str] = None
+        if self._dir_lock is not None:
+            if lock_token is None:
+                self._lock_token = self._dir_lock.claim()
+            elif self._dir_lock.holds(lock_token):
+                self._lock_token = lock_token
+            else:
+                self._dir_lock = None
+                raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
+                                  "stale or another instance's); refusing to start")
         try:
             self._start()
         except BaseException:
@@ -152,13 +161,18 @@ class SupportService:
 
     def close(self) -> None:
         """Give the data directory back (a restart in the same process closes the old instance first). A closed
-        instance never writes again: its log and body store refuse, and every commit is refused (V5r-Info)."""
-        self._closed = True
-        self.log.closed = True
-        self.bodies.closed = True
-        if getattr(self, "_dir_lock", None) is not None:
-            self._dir_lock.release_claim()
-            self._dir_lock = None
+        instance never writes again: its log and body store refuse, and every commit is refused (V5r-Info). Taken
+        under the service lock, so it never interleaves with a commit (round 5c item 2)."""
+        with self.lock:
+            self._closed = True
+            with self.log.lock:
+                self.log.closed = True
+            with self.bodies.lock:
+                self.bodies.closed = True
+            if getattr(self, "_dir_lock", None) is not None:
+                self._dir_lock.release_claim(self._lock_token)
+                self._dir_lock = None
+                self._lock_token = None
 
     def _start(self) -> None:
         for r in self.log.iter_records():
@@ -741,9 +755,12 @@ class SupportService:
 
     def health(self) -> dict:
         with self.lock:
+            closed = self._closed            # round 5c item 3: a closed instance is never reported ok
             return {
-                "status": "ok" if self.integrity["ok"] else "degraded",
-                "integrity": dict(self.integrity),
+                "status": "closed" if closed else ("ok" if self.integrity["ok"] else "degraded"),
+                "closed": closed,
+                "integrity": {"ok": False, "checked_at": self.integrity.get("checked_at"),
+                              "problem": "this service instance is closed"} if closed else dict(self.integrity),
                 "in_memory": self.log.in_memory,
                 "non_production": self.settings.non_production,
                 "andre_approvals_configured": None,          # filled by the API (the gate lives there)

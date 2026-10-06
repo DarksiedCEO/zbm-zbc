@@ -139,8 +139,8 @@ class RecordLog:
         failed write is cut back to that size, so a line is never half in (AEGIS round 3, R3-3). If the file
         already ends with exactly this line (a write that reached the disk before an fsync error), it is adopted
         instead of written twice."""
-        self._refuse_if_closed()
         with self.lock:
+            self._refuse_if_closed()        # inside the lock: close() takes it too (round 5c item 2)
             if self.fail_next_append:
                 self.fail_next_append = False
                 raise StoreWriteError("simulated local store failure")
@@ -206,21 +206,26 @@ class RecordLog:
 
     def write_pending(self, line: bytes) -> None:
         """Fsync the exact next line aside before its ledger anchor is recorded."""
-        self._refuse_if_closed()
-        if not self.data_dir:
-            self._mem_pending = line
-            return
-        _write_file(self.pending_path, line, "pending line")
+        with self.lock:
+            self._refuse_if_closed()
+            if not self.data_dir:
+                self._mem_pending = line
+                return
+            _write_file(self.pending_path, line, "pending line")
 
     def clear_pending(self) -> None:
-        self._mem_pending = None
-        if self.data_dir:
-            try:
-                os.unlink(self.pending_path)
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                raise StoreWriteError(f"pending line could not be removed: {type(exc).__name__}") from exc
+        """Remove the pending line. A closed instance refuses: it must never delete a file the instance that now
+        owns the data directory wrote (round 5c item 2)."""
+        with self.lock:
+            self._refuse_if_closed()
+            self._mem_pending = None
+            if self.data_dir:
+                try:
+                    os.unlink(self.pending_path)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise StoreWriteError(f"pending line could not be removed: {type(exc).__name__}") from exc
 
     # a pending line found at start whose anchor is not on the ledger is kept aside, not trusted (AEGIS R4-1):
     # if the ledger later shows its anchor (it was in flight when the process stopped), it is appended then
@@ -228,11 +233,12 @@ class RecordLog:
     _mem_discarded: Optional[bytes] = None
 
     def write_discarded(self, line: bytes) -> None:
-        self._refuse_if_closed()
-        if not self.data_dir:
-            self._mem_discarded = line
-            return
-        _write_file(os.path.join(self.data_dir, DISCARDED_NAME), line, "discarded line")
+        with self.lock:
+            self._refuse_if_closed()
+            if not self.data_dir:
+                self._mem_discarded = line
+                return
+            _write_file(os.path.join(self.data_dir, DISCARDED_NAME), line, "discarded line")
 
     def read_discarded(self) -> Optional[bytes]:
         if not self.data_dir:
@@ -244,14 +250,16 @@ class RecordLog:
             return None
 
     def clear_discarded(self) -> None:
-        self._mem_discarded = None
-        if self.data_dir:
-            try:
-                os.unlink(os.path.join(self.data_dir, DISCARDED_NAME))
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                raise StoreWriteError(f"discarded line could not be removed: {type(exc).__name__}") from exc
+        with self.lock:
+            self._refuse_if_closed()        # a closed instance never deletes the live instance's file (round 5c)
+            self._mem_discarded = None
+            if self.data_dir:
+                try:
+                    os.unlink(os.path.join(self.data_dir, DISCARDED_NAME))
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise StoreWriteError(f"discarded line could not be removed: {type(exc).__name__}") from exc
 
     def read_pending(self) -> Optional[bytes]:
         if not self.data_dir:
@@ -322,13 +330,13 @@ class BodyStore:
         return hmac.new(self._key, data, hashlib.sha256).hexdigest()
 
     def put(self, text: str) -> str:
-        if self.closed:
-            raise StoreWriteError("this service instance is closed; its body store refuses writes")
         data = text.encode("utf-8")
         if len(data) > self.MAX_BYTES:
             raise StoreWriteError("body larger than 64 KiB")
         digest = self.digest(data)
         with self.lock:
+            if self.closed:
+                raise StoreWriteError("this service instance is closed; its body store refuses writes")
             if self.fail_next_put:
                 self.fail_next_put = False
                 raise StoreWriteError("simulated body store failure")
@@ -368,9 +376,9 @@ class BodyStore:
             return {n for n in os.listdir(self.dir) if _BODY_NAME.fullmatch(n)}
 
     def delete(self, digest: str) -> None:
-        if self.closed:
-            raise StoreWriteError("this service instance is closed; its body store refuses writes")
         with self.lock:
+            if self.closed:
+                raise StoreWriteError("this service instance is closed; its body store refuses writes")
             if not self.dir:
                 self._mem.pop(digest, None)
                 return
@@ -432,16 +440,33 @@ class DataDirLock:
             raise DataDirBusy(BUSY)
         self._fd = fd
 
-    def claim(self) -> None:
+    def claim(self) -> Optional[str]:
+        """Claim the directory for one service instance; returns the claim's ownership token (None when there is no
+        data directory). Only the holder of the token can release the claim or hand it to a service."""
         if self._fd is None:
-            return
+            return None
         if self.claimed:
             raise DataDirBusy("another service instance in this process already holds this data directory; refusing "
                               "to start (close the first instance)")
+        import secrets
+        self._token = secrets.token_hex(16)
         self.claimed = True
+        return self._token
 
-    def release_claim(self) -> None:
+    def holds(self, token: Optional[str]) -> bool:
+        """True only for the token of the CURRENT claim (AEGIS round 5c item 1)."""
+        import hmac as hmac_mod
+        current = getattr(self, "_token", None)
+        return bool(self.claimed and token and current and hmac_mod.compare_digest(token, current))
+
+    def release_claim(self, token: Optional[str] = None) -> bool:
+        """Give the claim back. Only the current claim's token releases it: a stale or wrong token is a no-op (it
+        never releases another instance's claim). Returns whether it released."""
+        if not self.holds(token):
+            return False
         self.claimed = False
+        self._token = None
+        return True
 
     def release(self) -> None:
         if self._fd is not None:
