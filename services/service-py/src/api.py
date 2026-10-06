@@ -44,7 +44,7 @@ from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
 from ports import Ports
 from reasons import R
 from service import CATALOGS, JOBS, SupportService
-from store import BodyStore, DataDirLock, RecordLog
+from store import BodyStore, RecordLog
 
 log = logging.getLogger("service.api")
 
@@ -593,7 +593,7 @@ def build_ports(settings: config_mod.Settings) -> Ports:
 def build(env: Optional[dict] = None):
     """The production wiring: settings, ledger, log, body store, ports; returns (asgi, service)."""
     settings = config_mod.load(env)
-    lock = DataDirLock(settings.data_dir)
+    lock = settings.data_dir_lock              # taken by config.load before the key and the log (V4b-I1)
     if settings.ledger_url and settings.ledger_token:
         ledger = HttpLedgerClient(settings.ledger_url, settings.ledger_token)
     else:

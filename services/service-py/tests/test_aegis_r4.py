@@ -137,8 +137,9 @@ def test_v4_l2_the_key_is_generated_atomically(tmp_path, monkeypatch):
         return real_link(src, dst, *a, **k)
     monkeypatch.setattr(os, "link", spy)
     key = _prod(d).hmac_key
-    assert calls == [("hmac.key.tmp", "hmac.key")]
-    assert sorted(os.listdir(d)) == ["hmac.key"] and _prod(d).hmac_key == key
+    assert len(calls) == 1 and calls[0][1] == "hmac.key"
+    assert re.fullmatch(rf"hmac\.key\.{os.getpid()}\.[0-9a-f]{{16}}\.tmp", calls[0][0])        # per process (V4b-I1)
+    assert sorted(os.listdir(d)) == ["hmac.key", "service.lock"] and _prod(d).hmac_key == key
 
 
 def test_v4_l2_a_leftover_temp_file_from_a_crash_is_replaced(tmp_path):

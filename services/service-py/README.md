@@ -94,6 +94,13 @@ directory's backups; a restore without it refuses to start. A log written before
 AEGIS round 2) is accepted only if every stored body it cites verifies under the configured key; its fingerprint is
 then written.
 
+One process per data directory: the service takes an exclusive flock on `SVC_DATA_DIR/service.lock` before it
+generates or reads the key and before it opens the log; a second process on the same directory refuses to start.
+
+Saving or approving a KB article returns `warnings`: words in its example questions that are on a watch list or one
+typo from a refused term. Read them before approving; the refused-term list cannot be complete and Andre's approval
+is the main control.
+
 ## Live run
 
 ```bash

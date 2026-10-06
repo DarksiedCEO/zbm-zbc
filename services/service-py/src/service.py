@@ -1346,6 +1346,8 @@ class SupportService:
                 raise Conflict(R("ITEM_UNCHANGED"))
             version = (cur["version"] + 1) if cur else 1
             resp = {"item_id": item_id, "version": version, "content_sha256": sha, "approved": False}
+            if catalog == "kb":
+                resp["warnings"] = self._question_warnings(content)
             self._commit(f"{catalog}_saved", {"effects": [{"op": "catalog_saved", "catalog": catalog,
                                                            "item_id": item_id, "version": version,
                                                            "content": content, "content_sha256": sha}],
@@ -1369,6 +1371,8 @@ class SupportService:
                 raise Conflict(R("APPROVAL_STALE"))
             resp = {"item_id": item_id, "version": item["version"], "content_sha256": item["content_sha256"],
                     "approved": True}
+            if catalog == "kb":
+                resp["warnings"] = self._question_warnings(item)
             self._commit(f"{catalog}_approved", {"effects": [{"op": "catalog_approved", "catalog": catalog,
                                                               "item_id": item_id, "version": item["version"],
                                                               "content_sha256": item["content_sha256"]}],
@@ -1394,12 +1398,18 @@ class SupportService:
                                                 "response": resp}, "andre")
             return resp
 
+    @staticmethod
+    def _question_warnings(item: dict) -> list[dict]:
+        return [{"question": q, "terms": t} for q in item["questions"] for t in [question_warnings(q)] if t]
+
     def catalog_view(self, catalog: str) -> list[dict]:
         with self.lock:
             out = []
             for item in sorted(self.catalog[catalog].values(), key=lambda i: i["item_id"]):
                 v = dict(item)
                 v["usable"] = self._usable(catalog, item["item_id"]) is not None
+                if catalog == "kb":
+                    v["warnings"] = self._question_warnings(item)
                 out.append(v)
             return out
 
@@ -2125,8 +2135,30 @@ closing closure unsubscribe stuff refundable owed return returned returns
 """.split())
 QUESTION_DENY_PHRASES = ("money back", "get rid", "have on me", "know about me", "shut down", "close my account",
                          "close out", "out of", "take off", "take down", "taken offline", "got into", "end things",
-                         "free month", "auto renew", "my info", "my data", "my information", "my account")
+                         "free month", "auto renew", "my info", "my data", "my information", "my account",
+                         # V4b-L1: the reviewer's round-4b near misses
+                         "phone number", "my number", "my phone", "my email", "to others", "done with you", "pull my",
+                         "come down")
+QUESTION_DENY_STEMS = ("compensat", "deactivat", "discontinu", "downgrad")
+# Not refused, but shown to Andre as a WARNING when he saves or approves a question that holds one (V4b-L1): the deny
+# list is a word list and can never be complete; Andre's reading of each question is the main control.
+QUESTION_WATCH_WORDS = frozenset("""
+keep give pause policy profile history details personal plan subscription membership number email phone password
+contact remove change update transfer move private privacy secure security bank charge charges billing bill pay
+payment paid refund cancel delete account login access stop end
+""".split())
 QUESTION_MAX_WORDS = 12
+
+
+def question_warnings(q: str) -> list[str]:
+    """Near-miss terms for Andre to look at: watch words, and words one typo from a deny word or stem."""
+    out = []
+    for w in triage_mod.normalise(q).split():
+        near = len(w) >= 4 and (any(triage_mod._one_edit(w, d) for d in QUESTION_DENY_WORDS if len(d) >= 4)
+                                or any(triage_mod._one_edit(w[:len(st)], st) for st in QUESTION_DENY_STEMS))
+        if (w in QUESTION_WATCH_WORDS or near) and w not in out:
+            out.append(w)
+    return out
 
 
 def question_denied(q: str) -> bool:
@@ -2135,6 +2167,7 @@ def question_denied(q: str) -> bool:
     return (len(words) > QUESTION_MAX_WORDS or triage_mod.denied_question(q) or triage_mod.single_intent(q) is not None
             or channels.opt_out_level(q) is not None or channels.negated_channel(norm)
             or any(w in QUESTION_DENY_WORDS for w in words)
+            or any(w.startswith(st) for w in words for st in QUESTION_DENY_STEMS)
             or any(f" {p} " in norm for p in QUESTION_DENY_PHRASES))
 
 

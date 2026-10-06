@@ -160,12 +160,9 @@ def test_a_blank_line_refuses_start_with_a_clear_message(hd):
 
 
 def test_second_process_on_the_same_data_dir_refuses(hd):
-    lock = store_mod.DataDirLock(hd.settings.data_dir)
-    try:
-        with pytest.raises(store_mod.StoreCorrupt, match="another service-py process"):
-            store_mod.DataDirLock(hd.settings.data_dir)
-    finally:
-        lock.release()
+    # the running service holds the flock (taken by config.load before the key and the log): another holder fails
+    with pytest.raises(store_mod.StoreCorrupt, match="another service-py process"):
+        store_mod.DataDirLock(hd.settings.data_dir)
 
 
 # --------------------------------------------------------------------------------------------------- pending line

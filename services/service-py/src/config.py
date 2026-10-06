@@ -10,9 +10,12 @@ import base64
 import json
 import os
 import re
+import secrets
 import stat
 from dataclasses import dataclass, field
 from typing import Optional
+
+from store import LOCK_NAME, DataDirLock, StoreCorrupt
 
 # Who may hold a caller token (ADR 0014 decision 2). `dashboard` is Andre's console backend: it is never Andre by
 # itself; Andre's actions also carry X-Andre-Approval-Token.
@@ -70,20 +73,43 @@ def weak_key(key: bytes) -> bool:
         or all(0x20 <= b < 0x7F for b in key)
 
 
+_HELD: dict = {}
+
+
+def hold_data_dir(data_dir: str) -> DataDirLock:
+    """The exclusive flock on SVC_DATA_DIR (security-py's DataDirLock), taken once per process at start-up, BEFORE the
+    key is generated or read and before the log is opened, and held for the life of the process (the kernel releases
+    it at exit). A second process on the same directory refuses to start."""
+    key = os.path.realpath(data_dir)
+    lock = _HELD.get(key)
+    if lock is None:
+        try:
+            lock = DataDirLock(data_dir)
+        except StoreCorrupt:
+            raise RuntimeError(f"{data_dir}: another service-py process holds this data directory (flock on "
+                               f"{LOCK_NAME}); refusing to start. Stop the other process first: two writers would "
+                               "fork the log") from None
+        _HELD[key] = lock
+    return lock
+
+
 def _generated_key(data_dir: str) -> bytes:
     """The service's own key: read from SVC_DATA_DIR/hmac.key, or created there on the first start ATOMICALLY (V4-L2):
-    32 random bytes written to a 0600 temporary file, fsynced, linked into place (``os.link`` refuses to replace an
-    existing file, so two first starts cannot both win) and the directory fsynced. A crash leaves either no key file
-    (the next start generates one) or a complete one; a leftover temporary file is removed. A key file that is
-    present but empty or invalid stops the start with the exact remedy."""
-    os.makedirs(data_dir, mode=0o700, exist_ok=True)
+    under the data directory's flock (V4b-I1: a second process refuses before touching anything), 32 random bytes are
+    written to a per-process 0600 temporary file (``hmac.key.<pid>.<random>.tmp``), fsynced, linked into place
+    (``os.link`` never replaces an existing file) and the directory fsynced. Every stale ``hmac.key.*.tmp`` is removed at
+    each start, whether or not the key exists (V4b-I2). A crash leaves either no key file (the next start generates one)
+    or a complete one. A key file that is present but empty or invalid stops the start with the exact remedy."""
+    hold_data_dir(data_dir)                    # V4b-I1: one process per data directory, before the key is touched
     path = os.path.join(data_dir, KEY_NAME)
-    tmp = path + ".tmp"
+    for name in os.listdir(data_dir):          # V4b-I2: stale temporary key files go, whether or not the key exists
+        if name.startswith(KEY_NAME + ".") and name.endswith(".tmp"):
+            try:
+                os.unlink(os.path.join(data_dir, name))
+            except FileNotFoundError:
+                pass
     if not os.path.lexists(path):
-        try:
-            os.unlink(tmp)                                   # a crash between write and link
-        except FileNotFoundError:
-            pass
+        tmp = f"{path}.{os.getpid()}.{secrets.token_hex(8)}.tmp"     # per process (V4b-I1)
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         try:
             os.write(fd, base64.b64encode(os.urandom(32)))
@@ -180,6 +206,7 @@ class Settings:
     hmac_key: bytes = b""                                  # keys every stored digest (bodies, consent texts)
     nonprod_outbox: Optional[str] = None                   # SVC_SMS_PROVIDER=nonprod_file (non-production only)
     key_source: str = "the non-production test key"         # named in a key-mismatch error (V4-L3)
+    data_dir_lock: Optional[object] = None                   # the flock held for the life of the process (V4b-I1)
     bind_addr: str = "127.0.0.1"
     port: int = 8460
 
@@ -236,6 +263,7 @@ def load(env: Optional[dict] = None) -> Settings:
     non_production = _flag(env, "SVC_NON_PRODUCTION")
     s = Settings(service_token=service_token, caller_tokens=_caller_tokens(env, service_token),
                  non_production=non_production, data_dir=_data_dir(env, non_production))
+    s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None
     s.ledger_url = (env.get("LEDGER_SERVICE_URL") or "").strip() or None
     s.ledger_token = (env.get("LEDGER_SERVICE_TOKEN") or "").strip() or None
     s.andre_token = (env.get("SVC_ANDRE_APPROVAL_TOKEN") or "").strip() or None
