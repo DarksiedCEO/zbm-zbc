@@ -372,23 +372,63 @@ class BodyStore:
 LOCK_NAME = "service.lock"
 
 
+class DataDirBusy(StoreCorrupt):
+    """Another holder has this data directory (another process's flock, or another service instance's claim)."""
+
+
+BUSY = "another service-py process holds this data directory; refusing to start"
+
+
 class DataDirLock:
     """One process per data directory (fcntl.flock, released by the kernel when the process ends). A second
-    instance on the same directory refuses to start: two writers would fork the log."""
+    instance on the same directory refuses to start: two writers would fork the log.
+
+    AEGIS round 5 (V5-L1): the flock is per PROCESS (config.load caches it); each service instance must ``claim()``
+    it, once: a second claim in the same process is refused like a second process, and ``release_claim()`` (the
+    service's ``close()``) gives it back. V5-I1: ``service.lock`` must be a regular file (``lstat``: a symlink, FIFO
+    or directory planted there refuses with a clear message, never a raw OSError)."""
 
     def __init__(self, data_dir: Optional[str]):
         self._fd = None
+        self.claimed = False
         if not data_dir:
             return
         import fcntl
+        import stat as stat_mod
         os.makedirs(data_dir, mode=0o700, exist_ok=True)
-        fd = os.open(os.path.join(data_dir, LOCK_NAME), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        path = os.path.join(data_dir, LOCK_NAME)
+        not_regular = StoreCorrupt(f"{LOCK_NAME} in the data directory is not a regular file (a symlink, FIFO, device "
+                                   "or directory); refusing to start: remove it (the service creates it)")
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            st = None
+        if st is not None and not stat_mod.S_ISREG(st.st_mode):
+            raise not_regular
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        except OSError:
+            raise not_regular from None
+        if not stat_mod.S_ISREG(os.fstat(fd).st_mode):
+            os.close(fd)
+            raise not_regular
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             os.close(fd)
-            raise StoreCorrupt("another service-py process holds this data directory; refusing to start")
+            raise DataDirBusy(BUSY)
         self._fd = fd
+
+    def claim(self) -> None:
+        if self._fd is None:
+            return
+        if self.claimed:
+            raise DataDirBusy("another service instance in this process already holds this data directory; refusing "
+                              "to start (close the first instance)")
+        self.claimed = True
+
+    def release_claim(self) -> None:
+        self.claimed = False
 
     def release(self) -> None:
         if self._fd is not None:

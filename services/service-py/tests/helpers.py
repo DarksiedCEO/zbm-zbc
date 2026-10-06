@@ -148,6 +148,7 @@ class Harness:
         self.client = TestClient(api._wrap(api.create_app(self.svc, self.settings)), raise_server_exceptions=False)
 
     def restart(self, **env_over) -> "Harness":
+        self.svc.close()                              # V5-L1: give the data directory back before the next instance
         return Harness(self.tmp, self.settings.data_dir, self.ledger, self.clock, self.ports, **env_over)
 
     # --- http

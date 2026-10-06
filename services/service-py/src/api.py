@@ -593,7 +593,8 @@ def build_ports(settings: config_mod.Settings) -> Ports:
 def build(env: Optional[dict] = None):
     """The production wiring: settings, ledger, log, body store, ports; returns (asgi, service)."""
     settings = config_mod.load(env)
-    lock = settings.data_dir_lock              # taken by config.load before the key and the log (V4b-I1)
+    lock = settings.data_dir_lock              # taken by config.load before the key and the log (V4b-I1); the
+                                               # service claims it once (V5-L1)
     if settings.ledger_url and settings.ledger_token:
         ledger = HttpLedgerClient(settings.ledger_url, settings.ledger_token)
     else:

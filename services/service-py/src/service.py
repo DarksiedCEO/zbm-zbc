@@ -137,6 +137,23 @@ class SupportService:
         self._in_flight: set = set()
         self._unconfirmed: dict[str, dict] = {}     # sent by the provider, result not yet committed: never resent
         self.key_fingerprint: Optional[str] = None
+        # V5-L1: one service instance per data directory, also within one process (config.load caches the flock)
+        self._dir_lock = getattr(settings, "data_dir_lock", None)
+        if self._dir_lock is not None:
+            self._dir_lock.claim()
+        try:
+            self._start()
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Give the data directory back (a restart in the same process closes the old instance first)."""
+        if getattr(self, "_dir_lock", None) is not None:
+            self._dir_lock.release_claim()
+            self._dir_lock = None
+
+    def _start(self) -> None:
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
         if self.key_fingerprint is not None and not hmac.compare_digest(self.key_fingerprint, self._key_fp()):

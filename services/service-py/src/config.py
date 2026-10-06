@@ -15,7 +15,7 @@ import stat
 from dataclasses import dataclass, field
 from typing import Optional
 
-from store import LOCK_NAME, DataDirLock, StoreCorrupt
+from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 
 # Who may hold a caller token (ADR 0014 decision 2). `dashboard` is Andre's console backend: it is never Andre by
 # itself; Andre's actions also carry X-Andre-Approval-Token.
@@ -85,10 +85,12 @@ def hold_data_dir(data_dir: str) -> DataDirLock:
     if lock is None:
         try:
             lock = DataDirLock(data_dir)
-        except StoreCorrupt:
+        except DataDirBusy:
             raise RuntimeError(f"{data_dir}: another service-py process holds this data directory (flock on "
                                f"{LOCK_NAME}); refusing to start. Stop the other process first: two writers would "
                                "fork the log") from None
+        except StoreCorrupt as exc:
+            raise RuntimeError(f"{data_dir}: {exc}") from None
         _HELD[key] = lock
     return lock
 
@@ -104,13 +106,21 @@ def _generated_key(data_dir: str) -> bytes:
     path = os.path.join(data_dir, KEY_NAME)
     for name in os.listdir(data_dir):          # V4b-I2: stale temporary key files go, whether or not the key exists
         if name.startswith(KEY_NAME + ".") and name.endswith(".tmp"):
+            stale = os.path.join(data_dir, name)
             try:
-                os.unlink(os.path.join(data_dir, name))
+                if not stat.S_ISREG(os.lstat(stale).st_mode):       # V5-I1: a planted FIFO, directory or symlink
+                    raise RuntimeError(f"{stale} is not a regular file (a symlink, FIFO or directory planted at a "
+                                       "temporary key path); refusing to start: remove it")
+                os.unlink(stale)
             except FileNotFoundError:
                 pass
     if not os.path.lexists(path):
         tmp = f"{path}.{os.getpid()}.{secrets.token_hex(8)}.tmp"     # per process (V4b-I1)
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        except OSError as exc:
+            raise RuntimeError(f"{tmp} cannot be created ({type(exc).__name__}); refusing to start: check the data "
+                               "directory") from None
         try:
             os.write(fd, base64.b64encode(os.urandom(32)))
             os.fsync(fd)
