@@ -64,7 +64,7 @@ def test_pii_key_required_in_production(tmp_path):
         load(SALES_NON_PRODUCTION=None, SALES_DATA_DIR=str(d))
     key = secret_file(tmp_path, "pii.key", PII_KEY_HEX.encode())
     s = load(SALES_NON_PRODUCTION=None, SALES_DATA_DIR=str(d), SALES_PII_HASH_KEY_FILE=key)
-    assert s.pii_key.reveal() == bytes.fromhex(PII_KEY_HEX) and "3f9c" not in repr(s.pii_key)
+    assert s.pii_key.reveal() == bytes.fromhex(PII_KEY_HEX) and PII_KEY_HEX[:8] not in repr(s.pii_key)
 
 
 def test_weak_pii_key_refused(tmp_path):

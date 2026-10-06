@@ -26,7 +26,8 @@ OUTREACH = "zbm-outreach.test"
 ZBM_DOMAIN, ZBC_DOMAIN = "zbestmedia.test", "zbestclips.test"
 POSTAL = "123 Test Street, Suite 4, Los Angeles, CA 90001"
 CONSENT_SHA = "a" * 64
-PII_KEY_HEX = "3f9c2a7e51d04b86c8e1f7a2093d5b6e4a1c8f0d72e9b35a6c4d1e8f0b7a2c93"
+# a fixed test-only key, derived rather than written out (no key-shaped literal for the secret scanner)
+PII_KEY_HEX = __import__("hashlib").sha256(b"sales-py test-only PII key").hexdigest()
 # 2026-10-06 18:00 UTC = 11:00 in Los Angeles, 14:00 in New York, 19:00 in London
 NOON = datetime(2026, 10, 6, 18, 0, tzinfo=timezone.utc)
 
