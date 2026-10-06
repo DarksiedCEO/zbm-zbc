@@ -43,7 +43,7 @@ from svc_people import PeopleMixin
 INTERNAL = "influencer"
 INTEGRITY_RETRY_S = 15
 FORCED_MIN_S = 10
-JOBS = ("send-queue", "payout-retry", "integrity")
+JOBS = ("send-queue", "payout-retry", "hold-expiry", "integrity")
 
 
 def _maybe(exc: Unavailable) -> Unavailable:
@@ -505,6 +505,8 @@ class InfluencerService(PeopleMixin, ConfirmMixin, OutreachMixin, DealsMixin, Pa
         try:
             if name == "send-queue":
                 return self.send_tick(body)
+            if name == "hold-expiry":
+                return self.expire_holds(body)
             return self.payout_retry(body)
         finally:
             self._tick_lock.release()

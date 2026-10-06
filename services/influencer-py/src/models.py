@@ -84,6 +84,12 @@ class Confirm(Strict):
     token: Annotated[StrictStr, Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9._:-]+$")]
 
 
+class BulkReject(Strict):
+    request_id: Id
+    conf_ids: Annotated[list[Id], Field(min_length=1, max_length=500)]
+    ids_sha256: Hex64
+
+
 class MinorReview(Strict):
     request_id: Id
     decision: Literal["confirm_minor", "not_a_minor"]

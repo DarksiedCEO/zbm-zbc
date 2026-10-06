@@ -58,13 +58,13 @@ def test_n1_one_address_gets_one_mail_a_day_and_one_open_confirmation(w):
     assert sum(1 for x in w.ports.email.sent if x[1] == "victim2@example.test") == 1   # 50312db: 20 mails
 
 
-def test_n1_a_different_request_supersedes_and_waits_a_day(w):
+def test_n1_a_different_request_waits_a_day_for_its_mail(w):
+    # amended in round 3 (R3-M1): a different request no longer supersedes the first; both stay valid
     a = w.ok(w.application("someone@example.test", handles=(("x", "one"),)), 201)
     w.ok(w.job("send-queue"))
     b = w.ok(w.application("someone@example.test", handles=(("x", "two"),)), 201)
     assert b["confirmation_id"] != a["confirmation_id"]
-    assert w.svc.confirmations[a["confirmation_id"]]["status"] == "superseded"
-    w.code(w.confirm(a["confirmation_id"]), 409, "CONFIRMATION_USED")
+    assert w.svc.confirmations[a["confirmation_id"]]["status"] == "pending"
     assert w.ok(w.job("send-queue"))["deferred"] == 1
     w.clock.advance(hours=24, seconds=1)
     assert w.ok(w.job("send-queue"))["confirmations_sent"] == 1

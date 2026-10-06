@@ -386,6 +386,14 @@ def _main(work: Path) -> int:
         check("AEGIS R2: a long, oddly shaped reply lands; one open confirmation per address; applications rate-limited",
               r3.status_code == 201 and len({x["confirmation_id"] for x in reps}) == 1
               and [x.status_code for x in more] == [201, 201, 429] and detail(more[2]) == "APPLICATION_RATE_LIMITED")
+        other_app = a.post("/applications", application("flood2@live-creator.example", "@flood2"), "hub").json()
+        stranger = a.post("/applications", application("flood2@live-creator.example", "@stranger2"), "hub")
+        r5 = a.post("/confirmations", {"request_id": rid(), "token": token(pii, other_app["confirmation_id"])}, "hub")
+        flood2 = a.get(f"/influencers/{other_app['influencer_id']}").json()
+        r6 = a.post("/jobs/hold-expiry/run", {"request_id": rid()}, "scheduler")
+        check("AEGIS R3: a stranger's application never invalidates the creator's open link; hold expiry runs",
+              stranger.status_code == 201 and r5.status_code == 200
+              and [h["handle"] for h in flood2["handles"]] == ["flood2"] and r6.status_code == 200)
         check("a reply is never refused for its sender fields; one that resolves nothing is kept for Andre",
               r.status_code == 201 and r.json()["suppressed"] is True and r2.status_code == 201
               and r2.json()["held"] is True and r2.json()["influencer_id"] is None)

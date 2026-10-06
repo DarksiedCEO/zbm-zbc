@@ -219,7 +219,10 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
    is wired it must (a) confirm that a `stripe:` / `vault:` tax reference EXISTS and belongs to the creator before it
    registers the payee (AEGIS R2-L-b: the shape is no longer guessed here), and (b) return its per-person key — an
    opaque keyed hash of the matched TIN — on `register_payee` and `payee_status` (AEGIS R2-N2). The vault must issue
-   references as `vault:` + 26 lowercase letters.
+   references as `vault:` + 26 lowercase letters. **Nothing ships until Finance confirms a vault reference EXISTS**
+   (AEGIS R3-L4): an all-letter reference can still encode digits (`a`..`j` for `0`..`9`), so its shape alone
+   proves nothing; the reference must resolve at Finance / the vault to a record of that creator before any payee is
+   registered or paid.
 6. Moving Andre's approvals from the shared approval token to Cybersecurity (22) passkeys, as the other departments
    move.
 7. An un-block path for a confirmed minor who later turns 18 (today: never contracted again).
@@ -230,7 +233,7 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
 ## Hub requirements (the creator portal / public forms)
 
 - **Per-IP rate limiting and a CAPTCHA (or equivalent) on the creator application form and the tax-reference form**
-  (AEGIS R2-N1). This service bounds what it can see — one open confirmation per address, at most one confirmation
+  (AEGIS R2-N1). This service bounds what it can see — at most three open confirmations per address (round 3), at most one confirmation
   mail per address per day, five applications per address per day, its own confirmation queue and daily cap, apart
   from outreach — but it never sees the caller's IP, so stopping a flood of distinct junk addresses is the hub's job.
 - The one-click unsubscribe page (`/u/<token>`) and the confirmation page (`/c/<token>`) on the outreach domain relay
@@ -272,7 +275,7 @@ after the fix).
 
 | Id | Finding | Fix |
 |---|---|---|
-| R2-N1 | Junk applications flooded confirmation mail: one address could be mailed twenty times, and fifty junk addresses used up the outreach cap so a real creator's confirmation did not go | One OPEN confirmation per record and kind: the same request reuses it, a different one supersedes it (the old token dies); at most one confirmation mail per address per 24 hours (a later one waits, `not_before`); five applications per address per 24 hours (429 `APPLICATION_RATE_LIMITED`); confirmation mails have their own queue (`INF_CONFIRMATION_QUEUE_MAX`, default 2000) and daily cap (`INF_CONFIRMATION_DAILY_CAP`, default 200), apart from outreach, and are sent before outreach with records we already hold first. Per-IP limits and a CAPTCHA are a hub requirement (above) |
+| R2-N1 | Junk applications flooded confirmation mail: one address could be mailed twenty times, and fifty junk addresses used up the outreach cap so a real creator's confirmation did not go | One OPEN confirmation per record and kind: the same request reuses it, a different one supersedes it (the old token dies) *(superseding replaced in round 3, R3-M1)*; at most one confirmation mail per address per 24 hours *(from send time since round 3)*; five applications per address per 24 hours (429 `APPLICATION_RATE_LIMITED`); confirmation mails have their own queue (`INF_CONFIRMATION_QUEUE_MAX`, default 2000) and daily cap (`INF_CONFIRMATION_DAILY_CAP`, default 200), apart from outreach, and are sent before outreach with records we already hold first. Per-IP limits and a CAPTCHA are a hub requirement (above) |
 | R2-N2 | Two tax references of one person were two people | Finance's per-person key (an opaque keyed hash of the matched TIN, returned by `register_payee` / `payee_status`; the stand-in returns none) ties records together for D2/D3, and is read again at payout. A payout with NO person key yet, on a deal Andre did not approve himself, waits for Andre (`PERSON_KEY_MISSING`) — read as "fail closed while the person cannot be proven under the limit" |
 | R2-N3 | A long reply text (422), a message id shaped like a tax id (422), or any other provider field could refuse a reply | The reply route reads every field leniently: any JSON type, unknown fields ignored and never stored, no tax-id scan (nothing raw is stored), text cut to 20,000 characters before it is classified and hashed, an unknown channel is `other` (the lower opt-out bar), a missing request id replaced by the body's SHA-256, a body that is not an object read as empty; the route accepts up to 512 KiB (the relay truncates beyond that) |
 | R2-L-a | The confirmation for an existing record went to the address typed into the form (`owner+evil@...`) | It goes to the address ON THE RECORD |
@@ -283,3 +286,19 @@ after the fix).
 **Log compatibility (Info).** Logs written by a58e633 (before round 1) do not replay on this version: their record
 lines carry the attestation inline and their tax lines a different kind. No log of this service exists outside tests
 and live runs (it is not in force), so this is accepted before launch; from launch on, log kinds only grow.
+
+## Amendment — AEGIS round 3 (Oct 6 2026, on fa0c091): NOT BLOCKING, every item fixed
+
+Regressions: `services/influencer-py/tests/test_aegis_r3.py` (each fails on fa0c091 and passes after the fix).
+
+| Id | Finding | Fix |
+|---|---|---|
+| R3-M1 | A stranger could supersede a creator's open confirmation again and again (and the 24-hour rule counted from queue time, so a cancelled mail delayed the next) | No request invalidates another's open confirmation: each stays valid until it expires and applies only its own payload. At most three open confirmations per address (429 `CONFIRMATIONS_OPEN_LIMIT`, the open ones untouched). The one-mail-a-day rule counts from SEND time; a cancelled mail never delays the next. *(Replaces round 2's supersede rule.)* |
+| R3-L1 | `/replies` was idempotent on the request id alone: the same id with another body was a 409 that dropped an opt-out | The key is the request id AND the body's hash; the README states the remaining transport limits (413/415/400/422/408) as the contract with the relay |
+| R3-L2 | Self-suppressed junk addresses could flood Andre's review queue | `INF_ANDRE_REVIEW_DAILY_CAP` (default 20) new review items a day; past it the item is kept as `awaiting_andre_digest` (approvable the same way, never dropped). Andre bulk-rejects with `POST /inf/v1/confirmations/bulk-reject`, bound to the SHA-256 of the exact id list, all or nothing |
+| R3-L3 | Known creators could use the whole confirmation cap | `INF_CONFIRMATION_NEW_ADDRESS_PERCENT` (default 25%, rounded up) of the daily confirmation cap is reserved for new addresses |
+| R3-L4 | A letter-only vault reference can still encode digits | Unlock item 5: Finance must confirm a vault reference exists before anything ships (no code change) |
+| R3-L5 | In-memory rate state and target-less holds grew for ever | Rate state older than 24 hours is pruned (memory only, rebuilt from the log); the `hold-expiry` job closes an unresolved hold (no influencer, no address or handle) after `INF_UNRESOLVED_HOLD_DAYS` (default 30) on the service clock, recorded on the ledger (`holds_expired`) and anchored like any other change. A hold with a target is never expired: only Andre lifts it |
+
+Accepted: with several open confirmations a creator could click a stranger's link by mistake; the mail lists exactly
+the accounts that confirmation would attach and says to ignore it if anything is wrong.

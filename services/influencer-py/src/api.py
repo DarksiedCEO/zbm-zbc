@@ -398,9 +398,13 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
 
     @app.get(P + "/confirmations", dependencies=auth)
     def confirmations(status_: Optional[str] = Query(default=None, alias="status",
-                                                     pattern="^(pending|undeliverable|pending_andre|applied|rejected)$"),
+                                                     pattern="^(pending|undeliverable|pending_andre|awaiting_andre|awaiting_andre_digest|applied|rejected|superseded)$"),
                       who: str = Depends(dashboard)) -> list:
         return svc.confirmations_view(status_)
+
+    @app.post(P + "/confirmations/bulk-reject", dependencies=auth)
+    def bulk_reject(req: dict = Depends(body(m.BulkReject)), who: str = Depends(andre("confirmations/bulk-reject"))):
+        return svc.bulk_reject(req)
 
     @app.post(P + "/confirmations/{cid}/approve", dependencies=auth)
     def approve_confirmation(cid: str, req: dict = Depends(body(m.Approve)),
@@ -498,7 +502,7 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
         return svc.reply(who, m.ReplyIn.model_validate(raw).model_dump(mode="python"), raw)
 
     @app.get(P + "/holds", dependencies=auth)
-    def holds(status_: Optional[str] = Query(default=None, alias="status", pattern="^(active|lifted|opted_out)$"),
+    def holds(status_: Optional[str] = Query(default=None, alias="status", pattern="^(active|lifted|opted_out|expired)$"),
               who: str = Depends(worker)) -> list:
         return svc.holds_view(status_)
 

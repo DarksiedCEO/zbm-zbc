@@ -173,6 +173,9 @@ class Settings:
     queue_max_per_caller: int = 500
     confirmation_daily_cap: int = 200
     confirmation_queue_max: int = 2000
+    confirmation_new_address_percent: int = 25
+    andre_review_daily_cap: int = 20
+    unresolved_hold_days: int = 30
     bind_addr: str = "127.0.0.1"
     port: int = 8480
 
@@ -318,6 +321,11 @@ def load(env: Optional[dict] = None) -> Settings:
     # AEGIS R2-N1: confirmation mails have their own queue and daily cap, apart from outreach
     s.confirmation_daily_cap = _int(env, "INF_CONFIRMATION_DAILY_CAP", 200, 1, 1000)
     s.confirmation_queue_max = _int(env, "INF_CONFIRMATION_QUEUE_MAX", 2000, 1, 20000)
+    # AEGIS round 3: the share of the confirmation cap reserved for new addresses (L3), new items a day in Andre's
+    # review queue (L2, the rest go to his digest), and the days an unresolved, target-less reply hold lasts (L5)
+    s.confirmation_new_address_percent = _int(env, "INF_CONFIRMATION_NEW_ADDRESS_PERCENT", 25, 0, 90)
+    s.andre_review_daily_cap = _int(env, "INF_ANDRE_REVIEW_DAILY_CAP", 20, 1, 1000)
+    s.unresolved_hold_days = _int(env, "INF_UNRESOLVED_HOLD_DAYS", 30, 1, 365)
     raw_max = (env.get("INF_AUTO_APPROVE_MAX") or "5000.00").strip()
     try:
         auto_max = money.parse(raw_max)

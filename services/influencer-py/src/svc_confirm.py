@@ -32,9 +32,11 @@ SUBJECTS = {"application": "Confirm your creator application",
             "tax_profile": "Confirm the change to your payout tax details"}
 
 
-RESEND_HOURS = 24          # AEGIS R2-N1: at most one confirmation mail per address per day
+RESEND_HOURS = 24          # AEGIS R2-N1 / R3-M1: at most one confirmation mail SENT per address per day
+OPEN_PER_ADDRESS = 3       # AEGIS R3-M1: open confirmations per address (429 beyond; the open ones stay valid)
 APPLICATIONS_PER_DAY = 5   # AEGIS R2-N1: applications per canonical address per 24 hours (429 beyond)
-OPEN = ("pending", "awaiting_andre")
+OPEN = ("pending", "awaiting_andre", "awaiting_andre_digest")
+REVIEW = ("awaiting_andre", "awaiting_andre_digest")
 
 
 def confirmation_sha256(c: dict) -> str:
@@ -61,7 +63,8 @@ class ConfirmMixin:
             self._close_mail(old, at)
         if d.get("confirmation"):
             c = dict(d["confirmation"])
-            c.update(created_at=at, decided_at=None)
+            c.update(created_at=at, decided_at=None,
+                     review_day=at[:10] if c["status"] == "awaiting_andre" else None)
             self.confirmations[c["conf_id"]] = c
         if d.get("message"):
             self._queue_confirmation_mail(d["message"], d["actor"], at)
@@ -70,8 +73,10 @@ class ConfirmMixin:
 
     def _queue_confirmation_mail(self, msg: dict, actor: str, at: str) -> None:
         self._a_message_queued({**msg, "actor": actor}, at)
-        self.messages[msg["message_id"]]["not_before"] = msg.get("not_before")
-        self.conf_mail_at[msg["to_hash"]] = at
+
+    def _reviews_today(self) -> int:
+        day = self.today()
+        return sum(1 for c in self.confirmations.values() if c.get("review_day") == day)
 
     def _a_confirmation_send_approved(self, d, at):
         c = self.confirmations[d["conf_id"]]
@@ -110,50 +115,69 @@ class ConfirmMixin:
         mac = hmac.new(self.pii_key, f"confirm\x00{conf_id}".encode(), hashlib.sha256).hexdigest()[:32]
         return f"{conf_id}.{mac}"
 
-    def _open_confirmation(self, iid: str, kind: str) -> Optional[dict]:
-        for c in self.confirmations.values():
-            if c["influencer_id"] == iid and c["kind"] == kind and c["status"] in OPEN \
-                    and self.now() <= parse_iso(c["expires_at"]):
-                return c
-        return None
+    def _open_confirmations(self, eh: str) -> list[dict]:
+        """Every confirmation still open for this address (any record, any kind), unexpired."""
+        return [c for c in self.confirmations.values() if c["email_hash"] == eh and c["status"] in OPEN
+                and self.now() <= parse_iso(c["expires_at"])]
 
     def _application_rate_problem(self, eh: str) -> None:
-        since = self.now() - timedelta(hours=24)
-        if sum(1 for t in self.app_times.get(eh, ()) if parse_iso(t) > since) >= APPLICATIONS_PER_DAY:
+        self._prune_rate_state(eh)
+        if len(self.app_times.get(eh, ())) >= APPLICATIONS_PER_DAY:
             raise Throttled(R("APPLICATION_RATE_LIMITED"))
 
+    def _prune_rate_state(self, eh: Optional[str] = None) -> None:
+        """AEGIS R3-L5: rate state older than 24 hours is dropped (memory only; rebuilt from the log at start)."""
+        since = self.now() - timedelta(hours=24)
+        for k in ([eh] if eh else list(self.app_times)):
+            kept = [t for t in self.app_times.get(k, ()) if parse_iso(t) > since]
+            if kept:
+                self.app_times[k] = kept
+            else:
+                self.app_times.pop(k, None)
+        for k in ([eh] if eh else list(self.conf_mail_at)):
+            t = self.conf_mail_at.get(k)
+            if t is not None and parse_iso(t) <= since:
+                self.conf_mail_at.pop(k, None)
+
+    def mail_wait(self, eh: str) -> bool:
+        """True while a confirmation mail was SENT to this address less than RESEND_HOURS ago (AEGIS R3-M1: a mail
+        that was queued and cancelled never delays the next one)."""
+        self._prune_rate_state(eh)
+        last = self.conf_mail_at.get(eh)
+        return bool(last) and self.now() - parse_iso(last) < timedelta(hours=RESEND_HOURS)
+
     def _confirmation_mail(self, cid: str, iid: str, eh: str, existing_record: bool) -> dict:
-        """The queued confirmation mail: on its own queue and daily cap (AEGIS R2-N1), at most one per address per
-        RESEND_HOURS (a later one waits: ``not_before``)."""
+        """The queued confirmation mail: on its own queue and daily cap (AEGIS R2-N1); the send-queue job sends at most
+        one per address per RESEND_HOURS, counted from SEND time (AEGIS R3-M1)."""
         queued = sum(1 for m in self.messages.values() if m["status"] == "queued" and m.get("purpose") == "confirmation")
         if queued >= self.settings.confirmation_queue_max:
             raise Throttled(R("QUEUE_FULL"))
-        last = self.conf_mail_at.get(eh)
-        not_before = None
-        if last and self.now() - parse_iso(last) < timedelta(hours=RESEND_HOURS):
-            not_before = iso(parse_iso(last) + timedelta(hours=RESEND_HOURS))
         return {"message_id": derived_id("msg", "confirm", cid, self.now().isoformat()), "channel": "email",
                 "purpose": "confirmation", "confirmation_id": cid, "influencer_id": iid, "to_hash": eh, "brand": None,
-                "from_domain": self.settings.outreach_domain, "not_before": not_before,
-                "existing_record": existing_record}
+                "from_domain": self.settings.outreach_domain, "existing_record": existing_record}
 
     def _request_confirmation(self, caller: str, rk: str, body: dict, iid: str, kind: str, email: str, eh: str,
                               payload: dict, record: Optional[dict] = None, ev: Optional[list] = None,
                               application_hash: Optional[str] = None) -> dict:
-        """One open confirmation per record and kind (AEGIS R2-N1): the same request again reuses it (no new mail);
-        a different one supersedes it (the old token dies) and is mailed no sooner than RESEND_HOURS after the last
-        mail to that address. The mail goes to the address ON THE RECORD (AEGIS R2-L-a). A suppressed address gets no
+        """AEGIS R3-M1: a request NEVER invalidates another request's open confirmation — each stays valid until it
+        expires and applies only its own payload. The same request again reuses its open confirmation (no new mail);
+        at most OPEN_PER_ADDRESS confirmations are open per address (429 beyond, the open ones untouched); the
+        send-queue job mails at most one per address per RESEND_HOURS from send time. The mail goes to the address ON THE RECORD (AEGIS R2-L-a). A suppressed address gets no
         mail until Andre approves THIS confirmation by its hash (AEGIS R2-L-d); a blocked record or an unconfigured
         outreach domain: ``undeliverable``. Commits one line; returns the confirmation."""
         ev = list(ev or [])
-        open_c = self._open_confirmation(iid, kind) if record is None else None
-        if open_c is not None and open_c["payload"] == payload:
-            self._commit("confirmation_requested", self._req({"reused": open_c["conf_id"],
+        opens = self._open_confirmations(eh)
+        same = next((c for c in opens if c["influencer_id"] == iid and c["kind"] == kind and c["payload"] == payload),
+                    None)
+        if same is not None:
+            self._commit("confirmation_requested", self._req({"reused": same["conf_id"],
                                                               "application_hash": application_hash}, caller, rk,
                                                              body, {"influencer_id": iid,
-                                                                    "confirmation_id": open_c["conf_id"]}),
+                                                                    "confirmation_id": same["conf_id"]}),
                          caller, evidence=ev or None)
-            return open_c
+            return same
+        if len(opens) >= OPEN_PER_ADDRESS:
+            raise Throttled(R("CONFIRMATIONS_OPEN_LIMIT"))
         cid = derived_id("cnf", caller, rk)
         conf = {"conf_id": cid, "influencer_id": iid, "kind": kind, "email": email, "email_hash": eh,
                 "payload": payload, "expires_at": iso(self.now() + timedelta(days=CONFIRM_DAYS)),
@@ -166,7 +190,10 @@ class ConfirmMixin:
         if not (s.outreach_domain and s.postal_address) or inf.get("blocked"):
             conf["status"] = "undeliverable"
         elif suppressed:
-            conf["status"] = "awaiting_andre"
+            # AEGIS R3-L2: at most INF_ANDRE_REVIEW_DAILY_CAP new review items a day open in Andre's queue; past it
+            # the item is kept for his daily digest (approvable the same way, never dropped)
+            conf["status"] = "awaiting_andre" if self._reviews_today() < s.andre_review_daily_cap \
+                else "awaiting_andre_digest"
             conf["content_sha256"] = confirmation_sha256(conf)
         else:
             conf["status"] = "pending"
@@ -176,7 +203,7 @@ class ConfirmMixin:
                                                                    "kind": kind, "email_hash": eh,
                                                                    "status": conf["status"]}, (caller, rk)))
         data = {"influencer_id": iid, "record": record, "confirmation": conf, "message": msg,
-                "superseded": [open_c["conf_id"]] if open_c else [], "application_hash": application_hash}
+                "application_hash": application_hash}
         self._commit("confirmation_requested", self._req(data, caller, rk, body,
                                                          {"influencer_id": iid, "confirmation_id": cid}),
                      caller, evidence=ev)
@@ -277,6 +304,31 @@ class ConfirmMixin:
                          evidence=ev)
             return self.confirmation_view(c)
 
+    def _a_confirmations_bulk_rejected(self, d, at):
+        for cid in d["conf_ids"]:
+            self._a_confirmation_rejected({"conf_id": cid}, at)
+
+    def bulk_reject(self, body: dict) -> dict:
+        """Andre clears his review queue in one action (AEGIS R3-L2), bound to the SHA-256 of the exact id list he
+        saw (``"\\n".join(conf_ids)``, in his order): a different list is refused, and nothing changes unless every
+        id is still waiting for him."""
+        with self.lock:
+            self._gate()
+            rk = self._rk("confirmation_bulk_reject", body["ids_sha256"], body)
+            if self._idem("andre", rk, body):
+                return {"rejected": list(body["conf_ids"])}
+            ids = list(body["conf_ids"])
+            if hashlib.sha256("\n".join(ids).encode()).hexdigest() != body["ids_sha256"] or len(set(ids)) != len(ids):
+                raise Conflict(R("ID_LIST_MISMATCH"))
+            for cid in ids:
+                c = self._get(self.confirmations, cid, "CONFIRMATION_UNKNOWN")
+                if c["status"] not in ("pending_andre",) + REVIEW:
+                    raise Conflict(R("CONFIRMATION_NOT_PENDING"))
+            self._commit("confirmations_bulk_rejected", self._req({"conf_ids": ids}, "andre", rk, body, None),
+                         "andre", evidence=("confirmations_bulk_rejected", f"andre:{body['ids_sha256'][:40]}",
+                                            {"conf_ids": ids, "ids_sha256": body["ids_sha256"]}, ("andre", rk)))
+            return {"rejected": ids}
+
     def decide_confirmation(self, conf_id: str, body: dict, approve: bool) -> dict:
         """Andre on a confirmed tax-reference change for a creator whose payee was already verified, or on mailing a
         confirmation to a SUPPRESSED creator who applied (AEGIS R2-L-d: only that one mail; the suppression stays in
@@ -287,7 +339,7 @@ class ConfirmMixin:
             if self._idem("andre", rk, body):
                 return self.confirmation_view(self.confirmations[conf_id])
             c = self._get(self.confirmations, conf_id, "CONFIRMATION_UNKNOWN")
-            if c["status"] not in ("pending_andre", "awaiting_andre"):
+            if c["status"] not in ("pending_andre",) + REVIEW:
                 raise Conflict(R("CONFIRMATION_NOT_PENDING"))
             iid = c["influencer_id"]
             if not approve:
@@ -299,7 +351,7 @@ class ConfirmMixin:
                 raise Conflict(R("CONTENT_HASH_MISMATCH"))
             if self.influencers[iid].get("blocked"):
                 raise Forbidden(R("INFLUENCER_BLOCKED"))
-            if c["status"] == "awaiting_andre":
+            if c["status"] in REVIEW:
                 expires = iso(self.now() + timedelta(days=CONFIRM_DAYS))
                 msg = self._confirmation_mail(conf_id, iid, c["email_hash"], True)
                 self._commit("confirmation_send_approved", self._req(

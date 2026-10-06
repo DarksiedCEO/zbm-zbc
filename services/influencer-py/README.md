@@ -57,6 +57,9 @@ ledger as `founder_approval_refused`).
 | `INF_QUEUE_MAX_PER_CALLER` | 500 | queued outreach messages one caller may have waiting (1..5000); past it `429 QUEUE_FULL` |
 | `INF_CONFIRMATION_DAILY_CAP` | 200 | confirmation mails per outreach domain per UTC day, apart from outreach (1..1000) |
 | `INF_CONFIRMATION_QUEUE_MAX` | 2000 | confirmation mails waiting at once (1..20000); past it `429 QUEUE_FULL` |
+| `INF_CONFIRMATION_NEW_ADDRESS_PERCENT` | 25 | share of the daily confirmation cap reserved for NEW addresses (0..90); records we hold use the rest |
+| `INF_ANDRE_REVIEW_DAILY_CAP` | 20 | new items a day in Andre's review queue (1..1000); past it they wait in his digest (`awaiting_andre_digest`), never dropped |
+| `INF_UNRESOLVED_HOLD_DAYS` | 30 | days an unresolved reply hold (one that names nobody) lasts before `hold-expiry` closes it (1..365) |
 | `INF_AUTO_APPROVE_MAX` | `5000.00` | largest deal total (and influencer and campaign aggregate) approved without Andre; at most 5000.00 |
 | `INF_EMAIL_PROVIDER`, `INF_DM_PROVIDER`, `INF_PUBLIC_PROFILE_PROVIDER`, `INF_PAID_DATABASE_PROVIDER`, `INF_FINANCE_URL`, `INF_LEGAL_URL`, `INF_DEAL_AGGREGATE_WINDOW_DAYS` | unset | not built: setting one (other than `none`/`0`) refuses start (the $5,000 per-person total is lifetime) |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | — | unset = every write refused (fail closed) |
@@ -74,8 +77,9 @@ All under `/inf/v1` except `/health`. "worker" = `dashboard` or `influencer_agen
 | `GET /status` | dashboard | integrity, ports wired, send pace, queue, holds, pending approvals |
 | `GET /intelligences` | worker | the eleven single-task components |
 | `POST /applications` | hub | the creator application form: `adult_18_plus` must be exactly `true` (false: 422 `MINOR_REFUSED`, nothing kept; missing: 422 `AGE_ATTESTATION_REQUIRED`); nothing about identity takes effect until confirmed |
-| `POST /confirmations` | hub | the token mailed to the address on record: the application (attestation, handles) or tax-reference change takes effect. One open confirmation per record and kind, one mail per address per day, five applications per address per day (429) |
+| `POST /confirmations` | hub | the token mailed to the address on record: that confirmation's own application (attestation, handles) or tax-reference change takes effect. No request invalidates another's open confirmation; at most three open per address (429 `CONFIRMATIONS_OPEN_LIMIT`), one mail sent per address per day, five applications per address per day (429) |
 | `GET /confirmations`; `POST /confirmations/{id}/approve`, `/reject` | dashboard; Andre | by hash: a confirmed tax-reference change for an already verified payee, or mailing a confirmation to a suppressed creator who applied |
+| `POST /confirmations/bulk-reject` | Andre | rejects every listed item, bound to `ids_sha256` = SHA-256 of `"\n".join(conf_ids)` in his order; all or nothing |
 | `POST /influencers` | dashboard | a prospect a person researched (never attested: no deal until the creator applies) |
 | `POST /discovery/import` | influencer_agent, scheduler | public-profile / paid-database discovery through the ports (stand-ins: 503 `SOURCE_NOT_WIRED`) |
 | `GET /influencers`, `/influencers/{id}` | worker | records, with suppressed / held / payee state |
@@ -105,9 +109,28 @@ All under `/inf/v1` except `/health`. "worker" = `dashboard` or `influencer_agen
 | `POST /payees/{influencer_id}/verify` | dashboard, influencer_agent, scheduler | register at Finance and read the verification (stand-in: 503 `FINANCE_UNAVAILABLE`) |
 | `POST /payouts`; `GET /payouts`, `/payouts/{id}` | worker | a payout request handed to Finance (31) for a verified payee (`pending_andre` when the person's lifetime deals exceed the limit and Andre did not approve the deal) |
 | `POST /payouts/{id}/approve`, `/reject` | Andre | a payout held by the per-person rule, by hash |
-| `POST /jobs/{send-queue,payout-retry,integrity}/run` | scheduler | jobs (one at a time) |
+| `POST /jobs/{send-queue,payout-retry,hold-expiry,integrity}/run` | scheduler | jobs (one at a time) |
 | `GET /audit/integrity`, `/audit/export` | auditor | integrity with the ledger's own verdict; export with emails and handles dropped (keyed hashes stay), names and texts as SHA-256 |
 
 Every body is refused 422 before it is parsed when it carries a raw tax id (`TAX_ID_REFUSED` with the `field` that
 tripped it, never the value: a key naming one, or a value shaped like one) or a date of birth, age, government id, payment, bank, IP, device or protected-trait key
 (`FORBIDDEN_FIELD`). Money is a canonical two-decimal string; a JSON number is refused.
+
+## Contract with the reply relay (`provider_events`)
+
+`POST /inf/v1/replies` never refuses a reply for its CONTENT: any JSON value in any field, unknown fields, a text of
+any length up to the body limit (cut to 20,000 characters before it is classified and hashed), a body that is not an
+object. The same `request_id` with a different body is a different reply; the same body again (with or without a
+`request_id`) is the same reply. What remains is the transport layer, shared by every route, which the relay must
+respect — it answers before the service reads the body, and the relay must not drop the reply when it sees one of
+these; it fixes the transport and sends again:
+
+| Answer | When | What the relay does |
+|---|---|---|
+| 413 | the body is over 512 KiB (`Content-Length` or bytes received) | truncate the text and send again |
+| 415 | the body is not `application/json` (or `+json`) | send it as JSON |
+| 400 | an unparseable `Content-Length`, or JSON the parser cannot read (for example a number of thousands of digits) | send valid JSON |
+| 422 | JSON nested deeper than 32 levels or with more than 20,000 members | flatten or drop the extra structure |
+| 408 | the body did not arrive within 30 seconds | send again |
+| 401 / 403 | a wrong service or caller token | fix the credentials |
+| 503 | the ledger or the store could not record it | retry with backoff (sales-py's S1-L2 rule: never drop an opt-out) |

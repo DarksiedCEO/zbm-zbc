@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+from datetime import timedelta
 from typing import Optional
 
 from clock import parse_iso
@@ -69,7 +70,7 @@ class OutreachMixin:
         self.messages[d["message_id"]] = {**{k: d.get(k) for k in (
             "message_id", "channel", "platform", "influencer_id", "to_hash", "brand", "template_id", "version",
             "template_sha256", "draft_id", "content_sha256", "rendered_sha256", "from_domain", "purpose",
-            "confirmation_id", "not_before", "existing_record")},
+            "confirmation_id", "existing_record")},
             "status": "queued", "reason": None, "queued_at": at, "updated_at": at, "sent_on": None,
             "provider_ref": None, "events": [], "queued_by": d["actor"]}
 
@@ -78,6 +79,10 @@ class OutreachMixin:
         msg.update(status="sending", sent_on=d["date"], updated_at=at)
         if msg["channel"] == "email":
             self._stats(d["date"], self._cap_key(msg))["sent"] += 1
+        if msg.get("purpose") == "confirmation":
+            self.conf_mail_at[msg["to_hash"]] = at          # R3-M1: the 24-hour rule counts from SEND time
+            if msg.get("existing_record"):
+                self._stats(d["date"], "known|" + self._cap_key(msg))["sent"] += 1
 
     def _a_message_sent(self, d, at):
         self.messages[d["message_id"]].update(status="sent", provider_ref=d.get("provider_ref"), updated_at=at)
@@ -130,6 +135,12 @@ class OutreachMixin:
                  decision=d["decision"])
         if d["decision"] == "opt_out":
             self._a_suppression_added({"hashes": d["hashes"], "reason": "hold_opt_out", "actor": d["actor"]}, at)
+
+    def _known_share(self, cap: int) -> int:
+        """AEGIS R3-L3: confirmations for records we already hold may use the daily confirmation cap only up to what
+        is not reserved for NEW addresses (INF_CONFIRMATION_NEW_ADDRESS_PERCENT, default 25%, rounded up)."""
+        reserved = -(-cap * self.settings.confirmation_new_address_percent // 100)
+        return cap - reserved
 
     @staticmethod
     def _cap_key(msg: dict) -> str:
@@ -519,6 +530,7 @@ class OutreachMixin:
                    "confirmations_sent": 0, "stopped": None}
         with self.lock:
             self._gate()
+            self._prune_rate_state()
             rk = self._rk("job", "send-queue", body)
             prev = self._idem("scheduler", rk, body)
             if prev:
@@ -547,14 +559,18 @@ class OutreachMixin:
                         break
                     continue
                 today = self.today()
-                if msg.get("not_before") and self.now() < parse_iso(msg["not_before"]):
-                    summary["deferred"] += 1                # one confirmation mail per address per day
+                if msg.get("purpose") == "confirmation" and self.mail_wait(msg["to_hash"]):
+                    summary["deferred"] += 1                # one confirmation mail per address per day (from send)
                     continue
                 cap = self.settings.confirmation_daily_cap if msg.get("purpose") == "confirmation" \
                     else self.settings.daily_send_cap
                 if msg["channel"] == "email" and not i06_send_cap.may_send(
                         self._stats(today, self._cap_key(msg))["sent"], cap):
                     summary["capped"] += 1
+                    continue
+                if msg.get("purpose") == "confirmation" and msg.get("existing_record") and not i06_send_cap.may_send(
+                        self._stats(today, "known|" + self._cap_key(msg))["sent"], self._known_share(cap)):
+                    summary["capped"] += 1                  # R3-L3: the rest is reserved for new addresses
                     continue
                 port = self.ports.email if msg["channel"] == "email" else self.ports.dm
                 if not port.wired:
@@ -657,7 +673,10 @@ class OutreachMixin:
         review entry for Andre (an active hold with no target)."""
         with self.lock:
             self._gate()
-            rk = self._rk("reply", "direct", body)
+            # AEGIS R3-L1: the key is the request id AND the body's hash: the same id with another body is another
+            # reply (never a 409 that drops an opt-out); the same body again is the same reply
+            target = payload_sha256({k: v for k, v in idem_body.items() if k != "request_id"})[:40]
+            rk = self._rk("reply", target, body)
             prev = self._idem(caller, rk, idem_body)
             if prev:
                 return dict(prev[1])
@@ -711,6 +730,31 @@ class OutreachMixin:
             self._commit("reply_received", self._req(data, caller, rk, idem_body, answer), caller,
                          evidence=evidence or None)
             return answer
+
+    def _a_holds_expired(self, d, at):
+        for hid in d["hold_ids"]:
+            self.holds[hid].update(status="expired", decided_at=at, decision="expired")
+
+    def expire_holds(self, body: dict) -> dict:
+        """The ``hold-expiry`` job (AEGIS R3-L5): an UNRESOLVED hold — a reply that named no influencer, address or
+        handle we could read, so it holds nobody — is closed after INF_UNRESOLVED_HOLD_DAYS on the service clock,
+        recorded and anchored like any other change. Holds with a target are never expired: only Andre lifts them."""
+        with self.lock:
+            self._gate()
+            rk = self._rk("job", "hold-expiry", body)
+            prev = self._idem("scheduler", rk, body)
+            if prev:
+                return {"job": "hold-expiry", "already_ran": True, **(prev[1] or {})}
+            cutoff = self.now() - timedelta(days=self.settings.unresolved_hold_days)
+            ids = sorted(h["hold_id"] for h in self.holds.values()
+                         if h["status"] == "active" and h.get("influencer_id") is None and not h["hashes"]
+                         and parse_iso(h["at"]) <= cutoff)
+            out = {"expired": len(ids)}
+            ev = [("holds_expired", f"job:{body['request_id']}"[:128], {"hold_ids": ids}, ("scheduler", rk))] \
+                if ids else None
+            self._commit("holds_expired", self._req({"hold_ids": ids}, "scheduler", rk, body, out), "scheduler",
+                         evidence=ev)
+            return {"job": "hold-expiry", **out}
 
     def holds_view(self, status: Optional[str]) -> list[dict]:
         with self.lock:
