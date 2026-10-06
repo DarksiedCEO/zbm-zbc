@@ -4,7 +4,7 @@ Status: accepted for build, Oct 6 2026 (founder Q&A the same day). Built and tes
 (from integration `5d49ee9`); **not in force**: no connector transport, vault client, OAuth app, model key,
 re-detection client or Finance refund contract exists, so every apply answers `CONNECTOR_NOT_WIRED` before anything
 is touched, the fire teams answer `MODEL_NOT_WIRED`, nothing is ever counted fixed, and approved refunds stay
-`queued`. Not wired into CI, `PY_SERVICES` or `docs/test-counts.md` (a separate wiring step). Awaiting AEGIS review.
+`queued`. Wired into CI, `PY_SERVICES` and `docs/test-counts.md` on branch `wire-clientfix-28` at f0a9fc7. Awaiting AEGIS review.
 
 Context: department 28 already has `services/delivery-py` (ADR 0011), the AEGIS fix engine for OUR code. This ADR adds
 the lane that fixes CLIENT systems. Inputs: the founder Q&A below; the Sep 27 2026 AEGIS verdict on deer-flow v2.1.0 /
@@ -254,8 +254,8 @@ until Andre adds the OAuth app credentials, the vault client and the transport (
     third-party CRMs (`CFX_CRM_PROVIDER`); WooCommerce if Andre accepts key-based app connections (`CFX_WOOCOMMERCE`).
 11. Andre's approvals by passkey through Cybersecurity (22) instead of `X-Andre-Approval-Token`; caller tokens minted by
     Cybersecurity (22).
-12. CI wiring (`ci.yml`, `PY_SERVICES`, `docs/test-counts.md`) and the console pages (jobs, approvals, frozen
-    resources, refunds, tasks).
+12. ~~CI wiring (`ci.yml`, `PY_SERVICES`, `docs/test-counts.md`)~~ (**done** on branch `wire-clientfix-28`, commit
+    f0a9fc7) and the console pages (jobs, approvals, frozen resources, refunds, tasks).
 
 ## Known limits (accepted)
 

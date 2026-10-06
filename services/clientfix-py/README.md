@@ -23,7 +23,8 @@ Architecture, founder decisions, the connector table with doc citations, and the
 
 **Status:** built and tested; not in force. Nothing is wired: every apply answers `503 CONNECTOR_NOT_WIRED` before
 anything is touched, engaging the fire team answers `503 MODEL_NOT_WIRED`, re-detection answers unknown (nothing is
-ever counted fixed), and approved refunds stay `queued`. Not in CI and not in `docs/test-counts.md` yet.
+ever counted fixed), and approved refunds stay `queued`. Wired into CI and `docs/test-counts.md` on `wire-clientfix-28`
+at f0a9fc7.
 
 ## Run
 
