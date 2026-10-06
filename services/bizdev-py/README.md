@@ -89,7 +89,7 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /responses`, `/responses/{id}/versions`; `GET /responses/{id}` | worker | a response or pitch from approved blocks + custom text |
 | `POST /responses/{id}/approve` | Andre | exact version and hash, naming exactly the sensitivity flags raised |
 | `POST /responses/{id}/submit` | worker | every gate; queued for the submission port |
-| `GET /submissions`; `POST /submissions/{id}/cancel` | worker | the submission queue |
+| `GET /submissions`; `POST /submissions/{id}/cancel` | worker | the submission queue (`queued`, `sending` — outcome unknown, reconciled, never resubmittable — `submitted`, `refused`, `cancelled`) |
 | `POST /partners`; `GET /partners`, `/partners/{id}` | worker | referral, agency_alliance, white_label |
 | `POST /partners/{id}/rate`; `/rate/approve` | worker; Andre | versioned commission rate (0.01..50.00 %) |
 | `POST /partners/{id}/payee` | Andre | Finance payee ref + tax reference (`vault:tax:` / `tok:` only) |

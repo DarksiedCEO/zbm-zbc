@@ -65,8 +65,13 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     `submission-queue` job re-checks every gate from current state, cancels on a hard failure (deadline passed,
     superseded, hash mismatch, a block retired, an addendum item not yet attested, closed), holds while only the
     deal gate is open, and — the port not being wired —
-    leaves it `queued`. With a port, `submission_sending` is recorded before the call, the outcome after; an outcome
-    that cannot be recorded leaves it `sending`, never resent. `deadline-sweep` cancels late queued submissions and
+    leaves it `queued`. With a port, `submission_sending` is recorded before the call, the outcome after. Only
+    `accepted` with a provider reference is `submitted`, and only an explicit `refused` ends the attempt (the response
+    may then be submitted again). A timeout, an exception or any other answer is an UNKNOWN outcome: the submission
+    stays `sending` — never `failed`, never resent, never resubmittable (it may have been delivered) — and each run
+    reconciles it through the port's `submission_status` (the stand-in answers `unknown`). If its deadline passes
+    while it is still unknown, the queue job or `deadline-sweep` opens ONE task for Andre
+    (`SUBMISSION_OUTCOME_UNKNOWN`); it is never auto-failed. (AEGIS round 1 follow-up.) `deadline-sweep` cancels late queued submissions and
     opens one task per pursuit whose deadline passed.
 12. **Government bids (fail closed).** Every government bid carries i05's baseline items (SAM registration,
     debarment / suspension, independent price determination, authority to bind, conflict of interest, gifts and
@@ -228,7 +233,8 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
 - ledger-rust has no filtered read, so every integrity check reads the whole shared ledger (security-py's L7 rate
   limit is kept). `verify_integrity` still reads `entries()` under the lock (service-py's accepted stall).
 - The ledger's `department` field is self-declared by any holder of the ledger token.
-- A send, submission or payout whose outcome cannot be recorded stays `sending` and is never retried on its own.
+- A send, submission or payout whose outcome is unknown stays `sending` and is never retried on its own; submissions
+  and payouts are reconciled through their ports' status calls (stand-ins answer `unknown`).
 - A deal value is what the agent records; the threshold cannot see a price written only into a response's text.
   Andre's approval of every response and pitch (its exact text) and of every win is the control for that.
 - The sensitivity flags (i06), the deceptive-subject rules (i08) and the raw-tax-id scan (i12) are word and shape
@@ -266,3 +272,11 @@ Regression tests: `services/bizdev-py/tests/test_aegis_r1.py` (each fails on 2d3
 - **Lows** body addresses are held whoever sent the reply and after NFKC; `org_key` folds confusables; the window
   applies to closed deals only (decisions 9, 18, 21).
 - **Port** 8480 collided with department 11; the default is now 8490 (decision 1).
+
+## Amendment — AEGIS round 1 follow-up (Oct 6 2026, coordinator-approved)
+
+A submission whose submit call timed out or errored was marked `failed` and could be resubmitted, so a bid that had
+in fact arrived could be submitted twice. Now an unknown outcome stays `sending` (never failed, never resubmittable),
+is reconciled through the new `SubmissionPort.submission_status`, only an explicit refusal makes the response
+resubmittable, and a deadline passing while the outcome is unknown opens one task for Andre (decision 11).
+Regression tests: `services/bizdev-py/tests/test_aegis_r1b.py` (each fails on 22fe413).

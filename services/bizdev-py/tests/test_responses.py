@@ -197,12 +197,12 @@ def test_won_with_stand_ins_stays_pending_delivery(tmp_path):
     assert h.ok(h.job("handoff-retry"))["pending_delivery"] == 2
 
 
-def test_failed_submission_can_be_resubmitted(tmp_path):
-    h = Harness(tmp_path, ports=wired_ports(submission=RecordingSubmission("failed")))
+def test_refused_submission_can_be_resubmitted(tmp_path):
+    h = Harness(tmp_path, ports=wired_ports(submission=RecordingSubmission("refused")))
     p = _responding(h)
     r = h.ready_response(p["pursuit_id"])
     h.ok(h.submit(r), 201)
-    assert h.ok(h.job("submission-queue"))["failed"] == 1
+    assert h.ok(h.job("submission-queue"))["refused"] == 1
     h.ports.submission.status = "accepted"
     h.ok(h.submit(r), 201)
     assert h.ok(h.job("submission-queue"))["submitted"] == 1

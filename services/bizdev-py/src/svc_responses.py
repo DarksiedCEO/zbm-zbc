@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Optional
 
 from errors import Conflict, NotFound, Throttled, Unavailable
-from intelligences import i04_assembly, i06_sensitivity
+from intelligences import i03_deadline, i04_assembly, i06_sensitivity
 from ledger import derived_id
 from reasons import R
 
@@ -73,11 +73,14 @@ class ResponsesMixin:
     def _a_submission_result(self, d, at):
         s = self.submissions[d["submission_id"]]
         s.update(status=d["status"], provider_ref=d.get("provider_ref"), updated_at=at,
-                 reason=None if d["status"] == "submitted" else "PROVIDER_FAILED")
+                 reason=None if d["status"] == "submitted" else "REFUSED_BY_RECIPIENT")
         if d["status"] == "submitted":
             p = self.pursuits[s["pursuit_id"]]
             if p["stage"] == "responding":
                 p.update(stage="submitted", updated_at=at)
+
+    def _a_submission_flagged(self, d, at):
+        pass                                           # its task is applied by _apply
 
     def _a_submission_cancelled(self, d, at):
         self.submissions[d["submission_id"]].update(status="cancelled", reason=d["reason"], updated_at=at)
@@ -341,17 +344,61 @@ class ResponsesMixin:
             return problem, None
         return None, hold
 
+    def _unknown_past_deadline_task(self, sid: str) -> Optional[dict]:
+        """One task for Andre when a submission whose outcome is unknown reaches its deadline (never auto-failed:
+        it may have been delivered)."""
+        s = self.submissions[sid]
+        p = self.pursuits[s["pursuit_id"]]
+        if s["status"] != "sending" or not p["deadline"] or not i03_deadline.passed(p["deadline"], self.now()):
+            return None
+        t = self._task("submission_unknown", f"submission:{sid}", p["deadline"], "SUBMISSION_OUTCOME_UNKNOWN")
+        return None if t["task_id"] in self.tasks else t
+
+    def _settle_submission(self, sid: str, status: str, ref, summary: dict) -> None:
+        """Record what the submission port said about a submission in ``sending``. ``accepted`` with a reference:
+        delivered. ``refused``: certainly not delivered, so the response may be submitted again. Anything else — a
+        timeout, an exception, an unknown or unreadable answer, ``accepted`` without a reference — leaves it
+        ``sending``: never marked failed, never resubmittable, reconciled by the next run through
+        ``submission_status``; past its deadline it opens one task for Andre."""
+        s = self.submissions[sid]
+        if s["status"] != "sending":
+            return
+        if (status == "accepted" and ref) or status == "refused":
+            final = "submitted" if status == "accepted" else "refused"
+            self._commit("submission_result", {"submission_id": sid, "status": final,
+                                               "provider_ref": ref if final == "submitted" else None},
+                         "scheduler", evidence=("submission_result", f"submission:{sid}",
+                                                {"submission_id": sid, "status": final}, (sid, final)))
+            summary["submitted" if final == "submitted" else "refused"] += 1
+            return
+        summary["unknown"] += 1
+        t = self._unknown_past_deadline_task(sid)
+        if t is not None:
+            self._commit("submission_flagged", {"submission_id": sid, "tasks": [t]}, "scheduler",
+                         evidence=("submission_outcome_unknown", f"submission:{sid}",
+                                   {"submission_id": sid, "code": "SUBMISSION_OUTCOME_UNKNOWN"}, (sid, "unknown")))
+
     def submission_tick(self) -> dict:
         """The ``submission-queue`` job: one submission at a time. Under the lock every gate is re-checked from
         current state (the deadline against the injected clock); a send is recorded (typed ``submission_sending``
-        event, then the log line) BEFORE the port is called, outside the lock; the outcome is recorded after. A
-        submission whose outcome could not be recorded stays ``sending`` (never resent on its own)."""
-        summary = {"submitted": 0, "failed": 0, "cancelled": 0, "held": 0, "not_wired": 0}
+        event, then the log line) BEFORE the port is called, outside the lock; the outcome is recorded after
+        (``_settle_submission``). Submissions already ``sending`` are reconciled first. A submission whose outcome is
+        unknown stays ``sending``: never failed, never resent, never resubmittable."""
+        summary = {"submitted": 0, "refused": 0, "unknown": 0, "cancelled": 0, "held": 0, "not_wired": 0}
         with self.lock:
             self._gate()
-            ids = [s["submission_id"] for s in sorted(self.submissions.values(),
-                                                      key=lambda x: (x["queued_at"], x["submission_id"]))
-                   if s["status"] == "queued"]
+            ordered = sorted(self.submissions.values(), key=lambda x: (x["queued_at"], x["submission_id"]))
+            sending = [s["submission_id"] for s in ordered if s["status"] == "sending"]
+            ids = [s["submission_id"] for s in ordered if s["status"] == "queued"]
+        for sid in sending:                                  # reconcile unknown outcomes first
+            try:
+                ans = self.ports.submission.submission_status(sid)          # outside the lock
+                status, ref = ans.status, ans.provider_ref
+            except Exception:      # noqa: BLE001 - an unreadable answer is still unknown
+                status, ref = "unknown", None
+            with self.lock:
+                self._gate()
+                self._settle_submission(sid, status, ref, summary)
         for sid in ids:
             try:
                 with self.lock:
@@ -380,16 +427,12 @@ class ResponsesMixin:
                     pid, sha = s["pursuit_id"], s["content_sha256"]
                 try:
                     res = self.ports.submission.submit(sid, pid, sha, text)     # outside the lock
-                    ok = res.status == "accepted"
-                    ref = res.provider_ref if ok else None
-                except Exception:      # noqa: BLE001 - an adapter error is a failed submission
-                    ok, ref = False, None
+                    status, ref = res.status, res.provider_ref
+                except Exception:      # noqa: BLE001 - a timeout or lost answer: it may have been delivered
+                    status, ref = "unknown", None
                 with self.lock:
-                    status = "submitted" if ok else "failed"
-                    self._commit("submission_result", {"submission_id": sid, "status": status, "provider_ref": ref},
-                                 "scheduler", evidence=("submission_result", f"submission:{sid}",
-                                                        {"submission_id": sid, "status": status}, (sid, status)))
-                    summary["submitted" if ok else "failed"] += 1
+                    self._gate()
+                    self._settle_submission(sid, status, ref, summary)
             except Unavailable:
                 raise
             except Exception:      # noqa: BLE001 - AEGIS round 1 M3: one bad item never stalls the queue

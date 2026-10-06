@@ -502,7 +502,7 @@ def create_app(service: BizDevService, settings: config_mod.Settings) -> FastAPI
 
     @app.get(P + "/submissions", dependencies=auth)
     def submissions(status_: Optional[str] = Query(default=None, alias="status",
-                                                   pattern="^(queued|sending|submitted|failed|cancelled)$"),
+                                                   pattern="^(queued|sending|submitted|refused|cancelled)$"),
                     who: str = Depends(worker)) -> list:
         return svc.submissions_view(status_)
 

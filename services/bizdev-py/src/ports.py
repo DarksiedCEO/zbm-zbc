@@ -6,8 +6,9 @@ its exception text is dropped. No port is ever called with the service lock held
 
 - ``EmailSender``: send one outreach email. Stand-in: ``not_wired`` — the message stays ``queued``, visibly, and
   nothing is recorded as sent.
-- ``SubmissionPort``: deliver one Andre-approved bid / RFP / RFQ response or pitch. Stand-in: ``not_wired`` — the
-  submission stays ``queued`` (re-checked, deadline included, every time the job looks at it).
+- ``SubmissionPort``: deliver one Andre-approved bid / RFP / RFQ response or pitch, and reconcile one whose outcome
+  is unknown (``submission_status``). Stand-in: ``not_wired`` — the submission stays ``queued`` (re-checked, deadline
+  included, every time the job looks at it); its status answer is ``unknown``.
 - ``BidSource``: fetch bid opportunities from a portal. Stand-in raises ``NotWired``; no fetching code exists here.
 - ``Handoff`` x2 (Onboarding: create the client; Finance: draft the first invoice) for a won pursuit. Stand-in:
   ``unavailable`` — the hand-off stays ``pending_delivery``, retried by ``handoff-retry``. A real adapter must be
@@ -55,7 +56,15 @@ class NotWiredSender:
 class SubmissionPort(Protocol):
     wired: bool
 
-    def submit(self, submission_id: str, pursuit_id: str, content_sha256: str, text: str) -> SendResult: ...
+    def submit(self, submission_id: str, pursuit_id: str, content_sha256: str, text: str) -> SendResult:
+        """``accepted`` (with a provider reference) = delivered; ``refused`` = certainly not delivered; anything else
+        (or an exception) is an unknown outcome: the submission stays ``sending`` and is reconciled."""
+        ...
+
+    def submission_status(self, submission_id: str) -> SendResult:
+        """Reconcile one submission whose outcome is unknown: ``accepted`` (with a reference), ``refused``, or
+        anything else = still unknown."""
+        ...
 
 
 class NotWiredSubmission:
@@ -63,6 +72,9 @@ class NotWiredSubmission:
 
     def submit(self, submission_id, pursuit_id, content_sha256, text) -> SendResult:
         return SendResult(NOT_WIRED)
+
+    def submission_status(self, submission_id) -> SendResult:
+        return SendResult("unknown")
 
 
 class BidSource(Protocol):

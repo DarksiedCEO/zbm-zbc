@@ -109,7 +109,13 @@ class RecordingSubmission:
 
     def submit(self, submission_id, pursuit_id, content_sha256, text):
         self.calls.append((submission_id, pursuit_id, content_sha256, text))
+        if isinstance(self.status, BaseException):
+            raise self.status
         return SendResult(self.status, f"sub-ref-{len(self.calls)}" if self.status == "accepted" else None)
+
+    def submission_status(self, submission_id):
+        self.reconciled = getattr(self, "reconciled", []) + [submission_id]
+        return SendResult(*getattr(self, "status_answer", ("unknown", None)))
 
 
 class RecordingHandoff:

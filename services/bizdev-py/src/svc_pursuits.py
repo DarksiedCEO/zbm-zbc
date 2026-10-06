@@ -566,6 +566,10 @@ class PursuitsMixin:
                     t = self._task("deadline_passed", f"pursuit:{p['pursuit_id']}", p["deadline"], "DEADLINE_PASSED")
                     if t["task_id"] not in self.tasks:
                         tasks.append(t)
+            for sid in sorted(x["submission_id"] for x in self.submissions.values() if x["status"] == "sending"):
+                t = self._unknown_past_deadline_task(sid)       # unknown outcome past the deadline: Andre, never failed
+                if t is not None and t["task_id"] not in {x["task_id"] for x in tasks}:
+                    tasks.append(t)
             if cancel or tasks:
                 self._commit("deadline_swept", {"cancel": cancel, "tasks": tasks}, "scheduler",
                              evidence=[("submission_cancelled", f"submission:{sid}",
