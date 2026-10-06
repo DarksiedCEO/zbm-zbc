@@ -44,6 +44,7 @@ def test_r4_h1_a_stranger_cannot_glue_two_contacts_together(tmp_path):
     h.ok(h.job("send-queue"))
     _reply(h, message_id=mb["message_id"], text="Please never write to me again, I mean it")
     ra = _reply(h, message_id=ma["message_id"], text="Sounds good, tell me more")
+    h.contact(email="mallory@evil.test", verify=False)              # a RESOLVED sender (round 5: else no named holds)
     glue = _reply(h, from_email="mallory@evil.test", text="fyi alice@a.test bob@b.test")
     holds = h.holds()
     assert all(len(x["contact_ids"]) <= 1 for x in holds.values())   # nothing merged
@@ -56,6 +57,7 @@ def test_r4_h1_a_stranger_cannot_glue_two_contacts_together(tmp_path):
 def test_r4_h2_opting_out_a_spam_hold_never_suppresses_a_body_named_contact(tmp_path):
     h = Harness(tmp_path, ports=wired_ports())
     a, t = h.contact(email="alice@a.test"), h.template()
+    h.contact(email="spammer@evil.test", verify=False)              # resolved, so its body does name alice
     s = _reply(h, from_email="spammer@evil.test", text="BUY NOW alice@a.test")
     h.ok(h.decide(s["hold_id"], "opt_out"))                           # the spammer's (sender) hold only
     view = h.ok(h.get(f"/contacts/{a['contact_id']}"))
@@ -70,6 +72,7 @@ def test_r4_h2_opting_out_a_spam_hold_never_suppresses_a_body_named_contact(tmp_
 def test_r4_h2_a_named_contact_is_opted_out_only_by_its_own_hold(tmp_path):
     h = Harness(tmp_path, ports=wired_ports())
     a = h.contact(email="alice@a.test")
+    h.contact(email="spammer@evil.test", verify=False)
     _reply(h, from_email="spammer@evil.test", text="BUY NOW alice@a.test")
     named = next(x for x in h.holds().values() if x["contact_ids"] == [a["contact_id"]])
     h.ok(h.decide(named["hold_id"], "opt_out"))
@@ -86,7 +89,7 @@ def test_r4_m1_a_reply_stream_cannot_starve_a_decision(tmp_path):
         _reply(h, from_email=f"x{i}@evil.test", text="hi alice@a.test")   # lands between view and decision
         ok += h.decide(r["hold_id"], "resume", seen=seen).status_code == 200
     assert ok == 5
-    assert _held(h, a) is True                                           # the later named holds still stand
+    assert _held(h, a) is False         # round 5: unresolved outsiders' bodies hold nobody; alice's own holds decided
 
 
 def test_r4_decision_hash_binds_the_set_and_the_action(tmp_path):

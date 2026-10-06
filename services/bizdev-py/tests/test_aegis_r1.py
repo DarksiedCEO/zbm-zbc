@@ -285,7 +285,8 @@ def test_low_body_addresses_held_even_for_a_known_sender(tmp_path):
 
 def test_low_fullwidth_body_address_is_held(h):
     sam = h.contact(email="sam@other.test")
-    h.ok(h.post("/replies", {"request_id": rid(), "from_email": "nobody@unknown.test",
+    h.contact(email="known@sender.test", verify=False)              # round 5: only a resolved sender's body holds
+    h.ok(h.post("/replies", {"request_id": rid(), "from_email": "known@sender.test",
                              "text": "contact ｓａｍ＠ｏｔｈｅｒ．"
                                      "ｔｅｓｔ"}, caller="provider_events"), 201)
     assert h.ok(h.get(f"/contacts/{sam['contact_id']}"))["held"] is True

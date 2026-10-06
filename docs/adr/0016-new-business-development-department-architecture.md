@@ -178,9 +178,12 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     parses (IDN `xn--` addresses parse; i02); a sender that does not parse is held under the keyed hash of its
     normalised raw form. The reply text is never stored (SHA-256). Holds (AEGIS round 4, replacing round 3's groups):
     every reply makes its OWN holds and they never merge — one SENDER hold (the contact resolved through the message
-    or the sender's address, the addresses resolving to them, the raw form of an unparseable sender), and one
-    NAMED hold for each contact written in the body (NFKC, fullwidth forms count) covering only that contact, plus
-    one for each other body address (at most five) covering only that address. All of a reply's holds are linked to
+    or the sender's address, the addresses resolving to them, the raw form of an unparseable sender), and — only when
+    the sender resolves to a known contact or the reply names a message (round 5 M1) — one NAMED hold for each
+    contact written in the body (NFKC, fullwidth forms count; at most ten) covering only that contact, plus one for
+    each other body address (at most five) covering only that address. An unresolved outsider's body holds nobody;
+    the task records `sender_resolved` and `body_addresses_truncated`. One evidence event per reply lists its hold
+    ids; a review task holds at most 50 holds, then a numbered part opens. All of a reply's holds are linked to
     its review task, which is deduped per sender per day. Andre decides EXACTLY the holds he names (`POST
     /holds/decision`, each `{hold_id, reply_id}`), under `decision_sha256` over that set (with each hold's
     `hold_sha256`) and the action; every named hold must be active and unchanged. Holds made later are untouched and
@@ -200,7 +203,8 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
 24. **Audit export** (`GET /audit/export`): the log with emails replaced by their keyed hashes (a raw value without a
     stored hash is dropped) and names, notes, labels and free text by SHA-256 (i13).
 25. **Record first.** Every state change is one `_commit`: its typed evidence events are recorded on the ledger
-    first, then the exact log line is fsynced aside (pending line), anchored on the ledger, appended (exact-size: the
+    first (each event id derived from the request key PLUS the payload hash, round 5: a retry with the same payload
+    dedupes, a retry after the state changed gets a new id, never a lasting 409), then the exact log line is fsynced aside (pending line), anchored on the ledger, appended (exact-size: the
     file must be exactly the in-memory lines; a blank line is never written and refuses start), and only then
     applied by the same `_apply` that replays the log at start. Typed evidence payloads carry ids, codes and hashes
     only: amounts, rates and values enter as `terms_sha256` (the SHA-256 of the canonical terms); emails as keyed
@@ -354,3 +358,14 @@ not finish within 60 s there).
 - **Performance** the group closure was quadratic under the lock. Holds and queued messages are indexed (by contact
   and by address), contacts by address hash, and `GET /holds` paginates first.
 - **Info** a task with no linked hold is never auto-closed.
+
+## Amendment — AEGIS round 5 (Oct 6 2026, on 4251b75): NOT BLOCKING, every item fixed
+
+Regression tests: `services/bizdev-py/tests/test_aegis_r5.py` (each fails on 4251b75).
+
+- **R5-M1** one outside email held every contact it named, with one ledger event per hold. Named holds now need a
+  resolved sender (a known contact or a message id), at most ten per reply; the rest are counted on the task
+  (`body_addresses_truncated`, `sender_resolved`); one evidence event per reply lists its hold ids (decision 21).
+- **Low** evidence ids include the payload hash (decision 25). **Low** `decide_holds` refuses duplicate hold ids
+  itself. **Low** a review task is split into numbered parts past 50 holds. **Low** the README states what the
+  dashboard must show for named holds and what opting out a task does.

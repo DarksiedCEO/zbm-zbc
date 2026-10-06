@@ -179,13 +179,14 @@ def test_l1_every_contact_named_in_a_body_is_held(tmp_path):
     c = h.contact()
     t = h.template()
     body = " ".join(f"x{j}@spam{j}.test" for j in range(8)) + " pat@westagency.test"
-    h.ok(h.post("/replies", {"request_id": rid(), "from_email": "spam@evil.test", "text": body},
+    h.contact(email="sam@other.test", verify=False)                 # round 5: a resolved sender (a contact)
+    h.ok(h.post("/replies", {"request_id": rid(), "from_email": "sam@other.test", "text": body},
                 caller="provider_events"), 201)
     assert h.ok(h.get(f"/contacts/{c['contact_id']}"))["held"] is True
     h.refused(h.queue(c, t), 403, "CONTACT_HELD")
     holds = list(h.holds(status="active").values())           # round 4: one hold each, never merged
     assert len(holds) == 1 + 5 + 1                                    # sender, five strangers, the contact
-    assert [x["contact_ids"] for x in holds if x["contact_ids"]] == [[c["contact_id"]]]
+    assert [x["contact_ids"] for x in holds if x["kind"] == "named" and x["contact_ids"]] == [[c["contact_id"]]]
 
 
 # --------------------------------------------------------------------------------------------------- L2

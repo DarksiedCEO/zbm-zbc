@@ -164,14 +164,16 @@ def test_opt_out_decision_suppresses(tmp_path):
     assert h.ok(h.get(f"/contacts/{c['contact_id']}"))["suppressed"] is True
 
 
-def test_unresolved_reply_holds_named_contact_never_suppresses_it(tmp_path):
+def test_unresolved_reply_never_holds_or_suppresses_a_named_contact(tmp_path):
     h = _wired(tmp_path)
     c = h.contact(email="named@client.test")
     ans = h.ok(h.post("/replies", {"request_id": rid(), "from_email": "stranger@else.test",
                                    "text": "STOP emailing named@client.test"}, caller="provider_events"), 201)
     view = h.ok(h.get(f"/contacts/{c['contact_id']}"))
-    assert view["held"] is True and view["suppressed"] is False
-    assert ans["suppressed"] is True                     # the sender's own address is suppressed
+    assert view["held"] is False and view["suppressed"] is False      # round 5 M1: an outsider's body holds nobody
+    assert ans["suppressed"] is True and ans["body_addresses_truncated"] == 1   # the sender's own address only
+    task = next(t for t in h.ok(h.get("/tasks")) if t["task_id"] == ans["task_id"])
+    assert task["sender_resolved"] is False and task["body_addresses_truncated"] == 1
     bare = h.ok(h.post("/replies", {"request_id": rid(), "text": "hello"}, caller="provider_events"), 201)
     assert bare["held"] is True and bare["sender_resolved"] is False           # recorded anyway, Andre has a task
     assert bare["task_id"] in {t["task_id"] for t in h.ok(h.get("/tasks?status=open"))}

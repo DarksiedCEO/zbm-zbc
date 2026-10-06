@@ -184,8 +184,10 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
             for event_type, subject_id, payload, id_parts in (evidence if isinstance(evidence, list) else
                                                               [evidence] if evidence is not None else []):
                 try:
-                    self._record_twice(derived_id("evd", event_type, *id_parts), event_type, actor, subject_id,
-                                       payload, f"{event_type} {subject_id}")
+                    # AEGIS round 5: the id is the request key PLUS the payload hash — a retry with the same payload
+                    # dedupes on the ledger, a retry after the state changed gets a new id (never a lasting 409)
+                    self._record_twice(derived_id("evd", event_type, *id_parts, payload_sha256(payload)), event_type,
+                                       actor, subject_id, payload, f"{event_type} {subject_id}")
                 except LedgerRecordError:
                     raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
             rec, line = self.log.prepare(kind, at, data)
@@ -292,6 +294,11 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
         if kind == "reply_received":                   # link a task opened in this same line to its holds
             for h in d.get("holds") or ([d["hold"]] if d.get("hold") else []):
                 self._link_task(h)
+            note = d.get("task_note")
+            if note and note["task_id"] in self.tasks:   # what Andre sees on the task (AEGIS round 5 M1)
+                t = self.tasks[note["task_id"]]
+                t["body_addresses_truncated"] = t.get("body_addresses_truncated", 0) + note["body_addresses_truncated"]
+                t["sender_resolved"] = note["sender_resolved"]
         if d.get("request_id") and d.get("actor"):
             self.requests[(d["actor"], d["request_id"])] = (d.get("request_sha"), d.get("_obj"))
 

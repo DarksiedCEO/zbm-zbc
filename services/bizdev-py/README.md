@@ -44,12 +44,17 @@ after a restart), a different body under the same key is `409 REQUEST_ID_REUSED`
 (`finance_event_id`, `finance_ref`) are finance-py's own generated ids (`fin-<prefix>-<40 hex>` or 26 Crockford).
 
 **Hold decisions.** Every reply makes its own holds: one for its sender (the contact resolved through the message
-or the sender's address) and one for each contact or other address named in its body (at most five non-contacts),
-never merged. Andre decides exactly the holds he names: `decision_sha256` is the SHA-256 of the canonical JSON
+or the sender's address) and — only when the sender resolves to a known contact or the reply names a message — one
+for each contact named in its body (at most ten) and each other body address (at most five), never merged. An
+unresolved outsider's body holds nobody. The review task (one per sender per day, split into numbered `part`s of at
+most 50 holds) shows `sender_resolved` and `body_addresses_truncated` (the body addresses that got no hold). Andre decides exactly the holds he names: `decision_sha256` is the SHA-256 of the canonical JSON
 (`sort_keys`, separators `,` `:`, UTF-8) of `{"decision": <resume|opt_out>, "holds": sorted([[hold_id, reply_id,
 hold_sha256], ...])}`, with `hold_sha256` as `GET /holds` shows it. Every named hold must be active and unchanged;
 holds made later are untouched. A contact stays held while ANY active hold covers it. `opt_out` suppresses only what
 the decided hold may suppress: a sender hold its resolved sender addresses, a named hold only its own address.
+The dashboard MUST show `kind: named` holds distinctly from the sender's hold (they are other people the sender
+wrote about), and must make clear that opting out a whole task opts out EVERY named hold in it — each of those
+contacts is suppressed for good.
 
 Headers: `Authorization: Bearer <service token>` on every route but `/health`; `X-NBD-Caller-Token` everywhere
 else; Andre's routes also `X-Andre-Approval-Token`, accepted only through the `dashboard` caller.

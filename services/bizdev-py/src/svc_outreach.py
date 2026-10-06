@@ -25,6 +25,8 @@ from ledger import derived_id
 from reasons import R
 
 BODY_STRANGERS_MAX = 5           # addresses in a reply body that are NOT contacts, held at most this many
+BODY_CONTACTS_MAX = 10           # contacts named in one reply body that get their own hold (AEGIS round 5 M1)
+TASK_HOLDS_MAX = 50              # holds linked to one review task; past it a numbered part is opened (round 5)
 
 
 class OutreachMixin:
@@ -572,40 +574,58 @@ class OutreachMixin:
                 evidence.append(("suppression_added", f"reply:{reply_id}",
                                  {"hashes": sender, "reason": "stop_reply"}, (caller, rk)))
             sender_key = f"contact:{cid}" if cid else (from_h or raw_h or f"reply:{reply_id}")
-            task = self._task("review_reply", sender_key, self.today(), cls)
-            existing = self.tasks.get(task["task_id"])
-            if existing is not None and existing["status"] != "open":
-                task = self._task("review_reply", sender_key, f"{self.today()}|{reply_id}", cls)
-                existing = None
-            tid = task["task_id"]
-            holds = [{"hold_id": derived_id("hld", reply_id), "reply_id": reply_id, "kind": "sender",
-                      "contact_ids": [cid] if cid else [], "hashes": sorted(set(sender) | ({raw_h} if raw_h else set())),
-                      "suppress_hashes": sender, "task_id": tid}]
-            strangers = 0
+            resolved = c is not None or m is not None
+            body_holds, truncated, strangers, named_n = [], 0, 0, 0
             for e in i02_identity.all_emails_in(body["text"]):     # body addresses: each its own hold, never merged
                 eh = i02_identity.keyed(self.pii_key, "email", e)
                 if eh in sender:
                     continue
                 named = self.contact_by_hash.get(eh)
-                if named is None:
-                    if strangers >= BODY_STRANGERS_MAX:
-                        continue
+                # AEGIS round 5 M1: an unresolved outsider's body holds nobody; a resolved sender's holds at most
+                # BODY_CONTACTS_MAX contacts and BODY_STRANGERS_MAX other addresses; the rest are counted
+                if not resolved or (named and named_n >= BODY_CONTACTS_MAX) or \
+                        (not named and strangers >= BODY_STRANGERS_MAX):
+                    truncated += 1
+                    continue
+                if named:
+                    named_n += 1
+                else:
                     strangers += 1
-                holds.append({"hold_id": derived_id("hld", reply_id, eh), "reply_id": reply_id, "kind": "named",
-                              "contact_ids": [named] if named else [], "hashes": [eh], "suppress_hashes": [eh],
-                              "task_id": tid})
+                body_holds.append({"hold_id": derived_id("hld", reply_id, eh), "reply_id": reply_id, "kind": "named",
+                                   "contact_ids": [named] if named else [], "hashes": [eh], "suppress_hashes": [eh]})
+            task, existing = self._review_task(sender_key, cls, 1 + len(body_holds), reply_id)
+            tid = task["task_id"]
+            holds = [{"hold_id": derived_id("hld", reply_id), "reply_id": reply_id, "kind": "sender",
+                      "contact_ids": [cid] if cid else [], "hashes": sorted(set(sender) | ({raw_h} if raw_h else set())),
+                      "suppress_hashes": sender, "task_id": tid}] + [{**x, "task_id": tid} for x in body_holds]
             data["holds"] = holds
-            for hh in holds:
-                evidence.append(("reply_hold_applied", f"hold:{hh['hold_id']}",
-                                 {"hold_id": hh["hold_id"], "kind": hh["kind"], "contact_ids": hh["contact_ids"],
-                                  "hashes": hh["hashes"], "reply_id": reply_id, "class": cls},
-                                 (caller, rk, hh["hold_id"])))
+            data["task_note"] = {"task_id": tid, "body_addresses_truncated": truncated, "sender_resolved": resolved}
+            # AEGIS round 5 M1: ONE evidence event per reply, listing its hold ids
+            evidence.append(("reply_holds_applied", f"reply:{reply_id}",
+                             {"reply_id": reply_id, "class": cls, "hold_ids": [x["hold_id"] for x in holds],
+                              "sender_resolved": resolved, "body_addresses_truncated": truncated}, (caller, rk)))
             data["tasks"] = [] if existing is not None else [task]
             answer = {"reply_id": reply_id, "class": cls, "suppressed": bool(data.get("hashes")), "held": True,
                       "hold_id": holds[0]["hold_id"], "hold_ids": [x["hold_id"] for x in holds], "task_id": tid,
-                      "sender_resolved": bool(sender)}
+                      "sender_resolved": bool(sender), "body_addresses_truncated": truncated}
             self._commit("reply_received", self._req(data, caller, rk, body, answer), caller, evidence=evidence)
             return answer
+
+    def _review_task(self, sender_key: str, cls: str, adding: int, reply_id: str) -> tuple[dict, Optional[dict]]:
+        """The review task for this sender today (AEGIS round 2 L2): the first OPEN part with room for ``adding``
+        more holds; past TASK_HOLDS_MAX a numbered part is opened (round 5). Returns (task, existing-or-None)."""
+        today = self.today()
+        for part in range(1, 100_000):
+            ident = today if part == 1 else f"{today}|part{part}"
+            task = self._task("review_reply", sender_key, ident, cls)
+            task["part"] = part
+            t = self.tasks.get(task["task_id"])
+            if t is None:
+                return task, None
+            if t["status"] == "open" and len(t.get("hold_ids") or []) + adding <= TASK_HOLDS_MAX:
+                return task, t
+        task = self._task("review_reply", sender_key, f"{today}|{reply_id}", cls)
+        return task, None
 
     # ------------------------------------------------------------------------------------------------ hold decisions
 
@@ -647,6 +667,8 @@ class OutreachMixin:
         later are untouched (each has its own task), so a reply stream cannot starve a decision. A contact stays held
         while any active hold covers it."""
         named = body["holds"]
+        if len({x["hold_id"] for x in named}) != len(named):           # AEGIS round 5: refused here, not only in the API
+            raise Invalid(R("INVALID"), field="holds")
         target = i04_assembly.sha(sorted(x["hold_id"] for x in named))[:40]
         with self.lock:
             self._gate()

@@ -395,7 +395,7 @@ def _main(work: Path) -> int:
         say(f"ledger: {len(ents)} entries, {len(mine)} from bizdev; types: {', '.join(types)}")
         check("bids, approvals, attestations, submissions, rates and holds are typed events on the ledger",
               {"log_anchor", "pursuit_opened", "bid_decided", "block_approved", "response_approved",
-               "submission_queued", "checklist_attested", "rate_approved", "template_approved", "reply_hold_applied",
+               "submission_queued", "checklist_attested", "rate_approved", "template_approved", "reply_holds_applied",
                "contact_created"} <= set(types))
         blob = json.dumps(ents)
         check("no email, name, amount, rate or reply text on the ledger",
