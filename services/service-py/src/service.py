@@ -147,8 +147,9 @@ class SupportService:
         if self._dir_lock is not None:
             if lock_token is None:
                 lock_token = self._dir_lock.claim()
-            if self._dir_lock.adopt(lock_token):          # single use (AEGIS a5dd261 L4)
-                self._lock_token = lock_token
+            adopted = self._dir_lock.adopt(lock_token)    # single use (a5dd261 L4); a token of our own (cc27b69 Info)
+            if adopted is not None:
+                self._lock_token = adopted
             else:
                 self._dir_lock = None
                 raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
@@ -634,11 +635,30 @@ class SupportService:
 
     def audit_integrity(self) -> dict:
         """``/svc/v1/audit/integrity``: a closed instance refuses 503 SERVICE_CLOSED (AEGIS a5dd261 M1 / L2)."""
+        return self._integrity_and_ledger(always=False)
+
+    def _integrity_and_ledger(self, always: bool) -> dict:
+        """The integrity job and the audit route. The ledger's chain ``verify()`` (an HTTP call, up to the client
+        timeout) runs OUTSIDE the service lock (AEGIS cc27b69 L1): under the lock, refuse if closed and snapshot the
+        integrity result and the log length; release; verify; re-take the lock and re-check. Closed meanwhile:
+        refused 503 SERVICE_CLOSED, nothing written. The log or the integrity result changed meanwhile: retried
+        once, then the current integrity result is reported with ``ledger_valid: null`` (never a stale pairing)."""
+        for _ in range(2):
+            with self.lock:
+                if self._closed:
+                    raise Unavailable(R("SERVICE_CLOSED"))
+                res = self.verify_integrity(force=True, always=always)
+                seen = (len(self.log), dict(self.integrity))
+            ledger_ok = self.rec.client.verify()
+            with self.lock:
+                if self._closed:
+                    raise Unavailable(R("SERVICE_CLOSED"))
+                if (len(self.log), dict(self.integrity)) == seen:
+                    return {"integrity": res, "ledger_valid": ledger_ok, "log_length": seen[0]}
         with self.lock:
             if self._closed:
                 raise Unavailable(R("SERVICE_CLOSED"))
-            res = self.verify_integrity(force=True)
-            return {"integrity": res, "ledger_valid": self.rec.client.verify(), "log_length": len(self.log)}
+            return {"integrity": dict(self.integrity), "ledger_valid": None, "log_length": len(self.log)}
 
     def _settle_pending(self, by_id: dict) -> tuple[Optional[str], bool]:
         """security-py's (AEGIS R4-1 / R5-1): our own line (kept in memory) is rolled forward; a line found on disk
@@ -2078,13 +2098,9 @@ class SupportService:
     def run_job(self, name: str, body: dict) -> dict:
         if name not in JOBS:
             raise NotFound(R("JOB_UNKNOWN"))
-        if name == "integrity":
-            with self.lock:
-                if self._closed:                          # AEGIS a5dd261 M1: a closed instance runs no job
-                    raise Unavailable(R("SERVICE_CLOSED"))
-                res = self.verify_integrity(force=True, always=True)
-                ledger_ok = self.rec.client.verify()
-            return {"job": name, "integrity": res, "ledger_valid": ledger_ok}
+        if name == "integrity":                          # refused when closed (AEGIS a5dd261 M1); verify() unlocked
+            out = self._integrity_and_ledger(always=True)  # (AEGIS cc27b69 L1)
+            return {"job": name, "integrity": out["integrity"], "ledger_valid": out["ledger_valid"]}
         if not self._tick_lock.acquire(blocking=False):
             raise Conflict(R("JOB_RUNNING"))
         try:

@@ -123,7 +123,7 @@ def test_l4_a_claim_token_is_adopted_once(tmp_path):
     first = make()
     with pytest.raises(store_mod.DataDirBusy, match="already adopted"):
         make()                                                     # the same token, a second time: refused
-    assert s.data_dir_lock.holds(token) and first._lock_token == token   # the first instance keeps its claim
+    assert s.data_dir_lock.holds(first._lock_token)                # the first instance keeps its claim
     first.close()
     assert not s.data_dir_lock.claimed
 

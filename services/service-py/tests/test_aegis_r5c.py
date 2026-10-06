@@ -41,7 +41,7 @@ def test_item1_an_unclaimed_or_stale_token_is_refused(tmp_path):
         make("x" * 32)                                             # someone else's claim is held: refused
     assert lock.claimed and lock.holds(live)                       # and the refused attempt left it alone
     svc = make(live)
-    assert svc._lock_token == live
+    assert lock.holds(svc._lock_token) and not lock.holds(live)   # the service holds a token of its own (cc27b69)
     svc.close()
     assert not lock.claimed
 

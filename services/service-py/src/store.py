@@ -480,14 +480,18 @@ class DataDirLock:
         with self._mutex:
             return self._holds(token)
 
-    def adopt(self, token: Optional[str]) -> bool:
-        """Hand the current claim to ONE service instance: true only for the current claim's token, and only once
-        (AEGIS a5dd261 L4: a second service handed the same token is refused)."""
+    def adopt(self, token: Optional[str]) -> Optional[str]:
+        """Hand the current claim to ONE service instance: only for the current claim's token, and only once
+        (AEGIS a5dd261 L4: a second service handed the same token is refused). Returns a NEW token that only the
+        adopting service holds; the claimer's token stops working, so it can no longer release the adopted claim
+        (AEGIS cc27b69 Info). None when refused."""
+        import secrets
         with self._mutex:
             if self._adopted or not self._holds(token):
-                return False
+                return None
             self._adopted = True
-            return True
+            self._token = secrets.token_hex(16)
+            return self._token
 
     def release_claim(self, token: Optional[str] = None) -> bool:
         """Give the claim back. Only the current claim's token releases it: a stale or wrong token is a no-op (it
