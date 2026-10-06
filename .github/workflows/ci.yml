@@ -1,8 +1,8 @@
 # zbm-zbc continuous integration.
 #
-# One job per service (the twelve pip-managed Python services share one matrix definition and report as separate
+# One job per service (the fourteen pip-managed Python services share one matrix definition and report as separate
 # checks, e.g. "python-tests (finance-py, 3.13)"), the uv-managed delivery-py, ledger-rust, orchestrator-go, the
-# dashboard, the eight self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
+# dashboard, the ten self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
 # delivery-py, dependency and secret scans, and one `required` job that needs every other job so branch protection
 # has a single check to require. See docs/ci.md for what each job proves and what is deliberately not here yet.
 #
@@ -24,7 +24,7 @@
 #
 # Path filtering is done by the `changes` job (a plain `git diff`, no third-party action) so an unrelated change
 # does not run every suite. Shared files (root README.md, docs/**, fixtures/**, devtools/**, .github/**) run
-# everything. The thirteen Python services are one cluster: their tests read each other's sources (ports.py,
+# everything. The fifteen Python services are one cluster: their tests read each other's sources (ports.py,
 # requirements.txt, api.py, ledger-rust's server.rs), so a change to any of them, or to ledger-rust, runs all of
 # them. A path no rule knows about runs everything (fail safe).
 
@@ -152,6 +152,8 @@ jobs:
           - security-py
           - sales-py
           - service-py
+          - influencer-py
+          - bizdev-py
         # macOS (Apple Silicon): every service once, on Python 3.13
         include:
           - {os: macos-26, python: "3.13", service: detection-py}
@@ -166,6 +168,8 @@ jobs:
           - {os: macos-26, python: "3.13", service: security-py}
           - {os: macos-26, python: "3.13", service: sales-py}
           - {os: macos-26, python: "3.13", service: service-py}
+          - {os: macos-26, python: "3.13", service: influencer-py}
+          - {os: macos-26, python: "3.13", service: bizdev-py}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -379,7 +383,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
-        service: [compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py, sales-py, service-py]
+        service: [compliance-py, verification-py, clipper-network-py, finance-py, legal-py, security-py, sales-py, service-py, influencer-py, bizdev-py]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -618,8 +622,9 @@ jobs:
   # ---------------------------------------------------------------------------------------------------------------
   # Secret scan over the whole git history with the gitleaks release binary (checksum-verified download; no
   # third-party action, no licence key). .gitleaks.toml allowlists exact fake strings only: four used by
-  # onboarding-py's redaction tests, two fake Stripe test-key shapes used by finance-py's simulated Stripe, and the
-  # retired test-only PII hash key still in sales-py's history (replaced in 6072160).
+  # onboarding-py's redaction tests, two fake Stripe test-key shapes used by finance-py's simulated Stripe, the
+  # retired test-only PII hash key still in sales-py's history (replaced in 6072160), and the fake tax id still in
+  # bizdev-py's history (tests/test_aegis_r1.py in 22fe413).
   # ---------------------------------------------------------------------------------------------------------------
   secret-scan:
     name: secret-scan (gitleaks)
