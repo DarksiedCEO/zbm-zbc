@@ -83,7 +83,7 @@ All under `/sales/v1` except `/health`. "worker" = `dashboard` or `sales_agent`;
 | `POST /templates/{id}/versions/{v}/approve` | Andre | binds the content hash |
 | `POST /outreach/email`, `/outreach/sms`, `/outreach/voice` | sales_agent | queue (rules checked now and again at send) |
 | `GET /outreach/messages`; `POST /outreach/messages/{id}/cancel` | worker | the queue |
-| `POST /events/email`; `POST /replies` | provider_events | bounces, complaints, replies |
+| `POST /events/email`; `POST /replies` | provider_events | bounces, complaints, replies (a reply is never refused: fields read leniently, sweep A) |
 | `GET /pricebook/{brand}` | worker | the price book |
 | `POST /pricebook/{brand}/lines/{line_id}/approve`, `/withdraw` | Andre | versioned prices |
 | `POST /proposals`; `GET /proposals`, `/proposals/{id}` | worker | build (auto-approved or `pending_andre`) |
@@ -92,3 +92,4 @@ All under `/sales/v1` except `/health`. "worker" = `dashboard` or `sales_agent`;
 | `POST /proposals/{id}/won` | Andre; or worker with the client's acceptance confirmed by Legal | hands off to Onboarding and Finance |
 | `POST /jobs/{send-queue,warmup-reset,handoff-retry,stale-leads,integrity}/run` | scheduler | jobs |
 | `GET /audit/integrity`, `/audit/export` | dashboard, compliance_38 | export with emails and phones as keyed hashes |
+| `GET /audit/evidence` | dashboard, compliance_38 | every typed ledger event, `committed` (named by an anchored log line) or `attempted` (sweep A R6-M1) |
