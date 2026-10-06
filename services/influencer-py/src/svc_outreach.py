@@ -74,7 +74,7 @@ class OutreachMixin:
         self.messages[d["message_id"]] = {**{k: d.get(k) for k in (
             "message_id", "channel", "platform", "influencer_id", "to_hash", "brand", "template_id", "version",
             "template_sha256", "draft_id", "content_sha256", "rendered_sha256", "from_domain", "purpose",
-            "confirmation_id", "existing_record")},
+            "confirmation_id", "existing_record", "requester", "reasked")},
             "status": "queued", "reason": None, "queued_at": at, "updated_at": at, "sent_on": None,
             "provider_ref": None, "events": [], "queued_by": d["actor"]}
 
@@ -547,8 +547,8 @@ class OutreachMixin:
             # new addresses, so a flood of junk applications cannot starve a real creator's confirmation (R2-N1)
             ids = [m["message_id"] for m in sorted(
                 (m for m in self.messages.values() if m["status"] == "queued"),
-                key=lambda m: (m.get("purpose") != "confirmation", not m.get("existing_record"), m["queued_at"],
-                               m["message_id"]))]
+                key=lambda m: (m.get("purpose") != "confirmation", not m.get("existing_record"),
+                               not m.get("reasked")))]   # stable: queue order within; R6-L1: re-asked first
         for mid in ids:
             with self.lock:
                 if self._closed:

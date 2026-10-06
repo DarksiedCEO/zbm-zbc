@@ -58,6 +58,8 @@ class LinkRequest(Strict):
     request_id: Id
     email: Email
     brand: Optional[Brand] = None
+    # AEGIS R6-L1: the hub's keyed hash of the requester's IP or session (opaque; kept only as our keyed hash of it)
+    requester_key: Optional[Hex64] = None
 
 
 class ApplicationIn(Strict):

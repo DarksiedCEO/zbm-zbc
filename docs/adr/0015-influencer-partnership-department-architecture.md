@@ -259,6 +259,10 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
   press, never on a GET, so mail scanners and prefetchers cannot use up the single-use link; the hub derives the
   `request_id` of the click from the token so repeat clicks and retries return the same session (R5-L1). Both are in
   `services/influencer-py/README.md`, "Contract with the hub".
+- *(AEGIS round 6.)* Every public application carries `requester_key`: the hub's HMAC-SHA-256 (under a key only the
+  hub holds) of the requester's IP or portal session, 64 lowercase hex. The service validates its shape, keeps only
+  its own keyed hash of it, and shares the new-address link-mail queue fairly between requesters (R6-L1). Without it a
+  request falls in the keyless bucket, which never displaces keyed mail.
 
 ## Settings
 
@@ -367,3 +371,15 @@ Regressions: `services/influencer-py/tests/test_aegis_r5.py` (each fails on bb07
 | R5-L1 | A mail scanner or prefetcher could use up the single-use link | Hub contract (above and in the README): the link page confirms only on a button press; the click's `request_id` is derived from the token, so repeat clicks get the same session |
 | R5-L2 / L3 | A record created for the address between the click and the submit (a prospect, an import) got a DUPLICATE record from the session's application | The application looks the address up again under the lock and BINDS to the record it finds (the tax route resolves the session's record the same way). Chosen over refusing `STATE_CHANGED` because the click proved control of that very address, which is exactly what binds an existing record when it exists at click time; the application only adds the attestation and the handles no other record holds and never overwrites the record's identity fields (address, name, source, existing handles); refusing would force a new click (and a day's wait for the mail) for a race the creator cannot see. A declared minor in such a session freezes the record found |
 | Info | No procedure for a creator who lost their mailbox | Unlock item 10: the operator procedure today, and the Andre-only, hash-bound route to build (not built) |
+
+## Amendment — AEGIS round 6 (Oct 6 2026, on cd64e6b): NOT BLOCKING, the one Low fixed
+
+Regressions: `services/influencer-py/tests/test_aegis_r6.py` (each fails on cd64e6b and passes after the fix).
+
+| Id | Finding | Fix |
+|---|---|---|
+| R6-L1 | A sustained flood could keep one new creator's link mail evicted for ever: eviction took the oldest mail and sending also went oldest first | **Per-requester fairness** (the reviewer's preferred option). The hub sends an opaque `requester_key` (its keyed hash of the IP or session; 64 lowercase hex, validated; kept only as our own keyed hash of it). A requester has at most `INF_CONFIRMATION_PER_REQUESTER` (default 3) new-address mails queued — past it its OWN oldest is evicted; a full pool evicts the oldest mail of the requester with the MOST queued; requests without a key form their own bucket, which may evict only keyless mail (with none queued, one keyless mail may stand over the pool). Fallback for keyless traffic: a re-ask after an eviction is marked `reasked`, is evicted last within its bucket, and is sent ahead of first-time mail. Within a priority the send order is the queue order (a stable sort; no tie broken by message id). Every eviction stays recorded and anchored (`confirmation_mail_evicted`) and the evicted link stays valid |
+
+Accepted: a flooder who rotates many requester keys (many IPs or sessions) still competes for the pool; bounding that
+is the hub's per-IP / per-session limits and CAPTCHA, and the re-ask fallback keeps a creator who asks again ahead of
+first-time mail.

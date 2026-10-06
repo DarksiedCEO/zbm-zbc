@@ -166,26 +166,56 @@ class ConfirmMixin:
 
     # ------------------------------------------------------------------------------------------------ the link
 
-    def _confirmation_mail(self, cid: str, iid: Optional[str], eh: str, existing_record: bool) -> tuple[dict, list]:
+    def _requester(self, body: dict) -> Optional[str]:
+        """AEGIS R6-L1: the hub's opaque ``requester_key`` (its keyed hash of the IP or session, 64 hex) is kept only as
+        OUR keyed hash of it; a request without one is in the keyless bucket (None)."""
+        k = body.get("requester_key")
+        if not k:
+            return None
+        return "rq-" + hmac.new(self.pii_key, f"requester\x00{k}".encode(), hashlib.sha256).hexdigest()[:32]
+
+    def _confirmation_mail(self, cid: str, iid: Optional[str], eh: str, existing_record: bool,
+                           requester: Optional[str] = None, reasked: bool = False) -> tuple[dict, list]:
         """The queued link mail: on its own queue and daily cap (AEGIS R2-N1); the send-queue job sends at most one per
         address per RESEND_HOURS, counted from SEND time.
 
-        AEGIS R5-M2: a link mail is never refused. ``INF_CONFIRMATION_QUEUE_MAX`` bounds NEW-address link mails only;
+        A link mail is never refused (AEGIS R5-M2). ``INF_CONFIRMATION_QUEUE_MAX`` bounds NEW-address link mails only;
         mail for an address we already hold a record for has its own share, bounded by the records themselves (one
-        open link and one queued mail per address), so a flood of junk addresses can never crowd it out. When the
-        new-address share is full, the OLDEST queued new-address mail is evicted (recorded on the ledger and anchored
-        with the line that queues the new one); its link stays valid, and a repeat request mails it again.
-        Returns (message, [evidence])."""
+        open link and one queued mail per address). Room in the new-address pool is shared FAIRLY between requesters
+        (AEGIS R6-L1), so a sustained flood cannot keep one creator's mail evicted:
+
+        - a requester (the hub's ``requester_key``) has at most ``INF_CONFIRMATION_PER_REQUESTER`` new-address mails
+          queued: past it, ITS OWN oldest mail makes room;
+        - when the pool is full, the requester with the MOST mail queued gives up its oldest (a keyless request may
+          only evict keyless mail: the keyless bucket is its own requester and can never push out a keyed one);
+        - within a bucket a re-asked mail (one whose earlier mail was evicted) goes last, and the send-queue job sends
+          re-asked mail before first-time mail (the fallback when the hub sends no key).
+
+        An eviction is recorded on the ledger and anchored with the line that queues the new mail; the evicted link
+        stays valid and a repeat request mails it again. Returns (message, [evidence])."""
         msg = {"message_id": derived_id("msg", "confirm", cid, self.now().isoformat()), "channel": "email",
                "purpose": "confirmation", "confirmation_id": cid, "influencer_id": iid, "to_hash": eh, "brand": None,
-               "from_domain": self.settings.outreach_domain, "existing_record": existing_record}
+               "from_domain": self.settings.outreach_domain, "existing_record": existing_record,
+               "requester": None if existing_record else requester, "reasked": bool(reasked and not existing_record)}
         if existing_record:
             return msg, []
         new = [m for m in self.messages.values() if m["status"] == "queued"            # queue order (the log's)
                and m.get("purpose") == "confirmation" and not m.get("existing_record")]
-        if len(new) < self.settings.confirmation_queue_max:
+        buckets: dict = {}
+        for m in new:
+            buckets.setdefault(m.get("requester"), []).append(m)
+        own = buckets.get(requester, [])
+        victims = None
+        if requester is not None and len(own) >= self.settings.confirmation_per_requester:
+            victims = own
+        elif len(new) >= self.settings.confirmation_queue_max:
+            allowed = [k for k in buckets if requester is not None or k is None]
+            if allowed:
+                biggest = max(allowed, key=lambda k: (len(buckets[k]), -new.index(buckets[k][0])))
+                victims = buckets[biggest]
+        if not victims:
             return msg, []
-        old = new[0]
+        old = next((m for m in victims if not m.get("reasked")), victims[0])
         msg["evict"] = old["message_id"]
         return msg, [("confirmation_mail_evicted", f"msg:{old['message_id']}",
                       {"message_id": old["message_id"], "conf_id": old["confirmation_id"],
@@ -223,7 +253,9 @@ class ConfirmMixin:
             if c is not None:
                 m = self.messages.get(c.get("message_id") or "")
                 if c["status"] == "pending" and deliverable and (m is None or m["status"] != "queued"):
-                    msg, evicted = self._confirmation_mail(c["conf_id"], existing_id, eh, existing is not None)
+                    msg, evicted = self._confirmation_mail(
+                        c["conf_id"], existing_id, eh, existing is not None, self._requester(body),
+                        reasked=bool(m and m.get("reason") == "QUEUE_EVICTED"))
                     evict = msg.pop("evict", None)
                     self._commit("confirmation_remailed", self._req({"conf_id": c["conf_id"], "message": msg,
                                                                      "evict": evict}, caller, rk, body, c["conf_id"]),
@@ -249,7 +281,8 @@ class ConfirmMixin:
                 conf["content_sha256"] = confirmation_sha256(conf)
             else:
                 conf["status"] = "pending"
-                msg, evicted = self._confirmation_mail(cid, existing_id, eh, existing is not None)
+                msg, evicted = self._confirmation_mail(cid, existing_id, eh, existing is not None,
+                                                       self._requester(body))
                 evict = msg.pop("evict", None)
                 conf["message_id"] = msg["message_id"]
             ev = ("confirmation_requested", f"confirmation:{cid}", {"conf_id": cid, "influencer_id": existing_id,

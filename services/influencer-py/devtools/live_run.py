@@ -403,7 +403,8 @@ def _main(work: Path) -> int:
         r3 = a.post("/replies", {"channel": "email", "message_id": "<123456789@mail.example>",
                                  "from_email": "other@live-creator.example", "text": "STOP\n" + "> quoted\n" * 3000,
                                  "provider_extra": True}, "provider_events")
-        reps = [a.post("/applications", {"request_id": rid(), "email": "flood@live-creator.example"}, "hub")
+        reps = [a.post("/applications", {"request_id": rid(), "email": "flood@live-creator.example",
+                                         "requester_key": hashlib.sha256(b"live-run requester").hexdigest()}, "hub")
                 for _ in range(8)]
         check("AEGIS R2/R4: a long, oddly shaped reply lands; one open link per address, repeats never refused",
               r3.status_code == 201 and {x.status_code for x in reps} == {201}

@@ -180,7 +180,7 @@ def find(obj: Any, exempt: frozenset = frozenset(), _key: str = "", _path: str =
     if isinstance(obj, str):
         if _key in STRICT_REF_KEYS and long_digit_run(obj):
             return "TAX_ID_REFUSED", _path or "body"
-        free = not (ID_KEY.search(_key) or _key.endswith("_ref") or _key in ("request_id", "ref"))
+        free = not (ID_KEY.search(_key) or _key.endswith("_ref") or _key in ("request_id", "ref", "requester_key"))
         if tin_in(obj, free_text=free):
             return "TAX_ID_REFUSED", _path or "body"
     return None
