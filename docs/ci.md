@@ -141,7 +141,7 @@ install stable`, which floats with the stable channel (scout C3-12; a new stable
 - **The Revenue Recovery three-process live run** (ledger-rust + detection-py + orchestrator-go, the run that
   produced `ledger_verify: valid: true` in the root README's review table). No script for it exists in the
   repository — it was driven by hand — so it is not wired. Writing one is the next step; do not add a job that
-  claims it until the script exists and exits non-zero on a mismatch like the five department `live_run.py`s do.
+  claims it until the script exists and exits non-zero on a mismatch like the eight department `live_run.py`s do.
 - **creative-py's `devtools/live_smoke.py`** and **onboarding-py's live server** as separate live-run jobs. The
   smoke script needs an already-running creative-py and ledger and does not start them itself; onboarding-py's
   live ledger-rust tests run inside its pytest suite (and therefore in `python-tests`), so nothing is lost.
