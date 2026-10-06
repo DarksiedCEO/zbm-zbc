@@ -1,11 +1,10 @@
 import os
 import sys
-
-sys.dont_write_bytecode = True
 from pathlib import Path
 
 import pytest
 
+sys.dont_write_bytecode = True
 SRC = Path(__file__).resolve().parents[1] / "src"
 TESTS = Path(__file__).resolve().parent
 for p in (SRC, TESTS):

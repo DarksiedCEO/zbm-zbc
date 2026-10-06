@@ -15,18 +15,23 @@ NUMBER = 6
 NAME = "sensitivity_flags"
 DECIDES = "GIFT / LOBBYING / CONFLICT_OF_INTEREST / CONTINGENT_FEE flags on custom text"
 
+def _rx(pattern: str) -> re.Pattern:
+    """A space in a rule also matches no space: the normaliser joins ``success-fee`` into ``successfee``."""
+    return re.compile(pattern.replace(" ", " ?"))
+
+
 RULES = (
-    ("GIFT", re.compile(r"\b(gifts?|gratuit(y|ies)|meals?|dinners?|lunch(es)?|entertainment|tickets?|honorari(um|a)|"
+    ("GIFT", _rx(r"\b(gifts?|gratuit(y|ies)|meals?|dinners?|lunch(es)?|entertainment|tickets?|honorari(um|a)|"
                         r"donations?|travel (paid|covered)|complimentary|perks?|hospitality|giveaways?|swag|"
                         r"gift ?cards?|free (trip|stay|event))\b")),
-    ("LOBBYING", re.compile(r"\b(lobby\w*|campaign contributions?|political contributions?|pac|elected officials?|"
+    ("LOBBYING", _rx(r"\b(lobby\w*|campaign contributions?|political contributions?|pac|elected officials?|"
                             r"council ?members?|commissioners?|influence|advocacy|government relations|public affairs|"
                             r"meet(ing)? with (the )?(mayor|senator|supervisor|official))\b")),
-    ("CONFLICT_OF_INTEREST", re.compile(r"\b(conflicts? of interest|coi|former (government |agency |county |city |"
+    ("CONFLICT_OF_INTEREST", _rx(r"\b(conflicts? of interest|coi|former (government |agency |county |city |"
                                         r"state )?(employees?|officials?|staff)|revolving door|relatives?|family "
                                         r"members?|spouses?|brother|sister|cousin|related part(y|ies)|ownership "
                                         r"interest|financial interest|personal relationship|friends? (of|with))\b")),
-    ("CONTINGENT_FEE", re.compile(r"\b(contingen\w* fees?|success fees?|finders? fees?|kickbacks?|inducements?|"
+    ("CONTINGENT_FEE", _rx(r"\b(contingen\w* fees?|success fees?|finders? fees?|kickbacks?|inducements?|"
                                   r"commissions? (on|for) (award|winning|the contract)|referral fees?|rebates?)\b")),
 )
 

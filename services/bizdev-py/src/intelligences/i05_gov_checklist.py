@@ -3,13 +3,15 @@
 Decides: the checklist a public-sector bid carries. Every government bid gets the BASELINE items whatever the request
 says; the agent may add items from OPTIONAL (or ``custom`` items with a label). Each item is something only Andre may
 attest, one item at a time, naming the item's exact hash; nothing is ever attested automatically, by default, in bulk
-or by an agent. SENSITIVE items (conflict of interest, gifts and gratuities, lobbying, contingent fees) are flagged to
-Andre as review tasks when the bid is created. Never: fetches a bid portal, decides an answer, or attests."""
+or by an agent. SENSITIVE items (conflict of interest, gifts and gratuities, lobbying, contingent fees, and any custom item
+whose label raises an i06 sensitivity flag) are flagged to Andre as review tasks when they are added. Never: fetches a bid portal, decides an answer, or attests."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+
+from intelligences import i06_sensitivity
 
 NUMBER = 5
 NAME = "gov_bid_checklist"
@@ -46,7 +48,8 @@ def build(pursuit_id: str, requested: list) -> list:
         if key in seen:
             continue
         seen.add(key)
-        items.append({"code": code, "label": label, "sensitive": code in SENSITIVE,
+        sensitive = code in SENSITIVE or (code == "custom" and bool(i06_sensitivity.flags(label)))
+        items.append({"code": code, "label": label, "sensitive": sensitive,
                       "item_sha256": item_sha256(pursuit_id, code, label)})
     if len(items) > MAX_ITEMS:
         raise ValueError("CHECKLIST_TOO_LARGE")

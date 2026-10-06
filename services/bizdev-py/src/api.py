@@ -424,6 +424,10 @@ def create_app(service: BizDevService, settings: config_mod.Settings) -> FastAPI
     def pursuit_deal_approval(pid: str, req: dict = Depends(body(m.DealApproval)), who: str = Depends(andre)) -> dict:
         return svc.approve_deal(_id(pid), req)
 
+    @app.post(P + "/pursuits/{pid}/checklist", dependencies=auth)
+    def extend_checklist(pid: str, req: dict = Depends(body(m.ChecklistExtend)), who: str = Depends(worker)) -> dict:
+        return svc.extend_checklist(who, _id(pid), req)
+
     @app.post(P + "/pursuits/{pid}/checklist/{item_id}/attest", dependencies=auth)
     def attest(pid: str, item_id: str, req: dict = Depends(body(m.Attest)), who: str = Depends(andre)) -> dict:
         return svc.attest(_id(pid), _id(item_id), req)

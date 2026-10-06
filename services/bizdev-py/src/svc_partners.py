@@ -243,7 +243,7 @@ class PartnersMixin:
                 p = self._get(self.partners, target_id, "PARTNER_NOT_FOUND")
                 if body["kind"] not in AGREEMENTS_FOR[p["kind"]]:
                     raise Invalid(R("AGREEMENT_KIND_INVALID"))
-                brand = p["brands"][0] if len(p["brands"]) == 1 else "zbm"
+                brand = p["brands"][0] if len(p["brands"]) == 1 else "both"
                 req = AgreementHandoff(derived_id("agr", caller, rk), body["kind"], brand, target_id, None)
             else:
                 p = self._get(self.pursuits, target_id, "PURSUIT_NOT_FOUND")
@@ -516,6 +516,6 @@ class PartnersMixin:
                                                "finance_ref": ref if done else None}, "scheduler",
                              evidence=("payout_result", f"payout:{pay_id}",
                                        {"payout_id": pay_id, "status": "with_finance" if done else "queued"},
-                                       (pay_id, "result", ref or "none", summary["failed"])))
+                                       (pay_id, "result", ref or "none")))
                 summary["with_finance" if done else "failed"] += 1
         return summary

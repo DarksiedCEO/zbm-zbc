@@ -203,7 +203,8 @@ class OutreachMixin:
                 return self.contact_view(self.contacts[cid])
             c = self._get(self.contacts, cid, "CONTACT_NOT_FOUND")
             fields = {k: body[k] for k in ("first_name", "company") if body.get(k) is not None}
-            if not fields or not all(i08_templates.merge_value_ok(v) for v in fields.values()):
+            if not fields or not all(i08_templates.merge_value_ok(v) and not i08_templates.urls(v)
+                                     for v in fields.values()):
                 raise Invalid(R("MERGE_FIELD_REFUSED"))
             data = {"contact_id": cid, **fields}
             self._commit("merge_fields_verified", self._req(data, "dashboard", rk, body, cid), "dashboard",
@@ -433,7 +434,7 @@ class OutreachMixin:
                     raise Invalid(R("EMAIL_INVALID"))
                 hashes.append(i02_identity.keyed(self.pii_key, "email", e))
             if not hashes:
-                raise Invalid(R("REPLY_SENDER_REQUIRED"))
+                raise Invalid(R("INVALID"))
             self._suppress(caller, rk, body, hashes, "manual")
             return {"suppressed": sorted(set(hashes))}
 

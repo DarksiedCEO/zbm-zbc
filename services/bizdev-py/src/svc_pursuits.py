@@ -72,6 +72,12 @@ class PursuitsMixin:
         if tid and tid in self.tasks and self.tasks[tid]["status"] == "open":
             self.tasks[tid].update(status="closed", closed_at=at, outcome="attested")
 
+    def _a_checklist_extended(self, d, at):
+        p = self.pursuits[d["pursuit_id"]]
+        for item in d["items"]:
+            p["checklist"].append({**item, "attested_at": None})
+        p["updated_at"] = at
+
     def _a_pursuit_won(self, d, at):
         p = self.pursuits[d["pursuit_id"]]
         p.update(stage="won", updated_at=at, closed_reason="won")
@@ -346,6 +352,40 @@ class PursuitsMixin:
                          evidence=("checklist_attested", f"pursuit:{pid}",
                                    {"pursuit_id": pid, "item_id": item_id, "item_sha256": item["item_sha256"],
                                     "code": item["code"]}, ("andre", rk)))
+            return self.pursuit_view(p)
+
+    def extend_checklist(self, caller: str, pid: str, body: dict) -> dict:
+        """A buyer's addendum adds certifications: items may be ADDED (never removed or edited) until submission;
+        each new item is unattested and a sensitive one opens a task for Andre."""
+        with self.lock:
+            self._gate()
+            rk = self.rk("checklist_extend", pid, body)
+            if self._idem(caller, rk, body):
+                return self.pursuit_view(self.pursuits[pid])
+            p = self._open(pid)
+            if p["kind"] != "government_bid":
+                raise Conflict(R("NOT_A_GOVERNMENT_BID"))
+            if p["stage"] == "submitted" or any(s["pursuit_id"] == pid and s["status"] in ("sending", "submitted")
+                                                for s in self.submissions.values()):
+                raise Conflict(R("STAGE_NOT_ALLOWED"))
+            existing = [{"code": i["code"], "label": i["label"]} for i in p["checklist"]
+                        if i["code"] not in i05_gov_checklist.BASELINE]
+            try:
+                full = i05_gov_checklist.build(pid, existing + [dict(x) for x in body["items"]])
+            except ValueError as exc:
+                raise Invalid(R(str(exc))) from None
+            have = {i["item_sha256"] for i in p["checklist"]}
+            new = [i for i in full if i["item_sha256"] not in have]
+            if not new:
+                return self.pursuit_view(p)
+            for item in new:
+                item["item_id"] = derived_id("chk", pid, item["code"], item["label"])
+            tasks = [self._task("checklist_sensitive", f"pursuit:{pid}", i["item_id"], i["code"])
+                     for i in new if i["sensitive"]]
+            data = {"pursuit_id": pid, "items": new, "tasks": tasks}
+            self._commit("checklist_extended", self._req(data, caller, rk, body, pid), caller,
+                         evidence=("checklist_extended", f"pursuit:{pid}",
+                                   {"pursuit_id": pid, "items": [i["item_sha256"] for i in new]}, (caller, rk)))
             return self.pursuit_view(p)
 
     # ------------------------------------------------------------------------------------------------ gates

@@ -1,4 +1,4 @@
-"""Contact and counterparty identity (ADR 0016 decisions 9 and 19). Copied from sales-py's i02_identity (email and
+"""Contact and counterparty identity (ADR 0016 decisions 9 and 20). Copied from sales-py's i02_identity (email and
 domain rules, keyed hashes); phone handling dropped (this department never texts or calls).
 
 Decides: the canonical form of an email (lowercased, ``+tag`` removed), a domain (lowercased, ``www.`` removed), a

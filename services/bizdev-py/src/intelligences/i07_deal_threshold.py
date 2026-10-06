@@ -21,7 +21,7 @@ NUMBER = 7
 NAME = "deal_threshold"
 DECIDES = "the counterparty group's aggregate value and whether it needs Andre"
 
-LIVE = frozenset({"identified", "qualifying", "responding", "submitted", "won", "registered", "pending_andre"})
+LIVE = frozenset({"identified", "qualifying", "responding", "submitted", "won", "registered"})
 
 
 def keys(counterparty_ref: str, domain_registrable: str, org: str) -> list[str]:

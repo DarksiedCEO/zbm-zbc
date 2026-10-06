@@ -26,7 +26,7 @@ AGREEMENT_KINDS = ("referral_agreement", "alliance_agreement", "white_label_agre
 class AgreementHandoff:
     handoff_id: str
     kind: str                         # one of AGREEMENT_KINDS
-    brand: str
+    brand: str                        # zbm | zbc | both (a partner of both brands)
     partner_id: Optional[str]
     pursuit_id: Optional[str]
 

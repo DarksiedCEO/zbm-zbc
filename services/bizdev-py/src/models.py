@@ -105,6 +105,11 @@ class PursuitCreate(Strict):
     checklist: list[ChecklistRequest] = Field(default_factory=list, max_length=50)
 
 
+class ChecklistExtend(Strict):
+    request_id: Id
+    items: list[ChecklistRequest] = Field(min_length=1, max_length=20)
+
+
 class ValueSet(Strict):
     request_id: Id
     value: Money
