@@ -754,9 +754,9 @@ class OutreachMixin:
             # every number tied to the reply: the contact's, the message's, the sender's
             phones = {h for h in (phone_h, msg["to_hash"] if msg and msg["channel"] != "email" else None,
                                   c.get("phone_hash") if c else None) if h}
-            # AEGIS S4-M2: an UNRESOLVED reply may name its sender in the body. A number in the body is held (and
-            # suppressed if the reply is an opt-out); an address in the body resolves to a contact whose numbers are
-            # held. A person always reviews an unresolved reply.
+            # AEGIS S4-M2 / S5-L2: an UNRESOLVED reply may name its sender in the body. A number in the body is
+            # HELD (never suppressed: anyone can type anyone's number); an address in the body resolves to a contact
+            # whose numbers are held. A person always reviews an unresolved reply and confirms any opt-out.
             body_phones: set = set()
             named_phones: set = set()
             if contact_id is None:
@@ -778,8 +778,9 @@ class OutreachMixin:
                 # is suppressed, and any phone's consents are revoked (ADR 0013 decision 13)
                 hashes = {h for h in (email_h, phone_h, msg["to_hash"] if msg else None,
                                       c.get("email_hash") if c else None, c.get("phone_hash") if c else None) if h}
-                hashes |= body_phones
-                if not hashes and not named_phones:
+                # S5-L2: only the SENDER's own address and number (and the resolved contact's) get the automatic
+                # opt-out; a number merely written in the body is held for a person, never suppressed or revoked
+                if not hashes and not named_phones and not body_phones:
                     raise Invalid(R("REPLY_SENDER_REQUIRED"))
                 if hashes:
                     phs = sorted(h for h in hashes if h.startswith("phone:"))
@@ -788,7 +789,7 @@ class OutreachMixin:
                     data.update(hashes=sorted(hashes), reason="stop_reply")
                     evidence.append(("suppression_added", f"reply:{reply_id}",
                                      {"hashes": sorted(hashes), "reason": "stop_reply"}, (caller, rk)))
-                hold_phones = named_phones - hashes          # a contact named by address: held for a person
+                hold_phones = (named_phones | body_phones) - hashes     # named in the body: held for a person
             else:
                 # AEGIS S3-C1/C2/H1: no interpretation on any path that can lead to another text or call. ANY reply,
                 # on any channel, holds phone outreach (SMS and voice, both brands) for every number of the resolved

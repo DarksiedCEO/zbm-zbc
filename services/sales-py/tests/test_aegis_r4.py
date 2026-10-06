@@ -105,13 +105,14 @@ def test_s4_l1_toll_free_is_refused(tmp_path):
 
 # ------------------------------------------------------------------ S4-M2 unattributed replies
 
-def test_s4_m2_unattributed_opt_out_naming_a_number_suppresses_it_and_opens_a_task(w):
+def test_s4_m2_unattributed_opt_out_naming_a_number_holds_it_and_opens_a_task(w):
+    """Since round 4b (S5-L2) a number in the body is held for a person, not suppressed."""
     lead, t = texted(w)
     r = w.ok(w.post("/sales/v1/replies", {"request_id": rid(), "channel": "sms", "from_phone": "+12125550199",
                                           "text": "this is jane, stop texting 3105550100"}, "provider_events"), 201)
-    assert r["suppressed"] is True and r["task_id"]
+    assert r["held"] is True and r["task_id"]
     assert w.svc.tasks[r["task_id"]]["kind"] == "review_reply"
-    w.refused(q_sms(w, lead["contact_id"], t), 403, "SUPPRESSED")
+    w.refused(q_sms(w, lead["contact_id"], t), 403, "PHONE_HOLD")
     w.ok(w.job("send-queue"))
     assert len(w.ports.sms.sent) == 1
 

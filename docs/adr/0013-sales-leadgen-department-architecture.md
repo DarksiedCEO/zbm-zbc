@@ -221,7 +221,7 @@ Regressions: `services/sales-py/tests/test_aegis_r4.py` (the reviewer's cases). 
 
 | Id | Finding | Fix |
 |---|---|---|
-| S4-M1 (Medium, treated as Critical) | US area codes that span two time zones were mapped to one, so "the stricter wins" was false: an 850 (Florida panhandle) number with a Chicago zone was texted at 21:30 Eastern, a 928 Navajo Nation number with a Phoenix zone at 21:30 Mountain daylight | Every area code that spans zones lists every zone it covers: 850/448 ET+CT; 928 Arizona+Mountain (Navajo daylight time); 541/458 and 775 Pacific+Mountain; 208/986 Mountain+Pacific; 308, 605, 701, 785, 620, 915, 432, 580 Central+Mountain; 219, 574, 812, 930, 270, 364, 606, 423, 931, 906, 334/483 Eastern+Central; 907 Alaska+Hawaii-Aleutian; Canada's 236/250/257/672/778, 306/639/474, 367/418/581, 807, 709/879, 867. The window must hold in the recorded zone and in every listed zone, so the claim is now true; a test checks each spanning code lists zones with different UTC offsets |
+| S4-M1 (Medium, treated as Critical) | US area codes that span two time zones were mapped to one, so "the stricter wins" was false: an 850 (Florida panhandle) number with a Chicago zone was texted at 21:30 Eastern, a 928 Navajo Nation number with a Phoenix zone at 21:30 Mountain daylight | Every area code that spans zones lists every zone it covers: 850/448 ET+CT; 928 Arizona+Mountain (Navajo daylight time); 541/458 and 775 Pacific+Mountain; 208/986 Mountain+Pacific; 308, 605, 701, 785, 620, 915, 432, 580 Central+Mountain; 219, 574, 812, 930, 270, 364, 606, 423, 931, 906, 334/483 Eastern+Central; 907 Alaska+Hawaii-Aleutian; Canada's 236/250/257/672/778, 306/639/474, 367/418/581, 807, 709/879, 867. The window must hold in the recorded zone and in every listed zone (*corrected in round 4b:* the claim that this made "the stricter wins" true everywhere was not yet true — 306/639/474 lacked Manitoba time for Creighton and Denare Beach, S5-M1); a test checks each spanning code lists zones with different UTC offsets |
 | S4-M2 (Medium) | A reply that could not be tied to a contact sometimes opened no task (opt-outs) and never looked at the numbers or addresses in its body, so "this is Jane, stop texting 310 555 0100" from another phone left Jane's texts running | An unresolved reply ALWAYS opens a `review_reply` task, opt-outs included. Numbers in the body are held (and suppressed when the reply is an opt-out); an address in the body resolves to its contact, whose numbers are held (`i02_identity.phones_in` / `emails_in`, at most five each). One commit records every typed event first (suppression and hold) |
 | S4-L1 (Low) | The area-code table missed geographic codes (208, 812, 423, 270, 606, 308, 915, 458, 986, 906, 930, ...) and listed the non-geographic 456 | Rebuilt from the NANPA geographic NPA list by state, province and territory (overlays included); 456 removed. A test asserts every code is a geographic NPA (`[2-9][0-8][0-9]`, not N11, not 37X/96X, not 456/5XX/600/622/700/710/8XX toll-free/900) and the named codes are present. An unlisted code is still refused (`AREA_CODE_UNKNOWN`) |
 | S1-L4 (Low, round 1) | Its text had not reached the fix pass | Recorded in the round-1 residuals above |
@@ -231,3 +231,23 @@ Acme, quit texting my cell" from a personal address) cannot be tied to anyone; i
 and its sender's own address or number is suppressed if it is an opt-out, but texts to the contact it meant keep
 their current state until the person acts. Area codes added to the plan after this table was built are refused until
 the table is updated (fail closed).
+
+## Amendment — AEGIS round 4b (Oct 5 2026): NOT BLOCKING, every finding fixed anyway
+
+Regressions: `services/sales-py/tests/test_aegis_r4b.py`. Every new guard was mutation-checked.
+
+| Id | Finding | Fix |
+|---|---|---|
+| S5-M1 (Medium, treated as Critical) | Saskatchewan's 306/639/474 listed Regina and Alberta time but not Manitoba time, kept by Creighton and Denare Beach: a 306 number recorded as Regina was texted at 21:30 local in Creighton | 306/639/474 list America/Winnipeg too. The table was swept again for communities that keep another zone; each is covered by an offset-equivalent listed zone, checked by a test: Lloydminster (Alberta time, 306/639), Blanc-Sablon (Atlantic, 418/367/581), Creston and Fort Nelson (Mountain standard, the B.C. codes), Nunavut's Iqaluit / Rankin Inlet / Cambridge Bay (867), Atikokan (Eastern standard, 807), Labrador (Atlantic, 709/879), Phenix City (Eastern, 334), West Wendover and Jackpot (Mountain, 775), Kenton (Mountain, 580). "The stricter wins" now holds for every listed code |
+| S5-L1 (Low) | 231 and 269 (Michigan, Eastern) were missing | Added. Cross-check against the round-3 table (48cf35f): the codes missing from the round-4 table were 269 (dropped by mistake, restored) and 456 (non-geographic, removed on purpose); no other code was dropped. A test pins this. 748 (a Colorado overlay) is added. 235 (Missouri) and 324 (Florida) stay: they are assigned overlays |
+| S5-L2 (Low) | A number written in the body of an unattributed opt-out was permanently suppressed, and its consents revoked: anyone could opt out anyone ("unsubscribe. stop texting 310 555 0100" from a stranger's address) | A number in the body is HELD, never suppressed or revoked; a person confirms on the review task (Andre's `opt_out` decision makes it permanent, `not_an_opt_out` releases it). Only the sender's own number or address — and the contact the reply resolves to through the message or the sender — gets the automatic opt-out |
+
+**Abuse case (S5-L2).** A stranger can still cause a HOLD on someone else's number by naming it in a reply. That pauses
+texts and calls to that number until Andre decides the task; it never suppresses the number and never revokes its
+consents, so the worst outcome is a delayed text, never a lost opt-in or an unwanted one.
+
+**Email-address asymmetry (S5-L2).** An email address written in a reply's body only resolves a contact so that its
+numbers are held; it never suppresses that address (there is no email hold: email is suppressed only for the sender's
+own address, the address the message went to, or an address a person suppresses). A genuine person who writes from a
+personal account and names their work address is therefore not automatically removed from email; the review task
+shows the reply to a person, who suppresses it.
