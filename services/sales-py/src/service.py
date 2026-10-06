@@ -80,7 +80,7 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
         self.consents: dict[str, list] = {}
         self.templates: dict[str, dict] = {}
         self.messages: dict[str, dict] = {}
-        self.warmup: dict = {"step": 0, "started_on": None, "advanced_on": None}
+        self.warmup: dict[str, dict] = {}           # per outreach domain (AEGIS S1-M2)
         self.day_stats: dict[str, dict] = {}
         self.pricebook: dict[str, dict] = {}
         self.proposals: dict[str, dict] = {}
@@ -374,9 +374,9 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
                 "outreach_domain": s.outreach_domain,
                 "email_outreach_configured": bool(s.outreach_domain and s.postal_address),
                 "ports_wired": self.ports.wired(),
-                "warmup_step": self.warmup["step"] + 1,
+                "warmup_step": self._wu(s.outreach_domain)["step"] + 1,
                 "send_cap_today": self._cap_today(),
-                "sent_today": self._stats(self.today())["sent"],
+                "sent_today": self._stats(self.today(), s.outreach_domain)["sent"],
                 "queued": sum(1 for m in self.messages.values() if m["status"] == "queued"),
                 "pending_andre": sum(1 for p in self.proposals.values() if p["status"] == "pending_andre"),
                 "handoffs_pending": sum(1 for h in self.handoffs.values() if h["status"] == "pending_delivery"),

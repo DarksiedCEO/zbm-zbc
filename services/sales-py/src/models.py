@@ -272,8 +272,15 @@ class ProposalSend(Strict):
     contract_ref: Id
 
 
+class Acceptance(Strict):
+    kind: Literal["legal_acceptance", "esign_envelope"]
+    ref: Id
+
+
 class ProposalWon(Strict):
+    """Won needs Andre (dashboard + his token) or the client's recorded acceptance, confirmed by Legal (S1-L1)."""
     request_id: Id
+    acceptance: Optional[Acceptance] = None
 
 
 class ProposalLost(Strict):

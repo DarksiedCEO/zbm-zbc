@@ -26,8 +26,9 @@ agent calls this service yet.
    (Andre's console: referrals, partners; with Andre's token, Andre himself), `scheduler`, `sales_agent` (the agent
    runtime that works the pipeline), `provider_events` (bounce, complaint and reply webhooks relayed from the send
    providers), `compliance_38` (audit reads).
-3. **Fail closed at start.** Missing service token, a production start without `SALES_DATA_DIR` or
-   `SALES_PII_HASH_KEY_FILE`, an outreach domain equal to, under or over one of `SALES_PRIMARY_DOMAINS` (or set without
+3. **Fail closed at start.** Missing service token, a production start without `SALES_DATA_DIR`, no
+   `SALES_PII_HASH_KEY_FILE` in production or with any `SALES_DATA_DIR`, `SALES_PRIMARY_DOMAINS` naming fewer than two
+   registrable domains (both brands'), an outreach domain sharing a registrable domain with one of them (or set without
    them, or without `SALES_POSTAL_ADDRESS`), `SALES_AUTO_APPROVE_MAX` above 10000.00, a warm-up schedule that starts
    above 50 a day, decreases, more than doubles in a day or exceeds 500, a `noreply` From mailbox, or any switch that
    would select an unbuilt provider or client (`SALES_EMAIL_PROVIDER`, `SALES_SMS_PROVIDER`, `SALES_VOICE_PROVIDER`,
@@ -137,3 +138,34 @@ agent calls this service yet.
 ## Settings
 
 All settings are in `services/sales-py/README.md`.
+
+## Amendment — AEGIS round 1 (Oct 5 2026): BLOCKING, every finding fixed
+
+Regressions: `services/sales-py/tests/test_aegis_r1.py` (each the reviewer's scenario). Each new guard was
+mutation-checked on a copy: removing it fails at least one test.
+
+| Id | Finding | Fix |
+|---|---|---|
+| S1-H1 (High) | Merge fields (a company name typed into a public form) injected unapproved or deceptive copy and links into Andre-approved emails | A merge value the template uses must be ASCII letters, digits, space and `.'&-`, at most 40 characters, with no `://`, `www.` or `@` (else `MERGE_FIELD_REFUSED`); the RENDERED subject is checked for deception (`SUBJECT_DECEPTIVE`) and the rendered text may carry no URL or domain the approved template does not (`URL_NOT_APPROVED`) — at queue time and again at send time |
+| S1-H2 (High) | A deal split into proposals of $10,000 or less was auto-approved and sent piece by piece | A proposal is auto-approved only if it AND the opportunity's approved, sent and won proposals together stay within `SALES_AUTO_APPROVE_MAX`; otherwise `pending_andre` with `OPPORTUNITY_TOTAL_OVER_MAX` (lost proposals do not count) |
+| S1-H3 (High) | Plain-language SMS/voice revocations ("please cancel", "wrong number", fullwidth or dotted STOP, Spanish) went to review and texts continued | The classifier normalises (NFKC, accents removed, punctuation between letters removed); on SMS and voice any cancel / end / quit / stop / unsubscribe / opt out / revoke anywhere, "wrong number", "lose my number", "leave me alone", "remove", "no more texts/messages/calls", and alto / parar / cancelar / baja / "no más mensajes" are opt-outs; when in doubt, suppress; an opt-out suppresses every channel and both brands |
+| S1-M1 (Medium) | The agent could move a contact's time zone to a daytime zone and text at night | Only hub, onboarding and dashboard set a time zone, each change is a typed ledger event (`contact_time_zone_set`) before it applies, and a +1 (NANP) number must have an `America/*` or US Pacific zone (`TIME_ZONE_PHONE_MISMATCH`, at intake too) |
+| S1-M2 (Medium) | Warm-up was global: a brand-new outreach domain inherited the old domain's full pace | Warm-up step and daily counts are kept per outreach domain; a new domain starts at day 1 |
+| S1-M3 (Medium) | The outreach-domain check was a suffix test (`go.zbestmedia.com` beside `www.zbestmedia.com` passed; one primary listed let the sister brand's domain be the outreach domain) | Registrable domains are compared (last two labels, three under a listed two-level suffix such as `co.uk`, `com.au`); `SALES_PRIMARY_DOMAINS` must name at least two different registrable domains (both brands), and none may share one with the outreach domain |
+| S1-M4 (Medium) | The one-click unsubscribe suppressed the email only; texts continued under the old consent | It suppresses every hash of the contact and revokes all consents, as an opt-out reply does; a spam complaint does the same |
+| S1-M5 (Medium) | The key rule (16 different characters) refused about a third of `openssl rand -hex 32` keys, and the committed live run used a 24-byte hex key and failed intermittently | The key file holds hex or base64 of at least 32 decoded bytes; the decoded bytes are the key (at least 8 different values); the live run uses a 32-byte key and passes as committed |
+| S1-L1 (Low) | Any worker could mark a proposal won, creating a client and an invoice draft | Won needs Andre (dashboard + his token) or the client's acceptance of THIS proposal (Legal acceptance or e-sign envelope) confirmed through the Legal port (stand-in: `LEGAL_UNAVAILABLE`); `proposal_won` is a typed ledger event |
+| S1-L2 (Low) | A STOP or reply refused with 503 (ledger down) is lost unless the relay retries | Stated adapter requirement (below) |
+| S1-L3 (Low) | `SALES_NON_PRODUCTION=1` with a data directory wrote a durable log under the fixed test key | A real key is required whenever `SALES_DATA_DIR` is set |
+| S1-L4 (Low) | Accepted as a residual by the reviewer | Recorded below |
+
+**Adapter requirement (S1-L2).** The provider-events relay (bounces, complaints, replies) and the hub (unsubscribe,
+consent revocation) MUST retry a 503 with the same `request_id` until it is answered 2xx or 4xx, with backoff and an
+alert after 15 minutes. A STOP must never be dropped because the ledger was briefly down; the service refuses rather
+than suppress unrecorded, so the retry is what makes the opt-out land.
+
+**Residuals (accepted).** S1-L4 was accepted by the round-1 review as a residual; its text did not reach this fix
+pass, and the integration lead records its description here. Splitting a deal across several opportunities of one
+account (each needs its own qualified lead) is not summed (S1-H2 is per opportunity, as the review asked). The
+merge-value rule is ASCII-only: a contact whose first name or company carries other letters (José, Zoë) gets no
+template that uses that field (refused, never altered).

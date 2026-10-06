@@ -136,6 +136,11 @@ def rid() -> str:
     return "live-" + uuid.uuid4().hex
 
 
+def phone_for(zone: str, local: str) -> str:
+    """A number that fits the zone (a +1 number must have an American zone, AEGIS S1-M1)."""
+    return f"+1310555{local}" if zone.startswith(("America/", "Pacific/Honolulu")) else f"+4420718{local}"
+
+
 def lead_body(email, phone, tz, kind="site_form", source="inbound", interest=("revenue_recovery",), **extra):
     contact = {"name": "Live Person", "email": email, "time_zone": tz}
     if phone:
@@ -158,7 +163,7 @@ def _main(work: Path) -> int:
     data = work / "sales"
     env = {"SALES_SERVICE_TOKEN": TOKEN, "SALES_CALLER_TOKENS": json.dumps(CALLERS),
            "SALES_DATA_DIR": str(data), "SALES_ANDRE_APPROVAL_TOKEN": ANDRE,
-           "SALES_PII_HASH_KEY_FILE": secret_file(etc / "pii.key", os.urandom(24).hex().encode()),
+           "SALES_PII_HASH_KEY_FILE": secret_file(etc / "pii.key", os.urandom(32).hex().encode()),
            "SALES_OUTREACH_DOMAIN": "zbm-outreach.example", "SALES_PRIMARY_DOMAINS": "zbestmedia.com,zbestclips.com",
            "SALES_POSTAL_ADDRESS": "123 Example Street, Los Angeles, CA 90001", "SALES_PORT": str(ps),
            "LEDGER_SERVICE_URL": L, "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN}
@@ -189,7 +194,7 @@ def _main(work: Path) -> int:
         # --- leads ------------------------------------------------------------------------------------------------
         day_zone, night_zone = zone_where(True), zone_where(False)
         say(f"recipient zones: daytime {day_zone}, night {night_zone}")
-        r = a.post("/leads", lead_body("buyer@live-shop.example", "+13105550123", day_zone), "hub")
+        r = a.post("/leads", lead_body("buyer@live-shop.example", phone_for(day_zone, "0123"), day_zone), "hub")
         lead = r.json()
         check("an inbound site-form lead is scored and routed", r.status_code == 201 and lead["brand"] == "zbm"
               and lead["status"] == "qualified")
@@ -245,7 +250,7 @@ def _main(work: Path) -> int:
         check("express consent recorded", r.status_code == 201)
         r = a.post("/outreach/sms", {**sms, "request_id": rid()}, "sales_agent")
         check("with consent, inside the recipient's window, the text is queued", r.status_code == 201)
-        night = a.post("/leads", lead_body("night@night-shop.example", "+13105550199", night_zone), "hub").json()
+        night = a.post("/leads", lead_body("night@night-shop.example", phone_for(night_zone, "0199"), night_zone), "hub").json()
         a.post("/consents", {"request_id": rid(), "contact_id": night["contact_id"], "channel": "sms", "brand": "zbm",
                              "source": "web_form",
                              "captured_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -285,6 +290,14 @@ def _main(work: Path) -> int:
         big = a.post("/proposals", {"request_id": rid(), "opportunity_id": opp["opportunity_id"],
                                     "lines": [{"line_id": line, "quantity": 5}]}, "sales_agent").json()
         check("over $10,000 waits for Andre", big["status"] == "pending_andre")
+        third = a.post("/proposals", {"request_id": rid(), "opportunity_id": opp["opportunity_id"],
+                                      "lines": [{"line_id": line, "quantity": 1}]}, "sales_agent").json()
+        check("a deal split into pieces under $10,000 still waits for Andre (S1-H2)",
+              third["status"] == "pending_andre" and third["needs_andre"] == ["OPPORTUNITY_TOTAL_OVER_MAX"])
+        r = a.post(f"/contacts/{lead['contact_id']}/time-zone", {"request_id": rid(), "time_zone": night_zone},
+                   "sales_agent")
+        check("the agent cannot change a recipient's time zone (S1-M1)",
+              r.status_code == 403 and r.json()["detail"] == "CALLER_NOT_ALLOWED")
         r = a.post(f"/proposals/{big['proposal_id']}/send", {"request_id": rid(), "contract_kind": "client_msa",
                                                             "contract_ref": "msa-1"}, "sales_agent")
         check("a pending proposal cannot be sent", r.status_code == 409)

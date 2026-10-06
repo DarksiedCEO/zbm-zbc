@@ -26,6 +26,7 @@ OUTREACH = "zbm-outreach.test"
 PRIMARY = "zbestmedia.test,zbestclips.test"
 POSTAL = "123 Test Street, Suite 4, Los Angeles, CA 90001"
 CONSENT_SHA = "a" * 64
+PII_KEY_HEX = "3f9c2a7e51d04b86c8e1f7a2093d5b6e4a1c8f0d72e9b35a6c4d1e8f0b7a2c93"
 # 2026-10-06 18:00 UTC = 11:00 in Los Angeles, 14:00 in New York, 19:00 in London
 NOON = datetime(2026, 10, 6, 18, 0, tzinfo=timezone.utc)
 
@@ -115,6 +116,12 @@ class FakeLegal:
     def in_force(self, account_id, contract_kind, contract_ref) -> ContractCheck:
         return ContractCheck(self.status)
 
+    def accepted(self, account_id, proposal_id, content_sha256, kind, ref) -> ContractCheck:
+        self.acceptance_checks = getattr(self, "acceptance_checks", []) + [(proposal_id, content_sha256, kind, ref)]
+        return ContractCheck(self.acceptance)
+
+    acceptance = "accepted"
+
 
 def wired_ports(**over) -> Ports:
     p = Ports.default()
@@ -148,6 +155,8 @@ class Harness:
                  clock: Optional[FixedClock] = None, ports: Optional[Ports] = None, **env_over):
         self.tmp = tmp
         self.env_over = env_over
+        if data_dir and "SALES_PII_HASH_KEY_FILE" not in env_over:     # a durable log needs a real key (S1-L3)
+            env_over["SALES_PII_HASH_KEY_FILE"] = secret_file(tmp, "pii.key", PII_KEY_HEX.encode())
         self.env = base_env(SALES_DATA_DIR=data_dir, **env_over)
         self.settings = config_mod.load(self.env)
         self.ledger = ledger or FakeLedger()

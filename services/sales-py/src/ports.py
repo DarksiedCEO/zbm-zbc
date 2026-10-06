@@ -9,8 +9,9 @@ select one refuses start (config.NOT_BUILT).
 - ``OnboardingHandoff`` (create the client) and ``FinanceHandoff`` (draft the first invoice) for a won deal.
   Stand-in: ``unavailable`` — the hand-off stays ``pending_delivery`` and the ``handoff-retry`` job retries it. A
   real adapter must be idempotent on ``handoff_id`` (a retry after a lost answer sends it again).
-- ``LegalContracts``: is a client_msa / order form in force for this account (Legal 37)? Stand-in: ``unavailable``,
-  so no proposal can be sent (``LEGAL_UNAVAILABLE``).
+- ``LegalContracts``: is a client_msa / order form in force for this account (Legal 37)? Did the client accept this
+  proposal (a Legal acceptance or a completed e-signature envelope)? Stand-in: ``unavailable``, so no proposal can be
+  sent and no agent can mark one won (``LEGAL_UNAVAILABLE``); Andre still can.
 """
 
 from __future__ import annotations
@@ -102,11 +103,18 @@ class LegalContracts(Protocol):
 
     def in_force(self, account_id: str, contract_kind: str, contract_ref: str) -> ContractCheck: ...
 
+    def accepted(self, account_id: str, proposal_id: str, content_sha256: str, kind: str, ref: str) -> ContractCheck:
+        """Did the client accept THIS proposal (a Legal acceptance or a completed e-signature envelope)?"""
+        ...
+
 
 class NotWiredLegal:
     wired = False
 
     def in_force(self, account_id, contract_kind, contract_ref) -> ContractCheck:
+        return ContractCheck("unavailable")
+
+    def accepted(self, account_id, proposal_id, content_sha256, kind, ref) -> ContractCheck:
         return ContractCheck("unavailable")
 
 

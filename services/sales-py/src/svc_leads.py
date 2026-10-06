@@ -162,6 +162,8 @@ class LeadsMixin:
         tz = c.get("time_zone")
         if tz is not None and i07_quiet_hours.zone(tz) is None:
             raise Invalid(R("TIME_ZONE_INVALID"))
+        if not i07_quiet_hours.zone_fits_phone(tz, phone):
+            raise Invalid(R("TIME_ZONE_PHONE_MISMATCH"))
         k = self.pii_key
         return {"name": c["name"], "email": email, "phone": phone, "title": c.get("title"), "time_zone": tz,
                 "email_hash": i02_identity.keyed(k, "email", email) if email else None,
@@ -339,11 +341,16 @@ class LeadsMixin:
             rk = f"contact_tz|{contact_id}|{body['request_id']}"
             if self._idem(caller, rk, body):
                 return self.contact_view(self.contacts[contact_id])
-            self._get(self.contacts, contact_id, "CONTACT_NOT_FOUND")
+            c = self._get(self.contacts, contact_id, "CONTACT_NOT_FOUND")
             if i07_quiet_hours.zone(body["time_zone"]) is None:
                 raise Invalid(R("TIME_ZONE_INVALID"))
-            self._commit("contact_time_zone_set", self._req({"contact_id": contact_id, "time_zone": body["time_zone"]},
-                                                            caller, rk, body, contact_id), caller)
+            if not i07_quiet_hours.zone_fits_phone(body["time_zone"], c.get("phone")):
+                raise Invalid(R("TIME_ZONE_PHONE_MISMATCH"))
+            # AEGIS S1-M1: the zone decides quiet hours, so every change is a typed ledger event before it applies
+            data = {"contact_id": contact_id, "time_zone": body["time_zone"]}
+            self._commit("contact_time_zone_set", self._req(data, caller, rk, body, contact_id), caller,
+                         evidence=("contact_time_zone_set", f"contact:{contact_id}",
+                                   {**data, "previous": c.get("time_zone")}, (caller, rk)))
             return self.contact_view(self.contacts[contact_id])
 
     def set_stage(self, caller: str, opp_id: str, body: dict) -> dict:

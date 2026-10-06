@@ -20,7 +20,7 @@ cd services/sales-py && python3 -m pytest -q -p no:cacheprovider     # no networ
 export SALES_SERVICE_TOKEN=<secret>                       # required: refuses to start without it
 export SALES_CALLER_TOKENS='{"hub": "<>=32 printable chars>", "dashboard": "...", "sales_agent": "...", "scheduler": "..."}'
 export SALES_DATA_DIR=/var/lib/zbm/sales                  # required unless SALES_NON_PRODUCTION=1; owned by the service user, 0700
-export SALES_PII_HASH_KEY_FILE=/etc/zbm/sales/pii.key     # required in production; 0600; never change it after first start
+export SALES_PII_HASH_KEY_FILE=/etc/zbm/sales/pii.key     # openssl rand -hex 32 > pii.key; 0600; never change it
 export SALES_ANDRE_APPROVAL_TOKEN=<Andre's token>         # unset = nothing can be approved
 export SALES_OUTREACH_DOMAIN=zbm-outreach.example SALES_PRIMARY_DOMAINS=zbestmedia.com,zbestclips.com
 export SALES_POSTAL_ADDRESS="<street address, city, state, zip>"
@@ -39,10 +39,10 @@ else; Andre's routes also `X-Andre-Approval-Token` (through the `dashboard` call
 | `SALES_CALLER_TOKENS` | `{}` | JSON `{caller: token}`; callers in `src/config.py` `KNOWN_CALLERS`; all distinct, none equal to the service token |
 | `SALES_NON_PRODUCTION` | 0 | 1 allows the in-memory store and a fixed test PII key. Never in production |
 | `SALES_DATA_DIR` | — | required in production; a directory owned by the service user, mode 0700 |
-| `SALES_PII_HASH_KEY_FILE` | — | required in production: at least 32 random bytes, file mode 0600, not a symlink. Its fingerprint is bound in the log; a different key refuses start |
+| `SALES_PII_HASH_KEY_FILE` | — | required in production and whenever `SALES_DATA_DIR` is set: a generated key of at least 32 bytes as hex or base64 (`openssl rand -hex 32`), file mode 0600, not a symlink. Its fingerprint is bound in the log; a different key refuses start |
 | `SALES_ANDRE_APPROVAL_TOKEN` | — | Andre's approvals; equal to the service or a caller token = not configured |
 | `SALES_OUTREACH_DOMAIN` | — | the only domain cold email is sent from; unset = no cold email (`OUTREACH_NOT_CONFIGURED`) |
-| `SALES_PRIMARY_DOMAINS` | — | comma list; required with an outreach domain, which must not equal, be under or be over any of them |
+| `SALES_PRIMARY_DOMAINS` | — | comma list of both brands' own domains (at least two different registrable domains); required with an outreach domain, which must not share a registrable domain with any of them |
 | `SALES_POSTAL_ADDRESS` | — | required with an outreach domain; printed in every email |
 | `SALES_OUTREACH_FROM_LOCAL` | `hello` | the From mailbox (must accept replies; `noreply` refused) |
 | `SALES_WARMUP_SCHEDULE` | `20,30,40,60,80,100,150,200` | sends per day by warm-up step; day 1 ≤ 50, never decreasing, at most doubling, ≤ 500 |
@@ -67,7 +67,8 @@ All under `/sales/v1` except `/health`. "worker" = `dashboard` or `sales_agent`;
 | `POST /leads` | hub, onboarding, detection (inbound); dashboard (referral, partner) | a lead with its evidence |
 | `POST /leads/import` | sales_agent, scheduler | public-data / paid-provider leads through their ports |
 | `GET /leads`, `/leads/{id}`; `POST /leads/{id}/owner`, `/disqualify`, `/convert` | worker | pipeline |
-| `GET /contacts/{id}`; `POST /contacts/{id}/time-zone` | worker | contact, consent and suppression state |
+| `GET /contacts/{id}` | worker | contact, consent and suppression state |
+| `POST /contacts/{id}/time-zone` | hub, onboarding, dashboard | never the agent; a +1 number needs an American zone |
 | `GET /opportunities`, `/opportunities/{id}`; `POST /opportunities/{id}/stage` | worker | stages (not `closed_won`) |
 | `POST /activities`; `GET /tasks`; `POST /tasks/{id}/close` | worker | activities and tasks |
 | `POST /consents` | hub, onboarding, dashboard | express consent for sms / voice, per brand |
@@ -83,6 +84,7 @@ All under `/sales/v1` except `/health`. "worker" = `dashboard` or `sales_agent`;
 | `POST /pricebook/{brand}/lines/{line_id}/approve`, `/withdraw` | Andre | versioned prices |
 | `POST /proposals`; `GET /proposals`, `/proposals/{id}` | worker | build (auto-approved or `pending_andre`) |
 | `POST /proposals/{id}/approve` | Andre | binds the content hash |
-| `POST /proposals/{id}/send`, `/won`, `/lost`; `GET /handoffs` | worker | send needs Legal; won hands off |
+| `POST /proposals/{id}/send`, `/lost`; `GET /handoffs` | worker | send needs Legal |
+| `POST /proposals/{id}/won` | Andre; or worker with the client's acceptance confirmed by Legal | hands off to Onboarding and Finance |
 | `POST /jobs/{send-queue,warmup-reset,handoff-retry,stale-leads,integrity}/run` | scheduler | jobs |
 | `GET /audit/integrity`, `/audit/export` | dashboard, compliance_38 | export with emails and phones as keyed hashes |

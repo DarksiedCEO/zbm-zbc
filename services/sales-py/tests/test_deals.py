@@ -18,6 +18,7 @@ def send(h, p, ref="msa-1"):
 
 
 RR = "zbm.revenue_recovery_engagement"
+WON = {"request_id": "won-1", "acceptance": {"kind": "esign_envelope", "ref": "env-1"}}
 SOCIAL = "zbm.social_management_monthly"
 TV = "zbm.media_buy_tv"
 
@@ -208,7 +209,7 @@ def test_won_hands_off_to_onboarding_and_finance(w):
     w.refused(w.post(f"/sales/v1/proposals/{p['proposal_id']}/won", {"request_id": rid()}, "sales_agent"), 409,
               "PROPOSAL_NOT_SENT")
     w.ok(send(w, p))
-    won = w.ok(w.post(f"/sales/v1/proposals/{p['proposal_id']}/won", {"request_id": rid()}, "sales_agent"))
+    won = w.ok(w.post(f"/sales/v1/proposals/{p['proposal_id']}/won", WON, "sales_agent"))
     assert sorted(x["kind"] for x in won["handoffs"]) == ["finance_invoice_draft", "onboarding_create_client"]
     assert all(x["status"] == "delivered" for x in won["handoffs"])
     fin = w.ports.finance.calls[0][1]
@@ -222,7 +223,7 @@ def test_handoff_stand_ins_stay_pending_and_the_job_retries(tmp_path):
     h.ok(h.price(RR, price="2500.00"))
     p = h.ok(propose(h, h.opportunity(), [{"line_id": RR}]), 201)
     h.ok(send(h, p))
-    won = h.ok(h.post(f"/sales/v1/proposals/{p['proposal_id']}/won", {"request_id": rid()}, "sales_agent"))
+    won = h.ok(h.post(f"/sales/v1/proposals/{p['proposal_id']}/won", {**WON, "request_id": rid()}, "sales_agent"))
     assert all(x["status"] == "pending_delivery" for x in won["handoffs"])
     assert h.ok(h.job("handoff-retry"))["pending_delivery"] == 2
     ports.onboarding.status = ports.finance.status = "delivered"

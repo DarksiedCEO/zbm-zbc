@@ -70,6 +70,39 @@ def _merge(text: str, fields: dict) -> str:
     return _PLACEHOLDER.sub(lambda m: _clean(fields.get(m.group(1).strip())), text)
 
 
+# AEGIS S1-H1: a merge value comes from a form anyone can fill in, so it is never trusted as copy. Only ASCII letters,
+# digits, space and . ' & - ; no scheme, no "www.", no "@"; at most 40 characters. A template that uses a field whose
+# value breaks this is refused for that contact (MERGE_FIELD_REFUSED); the RENDERED subject is checked for deception
+# and the rendered text may carry no URL or domain the approved template does not carry.
+MERGE_VALUE = re.compile(r"[A-Za-z0-9 .'&-]{0,40}")
+_URL = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*://\S+|www\.\S+|\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+                  r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,24}\b)")
+
+
+def merge_value_ok(v: str) -> bool:
+    low = v.lower()
+    return bool(MERGE_VALUE.fullmatch(v)) and "://" not in low and "www." not in low and "@" not in low
+
+
+def urls(text: str) -> set[str]:
+    return {u.lower().rstrip(".,;:!?)") for u in _URL.findall(text or "")}
+
+
+def merge_problem(tpl: dict, fields: dict) -> Optional[str]:
+    """None when every used merge value is safe and the merged copy is still honest; otherwise a refusal code."""
+    subject, body = tpl.get("subject"), tpl["body"]
+    for name in {n.strip() for n in _PLACEHOLDER.findall((subject or "") + "\n" + body)}:
+        if not merge_value_ok(fields.get(name) or ""):
+            return "MERGE_FIELD_REFUSED"
+    merged_subject = _merge(subject, fields) if subject is not None else None
+    if merged_subject is not None and deceptive_subject(merged_subject):
+        return "SUBJECT_DECEPTIVE"
+    merged = (merged_subject or "") + "\n" + _merge(body, fields)
+    if urls(merged) - urls((subject or "") + "\n" + body):
+        return "URL_NOT_APPROVED"
+    return None
+
+
 def first_name(name: str) -> str:
     return (name or "").strip().split(" ", 1)[0]
 

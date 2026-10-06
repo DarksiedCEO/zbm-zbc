@@ -6,6 +6,7 @@ problem refuses start (fail closed); a missing optional piece leaves that capabi
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -75,6 +76,24 @@ def _secret_file_bytes(env, name: str, max_bytes: int = 4096) -> bytes:
     finally:
         os.close(fd)
     return raw.strip()
+
+
+def pii_key(raw: bytes) -> bytes:
+    """AEGIS S1-M5: the key file holds a generated key as hex (``openssl rand -hex 32``) or base64 (``openssl rand
+    -base64 32``) of at least 32 bytes; the DECODED bytes are the key and must not be trivially repetitive."""
+    text = raw.decode("ascii", "replace").strip()
+    key = b""
+    if re.fullmatch(r"(?:[0-9a-fA-F]{2}){32,512}", text):
+        key = bytes.fromhex(text)
+    elif re.fullmatch(r"[A-Za-z0-9+/_-]{43,1024}={0,2}", text):
+        try:
+            key = base64.b64decode(text.replace("-", "+").replace("_", "/") + "=" * (-len(text) % 4), validate=True)
+        except ValueError:
+            key = b""
+    if len(key) < 32 or len(set(key)) < 8:
+        raise RuntimeError("SALES_PII_HASH_KEY_FILE must hold a generated key of at least 32 bytes, hex or base64 "
+                           "(openssl rand -hex 32)")
+    return key
 
 
 def _flag(env, name: str) -> bool:
@@ -157,9 +176,27 @@ def _caller_tokens(env, service_token: str) -> dict:
     return dict(tokens)
 
 
+# Two-level public suffixes that are common for our clients and for domain registrations (AEGIS S1-M3). A full
+# Public Suffix List is not vendored: an unlisted two-level suffix is compared on its last two labels, which can
+# only make the check stricter (two unrelated example.co.xx domains look related and are refused).
+TWO_LEVEL_SUFFIXES = frozenset({
+    "co.uk", "org.uk", "me.uk", "ltd.uk", "plc.uk", "net.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au",
+    "co.nz", "net.nz", "org.nz", "co.za", "co.jp", "ne.jp", "or.jp", "co.in", "net.in", "org.in", "com.br", "net.br",
+    "com.mx", "com.ar", "com.co", "com.sg", "com.hk", "com.tw", "com.cn", "com.tr", "co.kr", "co.il", "com.my",
+    "com.ph", "co.id", "com.pk", "com.ng", "com.eg", "com.sa", "co.th", "com.vn", "com.pe", "com.ec", "co.ve"})
+
+
+def registrable(domain: str) -> str:
+    """The registrable domain: the last two labels, or the last three under a known two-level suffix."""
+    labels = domain.lower().rstrip(".").split(".")
+    n = 3 if len(labels) >= 3 and ".".join(labels[-2:]) in TWO_LEVEL_SUFFIXES else 2
+    return ".".join(labels[-n:])
+
+
 def related_domains(a: str, b: str) -> bool:
-    """True when one domain is the other or under it (an outreach domain must share no reputation with a primary)."""
-    return a == b or a.endswith("." + b) or b.endswith("." + a)
+    """True when two domains share a registrable domain (``go.zbestmedia.com`` and ``www.zbestmedia.com`` do): an
+    outreach domain must share no reputation with a brand's own domain."""
+    return registrable(a) == registrable(b)
 
 
 def _domains(env) -> tuple[Optional[str], tuple]:
@@ -176,11 +213,14 @@ def _domains(env) -> tuple[Optional[str], tuple]:
     if not primary:
         raise RuntimeError("SALES_OUTREACH_DOMAIN is set but SALES_PRIMARY_DOMAINS is not: the service cannot prove "
                            "the outreach domain is separate from the brands' own domains, so it refuses to start")
+    if len({registrable(p) for p in primary}) < 2:
+        raise RuntimeError("SALES_PRIMARY_DOMAINS must list both brands' own domains (ZBM and ZBC: at least two "
+                           "different registrable domains), so neither can be used as the outreach domain")
     for p in primary:
         if related_domains(outreach, p):
-            raise RuntimeError("SALES_OUTREACH_DOMAIN must be a separate domain: it equals, or is under or over, one of "
-                               "SALES_PRIMARY_DOMAINS (cold email from a primary domain puts the brands' own mail at "
-                               "risk)")
+            raise RuntimeError("SALES_OUTREACH_DOMAIN must be a separate domain: it shares a registrable domain with "
+                               "one of SALES_PRIMARY_DOMAINS (cold email from a brand's own domain puts the brands' own "
+                               "mail at risk)")
     return outreach, primary
 
 
@@ -242,13 +282,11 @@ def load(env: Optional[dict] = None) -> Settings:
     s.andre_token = andre
 
     if env.get("SALES_PII_HASH_KEY_FILE"):
-        raw = _secret_file_bytes(env, "SALES_PII_HASH_KEY_FILE")
-        if len(raw) < 32 or len(set(raw)) < 16:
-            raise RuntimeError("SALES_PII_HASH_KEY_FILE must hold a generated key (at least 32 bytes, 16 different)")
-        s.pii_key = Secret(raw)
-    elif not non_production:
-        raise RuntimeError("SALES_PII_HASH_KEY_FILE is required: emails and phones are matched, suppressed and "
-                           "exported as keyed hashes (SALES_NON_PRODUCTION=1 uses a fixed test key)")
+        s.pii_key = Secret(pii_key(_secret_file_bytes(env, "SALES_PII_HASH_KEY_FILE")))
+    elif not non_production or s.data_dir:
+        # AEGIS S1-L3: a durable log is never written under the fixed test key, non-production or not
+        raise RuntimeError("SALES_PII_HASH_KEY_FILE is required whenever SALES_DATA_DIR is set (and always in "
+                           "production): emails and phones are matched, suppressed and exported as keyed hashes")
     else:
         s.pii_key = Secret(b"sales-py non-production pii hash key, never in production")
 

@@ -70,7 +70,7 @@ def test_quiet_hours_by_recipient_time_zone(tmp_path, utc_hour, tz, ok):
     from clock import FixedClock
     from helpers import Harness, wired_ports
     h = Harness(tmp_path, ports=wired_ports(), clock=FixedClock(datetime(2026, 10, 7, utc_hour, tzinfo=timezone.utc)))
-    lead = h.lead(tz=tz)
+    lead = h.lead(tz=tz, phone="+13105550100" if tz.startswith("America/") else "+442071838750")
     h.ok(h.consent(lead["contact_id"]), 201)
     r = sms(h, lead["contact_id"], sms_template(h))
     if utc_hour == 4:
@@ -88,7 +88,7 @@ def test_unknown_time_zone_refused(w):
     w.ok(w.consent(lead["contact_id"], channel="voice"), 201)
     w.refused(voice(w, lead["contact_id"]), 403, "TIME_ZONE_UNKNOWN")
     w.ok(w.post(f"/sales/v1/contacts/{lead['contact_id']}/time-zone", {"request_id": rid(),
-                                                                         "time_zone": "America/Chicago"}, "sales_agent"))
+                                                                         "time_zone": "America/Chicago"}, "hub"))
     w.ok(sms(w, lead["contact_id"], sms_template(w)), 201)
 
 

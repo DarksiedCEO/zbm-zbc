@@ -164,8 +164,8 @@ def test_second_process_on_the_same_data_dir_refuses(tmp_path):
 
 
 def test_changed_pii_key_refuses_start(tmp_path):
-    k1 = secret_file(tmp_path, "k1", b"first-key-0123456789abcdefghijklmnopqrstuv")
-    k2 = secret_file(tmp_path, "k2", b"second-key-0123456789abcdefghijklmnopqrstu")
+    k1 = secret_file(tmp_path, "k1", os.urandom(32).hex().encode())
+    k2 = secret_file(tmp_path, "k2", os.urandom(32).hex().encode())
     h = durable(tmp_path, SALES_PII_HASH_KEY_FILE=k1)
     populate(h)
     with pytest.raises(store_mod.StoreCorrupt, match="different key"):

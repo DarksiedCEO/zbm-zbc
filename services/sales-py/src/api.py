@@ -384,7 +384,8 @@ def create_app(service: SalesService, settings: config_mod.Settings) -> FastAPI:
         return svc.contact(_id(contact_id))
 
     @app.post("/sales/v1/contacts/{contact_id}/time-zone", dependencies=auth)
-    def time_zone(contact_id: str, req: dict = Depends(body(m.TimeZoneSet)), who: str = Depends(worker)) -> dict:
+    def time_zone(contact_id: str, req: dict = Depends(body(m.TimeZoneSet)),
+                  who: str = Depends(caller("hub", "onboarding", "dashboard"))) -> dict:    # never the agent (S1-M1)
         return svc.set_time_zone(who, _id(contact_id), req)
 
     @app.get("/sales/v1/opportunities", dependencies=auth)
@@ -540,8 +541,16 @@ def create_app(service: SalesService, settings: config_mod.Settings) -> FastAPI:
     def send_proposal(pid: str, req: dict = Depends(body(m.ProposalSend)), who: str = Depends(worker)) -> dict:
         return svc.send_proposal(who, _id(pid), req)
 
+    andre_won = andre("proposal_won")
+
+    def won_actor(request: Request, x_andre_approval_token: Optional[str] = Header(default=None)) -> str:
+        """Andre (dashboard + his token), or a worker that must then show the client's confirmed acceptance."""
+        if x_andre_approval_token is not None:
+            return andre_won(request, x_andre_approval_token)
+        return worker(request)
+
     @app.post("/sales/v1/proposals/{pid}/won", dependencies=auth)
-    def won(pid: str, req: dict = Depends(body(m.ProposalWon)), who: str = Depends(worker)) -> dict:
+    def won(pid: str, req: dict = Depends(body(m.ProposalWon)), who: str = Depends(won_actor)) -> dict:
         return svc.proposal_won(who, _id(pid), req)
 
     @app.post("/sales/v1/proposals/{pid}/lost", dependencies=auth)

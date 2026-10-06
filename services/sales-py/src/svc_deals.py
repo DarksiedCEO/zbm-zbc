@@ -160,9 +160,12 @@ class DealsMixin:
             if o["stage"] in ("closed_won", "closed_lost"):
                 raise Conflict(R("OPPORTUNITY_CLOSED"))
             try:
+                committed = money.total(p["total"] for p in self.proposals.values()
+                                        if p["opportunity_id"] == o["opportunity_id"]
+                                        and p["status"] in ("approved", "sent", "won"))
                 q = i11_pricing.compute(o["brand"], [dict(x) for x in body["lines"]], self.pricebook,
                                         body.get("discount", "0.00"), body.get("custom_terms"),
-                                        self.settings.auto_approve_max)
+                                        self.settings.auto_approve_max, committed)
             except i11_pricing.QuoteProblem as exc:
                 raise (Conflict if exc.code == "PRICE_NOT_APPROVED" else Invalid)(R(exc.code)) from None
             except money.MoneyError:
@@ -241,13 +244,31 @@ class DealsMixin:
             return dict(p)
 
     def proposal_won(self, caller: str, pid: str, body: dict) -> dict:
+        """AEGIS S1-L1: a won deal creates a client and an invoice draft, so it needs Andre (``caller == "andre"``,
+        the FounderGate) or the client's acceptance of THIS proposal confirmed by Legal (stand-in: refused)."""
+        rk = f"proposal_won|{pid}|{body['request_id']}"
         with self.lock:
             self._gate()
-            rk = f"proposal_won|{pid}|{body['request_id']}"
             if self._idem(caller, rk, body):
                 return {**self.proposals[pid], "handoffs": self._handoffs_of(pid)}
             p = self._get(self.proposals, pid, "PROPOSAL_NOT_FOUND")
             if p["status"] != "sent":
+                raise Conflict(R("PROPOSAL_NOT_SENT"))
+            sha, account_id = p["content_sha256"], p["account_id"]
+        acc = body.get("acceptance")
+        if caller != "andre":
+            if acc is None:
+                raise Forbidden(R("ACCEPTANCE_REQUIRED"))
+            check = self.ports.legal.accepted(account_id, pid, sha, acc["kind"], acc["ref"])   # outside the lock
+            if check.status == "unavailable":
+                raise Unavailable(R("LEGAL_UNAVAILABLE"))
+            if check.status != "accepted":
+                raise Forbidden(R("ACCEPTANCE_NOT_CONFIRMED"))
+        with self.lock:
+            self._gate()
+            if self._idem(caller, rk, body):
+                return {**self.proposals[pid], "handoffs": self._handoffs_of(pid)}
+            if p["status"] != "sent" or p["content_sha256"] != sha:
                 raise Conflict(R("PROPOSAL_NOT_SENT"))
             o = self.opps[p["opportunity_id"]]
             acc = self.accounts.get(p["account_id"]) or {}
@@ -262,8 +283,10 @@ class DealsMixin:
                                                                     for x in p["lines"]],
                              "discount": p["discount"], "total": p["total"],
                              "payment_methods": p["payment_methods"]}}]
-            self._commit("proposal_won", self._req({"proposal_id": pid, "handoffs": handoffs}, caller, rk, body, pid),
-                         caller)
+            won = {"proposal_id": pid, "handoffs": handoffs, "by": caller, "acceptance": acc}
+            self._commit("proposal_won", self._req(won, caller, rk, body, pid), caller,
+                         evidence=("proposal_won", f"proposal:{pid}", {"proposal_id": pid, "content_sha256": sha,
+                                                                       "by": caller, "acceptance": acc}, (caller, rk)))
             ids = [h["handoff_id"] for h in handoffs]
         for hid in ids:
             self._deliver(hid)

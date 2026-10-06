@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 import config
-from helpers import ANDRE, CALLERS, SERVICE_TOKEN, base_env, secret_file
+from helpers import ANDRE, CALLERS, PII_KEY_HEX, SERVICE_TOKEN, base_env, secret_file
 
 
 def load(**over):
@@ -58,9 +58,9 @@ def test_pii_key_required_in_production(tmp_path):
     d.mkdir(mode=0o700)
     with pytest.raises(RuntimeError, match="SALES_PII_HASH_KEY_FILE is required"):
         load(SALES_NON_PRODUCTION=None, SALES_DATA_DIR=str(d))
-    key = secret_file(tmp_path, "pii.key", b"0123456789abcdefghijklmnopqrstuvwxyzABCD")
+    key = secret_file(tmp_path, "pii.key", PII_KEY_HEX.encode())
     s = load(SALES_NON_PRODUCTION=None, SALES_DATA_DIR=str(d), SALES_PII_HASH_KEY_FILE=key)
-    assert s.pii_key.reveal().startswith(b"0123") and "0123" not in repr(s.pii_key)
+    assert s.pii_key.reveal() == bytes.fromhex(PII_KEY_HEX) and "3f9c" not in repr(s.pii_key)
 
 
 def test_weak_pii_key_refused(tmp_path):

@@ -30,6 +30,8 @@ class OutreachMixin:
     # ------------------------------------------------------------------------------------------------ replay
 
     def _a_suppression_added(self, d, at):
+        for k in d.get("revoke_keys") or ():
+            self.consents.setdefault(k, []).append({"event": "revoked", "at": at, "source": d["reason"]})
         for h in d["hashes"]:
             if h not in self.suppression:            # append-only: the first entry stands, nothing is ever removed
                 self.suppression[h] = {"hash": h, "reason": d["reason"], "at": at, "by": d["actor"]}
@@ -82,9 +84,10 @@ class OutreachMixin:
         msg = self.messages[d["message_id"]]
         msg.update(status="sending", sent_on=d["date"], updated_at=at)
         if msg["channel"] == "email":
-            if self.warmup["started_on"] is None:
-                self.warmup["started_on"] = d["date"]
-            self._stats(d["date"])["sent"] += 1
+            w = self._wu(msg["from_domain"])
+            if w["started_on"] is None:
+                w["started_on"] = d["date"]
+            self._stats(d["date"], msg["from_domain"])["sent"] += 1
 
     def _a_message_sent(self, d, at):
         self.messages[d["message_id"]].update(status="sent", provider_ref=d.get("provider_ref"), updated_at=at)
@@ -99,9 +102,10 @@ class OutreachMixin:
         msg = self.messages[d["message_id"]]
         msg["events"] = (msg["events"] + [{"event": d["event"], "at": at}])[-20:]
         if d["event"] in ("hard_bounce", "complaint") and msg.get("sent_on"):
-            self._stats(msg["sent_on"])[d["event"]] += 1
+            self._stats(msg["sent_on"], msg["from_domain"])[d["event"]] += 1
         if d.get("hashes"):
-            self._a_suppression_added({"hashes": d["hashes"], "reason": d["reason"], "actor": d["actor"]}, at)
+            self._a_suppression_added({"hashes": d["hashes"], "reason": d["reason"], "actor": d["actor"],
+                                       "revoke_keys": d.get("revoke_keys")}, at)
 
     def _a_reply_received(self, d, at):
         if d.get("revoke_keys"):
@@ -116,11 +120,16 @@ class OutreachMixin:
                                                           "class": d["class"], "by": d["actor"], "at": at})
 
     def _a_warmup_advanced(self, d, at):
-        self.warmup["step"] = d["step"]
-        self.warmup["advanced_on"] = d["date"]
+        w = self._wu(d["domain"])
+        w["step"] = d["step"]
+        w["advanced_on"] = d["date"]
 
-    def _stats(self, day: str) -> dict:
-        return self.day_stats.setdefault(day, {"sent": 0, "complaint": 0, "hard_bounce": 0})
+    def _wu(self, domain: Optional[str]) -> dict:
+        """The warm-up state of ONE outreach domain: a new domain starts the schedule from day 1 (AEGIS S1-M2)."""
+        return self.warmup.setdefault(domain or "", {"step": 0, "started_on": None, "advanced_on": None})
+
+    def _stats(self, day: str, domain: Optional[str]) -> dict:
+        return self.day_stats.setdefault(f"{domain or ''}|{day}", {"sent": 0, "complaint": 0, "hard_bounce": 0})
 
     # ------------------------------------------------------------------------------------------------ checks
 
@@ -133,7 +142,7 @@ class OutreachMixin:
 
     def _cap_today(self) -> int:
         s = self.settings
-        return i09_send_cap.cap(s.warmup, self.warmup["step"], s.daily_send_cap)
+        return i09_send_cap.cap(s.warmup, self._wu(s.outreach_domain)["step"], s.daily_send_cap)
 
     def _template_version(self, template_id: str, version: int, channel: str) -> tuple[dict, dict]:
         t = self.templates.get(template_id)
@@ -161,6 +170,9 @@ class OutreachMixin:
     def _fields(self, contact: dict) -> dict:
         acc = self.accounts.get(contact["account_id"]) or {}
         return {"first_name": i08_templates.first_name(contact["name"]), "company": acc.get("name") or ""}
+
+    def _merge_problem(self, t: dict, v: dict, contact: dict) -> Optional[str]:
+        return i08_templates.merge_problem({"subject": v["subject"], "body": v["body"]}, self._fields(contact))
 
     def unsubscribe_token(self, message_id: str) -> str:
         mac = hmac.new(self.pii_key, f"unsubscribe\x00{message_id}".encode(), hashlib.sha256).hexdigest()[:32]
@@ -245,9 +257,21 @@ class OutreachMixin:
 
     # ------------------------------------------------------------------------------------------------ suppression
 
-    def _suppress(self, actor: str, rk: str, body: dict, hashes: list[str], reason: str, kind: str = "suppression_added",
+    def _opt_out_hashes(self, contact: Optional[dict], *more: Optional[str]) -> set[str]:
+        """Every address and number an opt-out covers: all of the contact's, plus any given (AEGIS S1-M4)."""
+        hs = {h for h in more if h}
+        if contact:
+            hs |= {h for h in (contact.get("email_hash"), contact.get("phone_hash")) if h}
+        return hs
+
+    def _revoke_keys(self, hashes) -> list[str]:
+        return [k for ph in sorted(h for h in hashes if h.startswith("phone:")) for k in self._all_consent_keys(ph)]
+
+    def _suppress(self, actor: str, rk: str, body: dict, hashes, reason: str, kind: str = "suppression_added",
                   extra: Optional[dict] = None) -> None:
-        self._commit(kind, self._req({"hashes": sorted(set(hashes)), "reason": reason, **(extra or {})}, actor, rk,
+        hashes = sorted(set(hashes))
+        extra = {"revoke_keys": self._revoke_keys(hashes), **(extra or {})}
+        self._commit(kind, self._req({"hashes": sorted(set(hashes)), "reason": reason, **extra}, actor, rk,
                                      body, sorted(set(hashes))), actor,
                      evidence=("suppression_added", f"suppression:{hashlib.sha256(''.join(sorted(hashes)).encode()).hexdigest()[:40]}",
                                {"hashes": sorted(set(hashes)), "reason": reason}, (actor, rk)))
@@ -287,13 +311,16 @@ class OutreachMixin:
             mid = token.split(".", 1)[0]
             if not hmac.compare_digest(self.unsubscribe_token(mid), token) or mid not in self.messages:
                 raise NotFound(R("UNSUBSCRIBE_TOKEN_UNKNOWN"))
-            h = self.messages[mid]["to_hash"]
-            if h in self.suppression:
-                return {"unsubscribed": True}
+            msg = self.messages[mid]
+            hashes = self._opt_out_hashes(self.contacts.get(msg["contact_id"]), msg["to_hash"])
             rk = f"unsubscribe|{mid}|{body['request_id']}"
             if self._idem(caller, rk, body):
                 return {"unsubscribed": True}
-            self._suppress(caller, rk, body, [h], "unsubscribe")
+            if all(h in self.suppression for h in hashes) and not any(
+                    self.consents.get(k) and self.consents[k][-1]["event"] == "granted"
+                    for k in self._revoke_keys(hashes)):
+                return {"unsubscribed": True}
+            self._suppress(caller, rk, body, hashes, "unsubscribe")
             return {"unsubscribed": True}
 
     def suppressions_view(self) -> list[dict]:
@@ -436,7 +463,7 @@ class OutreachMixin:
             if not c.get("email_hash"):
                 raise Invalid(R("CONTACT_NO_EMAIL"))
             t, v = self._template_version(body["template_id"], body["version"], "email")
-            problem = self._template_usable(t, v)
+            problem = self._template_usable(t, v) or self._merge_problem(t, v, c)
             if problem:
                 raise Forbidden(R(problem))
             if self._is_suppressed("email", c):
@@ -457,7 +484,7 @@ class OutreachMixin:
                 return self.message_view(self.messages[prev[1]])
             c = self._get(self.contacts, body["contact_id"], "CONTACT_NOT_FOUND")
             t, v = self._template_version(body["template_id"], body["version"], "sms")
-            problem = self._template_usable(t, v)
+            problem = self._template_usable(t, v) or self._merge_problem(t, v, c)
             if problem:
                 raise Forbidden(R(problem))
             self._phone_checks(c, "sms", t["brand"])
@@ -516,6 +543,9 @@ class OutreachMixin:
             return problem or "TEMPLATE_HASH_MISMATCH", None, None
         if msg["channel"] == "email" and msg["from_domain"] != self.settings.outreach_domain:
             return "OUTREACH_DOMAIN_CHANGED", None, None
+        merge = self._merge_problem(t, v, c)               # AEGIS S1-H1: again, from current state, at send time
+        if merge:
+            return merge, None, None
         rendered = self._render(msg, t, v, c)
         if i08_templates.rendered_sha256(rendered) != msg["rendered_sha256"]:
             return "RENDERED_CONTENT_CHANGED", None, None
@@ -563,7 +593,7 @@ class OutreachMixin:
                     summary["deferred_quiet_hours"] += 1
                     continue
                 today = self.today()
-                if msg["channel"] == "email" and self._stats(today)["sent"] >= self._cap_today():
+                if msg["channel"] == "email" and self._stats(today, msg["from_domain"])["sent"] >= self._cap_today():
                     summary["capped"] += 1
                     continue
                 port = getattr(self.ports, msg["channel"])
@@ -605,23 +635,26 @@ class OutreachMixin:
 
     def _warmup_reset(self, body: dict, rk: str) -> dict:
         today = self.now().date()
-        w = self.warmup
+        domain = self.settings.outreach_domain
+        w = self._wu(domain)
         step, held = w["step"], None
-        if w["started_on"] is None:
+        if domain is None:
+            held = "NO_OUTREACH_DOMAIN"
+        elif w["started_on"] is None:
             held = "NOT_STARTED"
         elif w["advanced_on"] == today.isoformat():
             held = "ALREADY_ADVANCED_TODAY"
         elif step >= len(self.settings.warmup) - 1:
             held = "AT_FULL_PACE"
         else:
-            st = self._stats((today - timedelta(days=1)).isoformat())
+            st = self._stats((today - timedelta(days=1)).isoformat(), domain)
             if i09_send_cap.may_advance(st["sent"], st["complaint"], st["hard_bounce"]):
                 step += 1
             else:
                 held = "HELD_BY_YESTERDAY"
-        result = {"step": step + 1, "held": held, "cap_today": i09_send_cap.cap(self.settings.warmup, step,
-                                                                                 self.settings.daily_send_cap)}
-        data = {"date": today.isoformat() if held is None else w["advanced_on"], "step": step}
+        result = {"domain": domain, "step": step + 1, "held": held,
+                  "cap_today": i09_send_cap.cap(self.settings.warmup, step, self.settings.daily_send_cap)}
+        data = {"domain": domain, "date": today.isoformat() if held is None else w["advanced_on"], "step": step}
         self._commit("warmup_advanced", self._req(data, "scheduler", rk, body, result), "scheduler")
         return result
 
@@ -638,9 +671,12 @@ class OutreachMixin:
                 raise Invalid(R("INVALID"), field="message_id")
             if msg["status"] not in ("sending", "sent", "failed"):
                 raise Conflict(R("MESSAGE_NOT_SENT"))
-            hashes = [msg["to_hash"]] if body["event"] in ("hard_bounce", "complaint") else []
+            if body["event"] == "complaint":          # a spam complaint is an opt-out: everywhere (S1-M4)
+                hashes = sorted(self._opt_out_hashes(self.contacts.get(msg["contact_id"]), msg["to_hash"]))
+            else:
+                hashes = [msg["to_hash"]] if body["event"] == "hard_bounce" else []
             data = {"message_id": msg["message_id"], "event": body["event"], "hashes": hashes,
-                    "reason": body["event"] if hashes else None}
+                    "reason": body["event"] if hashes else None, "revoke_keys": self._revoke_keys(hashes)}
             ev = None
             if hashes:
                 ev = ("suppression_added", f"msg:{msg['message_id']}", {"hashes": hashes, "reason": body["event"]},
@@ -674,7 +710,7 @@ class OutreachMixin:
             contact_id = msg["contact_id"] if msg else (self.email_index.get(email_h) if email_h else None) or \
                 (self.phone_index.get(phone_h) if phone_h else None)
             c = self.contacts.get(contact_id) if contact_id else None
-            cls = i10_replies.classify(body["text"])
+            cls = i10_replies.classify(body["text"], body["channel"])
             reply_id = derived_id("rpl", caller, rk)
             text_sha = hashlib.sha256(body["text"].encode("utf-8")).hexdigest()
             data = {"reply_id": reply_id, "channel": body["channel"], "message_id": body.get("message_id"),

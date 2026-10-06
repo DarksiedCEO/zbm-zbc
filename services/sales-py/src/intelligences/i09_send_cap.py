@@ -1,7 +1,8 @@
 """Sending pace for the outreach domain: the warm-up schedule and the daily cap (ADR 0013 decision 10).
 
-Decides: how many cold emails the outreach domain may send on a given UTC day. Day 1 of the schedule is the first day
-anything was sent; the schedule only moves forward one step on a day the ``warmup-reset`` job advances it, and holds
+Decides: how many cold emails the outreach domain may send on a given UTC day. The step and the daily counts are kept
+PER outreach domain (AEGIS S1-M2): a new domain starts the schedule from day 1. Day 1 is the first day that domain
+sent anything; the schedule only moves forward one step on a day the ``warmup-reset`` job advances it, and holds
 (does not advance) while yesterday's complaint rate was above 0.3% or its hard-bounce rate above 5% (integer
 arithmetic). The day's cap is min(schedule step, SALES_DAILY_SEND_CAP). Never: sends."""
 

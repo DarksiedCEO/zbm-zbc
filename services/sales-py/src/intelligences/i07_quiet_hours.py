@@ -26,6 +26,18 @@ def zone(name: Optional[str]) -> Optional[ZoneInfo]:
         return None
 
 
+# AEGIS S1-M1: a North American (+1) number can only be in a North American zone; a recorded zone that contradicts
+# the number is refused, so nobody can move a recipient to a daytime zone to text them at night.
+US_PACIFIC = frozenset({"Pacific/Honolulu", "Pacific/Guam", "Pacific/Saipan", "Pacific/Pago_Pago",
+                        "Pacific/Midway", "Pacific/Wake", "Pacific/Johnston"})
+
+
+def zone_fits_phone(tz_name: Optional[str], e164: Optional[str]) -> bool:
+    if not tz_name or not e164 or not e164.startswith("+1"):
+        return True
+    return tz_name.startswith("America/") or tz_name in US_PACIFIC
+
+
 def allowed(now_utc: datetime, tz_name: Optional[str]) -> Optional[bool]:
     """True inside the window, False outside, None when the time zone is unknown (the caller refuses)."""
     z = zone(tz_name)

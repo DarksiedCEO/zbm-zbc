@@ -2,7 +2,8 @@
 
 Decides: the two price books' service lines (every line exists with NO price until Andre approves one), a proposal's
 line amounts, subtotal, discount and total; whether a proposal may go out without Andre (total <= the auto-approve
-maximum, no media-buy line, no discount, no custom term — all four); and the payment methods it must state
+maximum, and with the opportunity's other approved, sent or won proposals still <= it; no media-buy line, no
+discount, no custom term — all of them); and the payment methods it must state
 (Finance's rule: any media buy -> ACH only; card only for Revenue Recovery up to $5,000; otherwise ACH).
 
 A media-buy line is cost + markup: the markup Andre approved for the line is the standard (he is expected to approve
@@ -61,7 +62,9 @@ class QuoteProblem(ValueError):
 
 
 def compute(brand: str, requested: list[dict], book: dict, discount: str, custom_terms: Optional[str],
-            auto_max: Decimal) -> dict:
+            auto_max: Decimal, committed: Decimal = Decimal("0.00")) -> dict:
+    """``committed``: the total of the opportunity's other proposals that are approved, sent or won (AEGIS S1-H2: a
+    deal split into proposals under the maximum is judged as the sum)."""
     """``book``: line_id -> the line's state (``approved`` = {version, price, markup_pct} or None)."""
     out, has_media, custom_markup = [], False, False
     seen = set()
@@ -109,6 +112,8 @@ def compute(brand: str, requested: list[dict], book: dict, discount: str, custom
     reasons = []
     if total > auto_max:
         reasons.append("OVER_AUTO_APPROVE_MAX")
+    elif money.q(total + money.D(committed)) > auto_max:
+        reasons.append("OPPORTUNITY_TOTAL_OVER_MAX")
     if has_media:
         reasons.append("MEDIA_BUY_LINE")
     if disc > 0:
