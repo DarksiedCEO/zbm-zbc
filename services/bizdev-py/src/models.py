@@ -402,8 +402,16 @@ class Suppress(Strict):
     email: Optional[Email] = None
 
 
+class HoldRef(Strict):
+    hold_id: NbId
+    reply_id: NbId
+
+
 class HoldDecision(Strict):
+    """AEGIS round 4: Andre names exactly the holds he decides, each with its reply, and the hash over that set and
+    the action."""
     request_id: RequestId
     decision: Literal["resume", "opt_out"]
-    state_sha256: Sha256
+    holds: list[HoldRef] = Field(min_length=1, max_length=200)
+    decision_sha256: Sha256
 

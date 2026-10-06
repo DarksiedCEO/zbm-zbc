@@ -43,6 +43,14 @@ characters, in any case — it is lower-cased before the shape check and before 
 after a restart), a different body under the same key is `409 REQUEST_ID_REUSED`. Finance's ids
 (`finance_event_id`, `finance_ref`) are finance-py's own generated ids (`fin-<prefix>-<40 hex>` or 26 Crockford).
 
+**Hold decisions.** Every reply makes its own holds: one for its sender (the contact resolved through the message
+or the sender's address) and one for each contact or other address named in its body (at most five non-contacts),
+never merged. Andre decides exactly the holds he names: `decision_sha256` is the SHA-256 of the canonical JSON
+(`sort_keys`, separators `,` `:`, UTF-8) of `{"decision": <resume|opt_out>, "holds": sorted([[hold_id, reply_id,
+hold_sha256], ...])}`, with `hold_sha256` as `GET /holds` shows it. Every named hold must be active and unchanged;
+holds made later are untouched. A contact stays held while ANY active hold covers it. `opt_out` suppresses only what
+the decided hold may suppress: a sender hold its resolved sender addresses, a named hold only its own address.
+
 Headers: `Authorization: Bearer <service token>` on every route but `/health`; `X-NBD-Caller-Token` everywhere
 else; Andre's routes also `X-Andre-Approval-Token`, accepted only through the `dashboard` caller.
 
@@ -120,7 +128,8 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /events/email`; `POST /replies` | provider_events | bounces, complaints; replies (always recorded, never refused for its sender; any reply holds the contact) |
 | `POST /unsubscribe` | hub | the one-click link's token |
 | `POST /suppressions`; `GET /suppressions` | dashboard, bizdev_agent, provider_events; dashboard, compliance_38 | append-only, both brands |
-| `GET /holds`; `POST /holds/{id}/decision` | dashboard; Andre | `resume` or `opt_out` for the hold's whole group, naming its `state_sha256` (a reply that arrives after Andre looked makes it stale: 409) |
+| `GET /holds?status=&limit=&offset=` | dashboard | holds, paginated (limit 1..2000, default 200), each with its `hold_sha256` |
+| `POST /holds/decision` | Andre | `resume` or `opt_out` for EXACTLY the holds named (each `{hold_id, reply_id}`), with `decision_sha256` (below) |
 | `GET /tasks`; `POST /tasks/{id}/close` | dashboard; Andre | Andre's review queue |
 | `POST /jobs/{send-queue,submission-queue,deadline-sweep,handoff-retry,payout-request,integrity}/run` | scheduler | jobs, one at a time (`409 JOB_RUNNING`) |
 | `GET /audit/integrity`, `/audit/export` | dashboard, compliance_38 | ledger verdict as returned; export with emails as keyed hashes, text as SHA-256 |

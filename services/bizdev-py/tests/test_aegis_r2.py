@@ -183,8 +183,9 @@ def test_l1_every_contact_named_in_a_body_is_held(tmp_path):
                 caller="provider_events"), 201)
     assert h.ok(h.get(f"/contacts/{c['contact_id']}"))["held"] is True
     h.refused(h.queue(c, t), 403, "CONTACT_HELD")
-    hold = h.ok(h.get("/holds?status=active"))[0]
-    assert len(hold["hashes"]) == 1 + 5 + 1                           # sender, five strangers, the contact
+    holds = list(h.holds(status="active").values())           # round 4: one hold each, never merged
+    assert len(holds) == 1 + 5 + 1                                    # sender, five strangers, the contact
+    assert [x["contact_ids"] for x in holds if x["contact_ids"]] == [[c["contact_id"]]]
 
 
 # --------------------------------------------------------------------------------------------------- L2

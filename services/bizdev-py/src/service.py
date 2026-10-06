@@ -97,6 +97,8 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
         self.holds: dict[str, dict] = {}
         self.hold_by_hash: dict[str, set] = {}          # active holds by keyed address hash (AEGIS round 2 L2)
         self.hold_by_contact: dict[str, set] = {}
+        self.contact_by_hash: dict[str, str] = {}       # keyed email hash -> contact (AEGIS round 4: no full scans)
+        self.msgs_by_key: dict[str, set] = {}           # to_hash / contact id -> message ids
         self.tasks: dict[str, dict] = {}
         self.sent_per_day: dict[str, int] = {}
         self.requests: dict[tuple, tuple] = {}
@@ -287,11 +289,9 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
         for t in d.get("tasks") or ():
             if t["task_id"] not in self.tasks:
                 self.tasks[t["task_id"]] = {**t, "status": "open", "opened_at": at, "closed_at": None, "outcome": None}
-        h = d.get("hold") if kind == "reply_received" else None
-        if h and h["task_id"] in self.tasks:          # link a task opened in this same line to its hold
-            ids = self.tasks[h["task_id"]].setdefault("hold_ids", [])
-            if h["hold_id"] not in ids:
-                ids.append(h["hold_id"])
+        if kind == "reply_received":                   # link a task opened in this same line to its holds
+            for h in d.get("holds") or ([d["hold"]] if d.get("hold") else []):
+                self._link_task(h)
         if d.get("request_id") and d.get("actor"):
             self.requests[(d["actor"], d["request_id"])] = (d.get("request_sha"), d.get("_obj"))
 

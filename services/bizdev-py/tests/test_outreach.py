@@ -126,8 +126,7 @@ def test_any_reply_holds_until_andre_decides(tmp_path):
     h.refused(h.decide(ans["hold_id"], "resume", andre=False), 403)
     h.ok(h.decide(ans["hold_id"], "resume"))
     assert h.ok(h.queue(c, t), 201)["status"] == "queued"
-    h.refused(h.decide(ans["hold_id"], "opt_out", state="0" * 64),
-              409, "HOLD_CLOSED")
+    h.refused(h.decide(ans["hold_id"], "opt_out"), 409, "HOLD_CLOSED")
 
 
 def test_out_of_office_also_holds(tmp_path):

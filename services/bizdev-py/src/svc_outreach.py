@@ -35,6 +35,7 @@ class OutreachMixin:
                                                                "partner_id", "pursuit_id")},
                                           "first_name": None, "company": None, "created_at": at,
                                           "created_by": d["actor"]}
+        self.contact_by_hash[d["email_hash"]] = d["contact_id"]
 
     def _a_merge_fields_verified(self, d, at):
         c = self.contacts[d["contact_id"]]
@@ -61,6 +62,8 @@ class OutreachMixin:
             "message_id", "contact_id", "to_hash", "brand", "template_id", "version", "template_sha256",
             "rendered_sha256", "from_domain")}, "status": "queued", "reason": None, "queued_at": at, "updated_at": at,
             "sent_on": None, "provider_ref": None, "events": [], "queued_by": d["actor"]}
+        self.msgs_by_key.setdefault(d["to_hash"], set()).add(d["message_id"])       # AEGIS round 4: no full scans
+        self.msgs_by_key.setdefault(d["contact_id"], set()).add(d["message_id"])
 
     def _a_message_sending(self, d, at):
         self.messages[d["message_id"]].update(status="sending", sent_on=d["date"], updated_at=at)
@@ -86,57 +89,67 @@ class OutreachMixin:
         for h in hashes:
             if h not in self.suppression:            # append-only: the first entry stands, nothing is ever removed
                 self.suppression[h] = {"hash": h, "reason": reason, "at": at, "by": actor}
-        hs = set(hashes)
-        for m in self.messages.values():
-            if m["status"] == "queued" and m["to_hash"] in hs:
-                m.update(status="cancelled", reason="SUPPRESSED", updated_at=at)
+        for h in hashes:
+            for mid in self.msgs_by_key.get(h, ()):
+                m = self.messages[mid]
+                if m["status"] == "queued" and m["to_hash"] == h:
+                    m.update(status="cancelled", reason="SUPPRESSED", updated_at=at)
 
     def _a_reply_received(self, d, at):
         if d.get("hashes"):
             self._suppress_apply(d["hashes"], d["reason"], d["actor"], at)
-        h = d.get("hold")
-        if h:
-            self.holds[h["hold_id"]] = {**h, "status": "active", "at": at, "decided_at": None, "decision": None}
-            for x in h["hashes"]:                     # AEGIS round 2 L2: active holds indexed by hash and contact
+        for h in d.get("holds") or ([d["hold"]] if d.get("hold") else []):
+            self.holds[h["hold_id"]] = {"kind": "sender", "suppress_hashes": h.get("hashes", []), **h,
+                                        "status": "active", "at": at, "decided_at": None, "decision": None}
+            for x in h["hashes"]:                     # active holds indexed by address hash and by contact
                 self.hold_by_hash.setdefault(x, set()).add(h["hold_id"])
             for c in h["contact_ids"]:
                 self.hold_by_contact.setdefault(c, set()).add(h["hold_id"])
-            t = self.tasks.get(h["task_id"])          # AEGIS round 3 H1: the (deduped) task lists every hold it covers
-            if t is not None:
-                t.setdefault("hold_ids", [])
-                if h["hold_id"] not in t["hold_ids"]:
-                    t["hold_ids"].append(h["hold_id"])
             self._cancel_held(h, at)
+            self._link_task(h)
+
+    def _link_task(self, h: dict) -> None:
+        t = self.tasks.get(h["task_id"])
+        if t is not None:
+            ids = t.setdefault("hold_ids", [])
+            if h["hold_id"] not in ids:
+                ids.append(h["hold_id"])
 
     def _cancel_held(self, h: dict, at: str) -> None:
-        cids, hs = set(h["contact_ids"]), set(h["hashes"])
-        for m in self.messages.values():
-            if m["status"] == "queued" and (m["contact_id"] in cids or m["to_hash"] in hs):
-                m.update(status="cancelled", reason="CONTACT_HELD", updated_at=at)
+        for key in (*h["contact_ids"], *h["hashes"]):
+            for mid in self.msgs_by_key.get(key, ()):
+                m = self.messages[mid]
+                if m["status"] == "queued":
+                    m.update(status="cancelled", reason="CONTACT_HELD", updated_at=at)
 
     def _a_holds_decided(self, d, at):
-        """AEGIS round 3 H1: one decision covers every active hold of the group it named by state hash; every review
-        task tied to those holds closes (none is left orphaned)."""
+        """AEGIS round 4: the decision covers EXACTLY the holds Andre named. A review task closes only when every hold
+        linked to it is decided; a task with no linked hold is never closed automatically."""
+        tasks = set()
         for hid in d["hold_ids"]:
-            self._a_hold_decided({**d, "hold_id": hid}, at)
-        for t in self.tasks.values():
-            if t["status"] == "open" and t["kind"] == "review_reply" and \
-                    all(self.holds[x]["status"] != "active" for x in t.get("hold_ids", ()) if x in self.holds):
-                t.update(status="closed", closed_at=at, outcome=d["decision"])
+            self._a_hold_decided({**d, "hold_id": hid}, at, close_task=False)
+            tasks.add(self.holds[hid]["task_id"])
+        for tid in sorted(tasks):
+            self._close_task_if_decided(tid, at, d["decision"])
 
-    def _a_hold_decided(self, d, at):
+    def _close_task_if_decided(self, tid: str, at: str, outcome: str) -> None:
+        t = self.tasks.get(tid)
+        ids = (t or {}).get("hold_ids") or []
+        if t is not None and t["status"] == "open" and ids and \
+                all(self.holds[x]["status"] != "active" for x in ids if x in self.holds):
+            t.update(status="closed", closed_at=at, outcome=outcome)
+
+    def _a_hold_decided(self, d, at, close_task: bool = True):
         h = self.holds[d["hold_id"]]
         h.update(status="lifted" if d["decision"] == "resume" else "opted_out", decided_at=at, decision=d["decision"])
         for x in h["hashes"]:
             self.hold_by_hash.get(x, set()).discard(h["hold_id"])
         for c in h["contact_ids"]:
             self.hold_by_contact.get(c, set()).discard(h["hold_id"])
-        t = self.tasks.get(h["task_id"])
-        still = any(o["status"] == "active" and o["task_id"] == h["task_id"] for o in self.holds.values())
-        if t is not None and t["status"] == "open" and not still:
-            t.update(status="closed", closed_at=at, outcome=d["decision"])
-        if d["decision"] == "opt_out":
-            self._suppress_apply(h["hashes"], "andre_opt_out", d["actor"], at)
+        if d["decision"] == "opt_out":                 # only what this hold may suppress (round 4: never body names)
+            self._suppress_apply(h.get("suppress_hashes", h["hashes"]), "andre_opt_out", d["actor"], at)
+        if close_task:
+            self._close_task_if_decided(h["task_id"], at, d["decision"])
 
     # ------------------------------------------------------------------------------------------------ checks
 
@@ -522,11 +535,14 @@ class OutreachMixin:
 
     def reply(self, caller: str, body: dict) -> dict:
         """A reply is ALWAYS recorded, held and given to Andre (AEGIS round 1 H1): its sender fields never refuse it.
-        The message it answers (when known) names the contact, whose address is held and, for opt-out wording,
-        suppressed. A sender address that parses is held (and suppressed on opt-out wording); one that does not parse
-        (quoted or UTF-8 local part, over-long, odd TLD) is held under the keyed hash of its normalised raw form.
-        Addresses written in the body (NFKC-normalised, so fullwidth forms count) are held whoever sent the reply,
-        never suppressed. With nothing resolvable the reply still opens a hold record and a task for Andre."""
+
+        AEGIS round 4: holds never merge. The reply's SENDER gets one hold — the contact resolved through the message
+        (or the sender's address), the addresses that resolve to them, and the keyed raw form of a sender that does
+        not parse. Each contact named in the body gets its OWN hold covering only that contact, and each other body
+        address (at most BODY_STRANGERS_MAX) its own hold covering only that address. All of them are linked to the
+        reply's review task (one per sender per day). An ``opt_out`` decision suppresses only what a hold may
+        suppress: the sender hold its RESOLVED sender addresses (never the raw form, never a body address); a named
+        hold only its own contact, by a decision on that hold."""
         with self.lock:
             self._gate()
             rk = self.rk("reply", body.get("message_id") or "direct", body)
@@ -541,109 +557,119 @@ class OutreachMixin:
                     from_h = i02_identity.keyed(self.pii_key, "email", e)
                 else:
                     raw_h = i02_identity.keyed(self.pii_key, "email_raw", i02_identity.raw_address(body["from_email"]))
-            by_email = {c["email_hash"]: c["contact_id"] for c in self.contacts.values()}
-            cid = m["contact_id"] if m else by_email.get(from_h)
+            cid = m["contact_id"] if m else self.contact_by_hash.get(from_h)
             c = self.contacts.get(cid) if cid else None
             cls = i09_replies.classify(body["text"], "email")
             reply_id = derived_id("rpl", caller, rk)
             data = {"reply_id": reply_id, "message_id": body.get("message_id"), "contact_id": cid, "class": cls,
                     "message_known": m is not None,
                     "text_sha256": hashlib.sha256(body["text"].encode("utf-8", "surrogatepass")).hexdigest()}
-            sender = {h for h in (from_h, m["to_hash"] if m else None, c.get("email_hash") if c else None) if h}
-            hold_cids = {c["contact_id"]} if c is not None else set()
-            hold_hashes = set(sender) | ({raw_h} if raw_h else set())
-            strangers = 0
-            for e in i02_identity.all_emails_in(body["text"]):   # named in the body: held, never suppressed
-                eh = i02_identity.keyed(self.pii_key, "email", e)
-                named = by_email.get(eh)
-                if named:                                        # AEGIS round 2 L1: EVERY contact named is held
-                    hold_cids.add(named)
-                    hold_hashes.add(eh)
-                elif strangers < BODY_STRANGERS_MAX:             # the cap applies to addresses that are not contacts
-                    strangers += 1
-                    hold_hashes.add(eh)
+            sender = sorted({h for h in (from_h, m["to_hash"] if m else None, c.get("email_hash") if c else None)
+                             if h})
             evidence = []
             if cls == "unsubscribe" and sender:
-                data.update(hashes=sorted(sender), reason="stop_reply")
+                data.update(hashes=sender, reason="stop_reply")
                 evidence.append(("suppression_added", f"reply:{reply_id}",
-                                 {"hashes": sorted(sender), "reason": "stop_reply"}, (caller, rk)))
-            # AEGIS round 2 L2: one open review task per sender per day; a hold only for what is not already held
+                                 {"hashes": sender, "reason": "stop_reply"}, (caller, rk)))
             sender_key = f"contact:{cid}" if cid else (from_h or raw_h or f"reply:{reply_id}")
             task = self._task("review_reply", sender_key, self.today(), cls)
             existing = self.tasks.get(task["task_id"])
             if existing is not None and existing["status"] != "open":
                 task = self._task("review_reply", sender_key, f"{self.today()}|{reply_id}", cls)
                 existing = None
-            # AEGIS round 3 H1: EVERY reply creates its own hold (only the review task is deduped), so a decision taken
-            # on an earlier reply can never release what a later one holds
-            hold_id = derived_id("hld", reply_id)
-            data["hold"] = {"hold_id": hold_id, "contact_ids": sorted(hold_cids), "hashes": sorted(hold_hashes),
-                            "reply_id": reply_id, "task_id": task["task_id"]}
-            evidence.append(("reply_hold_applied", f"hold:{hold_id}",
-                             {"hold_id": hold_id, "contact_ids": sorted(hold_cids), "hashes": sorted(hold_hashes),
-                              "reply_id": reply_id, "class": cls}, (caller, rk)))
+            tid = task["task_id"]
+            holds = [{"hold_id": derived_id("hld", reply_id), "reply_id": reply_id, "kind": "sender",
+                      "contact_ids": [cid] if cid else [], "hashes": sorted(set(sender) | ({raw_h} if raw_h else set())),
+                      "suppress_hashes": sender, "task_id": tid}]
+            strangers = 0
+            for e in i02_identity.all_emails_in(body["text"]):     # body addresses: each its own hold, never merged
+                eh = i02_identity.keyed(self.pii_key, "email", e)
+                if eh in sender:
+                    continue
+                named = self.contact_by_hash.get(eh)
+                if named is None:
+                    if strangers >= BODY_STRANGERS_MAX:
+                        continue
+                    strangers += 1
+                holds.append({"hold_id": derived_id("hld", reply_id, eh), "reply_id": reply_id, "kind": "named",
+                              "contact_ids": [named] if named else [], "hashes": [eh], "suppress_hashes": [eh],
+                              "task_id": tid})
+            data["holds"] = holds
+            for hh in holds:
+                evidence.append(("reply_hold_applied", f"hold:{hh['hold_id']}",
+                                 {"hold_id": hh["hold_id"], "kind": hh["kind"], "contact_ids": hh["contact_ids"],
+                                  "hashes": hh["hashes"], "reply_id": reply_id, "class": cls},
+                                 (caller, rk, hh["hold_id"])))
             data["tasks"] = [] if existing is not None else [task]
             answer = {"reply_id": reply_id, "class": cls, "suppressed": bool(data.get("hashes")), "held": True,
-                      "hold_id": hold_id, "task_id": task["task_id"], "sender_resolved": bool(sender)}
+                      "hold_id": holds[0]["hold_id"], "hold_ids": [x["hold_id"] for x in holds], "task_id": tid,
+                      "sender_resolved": bool(sender)}
             self._commit("reply_received", self._req(data, caller, rk, body, answer), caller, evidence=evidence)
             return answer
 
-    def holds_view(self, status: Optional[str]) -> list[dict]:
-        with self.lock:
-            return [self.hold_view(h) for h in self.holds.values() if status is None or h["status"] == status][:2000]
+    # ------------------------------------------------------------------------------------------------ hold decisions
 
-    def hold_group(self, hold_id: str) -> list[str]:
-        """Every ACTIVE hold sharing a contact or an address hash with ``hold_id``, transitively (index lookups)."""
-        h = self.holds[hold_id]
-        group, frontier = set(), [hold_id] if h["status"] == "active" else []
-        while frontier:
-            x = frontier.pop()
-            if x in group:
-                continue
-            group.add(x)
-            hx = self.holds[x]
-            for c in hx["contact_ids"]:
-                frontier.extend(self.hold_by_contact.get(c, ()))
-            for k in hx["hashes"]:
-                frontier.extend(self.hold_by_hash.get(k, ()))
-        return sorted(group)
+    @staticmethod
+    def hold_sha256(h: dict) -> str:
+        """A hold's identity and content (holds never change after they are made, only their status)."""
+        return i04_assembly.sha({k: h.get(k) for k in ("hold_id", "reply_id", "kind", "contact_ids", "hashes",
+                                                       "suppress_hashes", "task_id", "status")})
 
-    def hold_state_sha256(self, hold_id: str) -> str:
-        """What Andre saw: every active hold of the group, the replies behind them and their count. A reply that
-        arrives after he looked changes it, so his decision is stale (409)."""
-        group = self.hold_group(hold_id)
-        return i04_assembly.sha({"hold_id": hold_id, "active_holds": group,
-                                 "replies": sorted(self.holds[x]["reply_id"] for x in group), "reply_count": len(group)})
+    @staticmethod
+    def decision_sha256(decision: str, holds: list) -> str:
+        """What Andre decides: exactly this set of holds, each as (hold_id, reply_id, hold_sha256), and the action.
+        The dashboard computes it from GET /holds; README documents the formula."""
+        return i04_assembly.sha({"decision": decision,
+                                 "holds": sorted([x["hold_id"], x["reply_id"], x["hold_sha256"]] for x in holds)})
 
     def hold_view(self, h: dict) -> dict:
         out = dict(h)
-        if h["status"] == "active":
-            out["group"] = self.hold_group(h["hold_id"])
-            out["state_sha256"] = self.hold_state_sha256(h["hold_id"])
+        out["hold_sha256"] = self.hold_sha256(h)
         return out
 
-    def decide_hold(self, hold_id: str, body: dict) -> dict:
-        """Andre's decision on a hold's whole group, naming its exact state hash (AEGIS round 3 H1): ``resume`` lifts
-        every hold of the group and nothing else (a suppression stays exactly as it was); ``opt_out`` suppresses every
-        address they cover. Every review task tied to them closes."""
+    def holds_view(self, status: Optional[str], limit: int = 200, offset: int = 0) -> list[dict]:
+        """Paginated BEFORE anything is computed (AEGIS round 4): a filter pass over the ids, one slice, then a
+        constant-size view per hold in the page."""
+        with self.lock:
+            it = (h for h in self.holds.values() if status is None or h["status"] == status)
+            page = []
+            for i, h in enumerate(it):
+                if i < offset:
+                    continue
+                if len(page) >= limit:
+                    break
+                page.append(h)
+            return [self.hold_view(h) for h in page]
+
+    def decide_holds(self, body: dict) -> dict:
+        """Andre decides EXACTLY the holds he names (AEGIS round 4): each must exist, be active and unchanged, and
+        carry the named reply; ``decision_sha256`` must be computed over exactly that set and the action. Holds made
+        later are untouched (each has its own task), so a reply stream cannot starve a decision. A contact stays held
+        while any active hold covers it."""
+        named = body["holds"]
+        target = i04_assembly.sha(sorted(x["hold_id"] for x in named))[:40]
         with self.lock:
             self._gate()
-            rk = self.rk("hold_decision", hold_id, body)
+            rk = self.rk("holds_decide", target, body)
             if self._idem("andre", rk, body):
-                return self.hold_view(self.holds[hold_id])
-            h = self._get(self.holds, hold_id, "HOLD_NOT_FOUND")
-            if h["status"] != "active":
-                raise Conflict(R("HOLD_CLOSED"))
-            if body["state_sha256"] != self.hold_state_sha256(hold_id):
+                return {"decided": sorted(x["hold_id"] for x in named), "decision": body["decision"]}
+            current = []
+            for x in named:
+                h = self._get(self.holds, x["hold_id"], "HOLD_NOT_FOUND")
+                if h["status"] != "active":
+                    raise Conflict(R("HOLD_CLOSED"))
+                if h["reply_id"] != x["reply_id"]:
+                    raise Conflict(R("STATE_HASH_MISMATCH"))
+                current.append({"hold_id": h["hold_id"], "reply_id": h["reply_id"], "hold_sha256": self.hold_sha256(h)})
+            if body["decision_sha256"] != self.decision_sha256(body["decision"], current):
                 raise Conflict(R("STATE_HASH_MISMATCH"))
-            group = self.hold_group(hold_id)
-            hashes = sorted({x for g in group for x in self.holds[g]["hashes"]})
-            data = {"hold_id": hold_id, "hold_ids": group, "decision": body["decision"],
-                    "state_sha256": body["state_sha256"]}
-            evidence = [("hold_decided", f"hold:{hold_id}", {k: data[k] for k in ("hold_ids", "decision",
-                                                                                    "state_sha256")}, ("andre", rk))]
-            if body["decision"] == "opt_out" and hashes:
-                evidence.append(("suppression_added", f"hold:{hold_id}",
-                                 {"hashes": hashes, "reason": "andre_opt_out"}, ("andre", rk)))
-            self._commit("holds_decided", self._req(data, "andre", rk, body, hold_id), "andre", evidence=evidence)
-            return self.hold_view(h)
+            ids = sorted(x["hold_id"] for x in named)
+            data = {"hold_ids": ids, "decision": body["decision"], "decision_sha256": body["decision_sha256"]}
+            evidence = [("hold_decided", f"holds:{target}", data, ("andre", rk))]
+            supp = sorted({k for i in ids for k in self.holds[i].get("suppress_hashes", self.holds[i]["hashes"])})
+            if body["decision"] == "opt_out" and supp:
+                evidence.append(("suppression_added", f"holds:{target}", {"hashes": supp, "reason": "andre_opt_out"},
+                                 ("andre", rk)))
+            out = {"decided": ids, "decision": body["decision"]}
+            self._commit("holds_decided", self._req(data, "andre", rk, body, out), "andre", evidence=evidence)
+            return out

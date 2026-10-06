@@ -663,12 +663,16 @@ def create_app(service: BizDevService, settings: config_mod.Settings) -> FastAPI
 
     @app.get(P + "/holds", dependencies=auth)
     def holds(status_: Optional[str] = Query(default=None, alias="status", pattern="^(active|lifted|opted_out)$"),
+              limit: int = Query(default=200, ge=1, le=2000), offset: int = Query(default=0, ge=0, le=10_000_000),
               who: str = Depends(dashboard)) -> list:
-        return svc.holds_view(status_)
+        return svc.holds_view(status_, limit, offset)
 
-    @app.post(P + "/holds/{hold_id}/decision", dependencies=auth)
-    def hold_decision(hold_id: str, req: dict = Depends(body(m.HoldDecision)), who: str = Depends(andre)) -> dict:
-        return svc.decide_hold(_id(hold_id), req)
+    @app.post(P + "/holds/decision", dependencies=auth)
+    def hold_decision(req: dict = Depends(body(m.HoldDecision)), who: str = Depends(andre)) -> dict:
+        ids = [x["hold_id"] for x in req["holds"]]
+        if len(set(ids)) != len(ids):
+            raise Invalid(R("INVALID"), field="holds")
+        return svc.decide_holds(req)
 
     # ------------------------------------------------------------------ tasks, jobs, audit
 

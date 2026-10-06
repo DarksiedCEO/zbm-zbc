@@ -173,21 +173,24 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     unlock item 6). Everything is checked at queue time and again from current state at send time; a send is recorded
     (`outreach_send`) before the port is called; the daily cap counts by the service clock's UTC date.
 21. **Replies hold.** A reply is ALWAYS recorded: its sender fields never refuse it (AEGIS round 1 H1). ANY reply
-    (an out-of-office included) holds further automatic outreach to the contact, both brands, and cancels its queued
-    messages, until Andre decides: `resume` lifts the hold and nothing else; `opt_out` suppresses permanently. Opt-out
-    wording (i09, sales-py's normaliser) also suppresses at once, through the message it answers (its recipient and
-    contact) and the sender's address when it parses (IDN `xn--` addresses parse; i02). A sender address that does
-    not parse (quoted or UTF-8 local part, over 64 characters) is held under the keyed hash of its normalised raw form;
-    an unknown message id is recorded, not refused. Addresses written in the body, after NFKC (fullwidth forms
-    count), are held — never suppressed — whoever sent the reply, and matched against existing contacts. Every reply
-    opens a review task, even with nothing resolvable. The reply text is never stored (SHA-256). AEGIS round 2: every
-    address in the body that is an existing contact is held (the cap of five applies only to addresses that are not
-    contacts, L1); one review task per sender per day; active holds are indexed by address hash and by contact (L2).
-    AEGIS round 3 H1: EVERY reply creates its own hold (only the task is deduped, and it lists every hold it
-    covers). Andre decides a hold's GROUP — every active hold sharing a contact or an address hash with it,
-    transitively — naming its `state_sha256` (the group's hold ids, their replies and their count); a reply that
-    arrives after he looked changes it and his decision is refused 409. The decision lifts (or opts out) every hold
-    of the group and closes every review task tied to them; no review task is left without an active hold.
+    (an out-of-office included) holds further automatic outreach until Andre decides. Opt-out wording (i09) also
+    suppresses at once, through the message it answers (its recipient and contact) and the sender's address when it
+    parses (IDN `xn--` addresses parse; i02); a sender that does not parse is held under the keyed hash of its
+    normalised raw form. The reply text is never stored (SHA-256). Holds (AEGIS round 4, replacing round 3's groups):
+    every reply makes its OWN holds and they never merge — one SENDER hold (the contact resolved through the message
+    or the sender's address, the addresses resolving to them, the raw form of an unparseable sender), and one
+    NAMED hold for each contact written in the body (NFKC, fullwidth forms count) covering only that contact, plus
+    one for each other body address (at most five) covering only that address. All of a reply's holds are linked to
+    its review task, which is deduped per sender per day. Andre decides EXACTLY the holds he names (`POST
+    /holds/decision`, each `{hold_id, reply_id}`), under `decision_sha256` over that set (with each hold's
+    `hold_sha256`) and the action; every named hold must be active and unchanged. Holds made later are untouched and
+    keep their own task, so no reply stream can make his decision stale (round 4 M1). A contact is released only
+    when EVERY active hold covering it is decided. `opt_out` suppresses only what the decided hold may suppress: a
+    sender hold its RESOLVED sender addresses (never a raw form, never a body address); a named hold only its own
+    address — so a body-named contact is suppressed only by a decision on its own hold. A review task closes when
+    every hold linked to it is decided; a task with no linked hold is never closed automatically. Holds are indexed
+    by contact and by address, `GET /holds` paginates before computing anything, and nothing under the lock is
+    worse than linear in the request.
 22. **Ports** (`src/ports.py`, `src/legal_client.py`): email, submission, bid source, Onboarding and Finance hand-offs,
     Finance payouts, Legal agreements. Each stand-in fails closed and says so in `/status`; a port that raises is
     unavailable; no port is called with the lock held.
@@ -336,3 +339,18 @@ kept as a property test, `tests/test_fuzz_payouts.py`.
   contract is in the README).
 - **Info** `not_delivered` / `not_paid` ask the port once first; a delivered / paid answer is applied and the call
   refused `409 PORT_SAYS_DELIVERED` (decisions 11, 17).
+
+## Amendment — AEGIS round 4 (Oct 6 2026, on 20e08c6): BLOCKING (two Highs), every item fixed
+
+Regression tests: `services/bizdev-py/tests/test_aegis_r4.py` (each fails on 20e08c6; the 2,000-hold listing does
+not finish within 60 s there).
+
+- **H1 / H2** both came from round 3's transitive hold group: a stranger naming two contacts glued their holds, so
+  resuming one released the other (H1), and opting out a spam hold suppressed every contact it named (H2). Groups
+  are gone: a decision covers exactly the holds named under a hash over that set and the action; body-named
+  addresses get their own holds; `opt_out` suppresses only what the decided hold may suppress (decision 21).
+- **M1** a reply stream could starve a decision (every new reply changed the group's hash). Later holds no longer
+  touch a decision (decision 21).
+- **Performance** the group closure was quadratic under the lock. Holds and queued messages are indexed (by contact
+  and by address), contacts by address hash, and `GET /holds` paginates first.
+- **Info** a task with no linked hold is never auto-closed.

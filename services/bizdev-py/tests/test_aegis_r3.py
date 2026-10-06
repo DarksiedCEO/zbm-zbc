@@ -29,24 +29,19 @@ def _reply(h, m, text):
 
 # --------------------------------------------------------------------------------------------------- R3-H1
 
-def test_h1_reviewer_sequence_a_stale_decision_never_releases_the_contact(tmp_path):
+def test_h1_reviewer_sequence_a_decision_on_reply_1_never_releases_reply_2(tmp_path):
     h = Harness(tmp_path, ports=wired_ports())
     c, t, m = _sent(h)
     r1 = _reply(h, m, "Thanks, let me think")
-    seen_by_andre = h.hold_state(r1["hold_id"])                     # Andre opens T1 and looks
+    seen_by_andre = h.holds()                                       # Andre opens T1 and looks
     h.clock.advance(days=1)
     r2 = _reply(h, m, "Actually please do not reach out again to our team")
-    assert r2["hold_id"] != r1["hold_id"]                           # every reply has its own hold
-    assert r2["task_id"] != r1["task_id"]                           # a new day: a new task
-    h.refused(h.decide(r1["hold_id"], "resume", state=seen_by_andre), 409, "STATE_HASH_MISMATCH")
+    assert r2["hold_id"] != r1["hold_id"] and r2["task_id"] != r1["task_id"]
+    h.ok(h.decide(r1["hold_id"], "resume", seen=seen_by_andre))     # exactly what he saw: reply 1's hold only
     assert h.ok(h.get(f"/contacts/{c['contact_id']}"))["held"] is True
     h.refused(h.queue(c, t), 403, "CONTACT_HELD")
-    # with the current state, the decision covers BOTH holds and closes BOTH tasks: nothing orphaned
-    assert sorted(next(x for x in h.ok(h.get("/holds")) if x["hold_id"] == r1["hold_id"])["group"]) == \
-        sorted([r1["hold_id"], r2["hold_id"]])
-    h.ok(h.decide(r1["hold_id"], "resume"))
-    holds = {x["hold_id"]: x["status"] for x in h.ok(h.get("/holds"))}
-    assert holds[r1["hold_id"]] == holds[r2["hold_id"]] == "lifted"
+    h.ok(h.decide(r2["hold_id"], "resume"))                         # every hold covering the contact decided
+    assert h.ok(h.get(f"/contacts/{c['contact_id']}"))["held"] is False
     assert not [x for x in h.ok(h.get("/tasks?status=open")) if x["kind"] == "review_reply"]
 
 
@@ -60,24 +55,28 @@ def test_h1_same_day_replies_share_one_task_linked_to_every_hold(tmp_path):
     assert sorted(task["hold_ids"]) == sorted([r1["hold_id"], r2["hold_id"]])
     h.ok(h.decide(r2["hold_id"], "opt_out"))
     assert h.ok(h.get(f"/contacts/{c['contact_id']}"))["suppressed"] is True
+    assert next(x for x in h.ok(h.get("/tasks")) if x["task_id"] == r1["task_id"])["status"] == "open"
+    h.ok(h.decide(r1["hold_id"], "resume"))
     assert next(x for x in h.ok(h.get("/tasks")) if x["task_id"] == r1["task_id"])["status"] == "closed"
 
 
-def test_h1_a_reply_after_andre_looked_makes_his_decision_stale_same_day(tmp_path):
+def test_h1_a_reply_after_andre_looked_stays_held_same_day(tmp_path):
     h = Harness(tmp_path, ports=wired_ports())
     c, t, m = _sent(h)
     r1 = _reply(h, m, "maybe")
-    seen = h.hold_state(r1["hold_id"])
+    seen = h.holds()
     _reply(h, m, "no, stop")
-    h.refused(h.decide(r1["hold_id"], "resume", state=seen), 409, "STATE_HASH_MISMATCH")
+    h.ok(h.decide(r1["hold_id"], "resume", seen=seen))
     assert h.ok(h.get(f"/contacts/{c['contact_id']}"))["held"] is True
 
 
-def test_h1_decision_needs_a_state_hash(tmp_path):
+def test_h1_decision_needs_a_hash(tmp_path):
     h = Harness(tmp_path, ports=wired_ports())
     c, t, m = _sent(h)
     r1 = _reply(h, m, "hello")
-    h.refused(h.post(f"/holds/{r1['hold_id']}/decision", {"request_id": rid(), "decision": "resume"}, andre=True), 422)
+    h.refused(h.post("/holds/decision", {"request_id": rid(), "decision": "resume",
+                                         "holds": [{"hold_id": r1["hold_id"], "reply_id": r1["reply_id"]}]},
+                     andre=True), 422)
 
 
 # --------------------------------------------------------------------------------------------------- Low: ticks
@@ -134,6 +133,17 @@ def test_info_uppercase_request_ids_are_one_request(tmp_path):
     assert again["commission"]["client_paid"] == "100.00"            # the same request, answered once
     h.ok(h.post(f"/partners/{h.partner(key='mixed')['partner_id']}/rate",
                 {"request_id": uuid.uuid4().hex.upper(), "version": 1, "rate_pct": "10.00"}))
+
+
+def test_info_uppercase_then_lowercase_is_one_pursuit(tmp_path):
+    """Reviewer probe (round 4 test_r4.py ``test_case``): it already held on 20e08c6, the round-3 fix."""
+    h = Harness(tmp_path, ports=wired_ports())
+    u = str(uuid.uuid4())
+    body = {"brand": "zbm", "kind": "formal_pitch", "title": "t", "value": "10.00",
+            "counterparty": {"ref": "org:x", "name": "X", "domain": "x.test"}}
+    a = h.ok(h.post("/pursuits", {"request_id": u.upper(), **body}), 201)
+    b = h.ok(h.post("/pursuits", {"request_id": u, **body}), 201)
+    assert a["pursuit_id"] == b["pursuit_id"] and len(h.svc.pursuits) == 1
 
 
 # --------------------------------------------------------------------------------------------------- Info: port

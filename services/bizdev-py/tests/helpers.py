@@ -358,13 +358,27 @@ class Harness:
                                              "deal_id": deal_id, "kind": kind, "amount": amount, "currency": "USD"},
                          caller="finance_31")
 
-    def hold_state(self, hold_id: str) -> str:
-        return next(x for x in self.ok(self.get("/holds")) if x["hold_id"] == hold_id).get("state_sha256", "0" * 64)
+    def holds(self, **params) -> dict:
+        return {x["hold_id"]: x for x in self.ok(self.get("/holds", params={"limit": 2000, **params}))}
 
-    def decide(self, hold_id: str, decision: str, caller: str = "dashboard", andre: bool = True,
-               state: Optional[str] = None):
-        return self.post(f"/holds/{hold_id}/decision", {"request_id": rid(), "decision": decision,
-                                                        "state_sha256": state or self.hold_state(hold_id)},
+    @staticmethod
+    def decision_sha(decision: str, holds: list) -> str:
+        """The README formula, computed here independently: SHA-256 of canonical JSON over the decision and the sorted
+        [hold_id, reply_id, hold_sha256] triples."""
+        doc = {"decision": decision, "holds": sorted([x["hold_id"], x["reply_id"], x["hold_sha256"]] for x in holds)}
+        return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                              .encode("utf-8")).hexdigest()
+
+    def decide(self, hold_ids, decision: str, caller: str = "dashboard", andre: bool = True,
+               sha: Optional[str] = None, seen: Optional[dict] = None):
+        """Decide exactly ``hold_ids`` (one id or a list), as Andre sees them now (or as ``seen``)."""
+        ids = [hold_ids] if isinstance(hold_ids, str) else list(hold_ids)
+        view = seen or self.holds()
+        named = [view[i] for i in ids]
+        return self.post("/holds/decision", {"request_id": rid(), "decision": decision,
+                                             "holds": [{"hold_id": x["hold_id"], "reply_id": x["reply_id"]}
+                                                       for x in named],
+                                             "decision_sha256": sha or self.decision_sha(decision, named)},
                          caller=caller, andre=andre)
 
     # --- builders: outreach
