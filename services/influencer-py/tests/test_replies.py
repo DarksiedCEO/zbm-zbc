@@ -84,9 +84,11 @@ def test_an_unresolved_reply_holds_whoever_the_address_turns_out_to_be(w):
     w.code(w.email(inf, t), 403, "REPLY_HOLD")
 
 
-def test_a_reply_needs_a_sender(h):
-    h.code(reply(h, "hi"), 422, "REPLY_SENDER_REQUIRED")
-    h.code(reply(h, "hi", from_handle="@x"), 422, "INVALID")
+def test_a_reply_with_no_sender_is_still_recorded_for_andre(h):
+    out = h.ok(reply(h, "hi"), 201)
+    assert out["held"] is True and out["influencer_id"] is None
+    out = h.ok(reply(h, "hi", from_handle="@x"), 201)                 # a handle on an email reply: ignored
+    assert out["ignored"] == ["from_handle"] and h.svc.holds[out["hold_id"]]["unresolved"] is True
 
 
 def test_andre_decides_a_hold(w):
@@ -121,4 +123,5 @@ def test_a_held_message_queued_before_the_hold_is_cancelled_at_send_time(w):
     w.svc.holds["x"] = {"hold_id": "x", "influencer_id": inf["influencer_id"], "hashes": [], "status": "active"}
     w.svc.messages[m["message_id"]]["status"] = "queued"
     out = w.ok(w.job("send-queue"))
-    assert out["cancelled"] == 1 and not w.ports.email.sent
+    assert out["cancelled"] == 1 and w.svc.messages[m["message_id"]]["reason"] == "REPLY_HOLD"
+    assert not w.ports.email.sent

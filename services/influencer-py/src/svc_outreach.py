@@ -15,7 +15,7 @@ import hmac
 from typing import Optional
 
 from errors import Conflict, Forbidden, Invalid, NotFound, Throttled, Unavailable
-from intelligences import i04_suppression, i05_templates, i06_send_cap, i07_replies, i10_dm_guard
+from intelligences import i02_identity, i04_suppression, i05_templates, i06_send_cap, i07_replies, i10_dm_guard
 from ledger import derived_id
 from reasons import R
 
@@ -37,6 +37,8 @@ class OutreachMixin:
         for msg in self.messages.values():
             if msg["status"] != "queued":
                 continue
+            if reason == "REPLY_HOLD" and msg.get("purpose") == "confirmation":
+                continue            # a confirmation answers the creator's own request; a hold stops outreach only
             inf = self.influencers.get(msg["influencer_id"]) or {}
             if msg["influencer_id"] == influencer_id or msg["to_hash"] in hashes \
                     or hashes & set(i04_suppression.hashes_of(inf)):
@@ -60,7 +62,8 @@ class OutreachMixin:
     def _a_message_queued(self, d, at):
         self.messages[d["message_id"]] = {**{k: d.get(k) for k in (
             "message_id", "channel", "platform", "influencer_id", "to_hash", "brand", "template_id", "version",
-            "template_sha256", "draft_id", "content_sha256", "rendered_sha256", "from_domain")},
+            "template_sha256", "draft_id", "content_sha256", "rendered_sha256", "from_domain", "purpose",
+            "confirmation_id")},
             "status": "queued", "reason": None, "queued_at": at, "updated_at": at, "sent_on": None,
             "provider_ref": None, "events": [], "queued_by": d["actor"]}
 
@@ -457,6 +460,8 @@ class OutreachMixin:
 
     def _send_problem(self, msg: dict) -> tuple[Optional[str], Optional[dict]]:
         """(cancel_code, payload) for one queued message, from current state."""
+        if msg.get("purpose") == "confirmation":
+            return self._confirmation_send_problem(msg)
         inf = self.influencers.get(msg["influencer_id"])
         if inf is None:
             return "INFLUENCER_NOT_FOUND", None
@@ -546,7 +551,9 @@ class OutreachMixin:
                     summary["stopped"] = "LEDGER_UNAVAILABLE"
                     break
             try:
-                if msg["channel"] == "email":
+                if msg.get("purpose") == "confirmation":
+                    result = port.send(mid, self.confirmations[msg["confirmation_id"]]["email"], payload)
+                elif msg["channel"] == "email":
                     result = port.send(mid, inf["email"], payload)
                 else:
                     result = port.send(mid, payload["platform"], payload["handle"], payload["text"])
@@ -598,25 +605,36 @@ class OutreachMixin:
         """A reply on any channel. ANY reply holds every further automatic outreach to that influencer until Andre
         decides (no interpretation: "yes" and "interested" hold too); the one exception is an email whose raw body is
         exactly a fixed machine auto-reply. Opt-out wording also suppresses at once, everywhere. The text is never
-        stored: only its SHA-256 and the label."""
+        stored: only its SHA-256 and the label.
+
+        A reply is NEVER refused for its sender fields (AEGIS R1-M4): an unknown message id, an address that cannot be
+        read, ``Name <addr>`` (the address inside is used), a handle on an email reply or a handle that cannot be read
+        are each ignored and whatever does resolve is used; when nothing resolves the reply is still recorded, as a
+        review entry for Andre (an active hold with no target)."""
         with self.lock:
             self._gate()
-            rk = self._rk("reply", body.get("message_id") or "direct", body)
+            rk = self._rk("reply", "direct", body)
             prev = self._idem(caller, rk, body)
             if prev:
                 return dict(prev[1])
-            msg = self._get(self.messages, body["message_id"], "MESSAGE_NOT_FOUND") if body.get("message_id") \
-                else None
+            ignored = []
+            msg = self.messages.get(body.get("message_id") or "")
+            if body.get("message_id") is not None and msg is None:
+                ignored.append("message_id")
             email_h = handle_h = None
             if body.get("from_email") is not None:
-                email_h = self._email(body["from_email"])[1]
+                addr = i02_identity.sender_email(body["from_email"])
+                if addr:
+                    email_h = i02_identity.email_hash(self.pii_key, addr)
+                else:
+                    ignored.append("from_email")
             if body.get("from_handle") is not None:
-                if body["channel"] == "email":
-                    raise Invalid(R("INVALID"), field="from_handle")
-                handle_h = self._handles([{"platform": body["channel"], "handle": body["from_handle"]}])[0][
-                    "handle_hash"]
-            if msg is None and email_h is None and handle_h is None:
-                raise Invalid(R("REPLY_SENDER_REQUIRED"))
+                canon = i02_identity.handle(body["channel"], body["from_handle"]) if body["channel"] != "email" \
+                    else None
+                if canon:
+                    handle_h = i02_identity.handle_hash(self.pii_key, body["channel"], canon)
+                else:
+                    ignored.append("from_handle")
             iid = (msg["influencer_id"] if msg else None) or (self.email_index.get(email_h) if email_h else None) \
                 or (self.handle_index.get(handle_h) if handle_h else None)
             inf = self.influencers.get(iid) if iid else None
@@ -625,26 +643,27 @@ class OutreachMixin:
             if auto:
                 cls = "out_of_office"
             reply_id = derived_id("rpl", caller, rk)
-            data = {"reply_id": reply_id, "channel": body["channel"], "message_id": body.get("message_id"),
-                    "influencer_id": iid, "class": cls,
+            data = {"reply_id": reply_id, "channel": body["channel"], "message_id": msg["message_id"] if msg else None,
+                    "influencer_id": iid, "class": cls, "ignored": ignored,
                     "text_sha256": hashlib.sha256(body["text"].encode("utf-8", "surrogatepass")).hexdigest()}
             named = {h for h in (email_h, handle_h, msg["to_hash"] if msg else None) if h}
             if inf is not None:
                 named |= set(i04_suppression.hashes_of(inf))
             evidence = []
-            if cls == "unsubscribe":
+            if cls == "unsubscribe" and named:
                 data.update(hashes=sorted(named), reason="opt_out_reply")
                 evidence.append(self._suppression_evidence(named, "opt_out_reply", caller, rk))
-            if not auto:
+            # nothing resolved: still a hold (a review entry for Andre), even for an exact auto-reply
+            if not auto or not named:
                 hold_id = derived_id("hld", reply_id)
                 data["hold"] = {"hold_id": hold_id, "influencer_id": iid, "hashes": sorted(named),
-                                "reply_id": reply_id, "class": cls}
+                                "reply_id": reply_id, "class": cls, "unresolved": not named}
                 evidence.append(("outreach_hold_applied", f"hold:{hold_id}",
                                  {"hold_id": hold_id, "influencer_id": iid, "hashes": sorted(named),
-                                  "reply_id": reply_id, "class": cls}, (caller, rk)))
+                                  "reply_id": reply_id, "class": cls, "unresolved": not named}, (caller, rk)))
             answer = {"reply_id": reply_id, "class": cls, "influencer_id": iid,
                       "suppressed": bool(data.get("hashes")), "held": bool(data.get("hold")),
-                      "hold_id": (data.get("hold") or {}).get("hold_id")}
+                      "hold_id": (data.get("hold") or {}).get("hold_id"), "ignored": ignored}
             self._commit("reply_received", self._req(data, caller, rk, body, answer), caller,
                          evidence=evidence or None)
             return answer

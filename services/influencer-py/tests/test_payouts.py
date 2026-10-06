@@ -11,14 +11,20 @@ from helpers import FakeFinance, Harness, rid, wired_ports
 
 def test_tax_profile_holds_a_reference_and_its_hash_only(w):
     inf = w.creator()
-    out = w.ok(w.tax(inf), 201)
+    conf = w.ok(w.tax(inf), 201)
+    assert conf["status"] == "pending" and "payload" not in conf and "email" not in conf
+    assert w.svc.influencers[inf["influencer_id"]]["tax"] is None             # nothing before the confirmation
+    w.ok(w.confirm(conf["conf_id"]))
+    out = w.ok(w.get(f"/influencers/{inf['influencer_id']}"))
     assert out["tax_profile"]["tax_form"] == "w9" and "tax_ref" not in out["tax_profile"]
     ev = w.ledger.of_type("tax_profile_recorded")[0]["_payload"]
     assert "tax_ref" not in ev and len(ev["tax_ref_sha256"]) == 64
 
 
 @pytest.mark.parametrize("ref", ["123456789", "ssn:123456789", "stripe:short", "http://x", "stripe:acct 1",
-                                 "stripe:" + "a" * 121])
+                                 "stripe:" + "a" * 121, "vault:ssn123456789", "fin:abcdefgh", "stripe:acct_ATTACKER1",
+                                 "stripe:acct_123456789abcdefgh", "vault:12345678-9abc-def0-1234-567890abcdef",
+                                 "vault:new-destination-1"])
 def test_tax_ref_must_be_an_opaque_reference(w, ref):
     inf = w.creator()
     assert w.tax(inf, ref=ref).status_code == 422
@@ -41,14 +47,14 @@ def test_tax_form_matches_country_and_legal_form(w, form, country, legal, ok):
 def test_only_the_creator_portal_or_console_records_a_tax_reference(w):
     inf = w.creator()
     r = w.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"], "tax_form": "w9",
-                                 "tax_ref": "stripe:acct_TESTabcdef", "legal_form": "individual", "country": "US"},
+                                 "tax_ref": "stripe:acct_TESTabcdefghijklmnop", "legal_form": "individual", "country": "US"},
                caller="influencer_agent")
     w.code(r, 403, "CALLER_NOT_ALLOWED")
 
 
 def test_finance_stand_in_nothing_is_verified_or_paid(h):
     inf = h.creator()
-    h.ok(h.tax(inf), 201)
+    h.tax_confirmed(inf)
     n = len(h.svc.log)
     h.code(h.verify(inf), 503, "FINANCE_UNAVAILABLE")
     assert len(h.svc.log) == n
@@ -62,7 +68,10 @@ def test_verification_needs_a_tax_reference(w):
 
 def test_a_new_tax_reference_resets_verification(w):
     inf, d, content = w.paid_ready()
-    w.ok(w.tax(inf, ref="stripe:acct_TESTother1"), 201)
+    conf = w.tax_confirmed(inf, ref="stripe:acct_TESTotherreference")
+    assert conf["status"] == "pending_andre"                       # a verified payee: Andre approves the change
+    w.ok(w.post(f"/confirmations/{conf['conf_id']}/approve",
+                {"request_id": rid(), "content_sha256": conf["content_sha256"]}, andre=True))
     assert w.svc.influencers[inf["influencer_id"]]["payee"]["status"] == "none"
     w.code(w.payout(d, "100.00", [content["content_id"]]), 403, "PAYEE_NOT_VERIFIED")
 
@@ -74,7 +83,7 @@ def test_pending_verification_is_not_verified(tmp_path):
     content = h.ok(h.content(d), 201)
     h.approve_content(content)
     h.ok(h.live(content))
-    h.ok(h.tax(inf), 201)
+    h.tax_confirmed(inf)
     assert h.ok(h.verify(inf))["payee"]["status"] == "pending"
     h.code(h.payout(d, "100.00", [content["content_id"]]), 403, "PAYEE_NOT_VERIFIED")
 
@@ -103,7 +112,7 @@ def test_payout_rules(w):
 def test_payout_needs_live_content_and_a_contract(w):
     inf, c, b, d = w.setup_deal()
     content = w.ok(w.content(d), 201)
-    w.ok(w.tax(inf), 201)
+    w.tax_confirmed(inf)
     w.ok(w.verify(inf))
     w.code(w.payout(d, "100.00", [content["content_id"]]), 409, "CONTRACT_NOT_IN_FORCE")
     w.contract(d)
@@ -164,7 +173,9 @@ def test_a_waiting_payout_is_cancelled_when_the_payee_changes(tmp_path):
     inf, d, content = h.paid_ready(fee="500.00")
     p = h.ok(h.payout(d, "500.00", [content["content_id"]]), 201)
     assert p["status"] == "pending_finance"
-    h.ok(h.tax(inf, ref="vault:new-destination-1"), 201)          # a new tax reference: the payee must re-verify
+    conf = h.tax_confirmed(inf, ref="vault:0f0e0d0c-0b0a-4908-8706-a5a4a3a2a1a0")
+    h.ok(h.post(f"/confirmations/{conf['conf_id']}/approve",
+                {"request_id": rid(), "content_sha256": conf["content_sha256"]}, andre=True))
     fin.payout = "accepted"
     out = h.ok(h.job("payout-retry"))
     assert out["cancelled"] == 1 and h.svc.payouts[p["payout_id"]]["reason"] == "PAYEE_CHANGED"

@@ -122,8 +122,11 @@ class PayoutAnswer:
 class FinancePayees(Protocol):
     wired: bool
 
-    def register_payee(self, payee_id: str, tax_ref: str, tax_form: str, legal_form: str,
-                       country: str) -> PayeeAnswer: ...
+    def register_payee(self, payee_id: str, tax_ref: str, tax_form: str, legal_form: str, country: str,
+                       identity_ref: str) -> PayeeAnswer:
+        """``identity_ref``: the creator's CONFIRMED identity (record id and the SHA-256 of the confirmed address) for
+        Finance to match the payee's KYC against (AEGIS R1-M2)."""
+        ...
 
     def payee_status(self, payee_ref: str) -> PayeeStatus: ...
 

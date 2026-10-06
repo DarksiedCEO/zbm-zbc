@@ -3,12 +3,14 @@
 1. **Raw tax identification numbers** (Andre, Oct 6 2026: never store a raw TIN, SSN or EIN; store a reference only):
    - a key that names one, at any depth, in any spelling (``ssn``, ``SSN``, ``taxId``, ``tax-id``, ``ein``, ``itin``,
      ``taxpayer_identification_number``, ``social_security_number``, ``tin_last4`` ...): ``TAX_ID_REFUSED``;
-   - a VALUE that has the shape of one, anywhere in the body (after Unicode NFKC, so fullwidth digits count): a group
-     of exactly nine digits standing alone (any script's digits), written together or split by up to three spaces, dots,
-     underscores or dashes between digits (``123-45-6789``, ``12-3456789``, ``123 - 45 - 6789``, ``123.45.6789``,
-     ``123456789``): ``TAX_ID_REFUSED``. "Standing alone" means no digit or letter
-     touches the group, so a 10-digit phone number, a hex digest or ``acct_1N...`` is not one; in free text (captions,
-     briefs, DMs, templates, notes) a letter may touch it and it is still refused. Money fields are not scanned (they
+   - a VALUE that has the shape of one, anywhere in the body (after Unicode NFKC, any script's digits as ASCII): a
+     number of exactly nine digits, where up to MAX_GAP characters that are not letters or digits — spaces,
+     punctuation, symbols, combining marks, invisible format characters — between two digits do not end the number
+     (``123-45-6789``, ``123​45​6789``, ``123/45/6789``, ``12:3456789``, ``123    45    6789``): ``TAX_ID_REFUSED``. In
+     free text (captions, briefs, DMs, templates, names, notes) the classic 3-2-4 and 2-7 shapes are refused even
+     inside a longer run, and a letter may touch the number; in ids and references a number some letter touches is an
+     id (``x123456789``), one no letter touches is refused (``acct_123456789``); a 10-digit phone number is never
+     nine digits. ``tax_ref`` is stricter: ANY number of nine or more digits is refused (AEGIS R1-M3). Money fields are not scanned (they
      are canonical amounts). Handles and email addresses are read like ids ("gamer123456789" is a handle; "123456789"
      is refused). The inbound reply (``POST /inf/v1/replies``) is the one exemption: its text, sender address and
      sender handle are never stored raw (a SHA-256 or a keyed hash), and refusing one would drop an opt-out.
@@ -51,21 +53,57 @@ _FORBIDDEN_STEMS = ("dateofbirth", "birthdate", "birthday", "birthyear", "yearof
                     "driverlicen", "cardnumber", "bankaccount", "routingnumber", "accountnumber")
 
 MONEY_KEYS = frozenset({"fee", "product_value", "amount", "total", "auto_approve_max"})
-ID_KEY = re.compile(r"(^|_)(id|ids|sha256|hash|hashes|handle|email)$")
+ID_KEY = re.compile(r"(^|_)(id|ids|sha256|hash|hashes|handle|email|token)$")
 
-_SEP = r"[\s._\-\u2010-\u2015\u2212]"     # a space, dot, underscore or any dash between digits, up to three
-_NO_DIGIT_BEFORE = r"(?<![0-9])(?<![0-9]%s)(?<![0-9]%s%s)(?<![0-9]%s%s%s)" % ((_SEP,) * 6)
-_NINE = r"[0-9](?:%s{0,3}[0-9]){8}(?![0-9])(?!%s{1,3}[0-9])" % (_SEP, _SEP)
-# exactly nine digits, optionally separated, with no digit or letter touching the group (id and reference values)
-_TIN_STANDALONE = re.compile(_NO_DIGIT_BEFORE + r"(?<![A-Za-z])" + _NINE + r"(?![A-Za-z])")
-# in free text: exactly nine digits with no DIGIT touching the group (a letter may: "SSN123456789" is still refused)
-_TIN_TEXT = re.compile(_NO_DIGIT_BEFORE + _NINE)
+MAX_GAP = 8          # non-alphanumeric characters (spaces, punctuation, symbols, invisible format characters) allowed
+                     # between two digits of one number (AEGIS R1-M3)
+_CLASSIC = (re.compile(r"(?<![0-9])[0-9]{3}[\W_]{1,%d}[0-9]{2}[\W_]{1,%d}[0-9]{4}(?![0-9])" % (MAX_GAP, MAX_GAP)),
+            re.compile(r"(?<![0-9])[0-9]{2}[\W_]{1,%d}[0-9]{7}(?![0-9])" % MAX_GAP),
+            re.compile(r"(?<![0-9])[0-9]{9}(?![0-9])"))
 
 
 def _ascii_digits(value: str) -> str:
     """NFKC (fullwidth digits), then every other Unicode decimal digit (Arabic-Indic, Devanagari, ...) as ASCII."""
     v = unicodedata.normalize("NFKC", value)
     return "".join(str(unicodedata.decimal(c)) if c.isdecimal() and not c.isascii() else c for c in v)
+
+
+def digit_groups(value: str) -> list[tuple[int, bool, bool]]:
+    """Every number in ``value`` as (digit count, a letter immediately before it, a letter immediately after it).
+    Digits separated by up to MAX_GAP characters that are not letters or digits — any space, punctuation, symbol,
+    combining mark or invisible format character — belong to one number (``123​45​6789``, ``123/45/6789``,
+    ``12:3456789``, ``123 ⁃ 45 ⁃ 6789`` are each one nine-digit number)."""
+    v = _ascii_digits(value)
+    out, i, n = [], 0, len(v)
+    while i < n:
+        if not ("0" <= v[i] <= "9"):
+            i += 1
+            continue
+        start, count, j = i, 0, i
+        last = i
+        while j < n:
+            if "0" <= v[j] <= "9":
+                count += 1
+                last = j
+                j += 1
+                continue
+            k = j
+            while k < n and k - j < MAX_GAP and not v[k].isalnum():
+                k += 1
+            if k < n and k - j <= MAX_GAP and k > j and "0" <= v[k] <= "9":
+                j = k
+                continue
+            break
+        before = start > 0 and v[start - 1].isalpha()
+        after = last + 1 < n and v[last + 1].isalpha()
+        out.append((count, before, after))
+        i = last + 1
+    return out
+
+
+def _classic(value: str) -> bool:
+    v = _ascii_digits(value)
+    return any(rx.search(v) for rx in _CLASSIC)
 
 
 def _compact(key: str) -> str:
@@ -87,8 +125,23 @@ def forbidden_key(key: str) -> bool:
     return c in _FORBIDDEN_COMPACT or any(s in c for s in _FORBIDDEN_STEMS)
 
 
+STRICT_REF_KEYS = frozenset({"tax_ref"})
+
+
 def tin_in(value: str, free_text: bool) -> bool:
-    return bool((_TIN_TEXT if free_text else _TIN_STANDALONE).search(_ascii_digits(value)))
+    """Free text: any nine-digit number, or the classic 3-2-4 / 2-7 shapes. Ids and references: a nine-digit number
+    that no letter touches (``acct_123456789`` and ``ev-123456789`` are refused, ``x123456789`` is an id)."""
+    if _classic(value) and free_text:
+        return True
+    for count, before, after in digit_groups(value):
+        if count == 9 and (free_text or not (before or after)):
+            return True
+    return False
+
+
+def long_digit_run(value: str) -> bool:
+    """References that point at tax data (``tax_ref``): ANY number of nine or more digits is refused (AEGIS R1-M3)."""
+    return any(count >= 9 for count, _, _ in digit_groups(value)) or _classic(value)
 
 
 def problem(obj: Any, exempt: frozenset = frozenset(), _key: str = "", depth: int = 0) -> Optional[str]:
@@ -116,6 +169,8 @@ def problem(obj: Any, exempt: frozenset = frozenset(), _key: str = "", depth: in
                 return found
         return None
     if isinstance(obj, str):
+        if _key in STRICT_REF_KEYS and long_digit_run(obj):
+            return "TAX_ID_REFUSED"
         free = not (ID_KEY.search(_key) or _key.endswith("_ref") or _key in ("request_id", "ref"))
         if tin_in(obj, free_text=free):
             return "TAX_ID_REFUSED"

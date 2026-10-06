@@ -34,6 +34,7 @@ from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordEr
 from ports import Ports
 from reasons import R
 from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
+from svc_confirm import ConfirmMixin
 from svc_deals import DealsMixin
 from svc_outreach import OutreachMixin
 from svc_payouts import PayoutsMixin
@@ -59,7 +60,7 @@ def request_sha(body: dict) -> str:
     return payload_sha256(body)
 
 
-class InfluencerService(PeopleMixin, OutreachMixin, DealsMixin, PayoutsMixin):
+class InfluencerService(PeopleMixin, ConfirmMixin, OutreachMixin, DealsMixin, PayoutsMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports: Optional[Ports] = None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None):
         self.settings = settings
@@ -89,12 +90,14 @@ class InfluencerService(PeopleMixin, OutreachMixin, DealsMixin, PayoutsMixin):
         self.material: dict[str, dict] = {}
         self.contents: dict[str, dict] = {}
         self.payouts: dict[str, dict] = {}
+        self.confirmations: dict[str, dict] = {}
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
         self._last_integrity_try = 0.0
         self._own_pending: Optional[bytes] = None
         self._inflight: set = set()
+        self._payout_inflight: set = set()
         # service-py V5-L1 / V5r-L1: one service instance per data directory, also within one process. api.build claims
         # BEFORE the log is built and passes the claim's token; the service adopts that claim only if the token IS the
         # current claim, once (a5dd261 L4), and gives it back on close or a failed start
@@ -481,6 +484,8 @@ class InfluencerService(PeopleMixin, OutreachMixin, DealsMixin, PayoutsMixin):
                 "deals_pending_andre": sum(1 for x in self.deals.values() if x["status"] == "pending_andre"),
                 "contents_pending_andre": sum(1 for x in self.contents.values() if x["status"] == "submitted"),
                 "payouts_pending_finance": sum(1 for x in self.payouts.values() if x["status"] == "pending_finance"),
+                "payouts_pending_andre": sum(1 for x in self.payouts.values() if x["status"] == "pending_andre"),
+                "confirmations_pending": sum(1 for x in self.confirmations.values() if x["status"] == "pending"),
                 "suppressed": len(self.suppression),
                 "log_length": len(self.log),
             }

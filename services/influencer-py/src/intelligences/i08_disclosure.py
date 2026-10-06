@@ -9,8 +9,9 @@ Decides:
   the exact disclosure, where it goes, the platform label, honest-opinion and actual-use rules) — a brief cannot leave
   it out, and Andre's approval binds the hash of the brief WITH that section;
 - whether a caption carries the disclosure: the exact disclosure text (ASCII, case-insensitive, with nothing but a
-  space, punctuation or the caption's edge touching it, so ``#adventure`` is not ``#ad``) must END within the first
-  ``DISCLOSURE_WINDOW`` (100) characters and come BEFORE any other hashtag (not buried in a hashtag block);
+  space, punctuation or the caption's edge touching it, so ``#adventure`` is not ``#ad``) must be on the caption's
+  FIRST line, END within the first ``DISCLOSURE_WINDOW`` (100) characters and come BEFORE any other hashtag (not
+  buried in a hashtag block), with no combining mark touching it (AEGIS R1-L1);
 - hidden characters: a caption, brief or DM holding a bidirectional control, a zero-width space or joiner, a word joiner,
   a byte-order mark, a tag or private-use character, or any other invisible format character is refused (a zero-width
   joiner is allowed only between two emoji, as in family emoji) — so a look-alike or split disclosure can never pass;
@@ -65,14 +66,23 @@ def _pattern(disclosure: str) -> re.Pattern:
     return re.compile(r"(?<![\w#])" + re.escape(disclosure) + r"(?![\w])", re.IGNORECASE | re.ASCII)
 
 
+_MARKS = ("Mn", "Me", "Mc")
+
+
 def caption_problem(caption: str, disclosure: str) -> Optional[str]:
+    """AEGIS R1-L1: the disclosure must be on the FIRST line (a caption folded after its first line hides it) and end
+    within ``DISCLOSURE_WINDOW`` characters, before any other hashtag; a combining mark touching it (a strike-through or
+    an enclosing "prohibited" mark drawn over ``#ad``) is refused."""
     if hidden_characters(caption):
         return "CONTENT_HIDDEN_CHARACTERS"
     m = _pattern(disclosure).search(caption)
     if m is None:
         return "DISCLOSURE_MISSING"
-    if m.end() > DISCLOSURE_WINDOW or re.search(r"#\w", caption[:m.start()]):
+    if "\n" in caption[:m.start()] or m.end() > DISCLOSURE_WINDOW or re.search(r"#\w", caption[:m.start()]):
         return "DISCLOSURE_NOT_PROMINENT"
+    around = caption[max(0, m.start() - 1):m.start()] + caption[m.end():m.end() + 1]
+    if any(unicodedata.category(c) in _MARKS for c in around):
+        return "DISCLOSURE_OBSCURED"
     return None
 
 

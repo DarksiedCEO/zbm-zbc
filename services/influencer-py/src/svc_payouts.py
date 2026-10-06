@@ -2,16 +2,19 @@
 InfluencerService.
 
 - **Tax information is a reference, never a number.** The creator's tax form is collected by Finance (31) / Stripe
-  (or the vault); this service stores only the form kind, legal form, country and an opaque reference
-  (``fin:...``, ``stripe:...``, ``vault:...``) and its SHA-256. A raw TIN, SSN or EIN anywhere in a request is refused
-  422 ``TAX_ID_REFUSED`` (textguard.py). A new tax reference resets the payee: verification starts again.
+  (or the vault); this service stores only the form kind, legal form, country and a provider reference
+  (``stripe:acct_...`` or ``vault:<uuid>``) and its SHA-256. A raw TIN, SSN or EIN anywhere in a request is refused
+  422 ``TAX_ID_REFUSED`` (textguard.py). A reference takes effect only once the creator confirms it from the address
+  on record, and for a creator whose payee is already verified only once Andre approves it (AEGIS R1-M2); a new
+  reference resets the payee: verification starts again.
 - **Verified before paid.** ``POST /inf/v1/payees/{influencer_id}/verify`` registers the payee at Finance (from the
   reference) and reads its verification (KYC and TIN match happen at Finance and Stripe, never here); only Finance's
   ``verified`` counts. A payout request re-reads it from Finance at request time.
 - **Payouts go through the Finance port; this service never calls Stripe.** A payout is for a contracted deal, for
   content Andre approved that is live, at most the deal's cash fee in total; it is recorded on the ledger
   (``payout_requested``) and in the log BEFORE Finance is called, and ``payout-retry`` re-sends what Finance could not
-  take. Nothing is ever paid here: Finance pays, and only after its own approvals.
+  take. A payout for a PERSON whose lifetime deals exceed the $5,000 limit, on a deal Andre did not approve himself,
+  waits for Andre (AEGIS R1-M5). Nothing is ever paid here: Finance pays, and only after its own approvals.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from typing import Optional
 import money
 from errors import Conflict, Forbidden, Invalid, Unavailable
 from intelligences import i01_intake
-from ledger import derived_id
+from ledger import derived_id, payload_sha256
 from reasons import R
 
 
@@ -30,15 +33,28 @@ def _rsha(ref: str) -> str:
     return hashlib.sha256(ref.encode("utf-8")).hexdigest()
 
 
+def payout_sha256(p: dict) -> str:
+    """What Andre approves for a payout held by the per-person rule (the payee by its SHA-256 only)."""
+    return payload_sha256({"payout_id": p["payout_id"], "deal_id": p["deal_id"], "influencer_id": p["influencer_id"],
+                           "amount": p["amount"], "currency": p["currency"], "content_ids": p["content_ids"],
+                           "payee_ref_sha256": _rsha(p["payee_ref"])})
+
+
 class PayoutsMixin:
     # ------------------------------------------------------------------------------------------------ replay
 
-    def _a_tax_profile_recorded(self, d, at):
-        inf = self.influencers[d["influencer_id"]]
+    def _apply_tax(self, inf: dict, d: dict, at: str) -> None:
+        """A confirmed (and, for a verified payee, Andre-approved) tax reference takes effect."""
         inf["tax"] = {k: d[k] for k in ("tax_form", "tax_ref", "tax_ref_sha256", "legal_form", "country")}
         inf["tax"]["recorded_at"] = at
         inf["payee"] = {"payee_ref": None, "status": "none", "checked_at": None}     # a new reference: verify again
         inf["updated_at"] = at
+
+    @staticmethod
+    def _tax_evidence(iid: str, p: dict, actor: str, rk: str):
+        return ("tax_profile_recorded", f"influencer:{iid}",
+                {"influencer_id": iid, **{k: p[k] for k in ("tax_form", "tax_ref_sha256", "legal_form", "country")}},
+                (actor, rk))
 
     def _a_payee_checked(self, d, at):
         inf = self.influencers[d["influencer_id"]]
@@ -47,10 +63,15 @@ class PayoutsMixin:
     def _a_payout_requested(self, d, at):
         self.payouts[d["payout_id"]] = {**{k: d[k] for k in ("payout_id", "deal_id", "influencer_id", "amount",
                                                               "currency", "brand", "content_ids", "payee_ref")},
-                                        "status": "pending_finance", "finance_ref": None, "reason": None, "requested_at": at,
+                                        "status": d.get("status", "pending_finance"), "finance_ref": None,
+                                        "reason": None, "needs_andre": d.get("needs_andre", []),
+                                        "content_sha256": d.get("content_sha256"), "requested_at": at,
                                         "updated_at": at, "requested_by": d["actor"]}
         deal = self.deals[d["deal_id"]]
         deal["requested"] = money.fmt(money.total([deal["requested"], d["amount"]]))
+
+    def _a_payout_approved(self, d, at):
+        self.payouts[d["payout_id"]].update(status="pending_finance", approved_by="andre", updated_at=at)
 
     def _a_payout_result(self, d, at):
         p = self.payouts[d["payout_id"]]
@@ -66,27 +87,30 @@ class PayoutsMixin:
     # ------------------------------------------------------------------------------------------------ tax profile
 
     def record_tax_profile(self, caller: str, body: dict) -> dict:
+        """A tax REFERENCE never takes effect on the caller's word (AEGIS R1-M2): it is mailed for confirmation to the
+        address on the record, and a change for a creator whose payee is already verified then also needs Andre's
+        approval of its hash. Answers the pending confirmation."""
         with self.lock:
             self._gate()
             rk = self._rk("tax_profile", body["influencer_id"], body)
-            if self._idem(caller, rk, body):
-                return self.influencer_view(self.influencers[body["influencer_id"]])
+            prev = self._idem(caller, rk, body)
+            if prev:
+                return self.confirmation_view(self.confirmations[prev[1]])
             inf = self._get(self.influencers, body["influencer_id"], "INFLUENCER_NOT_FOUND")
             problem = i01_intake.contractable(inf)
             if problem:
                 raise Forbidden(R(problem))
-            data = {"influencer_id": inf["influencer_id"], "tax_form": body["tax_form"], "tax_ref": body["tax_ref"],
-                    "tax_ref_sha256": _rsha(body["tax_ref"]), "legal_form": body["legal_form"],
-                    "country": body["country"]}
             # W-9 for a US person; W-8BEN for a foreign individual; W-8BEN-E for a foreign entity
             us, w9 = body["country"] == "US", body["tax_form"] == "w9"
             if us != w9 or (not w9 and (body["tax_form"] == "w8bene") != (body["legal_form"] == "entity")):
                 raise Invalid(R("TAX_FORM_MISMATCH"))
-            self._commit("tax_profile_recorded", self._req(data, caller, rk, body, inf["influencer_id"]), caller,
-                         evidence=("tax_profile_recorded", f"influencer:{inf['influencer_id']}",
-                                   {k: data[k] for k in ("influencer_id", "tax_form", "tax_ref_sha256", "legal_form",
-                                                         "country")}, (caller, rk)))
-            return self.influencer_view(inf)
+            payload = {"tax_form": body["tax_form"], "tax_ref": body["tax_ref"], "tax_ref_sha256": _rsha(body["tax_ref"]),
+                       "legal_form": body["legal_form"], "country": body["country"]}
+            conf, msg, ev = self._confirmation(caller, rk, inf["influencer_id"], "tax_profile", inf["email"],
+                                               inf["email_hash"], payload)
+            self._commit("confirmation_requested", self._req({"confirmation": conf, "message": msg}, caller, rk, body,
+                                                             conf["conf_id"]), caller, evidence=ev)
+            return self.confirmation_view(self.confirmations[conf["conf_id"]])
 
     # ------------------------------------------------------------------------------------------------ verification
 
@@ -108,13 +132,14 @@ class PayoutsMixin:
             tax = dict(inf["tax"])
             payee_ref = inf["payee"]["payee_ref"]
             payee_id = derived_id("pye", influencer_id, tax["tax_ref_sha256"])
+            identity_ref = self.identity_ref(inf)
         self._begin(rk)
         try:
             fin = self.ports.finance
             try:
                 if payee_ref is None:
                     reg = fin.register_payee(payee_id, tax["tax_ref"], tax["tax_form"], tax["legal_form"],
-                                             tax["country"])
+                                             tax["country"], identity_ref)
                     if reg.status == "unavailable":
                         raise Unavailable(R("FINANCE_UNAVAILABLE"))
                     if reg.status != "registered" or not isinstance(reg.payee_ref, str) \
@@ -145,6 +170,13 @@ class PayoutsMixin:
                 return self.influencer_view(inf)
         finally:
             self._end(rk)
+
+    @staticmethod
+    def identity_ref(inf: dict) -> str:
+        """The creator's CONFIRMED identity for Finance to match the payee's KYC against (AEGIS R1-M2): our record id
+        and the SHA-256 of the confirmed canonical address (Finance can hash the address Stripe verified)."""
+        from intelligences import i02_identity
+        return f"{inf['influencer_id']}:" + hashlib.sha256(i02_identity.canonical(inf["email"]).encode()).hexdigest()
 
     # ------------------------------------------------------------------------------------------------ payouts
 
@@ -222,17 +254,57 @@ class PayoutsMixin:
                 data = {"payout_id": pid, "deal_id": d["deal_id"], "influencer_id": inf["influencer_id"],
                         "amount": money.fmt(amount), "currency": d["currency"], "brand": d["brand"],
                         "content_ids": list(body["content_ids"]), "payee_ref": payee_ref}
+                # AEGIS R1-M5: the $5,000 rule again, keyed on the PERSON being paid — every deal of every record
+                # sharing this payee or tax reference, lifetime. Over it, a deal Andre did not approve himself is paid
+                # only after Andre approves this payout by its hash.
+                person_total = self._person_total(inf)
+                needs = ["PAYEE_TOTAL_OVER_LIMIT"] if (person_total > self.settings.auto_approve_max
+                                                        and d.get("approved_by") != "andre") else []
+                data.update(status="pending_andre" if needs else "pending_finance", needs_andre=needs,
+                            content_sha256=payout_sha256(data))
                 self._commit("payout_requested", self._req(data, caller, rk, body, pid), caller,
                              evidence=("payout_requested", f"payout:{pid}",
                                        {"payout_id": pid, "deal_id": d["deal_id"],
                                         "influencer_id": inf["influencer_id"], "amount": data["amount"],
                                         "currency": data["currency"], "content_ids": data["content_ids"],
-                                        "payee_ref_sha256": _rsha(payee_ref)}, (caller, rk)))
-            self._hand_to_finance(pid)
+                                        "payee_ref_sha256": _rsha(payee_ref), "needs_andre": needs,
+                                        "content_sha256": data["content_sha256"]}, (caller, rk)))
+            if not needs:
+                self._hand_to_finance(pid)
             with self.lock:
                 return self.payout_view(self.payouts[pid])
         finally:
             self._end(rk)
+
+    def decide_payout(self, payout_id: str, body: dict, approve: bool) -> dict:
+        """Andre on a payout held by the per-person $5,000 rule: approve binds its hash and hands it to Finance."""
+        with self.lock:
+            self._gate()
+            rk = self._rk("payout_approve" if approve else "payout_reject", payout_id, body)
+            if self._idem("andre", rk, body):
+                return self.payout_view(self.payouts[payout_id])
+            p = self._get(self.payouts, payout_id, "PAYOUT_NOT_FOUND")
+            if p["status"] != "pending_andre":
+                raise Conflict(R("PAYOUT_NOT_PENDING"))
+            if not approve:
+                self._commit("payout_result", self._req({"payout_id": payout_id, "status": "cancelled",
+                                                         "reason": "REJECTED_BY_ANDRE"}, "andre", rk, body, payout_id),
+                             "andre", evidence=("payout_result", f"payout:{payout_id}",
+                                                {"payout_id": payout_id, "status": "cancelled",
+                                                 "reason": "REJECTED_BY_ANDRE"}, ("andre", rk)))
+                return self.payout_view(p)
+            if body["content_sha256"] != p["content_sha256"] or payout_sha256(p) != p["content_sha256"]:
+                raise Conflict(R("CONTENT_HASH_MISMATCH"))
+            stale = self._stale_payout(p)
+            if stale:
+                raise Conflict(R("STATE_CHANGED"))
+            self._commit("payout_approved", self._req({"payout_id": payout_id}, "andre", rk, body, payout_id),
+                         "andre", evidence=("payout_approved", f"payout:{payout_id}",
+                                            {"payout_id": payout_id, "content_sha256": p["content_sha256"]},
+                                            ("andre", rk)))
+        self._hand_to_finance(payout_id)
+        with self.lock:
+            return self.payout_view(self.payouts[payout_id])
 
     def _stale_payout(self, p: dict) -> Optional[str]:
         """A payout still waiting for Finance is never handed over once the payee it was requested for is no longer
@@ -245,43 +317,65 @@ class PayoutsMixin:
         return None
 
     def _hand_to_finance(self, pid: str) -> str:
-        """Hand one recorded payout to Finance (outside the lock) and record its answer. ``unavailable`` leaves it
-        ``pending_finance`` for ``payout-retry``; the adapter is idempotent on ``payout_id``. A payout whose payee
-        changed or whose influencer is blocked is cancelled instead (its amount released), never handed over."""
+        """Hand one recorded payout to Finance (outside the lock) and record its answer. One hand-over per payout at a
+        time (AEGIS R1-L3: the request and the retry job never race); Finance's verification of the payee is read
+        again right before every hand-over. ``unavailable`` leaves it ``pending_finance`` for ``payout-retry``; the
+        adapter is idempotent on ``payout_id``. A payout whose payee changed or is no longer verified, or whose
+        influencer is blocked, is cancelled instead (its amount released), never handed over."""
         with self.lock:
+            if pid in self._payout_inflight:
+                return "in_flight"
             p = dict(self.payouts[pid])
             if p["status"] != "pending_finance" or self._closed:
                 return p["status"]
-            stale = self._stale_payout(p)
-            if stale:
-                try:
-                    self._commit("payout_result", {"payout_id": pid, "status": "cancelled", "reason": stale},
-                                 INTERNAL_ACTOR, evidence=("payout_result", f"payout:{pid}",
-                                                           {"payout_id": pid, "status": "cancelled", "reason": stale},
-                                                           (pid, "cancelled")))
-                except Unavailable:
-                    return "pending_finance"
-                return "cancelled"
+            self._payout_inflight.add(pid)
         try:
-            ans = self.ports.finance.request_payout(pid, p["payee_ref"], p["amount"], p["currency"], p["brand"],
-                                                    p["deal_id"])
-        except Exception:  # noqa: BLE001
-            return "pending_finance"
-        if ans.status not in ("accepted", "refused"):
-            return "pending_finance"
-        status = "submitted" if ans.status == "accepted" else "refused_by_finance"
-        ref = ans.finance_ref if isinstance(ans.finance_ref, str) and 1 <= len(ans.finance_ref) <= 128 else None
-        with self.lock:
-            if self.payouts[pid]["status"] != "pending_finance":
-                return self.payouts[pid]["status"]
+            stale = None
             try:
-                self._commit("payout_result", {"payout_id": pid, "status": status, "finance_ref": ref}, INTERNAL_ACTOR,
-                             evidence=("payout_result", f"payout:{pid}",
-                                       {"payout_id": pid, "status": status,
-                                        "finance_ref_sha256": _rsha(ref) if ref else None}, (pid, status)))
-            except Unavailable:
-                return "pending_finance"            # Finance holds it (idempotent); recorded at the next retry
-            return status
+                st = self.ports.finance.payee_status(p["payee_ref"])
+            except Exception:  # noqa: BLE001
+                st = None
+            if st is None or st.status == "unavailable":
+                return "pending_finance"
+            if st.status != "verified":
+                stale = "PAYEE_NOT_VERIFIED"
+            with self.lock:
+                if self.payouts[pid]["status"] != "pending_finance" or self._closed:
+                    return self.payouts[pid]["status"]
+                stale = stale or self._stale_payout(p)
+                if stale:
+                    try:
+                        self._commit("payout_result", {"payout_id": pid, "status": "cancelled", "reason": stale},
+                                     INTERNAL_ACTOR, evidence=("payout_result", f"payout:{pid}",
+                                                               {"payout_id": pid, "status": "cancelled",
+                                                                "reason": stale}, (pid, "cancelled")))
+                    except Unavailable:
+                        return "pending_finance"
+                    return "cancelled"
+            try:
+                ans = self.ports.finance.request_payout(pid, p["payee_ref"], p["amount"], p["currency"], p["brand"],
+                                                        p["deal_id"])
+            except Exception:  # noqa: BLE001
+                return "pending_finance"
+            if ans.status not in ("accepted", "refused"):
+                return "pending_finance"
+            status = "submitted" if ans.status == "accepted" else "refused_by_finance"
+            ref = ans.finance_ref if isinstance(ans.finance_ref, str) and 1 <= len(ans.finance_ref) <= 128 else None
+            with self.lock:
+                if self.payouts[pid]["status"] != "pending_finance":
+                    return self.payouts[pid]["status"]
+                try:
+                    self._commit("payout_result", {"payout_id": pid, "status": status, "finance_ref": ref},
+                                 INTERNAL_ACTOR, evidence=("payout_result", f"payout:{pid}",
+                                                           {"payout_id": pid, "status": status,
+                                                            "finance_ref_sha256": _rsha(ref) if ref else None},
+                                                           (pid, status)))
+                except Unavailable:
+                    return "pending_finance"            # Finance holds it (idempotent); recorded at the next retry
+                return status
+        finally:
+            with self.lock:
+                self._payout_inflight.discard(pid)
 
     def payout_retry(self, body: dict) -> dict:
         """The ``payout-retry`` job: every payout still ``pending_finance`` is handed to Finance again."""
@@ -292,7 +386,7 @@ class PayoutsMixin:
             if prev:
                 return {"job": "payout-retry", "already_ran": True, **(prev[1] or {})}
             ids = [p["payout_id"] for p in self.payouts.values() if p["status"] == "pending_finance"]
-        out = {"submitted": 0, "refused_by_finance": 0, "pending_finance": 0, "cancelled": 0}
+        out = {"submitted": 0, "refused_by_finance": 0, "pending_finance": 0, "cancelled": 0, "in_flight": 0}
         for pid in ids:
             st = self._hand_to_finance(pid)
             out[st] = out.get(st, 0) + 1

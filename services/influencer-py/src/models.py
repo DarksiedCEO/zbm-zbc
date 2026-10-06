@@ -79,6 +79,11 @@ class ProspectIn(Strict):
     evidence_ref: Id
 
 
+class Confirm(Strict):
+    request_id: Id
+    token: Annotated[StrictStr, Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9._:-]+$")]
+
+
 class MinorReview(Strict):
     request_id: Id
     decision: Literal["confirm_minor", "not_a_minor"]
@@ -156,12 +161,13 @@ class EmailEvent(Strict):
 
 class ReplyIn(Strict):
     """A reply relayed from the email provider or a platform. The text is classified and hashed, never stored, and
-    never refused for its content (an opt-out must always land)."""
+    never refused for its content or its sender fields (an opt-out must always land, AEGIS R1-M4): an unknown or
+    unreadable message id, address or handle is ignored by the service, never a 4xx."""
     request_id: Id
     channel: Literal["email", "instagram", "tiktok", "x", "youtube"]
-    message_id: Optional[Id] = None
-    from_email: Optional[Email] = None
-    from_handle: Optional[Annotated[StrictStr, Field(min_length=1, max_length=64)]] = None
+    message_id: Optional[Annotated[StrictStr, Field(max_length=1000)]] = None
+    from_email: Optional[Annotated[StrictStr, Field(max_length=1000)]] = None
+    from_handle: Optional[Annotated[StrictStr, Field(max_length=1000)]] = None
     text: Annotated[StrictStr, Field(max_length=20_000)]
 
 
@@ -229,7 +235,9 @@ class TaxProfile(Strict):
     request_id: Id
     influencer_id: Id
     tax_form: Literal["w9", "w8ben", "w8bene"]
-    tax_ref: Annotated[StrictStr, Field(pattern=r"^(fin|stripe|vault):[A-Za-z0-9._:-]{6,120}$")]
+    # AEGIS R1-M3: provider formats only — a Stripe connected account, or a vault UUID
+    tax_ref: Annotated[StrictStr, Field(pattern=r"^(stripe:acct_[A-Za-z0-9]{16,64}|vault:[0-9a-f]{8}-[0-9a-f]{4}-"
+                                                r"[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")]
     legal_form: Literal["individual", "entity"]
     country: Country
 

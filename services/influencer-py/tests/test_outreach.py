@@ -96,9 +96,13 @@ def test_email_is_can_spam_complete_and_from_the_outreach_domain(w):
 
 def test_outreach_not_configured_refuses(tmp_path):
     h = Harness(tmp_path, INF_OUTREACH_DOMAIN=None, INF_POSTAL_ADDRESS=None)
-    inf = h.creator()
+    app = h.ok(h.application(), 201)
+    assert app["confirmation_status"] == "undeliverable" and not h.svc.messages     # nothing can be confirmed
+    h.code(h.confirm(app["confirmation_id"]), 409, "CONFIRMATION_USED")
+    p = h.prospect()
+    h.ok(h.post(f"/influencers/{p['influencer_id']}/first-name", {"request_id": rid(), "first_name": "Al"}))
     t = h.template()
-    h.code(h.email(inf, t), 403, "OUTREACH_NOT_CONFIGURED")
+    h.code(h.email(p, t), 403, "OUTREACH_NOT_CONFIGURED")
 
 
 def test_a_name_typed_into_a_form_never_renders(w):

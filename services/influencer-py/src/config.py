@@ -272,6 +272,8 @@ NOT_BUILT = {
     "INF_FINANCE_URL": "the Finance (31) payee and payout client: not built yet (no payee is verified, nothing is "
                        "paid)",
     "INF_LEGAL_URL": "the Legal (37) contract client: not built yet (no contract can be sent)",
+    "INF_DEAL_AGGREGATE_WINDOW_DAYS": "a time window for the $5,000 per-person deal total: not built (the total is "
+                                      "lifetime, AEGIS R1-H1)",
 }
 
 

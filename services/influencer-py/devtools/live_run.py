@@ -9,8 +9,10 @@ usage: LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/li
 No check depends on the wall-clock hour or the day of the week (influencer outreach has no quiet-hours rule, and nothing
 here reads the time except the log lines' own timestamps).
 
-Proves: start-up integrity against the real ledger; a second process on the data directory refused; the 18+ rule (an
-adult application kept, a minor and a missing attestation refused, nothing kept); a date of birth and raw tax ids
+Proves: start-up integrity against the real ledger; a second process on the data directory refused; the email
+confirmation round trip (an application or a tax reference changes nothing until the token mailed to the address on
+record comes back; a stranger's application attaches no handle); the 18+ rule (an adult application kept, a minor and a
+missing attestation refused, nothing kept); replies never refused for their sender fields; a date of birth and raw tax ids
 refused; discovery ports not wired; Andre's template approval (a wrong token refused and recorded); outreach email
 queued but not sent while no provider is wired; a DM sent only as Andre approved it (and staying queued: no DM
 provider); any reply holding outreach until Andre decides; an opt-out suppressing both brands and DMs; the brief's FTC
@@ -23,6 +25,7 @@ it; GET /ledger/verify valid. Exit 0 only if every check holds. Kills only the P
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import shutil
@@ -139,6 +142,11 @@ def detail(r) -> str:
         return ""
 
 
+def token(key: bytes, conf_id: str) -> str:
+    """The live run plays the creator's mailbox: the confirmation link's token (the email port is not wired)."""
+    return f"{conf_id}." + hmac.new(key, f"confirm\x00{conf_id}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
 def application(email, handle, adult=True, **extra):
     body = {"request_id": rid(), "display_name": "Live Creator", "email": email,
             "handles": [{"platform": "instagram", "handle": handle}], "niches": ["gaming"], "follower_band": "mid",
@@ -156,9 +164,10 @@ def _main(work: Path) -> int:
     etc = work / "etc"
     etc.mkdir(mode=0o700)
     data = work / "influencer"
+    pii = os.urandom(32)
     env = {"INF_SERVICE_TOKEN": TOKEN, "INF_CALLER_TOKENS": json.dumps(CALLERS), "INF_DATA_DIR": str(data),
            "INF_ANDRE_APPROVAL_TOKEN": ANDRE,
-           "INF_PII_HASH_KEY_FILE": secret_file(etc / "pii.key", os.urandom(32).hex().encode()),
+           "INF_PII_HASH_KEY_FILE": secret_file(etc / "pii.key", pii.hex().encode()),
            "INF_OUTREACH_DOMAIN": "zb-creators.example", "INF_ZBM_DOMAIN": "zbestmedia.com",
            "INF_ZBC_DOMAIN": "zbestclips.com", "INF_POSTAL_ADDRESS": "123 Example Street, Los Angeles, CA 90001",
            "INF_PORT": str(ps), "LEDGER_SERVICE_URL": L, "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN}
@@ -188,9 +197,21 @@ def _main(work: Path) -> int:
 
         # --- creators and the 18+ rule ----------------------------------------------------------------------------
         r = a.post("/applications", application("creator@live-creator.example", "@live.creator"), "hub")
-        inf = r.json()
-        check("an adult creator application is kept with the attestation flag only",
-              r.status_code == 201 and inf["adult_attested"] is True)
+        app = r.json()
+        check("an application changes nothing about identity until the address is confirmed (AEGIS R1-M1/M2)",
+              r.status_code == 201 and app["adult_attested"] is False and app["handles"] == []
+              and app["confirmation_status"] == "pending")
+        r = a.post("/confirmations", {"request_id": rid(), "token": token(pii, app["confirmation_id"])[:-1] + "x"},
+                   "hub")
+        r2 = a.post("/confirmations", {"request_id": rid(), "token": token(pii, app["confirmation_id"])}, "hub")
+        inf = a.get(f"/influencers/{app['influencer_id']}").json()
+        check("a wrong token is refused; the right one attests the creator with the flag only",
+              r.status_code == 404 and r2.status_code == 200 and inf["adult_attested"] is True
+              and inf["email_confirmed"] is True and [h["handle"] for h in inf["handles"]] == ["live.creator"])
+        r = a.post("/applications", application("Creator@live-creator.example", "@stranger"), "hub")
+        inf2 = a.get(f"/influencers/{inf['influencer_id']}").json()
+        check("a stranger's application with the creator's address attaches no handle",
+              r.status_code == 201 and [h["handle"] for h in inf2["handles"]] == ["live.creator"])
         r = a.post("/applications", application("kid@live-creator.example", "@kid", adult=False), "hub")
         r2 = a.post("/applications", application("none@live-creator.example", "@none", adult=None), "hub")
         n_inf = len(a.get("/influencers").json())
@@ -200,8 +221,8 @@ def _main(work: Path) -> int:
         r = a.post("/applications", application("dob@live-creator.example", "@dob", date_of_birth="2001-01-01"), "hub")
         check("a date of birth is refused", r.status_code == 422 and detail(r) == "FORBIDDEN_FIELD")
         r = a.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"], "tax_form": "w9",
-                                     "tax_ref": "stripe:acct_LIVEabcdef", "legal_form": "individual", "country": "US",
-                                     "ssn": "000-00-0000"}, "hub")
+                                     "tax_ref": "stripe:acct_LIVEabcdefghijklmn", "legal_form": "individual",
+                                     "country": "US", "ssn": "000-00-0000"}, "hub")
         r2 = a.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"], "tax_form": "w9",
                                       "tax_ref": "vault:123-45-6789", "legal_form": "individual", "country": "US"},
                     "hub")
@@ -236,7 +257,8 @@ def _main(work: Path) -> int:
         msg = a.post("/outreach/email", {**email_body, "request_id": rid()}, "influencer_agent").json()
         job = a.post("/jobs/send-queue/run", {"request_id": rid()}, "scheduler").json()
         check("outreach email is queued and stays queued while no provider is wired",
-              msg["status"] == "queued" and job["not_wired"] == 1 and job["sent"] == 0)
+              msg["status"] == "queued" and job["not_wired"] >= 1 and job["sent"] == 0
+              and a.get("/outreach/messages?status=queued", "influencer_agent").json()[0]["status"] == "queued")
         dr = a.post("/dm-drafts", {"request_id": rid(), "influencer_id": inf["influencer_id"],
                                    "platform": "instagram", "brand": "zbc",
                                    "text": "Hi! Loved your last stream. Open to a paid collab?"},
@@ -253,13 +275,16 @@ def _main(work: Path) -> int:
                    "dashboard", ANDRE)
         job = a.post("/jobs/send-queue/run", {"request_id": rid()}, "scheduler").json()
         check("an approved DM stays queued: there is no DM provider",
-              r.status_code == 200 and job["not_wired"] == 2 and job["sent"] == 0)
+              r.status_code == 200 and job["sent"] == 0 and any(
+                  m["channel"] == "dm" and m["status"] == "queued"
+                  for m in a.get("/outreach/messages", "influencer_agent").json()))
 
         # --- replies hold, opt-outs suppress ------------------------------------------------------------------------
         rep = a.post("/replies", {"request_id": rid(), "channel": "instagram", "from_handle": "@live.creator",
                                   "text": "yes interested!"}, "provider_events").json()
         r = a.post("/outreach/email", {**email_body, "request_id": rid()}, "influencer_agent")
-        msgs = a.get("/outreach/messages?status=queued", "influencer_agent").json()
+        msgs = [m for m in a.get("/outreach/messages?status=queued", "influencer_agent").json()
+                if m.get("purpose") != "confirmation"]          # a confirmation mail is not outreach
         check("any reply (even 'yes') holds every further outreach until Andre decides",
               rep["held"] is True and r.status_code == 403 and detail(r) == "REPLY_HOLD" and not msgs)
         r = a.post(f"/holds/{rep['hold_id']}/decision", {"request_id": rid(), "decision": "continue"}, "dashboard",
@@ -267,6 +292,7 @@ def _main(work: Path) -> int:
         r2 = a.post("/outreach/email", {**email_body, "request_id": rid()}, "influencer_agent")
         check("Andre's decision lifts the hold", r.status_code == 200 and r2.status_code == 201)
         other = a.post("/applications", application("other@live-creator.example", "@other.creator"), "hub").json()
+        a.post("/confirmations", {"request_id": rid(), "token": token(pii, other["confirmation_id"])}, "hub")
         a.post(f"/influencers/{other['influencer_id']}/first-name", {"request_id": rid(), "first_name": "Other"})
         rep = a.post("/replies", {"request_id": rid(), "channel": "email", "from_email": "other@live-creator.example",
                                   "text": "Please unsubscribe me"}, "provider_events").json()
@@ -299,9 +325,9 @@ def _main(work: Path) -> int:
         check("a float fee is refused", r.status_code == 422)
         d1 = a.post("/deals", {"request_id": rid(), **deal_body, "fee": "5000.00"}, "influencer_agent").json()
         d2 = a.post("/deals", {"request_id": rid(), **deal_body, "fee": "1.00"}, "influencer_agent").json()
-        check("$5,000.00 is approved here; a $1.00 split in the same campaign still goes to Andre",
+        check("$5,000.00 is approved here; a $1.00 more for the same person, ever, goes to Andre",
               d1["status"] == "approved" and d2["status"] == "pending_andre"
-              and "CAMPAIGN_TOTAL_OVER_LIMIT" in d2["needs_andre"])
+              and "INFLUENCER_TOTAL_OVER_LIMIT" in d2["needs_andre"])
         r = a.post(f"/deals/{d2['deal_id']}/approve", {"request_id": rid(), "content_sha256": d2["content_sha256"]},
                    "dashboard", ANDRE)
         mc = a.get("/material-connections", "compliance_38").json()
@@ -333,14 +359,27 @@ def _main(work: Path) -> int:
         check("sending a contract is refused while Legal is a stand-in",
               r.status_code == 503 and detail(r) == "LEGAL_UNAVAILABLE")
         r = a.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"], "tax_form": "w9",
-                                     "tax_ref": "stripe:acct_LIVEabcdef", "legal_form": "individual", "country": "US"},
-                   "hub")
+                                     "tax_ref": "stripe:acct_LIVEabcdefghijklmn", "legal_form": "individual",
+                                     "country": "US"}, "hub")
+        before = a.get(f"/influencers/{inf['influencer_id']}").json()["tax_profile"]
+        r1 = a.post("/confirmations", {"request_id": rid(), "token": token(pii, r.json()["conf_id"])}, "hub")
+        after = a.get(f"/influencers/{inf['influencer_id']}").json()["tax_profile"]
+        check("a tax REFERENCE takes effect only once confirmed from the address on record",
+              r.status_code == 201 and before is None and r1.status_code == 200 and after["tax_form"] == "w9")
         r2 = a.post(f"/payees/{inf['influencer_id']}/verify", {"request_id": rid()}, "influencer_agent")
         r3 = a.post("/payouts", {"request_id": rid(), "deal_id": d1["deal_id"], "amount": "100.00",
                                  "content_ids": [content["content_id"]]}, "influencer_agent")
-        check("a tax REFERENCE is kept; verification and payouts refused while Finance is a stand-in",
-              r.status_code == 201 and r2.status_code == 503 and detail(r2) == "FINANCE_UNAVAILABLE"
+        check("verification and payouts refused while Finance is a stand-in",
+              r2.status_code == 503 and detail(r2) == "FINANCE_UNAVAILABLE"
               and r3.status_code == 409 and not a.get("/payouts").json())
+        r = a.post("/replies", {"request_id": rid(), "channel": "email", "message_id": "unknown-message",
+                                "from_email": "Other <other@live-creator.example>", "text": "stop"},
+                   "provider_events")
+        r2 = a.post("/replies", {"request_id": rid(), "channel": "email", "from_handle": "@nobody",
+                                 "text": "stop"}, "provider_events")
+        check("a reply is never refused for its sender fields; one that resolves nothing is kept for Andre",
+              r.status_code == 201 and r.json()["suppressed"] is True and r2.status_code == 201
+              and r2.json()["held"] is True and r2.json()["influencer_id"] is None)
 
         # --- restart ------------------------------------------------------------------------------------------------
         stop(sp, "influencer")
@@ -393,7 +432,8 @@ def _main(work: Path) -> int:
             "log_anchor", "influencer_recorded", "age_attestation_recorded", "template_approved", "dm_approved",
             "outreach_hold_applied", "hold_decided", "suppression_added", "brief_approved", "deal_recorded",
             "deal_approved", "material_connection_recorded", "content_approved", "tax_profile_recorded",
-            "founder_approval_refused", "first_name_verified"} <= set(types))
+            "founder_approval_refused", "first_name_verified", "confirmation_requested",
+            "email_confirmed"} <= set(types))
         blob = json.dumps(ents)
         check("nothing personal on the ledger (no email, handle, name or tax reference)",
               "live-creator.example" not in blob and "live.creator" not in blob and "Live Creator" not in blob

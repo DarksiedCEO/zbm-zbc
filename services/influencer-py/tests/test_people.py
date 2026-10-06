@@ -11,8 +11,11 @@ from helpers import FakeSource, rid, wired_ports
 # ------------------------------------------------------------------------------------------------ 18+ attestation
 
 def test_an_adult_application_is_recorded_with_the_flag_only(h):
-    inf = h.ok(h.application(), 201)
-    assert inf["adult_attested"] is True and inf["source"] == "inbound_application"
+    app = h.ok(h.application(), 201)
+    assert app["adult_attested"] is False and app["handles"] == [] and app["email_confirmed"] is False
+    h.ok(h.confirm(app["confirmation_id"]))
+    inf = h.ok(h.get(f"/influencers/{app['influencer_id']}"))
+    assert inf["adult_attested"] is True and inf["source"] == "inbound_application" and inf["email_confirmed"]
     assert inf["attestation"] == {"text_version": "age-v1", "text_sha256": inf["attestation"]["text_sha256"],
                                   "source": "creator_form"}
     assert inf["fit"]["zbc"]["tier"] == "A"
@@ -60,17 +63,25 @@ def test_andre_confirms_a_minor_for_good(w):
     w.code(w.post(url, {"request_id": rid(), "decision": "not_a_minor"}, andre=True), 409, "NO_MINOR_REVIEW")
 
 
-def test_andre_releases_a_false_declaration_without_an_attestation(w):
+def test_andre_releases_a_false_declaration_and_the_prior_attestation_returns(w):
     inf = w.creator(email="real@example.test", handles=(("x", "@real"),))
     c = w.campaign()
     b = w.brief(c)
     w.code(w.application(email="real@example.test", adult=False), 422, "MINOR_REFUSED")   # someone else typed it
+    w.code(w.deal(inf, c, b), 403, "INFLUENCER_BLOCKED")
     out = w.ok(w.post(f"/influencers/{inf['influencer_id']}/minor-review",
                       {"request_id": rid(), "decision": "not_a_minor"}, andre=True))
-    assert out["blocked"] is None and out["adult_attested"] is False and out["suppressed"] is False
-    w.code(w.deal(out, c, b), 403, "AGE_ATTESTATION_REQUIRED")        # the creator attests again on their own form
-    w.ok(w.application(email="real@example.test"), 201)
-    w.ok(w.deal(out, c, b), 201)
+    assert out["blocked"] is None and out["adult_attested"] is True and out["suppressed"] is False
+    assert out["attestation"] == inf["attestation"]
+    w.ok(w.deal(out, c, b), 201)                                       # AEGIS R1-L4: not halted
+
+
+def test_a_released_record_that_never_attested_stays_unattested(w):
+    p = w.prospect(email="young@example.test")
+    w.code(w.application(email="young@example.test", adult=False), 422, "MINOR_REFUSED")
+    out = w.ok(w.post(f"/influencers/{p['influencer_id']}/minor-review",
+                      {"request_id": rid(), "decision": "not_a_minor"}, andre=True))
+    assert out["blocked"] is None and out["adult_attested"] is False
 
 
 def test_the_minor_refusal_replays_as_a_refusal(h):
@@ -89,19 +100,25 @@ def test_only_the_creator_form_attests(h):
         h.code(h.post("/applications", body, caller=caller), 403, "CALLER_NOT_ALLOWED")
 
 
-def test_an_application_with_a_prospects_address_attests_that_prospect(h):
+def test_a_confirmed_application_with_a_prospects_address_attests_that_prospect(h):
     p = h.prospect(email="found@example.test", handles=(("tiktok", "@found.one"),))
     assert p["adult_attested"] is False
-    inf = h.ok(h.application(email="found@example.test", handles=(("tiktok", "@other"), ("x", "@found_x"),
+    app = h.ok(h.application(email="found@example.test", handles=(("tiktok", "@other"), ("x", "@found_x"),
                                                                   ("instagram", "@creator.one"))), 201)
-    assert inf["influencer_id"] == p["influencer_id"] and inf["adult_attested"] is True
+    assert app["influencer_id"] == p["influencer_id"] and app["adult_attested"] is False   # not before confirmation
+    assert len(app["handles"]) == 1
+    h.ok(h.confirm(app["confirmation_id"]))
+    inf = h.ok(h.get(f"/influencers/{p['influencer_id']}"))
+    assert inf["adult_attested"] is True
     plats = {x["platform"]: x["handle"] for x in inf["handles"]}
     assert plats == {"tiktok": "found.one", "x": "found_x", "instagram": "creator.one"}   # tiktok kept, never moved
 
 
 def test_a_handle_held_by_another_record_is_not_moved_by_an_application(h):
     p = h.prospect(email=None, handles=(("tiktok", "@famous"),))
-    inf = h.ok(h.application(email="impostor@example.test", handles=(("tiktok", "@famous"),)), 201)
+    app = h.ok(h.application(email="impostor@example.test", handles=(("tiktok", "@famous"),)), 201)
+    h.ok(h.confirm(app["confirmation_id"]))
+    inf = h.ok(h.get(f"/influencers/{app['influencer_id']}"))
     assert inf["influencer_id"] != p["influencer_id"] and inf["handles"] == []
     assert h.svc.handle_index[h.svc.influencers[p["influencer_id"]]["handles"][0]["handle_hash"]] == p["influencer_id"]
 

@@ -17,7 +17,7 @@ from helpers import MEDIA, rid
 def test_a_tax_id_key_anywhere_is_refused(w, key):
     inf = w.creator()
     body = {"request_id": rid(), "influencer_id": inf["influencer_id"], "tax_form": "w9",
-            "tax_ref": "stripe:acct_TESTabcdef", "legal_form": "individual", "country": "US", key: "x"}
+            "tax_ref": "stripe:acct_TESTabcdefghijklmnop", "legal_form": "individual", "country": "US", key: "x"}
     w.code(w.post("/tax-profiles", body, caller="hub"), 422, "TAX_ID_REFUSED")
     nested = {"request_id": rid(), "display_name": "A", "email": "a@b.test", "adult_18_plus": True,
               "attestation_text_version": "v1", "attestation_text_sha256": "a" * 64, "extra": [{key: "1"}]}
@@ -29,7 +29,7 @@ def test_a_tax_id_key_anywhere_is_refused(w, key):
                                    "123–45–6789"])
 def test_a_tax_id_shaped_reference_is_refused(w, value):
     inf = w.creator()
-    for ref in (f"stripe:{value}", f"vault:acct_{value}", f"fin:{value}-x"):
+    for ref in (f"stripe:acct_{value}abcdefghijklmn", f"vault:{value}", f"stripe:{value}"):
         r = w.tax(inf, ref=ref)
         assert r.status_code == 422, (ref, r.text)
 

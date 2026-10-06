@@ -38,6 +38,7 @@ MEDIA = [hashlib.sha256(b"media-1").hexdigest()]
 # a fixed instant; NO test depends on the hour of day (influencer outreach has no quiet-hours rule)
 T0 = datetime(2026, 10, 6, 18, 0, tzinfo=timezone.utc)
 P = "/inf/v1"
+TAX_REF = "stripe:acct_TESTabcdefghijklmnop"
 
 
 def rid() -> str:
@@ -142,8 +143,8 @@ class FakeFinance:
         self.registered: list = []
         self.payouts: list = []
 
-    def register_payee(self, payee_id, tax_ref, tax_form, legal_form, country):
-        self.registered.append((payee_id, tax_ref, tax_form, legal_form, country))
+    def register_payee(self, payee_id, tax_ref, tax_form, legal_form, country, identity_ref):
+        self.registered.append((payee_id, tax_ref, tax_form, legal_form, country, identity_ref))
         return PayeeAnswer(self.register, f"payee-{payee_id[-8:]}" if self.register == "registered" else None)
 
     def payee_status(self, payee_ref):
@@ -247,9 +248,15 @@ class Harness:
             body["adult_18_plus"] = adult
         return self.post("/applications", body, caller="hub")
 
+    def confirm(self, conf_id: str):
+        return self.post("/confirmations", {"request_id": rid(), "token": self.svc.confirmation_token(conf_id)},
+                         caller="hub")
+
     def creator(self, email: str = "creator@example.test", handles=(("instagram", "@creator.one"),),
                 first_name: Optional[str] = "Casey") -> dict:
-        inf = self.ok(self.application(email, handles), 201)
+        app = self.ok(self.application(email, handles), 201)
+        self.ok(self.confirm(app["confirmation_id"]))
+        inf = self.ok(self.get(f"/influencers/{app['influencer_id']}"))
         if first_name:
             self.ok(self.post(f"/influencers/{inf['influencer_id']}/first-name",
                               {"request_id": rid(), "first_name": first_name}))
@@ -328,10 +335,15 @@ class Harness:
                                                                "content_sha256": c["content_sha256"],
                                                                "post_ref": "post-1"}, caller="influencer_agent")
 
-    def tax(self, inf: dict, ref="stripe:acct_TESTabcdef", form="w9", country="US", legal="individual"):
+    def tax(self, inf: dict, ref=TAX_REF, form="w9", country="US", legal="individual"):
+        """Asks for the change; it takes effect only once confirmed (``tax_confirmed``)."""
         return self.post("/tax-profiles", {"request_id": rid(), "influencer_id": inf["influencer_id"],
                                            "tax_form": form, "tax_ref": ref, "legal_form": legal,
                                            "country": country}, caller="hub")
+
+    def tax_confirmed(self, inf: dict, ref=TAX_REF, **kw) -> dict:
+        conf = self.ok(self.tax(inf, ref=ref, **kw), 201)
+        return self.ok(self.confirm(conf["conf_id"]))
 
     def verify(self, inf: dict):
         return self.post(f"/payees/{inf['influencer_id']}/verify", {"request_id": rid()}, caller="influencer_agent")
@@ -347,6 +359,6 @@ class Harness:
         content = self.ok(self.content(d), 201)
         self.approve_content(content)
         self.ok(self.live(content))
-        self.ok(self.tax(inf), 201)
+        self.tax_confirmed(inf)
         self.ok(self.verify(inf))
         return inf, d, content

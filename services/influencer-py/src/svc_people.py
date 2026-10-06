@@ -25,10 +25,9 @@ class PeopleMixin:
     def _a_influencer_created(self, d, at):
         inf = {k: d.get(k) for k in ("influencer_id", "source", "display_name", "email", "email_hash", "niches",
                                      "follower_band", "engagement_band", "country", "evidence_ref", "fit")}
-        inf.update(handles=[dict(h) for h in d["handles"]], adult_attested=bool(d.get("attestation")),
-                   attestation=d.get("attestation"), attested_at=at if d.get("attestation") else None,
-                   blocked=None, verified_first_name=None, created_at=at, updated_at=at, tax=None,
-                   payee={"payee_ref": None, "status": "none", "checked_at": None})
+        inf.update(handles=[dict(h) for h in d["handles"]], adult_attested=False, attestation=None, attested_at=None,
+                   email_confirmed=False, blocked=None, blocked_prior=None, verified_first_name=None, created_at=at,
+                   updated_at=at, tax=None, payee={"payee_ref": None, "status": "none", "checked_at": None})
         self.influencers[d["influencer_id"]] = inf
         self._index(inf)
 
@@ -38,10 +37,14 @@ class PeopleMixin:
         for h in inf["handles"]:
             self.handle_index.setdefault(h["handle_hash"], inf["influencer_id"])
 
-    def _a_influencer_attested(self, d, at):
-        inf = self.influencers[d["influencer_id"]]
-        inf.update(adult_attested=True, attestation=d["attestation"], attested_at=at, updated_at=at)
-        inf["handles"] += [dict(h) for h in d.get("add_handles", ())]
+    def _apply_application(self, inf: dict, d: dict, at: str) -> None:
+        """A confirmed application (the token came back from the address): the 18+ attestation and the handles that
+        no other record holds take effect, and the address is confirmed."""
+        inf.update(adult_attested=True, attestation=d["attestation"], attested_at=at, email_confirmed=True,
+                   updated_at=at)
+        have = {h["platform"] for h in inf["handles"]}
+        inf["handles"] += [dict(h) for h in d.get("add_handles", ()) if h["platform"] not in have
+                           and h["handle_hash"] not in self.handle_index]
         self._index(inf)
 
     def _a_influencer_blocked(self, d, at):
@@ -49,6 +52,7 @@ class PeopleMixin:
         everything queued to it is cancelled; Andre then confirms (permanent suppression) or releases it. A flag only:
         no age, no date of birth."""
         inf = self.influencers[d["influencer_id"]]
+        inf["blocked_prior"] = {k: inf.get(k) for k in ("adult_attested", "attestation", "attested_at")}
         inf.update(blocked=d["reason"], adult_attested=False, updated_at=at)
         self._cancel_queued(set(), at, "INFLUENCER_BLOCKED", inf["influencer_id"])
         for dr in self.dm_drafts.values():
@@ -60,8 +64,13 @@ class PeopleMixin:
         if d["decision"] == "confirm_minor":
             inf.update(blocked="MINOR_CONFIRMED", updated_at=at)
             self._a_suppression_added({"hashes": d["hashes"], "reason": "minor_declared", "actor": d["actor"]}, at)
-        else:                                   # not_a_minor: released, but NOT attested — the creator applies again
-            inf.update(blocked=None, adult_attested=False, attestation=None, attested_at=None, updated_at=at)
+        else:
+            # not_a_minor (AEGIS R1-L4): released with the attestation the creator had made BEFORE the false
+            # declaration, if any (a record that never attested stays unattested: the creator applies again)
+            prior = inf.get("blocked_prior") or {}
+            inf.update(blocked=None, adult_attested=bool(prior.get("adult_attested")),
+                       attestation=prior.get("attestation"), attested_at=prior.get("attested_at"),
+                       blocked_prior=None, updated_at=at)
 
     def _a_first_name_verified(self, d, at):
         self.influencers[d["influencer_id"]].update(verified_first_name=d["first_name"], updated_at=at)
@@ -91,13 +100,11 @@ class PeopleMixin:
             raise Invalid(R("EMAIL_INVALID"))
         return e, i02_identity.email_hash(self.pii_key, e)
 
-    def _record(self, source: str, body: dict, email: Optional[str], eh: Optional[str], handles: list,
-                attestation: Optional[dict]) -> dict:
+    def _record(self, source: str, body: dict, email: Optional[str], eh: Optional[str], handles: list) -> dict:
         return {"source": source, "display_name": body["display_name"], "email": email, "email_hash": eh,
                 "handles": handles, "niches": list(body.get("niches") or []),
                 "follower_band": body.get("follower_band"), "engagement_band": body.get("engagement_band"),
                 "country": body.get("country"), "evidence_ref": body.get("evidence_ref"),
-                "attestation": attestation,
                 "fit": i03_fit.score(body.get("niches"), body.get("follower_band"), body.get("engagement_band"))}
 
     def _existing(self, eh: Optional[str], handles: list) -> Optional[str]:
@@ -109,21 +116,21 @@ class PeopleMixin:
         return None
 
     @staticmethod
-    def _created_events(iid: str, source: str, attestation: Optional[dict], actor: str, rk: str) -> list:
-        ev = [("influencer_recorded", f"influencer:{iid}", {"influencer_id": iid, "source": source,
-                                                            "adult_attested": bool(attestation)}, (actor, rk))]
-        if attestation:
-            ev.append(("age_attestation_recorded", f"influencer:{iid}",
-                       {"influencer_id": iid, "adult_18_plus": True, **attestation}, (actor, rk)))
-        return ev
+    def _created_events(iid: str, source: str, actor: str, rk: str) -> list:
+        return [("influencer_recorded", f"influencer:{iid}", {"influencer_id": iid, "source": source,
+                                                              "adult_attested": False}, (actor, rk))]
 
     # ------------------------------------------------------------------------------------------------ applications
 
     def apply(self, caller: str, body: dict) -> dict:
-        """The creator application form. Only the creator's own form attests (i01). A declared minor is refused and
-        nothing about them is kept; when the address matches a record we already hold, that record is BLOCKED at once
-        (a flag only: no age, no date of birth) and waits for Andre's minor review. It is not suppressed
-        automatically: anyone can type anyone's address into a public form, so a stranger can freeze a record but
+        """The creator application form. Only the creator's own form attests (i01), and only once the creator proves
+        the address (AEGIS R1-M1/M2): an application changes NO identity field of any record — no attestation, no
+        handle — until the confirmation token mailed to that address comes back (``POST /inf/v1/confirmations``). A
+        new address gets a bare record (no handle, not attested, address unconfirmed).
+
+        A declared minor is refused and nothing about them is kept; when the address matches a record we already hold,
+        that record is FROZEN at once (a flag only: no age, no date of birth) and waits for Andre's minor review. It is
+        not suppressed: anyone can type anyone's address into a public form, so a stranger can freeze a record but
         never permanently opt a creator out (sales-py S5-L2's reasoning)."""
         problem = i01_intake.source_problem("inbound_application", caller)
         if problem:
@@ -136,7 +143,7 @@ class PeopleMixin:
             if prev:
                 if (prev[1] or {}).get("refused"):
                     raise Invalid(R(prev[1]["refused"]))
-                return self.influencer_view(self.influencers[prev[1]["influencer_id"]])
+                return self._application_answer(prev[1]["influencer_id"], prev[1]["confirmation_id"])
             existing_id = self.email_index.get(eh)
             existing = self.influencers.get(existing_id) if existing_id else None
             age = i01_intake.attestation_problem(body.get("adult_18_plus"))
@@ -154,27 +161,31 @@ class PeopleMixin:
             if existing is not None and existing.get("blocked"):
                 raise Forbidden(R("INFLUENCER_BLOCKED"))
             handles = self._handles(body.get("handles") or [])
-            attestation = {"text_version": body["attestation_text_version"],
-                           "text_sha256": body["attestation_text_sha256"], "source": "creator_form"}
-            if existing is not None:
+            payload = {"attestation": {"text_version": body["attestation_text_version"],
+                                       "text_sha256": body["attestation_text_sha256"], "source": "creator_form"},
+                       "add_handles": handles}
+            record = None
+            ev = []
+            if existing is None:
+                iid = derived_id("inf", caller, rk)
+                record = {"influencer_id": iid, **self._record("inbound_application", body, email, eh, [])}
+                ev += self._created_events(iid, "inbound_application", caller, rk)
+            else:
                 iid = existing["influencer_id"]
-                have = {h["platform"] for h in existing["handles"]}
-                # a handle already tied to ANOTHER record is not moved here (the application's address proves only
-                # this record); a platform this record already has keeps its handle
-                add = [h for h in handles if h["platform"] not in have and h["handle_hash"] not in self.handle_index]
-                self._commit("influencer_attested", self._req(
-                    {"influencer_id": iid, "attestation": attestation, "add_handles": add}, caller, rk, body,
-                    {"influencer_id": iid}), caller,
-                    evidence=("age_attestation_recorded", f"influencer:{iid}",
-                              {"influencer_id": iid, "adult_18_plus": True, **attestation}, (caller, rk)))
-                return self.influencer_view(self.influencers[iid])
-            handles = [h for h in handles if h["handle_hash"] not in self.handle_index]
-            iid = derived_id("inf", caller, rk)
-            self._commit("influencer_created", self._req(
-                {"influencer_id": iid, **self._record("inbound_application", body, email, eh, handles, attestation)},
-                caller, rk, body, {"influencer_id": iid}), caller,
-                evidence=self._created_events(iid, "inbound_application", attestation, caller, rk))
-            return self.influencer_view(self.influencers[iid])
+            conf, msg, cev = self._confirmation(caller, rk, iid, "application", email, eh, payload)
+            self._commit("application_received", self._req(
+                {"influencer_id": iid, "record": record, "confirmation": conf, "message": msg}, caller, rk, body,
+                {"influencer_id": iid, "confirmation_id": conf["conf_id"]}), caller, evidence=ev + cev)
+            return self._application_answer(iid, conf["conf_id"])
+
+    def _application_answer(self, iid: str, conf_id: str) -> dict:
+        return {**self.influencer_view(self.influencers[iid]), "confirmation_id": conf_id,
+                "confirmation_status": self.confirmations[conf_id]["status"]}
+
+    def _a_application_received(self, d, at):
+        if d.get("record"):
+            self._a_influencer_created(d["record"], at)
+        self._a_confirmation_requested(d, at)
 
     def create_prospect(self, caller: str, body: dict) -> dict:
         """A profile a person at Andre's console researched. Not attested: it can be contacted (email under the
@@ -196,9 +207,9 @@ class PeopleMixin:
                 raise Conflict(R("INFLUENCER_EXISTS"), influencer_id=dup)
             iid = derived_id("inf", caller, rk)
             self._commit("influencer_created", self._req(
-                {"influencer_id": iid, **self._record("manual_research", body, email, eh, handles, None)},
+                {"influencer_id": iid, **self._record("manual_research", body, email, eh, handles)},
                 caller, rk, body, {"influencer_id": iid}), caller,
-                evidence=self._created_events(iid, "manual_research", None, caller, rk))
+                evidence=self._created_events(iid, "manual_research", caller, rk))
             return self.influencer_view(self.influencers[iid])
 
     def import_discovery(self, caller: str, body: dict) -> dict:
@@ -249,8 +260,8 @@ class PeopleMixin:
                     continue
                 iid = derived_id("inf", caller, rk, i)
                 self._commit("influencer_created", {"influencer_id": iid, **self._record(
-                    body["source"], rec, email, eh, handles, None)}, caller,
-                    evidence=self._created_events(iid, body["source"], None, caller, f"{rk}#{i}"))
+                    body["source"], rec, email, eh, handles)}, caller,
+                    evidence=self._created_events(iid, body["source"], caller, f"{rk}#{i}"))
                 created.append(iid)
             answer = {"source": body["source"], "created": created, "skipped": skipped, "duplicates": duplicates}
             self._commit("job_ran", self._req({"job": "discovery-import"}, caller, rk, body, answer), caller)
@@ -298,7 +309,7 @@ class PeopleMixin:
     # ------------------------------------------------------------------------------------------------ views
 
     def influencer_view(self, inf: dict) -> dict:
-        out = {k: v for k, v in inf.items() if k not in ("handles", "tax", "payee")}
+        out = {k: v for k, v in inf.items() if k not in ("handles", "tax", "payee", "blocked_prior")}
         out["handles"] = [dict(h) for h in inf["handles"]]
         out["suppressed"] = i04_suppression.suppressed(self.suppression, i04_suppression.hashes_of(inf))
         out["held"] = self._held(inf)

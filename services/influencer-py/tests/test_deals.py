@@ -18,7 +18,7 @@ def test_the_5000_line_is_exact(w, fee, product, auto):
     b = w.brief(c)
     d = w.ok(w.deal(inf, c, b, fee=fee, product=product), 201)
     assert (d["status"] == "approved") is auto
-    assert d["needs_andre"] == ([] if auto else ["DEAL_OVER_LIMIT", "INFLUENCER_OPEN_TOTAL_OVER_LIMIT",
+    assert d["needs_andre"] == ([] if auto else ["DEAL_OVER_LIMIT", "INFLUENCER_TOTAL_OVER_LIMIT",
                                                  "CAMPAIGN_TOTAL_OVER_LIMIT"])
 
 
@@ -37,39 +37,39 @@ def test_a_split_deal_in_one_campaign_still_reaches_andre(w):
     second = w.ok(w.deal(inf, c, b, fee="2500.00"), 201)
     assert first["status"] == "approved"
     assert second["status"] == "pending_andre"
-    assert second["needs_andre"] == ["INFLUENCER_OPEN_TOTAL_OVER_LIMIT", "CAMPAIGN_TOTAL_OVER_LIMIT"]
+    assert second["needs_andre"] == ["INFLUENCER_TOTAL_OVER_LIMIT", "CAMPAIGN_TOTAL_OVER_LIMIT"]
 
 
-def test_a_split_across_campaigns_and_brands_is_caught_by_the_open_total(w):
+def test_a_split_across_campaigns_and_brands_is_caught_by_the_person_total(w):
     inf = w.creator()
     c1, c2 = w.campaign(), w.campaign(brand="zbc")
     b1, b2 = w.brief(c1), w.brief(c2)
     w.ok(w.deal(inf, c1, b1, fee="4000.00"), 201)
     d2 = w.ok(w.deal(inf, c2, b2, fee="1500.00"), 201)
-    assert d2["needs_andre"] == ["INFLUENCER_OPEN_TOTAL_OVER_LIMIT"]
+    assert d2["needs_andre"] == ["INFLUENCER_TOTAL_OVER_LIMIT"]
 
 
-def test_pending_deals_count_toward_the_open_total(w):
+def test_pending_deals_count_toward_the_person_total(w):
     inf = w.creator()
     c1, c2 = w.campaign(), w.campaign()
     b1, b2 = w.brief(c1), w.brief(c2)
     big = w.ok(w.deal(inf, c1, b1, fee="6000.00"), 201)
     assert big["status"] == "pending_andre"
     small = w.ok(w.deal(inf, c2, b2, fee="10.00"), 201)
-    assert small["needs_andre"] == ["INFLUENCER_OPEN_TOTAL_OVER_LIMIT"]
+    assert small["needs_andre"] == ["INFLUENCER_TOTAL_OVER_LIMIT"]
 
 
-def test_one_after_another_in_a_campaign_counts_completed_deals(w):
+def test_completed_deals_count_for_life(w):
     inf, d, content = w.paid_ready(fee="4000.00")
     w.ok(w.payout(d, "4000.00", [content["content_id"]]), 201)
     assert w.svc.deals[d["deal_id"]]["status"] == "completed"
     c = w.svc.campaigns[d["campaign_id"]]
     b = w.svc.briefs[d["brief_id"]]
     again = w.ok(w.deal(inf, c, b, fee="1500.00"), 201)
-    assert again["needs_andre"] == ["CAMPAIGN_TOTAL_OVER_LIMIT"]          # not open any more, but same campaign
+    assert again["needs_andre"] == ["INFLUENCER_TOTAL_OVER_LIMIT", "CAMPAIGN_TOTAL_OVER_LIMIT"]
     other = w.campaign()
     ob = w.brief(other)
-    assert w.ok(w.deal(inf, other, ob, fee="1500.00"), 201)["needs_andre"] == []   # 1500 open + 1500: within
+    assert w.ok(w.deal(inf, other, ob, fee="900.00"), 201)["needs_andre"] == ["INFLUENCER_TOTAL_OVER_LIMIT"]
 
 
 def test_cancelled_and_rejected_deals_do_not_count(w):

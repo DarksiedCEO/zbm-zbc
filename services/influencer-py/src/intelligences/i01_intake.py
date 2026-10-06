@@ -44,4 +44,6 @@ def contractable(influencer: dict) -> Optional[str]:
         return "INFLUENCER_BLOCKED"
     if influencer.get("adult_attested") is not True:
         return "AGE_ATTESTATION_REQUIRED"
+    if influencer.get("email_confirmed") is not True:
+        return "EMAIL_NOT_CONFIRMED"
     return None

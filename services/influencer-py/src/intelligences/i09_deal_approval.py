@@ -5,13 +5,15 @@ Decides, in exact Decimal arithmetic (money.py; no float anywhere): a deal's tot
 any product given. It may be approved without Andre only if ALL of these stay within ``INF_AUTO_APPROVE_MAX`` (default
 and ceiling 5000.00):
   D1 the deal's own total;
-  D2 the deal plus every OPEN deal of the same influencer, across both brands and every campaign (open = pending
-     Andre, approved, contract sent, contracted);
-  D3 the deal plus every other deal of the same influencer in the same campaign that was not rejected or cancelled
-     (completed deals count here), so a deal split into pieces, at once or one after another, still reaches Andre
-     (sales-py's S1-H2 fix).
-Each rule that fails is named (``DEAL_OVER_LIMIT``, ``INFLUENCER_OPEN_TOTAL_OVER_LIMIT``,
-``CAMPAIGN_TOTAL_OVER_LIMIT``); any one sends the deal to ``pending_andre``. Never: approves on Andre's behalf."""
+  D2 the deal plus EVERY other deal of the same PERSON that was not rejected or cancelled — lifetime, across both
+     brands and every campaign, completed deals included (AEGIS R1-H1: deals run one after another were each approved
+     alone) — where the person is the record AND every record sharing its tax reference or Finance payee (AEGIS
+     R1-M5: one creator under two records);
+  D3 the same, within the deal's campaign (a subset of D2, named so Andre sees a campaign-level split).
+Each rule that fails is named (``DEAL_OVER_LIMIT``, ``INFLUENCER_TOTAL_OVER_LIMIT``, ``CAMPAIGN_TOTAL_OVER_LIMIT``);
+any one sends the deal to ``pending_andre``. A time window instead of lifetime is not built
+(``INF_DEAL_AGGREGATE_WINDOW_DAYS`` refuses start). The rule is applied again at payout time keyed on the payee
+(svc_payouts). Never: approves on Andre's behalf."""
 
 from __future__ import annotations
 
@@ -21,9 +23,8 @@ import money
 
 NUMBER = 9
 NAME = "deal_approval"
-DECIDES = "whether a deal needs Andre (D1 own total, D2 influencer's open deals, D3 influencer's campaign deals)"
+DECIDES = "whether a deal needs Andre (D1 own total, D2 the person's lifetime deals, D3 their deals in the campaign)"
 
-OPEN = ("pending_andre", "approved", "contract_sent", "contracted")
 NOT_COUNTED = ("rejected", "cancelled")
 
 
@@ -32,13 +33,13 @@ def deal_total(fee: Decimal, product_value: Decimal) -> Decimal:
 
 
 def needs_andre(total: Decimal, others: list[dict], campaign_id: str, limit: Decimal) -> list[str]:
-    """``others``: the influencer's other deals (``status``, ``campaign_id``, ``total`` as canonical strings)."""
+    """``others``: the person's other deals (``status``, ``campaign_id``, ``total`` as canonical strings)."""
     reasons = []
     if total > limit:
         reasons.append("DEAL_OVER_LIMIT")
-    open_sum = money.total([total] + [d["total"] for d in others if d["status"] in OPEN])
-    if open_sum > limit:
-        reasons.append("INFLUENCER_OPEN_TOTAL_OVER_LIMIT")
+    person_sum = money.total([total] + [d["total"] for d in others if d["status"] not in NOT_COUNTED])
+    if person_sum > limit:
+        reasons.append("INFLUENCER_TOTAL_OVER_LIMIT")
     camp_sum = money.total([total] + [d["total"] for d in others
                                       if d["campaign_id"] == campaign_id and d["status"] not in NOT_COUNTED])
     if camp_sum > limit:

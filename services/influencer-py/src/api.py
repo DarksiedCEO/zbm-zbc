@@ -388,6 +388,28 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
                      who: str = Depends(andre("influencers/minor-review"))) -> dict:
         return svc.decide_minor_review(_id(iid), req)
 
+    # ------------------------------------------------------------------ email confirmation (AEGIS R1-M1/M2)
+
+    @app.post(P + "/confirmations", dependencies=auth)
+    def confirm(req: dict = Depends(body(m.Confirm)), who: str = Depends(caller("hub"))) -> dict:
+        return svc.confirm(who, req)
+
+    @app.get(P + "/confirmations", dependencies=auth)
+    def confirmations(status_: Optional[str] = Query(default=None, alias="status",
+                                                     pattern="^(pending|undeliverable|pending_andre|applied|rejected)$"),
+                      who: str = Depends(dashboard)) -> list:
+        return svc.confirmations_view(status_)
+
+    @app.post(P + "/confirmations/{cid}/approve", dependencies=auth)
+    def approve_confirmation(cid: str, req: dict = Depends(body(m.Approve)),
+                             who: str = Depends(andre("confirmations/approve"))) -> dict:
+        return svc.decide_confirmation(_id(cid), req, approve=True)
+
+    @app.post(P + "/confirmations/{cid}/reject", dependencies=auth)
+    def reject_confirmation(cid: str, req: dict = Depends(body(m.RequestOnly)),
+                            who: str = Depends(andre("confirmations/reject"))) -> dict:
+        return svc.decide_confirmation(_id(cid), req, approve=False)
+
     # ------------------------------------------------------------------ suppression and unsubscribe
 
     @app.post(P + "/suppressions", dependencies=auth, status_code=201)
@@ -601,9 +623,17 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
     def payout(req: dict = Depends(body(m.PayoutRequest)), who: str = Depends(worker)) -> dict:
         return svc.request_payout(who, req)
 
+    @app.post(P + "/payouts/{pid}/approve", dependencies=auth)
+    def approve_payout(pid: str, req: dict = Depends(body(m.Approve)), who: str = Depends(andre("payouts/approve"))):
+        return svc.decide_payout(_id(pid), req, approve=True)
+
+    @app.post(P + "/payouts/{pid}/reject", dependencies=auth)
+    def reject_payout(pid: str, req: dict = Depends(body(m.RequestOnly)), who: str = Depends(andre("payouts/reject"))):
+        return svc.decide_payout(_id(pid), req, approve=False)
+
     @app.get(P + "/payouts", dependencies=auth)
     def payouts(status_: Optional[str] = Query(default=None, alias="status",
-                                               pattern="^(pending_finance|submitted|refused_by_finance|cancelled)$"),
+                                               pattern="^(pending_andre|pending_finance|submitted|refused_by_finance|cancelled)$"),
                 who: str = Depends(worker)) -> list:
         return svc.payouts_view(status_)
 

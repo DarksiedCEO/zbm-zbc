@@ -18,7 +18,6 @@ from intelligences import i01_intake, i08_disclosure, i09_deal_approval
 from ledger import derived_id
 from reasons import R
 
-DEAL_OPEN = i09_deal_approval.OPEN
 CONTENT_DEAL_STATUSES = ("approved", "contract_sent", "contracted")
 
 
@@ -221,6 +220,34 @@ class DealsMixin:
 
     # ------------------------------------------------------------------------------------------------ deals
 
+    # ------------------------------------------------------------------------------------------------ one person
+
+    def _person_keys(self, inf: dict) -> set:
+        """What ties records to one PERSON: the tax reference (applied or waiting for confirmation / Andre) and the
+        Finance payee."""
+        keys = set()
+        if inf.get("tax"):
+            keys.add(("tax", inf["tax"]["tax_ref_sha256"]))
+        if inf["payee"]["payee_ref"]:
+            keys.add(("payee", inf["payee"]["payee_ref"]))
+        for c in self.confirmations.values():
+            if c["influencer_id"] == inf["influencer_id"] and c["kind"] == "tax_profile" \
+                    and c["status"] in ("pending", "pending_andre", "undeliverable"):
+                keys.add(("tax", c["payload"]["tax_ref_sha256"]))
+        return keys
+
+    def _linked_ids(self, inf: dict) -> set:
+        keys = self._person_keys(inf)
+        ids = {inf["influencer_id"]}
+        if keys:
+            ids |= {o["influencer_id"] for o in self.influencers.values() if self._person_keys(o) & keys}
+        return ids
+
+    def _person_total(self, inf: dict):
+        people = self._linked_ids(inf)
+        return money.total([x["total"] for x in self.deals.values() if x["influencer_id"] in people
+                            and x["status"] not in i09_deal_approval.NOT_COUNTED])
+
     def deal_view(self, d: dict) -> dict:
         return dict(d)
 
@@ -278,7 +305,8 @@ class DealsMixin:
             problem = self._brief_problem(b)
             if problem:
                 raise Conflict(R(problem))
-            others = [x for x in self.deals.values() if x["influencer_id"] == inf["influencer_id"]]
+            people = self._linked_ids(inf)
+            others = [x for x in self.deals.values() if x["influencer_id"] in people]
             reasons = i09_deal_approval.needs_andre(total, others, c["campaign_id"], self.settings.auto_approve_max)
             did = derived_id("dea", caller, rk)
             d = {"deal_id": did, "influencer_id": inf["influencer_id"], "campaign_id": c["campaign_id"],
