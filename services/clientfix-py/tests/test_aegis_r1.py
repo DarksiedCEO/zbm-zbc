@@ -424,7 +424,7 @@ def test_low_a_payment_for_a_job_closed_unpaid_becomes_an_andre_refund(h):
     h.ok(h.post(f"/jobs/{j['job_id']}/cancel", {"request_id": rid()}, andre=True))
     ev = "fin-evt-" + "9" * 40
     out = h.ok(h.pay(j, ev=ev))
-    assert out["orphan_payment"]["finance_event_id"] == ev
+    assert out["orphan_payments"][0]["finance_event_id"] == ev
     r = h.ok(h.get("/refunds"))[0]
     assert r["amount"] == "150.00" and r["finance_event_id"] == ev and r["status"] == "proposed"
     assert any(t["code"] == "ORPHANED_PAYMENT" and t["status"] == "open" for t in h.ok(h.get("/tasks")))
@@ -434,13 +434,14 @@ def test_low_a_payment_for_a_job_closed_unpaid_becomes_an_andre_refund(h):
 
 
 def test_low_the_brief_carries_the_stores_current_values_without_secrets(tmp_path):
+    """Round 1 Low, narrowed by round 2 R2-4: only a content check carries the client's text, labelled untrusted."""
     eng = FakeEngineers()
     h = Harness(tmp_path, ports=wired_ports(engineers=eng))
     conn = h.connection()
-    h.t.shop(SHOP_A).product(PRODUCT, seo_title="Old SEO", seo_desc="sk-ant-" + "api03" * 5)
-    j, it = _paid(h, conn, "product_seo_missing", PRODUCT)
+    h.t.shop(SHOP_A).product(PRODUCT, title="Old title", desc="sk-ant-" + "api03" * 5)
+    j, it = _paid(h, conn, "product_content_error", PRODUCT)
     brief = h.ok(h.get(f"/jobs/{j['job_id']}/brief", caller="fire_team"))
-    item = brief["items"][0]
-    assert item["before"] == [[PRODUCT, "seo.title", "Old SEO"]]
-    assert item["before_status"] == "read_some_withheld" and "sk-ant-" not in str(brief)
+    content = brief["items"][0]["untrusted_client_content"]
+    assert content["rows"] == [[PRODUCT, "title", "Old title"]]
+    assert content["status"] == "read_some_withheld" and "sk-ant-" not in str(brief)
     assert not h.t.writes()

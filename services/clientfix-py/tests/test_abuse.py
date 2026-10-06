@@ -50,9 +50,8 @@ def test_out_of_allowlist_operations_are_refused_and_nothing_is_stored_or_sent(h
          "OP_VALUE_INVALID"),
         (_seo_op(field="descriptionHtml", before="<p>Warm.</p>", after='<a href="javascript:go()">x</a>'),
          "OP_VALUE_INVALID"),
-        (_seo_op(field="title", before=None, after="New"), "OP_VALUE_INVALID"),
+        (_seo_op(field="title", before=None, after="New"), "OP_NOT_FOR_CHECK"),
         (_seo_op(after=None), "OP_VALUE_INVALID"),                         # product fields are never removed
-        (_seo_op(before="Same", after="Same"), "OP_NO_CHANGE"),
         (_seo_op(target="gid://shopify/Order/5"), "OP_TARGET_INVALID"),
         ({"op": "shopify.redirect.set", "target": "redirect:/a", "field": "target", "before": None,
           "after": "https://evil.test/phish"}, "OP_VALUE_INVALID"),        # off-store redirect
@@ -66,7 +65,7 @@ def test_out_of_allowlist_operations_are_refused_and_nothing_is_stored_or_sent(h
     for op, code in cases:
         h.refused(h.plan(j, _plan_item(conn, item, [op])), 422, code)
     assert h.ok(h.get(f"/jobs/{j['job_id']}"))["status"] == "paid"
-    assert not h.t.calls
+    assert not h.t.writes()
 
 
 def test_gtm_tag_code_and_parameters_are_not_editable(h):
@@ -118,7 +117,7 @@ def test_plan_hash_tampering_is_refused_at_approval_and_at_apply(h):
     with h.svc.lock:
         h.svc.jobs[j["job_id"]]["items"][item["item_id"]]["ops"][0]["after"] = "Injected by an attacker"
     h.refused(h.apply(j["job_id"]), 409, "APPROVAL_STALE")
-    assert not h.t.calls
+    assert not h.t.writes()
 
 
 def test_a_new_plan_after_approval_voids_the_approval(h):
@@ -129,7 +128,7 @@ def test_a_new_plan_after_approval_voids_the_approval(h):
     # only paid / planned jobs take a plan; an approved plan is changed only by cancelling (Andre)
     h.refused(h.post(f"/jobs/{j['job_id']}/cancel", {"request_id": rid()}), 403, "ANDRE_APPROVAL_REQUIRED")
     h.ok(h.post(f"/jobs/{j['job_id']}/cancel", {"request_id": rid()}, andre=True))
-    assert not h.t.calls
+    assert not h.t.writes()
 
 
 def test_client_approval_needs_the_clients_own_live_session(h):
@@ -276,7 +275,10 @@ def test_gtm_failure_after_publish_republishes_the_previous_live_version(h):
     h.ok(h.approve(j["job_id"]))
     it = h.ok(h.apply(j["job_id"]))["items"][0]
     assert it["status"] == "rolled_back", it
-    assert gtm.live == before
+    # AEGIS round 2 R2-1: a REVERT version with the snapshot's content is now both latest and live
+    assert gtm.live == gtm.latest and gtm.live != before
+    tags = {t["tagId"]: t for t in gtm.versions[gtm.live]["tag"]}
+    assert tags["12"]["paused"] is True
 
 
 # ------------------------------------------------------------------------------------------- 4. rollback failure
@@ -383,7 +385,7 @@ def test_revocation_cancels_planned_items_and_is_never_refused(h):
     assert jj["items"][0]["status"] == "cancelled_revoked"
     assert jj["status"] == "refund_pending"                  # paid, nothing fixed: a full refund is proposed
     h.refused(h.apply(j["job_id"]), 409)
-    assert not h.t.calls
+    assert not h.t.writes()
 
 
 # ------------------------------------------------------------------------------------------- 6. tenants
@@ -590,9 +592,10 @@ def test_no_work_before_payment(h):
     h.ok(h.pay(j, ev=ev))
     h.ok(h.pay(j, ev=ev))                                     # the same event again: answered, nothing new
     h.refused(h.pay(j, ev=ev, amount="1.00"), 409, "FINANCE_EVENT_REUSED")
-    h.refused(h.pay(j, amount=j["quote"]["total"]), 409, "JOB_STATE")         # paid once only
+    dup = h.ok(h.pay(j, amount=j["quote"]["total"]))          # paid twice: recorded and proposed for refund
+    assert len(dup["orphan_payments"]) == 1 and len(h.ok(h.get("/refunds"))) == 1
     assert not h.t.calls
-    assert len(h.ledger.of_type("payment_confirmed")) == 1
+    assert len(h.ledger.of_type("payment_confirmed")) == 1 and len(h.ledger.of_type("payment_orphaned")) == 1
 
 
 def test_payment_from_anyone_but_finance_is_refused(h):
@@ -666,12 +669,12 @@ def test_default_ports_fail_closed_before_anything_is_touched(tmp_path):
     h.refused(h.post(f"/jobs/{j['job_id']}/engage", {"request_id": rid()}, caller="clientfix_agent"), 503,
               "MODEL_NOT_WIRED")
     item = h.item(j["job_id"])
-    h.ok(h.plan(j, _plan_item(conn, item, [_seo_op()])))
-    h.ok(h.approve(j["job_id"]))
     n = len(h.ledger.events)
-    h.refused(h.apply(j["job_id"]), 503, "CONNECTOR_NOT_WIRED")
+    # a plan needs the store's current values (AEGIS round 2 R2-4): with no transport there is no plan at all
+    h.refused(h.plan(j, _plan_item(conn, item, [_seo_op()])), 503, "CONNECTOR_NOT_WIRED")
+    h.refused(h.apply(j["job_id"]), 409, "PLAN_REQUIRED")
     assert len(h.ledger.events) == n                          # nothing recorded, nothing touched
-    assert h.ok(h.tick("apply-queue"))["not_wired"] == 1
+    assert h.ok(h.tick("apply-queue"))["not_wired"] == 0                 # no approved job exists to apply
     st = h.ok(h.get("/status"))
     assert not any(st["ports_wired"].values())
 
@@ -691,8 +694,8 @@ def test_a_malicious_engineer_proposal_is_validated_like_any_plan(tmp_path):
     eng = FakeEngineers()
     h = Harness(tmp_path, ports=wired_ports(engineers=eng))
     conn, j, item = _paid_job(h)
-    eng.items = [{"item_id": item["item_id"], "connection_id": conn["connection_id"],
-                  "ops": [_seo_op(op="shopify.theme.write")]}]
+    theme = {k: v for k, v in _seo_op(op="shopify.theme.write").items() if k != "before"}
+    eng.items = [{"item_id": item["item_id"], "connection_id": conn["connection_id"], "ops": [theme]}]
     h.refused(h.post(f"/jobs/{j['job_id']}/engage", {"request_id": rid()}, caller="clientfix_agent"), 422,
               "OP_NOT_ALLOWED")
     eng.items = [{"item_id": item["item_id"], "connection_id": conn["connection_id"],

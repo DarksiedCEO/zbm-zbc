@@ -249,11 +249,16 @@ class Harness:
         return self.ok(self.post("/connections", body, caller="hub"), 201)
 
     def finding(self, conn: dict, check="product_seo_missing", target=PRODUCT, fid: Optional[str] = None,
-                client: Optional[str] = None) -> dict:
+                client: Optional[str] = None, field: Optional[str] = None) -> dict:
+        if field is None:                       # named-field checks need the exact name (AEGIS round 2 R2-7)
+            field = {"ga4_key_event_missing": "key_event:purchase", "ga4_key_event_wrong": "key_event:purchase",
+                     "product_metafield_wrong": "metafield:custom.care"}.get(check)
+        resource = {"connection_id": conn["connection_id"], "target": target}
+        if field is not None:
+            resource["field"] = field
         return self.ok(self.post("/findings", {"request_id": rid(), "finding_id": fid or f"rr:{uuid.uuid4().hex[:16]}",
                                                "agent_id": "platform-integration", "client_id": client or conn["client_id"],
-                                               "check_code": check, "resource": {"connection_id": conn["connection_id"],
-                                                                                  "target": target}},
+                                               "check_code": check, "resource": resource},
                                 caller="orchestrator"), 201)
 
     def job(self, findings: list, prices=None, client: Optional[str] = None) -> dict:
@@ -280,6 +285,9 @@ class Harness:
                                              "quote_sha256": quote_sha or job["quote_sha256"]}, caller="finance_31")
 
     def plan(self, job: dict, items: list, team: Optional[str] = None):
+        """Submit a plan. A plan never carries ``before`` (AEGIS round 2 R2-4: the service reads it from the store);
+        builders here still write the expected ``before`` for readability, and it is stripped before sending."""
+        items = [{**x, "ops": [{k: v for k, v in op.items() if k != "before"} for op in x["ops"]]} for x in items]
         return self.post(f"/jobs/{job['job_id']}/plan", {"request_id": rid(), "team": team or job["team"],
                                                          "items": items}, caller="fire_team")
 

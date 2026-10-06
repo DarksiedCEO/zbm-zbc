@@ -251,6 +251,14 @@ class FakeGTM:
         if req.method == "GET" and path == f"{self.c}/version_headers:latest":
             v = self.versions[self.latest]
             return HttpAnswer(200, {"path": v["path"], "containerVersionId": v["containerVersionId"], "name": v["name"]})
+        if req.method == "GET" and path == f"{self.c}/workspaces":
+            ws = [{"path": self.ws_path(k), "workspaceId": str(k), "name": w["name"]} for k, w in sorted(
+                self.workspaces.items())]
+            return HttpAnswer(200, {"workspace": ws})
+        mv = re.fullmatch(re.escape(self.c) + r"/versions/([0-9]+)", path)
+        if mv and req.method == "GET":
+            v = self.versions.get(path)
+            return HttpAnswer(200, copy.deepcopy(v)) if v else HttpAnswer(404, {"error": {"code": 404}})
         if req.method == "POST" and path == f"{self.c}/workspaces":
             ws = self._new_ws(req.body.get("name", ""), self._base_tags_of_latest())
             return HttpAnswer(200, {"path": self.ws_path(ws), "workspaceId": str(ws), "name": req.body.get("name"),
@@ -412,6 +420,15 @@ class FakeTransport:
     def call(self, conn, req: HttpRequest) -> HttpAnswer:
         blob = json.dumps([req.url, req.body], default=str)
         assert "vault:" not in blob and "shpat_" not in blob and "ya29." not in blob, "a credential in a request"
+        if req.method == "DELETE" and "tagmanager.googleapis.com" in req.url:
+            # the delete scope is accepted only because the code deletes nothing but its OWN run workspaces, by
+            # exact path: any other DELETE fails every test that sends one (ADR 0017, AEGIS round 2)
+            from connectors.tag_manager import RUN_PREFIX
+            m = re.fullmatch(r"https://tagmanager\.googleapis\.com/tagmanager/v2/accounts/[0-9]+/containers/[0-9]+"
+                             r"/workspaces/([0-9]+)", req.url)
+            assert m, f"a GTM DELETE outside a workspace path: {req.url}"
+            w = self.gtm.workspaces.get(int(m.group(1)))
+            assert w is None or w["name"].startswith(RUN_PREFIX), f"a GTM DELETE of a non-run workspace: {req.url}"
         self.calls.append((conn, req))
         if self.before is not None:
             self.before(conn, req)

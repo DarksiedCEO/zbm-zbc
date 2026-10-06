@@ -176,10 +176,11 @@ def test_engage_runs_the_fire_team_and_its_proposal_is_validated_like_any_plan(t
     h.ok(h.pay(j))
     item = h.item(j["job_id"])
     eng.items = [{"item_id": item["item_id"], "connection_id": conn["connection_id"],
-                  "ops": [{"op": "shopify.product.update", "target": PRODUCT, "field": "seo.title", "before": None,
+                  "ops": [{"op": "shopify.product.update", "target": PRODUCT, "field": "seo.title",
                            "after": "Better title"}]}]
     out = h.ok(h.post(f"/jobs/{j['job_id']}/engage", {"request_id": rid()}, caller="clientfix_agent"))
     assert out["status"] == "planned" and out["items"][0]["ops"][0]["after"] == "Better title"
+    assert out["items"][0]["ops"][0]["before"] is None        # read from the store by the service
     team, brief = eng.briefs[0]
     assert team == "alpha" and brief["items"][0]["allowed_ops"]
     assert "vault:" not in str(brief) and "token" not in str(brief)  # engineers never hold client credentials
@@ -225,19 +226,18 @@ def test_partial_fix_refunds_only_unfixed_items_after_andre(tmp_path):
     h.ok(h.accept(j))
     h.ok(h.pay(j))
     items = {i["finding_id"]: i for i in h.ok(h.get(f"/jobs/{j['job_id']}"))["items"]}
-    # item 2's "before" is stale (the store changed since the plan): it drifts and nothing is written for it
     h.ok(h.plan(j, [
         {"item_id": items[f1["finding_id"]]["item_id"], "connection_id": conn["connection_id"],
-         "ops": [{"op": "shopify.product.update", "target": PRODUCT, "field": "seo.title", "before": None,
-                  "after": "A"}]},
+         "ops": [{"op": "shopify.product.update", "target": PRODUCT, "field": "seo.title", "after": "A"}]},
         {"item_id": items[f2["finding_id"]]["item_id"], "connection_id": conn["connection_id"],
-         "ops": [{"op": "shopify.product.update", "target": PRODUCT2, "field": "seo.title", "before": "Stale",
-                  "after": "B"}]}]))
+         "ops": [{"op": "shopify.product.update", "target": PRODUCT2, "field": "seo.title", "after": "B"}]}]))
     h.ok(h.approve(j["job_id"]))
+    # item 2's store value changed after the plan was read and approved: it drifts and nothing is written for it
+    shop.products[PRODUCT2]["seo"]["title"] = "Changed by the merchant"
     out = h.ok(h.apply(j["job_id"]))
     st = {i["finding_id"]: i["status"] for i in out["items"]}
     assert st == {f1["finding_id"]: "applied_verified", f2["finding_id"]: "drifted"}
-    assert shop.products[PRODUCT2]["seo"]["title"] is None
+    assert shop.products[PRODUCT2]["seo"]["title"] == "Changed by the merchant"
     h.ok(h.tick("redetect"))
     refunds = h.ok(h.get("/refunds"))
     assert len(refunds) == 1 and refunds[0]["amount"] == "80.00" and refunds[0]["status"] == "proposed"
