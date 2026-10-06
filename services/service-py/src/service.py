@@ -100,7 +100,7 @@ def money_str(v: str) -> str:
 
 class SupportService:
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, bodies: BodyStore,
-                 ports: Optional[Ports] = None, clock: Optional[Clock] = None):
+                 ports: Optional[Ports] = None, clock: Optional[Clock] = None, lock_claimed: bool = False):
         self.settings = settings
         self.rec = recorder
         self.log = log
@@ -138,8 +138,11 @@ class SupportService:
         self._unconfirmed: dict[str, dict] = {}     # sent by the provider, result not yet committed: never resent
         self.key_fingerprint: Optional[str] = None
         # V5-L1: one service instance per data directory, also within one process (config.load caches the flock)
+        # V5r-L1: api.build claims BEFORE the log and the body store are built and passes lock_claimed=True; the
+        # service adopts that claim (and gives it back on close or a failed start)
+        self._closed = False
         self._dir_lock = getattr(settings, "data_dir_lock", None)
-        if self._dir_lock is not None:
+        if self._dir_lock is not None and not lock_claimed:
             self._dir_lock.claim()
         try:
             self._start()
@@ -148,7 +151,11 @@ class SupportService:
             raise
 
     def close(self) -> None:
-        """Give the data directory back (a restart in the same process closes the old instance first)."""
+        """Give the data directory back (a restart in the same process closes the old instance first). A closed
+        instance never writes again: its log and body store refuse, and every commit is refused (V5r-Info)."""
+        self._closed = True
+        self.log.closed = True
+        self.bodies.closed = True
         if getattr(self, "_dir_lock", None) is not None:
             self._dir_lock.release_claim()
             self._dir_lock = None
@@ -206,6 +213,8 @@ class SupportService:
     def _commit(self, kind: str, data: dict, actor: str) -> dict:
         """Typed events, then ledger anchor, then the local log, then memory (fail closed at every step)."""
         with self.lock:
+            if self._closed:
+                raise Unavailable(R("SERVICE_CLOSED"))
             if not self.integrity["ok"]:
                 raise Unavailable(R("INTEGRITY_UNVERIFIED"))
             at = iso(self.now())
@@ -708,6 +717,8 @@ class SupportService:
         return None
 
     def _gate(self) -> None:
+        if self._closed:
+            raise Unavailable(R("SERVICE_CLOSED"))
         if not self.verify_integrity()["ok"]:
             raise Unavailable(R("INTEGRITY_UNVERIFIED"))
 

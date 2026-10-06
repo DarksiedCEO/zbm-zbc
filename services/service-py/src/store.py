@@ -77,6 +77,7 @@ class RecordLog:
         self._lines: list[bytes] = []
         self.path: Optional[str] = None
         self.fail_next_append = False  # tests: simulate a disk failure
+        self.closed = False            # V5r-Info: set by the service's close(); every write then refuses
         if data_dir:
             os.makedirs(data_dir, mode=0o700, exist_ok=True)
             self.path = os.path.join(data_dir, LOG_NAME)
@@ -129,11 +130,16 @@ class RecordLog:
         rec, line = self.prepare(kind, at, data)
         return self.append_prepared(rec, line)
 
+    def _refuse_if_closed(self) -> None:
+        if self.closed:
+            raise StoreWriteError("this service instance is closed; its log refuses writes")
+
     def append_prepared(self, rec: dict, line: bytes) -> dict:
         """Append one line. The file must be exactly the in-memory lines before the write (else refused); a
         failed write is cut back to that size, so a line is never half in (AEGIS round 3, R3-3). If the file
         already ends with exactly this line (a write that reached the disk before an fsync error), it is adopted
         instead of written twice."""
+        self._refuse_if_closed()
         with self.lock:
             if self.fail_next_append:
                 self.fail_next_append = False
@@ -200,6 +206,7 @@ class RecordLog:
 
     def write_pending(self, line: bytes) -> None:
         """Fsync the exact next line aside before its ledger anchor is recorded."""
+        self._refuse_if_closed()
         if not self.data_dir:
             self._mem_pending = line
             return
@@ -221,6 +228,7 @@ class RecordLog:
     _mem_discarded: Optional[bytes] = None
 
     def write_discarded(self, line: bytes) -> None:
+        self._refuse_if_closed()
         if not self.data_dir:
             self._mem_discarded = line
             return
@@ -301,6 +309,7 @@ class BodyStore:
         self.dir = os.path.join(data_dir, BODIES_DIR) if data_dir else None
         self._mem: dict[str, bytes] = {}
         self.fail_next_put = False   # tests
+        self.closed = False          # V5r-Info: set by the service's close(); put / delete then refuse
         if self.dir:
             os.makedirs(self.dir, mode=0o700, exist_ok=True)
             for name in os.listdir(self.dir):
@@ -313,6 +322,8 @@ class BodyStore:
         return hmac.new(self._key, data, hashlib.sha256).hexdigest()
 
     def put(self, text: str) -> str:
+        if self.closed:
+            raise StoreWriteError("this service instance is closed; its body store refuses writes")
         data = text.encode("utf-8")
         if len(data) > self.MAX_BYTES:
             raise StoreWriteError("body larger than 64 KiB")
@@ -357,6 +368,8 @@ class BodyStore:
             return {n for n in os.listdir(self.dir) if _BODY_NAME.fullmatch(n)}
 
     def delete(self, digest: str) -> None:
+        if self.closed:
+            raise StoreWriteError("this service instance is closed; its body store refuses writes")
         with self.lock:
             if not self.dir:
                 self._mem.pop(digest, None)

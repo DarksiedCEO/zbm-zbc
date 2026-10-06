@@ -593,14 +593,20 @@ def build_ports(settings: config_mod.Settings) -> Ports:
 def build(env: Optional[dict] = None):
     """The production wiring: settings, ledger, log, body store, ports; returns (asgi, service)."""
     settings = config_mod.load(env)
-    lock = settings.data_dir_lock              # taken by config.load before the key and the log (V4b-I1); the
-                                               # service claims it once (V5-L1)
-    if settings.ledger_url and settings.ledger_token:
-        ledger = HttpLedgerClient(settings.ledger_url, settings.ledger_token)
-    else:
-        ledger = UnconfiguredLedgerClient()
-    svc = SupportService(settings, Recorder(ledger), RecordLog(settings.data_dir), BodyStore(settings.data_dir, settings.hmac_key),
-                         build_ports(settings))
+    lock = settings.data_dir_lock              # the flock, taken by config.load before the key (V4b-I1)
+    if lock is not None:
+        lock.claim()                           # V5r-L1: claimed BEFORE the log and the body store touch the directory
+    try:
+        if settings.ledger_url and settings.ledger_token:
+            ledger = HttpLedgerClient(settings.ledger_url, settings.ledger_token)
+        else:
+            ledger = UnconfiguredLedgerClient()
+        svc = SupportService(settings, Recorder(ledger), RecordLog(settings.data_dir),
+                             BodyStore(settings.data_dir, settings.hmac_key), build_ports(settings), lock_claimed=True)
+    except BaseException:
+        if lock is not None:
+            lock.release_claim()
+        raise
     svc.data_dir_lock = lock
     return _wrap(create_app(svc, settings)), svc
 

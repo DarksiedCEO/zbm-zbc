@@ -143,8 +143,17 @@ class Harness:
         self.ledger = ledger or FakeLedger()
         self.clock = clock or FixedClock(T0)
         self.ports = ports or Ports.default()
-        self.svc = SupportService(self.settings, Recorder(self.ledger), RecordLog(self.settings.data_dir),
-                                  BodyStore(self.settings.data_dir, self.settings.hmac_key), self.ports, self.clock)
+        lock = self.settings.data_dir_lock
+        if lock is not None:
+            lock.claim()                               # as api.build: claimed before the log and the body store
+        try:
+            self.svc = SupportService(self.settings, Recorder(self.ledger), RecordLog(self.settings.data_dir),
+                                      BodyStore(self.settings.data_dir, self.settings.hmac_key), self.ports,
+                                      self.clock, lock_claimed=True)
+        except BaseException:
+            if lock is not None:
+                lock.release_claim()
+            raise
         self.client = TestClient(api._wrap(api.create_app(self.svc, self.settings)), raise_server_exceptions=False)
 
     def restart(self, **env_over) -> "Harness":
