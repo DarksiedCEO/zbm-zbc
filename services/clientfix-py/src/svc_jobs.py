@@ -18,7 +18,8 @@ import hashlib
 import json
 
 import money
-from catalogue import CHECKS, FIRE_TEAMS, team_for
+from catalogue import CHECK_OPS, CHECKS, FIRE_TEAMS, op_allowed_for, team_for
+from connectors.base import HttpAnswer
 from connectors.base import OpRefused
 from errors import Conflict, Invalid, NotFound, Unavailable
 from ledger import derived_id
@@ -38,6 +39,23 @@ def sha(obj) -> str:
 
 def resource_key(connector: str, account: str, target: str) -> str:
     return f"{connector}|{account}|{target}"
+
+
+def _no_redirect_chain(planned: list, connections: dict) -> None:
+    """AEGIS round 1 M2: across the whole plan, per store, no redirect may point at a path another planned redirect
+    moves (a chain) and no set of them may form a loop. The store's EXISTING redirects are checked at apply time,
+    against what the connector reads (ShopifyConnector.dry_run)."""
+    from connectors.shopify import _norm
+    by_shop: dict = {}
+    for p in planned:
+        shop = connections[p["connection_id"]]["account_ref"]
+        for op in p["ops"]:
+            if op["op"] == "shopify.redirect.set":
+                by_shop.setdefault(shop, {})[_norm(op["target"][len("redirect:"):])] = _norm(op["after"])
+    for edges in by_shop.values():
+        for src, dst in edges.items():
+            if dst in edges:
+                raise Invalid(R("REDIRECT_CHAIN"))
 
 
 class JobsMixin:
@@ -191,16 +209,49 @@ class JobsMixin:
             j = self._get(self.jobs, body["job_id"], "JOB_NOT_FOUND")
             if j["status"] == "quoted":
                 raise Conflict(R("QUOTE_NOT_ACCEPTED"))
-            if j["status"] != "accepted":
-                raise Conflict(R("JOB_STATE"))
             if body["quote_sha256"] != j["quote_sha256"] or body["amount"] != j["quote"]["total"]:
                 raise Conflict(R("PAYMENT_MISMATCH"))
+            if j["status"] == "closed" and not j.get("payment") and not j.get("orphan_payment"):
+                return self._orphaned_payment(actor, rk, body, facts, j)
+            if j["status"] != "accepted":
+                raise Conflict(R("JOB_STATE"))
             self._commit("payment_confirmed", self._req({"facts": facts}, actor, rk, body, body["job_id"]), actor,
                          evidence=("payment_confirmed", f"job:{body['job_id']}",
                                    {"job_id": body["job_id"], "finance_event_id": body["finance_event_id"],
                                     "terms_sha256": sha([body["amount"], body["currency"]]),
                                     "quote_sha256": body["quote_sha256"]}, (actor, rk)))
             return self.job_view(body["job_id"])
+
+    def _orphaned_payment(self, actor: str, rk: str, body: dict, facts: dict, j: dict) -> dict:
+        """AEGIS round 1 Low: the client paid a quote whose job was already closed unpaid (cancelled, or every item
+        revoked). The money is real: the Finance event is recorded and a full refund is proposed for Andre (task),
+        never a bare refusal that leaves the payment nobody's."""
+        job_id = j["job_id"]
+        refund_id = derived_id("rfd", job_id)
+        terms = {"refund_id": refund_id, "job_id": job_id, "client_id": j["client_id"],
+                 "items": sorted(j["items"]), "amount": body["amount"], "currency": body["currency"],
+                 "finance_event_id": body["finance_event_id"], "report_sha256": None}
+        rsha = sha(terms)
+        tasks = [self._task("decide", refund_id, "ORPHANED_PAYMENT", "ORPHANED_PAYMENT")]
+        self._commit("payment_orphaned", self._req({"facts": facts, "terms": terms, "refund_sha256": rsha,
+                                                    "tasks": tasks}, actor, rk, body, job_id), actor,
+                     evidence=[("payment_orphaned", f"job:{job_id}",
+                                {"job_id": job_id, "finance_event_id": body["finance_event_id"],
+                                 "terms_sha256": sha([body["amount"], body["currency"]]),
+                                 "quote_sha256": body["quote_sha256"]}, (actor, rk)),
+                               ("refund_proposed", f"refund:{refund_id}",
+                                {"refund_id": refund_id, "job_id": job_id, "items": len(terms["items"]),
+                                 "terms_sha256": rsha}, (actor, rk, "refund"))])
+        return self.job_view(job_id)
+
+    def _a_payment_orphaned(self, d, at):
+        f, t = d["facts"], d["terms"]
+        self.finance_events[f["finance_event_id"]] = dict(f)
+        self.jobs[f["job_id"]]["orphan_payment"] = {"finance_event_id": f["finance_event_id"], "amount": f["amount"],
+                                                    "at": at}
+        self.refunds[t["refund_id"]] = {**t, "refund_sha256": d["refund_sha256"], "status": "proposed",
+                                        "proposed_at": at, "approved_at": None, "finance_ref": None,
+                                        "unknown_ticks": 0}
 
     def _a_payment_confirmed(self, d, at):
         f = d["facts"]
@@ -234,6 +285,57 @@ class JobsMixin:
         return {"job_id": job_id, "client_id": j["client_id"], "team": j["team"],
                 "team_lanes": list(FIRE_TEAMS[j["team"]]), "items": items}
 
+    def brief_with_before(self, job_id: str) -> dict:
+        """The brief plus each item's CURRENT values (AEGIS round 1 Low: plans written against reality). They are read
+        through the connector's read API outside the lock — reads only, a write is refused — and are client business
+        data, not secrets: still, any value the secrets scan flags is withheld."""
+        import secrets_guard
+        from connectors.base import UnknownState
+        from executor import Halt
+        from ports import ConnView
+        with self.lock:
+            self._gate()
+            self._paid(self._get(self.jobs, job_id, "JOB_NOT_FOUND"))
+            brief = self.brief(job_id)
+            views = {}
+            for it in brief["items"]:
+                c = self.connections[it["connection_id"]]
+                views[it["item_id"]] = ConnView(c["connection_id"], c["client_id"], c["connector"], c["account_ref"],
+                                                c["token_ref"])
+        for it in brief["items"]:
+            connector = self.connectors[it["connector"]]
+            keys = [(it["target"], f) for op, fields in CHECK_OPS.get(it["check_code"], {}).items()
+                    if op in connector.ops for f in fields if not f.endswith(":")]
+            it["before"], it["before_status"] = None, "unavailable"
+            if not keys:
+                it["before_status"] = "not_applicable"
+                continue
+            if not self.ports.transport.wired:
+                continue
+            conn = views[it["item_id"]]
+
+            def call(req, conn=conn):
+                with self.lock:
+                    if conn.connection_id in self.revoked_now or conn.client_id in self.revoked_clients_now:
+                        raise Halt("CONNECTION_REVOKED")
+                if req.is_write:
+                    raise Halt("CONNECTOR_NOT_WIRED")          # the brief never writes anything
+                try:
+                    ans = self.ports.transport.call(conn, req)
+                except Exception:                              # noqa: BLE001
+                    ans = None
+                return ans if isinstance(ans, HttpAnswer) else HttpAnswer(0, None)
+            try:
+                values = connector.read(conn.account_ref, keys, {}, call)
+            except (UnknownState, Halt):
+                it["before_status"] = "unknown"
+                continue
+            rows = sorted([k[0], k[1], v] for k, v in values.items())
+            safe = [r for r in rows if not secrets_guard.secret_value(r[2])]
+            it["before"] = safe
+            it["before_status"] = "read" if len(safe) == len(rows) else "read_some_withheld"
+        return brief
+
     def engage(self, actor: str, job_id: str, body: dict) -> dict:
         with self.lock:
             self._gate()
@@ -241,8 +343,8 @@ class JobsMixin:
             self._paid(j)
             if not self.ports.engineers.wired:
                 raise Unavailable(R("MODEL_NOT_WIRED"))
-            brief = self.brief(job_id)
             team = j["team"]
+        brief = self.brief_with_before(job_id)
         try:
             proposed = self.ports.engineers.propose(team, brief)
         except ModelNotWired:
@@ -301,12 +403,19 @@ class JobsMixin:
                         connector.validate(conn["account_ref"], op)
                     except OpRefused as exc:
                         raise Invalid(R(exc.code)) from None
+                    # AEGIS round 1 M1: the change set is bound to its finding — the finding's resource, and only
+                    # the operations and fields its check allows
+                    if op["target"] != it["resource"]["target"]:
+                        raise Invalid(R("RESOURCE_MISMATCH"))
+                    if not op_allowed_for(it["check_code"], op["op"], op["field"]):
+                        raise Invalid(R("OP_NOT_FOR_CHECK"))
                     key = resource_key(conn["connector"], conn["account_ref"], op["target"]) + "|" + op["field"]
                     if key in seen:
                         raise Invalid(R("OP_DUPLICATE_KEY"))
                     seen.add(key)
                     ops.append({k: op[k] for k in ("op", "target", "field", "before", "after")})
                 planned.append({"item_id": x["item_id"], "connection_id": conn["connection_id"], "ops": ops})
+            _no_redirect_chain(planned, self.connections)
             version = j["plan_version"] + 1
             data = {"job_id": job_id, "version": version, "team": body["team"], "items": planned}
             shadow = {**j, "plan_version": version, "plan_team": body["team"],

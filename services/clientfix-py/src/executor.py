@@ -52,84 +52,118 @@ Step = Callable[[str, dict], None]
 
 
 def run_item(connector: Connector, conn: ConnView, item_id: str, ops: list, transport, step: Step,
-             live: Callable[[], Optional[str]]) -> dict:
+             live: Callable[[], Optional[str]], live_rollback: Optional[Callable[[], Optional[str]]] = None) -> dict:
+    """``live`` is asked before every request; ``live_rollback`` (revocation and shutdown only, never a freeze) is
+    used for the guarded rollback after Andre froze a resource in the middle of a write (AEGIS round 1 Low)."""
     keys = [(op["target"], op["field"]) for op in ops]
+    extra = [k for k in connector.companions(keys) if k not in keys]
+    read_keys = keys + extra
     ctx: dict = {"item_id": item_id, "state": {}}
     out: dict = {"status": None, "failure": None, "written": [], "snapshot": None, "readback": None,
-                 "rollback": None, "dry_run": None, "instructions": None}
+                 "rollback": None, "dry_run": None, "instructions": None, "sent_writes": 0}
     sent = {"n": 0}
 
-    def call(req: HttpRequest) -> HttpAnswer:
-        code = live()
-        if code:
-            raise Halt(code)
-        write = req.is_write
-        if write:
-            sent["n"] += 1
-            step("request_sending", {"n": sent["n"], "request": req.describe()})
-        try:
-            ans = transport.call(conn, req)
-        except Halt:
-            raise
-        except Exception:              # noqa: BLE001 — any transport failure is an UNKNOWN answer, never success
-            ans = None
-        if not isinstance(ans, HttpAnswer) or isinstance(ans.status, bool) or not isinstance(ans.status, int):
-            ans = HttpAnswer(0, None)
-        if write:
-            body_sha = hashlib.sha256(json.dumps(ans.body, sort_keys=True, default=str).encode()).hexdigest()
-            step("request_answered", {"n": sent["n"], "status": ans.status, "body_sha256": body_sha})
-        return ans
+    def make_call(gate):
+        def call(req: HttpRequest) -> HttpAnswer:
+            code = gate()
+            if code:
+                raise Halt(code)
+            write = req.is_write
+            if write:
+                sent["n"] += 1
+                step("request_sending", {"n": sent["n"], "request": req.describe()})
+                out["sent_writes"] = sent["n"]
+            try:
+                ans = transport.call(conn, req)
+            except Halt:
+                raise
+            except Exception:          # noqa: BLE001 — any transport failure is an UNKNOWN answer, never success
+                ans = None
+            if not isinstance(ans, HttpAnswer) or isinstance(ans.status, bool) or not isinstance(ans.status, int):
+                ans = HttpAnswer(0, None)
+            if write:
+                body_sha = hashlib.sha256(json.dumps(ans.body, sort_keys=True, default=str).encode()).hexdigest()
+                step("request_answered", {"n": sent["n"], "status": ans.status, "body_sha256": body_sha})
+            return ans
+        return call
 
+    call = make_call(live)
+    snap: dict = {}
     try:
-        # 1-2 snapshot and drift
         try:
-            snap = connector.read(conn.account_ref, keys, ctx, call)
-        except UnknownState:
-            step("snapshot_unknown", {})
-            out["status"] = "snapshot_unknown"
+            # 1-2 snapshot (the planned keys AND their companions) and drift
+            try:
+                snap = connector.read(conn.account_ref, read_keys, ctx, call)
+            except UnknownState:
+                step("snapshot_unknown", {})
+                out["status"] = "snapshot_unknown"
+                return out
+            ctx["state"] = dict(snap)
+            ctx["snapshot"] = dict(snap)
+            out["snapshot"] = rows(snap)
+            step("snapshot_taken", {"snapshot_sha256": values_sha(snap), "snapshot": rows(snap)})
+            drift = [list(k) for op, k in zip(ops, keys) if not same(snap.get(k), op["before"])]
+            if drift:
+                step("drift_found", {"keys": drift})
+                out["status"] = "drifted"
+                return out
+            # 3 manual
+            if connector.manual:
+                out["instructions"] = connector.instructions(conn.account_ref, ops)
+                step("manual_instructions", {"instructions": out["instructions"]})
+                out["status"] = "awaiting_manual"
+                return out
+            # 4 prepare (GTM: base check, run workspace) and the dry run
+            pr, pmode = connector.prepare(conn.account_ref, ops, ctx, call)
+            dr, mode = (connector.dry_run(conn.account_ref, ops, ctx, call) if pr == APPLIED else (pr, pmode))
+            out["dry_run"] = {"outcome": dr, "mode": mode}
+            step("dry_run", {"outcome": dr, "mode": mode})
+            if dr != APPLIED:
+                out["status"] = "dry_run_refused" if dr == REFUSED else "dry_run_unknown"
+                return out
+            # 5-7 apply, stage, finalize, verify (companions must read back as their snapshot)
+            failure = _apply_and_verify(connector, conn, ops, keys, extra, snap, ctx, call, step, out)
+            if failure is None:
+                out["status"] = "applied_verified"
+                return out
+            out["failure"] = failure
+            # 8 rollback (guarded)
+            _rollback(connector, conn, snap, ctx, call, step, out)
             return out
-        ctx["state"] = dict(snap)
-        out["snapshot"] = rows(snap)
-        step("snapshot_taken", {"snapshot_sha256": values_sha(snap), "snapshot": rows(snap)})
-        drift = [list(k) for op, k in zip(ops, keys) if not same(snap.get(k), op["before"])]
-        if drift:
-            step("drift_found", {"keys": drift})
-            out["status"] = "drifted"
+        except Halt as h:
+            out["failure"] = out["failure"] or h.code
+            out["status"] = "halted_revoked" if h.code == "CONNECTION_REVOKED" else \
+                "halted_frozen" if h.code == "RESOURCE_FROZEN" else "interrupted"
+            out["halt"] = h.code
+            if h.code == "RESOURCE_FROZEN" and sent["n"] and live_rollback is not None and snap:
+                try:                                  # Andre froze it mid-write: a guarded rollback, then stop
+                    _rollback(connector, conn, snap, ctx, make_call(live_rollback), step, out)
+                except Halt:
+                    out["rollback"] = {"outcome": UNKNOWN, "proven": False}
+                out["status"] = "halted_frozen"
             return out
-        # 3 manual
-        if connector.manual:
-            out["instructions"] = connector.instructions(conn.account_ref, ops)
-            step("manual_instructions", {"instructions": out["instructions"]})
-            out["status"] = "awaiting_manual"
-            return out
-        # 4 dry run
-        dr, mode = connector.dry_run(conn.account_ref, ops, ctx, call)
-        out["dry_run"] = {"outcome": dr, "mode": mode}
-        step("dry_run", {"outcome": dr, "mode": mode})
-        if dr != APPLIED:
-            out["status"] = "dry_run_refused" if dr == REFUSED else "dry_run_unknown"
-            return out
-        # 5-7 apply, stage, finalize, verify
-        failure = _apply_and_verify(connector, conn, ops, keys, ctx, call, step, out)
-        if failure is None:
-            out["status"] = "applied_verified"
-            return out
-        out["failure"] = failure
-        # 8 rollback
-        _rollback(connector, conn, snap, ctx, call, step, out)
-        return out
-    except Halt as h:
-        out["failure"] = out["failure"] or h.code
-        out["status"] = "halted_revoked" if h.code == "CONNECTION_REVOKED" else \
-            "halted_frozen" if h.code == "RESOURCE_FROZEN" else "interrupted"
-        out["halt"] = h.code
-        return out
+    finally:
+        _cleanup(connector, conn, ctx, make_call(live_rollback or live), step)
 
 
-def _apply_and_verify(connector, conn, ops, keys, ctx, call, step, out) -> Optional[str]:
+def _cleanup(connector, conn, ctx, call, step) -> None:
+    try:
+        outcome = connector.cleanup(conn.account_ref, ctx, call)
+    except Halt:
+        outcome = "halted"
+    except Exception:                  # noqa: BLE001
+        outcome = UNKNOWN
+    if outcome is not None:
+        try:
+            step("cleanup", {"outcome": outcome})
+        except Halt:
+            pass
+
+
+def _apply_and_verify(connector, conn, ops, keys, extra, snap, ctx, call, step, out) -> Optional[str]:
     try:
         for op, key in zip(ops, keys):
-            out["written"].append([key[0], key[1], op["before"]])
+            out["written"].append([key[0], key[1], op["before"], op["after"]])
             outcome, _ = connector.write(conn.account_ref, key, op["after"], ctx, call)
             step("op_result", {"target": key[0], "field": key[1], "outcome": outcome})
             if outcome != APPLIED:
@@ -144,12 +178,13 @@ def _apply_and_verify(connector, conn, ops, keys, ctx, call, step, out) -> Optio
         if fin != APPLIED:
             return f"finalize_{fin}"
         try:
-            back = connector.read(conn.account_ref, keys, ctx, call)
+            back = connector.read(conn.account_ref, keys + extra, ctx, call)
         except UnknownState:
             step("verified", {"outcome": UNKNOWN})
             return "verify_unknown"
         out["readback"] = rows(back)
         mismatched = [list(k) for op, k in zip(ops, keys) if not same(back.get(k), op["after"])]
+        mismatched += [list(k) for k in extra if not same(back.get(k), snap.get(k))]
         step("verified", {"outcome": "match" if not mismatched else "mismatch", "readback_sha256": values_sha(back),
                           "readback": rows(back), "mismatched": mismatched})
         return "verify_mismatch" if mismatched else None
@@ -161,11 +196,13 @@ def _apply_and_verify(connector, conn, ops, keys, ctx, call, step, out) -> Optio
 
 
 def _rollback(connector, conn, snap, ctx, call, step, out) -> None:
-    written = [((t, f), before) for t, f, before in out["written"]]
+    written = [((t, f), before, after) for t, f, before, after in out["written"]]
     step("rollback_started", {"failure": out["failure"], "writes": len(written)})
     try:
         rb = connector.rollback(conn.account_ref, written, ctx, call)
-        proof_keys = connector.rollback_keys([k for k, _ in written], ctx)
+        keys = [k for k, _, _ in written]
+        keys += [k for k in connector.companions(keys) if k not in keys]
+        proof_keys = connector.rollback_keys(keys, ctx)
         proven = None
         if rb == APPLIED:
             try:

@@ -416,10 +416,7 @@ def create_app(service: ClientFixService, settings: config_mod.Settings) -> Fast
 
     @app.get(P + "/jobs/{job_id}/brief", dependencies=auth)
     def brief(job_id: str, who: str = Depends(caller("fire_team", "dashboard"))) -> dict:
-        with svc.lock:
-            j = svc._get(svc.jobs, _id(job_id), "JOB_NOT_FOUND")
-            svc._paid(j)
-            return svc.brief(job_id)
+        return svc.brief_with_before(_id(job_id))
 
     @app.post(P + "/jobs/{job_id}/engage", dependencies=auth)
     def engage(job_id: str, req: dict = Depends(body(m.RequestOnly)),

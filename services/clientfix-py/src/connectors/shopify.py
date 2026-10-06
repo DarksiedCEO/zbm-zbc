@@ -36,15 +36,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from connectors.base import (APPLIED, REFUSED, UNKNOWN, Call, Connector, HttpAnswer, HttpRequest, OpSpec,
+from connectors.base import (APPLIED, REFUSED, UNKNOWN, Call, Connector, HttpAnswer, HttpRequest, OpRefused, OpSpec,
                              UnknownState, html, one_of, text)
+from connectors.richtext import safe_url
 
 API_VERSION = "2026-10"
 SHOP = re.compile(r"[a-z0-9][a-z0-9-]{0,60}\.myshopify\.com")
 PRODUCT = re.compile(r"gid://shopify/Product/[1-9][0-9]{0,19}")
 PAGE = re.compile(r"gid://shopify/Page/[1-9][0-9]{0,19}")
-REDIRECT_TARGET = re.compile(r"redirect:/[\x21-\x7e]{0,1023}")
-REL_PATH = re.compile(r"/(?!/)[\x21-\x7e]{0,254}")
+REDIRECT_TARGET = re.compile(r"redirect:/(?![/\\\\])[\x21-\x5b\x5d-\x7e]{0,1023}")
 METAFIELD = re.compile(r"metafield:([A-Za-z0-9_-]{3,255})\.([A-Za-z0-9_-]{2,64})")
 MF_TYPES = ("single_line_text_field", "multi_line_text_field", "boolean", "number_integer", "url")
 
@@ -71,18 +71,37 @@ METAFIELDS_DELETE = ("mutation MetafieldsDelete($metafields: [MetafieldIdentifie
                      "metafields: $metafields) { deletedMetafields { ownerId namespace key } userErrors { field "
                      "message } } }")
 
+def _norm(path: str) -> str:
+    """Compare redirect paths as a store resolves them: case-insensitive, without a trailing slash or query."""
+    return path.split("?", 1)[0].rstrip("/").lower() or "/"
+
+
 # every operation document this connector can send (tests assert nothing else is ever sent)
 DOCUMENTS = (PRODUCT_READ, PRODUCT_UPDATE, PAGE_READ, PAGE_UPDATE, REDIRECT_BY_PATH, REDIRECT_CREATE, REDIRECT_UPDATE,
              REDIRECT_DELETE, METAFIELD_READ, METAFIELDS_SET, METAFIELDS_DELETE)
 
 
 def _mf_value(v: Any) -> bool:
-    return (isinstance(v, dict) and set(v) == {"type", "value"} and one_of(*MF_TYPES)(v["type"])
-            and isinstance(v["value"], str) and len(v["value"]) <= 10_000 and html(10_000)(v["value"]))
+    """A metafield value by its type: plain text (no markup), a canonical integer or boolean, or a safe URL."""
+    if not (isinstance(v, dict) and set(v) == {"type", "value"} and one_of(*MF_TYPES)(v["type"])
+            and isinstance(v["value"], str) and len(v["value"]) <= 10_000):
+        return False
+    t, val = v["type"], v["value"]
+    if t == "boolean":
+        return val in ("true", "false")
+    if t == "number_integer":
+        return bool(re.fullmatch(r"-?(0|[1-9][0-9]{0,17})", val))
+    if t == "url":
+        return safe_url(val, allow_fragment=False)
+    return text(10_000)(val) if t == "single_line_text_field" else (
+        "<" not in val and ">" not in val and "\x00" not in val)
 
 
-def _rel_path(v: Any) -> bool:
-    return isinstance(v, str) and bool(REL_PATH.fullmatch(v))
+def _redirect_to(v: Any) -> bool:
+    """A redirect target on the SAME store (AEGIS round 1 M2): a relative path a browser cannot resolve to another
+    origin — never ``//``, ``/\\`` or any backslash, no ``%2f`` / ``%5c`` / control escape, no fragment."""
+    return isinstance(v, str) and len(v) <= 255 and v.startswith("/") and safe_url(v, allow_fragment=False) \
+        and not v.startswith(("//", "/\\"))
 
 
 OPS = {
@@ -91,7 +110,7 @@ OPS = {
         {"title": text(255), "descriptionHtml": html(65_535), "seo.title": text(255), "seo.description": text(320)},
         create=True),                                  # create: only the seo fields may be absent (extra_checks)
     "shopify.page.update": OpSpec("shopify.page.update", PAGE, {"title": text(255), "body": html(512_000)}),
-    "shopify.redirect.set": OpSpec("shopify.redirect.set", REDIRECT_TARGET, {"target": _rel_path}, create=True),
+    "shopify.redirect.set": OpSpec("shopify.redirect.set", REDIRECT_TARGET, {"target": _redirect_to}, create=True),
     "shopify.metafield.set": OpSpec("shopify.metafield.set", PRODUCT, {}, ((METAFIELD, _mf_value),), create=True),
 }
 
@@ -107,9 +126,51 @@ class ShopifyConnector(Connector):
 
     def extra_checks(self, op: dict) -> None:
         # the seo fields may be absent (null) before; title / description / body never
-        from connectors.base import OpRefused
         if op["op"] == "shopify.product.update" and op["field"] in ("title", "descriptionHtml") and op["before"] is None:
             raise OpRefused("OP_VALUE_INVALID")
+        if op["op"] == "shopify.redirect.set":
+            path = op["target"][len("redirect:"):]
+            if re.search(r"%(?:2f|5c)", path, re.I) or _norm(op["after"]) == _norm(path):
+                raise OpRefused("OP_VALUE_INVALID")      # an escaped separator, or a redirect to itself
+
+    def companions(self, keys: list) -> list:
+        """productUpdate's ``seo`` is ONE object (SEOInput: title and description): writing either field sends both,
+        so both are snapshotted, the untouched one is sent with its snapshot value and verified unchanged (H2)."""
+        have, out = set(keys), []
+        for target, fld in keys:
+            if fld in ("seo.title", "seo.description"):
+                other = (target, "seo.description" if fld == "seo.title" else "seo.title")
+                if other not in have:
+                    have.add(other)
+                    out.append(other)
+        return out
+
+    def dry_run(self, account: str, ops: list, ctx: dict, call: Call) -> tuple[str, str]:
+        """No server dry run exists; besides the offline validation, a new redirect is refused when it would make a
+        chain or a loop with the store's EXISTING redirects (M2): its target already redirects somewhere, or another
+        redirect already points at its path."""
+        for op in ops:
+            if op["op"] != "shopify.redirect.set":
+                continue
+            path = op["target"][len("redirect:"):]
+            try:
+                onward = self._redirects(account, f"path:{op['after']}", call)
+                inward = self._redirects(account, f"target:{path}", call)
+            except UnknownState:
+                return UNKNOWN, "offline+redirect_graph"
+            if any(_norm(n["path"]) == _norm(op["after"]) for n in onward) \
+                    or any(_norm(n["target"]) == _norm(path) and _norm(n["path"]) != _norm(path) for n in inward):
+                return REFUSED, "offline+redirect_graph"
+        return APPLIED, "offline"
+
+    def _redirects(self, shop: str, q: str, call: Call) -> list:
+        d = self._data(call(self._req(shop, REDIRECT_BY_PATH, {"q": q})))
+        conn = d.get("urlRedirects")
+        nodes = conn.get("nodes") if isinstance(conn, dict) else None
+        if not isinstance(nodes, list) or not all(isinstance(n, dict) and isinstance(n.get("path"), str)
+                                                  and isinstance(n.get("target"), str) for n in nodes):
+            raise UnknownState("urlRedirects shape")
+        return nodes
 
     # ---------------------------------------------------------------- transport helpers
 

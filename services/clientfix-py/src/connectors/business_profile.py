@@ -62,6 +62,9 @@ OPS = {"gbp.location.patch": OpSpec("gbp.location.patch", LOCATION,
                                     target_check=lambda account, target: account == target)}
 
 
+UNLISTED = "storefrontAddress#unlisted"      # companion key: the address subfields the allowlist does not name
+
+
 def _body(fld: str, value) -> dict:
     if fld == "phoneNumbers.primaryPhone":
         return {"phoneNumbers": {"primaryPhone": value}}
@@ -91,13 +94,37 @@ class BusinessProfileConnector(Connector):
                 v = b.get("websiteUri")
                 if v is not None and not isinstance(v, str):
                     raise UnknownState("websiteUri")
-            else:
+            elif fld in ("storefrontAddress", UNLISTED):
                 a = b.get("storefrontAddress")
                 if a is not None and not isinstance(a, dict):
                     raise UnknownState("storefrontAddress")
-                v = {k: a[k] for k in ADDRESS_FIELDS if a and k in a} or None
+                if fld == UNLISTED:
+                    v = {k: a[k] for k in sorted(a) if k not in ADDRESS_FIELDS} if a else {}
+                else:
+                    v = {k: a[k] for k in ADDRESS_FIELDS if a and k in a} or None
+            else:
+                raise UnknownState("field")
             out[(target, fld)] = v
         return out
+
+    def companions(self, keys: list) -> list:
+        """``updateMask=storefrontAddress`` REPLACES the whole PostalAddress (AEGIS round 1 M3): its subfields outside
+        the allowlist (sublocality, recipients, organization, sortingCode, revision, ...) are snapshotted as a
+        companion, merged back into every address write, and verified unchanged. ``phoneNumbers.primaryPhone`` and
+        ``websiteUri`` are masked to exactly one scalar: no sibling is touched (additionalPhones stays)."""
+        out = []
+        for target, fld in keys:
+            if fld == "storefrontAddress" and (target, UNLISTED) not in keys and (target, UNLISTED) not in out:
+                out.append((target, UNLISTED))
+        return out
+
+    def _merged(self, key, fld: str, value, ctx: dict):
+        if fld != "storefrontAddress" or value is None:
+            return value
+        extra = ctx.get("state", {}).get((key[0], UNLISTED))
+        if not isinstance(extra, dict):
+            raise UnknownState("the unlisted address subfields were not snapshotted")
+        return {**extra, **value}
 
     def _patch(self, account: str, fld: str, value, validate_only: bool) -> HttpRequest:
         mask = "phoneNumbers.primaryPhone" if fld == "phoneNumbers.primaryPhone" else fld
@@ -106,7 +133,11 @@ class BusinessProfileConnector(Connector):
 
     def dry_run(self, account: str, ops: list, ctx: dict, call: Call) -> tuple[str, str]:
         for op in ops:
-            ans = call(self._patch(account, op["field"], op["after"], True))
+            try:
+                value = self._merged((op["target"], op["field"]), op["field"], op["after"], ctx)
+            except UnknownState:
+                return UNKNOWN, "validateOnly"
+            ans = call(self._patch(account, op["field"], value, True))
             if not isinstance(ans, HttpAnswer):
                 return UNKNOWN, "validateOnly"
             if 400 <= ans.status < 500:
@@ -117,6 +148,10 @@ class BusinessProfileConnector(Connector):
 
     def write(self, account: str, key, value, ctx: dict, call: Call) -> tuple[str, dict]:
         target, fld = key
+        try:
+            value = self._merged(key, fld, value, ctx)
+        except UnknownState:
+            return UNKNOWN, {}
         ans = call(self._patch(account, fld, value, False))
         if isinstance(ans, HttpAnswer) and ans.status == 200 and isinstance(ans.body, dict):
             return APPLIED, {}

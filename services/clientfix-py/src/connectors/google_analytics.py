@@ -16,7 +16,9 @@ GA4 — Google Analytics Admin API v1beta, key events (conversion tracking). VER
              (ONCE_PER_EVENT | ONCE_PER_SESSION), defaultValue {numericValue, currencyCode}
              https://developers.google.com/analytics/devguides/config/admin/v1/rest/v1beta/properties.keyEvents
 
-Version 1 allowlist: mark an event as a key event (create) and unmark one (delete, only when ``deletable``). Changing a
+Version 1 allowlist: mark an event as a key event (create) and unmark one (delete, only when ``deletable``). A
+deleted key event's whole snapshot is kept, so a rollback re-creates it with its ``defaultValue`` (AEGIS round 1 H2
+audit: no partial-object loss). Changing a
 counting method in place is not in the allowlist (``patch`` exists but its update mask was not verified here). No dry
 run exists: offline validation only. The field is ``key_event:<eventName>``; its value is ``{"countingMethod": ...}``
 or None (not a key event).
@@ -80,10 +82,13 @@ class GA4Connector(Connector):
             raise UnknownState("too many key events to read")
         names = ctx.setdefault("ke_name", {})
         deletable = ctx.setdefault("ke_deletable", {})
+        first = ctx.setdefault("ke_snapshot", {})
         out = {}
         for target, fld in keys:
             ev = KEY_EVENT_FIELD.fullmatch(fld).group(1)
             ke = events.get(ev)
+            if (target, fld) not in first:            # the FIRST read is the snapshot: kept whole (H2 audit)
+                first[(target, fld)] = dict(ke) if ke else None
             names[(target, fld)] = ke["name"] if ke else None
             deletable[(target, fld)] = bool(ke.get("deletable")) if ke else False
             if ke is None:
@@ -115,8 +120,12 @@ class GA4Connector(Connector):
                     names[key] = None
                     return APPLIED, {}
             else:
-                ans = call(HttpRequest("POST", f"{BASE}/{account}/keyEvents",
-                                       {"eventName": ev, "countingMethod": value["countingMethod"]}))
+                body = {"eventName": ev, "countingMethod": value["countingMethod"]}
+                snap = ctx.get("ke_snapshot", {}).get(key)
+                if snap and snap.get("countingMethod") == value["countingMethod"] \
+                        and isinstance(snap.get("defaultValue"), dict):
+                    body["defaultValue"] = dict(snap["defaultValue"])   # restoring a deleted key event restores it whole
+                ans = call(HttpRequest("POST", f"{BASE}/{account}/keyEvents", body))
                 b = ans.body if isinstance(ans, HttpAnswer) else None
                 if isinstance(ans, HttpAnswer) and ans.status == 200 and isinstance(b, dict) \
                         and b.get("eventName") == ev and isinstance(b.get("name"), str) \

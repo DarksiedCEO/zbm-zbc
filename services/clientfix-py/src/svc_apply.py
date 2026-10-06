@@ -37,10 +37,10 @@ from errors import Conflict, Forbidden, NotFound, Unavailable
 from ledger import derived_id
 from ports import ConnView
 from reasons import R
-from svc_jobs import TERMINAL, UNFIXED, resource_key, sha
+from svc_jobs import TERMINAL, UNFIXED, sha
 
 ACTOR = "clientfix"     # internal lines (executor steps, settlements): the department itself
-FREEZE_ON = ("rollback_failed", "interrupted", "halted_revoked")
+FREEZE_ON = ("rollback_failed", "interrupted", "halted_revoked", "halted_frozen")
 
 
 class ApplyMixin:
@@ -77,10 +77,11 @@ class ApplyMixin:
                 if it["status"] != "planned":
                     continue
                 conn = self._conn_for(j["client_id"], it["connection_id"])
-                if conn["status"] != "active" or conn["connection_id"] in self.revoked_now:
+                if conn["status"] != "active" or conn["connection_id"] in self.revoked_now \
+                        or j["client_id"] in self.revoked_clients_now:
                     raise Conflict(R("CONNECTION_REVOKED"))
                 for op in it["ops"]:
-                    key = resource_key(conn["connector"], conn["account_ref"], op["target"])
+                    key = self.connectors[conn["connector"]].lease_key(conn["account_ref"], op["target"])
                     if key in self.frozen:
                         raise Conflict(R("RESOURCE_FROZEN"))
                     if key in self.lease_by_resource:
@@ -156,7 +157,7 @@ class ApplyMixin:
             conn = ConnView(c["connection_id"], c["client_id"], c["connector"], c["account_ref"], c["token_ref"])
             connector = self.connectors[c["connector"]]
             ops = [dict(op) for op in it["ops"]]
-            keys = sorted({resource_key(c["connector"], c["account_ref"], op["target"]) for op in ops})
+            keys = sorted({connector.lease_key(c["account_ref"], op["target"]) for op in ops})
         counter = {"n": 0}
 
         def live() -> Optional[str]:
@@ -164,7 +165,8 @@ class ApplyMixin:
                 if self._closed:
                     return "SERVICE_CLOSED"
                 cc = self.connections[conn.connection_id]
-                if conn.connection_id in self.revoked_now or cc["status"] != "active" \
+                if conn.connection_id in self.revoked_now or conn.client_id in self.revoked_clients_now \
+                        or cc["status"] != "active" \
                         or self.revocation_epoch.get(conn.client_id, 0) != epoch:
                     return "CONNECTION_REVOKED"
                 if conn.client_id in self.frozen_clients or any(k in self.frozen for k in keys):
@@ -182,7 +184,12 @@ class ApplyMixin:
                 except Unavailable:
                     raise executor.Halt("LEDGER_UNAVAILABLE") from None
 
-        result = executor.run_item(connector, conn, item_id, ops, self.ports.transport, step, live)
+        def live_rollback() -> Optional[str]:
+            """For the guarded rollback after Andre froze a resource mid-write: revocation and shutdown still stop it."""
+            code = live()
+            return None if code == "RESOURCE_FROZEN" else code
+
+        result = executor.run_item(connector, conn, item_id, ops, self.ports.transport, step, live, live_rollback)
         with self.lock:
             try:
                 self._settle_item(job_id, item_id, result, keys)
@@ -191,11 +198,13 @@ class ApplyMixin:
 
     def _settle_item(self, job_id: str, item_id: str, result: dict, keys: list) -> None:
         status = result["status"]
-        freeze = status in FREEZE_ON and (status != "halted_revoked" or bool(result["written"]))
+        # a halt freezes only when a write was actually sent (round 0 counted an op that never left)
+        freeze = status in FREEZE_ON and (status not in ("halted_revoked", "halted_frozen")
+                                          or bool(result.get("sent_writes")))
         tasks = []
         if freeze:
             code = {"rollback_failed": "ROLLBACK_FAILED", "interrupted": "APPLY_INTERRUPTED",
-                    "halted_revoked": "REVOKED_MID_APPLY"}[status]
+                    "halted_revoked": "REVOKED_MID_APPLY", "halted_frozen": "FROZEN_MID_APPLY"}[status]
             tasks.append(self._task("alert", item_id, code, code))
         data = {"job_id": job_id, "item_id": item_id, "status": status, "failure": result.get("failure"),
                 "written": result["written"], "snapshot": result["snapshot"], "readback": result["readback"],
@@ -245,7 +254,8 @@ class ApplyMixin:
                     if it["status"] != "planned":
                         continue
                     c = self.connections[it["connection_id"]]
-                    keys = sorted({resource_key(c["connector"], c["account_ref"], op["target"]) for op in it["ops"]})
+                    keys = sorted({self.connectors[c["connector"]].lease_key(c["account_ref"], op["target"])
+                                   for op in it["ops"]})
                     self._settle_item(job_id, it["item_id"], {"status": "interrupted", "failure": "process_stopped",
                                                               "written": [], "snapshot": None, "readback": None,
                                                               "rollback": None, "dry_run": None,
@@ -514,9 +524,10 @@ class ApplyMixin:
 
     def _a_refund_approved(self, d, at):
         self.refunds[d["refund_id"]].update(status="queued", approved_at=at)
-        tid = derived_id("tsk", "decide", d["refund_id"], "REFUND_DECISION")
-        if tid in self.tasks and self.tasks[tid]["status"] == "open":
-            self.tasks[tid].update(status="closed", closed_at=at, outcome="approved")
+        for code in ("REFUND_DECISION", "ORPHANED_PAYMENT"):
+            tid = derived_id("tsk", "decide", d["refund_id"], code)
+            if tid in self.tasks and self.tasks[tid]["status"] == "open":
+                self.tasks[tid].update(status="closed", closed_at=at, outcome="approved")
 
     def refund_tick(self) -> dict:
         out = {"with_finance": 0, "not_wired": 0, "refused": 0, "unknown": 0}

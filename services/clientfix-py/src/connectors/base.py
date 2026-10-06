@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 APPLIED, REFUSED, UNKNOWN = "applied", "refused", "unknown"
+CONFLICT = "conflict"            # rollback only: a key changed by someone else since our write; left alone
 
 Key = tuple            # (target, field)
 
@@ -103,8 +104,6 @@ def same(a: Any, b: Any) -> bool:
 
 # ------------------------------------------------------------------------------------------- value validators
 
-_UNSAFE_HTML = re.compile(r"<\s*(script|iframe|object|embed|form|base|meta|link|style)\b|javascript\s*:|vbscript\s*:"
-                          r"|data\s*:\s*text/html|\son[a-z]{2,20}\s*=|srcdoc\s*=", re.I)
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff]")
 
 
@@ -115,10 +114,18 @@ def text(max_len: int, min_len: int = 1) -> Callable[[Any], bool]:
 
 
 def html(max_len: int) -> Callable[[Any], bool]:
-    """Rich text an agent may write into a client's store: no script, frame, form, style, event handler or script
-    URL (ADR 0017 decision 12; the client approves the exact text as well)."""
+    """Rich text an agent may WRITE into a client's store: accepted only when the allowlist rebuild returns it
+    unchanged (``richtext.is_safe``; AEGIS round 1 H1 replaced the round-0 denylist). A ``before`` value is the
+    client's own current content, never written by an agent except to restore it, so it is only bounded
+    (``ok.before``): a store whose description already holds markup outside the allowlist can still be fixed."""
+    from connectors.richtext import is_safe
+
     def ok(v: Any) -> bool:
-        return isinstance(v, str) and len(v) <= max_len and not _CONTROL.search(v) and not _UNSAFE_HTML.search(v)
+        return isinstance(v, str) and len(v) <= max_len and is_safe(v)
+
+    def before(v: Any) -> bool:
+        return isinstance(v, str) and len(v) <= max_len and "\x00" not in v
+    ok.before = before
     return ok
 
 
@@ -162,9 +169,10 @@ class Connector:
             raise OpRefused("OP_VALUE_INVALID")
         if after is None and not spec.remove:
             raise OpRefused("OP_VALUE_INVALID")
-        for v in (before, after):
-            if v is not None and not check(v):
-                raise OpRefused("OP_VALUE_INVALID")
+        if after is not None and not check(after):
+            raise OpRefused("OP_VALUE_INVALID")
+        if before is not None and not getattr(check, "before", check)(before):
+            raise OpRefused("OP_VALUE_INVALID")
         if same(before, after):
             raise OpRefused("OP_NO_CHANGE")
         self.extra_checks(op)
@@ -175,8 +183,25 @@ class Connector:
 
     # ---------------------------------------------------------------- I/O through ``call``
 
+    def lease_key(self, account: str, target: str) -> str:
+        """The unit two runs may never touch at once (and the unit that is frozen). Default: one platform resource."""
+        return f"{self.name}|{account}|{target}"
+
+    def companions(self, keys: list) -> list:
+        """Keys a write of ``keys`` also sends or replaces (AEGIS round 1 H2 / M3): read in the snapshot, sent with
+        their SNAPSHOT value, and verified unchanged. Default: none."""
+        return []
+
     def read(self, account: str, keys: list, ctx: dict, call: Call) -> dict:
         raise UnknownState("connector not built")
+
+    def prepare(self, account: str, ops: list, ctx: dict, call: Call) -> tuple[str, str]:
+        """After the drift check, before the dry run (GTM: base check and a dedicated run workspace)."""
+        return APPLIED, "none"
+
+    def cleanup(self, account: str, ctx: dict, call: Call) -> Optional[str]:
+        """Always last (GTM: delete the run workspace if it still exists). None = nothing to clean."""
+        return None
 
     def dry_run(self, account: str, ops: list, ctx: dict, call: Call) -> tuple[str, str]:
         """``(APPLIED, mode)`` = the change would be accepted; REFUSED / UNKNOWN otherwise. Shopify and GA4 offer no
@@ -195,27 +220,36 @@ class Connector:
         return APPLIED
 
     def rollback(self, account: str, written: list, ctx: dict, call: Call) -> str:
-        """Undo, in reverse order, every write that may have happened (``written`` = [(key, before)], an UNKNOWN write
-        included). The current state is RE-READ first (it refreshes ids and compare digests a lost answer never
-        delivered), and only a key that differs from its snapshot is written back; every write is attempted even
-        after one fails, and the worst outcome is returned. A connector whose finalize is reversible as a whole
-        (GTM: re-publish the previous live version) overrides this."""
-        keys = [k for k, _ in written]
+        """Undo, in reverse order, every write that may have happened (``written`` = [(key, before, after)], an
+        UNKNOWN write included). The current state is RE-READ first, companions included — a companion that changed
+since the snapshot makes the whole rollback ``conflict`` with nothing written (it refreshes ids and compare digests a lost
+        answer never delivered). GUARDED (AEGIS round 1 M5): a key is written back only when its current value is
+        exactly OUR ``after``; when it already equals ``before`` nothing is written; any OTHER value means someone else
+        changed it since — it is left alone and the rollback is ``conflict`` (never proven: the service freezes the
+        resource and alerts Andre). Every key is attempted; the worst outcome is returned."""
+        keys = [k for k, _, _ in written]
+        extra = [k for k in self.companions(keys) if k not in keys]
         try:
-            current = self.read(account, keys, ctx, call)
+            current = self.read(account, keys + extra, ctx, call)
         except UnknownState:
             return UNKNOWN
         ctx.setdefault("state", {}).update(current)
+        snapshot = ctx.get("snapshot", {})
+        if any(not same(current.get(k), snapshot.get(k)) for k in extra):
+            return CONFLICT        # a companion changed under us: writing back would send our stale copy of it
         worst = APPLIED
-        for key, before in reversed(written):
+        for key, before, after in reversed(written):
             if same(current.get(key), before):
+                continue
+            if not same(current.get(key), after):
+                worst = CONFLICT if worst == APPLIED else worst
                 continue
             outcome, _ = self.write(account, key, before, ctx, call)
             if outcome == APPLIED:
                 ctx["state"][key] = before
             elif outcome == UNKNOWN or worst == UNKNOWN:
                 worst = UNKNOWN
-            else:
+            elif worst != UNKNOWN:
                 worst = REFUSED
         return worst
 

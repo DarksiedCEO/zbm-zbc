@@ -42,6 +42,29 @@ CHECKS: dict[str, tuple[str, tuple[str, ...]]] = {
     "listing_website_wrong": ("listings_reviews", ("gbp",)),
 }
 
+# check code -> {operation: allowed fields} (AEGIS round 1 M1): a change set for a finding may only use these, and every
+# op's target must BE the finding's resource. A field ending in ":" is a prefix (a metafield or key-event name).
+CHECK_OPS: dict[str, dict[str, tuple[str, ...]]] = {
+    "product_seo_missing": {"shopify.product.update": ("seo.title", "seo.description")},
+    "product_content_error": {"shopify.product.update": ("title", "descriptionHtml")},
+    "page_content_error": {"shopify.page.update": ("title", "body")},
+    "broken_link": {"shopify.redirect.set": ("target",)},
+    "product_metafield_wrong": {"shopify.metafield.set": ("metafield:",)},
+    "ga4_key_event_missing": {"ga4.key_event.set": ("key_event:",)},
+    "ga4_key_event_wrong": {"ga4.key_event.set": ("key_event:",)},
+    "gtm_tag_paused": {"gtm.tag.update": ("paused",)},
+    "gtm_tag_trigger_wrong": {"gtm.tag.update": ("firingTriggerId",)},
+    "listing_phone_wrong": {"gbp.location.patch": ("phoneNumbers.primaryPhone",), "yelp.business.set": ("phone",)},
+    "listing_address_wrong": {"gbp.location.patch": ("storefrontAddress",), "yelp.business.set": ("location",)},
+    "listing_website_wrong": {"gbp.location.patch": ("websiteUri",)},
+}
+
+
+def op_allowed_for(check: str, op: str, field: str) -> bool:
+    fields = CHECK_OPS.get(check, {}).get(op, ())
+    return any(field == f or (f.endswith(":") and field.startswith(f)) for f in fields)
+
+
 # detection-py's LeakCategory values (services/detection-py/src/zbm_schema/__init__.py), recorded when a finding came
 # from Revenue Recovery; never re-derived here
 DETECTION_CATEGORIES = frozenset({

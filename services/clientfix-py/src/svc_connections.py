@@ -108,7 +108,11 @@ class ConnectionsMixin:
         with self.lock:
             c = self._get(self.connections, cid, "CONNECTION_NOT_FOUND")
             self.revoked_now.add(cid)                     # the kill switch first: running work stops now
+            # AEGIS round 1 M4: and for EVERY connection of this client, until the revocation is committed (from
+            # then on the client's revocation epoch stops every run that started before it)
+            self.revoked_clients_now.add(c["client_id"])
             if c["status"] == "revoked":
+                self.revoked_clients_now.discard(c["client_id"])
                 return self.connection_view(cid)
             rk = self.rk("revoke", cid, body)
             if self._idem(actor, rk, body):
@@ -132,6 +136,7 @@ class ConnectionsMixin:
             except Unavailable as exc:
                 exc.body = {**exc.body, "work_stopped": True}    # the kill switch holds in this process regardless
                 raise
+            self.revoked_clients_now.discard(c["client_id"])
             for job_id in sorted({x[0] for x in cancelled}):     # a job left with nothing to do settles now
                 self._settle_if_done(job_id)
             return self.connection_view(cid)
