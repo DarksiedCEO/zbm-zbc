@@ -62,7 +62,7 @@ else. Andre's actions go through the `dashboard` caller and carry an `approval` 
 | `POST /sec/v1/holds`, `/holds/{id}/release` | legal_37 | preservation holds |
 | `POST /sec/v1/incidents`, `/{id}/notes`, `/{id}/close`; `GET /incidents` | dashboard (close: passkey) | incidents |
 | `POST /sec/v1/scans`; `GET /findings`; `POST /findings/{id}/accept` | scheduler or dashboard; dashboard, compliance_38; passkey | findings |
-| `POST /sec/v1/jobs/{rotate-signing-key,compliance-report,rotation-due,findings-due,alerts-retry,integrity}/run` | scheduler | |
+| `POST /sec/v1/jobs/{rotate-signing-key,compliance-report,rotation-due,findings-due,alerts-retry,integrity,hold-release-retry}/run` | scheduler | |
 | `GET /sec/v1/audit/integrity`, `/audit/events`, `/audit/access` | dashboard (integrity: compliance_38 too) | audit |
 
 ## First passkey

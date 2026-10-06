@@ -161,12 +161,10 @@ def test_r3_2_freeze_challenges_are_bound_single_use_and_expire(hk):
     assert r.json()["detail"] == "APPROVAL_ACTION_MISMATCH"
 
 
-def test_r3_2_an_expired_freeze_challenge_is_refused(hk, monkeypatch):
-    import time as time_mod
+def test_r3_2_an_expired_freeze_challenge_is_refused(hk):
     body = {"request_id": rid(), "target_kind": "caller", "target_id": "legal_37", "reason_code": "TEST"}
     ch = hk.challenge("FREEZE", "caller:legal_37", body)
-    later = time_mod.time() + 301
-    monkeypatch.setattr(time_mod, "time", lambda: later)
+    hk.clock.advance(seconds=301)                 # sweep A: the emergency challenge runs on the service clock
     r = hk.post("/sec/v1/freezes", {**body, "approval": hk.keys[0].assert_(ch)})
     assert r.json()["detail"] == "APPROVAL_CHALLENGE_EXPIRED"
 
