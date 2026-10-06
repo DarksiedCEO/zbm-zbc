@@ -66,6 +66,9 @@ line it was meant for), and the line lists the events it carries (`data.evidence
 the ledger holds that line's anchor, and the payload's `rk` and `seq` are that line's (its `payload_sha256` matching
 the ledger's); every other event is `attempted`. Exactly one event per logical action is `committed`. This is the
 view Compliance (38) and auditors use; never count raw ledger events of department `bizdev` as things that happened.
+The view is eventually consistent: a commit in flight while it is read (its evidence recorded, its line not yet
+anchored) shows as `attempted` — re-read to settle. The answer says so (`"consistency": "eventual; re-read to
+settle"`). Only new log lines are parsed per read (cached by log length, outside the service lock).
 
 Headers: `Authorization: Bearer <service token>` on every route but `/health`; `X-NBD-Caller-Token` everywhere
 else; Andre's routes also `X-Andre-Approval-Token`, accepted only through the `dashboard` caller.

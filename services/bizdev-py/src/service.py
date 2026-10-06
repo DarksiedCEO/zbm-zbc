@@ -53,6 +53,11 @@ FORCED_MIN_S = 10
 JOBS = ("send-queue", "submission-queue", "deadline-sweep", "handoff-retry", "payout-request", "integrity")
 
 
+def _parse_line(line: bytes) -> dict:
+    """One log line parsed (a module function so the evidence view's parse count can be tested)."""
+    return json.loads(line)
+
+
 def _maybe(exc: Unavailable) -> Unavailable:
     """Mark an outcome as unknown: the line is pending and may still take effect (security-py round 2 N2)."""
     exc.maybe = True
@@ -109,6 +114,9 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
         self._last_integrity_try = 0
         self._own_pending: Optional[bytes] = None
         self.attempts: dict[str, dict] = {}
+        # /audit/evidence cache (AEGIS round 7): lines parsed so far, keyed by log length; never touched under self.lock
+        self._evidence_lock = threading.Lock()
+        self._evidence_cache: dict = {"n": 0, "epoch": None, "lines": []}
         # service-py V5-L1 / V5r-L1 / round 5c item 1 / a5dd261 L4: one service instance per data directory, also
         # within one process. api.build claims BEFORE the log is built and passes the claim's token; the service
         # adopts that claim only if the token IS the current claim (single use), and gives it back on close or a
@@ -588,14 +596,30 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
         * ``attempted`` — anything else: recorded first (record-first commit), but its state change never reached the
           anchored log (a refused or failed commit, or a retry that was later committed under another seq).
 
-        Unanchored evidence = attempted, not done. Exactly one ``committed`` event exists per logical action. The ledger
-        read and the checks run OUTSIDE the service lock (a snapshot of the log is taken under it)."""
-        with self.lock:
-            if self._closed:
-                raise Unavailable(R("SERVICE_CLOSED"))
-            records = list(self.log.iter_records())
-            shas = self.log.line_shas()
-            epoch = self.log.epoch
+        Unanchored evidence = attempted, not done. Exactly one ``committed`` event exists per logical action.
+        AEGIS round 7: under the service lock only the raw lines not yet seen are copied (no parsing, no hashing);
+        they are parsed and hashed outside it and cached by log length, so a page costs only the new lines. The view
+        is eventually consistent: a commit in flight while it is read may show as ``attempted``; re-read to settle."""
+        with self._evidence_lock:
+            with self.lock:
+                if self._closed:
+                    raise Unavailable(R("SERVICE_CLOSED"))
+                cache = self._evidence_cache
+                n = len(self.log)
+                if n < cache["n"]:                       # never within one instance (append-only), but stay correct
+                    cache = self._evidence_cache = {"n": 0, "epoch": None, "lines": []}
+                new = self.log.raw_lines(cache["n"])
+            for raw in new:                              # outside the service lock: parse and hash only new lines
+                r = _parse_line(raw)
+                line_sha = sha256_hex(raw)
+                if cache["epoch"] is None:
+                    cache["epoch"] = line_sha[:16]
+                evs = r["data"].get("evidence")
+                if evs:
+                    rk = r["data"].get("request_id") or f"{INTERNAL}|{r['kind']}"
+                    cache["lines"].append((r["seq"], line_sha, rk, r["kind"], evs))
+                cache["n"] += 1
+            epoch, lines, n_lines = cache["epoch"], list(cache["lines"]), cache["n"]
         try:
             entries = self.rec.client.entries()
         except LedgerQueryFailed:
@@ -603,17 +627,13 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
         mine = [e for e in entries if e.get("department") == DEPARTMENT]
         anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == "log_anchor"}
         named: dict[str, tuple] = {}                     # event_id -> (seq, rk, payload, log kind) of an anchored line
-        for r, line_sha in zip(records, shas):
-            evs = r["data"].get("evidence")
-            if not evs:
-                continue
-            aid, apayload = self._anchor_ids(epoch, r["seq"], line_sha)
+        for seq, line_sha, line_rk, kind, evs in lines:
+            aid, apayload = self._anchor_ids(epoch, seq, line_sha)
             a = anchors.get(aid)
             if a is None or a.get("payload_sha256") != payload_sha256(apayload) or a.get("subject_id") != f"log:{epoch}":
                 continue
-            line_rk = r["data"].get("request_id") or f"{INTERNAL}|{r['kind']}"
             for ev in evs:
-                named[ev["event_id"]] = (r["seq"], line_rk, ev.get("payload") or {}, r["kind"])
+                named[ev["event_id"]] = (seq, line_rk, ev.get("payload") or {}, kind)
         out, counts = [], {"committed": 0, "attempted": 0}
         for e in mine:
             if e.get("event_type") == "log_anchor" or (event_type is not None and e.get("event_type") != event_type):
@@ -629,8 +649,9 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
                     row.update(status="committed", seq=seq, rk=line_rk, log_kind=log_kind)
             counts[row["status"]] += 1
             out.append(row)
-        return {"rule": "unanchored evidence = attempted, not done", "total": len(out), **counts,
-                "limit": limit, "offset": offset, "evidence": out[offset:offset + limit], "log_length": len(records)}
+        return {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle",
+                "total": len(out), **counts, "limit": limit, "offset": offset,
+                "evidence": out[offset:offset + limit], "log_length": n_lines}
 
     def audit_export(self, since_seq: int, limit: int) -> dict:
         """The local log, personal data minimised (i13): emails as keyed hashes, names, notes and text as SHA-256."""

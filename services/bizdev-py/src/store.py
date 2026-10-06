@@ -103,6 +103,11 @@ class RecordLog:
         for ln in lines:
             yield json.loads(ln)
 
+    def raw_lines(self, start: int = 0) -> list[bytes]:
+        """The raw lines from index ``start`` on (no parsing: cheap enough to take under the service lock)."""
+        with self.lock:
+            return list(self._lines[start:])
+
     @property
     def epoch(self) -> Optional[str]:
         """Identity of THIS log: the first 16 hex of its first line's SHA-256 (None while empty).

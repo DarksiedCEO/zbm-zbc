@@ -395,3 +395,16 @@ Regression tests: `services/bizdev-py/tests/test_aegis_r6.py` (each fails on af9
 - **Low** the review-task part lookup walked every part from 1 on each reply (O(parts²) per sender per day): the
   current part per sender per day is remembered (`task_part`, rebuilt by replay) and the search starts there.
 - **Follow-up (not changed here)** sales-py and service-py: see the round-6 report; the coordinator opens it.
+
+## Amendment — AEGIS round 7 (Oct 6 2026, on 09030da): NOT BLOCKING, cleared for wiring
+
+Regression tests: `services/bizdev-py/tests/test_aegis_r7.py` (each fails on 09030da).
+
+- **Low** `audit_evidence` parsed the whole log under the service lock. Under the lock it now copies only the raw
+  lines it has not seen; they are parsed and hashed outside the lock and cached by log length (per instance, behind
+  its own lock), so a page costs only the new lines. The ledger read stays outside the lock.
+- **Info** `/audit/evidence` is eventually consistent: a commit in flight while it is read shows as `attempted`;
+  re-read to settle (README; the answer carries `"consistency": "eventual; re-read to settle"`).
+- **Info** log lines written before 09030da carry no `data.evidence`, so evidence recorded by those commits shows as
+  `attempted`. Acceptable before launch: no production log exists, and a log started at or after 09030da has none.
+
