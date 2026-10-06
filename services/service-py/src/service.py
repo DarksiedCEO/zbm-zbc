@@ -63,7 +63,8 @@ SMS_FOOTER = "\nReply STOP to opt out."
 OPT_OUT_ONLY_WORDS = 4          # an opt-out of at most this many words is only that: no ticket
 MAX_SEND_ATTEMPTS = 5
 KEY_FINGERPRINT_LABEL = b"service-py SVC_HMAC_KEY fingerprint v1"
-SUBJECT_WORDS = frozenset({"re", "fw", "fwd", "question", "questions", "hours", "info", "hello", "hi", "quick"})
+# V3-H1: an email subject must be one of these (or the article's title or one of its questions) for the bot to answer
+NEUTRAL_SUBJECTS = frozenset({"question", "quick question", "hello", "hi", "hey", "inquiry", "enquiry", "help"})
 SENSITIVE = frozenset({"money", "contract", "complaint", "security", "privacy"})
 CATALOGS = ("kb", "template", "offer")
 PERSONAL_KEYS = ("email", "phone", "display_name", "contact_ref", "timezone", "to", "from_number", "from_address",
@@ -73,7 +74,8 @@ EVENTS = {"consent_granted": "consent_changed", "consent_revoked": "consent_chan
           "handoff_new": "escalation_opened", "ticket_escalated": "escalation_opened",
           "catalog_approved": "approval_recorded", "catalog_retired": "approval_recorded",
           "alert_new": "alert_raised", "sla_breach": "sla_breached", "plan_new": "save_plan_started",
-          "plan_offer": "offer_selected", "routing_set": "approval_recorded", "message_sending": "message_sending"}
+          "plan_offer": "offer_selected", "routing_set": "approval_recorded", "message_sending": "message_sending",
+          "sms_paused": "sms_paused", "sms_pause_cleared": "sms_pause_cleared"}
 
 
 def _maybe(exc: Unavailable) -> Unavailable:
@@ -111,7 +113,8 @@ class SupportService:
         self.contacts: dict[str, dict] = {}
         self.contact_index: dict[tuple, str] = {}
         self.consents: dict[tuple, dict] = {}
-        self.revocations: dict[tuple, str] = {}       # (contact, channel, address) -> when it was last revoked
+        # V3-C2: revocations belong to the ADDRESS: (brand, channel, HMAC of the address) -> when last revoked
+        self.addr_revocations: dict[tuple, str] = {}
         self.sms_paused: dict[tuple, str] = {}        # (contact, phone) -> when proactive SMS was paused (V2-H3)
         self.address_changed_at: dict[tuple, str] = {}   # (contact, "phone" | "email") -> when it last changed
         self.tickets: dict[str, dict] = {}
@@ -139,6 +142,16 @@ class SupportService:
             # V2-M1: another key would make every stored body unreadable (and new ones unjoinable): refuse
             raise StoreCorrupt("SVC_HMAC_KEY_FILE is not the key this log was written with (fingerprint mismatch); "
                                "refusing to start")
+        if self.key_fingerprint is None and len(self.log):
+            # V3-L2: a log from before the fingerprint existed: adopt this key only if every stored body the log cites
+            # verifies with it (a wrong key would make them all unreadable); otherwise refuse
+            cited: set = set()
+            for r in self.log.iter_records():
+                _digests(r["data"], cited)
+            present = cited & self.bodies.names()
+            if any(self.bodies.get(d) is None for d in present):
+                raise StoreCorrupt("this log predates the key fingerprint and its stored bodies do not verify with the "
+                                   "configured key; refusing to start (restore the key the log was written with)")
         if self.log.read_pending() is None and self.log.read_discarded() is None:
             self._remove_orphans()
         self.verify_integrity(force=True)
@@ -307,7 +320,9 @@ class SupportService:
         else:
             c.update(status="revoked", revoked_at=at, revoked_via=e["via"])
         self.consents[key] = c
-        self.revocations[(e["contact_id"], e["channel"], e.get("address"))] = at
+        if e.get("address"):
+            brand = self.contacts[e["contact_id"]]["brand"]
+            self.addr_revocations[(brand, e["channel"], self._addr_key(e["channel"], e["address"]))] = at
         for m in self.messages.values():
             if m["dir"] == "out" and m["contact_id"] == e["contact_id"] and m["channel"] == e["channel"] \
                     and m["status"] == "queued" and m.get("origin") != "opt_out":
@@ -368,7 +383,7 @@ class SupportService:
     def _e_message_out(self, e, at):
         m = {k: e.get(k) for k in ("message_id", "ticket_id", "contact_id", "brand", "channel", "origin", "ref",
                                    "body_sha256", "subject", "proactive", "status", "plan_id", "step_id",
-                                   "survey_id")}
+                                   "survey_id", "bound_to")}
         m.update(dir="out", at=at, updated_at=at, attempts=0, reason=e.get("reason"), provider_accepted=False)
         self.messages[e["message_id"]] = m
         if e.get("ticket_id"):
@@ -721,9 +736,51 @@ class SupportService:
         return {"op": "alert_new", "alert_id": derived_id("alr", code, subject, ident), "code": R(code),
                 "subject": subject}
 
+    def _addr_key(self, channel: str, address: str) -> str:
+        return hmac.new(self.settings.hmac_key, f"{channel}:{address}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def _addr_revoked_at(self, brand: str, channel: str, address: Optional[str]) -> Optional[str]:
+        return self.addr_revocations.get((brand, channel, self._addr_key(channel, address))) if address else None
+
+    def _live_consent(self, contact: dict, channel: str) -> Optional[dict]:
+        """The contact's consent for a channel, unless its address was revoked (on ANY contact of the brand) after it
+        was captured (V3-C2)."""
+        c = self.consents.get((contact["contact_id"], channel))
+        if c and c.get("status") == "active":
+            revoked = self._addr_revoked_at(contact["brand"], channel, c.get("address"))
+            if revoked is not None and (not c.get("captured_at") or c["captured_at"] <= revoked):
+                return None
+        return c
+
     def _channel_check(self, channel: str, contact: dict, proactive: bool, opt_out: bool = False) -> Optional[str]:
-        return channels.check(channel, contact, lambda ch: self.consents.get((contact["contact_id"], ch)), proactive,
+        return channels.check(channel, contact, lambda ch: self._live_consent(contact, ch), proactive,
                               self.now(), opt_out, (contact["contact_id"], contact.get("phone")) in self.sms_paused)
+
+    def _named_contacts(self, brand: str, text: str, exclude: str) -> list[dict]:
+        """Contacts of this brand a message names by phone number or email address (V3-M2)."""
+        found = []
+        for raw in PHONE_RE.findall(text):
+            digits = re.sub(r"[^0-9]", "", raw)
+            for num in {"+" + digits, "+1" + digits}:
+                cid = self.contact_index.get((brand, "phone", num))
+                if cid and cid != exclude and cid not in [c["contact_id"] for c in found]:
+                    found.append(self.contacts[cid])
+        for addr in EMAIL_RE.findall(text.lower()):
+            cid = self.contact_index.get((brand, "email", addr))
+            if cid and cid != exclude and cid not in [c["contact_id"] for c in found]:
+                found.append(self.contacts[cid])
+        return found
+
+    def _pause_effects(self, contacts: list, extra_phone: Optional[str] = None) -> list:
+        """Pause proactive SMS to every phone of these contacts (V3-C1); the first may also be paused on the number
+        the message came from."""
+        out, seen = [], set()
+        for i, c in enumerate(contacts):
+            for phone in {c.get("phone"), extra_phone if i == 0 else None} - {None}:
+                if (c["contact_id"], phone) not in seen:
+                    seen.add((c["contact_id"], phone))
+                    out.append({"op": "sms_paused", "contact_id": c["contact_id"], "phone": phone})
+        return out
 
     def clear_sms_pause(self, contact_id: str, body: dict) -> dict:
         """Andre clears a pause on proactive SMS. It never restores a consent: a revoked consent stays revoked."""
@@ -878,9 +935,12 @@ class SupportService:
                                                    else "email"))
             if changed is not None and captured < parse_iso(changed):
                 raise Conflict(R("CONSENT_PREDATES_ADDRESS"))         # V2-H2: captured before this address was theirs
-            revoked = self.revocations.get((contact["contact_id"], body["channel"], address))
+            revoked = self._addr_revoked_at(contact["brand"], body["channel"], address)
             if revoked is not None and captured <= parse_iso(revoked):
-                raise Conflict(R("CONSENT_PREDATES_REVOCATION"))      # V1-H4: an old capture never undoes a STOP
+                # V1-H4 / V3-C2: an old capture never undoes a STOP, on this contact or any other with this address
+                raise Conflict(R("CONSENT_PREDATES_REVOCATION"))
+            if captured < parse_iso(contact["created_at"]):
+                raise Conflict(R("CONSENT_PREDATES_CONTACT"))         # V3-C2: captured before the contact existed
             text_sha = self._put_body(body["consent_text"])
             cid = self._did("cns", actor, "consent", target, body["request_id"])
             effect = {"op": "consent_granted", "consent_id": cid, "contact_id": contact["contact_id"],
@@ -988,31 +1048,41 @@ class SupportService:
                 contact = self._find_or_new_contact(actor, brand, "contact_ref", body["contact_ref"], rid, effects)
             new_contact = bool(effects)
             text = body["text"]
-            # V2-H3: the opt-out check runs on EVERY channel (body and subject): a STOP by chat or email revokes SMS
-            # consent too. An inbound SMS also pauses proactive SMS to that number unless the bot answers it.
-            opted_out = channels.is_opt_out(text) or bool(body.get("subject") and channels.is_opt_out(body["subject"]))
+            # Opt-outs (V1-H3, V2-H3, V3): checked on EVERY channel, body and subject. "exact" revokes SMS consent
+            # anywhere; "suspected" (a typo, a negation near text/sms/phone) revokes on SMS and, on chat or email,
+            # pauses proactive SMS and asks Andre. Any inbound the bot does not answer pauses proactive SMS to every
+            # phone of the resolved contact and of any contact the message names (V3-C1, V3-M2).
+            levels = {channels.opt_out_level(text), channels.opt_out_level(body["subject"]) if body.get("subject")
+                      else None}
+            level = "exact" if "exact" in levels else ("suspected" if "suspected" in levels else None)
+            revoke = level == "exact" or (level == "suspected" and channel == "sms")
             sms_number = body["from_number"] if channel == "sms" else contact.get("phone")
-            pause = [{"op": "sms_paused", "contact_id": contact["contact_id"], "phone": body["from_number"]}] \
-                if channel == "sms" else []
-            if opted_out:
-                # V1-H3: an opt-out word or phrase anywhere revokes SMS consent at once (every queued SMS to them
-                # cancelled); the one permitted confirmation goes (by SMS only) if they had consent for this number
+            named = self._named_contacts(brand, text + " " + (body.get("subject") or ""), contact["contact_id"])
+            pause = self._pause_effects([contact] + named, extra_phone=sms_number)
+            resp = {"contact_id": contact["contact_id"]}
+            if revoke:
                 had = channel == "sms" and channels.consent_matches(
                     self.consents.get((contact["contact_id"], "sms")), sms_number)
                 effects.append({"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "sms",
                                 "via": "stop_keyword" if channel == "sms" else f"stop_by_{channel}",
                                 "request_id": rid, "address": sms_number})
-                resp = {"action": "opted_out", "contact_id": contact["contact_id"]}
-                if had:
+                resp["action"] = "opted_out"
+                if had:     # V3-C3: the one confirmation goes ONLY to the number that sent the STOP
                     conf = channels.OPT_OUT_CONFIRMATION.replace("{brand_name}", BRAND_NAMES[brand])
                     cmid = self._did("msg", actor, "opt_out_confirmation", target, rid)
-                    effects.append(self._out_effect(cmid, contact, brand, "sms", "opt_out", conf, False))
+                    effects.append(self._out_effect(cmid, contact, brand, "sms", "opt_out", conf, False,
+                                                    bound_to=sms_number))
                     resp["confirmation_message_id"] = cmid
-                if channel == "sms" and len(triage_mod.normalise(text).split()) <= OPT_OUT_ONLY_WORDS:
+                if new_contact or named:
+                    # V3-M2: an opt-out from an address no contact had (or naming another contact): Andre sees it
+                    effects.append(self._alert_effect("OPT_OUT_UNKNOWN_SENDER", contact["contact_id"], rid))
+                elif channel == "sms" and len(triage_mod.normalise(text).split()) <= OPT_OUT_ONLY_WORDS:
                     self._commit("sms_opt_out", {"effects": effects + pause,
                                                  "request": self._req(actor, f"inbound_{channel}", target, body),
                                                  "response": resp}, actor)
                     return resp
+            elif level == "suspected":
+                effects.append(self._alert_effect("SMS_OPT_OUT_SUSPECTED", contact["contact_id"], rid))
             ticket, is_new = self._ticket_for(actor, contact, brand, channel, body.get("ticket_id"), rid, effects,
                                               new_contact)
             if not is_new and ticket["status"] in ("pending_customer", "resolved"):
@@ -1021,8 +1091,9 @@ class SupportService:
                     ticket = {**ticket, "reopened": ticket["reopened"] + 1}
             tri = triage_mod.classify(text, self._recent_inbound(contact["contact_id"]), ticket["reopened"],
                                       body.get("subject"))
-            if opted_out and tri.routine_candidate:
-                tri = triage_mod.Triage("no_answer", (), tri.signals + ("sms:opted_out",), False, tri.question_count)
+            if level:
+                tri = triage_mod.Triage(tri.primary if tri.categories else "other", tri.categories,
+                                        tri.signals + (f"sms:opt_out_{level}",), False, tri.question_count)
             body_sha_ = self._put_body(text)
             subject_sha = self._put_body(body["subject"]) if body.get("subject") else None
             mid = self._did("msg", actor, f"inbound_{channel}", target, rid)
@@ -1031,22 +1102,23 @@ class SupportService:
                             "body_sha256": body_sha_, "subject_sha256": subject_sha,
                             "triage": {"primary": tri.primary, "categories": list(tri.categories),
                                        "signals": list(tri.signals)}})
-            resp = {"ticket_id": ticket["ticket_id"], "message_id": mid, "contact_id": contact["contact_id"],
-                    **({"opted_out": True} if opted_out else {})}
+            resp.update(ticket_id=ticket["ticket_id"], message_id=mid, **({"opted_out": True} if revoke else {}))
+            resp.pop("action", None)
             answered = False
-            if tri.routine_candidate and ticket["queue"] != "bot":
-                # the ticket is with Andre: a follow-up is his to answer, never the bot's (fail toward the human)
-                tri = triage_mod.Triage("no_answer", (), tri.signals + ("kb:ticket_with_human",), False,
-                                        tri.question_count)
-            if tri.routine_candidate:
+            why = None
+            if tri.categories:
+                why = "escalation"
+            elif level:
+                why = "opt_out"
+            elif ticket["queue"] != "bot":
+                why = "ticket_with_human"            # a follow-up on Andre's ticket is his, never the bot's
+            else:
+                # V3-H1: only a message that IS an approved example question (after exact_form) is answered
                 article, why = kb.match(list(self.catalog["kb"].values()), text, brand, channel)
-                if article is not None:
-                    # V2-H1: fail closed: every word of the message (and subject) must be on the allow-list
-                    allowed = triage_mod.article_words(article["rules"], article.get("vocabulary", ()))
-                    gate = triage_mod.allow_listed(text, allowed) or (
-                        body.get("subject") and triage_mod.allow_listed(body["subject"], allowed | SUBJECT_WORDS, 1))
-                    if gate:
-                        article, why = None, gate
+                if article is not None and body.get("subject") and kb.exact_form(body["subject"]) not in (
+                        NEUTRAL_SUBJECTS | {kb.exact_form(q) for q in article["questions"]}
+                        | {kb.exact_form(article["title"])}):
+                    article, why = None, "subject_not_neutral"
                 reason = self._channel_check(channel, contact, proactive=False) if article else None
                 if article is not None and reason in (None, "QUIET_HOURS"):
                     answered = True
@@ -1064,10 +1136,11 @@ class SupportService:
                     resp.update(action="answered", answer_message_id=out_id)
                     if channel == "chat":
                         resp["answer"] = {"text": article["answer"], "article_id": article["article_id"]}
-                else:
-                    tri = triage_mod.Triage("no_answer", (), tri.signals + (f"kb:{why if not article else reason}",),
-                                            False, tri.question_count)
+                elif article is not None:
+                    why = reason
             if not answered:
+                tri = triage_mod.Triage("no_answer" if not tri.categories else tri.primary, tri.categories,
+                                        tri.signals + (f"kb:{why}",), False, tri.question_count)
                 effects += pause
                 effects += self._escalate_effects(actor, ticket, tri, target, rid)
                 resp["action"] = "escalated" if tri.categories else "queued_for_human"
@@ -1249,8 +1322,12 @@ class SupportService:
                     raise Invalid(R("TEMPLATE_PLACEHOLDER"))
                 if content["purpose"] == "offer" and "{offer_terms}" not in content["text"]:
                     raise Invalid(R("TEMPLATE_PLACEHOLDER"))
-            if catalog == "kb" and set(triage_mod.article_words({}, content["vocabulary"])) & triage_mod.DENY:
-                raise Invalid(R("VOCABULARY_DENIED"))
+            if catalog == "kb":
+                if any(triage_mod.denied_question(q) for q in content["questions"]):
+                    raise Invalid(R("QUESTION_DENIED"))     # V3-M1: an example question never carries a category
+                if len({kb.exact_form(q) for q in content["questions"]}) != len(content["questions"]) \
+                        or not all(kb.exact_form(q) for q in content["questions"]):
+                    raise Invalid(R("INVALID"))
             if catalog == "offer":
                 Decimal(content["price"])                      # the model already pins the format
             cur = self.catalog[catalog].get(item_id)
@@ -1795,6 +1872,8 @@ class SupportService:
         if self.bodies.get(m["body_sha256"]) is None:
             return "BODY_MISSING"
         contact = self.contacts[m["contact_id"]]
+        if m.get("bound_to") and contact.get("phone") != m["bound_to"]:
+            return "ADDRESS_CHANGED"         # V3-C3: a confirmation goes only to the number that sent the STOP
         reason = self._channel_check(m["channel"], contact, bool(m["proactive"]), m.get("origin") == "opt_out")
         if reason is not None:
             return reason
@@ -1875,8 +1954,8 @@ class SupportService:
                     self._commit("outbound_sending", {"effects": [{
                         "op": "message_sending", "message_id": mid, "channel": m["channel"], "brand": m["brand"],
                         "body_sha256": m["body_sha256"], "attempt": attempt, "origin": m["origin"]}]}, INTERNAL)
-                    to = contact["email"] if m["channel"] == "email" else (
-                        contact["phone"] if m["channel"] == "sms" else contact["contact_id"])
+                    to = m.get("bound_to") or (contact["email"] if m["channel"] == "email" else (
+                        contact["phone"] if m["channel"] == "sms" else contact["contact_id"]))
                     sender_id = self.settings.support_email.get(m["brand"]) if m["channel"] == "email" else (
                         self.settings.sms_number.get(m["brand"]) if m["channel"] == "sms" else m["brand"])
                     msg = Outbound(mid, m["brand"], m["channel"], to, sender_id or "", m.get("subject"),
@@ -2018,7 +2097,7 @@ class SupportService:
 
 
 CATALOG_CONTENT = {
-    "kb": ("brands", "channels", "title", "answer", "rules", "vocabulary"),
+    "kb": ("brands", "channels", "title", "answer", "questions"),
     "template": ("purpose", "brand", "channels", "text"),
     "offer": ("brand", "title", "terms", "price", "currency"),
 }
@@ -2029,6 +2108,8 @@ def catalog_sha(catalog: str, content: dict) -> str:
 
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
+PHONE_RE = re.compile(r"\+?\(?\d[\d\s().-]{8,16}\d")
+EMAIL_RE = re.compile(r"[a-z0-9._%+-]{1,64}@[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){1,8}")
 
 
 def _digests(obj, out: set) -> None:

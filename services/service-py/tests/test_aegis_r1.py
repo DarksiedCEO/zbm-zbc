@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 
 import pytest
 
@@ -273,7 +274,8 @@ def test_v1_h4_a_consent_captured_before_a_stop_cannot_bring_it_back(tmp_path):
 def test_v1_m1_older_consent_evidence_survives_restart(tmp_path):
     h = Harness(tmp_path, data_dir=str(tmp_path / "data"))
     cid = h.contact(phone="+13105551234", timezone="America/Los_Angeles")
-    r1 = h.ok(h.consent(cid, captured_at="2026-09-01T10:00:00Z", text="ORIGINAL wording v1"), 201)
+    r1 = h.ok(h.consent(cid, text="ORIGINAL wording v1"), 201)
+    h.clock.advance(minutes=1)
     h.ok(h.consent(cid, text="NEW wording v2"), 201)
     h2 = h.restart()
     assert h2.svc.bodies.get(r1["consent_text_sha256"]) == "ORIGINAL wording v1"
@@ -302,11 +304,13 @@ def test_v1_m2_stored_digests_are_keyed(h):
     assert hashlib.sha256(b"yes").hexdigest() not in json.dumps(h.ledger.events)
 
 
-def test_v1_m2_production_needs_the_key_file():
+def test_v1_m2_production_always_has_a_key(tmp_path):
     import config as config_mod
     from helpers import base_env
-    with pytest.raises(RuntimeError, match="SVC_HMAC_KEY_FILE is required"):
-        config_mod.load(base_env(SVC_NON_PRODUCTION=None, SVC_DATA_DIR="/nonexistent-svc-dir"))
+    with pytest.raises(RuntimeError, match="SVC_DATA_DIR is required"):
+        config_mod.load(base_env(SVC_NON_PRODUCTION=None))
+    s = config_mod.load(base_env(SVC_NON_PRODUCTION=None, SVC_DATA_DIR=str(tmp_path / "d")))   # V3-L1: generated
+    assert len(s.hmac_key) == 32 and (os.stat(tmp_path / "d" / "hmac.key").st_mode & 0o777) == 0o600
 
 
 # --------------------------------------------------------------------------------------------------- V1-L1, V1-L2

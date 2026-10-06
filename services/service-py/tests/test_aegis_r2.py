@@ -12,7 +12,6 @@ import pytest
 import channels
 import config as config_mod
 import store as store_mod
-import triage
 from helpers import Harness, RecordingSender, base_env, rid
 from ports import Outbound, Ports
 
@@ -116,11 +115,13 @@ OPT_OUT_VARIANTS = ["stopp","stahp","unsubcribe","unsusbcribe","🛑","✋ no mo
 "opt-out","unsubscribe​","halt","desist","no more","Who is this?","pls stop","stoooop","STOPPPP","ending","cancelled"]
 
 
+TURNAROUND_QUESTIONS = ["How long does a project take?", "What is the usual turnaround?"]
+
+
 def _corpus_harness(tmp_path):
     h = Harness(tmp_path)
     h.article()
-    h.article("turnaround", rules={"any": ["how long", "turnaround", "timeline"], "min_any": 1},
-              answer="Most projects take two weeks.")
+    h.article("turnaround", questions=TURNAROUND_QUESTIONS, answer="Most projects take two weeks.")
     return h
 
 
@@ -151,60 +152,17 @@ def test_v2_h1_zero_auto_answers_on_the_reviewers_corpus(tmp_path, channel):
 
 POSITIVE = [
     ("What are your hours?", "hours"), ("When are you open?", "hours"), ("What are your opening hours?", "hours"),
-    ("Hi, what are your hours?", "hours"), ("Hello! When are you open today?", "hours"),
-    ("Are you open on Saturday?", "hours"), ("What time do you open tomorrow?", "hours"),
-    ("Are you open on weekends?", "hours"), ("How long does a project take?", "turnaround"),
-    ("What is the usual turnaround?", "turnaround"), ("What is your timeline for a project?", "turnaround"),
+    ("Hi, what are your hours?", "hours"), ("Hello! When are you open tomorrow?", "hours"),
+    ("Are you open on Saturday?", "hours"), ("what time do you open, thanks", "hours"),
+    ("How long does a project take?", "turnaround"), ("What is the usual turnaround please", "turnaround"),
 ]
 
 
 @pytest.mark.parametrize("text,article", POSITIVE)
-def test_v2_h1_genuinely_routine_questions_are_still_answered(tmp_path, text, article):
-    h = Harness(tmp_path)
-    h.article()
-    h.article("turnaround", rules={"any": ["how long", "turnaround", "timeline"], "min_any": 1},
-              answer="Most projects take two weeks.", vocabulary=["project", "projects", "take", "takes", "usual"])
+def test_v2_h1_exact_approved_questions_are_still_answered(tmp_path, text, article):
+    h = _corpus_harness(tmp_path)
     r = h.ok(h.chat(text), 201)
     assert r["action"] == "answered" and r["answer"]["article_id"] == article
-
-
-@pytest.mark.parametrize("text,reason", [
-    ("What are your hours\nplease", "other:line_separator"), ("What are your hours\r", None),
-    ("What are your\u2028hours", "other:line_separator"), ("What are your hours\u0085", None),
-    ("What are your hours \U0001F621", "other:symbol"), ("What are your hours 24", "other:symbol"),
-    ("What are your hours $", "other:symbol"), ("What are your h o u r s", "other:letter_run"),
-    ("What are your hours mate", "other:unknown_word"), ("hours?", "other:too_short"),
-    ("What are your hours not", "other:unknown_word"), ("What are your hours", None),
-])
-def test_v2_h1_allow_list_gate(text, reason):
-    allowed = triage.article_words({"any": ["hours"]})
-    got = triage.allow_listed(text, allowed)
-    if reason is None:
-        assert got is None or got == "other:line_separator"      # trailing separators are stripped first
-    else:
-        assert got == reason
-
-
-def test_v2_h1_an_article_word_on_the_deny_list_never_opens_the_gate():
-    allowed = triage.article_words({"any": ["hours", "refund", "lawyer"]})
-    assert triage.allow_listed("What are your refund hours", allowed) == "other:unknown_word"
-
-
-def test_v2_h1_vocabulary_with_a_denied_word_is_refused(h):
-    r = h.post("/svc/v1/kb/articles", {"request_id": rid(), "item_id": "bad", "brands": ["zbm"], "channels": ["chat"],
-                                       "title": "t", "answer": "a", "rules": {"any": ["hours"]},
-                                       "vocabulary": ["refund"]})
-    assert r.status_code == 422 and r.json()["detail"] == "VOCABULARY_DENIED"
-
-
-def test_v2_h1_vocabulary_is_part_of_what_andre_approves(h):
-    saved = h.article("turnaround", rules={"any": ["turnaround"]}, answer="Two weeks.", vocabulary=["project"])
-    r = h.ok(h.post("/svc/v1/kb/articles", {"request_id": rid(), "item_id": "turnaround", "brands": ["zbm", "zbc"],
-                                            "channels": ["chat", "email", "sms"], "title": "Opening hours",
-                                            "answer": "Two weeks.", "rules": {"any": ["turnaround"]},
-                                            "vocabulary": ["project", "deal"]}), 201)
-    assert r["version"] == saved["version"] + 1 and r["approved"] is False
-    assert h.ok(h.chat("What is the project turnaround?"), 201)["action"] == "queued_for_human"
 
 
 # --------------------------------------------------------------------------------------------------- V2-H2
@@ -226,14 +184,14 @@ def _survey(h):
 
 def test_v2_h2_c6_a_replay_after_a_number_change_is_refused(tmp_path):
     h, s, cid = _sms_setup(tmp_path)
-    h.ok(h.consent(cid), 201)                                       # for A, captured 10-01
+    h.ok(h.consent(cid), 201)                                       # for A, captured at T0
+    h.clock.advance(minutes=1)
     h.contact(phone="+13105559999", timezone="America/Los_Angeles")  # the hub changes the number to B
-    r = h.consent(cid)                                              # the SAME 10-01 capture, replayed, now for B
+    r = h.consent(cid, captured_at="2026-10-06T18:00:00Z")          # the SAME capture, replayed, now for B
     assert r.status_code == 409 and r.json()["detail"] == "CONSENT_PREDATES_ADDRESS"
     assert _survey(h).status_code == 409
     h.ok(h.job("outbound-tick"))
     assert not s.sent
-    h.clock.advance(minutes=1)
     h.ok(h.consent(cid, captured_at="2026-10-06T18:01:00Z"), 201)  # a capture made for B, after the change
 
 
@@ -425,9 +383,10 @@ def test_an_offer_template_retired_after_selection_blocks_the_step(tmp_path):
     assert not s.sent
 
 
-@pytest.mark.parametrize("subject", ["ugh", "you con artists", "Hours \U0001F621", "Hours", "Quick hours question"])
-def test_v2_h1_the_email_subject_must_pass_the_allow_list_too(h, subject):
+@pytest.mark.parametrize("subject,answered", [("ugh", False), ("you con artists", False), ("Hours \U0001F621", False),
+                                              ("Hours", False), ("Question", True), ("Quick question", True),
+                                              ("What are your opening hours?", True), ("Opening hours", True)])
+def test_v2_h1_the_email_subject_must_be_neutral(h, subject, answered):
     h.article()
     r = h.ok(h.email("What are your opening hours?", subject=subject), 201)
-    expected = "answered" if subject in ("Hours", "Quick hours question") else "queued_for_human"
-    assert r["action"] == expected
+    assert (r["action"] == "answered") is answered

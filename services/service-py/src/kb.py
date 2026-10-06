@@ -1,33 +1,36 @@
 """
-Intelligence I2 — the approved-answer matcher (ADR 0014 decision 14). Deterministic, one job: pick at most ONE
-Andre-approved knowledge-base article whose rules match a routine message. Never generates text: the answer sent is
-the article's approved text, byte for byte.
+Intelligence I2 — the approved-answer matcher (ADR 0014 decision 14, AEGIS round 3 V3-H1). Deterministic, one job:
+answer only a message that IS one of the example questions Andre approved with an article. No interpretation:
+two rounds of review showed that word-level rules (blocklists, then allow-lists) let meaning through.
+
+The message and each approved question are compared after ``exact_form``, a tiny fixed normalisation and nothing
+else: lower case; whitespace trimmed and collapsed; one leading greeting (hi, hello, hey, with an optional comma or
+exclamation mark) removed; one trailing "thanks", "thank you" or "please" removed; trailing ? . ! removed. Equal ->
+that article (if exactly one article has it); anything else -> a human.
 
 An article is usable only when its CURRENT version is approved and the approval names the SHA-256 of exactly that
-content (``content_sha256``, recomputed here at match time, so an edit — which makes a new, unapproved version — or a
-tampered record is never used). Rules per article (all lower-case words or phrases, whole-word matched on the
-normalised text, triage.normalise):
-
-  exclude  none of these may appear
-  phrases  any one present matches (score 1000 + its length in words)
-  all      every one must appear                     \\  at least one of the two lists; score 10 per `all` term
-  any      at least ``min_any`` of these must appear /   plus 1 per `any` hit
-
-The highest score wins; a tie at the top is ambiguous and nothing is answered (a human is). No match: nothing.
+content, example questions included (``content_sha256``, recomputed at match time: an edit, which makes a new
+unapproved version, or a tampered record is never used). The text sent is the article's answer, byte for byte.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from ledger import payload_sha256
-from triage import normalise
 
-CONTENT_KEYS = ("brands", "channels", "title", "answer", "rules", "vocabulary")
+CONTENT_KEYS = ("brands", "channels", "title", "answer", "questions")
+_GREETING = re.compile(r"^(hi|hello|hey)\s*[,!]?\s+")
+_THANKS = re.compile(r"[\s,]+(thanks|thank you|please)$")
 
 
-def content_of(article: dict) -> dict:
-    return {k: article[k] for k in CONTENT_KEYS}
+def exact_form(text: str) -> str:
+    t = " ".join(text.lower().split())
+    t = t.rstrip("?.! ").strip()
+    t = _GREETING.sub("", t, count=1)
+    t = _THANKS.sub("", t, count=1)
+    return t.rstrip("?.! ").strip()
 
 
 def content_sha(content: dict) -> str:
@@ -41,41 +44,15 @@ def usable(article: dict) -> bool:
         and appr["content_sha256"] == article["content_sha256"] == content_sha(article)
 
 
-def _present(norm: str, term: str) -> bool:
-    t = normalise(term).strip()
-    return bool(t) and f" {t} " in norm
-
-
-def score(rules: dict, norm: str) -> int:
-    if any(_present(norm, t) for t in rules.get("exclude", ())):
-        return 0
-    phrase_hits = [p for p in rules.get("phrases", ()) if _present(norm, p)]
-    if phrase_hits:
-        return 1000 + max(len(normalise(p).split()) for p in phrase_hits)
-    all_terms, any_terms = rules.get("all", ()), rules.get("any", ())
-    if not all_terms and not any_terms:
-        return 0
-    if not all(_present(norm, t) for t in all_terms):
-        return 0
-    any_hits = sum(1 for t in any_terms if _present(norm, t))
-    if any_terms and any_hits < max(1, rules.get("min_any", 1)):
-        return 0
-    return 10 * len(all_terms) + any_hits
-
-
 def match(articles: list[dict], text: str, brand: str, channel: str) -> tuple[Optional[dict], str]:
     """(article, reason). reason: matched | no_match | ambiguous."""
-    norm = normalise(text)
-    scored = []
-    for a in articles:
-        if not usable(a) or a["status"] != "active" or brand not in a["brands"] or channel not in a["channels"]:
-            continue
-        sc = score(a["rules"], norm)
-        if sc > 0:
-            scored.append((sc, a["article_id"], a))
-    if not scored:
+    form = exact_form(text)
+    if not form:
         return None, "no_match"
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+    hits = [a for a in articles if usable(a) and a["status"] == "active" and brand in a["brands"]
+            and channel in a["channels"] and form in {exact_form(q) for q in a["questions"]}]
+    if not hits:
+        return None, "no_match"
+    if len(hits) > 1:
         return None, "ambiguous"
-    return scored[0][2], "matched"
+    return hits[0], "matched"

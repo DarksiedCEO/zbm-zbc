@@ -99,6 +99,11 @@ def daytime_zone() -> str:
     return "UTC"
 
 
+def now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def rid() -> str:
     return "live-" + uuid.uuid4().hex
 
@@ -155,7 +160,7 @@ def _main(work: Path) -> int:
         art = a.post("/svc/v1/kb/articles", {"request_id": rid(), "item_id": "hours", "brands": ["zbm", "zbc"],
                                              "channels": ["chat", "email", "sms"], "title": "Opening hours",
                                              "answer": "We are open Monday to Friday, 9am to 6pm Pacific.",
-                                             "rules": {"any": ["hours", "open"]}}).json()
+                                             "questions": ["What are your hours?", "When are you open?"]}).json()
         r = a.post("/svc/v1/chat/messages", {"request_id": rid(), "brand": "zbm", "contact_ref": "client:live1",
                                              "text": "what are your hours?"}, caller="hub").json()
         check("an unapproved article is never used", r["action"] == "queued_for_human" and "answer" not in r)
@@ -169,6 +174,11 @@ def _main(work: Path) -> int:
                                              "text": "When are you open?"}, caller="hub").json()
         check("a routine question is answered right away with the approved text",
               r["action"] == "answered" and r["answer"]["text"].startswith("We are open"))
+        para = a.post("/svc/v1/chat/messages", {"request_id": rid(), "brand": "zbm", "contact_ref": "client:live2b",
+                                                "text": "When are you open so I can get my money back?"},
+                      caller="hub").json()
+        check("only an exact approved question is answered: a paraphrase goes to Andre",
+              para["action"] != "answered")
         answered_ticket = r["ticket_id"]
 
         # --- escalations ----------------------------------------------------------------------------------------
@@ -203,7 +213,7 @@ def _main(work: Path) -> int:
               r.json()["detail"] == "SMS_CONSENT_REQUIRED")
         a.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid, "channel": "sms",
                                         "address": "+13105551234", "source": "portal_form",
-                                    "consent_text": "I agree to receive texts.", "captured_at": "2026-10-01T10:00:00Z",
+                                    "consent_text": "I agree to receive texts.", "captured_at": now_iso(),
                                     "express": True}, caller="hub")
         r = a.post("/svc/v1/inbound/sms", {"request_id": rid(), "brand": "zbm", "to_number": "+13105550100",
                                            "from_number": "+13105551234", "text": "Please stop texting me"},
@@ -265,7 +275,7 @@ def _main(work: Path) -> int:
                                            "phone": "+13105557777", "timezone": tz}, caller="hub").json()["contact_id"]
         a.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid2, "channel": "sms",
                                     "address": "+13105557777", "source": "portal_form",
-                                    "consent_text": "I agree to receive texts.", "captured_at": "2026-10-01T10:00:00Z",
+                                    "consent_text": "I agree to receive texts.", "captured_at": now_iso(),
                                     "express": True}, caller="hub")
         t2 = a.post("/svc/v1/inbound/sms", {"request_id": rid(), "brand": "zbm", "to_number": "+13105550100",
                                             "from_number": "+13105557777", "text": "I need help with my campaign"},

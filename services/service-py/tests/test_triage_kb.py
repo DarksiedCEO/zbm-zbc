@@ -85,38 +85,39 @@ def test_signals_are_codes_not_text():
 
 # --------------------------------------------------------------------------------------------------- I2 matcher
 
-def _art(article_id="a1", rules=None, approved=True, **over):
+def _art(article_id="a1", questions=("What are your hours?",), approved=True, **over):
     content = {"brands": ["zbm"], "channels": ["chat"], "title": "t", "answer": "the approved answer",
-               "rules": rules or {"any": ["hours"], "min_any": 1, "all": [], "phrases": [], "exclude": []},
-               "vocabulary": []}
+               "questions": list(questions)}
     content.update(over)
     sha = kb.content_sha(content)
     return {"article_id": article_id, "status": "active", "version": 1, "content_sha256": sha,
             "approved": {"version": 1, "content_sha256": sha} if approved else None, **content}
 
 
-def test_matcher_rules():
-    norm = triage.normalise
-    r = {"all": ["opening", "hours"], "any": [], "min_any": 1, "phrases": [], "exclude": ["holiday"]}
-    assert kb.score(r, norm("what are your opening hours")) == 20
-    assert kb.score(r, norm("opening hours on a holiday")) == 0
-    assert kb.score(r, norm("hours")) == 0
-    assert kb.score({"phrases": ["office hours"]}, norm("Office hours?")) == 1002
-    assert kb.score({"any": ["a1x", "b1x"], "min_any": 2}, norm("a1x only")) == 0
-    assert kb.score({}, norm("anything")) == 0
+@pytest.mark.parametrize("raw,form", [
+    ("What are your hours?", "what are your hours"), ("  WHAT   are your\thours ?? ", "what are your hours"),
+    ("Hi, what are your hours?", "what are your hours"), ("hello! what are your hours", "what are your hours"),
+    ("hey what are your hours", "what are your hours"), ("What are your hours, thanks", "what are your hours"),
+    ("what are your hours thank you!", "what are your hours"), ("what are your hours please?", "what are your hours"),
+    ("hi there what are your hours", "there what are your hours"), ("What are your hours? I want a refund",
+                                                                     "what are your hours? i want a refund"),
+])
+def test_exact_form_is_tiny_and_fixed(raw, form):
+    assert kb.exact_form(raw) == form
 
 
 def test_matcher_unapproved_tampered_brand_channel_ambiguous():
-    assert kb.match([_art(approved=False)], "hours?", "zbm", "chat") == (None, "no_match")
+    assert kb.match([_art(approved=False)], "What are your hours?", "zbm", "chat") == (None, "no_match")
     t = _art()
     t["answer"] = "edited behind the approval"          # content no longer matches the approved hash
-    assert kb.match([t], "hours?", "zbm", "chat") == (None, "no_match")
-    assert kb.match([_art()], "hours?", "zbc", "chat")[0] is None
-    assert kb.match([_art()], "hours?", "zbm", "email")[0] is None
-    a, why = kb.match([_art("a1"), _art("a2")], "hours?", "zbm", "chat")
+    assert kb.match([t], "What are your hours?", "zbm", "chat") == (None, "no_match")
+    assert kb.match([_art()], "What are your hours?", "zbc", "chat")[0] is None
+    assert kb.match([_art()], "What are your hours?", "zbm", "email")[0] is None
+    a, why = kb.match([_art("a1"), _art("a2")], "What are your hours?", "zbm", "chat")
     assert a is None and why == "ambiguous"
-    a, why = kb.match([_art("a1"), _art("a2", rules={"phrases": ["your hours"]})], "your hours?", "zbm", "chat")
+    a, why = kb.match([_art("a1"), _art("a2", questions=["Your hours?"])], "your hours", "zbm", "chat")
     assert a["article_id"] == "a2" and why == "matched"
+    assert kb.match([_art()], "what are your hours today", "zbm", "chat") == (None, "no_match")
 
 
 # --------------------------------------------------------------------------------------------------- through the API
@@ -142,7 +143,7 @@ def test_editing_an_article_unapproves_it(h):
     h.article()
     h.ok(h.post("/svc/v1/kb/articles", {"request_id": rid(), "item_id": "hours", "brands": ["zbm", "zbc"],
                                         "channels": ["chat"], "title": "Opening hours",
-                                        "answer": "We are open 24/7!", "rules": {"any": ["hours"]}}), 201)
+                                        "answer": "We are open 24/7!", "questions": ["What are your hours?"]}), 201)
     r = h.ok(h.chat("what are your hours"), 201)
     assert r["action"] == "queued_for_human"
     arts = h.ok(h.get("/svc/v1/kb/articles"))

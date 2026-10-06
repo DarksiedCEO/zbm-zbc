@@ -28,6 +28,10 @@ ZBM_SMS, ZBC_SMS = "+13105550100", "+13105550200"
 T0 = datetime(2026, 10, 6, 18, 0, 0, tzinfo=timezone.utc)
 
 
+HOURS_QUESTIONS = ("What are your hours?", "What are your opening hours?", "When are you open?",
+                  "What time do you open?", "Are you open on Saturday?", "When are you open tomorrow?")
+
+
 def rid() -> str:
     return "r-" + uuid.uuid4().hex
 
@@ -180,10 +184,9 @@ class Harness:
 
     def article(self, item_id: str = "hours", approve: bool = True, brands=("zbm", "zbc"),
                 channels=("chat", "email", "sms"), answer: str = "We are open Monday to Friday, 9am to 6pm Pacific.",
-                rules: Optional[dict] = None, vocabulary=()) -> dict:
+                questions=None) -> dict:
         body = {"request_id": rid(), "item_id": item_id, "brands": list(brands), "channels": list(channels),
-                "title": "Opening hours", "answer": answer,
-                "rules": rules or {"any": ["hours", "open", "opening"], "min_any": 1}, "vocabulary": list(vocabulary)}
+                "title": "Opening hours", "answer": answer, "questions": list(questions or HOURS_QUESTIONS)}
         saved = self.ok(self.post("/svc/v1/kb/articles", body), 201)
         if approve:
             self.approve("kb/articles", saved)
@@ -215,9 +218,12 @@ class Harness:
         body = {"request_id": rid(), "brand": brand, "contact_ref": ref, **fields}
         return self.ok(self.post("/svc/v1/contacts", body, caller="hub"), 201)["contact_id"]
 
-    def consent(self, contact_id: str, channel: str = "sms", captured_at: str = "2026-10-01T10:00:00Z",
+    def consent(self, contact_id: str, channel: str = "sms", captured_at: Optional[str] = None,
                 text: str = "I agree to receive account texts from Z Best Media.", address: Optional[str] = None):
         c = self.svc.contacts.get(contact_id) or {}
+        if captured_at is None:                       # V3-C2: a capture is never before the contact existed
+            from clock import iso
+            captured_at = iso(self.clock.now())
         address = address or c.get("phone" if channel == "sms" else "email") or "+19999999999"
         return self.post("/svc/v1/consents", {"request_id": rid(), "contact_id": contact_id, "channel": channel,
                                               "address": address,

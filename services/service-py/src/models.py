@@ -70,8 +70,7 @@ Title = Annotated[StrictStr, Field(min_length=1, max_length=120), AfterValidator
 Timestamp = Annotated[StrictStr, Field(max_length=40), AfterValidator(_ts)]
 DateStr = Annotated[StrictStr, Field(pattern=r"^20[0-9]{2}-[01][0-9]-[0-3][0-9]$"), AfterValidator(_date)]
 ItemId = Annotated[StrictStr, Field(pattern=r"^[a-z][a-z0-9_-]{2,59}$")]
-Term = Annotated[StrictStr, Field(pattern=r"^[a-z0-9][a-z0-9' -]{0,59}$")]
-Phrase = Annotated[StrictStr, Field(pattern=r"^[a-z0-9][a-z0-9' -]{2,119}$")]
+Question = Annotated[StrictStr, Field(min_length=3, max_length=200, pattern=r"^[A-Za-z0-9' ,?.!-]+$")]
 Money = Annotated[StrictStr, Field(pattern=r"^(0|[1-9][0-9]{0,7})\.[0-9]{2}$")]
 Sha256 = Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]
 Ref = Annotated[StrictStr, Field(pattern=r"^[A-Za-z0-9._:/-]{1,200}$")]
@@ -179,14 +178,6 @@ class PrioritySet(Strict):
     priority: Literal["p1", "p2", "p3", "p4"]
 
 
-class KbRules(Strict):
-    all: Annotated[list[Term], Field(max_length=10), AfterValidator(_unique)] = []
-    any: Annotated[list[Term], Field(max_length=20), AfterValidator(_unique)] = []
-    min_any: Annotated[StrictInt, Field(ge=1, le=10)] = 1
-    phrases: Annotated[list[Phrase], Field(max_length=10), AfterValidator(_unique)] = []
-    exclude: Annotated[list[Term], Field(max_length=20), AfterValidator(_unique)] = []
-
-
 class ArticleSave(Strict):
     request_id: Id
     item_id: ItemId
@@ -194,9 +185,8 @@ class ArticleSave(Strict):
     channels: Annotated[list[OutChannel], Field(min_length=1, max_length=3), AfterValidator(_unique)]
     title: Title
     answer: ShortText
-    rules: KbRules
-    # V2-H1: words a routine question may also contain (approved with the article); denied words are refused
-    vocabulary: Annotated[list[Term], Field(max_length=40), AfterValidator(_unique)] = []
+    # V3-H1: the bot answers ONLY a message equal to one of these (after kb.exact_form); approved with the article
+    questions: Annotated[list[Question], Field(min_length=1, max_length=20), AfterValidator(_unique)]
 
 
 class TemplateSave(Strict):

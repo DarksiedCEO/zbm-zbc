@@ -20,7 +20,7 @@ def _alert_codes(h):
 @pytest.mark.parametrize("text", ["I want a refund", "what are your hours? also I want a refund",
                                   "refund", "Can I get my money back for the hours you were closed?"])
 def test_a_refund_is_never_auto_answered_even_when_an_article_matches(h, text):
-    h.article(rules={"any": ["hours", "refund", "money"], "min_any": 1})
+    h.article()
     r = h.ok(h.chat(text), 201)
     assert r["action"] == "escalated" and "answer" not in r
     t = h.ok(h.get(f"/svc/v1/tickets/{r['ticket_id']}"))
@@ -79,7 +79,7 @@ def test_a_raising_port_is_unavailable_never_an_error(tmp_path):
 @pytest.mark.parametrize("text", ["this is the worst service ever", "what the fuck", "WHERE IS MY REPORT ALREADY",
                                   "I want to make a complaint!!!"])
 def test_complaints_go_to_andre(h, text):
-    h.article(rules={"any": ["report", "service", "where"], "min_any": 1})
+    h.article()
     r = h.ok(h.chat(text), 201)
     assert r["action"] == "escalated"
     assert "ESCALATION_COMPLAINT" in _alert_codes(h)
@@ -104,7 +104,7 @@ def test_security_goes_to_cybersecurity_and_is_p1(h):
 @pytest.mark.parametrize("text", ["Please delete my data", "delete my account and all my personal information",
                                   "GDPR right to be forgotten request"])
 def test_privacy_requests_route_to_compliance_and_legal_and_are_never_answered(h, text):
-    h.article(rules={"any": ["delete", "data", "account", "request"], "min_any": 1})
+    h.article()
     r = h.ok(h.chat(text), 201)
     assert r["action"] == "escalated" and "answer" not in r
     hof = _handoffs(h, r["ticket_id"])

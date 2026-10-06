@@ -39,7 +39,7 @@ else; Andre's actions go through the `dashboard` caller AND carry `X-Andre-Appro
 | `SVC_ANDRE_APPROVAL_TOKEN` | unset | Andre's approvals (FounderGate); equal to the service token or any caller token = not configured |
 | `SVC_NON_PRODUCTION` | 0 | 1 allows the in-memory store (tests only). Never in production |
 | `SVC_DATA_DIR` | — | required in production; a directory owned by the service user, mode 0700 |
-| `SVC_HMAC_KEY_FILE` | — | required in production: a 0600 file holding 32+ random bytes, base64 (all zeros or fewer than 16 distinct bytes refused); keys the digests of stored bodies and consent texts (HMAC-SHA-256). Its fingerprint is written to the log at the first start; another key refuses start. `SVC_NON_PRODUCTION=1` without it uses a fixed test key |
+| `SVC_HMAC_KEY_FILE` | unset | normally unset: the service GENERATES its key on the first start (32 bytes from `os.urandom`) and keeps it in `SVC_DATA_DIR/hmac.key` (0600). A supplied file must hold 32+ random-looking bytes, base64 (refused: all zeros, fewer than 16 distinct bytes, a repeated 8-byte block, or only printable characters). The key's fingerprint is written to the log at the first start; another key refuses start. `SVC_NON_PRODUCTION=1` without a data directory uses a fixed test key |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | unset = every write refused (fail closed) |
 | `SVC_SUPPORT_EMAIL_ZBM`, `SVC_SUPPORT_EMAIL_ZBC` | unset | the support identity per brand (inbound must be addressed to it; outbound is sent from it); must differ; unset = that brand's email refused |
 | `SVC_SMS_NUMBER_ZBM`, `SVC_SMS_NUMBER_ZBC` | unset | the brand's SMS number, E.164; must differ; unset = that brand's SMS refused |
@@ -84,6 +84,15 @@ a date of birth, government id, card or bank account number, IP address or devic
 | `POST /svc/v1/outbound/{message_id}/resolve` | Andre | a message held as `sending` (send outcome unknown after a restart): `sent`, `requeue` or `cancel` |
 | `POST /svc/v1/jobs/{sla-sweep,health-recompute,save-plan-tick,outbound-tick,handoff-retries,integrity}/run` | scheduler | the jobs (idempotent per request id) |
 | `GET /svc/v1/audit/integrity`, `/audit/events` | dashboard, compliance_38 | integrity against the ledger; the log with personal data replaced by HMAC under a key made for that export (returned once with it) |
+
+## The HMAC key
+
+Stored bodies, consent texts and address revocations are addressed by HMAC-SHA-256 under the service's key. **Key
+rotation is not supported yet**: every stored digest would have to be recomputed under the new key, and that
+procedure is not built (ADR 0014 unlock list). Keep `SVC_DATA_DIR/hmac.key` (or the supplied key file) with the data
+directory's backups; a restore without it refuses to start. A log written before the key fingerprint existed (before
+AEGIS round 2) is accepted only if every stored body it cites verifies under the configured key; its fingerprint is
+then written.
 
 ## Live run
 

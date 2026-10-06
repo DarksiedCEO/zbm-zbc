@@ -70,23 +70,46 @@ def _collapse(word: str) -> str:
     return re.sub(r"(.)\1+", r"\1", word)
 
 
-def is_opt_out(text: str) -> bool:
-    """An opt-out anywhere in the message (V1-H3, V2-H3), on ANY inbound channel: a listed word or phrase, a word one
-    typo away from stop / unsubscribe once repeated letters are collapsed and digits read as letters, a stop-sign
-    emoji, or a short ambiguous message on its own. Over-matching only ever stops texts."""
+CHANNEL_WORDS = ("text", "texts", "texting", "txt", "txts", "sms", "message", "messages", "messaging", "msg", "msgs",
+                 "phone", "cell", "mobile", "number")
+NEGATORS = ("no", "not", "never", "dont", "do not", "stop", "quit", "without", "nothing", "none", "unwelcome",
+            "instead", "prefer", "only")
+NEAR = 4                            # tokens between a negator and a channel word (V3-C1 label)
+
+
+def negated_channel(norm: str) -> bool:
+    """A negation within NEAR tokens of text / sms / message / phone / cell ("please no texts", "I do not want text
+    messages", "texts are not welcome"): a likely SMS opt-out, labelled for Andre (V3-C1)."""
+    toks = norm.split()
+    neg = [i for i, t in enumerate(toks) if t in NEGATORS or (t == "do" and i + 1 < len(toks) and toks[i + 1] == "not")]
+    chan = [i for i, t in enumerate(toks) if t in CHANNEL_WORDS]
+    return any(abs(i - j) <= NEAR for i in neg for j in chan)
+
+
+def opt_out_level(text: str) -> Optional[str]:
+    """``exact``: a listed opt-out word or phrase anywhere (also with repeated letters collapsed or digits read as
+    letters, "S T O P", a stop-sign emoji) or a short ambiguous message on its own. ``suspected``: only a one-typo
+    match of stop / unsubscribe, or a negation near a channel word. None otherwise. On SMS both revoke; on chat and
+    email only ``exact`` revokes, ``suspected`` pauses proactive SMS and asks Andre (V3 Info)."""
     if any(sym in text for sym in OPT_OUT_SYMBOLS):
-        return True
+        return "exact"
     variants = {normalise(text), normalise(text.translate(_LEET))}
     variants |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(variants)}
+    suspected = False
     for norm in variants:
         if any(f" {normalise(t).strip()} " in norm for t in OPT_OUT_TERMS):
-            return True
+            return "exact"
         if norm.strip() in OPT_OUT_SHORT:
-            return True
+            return "exact"
         for tok in norm.split():
             if len(tok) >= 4 and any(_one_edit(tok, stem) for stem in OPT_OUT_FUZZY):
-                return True
-    return False
+                suspected = True
+        suspected = suspected or negated_channel(norm)
+    return "suspected" if suspected else None
+
+
+def is_opt_out(text: str) -> bool:
+    return opt_out_level(text) is not None
 
 
 is_stop = is_opt_out

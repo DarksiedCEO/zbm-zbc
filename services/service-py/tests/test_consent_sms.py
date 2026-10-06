@@ -32,7 +32,7 @@ def test_consent_is_recorded_with_source_time_and_text_hash_never_the_text(h):
     c = h.ok(h.consent(cid), 201)
     view = h.ok(h.get(f"/svc/v1/contacts/{cid}/consents", caller="hub"))[0]
     assert view["status"] == "active" and view["source"] == "portal_form" and view["express"] is True
-    assert view["captured_at"] == "2026-10-01T10:00:00Z" and len(view["consent_text_sha256"]) == 64
+    assert view["captured_at"] == "2026-10-06T18:00:00Z" and len(view["consent_text_sha256"]) == 64
     assert c["consent_text_sha256"] == view["consent_text_sha256"]
     assert "agree" not in str(h.ledger.events)
     assert h.ledger.of_type("consent_changed")
@@ -129,7 +129,8 @@ def test_not_an_opt_out(text):
 
 def test_stop_from_an_unknown_number_records_a_revocation(h):
     r = h.ok(h.sms("STOP", frm="+13105550001"), 201)
-    assert r["action"] == "opted_out"
+    assert r["opted_out"] is True and r["action"] == "queued_for_human"          # V3-M2: Andre sees it
+    assert "OPT_OUT_UNKNOWN_SENDER" in [a["code"] for a in h.ok(h.get("/svc/v1/alerts"))]
     assert h.ok(h.get(f"/svc/v1/contacts/{r['contact_id']}/consents", caller="hub"))[0]["status"] == "revoked"
 
 
@@ -263,7 +264,7 @@ def test_an_answer_whose_article_was_edited_before_sending_is_cancelled(tmp_path
     r = h.ok(h.email("what are your opening hours"), 201)
     h.ok(h.post("/svc/v1/kb/articles", {"request_id": rid(), "item_id": "hours", "brands": ["zbm"],
                                         "channels": ["email"], "title": "t", "answer": "changed",
-                                        "rules": {"any": ["hours"]}}), 201)
+                                        "questions": ["What are your opening hours?"]}), 201)
     assert h.ok(h.job("outbound-tick"))["cancelled"] == 1 and not senders["email"].sent
     assert h.ok(h.get(f"/svc/v1/tickets/{r['ticket_id']}"))["queue"] == "andre"
 
