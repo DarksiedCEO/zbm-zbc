@@ -821,6 +821,104 @@ cd services/service-py && python3 -m pytest -q   # count: docs/test-counts.md
 LEDGER_BIN=services/ledger-rust/target/release/server python3 services/service-py/devtools/live_run.py
 ```
 
+## Influencer & Partnership Marketing (11) (`services/influencer-py`) — Oct 6, 2026
+
+One service for both brands, ZBM and ZBC: finds creators (their own applications, profiles a person researched, and
+later a paid influencer database and public-profile data through ports that are not built; no scraping code); reaches
+them by outreach email from a separate domain under CAN-SPAM, and by platform DMs only as Andre approved each one;
+runs influencer campaigns and campaign-level co-marketing with brands and agencies; issues sponsored-content briefs
+that always carry an FTC disclosure; makes deals; sends contracts through Legal (37); and asks Finance (31) to pay
+verified creators. Referral and alliance partner commissions are department 12's. Founder decisions (Oct 6 Q&A),
+architecture and the unlock list: `docs/adr/0015-influencer-partnership-department-architecture.md`. Routes, settings
+and the hub contract: `services/influencer-py/README.md`. Env prefix `INF_`, default port 8480.
+
+- **Status:** built and tested (count: docs/test-counts.md). **Not in force.** No send provider, DM provider,
+  discovery source or department client is wired: email and approved DMs stay queued, imports answer
+  `SOURCE_NOT_WIRED`, contracts `LEGAL_UNAVAILABLE`, payee verification `FINANCE_UNAVAILABLE`, and nothing is ever
+  paid. Setting any unbuilt provider or client switch refuses start.
+- **Andre approves** template versions, every DM draft, briefs, deals over the limit and final content, each by its
+  content SHA-256, and decides reply holds and minor reviews. A deal goes to him when it, or the same person's
+  lifetime total across both brands and every campaign, or the campaign's total, is over $5,000; the rule is applied
+  again at payout time, keyed on the payee.
+- **Fails closed.** Creators attest to being 18 or older (no date of birth is ever accepted; a declared minor naming a
+  record we hold freezes it for Andre's review). The mailbox is confirmed before an application is taken. A raw TIN,
+  SSN or EIN is refused 422 by key and by shape; only a provider reference is kept. Any reply on any channel holds
+  every further outreach to that creator until Andre decides; one suppression list covers both brands, email and
+  DMs. Content without the exact disclosure up front is refused, and counts live only once Andre approved it and the
+  contract is in force.
+- **Record-first log** (security-py's design as fixed in ADR 0012, with service-py's closed-instance and claim rules
+  from ADR 0014): every change is a typed ledger event and an anchored log line before it takes effect; emails and
+  handles reach the ledger and the export only as keyed hashes; a truncated, replaced or edited log stops all writes.
+- **Open unlock items** (ADR 0015): the email provider, its webhooks and DNS, and the hub's unsubscribe page; DM
+  providers; the discovery sources; the Legal (37) contract client (legal-py needs an influencer-agreement document
+  type); the Finance (31) payee and payout client, which must confirm a `stripe:` / `vault:` tax reference exists and
+  belongs to the creator before any payee is registered, and must return its `person_key` (an opaque keyed hash of
+  the matched TIN) on `register_payee` and `payee_status`; the hub contract (per-IP and per-session rate limits and a
+  CAPTCHA on the public forms, `requester_key`, the `/u/<token>` and `/c/<token>` pages); passkey approvals through
+  Cybersecurity (22); an un-block path for a confirmed minor who later turns 18; a CCPA erasure design; a route to
+  change a creator's email.
+- **Live run** (`devtools/live_run.py`: real ledger-rust binary, production entrypoint): start-up integrity → second
+  process on the same data directory refused → address-first application, link and session → minor and missing
+  attestation refused → date of birth and raw TIN refused → discovery not wired → template approval → outreach email
+  queued, not sent → DM approved by hash and still queued → any reply holds, Andre lifts it → opt-out suppressing
+  both brands and DMs → brief with its FTC section → the $5,000 rule with a split caught → deal and content approval
+  by hash → contract refused while Legal is a stand-in → tax reference inside a session only → Finance refusing →
+  restart → forged pending line inert → truncated log detected → nothing personal on the ledger →
+  `GET /ledger/verify` valid.
+
+```bash
+cd services/influencer-py && python3 -m pytest -q   # count: docs/test-counts.md
+LEDGER_BIN=services/ledger-rust/target/release/server python3 services/influencer-py/devtools/live_run.py
+```
+
+## New Business Development (12) (`services/bizdev-py`) — Oct 6, 2026
+
+One service for both brands, ZBM and ZBC, for two jobs: big pursuits (enterprise and government bids, RFP / RFQ
+responses and formal pitches, as multi-month pursuits with stages, deadlines, bid / no-bid qualification and win /
+loss) and partnerships (referral partners, agency alliances and white-label deals, with commissions paid through
+Finance). Everyday leads and deals stay with Sales (27); influencer and co-marketing work is department 11; political
+work and public affairs are department 14. Founder decisions (Oct 6 Q&A), architecture and the unlock list:
+`docs/adr/0016-new-business-development-department-architecture.md`. Routes and settings:
+`services/bizdev-py/README.md`. Env prefix `NBD_`, default port 8490.
+
+- **Status:** built and tested (count: docs/test-counts.md). **Not in force.** No provider or department client is
+  wired: outreach email, submissions and partner payouts stay `queued`, won pursuits' hand-offs stay
+  `pending_delivery`, bid-portal import answers `SOURCE_NOT_WIRED`, and every Legal (37) agreement hand-off is refused
+  `LEGAL_UNAVAILABLE`, so no partner deal can be marked won yet. Nothing is ever paid. Setting any unbuilt provider or
+  client switch refuses start.
+- **Andre decides.** The AI drafts; every response and pitch is assembled only from approved boilerplate plus
+  approved custom text and needs Andre's approval of its exact hash. The `bid` decision, deadline moves, wins,
+  partner rates, payees and hold decisions are his alone. Any pursuit or partner deal over $10,000 goes to him,
+  aggregated over every deal sharing a counterparty ref, registrable domain or normalised name: every live deal
+  counts, and closed deals count within `NBD_AGGREGATION_WINDOW_DAYS` (default 365), so a split deal cannot get
+  under the threshold inside that window.
+- **Fails closed.** A submission past its stored deadline is refused (judged on the service's injected clock, never
+  the wall clock); an outcome that is not known stays `sending` and is never resent. Government bids carry required
+  certifications that only Andre attests, one item at a time by hash; conflict-of-interest, gift, lobbying and
+  contingent-fee items are flagged to him. Commission accrues only on money Finance reports the client actually paid,
+  with clawback on refunds and chargebacks; partner tax information is a reference only, and a raw TIN / SSN / EIN is
+  refused 422. Outreach is email only, and any reply holds further outreach until Andre decides.
+- **Record-first log** (security-py's design as fixed in ADR 0012, with service-py's lifecycle from ADR 0014): typed
+  evidence on the ledger first, then the anchored log line; no email, name, amount, rate or reply text reaches the
+  ledger; a truncated, replaced or edited log stops all writes.
+- **Open unlock items** (ADR 0016): passkey approvals through Cybersecurity (22); the email provider and its webhook
+  relay; submission delivery; bid-portal sourcing; the Onboarding, Finance (31) and Legal (37) clients (Finance needs
+  a partner payee kind and a payout intake for partner commissions; legal-py needs intake kinds for partner
+  agreements, NDAs and white-label contracts); a suppression list shared with Sales (27); the console pages; minted
+  caller credentials.
+- **Live run** (`devtools/live_run.py`: real ledger-rust binary, production entrypoint): an unbuilt provider setting
+  refuses start → start-up integrity → second process refused → the bid decision is Andre's → response approval by
+  hash, submission still queued → a submission past its deadline refused → a government bid refused until every item
+  is attested, sensitive items flagged → a split deal aggregated over $10,000 → a raw SSN refused → partner rate
+  Andre's → agreements and partner wins refused while Legal is a stand-in → no commission without a won deal →
+  outreach queued, a reply holds → restart → truncated log detected → nothing personal on the ledger →
+  `GET /ledger/verify` valid.
+
+```bash
+cd services/bizdev-py && python3 -m pytest -q   # count: docs/test-counts.md
+LEDGER_BIN=services/ledger-rust/target/release/server python3 services/bizdev-py/devtools/live_run.py
+```
+
 ## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026, fix waves 20-26b applied
 
 The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;

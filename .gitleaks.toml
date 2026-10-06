@@ -33,3 +33,14 @@ regexTarget = "secret"
 regexes = [
   '''^3f9c2a7e51d04b86c8e1f7a2093d5b6e4a1c8f0d72e9b35a6c4d1e8f0b7a2c93$''',
 ]
+
+# Test-only value: a FAKE tax id written into a partner key by bizdev-py's AEGIS round 1 regression test
+# (services/bizdev-py/tests/test_aegis_r1.py, first committed in 22fe413), flagged as generic-api-key. It was never a
+# secret or a real taxpayer id; the test now builds it from parts, so it exists as one literal only in history.
+# Exact string, matched against the detected secret.
+[[allowlists]]
+description = "Fake test tax id from bizdev-py's AEGIS round 1 regression test (tests/test_aegis_r1.py in 22fe413; built from parts since). Exact string, matched against the detected secret."
+regexTarget = "secret"
+regexes = [
+  '''^west-1234-56789$''',
+]
