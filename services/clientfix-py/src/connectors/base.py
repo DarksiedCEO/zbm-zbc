@@ -214,6 +214,10 @@ class Connector:
         """Always last (GTM: delete the run workspace if it still exists). None = nothing to clean."""
         return None
 
+    def leftovers(self, ctx: dict) -> list:
+        """After cleanup: what this run created on the platform that may still exist (GTM: run workspaces)."""
+        return []
+
     def dry_run(self, account: str, ops: list, ctx: dict, call: Call) -> tuple[str, str]:
         """``(APPLIED, mode)`` = the change would be accepted; REFUSED / UNKNOWN otherwise. Shopify and GA4 offer no
         server-side dry run: the offline validation above is all there is ("offline")."""

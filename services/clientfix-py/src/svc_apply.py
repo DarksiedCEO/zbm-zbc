@@ -206,7 +206,13 @@ class ApplyMixin:
         if freeze:
             code = {"rollback_failed": "ROLLBACK_FAILED", "interrupted": "APPLY_INTERRUPTED",
                     "halted_revoked": "REVOKED_MID_APPLY", "halted_frozen": "FROZEN_MID_APPLY"}[status]
-            tasks.append(self._task("alert", item_id, code, code))
+            t = self._task("alert", item_id, code, code)
+            # round 4 Info 2: name the foreign version that made it a conflict, and any run workspace left behind
+            if result.get("foreign_version"):
+                t["ref"] = result["foreign_version"]
+            if result.get("run_workspaces_left"):
+                t["run_workspaces"] = list(result["run_workspaces_left"])
+            tasks.append(t)
         if result.get("poisoned_version"):
             # AEGIS round 2 R2-1: name the version a future run would otherwise build on
             t = self._task("alert", item_id, "GTM_VERSION_POISONED", "GTM_VERSION_POISONED")
@@ -223,6 +229,8 @@ class ApplyMixin:
                 "rollback": result["rollback"], "dry_run": result["dry_run"], "instructions": result["instructions"],
                 "poisoned_version": result.get("poisoned_version"),
                 "release_may_be_unpublished": result.get("release_may_be_unpublished"),
+                "foreign_version": result.get("foreign_version"),
+                "run_workspaces_left": result.get("run_workspaces_left", []),
                 "freeze": keys if freeze else [], "tasks": tasks}
         evidence = [("item_settled", f"item:{item_id}", {"job_id": job_id, "item_id": item_id, "status": status,
                                                          "failure": result.get("failure"), "frozen": len(data["freeze"])},

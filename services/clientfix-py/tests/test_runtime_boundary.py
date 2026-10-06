@@ -40,7 +40,9 @@ def test_no_agent_runtime_or_model_sdk_is_imported_by_this_service():
 def test_requirements_pin_only_the_api_layer():
     names = {re.split(r"[=<>\[ ]", ln.strip())[0].lower() for ln in (SERVICE / "requirements.txt").read_text()
              .splitlines() if ln.strip() and not ln.startswith("#")}
-    assert names == {"pydantic", "pytest", "fastapi", "uvicorn", "httpx"}
+    # idna (BSD-3-Clause; already installed as httpx's own dependency) is pinned because the plan view imports it for
+    # UTS #46 / IDNA2008 host checks (AEGIS round 4 Info 3); it is a pure-Python library, no runtime or SDK
+    assert names == {"pydantic", "pytest", "fastapi", "uvicorn", "httpx", "idna"}
 
 
 def test_delivery_runtime_keeps_the_elastic_studio_path_cut():

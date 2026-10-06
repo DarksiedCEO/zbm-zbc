@@ -54,6 +54,7 @@ Live run against the real ledger binary and this production entrypoint:
 | `CFX_MAX_ITEMS_PER_JOB` | `50` (1..200) | items in one job |
 | `CFX_MAX_OPS_PER_ITEM` | `20` (1..50) | operations in one item's change set |
 | `CFX_BRIEF_READ_INTERVAL_SECONDS` | `300` (0..86400) | a brief reads an item's store content live at most once per interval (service clock); otherwise the cached read is reused |
+| `CFX_MALFORMED_TASKS_MAX` | `5` (1..1000) | open Andre tasks for schema-invalid Finance posts (one per body, keyed hash only); beyond this every further body rolls into one open digest task with a count |
 | `CFX_BIND_ADDR` / `CFX_PORT` | `127.0.0.1` / `8500` | listen address |
 | `CFX_REQUEST_HEAD_TIMEOUT_SECONDS`, `CFX_KEEP_ALIVE_TIMEOUT_SECONDS`, `CFX_LIMIT_CONCURRENCY`, `CFX_SWITCH_INTERVAL_SECONDS`, `CFX_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`serve.py`, shared with every Python service) |
 | `LEDGER_SERVICE_URL` / `LEDGER_SERVICE_TOKEN` | unset | ledger-rust; unset = nothing can take effect |

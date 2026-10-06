@@ -88,7 +88,8 @@ class ClientFixService(ConnectionsMixin, JobsMixin, ApplyMixin):
         self.items: dict[str, str] = {}                # item id -> job id
         self.finance_events: dict[str, dict] = {}
         self.finance_conflicts: dict[tuple, dict] = {}  # (event id, sha of conflicting facts) -> recorded conflict
-        self.finance_malformed: dict[str, str] = {}     # sha256 of a schema-invalid Finance body -> recorded at
+        self.finance_malformed: dict[str, str] = {}     # HMAC of a schema-invalid Finance body -> recorded at
+        self.malformed_rolled: dict[str, int] = {}      # digest task id -> malformed bodies rolled into it (r4 L3)
         self.leases: dict[str, dict] = {}              # lease id -> lease
         self.lease_by_resource: dict[str, str] = {}    # resource key -> ACTIVE lease id
         self.frozen: dict[str, dict] = {}              # resource key -> freeze
@@ -508,8 +509,12 @@ class ClientFixService(ConnectionsMixin, JobsMixin, ApplyMixin):
 
     def tasks_view(self, status: Optional[str]) -> list[dict]:
         with self.lock:
-            return [dict(t) for t in sorted(self.tasks.values(), key=lambda t: (t["opened_at"], t["task_id"]))
-                    if status is None or t["status"] == status][:2000]
+            out = [dict(t) for t in sorted(self.tasks.values(), key=lambda t: (t["opened_at"], t["task_id"]))
+                   if status is None or t["status"] == status][:2000]
+            for t in out:                                 # a digest task shows how many bodies it holds (r4 L3)
+                if t["code"] == "FINANCE_EVENT_MALFORMED_DIGEST":
+                    t["count"] = self.malformed_rolled.get(t["task_id"], 0)
+            return out
 
     def close_task(self, task_id: str, body: dict) -> dict:
         """Andre closes a task once he has dealt with it (a rollback failure, an interrupted apply, a disagreeing

@@ -498,7 +498,8 @@ class TagManagerConnector(Connector):
             return APPLIED if ctx["restored_live"] else CONFLICT
         try:
             created = ctx.get("version_created") or self._identify_ours(account, ctx, call)
-        except NotOurs:
+        except NotOurs as exc:
+            ctx["foreign_version"] = exc.args[0]          # round 4 Info 2: the task names it
             return CONFLICT                               # M2: the latest version is someone else's: left alone
         except UnknownState:
             return UNKNOWN
@@ -522,11 +523,13 @@ class TagManagerConnector(Connector):
                 ctx["published"] = False
                 republished = True
             elif live["path"] != prev:
+                ctx["foreign_version"] = live["path"]
                 return CONFLICT                           # someone else published after us: never un-publish them
             latest = self._latest_id(account, call)
             if latest not in (prev_id, created_id):
                 if republished:                           # a newer version than ours may have been live a moment ago
                     ctx["release_may_be_unpublished"] = f"{account}/versions/{latest}"
+                ctx["foreign_version"] = f"{account}/versions/{latest}"
                 return CONFLICT                           # someone else's newer version sits on top of ours
             if latest == prev_id:
                 ctx["poisoned_version"] = None
@@ -612,3 +615,17 @@ class TagManagerConnector(Connector):
 
     def cleanup(self, account: str, ctx: dict, call: Call):
         return self._delete_workspace(ctx, call)
+
+    def leftovers(self, ctx: dict) -> list:
+        """Run workspaces that may still exist after cleanup (round 4 Info 2): one not deleted and not consumed, or one
+        handed to a create_version whose outcome is unknown (it "deletes the workspace" only if it ran)."""
+        out = []
+        for role, consumed, made in (("fix", "workspace_consumed", "version_created"),
+                                     ("revert", "revert_consumed", None)):
+            path = ctx.get("workspaces", {}).get(role)
+            if path is None or ctx.get(f"{role}_deleted"):
+                continue
+            if ctx.get(consumed) and (made is None or ctx.get(made)):
+                continue
+            out.append(path)
+        return out

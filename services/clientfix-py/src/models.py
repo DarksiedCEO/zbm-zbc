@@ -118,7 +118,7 @@ class PaymentEvent(Strict):
     job_id: CfxId
     kind: Literal["payment_confirmed"]
     amount: Money
-    currency: StrictStr
+    currency: Annotated[StrictStr, Field(pattern=r"^[A-Z]{3}$")]   # AEGIS round 4 L2: an ISO 4217 shape, nothing else
     quote_sha256: Sha256
 
 

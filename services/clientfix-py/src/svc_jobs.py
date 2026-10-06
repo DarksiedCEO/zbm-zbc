@@ -15,10 +15,13 @@ Finance has confirmed the quote's exact amount. Any new plan version voids the c
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 import unicodedata
 from typing import Optional
+
+import idna
 
 import money
 from catalogue import CHECK_OPS, CHECKS, CONTENT_CHECKS, FIRE_TEAMS, op_allowed_for, team_for
@@ -61,17 +64,36 @@ def external_hosts(value) -> set:
     return set()
 
 
-_LOOKALIKE_SCRIPTS = ("CYRILLIC", "GREEK", "ARMENIAN", "CHEROKEE", "COPTIC")
+_LOOKALIKE_SCRIPTS = frozenset({"CYRILLIC", "GREEK", "ARMENIAN", "CHEROKEE", "COPTIC"})
+
+
+def _script(ch: str) -> str:
+    if ch.isascii():
+        return "LATIN" if ch.isalpha() else "COMMON"
+    name = unicodedata.name(ch, "UNKNOWN")
+    if not unicodedata.category(ch).startswith("L"):
+        return "COMMON"
+    return name.split(" ")[0]
 
 
 def host_detail(host: str) -> dict:
-    """AEGIS round 3 Info: a punycode (``xn--``) host is shown NEXT TO its Unicode form, with a ``confusable`` flag —
-    set when a label mixes scripts, uses a script whose letters pass for Latin ones, or does not decode at all — so
-    the client approving the plan sees what the link really points at."""
+    """A punycode (``xn--``) host is shown NEXT TO its Unicode form, with a ``confusable`` flag and its reasons
+    (AEGIS round 3 Info, round 4 Info 3), so the client approving the plan sees where the link really points:
+
+      - ``idna_invalid``      the label is not valid IDNA2008 (``idna.check_label``): fullwidth, mathematical and
+                              other compatibility letters are DISALLOWED code points;
+      - ``not_uts46_mapped``  UTS #46 processing (``idna.uts46_remap``, non-transitional, STD3) changes the label: a
+                              registered label is already in mapped form, so a label that maps to something else is
+                              a look-alike of what it maps to;
+      - ``ascii_lookalike``   its NFKC case-folded skeleton is plain ASCII although the label is not;
+      - ``mixed_script``      letters from more than one script in one label;
+      - ``lookalike_script``  letters of a script whose letters pass for Latin ones (Cyrillic, Greek, ...);
+      - ``undecodable``       the punycode does not decode.
+    A legitimate IDN such as ``bücher`` or ``中国`` raises none of them."""
     labels = host.split(".")
     if not any(lb.startswith("xn--") for lb in labels):
-        return {"host": host, "unicode": None, "confusable": False}
-    out, confusable = [], False
+        return {"host": host, "unicode": None, "confusable": False, "reasons": []}
+    out, reasons = [], set()
     for lb in labels:
         if not lb.startswith("xn--"):
             out.append(lb)
@@ -79,19 +101,26 @@ def host_detail(host: str) -> dict:
         try:
             u = lb[4:].encode("ascii").decode("punycode")
         except (UnicodeError, ValueError):
-            return {"host": host, "unicode": None, "confusable": True}
-        scripts = set()
-        for ch in u:
-            if ch.isascii():
-                scripts.add("LATIN" if ch.isalpha() else "COMMON")
-                continue
-            name = unicodedata.name(ch, "UNKNOWN")
-            scripts.add(name.split(" ")[0])
-        letters = scripts - {"COMMON"}
-        if len(letters) > 1 or letters & set(_LOOKALIKE_SCRIPTS) or "UNKNOWN" in letters:
-            confusable = True
+            return {"host": host, "unicode": None, "confusable": True, "reasons": ["undecodable"]}
         out.append(u)
-    return {"host": host, "unicode": ".".join(out), "confusable": confusable}
+        try:
+            idna.check_label(u)
+        except (idna.IDNAError, ValueError):
+            reasons.add("idna_invalid")
+        try:
+            if idna.uts46_remap(u, std3_rules=True, transitional=False) != u:
+                reasons.add("not_uts46_mapped")
+        except (idna.IDNAError, ValueError):
+            reasons.add("idna_invalid")
+        skeleton = unicodedata.normalize("NFKC", u).casefold()
+        if not u.isascii() and skeleton.isascii():
+            reasons.add("ascii_lookalike")
+        letters = {_script(ch) for ch in u} - {"COMMON"}
+        if len(letters) > 1:
+            reasons.add("mixed_script")
+        if letters & _LOOKALIKE_SCRIPTS:
+            reasons.add("lookalike_script")
+    return {"host": host, "unicode": ".".join(out), "confusable": bool(reasons), "reasons": sorted(reasons)}
 
 
 def _no_redirect_chain(planned: list, connections: dict) -> None:
@@ -352,23 +381,50 @@ class JobsMixin:
     def _a_finance_event_conflict(self, d, at):
         self.finance_conflicts[(d["finance_event_id"], d["facts_sha256"])] = {"facts": d["facts"], "at": at}
 
+    def _malformed_key(self) -> bytes:
+        """AEGIS round 4 Info 1: the malformed-body digest is KEYED (HMAC-SHA256), so a low-entropy secret inside a
+        known-shape body cannot be recovered from the ledger by brute force. This department has no separate hash key
+        file; the key is derived, domain-separated, from the service's own secret (CFX_SERVICE_TOKEN), which never
+        leaves the process. Rotating that token only changes future digests (one more record for a resent body)."""
+        return hmac.new(self.settings.service_token.encode("utf-8"), b"clientfix-py finance-malformed-body v1",
+                        hashlib.sha256).digest()
+
     def payment_malformed(self, actor: str, payload) -> None:
-        """An authenticated Finance post that fails the schema: recorded by the SHA-256 of its canonical body only
-        (its content may be anything and is never stored), once per distinct body, with a task for Andre. A ledger
-        that cannot take the line is 503 (retry), never a silent refusal."""
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                                           default=str).encode("utf-8")).hexdigest()
+        """An authenticated Finance post that fails the schema: recorded by the keyed HMAC of its canonical body only
+        (its content may be anything and is never stored), once per distinct body. Up to CFX_MALFORMED_TASKS_MAX
+        open tasks each name one body; beyond that every further body rolls into ONE open digest task with a count
+        (AEGIS round 4 L3). A ledger that cannot take the line is 503 (retry), never a silent refusal."""
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                               default=str).encode("utf-8")
+        digest = hmac.new(self._malformed_key(), canonical, hashlib.sha256).hexdigest()
         with self.lock:
             self._gate()
             if digest in self.finance_malformed:
                 return
-            t = self._task("decide", digest, "FINANCE_EVENT_MALFORMED", "FINANCE_EVENT_MALFORMED")
-            self._commit("finance_event_malformed", {"body_sha256": digest, "tasks": [t]}, actor,
+            open_n = sum(1 for t in self.tasks.values()
+                         if t["code"] == "FINANCE_EVENT_MALFORMED" and t["status"] == "open")
+            data: dict = {"body_hmac": digest}
+            if open_n < self.settings.malformed_tasks_max:
+                data["tasks"] = [self._task("decide", digest, "FINANCE_EVENT_MALFORMED", "FINANCE_EVENT_MALFORMED")]
+            else:
+                rolled = [t for t in self.tasks.values() if t["code"] == "FINANCE_EVENT_MALFORMED_DIGEST"]
+                current = next((t for t in rolled if t["status"] == "open"), None)
+                if current is None:
+                    t = self._task("decide", f"finance-malformed-digest-{len(rolled) + 1}",
+                                   "FINANCE_EVENT_MALFORMED_DIGEST", "FINANCE_EVENT_MALFORMED_DIGEST")
+                    data["tasks"] = [t]
+                    data["digest_task_id"] = t["task_id"]
+                else:
+                    data["digest_task_id"] = current["task_id"]
+            self._commit("finance_event_malformed", data, actor,
                          evidence=("finance_event_malformed", f"finance-body:{digest}",
-                                   {"body_sha256": digest}, (actor, digest)))
+                                   {"body_hmac": digest, "rolled": "digest_task_id" in data}, (actor, digest)))
 
     def _a_finance_event_malformed(self, d, at):
-        self.finance_malformed[d["body_sha256"]] = at
+        self.finance_malformed[d.get("body_hmac") or d.get("body_sha256")] = at
+        tid = d.get("digest_task_id")
+        if tid:
+            self.malformed_rolled[tid] = self.malformed_rolled.get(tid, 0) + 1
 
     def _a_payment_confirmed(self, d, at):
         f = d["facts"]

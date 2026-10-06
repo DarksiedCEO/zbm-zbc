@@ -244,7 +244,11 @@ def _main(work: Path) -> int:
               rv.status_code == 200 and rv.json()["status"] == "revoked"
               and job["items"][0]["status"] == "cancelled_revoked" and job["report"] is not None
               and job["status"] == "refund_pending")
-        r = a.get("/refunds").json()[0]
+        # AEGIS round 4 L1: the orphaned 174.99 payment above has its own refund; select THIS job's unfixed refund
+        # by kind and job id, never by list position (refund ids are hashes, so the order is not fixed)
+        def unfixed_refund() -> dict:
+            return next(x for x in a.get("/refunds").json() if x["kind"] == "unfixed" and x["job_id"] == jid)
+        r = unfixed_refund()
         no_andre = a.post(f"/refunds/{r['refund_id']}/approve", {"request_id": rid(), "sha256": r["refund_sha256"]})
         bad_hash = a.post(f"/refunds/{r['refund_id']}/approve", {"request_id": rid(), "sha256": "1" * 64}, andre=True)
         ok = a.post(f"/refunds/{r['refund_id']}/approve", {"request_id": rid(), "sha256": r["refund_sha256"]},
@@ -253,7 +257,7 @@ def _main(work: Path) -> int:
         check("the refund needs Andre's token and exact hash, then stays queued (Finance not wired)",
               r["amount"] == "175.00" and no_andre.status_code == 403 and bad_hash.status_code == 409
               and ok.status_code == 200 and tick.get("not_wired") == 1
-              and a.get("/refunds").json()[0]["status"] == "queued")
+              and unfixed_refund()["status"] == "queued")
 
         # --- restart, truncation ------------------------------------------------------------------------------------
         stop(sp, "service")

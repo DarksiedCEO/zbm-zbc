@@ -411,9 +411,13 @@ accounts.containers.versions/publish, accounts.containers.versions/get, accounts
   fingerprint of the version being published ("must match the fingerprint of the container version in storage"); it
   has no precondition on the version currently live. Between the rollback reading "live is ours" and re-publishing the
   snapshot, a release the client publishes can be un-published by us. It cannot be prevented through the API; it is
-  DETECTED: after the re-publish the latest version is read, and a version newer than ours makes the rollback a
-  `conflict` (`rollback_failed`, container frozen) with a `GTM_RELEASE_MAY_BE_UNPUBLISHED` task naming that version
-  (`ref`) so Andre re-publishes it if it was live. The window is two API calls long and only exists after a failed run.
+  DETECTED only in part: after the re-publish the latest version is read, and a version newer than ours makes the
+  rollback a `conflict` (`rollback_failed`, container frozen) with a `GTM_RELEASE_MAY_BE_UNPUBLISHED` task naming
+  that version (`ref`) so Andre re-publishes it if it was live. *Corrected in round 4 (Info 4):* this detection covers
+  only a client release that CREATES a new version. A client who re-publishes an existing older version inside the
+  window creates no new version, leaves the latest header unchanged, and is NOT detected — our re-publish of the
+  snapshot silently replaces theirs. The window is two API calls long (read live, publish) and only exists during the
+  rollback of a failed run; this part is accepted as is.
 - **L5** `/brief` checks the kill switch (`revoked_now`, `revoked_clients_now`) and the connection's status before
   using its cache; a revocation (even one whose commit failed) drops every cached read of that client's items.
 - **Every Finance payment path (round 3 follow-up).** `POST /finance/events` (caller `finance_31`, the only route that
@@ -424,12 +428,12 @@ accounts.containers.versions/publish, accounts.containers.versions/get, accounts
   | accepted job, exact amount and quote hash, USD | 200, job `paid` | `payment_confirmed` |
   | job still `quoted` (quote not accepted) | 200, job unpaid | `payment_orphaned` + full refund proposal (`reason: quote_not_accepted`) + `ORPHANED_PAYMENT` task |
   | amount or quote hash differs | 200, job unpaid | same, `reason: payment_mismatch` |
-  | currency other than USD | 200, job unpaid | same, `reason: currency_not_supported` |
+  | currency other than USD (three capital letters, ISO 4217 shape) | 200, job unpaid | same, `reason: currency_not_supported` |
   | job already paid, or closed unpaid | 200 | same, `reason: job_cannot_take_payment` |
   | job id unknown | 404 `JOB_NOT_FOUND` with `recorded: true` and the `refund_id` | same, `reason: job_not_found` (`client_id` null, no items) |
   | the same Finance event id again, same facts | the first answer | none needed (already recorded) |
   | the same Finance event id with OTHER facts | 409 `FINANCE_EVENT_REUSED` with `recorded: true` | `finance_event_conflict` (both fact hashes) + `FINANCE_EVENT_CONFLICT` task, once per distinct fact set; no automatic refund — which event is the money is ambiguous, Andre decides |
-  | body fails the schema (a float, a missing field, a secret-shaped value) | 422 | `finance_event_malformed` with ONLY the SHA-256 of the canonical body + `FINANCE_EVENT_MALFORMED` task, once per body |
+  | body fails the schema (a float, a missing field, a secret-shaped value, a currency that is not `^[A-Z]{3}$`) | 422 | `finance_event_malformed` with ONLY the keyed HMAC of the canonical body (round 4 Info 1) + `FINANCE_EVENT_MALFORMED` task, once per body; beyond `CFX_MALFORMED_TASKS_MAX` open ones (default 5) further bodies roll into one `FINANCE_EVENT_MALFORMED_DIGEST` task with a count (round 4 L3) |
   | service closed, integrity unverified, or the ledger cannot take the line | 503 | nothing could be written; nothing was accepted either: Finance retries the same event id (idempotent) |
   | caller is not `finance_31` | 403 | not a Finance payment event (unauthenticated input is never written to the ledger) |
   `REQUEST_ID_REUSED` cannot occur on this route: the request key is scoped by the Finance event id, and an event id
@@ -437,3 +441,36 @@ accounts.containers.versions/publish, accounts.containers.versions/get, accounts
 - **Info** every punycode host in `new_external_hosts` is shown next to its Unicode form in
   `new_external_hosts_detail` (job and item views) with a `confusable` flag (mixed scripts, a Latin-lookalike script,
   or undecodable punycode), so the client approving the plan sees where the link really points.
+
+## Amendment — AEGIS round 4 (Oct 6 2026, on b75a77b): not blocking, cleared for wiring; Lows and Infos closed
+
+Regression tests: `services/clientfix-py/tests/test_aegis_r4.py` (18 of 19 fail on b75a77b; the 19th is the control
+that a well-formed non-USD payment is still recorded and refunded).
+
+- **L1** the live run selects the refund it checks by `kind == "unfixed"` and its job id, never by list position (the
+  orphaned refund of the mismatched test payment sorts anywhere: refund ids are hashes). Run five times in a row.
+- **L2** `PaymentEvent.currency` must match `^[A-Z]{3}$`. Anything else is a schema failure: recorded only as a keyed
+  digest (never the text), so free text can no longer reach the log, the refund terms or Finance.
+- **L3** at most `CFX_MALFORMED_TASKS_MAX` (default 5, 1..1000) open `FINANCE_EVENT_MALFORMED` tasks; every further
+  distinct body is still one ledger line but rolls into ONE open `FINANCE_EVENT_MALFORMED_DIGEST` task whose `count`
+  grows; once Andre closes it, the next overflow opens a new one.
+- **Info 1** the malformed-body digest is HMAC-SHA256 under a key derived (domain-separated,
+  `clientfix-py finance-malformed-body v1`) from the service's own secret `CFX_SERVICE_TOKEN`: this department has no
+  separate hash-key file, and the token never leaves the process. A low-entropy secret inside a known-shape body can
+  no longer be brute-forced from the ledger. Rotating the token changes future digests only.
+- **Info 2** a `ROLLBACK_FAILED` (or other freeze) task names the foreign version that made the rollback a
+  `conflict` (`ref`) and every run workspace this run created that may still exist (`run_workspaces`: not deleted
+  and not consumed, or handed to a `create_version` whose outcome is unknown). The reaper still treats it under M3.
+- **Info 3** `new_external_hosts_detail` flags a punycode host by UTS #46 / IDNA2008 (the `idna` library, BSD-3,
+  already httpx's dependency, now pinned): `idna_invalid` (`check_label`: fullwidth and mathematical letters are
+  disallowed code points), `not_uts46_mapped` (`uts46_remap`, non-transitional, STD3, changes the label),
+  `ascii_lookalike` (the NFKC case-folded skeleton is ASCII), `mixed_script`, `lookalike_script` (Cyrillic, Greek,
+  Armenian, Cherokee, Coptic letters), `undecodable`. `ｇｏｏｇｌｅ`, `𝐠𝐨𝐨𝐠𝐥𝐞`, `аpple`, `аррӏе` are flagged; `bücher`,
+  `café`, `中国` are not.
+- **Info 4** the L4 text above is corrected (an old version re-published by the client inside the window is not
+  detected). **Accepted risk: the reaper's getStatus→DELETE window.** workspaces.delete has no precondition (no
+  fingerprint), so between getStatus and the DELETE there is a one-request window in which someone could start
+  editing the orphaned run workspace; that edit would be deleted with it. The reaper holds the container and re-checks
+  lease, freeze and revocation under the lock right before the DELETE (round 3 L1), which closes the window for this
+  service's own runs, but not for a person working in the GTM UI. It is accepted: the workspace is one this service
+  created, recorded and abandoned, with no change in it a request earlier.

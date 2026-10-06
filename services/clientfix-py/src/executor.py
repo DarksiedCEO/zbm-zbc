@@ -147,10 +147,10 @@ def run_item(connector: Connector, conn: ConnView, item_id: str, ops: list, tran
                 out["status"] = "halted_frozen"
             return out
     finally:
-        _cleanup(connector, conn, ctx, make_call(live_rollback or live), step)
+        _cleanup(connector, conn, ctx, make_call(live_rollback or live), step, out)
 
 
-def _cleanup(connector, conn, ctx, call, step) -> None:
+def _cleanup(connector, conn, ctx, call, step, out) -> None:
     try:
         outcome = connector.cleanup(conn.account_ref, ctx, call)
     except Halt:
@@ -162,6 +162,12 @@ def _cleanup(connector, conn, ctx, call, step) -> None:
             step("cleanup", {"outcome": outcome})
         except Halt:
             pass
+    try:
+        left = connector.leftovers(ctx)
+    except Exception:                  # noqa: BLE001
+        left = []
+    if left:
+        out["run_workspaces_left"] = sorted(left)
 
 
 def _apply_and_verify(connector, conn, ops, keys, extra, snap, ctx, call, step, out) -> Optional[str]:
@@ -228,7 +234,7 @@ def _rollback(connector, conn, snap, ctx, call, step, out) -> None:
 def _gtm_refs(ctx: dict, out: dict) -> None:
     """GTM: our version is still the container's latest (R2-1) / a newer release may have been un-published by our
     re-publish of the snapshot (round 3 L4, accepted risk): each is named so Andre's task points at it."""
-    for k in ("poisoned_version", "release_may_be_unpublished"):
+    for k in ("poisoned_version", "release_may_be_unpublished", "foreign_version"):
         if ctx.get(k):
             out[k] = ctx[k]
         else:
