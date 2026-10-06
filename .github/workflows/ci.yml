@@ -2,7 +2,7 @@
 #
 # One job per service (the twelve pip-managed Python services share one matrix definition and report as separate
 # checks, e.g. "python-tests (finance-py, 3.13)"), the uv-managed delivery-py, ledger-rust, orchestrator-go, the
-# dashboard, the five self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
+# dashboard, the eight self-contained live runs (real ledger-rust binary over real HTTP), the Docker live proof for
 # delivery-py, dependency and secret scans, and one `required` job that needs every other job so branch protection
 # has a single check to require. See docs/ci.md for what each job proves and what is deliberately not here yet.
 #

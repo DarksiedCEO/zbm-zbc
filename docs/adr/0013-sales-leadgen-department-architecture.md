@@ -135,7 +135,8 @@ agent calls this service yet.
 6. Rendering and delivering the proposal document itself (the service records the approved content and its release).
 7. A per-state quiet-hours and call-frequency table; a CCPA erasure design for the local log; a country-to-zone
    check so texts and calls can reach numbers outside +1 (refused until then, AEGIS S3-M1).
-8. Wiring into CI, the hygiene checker's service list and docs/test-counts.md (left to the integration lead).
+8. ~~Wiring into CI, the hygiene checker's service list and docs/test-counts.md (left to the integration lead).~~
+   **Done** on branch `wire-sales-service-26-30`, commit 2ef6a2c.
 
 ## Settings
 
