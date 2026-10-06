@@ -24,12 +24,12 @@ NUMBER = 7
 NAME = "reply_classifier"
 DECIDES = "unsubscribe / out_of_office / interested / review"
 
-_CARRIER = {"stop", "stopall", "unsubscribe", "cancel", "end", "quit", "revoke", "optout", "opt out", "stop all"}
-_UNSUB = re.compile(r"\b(stop|stopall|unsubscrib\w*|opt ?out|revoke|remove me|take me off|do not (contact|email|"
+_CARRIER = {"stop", "stopall", "unsubscribe", "unsub", "cancel", "end", "quit", "revoke", "optout", "opt out", "stop all"}
+_UNSUB = re.compile(r"\b(stop|stopall|unsub\w*|opt ?out|revoke|remove me|take me off|do not (contact|email|"
                     r"text|call)|dont (contact|email|text|call)|stop (texting|emailing|calling|contacting)|"
                     r"not interested|no thanks|no thank you|leave me alone|wrong person|no more (emails?|messages?)|"
                     r"alto|parar|cancelar|baja|no mas mensajes)\b")
-_UNSUB_PHONE = re.compile(r"\b(cancel\w*|end|quit|stop\w*|unsubscrib\w*|opt ?out|revoke\w*|wrong (number|person)|"
+_UNSUB_PHONE = re.compile(r"\b(cancel\w*|end|quit|stop\w*|unsub\w*|opt ?out|revoke\w*|wrong (number|person)|"
                           r"lose my number|leave me alone|remove\w*|no more (texts?|messages?|calls?))\b")
 _OOO = re.compile(r"\b(out of (the )?office|ooo|automatic reply|auto ?reply|on vacation|away until|on leave|"
                   r"currently away|limited access to email)\b")
@@ -57,7 +57,7 @@ def _fold_word(w: str) -> str:
 def normalise(text: str) -> str:
     t = unicodedata.normalize("NFKC", text)
     t = "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c)).casefold()
-    t = t.translate(_CONFUSABLE)
+    t = t.translate(_CONFUSABLE).replace("_", " ")             # sweep A: "_" separates words (S_T_O_P, please_unsubscribe)
     t = " ".join(_fold_word(w) for w in t.split())
     t = re.sub(r"(?<=[^\W\d_])[^\w\s]+(?=[^\W\d_])", "", t)      # S.T.O.P -> stop, don't -> dont, opt-out -> optout
     t = re.sub(r"[^\w\s]+", " ", t)
@@ -73,13 +73,21 @@ def normalise(text: str) -> str:
     return " ".join(out)
 
 
+def _collapse(t: str) -> str:
+    """Repeated letters collapsed (service-py's channels._collapse): "stoooop" -> "stop"."""
+    return re.sub(r"([^\W\d_])\1+", r"\1", t)
+
+
 def classify(text: str, channel: str = "email") -> str:
     """``channel`` is ``email`` or a platform (instagram, tiktok, x, youtube): a DM gets the lower opt-out bar."""
     t = normalise(text)
-    if t in _CARRIER or _UNSUB.search(t):
-        return "unsubscribe"
-    if channel != "email" and _UNSUB_PHONE.search(t):
-        return "unsubscribe"
+    # sweep A: repeated letters collapsed too ("stoooop", "unsubbbscribe"); only for opt-out wording (over-suppressing
+    # is the safe side), never for the other labels
+    for v in (t, _collapse(t)):
+        if v in _CARRIER or _UNSUB.search(v):
+            return "unsubscribe"
+        if channel != "email" and _UNSUB_PHONE.search(v):
+            return "unsubscribe"
     if _OOO.search(t):
         return "out_of_office"
     if _INTERESTED.search(t):

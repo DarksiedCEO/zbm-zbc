@@ -46,6 +46,9 @@ class LeadsMixin:
         if d.get("task"):
             self._a_task_opened(d["task"], at)
 
+    def _a_lead_import_ran(self, d, at):
+        pass                                         # the request record (_apply) is the point: the import's answer
+
     def _a_lead_evidence_added(self, d, at):
         lead = self.leads[d["lead_id"]]
         lead["evidence"] = (lead["evidence"] + [d["evidence"]])[-MAX_EVIDENCE:]
@@ -266,15 +269,21 @@ class LeadsMixin:
         return self.lead_view(self.leads[lead_id])
 
     def import_leads(self, caller: str, body: dict) -> dict:
-        """Public-data and paid-provider leads come only through their ports (not built: 503 SOURCE_NOT_WIRED)."""
+        """Public-data and paid-provider leads come only through their ports (not built: 503 SOURCE_NOT_WIRED).
+
+        Sweep A: the import's answer is committed under its request key (``lead_import_ran``), so the same body again
+        answers what the first call did (``already_ran``) and the same request_id with another body is 409
+        REQUEST_ID_REUSED. Before, nothing was ever recorded under the import's own key: a reuse with another body
+        ran a second, different import. A retry after a failure part-way skips the items already committed (their
+        own keys ``<rk>|<i>``)."""
         source = body["source"]
         port = self.ports.sources[source]
+        rk = f"lead_import|{source}|{body['request_id']}"
         with self.lock:
             self._gate()
-            rk = f"lead_import|{source}|{body['request_id']}"
             prev = self._idem(caller, rk, body)
             if prev:
-                return {"source": source, "already_ran": True}
+                return {**(prev[1] or {"source": source}), "already_ran": True}
         try:
             found = port.fetch(body["limit"])
         except NotWired:
@@ -300,7 +309,14 @@ class LeadsMixin:
                     duplicates += 1
                 else:
                     created.append(view["lead_id"])
-            return {"source": source, "created": created, "duplicates": duplicates, "refused": refused}
+            prev = self._idem(caller, rk, body)             # another call with this key finished meanwhile
+            if prev:
+                return {**(prev[1] or {"source": source}), "already_ran": True}
+            result = {"source": source, "created": created, "duplicates": duplicates, "refused": refused}
+            self._commit("lead_import_ran", self._req({"source": source, "created": len(created),
+                                                       "duplicates": duplicates, "refused": refused},
+                                                      caller, rk, body, result), caller)
+            return result
 
     # ------------------------------------------------------------------------------------------------ pipeline
 

@@ -3,7 +3,7 @@ service. Money and percentages are canonical strings, checked again by money.py 
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
@@ -244,13 +244,20 @@ class EmailEvent(Strict):
     event: Literal["delivered", "soft_bounce", "hard_bounce", "complaint"]
 
 
-class ReplyIn(Strict):
-    request_id: Id
-    channel: Literal["email", "sms", "voice"]
-    message_id: Optional[Id] = None
-    from_email: Optional[Annotated[StrictStr, Field(max_length=254)]] = None
-    from_phone: Optional[Annotated[StrictStr, Field(max_length=32)]] = None
-    text: Annotated[StrictStr, Field(min_length=0, max_length=10_000)]   # an empty (media-only) reply still holds
+class ReplyIn(BaseModel):
+    """A reply relayed from the email / SMS / voice provider. NOTHING a provider sends may get a reply refused (sweep A,
+    influencer-py's AEGIS R1-M4 / R2-N3 raw-body approach): every field is optional and of any JSON type, unknown
+    fields are ignored (never stored), and the service reads what it can (svc_outreach._reply_fields) — a text of any
+    length is truncated before it is classified and hashed, ``Name <addr>`` is read as ``addr``, a channel it does not
+    know is ``other`` (the lower phone opt-out bar), a missing or unreadable request id is replaced by the SHA-256 of
+    the body. The text, addresses and numbers are never stored raw (only keyed hashes and the text's SHA-256)."""
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    request_id: Any = None
+    channel: Any = None
+    message_id: Any = None
+    from_email: Any = None
+    from_phone: Any = None
+    text: Any = None
 
 
 class PriceApprove(Strict):

@@ -37,7 +37,7 @@ from starlette.concurrency import run_in_threadpool
 
 import config as config_mod
 import models as m
-from errors import Forbidden, FounderRefused, Invalid, SalesError
+from errors import Forbidden, FounderRefused, Invalid, SalesError, Unavailable
 from founder import FounderGate
 from intelligences import registry
 from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
@@ -512,8 +512,12 @@ def create_app(service: SalesService, settings: config_mod.Settings) -> FastAPI:
         return svc.email_event(who, req)
 
     @app.post("/sales/v1/replies", dependencies=auth, status_code=201)
-    def reply(req: dict = Depends(body(m.ReplyIn)), who: str = Depends(events)) -> dict:
-        return svc.reply(who, req)
+    def reply(payload: Any = Body(default=None), who: str = Depends(events)) -> dict:
+        # sweep A (influencer-py's AEGIS R2-N3): never refused for anything a provider sends — no forbidden-key scan
+        # (unknown fields are ignored and nothing raw is stored); a body that is not a JSON object is read as an
+        # empty reply (still recorded, as a review entry for a person)
+        raw = payload if isinstance(payload, dict) else {}
+        return svc.reply(who, m.ReplyIn.model_validate(raw).model_dump(mode="python"), raw)
 
     # ------------------------------------------------------------------ price books and proposals
 
@@ -584,6 +588,8 @@ def create_app(service: SalesService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get("/sales/v1/audit/integrity", dependencies=auth)
     def integrity(who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
+        if svc.closed:
+            raise Unavailable(R("SERVICE_CLOSED"))
         res = svc.verify_integrity(force=True)
         return {"integrity": res, "ledger_valid": svc.rec.client.verify(), "log_length": len(svc.log)}
 
@@ -591,6 +597,13 @@ def create_app(service: SalesService, settings: config_mod.Settings) -> FastAPI:
     def audit_export(since: int = Query(default=1, ge=1, le=10_000_000), limit: int = Query(default=200, ge=1, le=1000),
                      who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
         return svc.audit_export(since, limit)
+
+    @app.get("/sales/v1/audit/evidence", dependencies=auth)
+    def audit_evidence(limit: int = Query(default=200, ge=1, le=1000), offset: int = Query(default=0, ge=0, le=10_000_000),
+                       event_type: Optional[str] = Query(default=None, pattern=r"^[a-z_]{1,64}$"),
+                       who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
+        """Sweep A R6-M1: the evidence view Compliance (38) and auditors use; unanchored evidence = attempted."""
+        return svc.audit_evidence(limit, offset, event_type)
 
     return app
 

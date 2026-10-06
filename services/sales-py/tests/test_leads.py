@@ -75,7 +75,8 @@ def test_import_through_a_wired_port_keeps_source_and_evidence_and_refuses_bad_r
     assert lead["source"] == "public_data" and lead["evidence"][0]["kind"] == "public_record"
     assert "I1" not in lead["score"]["rules"]
     again = h.ok(h.post("/sales/v1/leads/import", body, "sales_agent"))
-    assert again["created"] == [] and again["duplicates"] == 1     # a retried import adds nothing
+    # a retried import adds nothing; sweep A: it answers what the first call did (the result is committed)
+    assert again["already_ran"] is True and again["created"] == r["created"] and len(h.svc.leads) == 1
 
 
 # ------------------------------------------------------------------ dedupe
