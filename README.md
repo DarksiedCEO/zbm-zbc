@@ -919,6 +919,59 @@ cd services/bizdev-py && python3 -m pytest -q   # count: docs/test-counts.md
 LEDGER_BIN=services/ledger-rust/target/release/server python3 services/bizdev-py/devtools/live_run.py
 ```
 
+## Client Delivery & Operations (28): the client-fix lane (`services/clientfix-py`) — Oct 6, 2026
+
+The second lane of department 28. `services/delivery-py` (ADR 0011, the section below) is the AEGIS fix engine for
+our own code and owns the agent runtime; this service fixes what Revenue Recovery finds in a client's systems, in four
+version-1 lanes: store and website settings (Shopify product pages and SEO, pages, redirects, product metafields),
+tracking and analytics (GA4 key events, Google Tag Manager tags), follow-up automations (ports to Service 29-30 and
+Sales 27, not built), and listings and reviews (Google Business Profile phone, website and address; Yelp as a guided
+manual fix). Founder decisions (Oct 6 Q&A), the connector table with doc citations, and the unlock list:
+`docs/adr/0017-client-fix-lane-architecture.md`. Routes, settings and contracts: `services/clientfix-py/README.md`.
+Env prefix `CFX_`, default port 8500.
+
+- **Status:** built and tested (count: docs/test-counts.md). **Not in force.** Nothing is wired: every apply answers
+  `503 CONNECTOR_NOT_WIRED` before anything is touched, engaging the fire team answers `503 MODEL_NOT_WIRED`,
+  re-detection answers unknown (nothing is ever counted fixed), and approved refunds stay `queued`. Setting any
+  unbuilt provider or client switch refuses start.
+- **Relationship to delivery-py.** The fire teams (two teams of Claude lane specialists, 3 and 4) run inside
+  delivery-py's runtime and its sandbox, guardrail and egress adapters, never here: nothing under
+  `clientfix-py/src` imports deer-flow, LangGraph, LangChain or a model SDK, and `tests/test_runtime_boundary.py`
+  also fails if delivery-py's three guards against the Elastic-licensed LangGraph Studio path are weakened. The teams
+  only propose change sets (typed operations from a per-connector allowlist, with `after` values); the service reads
+  every `before` value from the platform itself and treats the change set as untrusted data.
+- **The client approves, code applies.** Official OAuth app connections only: a password field or token-shaped value
+  is refused, the token stays in the Cybersecurity (22) vault, and revoking a connection halts that client's in-flight
+  work and cancels every not-yet-applied item planned on that connection. No work before Finance confirms payment of exactly the quoted amount. The
+  client approves the exact plan by its hash; deterministic code (`src/executor.py`) snapshots, dry-runs where the
+  platform can, applies, reads back, and rolls back from the snapshot on any mismatch, freezing the resource for Andre
+  when a rollback cannot be proven. Only a re-detection by Revenue Recovery makes an item `fixed_proven`; every other
+  item is proposed for refund, which Andre approves by his token and the exact hash.
+- **Record-first log** (bizdev-py's design): typed evidence on the ledger first, then the anchored log line; no
+  client value, shop, vault reference, session token or amount reaches the ledger; a truncated, replaced or edited
+  log stops all writes.
+- **Unlock list** (ADR 0017): an Anthropic API key for the fire teams, held in the Cybersecurity (22) vault and read
+  by delivery-py, never by this service; a delivery-py change-set route; a Shopify Partner app; a Google Cloud
+  project with an OAuth client for GA4 Admin, Tag Manager and Business Profile, plus Google's Business Profile API
+  approval; Andre's Yelp choice (a Yelp Fusion plan and key for verifying guided fixes, or a partner contract for the
+  Data Ingestion API); the Finance refund contract (finance-py intakes for a client-fix invoice and an Andre-approved
+  client-fix refund, and a `payment_confirmed` sender); the hub client session (the client login behind
+  `POST /client-sessions`, the OAuth flows, the revocation relay); the vault client and connector transport; a
+  re-detection route in Revenue Recovery; the automation routes in service-py and sales-py; passkey approvals and
+  minted caller tokens through Cybersecurity (22); the console pages.
+- **Live run** (`devtools/live_run.py`: real ledger-rust binary, production entrypoint, every port a stand-in): the
+  Anthropic key setting refuses start → start-up integrity → second process refused → password and token values
+  refused, vault reference accepted → tenant mismatch refused → quote accepted in a client session, no plan before
+  payment, only the exact amount pays → fire team answers `MODEL_NOT_WIRED` → out-of-allowlist op and model-typed
+  `before` refused → plan refused `CONNECTOR_NOT_WIRED` with nothing recorded → revocation cancels the open item and
+  the job settles into a dated report and a refund → refund needs Andre's token and hash, then stays queued →
+  restart → truncated log detected → nothing of the client's on the ledger → `GET /ledger/verify` valid.
+
+```bash
+cd services/clientfix-py && python3 -m pytest -q   # count: docs/test-counts.md
+LEDGER_BIN=services/ledger-rust/target/release/server python3 services/clientfix-py/devtools/live_run.py
+```
+
 ## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026, fix waves 20-26b applied
 
 The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;
