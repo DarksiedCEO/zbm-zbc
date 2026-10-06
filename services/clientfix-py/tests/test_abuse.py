@@ -577,7 +577,9 @@ def test_no_work_before_payment(h):
               "PAYMENT_REQUIRED")
     h.refused(h.get(f"/jobs/{j['job_id']}/brief", caller="fire_team"), 409, "PAYMENT_REQUIRED")
     h.refused(h.apply(j["job_id"]), 409, "PAYMENT_REQUIRED")
-    h.refused(h.pay(j), 409, "QUOTE_NOT_ACCEPTED")
+    early_pay = h.ok(h.pay(j))                                # before acceptance: recorded, refunded, never pays
+    assert early_pay["status"] == "quoted" and early_pay["payment"] is None
+    assert [p["reason"] for p in early_pay["orphan_payments"]] == ["quote_not_accepted"]
     h.refused(h.post(f"/jobs/{j['job_id']}/quote/accept", {"request_id": rid(), "sha256": "c" * 64}, caller="hub",
                      session=h.session()), 409, "QUOTE_HASH_MISMATCH")
     h.ok(h.accept(j))
@@ -585,7 +587,8 @@ def test_no_work_before_payment(h):
     # AEGIS round 3 L3: a payment that does not match the quote never pays the job; it is recorded and refunded
     for bad in (h.pay(j, amount="149.99"), h.pay(j, quote_sha="d" * 64)):
         assert h.ok(bad)["status"] == "accepted" and h.ok(bad)["payment"] is None
-    assert sorted(r["reason"] for r in h.ok(h.get("/refunds"))) == ["payment_mismatch", "payment_mismatch"]
+    assert sorted(r["reason"] for r in h.ok(h.get("/refunds"))) == ["payment_mismatch", "payment_mismatch",
+                                                                    "quote_not_accepted"]
     r = h.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin-evt-" + "a" * 40,
                                    "job_id": j["job_id"], "kind": "payment_confirmed", "amount": 150.0,
                                    "currency": "USD", "quote_sha256": j["quote_sha256"]}, caller="finance_31")
@@ -595,9 +598,9 @@ def test_no_work_before_payment(h):
     h.ok(h.pay(j, ev=ev))                                     # the same event again: answered, nothing new
     h.refused(h.pay(j, ev=ev, amount="1.00"), 409, "FINANCE_EVENT_REUSED")
     dup = h.ok(h.pay(j, amount=j["quote"]["total"]))          # paid twice: recorded and proposed for refund
-    assert len(dup["orphan_payments"]) == 3 and len(h.ok(h.get("/refunds"))) == 3     # 2 mismatched + the duplicate
+    assert len(dup["orphan_payments"]) == 4 and len(h.ok(h.get("/refunds"))) == 4  # early, 2 mismatched, duplicate
     assert not h.t.calls
-    assert len(h.ledger.of_type("payment_confirmed")) == 1 and len(h.ledger.of_type("payment_orphaned")) == 3
+    assert len(h.ledger.of_type("payment_confirmed")) == 1 and len(h.ledger.of_type("payment_orphaned")) == 4
 
 
 def test_payment_from_anyone_but_finance_is_refused(h):

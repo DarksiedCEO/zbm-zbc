@@ -126,7 +126,7 @@ anchored log line with matching `rk` and `seq` are `committed` in `GET /cfx/v1/a
 | `GET /jobs[?client_id&status]` | dashboard, clientfix_agent, compliance_38 | jobs |
 | `GET /jobs/{id}` | dashboard, clientfix_agent, compliance_38; hub inside the client's session | one job: items, quote, plan, results, report |
 | `POST /jobs/{id}/quote/accept` | hub + client session | accept the quote by hash; asks Finance for the up-front invoice (not wired) |
-| `POST /finance/events` | finance_31 | `payment_confirmed` for exactly the quote's amount and hash; any other payment (mismatched, duplicate, closed job) is recorded and its full refund proposed |
+| `POST /finance/events` | finance_31 | `payment_confirmed` for exactly the quote's amount and hash pays an accepted job; every other payment (quote not accepted, mismatched, non-USD, duplicate, closed or unknown job) is recorded and its full refund proposed; a reused event id or a malformed body is recorded (hash only) for Andre (ADR 0017, round 3) |
 | `GET /jobs/{id}/brief` | fire_team, dashboard | the fire team's brief; only content checks carry the client's text, as `untrusted_client_content` (read-only, secret-shaped values withheld, at most one live read per item per interval) — paid jobs only |
 | `POST /jobs/{id}/engage` | clientfix_agent, dashboard, scheduler | run the fire team (503 `MODEL_NOT_WIRED` today) |
 | `POST /jobs/{id}/plan` | fire_team, dashboard | submit the change sets: `{op, target, field, after}` only — the service reads every `before` from the store itself (503 `CONNECTOR_NOT_WIRED` today); paid jobs only |

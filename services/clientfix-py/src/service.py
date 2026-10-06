@@ -87,6 +87,8 @@ class ClientFixService(ConnectionsMixin, JobsMixin, ApplyMixin):
         self.jobs: dict[str, dict] = {}
         self.items: dict[str, str] = {}                # item id -> job id
         self.finance_events: dict[str, dict] = {}
+        self.finance_conflicts: dict[tuple, dict] = {}  # (event id, sha of conflicting facts) -> recorded conflict
+        self.finance_malformed: dict[str, str] = {}     # sha256 of a schema-invalid Finance body -> recorded at
         self.leases: dict[str, dict] = {}              # lease id -> lease
         self.lease_by_resource: dict[str, str] = {}    # resource key -> ACTIVE lease id
         self.frozen: dict[str, dict] = {}              # resource key -> freeze

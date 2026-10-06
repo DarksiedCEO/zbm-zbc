@@ -1,6 +1,7 @@
 """AEGIS round 3 on 407d2db (not blocking; GTM stays unwired until M1-M3 are fixed). The reviewer's ``test_defect_*``
-probes asserted each defect; these tests assert the FIX. 16 of the 17 fail on 407d2db; the 17th,
-``test_m2_coverage_*``, is the positive half of M2 (our own exact version is still recognised)."""
+probes asserted each defect; these tests assert the FIX. 16 of the first 17 fail on 407d2db; the 17th,
+``test_m2_coverage_*``, is the positive half of M2 (our own exact version is still recognised). The five Finance-path
+tests at the end (the follow-up: every payment the service cannot take is recorded) all fail on 67c1eb8."""
 
 from __future__ import annotations
 
@@ -388,3 +389,79 @@ def test_info_a_punycode_host_is_shown_with_its_unicode_form_and_flagged(h):
     assert detail["xn--pple-43d.com"]["unicode"] == "аpple.com" and detail["xn--pple-43d.com"]["confusable"]
     assert detail["xn--caf-dma.fr"]["unicode"] == "café.fr" and not detail["xn--caf-dma.fr"]["confusable"]
     assert v["items"][0]["new_external_hosts_detail"] == v["new_external_hosts_detail"]
+
+
+# ============================================================================== every Finance payment path records
+
+def _quoted(h):
+    conn = h.connection()
+    h.t.shop(SHOP_A).product(PRODUCT)
+    return h.job([h.finding(conn, target=PRODUCT)])
+
+
+def _refund_for(h, ev):
+    return [r for r in h.ok(h.get("/refunds")) if r["finance_event_id"] == ev]
+
+
+def test_payment_before_quote_acceptance_is_recorded_and_refunded(h):
+    j = _quoted(h)
+    ev = "fin-evt-" + "1" * 40
+    out = h.ok(h.pay(j, ev=ev))
+    assert out["status"] == "quoted" and out["payment"] is None
+    [r] = _refund_for(h, ev)
+    assert r["kind"] == "orphaned_payment" and r["reason"] == "quote_not_accepted" and r["status"] == "proposed"
+    assert r["amount"] == j["quote"]["total"]
+    assert "ORPHANED_PAYMENT" in [t["code"] for t in _tasks(h)]
+    h.ok(h.pay(j, ev=ev))                                         # a replay: answered, nothing new
+    assert len(h.ledger.of_type("payment_orphaned")) == 1
+    h.ok(h.accept(j))
+    assert h.ok(h.pay(j))["status"] == "paid"                     # the job can still be paid properly
+
+
+def test_payment_in_another_currency_is_recorded_and_refunded(h):
+    j = _quoted(h)
+    h.ok(h.accept(j))
+    ev = "fin-evt-" + "2" * 40
+    r = h.post("/finance/events", {"request_id": rid(), "finance_event_id": ev, "job_id": j["job_id"],
+                                   "kind": "payment_confirmed", "amount": j["quote"]["total"], "currency": "EUR",
+                                   "quote_sha256": j["quote_sha256"]}, caller="finance_31")
+    assert h.ok(r)["payment"] is None
+    [rf] = _refund_for(h, ev)
+    assert rf["reason"] == "currency_not_supported" and rf["currency"] == "EUR"
+
+
+def test_payment_for_an_unknown_job_is_recorded_and_refunded(h):
+    ev = "fin-evt-" + "3" * 40
+    ghost = {"job_id": "cfx-job-" + "f" * 40, "quote": {"total": "10.00"}, "quote_sha256": "e" * 64}
+    out = h.refused(h.pay(ghost, ev=ev), 404, "JOB_NOT_FOUND")
+    assert out["recorded"] is True
+    [rf] = _refund_for(h, ev)
+    assert rf["reason"] == "job_not_found" and rf["client_id"] is None and rf["amount"] == "10.00"
+    assert out["refund_id"] == rf["refund_id"]
+    h.refused(h.pay(ghost, ev=ev), 404, "JOB_NOT_FOUND")          # a replay: nothing new
+    assert len(h.ledger.of_type("payment_orphaned")) == 1
+
+
+def test_a_reused_finance_event_id_is_recorded_for_andre(h):
+    j = _quoted(h)
+    h.ok(h.accept(j))
+    ev = "fin-evt-" + "4" * 40
+    h.ok(h.pay(j, ev=ev))
+    out = h.refused(h.pay(j, ev=ev, amount="1.00"), 409, "FINANCE_EVENT_REUSED")
+    assert out["recorded"] is True
+    h.refused(h.pay(j, ev=ev, amount="1.00"), 409, "FINANCE_EVENT_REUSED")
+    assert len(h.ledger.of_type("finance_event_conflict")) == 1
+    assert [t["code"] for t in _tasks(h)].count("FINANCE_EVENT_CONFLICT") == 1
+
+
+def test_a_malformed_finance_post_is_recorded_by_hash_only(h):
+    j = _quoted(h)
+    bad = {"request_id": rid(), "finance_event_id": "fin-evt-" + "5" * 40, "job_id": j["job_id"],
+           "kind": "payment_confirmed", "amount": 150.0, "currency": "USD", "quote_sha256": j["quote_sha256"]}
+    h.refused(h.post("/finance/events", bad, caller="finance_31"), 422)
+    h.refused(h.post("/finance/events", bad, caller="finance_31"), 422)
+    [line] = h.ledger.of_type("finance_event_malformed")
+    assert "150.0" not in str(line) and j["job_id"] not in str(line)  # the body itself is never stored
+    assert [t["code"] for t in _tasks(h)].count("FINANCE_EVENT_MALFORMED") == 1
+    h.refused(h.post("/finance/events", bad, caller="hub"), 403)      # not Finance: not a payment event
+    assert len(h.ledger.of_type("finance_event_malformed")) == 1

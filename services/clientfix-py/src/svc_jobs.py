@@ -18,6 +18,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from typing import Optional
 
 import money
 from catalogue import CHECK_OPS, CHECKS, CONTENT_CHECKS, FIRE_TEAMS, op_allowed_for, team_for
@@ -262,16 +263,30 @@ class JobsMixin:
             seen = self.finance_events.get(body["finance_event_id"])
             if seen is not None:
                 if seen != facts:
-                    raise Conflict(R("FINANCE_EVENT_REUSED"))
-                return self.job_view(body["job_id"])
+                    # the same Finance event id with other facts: which one is the money is ambiguous, so nothing is
+                    # paid or refunded automatically — the conflict is RECORDED and Andre decides (round 3 follow-up)
+                    self._finance_event_conflict(actor, body, facts, seen)
+                    exc = Conflict(R("FINANCE_EVENT_REUSED"))
+                    exc.body = {**exc.body, "recorded": True}
+                    raise exc
+                return self.job_view(body["job_id"])         # a replay of a recorded event: answered, nothing new
             rk = self.rk("payment", body["finance_event_id"], body)
             if self._idem(actor, rk, body):
                 return self.job_view(body["job_id"])
+            j = self.jobs.get(body["job_id"])
+            if j is None:
+                # money for a job this service does not know: recorded, its full refund proposed (round 3 follow-up)
+                self._orphaned_payment(actor, rk, body, facts, None, "job_not_found")
+                exc = NotFound(R("JOB_NOT_FOUND"))
+                exc.body = {**exc.body, "recorded": True,
+                            "refund_id": derived_id("rfd", body["job_id"], body["finance_event_id"])}
+                raise exc
+            # Every payment a job cannot take is RECORDED and refunded in full on Andre's approval — never a bare
+            # refusal (AEGIS round 1 Low, round 2 R2-6, round 3 L3 and its follow-up). ADR 0017 lists every path.
             if body["currency"] != "USD":
-                raise Invalid(R("CURRENCY_NOT_SUPPORTED"))
-            j = self._get(self.jobs, body["job_id"], "JOB_NOT_FOUND")
+                return self._orphaned_payment(actor, rk, body, facts, j, "currency_not_supported")
             if j["status"] == "quoted":
-                raise Conflict(R("QUOTE_NOT_ACCEPTED"))
+                return self._orphaned_payment(actor, rk, body, facts, j, "quote_not_accepted")
             if body["quote_sha256"] != j["quote_sha256"] or body["amount"] != j["quote"]["total"]:
                 # AEGIS round 3 L3: a payment that does not match the quote is real money too: recorded, the job is
                 # NOT paid by it, and its full refund is proposed for Andre (never a bare refusal)
@@ -287,14 +302,15 @@ class JobsMixin:
                                     "quote_sha256": body["quote_sha256"]}, (actor, rk)))
             return self.job_view(body["job_id"])
 
-    def _orphaned_payment(self, actor: str, rk: str, body: dict, facts: dict, j: dict, why: str) -> dict:
+    def _orphaned_payment(self, actor: str, rk: str, body: dict, facts: dict, j: Optional[dict], why: str):
         """AEGIS round 1 Low / round 2 R2-6: the client paid a quote whose job cannot take the payment (closed unpaid,
         or paid already — every further payment). The money is real: each Finance event is recorded and refunded in
         full on its own proposal for Andre (task), never a bare refusal that leaves the payment nobody's."""
-        job_id = j["job_id"]
+        job_id = body["job_id"] if j is None else j["job_id"]
         refund_id = derived_id("rfd", job_id, body["finance_event_id"])
-        terms = {"refund_id": refund_id, "kind": "orphaned_payment", "job_id": job_id, "client_id": j["client_id"],
-                 "items": sorted(j["items"]), "amount": body["amount"], "currency": body["currency"],
+        terms = {"refund_id": refund_id, "kind": "orphaned_payment", "job_id": job_id,
+                 "client_id": None if j is None else j["client_id"], "items": [] if j is None else sorted(j["items"]),
+                 "amount": body["amount"], "currency": body["currency"],
                  "finance_event_id": body["finance_event_id"], "reason": why, "report_sha256": None}
         rsha = sha(terms)
         tasks = [self._task("decide", refund_id, "ORPHANED_PAYMENT", "ORPHANED_PAYMENT")]
@@ -307,16 +323,52 @@ class JobsMixin:
                                ("refund_proposed", f"refund:{refund_id}",
                                 {"refund_id": refund_id, "job_id": job_id, "items": len(terms["items"]),
                                  "terms_sha256": rsha}, (actor, rk, "refund"))])
-        return self.job_view(job_id)
+        return None if j is None else self.job_view(job_id)
 
     def _a_payment_orphaned(self, d, at):
         f, t = d["facts"], d["terms"]
         self.finance_events[f["finance_event_id"]] = dict(f)
-        self.jobs[f["job_id"]].setdefault("orphan_payments", []).append(
-            {"finance_event_id": f["finance_event_id"], "amount": f["amount"], "at": at})
+        if f["job_id"] in self.jobs:                       # an unknown job's payment has no job to note it on
+            self.jobs[f["job_id"]].setdefault("orphan_payments", []).append(
+                {"finance_event_id": f["finance_event_id"], "amount": f["amount"], "currency": f["currency"],
+                 "reason": t.get("reason"), "at": at})
         self.refunds[t["refund_id"]] = {**t, "refund_sha256": d["refund_sha256"], "status": "proposed",
                                         "proposed_at": at, "approved_at": None, "finance_ref": None,
                                         "unknown_ticks": 0}
+
+    def _finance_event_conflict(self, actor: str, body: dict, facts: dict, seen: dict) -> None:
+        """A Finance event id reused with other facts: one line per distinct conflicting fact set, and one task."""
+        key = (body["finance_event_id"], sha(facts))
+        if key in self.finance_conflicts:
+            return
+        t = self._task("decide", body["finance_event_id"], "FINANCE_EVENT_CONFLICT", "FINANCE_EVENT_CONFLICT")
+        self._commit("finance_event_conflict", {"finance_event_id": body["finance_event_id"], "facts": facts,
+                                                "facts_sha256": sha(facts), "recorded_sha256": sha(seen),
+                                                "tasks": [t]}, actor,
+                     evidence=("finance_event_conflict", f"finance:{body['finance_event_id']}"[:128],
+                               {"finance_event_id": body["finance_event_id"], "facts_sha256": sha(facts),
+                                "recorded_sha256": sha(seen)}, (actor, body["finance_event_id"], sha(facts))))
+
+    def _a_finance_event_conflict(self, d, at):
+        self.finance_conflicts[(d["finance_event_id"], d["facts_sha256"])] = {"facts": d["facts"], "at": at}
+
+    def payment_malformed(self, actor: str, payload) -> None:
+        """An authenticated Finance post that fails the schema: recorded by the SHA-256 of its canonical body only
+        (its content may be anything and is never stored), once per distinct body, with a task for Andre. A ledger
+        that cannot take the line is 503 (retry), never a silent refusal."""
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                                           default=str).encode("utf-8")).hexdigest()
+        with self.lock:
+            self._gate()
+            if digest in self.finance_malformed:
+                return
+            t = self._task("decide", digest, "FINANCE_EVENT_MALFORMED", "FINANCE_EVENT_MALFORMED")
+            self._commit("finance_event_malformed", {"body_sha256": digest, "tasks": [t]}, actor,
+                         evidence=("finance_event_malformed", f"finance-body:{digest}",
+                                   {"body_sha256": digest}, (actor, digest)))
+
+    def _a_finance_event_malformed(self, d, at):
+        self.finance_malformed[d["body_sha256"]] = at
 
     def _a_payment_confirmed(self, d, at):
         f = d["facts"]

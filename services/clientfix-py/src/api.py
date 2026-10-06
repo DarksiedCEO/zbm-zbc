@@ -302,24 +302,27 @@ def create_app(service: ClientFixService, settings: config_mod.Settings) -> Fast
     def session(request: Request) -> Optional[str]:
         return request.headers.get(SESSION_HEADER)
 
+    def validated(model: type[BaseModel], payload: Any) -> dict:
+        if payload is None:
+            raise RequestValidationError([{"loc": ("body",), "msg": "a JSON body is required", "type": "missing"}])
+        bad = secrets_guard.forbidden_keys(payload)
+        if bad:
+            raise RequestValidationError([{"loc": ("body", b), "msg": "this service never takes a password, a "
+                                           "secret, a raw token or personal data", "type": "forbidden_field"}
+                                          for b in bad[:20]])
+        if secrets_guard.secret_value(payload):
+            raise Invalid(R("SECRET_REFUSED"))
+        try:
+            return model.model_validate(payload).model_dump(mode="json")
+        except ValidationError as exc:
+            raise RequestValidationError(
+                [{**e, "loc": ("body", *e.get("loc", ()))} for e in exc.errors(include_url=False,
+                                                                               include_input=False)]
+            ) from None
+
     def body(model: type[BaseModel]) -> Callable:
         def parse(payload: Any = Body(default=None)) -> dict:
-            if payload is None:
-                raise RequestValidationError([{"loc": ("body",), "msg": "a JSON body is required", "type": "missing"}])
-            bad = secrets_guard.forbidden_keys(payload)
-            if bad:
-                raise RequestValidationError([{"loc": ("body", b), "msg": "this service never takes a password, a "
-                                               "secret, a raw token or personal data", "type": "forbidden_field"}
-                                              for b in bad[:20]])
-            if secrets_guard.secret_value(payload):
-                raise Invalid(R("SECRET_REFUSED"))
-            try:
-                return model.model_validate(payload).model_dump(mode="json")
-            except ValidationError as exc:
-                raise RequestValidationError(
-                    [{**e, "loc": ("body", *e.get("loc", ()))} for e in exc.errors(include_url=False,
-                                                                                   include_input=False)]
-                ) from None
+            return validated(model, payload)
         return parse
 
     @app.exception_handler(RequestValidationError)
@@ -409,7 +412,14 @@ def create_app(service: ClientFixService, settings: config_mod.Settings) -> Fast
         return svc.accept_quote(token, _id(job_id), req)
 
     @app.post(P + "/finance/events", dependencies=auth)
-    def payment(req: dict = Depends(body(m.PaymentEvent)), who: str = Depends(caller("finance_31"))) -> dict:
+    def payment(payload: Any = Body(default=None), who: str = Depends(caller("finance_31"))) -> dict:
+        """AEGIS round 3 follow-up: an AUTHENTICATED Finance post is never refused without a record — even one that
+        fails the schema is recorded (its body's SHA-256 only, never its content) with a task for Andre."""
+        try:
+            req = validated(m.PaymentEvent, payload)
+        except (RequestValidationError, Invalid) as exc:
+            svc.payment_malformed(who, payload)
+            raise exc
         return svc.payment_event(who, req)
 
     # ------------------------------------------------------------------ fire teams and plans

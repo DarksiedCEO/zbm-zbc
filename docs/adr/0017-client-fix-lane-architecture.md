@@ -99,9 +99,8 @@ weakened.
 9. **Fire-team assignment** (founder decision 2). `alpha` = 3 specialists (store, tracking, listings); `bravo` = 4
    (store, tracking, automations, listings). A job goes to the smallest team covering all its lanes (D-2).
 10. **No work before payment.** Engage, brief, plan and apply are refused `PAYMENT_REQUIRED` until Finance's event is
-    on record; payment before the quote is accepted is `QUOTE_NOT_ACCEPTED`; a wrong amount or hash never pays the job:
-    it is recorded and its full refund proposed for Andre (`reason: payment_mismatch`; AEGIS round 3 L3); a Finance
-    event id reused with other facts is `FINANCE_EVENT_REUSED`; a float is 422.
+    on record. Only `payment_confirmed` for exactly the quote's amount and hash on an accepted job pays it; every other
+    payment is recorded and never refused bare — see "Every Finance payment path" in the round 3 amendment.
 11. **Change sets.** A list of operations, each `{op, target, field, before, after}`: `op` from the connector's
     allowlist, `target` matching the op's target shape, `field` from the op's field list, `before` / `after` the exact
     values (None = absent; only where the op allows a create or a removal), validated by the field's value rule. No
@@ -417,6 +416,24 @@ accounts.containers.versions/publish, accounts.containers.versions/get, accounts
   (`ref`) so Andre re-publishes it if it was live. The window is two API calls long and only exists after a failed run.
 - **L5** `/brief` checks the kill switch (`revoked_now`, `revoked_clients_now`) and the connection's status before
   using its cache; a revocation (even one whose commit failed) drops every cached read of that client's items.
+- **Every Finance payment path (round 3 follow-up).** `POST /finance/events` (caller `finance_31`, the only route that
+  receives a Finance payment event; `PaymentEvent`, kind `payment_confirmed`) is the one entry point — Finance's refund
+  answers come back through the port's `request_refund` / `refund_status`, never as a payment. Every outcome:
+  | Case | Answer | Record |
+  |---|---|---|
+  | accepted job, exact amount and quote hash, USD | 200, job `paid` | `payment_confirmed` |
+  | job still `quoted` (quote not accepted) | 200, job unpaid | `payment_orphaned` + full refund proposal (`reason: quote_not_accepted`) + `ORPHANED_PAYMENT` task |
+  | amount or quote hash differs | 200, job unpaid | same, `reason: payment_mismatch` |
+  | currency other than USD | 200, job unpaid | same, `reason: currency_not_supported` |
+  | job already paid, or closed unpaid | 200 | same, `reason: job_cannot_take_payment` |
+  | job id unknown | 404 `JOB_NOT_FOUND` with `recorded: true` and the `refund_id` | same, `reason: job_not_found` (`client_id` null, no items) |
+  | the same Finance event id again, same facts | the first answer | none needed (already recorded) |
+  | the same Finance event id with OTHER facts | 409 `FINANCE_EVENT_REUSED` with `recorded: true` | `finance_event_conflict` (both fact hashes) + `FINANCE_EVENT_CONFLICT` task, once per distinct fact set; no automatic refund — which event is the money is ambiguous, Andre decides |
+  | body fails the schema (a float, a missing field, a secret-shaped value) | 422 | `finance_event_malformed` with ONLY the SHA-256 of the canonical body + `FINANCE_EVENT_MALFORMED` task, once per body |
+  | service closed, integrity unverified, or the ledger cannot take the line | 503 | nothing could be written; nothing was accepted either: Finance retries the same event id (idempotent) |
+  | caller is not `finance_31` | 403 | not a Finance payment event (unauthenticated input is never written to the ledger) |
+  `REQUEST_ID_REUSED` cannot occur on this route: the request key is scoped by the Finance event id, and an event id
+  already recorded is answered by the replay / conflict rows above before the request key is consulted.
 - **Info** every punycode host in `new_external_hosts` is shown next to its Unicode form in
   `new_external_hosts_detail` (job and item views) with a `confusable` flag (mixed scripts, a Latin-lookalike script,
   or undecodable punycode), so the client approving the plan sees where the link really points.
