@@ -84,7 +84,7 @@ PLUGIN_DIR = REPO / "devtools" / "pytest_plugin"
 MARKER_ENV = "ZBM_HYGIENE_RUN"
 
 PY_SERVICES = ("detection-py", "fulfillment-py", "onboarding-py", "creative-py", "compliance-py", "verification-py",
-               "clipper-network-py", "finance-py", "legal-py", "delivery-py")
+               "clipper-network-py", "finance-py", "legal-py", "delivery-py", "security-py")
 
 
 def violation(rule: str, where: str, detail: str) -> str:
