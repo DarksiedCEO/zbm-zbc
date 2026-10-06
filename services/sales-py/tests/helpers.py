@@ -23,7 +23,7 @@ SERVICE_TOKEN = "test-sales-service-token-0123456789abcdef"
 CALLERS = {c: f"test-sales-caller-{c}-0123456789abcdef" for c in config_mod.KNOWN_CALLERS}
 ANDRE = "test-andre-approval-token-0123456789abcdefgh"
 OUTREACH = "zbm-outreach.test"
-PRIMARY = "zbestmedia.test,zbestclips.test"
+ZBM_DOMAIN, ZBC_DOMAIN = "zbestmedia.test", "zbestclips.test"
 POSTAL = "123 Test Street, Suite 4, Los Angeles, CA 90001"
 CONSENT_SHA = "a" * 64
 PII_KEY_HEX = "3f9c2a7e51d04b86c8e1f7a2093d5b6e4a1c8f0d72e9b35a6c4d1e8f0b7a2c93"
@@ -135,7 +135,7 @@ def wired_ports(**over) -> Ports:
 def base_env(**over) -> dict:
     env = {"SALES_SERVICE_TOKEN": SERVICE_TOKEN, "SALES_CALLER_TOKENS": json.dumps(CALLERS),
            "SALES_NON_PRODUCTION": "1", "SALES_ANDRE_APPROVAL_TOKEN": ANDRE, "SALES_OUTREACH_DOMAIN": OUTREACH,
-           "SALES_PRIMARY_DOMAINS": PRIMARY, "SALES_POSTAL_ADDRESS": POSTAL}
+           "SALES_ZBM_DOMAIN": ZBM_DOMAIN, "SALES_ZBC_DOMAIN": ZBC_DOMAIN, "SALES_POSTAL_ADDRESS": POSTAL}
     env.update({k: v for k, v in over.items() if v is not None})
     for k in [k for k, v in over.items() if v is None]:
         env.pop(k, None)
@@ -222,6 +222,20 @@ class Harness:
         if referrer:
             body["referrer"] = referrer
         return self.ok(self.post("/sales/v1/leads", body, caller), code)
+
+    def verify(self, lead: dict, display_name: Optional[str] = None, first_name: Optional[str] = None) -> dict:
+        """A person at the console verifies the names merge fields may render (AEGIS S2-H1). A value the rules refuse
+        stays unverified (the template is then refused for that contact)."""
+        acc = self.svc.accounts[lead["account_id"]]
+        c = self.svc.contacts[lead["contact_id"]]
+        self.post(f"/sales/v1/accounts/{lead['account_id']}/display-name",
+                  {"request_id": rid(), "display_name": display_name or acc["name"]})
+        self.post(f"/sales/v1/contacts/{lead['contact_id']}/first-name",
+                  {"request_id": rid(), "first_name": first_name or c["name"].split(" ")[0]})
+        return lead
+
+    def vlead(self, **kw) -> dict:
+        return self.verify(self.lead(**kw))
 
     def opportunity(self, **lead_kw) -> dict:
         lead = self.lead(**lead_kw)

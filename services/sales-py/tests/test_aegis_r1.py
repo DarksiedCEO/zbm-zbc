@@ -28,7 +28,7 @@ def sms_q(h, cid, t):
 # ------------------------------------------------------------------ S1-H1 merge fields
 
 def test_s1_h1_merge_field_cannot_inject_a_deceptive_subject(w):
-    lead = w.lead(account={"name": "URGENT: account suspended - verify your password", "domain": "acme-shop.test"})
+    lead = w.vlead(account={"name": "URGENT: account suspended - verify your password", "domain": "acme-shop.test"})
     t = w.template()
     r = q_email(w, lead["contact_id"], t)
     assert r.status_code == 403 and r.json()["detail"] == "MERGE_FIELD_REFUSED"
@@ -37,7 +37,7 @@ def test_s1_h1_merge_field_cannot_inject_a_deceptive_subject(w):
 
 
 def test_s1_h1_letters_only_value_that_makes_the_subject_deceptive_is_refused(w):
-    lead = w.lead(account={"name": "Final notice", "domain": "acme-shop.test"})
+    lead = w.vlead(account={"name": "Final notice", "domain": "acme-shop.test"})
     w.refused(q_email(w, lead["contact_id"], w.template()), 403, "SUBJECT_DECEPTIVE")
 
 
@@ -47,14 +47,14 @@ def test_s1_h1_letters_only_value_that_makes_the_subject_deceptive_is_refused(w)
                                           ("evil.example", "URL_NOT_APPROVED"),
                                           ("A" * 41, "MERGE_FIELD_REFUSED")])
 def test_s1_h1_merge_field_cannot_inject_a_link(w, company, code):
-    lead = w.lead(account={"name": company, "domain": "acme-shop.test"})
+    lead = w.vlead(account={"name": company, "domain": "acme-shop.test"})
     t = w.template(body="Hi {{first_name}}, we help {{company}} recover revenue.")
     w.refused(q_email(w, lead["contact_id"], t), 403, code)
 
 
 def test_s1_h1_checked_again_at_send_time(w, monkeypatch):
     """A message queued before the rule existed (or past a queue-time gap) is still stopped at send time."""
-    lead = w.lead(account={"name": "Claim at http://evil.example/x", "domain": "acme-shop.test"})
+    lead = w.vlead(account={"name": "Claim at http://evil.example/x", "domain": "acme-shop.test"})
     t = w.template()
     with monkeypatch.context() as mp:
         mp.setattr(type(w.svc), "_merge_problem", lambda self, t, v, c: None)
@@ -65,7 +65,7 @@ def test_s1_h1_checked_again_at_send_time(w, monkeypatch):
 
 
 def test_s1_h1_a_field_the_template_does_not_use_is_not_judged(w):
-    lead = w.lead(account={"name": "Shop @ http://x.example", "domain": "acme-shop.test"})
+    lead = w.vlead(account={"name": "Shop @ http://x.example", "domain": "acme-shop.test"})
     t = w.template(name="nocompany", subject="A quick idea", body="Hi {{first_name}}, a quick idea for you.")
     w.ok(q_email(w, lead["contact_id"], t), 201)
 
@@ -110,7 +110,7 @@ def test_s1_h3_sms_opt_out_wording(text):
 
 
 def test_s1_h3_cancel_reply_stops_texts_on_every_channel_and_brand(w):
-    lead = w.lead()
+    lead = w.vlead()
     for ch in ("sms", "voice"):
         for b in ("zbm", "zbc"):
             w.ok(w.consent(lead["contact_id"], channel=ch, brand=b), 201)
@@ -132,7 +132,7 @@ def test_s1_h3_cancel_reply_stops_texts_on_every_channel_and_brand(w):
 def test_s1_m1_agent_cannot_move_a_time_zone_to_dodge_quiet_hours(tmp_path):
     clock = FixedClock(datetime(2026, 10, 7, 6, 0, tzinfo=timezone.utc))     # 23:00 in Los Angeles
     w = Harness(tmp_path, clock=clock, ports=wired_ports())
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.consent(lead["contact_id"]), 201)
     t = w.template(channel="sms", name="sms1", subject=None, body="Hi {{first_name}}, quick question?")
     w.refused(sms_q(w, lead["contact_id"], t), 403, "QUIET_HOURS")
@@ -147,7 +147,7 @@ def test_s1_m1_agent_cannot_move_a_time_zone_to_dodge_quiet_hours(tmp_path):
 
 
 def test_s1_m1_allowed_change_is_a_typed_ledger_event(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.post(f"/sales/v1/contacts/{lead['contact_id']}/time-zone",
                 {"request_id": rid(), "time_zone": "Pacific/Honolulu"}, "onboarding"))
     assert w.ledger.of_type("contact_time_zone_set")
@@ -167,7 +167,7 @@ def test_s1_m2_a_new_outreach_domain_restarts_the_warmup(tmp_path):
     t = h.template()
     for day in range(3):
         for i in range(4):
-            lead = h.lead(email=f"p{day}{i}@shop{day}{i}.test", phone=None,
+            lead = h.vlead(email=f"p{day}{i}@shop{day}{i}.test", phone=None,
                           account={"name": f"Shop {day}{i}", "domain": f"shop{day}{i}.test"})
             h.ok(q_email(h, lead["contact_id"], t), 201)
         h.ok(h.job("send-queue"))
@@ -181,30 +181,30 @@ def test_s1_m2_a_new_outreach_domain_restarts_the_warmup(tmp_path):
 
 # ------------------------------------------------------------------ S1-M3 registrable domains
 
-@pytest.mark.parametrize("outreach,primary", [("go.zbestmedia.com", "www.zbestmedia.com,zbestclips.com"),
-                                              ("mail.zbm.co.uk", "zbm.co.uk,zbestclips.com"),
-                                              ("zbestclips.com", "zbestmedia.com,zbestclips.com")])
-def test_s1_m3_sibling_subdomains_share_a_registrable_domain(outreach, primary):
+@pytest.mark.parametrize("outreach,zbm,zbc", [("go.zbestmedia.com", "www.zbestmedia.com", "zbestclips.com"),
+                                               ("mail.zbm.co.uk", "zbm.co.uk", "zbestclips.com"),
+                                               ("zbestclips.com", "zbestmedia.com", "zbestclips.com")])
+def test_s1_m3_sibling_subdomains_share_a_registrable_domain(outreach, zbm, zbc):
     with pytest.raises(RuntimeError, match="registrable"):
-        config_mod.load(base_env(SALES_OUTREACH_DOMAIN=outreach, SALES_PRIMARY_DOMAINS=primary))
+        config_mod.load(base_env(SALES_OUTREACH_DOMAIN=outreach, SALES_ZBM_DOMAIN=zbm, SALES_ZBC_DOMAIN=zbc))
 
 
-@pytest.mark.parametrize("primary", ["zbestmedia.com", "zbestmedia.com,www.zbestmedia.com"])
-def test_s1_m3_both_brand_domains_must_be_listed(primary):
-    with pytest.raises(RuntimeError, match="both brands"):
-        config_mod.load(base_env(SALES_OUTREACH_DOMAIN="zbestclips.com", SALES_PRIMARY_DOMAINS=primary))
+@pytest.mark.parametrize("missing", ["SALES_ZBM_DOMAIN", "SALES_ZBC_DOMAIN"])
+def test_s1_m3_both_brand_domains_must_be_listed(missing):
+    with pytest.raises(RuntimeError, match="SALES_ZBM_DOMAIN and SALES_ZBC_DOMAIN are not both set"):
+        config_mod.load(base_env(**{"SALES_OUTREACH_DOMAIN": "zbm-outreach.com", missing: None}))
 
 
 def test_s1_m3_two_level_suffix_is_not_one_registrable_domain():
-    s = config_mod.load(base_env(SALES_OUTREACH_DOMAIN="zbm-outreach.co.uk",
-                                 SALES_PRIMARY_DOMAINS="zbestmedia.co.uk,zbestclips.com"))
+    s = config_mod.load(base_env(SALES_OUTREACH_DOMAIN="zbm-outreach.co.uk", SALES_ZBM_DOMAIN="zbestmedia.co.uk",
+                                 SALES_ZBC_DOMAIN="zbestclips.com"))
     assert s.outreach_domain == "zbm-outreach.co.uk"
 
 
 # ------------------------------------------------------------------ S1-M4 one-click unsubscribe
 
 def test_s1_m4_one_click_unsubscribe_stops_texts_too(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.consent(lead["contact_id"]), 201)
     w.ok(q_email(w, lead["contact_id"], w.template()), 201)
     w.ok(w.job("send-queue"))
@@ -219,7 +219,7 @@ def test_s1_m4_one_click_unsubscribe_stops_texts_too(w):
 
 
 def test_s1_m4_complaint_is_an_opt_out_everywhere(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.consent(lead["contact_id"]), 201)
     msg = w.ok(q_email(w, lead["contact_id"], w.template()), 201)
     w.ok(w.job("send-queue"))

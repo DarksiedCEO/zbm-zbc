@@ -15,6 +15,10 @@
    "tell me more", "send details", "send more info", "pricing", "what does it cost", "yes": a task to book a call.
 4. anything else — the human review queue.
 
+On SMS and voice the label is NOT what protects the person (AEGIS S2-C1): any reply there holds phone outreach to the
+number for both brands unless the whole message is a narrow positive form (``positive_reply``); only Andre lifts a
+hold, by deciding the review task is "not an opt-out".
+
 The reply text is never stored: only its SHA-256 and the class. Never: answers the person."""
 
 from __future__ import annotations
@@ -39,12 +43,40 @@ _INTERESTED = re.compile(r"\b(interested|lets talk|book|schedule|set up a call|c
                          r"send (me )?(the )?details|send (me )?more info|pricing|what does it cost|yes)\b")
 
 
+# Confusables that render like Latin letters (Cyrillic, Greek) and digits used as letters inside a word (AEGIS S2-C1).
+# This only improves the LABEL; the safety on SMS and voice is the fail-closed rule in positive_reply().
+_CONFUSABLE = str.maketrans({
+    "а": "a", "в": "b", "е": "e", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "с": "c", "т": "t", "у": "y",
+    "х": "x", "ѕ": "s", "і": "i", "ј": "j", "ԁ": "d", "ԛ": "q", "ԝ": "w", "ɡ": "g",
+    "α": "a", "β": "b", "ε": "e", "ζ": "z", "η": "n", "ι": "i", "κ": "k", "μ": "m", "ν": "v", "ο": "o", "ρ": "p",
+    "τ": "t", "υ": "u", "χ": "x"})
+_LEET = str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+
+def _fold_word(w: str) -> str:
+    """Digits and @/$ inside a word that also has letters are read as letters (St0p -> stop; 310 stays 310)."""
+    if any(c.isalpha() for c in w) and any(c in "013457@$" for c in w):
+        return w.translate(_LEET)
+    return w
+
+
 def normalise(text: str) -> str:
     t = unicodedata.normalize("NFKC", text)
     t = "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c)).casefold()
+    t = t.translate(_CONFUSABLE)
+    t = " ".join(_fold_word(w) for w in t.split())
     t = re.sub(r"(?<=[^\W\d_])[^\w\s]+(?=[^\W\d_])", "", t)      # S.T.O.P -> stop, don't -> dont, opt-out -> optout
     t = re.sub(r"[^\w\s]+", " ", t)
-    return " ".join(t.split())
+    words, out, run = t.split(), [], []
+    for w in words + [""]:                                     # S T O P -> stop (a run of 3+ single letters)
+        if len(w) == 1 and w.isalpha():
+            run.append(w)
+            continue
+        out += ["".join(run)] if len(run) >= 3 else run
+        run = []
+        if w:
+            out.append(w)
+    return " ".join(out)
 
 
 def classify(text: str, channel: str = "email") -> str:
@@ -58,3 +90,26 @@ def classify(text: str, channel: str = "email") -> str:
     if _INTERESTED.search(t):
         return "interested"
     return "review"
+
+
+# AEGIS S2-C1 — the fail-closed rule for SMS and voice. A reply on those channels HOLDS phone outreach to the number
+# (both brands) unless the WHOLE message is one of these narrow positive forms. Anything else, however it is worded,
+# in whatever language, is treated as a possible revocation until a human decides it is not.
+_POSITIVE_SMS = re.compile(r"(yes|yes please|yeah|yep|sure|ok|okay|interested|i m interested|im interested|"
+                           r"i am interested|call me|please call me|call me please|sounds good|tell me more|"
+                           r"lets talk|send details|send more info|more info)( thanks| thank you)?")
+_OOO_SMS = re.compile(r"(auto reply|autoreply|automatic reply|out of office|out of the office|im driving|"
+                      r"i m driving|i am driving)\b.{0,280}")
+
+
+def positive_reply(text: str, channel: str) -> str | None:
+    """``interested`` / ``out_of_office`` only when the whole normalised SMS or voice reply matches the allow-list
+    and carries no opt-out word; otherwise None (hold)."""
+    t = normalise(text)
+    if classify(text, channel) == "unsubscribe":
+        return None
+    if _POSITIVE_SMS.fullmatch(t):
+        return "interested"
+    if _OOO_SMS.fullmatch(t):
+        return "out_of_office"
+    return None

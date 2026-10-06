@@ -24,7 +24,7 @@ def test_classifier_table(text, cls):
 
 def setup(tmp_path):
     h = Harness(tmp_path, ports=wired_ports())
-    lead = h.lead()
+    lead = h.vlead()
     t = h.template()
     h.ok(h.post("/sales/v1/outreach/email", {"request_id": rid(), "contact_id": lead["contact_id"],
                                              "template_id": t["template_id"], "version": 1}, "sales_agent"), 201)
@@ -70,7 +70,7 @@ def test_anything_else_goes_to_human_review(tmp_path):
 def test_reply_text_is_never_stored_or_exported(tmp_path):
     d = str(tmp_path / "d")
     h = Harness(tmp_path, data_dir=d, ports=wired_ports())
-    lead = h.lead()
+    lead = h.vlead()
     t = h.template()
     h.ok(h.post("/sales/v1/outreach/email", {"request_id": rid(), "contact_id": lead["contact_id"],
                                              "template_id": t["template_id"], "version": 1}, "sales_agent"), 201)

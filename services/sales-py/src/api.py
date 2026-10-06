@@ -388,6 +388,14 @@ def create_app(service: SalesService, settings: config_mod.Settings) -> FastAPI:
                   who: str = Depends(caller("hub", "onboarding", "dashboard"))) -> dict:    # never the agent (S1-M1)
         return svc.set_time_zone(who, _id(contact_id), req)
 
+    @app.post("/sales/v1/accounts/{account_id}/display-name", dependencies=auth)
+    def display_name(account_id: str, req: dict = Depends(body(m.DisplayName)), who: str = Depends(dashboard)):
+        return svc.verify_display_name(who, _id(account_id), req)
+
+    @app.post("/sales/v1/contacts/{contact_id}/first-name", dependencies=auth)
+    def first_name(contact_id: str, req: dict = Depends(body(m.FirstName)), who: str = Depends(dashboard)) -> dict:
+        return svc.verify_first_name(who, _id(contact_id), req)
+
     @app.get("/sales/v1/opportunities", dependencies=auth)
     def opportunities(stage: Optional[str] = Query(default=None, pattern="^[a-z_]{1,20}$"),
                       who: str = Depends(worker)) -> list:
@@ -413,6 +421,11 @@ def create_app(service: SalesService, settings: config_mod.Settings) -> FastAPI:
     @app.post("/sales/v1/tasks/{task_id}/close", dependencies=auth)
     def close_task(task_id: str, req: dict = Depends(body(m.TaskClose)), who: str = Depends(worker)) -> dict:
         return svc.close_task(who, _id(task_id), req)
+
+    @app.post("/sales/v1/tasks/{task_id}/decision", dependencies=auth)
+    def hold_decision(task_id: str, req: dict = Depends(body(m.HoldDecision)),
+                      who: str = Depends(andre("hold_decision"))) -> dict:
+        return svc.decide_hold(_id(task_id), req)
 
     # ------------------------------------------------------------------ consent and suppression
 

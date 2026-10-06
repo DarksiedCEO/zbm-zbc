@@ -15,7 +15,7 @@ def queue(h, contact_id, t, version=1, request_id=None):
 
 
 def test_queue_and_send_with_footer_unsubscribe_and_honest_from(w):
-    lead = w.lead()
+    lead = w.vlead()
     t = w.template()
     msg = w.ok(queue(w, lead["contact_id"], t), 201)
     assert msg["status"] == "queued" and msg["from_domain"] == "zbm-outreach.test"
@@ -32,7 +32,7 @@ def test_queue_and_send_with_footer_unsubscribe_and_honest_from(w):
 
 
 def test_send_is_on_the_ledger_before_the_provider_is_called(w):
-    lead = w.lead()
+    lead = w.vlead()
     msg = w.ok(queue(w, lead["contact_id"], w.template()), 201)
     seen = {}
     real = w.ports.email.send
@@ -46,7 +46,7 @@ def test_send_is_on_the_ledger_before_the_provider_is_called(w):
 
 
 def test_ledger_down_means_nothing_is_sent(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(queue(w, lead["contact_id"], w.template()), 201)
     w.ledger.fail = True
     r = w.job("send-queue")
@@ -57,7 +57,7 @@ def test_ledger_down_means_nothing_is_sent(w):
 
 
 def test_not_wired_provider_leaves_the_message_queued_visibly(h):
-    lead = h.lead()
+    lead = h.vlead()
     h.ok(queue(h, lead["contact_id"], h.template()), 201)
     r = h.ok(h.job("send-queue"))
     assert r["not_wired"] == 1 and r["sent"] == 0
@@ -67,17 +67,17 @@ def test_not_wired_provider_leaves_the_message_queued_visibly(h):
 
 def test_no_outreach_domain_no_cold_email(tmp_path):
     h = Harness(tmp_path, SALES_OUTREACH_DOMAIN=None, SALES_POSTAL_ADDRESS=None)
-    lead = h.lead()
+    lead = h.vlead()
     h.refused(queue(h, lead["contact_id"], h.template()), 403, "OUTREACH_NOT_CONFIGURED")
 
 
 def test_template_not_approved_refused(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.refused(queue(w, lead["contact_id"], w.template(approve=False)), 403, "TEMPLATE_NOT_APPROVED")
 
 
 def test_template_edited_after_approval_is_refused_at_queue_and_at_send(w):
-    lead = w.lead()
+    lead = w.vlead()
     t = w.template()
     w.ok(queue(w, lead["contact_id"], t), 201)                     # queued against the approved hash
     w.ok(w.post(f"/sales/v1/templates/{t['template_id']}/versions/1/edit",
@@ -90,7 +90,7 @@ def test_template_edited_after_approval_is_refused_at_queue_and_at_send(w):
 
 
 def test_template_tampered_in_memory_is_caught_by_the_hash(w):
-    lead = w.lead()
+    lead = w.vlead()
     t = w.template()
     w.svc.templates[t["template_id"]]["versions"]["1"]["body"] = "tampered"
     w.refused(queue(w, lead["contact_id"], t), 403, "TEMPLATE_HASH_MISMATCH")
@@ -129,7 +129,7 @@ def test_unknown_merge_field_refused(w):
 
 
 def test_only_the_sales_agent_queues_outreach(w):
-    lead = w.lead()
+    lead = w.vlead()
     t = w.template()
     for caller in ("dashboard", "hub", "scheduler"):
         r = w.post("/sales/v1/outreach/email", {"request_id": rid(), "contact_id": lead["contact_id"],
@@ -138,7 +138,7 @@ def test_only_the_sales_agent_queues_outreach(w):
 
 
 def test_one_click_unsubscribe_then_resend_refused_across_both_brands(w):
-    lead = w.lead()
+    lead = w.vlead()
     zbm = w.template()
     zbc = w.template(brand="zbc", name="clips", subject="Clips for {{company}}",
                      body="Hi {{first_name}}, we run clipping campaigns.")
@@ -165,7 +165,7 @@ def test_suppression_is_append_only_there_is_no_way_to_remove(w):
     routes = [(r.path, sorted(getattr(r, "methods", []))) for r in fastapi_app.routes if "suppression" in r.path]
     assert routes and all("DELETE" not in m for _, m in routes)
     assert not any("remove" in p or "delete" in p or "lift" in p for p, _ in routes)
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.post("/sales/v1/suppressions", {"request_id": rid(), "contact_id": lead["contact_id"],
                                            "reason": "manual"}), 201)
     r = w.client.delete("/sales/v1/suppressions", headers=w.headers())
@@ -176,14 +176,14 @@ def test_suppression_is_append_only_there_is_no_way_to_remove(w):
 def test_hub_suppression_by_raw_email_matches_a_contact_later(w):
     w.ok(w.post("/sales/v1/suppressions", {"request_id": rid(), "email": "JANE@acme-shop.test",
                                            "reason": "unsubscribe"}, "hub"), 201)
-    lead = w.lead()
+    lead = w.vlead()
     w.refused(queue(w, lead["contact_id"], w.template()), 403, "SUPPRESSED")
     assert "jane@" not in str(w.ok(w.get("/sales/v1/suppressions")))
 
 
 @pytest.mark.parametrize("event", ["hard_bounce", "complaint"])
 def test_hard_bounce_and_complaint_suppress(w, event):
-    lead = w.lead()
+    lead = w.vlead()
     t = w.template()
     msg = w.ok(queue(w, lead["contact_id"], t), 201)
     w.ok(w.job("send-queue"))
@@ -193,7 +193,7 @@ def test_hard_bounce_and_complaint_suppress(w, event):
 
 
 def test_soft_bounce_does_not_suppress_and_unsent_message_events_refused(w):
-    lead = w.lead()
+    lead = w.vlead()
     t = w.template()
     msg = w.ok(queue(w, lead["contact_id"], t), 201)
     w.refused(w.post("/sales/v1/events/email", {"request_id": rid(), "message_id": msg["message_id"],
@@ -205,7 +205,7 @@ def test_soft_bounce_does_not_suppress_and_unsent_message_events_refused(w):
 
 
 def _leads(h, n):
-    return [h.lead(email=f"p{i}@shop{i}.test", phone=None, account={"name": f"Shop {i}"})["contact_id"]
+    return [h.vlead(email=f"p{i}@shop{i}.test", phone=None, account={"name": f"Shop {i}"})["contact_id"]
             for i in range(n)]
 
 
@@ -250,13 +250,13 @@ def test_warmup_is_bounded_by_the_daily_cap(tmp_path):
 def test_provider_failure_is_recorded_and_not_retried(tmp_path):
     ports = wired_ports(email=FakeSender("failed"))
     h = Harness(tmp_path, ports=ports)
-    h.ok(queue(h, h.lead()["contact_id"], h.template()), 201)
+    h.ok(queue(h, h.vlead()["contact_id"], h.template()), 201)
     assert h.ok(h.job("send-queue"))["failed"] == 1
     assert h.ok(h.job("send-queue"))["failed"] == 0 and len(ports.email.sent) == 1
 
 
 def test_queue_is_idempotent_and_a_changed_body_is_409(w):
-    lead = w.lead()
+    lead = w.vlead()
     t = w.template()
     request_id = rid()
     a = w.ok(queue(w, lead["contact_id"], t, request_id=request_id), 201)
@@ -267,7 +267,7 @@ def test_queue_is_idempotent_and_a_changed_body_is_409(w):
 
 
 def test_send_tick_is_idempotent_per_request(w):
-    w.ok(queue(w, w.lead()["contact_id"], w.template()), 201)
+    w.ok(queue(w, w.vlead()["contact_id"], w.template()), 201)
     request_id = rid()
     assert w.ok(w.job("send-queue", request_id))["sent"] == 1
     again = w.ok(w.job("send-queue", request_id))
@@ -275,12 +275,12 @@ def test_send_tick_is_idempotent_per_request(w):
 
 
 def test_cancel_a_queued_message(w):
-    msg = w.ok(queue(w, w.lead()["contact_id"], w.template()), 201)
+    msg = w.ok(queue(w, w.vlead()["contact_id"], w.template()), 201)
     w.ok(w.post(f"/sales/v1/outreach/messages/{msg['message_id']}/cancel", {"request_id": rid()}, "sales_agent"))
     w.ok(w.job("send-queue"))
     assert w.ports.email.sent == []
 
 
 def test_contact_without_email_cannot_be_emailed(w):
-    lead = w.lead(email=None)
+    lead = w.vlead(email=None)
     w.refused(queue(w, lead["contact_id"], w.template()), 422, "CONTACT_NO_EMAIL")

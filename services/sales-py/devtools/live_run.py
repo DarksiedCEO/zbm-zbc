@@ -132,13 +132,21 @@ class Api:
         return httpx.get(self.base + "/sales/v1" + path, headers=self.h(caller), timeout=30)
 
 
+def verify(a: "Api", lead: dict) -> None:
+    """A person at the console verifies the names merge fields render (AEGIS S2-H1)."""
+    a.post(f"/accounts/{lead['account_id']}/display-name", {"request_id": rid(), "display_name": "Live Shop"})
+    a.post(f"/contacts/{lead['contact_id']}/first-name", {"request_id": rid(), "first_name": "Live"})
+
+
 def rid() -> str:
     return "live-" + uuid.uuid4().hex
 
 
 def phone_for(zone: str, local: str) -> str:
     """A number that fits the zone (a +1 number must have an American zone, AEGIS S1-M1)."""
-    return f"+1310555{local}" if zone.startswith(("America/", "Pacific/Honolulu")) else f"+4420718{local}"
+    area = {"Pacific/Honolulu": "808", "America/Los_Angeles": "310", "America/Chicago": "312",
+            "America/New_York": "212"}.get(zone)       # the area code's own zone is checked too (S2-L1)
+    return f"+1{area}555{local}" if area else f"+4420718{local}"
 
 
 def lead_body(email, phone, tz, kind="site_form", source="inbound", interest=("revenue_recovery",), **extra):
@@ -164,7 +172,8 @@ def _main(work: Path) -> int:
     env = {"SALES_SERVICE_TOKEN": TOKEN, "SALES_CALLER_TOKENS": json.dumps(CALLERS),
            "SALES_DATA_DIR": str(data), "SALES_ANDRE_APPROVAL_TOKEN": ANDRE,
            "SALES_PII_HASH_KEY_FILE": secret_file(etc / "pii.key", os.urandom(32).hex().encode()),
-           "SALES_OUTREACH_DOMAIN": "zbm-outreach.example", "SALES_PRIMARY_DOMAINS": "zbestmedia.com,zbestclips.com",
+           "SALES_OUTREACH_DOMAIN": "zbm-outreach.example", "SALES_ZBM_DOMAIN": "zbestmedia.com",
+           "SALES_ZBC_DOMAIN": "zbestclips.com",
            "SALES_POSTAL_ADDRESS": "123 Example Street, Los Angeles, CA 90001", "SALES_PORT": str(ps),
            "LEDGER_SERVICE_URL": L, "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN}
     for k in [k for k in os.environ if k.startswith("SALES_")]:
@@ -227,6 +236,11 @@ def _main(work: Path) -> int:
         r = a.post("/templates", {"request_id": rid(), "brand": "zbm", "channel": "email", "name": "bait",
                                   "subject": "Re: your invoice", "body": "x"}, "sales_agent")
         check("a deceptive subject is refused", r.status_code == 422 and r.json()["detail"] == "SUBJECT_DECEPTIVE")
+        r = a.post("/outreach/email", {"request_id": rid(), "contact_id": lead["contact_id"],
+                                       "template_id": t["template_id"], "version": 1}, "sales_agent")
+        check("a name typed into a form never renders: unverified merge fields refused (S2-H1)",
+              r.status_code == 403 and r.json()["detail"] == "MERGE_FIELD_REFUSED")
+        verify(a, lead)
         msg = a.post("/outreach/email", {"request_id": rid(), "contact_id": lead["contact_id"],
                                          "template_id": t["template_id"], "version": 1}, "sales_agent").json()
         r = a.post("/jobs/send-queue/run", {"request_id": rid()}, "scheduler").json()
@@ -250,7 +264,11 @@ def _main(work: Path) -> int:
         check("express consent recorded", r.status_code == 201)
         r = a.post("/outreach/sms", {**sms, "request_id": rid()}, "sales_agent")
         check("with consent, inside the recipient's window, the text is queued", r.status_code == 201)
-        night = a.post("/leads", lead_body("night@night-shop.example", phone_for(night_zone, "0199"), night_zone), "hub").json()
+        if r.status_code != 201:
+            say(f"    answer: {r.status_code} {r.text[:120]}")
+        night = a.post("/leads", lead_body("night@night-shop.example", phone_for(night_zone, "0199"), night_zone),
+                       "hub").json()
+        verify(a, night)
         a.post("/consents", {"request_id": rid(), "contact_id": night["contact_id"], "channel": "sms", "brand": "zbm",
                              "source": "web_form",
                              "captured_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -258,6 +276,12 @@ def _main(work: Path) -> int:
         r = a.post("/outreach/sms", {**sms, "request_id": rid(), "contact_id": night["contact_id"]}, "sales_agent")
         check("a text at night in the recipient's zone is refused",
               r.status_code == 403 and r.json()["detail"] == "QUIET_HOURS")
+
+        r = a.post("/replies", {"request_id": rid(), "channel": "sms", "from_phone": phone_for(night_zone, "0199"),
+                                "text": "Opt me out"}, "provider_events").json()
+        r2 = a.post("/outreach/sms", {**sms, "request_id": rid(), "contact_id": night["contact_id"]}, "sales_agent")
+        check("an SMS reply that is not a plain yes holds the number (S2-C1)",
+              r["held"] is True and r2.status_code == 403 and r2.json()["detail"] == "PHONE_HOLD")
 
         # --- opt-out across brands ----------------------------------------------------------------------------------
         r = a.post("/replies", {"request_id": rid(), "channel": "email", "message_id": msg["message_id"],
@@ -357,6 +381,7 @@ def _main(work: Path) -> int:
         types = sorted({x["event_type"] for x in mine})
         say(f"ledger: {len(ents)} entries, {len(mine)} from sales; types: {', '.join(types)}")
         check("typed events are on the ledger", {"log_anchor", "consent_granted", "suppression_added",
+                                                  "phone_hold_applied", "account_display_name_verified",
                                                   "template_approved", "price_approved", "proposal_approved",
                                                   "founder_approval_refused"} <= set(types))
         check("no raw email on the ledger", "live-shop.example" not in json.dumps(ents)

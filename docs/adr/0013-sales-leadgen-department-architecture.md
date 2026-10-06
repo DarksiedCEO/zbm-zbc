@@ -27,8 +27,9 @@ agent calls this service yet.
    runtime that works the pipeline), `provider_events` (bounce, complaint and reply webhooks relayed from the send
    providers), `compliance_38` (audit reads).
 3. **Fail closed at start.** Missing service token, a production start without `SALES_DATA_DIR`, no
-   `SALES_PII_HASH_KEY_FILE` in production or with any `SALES_DATA_DIR`, `SALES_PRIMARY_DOMAINS` naming fewer than two
-   registrable domains (both brands'), an outreach domain sharing a registrable domain with one of them (or set without
+   `SALES_PII_HASH_KEY_FILE` in production or with any `SALES_DATA_DIR`, an outreach domain without both
+   `SALES_ZBM_DOMAIN` and `SALES_ZBC_DOMAIN`, an outreach domain sharing a registrable domain with either of them or
+   with `SALES_PRIMARY_DOMAINS` (or set without
    them, or without `SALES_POSTAL_ADDRESS`), `SALES_AUTO_APPROVE_MAX` above 10000.00, a warm-up schedule that starts
    above 50 a day, decreases, more than doubles in a day or exceeds 500, a `noreply` From mailbox, or any switch that
    would select an unbuilt provider or client (`SALES_EMAIL_PROVIDER`, `SALES_SMS_PROVIDER`, `SALES_VOICE_PROVIDER`,
@@ -169,3 +170,21 @@ pass, and the integration lead records its description here. Splitting a deal ac
 account (each needs its own qualified lead) is not summed (S1-H2 is per opportunity, as the review asked). The
 merge-value rule is ASCII-only: a contact whose first name or company carries other letters (José, Zoë) gets no
 template that uses that field (refused, never altered).
+
+## Amendment — AEGIS round 2 (Oct 5 2026): BLOCKING, every finding fixed
+
+Round 2 confirmed every round-1 finding closed and found that the S1-H1 and S1-H3 fixes were word lists that plain
+wording still passed. Both are now fail-closed designs; the lists remain only as a second layer and for labels.
+Regressions: `services/sales-py/tests/test_aegis_r2.py` (the reviewer's cases). Every new guard was mutation-checked.
+
+| Id | Finding | Fix |
+|---|---|---|
+| S2-C1 (Critical) | SMS/voice revocations worded outside the list ("Opt me out", "unsub", "delete my number", "I did not sign up for this", "no me escribas", ...) went to review and texting continued | **Fail closed:** every SMS or voice reply HOLDS phone outreach to that number for both brands (typed `phone_hold_applied` on the ledger first, in the same commit; queued texts and calls to it cancelled) unless the WHOLE normalised message is a narrow positive form (`i10_replies.positive_reply`: yes, ok, interested, call me, sounds good, tell me more ...; or an auto-reply such as out of office / I'm driving). A hold is lifted only by Andre (dashboard + token) deciding its `review_reply` task `not_an_opt_out` (`POST /sales/v1/tasks/{id}/decision`); lifting touches nothing else, so a consent that was revoked and a suppression stay as they are; `opt_out` makes it permanent. The ordinary task close refuses held tasks. The classifier now also folds confusables (Cyrillic/Greek look-alikes, digits inside words) and joins spaced letters (`S T O P`), for labels only |
+| S2-H1 (High) | Merge values that pass the character rule still carried deceptive or actionable copy ("Acc0unt Suspended", "Acme call 310-555-0199", "Wire 5000 to us today") | **Fail closed:** `{{company}}` renders only the account's `display_name` and `{{first_name}}` only the contact's `verified_first_name`, each set by a person at the console (`POST /accounts/{id}/display-name`, `/contacts/{id}/first-name`; dashboard, typed ledger event). No verified value → `MERGE_FIELD_REFUSED` (or use a template with a generic greeting). Nothing typed into a form ever renders. The character, length, deception and URL rules stay as the second layer |
+| S2-L1 (Low) | A +1 number accepted any `America/*` zone (South America, Greenland) and a far zone (Honolulu for a Los Angeles number) let a text land at 21:30 local | +1 numbers accept only NANP zones (an explicit list: US and territories, Canada, NANP Caribbean). The window must hold in the recorded zone AND in the area code's zone (a US area-code table); an unlisted area code must be inside the window in both Eastern and Pacific time (11:00-21:00 Eastern) |
+| S2-L2 (Low) | Brand domains were an unnamed list | `SALES_ZBM_DOMAIN` and `SALES_ZBC_DOMAIN` pin them, both required to send, different registrable domains; the outreach domain may share a registrable domain with neither (nor with `SALES_PRIMARY_DOMAINS`, now optional extras) |
+| S2 DoS (unverified) | Unbounded queueing could grow the log and memory | Each caller may have at most `SALES_QUEUE_MAX_PER_CALLER` (default 2000, 1..20000) messages queued; past it `429 QUEUE_FULL` |
+
+Accepted: a genuine SMS "yes" with extra words ("yes, call me Tuesday after 3") is held until Andre decides it (the
+cost of failing closed is a human review, never an unwanted text). An area code not in the table gets the Eastern
+and Pacific intersection, which can be stricter than the person's real window.

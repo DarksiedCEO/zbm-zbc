@@ -15,7 +15,7 @@ from datetime import timedelta
 from typing import Optional
 
 from clock import parse_iso
-from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
+from errors import Conflict, Forbidden, Invalid, NotFound, Throttled, Unavailable
 from intelligences import i02_identity, i05_suppression, i06_consent, i07_quiet_hours, i08_templates, i09_send_cap, \
     i10_replies
 from ledger import derived_id
@@ -108,6 +108,13 @@ class OutreachMixin:
                                        "revoke_keys": d.get("revoke_keys")}, at)
 
     def _a_reply_received(self, d, at):
+        if d.get("hold"):
+            h = d["hold"]
+            self.phone_holds[h["hold_id"]] = {**h, "status": "active", "at": at, "decided_at": None, "decision": None}
+            hs = set(h["hashes"])
+            for msg in self.messages.values():
+                if msg["status"] == "queued" and msg["channel"] in ("sms", "voice") and msg["to_hash"] in hs:
+                    msg.update(status="cancelled", reason="PHONE_HOLD", updated_at=at)
         if d.get("revoke_keys"):
             for k in d["revoke_keys"]:
                 self.consents.setdefault(k, []).append({"event": "revoked", "at": at, "source": "reply"})
@@ -132,6 +139,21 @@ class OutreachMixin:
         return self.day_stats.setdefault(f"{domain or ''}|{day}", {"sent": 0, "complaint": 0, "hard_bounce": 0})
 
     # ------------------------------------------------------------------------------------------------ checks
+
+    def _a_phone_hold_decided(self, d, at):
+        h = self.phone_holds[d["hold_id"]]
+        h.update(status="lifted" if d["decision"] == "not_an_opt_out" else "converted", decided_at=at,
+                 decision=d["decision"])
+        self.tasks[h["task_id"]].update(status="closed", closed_at=at, outcome=d["decision"])
+        if d["decision"] == "opt_out":
+            self._a_suppression_added({"hashes": d["hashes"], "reason": "stop_reply", "actor": d["actor"],
+                                       "revoke_keys": d["revoke_keys"]}, at)
+
+    def _held(self, phone_hash: Optional[str]) -> bool:
+        """An SMS/voice reply that is not a narrow positive form holds the number (AEGIS S2-C1). Lifting a hold
+        touches nothing else: a revoked consent or a suppression stays exactly as it was."""
+        return bool(phone_hash) and any(h["status"] == "active" and phone_hash in h["hashes"]
+                                        for h in self.phone_holds.values())
 
     def _is_suppressed(self, channel: str, contact: dict) -> bool:
         return i05_suppression.suppressed(self.suppression, i05_suppression.hashes_for(channel, contact))
@@ -169,7 +191,8 @@ class OutreachMixin:
 
     def _fields(self, contact: dict) -> dict:
         acc = self.accounts.get(contact["account_id"]) or {}
-        return {"first_name": i08_templates.first_name(contact["name"]), "company": acc.get("name") or ""}
+        # S2-H1: only values a person verified at the console; never the name typed into a form
+        return {"first_name": contact.get("verified_first_name"), "company": acc.get("display_name")}
 
     def _merge_problem(self, t: dict, v: dict, contact: dict) -> Optional[str]:
         return i08_templates.merge_problem({"subject": v["subject"], "body": v["body"]}, self._fields(contact))
@@ -432,6 +455,9 @@ class OutreachMixin:
     # ------------------------------------------------------------------------------------------------ queue
 
     def _queue(self, caller: str, rk: str, body: dict, data: dict) -> dict:
+        queued = sum(1 for x in self.messages.values() if x["status"] == "queued" and x["queued_by"] == caller)
+        if queued >= self.settings.queue_max_per_caller:          # AEGIS S2: a caller cannot flood the log
+            raise Throttled(R("QUEUE_FULL"))
         mid = derived_id("msg", caller, rk)
         self._commit("message_queued", self._req({"message_id": mid, **data}, caller, rk, body, mid), caller)
         return self.message_view(self.messages[mid])
@@ -441,9 +467,11 @@ class OutreachMixin:
             raise Invalid(R("CONTACT_NO_PHONE"))
         if self._is_suppressed(channel, c):
             raise Forbidden(R("SUPPRESSED"))
+        if self._held(c["phone_hash"]):
+            raise Forbidden(R("PHONE_HOLD"))
         if not self._consent_active(c, channel, brand):
             raise Forbidden(R("CONSENT_REQUIRED"))
-        ok = i07_quiet_hours.allowed(self.now(), c.get("time_zone"))
+        ok = i07_quiet_hours.allowed(self.now(), c.get("time_zone"), c.get("phone"))
         if ok is None:
             raise Forbidden(R("TIME_ZONE_UNKNOWN"))
         if not ok:
@@ -527,10 +555,12 @@ class OutreachMixin:
         c = self.contacts.get(msg["contact_id"])
         if c is None or msg["to_hash"] in self.suppression or self._is_suppressed(msg["channel"], c):
             return "SUPPRESSED", None, None
+        if msg["channel"] in ("sms", "voice") and (self._held(msg["to_hash"]) or self._held(c.get("phone_hash"))):
+            return "PHONE_HOLD", None, None
         if msg["channel"] == "voice":
             if not self._consent_active(c, "voice", msg["brand"]):
                 return "CONSENT_REQUIRED", None, None
-            ok = i07_quiet_hours.allowed(self.now(), c.get("time_zone"))
+            ok = i07_quiet_hours.allowed(self.now(), c.get("time_zone"), c.get("phone"))
             if ok is None:
                 return "TIME_ZONE_UNKNOWN", None, None
             return None, {"purpose": msg["purpose"], "brand": msg["brand"]}, None if ok else "QUIET_HOURS"
@@ -552,7 +582,7 @@ class OutreachMixin:
         if msg["channel"] == "sms":
             if not self._consent_active(c, "sms", msg["brand"]):
                 return "CONSENT_REQUIRED", None, None
-            ok = i07_quiet_hours.allowed(self.now(), c.get("time_zone"))
+            ok = i07_quiet_hours.allowed(self.now(), c.get("time_zone"), c.get("phone"))
             if ok is None:
                 return "TIME_ZONE_UNKNOWN", None, None
             if not ok:
@@ -729,7 +759,26 @@ class OutreachMixin:
                 data.update(hashes=sorted(hashes), reason="stop_reply")
                 ev = ("suppression_added", f"reply:{reply_id}", {"hashes": sorted(hashes), "reason": "stop_reply"},
                       (caller, rk))
+            elif body["channel"] in ("sms", "voice") and i10_replies.positive_reply(body["text"],
+                                                                                body["channel"]) is None:
+                # AEGIS S2-C1: fail closed. Not a narrow positive form -> phone outreach to the number is HELD for both
+                # brands (recorded on the ledger first, in this commit), and only Andre can lift it via the task.
+                phones = {h for h in (phone_h, msg["to_hash"] if msg and msg["channel"] != "email" else None,
+                                      c.get("phone_hash") if c else None) if h}
+                if not phones:
+                    raise Invalid(R("REPLY_SENDER_REQUIRED"))
+                hold_id = derived_id("hld", reply_id)
+                task_id = derived_id("tsk", "review_reply", reply_id)
+                data["hold"] = {"hold_id": hold_id, "hashes": sorted(phones), "reply_id": reply_id,
+                                "task_id": task_id}
+                data["task"] = {"task_id": task_id, "kind": "review_reply", "hold_id": hold_id,
+                                "target": f"contact:{contact_id}" if contact_id else f"reply:{reply_id}",
+                                "due_on": self.today()}
+                ev = ("phone_hold_applied", f"hold:{hold_id}", {"hold_id": hold_id, "hashes": sorted(phones),
+                                                                  "reply_id": reply_id, "class": cls}, (caller, rk))
             else:
+                if body["channel"] in ("sms", "voice"):
+                    cls = data["class"] = i10_replies.positive_reply(body["text"], body["channel"])
                 target = f"contact:{contact_id}" if contact_id else f"reply:{reply_id}"
                 kind, due = {"interested": ("book_call", self.today()),
                              "out_of_office": ("reschedule", (self.now() + timedelta(days=RESCHEDULE_DAYS)).date()
@@ -738,6 +787,28 @@ class OutreachMixin:
                 data["task"] = {"task_id": derived_id("tsk", kind, reply_id), "kind": kind, "target": target,
                                 "due_on": due}
             answer = {"reply_id": reply_id, "class": cls, "suppressed": bool(data.get("hashes")),
+                      "held": bool(data.get("hold")),
                       "task_id": (data.get("task") or {}).get("task_id")}
             self._commit("reply_received", self._req(data, caller, rk, body, answer), caller, evidence=ev)
             return answer
+
+    def decide_hold(self, task_id: str, body: dict) -> dict:
+        """Andre's decision on a held SMS/voice reply (AEGIS S2-C1). ``not_an_opt_out`` lifts the hold and nothing
+        else (consents and suppressions are untouched); ``opt_out`` makes it a permanent opt-out."""
+        with self.lock:
+            self._gate()
+            rk = f"hold_decision|{task_id}|{body['request_id']}"
+            if self._idem("andre", rk, body):
+                return dict(self.tasks[task_id])
+            t = self._get(self.tasks, task_id, "TASK_NOT_FOUND")
+            hold = self.phone_holds.get(t.get("hold_id") or "")
+            if hold is None:
+                raise Conflict(R("TASK_HAS_NO_HOLD"))
+            if hold["status"] != "active":
+                raise Conflict(R("TASK_CLOSED"))
+            data = {"hold_id": hold["hold_id"], "decision": body["decision"], "hashes": hold["hashes"],
+                    "revoke_keys": self._revoke_keys(hold["hashes"]) if body["decision"] == "opt_out" else []}
+            self._commit("phone_hold_decided", self._req(data, "andre", rk, body, task_id), "andre",
+                         evidence=("phone_hold_decided", f"hold:{hold['hold_id']}",
+                                   {"hold_id": hold["hold_id"], "decision": body["decision"]}, ("andre", rk)))
+            return dict(self.tasks[task_id])

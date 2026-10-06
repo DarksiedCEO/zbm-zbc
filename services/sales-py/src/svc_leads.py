@@ -11,7 +11,7 @@ from pydantic import ValidationError
 import models as m
 from clock import parse_iso
 from errors import Conflict, Forbidden, Invalid, Unavailable
-from intelligences import i01_intake, i02_identity, i03_scoring, i04_routing, i07_quiet_hours
+from intelligences import i01_intake, i02_identity, i03_scoring, i04_routing, i07_quiet_hours, i08_templates
 from ledger import derived_id
 from ports import NotWired
 from reasons import R
@@ -76,6 +76,14 @@ class LeadsMixin:
         for lid in d["lead_ids"]:
             self.leads[lid].update(status="stale", updated_at=at)
 
+    def _a_account_display_name_verified(self, d, at):
+        a = self.accounts[d["account_id"]]
+        a["display_name"], a["display_name_verified_at"] = d["display_name"], at
+
+    def _a_contact_first_name_verified(self, d, at):
+        c = self.contacts[d["contact_id"]]
+        c["verified_first_name"], c["updated_at"] = d["first_name"], at
+
     def _a_contact_time_zone_set(self, d, at):
         c = self.contacts[d["contact_id"]]
         c["time_zone"], c["updated_at"] = d["time_zone"], at
@@ -91,7 +99,7 @@ class LeadsMixin:
     def _a_task_opened(self, d, at):
         self.tasks[d["task_id"]] = {"task_id": d["task_id"], "kind": d["kind"], "target": d["target"],
                                     "due_on": d.get("due_on"), "status": "open", "opened_at": at, "closed_at": None,
-                                    "outcome": None}
+                                    "outcome": None, "hold_id": d.get("hold_id")}
 
     def _a_task_closed(self, d, at):
         t = self.tasks[d["task_id"]]
@@ -106,8 +114,10 @@ class LeadsMixin:
 
     def contact_view(self, c: dict) -> dict:
         consent = {f"{ch}:{b}": self._consent_active(c, ch, b) for ch in ("sms", "voice") for b in ("zbm", "zbc")}
-        return {k: c.get(k) for k in ("contact_id", "account_id", "name", "email", "phone", "title", "time_zone")} | {
+        return {k: c.get(k) for k in ("contact_id", "account_id", "name", "email", "phone", "title", "time_zone",
+                                      "verified_first_name")} | {
             "email_suppressed": self._is_suppressed("email", c), "phone_suppressed": self._is_suppressed("sms", c),
+            "phone_held": self._held(c.get("phone_hash")),
             "consent": consent}
 
     def lead_view(self, lead: dict, duplicate: bool = False) -> dict:
@@ -353,6 +363,39 @@ class LeadsMixin:
                                    {**data, "previous": c.get("time_zone")}, (caller, rk)))
             return self.contact_view(self.contacts[contact_id])
 
+    def _verify_value(self, value: str) -> str:
+        v = " ".join(value.split())
+        if not v or not i08_templates.merge_value_ok(v):
+            raise Invalid(R("MERGE_FIELD_REFUSED"))
+        return v
+
+    def verify_display_name(self, caller: str, account_id: str, body: dict) -> dict:
+        """AEGIS S2-H1: the only name ``{{company}}`` ever renders, set by a person at the console."""
+        with self.lock:
+            self._gate()
+            rk = f"display_name|{account_id}|{body['request_id']}"
+            if self._idem(caller, rk, body):
+                return dict(self.accounts[account_id])
+            self._get(self.accounts, account_id, "ACCOUNT_NOT_FOUND")
+            data = {"account_id": account_id, "display_name": self._verify_value(body["display_name"])}
+            self._commit("account_display_name_verified", self._req(data, caller, rk, body, account_id), caller,
+                         evidence=("account_display_name_verified", f"account:{account_id}", data, (caller, rk)))
+            return dict(self.accounts[account_id])
+
+    def verify_first_name(self, caller: str, contact_id: str, body: dict) -> dict:
+        """AEGIS S2-H1: the only name ``{{first_name}}`` ever renders, set by a person at the console."""
+        with self.lock:
+            self._gate()
+            rk = f"first_name|{contact_id}|{body['request_id']}"
+            if self._idem(caller, rk, body):
+                return self.contact_view(self.contacts[contact_id])
+            self._get(self.contacts, contact_id, "CONTACT_NOT_FOUND")
+            data = {"contact_id": contact_id, "first_name": self._verify_value(body["first_name"])}
+            self._commit("contact_first_name_verified", self._req(data, caller, rk, body, contact_id), caller,
+                         evidence=("contact_first_name_verified", f"contact:{contact_id}",
+                                   {"contact_id": contact_id}, (caller, rk)))
+            return self.contact_view(self.contacts[contact_id])
+
     def set_stage(self, caller: str, opp_id: str, body: dict) -> dict:
         with self.lock:
             self._gate()
@@ -391,6 +434,8 @@ class LeadsMixin:
             t = self._get(self.tasks, task_id, "TASK_NOT_FOUND")
             if t["status"] != "open":
                 raise Conflict(R("TASK_CLOSED"))
+            if t.get("hold_id"):
+                raise Forbidden(R("HOLD_NEEDS_ANDRE_DECISION"))      # S2-C1: only Andre's decision closes it
             self._commit("task_closed", self._req({"task_id": task_id, "outcome": body["outcome"]}, caller, rk, body,
                                                   task_id), caller)
             return dict(t)

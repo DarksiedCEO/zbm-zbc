@@ -85,6 +85,7 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
         self.pricebook: dict[str, dict] = {}
         self.proposals: dict[str, dict] = {}
         self.handoffs: dict[str, dict] = {}
+        self.phone_holds: dict[str, dict] = {}
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}

@@ -27,16 +27,16 @@ def sms_template(h, brand="zbm"):
 
 
 def test_cold_sms_without_consent_refused(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.refused(sms(w, lead["contact_id"], sms_template(w)), 403, "CONSENT_REQUIRED")
 
 
 def test_cold_call_without_consent_refused(w):
-    w.refused(voice(w, w.lead()["contact_id"]), 403, "CONSENT_REQUIRED")
+    w.refused(voice(w, w.vlead()["contact_id"]), 403, "CONSENT_REQUIRED")
 
 
 def test_sms_with_consent_is_sent_with_stop_language(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.consent(lead["contact_id"]), 201)
     w.ok(sms(w, lead["contact_id"], sms_template(w)), 201)
     assert w.ok(w.job("send-queue"))["sent"] == 1
@@ -47,13 +47,13 @@ def test_sms_with_consent_is_sent_with_stop_language(w):
 
 
 def test_consent_to_one_brand_is_not_consent_to_the_other(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.consent(lead["contact_id"], brand="zbm"), 201)
     w.refused(sms(w, lead["contact_id"], sms_template(w, "zbc")), 403, "CONSENT_REQUIRED")
 
 
 def test_consent_for_sms_is_not_consent_for_calls(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.consent(lead["contact_id"], channel="sms"), 201)
     w.refused(voice(w, lead["contact_id"]), 403, "CONSENT_REQUIRED")
     w.ok(w.consent(lead["contact_id"], channel="voice"), 201)
@@ -70,7 +70,7 @@ def test_quiet_hours_by_recipient_time_zone(tmp_path, utc_hour, tz, ok):
     from clock import FixedClock
     from helpers import Harness, wired_ports
     h = Harness(tmp_path, ports=wired_ports(), clock=FixedClock(datetime(2026, 10, 7, utc_hour, tzinfo=timezone.utc)))
-    lead = h.lead(tz=tz, phone="+13105550100" if tz.startswith("America/") else "+442071838750")
+    lead = h.vlead(tz=tz, phone="+13105550100" if tz.startswith("America/") else "+442071838750")
     h.ok(h.consent(lead["contact_id"]), 201)
     r = sms(h, lead["contact_id"], sms_template(h))
     if utc_hour == 4:
@@ -82,7 +82,7 @@ def test_quiet_hours_by_recipient_time_zone(tmp_path, utc_hour, tz, ok):
 
 
 def test_unknown_time_zone_refused(w):
-    lead = w.lead(tz=None)
+    lead = w.vlead(tz=None)
     w.ok(w.consent(lead["contact_id"]), 201)
     w.refused(sms(w, lead["contact_id"], sms_template(w)), 403, "TIME_ZONE_UNKNOWN")
     w.ok(w.consent(lead["contact_id"], channel="voice"), 201)
@@ -93,7 +93,7 @@ def test_unknown_time_zone_refused(w):
 
 
 def test_queued_text_waits_for_the_window_at_send_time(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.consent(lead["contact_id"]), 201)
     w.ok(sms(w, lead["contact_id"], sms_template(w)), 201)
     w.clock.advance(hours=11)                          # 22:00 in Los Angeles
@@ -104,7 +104,7 @@ def test_queued_text_waits_for_the_window_at_send_time(w):
 
 
 def test_revocation_covers_every_channel_and_brand_and_cancels_the_queue(w):
-    lead = w.lead()
+    lead = w.vlead()
     cid = lead["contact_id"]
     for ch in ("sms", "voice"):
         for b in ("zbm", "zbc"):
@@ -120,7 +120,7 @@ def test_revocation_covers_every_channel_and_brand_and_cancels_the_queue(w):
 
 
 def test_stop_reply_revokes_and_suppresses_immediately(w):
-    lead = w.lead()
+    lead = w.vlead()
     cid = lead["contact_id"]
     w.ok(w.consent(cid), 201)
     w.ok(sms(w, cid, sms_template(w)), 201)
@@ -135,12 +135,12 @@ def test_stop_reply_revokes_and_suppresses_immediately(w):
 def test_stop_from_an_unknown_number_still_suppresses_it(w):
     w.ok(w.post("/sales/v1/replies", {"request_id": rid(), "channel": "sms", "from_phone": "+1 (310) 555-0100",
                                       "text": "stop"}, "provider_events"), 201)
-    lead = w.lead()
+    lead = w.vlead()
     w.refused(w.consent(lead["contact_id"]), 403, "SUPPRESSED")
 
 
 def test_consent_in_the_future_refused(w):
-    lead = w.lead()
+    lead = w.vlead()
     r = w.post("/sales/v1/consents", {"request_id": rid(), "contact_id": lead["contact_id"], "channel": "sms",
                                       "brand": "zbm", "source": "web_form", "captured_at": "2027-01-01T00:00:00Z",
                                       "consent_text_version": "v1", "consent_text_sha256": CONSENT_SHA}, "hub")
@@ -148,7 +148,7 @@ def test_consent_in_the_future_refused(w):
 
 
 def test_consent_needs_the_consent_text_hash(w):
-    lead = w.lead()
+    lead = w.vlead()
     r = w.post("/sales/v1/consents", {"request_id": rid(), "contact_id": lead["contact_id"], "channel": "sms",
                                       "brand": "zbm", "source": "web_form", "captured_at": "2026-10-06T17:00:00Z",
                                       "consent_text_version": "v1"}, "hub")
@@ -156,7 +156,7 @@ def test_consent_needs_the_consent_text_hash(w):
 
 
 def test_consent_only_from_capture_points(w):
-    lead = w.lead()
+    lead = w.vlead()
     for caller in ("sales_agent", "detection", "scheduler"):
         r = w.post("/sales/v1/consents", {"request_id": rid(), "contact_id": lead["contact_id"], "channel": "sms",
                                           "brand": "zbm", "source": "web_form", "captured_at": "2026-10-06T17:00:00Z",
@@ -165,7 +165,7 @@ def test_consent_only_from_capture_points(w):
 
 
 def test_ledger_down_no_consent_change(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ledger.fail = True
     w.refused(w.consent(lead["contact_id"]), 503, "LEDGER_UNAVAILABLE")
     w.ledger.fail = False
@@ -173,7 +173,7 @@ def test_ledger_down_no_consent_change(w):
 
 
 def test_consent_revoked_between_queue_and_send_cancels(w):
-    lead = w.lead()
+    lead = w.vlead()
     w.ok(w.consent(lead["contact_id"]), 201)
     msg = w.ok(sms(w, lead["contact_id"], sms_template(w)), 201)
     w.svc.consents[next(iter(w.svc.consents))].append({"event": "revoked", "at": "x", "source": "test"})
@@ -183,7 +183,7 @@ def test_consent_revoked_between_queue_and_send_cancels(w):
 
 
 def test_voice_not_wired_stays_queued(h):
-    lead = h.lead()
+    lead = h.vlead()
     h.ok(h.consent(lead["contact_id"], channel="voice"), 201)
     h.ok(voice(h, lead["contact_id"]), 201)
     assert h.ok(h.job("send-queue"))["not_wired"] == 1

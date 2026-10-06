@@ -184,7 +184,7 @@ def test_blank_line_refuses_start(tmp_path):
 
 def test_suppression_survives_restart_and_still_blocks(tmp_path):
     h = durable(tmp_path, ports=wired_ports())
-    lead = h.lead()
+    lead = h.vlead()
     h.ok(h.post("/sales/v1/suppressions", {"request_id": rid(), "contact_id": lead["contact_id"], "reason": "manual"},
                 "dashboard"), 201)
     h2 = h.restart()

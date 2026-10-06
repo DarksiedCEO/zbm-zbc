@@ -132,6 +132,16 @@ class TimeZoneSet(Strict):
     time_zone: Annotated[StrictStr, Field(pattern=r"^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$", max_length=64)]
 
 
+class DisplayName(Strict):
+    request_id: Id
+    display_name: Annotated[StrictStr, Field(min_length=1, max_length=40)]
+
+
+class FirstName(Strict):
+    request_id: Id
+    first_name: Annotated[StrictStr, Field(min_length=1, max_length=40)]
+
+
 class StageSet(Strict):
     request_id: Id
     stage: Stage
@@ -148,6 +158,11 @@ class ActivityIn(Strict):
 class TaskClose(Strict):
     request_id: Id
     outcome: Literal["done", "dismissed"]
+
+
+class HoldDecision(Strict):
+    request_id: Id
+    decision: Literal["not_an_opt_out", "opt_out"]
 
 
 class ConsentGrant(Strict):

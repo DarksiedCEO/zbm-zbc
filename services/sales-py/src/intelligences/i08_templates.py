@@ -70,6 +70,10 @@ def _merge(text: str, fields: dict) -> str:
     return _PLACEHOLDER.sub(lambda m: _clean(fields.get(m.group(1).strip())), text)
 
 
+# AEGIS S2-H1: merge values are never taken from what outside parties typed. ``company`` renders only the account's
+# ``display_name`` and ``first_name`` only the contact's ``verified_first_name``, both set by a person at the console
+# (a typed ledger event each); with no verified value the template is refused for that contact (or uses a generic
+# greeting). The rules below are the second layer.
 # AEGIS S1-H1: a merge value comes from a form anyone can fill in, so it is never trusted as copy. Only ASCII letters,
 # digits, space and . ' & - ; no scheme, no "www.", no "@"; at most 40 characters. A template that uses a field whose
 # value breaks this is refused for that contact (MERGE_FIELD_REFUSED); the RENDERED subject is checked for deception
@@ -92,7 +96,8 @@ def merge_problem(tpl: dict, fields: dict) -> Optional[str]:
     """None when every used merge value is safe and the merged copy is still honest; otherwise a refusal code."""
     subject, body = tpl.get("subject"), tpl["body"]
     for name in {n.strip() for n in _PLACEHOLDER.findall((subject or "") + "\n" + body)}:
-        if not merge_value_ok(fields.get(name) or ""):
+        value = fields.get(name)
+        if not value or not merge_value_ok(value):       # S2-H1: no human-verified value -> refused
             return "MERGE_FIELD_REFUSED"
     merged_subject = _merge(subject, fields) if subject is not None else None
     if merged_subject is not None and deceptive_subject(merged_subject):

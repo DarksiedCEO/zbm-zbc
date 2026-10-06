@@ -12,18 +12,22 @@ def load(**over):
     return config.load(base_env(**over))
 
 
-@pytest.mark.parametrize("outreach,primary", [("zbestmedia.test", None), ("mail.zbestmedia.test", None),
-                                              ("ZBESTCLIPS.test", None),
-                                              ("zbm-outreach.test", "zbestmedia.test,news.zbm-outreach.test")])
-def test_outreach_domain_equal_to_under_or_over_a_primary_refuses_start(outreach, primary):
-    over = {"SALES_PRIMARY_DOMAINS": primary} if primary else {}
+@pytest.mark.parametrize("outreach,over", [("zbestmedia.test", {}), ("mail.zbestmedia.test", {}),
+                                           ("ZBESTCLIPS.test", {}),
+                                           ("zbm-outreach.test", {"SALES_PRIMARY_DOMAINS": "news.zbm-outreach.test"})])
+def test_outreach_domain_sharing_a_registrable_domain_with_a_brand_refuses_start(outreach, over):
     with pytest.raises(RuntimeError, match="separate domain"):
         load(SALES_OUTREACH_DOMAIN=outreach, **over)
 
 
-def test_outreach_domain_without_primary_domains_refuses_start():
-    with pytest.raises(RuntimeError, match="SALES_PRIMARY_DOMAINS is not"):
-        load(SALES_PRIMARY_DOMAINS=None)
+def test_outreach_domain_without_both_brand_domains_refuses_start():
+    with pytest.raises(RuntimeError, match="not both set"):
+        load(SALES_ZBC_DOMAIN=None)
+
+
+def test_brand_domains_must_differ():
+    with pytest.raises(RuntimeError, match="different domains"):
+        load(SALES_ZBC_DOMAIN="clips.zbestmedia.test")
 
 
 def test_outreach_domain_without_postal_address_refuses_start():

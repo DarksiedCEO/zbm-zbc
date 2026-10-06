@@ -151,6 +151,7 @@ class Settings:
     daily_send_cap: int = 200
     auto_approve_max: Decimal = AUTO_APPROVE_CEILING
     stale_lead_days: int = 30
+    queue_max_per_caller: int = 2000
     bind_addr: str = "127.0.0.1"
     port: int = 8450
 
@@ -199,28 +200,38 @@ def related_domains(a: str, b: str) -> bool:
     return registrable(a) == registrable(b)
 
 
+def _domain_env(env, name: str) -> Optional[str]:
+    v = (env.get(name) or "").strip().lower() or None
+    if v is not None and not _HOST.fullmatch(v):
+        raise RuntimeError(f"{name} must be a domain name (lowercase, no scheme, no path)")
+    return v
+
+
 def _domains(env) -> tuple[Optional[str], tuple]:
-    outreach = (env.get("SALES_OUTREACH_DOMAIN") or "").strip().lower() or None
+    """AEGIS S1-M3 / S2-L2: the two brand domains are pinned by name (SALES_ZBM_DOMAIN, SALES_ZBC_DOMAIN), both required
+    before anything can be sent; SALES_PRIMARY_DOMAINS may add more of the brands' own domains. The outreach domain may
+    share a registrable domain with none of them."""
+    outreach = _domain_env(env, "SALES_OUTREACH_DOMAIN")
+    zbm, zbc = _domain_env(env, "SALES_ZBM_DOMAIN"), _domain_env(env, "SALES_ZBC_DOMAIN")
     raw_primary = (env.get("SALES_PRIMARY_DOMAINS") or "").strip().lower()
-    primary = tuple(p.strip() for p in raw_primary.split(",") if p.strip()) if raw_primary else ()
-    for p in primary:
+    extra = tuple(p.strip() for p in raw_primary.split(",") if p.strip()) if raw_primary else ()
+    for p in extra:
         if not _HOST.fullmatch(p):
             raise RuntimeError("SALES_PRIMARY_DOMAINS must be a comma-separated list of domain names")
+    if zbm and zbc and related_domains(zbm, zbc):
+        raise RuntimeError("SALES_ZBM_DOMAIN and SALES_ZBC_DOMAIN must be the two brands' different domains")
+    primary = tuple(x for x in (zbm, zbc) if x) + extra
     if outreach is None:
         return None, primary
-    if not _HOST.fullmatch(outreach):
-        raise RuntimeError("SALES_OUTREACH_DOMAIN must be a domain name (lowercase, no scheme, no path)")
-    if not primary:
-        raise RuntimeError("SALES_OUTREACH_DOMAIN is set but SALES_PRIMARY_DOMAINS is not: the service cannot prove "
-                           "the outreach domain is separate from the brands' own domains, so it refuses to start")
-    if len({registrable(p) for p in primary}) < 2:
-        raise RuntimeError("SALES_PRIMARY_DOMAINS must list both brands' own domains (ZBM and ZBC: at least two "
-                           "different registrable domains), so neither can be used as the outreach domain")
+    if not (zbm and zbc):
+        raise RuntimeError("SALES_OUTREACH_DOMAIN is set but SALES_ZBM_DOMAIN and SALES_ZBC_DOMAIN are not both set: "
+                           "the service cannot prove the outreach domain is separate from both brands' own domains, "
+                           "so it refuses to start")
     for p in primary:
         if related_domains(outreach, p):
-            raise RuntimeError("SALES_OUTREACH_DOMAIN must be a separate domain: it shares a registrable domain with "
-                               "one of SALES_PRIMARY_DOMAINS (cold email from a brand's own domain puts the brands' own "
-                               "mail at risk)")
+            raise RuntimeError("SALES_OUTREACH_DOMAIN must be a separate domain: it shares a registrable domain with a "
+                               "brand domain (SALES_ZBM_DOMAIN, SALES_ZBC_DOMAIN or SALES_PRIMARY_DOMAINS); cold email "
+                               "from a brand's own domain puts the brands' own mail at risk")
     return outreach, primary
 
 
@@ -309,6 +320,7 @@ def load(env: Optional[dict] = None) -> Settings:
                            "send without him)")
     s.auto_approve_max = auto_max
     s.stale_lead_days = _int(env, "SALES_STALE_LEAD_DAYS", 30, 7, 365)
+    s.queue_max_per_caller = _int(env, "SALES_QUEUE_MAX_PER_CALLER", 2000, 1, 20000)
     for name, why in NOT_BUILT.items():
         if (env.get(name) or "").strip() not in ("", "none", "0"):
             raise RuntimeError(f"{name}: {why}. Unset it; this service refuses to start rather than pretend.")
