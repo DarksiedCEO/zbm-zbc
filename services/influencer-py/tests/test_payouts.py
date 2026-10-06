@@ -24,6 +24,7 @@ def test_tax_profile_holds_a_reference_and_its_hash_only(w):
 @pytest.mark.parametrize("ref", ["123456789", "ssn:123456789", "stripe:short", "http://x", "stripe:acct 1",
                                  "stripe:" + "a" * 121, "vault:ssn123456789", "fin:abcdefgh", "stripe:acct_ATTACKER1",
                                  "stripe:acct_123456789abcdefgh", "vault:12345678-9abc-def0-1234-567890abcdef",
+                                 "vault:abcdefghijklmnopqrstuvwxy", "vault:ABCDEFGHIJKLMNOPQRSTUVWXYZ",
                                  "vault:new-destination-1"])
 def test_tax_ref_must_be_an_opaque_reference(w, ref):
     inf = w.creator()
@@ -173,7 +174,7 @@ def test_a_waiting_payout_is_cancelled_when_the_payee_changes(tmp_path):
     inf, d, content = h.paid_ready(fee="500.00")
     p = h.ok(h.payout(d, "500.00", [content["content_id"]]), 201)
     assert p["status"] == "pending_finance"
-    conf = h.tax_confirmed(inf, ref="vault:0f0e0d0c-0b0a-4908-8706-a5a4a3a2a1a0")
+    conf = h.tax_confirmed(inf, ref="vault:abcdefghijklmnopqrstuvwxyz")
     h.ok(h.post(f"/confirmations/{conf['conf_id']}/approve",
                 {"request_id": rid(), "content_sha256": conf["content_sha256"]}, andre=True))
     fin.payout = "accepted"

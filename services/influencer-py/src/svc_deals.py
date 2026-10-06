@@ -223,28 +223,30 @@ class DealsMixin:
     # ------------------------------------------------------------------------------------------------ one person
 
     def _person_keys(self, inf: dict) -> set:
-        """What ties records to one PERSON: the tax reference (applied or waiting for confirmation / Andre) and the
-        Finance payee."""
+        """What ties records to one PERSON: the tax reference (applied or waiting for confirmation / Andre), the
+        Finance payee and Finance's per-person key of the matched TIN."""
         keys = set()
         if inf.get("tax"):
             keys.add(("tax", inf["tax"]["tax_ref_sha256"]))
         if inf["payee"]["payee_ref"]:
             keys.add(("payee", inf["payee"]["payee_ref"]))
+        if inf["payee"].get("person_key"):                 # AEGIS R2-N2: Finance's key of the matched TIN
+            keys.add(("person", inf["payee"]["person_key"]))
         for c in self.confirmations.values():
             if c["influencer_id"] == inf["influencer_id"] and c["kind"] == "tax_profile" \
                     and c["status"] in ("pending", "pending_andre", "undeliverable"):
                 keys.add(("tax", c["payload"]["tax_ref_sha256"]))
         return keys
 
-    def _linked_ids(self, inf: dict) -> set:
-        keys = self._person_keys(inf)
+    def _linked_ids(self, inf: dict, extra_key=None) -> set:
+        keys = self._person_keys(inf) | ({extra_key} if extra_key else set())
         ids = {inf["influencer_id"]}
         if keys:
             ids |= {o["influencer_id"] for o in self.influencers.values() if self._person_keys(o) & keys}
         return ids
 
-    def _person_total(self, inf: dict):
-        people = self._linked_ids(inf)
+    def _person_total(self, inf: dict, extra_key=None):
+        people = self._linked_ids(inf, extra_key)
         return money.total([x["total"] for x in self.deals.values() if x["influencer_id"] in people
                             and x["status"] not in i09_deal_approval.NOT_COUNTED])
 

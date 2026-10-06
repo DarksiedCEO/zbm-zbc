@@ -12,12 +12,18 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 from typing import Optional
 
+from clock import parse_iso
 from errors import Conflict, Forbidden, Invalid, NotFound, Throttled, Unavailable
 from intelligences import i02_identity, i04_suppression, i05_templates, i06_send_cap, i07_replies, i10_dm_guard
-from ledger import derived_id
+from ledger import derived_id, payload_sha256
 from reasons import R
+
+
+REPLY_TEXT_MAX = 20_000
+REPLY_CHANNELS = ("email", "instagram", "tiktok", "x", "youtube")
 
 
 def _set_sha(hashes) -> str:
@@ -63,7 +69,7 @@ class OutreachMixin:
         self.messages[d["message_id"]] = {**{k: d.get(k) for k in (
             "message_id", "channel", "platform", "influencer_id", "to_hash", "brand", "template_id", "version",
             "template_sha256", "draft_id", "content_sha256", "rendered_sha256", "from_domain", "purpose",
-            "confirmation_id")},
+            "confirmation_id", "not_before", "existing_record")},
             "status": "queued", "reason": None, "queued_at": at, "updated_at": at, "sent_on": None,
             "provider_ref": None, "events": [], "queued_by": d["actor"]}
 
@@ -71,7 +77,7 @@ class OutreachMixin:
         msg = self.messages[d["message_id"]]
         msg.update(status="sending", sent_on=d["date"], updated_at=at)
         if msg["channel"] == "email":
-            self._stats(d["date"], msg["from_domain"])["sent"] += 1
+            self._stats(d["date"], self._cap_key(msg))["sent"] += 1
 
     def _a_message_sent(self, d, at):
         self.messages[d["message_id"]].update(status="sent", provider_ref=d.get("provider_ref"), updated_at=at)
@@ -86,7 +92,7 @@ class OutreachMixin:
         msg = self.messages[d["message_id"]]
         msg["events"] = (msg["events"] + [{"event": d["event"], "at": at}])[-20:]
         if d["event"] in ("hard_bounce", "complaint") and msg.get("sent_on") and msg["channel"] == "email":
-            self._stats(msg["sent_on"], msg["from_domain"])[d["event"]] += 1
+            self._stats(msg["sent_on"], self._cap_key(msg))[d["event"]] += 1
         if d.get("hashes"):
             self._a_suppression_added({"hashes": d["hashes"], "reason": d["reason"], "actor": d["actor"]}, at)
 
@@ -124,6 +130,11 @@ class OutreachMixin:
                  decision=d["decision"])
         if d["decision"] == "opt_out":
             self._a_suppression_added({"hashes": d["hashes"], "reason": "hold_opt_out", "actor": d["actor"]}, at)
+
+    @staticmethod
+    def _cap_key(msg: dict) -> str:
+        """Confirmation mails count against their OWN daily cap (AEGIS R2-N1), never against outreach."""
+        return ("confirm|" if msg.get("purpose") == "confirmation" else "") + (msg.get("from_domain") or "")
 
     def _stats(self, day: str, domain: Optional[str]) -> dict:
         return self.day_stats.setdefault(f"{domain or ''}|{day}", {"sent": 0, "complaint": 0, "hard_bounce": 0})
@@ -319,7 +330,8 @@ class OutreachMixin:
     # ------------------------------------------------------------------------------------------------ email queue
 
     def _queue_room(self, caller: str) -> None:
-        queued = sum(1 for x in self.messages.values() if x["status"] == "queued" and x["queued_by"] == caller)
+        queued = sum(1 for x in self.messages.values() if x["status"] == "queued" and x["queued_by"] == caller
+                     and x.get("purpose") != "confirmation")
         if queued >= self.settings.queue_max_per_caller:          # sales-py S2: a caller cannot flood the log
             raise Throttled(R("QUEUE_FULL"))
 
@@ -503,15 +515,20 @@ class OutreachMixin:
         recorded (typed ``outreach_send`` event, then the log line); the provider is called outside the lock; the
         outcome is recorded after. A message whose outcome could not be recorded stays ``sending`` (never resent on
         its own: a duplicate message to a creator is worse than a missing one)."""
-        summary = {"sent": 0, "failed": 0, "cancelled": 0, "capped": 0, "not_wired": 0, "stopped": None}
+        summary = {"sent": 0, "failed": 0, "cancelled": 0, "capped": 0, "deferred": 0, "not_wired": 0,
+                   "confirmations_sent": 0, "stopped": None}
         with self.lock:
             self._gate()
             rk = self._rk("job", "send-queue", body)
             prev = self._idem("scheduler", rk, body)
             if prev:
                 return {"job": "send-queue", "already_ran": True, **(prev[1] or {})}
-            ids = [m["message_id"] for m in sorted((m for m in self.messages.values() if m["status"] == "queued"),
-                                                   key=lambda m: (m["queued_at"], m["message_id"]))]
+            # confirmations first, on their own cap: those for records we already hold (a creator we know) before
+            # new addresses, so a flood of junk applications cannot starve a real creator's confirmation (R2-N1)
+            ids = [m["message_id"] for m in sorted(
+                (m for m in self.messages.values() if m["status"] == "queued"),
+                key=lambda m: (m.get("purpose") != "confirmation", not m.get("existing_record"), m["queued_at"],
+                               m["message_id"]))]
         for mid in ids:
             with self.lock:
                 if self._closed:
@@ -530,8 +547,13 @@ class OutreachMixin:
                         break
                     continue
                 today = self.today()
+                if msg.get("not_before") and self.now() < parse_iso(msg["not_before"]):
+                    summary["deferred"] += 1                # one confirmation mail per address per day
+                    continue
+                cap = self.settings.confirmation_daily_cap if msg.get("purpose") == "confirmation" \
+                    else self.settings.daily_send_cap
                 if msg["channel"] == "email" and not i06_send_cap.may_send(
-                        self._stats(today, msg["from_domain"])["sent"], self.settings.daily_send_cap):
+                        self._stats(today, self._cap_key(msg))["sent"], cap):
                     summary["capped"] += 1
                     continue
                 port = self.ports.email if msg["channel"] == "email" else self.ports.dm
@@ -564,7 +586,7 @@ class OutreachMixin:
                     if result is not None and result.status == "accepted":
                         self._commit("message_sent", {"message_id": mid, "provider_ref": result.provider_ref},
                                      "scheduler")
-                        summary["sent"] += 1
+                        summary["confirmations_sent" if msg.get("purpose") == "confirmation" else "sent"] += 1
                     else:
                         self._commit("message_failed", {"message_id": mid}, "scheduler")
                         summary["failed"] += 1
@@ -601,7 +623,29 @@ class OutreachMixin:
             self._commit("message_event", self._req(data, caller, rk, body, msg["message_id"]), caller, evidence=ev)
             return self.message_view(msg)
 
-    def reply(self, caller: str, body: dict) -> dict:
+    def _reply_fields(self, body: dict, raw: dict) -> dict:
+        """What the service reads from a provider's reply (AEGIS R2-N3): never an error. A text of any length is cut to
+        REPLY_TEXT_MAX characters BEFORE it is classified and hashed; a field of the wrong type is absent; an unknown
+        channel is ``other`` (the lower DM opt-out bar applies); an unreadable request id is replaced by the SHA-256 of
+        the body (the relay's retry of the same body is still the same reply)."""
+        def text_of(v, n):
+            return v[:n] if isinstance(v, str) else None
+        rq = body.get("request_id")
+        if not (isinstance(rq, str) and re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", rq)):
+            rq = "h-" + payload_sha256(raw)[:40]
+        ch = body.get("channel")
+        return {"request_id": rq, "channel": ch if ch in REPLY_CHANNELS else "other",
+                "message_id": text_of(body.get("message_id"), 1000), "from_email": text_of(body.get("from_email"), 1000),
+                "from_handle": text_of(body.get("from_handle"), 1000),
+                "text": text_of(body.get("text"), REPLY_TEXT_MAX) or ""}
+
+    def reply(self, caller: str, raw_body: dict, raw: Optional[dict] = None) -> dict:
+        body = self._reply_fields(raw_body, raw if raw is not None else raw_body)
+        idem_body = {**{k: v for k, v in body.items() if k != "text"},
+                     "text_sha256": hashlib.sha256(body["text"].encode("utf-8", "surrogatepass")).hexdigest()}
+        return self._reply(caller, body, idem_body)
+
+    def _reply(self, caller: str, body: dict, idem_body: dict) -> dict:
         """A reply on any channel. ANY reply holds every further automatic outreach to that influencer until Andre
         decides (no interpretation: "yes" and "interested" hold too); the one exception is an email whose raw body is
         exactly a fixed machine auto-reply. Opt-out wording also suppresses at once, everywhere. The text is never
@@ -614,7 +658,7 @@ class OutreachMixin:
         with self.lock:
             self._gate()
             rk = self._rk("reply", "direct", body)
-            prev = self._idem(caller, rk, body)
+            prev = self._idem(caller, rk, idem_body)
             if prev:
                 return dict(prev[1])
             ignored = []
@@ -629,8 +673,8 @@ class OutreachMixin:
                 else:
                     ignored.append("from_email")
             if body.get("from_handle") is not None:
-                canon = i02_identity.handle(body["channel"], body["from_handle"]) if body["channel"] != "email" \
-                    else None
+                canon = i02_identity.handle(body["channel"], body["from_handle"]) \
+                    if body["channel"] in i02_identity.PLATFORMS else None
                 if canon:
                     handle_h = i02_identity.handle_hash(self.pii_key, body["channel"], canon)
                 else:
@@ -664,7 +708,7 @@ class OutreachMixin:
             answer = {"reply_id": reply_id, "class": cls, "influencer_id": iid,
                       "suppressed": bool(data.get("hashes")), "held": bool(data.get("hold")),
                       "hold_id": (data.get("hold") or {}).get("hold_id"), "ignored": ignored}
-            self._commit("reply_received", self._req(data, caller, rk, body, answer), caller,
+            self._commit("reply_received", self._req(data, caller, rk, idem_body, answer), caller,
                          evidence=evidence or None)
             return answer
 

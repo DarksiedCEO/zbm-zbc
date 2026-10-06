@@ -377,6 +377,15 @@ def _main(work: Path) -> int:
                    "provider_events")
         r2 = a.post("/replies", {"request_id": rid(), "channel": "email", "from_handle": "@nobody",
                                  "text": "stop"}, "provider_events")
+        r3 = a.post("/replies", {"channel": "email", "message_id": "<123456789@mail.example>",
+                                 "from_email": "other@live-creator.example", "text": "STOP\n" + "> quoted\n" * 3000,
+                                 "provider_extra": True}, "provider_events")
+        reps = [a.post("/applications", application("flood@live-creator.example", "@flood"), "hub").json()
+                for _ in range(3)]
+        more = [a.post("/applications", application("flood@live-creator.example", "@flood"), "hub") for _ in range(3)]
+        check("AEGIS R2: a long, oddly shaped reply lands; one open confirmation per address; applications rate-limited",
+              r3.status_code == 201 and len({x["confirmation_id"] for x in reps}) == 1
+              and [x.status_code for x in more] == [201, 201, 429] and detail(more[2]) == "APPLICATION_RATE_LIMITED")
         check("a reply is never refused for its sender fields; one that resolves nothing is kept for Andre",
               r.status_code == 201 and r.json()["suppressed"] is True and r2.status_code == 201
               and r2.json()["held"] is True and r2.json()["influencer_id"] is None)

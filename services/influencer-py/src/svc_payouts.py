@@ -20,6 +20,7 @@ InfluencerService.
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Optional
 
 import money
@@ -31,6 +32,11 @@ from reasons import R
 
 def _rsha(ref: str) -> str:
     return hashlib.sha256(ref.encode("utf-8")).hexdigest()
+
+
+def _key(v) -> Optional[str]:
+    """Finance's per-person key, only in the shape an opaque reference has (anything else is no key)."""
+    return v if isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", v) else None
 
 
 def payout_sha256(p: dict) -> str:
@@ -58,7 +64,8 @@ class PayoutsMixin:
 
     def _a_payee_checked(self, d, at):
         inf = self.influencers[d["influencer_id"]]
-        inf["payee"] = {"payee_ref": d["payee_ref"], "status": d["status"], "checked_at": at}
+        inf["payee"] = {"payee_ref": d["payee_ref"], "status": d["status"], "checked_at": at,
+                        "person_key": d.get("person_key")}
 
     def _a_payout_requested(self, d, at):
         self.payouts[d["payout_id"]] = {**{k: d[k] for k in ("payout_id", "deal_id", "influencer_id", "amount",
@@ -95,7 +102,7 @@ class PayoutsMixin:
             rk = self._rk("tax_profile", body["influencer_id"], body)
             prev = self._idem(caller, rk, body)
             if prev:
-                return self.confirmation_view(self.confirmations[prev[1]])
+                return self.confirmation_view(self.confirmations[prev[1]["confirmation_id"]])
             inf = self._get(self.influencers, body["influencer_id"], "INFLUENCER_NOT_FOUND")
             problem = i01_intake.contractable(inf)
             if problem:
@@ -106,11 +113,9 @@ class PayoutsMixin:
                 raise Invalid(R("TAX_FORM_MISMATCH"))
             payload = {"tax_form": body["tax_form"], "tax_ref": body["tax_ref"], "tax_ref_sha256": _rsha(body["tax_ref"]),
                        "legal_form": body["legal_form"], "country": body["country"]}
-            conf, msg, ev = self._confirmation(caller, rk, inf["influencer_id"], "tax_profile", inf["email"],
-                                               inf["email_hash"], payload)
-            self._commit("confirmation_requested", self._req({"confirmation": conf, "message": msg}, caller, rk, body,
-                                                             conf["conf_id"]), caller, evidence=ev)
-            return self.confirmation_view(self.confirmations[conf["conf_id"]])
+            conf = self._request_confirmation(caller, rk, body, inf["influencer_id"], "tax_profile", inf["email"],
+                                              inf["email_hash"], payload)
+            return self.confirmation_view(conf)
 
     # ------------------------------------------------------------------------------------------------ verification
 
@@ -131,6 +136,7 @@ class PayoutsMixin:
                 raise Conflict(R("TAX_PROFILE_REQUIRED"))
             tax = dict(inf["tax"])
             payee_ref = inf["payee"]["payee_ref"]
+            person_key = inf["payee"].get("person_key")
             payee_id = derived_id("pye", influencer_id, tax["tax_ref_sha256"])
             identity_ref = self.identity_ref(inf)
         self._begin(rk)
@@ -146,7 +152,9 @@ class PayoutsMixin:
                             or not 1 <= len(reg.payee_ref) <= 128:
                         raise Conflict(R("PAYEE_REFUSED"))
                     payee_ref = reg.payee_ref
+                    person_key = _key(reg.person_key)
                 st = fin.payee_status(payee_ref)
+                person_key = _key(st.person_key) or person_key
             except (Unavailable, Conflict):
                 raise
             except Exception:  # noqa: BLE001 - a port that raises is unavailable; its text is dropped
@@ -163,10 +171,12 @@ class PayoutsMixin:
                 if problem:
                     raise Forbidden(R(problem))
                 self._commit("payee_checked", self._req({"influencer_id": influencer_id, "payee_ref": payee_ref,
-                                                         "status": status}, caller, rk, body, influencer_id), caller,
+                                                         "status": status, "person_key": person_key}, caller, rk,
+                                                        body, influencer_id), caller,
                              evidence=("payee_status_recorded", f"influencer:{influencer_id}",
                                        {"influencer_id": influencer_id, "status": status,
-                                        "payee_ref_sha256": _rsha(payee_ref)}, (caller, rk)))
+                                        "payee_ref_sha256": _rsha(payee_ref),
+                                        "person_key_sha256": _rsha(person_key) if person_key else None}, (caller, rk)))
                 return self.influencer_view(inf)
         finally:
             self._end(rk)
@@ -242,6 +252,7 @@ class PayoutsMixin:
                 raise Unavailable(R("FINANCE_UNAVAILABLE"))
             if st.status != "verified":
                 raise Forbidden(R("PAYEE_NOT_VERIFIED"))
+            person_key = _key(st.person_key)
             with self.lock:
                 self._gate()
                 prev = self._idem(caller, rk, body)
@@ -257,9 +268,16 @@ class PayoutsMixin:
                 # AEGIS R1-M5: the $5,000 rule again, keyed on the PERSON being paid — every deal of every record
                 # sharing this payee or tax reference, lifetime. Over it, a deal Andre did not approve himself is paid
                 # only after Andre approves this payout by its hash.
-                person_total = self._person_total(inf)
-                needs = ["PAYEE_TOTAL_OVER_LIMIT"] if (person_total > self.settings.auto_approve_max
-                                                        and d.get("approved_by") != "andre") else []
+                # AEGIS R2-N2: keyed ALSO on Finance's per-person key read just now; without one the person cannot be
+                # proven under the limit, so a payout on a deal Andre did not approve himself waits for him
+                key = person_key or inf["payee"].get("person_key")
+                person_total = self._person_total(inf, extra_key=("person", key) if key else None)
+                needs = []
+                if d.get("approved_by") != "andre":
+                    if person_total > self.settings.auto_approve_max:
+                        needs.append("PAYEE_TOTAL_OVER_LIMIT")
+                    if not key:
+                        needs.append("PERSON_KEY_MISSING")
                 data.update(status="pending_andre" if needs else "pending_finance", needs_andre=needs,
                             content_sha256=payout_sha256(data))
                 self._commit("payout_requested", self._req(data, caller, rk, body, pid), caller,

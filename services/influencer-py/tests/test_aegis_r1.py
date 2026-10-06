@@ -72,6 +72,7 @@ def test_m1_a_stranger_cannot_attach_a_handle_and_opt_the_creator_out(w):
 def test_m1_the_confirmation_mail_goes_to_the_address_on_record_and_only_its_token_works(w):
     victim = w.creator(email="victim@example.test", handles=(("instagram", "victim"),))
     app = w.ok(w.application("victim@example.test", handles=(("tiktok", "stranger"),)), 201)
+    w.clock.advance(hours=25)                    # R2-N1: one confirmation mail per address per day
     w.ok(w.job("send-queue"))
     mid, to, msg = w.ports.email.sent[-1]
     assert to == "victim@example.test" and "/c/" in msg["body"] and "If it was not you" in msg["body"]

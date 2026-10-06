@@ -144,34 +144,48 @@ def long_digit_run(value: str) -> bool:
     return any(count >= 9 for count, _, _ in digit_groups(value)) or _classic(value)
 
 
-def problem(obj: Any, exempt: frozenset = frozenset(), _key: str = "", depth: int = 0) -> Optional[str]:
-    """``TAX_ID_REFUSED`` or ``FORBIDDEN_FIELD`` for the first thing found, else None. ``exempt`` names keys whose
-    VALUES are not scanned (the never-stored reply text); their keys are still checked."""
+def _seg(key) -> str:
+    """A path segment for an error: the key's name, or ``*`` when the key itself could carry the value (AEGIS R2-L-c:
+    name the field, never echo the value)."""
+    k = str(key)
+    return "*" if len(k) > 64 or tin_in(k, True) or not re.fullmatch(r"[A-Za-z0-9_.-]+", k) else k
+
+
+def find(obj: Any, exempt: frozenset = frozenset(), _key: str = "", _path: str = "",
+         depth: int = 0) -> Optional[tuple[str, str]]:
+    """(``TAX_ID_REFUSED`` or ``FORBIDDEN_FIELD``, the field's path such as ``handles[].handle``) for the first thing
+    found, else None. ``exempt`` names keys whose VALUES are not scanned; their keys are still checked."""
     if depth > 40:
-        return "FORBIDDEN_FIELD"
+        return "FORBIDDEN_FIELD", _path or "body"
     if isinstance(obj, dict):
-        for k, v in obj.items():
-            if tax_key(k):
-                return "TAX_ID_REFUSED"
+        for k in obj:
+            p = f"{_path}.{_seg(k)}" if _path else _seg(k)
+            if tax_key(k) or tin_in(str(k), True):       # a key can carry the number too (R2-L-c)
+                return "TAX_ID_REFUSED", p
             if forbidden_key(k):
-                return "FORBIDDEN_FIELD"
+                return "FORBIDDEN_FIELD", p
         for k, v in obj.items():
             if k in exempt or k in MONEY_KEYS:
                 continue
-            found = problem(v, exempt, str(k), depth + 1)
+            found = find(v, exempt, str(k), f"{_path}.{_seg(k)}" if _path else _seg(k), depth + 1)
             if found:
                 return found
         return None
     if isinstance(obj, list):
         for v in obj[:10_000]:
-            found = problem(v, exempt, _key, depth + 1)
+            found = find(v, exempt, _key, f"{_path}[]", depth + 1)
             if found:
                 return found
         return None
     if isinstance(obj, str):
         if _key in STRICT_REF_KEYS and long_digit_run(obj):
-            return "TAX_ID_REFUSED"
+            return "TAX_ID_REFUSED", _path or "body"
         free = not (ID_KEY.search(_key) or _key.endswith("_ref") or _key in ("request_id", "ref"))
         if tin_in(obj, free_text=free):
-            return "TAX_ID_REFUSED"
+            return "TAX_ID_REFUSED", _path or "body"
     return None
+
+
+def problem(obj: Any, exempt: frozenset = frozenset()) -> Optional[str]:
+    found = find(obj, exempt)
+    return found[0] if found else None

@@ -91,6 +91,8 @@ class InfluencerService(PeopleMixin, ConfirmMixin, OutreachMixin, DealsMixin, Pa
         self.contents: dict[str, dict] = {}
         self.payouts: dict[str, dict] = {}
         self.confirmations: dict[str, dict] = {}
+        self.conf_mail_at: dict[str, str] = {}       # canonical address hash -> last confirmation mail queued
+        self.app_times: dict[str, list] = {}         # canonical address hash -> application times
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}

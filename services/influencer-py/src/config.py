@@ -171,6 +171,8 @@ class Settings:
     daily_send_cap: int = 50
     auto_approve_max: Decimal = AUTO_APPROVE_CEILING
     queue_max_per_caller: int = 500
+    confirmation_daily_cap: int = 200
+    confirmation_queue_max: int = 2000
     bind_addr: str = "127.0.0.1"
     port: int = 8480
 
@@ -313,6 +315,9 @@ def load(env: Optional[dict] = None) -> Settings:
     s.from_local = local
     s.daily_send_cap = _int(env, "INF_DAILY_SEND_CAP", 50, 1, 200)
     s.queue_max_per_caller = _int(env, "INF_QUEUE_MAX_PER_CALLER", 500, 1, 5000)
+    # AEGIS R2-N1: confirmation mails have their own queue and daily cap, apart from outreach
+    s.confirmation_daily_cap = _int(env, "INF_CONFIRMATION_DAILY_CAP", 200, 1, 1000)
+    s.confirmation_queue_max = _int(env, "INF_CONFIRMATION_QUEUE_MAX", 2000, 1, 20000)
     raw_max = (env.get("INF_AUTO_APPROVE_MAX") or "5000.00").strip()
     try:
         auto_max = money.parse(raw_max)

@@ -54,7 +54,9 @@ ledger as `founder_approval_refused`).
 | `INF_POSTAL_ADDRESS` | — | required with an outreach domain; printed in every email (CAN-SPAM) |
 | `INF_OUTREACH_FROM_LOCAL` | `creators` | the From mailbox (must accept replies; `noreply` refused) |
 | `INF_DAILY_SEND_CAP` | 50 | outreach emails per outreach domain per UTC day (1..200); over it they wait |
-| `INF_QUEUE_MAX_PER_CALLER` | 500 | queued messages one caller may have waiting (1..5000); past it `429 QUEUE_FULL` |
+| `INF_QUEUE_MAX_PER_CALLER` | 500 | queued outreach messages one caller may have waiting (1..5000); past it `429 QUEUE_FULL` |
+| `INF_CONFIRMATION_DAILY_CAP` | 200 | confirmation mails per outreach domain per UTC day, apart from outreach (1..1000) |
+| `INF_CONFIRMATION_QUEUE_MAX` | 2000 | confirmation mails waiting at once (1..20000); past it `429 QUEUE_FULL` |
 | `INF_AUTO_APPROVE_MAX` | `5000.00` | largest deal total (and influencer and campaign aggregate) approved without Andre; at most 5000.00 |
 | `INF_EMAIL_PROVIDER`, `INF_DM_PROVIDER`, `INF_PUBLIC_PROFILE_PROVIDER`, `INF_PAID_DATABASE_PROVIDER`, `INF_FINANCE_URL`, `INF_LEGAL_URL`, `INF_DEAL_AGGREGATE_WINDOW_DAYS` | unset | not built: setting one (other than `none`/`0`) refuses start (the $5,000 per-person total is lifetime) |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | — | unset = every write refused (fail closed) |
@@ -72,8 +74,8 @@ All under `/inf/v1` except `/health`. "worker" = `dashboard` or `influencer_agen
 | `GET /status` | dashboard | integrity, ports wired, send pace, queue, holds, pending approvals |
 | `GET /intelligences` | worker | the eleven single-task components |
 | `POST /applications` | hub | the creator application form: `adult_18_plus` must be exactly `true` (false: 422 `MINOR_REFUSED`, nothing kept; missing: 422 `AGE_ATTESTATION_REQUIRED`); nothing about identity takes effect until confirmed |
-| `POST /confirmations` | hub | the token mailed to the address on record: the application (attestation, handles) or tax-reference change takes effect |
-| `GET /confirmations`; `POST /confirmations/{id}/approve`, `/reject` | dashboard; Andre | a confirmed tax-reference change for an already verified payee, approved by hash |
+| `POST /confirmations` | hub | the token mailed to the address on record: the application (attestation, handles) or tax-reference change takes effect. One open confirmation per record and kind, one mail per address per day, five applications per address per day (429) |
+| `GET /confirmations`; `POST /confirmations/{id}/approve`, `/reject` | dashboard; Andre | by hash: a confirmed tax-reference change for an already verified payee, or mailing a confirmation to a suppressed creator who applied |
 | `POST /influencers` | dashboard | a prospect a person researched (never attested: no deal until the creator applies) |
 | `POST /discovery/import` | influencer_agent, scheduler | public-profile / paid-database discovery through the ports (stand-ins: 503 `SOURCE_NOT_WIRED`) |
 | `GET /influencers`, `/influencers/{id}` | worker | records, with suppressed / held / payee state |
@@ -87,7 +89,7 @@ All under `/inf/v1` except `/health`. "worker" = `dashboard` or `influencer_agen
 | `GET /outreach/messages`; `POST /outreach/messages/{id}/cancel` | worker | the queue (email and approved DMs) |
 | `POST /dm-drafts`; `GET /dm-drafts` | influencer_agent; worker | the agent drafts a platform DM |
 | `POST /dm-drafts/{id}/approve`, `/reject` | Andre | approve binds the hash and queues the DM (no DM provider: it stays queued) |
-| `POST /events/email`; `POST /replies` | provider_events | bounces and complaints; replies on any channel (any reply holds; never refused for its sender fields) |
+| `POST /events/email`; `POST /replies` | provider_events | bounces and complaints; replies on any channel (any reply holds; never refused for anything a provider sends: lenient fields, text truncated, up to 512 KiB) |
 | `GET /holds`; `POST /holds/{id}/decision` | worker; Andre | `continue` lifts the hold; `opt_out` suppresses |
 | `POST /campaigns`, `/campaigns/{id}/close`; `GET /campaigns`, `/campaigns/{id}` | worker | influencer or `co_marketing` (with its partner); live-content count |
 | `POST /briefs`; `GET /briefs`, `/briefs/{id}` | worker (`GET /briefs/{id}` also hub) | a brief with its required disclosure and the fixed FTC section |
@@ -99,13 +101,13 @@ All under `/inf/v1` except `/health`. "worker" = `dashboard` or `influencer_agen
 | `POST /contents/{id}/approve`, `/reject` | Andre | the final content, by hash |
 | `POST /contents/{id}/live` | worker | counts live only when approved (hash named again) and contracted |
 | `GET /material-connections` | auditor | FTC material-connection records |
-| `POST /tax-profiles` | hub, dashboard | a tax REFERENCE (`stripe:acct_...` or `vault:<uuid>`), never a number; takes effect only once confirmed by email (and, for a verified payee, approved by Andre) |
+| `POST /tax-profiles` | hub, dashboard | a tax REFERENCE (`stripe:acct_...` or `vault:` + 26 lowercase letters), never a number; takes effect only once confirmed by email (and, for a verified payee, approved by Andre) |
 | `POST /payees/{influencer_id}/verify` | dashboard, influencer_agent, scheduler | register at Finance and read the verification (stand-in: 503 `FINANCE_UNAVAILABLE`) |
 | `POST /payouts`; `GET /payouts`, `/payouts/{id}` | worker | a payout request handed to Finance (31) for a verified payee (`pending_andre` when the person's lifetime deals exceed the limit and Andre did not approve the deal) |
 | `POST /payouts/{id}/approve`, `/reject` | Andre | a payout held by the per-person rule, by hash |
 | `POST /jobs/{send-queue,payout-retry,integrity}/run` | scheduler | jobs (one at a time) |
 | `GET /audit/integrity`, `/audit/export` | auditor | integrity with the ledger's own verdict; export with emails and handles dropped (keyed hashes stay), names and texts as SHA-256 |
 
-Every body is refused 422 before it is parsed when it carries a raw tax id (`TAX_ID_REFUSED`: a key naming one, or a
-value shaped like one) or a date of birth, age, government id, payment, bank, IP, device or protected-trait key
+Every body is refused 422 before it is parsed when it carries a raw tax id (`TAX_ID_REFUSED` with the `field` that
+tripped it, never the value: a key naming one, or a value shaped like one) or a date of birth, age, government id, payment, bank, IP, device or protected-trait key
 (`FORBIDDEN_FIELD`). Money is a canonical two-decimal string; a JSON number is refused.

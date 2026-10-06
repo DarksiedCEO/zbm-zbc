@@ -11,13 +11,14 @@ service-py's api.py, itself security-py's):
   ``X-Andre-Approval-Token`` (INF_ANDRE_APPROVAL_TOKEN, legal-py's FounderGate): the dashboard alone is never Andre,
   a token equal to the service or a caller token counts as not configured, and every refusal is recorded on the
   ledger (``founder_approval_refused``);
-- before a body is parsed: a raw tax id (a key naming one, or a value shaped like one) is refused 422
+- before a body is parsed (every route but /replies, which is never refused for its content): a raw tax id (a key
+  naming one, or a value shaped like one) is refused 422
   ``TAX_ID_REFUSED``; a date of birth, age, government id, payment, bank, IP, device or protected-trait key 422
   ``FORBIDDEN_FIELD`` (textguard.py);
 - every response carries ``Cache-Control: no-store``; /docs, /redoc, /openapi.json disabled; bind 127.0.0.1 unless
   INF_BIND_ADDR says otherwise; port 8480; hardened launcher (serve.py);
-- request limits before any route: target 4 KiB (414), head 16 KiB (431), body 128 KiB (413), JSON only (415), JSON
-  nesting depth and member count bounded (422), body read deadline (408). Error bodies carry a reason code from
+- request limits before any route: target 4 KiB (414), head 16 KiB (431), body 128 KiB (413; 512 KiB on /replies),
+  JSON only (415), JSON nesting depth and member count bounded (422), body read deadline (408). Error bodies carry a reason code from
   reasons.py and never echo request content.
 """
 
@@ -53,7 +54,7 @@ log = logging.getLogger("influencer.api")
 
 CALLER_HEADER = "X-INF-Caller-Token"
 FOUNDER_HEADER = "X-Andre-Approval-Token"
-MAX_BODY_BYTES = 128 * 1024
+MAX_BODY_BYTES = 512 * 1024
 MAX_TARGET_BYTES = 4096
 MAX_HEAD_BYTES = 16 * 1024
 BODY_READ_TIMEOUT_S = 30.0
@@ -62,7 +63,8 @@ MAX_JSON_MEMBERS = 20_000
 ERROR_MAX_ERRORS = 20
 ERROR_MAX_STR = 120
 
-ROUTE_LIMITS: list[tuple[re.Pattern, int]] = []
+# AEGIS R2-N3: a reply (a long quoted thread) may be up to 512 KiB; the relay truncates anything longer before it sends
+ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [(re.compile(r"^/inf/v1/replies$"), 512 * 1024)]
 DEFAULT_ROUTE_LIMIT = 128 * 1024
 
 
@@ -228,7 +230,7 @@ class Callers:
 def _sanitize(errors: list[dict]) -> dict:
     out = []
     for e in errors[:ERROR_MAX_ERRORS]:
-        loc = [str(x)[:ERROR_MAX_STR] if isinstance(x, str) else x for x in list(e.get("loc", ()))[:8]]
+        loc = [textguard._seg(x)[:ERROR_MAX_STR] if isinstance(x, str) else x for x in list(e.get("loc", ()))[:8]]
         out.append({"loc": loc, "msg": str(e.get("msg", ""))[:ERROR_MAX_STR], "type": e.get("type")})
     return {"detail": out, "errors_total": len(errors)}
 
@@ -313,9 +315,9 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
         def parse(payload: Any = Body(default=None)) -> dict:
             if payload is None:
                 raise RequestValidationError([{"loc": ("body",), "msg": "a JSON body is required", "type": "missing"}])
-            problem = textguard.problem(payload, exempt)
-            if problem:
-                raise Invalid(R(problem))
+            found = textguard.find(payload, exempt)
+            if found:
+                raise Invalid(R(found[0]), field=found[1])         # AEGIS R2-L-c: the field, never the value
             try:
                 return model.model_validate(payload).model_dump(mode="json")
             except ValidationError as exc:
@@ -489,9 +491,11 @@ def create_app(service: InfluencerService, settings: config_mod.Settings) -> Fas
         return svc.email_event(who, req)
 
     @app.post(P + "/replies", dependencies=auth, status_code=201)
-    def reply(req: dict = Depends(body(m.ReplyIn, exempt=frozenset({"text", "from_email", "from_handle"}))),
-              who: str = Depends(caller("provider_events"))) -> dict:
-        return svc.reply(who, req)
+    def reply(payload: Any = Body(default=None), who: str = Depends(caller("provider_events"))) -> dict:
+        # AEGIS R2-N3: never refused for anything a provider sends (no tax-id scan: nothing raw is stored); a body that
+        # is not a JSON object is read as an empty reply (it is still recorded, as a review entry)
+        raw = payload if isinstance(payload, dict) else {}
+        return svc.reply(who, m.ReplyIn.model_validate(raw).model_dump(mode="python"), raw)
 
     @app.get(P + "/holds", dependencies=auth)
     def holds(status_: Optional[str] = Query(default=None, alias="status", pattern="^(active|lifted|opted_out)$"),

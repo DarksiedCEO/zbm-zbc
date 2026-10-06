@@ -67,8 +67,10 @@ def test_a_reply_text_is_never_refused_for_its_content(w):
                             "text": "stop. my ssn is 123-45-6789"}, caller="provider_events")
     body = w.ok(r, 201)
     assert body["suppressed"] is True and body["influencer_id"] == inf["influencer_id"]
-    w.code(w.post("/replies", {"request_id": rid(), "channel": "email", "from_email": "creator@example.test",
-                               "ssn": "x", "text": "hi"}, caller="provider_events"), 422, "TAX_ID_REFUSED")
+    # AEGIS R2-N3: nothing a provider sends refuses a reply; an unknown field is ignored and never stored
+    out = w.ok(w.post("/replies", {"request_id": rid(), "channel": "email", "from_email": "creator@example.test",
+                                   "ssn": "123-45-6789", "text": "hi"}, caller="provider_events"), 201)
+    assert out["held"] is True and "123-45-6789" not in str(w.svc.log.records)
 
 
 # ------------------------------------------------------------------------------------------------ minors, personal data

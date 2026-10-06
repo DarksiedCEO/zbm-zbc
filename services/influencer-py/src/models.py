@@ -3,7 +3,7 @@ service. Money is a canonical string, checked again by money.py where it is used
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
@@ -159,16 +159,20 @@ class EmailEvent(Strict):
     event: Literal["delivered", "soft_bounce", "hard_bounce", "complaint"]
 
 
-class ReplyIn(Strict):
-    """A reply relayed from the email provider or a platform. The text is classified and hashed, never stored, and
-    never refused for its content or its sender fields (an opt-out must always land, AEGIS R1-M4): an unknown or
-    unreadable message id, address or handle is ignored by the service, never a 4xx."""
-    request_id: Id
-    channel: Literal["email", "instagram", "tiktok", "x", "youtube"]
-    message_id: Optional[Annotated[StrictStr, Field(max_length=1000)]] = None
-    from_email: Optional[Annotated[StrictStr, Field(max_length=1000)]] = None
-    from_handle: Optional[Annotated[StrictStr, Field(max_length=1000)]] = None
-    text: Annotated[StrictStr, Field(max_length=20_000)]
+class ReplyIn(BaseModel):
+    """A reply relayed from the email provider or a platform. NOTHING a provider sends may get a reply refused (AEGIS
+    R1-M4, R2-N3): every field is optional and of any JSON type, unknown fields are ignored (never stored), and the
+    service reads what it can — a text of any length is truncated before it is classified and hashed, a channel it does
+    not know is ``other``, a missing or unreadable request id is replaced by the SHA-256 of the body. The tax-id scan
+    does not run on this body: its text, addresses, handles and message id are never stored raw (only hashes, and a
+    message id only when it is one of ours)."""
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    request_id: Any = None
+    channel: Any = None
+    message_id: Any = None
+    from_email: Any = None
+    from_handle: Any = None
+    text: Any = None
 
 
 class HoldDecision(Strict):
@@ -235,9 +239,9 @@ class TaxProfile(Strict):
     request_id: Id
     influencer_id: Id
     tax_form: Literal["w9", "w8ben", "w8bene"]
-    # AEGIS R1-M3: provider formats only — a Stripe connected account, or a vault UUID
-    tax_ref: Annotated[StrictStr, Field(pattern=r"^(stripe:acct_[A-Za-z0-9]{16,64}|vault:[0-9a-f]{8}-[0-9a-f]{4}-"
-                                                r"[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")]
+    # AEGIS R1-M3 / R2-L-b: provider formats only — a Stripe connected account, or a vault reference in an alphabet
+    # with NO digits (26 lowercase letters), so its shape can never hide a tax id; that it EXISTS is Finance's to confirm
+    tax_ref: Annotated[StrictStr, Field(pattern=r"^(stripe:acct_[A-Za-z0-9]{16,64}|vault:[a-z]{26})$")]
     legal_form: Literal["individual", "entity"]
     country: Country
 

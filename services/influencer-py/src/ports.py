@@ -12,8 +12,9 @@ lock held.
 - ``LegalContracts`` (Legal 37): send the influencer agreement for a deal and read whether it is in force. Stand-in:
   ``unavailable`` (503 ``LEGAL_UNAVAILABLE``), so no contract can be sent and no deal becomes ``contracted``.
 - ``FinancePayees`` (Finance 31): register the influencer as a payee from a tax REFERENCE (never a raw TIN), read the
-  payee's verification (Stripe Connect KYC and TIN match happen at Finance and Stripe, never here), and hand Finance a
-  payout request. This service never calls Stripe. Stand-in: ``unavailable`` for every call (503
+  payee's verification (Stripe Connect KYC and TIN match happen at Finance and Stripe, never here) with Finance's
+  per-PERSON key — an opaque keyed hash of the matched TIN, computed by Finance, so two payees with different references
+  but one TIN are one person here (AEGIS R2-N2; the stand-in returns none) — and hand Finance a payout request. This service never calls Stripe. Stand-in: ``unavailable`` for every call (503
   ``FINANCE_UNAVAILABLE``): no payee is ever verified and no payout is ever requested. A real adapter must be
   idempotent on ``payee_id`` and ``payout_id`` (a retry after a lost answer sends the same request again).
 """
@@ -106,11 +107,13 @@ class NotWiredLegal:
 class PayeeAnswer:
     status: str                       # registered | refused | unavailable
     payee_ref: Optional[str] = None
+    person_key: Optional[str] = None  # AEGIS R2-N2: Finance's opaque keyed hash of the MATCHED TIN (one per person)
 
 
 @dataclass(frozen=True)
 class PayeeStatus:
     status: str                       # verified | pending | refused | unavailable
+    person_key: Optional[str] = None
 
 
 @dataclass(frozen=True)

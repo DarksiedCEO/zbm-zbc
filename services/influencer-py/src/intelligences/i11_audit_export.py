@@ -18,7 +18,7 @@ DECIDES = "the minimised form of each exported record"
 DROPPED = ("email", "handle", "to")
 DIGESTED = ("display_name", "first_name", "verified_first_name", "name", "partner_name", "text", "body", "subject",
             "caption", "title", "note", "tax_ref", "evidence_ref", "envelope_ref", "post_ref", "payee_ref",
-            "finance_ref", "provider_ref", "partner_ref")
+            "finance_ref", "provider_ref", "partner_ref", "person_key")
 
 
 def _sha(v: str) -> str:

@@ -160,6 +160,7 @@ class PeopleMixin:
                 raise Invalid(R(age))
             if existing is not None and existing.get("blocked"):
                 raise Forbidden(R("INFLUENCER_BLOCKED"))
+            self._application_rate_problem(eh)
             handles = self._handles(body.get("handles") or [])
             payload = {"attestation": {"text_version": body["attestation_text_version"],
                                        "text_sha256": body["attestation_text_sha256"], "source": "creator_form"},
@@ -170,22 +171,17 @@ class PeopleMixin:
                 iid = derived_id("inf", caller, rk)
                 record = {"influencer_id": iid, **self._record("inbound_application", body, email, eh, [])}
                 ev += self._created_events(iid, "inbound_application", caller, rk)
+                to = email
             else:
                 iid = existing["influencer_id"]
-            conf, msg, cev = self._confirmation(caller, rk, iid, "application", email, eh, payload)
-            self._commit("application_received", self._req(
-                {"influencer_id": iid, "record": record, "confirmation": conf, "message": msg}, caller, rk, body,
-                {"influencer_id": iid, "confirmation_id": conf["conf_id"]}), caller, evidence=ev + cev)
+                to = existing["email"]          # AEGIS R2-L-a: the address ON THE RECORD, never the one typed
+            conf = self._request_confirmation(caller, rk, body, iid, "application", to, eh, payload, record=record,
+                                              ev=ev, application_hash=eh)
             return self._application_answer(iid, conf["conf_id"])
 
     def _application_answer(self, iid: str, conf_id: str) -> dict:
         return {**self.influencer_view(self.influencers[iid]), "confirmation_id": conf_id,
                 "confirmation_status": self.confirmations[conf_id]["status"]}
-
-    def _a_application_received(self, d, at):
-        if d.get("record"):
-            self._a_influencer_created(d["record"], at)
-        self._a_confirmation_requested(d, at)
 
     def create_prospect(self, caller: str, body: dict) -> dict:
         """A profile a person at Andre's console researched. Not attested: it can be contacted (email under the

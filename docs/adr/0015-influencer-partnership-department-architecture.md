@@ -114,8 +114,9 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
     characters — between two digits do not end a number; free text also refuses the classic 3-2-4 / 2-7 shapes inside
     longer runs; `tax_ref` refuses ANY number of nine or more digits. Money fields are not scanned. A tax profile holds
     only the form kind (W-9 for a US person, W-8BEN for a foreign individual, W-8BEN-E for a foreign entity), the legal
-    form, the country and a provider reference — `stripe:acct_` + 16..64 letters and digits, or `vault:` + a lowercase
-    UUID — (its SHA-256 on the ledger). Every tax-reference change goes through the email confirmation (decision 8);
+    form, the country and a provider reference — `stripe:acct_` + 16..64 letters and digits, or `vault:` + exactly 26
+    lowercase letters (the vault's reference alphabet has NO digits, so a reference's shape can never hide a tax id;
+    AEGIS R2-L-b) — (its SHA-256 on the ledger). Whether a reference EXISTS is Finance's to confirm (unlock item 5). Every tax-reference change goes through the email confirmation (decision 8);
     for a creator whose payee is already verified it then also waits for Andre's approval of its hash
     (`POST /inf/v1/confirmations/{id}/approve`).
 14. **FTC Endorsement Guides, fail closed** (i08). A brief's disclosure comes from a closed list (`#ad`, `#sponsored`,
@@ -214,13 +215,27 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
 2. Platform DM providers (Instagram, TikTok, X, YouTube) and their reply webhooks.
 3. The paid influencer-database adapter and public-profile data source (through the ports only; no scraping).
 4. The Legal (37) contract client (needs an influencer-agreement document type in legal-py).
-5. The Finance (31) payee and payout client (needs an `influencer` payee kind and payout intake in finance-py).
+5. The Finance (31) payee and payout client (needs an `influencer` payee kind and payout intake in finance-py). When it
+   is wired it must (a) confirm that a `stripe:` / `vault:` tax reference EXISTS and belongs to the creator before it
+   registers the payee (AEGIS R2-L-b: the shape is no longer guessed here), and (b) return its per-person key — an
+   opaque keyed hash of the matched TIN — on `register_payee` and `payee_status` (AEGIS R2-N2). The vault must issue
+   references as `vault:` + 26 lowercase letters.
 6. Moving Andre's approvals from the shared approval token to Cybersecurity (22) passkeys, as the other departments
    move.
 7. An un-block path for a confirmed minor who later turns 18 (today: never contracted again).
 8. A CCPA erasure design for the local log that keeps the hash chain and the suppression hashes.
 9. Wiring into CI (`ci.yml`, the hygiene checker's `PY_SERVICES`) and `docs/test-counts.md` (left to the integration
    lead).
+
+## Hub requirements (the creator portal / public forms)
+
+- **Per-IP rate limiting and a CAPTCHA (or equivalent) on the creator application form and the tax-reference form**
+  (AEGIS R2-N1). This service bounds what it can see — one open confirmation per address, at most one confirmation
+  mail per address per day, five applications per address per day, its own confirmation queue and daily cap, apart
+  from outreach — but it never sees the caller's IP, so stopping a flood of distinct junk addresses is the hub's job.
+- The one-click unsubscribe page (`/u/<token>`) and the confirmation page (`/c/<token>`) on the outreach domain relay
+  the token to this service.
+- The hub submits content and tax references only for the creator signed in to the portal.
 
 ## Settings
 
@@ -249,3 +264,22 @@ Residuals (accepted): a `vault:` UUID that happens to hold nine or more digits i
 digits that is not a tax id (for example `10/06/2026 9am`, or `$1,000,000.00` written with cents) is refused
 (fail closed). The confirmation proves control of the mailbox, not identity; identity is Finance's KYC, matched
 against the confirmed address.
+
+## Amendment — AEGIS round 2 (Oct 6 2026, on 50312db): NOT BLOCKING, every follow-up fixed
+
+Regressions: `services/influencer-py/tests/test_aegis_r2.py` (each `test_vuln_*` probe; each fails on 50312db and passes
+after the fix).
+
+| Id | Finding | Fix |
+|---|---|---|
+| R2-N1 | Junk applications flooded confirmation mail: one address could be mailed twenty times, and fifty junk addresses used up the outreach cap so a real creator's confirmation did not go | One OPEN confirmation per record and kind: the same request reuses it, a different one supersedes it (the old token dies); at most one confirmation mail per address per 24 hours (a later one waits, `not_before`); five applications per address per 24 hours (429 `APPLICATION_RATE_LIMITED`); confirmation mails have their own queue (`INF_CONFIRMATION_QUEUE_MAX`, default 2000) and daily cap (`INF_CONFIRMATION_DAILY_CAP`, default 200), apart from outreach, and are sent before outreach with records we already hold first. Per-IP limits and a CAPTCHA are a hub requirement (above) |
+| R2-N2 | Two tax references of one person were two people | Finance's per-person key (an opaque keyed hash of the matched TIN, returned by `register_payee` / `payee_status`; the stand-in returns none) ties records together for D2/D3, and is read again at payout. A payout with NO person key yet, on a deal Andre did not approve himself, waits for Andre (`PERSON_KEY_MISSING`) — read as "fail closed while the person cannot be proven under the limit" |
+| R2-N3 | A long reply text (422), a message id shaped like a tax id (422), or any other provider field could refuse a reply | The reply route reads every field leniently: any JSON type, unknown fields ignored and never stored, no tax-id scan (nothing raw is stored), text cut to 20,000 characters before it is classified and hashed, an unknown channel is `other` (the lower opt-out bar), a missing request id replaced by the body's SHA-256, a body that is not an object read as empty; the route accepts up to 512 KiB (the relay truncates beyond that) |
+| R2-L-a | The confirmation for an existing record went to the address typed into the form (`owner+evil@...`) | It goes to the address ON THE RECORD |
+| R2-L-b | Vault references were judged by shape (UUIDs, a 14% false refusal rate) | `vault:` + 26 lowercase letters (no digits); Finance confirms existence when wired (unlock item 5) |
+| R2-L-c | A tax-id 422 did not say which field | `{"detail": "TAX_ID_REFUSED", "field": "handles[].handle"}`; a key that could itself carry the number is shown as `*`, and validation errors mask such keys the same way |
+| R2-L-d | A suppressed creator could never apply again | The confirmation waits `awaiting_andre`; Andre approves THAT confirmation by its hash (`POST /inf/v1/confirmations/{id}/approve`), which mails it; the suppression stays in place for outreach |
+
+**Log compatibility (Info).** Logs written by a58e633 (before round 1) do not replay on this version: their record
+lines carry the attestation inline and their tax lines a different kind. No log of this service exists outside tests
+and live runs (it is not in force), so this is accepted before launch; from launch on, log kinds only grow.

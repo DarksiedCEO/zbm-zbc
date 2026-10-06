@@ -136,19 +136,32 @@ class FakeLegal:
 
 
 class FakeFinance:
+    """Finance (31) as a recording fake. Its per-person key is a keyed hash of the "matched TIN": by default one per tax
+    reference; ``same_person`` lists references Finance matched to ONE TIN; ``person_keys=False`` returns none."""
     wired = True
 
-    def __init__(self, register: str = "registered", status: str = "verified", payout: str = "accepted"):
+    def __init__(self, register: str = "registered", status: str = "verified", payout: str = "accepted",
+                 person_keys: bool = True, same_person=()):
         self.register, self.status, self.payout = register, status, payout
+        self.person_keys, self.same_person = person_keys, set(same_person)
         self.registered: list = []
         self.payouts: list = []
+        self.keys: dict = {}
+
+    def _person(self, tax_ref):
+        if not self.person_keys:
+            return None
+        basis = "one-person" if tax_ref in self.same_person else tax_ref
+        return "pk-" + hashlib.sha256(basis.encode()).hexdigest()[:24]
 
     def register_payee(self, payee_id, tax_ref, tax_form, legal_form, country, identity_ref):
         self.registered.append((payee_id, tax_ref, tax_form, legal_form, country, identity_ref))
-        return PayeeAnswer(self.register, f"payee-{payee_id[-8:]}" if self.register == "registered" else None)
+        ref = f"payee-{payee_id[-8:]}" if self.register == "registered" else None
+        self.keys[ref] = self._person(tax_ref)
+        return PayeeAnswer(self.register, ref, self.keys[ref])
 
     def payee_status(self, payee_ref):
-        return PayeeStatus(self.status)
+        return PayeeStatus(self.status, self.keys.get(payee_ref))
 
     def request_payout(self, payout_id, payee_ref, amount, currency, brand, deal_id):
         self.payouts.append((payout_id, payee_ref, amount, currency, brand, deal_id))
