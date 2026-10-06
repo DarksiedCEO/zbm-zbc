@@ -71,7 +71,7 @@ All under `/sales/v1` except `/health`. "worker" = `dashboard` or `sales_agent`;
 | `GET /leads`, `/leads/{id}`; `POST /leads/{id}/owner`, `/disqualify`, `/convert` | worker | pipeline |
 | `GET /contacts/{id}` | worker | contact, consent, suppression and hold state |
 | `POST /accounts/{id}/display-name`, `/contacts/{id}/first-name` | dashboard | the only values `{{company}}` / `{{first_name}}` render (verified by a person) |
-| `POST /tasks/{id}/decision` | Andre | `not_an_opt_out` lifts an SMS/voice reply hold; `opt_out` makes it permanent |
+| `POST /tasks/{id}/decision` | Andre | any reply (every channel, but exact auto-reply texts) holds texts and calls to the contact's numbers; `not_an_opt_out` lifts it, `opt_out` makes it permanent |
 | `POST /contacts/{id}/time-zone` | hub, onboarding, dashboard | never the agent; a +1 number needs an American zone |
 | `GET /opportunities`, `/opportunities/{id}`; `POST /opportunities/{id}/stage` | worker | stages (not `closed_won`) |
 | `POST /activities`; `GET /tasks`; `POST /tasks/{id}/close` | worker | activities and tasks |

@@ -465,6 +465,9 @@ class OutreachMixin:
     def _phone_checks(self, c: dict, channel: str, brand: str) -> None:
         if not c.get("phone_hash"):
             raise Invalid(R("CONTACT_NO_PHONE"))
+        problem = i07_quiet_hours.phone_problem(c.get("phone"))   # S3-M1 / S3-L1
+        if problem:
+            raise Forbidden(R(problem))
         if self._is_suppressed(channel, c):
             raise Forbidden(R("SUPPRESSED"))
         if self._held(c["phone_hash"]):
@@ -557,6 +560,8 @@ class OutreachMixin:
             return "SUPPRESSED", None, None
         if msg["channel"] in ("sms", "voice") and (self._held(msg["to_hash"]) or self._held(c.get("phone_hash"))):
             return "PHONE_HOLD", None, None
+        if msg["channel"] in ("sms", "voice") and i07_quiet_hours.phone_problem(c.get("phone")):
+            return i07_quiet_hours.phone_problem(c.get("phone")), None, None
         if msg["channel"] == "voice":
             if not self._consent_active(c, "voice", msg["brand"]):
                 return "CONSENT_REQUIRED", None, None
@@ -759,33 +764,37 @@ class OutreachMixin:
                 data.update(hashes=sorted(hashes), reason="stop_reply")
                 ev = ("suppression_added", f"reply:{reply_id}", {"hashes": sorted(hashes), "reason": "stop_reply"},
                       (caller, rk))
-            elif body["channel"] in ("sms", "voice") and i10_replies.positive_reply(body["text"],
-                                                                                body["channel"]) is None:
-                # AEGIS S2-C1: fail closed. Not a narrow positive form -> phone outreach to the number is HELD for both
-                # brands (recorded on the ledger first, in this commit), and only Andre can lift it via the task.
+            else:
+                # AEGIS S3-C1/C2/H1: no interpretation on any path that can lead to another text or call. ANY reply,
+                # on any channel, holds phone outreach (SMS and voice, both brands) for every number of the resolved
+                # contact and the number it came from — "yes" and "interested" included (a person follows up and
+                # Andre releases). The ONE exception is a reply whose raw body, trimmed and lower-cased only, is
+                # exactly one of the fixed auto-reply texts (i10_replies.AUTO_REPLIES): no person's words in it.
                 phones = {h for h in (phone_h, msg["to_hash"] if msg and msg["channel"] != "email" else None,
                                       c.get("phone_hash") if c else None) if h}
-                if not phones:
+                auto = i10_replies.exact_auto_reply(body["text"])
+                if auto:
+                    cls = data["class"] = "out_of_office"
+                if body["channel"] in ("sms", "voice") and not phones:
                     raise Invalid(R("REPLY_SENDER_REQUIRED"))
-                hold_id = derived_id("hld", reply_id)
-                task_id = derived_id("tsk", "review_reply", reply_id)
-                data["hold"] = {"hold_id": hold_id, "hashes": sorted(phones), "reply_id": reply_id,
-                                "task_id": task_id}
-                data["task"] = {"task_id": task_id, "kind": "review_reply", "hold_id": hold_id,
-                                "target": f"contact:{contact_id}" if contact_id else f"reply:{reply_id}",
-                                "due_on": self.today()}
-                ev = ("phone_hold_applied", f"hold:{hold_id}", {"hold_id": hold_id, "hashes": sorted(phones),
-                                                                  "reply_id": reply_id, "class": cls}, (caller, rk))
-            else:
-                if body["channel"] in ("sms", "voice"):
-                    cls = data["class"] = i10_replies.positive_reply(body["text"], body["channel"])
                 target = f"contact:{contact_id}" if contact_id else f"reply:{reply_id}"
-                kind, due = {"interested": ("book_call", self.today()),
-                             "out_of_office": ("reschedule", (self.now() + timedelta(days=RESCHEDULE_DAYS)).date()
-                                               .isoformat()),
-                             "review": ("review_reply", self.today())}[cls]
-                data["task"] = {"task_id": derived_id("tsk", kind, reply_id), "kind": kind, "target": target,
-                                "due_on": due}
+                if phones and not auto:
+                    hold_id = derived_id("hld", reply_id)
+                    task_id = derived_id("tsk", "review_reply", reply_id)
+                    data["hold"] = {"hold_id": hold_id, "hashes": sorted(phones), "reply_id": reply_id,
+                                    "task_id": task_id}
+                    data["task"] = {"task_id": task_id, "kind": "review_reply", "hold_id": hold_id, "target": target,
+                                    "due_on": self.today()}
+                    ev = ("phone_hold_applied", f"hold:{hold_id}", {"hold_id": hold_id, "hashes": sorted(phones),
+                                                                      "reply_id": reply_id, "class": cls},
+                          (caller, rk))
+                else:
+                    kind, due = {"interested": ("book_call", self.today()),
+                                 "out_of_office": ("reschedule", (self.now() + timedelta(days=RESCHEDULE_DAYS))
+                                                   .date().isoformat()),
+                                 "review": ("review_reply", self.today())}[cls]
+                    data["task"] = {"task_id": derived_id("tsk", kind, reply_id), "kind": kind, "target": target,
+                                    "due_on": due}
             answer = {"reply_id": reply_id, "class": cls, "suppressed": bool(data.get("hashes")),
                       "held": bool(data.get("hold")),
                       "task_id": (data.get("task") or {}).get("task_id")}

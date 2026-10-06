@@ -250,7 +250,7 @@ class ReplyIn(Strict):
     message_id: Optional[Id] = None
     from_email: Optional[Annotated[StrictStr, Field(max_length=254)]] = None
     from_phone: Optional[Annotated[StrictStr, Field(max_length=32)]] = None
-    text: Annotated[StrictStr, Field(min_length=1, max_length=10_000)]
+    text: Annotated[StrictStr, Field(min_length=0, max_length=10_000)]   # an empty (media-only) reply still holds
 
 
 class PriceApprove(Strict):

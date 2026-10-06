@@ -87,11 +87,12 @@ def test_s2_c1_send_time_also_respects_a_hold(w):
 
 @pytest.mark.parametrize("text,cls", [("Yes", "interested"), ("yes please!", "interested"),
                                       ("Sounds good", "interested"), ("Out of office until Monday", "out_of_office")])
-def test_s2_c1_only_a_narrow_positive_reply_keeps_texting_open(w, text, cls):
+def test_s2_c1_positive_replies_are_held_too_since_round_3(w, text, cls):
+    """Round 2 let a narrow positive form through; round 3 (S3-C1) holds every reply but exact auto-reply texts."""
     lead, t, mid = texted(w)
     r = reply(w, mid, text)
-    assert r["held"] is False and r["class"] == cls
-    w.ok(q_sms(w, lead["contact_id"], t), 201)
+    assert r["held"] is True and r["class"] == cls
+    w.refused(q_sms(w, lead["contact_id"], t), 403, "PHONE_HOLD")
 
 
 @pytest.mark.parametrize("text", ["yes, but stop texting", "interested? no. never text me again", "yes I did not ask",
@@ -220,15 +221,12 @@ def test_s2_l1_non_nanp_zones_refused_for_a_plus_one_number(w, tz):
     w.lead(tz=tz, code=422)
 
 
-def test_s2_l1_unknown_area_code_needs_eastern_and_pacific_daytime(tmp_path):
-    early = FixedClock(datetime(2026, 10, 7, 14, 30, tzinfo=timezone.utc))   # 10:30 ET, 07:30 PT
-    w = Harness(tmp_path, clock=early, ports=wired_ports())
+def test_s2_l1_unknown_area_code_is_refused_since_round_3(tmp_path):
+    w = Harness(tmp_path, clock=FixedClock(datetime(2026, 10, 7, 17, 0, tzinfo=timezone.utc)), ports=wired_ports())
     lead = w.vlead(tz="America/New_York", phone="+19995550100")
     w.ok(w.consent(lead["contact_id"]), 201)
     t = w.template(channel="sms", name="s", subject=None, body="Hi {{first_name}}")
-    w.refused(q_sms(w, lead["contact_id"], t), 403, "QUIET_HOURS")
-    early.advance(hours=1)                                                   # 11:30 ET, 08:30 PT
-    w.ok(q_sms(w, lead["contact_id"], t), 201)
+    w.refused(q_sms(w, lead["contact_id"], t), 403, "AREA_CODE_UNKNOWN")
 
 
 # ------------------------------------------------------------------ S2-L2
@@ -261,6 +259,6 @@ def test_s2_queue_cap_is_bounded():
 
 
 @pytest.mark.parametrize("text", ["Out of office. Stop texting me", "auto reply: unsubscribe", "I'm driving, quit it"])
-def test_s2_c1_positive_reply_never_admits_an_opt_out_word(text):
+def test_s2_c1_auto_reply_words_with_anything_else_are_not_auto_replies(text):
     from intelligences import i10_replies
-    assert i10_replies.positive_reply(text, "sms") is None
+    assert i10_replies.exact_auto_reply(text) is False

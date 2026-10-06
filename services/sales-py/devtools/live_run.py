@@ -44,8 +44,11 @@ TOKEN = "live-sales-service-token-" + "s" * 20
 ANDRE = "live-andre-approval-token-" + "a" * 20
 CALLERS = {c: f"live-sales-caller-{c}-" + "c" * 24 for c in ("hub", "detection", "dashboard", "scheduler",
                                                              "sales_agent", "provider_events", "compliance_38")}
-ZONES = ("Pacific/Honolulu", "America/Los_Angeles", "America/Chicago", "America/New_York", "Europe/London",
-         "Europe/Berlin", "Asia/Dubai", "Asia/Kolkata", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland")
+# NANP zones with an area code the service knows (S3-L1: texts and calls only to +1 numbers in its table)
+AREA_FOR = {"Pacific/Pago_Pago": "684", "Pacific/Honolulu": "808", "America/Anchorage": "907",
+            "America/Los_Angeles": "310", "America/Denver": "303", "America/Chicago": "312", "America/New_York": "212",
+            "America/Halifax": "902", "America/St_Johns": "709", "Pacific/Guam": "671"}
+ZONES = tuple(AREA_FOR)
 LOG: list[str] = []
 PROCS: list[subprocess.Popen] = []
 CHECKS: list[tuple[str, bool]] = []
@@ -143,10 +146,8 @@ def rid() -> str:
 
 
 def phone_for(zone: str, local: str) -> str:
-    """A number that fits the zone (a +1 number must have an American zone, AEGIS S1-M1)."""
-    area = {"Pacific/Honolulu": "808", "America/Los_Angeles": "310", "America/Chicago": "312",
-            "America/New_York": "212"}.get(zone)       # the area code's own zone is checked too (S2-L1)
-    return f"+1{area}555{local}" if area else f"+4420718{local}"
+    """A +1 number whose area code is in the zone (the area code's zone is checked too, S2-L1 / S3-L1)."""
+    return f"+1{AREA_FOR[zone]}555{local}"
 
 
 def lead_body(email, phone, tz, kind="site_form", source="inbound", interest=("revenue_recovery",), **extra):
@@ -280,7 +281,7 @@ def _main(work: Path) -> int:
         r = a.post("/replies", {"request_id": rid(), "channel": "sms", "from_phone": phone_for(night_zone, "0199"),
                                 "text": "Opt me out"}, "provider_events").json()
         r2 = a.post("/outreach/sms", {**sms, "request_id": rid(), "contact_id": night["contact_id"]}, "sales_agent")
-        check("an SMS reply that is not a plain yes holds the number (S2-C1)",
+        check("any SMS reply holds the number until Andre releases it (S2-C1, S3-C1)",
               r["held"] is True and r2.status_code == 403 and r2.json()["detail"] == "PHONE_HOLD")
 
         # --- opt-out across brands ----------------------------------------------------------------------------------

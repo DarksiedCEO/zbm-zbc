@@ -15,9 +15,10 @@
    "tell me more", "send details", "send more info", "pricing", "what does it cost", "yes": a task to book a call.
 4. anything else — the human review queue.
 
-On SMS and voice the label is NOT what protects the person (AEGIS S2-C1): any reply there holds phone outreach to the
-number for both brands unless the whole message is a narrow positive form (``positive_reply``); only Andre lifts a
-hold, by deciding the review task is "not an opt-out".
+The label is NOT what protects the person (AEGIS S3-C1): ANY reply on ANY channel holds phone outreach to the
+contact's numbers for both brands unless its raw body is exactly one of ``AUTO_REPLIES``; only Andre lifts a hold, by
+deciding the review task is "not an opt-out". The label only names the task and, for opt-out wording, adds a
+permanent suppression.
 
 The reply text is never stored: only its SHA-256 and the class. Never: answers the person."""
 
@@ -44,7 +45,7 @@ _INTERESTED = re.compile(r"\b(interested|lets talk|book|schedule|set up a call|c
 
 
 # Confusables that render like Latin letters (Cyrillic, Greek) and digits used as letters inside a word (AEGIS S2-C1).
-# This only improves the LABEL; the safety on SMS and voice is the fail-closed rule in positive_reply().
+# This only improves the LABEL; the safety is the fail-closed hold in svc_outreach.reply (AEGIS S3-C1).
 _CONFUSABLE = str.maketrans({
     "а": "a", "в": "b", "е": "e", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "с": "c", "т": "t", "у": "y",
     "х": "x", "ѕ": "s", "і": "i", "ј": "j", "ԁ": "d", "ԛ": "q", "ԝ": "w", "ɡ": "g",
@@ -92,24 +93,18 @@ def classify(text: str, channel: str = "email") -> str:
     return "review"
 
 
-# AEGIS S2-C1 — the fail-closed rule for SMS and voice. A reply on those channels HOLDS phone outreach to the number
-# (both brands) unless the WHOLE message is one of these narrow positive forms. Anything else, however it is worded,
-# in whatever language, is treated as a possible revocation until a human decides it is not.
-_POSITIVE_SMS = re.compile(r"(yes|yes please|yeah|yep|sure|ok|okay|interested|i m interested|im interested|"
-                           r"i am interested|call me|please call me|call me please|sounds good|tell me more|"
-                           r"lets talk|send details|send more info|more info)( thanks| thank you)?")
-_OOO_SMS = re.compile(r"(auto reply|autoreply|automatic reply|out of office|out of the office|im driving|"
-                      r"i m driving|i am driving)\b.{0,280}")
+# AEGIS S3-C1 — the ONLY replies that do not hold phone outreach: these exact bodies, compared after trimming
+# whitespace and lower-casing and nothing else (no regex, no normalising, no tail). They are machine texts that carry
+# no person's words. Everything else, on every channel, holds the contact's numbers until Andre releases them.
+AUTO_REPLIES = frozenset({
+    "i'm driving with do not disturb while driving turned on. i'll see your message when i get where i'm going.",
+    "i\u2019m driving with do not disturb while driving turned on. i\u2019ll see your message when i get where "
+    "i\u2019m going.",
+    "i am currently out of the office.",
+    "i am out of the office.",
+    "out of office",
+})
 
 
-def positive_reply(text: str, channel: str) -> str | None:
-    """``interested`` / ``out_of_office`` only when the whole normalised SMS or voice reply matches the allow-list
-    and carries no opt-out word; otherwise None (hold)."""
-    t = normalise(text)
-    if classify(text, channel) == "unsubscribe":
-        return None
-    if _POSITIVE_SMS.fullmatch(t):
-        return "interested"
-    if _OOO_SMS.fullmatch(t):
-        return "out_of_office"
-    return None
+def exact_auto_reply(text: str) -> bool:
+    return text.strip().lower() in AUTO_REPLIES

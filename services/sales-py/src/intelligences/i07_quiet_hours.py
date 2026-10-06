@@ -50,9 +50,8 @@ CARIBBEAN_ZONES = frozenset({
     "America/St_Kitts", "America/St_Lucia", "America/St_Vincent", "America/Tortola", "America/Port_of_Spain",
     "America/Grand_Turk", "America/Lower_Princes", "Atlantic/Bermuda"})
 NANP_ZONES = US_ZONES | CANADA_ZONES | CARIBBEAN_ZONES
-# Where a US area code's numbers are (S2-L1). The recorded zone AND the area code's zone must both be inside the
-# window (the stricter wins); an area code not listed must be inside the window in BOTH Eastern and Pacific time
-# (11:00-21:00 Eastern).
+# Where a NANP area code's numbers are (S2-L1, S3-L1). The recorded zone AND the area code's zone(s) must all be
+# inside the window (the stricter wins); an area code not listed is refused (phone_problem).
 _AREA = {
     "America/New_York": "201 202 203 207 212 215 216 220 223 234 239 240 248 267 272 276 301 302 304 305 313 315 "
                         "321 324 330 332 336 339 347 351 352 380 386 401 404 407 410 412 413 419 434 440 443 445 470 "
@@ -72,8 +71,47 @@ _AREA = {
                            "925 949 951 971",
     "America/Anchorage": "907",
     "Pacific/Honolulu": "808",
+    # AEGIS S3-L1: Canada, US territories and the NANP Caribbean
+    "America/Vancouver": "236 250 257 604 672 778",
+    "America/Edmonton": "368 403 587 780 825",
+    "America/Regina": "306 474 639",
+    "America/Winnipeg": "204 431 584",
+    "America/Toronto": "226 249 263 289 343 354 365 367 382 387 416 418 437 438 450 468 514 519 548 579 581 613 647 "
+                       "683 705 742 753 819 873 905 942",
+    "America/Halifax": "428 506 782 902",
+    "America/Puerto_Rico": "787 939",
+    "America/St_Thomas": "340",
+    "Pacific/Guam": "671",
+    "Pacific/Saipan": "670",
+    "Pacific/Pago_Pago": "684",
+    "America/Nassau": "242", "America/Barbados": "246", "America/Anguilla": "264", "America/Antigua": "268",
+    "America/Tortola": "284", "America/Cayman": "345", "Atlantic/Bermuda": "441", "America/Grenada": "473",
+    "America/Grand_Turk": "649", "America/Jamaica": "658 876", "America/Montserrat": "664",
+    "America/Lower_Princes": "721", "America/St_Lucia": "758", "America/Dominica": "767",
+    "America/St_Vincent": "784", "America/Santo_Domingo": "809 829 849", "America/Port_of_Spain": "868",
+    "America/St_Kitts": "869",
 }
-AREA_ZONE = {code: z for z, codes in _AREA.items() for code in codes.split() if code.isdigit()}
+# Area codes that span zones: every zone they cover must be inside the window (the stricter wins).
+_SPLIT = {"807": ("America/Toronto", "America/Winnipeg"), "709": ("America/St_Johns", "America/Goose_Bay"),
+          "879": ("America/St_Johns", "America/Goose_Bay"),
+          "867": ("America/Whitehorse", "America/Edmonton", "America/Winnipeg", "America/Toronto")}
+AREA_ZONES: dict[str, tuple] = {code: (z,) for z, codes in _AREA.items() for code in codes.split()}
+AREA_ZONES.update(_SPLIT)
+AREA_ZONE = {k: v[0] for k, v in AREA_ZONES.items()}
+
+
+def phone_problem(e164: Optional[str]) -> Optional[str]:
+    """For SMS and voice (AEGIS S3-M1, S3-L1): only +1 numbers of exactly 12 characters whose area code is in the
+    table. An unknown area code is REFUSED: the fallback would be the intersection of 08:00-21:00 across every NANP
+    zone, and from Guam (UTC+10) to Newfoundland (UTC-2:30) that leaves at most about 90 minutes a day (22:00-23:30
+    UTC in summer) — too small to be a usable window, so it is not offered."""
+    if not e164 or not e164.startswith("+1"):
+        return "NON_NANP_NOT_SUPPORTED"
+    if len(e164) != 12 or not e164[1:].isdigit():
+        return "PHONE_INVALID"
+    if e164[2:5] not in AREA_ZONES:
+        return "AREA_CODE_UNKNOWN"
+    return None
 
 
 def zone_fits_phone(tz_name: Optional[str], e164: Optional[str]) -> bool:
@@ -93,7 +131,8 @@ def allowed(now_utc: datetime, tz_name: Optional[str], e164: Optional[str] = Non
     if z is None or not zone_fits_phone(tz_name, e164):
         return None
     zones = [z]
-    if e164 and e164.startswith("+1") and len(e164) == 12:
-        area = AREA_ZONE.get(e164[2:5])
-        zones += [ZoneInfo(area)] if area else [ZoneInfo("America/New_York"), ZoneInfo("America/Los_Angeles")]
+    if e164 and e164.startswith("+1"):
+        if phone_problem(e164):
+            return None                       # S3-L1: malformed or unknown area code -> refused, never a guess
+        zones += [ZoneInfo(x) for x in AREA_ZONES[e164[2:5]]]
     return all(_inside(now_utc, x) for x in zones)

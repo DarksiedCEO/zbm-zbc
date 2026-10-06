@@ -271,12 +271,12 @@ class DealsMixin:
             if p["status"] != "sent" or p["content_sha256"] != sha:
                 raise Conflict(R("PROPOSAL_NOT_SENT"))
             o = self.opps[p["opportunity_id"]]
-            acc = self.accounts.get(p["account_id"]) or {}
+            account = self.accounts.get(p["account_id"]) or {}       # S3-M2: never shadows the acceptance
             common = {"proposal_id": pid, "brand": p["brand"], "account_id": p["account_id"],
                       "contact_id": o["contact_id"], "content_sha256": p["content_sha256"]}
             handoffs = [
                 {"handoff_id": derived_id("hof", "onboarding", pid), "kind": "onboarding_create_client",
-                 "payload": {**common, "account_name": acc.get("name"), "product_lines": o["product_lines"],
+                 "payload": {**common, "account_name": account.get("name"), "product_lines": o["product_lines"],
                              "contract": p["contract"]}},
                 {"handoff_id": derived_id("hof", "finance", pid), "kind": "finance_invoice_draft",
                  "payload": {**common, "currency": "USD", "lines": [{"line_id": x["line_id"], "amount": x["amount"]}

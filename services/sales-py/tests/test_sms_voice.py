@@ -73,7 +73,9 @@ def test_quiet_hours_by_recipient_time_zone(tmp_path, utc_hour, tz, ok):
     lead = h.vlead(tz=tz, phone="+13105550100" if tz.startswith("America/") else "+442071838750")
     h.ok(h.consent(lead["contact_id"]), 201)
     r = sms(h, lead["contact_id"], sms_template(h))
-    if utc_hour == 4:
+    if tz.startswith("Europe/"):
+        h.refused(r, 403, "NON_NANP_NOT_SUPPORTED")    # S3-M1: no country -> zone check for non-+1 numbers yet
+    elif utc_hour == 4:
         h.refused(r, 403, "QUIET_HOURS")              # 21:00 sharp is outside 08:00-21:00
     elif ok:
         assert r.status_code == 201

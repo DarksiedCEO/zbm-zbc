@@ -133,7 +133,8 @@ agent calls this service yet.
 5. Moving Andre's approvals from the shared approval token to Cybersecurity (22) passkeys (ADR 0012), as the other
    departments move.
 6. Rendering and delivering the proposal document itself (the service records the approved content and its release).
-7. A per-state quiet-hours and call-frequency table; a CCPA erasure design for the local log.
+7. A per-state quiet-hours and call-frequency table; a CCPA erasure design for the local log; a country-to-zone
+   check so texts and calls can reach numbers outside +1 (refused until then, AEGIS S3-M1).
 8. Wiring into CI, the hygiene checker's service list and docs/test-counts.md (left to the integration lead).
 
 ## Settings
@@ -186,5 +187,26 @@ Regressions: `services/sales-py/tests/test_aegis_r2.py` (the reviewer's cases). 
 | S2 DoS (unverified) | Unbounded queueing could grow the log and memory | Each caller may have at most `SALES_QUEUE_MAX_PER_CALLER` (default 2000, 1..20000) messages queued; past it `429 QUEUE_FULL` |
 
 Accepted: a genuine SMS "yes" with extra words ("yes, call me Tuesday after 3") is held until Andre decides it (the
-cost of failing closed is a human review, never an unwanted text). An area code not in the table gets the Eastern
-and Pacific intersection, which can be stricter than the person's real window.
+cost of failing closed is a human review, never an unwanted text). *Corrected in round 3 (S3-L1):* this paragraph
+also claimed that the Eastern-and-Pacific fallback for an unlisted area code "can be stricter than the person's real
+window" as if it were always safe; it was not (Halifax, St. John's, Puerto Rico, Guam and Hawaii fall outside it).
+That fallback is gone: an unlisted area code is refused.
+
+## Amendment — AEGIS round 3 (Oct 5 2026): BLOCKING, every finding fixed
+
+Round 3 showed that interpreting free text kept being bypassed (hostile wording around an allowed word, emoji,
+look-alike letters, an opt-out sent by email about texts). Interpretation is now removed from every path that can
+lead to another text or call. Regressions: `services/sales-py/tests/test_aegis_r3.py` (every reviewer case). Every new
+guard was mutation-checked.
+
+| Id | Finding | Fix |
+|---|---|---|
+| S3-C1 (Critical) | The round-2 positive allow-list let hostile replies through ("yes stop", "ok 🛑", "I'm driving. Opt me out", "Out of office. I did not sign up for this", "уеѕ") | **No interpretation:** ANY inbound reply on ANY channel holds phone outreach (SMS and voice, both brands) for every number of the resolved contact and the number it came from (typed `phone_hold_applied` first), "yes" and "interested" included — a person follows up and Andre releases. The one exception is a raw body that, trimmed and lower-cased only, equals one of a few fixed machine texts (`i10_replies.AUTO_REPLIES`: the exact iOS "I'm driving with Do Not Disturb While Driving turned on…" text, with straight or curly apostrophes, and three exact out-of-office bodies) — no regex, no tail, no other normalising. The classifier remains for labels and still makes opt-out wording a permanent suppression. An empty (media-only) reply is accepted and holds |
+| S3-C2 (Critical) | An email reply saying "stop texting me" (in words outside the list) left texts and calls running | Covered by the same rule: email replies hold the contact's numbers too |
+| S3-H1 (High) | Voice replies and replies from a second number were only partly held | Same rule: every channel, every number of the contact plus the sender's number |
+| S3-M1 (Medium) | Non-+1 numbers were checked only against the recorded zone (a UK mobile at 03:00) | Texts and calls to numbers outside +1 are refused (`NON_NANP_NOT_SUPPORTED`) until a country-to-zone check exists (unlock list) |
+| S3-M2 (Medium) | `proposal_won` recorded the ACCOUNT under `acceptance` (a shadowed variable) | The account variable is renamed; the ledger and the log record the real acceptance, or `null` when Andre marks it won |
+| S3-L1 (Low) | Canada, the US territories and the NANP Caribbean were missing from the area-code table; the unknown-code fallback (Eastern and Pacific) let texts land at night in Halifax, St. John's, Puerto Rico and Guam; malformed +1 numbers were accepted; the round-2 "Accepted" note was wrong | The table covers the US, Canada (codes spanning zones list every zone they cover; the stricter wins), Puerto Rico, USVI, Guam, CNMI, American Samoa and the NANP Caribbean. An unknown area code is refused (`AREA_CODE_UNKNOWN`): the intersection of 08:00-21:00 across all NANP zones is at most about 90 minutes a day. A +1 number must be exactly `+1 NPA NXX XXXX` (12 characters). The round-2 note is corrected |
+
+Accepted: every reply except the fixed machine texts creates a review task for Andre; the hold never blocks email, and
+a held contact can still be reached by a person. Texts and calls are limited to +1 numbers.

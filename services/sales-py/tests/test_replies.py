@@ -46,19 +46,31 @@ def test_email_unsubscribe_reply_suppresses_both_brands(tmp_path):
               403, "SUPPRESSED")
 
 
-def test_interested_opens_a_book_call_task(tmp_path):
+def test_interested_reply_holds_the_phone_and_a_person_follows_up(tmp_path):
     h, lead, _, mid = setup(tmp_path)
     r = reply(h, mid, "Sounds good, let's talk Tuesday")
     task = h.ok(h.get("/sales/v1/tasks?status=open"))[0]
-    assert r["class"] == "interested" and task["kind"] == "book_call" and task["target"] == \
-        f"contact:{lead['contact_id']}"
+    assert r["class"] == "interested" and r["held"] is True and task["kind"] == "review_reply"
 
 
-def test_out_of_office_reschedules_a_week_out(tmp_path):
+def test_interested_from_an_email_only_contact_opens_a_book_call_task(tmp_path):
+    h = Harness(tmp_path, ports=wired_ports())
+    lead = h.vlead(phone=None)
+    t = h.template()
+    h.ok(h.post("/sales/v1/outreach/email", {"request_id": rid(), "contact_id": lead["contact_id"],
+                                             "template_id": t["template_id"], "version": 1}, "sales_agent"), 201)
+    h.ok(h.job("send-queue"))
+    r = reply(h, h.ports.email.sent[0][0], "Sounds good, let's talk Tuesday")
+    task = h.ok(h.get("/sales/v1/tasks?status=open"))[0]
+    assert r["held"] is False and task["kind"] == "book_call" and task["target"] == f"contact:{lead['contact_id']}"
+
+
+def test_an_exact_out_of_office_reply_reschedules_a_week_out(tmp_path):
     h, _, _, mid = setup(tmp_path)
-    reply(h, mid, "Out of office until the 20th")
+    assert reply(h, mid, "  Out of Office ")["held"] is False
     task = h.ok(h.get("/sales/v1/tasks"))[0]
     assert task["kind"] == "reschedule" and task["due_on"] == "2026-10-13"
+    assert reply(h, mid, "Out of office until the 20th")["held"] is True
 
 
 def test_anything_else_goes_to_human_review(tmp_path):

@@ -42,6 +42,8 @@ def phone(raw: str) -> Optional[str]:
         v = "+" + v
     if not re.fullmatch(r"\+[1-9][0-9]{7,14}", v):
         return None
+    if v.startswith("+1") and not re.fullmatch(r"\+1[2-9][0-9]{2}[2-9][0-9]{6}", v):
+        return None                     # S3-L1: a +1 number is exactly +1 NPA NXX XXXX (12 characters)
     return v
 
 
