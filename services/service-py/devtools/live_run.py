@@ -87,6 +87,18 @@ def stop(p: subprocess.Popen, name: str) -> None:
     say(f"stopped {name} pid={p.pid} (exit {p.returncode})")
 
 
+def daytime_zone() -> str:
+    """A time zone where it is between 10:00 and 18:00 now (SMS quiet hours are recipient-local)."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    for tz in ("America/Los_Angeles", "America/New_York", "Europe/London", "Europe/Berlin", "Asia/Dubai",
+               "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland",
+               "Pacific/Honolulu", "America/Anchorage", "America/Sao_Paulo", "Atlantic/Azores"):
+        if 10 <= datetime.now(timezone.utc).astimezone(ZoneInfo(tz)).hour < 18:
+            return tz
+    return "UTC"
+
+
 def rid() -> str:
     return "live-" + uuid.uuid4().hex
 
@@ -189,7 +201,8 @@ def _main(work: Path) -> int:
         r = a.post(f"/svc/v1/tickets/{sms_ticket}/reply", {"request_id": rid(), "text": "Hi"}, andre=True)
         check("an SMS without recorded consent is refused", r.status_code == 409 and
               r.json()["detail"] == "SMS_CONSENT_REQUIRED")
-        a.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid, "channel": "sms", "source": "portal_form",
+        a.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid, "channel": "sms",
+                                        "address": "+13105551234", "source": "portal_form",
                                     "consent_text": "I agree to receive texts.", "captured_at": "2026-10-01T10:00:00Z",
                                     "express": True}, caller="hub")
         r = a.post("/svc/v1/inbound/sms", {"request_id": rid(), "brand": "zbm", "to_number": "+13105550100",
@@ -199,6 +212,7 @@ def _main(work: Path) -> int:
         check("an opt-out phrase revokes SMS consent immediately and queues one confirmation",
               r["action"] == "opted_out" and cons[0]["status"] == "revoked" and r.get("confirmation_message_id"))
         r = a.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid, "channel": "sms",
+                                        "address": "+13105551234",
                                         "source": "portal_form", "consent_text": "I agree to receive texts.",
                                         "captured_at": "2026-10-01T10:00:00Z", "express": True}, caller="hub")
         check("a consent captured before the STOP cannot bring it back", r.status_code == 409)
@@ -238,6 +252,36 @@ def _main(work: Path) -> int:
         r = a.post("/svc/v1/chat/messages", {"request_id": rid(), "brand": "zbc", "contact_ref": "client:live5",
                                              "text": "what are your hours"}, caller="hub").json()
         check("the approval survives the restart", r["action"] == "answered")
+
+        # --- sending, end to end (V2-L4): the non-production file sender behind the SMS port ---------------------
+        stop(sp, "service")
+        outbox = work / "outbox.jsonl"
+        sp = start([sys.executable, "-m", "api"], {**env, "SVC_NON_PRODUCTION": "1", "SVC_SMS_PROVIDER": "nonprod_file",
+                                                   "SVC_NONPROD_OUTBOX_FILE": str(outbox)},
+                   str(SVC / "src"), "service", work)
+        wait_health(S + "/health")
+        tz = daytime_zone()
+        cid2 = a.post("/svc/v1/contacts", {"request_id": rid(), "brand": "zbm", "contact_ref": "client:sender",
+                                           "phone": "+13105557777", "timezone": tz}, caller="hub").json()["contact_id"]
+        a.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid2, "channel": "sms",
+                                    "address": "+13105557777", "source": "portal_form",
+                                    "consent_text": "I agree to receive texts.", "captured_at": "2026-10-01T10:00:00Z",
+                                    "express": True}, caller="hub")
+        t2 = a.post("/svc/v1/inbound/sms", {"request_id": rid(), "brand": "zbm", "to_number": "+13105550100",
+                                            "from_number": "+13105557777", "text": "I need help with my campaign"},
+                    caller="sms_gateway").json()["ticket_id"]
+        rep = a.post(f"/svc/v1/tickets/{t2}/reply", {"request_id": rid(), "text": "Andre here, calling you today."},
+                     andre=True).json()
+        tick = a.post("/svc/v1/jobs/outbound-tick/run", {"request_id": rid()}, caller="scheduler").json()
+        sent = [json.loads(x) for x in outbox.read_text().splitlines()] if outbox.exists() else []
+        mine_sent = [x for x in httpx.get(L + "/ledger/entries", headers=lh, timeout=60).json()
+                     if x.get("department") == "service" and x.get("subject_id") == rep["message_id"]]
+        say(f"tick={tick} outbox={[x['message_id'] for x in sent]} reply={rep} events={[x['event_type'] for x in mine_sent]}")
+        check("outbound-tick sends through the SMS port: message_sending, then the send, then message_sent",
+              rep["message_id"] in [x["message_id"] for x in sent] and tick.get("sent") == len(sent)
+              and [x["event_type"] for x in mine_sent] == ["message_sending", "message_sent"])
+        check("the opt-out confirmation queued earlier went out through the same port, once",
+              sum(1 for x in sent if x["to"] == "+13105551234" and "unsubscribed" in x["text"]) == 1)
 
         # --- a truncated log is caught --------------------------------------------------------------------------
         stop(sp, "service")

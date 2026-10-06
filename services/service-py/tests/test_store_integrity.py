@@ -56,13 +56,14 @@ def test_idempotency_key_is_actor_operation_target_and_request_id(h):
 def test_message_bodies_never_reach_the_ledger_or_the_log(hd):
     hd.article()
     hd.contact(email="secret.person@acme.test", phone="+13105551234")
-    hd.ok(hd.chat("my very private question about hours"), 201)
+    hd.ok(hd.chat("what are your hours"), 201)
+    hd.ok(hd.chat("my very private question", ref="client:other"), 201)
     led = json.dumps(hd.ledger.events)
     assert "private question" not in led and "secret.person" not in led and "+13105551234" not in led
     raw = open(_log(hd.settings.data_dir), "rb").read()
     assert b"private question" not in raw and b"secret.person" in raw     # the contact lives in the local log only
     bodies = os.listdir(os.path.join(hd.settings.data_dir, "bodies"))
-    assert len(bodies) == 2 and all(len(b) == 64 for b in bodies)
+    assert len(bodies) == 3 and all(len(b) == 64 for b in bodies)
 
 
 def test_a_body_is_stored_once(hd):
@@ -98,8 +99,9 @@ def test_audit_export_minimises_personal_data(hd):
     text = json.dumps(ev)
     assert "dana@acme.test" not in text and "Dana" not in text and "+13105551234" not in text
     assert "client:acme" not in text and "America/Los_Angeles" not in text
-    first = ev["events"][0]["data"]["effects"][0]
-    assert len(first["email_hmac"]) == 64 and "response" not in ev["events"][0]["data"]
+    saved = next(e for e in ev["events"] if e["kind"] == "contact_saved")
+    first = saved["data"]["effects"][0]
+    assert len(first["email_hmac"]) == 64 and "response" not in saved["data"]
     assert len(__import__("base64").b64decode(ev["hmac_key"])) == 32
 
 

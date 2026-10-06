@@ -39,7 +39,7 @@ else; Andre's actions go through the `dashboard` caller AND carry `X-Andre-Appro
 | `SVC_ANDRE_APPROVAL_TOKEN` | unset | Andre's approvals (FounderGate); equal to the service token or any caller token = not configured |
 | `SVC_NON_PRODUCTION` | 0 | 1 allows the in-memory store (tests only). Never in production |
 | `SVC_DATA_DIR` | — | required in production; a directory owned by the service user, mode 0700 |
-| `SVC_HMAC_KEY_FILE` | — | required in production: a 0600 file holding 32+ random bytes, base64; keys the digests of stored bodies and consent texts (HMAC-SHA-256). `SVC_NON_PRODUCTION=1` without it uses a fixed test key |
+| `SVC_HMAC_KEY_FILE` | — | required in production: a 0600 file holding 32+ random bytes, base64 (all zeros or fewer than 16 distinct bytes refused); keys the digests of stored bodies and consent texts (HMAC-SHA-256). Its fingerprint is written to the log at the first start; another key refuses start. `SVC_NON_PRODUCTION=1` without it uses a fixed test key |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | unset = every write refused (fail closed) |
 | `SVC_SUPPORT_EMAIL_ZBM`, `SVC_SUPPORT_EMAIL_ZBC` | unset | the support identity per brand (inbound must be addressed to it; outbound is sent from it); must differ; unset = that brand's email refused |
 | `SVC_SMS_NUMBER_ZBM`, `SVC_SMS_NUMBER_ZBC` | unset | the brand's SMS number, E.164; must differ; unset = that brand's SMS refused |
@@ -48,7 +48,7 @@ else; Andre's actions go through the `dashboard` caller AND carry `X-Andre-Appro
 | `SVC_SLA_P1_RESOLUTION_MINUTES`, `SVC_SLA_P2_RESOLUTION_MINUTES`, `SVC_SLA_P3_RESOLUTION_MINUTES`, `SVC_SLA_P4_RESOLUTION_MINUTES` | 480, 1440, 4320, 10080 | 60..20160; same ordering rule |
 | `SVC_AT_RISK_THRESHOLD` | 60 | 1..99; a health score below it is at risk |
 | `SVC_RENEWAL_WINDOW_DAYS` | 60 | 7..180 |
-| `SVC_VOICE_PROVIDER`, `SVC_EMAIL_PROVIDER`, `SVC_SMS_PROVIDER`, `SVC_CHAT_PROVIDER`, `SVC_ALERT_PROVIDER` | unset | not built: setting one refuses start |
+| `SVC_VOICE_PROVIDER`, `SVC_EMAIL_PROVIDER`, `SVC_SMS_PROVIDER`, `SVC_CHAT_PROVIDER`, `SVC_ALERT_PROVIDER` | unset | not built: setting one refuses start. Exception: `SVC_SMS_PROVIDER=nonprod_file` with `SVC_NON_PRODUCTION=1` and `SVC_NONPROD_OUTBOX_FILE` (absolute path) "sends" SMS by appending JSON lines to that file (the live run's sender; never in production) |
 | `SVC_FINANCE_URL`, `SVC_CYBER_URL`, `SVC_COMPLIANCE_URL`, `SVC_RESULTS_URL`, `SVC_ONBOARDING_URL` | unset | clients not built: setting one refuses start |
 | `SVC_BIND_ADDR`, `SVC_PORT` | 127.0.0.1, 8460 | |
 | `SVC_REQUEST_HEAD_TIMEOUT_SECONDS`, `SVC_KEEP_ALIVE_TIMEOUT_SECONDS`, `SVC_LIMIT_CONCURRENCY`, `SVC_SWITCH_INTERVAL_SECONDS`, `SVC_DRAINS_MAX` | 10, 5, 128, 0.001, 512 | launcher tuning (`src/serve.py`, shared with the other Python services; the switch interval only 0.0001 .. 0.05, `src/launch_guard.py`) |
@@ -63,7 +63,8 @@ a date of birth, government id, card or bank account number, IP address or devic
 | `GET /health` | open | `status` only (`ok` / `degraded`) |
 | `GET /svc/v1/status` | dashboard | integrity, wired ports, queues, SLA targets, Andre gate configured |
 | `POST /svc/v1/contacts`; `GET /contacts/{id}` | hub, onboarding; dashboard | the minimum about a person: ref, email, phone, time zone, display name |
-| `POST /svc/v1/consents`; `POST /consents/revoke`; `GET /contacts/{id}/consents` | hub, onboarding; hub, dashboard; dashboard, hub, compliance_38 | consent registry (express only; text stored once by hash) |
+| `POST /svc/v1/consents`; `POST /consents/revoke`; `GET /contacts/{id}/consents` | hub, onboarding; hub, dashboard; dashboard, hub, compliance_38 | consent registry (express only; names the address it is for; text stored once by keyed hash) |
+| `POST /svc/v1/contacts/{id}/sms-pause/clear` | Andre | lift the pause an unclear inbound SMS put on proactive SMS (never restores a revoked consent) |
 | `POST /svc/v1/chat/messages`; `GET /chat/threads/{ticket_id}?contact_ref=&brand=` | hub | inbound chat (answered inline when an approved answer matches); the thread as the contact sees it |
 | `POST /svc/v1/inbound/email` | email_gateway | inbound email to a brand's support identity |
 | `POST /svc/v1/inbound/sms` | sms_gateway | inbound SMS; a bare STOP / UNSUBSCRIBE / CANCEL / END / QUIT revokes SMS consent at once |

@@ -384,6 +384,10 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
     def consents(contact_id: str, who: str = Depends(caller("dashboard", "hub", "compliance_38"))) -> list:
         return svc.consents_view(_id(contact_id, SV_ID))
 
+    @app.post("/svc/v1/contacts/{contact_id}/sms-pause/clear", dependencies=auth)
+    def clear_sms_pause(contact_id: str, req: dict = Depends(body(m.RequestOnly)), who: str = Depends(andre)) -> dict:
+        return svc.clear_sms_pause(_id(contact_id, SV_ID), req)
+
     @app.post("/svc/v1/consents", dependencies=auth, status_code=201)
     def consent(req: dict = Depends(body(m.ConsentRecord)), who: str = Depends(caller("hub", "onboarding"))) -> dict:
         return svc.record_consent(who, req)
@@ -391,7 +395,12 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
     @app.post("/svc/v1/consents/revoke", dependencies=auth)
     def revoke(request: Request, req: dict = Depends(body(m.ConsentRevoke)),
                who: str = Depends(caller("hub", "dashboard"))) -> dict:
-        return svc.revoke_consent(who, req, andre=who == "dashboard" and andre_if_presented(request))
+        # V2-L2: a revocation always goes through; a bad optional Andre token only means it is recorded as "dashboard"
+        try:
+            andre_ok = who == "dashboard" and andre_if_presented(request)
+        except SvcError:
+            andre_ok = False
+        return svc.revoke_consent(who, req, andre=andre_ok)
 
     # ------------------------------------------------------------------ inbound
 
@@ -573,6 +582,9 @@ def _wrap(app: FastAPI):
 
 def build_ports(settings: config_mod.Settings) -> Ports:
     ports = Ports.default()
+    if settings.nonprod_outbox:
+        from nonprod_sender import NonProdFileSender
+        ports.senders["sms"] = NonProdFileSender(settings.nonprod_outbox)
     if settings.legal_url:
         ports.handoffs["legal_37"] = HttpLegal(settings.legal_url, settings.legal_token, settings.legal_caller_token)
     return ports

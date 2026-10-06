@@ -87,7 +87,8 @@ def test_signals_are_codes_not_text():
 
 def _art(article_id="a1", rules=None, approved=True, **over):
     content = {"brands": ["zbm"], "channels": ["chat"], "title": "t", "answer": "the approved answer",
-               "rules": rules or {"any": ["hours"], "min_any": 1, "all": [], "phrases": [], "exclude": []}}
+               "rules": rules or {"any": ["hours"], "min_any": 1, "all": [], "phrases": [], "exclude": []},
+               "vocabulary": []}
     content.update(over)
     sha = kb.content_sha(content)
     return {"article_id": article_id, "status": "active", "version": 1, "content_sha256": sha,

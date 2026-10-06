@@ -40,7 +40,8 @@ def test_consent_is_recorded_with_source_time_and_text_hash_never_the_text(h):
 
 def test_implied_consent_is_refused(h):
     cid = h.contact(phone="+13105551234", timezone="America/Los_Angeles")
-    r = h.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid, "channel": "sms", "source": "portal_form",
+    r = h.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid, "channel": "sms",
+                                    "address": "+13105551234", "source": "portal_form",
                                     "consent_text": "x", "captured_at": "2026-10-01T10:00:00Z", "express": False},
                caller="hub")
     assert r.status_code == 422
@@ -50,7 +51,8 @@ def test_consent_needs_an_address_and_a_past_time(h):
     cid = h.contact()
     assert h.consent(cid).json()["detail"] == "NO_ADDRESS"
     cid2 = h.contact("client:b", phone="+13105559999")
-    r = h.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid2, "channel": "sms", "source": "site_form",
+    r = h.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid2, "channel": "sms",
+                                    "address": "+13105559999", "source": "site_form",
                                     "consent_text": "yes", "captured_at": "2027-01-01T00:00:00Z", "express": True},
                caller="hub")
     assert r.json()["detail"] == "CONSENT_IN_FUTURE"
@@ -58,7 +60,8 @@ def test_consent_needs_an_address_and_a_past_time(h):
 
 def test_only_hub_or_onboarding_may_record_consent(h):
     cid = h.contact(phone="+13105551234")
-    r = h.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid, "channel": "sms", "source": "portal_form",
+    r = h.post("/svc/v1/consents", {"request_id": rid(), "contact_id": cid, "channel": "sms",
+                                    "address": "+13105551234", "source": "portal_form",
                                     "consent_text": "yes", "captured_at": "2026-10-01T10:00:00Z", "express": True},
                caller="sms_gateway")
     assert r.status_code == 403 and r.json()["detail"] == "CALLER_NOT_ALLOWED"

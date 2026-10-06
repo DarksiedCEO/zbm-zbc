@@ -319,6 +319,76 @@ def classify(text: str, recent_inbound_24h: int = 0, reopened: int = 0, subject:
     return Triage("routine", (), ("routine:candidate",), True, questions)
 
 
+# ------------------------------------------------------------------------------------------------ the allow-list gate
+# AEGIS round 2 (V2-H1): a blocklist does not converge (paraphrases, other languages, emoji, misspellings), so the
+# bot answers ONLY a message whose every word is known to be harmless: a stop word below, a word of the matched
+# approved article's rules, a word of that article's Andre-approved vocabulary, or the small base vocabulary. Every
+# lexicon above stays, as LABELS that route an escalation; nothing on DENY is ever allowed, whatever an article says.
+STOP_WORDS = frozenset("""
+a an the what whats are is do does how when where which can could would will i im we me my our us you your yours
+it its to for of on in at please thanks thank hi hello hey there be been get this that these those with about from
+by any have has tell know let like should usually normally currently
+""".split())
+BASE_VOCABULARY = frozenset("""
+today tomorrow tonight weekend weekends weekday weekdays monday tuesday wednesday thursday friday saturday sunday
+time times office morning afternoon evening question questions info help
+""".split())
+NEGATIONS = frozenset("""
+not no never nor neither none nothing nobody dont doesnt didnt cant cannot couldnt wont wouldnt shouldnt isnt arent
+wasnt werent havent hasnt hadnt aint without nope nah
+""".split())
+LINE_SEPARATORS = "\r\n\u2028\u2029\u0085\x0b\x0c"
+ALLOWED_CHARS = re.compile(r"[A-Za-z ?.,!'\u2019-]*")
+ROUTINE_MIN_WORDS = 3
+
+
+def _deny_words() -> frozenset:
+    out = set(NEGATIONS) | set(PROFANITY)
+    for terms in LEXICON.values():
+        for t in terms:
+            out |= set(normalise(t).split())
+    for terms in FUZZY.values():
+        out |= set(terms)
+    return frozenset(w for w in out if w not in ("a", "i", "my", "me", "the", "to", "of", "on", "in", "for", "your",
+                                                 "you", "is", "it", "do", "what", "how", "when", "can", "this",
+                                                 "that", "with", "about", "from", "by", "any", "have", "has", "be",
+                                                 "get", "there", "we", "us", "our", "at", "are", "an", "its"))
+
+
+DENY = _deny_words()
+
+
+def article_words(rules: dict, vocabulary=()) -> frozenset:
+    words: set = set()
+    for key in ("all", "any", "phrases"):
+        for t in rules.get(key, ()):
+            words |= set(normalise(t).split())
+    for t in vocabulary:
+        words |= set(normalise(t).split())
+    return frozenset(words)
+
+
+def allow_listed(text: str, allowed: frozenset, min_words: int = ROUTINE_MIN_WORDS) -> Optional[str]:
+    """None when EVERY word of ``text`` is allowed (stop words, base vocabulary, ``allowed``) and none is denied, and
+    the text has no symbol, emoji, digit, currency or line separator, no run of single letters, and at least
+    ROUTINE_MIN_WORDS words; else the reason code. Fail closed: anything not known goes to a human."""
+    stripped = text.strip()
+    if any(c in LINE_SEPARATORS for c in stripped):
+        return "other:line_separator"
+    cleaned = GREETING.sub("", clean(stripped), count=1).strip()
+    if not ALLOWED_CHARS.fullmatch(cleaned):
+        return "other:symbol"
+    tokens = re.sub(r"[^a-z]+", " ", cleaned.lower().replace("'", "").replace("\u2019", "")).split()
+    if len(tokens) < min_words:
+        return "other:too_short"
+    if any(len(a) == 1 and len(b) == 1 for a, b in zip(tokens, tokens[1:])):
+        return "other:letter_run"
+    ok = (STOP_WORDS | BASE_VOCABULARY | allowed) - DENY
+    if any(t not in ok for t in tokens):
+        return "other:unknown_word"
+    return None
+
+
 # Where each category goes (ADR 0014 decision 13). "andre" is the human queue Andre works.
 ROUTES = {
     "privacy": ("compliance_38", "legal_37", "andre"),

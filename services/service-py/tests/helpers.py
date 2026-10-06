@@ -180,10 +180,10 @@ class Harness:
 
     def article(self, item_id: str = "hours", approve: bool = True, brands=("zbm", "zbc"),
                 channels=("chat", "email", "sms"), answer: str = "We are open Monday to Friday, 9am to 6pm Pacific.",
-                rules: Optional[dict] = None) -> dict:
+                rules: Optional[dict] = None, vocabulary=()) -> dict:
         body = {"request_id": rid(), "item_id": item_id, "brands": list(brands), "channels": list(channels),
                 "title": "Opening hours", "answer": answer,
-                "rules": rules or {"any": ["hours", "open", "opening"], "min_any": 1}}
+                "rules": rules or {"any": ["hours", "open", "opening"], "min_any": 1}, "vocabulary": list(vocabulary)}
         saved = self.ok(self.post("/svc/v1/kb/articles", body), 201)
         if approve:
             self.approve("kb/articles", saved)
@@ -216,8 +216,11 @@ class Harness:
         return self.ok(self.post("/svc/v1/contacts", body, caller="hub"), 201)["contact_id"]
 
     def consent(self, contact_id: str, channel: str = "sms", captured_at: str = "2026-10-01T10:00:00Z",
-                text: str = "I agree to receive account texts from Z Best Media."):
+                text: str = "I agree to receive account texts from Z Best Media.", address: Optional[str] = None):
+        c = self.svc.contacts.get(contact_id) or {}
+        address = address or c.get("phone" if channel == "sms" else "email") or "+19999999999"
         return self.post("/svc/v1/consents", {"request_id": rid(), "contact_id": contact_id, "channel": channel,
+                                              "address": address,
                                               "source": "portal_form", "consent_text": text,
                                               "captured_at": captured_at, "express": True}, caller="hub")
 

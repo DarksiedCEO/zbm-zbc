@@ -18,19 +18,30 @@ from datetime import datetime
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from triage import normalise
+import re
+
+from triage import _one_edit, normalise
 
 QUIET_START_HOUR = 8       # 08:00 local: first minute SMS may go
 QUIET_END_HOUR = 21        # 21:00 local: first minute SMS may NOT go
 # AEGIS round 1 (V1-H3): any of these ANYWHERE in an inbound SMS (normalised like triage: "S T O P", a zero-width
 # space, full-width letters all count) revokes SMS consent; a short ambiguous message on its own revokes too.
 # Over-revoking only ever stops texts, never sends one.
-OPT_OUT_TERMS = ("stop", "stopall", "unsubscribe", "unsub", "cancel", "end", "quit", "revoke", "optout", "opt out",
-                 "remove me", "take me off", "leave me alone", "no more texts", "no more text", "no more messages",
-                 "no more sms", "dont text", "do not text", "dont message", "do not message", "dont contact",
-                 "do not contact", "wrong number", "wrong person", "not interested",
+OPT_OUT_TERMS = ("stop", "stopall", "unsubscribe", "unsub", "cancel", "cancelled", "canceled", "end", "quit", "revoke",
+                 "optout", "opt out", "halt", "desist", "stahp",
+                 "remove me", "take me off", "leave me alone", "no more", "dont text", "do not text", "dont message",
+                 "do not message", "dont contact", "do not contact", "dont txt", "do not txt", "dont send",
+                 "do not send", "never text", "never message", "never contact", "stop texting", "quit texting",
+                 "remove my number", "my number off", "lose my number", "take my number", "delete my number",
+                 "didnt sign up", "did not sign up", "never signed up", "who is this", "wrong number", "wrong person",
+                 "not interested",
                  "alto", "parar", "pare", "cancelar", "baja", "darme de baja", "no me escriban", "no mas mensajes",
-                 "numero equivocado")
+                 "numero equivocado", "arrete", "arreter", "desabonner", "sair", "cancele", "descadastrar",
+                 "parem", "nao quero")
+# V2-H3: one typo away from these (on 4+ letter tokens, after repeated letters are collapsed and leet undone)
+OPT_OUT_FUZZY = ("stop", "unsubscribe", "stopall")
+OPT_OUT_SYMBOLS = ("\U0001F6D1", "\u26D4", "\U0001F6AB", "\u270B")      # stop sign, no entry, prohibited, raised hand
+_LEET = str.maketrans({"0": "o", "5": "s", "1": "i", "3": "e", "4": "a", "@": "a", "$": "s", "7": "t"})
 OPT_OUT_SHORT = ("no", "nope", "nah", "no thanks", "no thank you", "bye", "go away", "enough", "basta", "no gracias")
 OPT_OUT_CONFIRMATION = ("You are unsubscribed from {brand_name} texts and will receive no further messages. "
                         "Contact {brand_name} support by email to change this.")
@@ -54,11 +65,28 @@ def within_sms_hours(now: datetime, tz: Optional[str]) -> Optional[bool]:
     return QUIET_START_HOUR <= local.hour < QUIET_END_HOUR
 
 
+def _collapse(word: str) -> str:
+    """Repeated letters collapsed ("stoooop", "STOPPPP" -> "stop")."""
+    return re.sub(r"(.)\1+", r"\1", word)
+
+
 def is_opt_out(text: str) -> bool:
-    norm = normalise(text)
-    if any(f" {normalise(t).strip()} " in norm for t in OPT_OUT_TERMS):
+    """An opt-out anywhere in the message (V1-H3, V2-H3), on ANY inbound channel: a listed word or phrase, a word one
+    typo away from stop / unsubscribe once repeated letters are collapsed and digits read as letters, a stop-sign
+    emoji, or a short ambiguous message on its own. Over-matching only ever stops texts."""
+    if any(sym in text for sym in OPT_OUT_SYMBOLS):
         return True
-    return norm.strip() in OPT_OUT_SHORT
+    variants = {normalise(text), normalise(text.translate(_LEET))}
+    variants |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(variants)}
+    for norm in variants:
+        if any(f" {normalise(t).strip()} " in norm for t in OPT_OUT_TERMS):
+            return True
+        if norm.strip() in OPT_OUT_SHORT:
+            return True
+        for tok in norm.split():
+            if len(tok) >= 4 and any(_one_edit(tok, stem) for stem in OPT_OUT_FUZZY):
+                return True
+    return False
 
 
 is_stop = is_opt_out
@@ -70,7 +98,7 @@ def consent_matches(consent: Optional[dict], address: Optional[str]) -> bool:
 
 
 def check(channel: str, contact: dict, consent_for: Callable[[str], Optional[dict]], proactive: bool, now: datetime,
-          opt_out_confirmation: bool = False) -> Optional[str]:
+          opt_out_confirmation: bool = False, sms_paused: bool = False) -> Optional[str]:
     """None when allowed now; else a reason code. ``consent_for(channel) -> the consent record or None``.
     ``opt_out_confirmation``: the one confirmation of an opt-out (no consent needed, sent at once)."""
     if channel == "sms":
@@ -80,6 +108,8 @@ def check(channel: str, contact: dict, consent_for: Callable[[str], Optional[dic
             return None
         if not consent_matches(consent_for("sms"), contact["phone"]):
             return "SMS_CONSENT_REQUIRED"
+        if proactive and sms_paused:
+            return "SMS_PAUSED"            # V2-H3: an unclear inbound text pauses proactive SMS until Andre clears it
         ok = within_sms_hours(now, contact.get("timezone"))
         if ok is None:
             return "TIMEZONE_UNKNOWN"

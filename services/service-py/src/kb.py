@@ -23,7 +23,7 @@ from typing import Optional
 from ledger import payload_sha256
 from triage import normalise
 
-CONTENT_KEYS = ("brands", "channels", "title", "answer", "rules")
+CONTENT_KEYS = ("brands", "channels", "title", "answer", "rules", "vocabulary")
 
 
 def content_of(article: dict) -> dict:

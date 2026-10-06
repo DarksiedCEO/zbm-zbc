@@ -114,6 +114,7 @@ class Settings:
     at_risk_threshold: int = 60
     renewal_window_days: int = 60
     hmac_key: bytes = b""                                  # keys every stored digest (bodies, consent texts)
+    nonprod_outbox: Optional[str] = None                   # SVC_SMS_PROVIDER=nonprod_file (non-production only)
     bind_addr: str = "127.0.0.1"
     port: int = 8460
 
@@ -191,7 +192,19 @@ def load(env: Optional[dict] = None) -> Settings:
         raise RuntimeError("SVC_SMS_NUMBER_ZBM and SVC_SMS_NUMBER_ZBC must differ: one number per brand")
 
     s.legal_url, s.legal_token, s.legal_caller_token = _thin(env, "SVC_LEGAL")
+    if (env.get("SVC_SMS_PROVIDER") or "").strip() == "nonprod_file":
+        # V2-L4: the live run's file sender; never in production
+        if not non_production:
+            raise RuntimeError("SVC_SMS_PROVIDER=nonprod_file is allowed only with SVC_NON_PRODUCTION=1")
+        outbox = (env.get("SVC_NONPROD_OUTBOX_FILE") or "").strip()
+        if not os.path.isabs(outbox):
+            raise RuntimeError("SVC_SMS_PROVIDER=nonprod_file needs SVC_NONPROD_OUTBOX_FILE (an absolute path)")
+        s.nonprod_outbox = outbox
+    elif (env.get("SVC_NONPROD_OUTBOX_FILE") or "").strip():
+        raise RuntimeError("SVC_NONPROD_OUTBOX_FILE is set but SVC_SMS_PROVIDER is not nonprod_file")
     for name, why in NOT_BUILT.items():
+        if name == "SVC_SMS_PROVIDER" and s.nonprod_outbox:
+            continue
         if (env.get(name) or "").strip() not in ("", "none", "0"):
             raise RuntimeError(f"{name}: {why}. Unset it; this service refuses to start rather than pretend.")
 
@@ -215,6 +228,9 @@ def load(env: Optional[dict] = None) -> Settings:
             key = b""
         if len(key) < 32:
             raise RuntimeError("SVC_HMAC_KEY_FILE must hold at least 32 random bytes, base64-encoded")
+        if key == bytes(len(key)) or len(set(key)) < 16:      # V2-L1: all zeros or too few distinct bytes
+            raise RuntimeError("SVC_HMAC_KEY_FILE holds a weak key (all zeros or fewer than 16 distinct bytes): "
+                               "generate one (python3 -c \"import os,base64;print(base64.b64encode(os.urandom(32)).decode())\")")
         s.hmac_key = key
     elif non_production:
         s.hmac_key = NON_PRODUCTION_HMAC_KEY

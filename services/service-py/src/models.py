@@ -22,6 +22,12 @@ def _printable(v: str) -> str:
     return v
 
 
+def _no_braces(v: str) -> str:
+    if "{" in v or "}" in v:
+        raise ValueError("braces are refused (they are template syntax)")
+    return v
+
+
 def _multiline(v: str) -> str:
     if any((ord(c) < 0x20 and c not in "\n\r\t") or 0x7F <= ord(c) <= 0x9F or 0xD800 <= ord(c) <= 0xDFFF for c in v):
         raise ValueError("control characters are refused")
@@ -55,7 +61,7 @@ Email = Annotated[StrictStr, Field(max_length=254,
                                    pattern=r"^[a-z0-9._%+-]{1,64}@[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63}){1,8}$")]
 Phone = Annotated[StrictStr, Field(pattern=r"^\+[1-9][0-9]{7,14}$")]
 Tz = Annotated[StrictStr, Field(pattern=r"^[A-Za-z][A-Za-z0-9_+/-]{0,63}$")]
-Name = Annotated[StrictStr, Field(min_length=1, max_length=80), AfterValidator(_printable)]
+Name = Annotated[StrictStr, Field(min_length=1, max_length=80), AfterValidator(_printable), AfterValidator(_no_braces)]
 Text = Annotated[StrictStr, Field(min_length=1, max_length=20000), AfterValidator(_multiline)]
 ShortText = Annotated[StrictStr, Field(min_length=1, max_length=2000), AfterValidator(_multiline)]
 SmsText = Annotated[StrictStr, Field(min_length=1, max_length=1600), AfterValidator(_multiline)]
@@ -93,6 +99,9 @@ class ConsentRecord(Strict):
     contact_id: SvId
     channel: Literal["sms", "email"]
     source: Literal["portal_form", "site_form", "onboarding_form", "signed_agreement", "recorded_call"]
+    # V2-H2: the number (sms) or email address the consent was given for; it must be the contact's current one
+    address: Annotated[StrictStr, Field(max_length=254, pattern=r"^(\+[1-9][0-9]{7,14}|[a-z0-9._%+-]{1,64}@[a-z0-9-]{1,63}"
+                                                                r"(\.[a-z0-9-]{1,63}){1,8})$")]
     consent_text: ShortText                     # the exact words the contact agreed to (stored once, by hash)
     captured_at: Timestamp
     express: Literal[True]                      # an express, affirmative consent; nothing implied is recorded
@@ -186,6 +195,8 @@ class ArticleSave(Strict):
     title: Title
     answer: ShortText
     rules: KbRules
+    # V2-H1: words a routine question may also contain (approved with the article); denied words are refused
+    vocabulary: Annotated[list[Term], Field(max_length=40), AfterValidator(_unique)] = []
 
 
 class TemplateSave(Strict):
