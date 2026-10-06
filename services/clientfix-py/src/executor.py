@@ -71,7 +71,10 @@ def run_item(connector: Connector, conn: ConnView, item_id: str, ops: list, tran
             write = req.is_write
             if write:
                 sent["n"] += 1
-                step("request_sending", {"n": sent["n"], "request": req.describe()})
+                facts = {"n": sent["n"], "request": req.describe()}
+                if req.note:
+                    facts["note"] = dict(req.note)      # e.g. a GTM run workspace's generated name (round 3 M3)
+                step("request_sending", facts)
                 out["sent_writes"] = sent["n"]
             try:
                 ans = transport.call(conn, req)
@@ -135,6 +138,7 @@ def run_item(connector: Connector, conn: ConnView, item_id: str, ops: list, tran
             out["status"] = "halted_revoked" if h.code == "CONNECTION_REVOKED" else \
                 "halted_frozen" if h.code == "RESOURCE_FROZEN" else "interrupted"
             out["halt"] = h.code
+            _gtm_refs(ctx, out)                       # AEGIS round 3 L2: a halt mid-revert still names our version
             if h.code == "RESOURCE_FROZEN" and sent["n"] and live_rollback is not None and snap:
                 try:                                  # Andre froze it mid-write: a guarded rollback, then stop
                     _rollback(connector, conn, snap, ctx, make_call(live_rollback), step, out)
@@ -216,10 +220,19 @@ def _rollback(connector, conn, snap, ctx, call, step, out) -> None:
         rb, proven = UNKNOWN, False
     ok = rb == APPLIED and proven is True
     out["rollback"] = {"outcome": rb, "proven": bool(proven)}
-    if ctx.get("poisoned_version"):                 # GTM: our version is still the container's latest (R2-1)
-        out["poisoned_version"] = ctx["poisoned_version"]
+    _gtm_refs(ctx, out)
     step("rollback_result", {"outcome": rb, "proven": bool(proven)})
     out["status"] = "rolled_back" if ok else "rollback_failed"
+
+
+def _gtm_refs(ctx: dict, out: dict) -> None:
+    """GTM: our version is still the container's latest (R2-1) / a newer release may have been un-published by our
+    re-publish of the snapshot (round 3 L4, accepted risk): each is named so Andre's task points at it."""
+    for k in ("poisoned_version", "release_may_be_unpublished"):
+        if ctx.get(k):
+            out[k] = ctx[k]
+        else:
+            out.pop(k, None)
 
 
 def verify_manual(connector: Connector, conn: ConnView, ops: list, transport, live) -> tuple[str, Optional[list]]:

@@ -18,11 +18,20 @@ https://developers.google.com/tag-platform/tag-manager/api/reference/rest/v2/ :
                           changeStatus none | added | deleted | updated), mergeConflict[]} — accounts.containers.workspaces/getStatus ; Entity
   quick_preview           POST {base}{workspace path}:quick_preview -> {containerVersion, syncStatus, compilerError}
                           (edit.containerversions) — accounts.containers.workspaces/quick_preview
-  create_version          POST {base}{workspace path}:create_version, body {name, notes} -> {containerVersion, syncStatus
-                          {mergeConflict, syncError}, compilerError, newWorkspacePath}; it "deletes the workspace"
+  create_version          POST {base}{workspace path}:create_version, body {name, notes} -> {containerVersion ("The
+                          container version created."), syncStatus ("Whether version creation failed when syncing the
+                          workspace to the LATEST container version"), compilerError, newWorkspacePath}; it "deletes the
+                          workspace, and sets the base container version to the newly created version"
                           (edit.containerversions) — accounts.containers.workspaces/create_version
+  versions.get            GET  {base}{accounts/*/containers/*/versions/*} -> ContainerVersion (incl. ``name``)
+                          — accounts.containers.versions/get
+  workspaces.list         GET  {base}{accounts/*/containers/*}/workspaces[?pageToken=] -> {workspace[], nextPageToken}
+                          — accounts.containers.workspaces/list
   versions.publish        POST {base}{accounts/*/containers/*/versions/*}:publish[?fingerprint=] -> {containerVersion,
-                          compilerError} (tagmanager.publish) — accounts.containers.versions/publish
+                          compilerError} (tagmanager.publish) — accounts.containers.versions/publish. The fingerprint
+                          is the PUBLISHED version's own ("must match the fingerprint of the container version in
+                          storage"); there is NO precondition on the version currently live (AEGIS round 3 L4: no
+                          compare-and-swap of the live version exists — a race is detected afterwards and frozen).
   workspaces.delete       DELETE {base}{workspace path} -> {} (tagmanager.delete.containers) — accounts.containers.workspaces/delete
 
 Proto3 JSON (https://protobuf.dev/programming-guides/json/): a field at its default "should" be omitted and a parser
@@ -38,11 +47,18 @@ unpublished edit in it):
   3. write     the planned tag fields in the run workspace, fingerprint compare-and-swap;
   4. stage     ``getStatus`` must list ONLY the planned tags as ``updated`` and no merge conflict; the latest version
                must still be the snapshot; ``quick_preview`` must compile;
-  5. finalize  ``create_version`` (no sync error, no merge conflict, compiles) then ``publish`` with its fingerprint;
+  5. finalize  ``create_version`` (no sync error, no merge conflict, compiles); because it syncs the workspace to the
+               LATEST version, the returned containerVersion must be EXACTLY the snapshot plus the planned values (a
+               revert: exactly the snapshot) and carry our exact name, else it is NOT published (AEGIS round 3 M1:
+               ``poisoned_version`` names it); then ``publish`` with its fingerprint;
   6. verify    the live version is ours, every planned field reads back, and EVERY other entity of the container
                equals the snapshot's (nothing unplanned went live);
   7. rollback  after publishing: re-publish the snapshot version; before it: delete the run workspace (nothing live
                changed) and prove the live version is still the snapshot's; cleanup deletes a run workspace left behind.
+               A version is taken for ours only by its exact name AND exact content (round 3 M2); a revert is never
+               built on a version that carries anything unplanned (round 3 M1).
+  8. reap      the recover tick deletes only run workspaces whose generated name the ledger recorded BEFORE the create
+               request, once that run settled, and only when ``getStatus`` shows no change at all (round 3 M3).
 The lease is the whole CONTAINER (one run per container at a time). Allowlist: a tag's ``paused`` flag and its
 ``firingTriggerId`` list; never a tag's code, type or parameters. Target shape: ``accounts/A/containers/C/tags/T``.
 """
@@ -69,6 +85,10 @@ ENTITY_LISTS = {"tag": "tagId", "trigger": "triggerId", "variable": "variableId"
 VOLATILE = ("fingerprint", "path", "workspaceId", "tagManagerUrl", "containerVersionId")
 RUN_PREFIX = "zbm-clientfix-run-"        # every workspace a run creates; the ONLY workspaces this code deletes
 MAX_PAGES = 20
+
+
+class NotOurs(Exception):
+    """The container's latest version is not exactly the one this run created (AEGIS round 3 M2)."""
 
 
 def _triggers(v) -> bool:
@@ -200,9 +220,11 @@ class TagManagerConnector(Connector):
         exist: the container's workspaces are listed and ours is found by its exact name, so cleanup deletes it."""
         name = f"{RUN_PREFIX}{role}-{str(ctx.get('item_id', ''))[-12:]}-{secrets.token_hex(6)}"
         ctx.setdefault("ws_names", {})[role] = name
+        # M3: the generated name goes on the ledger WITH the create request, before it is sent (``note``)
         ans = call(HttpRequest("POST", f"{BASE}/{account}/workspaces",
                                {"name": name, "description": "Client-approved fix (ZBM client fix lane); deleted after "
-                                                             "the run."}))
+                                                             "the run."},
+                               note={"gtm_run_workspace": name, "account": account}))
         b = ans.body if isinstance(ans, HttpAnswer) else None
         if _ok(ans) and isinstance(b.get("path"), str) and WORKSPACE.fullmatch(b["path"]) \
                 and b["path"].startswith(account + "/workspaces/"):
@@ -245,14 +267,41 @@ class TagManagerConnector(Connector):
             return APPLIED
         return REFUSED if _refused(ans) else UNKNOWN
 
-    def reap(self, account: str, call: Call) -> int:
-        """Delete orphaned run workspaces (name starts with RUN_PREFIX) — the recover tick's reaper (R2-5)."""
-        n = 0
+    def workspace_changes(self, path: str, call: Call) -> Optional[bool]:
+        """workspaces.getStatus: True when the workspace holds ANY change or merge conflict, False when it holds none,
+        None when the answer is not the documented shape."""
+        ans = call(HttpRequest("GET", f"{BASE}/{path}/status", None))
+        b = ans.body if isinstance(ans, HttpAnswer) else None
+        if not _ok(ans):
+            return None
+        changes, conflicts = b.get("workspaceChange", []), b.get("mergeConflict", [])
+        if not isinstance(changes, list) or not isinstance(conflicts, list):
+            return None
+        return bool(changes or conflicts)
+
+    def reap(self, account: str, owned: dict, call: Call, may_delete) -> dict:
+        """The recover tick's reaper (AEGIS round 2 R2-5, round 3 M3). ``owned`` maps the exact generated names the
+        ledger recorded BEFORE their create request, of runs that have SETTLED, to their record. A workspace is
+        deleted only when its name is one of them, ``getStatus`` shows no change at all (someone may have picked an
+        orphaned run workspace up and worked in it), and ``may_delete()`` — asked under the service lock right before
+        the DELETE (round 3 L1) — still allows it. A workspace with any change is HELD for Andre, never deleted.
+        Returns {"deleted": [names], "held": [(name, path)]}."""
+        out = {"deleted": [], "held": []}
         for w in self.list_workspaces(account, call):
-            if isinstance(w.get("name"), str) and w["name"].startswith(RUN_PREFIX):
-                if self._delete(account, w["path"], call) == APPLIED:
-                    n += 1
-        return n
+            name = w.get("name")
+            if not isinstance(name, str) or not name.startswith(RUN_PREFIX) or name not in owned:
+                continue                                  # not a name this service recorded: never touched
+            changed = self.workspace_changes(w["path"], call)
+            if changed is None:
+                continue
+            if changed:
+                out["held"].append((name, w["path"]))
+                continue
+            if not may_delete():
+                break
+            if self._delete(account, w["path"], call) == APPLIED:
+                out["deleted"].append(name)
+        return out
 
     def _load_tags(self, ws: str, planned: dict, call: Call) -> Optional[dict]:
         raw = {}
@@ -296,10 +345,36 @@ class TagManagerConnector(Connector):
                 return REFUSED                            # H3: only the plan's own changes may be versioned
         return APPLIED
 
-    def _version_and_publish(self, ws: str, name: str, call: Call) -> tuple[str, Optional[str], Optional[str]]:
-        """create_version then publish. Returns (outcome, created version path or None, published path or None)."""
-        ans = call(HttpRequest("POST", f"{BASE}/{ws}:create_version",
-                               {"name": name[:100], "notes": "ZBM client fix lane."}))
+    def _exact(self, version: dict, ctx: dict, want: dict) -> bool:
+        """``version`` holds EXACTLY the snapshot with every planned field at ``want[(tag_id, field)]`` — nothing more,
+        nothing less (AEGIS round 3 M1 / M2)."""
+        planned = ctx.get("planned", {})
+        try:
+            if not isinstance(version, dict) or self._unplanned_differences(ctx["live_before_version"], version,
+                                                                             planned):
+                return False
+            tags = self._tags_by_id(version)
+            return all(tid in tags and same(_value(tags[tid], f), want[(tid, f)])
+                       for tid, fields in planned.items() for f in fields)
+        except (UnknownState, KeyError, TypeError):
+            return False
+
+    def _snapshot_values(self, ctx: dict) -> dict:
+        snap = self._tags_by_id(ctx["live_before_version"])
+        return {(tid, f): _value(snap[tid], f) for tid, fields in ctx.get("planned", {}).items() for f in fields}
+
+    def _version_and_publish(self, ws: str, name: str, want: dict, ctx: dict,
+                             call: Call) -> tuple[str, Optional[str], Optional[str]]:
+        """create_version then publish. Returns (outcome, created version path or None, published path or None).
+
+        AEGIS round 3 M1: create_version syncs the workspace "to the latest container version" (workspaces/
+        create_version, syncStatus) — a version the client created after our last check is merged into ours. The
+        returned containerVersion ("The container version created.") is therefore compared with the EXACT expected
+        content — the snapshot plus ``want`` (the planned values going forward; the snapshot values for a revert) —
+        and our exact name, BEFORE publishing. Any difference: nothing is published, the outcome is UNKNOWN and
+        ``poisoned_version`` names the version (it is now the container's latest; Andre is tasked)."""
+        name = name[:100]
+        ans = call(HttpRequest("POST", f"{BASE}/{ws}:create_version", {"name": name, "notes": "ZBM client fix lane."}))
         b = ans.body if isinstance(ans, HttpAnswer) else None
         if not _ok(ans):
             return (REFUSED if _refused(ans) else UNKNOWN), None, None
@@ -308,7 +383,15 @@ class TagManagerConnector(Connector):
         if not isinstance(sync, dict) or _flag(sync, "syncError") is not False or sync.get("mergeConflict", []) \
                 or _flag(b, "compilerError") is not False or not isinstance(cv, dict) \
                 or not isinstance(cv.get("path"), str) or not VERSION_PATH.fullmatch(cv["path"]):
-            return UNKNOWN, (cv.get("path") if isinstance(cv, dict) and isinstance(cv.get("path"), str) else None), None
+            created = cv.get("path") if isinstance(cv, dict) and isinstance(cv.get("path"), str) else None
+            if created:
+                ctx["poisoned_version"] = created       # its content is unknown: never published, never built on
+            return UNKNOWN, created, None
+        if cv.get("name") != name or not self._exact(cv, ctx, want):
+            ctx["poisoned_version"] = cv["path"]
+            ctx["version_mismatch"] = cv["path"]
+            return UNKNOWN, cv["path"], None            # M1: never publish a version holding anything unplanned
+        ctx.setdefault("clean_versions", []).append(cv["path"])
         fp = f"?fingerprint={cv['fingerprint']}" if isinstance(cv.get("fingerprint"), str) else ""
         ans = call(HttpRequest("POST", f"{BASE}/{cv['path']}:publish{fp}", None))
         b = ans.body if isinstance(ans, HttpAnswer) else None
@@ -324,6 +407,7 @@ class TagManagerConnector(Connector):
         for op in ops:
             planned.setdefault(TAG.fullmatch(op["target"]).group(2), set()).add(op["field"])
         ctx["planned"] = planned
+        ctx["planned_after"] = {(TAG.fullmatch(op["target"]).group(2), op["field"]): op["after"] for op in ops}
         if ctx.get("latest_id") != ctx.get("live_before_id"):
             return REFUSED, "base_not_live"               # an unpublished version would ride along with ours
         outcome, ws = self._new_workspace(account, ctx, call, "fix")
@@ -375,10 +459,12 @@ class TagManagerConnector(Connector):
         return APPLIED if err is False else REFUSED if err is True else UNKNOWN
 
     def finalize(self, account: str, ctx: dict, call: Call) -> str:
+        # M2: a unique, exact name — a version is taken for ours only by this name AND its exact content
+        ctx["version_name"] = f"zbm-clientfix {str(ctx.get('item_id', ''))[-40:]} {secrets.token_hex(6)}"[:100]
         ctx["workspace_consumed"] = True                  # create_version "deletes the workspace" (or may have)
         ctx["finalize_maybe"] = True
-        outcome, created, published = self._version_and_publish(
-            ctx["workspace"], f"zbm-clientfix {ctx.get('item_id', '')}", call)
+        outcome, created, published = self._version_and_publish(ctx["workspace"], ctx["version_name"],
+                                                                ctx.get("planned_after", {}), ctx, call)
         if created:
             ctx["version_created"] = created
         if published:
@@ -412,26 +498,40 @@ class TagManagerConnector(Connector):
             return APPLIED if ctx["restored_live"] else CONFLICT
         try:
             created = ctx.get("version_created") or self._identify_ours(account, ctx, call)
+        except NotOurs:
+            return CONFLICT                               # M2: the latest version is someone else's: left alone
+        except UnknownState:
+            return UNKNOWN
+        try:
             live = self._live(account, call)
             if created is None:                           # nothing of ours exists: the live state must be untouched
                 ctx["restored_live"] = live["path"] if live["path"] == prev else None
                 return APPLIED if ctx["restored_live"] else CONFLICT
             ctx["poisoned_version"] = created
+            clean = created in ctx.get("clean_versions", ())
+            created_id = created.rsplit("/", 1)[1]
+            republished = False
             if live["path"] == created:
+                # L4 (accepted risk): versions.publish has no precondition on the live version, so a release the
+                # client publishes between this read and our publish is un-published; it is DETECTED just below
                 ans = call(HttpRequest("POST", f"{BASE}/{prev}:publish", None))
                 b = ans.body if isinstance(ans, HttpAnswer) else None
                 pv = b.get("containerVersion") if isinstance(b, dict) else None
                 if not (_ok(ans) and isinstance(pv, dict) and pv.get("path") == prev):
                     return UNKNOWN
                 ctx["published"] = False
+                republished = True
             elif live["path"] != prev:
                 return CONFLICT                           # someone else published after us: never un-publish them
             latest = self._latest_id(account, call)
-            created_id = created.rsplit("/", 1)[1]
+            if latest not in (prev_id, created_id):
+                if republished:                           # a newer version than ours may have been live a moment ago
+                    ctx["release_may_be_unpublished"] = f"{account}/versions/{latest}"
+                return CONFLICT                           # someone else's newer version sits on top of ours
             if latest == prev_id:
                 ctx["poisoned_version"] = None
-            elif latest != created_id:
-                return CONFLICT                           # someone else's newer draft sits on top of ours
+            elif not clean:
+                return UNKNOWN                            # M1: never build a revert on a version with unplanned content
             elif self._build_revert(account, ctx, call) != APPLIED:
                 return UNKNOWN
             live = self._live(account, call)
@@ -445,8 +545,9 @@ class TagManagerConnector(Connector):
             return UNKNOWN
 
     def _identify_ours(self, account: str, ctx: dict, call: Call) -> Optional[str]:
-        """The create_version answer was lost: the latest version is ours only when it is exactly the snapshot plus
-        the planned values (versions/get)."""
+        """The create_version answer was lost: the latest version is ours only when its ``name`` is EXACTLY the
+        unique name we sent AND its content is exactly the snapshot with every planned field at our ``after``
+        (versions/get; AEGIS round 3 M2). Anything else is someone else's version: ``NotOurs`` (CONFLICT)."""
         latest = self._latest_id(account, call)
         if latest == ctx.get("live_before_id"):
             return None
@@ -455,8 +556,10 @@ class TagManagerConnector(Connector):
         v = ans.body if isinstance(ans, HttpAnswer) else None
         if not _ok(ans) or v.get("path") != path:
             raise UnknownState("versions.get answer")
-        if self._unplanned_differences(ctx["live_before_version"], v, ctx.get("planned", {})):
-            raise UnknownState("the latest version is not ours")
+        if not ctx.get("version_name") or v.get("name") != ctx["version_name"] \
+                or not self._exact(v, ctx, ctx.get("planned_after", {})):
+            raise NotOurs(path)
+        ctx.setdefault("clean_versions", []).append(path)
         return path
 
     def _build_revert(self, account: str, ctx: dict, call: Call) -> str:
@@ -481,7 +584,8 @@ class TagManagerConnector(Connector):
         if self._only_planned_changes(ws, planned, call, ctx) != APPLIED:
             return REFUSED
         ctx["revert_consumed"] = True
-        outcome, _, published = self._version_and_publish(ws, f"zbm-clientfix revert {ctx.get('item_id', '')}", call)
+        name = f"zbm-clientfix revert {str(ctx.get('item_id', ''))[-40:]} {secrets.token_hex(6)}"
+        outcome, _, published = self._version_and_publish(ws, name, self._snapshot_values(ctx), ctx, call)
         return APPLIED if outcome == APPLIED and published else outcome
 
     def rollback_keys(self, keys: list, ctx: dict) -> list:

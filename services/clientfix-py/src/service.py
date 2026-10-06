@@ -95,6 +95,10 @@ class ClientFixService(ConnectionsMixin, JobsMixin, ApplyMixin):
         self.refunds: dict[str, dict] = {}
         self.tasks: dict[str, dict] = {}
         self.requests: dict[tuple, tuple] = {}
+        # AEGIS round 3 M3: (GTM container, generated run-workspace name) -> the run that recorded it BEFORE its create
+        # request; the reaper deletes nothing else. ``reaper_held``: workspaces held for Andre (a change was found)
+        self.run_workspaces: dict[tuple, dict] = {}
+        self.reaper_held: dict[tuple, dict] = {}
         # memory only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
         self._last_integrity_try = 0
@@ -103,6 +107,7 @@ class ClientFixService(ConnectionsMixin, JobsMixin, ApplyMixin):
         self._brief_cache: dict = {}                   # item id -> (read at, rows, status): memory only (R2-4)
         self.pending_revocations: dict = {}            # client -> connection ids whose revocation is not yet committed
         self._running: set = set()                     # jobs whose apply runs in THIS process
+        self._reaper_holding: set = set()              # GTM lease keys the reaper holds right now (round 3 L1)
         # /audit/evidence cache (AEGIS round 7): lines parsed so far, keyed by log length; never touched under self.lock
         self._evidence_lock = threading.Lock()
         self._evidence_cache: dict = {"n": 0, "epoch": None, "lines": []}

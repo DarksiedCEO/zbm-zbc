@@ -99,8 +99,9 @@ weakened.
 9. **Fire-team assignment** (founder decision 2). `alpha` = 3 specialists (store, tracking, listings); `bravo` = 4
    (store, tracking, automations, listings). A job goes to the smallest team covering all its lanes (D-2).
 10. **No work before payment.** Engage, brief, plan and apply are refused `PAYMENT_REQUIRED` until Finance's event is
-    on record; payment before the quote is accepted is `QUOTE_NOT_ACCEPTED`; a wrong amount or hash is
-    `PAYMENT_MISMATCH`; a Finance event id reused with other facts is `FINANCE_EVENT_REUSED`; a float is 422.
+    on record; payment before the quote is accepted is `QUOTE_NOT_ACCEPTED`; a wrong amount or hash never pays the job:
+    it is recorded and its full refund proposed for Andre (`reason: payment_mismatch`; AEGIS round 3 L3); a Finance
+    event id reused with other facts is `FINANCE_EVENT_REUSED`; a float is 422.
 11. **Change sets.** A list of operations, each `{op, target, field, before, after}`: `op` from the connector's
     allowlist, `target` matching the op's target shape, `field` from the op's field list, `before` / `after` the exact
     values (None = absent; only where the op allows a create or a removal), validated by the field's value rule. No
@@ -193,7 +194,8 @@ until Andre adds the OAuth app credentials, the vault client and the transport (
 ## Defaulted decisions (the brief or the founder was silent; the safest option taken)
 
 - **D-1 Quote prices** are set by `clientfix_agent` / the dashboard and accepted by the client by hash; Andre does not
-  approve quotes (not in the Q&A). A partial payment is refused (`PAYMENT_MISMATCH`): exactly the quote or nothing.
+  approve quotes (not in the Q&A). A partial payment never pays the job: exactly the quote or nothing (a mismatched
+  payment is recorded and refunded in full on Andre's approval — AEGIS round 3 L3).
 - **D-2 Fire-team composition:** `alpha` = store, tracking, listings; `bravo` = all four lanes. Automations go to
   `bravo` (its only home). The founder named the sizes, not the lanes.
 - **D-3 Version-1 allowlist is narrow:** no product create / delete, no price or inventory, no theme files, no
@@ -361,15 +363,60 @@ transport's own delete guard).
 - **R2-5** run workspaces have unique names (`zbm-clientfix-run-<role>-<item>-<random>`); a lost `workspaces.create`
   answer lists the container's workspaces (workspaces/list) and deletes ours by exact name; the `recover` tick (run first
   inside every `apply-queue`; the scheduler also runs it once after each start — start-up itself does no platform I/O)
-  reaps orphaned run workspaces of every unleased,
-  unfrozen GTM container, every DELETE recorded on the ledger before it leaves.
+  reaps orphaned run workspaces of every unleased, unfrozen GTM container, every DELETE recorded on the ledger before
+  it leaves. *Narrowed by round 3 M3 (below):* the reaper deletes ONLY a workspace whose exact generated name was
+  recorded on the ledger BEFORE the create request, of a run that has settled, and only when `getStatus` shows no
+  change; the name prefix alone selects nothing.
 - **R2-6** every payment a job cannot take (closed unpaid, or already paid) is recorded and gets its own refund proposal
   (`kind: orphaned_payment`, one per Finance event) and an `ORPHANED_PAYMENT` task; such a refund never closes the job.
 - **R2-7** checks whose fields are named (a GA4 key event, a Shopify metafield) bind the finding to ONE exact field
   (`resource.field`, required for them and refused for the others); a plan may only touch that field.
 - **Accepted risk: the `tagmanager.delete.containers` scope.** The client's vault token for GTM holds it (Google
   grants no narrower scope for deleting a workspace). The code sends exactly one kind of DELETE: a workspace of the
-  connected container that a run created (`TagManagerConnector._delete` refuses any other path; the reaper selects by
-  the `zbm-clientfix-run-` name prefix only). The test transport refuses any GTM DELETE that is not a run workspace,
+  connected container that a run created (`TagManagerConnector._delete` refuses any other path; the reaper selects
+  only names recorded on the ledger before their create request — round 3 M3). The test transport refuses any GTM DELETE that is not a run workspace,
   so every test that sent one would fail; a direct test proves the guard fires.
 - **`/brief` rate limit:** decision 4 above (per item, configurable, on the injected clock; memory only).
+
+## Amendment — AEGIS round 3 (Oct 6 2026, on 407d2db): not blocking; GTM stays unwired until M1–M3 were fixed
+
+Regression tests: `services/clientfix-py/tests/test_aegis_r3.py` (16 of 17 fail on 407d2db; the 17th is the positive
+half of M2: our own exact version is still recognised). Docs re-fetched Oct 6 2026:
+developers.google.com/tag-platform/tag-manager/api/reference/rest/v2/ accounts.containers.workspaces/create_version,
+accounts.containers.versions/publish, accounts.containers.versions/get, accounts.containers.workspaces/getStatus.
+
+- **M1 `create_version` syncs to the latest container version.** Its `syncStatus` is "Whether version creation failed
+  when syncing the workspace to the latest container version": a version the client created after our last check is
+  merged into ours. Before publishing, the returned `containerVersion` ("The container version created.") is compared
+  with the EXACT expected content — the snapshot plus the planned values going forward, the snapshot alone for a
+  revert — and our exact name. On any difference nothing is published, the outcome is UNKNOWN and
+  `poisoned_version` names the version (`rollback_failed`, container frozen, `GTM_VERSION_POISONED` task with `ref`).
+  A revert is never built on a version that is not known clean (content-checked, or identified by M2).
+- **M2 a version is ours only by exact name AND exact values.** Each `create_version` carries a unique name
+  (`zbm-clientfix <item> <random>`); a lost answer is resolved through versions.get, and the latest version is ours
+  only when its `name` equals the name we sent AND every planned field equals our `after` AND nothing else differs
+  from the snapshot. Anything else is someone else's: `conflict`, left alone (never un-published, never reverted).
+- **M3 the reaper.** The generated name of every run workspace is recorded on the ledger BEFORE the create request
+  (`HttpRequest.note` on the recorded `request_sending` step; indexed as `run_workspaces` on replay). The reaper only
+  considers a workspace whose exact name is on that index, for the same client, of a run that has SETTLED (its item is
+  no longer `planned` and its job is not running). Before deleting it asks `getStatus`
+  (accounts.containers.workspaces/getStatus): any change or merge conflict means someone worked in it — it is HELD,
+  never deleted, and a `GTM_RUN_WORKSPACE_CHANGED` task (`ref` = the workspace path) is opened for Andre once.
+- **L1** the reaper holds the container while it works (an apply is refused `RESOURCE_LEASED` meanwhile) and re-checks
+  lease, freeze, revocation and shutdown under the lock immediately before each DELETE (and before every request).
+- **L2** a halt (revocation, shutdown) in the middle of a revert still copies `poisoned_version` into the result, so
+  the `GTM_VERSION_POISONED` task names it.
+- **L3** a payment whose amount or quote hash does not match goes through the orphaned-payment path: recorded, the job
+  not paid by it, a full refund proposed (`reason: payment_mismatch`) and an `ORPHANED_PAYMENT` task.
+- **L4 accepted risk: there is no compare-and-swap on the GTM live version.** versions.publish takes only the
+  fingerprint of the version being published ("must match the fingerprint of the container version in storage"); it
+  has no precondition on the version currently live. Between the rollback reading "live is ours" and re-publishing the
+  snapshot, a release the client publishes can be un-published by us. It cannot be prevented through the API; it is
+  DETECTED: after the re-publish the latest version is read, and a version newer than ours makes the rollback a
+  `conflict` (`rollback_failed`, container frozen) with a `GTM_RELEASE_MAY_BE_UNPUBLISHED` task naming that version
+  (`ref`) so Andre re-publishes it if it was live. The window is two API calls long and only exists after a failed run.
+- **L5** `/brief` checks the kill switch (`revoked_now`, `revoked_clients_now`) and the connection's status before
+  using its cache; a revocation (even one whose commit failed) drops every cached read of that client's items.
+- **Info** every punycode host in `new_external_hosts` is shown next to its Unicode form in
+  `new_external_hosts_detail` (job and item views) with a `confusable` flag (mixed scripts, a Latin-lookalike script,
+  or undecodable punycode), so the client approving the plan sees where the link really points.

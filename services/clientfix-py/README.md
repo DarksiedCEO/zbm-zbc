@@ -85,12 +85,16 @@ user:password), is refused 422 (`SECRET_REFUSED`). Yelp takes no `token_ref` at 
 
 **Plans carry no `before`.** The service reads each current value from the platform at plan submission; the plan
 records `before_read_at`, and every new external link host is listed in `new_external_hosts` (item and job) for the
-client's and Andre's approval. Findings for a GA4 key event or a metafield name the exact field (`resource.field`).
+client's and Andre's approval; `new_external_hosts_detail` shows each punycode host next to its Unicode form with a
+`confusable` flag. Findings for a GA4 key event or a metafield name the exact field (`resource.field`).
 
 **Change sets** are bound to their finding: every op targets the finding's resource and uses only the ops and fields
 its check allows (`catalogue.CHECK_OPS`). Rich text is accepted only in the allowlist's canonical form
 (`connectors/richtext.py`: `sanitize(value) == value`). GTM targets are `accounts/A/containers/C/tags/T`; GTM runs lease
-the whole container. A rollback never overwrites a value it did not write (`conflict`: frozen, Andre alerted).
+the whole container. A rollback never overwrites a value it did not write (`conflict`: frozen, Andre alerted). A GTM
+version is published only when it is exactly the snapshot plus the plan (or, for a revert, exactly the snapshot); the
+`recover` tick deletes only run workspaces whose name the ledger recorded before their create, of settled runs, with
+no change in them (anything else: a `GTM_RUN_WORKSPACE_CHANGED` task). ADR 0017, AEGIS round 3.
 
 **Revocation is never refused.** `POST /connections/{id}/revoke` (hub or dashboard) sets the kill switch first: a
 running apply for that client stops at its next request (the client's revocation epoch moved), even if the commit
@@ -122,7 +126,7 @@ anchored log line with matching `rk` and `seq` are `committed` in `GET /cfx/v1/a
 | `GET /jobs[?client_id&status]` | dashboard, clientfix_agent, compliance_38 | jobs |
 | `GET /jobs/{id}` | dashboard, clientfix_agent, compliance_38; hub inside the client's session | one job: items, quote, plan, results, report |
 | `POST /jobs/{id}/quote/accept` | hub + client session | accept the quote by hash; asks Finance for the up-front invoice (not wired) |
-| `POST /finance/events` | finance_31 | `payment_confirmed` for exactly the quote's amount and hash |
+| `POST /finance/events` | finance_31 | `payment_confirmed` for exactly the quote's amount and hash; any other payment (mismatched, duplicate, closed job) is recorded and its full refund proposed |
 | `GET /jobs/{id}/brief` | fire_team, dashboard | the fire team's brief; only content checks carry the client's text, as `untrusted_client_content` (read-only, secret-shaped values withheld, at most one live read per item per interval) — paid jobs only |
 | `POST /jobs/{id}/engage` | clientfix_agent, dashboard, scheduler | run the fire team (503 `MODEL_NOT_WIRED` today) |
 | `POST /jobs/{id}/plan` | fire_team, dashboard | submit the change sets: `{op, target, field, after}` only — the service reads every `before` from the store itself (503 `CONNECTOR_NOT_WIRED` today); paid jobs only |
@@ -135,7 +139,7 @@ anchored log line with matching `rk` and `seq` are `committed` in `GET /cfx/v1/a
 | `GET /frozen`, `GET /leases` | dashboard, compliance_38 | frozen resources (with `freeze_sha256`), leases |
 | `POST /frozen/unfreeze` | Andre | unfreeze one resource by its exact `freeze_sha256` |
 | `GET /refunds`, `POST /refunds/{id}/approve` | dashboard, compliance_38 / Andre | refund proposals; Andre approves by `refund_sha256` |
-| `GET /tasks`, `POST /tasks/{id}/close` | dashboard / Andre | Andre's tasks (rollback failed, interrupted, revoked mid-apply, re-detection disagrees or unknown, refund decision) |
+| `GET /tasks`, `POST /tasks/{id}/close` | dashboard / Andre | Andre's tasks (rollback failed, interrupted, revoked mid-apply, re-detection disagrees or unknown, refund decision, GTM version poisoned / release may be un-published / run workspace changed — `ref` names it) |
 | `POST /ticks/{name}` | scheduler | `apply-queue`, `manual-verify`, `redetect`, `refunds`, `recover`, `integrity` |
 | `GET /audit/integrity`, `/audit/export`, `/audit/evidence` | dashboard, compliance_38 | integrity (ledger verdict as returned), the log with client values hashed, committed vs attempted evidence |
 

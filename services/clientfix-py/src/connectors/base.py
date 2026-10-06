@@ -52,6 +52,9 @@ class HttpRequest:
     body: Optional[dict] = None
     auth: str = "connection"
     mutates: Optional[bool] = None    # None: every method but GET mutates (a GraphQL query is a POST that does not)
+    # non-secret facts the executor records WITH the request, before it is sent (AEGIS round 3 M3: the name of a GTM
+    # run workspace is on the ledger before the create request leaves, so the reaper deletes only names it created)
+    note: Optional[dict] = field(default=None, compare=False)
 
     @property
     def is_write(self) -> bool:

@@ -211,7 +211,9 @@ def _main(work: Path) -> int:
                                           "quote_sha256": j["quote_sha256"]}, caller="finance_31")
         check("quote accepted in a client session; no plan before payment; only the exact amount pays",
               acc.status_code == 200 and early.status_code == 409 and early.json()["detail"] == "PAYMENT_REQUIRED"
-              and wrong.status_code == 409 and paid.status_code == 200 and paid.json()["status"] == "paid")
+              and wrong.status_code == 200 and wrong.json()["payment"] is None          # recorded, never pays the job
+              and [o["amount"] for o in wrong.json()["orphan_payments"]] == ["174.99"]  # (AEGIS round 3 L3: refunded)
+              and paid.status_code == 200 and paid.json()["status"] == "paid")
 
         # --- fire team, plan, approval, apply ---------------------------------------------------------------------
         eng = a.post(f"/jobs/{jid}/engage", {"request_id": rid()}, caller="clientfix_agent")

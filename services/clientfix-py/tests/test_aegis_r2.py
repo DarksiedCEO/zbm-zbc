@@ -247,13 +247,22 @@ def test_r2_5_run_workspace_names_are_unique_and_prefixed(h):
 
 
 def test_r2_5_the_reaper_deletes_only_orphaned_run_workspaces(h):
+    """Narrowed by AEGIS round 3 M3: only a run workspace whose name was recorded before its create, of a settled
+    run, with no change in it; a workspace that merely carries the prefix is never touched (test_aegis_r3)."""
     gtm = _setup(h)
-    h.connection(connector="gtm", account=CONT, scopes=GOOGLE_SCOPES["gtm"])
-    orphan = gtm._new_ws(RUN_PREFIX + "fix-left-behind", {})
+    st = {"on": True}
+    h.t.rules.append((lambda c, r: st["on"] and r.method == "PUT", HttpAnswer(400, {"error": {"code": 400}})))
+    h.t.rules.append((lambda c, r: st["on"] and r.method == "DELETE", HttpAnswer(500, {"error": {"code": 500}})))
+    conn, j = _gtm_job(h)
+    assert h.ok(h.apply(j["job_id"]))["items"][0]["status"] == "rolled_back"
+    st["on"] = False
+    [orphan] = [k for k, w in gtm.workspaces.items() if w["name"].startswith(RUN_PREFIX)]
+    lookalike = gtm._new_ws(RUN_PREFIX + "fix-left-behind", {})
     theirs = gtm._new_ws("Marketing team workspace", {})
     out = h.ok(h.tick("recover"))
     assert out["workspaces_reaped"] == 1
     assert orphan not in gtm.workspaces and theirs in gtm.workspaces and gtm.default_ws in gtm.workspaces
+    assert lookalike in gtm.workspaces
     assert h.ledger.of_type("reaper_request_sending")                # recorded before it left
 
 

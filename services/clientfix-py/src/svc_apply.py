@@ -85,7 +85,7 @@ class ApplyMixin:
                     key = self.connectors[conn["connector"]].lease_key(conn["account_ref"], op["target"])
                     if key in self.frozen:
                         raise Conflict(R("RESOURCE_FROZEN"))
-                    if key in self.lease_by_resource:
+                    if key in self.lease_by_resource or key in self._reaper_holding:
                         raise Conflict(R("RESOURCE_LEASED"))
                     if key not in leased:
                         leased.add(key)
@@ -212,10 +212,17 @@ class ApplyMixin:
             t = self._task("alert", item_id, "GTM_VERSION_POISONED", "GTM_VERSION_POISONED")
             t["ref"] = result["poisoned_version"]
             tasks.append(t)
+        if result.get("release_may_be_unpublished"):
+            # AEGIS round 3 L4 (accepted risk: no compare-and-swap on the live version): our re-publish of the
+            # snapshot may have un-published a release the client made a moment before it — Andre checks THAT version
+            t = self._task("alert", item_id, "GTM_RELEASE_MAY_BE_UNPUBLISHED", "GTM_RELEASE_MAY_BE_UNPUBLISHED")
+            t["ref"] = result["release_may_be_unpublished"]
+            tasks.append(t)
         data = {"job_id": job_id, "item_id": item_id, "status": status, "failure": result.get("failure"),
                 "written": result["written"], "snapshot": result["snapshot"], "readback": result["readback"],
                 "rollback": result["rollback"], "dry_run": result["dry_run"], "instructions": result["instructions"],
                 "poisoned_version": result.get("poisoned_version"),
+                "release_may_be_unpublished": result.get("release_may_be_unpublished"),
                 "freeze": keys if freeze else [], "tasks": tasks}
         evidence = [("item_settled", f"item:{item_id}", {"job_id": job_id, "item_id": item_id, "status": status,
                                                          "failure": result.get("failure"), "frozen": len(data["freeze"])},
@@ -228,6 +235,13 @@ class ApplyMixin:
 
     def _a_apply_step(self, d, at):
         it = self.jobs[d["job_id"]]["items"][d["item_id"]]
+        note = (d.get("facts") or {}).get("note") if d.get("step") == "request_sending" else None
+        if isinstance(note, dict) and isinstance(note.get("gtm_run_workspace"), str) \
+                and isinstance(note.get("account"), str):
+            # M3: this name was recorded BEFORE its create request left; only such names are ever reaped
+            self.run_workspaces[(note["account"], note["gtm_run_workspace"])] = {
+                "job_id": d["job_id"], "item_id": d["item_id"], "client_id": self.jobs[d["job_id"]]["client_id"],
+                "recorded_at": at}
         for ev in d.get("evidence") or ():
             it["evidence"].append({"seq": ev["payload"].get("seq"), "event_id": ev["event_id"], "step": d["step"]})
 
@@ -273,54 +287,111 @@ class ApplyMixin:
         return {"interrupted": n, "workspaces_reaped": self.reap_run_workspaces()}
 
     def reap_run_workspaces(self) -> int:
-        """AEGIS round 2 R2-5: delete orphaned GTM run workspaces (name prefix ``RUN_PREFIX``) of every active GTM
-        connection whose container is not leased or frozen. Every DELETE is recorded on the ledger before it leaves,
-        and its answer after; nothing but a run workspace of that container is ever deleted (connector._delete)."""
+        """Delete orphaned GTM run workspaces (AEGIS round 2 R2-5; round 3 M3 / L1). Only a workspace whose generated
+        name this service recorded on the ledger BEFORE the create request (``run_workspaces``), of the SAME client,
+        whose run has SETTLED (its item is no longer ``planned`` and its job no longer runs), is a candidate; the
+        connector deletes it only when ``getStatus`` shows no change at all — a workspace with any change is HELD and
+        an Andre task opened instead. The reaper holds the container (``_reaper_holding``: an apply is refused
+        ``RESOURCE_LEASED`` meanwhile) and re-checks lease, freeze and revocation under the lock right before each
+        DELETE. Every DELETE is recorded on the ledger before it leaves, and its answer after."""
         if not self.ports.transport.wired:
             return 0
         with self.lock:
             todo = []
             for c in sorted(self.connections.values(), key=lambda x: x["connection_id"]):
                 key = self.connectors["gtm"].lease_key(c["account_ref"], "") if c["connector"] == "gtm" else None
-                if key and c["status"] == "active" and c["connection_id"] not in self.revoked_now \
-                        and c["client_id"] not in self.revoked_clients_now and key not in self.lease_by_resource \
-                        and key not in self.frozen and c["client_id"] not in self.frozen_clients:
-                    todo.append(ConnView(c["connection_id"], c["client_id"], c["connector"], c["account_ref"],
-                                         c["token_ref"]))
+                if not key or self._reaper_blocked(c, key):
+                    continue
+                owned = {}
+                for (acct, name), rec in self.run_workspaces.items():
+                    if acct != c["account_ref"] or rec["client_id"] != c["client_id"] or (acct, name) in self.reaper_held:
+                        continue
+                    job = self.jobs.get(rec["job_id"])
+                    item = (job or {}).get("items", {}).get(rec["item_id"])
+                    if job is None or item is None or item["status"] == "planned" or rec["job_id"] in self._running:
+                        continue                              # that run has not settled: never touched
+                    owned[name] = rec
+                if owned:
+                    self._reaper_holding.add(key)
+                    todo.append((ConnView(c["connection_id"], c["client_id"], c["connector"], c["account_ref"],
+                                          c["token_ref"]), key, owned))
         n = 0
-        for conn in todo:
-            counter = {"n": 0}
-
-            def call(req, conn=conn, counter=counter):
-                with self.lock:
-                    if conn.connection_id in self.revoked_now or conn.client_id in self.revoked_clients_now:
-                        raise executor.Halt("CONNECTION_REVOKED")
-                if req.is_write:
-                    counter["n"] += 1
-                    self._reaper_step(conn, "request_sending", {"n": counter["n"], "request": req.describe()})
-                try:
-                    ans = self.ports.transport.call(conn, req)
-                except Exception:                              # noqa: BLE001
-                    ans = None
-                ans = ans if isinstance(ans, HttpAnswer) else HttpAnswer(0, None)
-                if req.is_write:
-                    self._reaper_step(conn, "request_answered", {"n": counter["n"], "status": ans.status})
-                return ans
+        for conn, key, owned in todo:
             try:
-                n += self.connectors["gtm"].reap(conn.account_ref, call)
-            except (UnknownState, executor.Halt, Unavailable):
-                continue
+                n += self._reap_one(conn, key, owned)
+            finally:
+                with self.lock:
+                    self._reaper_holding.discard(key)
         return n
 
-    def _reaper_step(self, conn, kind: str, facts: dict) -> None:
+    def _reaper_blocked(self, c: dict, key: str) -> bool:
+        """Under the lock: the container may not be reaped (leased, frozen, revoked, inactive, closed)."""
+        return (self._closed or c["status"] != "active" or c["connection_id"] in self.revoked_now
+                or c["client_id"] in self.revoked_clients_now or key in self.lease_by_resource
+                or key in self.frozen or c["client_id"] in self.frozen_clients)
+
+    def _reap_one(self, conn, key: str, owned: dict) -> int:
+        counter = {"n": 0}
+
+        def call(req):
+            with self.lock:
+                if self._reaper_blocked(self.connections[conn.connection_id], key):
+                    raise executor.Halt("REAPER_STOPPED")
+            if req.is_write:
+                counter["n"] += 1
+                self._reaper_step(conn, "request_sending", {"n": counter["n"], "request": req.describe()})
+            try:
+                ans = self.ports.transport.call(conn, req)
+            except Exception:                              # noqa: BLE001
+                ans = None
+            ans = ans if isinstance(ans, HttpAnswer) else HttpAnswer(0, None)
+            if req.is_write:
+                self._reaper_step(conn, "request_answered", {"n": counter["n"], "status": ans.status})
+            return ans
+
+        def may_delete() -> bool:                          # L1: re-checked under the lock right before the DELETE
+            with self.lock:
+                return not self._reaper_blocked(self.connections[conn.connection_id], key)
+
+        try:
+            res = self.connectors["gtm"].reap(conn.account_ref, owned, call, may_delete)
+        except (UnknownState, executor.Halt, Unavailable):
+            return 0
         with self.lock:
-            self._commit("reaper_step", {"connection_id": conn.connection_id, "step": kind, "facts": facts}, ACTOR,
+            for name in res["deleted"]:
+                try:
+                    self._reaper_step(conn, "workspace_deleted", {"account": conn.account_ref, "name": name})
+                except Unavailable:
+                    pass
+            for name, path in res["held"]:
+                rec = owned[name]
+                t = self._task("alert", f"{conn.account_ref}|{name}", "GTM_RUN_WORKSPACE_CHANGED",
+                               "GTM_RUN_WORKSPACE_CHANGED")
+                t["ref"] = path
+                try:
+                    self._reaper_step(conn, "workspace_held", {"account": conn.account_ref, "name": name,
+                                                               "path": path, "job_id": rec["job_id"],
+                                                               "item_id": rec["item_id"]}, tasks=[t])
+                except Unavailable:
+                    pass
+        return len(res["deleted"])
+
+    def _reaper_step(self, conn, kind: str, facts: dict, tasks: Optional[list] = None) -> None:
+        with self.lock:
+            d = {"connection_id": conn.connection_id, "step": kind, "facts": facts}
+            if tasks:
+                d["tasks"] = tasks
+            self._commit("reaper_step", d, ACTOR,
                          evidence=(f"reaper_{kind}", f"connection:{conn.connection_id}",
                                    {"connection_id": conn.connection_id, "step": kind, "facts_sha256": sha(facts)},
                                    (conn.connection_id, kind, facts.get("n"), len(self.log))))
 
     def _a_reaper_step(self, d, at):
-        pass
+        f = d.get("facts") or {}
+        if d.get("step") == "workspace_deleted":
+            self.run_workspaces.pop((f.get("account"), f.get("name")), None)
+        elif d.get("step") == "workspace_held":
+            self.reaper_held[(f.get("account"), f.get("name"))] = {"path": f.get("path"), "at": at}
 
     def apply_queue(self) -> dict:
         out = {"recovered": self.recover_interrupted()["interrupted"], "applied": 0, "not_wired": 0, "refused": 0}

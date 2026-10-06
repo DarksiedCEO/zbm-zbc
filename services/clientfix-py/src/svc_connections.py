@@ -108,6 +108,10 @@ class ConnectionsMixin:
         with self.lock:
             c = self._get(self.connections, cid, "CONNECTION_NOT_FOUND")
             self.revoked_now.add(cid)                     # the kill switch first: running work stops now
+            for j in self.jobs.values():                  # AEGIS round 3 L5: and no cached client content survives it
+                if j["client_id"] == c["client_id"]:
+                    for item_id in j["items"]:
+                        self._brief_cache.pop(item_id, None)
             # AEGIS round 1 M4 / round 2 R2-3: and for EVERY connection of this client while ANY of its revocations
             # is not yet committed (a set per client: one committed revocation never clears another's switch; from
             # the commit on, the client's revocation epoch stops every run that started before it)

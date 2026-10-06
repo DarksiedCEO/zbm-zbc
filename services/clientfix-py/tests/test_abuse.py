@@ -582,8 +582,10 @@ def test_no_work_before_payment(h):
                      session=h.session()), 409, "QUOTE_HASH_MISMATCH")
     h.ok(h.accept(j))
     h.refused(h.plan(j, plan), 409, "PAYMENT_REQUIRED")
-    h.refused(h.pay(j, amount="149.99"), 409, "PAYMENT_MISMATCH")
-    h.refused(h.pay(j, quote_sha="d" * 64), 409, "PAYMENT_MISMATCH")
+    # AEGIS round 3 L3: a payment that does not match the quote never pays the job; it is recorded and refunded
+    for bad in (h.pay(j, amount="149.99"), h.pay(j, quote_sha="d" * 64)):
+        assert h.ok(bad)["status"] == "accepted" and h.ok(bad)["payment"] is None
+    assert sorted(r["reason"] for r in h.ok(h.get("/refunds"))) == ["payment_mismatch", "payment_mismatch"]
     r = h.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin-evt-" + "a" * 40,
                                    "job_id": j["job_id"], "kind": "payment_confirmed", "amount": 150.0,
                                    "currency": "USD", "quote_sha256": j["quote_sha256"]}, caller="finance_31")
@@ -593,9 +595,9 @@ def test_no_work_before_payment(h):
     h.ok(h.pay(j, ev=ev))                                     # the same event again: answered, nothing new
     h.refused(h.pay(j, ev=ev, amount="1.00"), 409, "FINANCE_EVENT_REUSED")
     dup = h.ok(h.pay(j, amount=j["quote"]["total"]))          # paid twice: recorded and proposed for refund
-    assert len(dup["orphan_payments"]) == 1 and len(h.ok(h.get("/refunds"))) == 1
+    assert len(dup["orphan_payments"]) == 3 and len(h.ok(h.get("/refunds"))) == 3     # 2 mismatched + the duplicate
     assert not h.t.calls
-    assert len(h.ledger.of_type("payment_confirmed")) == 1 and len(h.ledger.of_type("payment_orphaned")) == 1
+    assert len(h.ledger.of_type("payment_confirmed")) == 1 and len(h.ledger.of_type("payment_orphaned")) == 3
 
 
 def test_payment_from_anyone_but_finance_is_refused(h):
