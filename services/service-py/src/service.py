@@ -639,26 +639,20 @@ class SupportService:
 
     def _integrity_and_ledger(self, always: bool) -> dict:
         """The integrity job and the audit route. The ledger's chain ``verify()`` (an HTTP call, up to the client
-        timeout) runs OUTSIDE the service lock (AEGIS cc27b69 L1): under the lock, refuse if closed and snapshot the
-        integrity result and the log length; release; verify; re-take the lock and re-check. Closed meanwhile:
-        refused 503 SERVICE_CLOSED, nothing written. The log or the integrity result changed meanwhile: retried
-        once, then the current integrity result is reported with ``ledger_valid: null`` (never a stale pairing)."""
-        for _ in range(2):
-            with self.lock:
-                if self._closed:
-                    raise Unavailable(R("SERVICE_CLOSED"))
-                res = self.verify_integrity(force=True, always=always)
-                seen = (len(self.log), dict(self.integrity))
-            ledger_ok = self.rec.client.verify()
-            with self.lock:
-                if self._closed:
-                    raise Unavailable(R("SERVICE_CLOSED"))
-                if (len(self.log), dict(self.integrity)) == seen:
-                    return {"integrity": res, "ledger_valid": ledger_ok, "log_length": seen[0]}
+        timeout) runs OUTSIDE the service lock (AEGIS cc27b69 L1). It checks the ledger's OWN chain, independent of
+        the local log, so its verdict is ALWAYS reported as returned: a False is never dropped, whatever commits
+        land meanwhile (AEGIS db08ff1 M). After it, the lock is re-taken, closed is re-checked (closed meanwhile:
+        503 SERVICE_CLOSED, nothing written), and the integrity result and log length are read fresh.
+        Remaining stall (accepted): ``verify_integrity`` still reads ``entries()`` under the lock."""
         with self.lock:
             if self._closed:
                 raise Unavailable(R("SERVICE_CLOSED"))
-            return {"integrity": dict(self.integrity), "ledger_valid": None, "log_length": len(self.log)}
+            self.verify_integrity(force=True, always=always)
+        ledger_ok = self.rec.client.verify()
+        with self.lock:
+            if self._closed:
+                raise Unavailable(R("SERVICE_CLOSED"))
+            return {"integrity": dict(self.integrity), "ledger_valid": ledger_ok, "log_length": len(self.log)}
 
     def _settle_pending(self, by_id: dict) -> tuple[Optional[str], bool]:
         """security-py's (AEGIS R4-1 / R5-1): our own line (kept in memory) is rolled forward; a line found on disk
