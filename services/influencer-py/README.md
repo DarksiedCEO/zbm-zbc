@@ -15,8 +15,8 @@ Architecture, founder decisions and the unlock list: `docs/adr/0015-influencer-p
 
 **Status:** built and tested; not in force. No send provider, DM provider, discovery source or department client is
 wired: email and approved DMs stay queued, imports answer `SOURCE_NOT_WIRED`, contracts `LEGAL_UNAVAILABLE`, payee
-verification `FINANCE_UNAVAILABLE`, and nothing is ever paid. Not wired into CI (`ci.yml`, `PY_SERVICES`) or
-`docs/test-counts.md` yet (left to the integration lead).
+verification `FINANCE_UNAVAILABLE`, and nothing is ever paid. Wired into CI (`ci.yml`, `PY_SERVICES`) and
+`docs/test-counts.md` on `wire-influencer-bizdev-11-12` at 241c54d.
 
 ## Run
 

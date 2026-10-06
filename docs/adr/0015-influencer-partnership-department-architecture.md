@@ -2,7 +2,8 @@
 
 Status: accepted for build, Oct 6 2026 (founder Q&A the same day). Not in force: no email provider is chosen, no
 platform DM provider exists, no discovery source is connected, the Legal (37) and Finance (31) clients are stand-ins,
-nothing is ever paid, and no department or agent calls this service yet. Not wired into CI or `docs/test-counts.md`.
+nothing is ever paid, and no department or agent calls this service yet. Wired into CI and `docs/test-counts.md` on
+`wire-influencer-bizdev-11-12` at 241c54d (unlock item 9).
 
 ## Founder decisions (Andre, Q&A Oct 6 2026 — binding)
 
@@ -231,8 +232,8 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
    move.
 7. An un-block path for a confirmed minor who later turns 18 (today: never contracted again).
 8. A CCPA erasure design for the local log that keeps the hash chain and the suppression hashes.
-9. Wiring into CI (`ci.yml`, the hygiene checker's `PY_SERVICES`) and `docs/test-counts.md` (left to the integration
-   lead).
+9. ~~Wiring into CI (`ci.yml`, the hygiene checker's `PY_SERVICES`) and `docs/test-counts.md` (left to the integration
+   lead).~~ **Done** on branch `wire-influencer-bizdev-11-12`, commit 241c54d.
 10. **A creator who lost their mailbox** (AEGIS R5 Info). There is NO route today to change a record's email or move
     its payee: the address on the record is the only way into a creator session, and the dedupe index never moves an
     address. Until it is built the operator procedure is: Andre verifies the person out of band (Finance's KYC on the
