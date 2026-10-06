@@ -6,7 +6,8 @@ of the values of every live deal (pursuits and partner deals, both brands) in th
 record was opened within the aggregation window, the deal itself included. Two deals are in one group when they
 share ANY counterparty key — the caller's counterparty ref, the registrable domain, or the normalised organisation
 name — and grouping is transitive. Over the threshold (strictly greater) needs Andre. Lost, withdrawn and no-bid deals
-do not count; won ones do. Never: approves anything. The service re-runs this at every gate (submission, win), so a
+without a delivered submission do not count. An aggregate too large for money (``Overflow``) needs Andre and can
+never be approved. Never: approves anything. The service re-runs this at every gate (submission, win), so a
 sibling deal opened later re-blocks an earlier one that has no approval binding its value."""
 
 from __future__ import annotations
@@ -21,7 +22,15 @@ NUMBER = 7
 NAME = "deal_threshold"
 DECIDES = "the counterparty group's aggregate value and whether it needs Andre"
 
-LIVE = frozenset({"identified", "qualifying", "responding", "submitted", "won", "registered"})
+OPEN = frozenset({"identified", "qualifying", "responding", "submitted", "registered"})
+# closed but still counted (inside the window): won, and a pursuit whose submission was delivered (or may have been:
+# ``sending``) whatever its stage (AEGIS round 1 H2: a delivered bid marked lost still went to that buyer)
+CLOSED_COUNTED = frozenset({"won", "delivered"})
+LIVE = OPEN | CLOSED_COUNTED
+
+
+class Overflow(Exception):
+    """The group's aggregate does not fit in money (an absurd value somewhere): the gate fails closed."""
 
 
 def keys(counterparty_ref: str, domain_registrable: str, org: str) -> list[str]:
@@ -34,8 +43,12 @@ def group(target_id: str, deals: dict, now: datetime, window_days: int) -> list[
     since = now - timedelta(days=window_days)
 
     def counts(d: dict) -> bool:
+        if d["status"] in OPEN:
+            return True                         # a live deal always counts, whatever its age (AEGIS round 1 Low)
+        if d["status"] not in CLOSED_COUNTED:
+            return False
         try:
-            return d["status"] in LIVE and parse_iso(d["opened_at"]) >= since
+            return parse_iso(d["opened_at"]) >= since      # the window applies to closed deals only
         except (TypeError, ValueError):
             return True                         # an unreadable date counts (fail closed)
 
@@ -54,7 +67,10 @@ def group(target_id: str, deals: dict, now: datetime, window_days: int) -> list[
 
 def aggregate(target_id: str, deals: dict, now: datetime, window_days: int) -> tuple[Decimal, list[str]]:
     members = group(target_id, deals, now, window_days)
-    return money.total(deals[i]["value"] for i in members), members
+    try:
+        return money.total(deals[i]["value"] for i in members), members
+    except money.MoneyError:
+        raise Overflow() from None
 
 
 def needs_andre(total: Decimal, threshold: Decimal) -> bool:

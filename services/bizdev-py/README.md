@@ -30,7 +30,7 @@ export NBD_ANDRE_APPROVAL_TOKEN=<Andre's token>         # unset = nothing can be
 export NBD_OUTREACH_DOMAIN=zbm-partners.example NBD_ZBM_DOMAIN=zbestmedia.com NBD_ZBC_DOMAIN=zbestclips.com
 export NBD_POSTAL_ADDRESS="<street address, city, state, zip>"
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>
-cd src && python3 -m api                                # NBD_BIND_ADDR (127.0.0.1), NBD_PORT (8480)
+cd src && python3 -m api                                # NBD_BIND_ADDR (127.0.0.1), NBD_PORT (8490)
 ```
 
 Live run against the real ledger binary and this production entrypoint:
@@ -58,7 +58,7 @@ else; Andre's routes also `X-Andre-Approval-Token`, accepted only through the `d
 | `NBD_QUEUE_MAX_PER_CALLER` | 500 | queued messages or submissions one caller may have waiting (1..5000); past it `429 QUEUE_FULL` |
 | `NBD_EMAIL_PROVIDER`, `NBD_SUBMISSION_PROVIDER`, `NBD_BID_SOURCE_PROVIDER`, `NBD_ONBOARDING_URL`, `NBD_FINANCE_URL`, `NBD_LEGAL_URL`, `NBD_SALES_SUPPRESSION_URL` | unset | not built: setting one refuses start |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | — | unset = every write refused (fail closed) |
-| `NBD_BIND_ADDR`, `NBD_PORT` | 127.0.0.1, 8480 | |
+| `NBD_BIND_ADDR`, `NBD_PORT` | 127.0.0.1, 8490 | |
 | `NBD_REQUEST_HEAD_TIMEOUT_SECONDS`, `NBD_KEEP_ALIVE_TIMEOUT_SECONDS`, `NBD_LIMIT_CONCURRENCY`, `NBD_SWITCH_INTERVAL_SECONDS`, `NBD_DRAINS_MAX` | 10, 5, 128, 0.001, 512 | launcher tuning (`src/serve.py`, shared with the other Python services) |
 
 ## Routes
@@ -81,7 +81,7 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /pursuits/{id}/checklist` | worker | a government bid: add addendum items (never remove or edit) |
 | `POST /pursuits/{id}/checklist/{item_id}/attest` | Andre | one item, by its exact hash |
 | `POST /pursuits/{id}/won` | Andre | after a delivered submission; hands off to Onboarding and Finance |
-| `POST /pursuits/{id}/lost`; `/withdraw` | worker; Andre | close |
+| `POST /pursuits/{id}/lost`; `/withdraw` | worker before anything was delivered, Andre after; Andre | close (a delivered bid stays in its counterparty's aggregate) |
 | `POST /pursuits/{id}/agreements` | worker | an NDA through Legal (37): `503 LEGAL_UNAVAILABLE` while Legal is a stand-in |
 | `GET /handoffs` | worker | won-pursuit hand-offs |
 | `POST /blocks`, `/blocks/{id}/versions`; `GET /blocks`, `/blocks/{id}` | worker | boilerplate (immutable versions) |
@@ -98,7 +98,7 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /partner-deals/{id}/value`; `/lost` | worker | |
 | `POST /partner-deals/{id}/deal-approval`; `/won` | Andre | won needs an approved rate and a Legal agreement in force |
 | `POST /finance/events` | finance_31 | a client payment, refund or chargeback on a won partner deal |
-| `POST /finance/payouts/{id}/paid` | finance_31 | Finance paid a payout it took |
+| `POST /finance/payouts/{id}/paid` | finance_31 | Finance paid a payout it took (a payout whose answer was lost stays `sending` and is reconciled by `payout-request`) |
 | `GET /payouts` | dashboard, finance_31 | payout requests (no tax reference shown) |
 | `POST /contacts`; `GET /contacts/{id}` | worker | email-only contacts of partners and pursuits |
 | `POST /contacts/{id}/merge-fields` | dashboard | the only values `{{first_name}}` / `{{company}}` render |
@@ -106,7 +106,7 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /templates/{id}/versions/{v}/approve` | Andre | by content hash |
 | `POST /outreach/email` | bizdev_agent | queue one email (names the template's approved hash) |
 | `GET /outreach/messages`; `POST /outreach/messages/{id}/cancel` | worker | the outreach queue |
-| `POST /events/email`; `POST /replies` | provider_events | bounces, complaints; replies (any reply holds the contact) |
+| `POST /events/email`; `POST /replies` | provider_events | bounces, complaints; replies (always recorded, never refused for its sender; any reply holds the contact) |
 | `POST /unsubscribe` | hub | the one-click link's token |
 | `POST /suppressions`; `GET /suppressions` | dashboard, bizdev_agent, provider_events; dashboard, compliance_38 | append-only, both brands |
 | `GET /holds`; `POST /holds/{id}/decision` | dashboard; Andre | `resume` or `opt_out` |

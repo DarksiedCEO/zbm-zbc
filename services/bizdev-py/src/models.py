@@ -46,6 +46,14 @@ def _few_digits(v: str) -> str:
     return v
 
 
+def _max8_digits(v: str) -> str:
+    """At most eight digits in total (AEGIS round 1 M2): no caller-chosen key, ref or request id of a partner or deal
+    request can carry a nine-digit taxpayer id in any arrangement."""
+    if sum(c.isdigit() for c in v) > 8:
+        raise ValueError("at most eight digits")
+    return v
+
+
 def _ts(v: str) -> str:
     parse_iso(v)
     return v
@@ -79,7 +87,11 @@ Pct = Annotated[StrictStr, Field(max_length=6, pattern=r"^(0|[1-9][0-9]?|100)\.[
 Sha256 = Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]
 Version = Annotated[StrictInt, Field(ge=1, le=100_000)]
 TaxRef = Annotated[StrictStr, Field(max_length=80)]
-FinanceRef = Annotated[StrictStr, Field(pattern=r"^fin:[A-Za-z0-9._-]{4,120}$")]
+FinanceRef = Annotated[StrictStr, Field(pattern=r"^fin:[A-Za-z0-9._-]{4,120}$"), AfterValidator(_max8_digits)]
+# the partner / deal forms of Id, Slug and Ref: at most eight digits in total (AEGIS round 1 M2)
+PId = Annotated[Id, AfterValidator(_max8_digits)]
+PSlug = Annotated[Slug, AfterValidator(_max8_digits)]
+PRef = Annotated[Ref, AfterValidator(_max8_digits)]
 
 
 class RequestOnly(Strict):
@@ -156,12 +168,12 @@ class Attest(Strict):
 
 
 class DealApproval(Strict):
-    request_id: Id
+    request_id: PId
     binding_sha256: Sha256
 
 
 class Lost(Strict):
-    request_id: Id
+    request_id: PId
     reason_code: Literal["price", "scope", "incumbent", "timing", "no_decision", "disqualified", "relationship",
                          "other"]
 
@@ -172,7 +184,7 @@ class Import(Strict):
 
 
 class AgreementRequest(Strict):
-    request_id: Id
+    request_id: PId
     kind: Literal["referral_agreement", "alliance_agreement", "white_label_agreement", "nda"]
 
 
@@ -236,10 +248,16 @@ class ResponseSubmit(Strict):
 
 # --------------------------------------------------------------------------------------------------- partners
 
+class PCounterparty(Strict):
+    ref: PRef
+    name: Name
+    domain: Domain
+
+
 # Partner records carry NO free text (no notes field): tax information can only ever arrive as a reference
 class PartnerCreate(Strict):
-    request_id: Id
-    partner_key: Slug
+    request_id: PId
+    partner_key: PSlug
     kind: Literal["referral", "agency_alliance", "white_label"]
     brands: Annotated[list[Brand], AfterValidator(_unique)] = Field(min_length=1, max_length=2)
     name: Name
@@ -247,44 +265,44 @@ class PartnerCreate(Strict):
 
 
 class RatePropose(Strict):
-    request_id: Id
+    request_id: PId
     version: Version
     rate_pct: Pct
 
 
 class RateApprove(Strict):
-    request_id: Id
+    request_id: PId
     version: Version
     binding_sha256: Sha256
 
 
 class PayeeSet(Strict):
-    request_id: Id
+    request_id: PId
     finance_payee_ref: FinanceRef
     tax_info_ref: TaxRef
 
 
 class PartnerDealCreate(Strict):
-    request_id: Id
+    request_id: PId
     partner_id: NbId
     brand: Brand
-    counterparty: Counterparty
+    counterparty: PCounterparty
     deal_value: Money
 
 
 class DealValueSet(Strict):
-    request_id: Id
+    request_id: PId
     deal_value: Money
 
 
 class PartnerDealWon(Strict):
-    request_id: Id
+    request_id: PId
     agreement_kind: Literal["referral_agreement", "alliance_agreement", "white_label_agreement"]
 
 
 class FinanceEvent(Strict):
-    request_id: Id
-    finance_event_id: Annotated[StrictStr, Field(pattern=r"^fin:[A-Za-z0-9._-]{4,120}$")]
+    request_id: PId
+    finance_event_id: FinanceRef
     deal_id: NbId
     kind: Literal["payment", "refund", "chargeback"]
     amount: Money
@@ -292,7 +310,7 @@ class FinanceEvent(Strict):
 
 
 class PayoutPaid(Strict):
-    request_id: Id
+    request_id: PId
     finance_ref: FinanceRef
 
 
@@ -344,7 +362,7 @@ class EmailEvent(Strict):
 class Reply(Strict):
     request_id: Id
     message_id: Optional[NbId] = None
-    from_email: Optional[Email] = None
+    from_email: Optional[Annotated[StrictStr, Field(min_length=1, max_length=1000)]] = None   # never refuses (H1)
     text: Annotated[StrictStr, Field(min_length=1, max_length=20000)]
 
 

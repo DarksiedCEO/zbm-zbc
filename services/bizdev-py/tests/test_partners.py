@@ -1,6 +1,7 @@
 """Partners: Andre approves each rate; tax information as references only; agreements through Legal (37), refused
 LEGAL_UNAVAILABLE while Legal is a stand-in; a partner deal is won only by Andre with an agreement in force."""
 
+from intelligences import i12_tax_refs
 from helpers import FakeLegal, Harness, rid, wired_ports
 
 
@@ -69,7 +70,8 @@ def test_payee_ref_digit_rule(h):
     p = h.partner()
     r = h.post(f"/partners/{p['partner_id']}/payee", {"request_id": rid(), "finance_payee_ref": "fin:p1a2b3c4d5e6f7g8h9",
                                                       "tax_info_ref": "vault:tax:abcdefghijklmnop"}, andre=True)
-    h.refused(r, 422, "PAYEE_REF_INVALID")
+    h.refused(r, 422)                     # nine digits cannot fit a Finance payee ref (models and i12)
+    assert not i12_tax_refs.payee_ref_ok("fin:p1a2b3c4d5e6f7g8h9")
 
 
 def test_payee_is_andre_only(h):

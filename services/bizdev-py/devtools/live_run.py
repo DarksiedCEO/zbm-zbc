@@ -105,8 +105,12 @@ def iso_in(seconds: float) -> str:
         .replace("+00:00", "Z")
 
 
+_NO_DIGITS = str.maketrans("0123456789", "ghijklmnop")
+
+
 def rid() -> str:
-    return "live-" + uuid.uuid4().hex
+    """No digits: partner and deal request ids may hold at most eight (ADR 0016 decision 16)."""
+    return "live-" + uuid.uuid4().hex.translate(_NO_DIGITS)
 
 
 class Api:
@@ -314,10 +318,10 @@ def _main(work: Path) -> int:
         check("agreements and partner wins are refused LEGAL_UNAVAILABLE while Legal is a stand-in",
               agr.status_code == 503 and agr.json()["detail"] == "LEGAL_UNAVAILABLE"
               and won.status_code == 503 and won.json()["detail"] == "LEGAL_UNAVAILABLE")
-        pay = a.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:live-ev-1",
+        pay = a.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:live-ev-a",
                                          "deal_id": deal["deal_id"], "kind": "payment", "amount": "100.00",
                                          "currency": "USD"}, caller="finance_31")
-        flt = a.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:live-ev-2",
+        flt = a.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:live-ev-b",
                                          "deal_id": deal["deal_id"], "kind": "payment", "amount": 100.0,
                                          "currency": "USD"}, caller="finance_31")
         check("no commission without a won deal; a float amount is refused",
@@ -346,6 +350,14 @@ def _main(work: Path) -> int:
         again = a.post("/outreach/email", {"request_id": rid(), **qbody})
         check("any reply holds further outreach until Andre decides",
               rep.get("held") is True and again.status_code == 403 and again.json()["detail"] == "CONTACT_HELD")
+        stop_idn = a.post("/replies", {"request_id": rid(), "message_id": m.json()["message_id"],
+                                       "from_email": "pat@xn--80ak6aa92e.xn--p1ai", "text": "STOP"},
+                          caller="provider_events")
+        weird = a.post("/replies", {"request_id": rid(), "from_email": '"pat lee"@livewest.test', "text": "remove me"},
+                       caller="provider_events")
+        check("a STOP from an IDN or unparseable sender is recorded, held and suppressed through the message",
+              stop_idn.status_code == 201 and stop_idn.json()["suppressed"] is True
+              and weird.status_code == 201 and weird.json()["held"] is True)
 
         # --- restart ---------------------------------------------------------------------------------------------
         stop(sp, "service")
@@ -356,7 +368,7 @@ def _main(work: Path) -> int:
         again = a.post("/outreach/email", {"request_id": rid(), **qbody})
         check("after a restart the log re-verifies and every record survives",
               st["integrity"]["ok"] is True and subs.get(queued_sub, {}).get("status") == "queued"
-              and again.status_code == 403 and again.json()["detail"] == "CONTACT_HELD")
+              and again.status_code == 403 and again.json()["detail"] == "SUPPRESSED")
         integ = a.get("/audit/integrity", caller="compliance_38").json()
         check("the integrity route reports the ledger's real verdict", integ["ledger_valid"] is True
               and integ["integrity"]["ok"] is True)

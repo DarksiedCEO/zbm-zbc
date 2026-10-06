@@ -17,8 +17,10 @@ NUMBER = 2
 NAME = "identity"
 DECIDES = "canonical email/domain/counterparty keys and their keyed hashes"
 
-_EMAIL = re.compile(r"^[a-z0-9!#$%&'*+/=?^_`{|}~.-]{1,64}@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
-_DOMAIN = re.compile(r"^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
+# a TLD is letters, or an IDN TLD in its punycode form (``xn--p1ai``); IDN labels below it are punycode too
+_TLD = r"(?:[a-z]{2,24}|xn--[a-z0-9-]{1,59})"
+_EMAIL = re.compile(r"^[a-z0-9!#$%&'*+/=?^_`{|}~.-]{1,64}@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+" + _TLD + "$")
+_DOMAIN = re.compile(r"^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+" + _TLD + "$")
 _SUFFIXES = ("incorporated", "corporation", "company", "limited", "inc", "corp", "co", "llc", "llp", "lp", "ltd",
              "plc", "gmbh", "sa", "ag", "pc", "the")
 
@@ -34,6 +36,12 @@ def email(raw: str) -> Optional[str]:
     return f"{local}@{dom}"
 
 
+def raw_address(raw: str) -> str:
+    """An address that does not parse, normalised only so the same text always gives the same keyed hash (NFKC,
+    case folded, surrounding whitespace dropped). Used to HOLD such a sender; it never becomes a contact."""
+    return unicodedata.normalize("NFKC", raw).strip().casefold()[:1000]
+
+
 def domain(raw: str) -> Optional[str]:
     v = raw.strip().lower().rstrip(".")
     v = v[4:] if v.startswith("www.") else v
@@ -41,10 +49,14 @@ def domain(raw: str) -> Optional[str]:
 
 
 def org_key(name: str) -> Optional[str]:
-    """``Acme, Inc.`` / ``ACME Incorporated`` / ``The Acme Co`` -> ``acme``: NFKC, accents dropped, case folded, every
-    non-alphanumeric removed after dropping common legal suffixes. None when nothing is left."""
+    """``Acme, Inc.`` / ``ACME Incorporated`` / ``The Acme Co`` / Cyrillic ``Аcme`` -> ``acme``: NFKC, accents
+    dropped, case folded, Cyrillic / Greek lookalikes folded with sales-py's confusables table (the one i09 uses,
+    AEGIS round 1 Low), every non-alphanumeric removed after dropping common legal suffixes. None when nothing is
+    left."""
+    from intelligences.i09_replies import _CONFUSABLE
     t = unicodedata.normalize("NFKC", name)
     t = "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c)).casefold()
+    t = t.translate(_CONFUSABLE)
     words = [w for w in re.split(r"[^0-9a-z]+", t) if w]
     while words and words[-1] in _SUFFIXES:
         words.pop()
@@ -64,12 +76,13 @@ def key_fingerprint(key: bytes) -> str:
     return hmac.new(key, b"bizdev-py pii key fingerprint", hashlib.sha256).hexdigest()[:32]
 
 
-_EMAIL_IN_TEXT = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}")
+_EMAIL_IN_TEXT = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.(?:[A-Za-z]{2,24}|xn--[A-Za-z0-9-]{1,59})")
 
 
 def emails_in(text: str) -> list[str]:
+    """Addresses written in a text, after NFKC (fullwidth ``ｓａｍ＠ｏｔｈｅｒ．ｔｅｓｔ`` is ``sam@other.test``)."""
     out = []
-    for m in _EMAIL_IN_TEXT.findall(text or "")[:20]:
+    for m in _EMAIL_IN_TEXT.findall(unicodedata.normalize("NFKC", text or ""))[:20]:
         e = email(m)
         if e and e not in out:
             out.append(e)

@@ -95,12 +95,17 @@ def test_lost_sibling_no_longer_counts(h):
     assert h.ok(h.get(f"/pursuits/{b['pursuit_id']}"))["deal_gate"]["needs_andre"] is False
 
 
-def test_window_uses_the_injected_clock(h):
-    h.pursuit(value="6000.00", deadline=None, kind="formal_pitch")
+def test_window_applies_to_closed_deals_only_and_uses_the_injected_clock(tmp_path):
+    h = Harness(tmp_path, ports=wired_ports())
+    h.pursuit(value="6000.00", deadline=None, kind="formal_pitch")              # open: counts whatever its age
+    won = h.won_deal(value="3000.00")                                          # closed (won), Acme's group below
+    h.ok(h.post("/partner-deals", {"request_id": rid(), "partner_id": won["partner_id"], "brand": "zbm",
+                                   "counterparty": {"ref": "org:acme-p", "name": "Acme", "domain": "acmep.test"},
+                                   "deal_value": "1.00"}), 201)
     h.clock.at = T0 + timedelta(days=366)
     b = h.pursuit(value="6000.00", ref="org:acme-later", name="Acme", domain="acme-later.test", deadline=None,
                   kind="formal_pitch")
-    assert b["deal_gate"]["aggregate"] == "6000.00"
+    assert b["deal_gate"]["aggregate"] == "12001.00"                          # the old open pitch still counts
 
 
 def test_threshold_setting_can_only_be_lowered(tmp_path):

@@ -24,6 +24,18 @@ from ports import NotWired
 from reasons import R
 
 OPEN_STAGES = ("identified", "qualifying", "responding", "submitted")
+DEAL_VALUE_MAX = money.D("1000000000.00")       # AEGIS round 1 M3: no deal is worth more; above it is 422
+
+
+def deal_value(raw, positive: bool) -> str:
+    """A pursuit or partner-deal value: the canonical money string, at most DEAL_VALUE_MAX (else 422)."""
+    try:
+        v = money.parse(raw, positive=positive)
+    except money.MoneyError:
+        raise Invalid(R("MONEY_INVALID")) from None
+    if v > DEAL_VALUE_MAX:
+        raise Invalid(R("VALUE_INVALID"))
+    return money.fmt(v)
 CLOSED_STAGES = ("won", "lost", "no_bid", "withdrawn")
 NEEDS_DEADLINE = ("rfp", "rfq", "enterprise_bid", "government_bid")
 
@@ -133,11 +145,18 @@ class PursuitsMixin:
         return {"counterparty": {"ref": cp["ref"], "name": cp["name"], "domain": dom},
                 "keys": i07_deal_threshold.keys(cp["ref"], reg, org)}
 
+    def _delivered(self, pid: str) -> bool:
+        """A submission of this pursuit was delivered, or may have been (``sending``)."""
+        return any(s["pursuit_id"] == pid and s["status"] in ("sending", "submitted") for s in self.submissions.values())
+
     def _deal_pool(self) -> dict:
         pool = {}
         for p in self.pursuits.values():
+            status = p["stage"]
+            if status in ("lost", "withdrawn", "no_bid") and self._delivered(p["pursuit_id"]):
+                status = "delivered"            # AEGIS round 1 H2: a delivered bid stays in the aggregate
             pool[p["pursuit_id"]] = {"keys": p["keys"], "value": p["value"], "opened_at": p["opened_at"],
-                                     "status": p["stage"]}
+                                     "status": status}
         for d in self.partner_deals.values():
             pool[d["deal_id"]] = {"keys": d["keys"], "value": d["deal_value"], "opened_at": d["opened_at"],
                                   "status": d["status"]}
@@ -145,7 +164,15 @@ class PursuitsMixin:
 
     def _deal_gate(self, deal_id: str) -> dict:
         pool = self._deal_pool()
-        total, members = i07_deal_threshold.aggregate(deal_id, pool, self.now(), self.settings.aggregation_window_days)
+        threshold = money.fmt(self.settings.deal_approval_threshold)
+        try:
+            total, members = i07_deal_threshold.aggregate(deal_id, pool, self.now(),
+                                                          self.settings.aggregation_window_days)
+        except i07_deal_threshold.Overflow:
+            # AEGIS round 1 M3: an aggregate too large for money fails closed (needs Andre, never approvable), never 500
+            members = i07_deal_threshold.group(deal_id, pool, self.now(), self.settings.aggregation_window_days)
+            return {"aggregate": None, "members": members, "needs_andre": True, "binding_sha256": None,
+                    "approved": False, "threshold": threshold, "overflow": True}
         needs = i07_deal_threshold.needs_andre(total, self.settings.deal_approval_threshold)
         binding = i04_assembly.sha({"deal_id": deal_id, "value": pool[deal_id]["value"], "aggregate": money.fmt(total),
                                     "members": members})
@@ -153,7 +180,7 @@ class PursuitsMixin:
         appr = rec.get("deal_approval")
         approved = (not needs) or bool(appr and appr["binding_sha256"] == binding)
         return {"aggregate": money.fmt(total), "members": members, "needs_andre": needs, "binding_sha256": binding,
-                "approved": approved, "threshold": money.fmt(self.settings.deal_approval_threshold)}
+                "approved": approved, "threshold": threshold}
 
     def approve_deal(self, deal_id: str, body: dict) -> dict:
         """Andre's deal approval: exactly the binding the gate shows now (value, aggregate, group)."""
@@ -170,7 +197,7 @@ class PursuitsMixin:
             g = self._deal_gate(deal_id)
             if not g["needs_andre"]:
                 raise Conflict(R("DEAL_APPROVAL_NOT_NEEDED"))
-            if body["binding_sha256"] != g["binding_sha256"]:
+            if g["binding_sha256"] is None or body["binding_sha256"] != g["binding_sha256"]:
                 raise Conflict(R("DEAL_APPROVAL_STALE"))
             data = {"deal_id": deal_id, "binding_sha256": g["binding_sha256"]}
             self._commit("deal_approved", self._req(data, "andre", rk, body, deal_id), "andre",
@@ -188,10 +215,7 @@ class PursuitsMixin:
             if prev:
                 return self.pursuit_view(self.pursuits[prev[1]])
             cp = self._counterparty(body["counterparty"])
-            try:
-                value = money.fmt(money.parse(body["value"]))
-            except money.MoneyError:
-                raise Invalid(R("MONEY_INVALID")) from None
+            value = deal_value(body["value"], positive=False)
             deadline = body.get("deadline")
             if deadline is None and body["kind"] in NEEDS_DEADLINE:
                 raise Invalid(R("DEADLINE_REQUIRED"))
@@ -296,10 +320,7 @@ class PursuitsMixin:
             p = self._open(pid)
             if p["stage"] == "submitted":
                 raise Conflict(R("STAGE_NOT_ALLOWED"))
-            try:
-                value = money.fmt(money.parse(body["value"]))
-            except money.MoneyError:
-                raise Invalid(R("MONEY_INVALID")) from None
+            value = deal_value(body["value"], positive=False)
             data = {"pursuit_id": pid, "value": value}
             self._commit("pursuit_value_set", self._req(data, caller, rk, body, pid), caller,
                          evidence=("deal_value_set", f"pursuit:{pid}",
@@ -445,18 +466,24 @@ class PursuitsMixin:
         with self.lock:
             return {**self.pursuit_view(self.pursuits[pid]), "handoffs": self._handoffs_of(pid)}
 
-    def pursuit_lost(self, caller: str, pid: str, body: dict) -> dict:
+    def pursuit_lost(self, caller: str, pid: str, body: dict, andre: bool = False) -> dict:
+        """The agent may close a pursuit as lost only before anything went out. Once a submission was delivered (or
+        may have been: ``sending``), it is Andre's alone (AEGIS round 1 H2); the pursuit stays in its counterparty's
+        aggregate either way (``_deal_pool``)."""
+        actor = "andre" if andre else caller
         with self.lock:
             self._gate()
             rk = self.rk("pursuit_lost", pid, body)
-            if self._idem(caller, rk, body):
+            if self._idem(actor, rk, body):
                 return self.pursuit_view(self.pursuits[pid])
             p = self._open(pid)
             if p["stage"] not in ("responding", "submitted"):
                 raise Conflict(R("STAGE_NOT_ALLOWED"))
+            if not andre and (p["stage"] == "submitted" or self._delivered(pid)):
+                raise FounderRefused(R("ANDRE_APPROVAL_REQUIRED"))
             data = {"pursuit_id": pid, "reason_code": body["reason_code"]}
-            self._commit("pursuit_lost", self._req(data, caller, rk, body, pid), caller,
-                         evidence=("pursuit_lost", f"pursuit:{pid}", data, (caller, rk)))
+            self._commit("pursuit_lost", self._req(data, actor, rk, body, pid), actor,
+                         evidence=("pursuit_lost", f"pursuit:{pid}", data, (actor, rk)))
             return self.pursuit_view(p)
 
     def withdraw(self, pid: str, body: dict) -> dict:

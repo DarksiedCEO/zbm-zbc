@@ -176,7 +176,7 @@ class Settings:
     deal_approval_threshold: Decimal = DEAL_APPROVAL_CEILING
     aggregation_window_days: int = 365
     bind_addr: str = "127.0.0.1"
-    port: int = 8480
+    port: int = 8490
 
 
 def _caller_tokens(env, service_token: str) -> dict:
@@ -326,6 +326,6 @@ def load(env: Optional[dict] = None) -> Settings:
     s.deal_approval_threshold = threshold
     s.aggregation_window_days = _int(env, "NBD_AGGREGATION_WINDOW_DAYS", 365, 90, 3650)
     s.bind_addr = (env.get("NBD_BIND_ADDR") or "127.0.0.1").strip()
-    s.port = _int(env, "NBD_PORT", 8480, 1024, 65535)
+    s.port = _int(env, "NBD_PORT", 8490, 1024, 65535)
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it
     return s

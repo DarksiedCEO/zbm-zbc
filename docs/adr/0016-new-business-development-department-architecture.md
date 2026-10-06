@@ -20,7 +20,7 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
 ## Decisions
 
 1. **One service, `services/bizdev-py`** (Python; FastAPI, pydantic strict). Ledger department `bizdev`, event ids
-   `nb-<abbr>-<40 hex>`, port 8480, `X-NBD-Caller-Token`, env prefix `NBD_`. The house pattern of sales-py (26-27)
+   `nb-<abbr>-<40 hex>`, port 8490, `X-NBD-Caller-Token`, env prefix `NBD_`. The house pattern of sales-py (26-27)
    and service-py (29-30) and ADRs 0012-0014, copied and adapted, not reinvented.
 2. **Boundaries.** Sales (27) keeps everyday leads, deals and its own outreach; department 11 owns influencer and
    co-marketing; department 14 owns political work. Nothing here calls Sales.
@@ -46,8 +46,9 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
    `unknown` on one is `needs_andre`, otherwise `bid` needs five yeses. **`bid` is always Andre's** and names the
    exact qualification hash he saw (a re-qualification makes it stale); `no_bid` may be recorded by the agent.
 9. **Counterparty identity.** Three keys per deal: the caller's ref, the registrable domain (sales-py's rule plus
-   common `.gov` two-level suffixes) and the organisation name normalised by i02 (NFKC, accents dropped, legal
-   suffixes such as Inc / LLC / Incorporated / The dropped).
+   common `.gov` two-level suffixes) and the organisation name normalised by i02 (NFKC, accents dropped, Cyrillic /
+   Greek lookalikes folded with sales-py's confusables table, legal suffixes such as Inc / LLC / Incorporated / The
+   dropped).
 10. **Responses and pitches.** Boilerplate blocks and responses are versioned and **immutable**: a change is a new
     version, so any change after an approval is a different content hash that no approval binds. Andre approves a
     block version by its hash; a response version (block parts at approved versions plus custom text) by its hash,
@@ -80,7 +81,8 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     the deal gate re-checked. The win records two hand-offs (Onboarding: create the client; Finance: draft the first
     invoice), ids and refs only, delivered outside the lock through ports that are not wired: they stay
     `pending_delivery`, retried by `handoff-retry` (an adapter must be idempotent on `handoff_id`). Lost: the agent,
-    with a reason code, from `responding` or `submitted`.
+    with a reason code, from `responding` — but once a submission was delivered (or is `sending`), marking the pursuit
+    lost is Andre's alone (AEGIS round 1 H2).
 14. **Bid sourcing** is a NOT_BUILT port (decision 12).
 15. **Partners and rates.** Kinds `referral`, `agency_alliance`, `white_label`. The agent proposes a commission rate
     (versioned, a canonical two-decimal percentage, 0.01..50.00); Andre approves exactly that version and binding
@@ -88,16 +90,21 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     against a counterparty and goes through the deal gate (decision 18). Only Andre marks a partner deal won, and only
     with an approved rate (snapshotted into the deal: later rate changes do not touch it) and an agreement Legal (37)
     shows in force (asked outside the lock; the stand-in answers `unavailable`: `503 LEGAL_UNAVAILABLE`).
-16. **Tax information** is a reference only, by structure first and by scanning second. (1) Partner records carry
-    NO free text (no notes field on a partner or a partner deal; unknown fields are 422). (2) Every name and domain
-    in the service holds at most six digits in total, so no nine-digit id fits however it is spaced. (3) A tax
-    reference is exactly `vault:tax:<16..64>` or `tok:<16..64>` and the Finance payee reference `fin:<4..120>`, each
-    with at most eight digits IN TOTAL (a token that happens to hold more is refused; the issuer re-mints it). (4)
-    As a second layer, i12 scans every string of a partner body for an SSN / ITIN or EIN shape (digit groups 3-2-4,
-    2-7 or 9 joined by any one to three non-word characters, fullwidth digits included) or a tax-id label followed
-    by digits: `422 TAX_ID_RAW_REFUSED`, without echoing it. Keys named `tin`, `ssn`, `ein`, `itin`, `tax_id`,
+16. **Tax information** is a reference only, by structure first and by scanning second (corrected in AEGIS round
+    1, M2: at 2d398f8 a nine-digit id still fit in `partner_key`, `counterparty.ref` and `request_id`, and
+    separators such as `x1-23456789` or `1 2 3 4 5 6 7 8 9` beat the scan). (1) Partner records carry NO free text
+    (no notes field on a partner or a partner deal; unknown fields are 422). (2) Every caller-chosen string of a
+    partner, partner-deal, deal-approval, loss, agreement and Finance request — `request_id`, `partner_key`,
+    `counterparty.ref`, `finance_event_id`, `finance_ref`, `finance_payee_ref` and the tax reference — holds at most
+    EIGHT digits in total (`models._max8_digits`), and every name and domain at most six, so no nine-digit id fits in
+    any arrangement. sales-py does not require UUID request ids, so neither does this service; the cap applies
+    instead. Server-issued `nb-…` ids are exempt: they are accepted only when they name an existing record. (3) A
+    tax reference is exactly `vault:tax:<16..64>` or `tok:<16..64>`, the Finance payee reference `fin:<4..120>`. (4)
+    As a second layer, i12 NFKC-normalises every string of a partner body, drops EVERY non-alphanumeric character
+    and refuses nine digits in a row (`422 TAX_ID_RAW_REFUSED`, never echoed); request_id is no longer skipped (only
+    money values, versions, hashes and server-issued ids are). Keys named `tin`, `ssn`, `ein`, `itin`, `tax_id`,
     `taxpayer_id` (and the other spellings in `api.FORBIDDEN_KEYS`) are refused 422 in every body. The payee is set
-    by Andre only (payout redirection is the classic fraud), never shown back, and digested in the audit export.
+    by Andre only, never shown back, and digested in the audit export.
 17. **Commissions, clawbacks, payouts.** Commission accrues only on money Finance (31) reports as actually paid by the
     client (`POST /finance/events`, caller `finance_31`, kinds `payment`, `refund`, `chargeback`, USD), on a won
     deal. The commissionable base is net client money, floored at 0.00 and capped at the won value. Accrued =
@@ -112,14 +119,22 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     (settled at once, so never requested twice), then hands queued requests to Finance through the payouts port,
     marking each `sending` first so a clawback cannot cut an amount being sent. Finance owns payees, tax checks,
     approvals and the Stripe rail; this service never calls Stripe. The port is not wired: requests stay `queued`.
-18. **Deal approval, aggregated.** The gate of a pursuit or partner deal is the SUM of the values of every live deal
-    (pursuits and partner deals, both brands; lost, no-bid and withdrawn excluded, won included) in its counterparty
-    group opened within `NBD_AGGREGATION_WINDOW_DAYS`; two deals are in one group when they share ANY counterparty
+    Only `delivered` with a Finance reference moves a payout to `with_finance`; only an explicit `refused` requeues
+    it, after taking from it any outstanding shortfall of its deal. A timeout, an exception or any other answer is an
+    UNKNOWN outcome: the payout stays `sending` (never resent, never cut by a clawback) and each `payout-request`
+    run reconciles it through the port's `payout_status` (the stand-in answers `unknown`). (AEGIS round 1 M1.)
+18. **Deal approval, aggregated.** The gate of a pursuit or partner deal is the SUM of the values of every deal in
+    its counterparty group (pursuits and partner deals, both brands) that still counts: every OPEN deal whatever its
+    age, and — opened within `NBD_AGGREGATION_WINDOW_DAYS` — won deals and any pursuit whose submission was delivered
+    (or is `sending`) whatever its stage, so a delivered bid marked lost still counts (AEGIS round 1 H2 and Low);
+    lost, no-bid and withdrawn deals with nothing delivered do not; two deals are in one group when they share ANY counterparty
     key, transitively. Over `NBD_DEAL_APPROVAL_THRESHOLD` (10000.00; may only be lowered) — strictly greater —
     needs Andre's deal approval, which binds the deal id, its value, the aggregate and the group members
     (`deal_gate.binding_sha256`). The gate is re-computed at every gate (submission, the submission queue, win): a
     sibling opened later, a value change or a member leaving the group makes the old approval stale. An approval
-    asked for a deal under the threshold is refused (`DEAL_APPROVAL_NOT_NEEDED`).
+    asked for a deal under the threshold is refused (`DEAL_APPROVAL_NOT_NEEDED`). A deal value is at most
+    1,000,000,000.00 (`422 VALUE_INVALID`); a group whose aggregate still does not fit in money (a legacy row) fails
+    closed — `needs_andre`, never approvable, never a 500 (AEGIS round 1 M3).
 19. **Legal hand-off.** `POST /partners/{id}/agreements` (kinds matching the partner: referral / alliance /
     white-label agreement, or an NDA) and `POST /pursuits/{id}/agreements` (NDA) call the Legal port outside the lock
     with ids and codes only. Anything but `delivered` with a Legal reference is `503 LEGAL_UNAVAILABLE` and nothing
@@ -135,11 +150,15 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     The suppression list is keyed by the address's HMAC, append-only, shared across both brands (with Sales:
     unlock item 6). Everything is checked at queue time and again from current state at send time; a send is recorded
     (`outreach_send`) before the port is called; the daily cap counts by the service clock's UTC date.
-21. **Replies hold.** ANY reply (an out-of-office included) holds further automatic outreach to the contact, both
-    brands, and cancels its queued messages, until Andre decides: `resume` lifts the hold and nothing else; `opt_out`
-    suppresses permanently. Opt-out wording (i09, sales-py's normaliser) also suppresses the sender at once. A reply
-    that cannot be tied to a contact still holds the sender's address, holds (never suppresses) contacts whose
-    addresses appear in its body, and always opens a review task. The reply text is never stored (its SHA-256 only).
+21. **Replies hold.** A reply is ALWAYS recorded: its sender fields never refuse it (AEGIS round 1 H1). ANY reply
+    (an out-of-office included) holds further automatic outreach to the contact, both brands, and cancels its queued
+    messages, until Andre decides: `resume` lifts the hold and nothing else; `opt_out` suppresses permanently. Opt-out
+    wording (i09, sales-py's normaliser) also suppresses at once, through the message it answers (its recipient and
+    contact) and the sender's address when it parses (IDN `xn--` addresses parse; i02). A sender address that does
+    not parse (quoted or UTF-8 local part, over 64 characters) is held under the keyed hash of its normalised raw form;
+    an unknown message id is recorded, not refused. Addresses written in the body, after NFKC (fullwidth forms
+    count), are held — never suppressed — whoever sent the reply, and matched against existing contacts. Every reply
+    opens a hold record and a review task, even with nothing resolvable. The reply text is never stored (SHA-256).
 22. **Ports** (`src/ports.py`, `src/legal_client.py`): email, submission, bid source, Onboarding and Finance hand-offs,
     Finance payouts, Legal agreements. Each stand-in fails closed and says so in `/status`; a port that raises is
     unavailable; no port is called with the lock held.
@@ -172,7 +191,9 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     `409 REQUEST_ID_REUSED`. Ledger event ids are derived from the same identity, so a retry records nothing twice.
 28. **Jobs** (caller `scheduler`, idempotent per request id, one at a time — `409 JOB_RUNNING`): `send-queue`,
     `submission-queue`, `deadline-sweep`, `handoff-retry`, `payout-request`, `integrity`. No job, check or test
-    depends on the wall-clock hour; everything time-based reads the injected clock.
+    depends on the wall-clock hour; everything time-based reads the injected clock. In the send, submission and
+    payout queues an item that fails with anything but a ledger / store outage is listed under `errors` in the job's
+    recorded result and the queue carries on (AEGIS round 1 M3).
 29. **Start-up safety.** The shared `graceful_close.py` and `launch_guard.py` (byte-identical, hygiene rule L4), the
     hardened launcher `serve.py`, and every NOT_BUILT provider setting refuses start.
 
@@ -223,3 +244,25 @@ All settings and routes are in `services/bizdev-py/README.md`: `NBD_SERVICE_TOKE
 `NBD_NON_PRODUCTION`, `NBD_DATA_DIR`, `NBD_PII_HASH_KEY_FILE`, `NBD_ANDRE_APPROVAL_TOKEN`,
 `NBD_DEAL_APPROVAL_THRESHOLD`, `NBD_AGGREGATION_WINDOW_DAYS`, the outreach settings, the NOT_BUILT switches and the
 launcher tuning.
+
+## Amendment — AEGIS round 1 (Oct 6 2026, on 2d398f8): BLOCKING, every finding fixed
+
+Regression tests: `services/bizdev-py/tests/test_aegis_r1.py` (each fails on 2d398f8).
+
+- **H1** a STOP reply was refused 422 when `from_email` did not parse (IDN TLD, quoted or UTF-8 local part, over 64
+  characters), so nothing was held or suppressed. Replies are now always recorded and held, suppressed through the
+  message they answer, unparseable senders held by the keyed hash of their raw form, IDN addresses accepted (decision
+  21).
+- **H2** the agent could mark a delivered bid lost, dropping it from the aggregate. Lost after delivery is Andre's;
+  a delivered pursuit counts whatever its stage (decisions 13, 18).
+- **M1** a payout whose answer was lost was requeued and then clawed back although Finance might hold it. Unknown
+  outcomes stay `sending` and are reconciled through `payout_status`; only `refused` requeues, after the shortfall
+  is applied (decision 17).
+- **M2** a nine-digit id fit in `partner_key`, `counterparty.ref` and `request_id`; separators beat the scan. Eight-digit
+  total cap on every caller-chosen key, ref and id of partner and deal requests; the scan strips every separator
+  (decision 16, corrected).
+- **M3** an oversized value overflowed the aggregate (500 on views, stalled submission queue). Values capped at
+  1,000,000,000.00; overflow fails closed; one failing item never stalls a queue (decisions 18, 28).
+- **Lows** body addresses are held whoever sent the reply and after NFKC; `org_key` folds confusables; the window
+  applies to closed deals only (decisions 9, 18, 21).
+- **Port** 8480 collided with department 11; the default is now 8490 (decision 1).

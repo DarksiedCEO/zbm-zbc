@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from errors import Conflict, NotFound, Throttled
+from errors import Conflict, NotFound, Throttled, Unavailable
 from intelligences import i04_assembly, i06_sensitivity
 from ledger import derived_id
 from reasons import R
@@ -353,41 +353,46 @@ class ResponsesMixin:
                                                       key=lambda x: (x["queued_at"], x["submission_id"]))
                    if s["status"] == "queued"]
         for sid in ids:
-            with self.lock:
-                self._gate()
-                s = self.submissions[sid]
-                if s["status"] != "queued":
-                    continue
-                cancel, hold = self._submission_check(s)
-                if cancel:
-                    data = {"submission_id": sid, "reason": cancel}
-                    self._commit("submission_cancelled", data, "scheduler",
-                                 evidence=("submission_cancelled", f"submission:{sid}", data, (sid, "tick", cancel)))
-                    summary["cancelled"] += 1
-                    continue
-                if hold:
-                    summary["held"] += 1
-                    continue
-                if not self.ports.submission.wired:
-                    summary["not_wired"] += 1           # stays queued, visibly; nothing is recorded as sent
-                    continue
-                r = self.responses[s["response_id"]]
-                text = i04_assembly.rendered_text(r["versions"][str(s["version"])]["doc"], self.blocks)
-                ev = {"submission_id": sid, "pursuit_id": s["pursuit_id"], "content_sha256": s["content_sha256"]}
-                self._commit("submission_sending", {"submission_id": sid}, "scheduler",
-                             evidence=("submission_sending", f"submission:{sid}", ev, (sid,)))
-                pid, sha = s["pursuit_id"], s["content_sha256"]
             try:
-                res = self.ports.submission.submit(sid, pid, sha, text)     # outside the lock
-                ok = res.status == "accepted"
-                ref = res.provider_ref if ok else None
-            except Exception:      # noqa: BLE001 - an adapter error is a failed submission
-                ok, ref = False, None
-            with self.lock:
-                status = "submitted" if ok else "failed"
-                self._commit("submission_result", {"submission_id": sid, "status": status, "provider_ref": ref},
-                             "scheduler", evidence=("submission_result", f"submission:{sid}",
-                                                    {"submission_id": sid, "status": status}, (sid, status)))
-                summary["submitted" if ok else "failed"] += 1
+                with self.lock:
+                    self._gate()
+                    s = self.submissions[sid]
+                    if s["status"] != "queued":
+                        continue
+                    cancel, hold = self._submission_check(s)
+                    if cancel:
+                        data = {"submission_id": sid, "reason": cancel}
+                        self._commit("submission_cancelled", data, "scheduler",
+                                     evidence=("submission_cancelled", f"submission:{sid}", data, (sid, "tick", cancel)))
+                        summary["cancelled"] += 1
+                        continue
+                    if hold:
+                        summary["held"] += 1
+                        continue
+                    if not self.ports.submission.wired:
+                        summary["not_wired"] += 1           # stays queued, visibly; nothing is recorded as sent
+                        continue
+                    r = self.responses[s["response_id"]]
+                    text = i04_assembly.rendered_text(r["versions"][str(s["version"])]["doc"], self.blocks)
+                    ev = {"submission_id": sid, "pursuit_id": s["pursuit_id"], "content_sha256": s["content_sha256"]}
+                    self._commit("submission_sending", {"submission_id": sid}, "scheduler",
+                                 evidence=("submission_sending", f"submission:{sid}", ev, (sid,)))
+                    pid, sha = s["pursuit_id"], s["content_sha256"]
+                try:
+                    res = self.ports.submission.submit(sid, pid, sha, text)     # outside the lock
+                    ok = res.status == "accepted"
+                    ref = res.provider_ref if ok else None
+                except Exception:      # noqa: BLE001 - an adapter error is a failed submission
+                    ok, ref = False, None
+                with self.lock:
+                    status = "submitted" if ok else "failed"
+                    self._commit("submission_result", {"submission_id": sid, "status": status, "provider_ref": ref},
+                                 "scheduler", evidence=("submission_result", f"submission:{sid}",
+                                                        {"submission_id": sid, "status": status}, (sid, status)))
+                    summary["submitted" if ok else "failed"] += 1
+            except Unavailable:
+                raise
+            except Exception:      # noqa: BLE001 - AEGIS round 1 M3: one bad item never stalls the queue
+                summary.setdefault("errors", []).append(sid)
         return summary
 

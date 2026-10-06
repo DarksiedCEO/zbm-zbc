@@ -102,7 +102,13 @@ class FinancePayouts(Protocol):
 
     def request_payout(self, payout_id: str, payload: dict) -> Delivery:
         """``payload``: ids, the finance payee ref, the tax reference, the amount (string) and the deal; Finance
-        decides, gates and pays (its own maker/checker). ``delivered`` = Finance took the request."""
+        decides, gates and pays (its own maker/checker). ``delivered`` = Finance took the request; ``refused`` =
+        Finance certainly did not take it; anything else (or an exception) is an unknown outcome."""
+        ...
+
+    def payout_status(self, payout_id: str) -> Delivery:
+        """Reconcile one request whose outcome is unknown: ``with_finance`` (with Finance's reference), ``refused``,
+        or anything else = still unknown (the payout stays ``sending``)."""
         ...
 
 
@@ -111,6 +117,9 @@ class NotWiredPayouts:
 
     def request_payout(self, payout_id, payload) -> Delivery:
         return Delivery(NOT_WIRED)
+
+    def payout_status(self, payout_id) -> Delivery:
+        return Delivery("unknown")
 
 
 @dataclass

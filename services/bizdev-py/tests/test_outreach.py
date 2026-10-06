@@ -174,8 +174,9 @@ def test_unresolved_reply_holds_named_contact_never_suppresses_it(tmp_path):
     view = h.ok(h.get(f"/contacts/{c['contact_id']}"))
     assert view["held"] is True and view["suppressed"] is False
     assert ans["suppressed"] is True                     # the sender's own address is suppressed
-    h.refused(h.post("/replies", {"request_id": rid(), "text": "hello"}, caller="provider_events"), 422,
-              "REPLY_SENDER_REQUIRED")
+    bare = h.ok(h.post("/replies", {"request_id": rid(), "text": "hello"}, caller="provider_events"), 201)
+    assert bare["held"] is True and bare["sender_resolved"] is False           # recorded anyway, Andre has a task
+    assert bare["task_id"] in {t["task_id"] for t in h.ok(h.get("/tasks?status=open"))}
 
 
 def test_reply_text_never_stored(tmp_path):

@@ -10,7 +10,7 @@ legal-py's request-limit, no-store, bearer and caller blocks):
 - a body naming a date of birth, government or tax id (TIN, SSN, EIN, ITIN), card or bank account number, phone, IP
   or device anywhere is refused 422 before it is parsed;
 - every response carries ``Cache-Control: no-store``; /docs, /redoc, /openapi.json disabled; bind 127.0.0.1 unless
-  NBD_BIND_ADDR says otherwise; port 8480; hardened launcher (serve.py);
+  NBD_BIND_ADDR says otherwise; port 8490; hardened launcher (serve.py);
 - request limits before any route: target 4 KiB (414), head 16 KiB (431), body 128 KiB (413), JSON only (415),
   JSON nesting depth and member count bounded (422), body read deadline (408). Error bodies carry a reason code from
   reasons.py and never echo request content.
@@ -437,8 +437,8 @@ def create_app(service: BizDevService, settings: config_mod.Settings) -> FastAPI
         return svc.pursuit_won(_id(pid), req)
 
     @app.post(P + "/pursuits/{pid}/lost", dependencies=auth)
-    def pursuit_lost(pid: str, req: dict = Depends(body(m.Lost)), who: str = Depends(worker)) -> dict:
-        return svc.pursuit_lost(who, _id(pid), req)
+    def pursuit_lost(request: Request, pid: str, req: dict = Depends(body(m.Lost)), who: str = Depends(worker)) -> dict:
+        return svc.pursuit_lost(who, _id(pid), req, andre=andre_if_presented(request))
 
     @app.post(P + "/pursuits/{pid}/withdraw", dependencies=auth)
     def pursuit_withdraw(pid: str, req: dict = Depends(body(m.RequestOnly)), who: str = Depends(andre)) -> dict:

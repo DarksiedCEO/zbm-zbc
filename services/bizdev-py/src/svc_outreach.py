@@ -19,7 +19,7 @@ import hashlib
 import hmac
 from typing import Optional
 
-from errors import Conflict, Forbidden, Invalid, NotFound, Throttled
+from errors import Conflict, Forbidden, Invalid, NotFound, Throttled, Unavailable
 from intelligences import i02_identity, i08_templates, i09_replies, i10_suppression
 from ledger import derived_id
 from reasons import R
@@ -376,38 +376,43 @@ class OutreachMixin:
                                                    key=lambda x: (x["queued_at"], x["message_id"]))
                    if m["status"] == "queued"]
         for mid in ids:
-            with self.lock:
-                self._gate()
-                m = self.messages[mid]
-                if m["status"] != "queued":
-                    continue
-                cancel, rendered = self._send_problem(m)
-                if cancel:
-                    self._commit("message_cancelled", {"message_id": mid, "reason": cancel}, "scheduler")
-                    summary["cancelled"] += 1
-                    continue
-                today = self.today()
-                if self.sent_per_day.get(today, 0) >= self.settings.daily_send_cap:
-                    summary["capped"] += 1
-                    continue
-                if not self.ports.email.wired:
-                    summary["not_wired"] += 1
-                    continue
-                to = self.contacts[m["contact_id"]]["email"]
-                self._commit("message_sending", {"message_id": mid, "date": today}, "scheduler",
-                             evidence=("outreach_send", f"msg:{mid}",
-                                       {"message_id": mid, "to_hash": m["to_hash"], "brand": m["brand"],
-                                        "template_sha256": m["template_sha256"],
-                                        "rendered_sha256": m["rendered_sha256"]}, (mid,)))
             try:
-                res = self.ports.email.send(mid, to, rendered)          # outside the lock
-                ok, ref = res.status == "accepted", res.provider_ref
-            except Exception:      # noqa: BLE001 - a provider adapter must never take the tick down
-                ok, ref = False, None
-            with self.lock:
-                self._commit("message_result", {"message_id": mid, "status": "sent" if ok else "failed",
-                                                "provider_ref": ref if ok else None}, "scheduler")
-                summary["sent" if ok else "failed"] += 1
+                with self.lock:
+                    self._gate()
+                    m = self.messages[mid]
+                    if m["status"] != "queued":
+                        continue
+                    cancel, rendered = self._send_problem(m)
+                    if cancel:
+                        self._commit("message_cancelled", {"message_id": mid, "reason": cancel}, "scheduler")
+                        summary["cancelled"] += 1
+                        continue
+                    today = self.today()
+                    if self.sent_per_day.get(today, 0) >= self.settings.daily_send_cap:
+                        summary["capped"] += 1
+                        continue
+                    if not self.ports.email.wired:
+                        summary["not_wired"] += 1
+                        continue
+                    to = self.contacts[m["contact_id"]]["email"]
+                    self._commit("message_sending", {"message_id": mid, "date": today}, "scheduler",
+                                 evidence=("outreach_send", f"msg:{mid}",
+                                           {"message_id": mid, "to_hash": m["to_hash"], "brand": m["brand"],
+                                            "template_sha256": m["template_sha256"],
+                                            "rendered_sha256": m["rendered_sha256"]}, (mid,)))
+                try:
+                    res = self.ports.email.send(mid, to, rendered)          # outside the lock
+                    ok, ref = res.status == "accepted", res.provider_ref
+                except Exception:      # noqa: BLE001 - a provider adapter must never take the tick down
+                    ok, ref = False, None
+                with self.lock:
+                    self._commit("message_result", {"message_id": mid, "status": "sent" if ok else "failed",
+                                                    "provider_ref": ref if ok else None}, "scheduler")
+                    summary["sent" if ok else "failed"] += 1
+            except Unavailable:
+                raise
+            except Exception:      # noqa: BLE001 - AEGIS round 1 M3: one bad item never stalls the queue
+                summary.setdefault("errors", []).append(mid)
         return summary
 
     # ------------------------------------------------------------------------------------------------ suppression
@@ -485,42 +490,43 @@ class OutreachMixin:
     # ------------------------------------------------------------------------------------------------ replies, holds
 
     def reply(self, caller: str, body: dict) -> dict:
+        """A reply is ALWAYS recorded, held and given to Andre (AEGIS round 1 H1): its sender fields never refuse it.
+        The message it answers (when known) names the contact, whose address is held and, for opt-out wording,
+        suppressed. A sender address that parses is held (and suppressed on opt-out wording); one that does not parse
+        (quoted or UTF-8 local part, over-long, odd TLD) is held under the keyed hash of its normalised raw form.
+        Addresses written in the body (NFKC-normalised, so fullwidth forms count) are held whoever sent the reply,
+        never suppressed. With nothing resolvable the reply still opens a hold record and a task for Andre."""
         with self.lock:
             self._gate()
             rk = self.rk("reply", body.get("message_id") or "direct", body)
             prev = self._idem(caller, rk, body)
             if prev:
                 return dict(prev[1])
-            m = None
-            if body.get("message_id") is not None:
-                m = self._get(self.messages, body["message_id"], "MESSAGE_NOT_FOUND")
-            from_h = None
+            m = self.messages.get(body["message_id"]) if body.get("message_id") is not None else None
+            from_h = raw_h = None
             if body.get("from_email") is not None:
                 e = i02_identity.email(body["from_email"])
-                if e is None:
-                    raise Invalid(R("EMAIL_INVALID"))
-                from_h = i02_identity.keyed(self.pii_key, "email", e)
-            if m is None and from_h is None:
-                raise Invalid(R("REPLY_SENDER_REQUIRED"))
+                if e is not None:
+                    from_h = i02_identity.keyed(self.pii_key, "email", e)
+                else:
+                    raw_h = i02_identity.keyed(self.pii_key, "email_raw", i02_identity.raw_address(body["from_email"]))
             by_email = {c["email_hash"]: c["contact_id"] for c in self.contacts.values()}
             cid = m["contact_id"] if m else by_email.get(from_h)
             c = self.contacts.get(cid) if cid else None
             cls = i09_replies.classify(body["text"], "email")
             reply_id = derived_id("rpl", caller, rk)
             data = {"reply_id": reply_id, "message_id": body.get("message_id"), "contact_id": cid, "class": cls,
+                    "message_known": m is not None,
                     "text_sha256": hashlib.sha256(body["text"].encode("utf-8", "surrogatepass")).hexdigest()}
             sender = {h for h in (from_h, m["to_hash"] if m else None, c.get("email_hash") if c else None) if h}
-            hold_cids, hold_hashes = set(), set()
-            if c is not None:
-                hold_cids.add(c["contact_id"])
-                hold_hashes |= sender
-            else:
-                hold_hashes |= sender                       # an unknown sender is held too (it may become a contact)
-                for e in i02_identity.emails_in(body["text"]):
-                    named = by_email.get(i02_identity.keyed(self.pii_key, "email", e))
-                    if named:                               # named in the body: held for Andre, never suppressed
-                        hold_cids.add(named)
-                        hold_hashes.add(self.contacts[named]["email_hash"])
+            hold_cids = {c["contact_id"]} if c is not None else set()
+            hold_hashes = set(sender) | ({raw_h} if raw_h else set())
+            for e in i02_identity.emails_in(body["text"]):          # named in the body: held, never suppressed
+                eh = i02_identity.keyed(self.pii_key, "email", e)
+                hold_hashes.add(eh)
+                named = by_email.get(eh)
+                if named:
+                    hold_cids.add(named)
             evidence = []
             if cls == "unsubscribe" and sender:
                 data.update(hashes=sorted(sender), reason="stop_reply")
@@ -535,7 +541,7 @@ class OutreachMixin:
                              {"hold_id": hold_id, "contact_ids": sorted(hold_cids), "hashes": sorted(hold_hashes),
                               "reply_id": reply_id, "class": cls}, (caller, rk)))
             answer = {"reply_id": reply_id, "class": cls, "suppressed": bool(data.get("hashes")), "held": True,
-                      "hold_id": hold_id, "task_id": task["task_id"]}
+                      "hold_id": hold_id, "task_id": task["task_id"], "sender_resolved": bool(sender)}
             self._commit("reply_received", self._req(data, caller, rk, body, answer), caller, evidence=evidence)
             return answer
 

@@ -20,6 +20,7 @@ from intelligences import i04_assembly, i06_sensitivity, i11_commission, i12_tax
 from legal_client import AgreementHandoff
 from ledger import derived_id
 from reasons import R
+from svc_pursuits import deal_value
 
 AGREEMENTS_FOR = {"referral": ("referral_agreement", "nda"), "agency_alliance": ("alliance_agreement", "nda"),
                   "white_label": ("white_label_agreement", "nda")}
@@ -104,7 +105,16 @@ class PartnersMixin:
         self.payouts[d["payout_id"]].update(status="sending", updated_at=at)
 
     def _a_payout_result(self, d, at):
-        self.payouts[d["payout_id"]].update(status=d["status"], finance_ref=d.get("finance_ref"), updated_at=at)
+        p = self.payouts[d["payout_id"]]
+        p.update(status=d["status"], finance_ref=d.get("finance_ref"), updated_at=at)
+        cut = money.D(d.get("shortfall_cut") or "0.00")
+        if cut > 0:                                    # a refused payout absorbs its deal's outstanding shortfall
+            c = self.partner_deals[p["deal_id"]]["commission"]
+            p["amount"] = money.fmt(money.q(money.D(p["amount"]) - cut))
+            c["settled"] = money.fmt(money.q(money.D(c["settled"]) - cut))
+            c["shortfall"] = money.fmt(money.q(money.D(c["shortfall"]) - cut))
+        if d["status"] == "queued" and money.D(p["amount"]) == 0:
+            p["status"] = "cancelled"
 
     def _a_payout_paid(self, d, at):
         self.payouts[d["payout_id"]].update(status="paid", finance_ref=d["finance_ref"], updated_at=at)
@@ -289,10 +299,7 @@ class PartnersMixin:
             if body["brand"] not in p["brands"]:
                 raise Invalid(R("PARTNER_BRAND_MISMATCH"))
             cp = self._counterparty(body["counterparty"])
-            try:
-                value = money.fmt(money.parse(body["deal_value"], positive=True))
-            except money.MoneyError:
-                raise Invalid(R("MONEY_INVALID")) from None
+            value = deal_value(body["deal_value"], positive=True)
             did = derived_id("pdl", caller, rk)
             data = {"deal_id": did, "partner_id": p["partner_id"], "brand": body["brand"], **cp,
                     "deal_value": value, "notes": body.get("notes")}
@@ -312,10 +319,7 @@ class PartnersMixin:
             d = self._get(self.partner_deals, did, "DEAL_NOT_FOUND")
             if d["status"] != "registered":
                 raise Conflict(R("DEAL_CLOSED"))
-            try:
-                value = money.fmt(money.parse(body["deal_value"], positive=True))
-            except money.MoneyError:
-                raise Invalid(R("MONEY_INVALID")) from None
+            value = deal_value(body["deal_value"], positive=True)
             data = {"deal_id": did, "deal_value": value}
             self._commit("partner_deal_value_set", self._req(data, caller, rk, body, did), caller,
                          evidence=("deal_value_set", f"deal:{did}",
@@ -460,12 +464,42 @@ class PartnersMixin:
 
     # ------------------------------------------------------------------------------------------------ payouts
 
+    def _settle_payout(self, pay_id: str, status: str, ref, summary: dict) -> None:
+        """Record what Finance said about a payout in ``sending`` (AEGIS round 1 M1). ``with_finance`` (with a
+        reference): Finance holds it. ``refused``: Finance certainly does not; it is requeued, after any outstanding
+        shortfall of its deal is taken from it (a clawback that could not reach it while it was in flight). Anything
+        else — a timeout, an exception, an unreadable or unknown answer — leaves it ``sending``, never resent:
+        Finance may hold it, and the next run reconciles it through ``payout_status``."""
+        p = self.payouts[pay_id]
+        if p["status"] != "sending":
+            return
+        if status == "with_finance" and ref:
+            self._commit("payout_result", {"payout_id": pay_id, "status": "with_finance", "finance_ref": ref},
+                         "scheduler", evidence=("payout_result", f"payout:{pay_id}",
+                                                {"payout_id": pay_id, "status": "with_finance"},
+                                                (pay_id, "result", ref)))
+            summary["with_finance"] += 1
+        elif status == "refused":
+            deal = self.partner_deals[p["deal_id"]]
+            cut = min(money.D(deal["commission"]["shortfall"]), money.D(p["amount"]))
+            data = {"payout_id": pay_id, "status": "queued", "finance_ref": None, "shortfall_cut": money.fmt(cut)}
+            self._commit("payout_result", data, "scheduler",
+                         evidence=("payout_result", f"payout:{pay_id}",
+                                   {"payout_id": pay_id, "status": "refused",
+                                    "terms_sha256": i04_assembly.sha({"shortfall_cut": data["shortfall_cut"],
+                                                                      "amount": p["amount"]})},
+                                   (pay_id, "refused", p["amount"])))
+            summary["refused"] += 1
+        else:
+            summary["unknown"] += 1
+
     def payout_tick(self) -> dict:
         """The ``payout-request`` job. For each won deal with an unpaid balance and a partner payee, a payout request
         is recorded (its amount is settled at once, so it is never requested twice); then every queued request is
         handed to Finance through the port, outside the lock, marked ``sending`` first so a clawback cannot cut an
-        amount Finance is being sent. Not wired: requests stay ``queued``. Nothing is ever paid here."""
-        summary = {"requested": 0, "with_finance": 0, "not_wired": 0, "failed": 0, "payee_missing": 0}
+        amount Finance is being sent. Payouts already ``sending`` are reconciled first (``_settle_payout``). Not
+        wired: requests stay ``queued``. Nothing is ever paid here."""
+        summary = {"requested": 0, "with_finance": 0, "not_wired": 0, "refused": 0, "unknown": 0, "payee_missing": 0}
         with self.lock:
             self._gate()
             for d in sorted(self.partner_deals.values(), key=lambda x: x["deal_id"]):
@@ -490,34 +524,45 @@ class PartnersMixin:
                                         "payee_sha256": p["payee"]["payee_sha256"],
                                         "terms_sha256": i04_assembly.sha({"amount": amount})}, (pay_id,)))
                 summary["requested"] += 1
-            queued = [x["payout_id"] for x in sorted(self.payouts.values(), key=lambda x: (x["requested_at"],
-                                                                                           x["payout_id"]))
-                      if x["status"] == "queued"]
-        for pay_id in queued:
+            ordered = sorted(self.payouts.values(), key=lambda x: (x["requested_at"], x["payout_id"]))
+            queued = [x["payout_id"] for x in ordered if x["status"] == "queued"]
+            sending = [x["payout_id"] for x in ordered if x["status"] == "sending"]
+        for pay_id in sending:                                         # reconcile first (AEGIS round 1 M1)
+            try:
+                ans = self.ports.payouts.payout_status(pay_id)              # outside the lock
+                status, ref = ans.status, ans.reference
+            except Exception:      # noqa: BLE001 - an unreadable answer is an unknown outcome
+                status, ref = "unknown", None
             with self.lock:
                 self._gate()
-                p = self.payouts[pay_id]
-                if p["status"] != "queued":
-                    continue
-                if not self.ports.payouts.wired:
-                    summary["not_wired"] += 1
-                    continue
-                payload = {k: p[k] for k in ("payout_id", "deal_id", "partner_id", "amount", "finance_payee_ref",
-                                             "tax_info_ref")}
-                payload["currency"] = "USD"
-                self._commit("payout_sending", {"payout_id": pay_id}, "scheduler",
-                             evidence=("payout_sending", f"payout:{pay_id}", {"payout_id": pay_id}, (pay_id, "send")))
+                self._settle_payout(pay_id, status, ref, summary)
+        for pay_id in queued:
             try:
-                res = self.ports.payouts.request_payout(pay_id, payload)     # outside the lock
-                status, ref = res.status, res.reference
-            except Exception:      # noqa: BLE001
-                status, ref = "unavailable", None
-            with self.lock:
-                done = status == "delivered" and bool(ref)
-                self._commit("payout_result", {"payout_id": pay_id, "status": "with_finance" if done else "queued",
-                                               "finance_ref": ref if done else None}, "scheduler",
-                             evidence=("payout_result", f"payout:{pay_id}",
-                                       {"payout_id": pay_id, "status": "with_finance" if done else "queued"},
-                                       (pay_id, "result", ref or "none")))
-                summary["with_finance" if done else "failed"] += 1
+                with self.lock:
+                    self._gate()
+                    p = self.payouts[pay_id]
+                    if p["status"] != "queued":
+                        continue
+                    if not self.ports.payouts.wired:
+                        summary["not_wired"] += 1
+                        continue
+                    payload = {k: p[k] for k in ("payout_id", "deal_id", "partner_id", "amount", "finance_payee_ref",
+                                                 "tax_info_ref")}
+                    payload["currency"] = "USD"
+                    self._commit("payout_sending", {"payout_id": pay_id}, "scheduler",
+                                 evidence=("payout_sending", f"payout:{pay_id}",
+                                           {"payout_id": pay_id, "terms_sha256": i04_assembly.sha({"amount": p["amount"]})},
+                                           (pay_id, "send", p["amount"])))
+                try:
+                    res = self.ports.payouts.request_payout(pay_id, payload)     # outside the lock
+                    status, ref = res.status, res.reference
+                except Exception:      # noqa: BLE001 - a timeout or lost answer: Finance may hold it (unknown)
+                    status, ref = "unknown", None
+                with self.lock:
+                    self._gate()
+                    self._settle_payout(pay_id, "with_finance" if status == "delivered" else status, ref, summary)
+            except Unavailable:
+                raise
+            except Exception:      # noqa: BLE001 - AEGIS round 1 M3: one bad item never stalls the queue
+                summary.setdefault("errors", []).append(pay_id)
         return summary
