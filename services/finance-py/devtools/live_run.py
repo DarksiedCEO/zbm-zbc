@@ -354,9 +354,23 @@ def _main(work: Path) -> int:
                {"request_id": rid(), "content_sha256": fop["content_sha256"], "decision": "approve"}, andre=True)
         B.dev("/devtools/advance", {"hours": 13})
         B.recon()
-        rel2 = B.post(f"/fin/v1/payout-batches/{b2['batch_id']}/release", {"request_id": rid()},
-                      caller="scheduler").json()
-        it2 = rel2["batch"]["items"][0]
+        # sweep B-F2: the rail accepts the week-2 payout and the anchor of its F4d booking line never reaches the
+        # ledger. The same release retries the item (same idempotency key) and books it under a new log line; the
+        # failed attempt stays on the ledger as "attempted" and the restart below must still verify every anchor.
+        B.dev("/devtools/ledger/drop-anchor-after-f4d", {})
+        rel2r = B.post(f"/fin/v1/payout-batches/{b2['batch_id']}/release", {"request_id": rid()}, caller="scheduler",
+                       ok=None)
+        rel2 = rel2r.json()
+        fired = B.get("/devtools/ledger/faults")["fired"]
+        it2 = rel2["batch"]["items"][0] if rel2r.status_code == 200 else {}
+        check("B: F4d anchor lost after the rail accepted -> booked on the retry in the same release (sweep B-F2)",
+              fired == 1 and rel2r.status_code == 200 and it2.get("status") == "submitted")
+        rk = "fin-je-" + hashlib.sha256(json.dumps(["zbc", f"F4d|{it2.get('item_id')}"], separators=(",", ":"))
+                                        .encode()).hexdigest()[:40]
+        ev = B.get("/fin/v1/audit/evidence", event_type="journal_entry_posted", limit=1000)
+        check("B: /fin/v1/audit/evidence: the F4d booking committed exactly once, the lost try attempted",
+              len([e for e in ev["events"] if e["status"] == "committed" and e["rk"] == rk]) == 1
+              and ev["counts"]["attempted"] >= 1)
         B.dev("/devtools/rail/paid", {"rail": "stripe", "idempotency_key": it2["idempotency_key"]})
         B.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [
             {"event_id": "evt-live-2", "type": "paid", "item_id": it2["item_id"], "signature": "sig-ok-test-only"}]},

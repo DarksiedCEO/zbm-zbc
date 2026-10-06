@@ -779,3 +779,92 @@ Not changed:
   the door on invoices, ZBC commercial profiles, media buys and billing profiles, instead of failing every contract
   check later.
 - **L9.** stripe-gateway caps deliveries in flight at 32. The next one is answered 503 at once, and Stripe retries.
+
+## Amendment: bug sweep fixes (Oct 6 2026, branch `fix-finance`)
+
+The Oct 6 backend bug sweep (project doc `bug-sweep-2026-10-06`) found that a payout Stripe had accepted could end up
+never booked (B-F2, Critical), and that bank receipts and Stripe payments had the same root cause (B-F1, B-F3). It
+also found a top-up replay bug (B-F4), an unbooked Stripe Dashboard refund (X-6), tokens in `repr(Settings)` (X-8),
+an unbounded lock map (X-10), the old `store.py` fsync bug (F-3/E-5), and the ledger `verify()` running under the
+service lock. Each reproducing probe is now a regression test in `tests/test_sweep_fixes.py`; every one fails on
+integration 5d49ee9 and passes here.
+
+**Root cause (B-F1..F3).** The journal evidence was recorded under a fixed id, `derived_id("je", entity, key)`, but
+its payload carried `entry_sha256`. That hash covers `posted_at` and the chain head, so any retry after a lost anchor
+sent a different payload under the same id, and the ledger answered 409 forever.
+
+**Decisions.**
+1. **Evidence ids (the bizdev R6 pattern).** Every typed event goes through `Op.record`.
+   - The caller's derived id is the action's request key, `rk`.
+   - The recorded payload is the caller's payload plus `rk` and `seq` (the log line it is meant for). It never
+     carries the wall clock.
+   - The recorded id is `i10.evidence_id(rk, type, payload_sha256)`.
+   - So the same action, with the same content, for the same line, is the same id and the same payload: the retry
+     gets the ledger's 200. Anything else gets a new id, never a lasting 409.
+   - Journal evidence binds `content_sha256` over the entity, lines, flow, source, key, reversal and approval. It
+     leaves out `posted_at`, the chain head and the effective date. The full entry, `entry_sha256` included, is in
+     the anchored log line.
+   - Instance leases and reconciles keep their exact ids (`raw=True`), because i10 parses them.
+2. **Committed vs attempted.** Each log line names its typed evidence (`data.evidence`: id, type, rk, payload hash).
+   - `_commit` refuses (503) if the log moved between an operation's evidence and its commit, so a line is never
+     mislabelled.
+   - `GET /fin/v1/audit/evidence` marks each Finance ledger event:
+     - `committed`: named by an anchored line, payload hash matching;
+     - `cited`: a crossing, lease, version or reconcile listed by an anchored line;
+     - `attempted`: anything else.
+3. **No ghost refusal for a retried action.** `i10.assess` no longer counts a ruling that no line cites as a ghost
+   when its id is `evidence_id(rk, type, its payload_sha256)` for an `(rk, type)` that a local line committed. That
+   ruling is an earlier attempt at a committed action. Without this, every retried booking would block the next
+   start until Andre reconciled. A ghost whose action was never committed is still voidable, as before.
+4. **Payout booking (B-F2).**
+   - In `_release`, a failure recorded after an item reached the rail is per item: the item answers
+     `outcome: unknown_reconciling`, `took_effect: "unknown"`, and the other items go on.
+   - `drive_open_items` catches `Unavailable` per item, and so does `retry_transfers` per operation.
+   - A 503 raised once money may have moved, in a release or in a bank transfer after the bank call, says
+     `took_effect: "unknown"` and `outcome: "unknown_reconciling"`. Only a 503 raised before anything could move
+     money says `false`; the API sets `false` only when the error does not say otherwise.
+   - A rail `paid` or `failed` event for an item still `submitting` is held (`held_submitting`, recorded as
+     `rail_event_held`). It is never acked and dropped.
+   - A redelivery of the same event re-applies it instead of answering `duplicate`. Finance also applies it itself:
+     right after the item's acceptance is booked, and in every rail-sync job (`replay_held_rail_events`). Each held
+     event is applied in its own operation.
+   - Treasury operations left `executing` (the bank answered, but the booking could not be recorded) are asked again
+     by the rail-sync job with the same key.
+5. **Top-up replay (B-F4).**
+   - The top-up answer is persisted with the approval commit (`_idem_add`), and so is a treasury decision's.
+   - A replay answers the operation's current state.
+   - An existing treasury operation is never re-created, so `attempts` is never reset.
+   - A posting that was already reversed is never the one a new bank instruction relies on.
+6. **Stripe Dashboard refunds (X-6).**
+   - `StripePayment.amount_refunded` is the charge's `amount_refunded`.
+   - Any increase over what Finance booked posts **F7r**, keyed by the new cumulative total, so it posts once:
+     Dr 1100 A/R[client] (2070 if the receipt was unapplied) / Cr 1060.
+   - A break `stripe_refund` opens for Andre.
+   - A full refund reopens the invoice and withdraws the client receipt (media: `_media_unpaid`).
+   - Any refund over 0 on a media prepayment sets `payment_refunded`, which blocks vendor payments (COLLECT_BEFORE_PAY)
+     until a new prepayment lands.
+7. **X-8.** Every token and key in `Settings` is `repr=False`.
+8. **X-10.** The per-batch release mutex is dropped when the batch does not exist or is terminal (settled, failed,
+   expired, rejected).
+9. **Store (F-3/E-5).** `store.py` is clientfix-py's, without the pending line:
+   - exact-size `pwrite` with adopt-if-present and `ftruncate` on failure;
+   - `O_NOFOLLOW`;
+   - an empty line refuses start;
+   - `DataDirLock`: a per-process `flock` taken by `config.load`, claimed once by `api.build_service`, and adopted
+     with a single-use token by the service;
+   - an inert `close()`: a closed instance refuses every ledger record and commit.
+10. **`verify()` outside the lock.** `integrity()` calls the ledger's `GET /ledger/verify` before it takes the
+    service lock.
+
+**Live run.** `devtools/live_server.py` gains a one-shot fault (`POST /devtools/ledger/drop-anchor-after-f4d`). The
+week-2 release now runs with it armed, so the rail accepts the payout and the anchor of its F4d booking line never
+reaches the ledger. Two checks follow:
+- the item is booked on the retry within the same release;
+- `/fin/v1/audit/evidence` shows that booking committed exactly once, and the lost try as attempted.
+
+The restart leg then verifies every anchor with the attempt still on the ledger. The run is 54/54 checks (was 52).
+
+**Known limitation (not changed).** These fixes cover an anchor that never reached the ledger. A different case
+remains: an anchor the ledger DID record, whose answer was lost, followed by a failed local append. That leaves a
+stray anchor, which is voidable at the next start and needs Andre's recorded reconcile, as before. bizdev, influencer
+and clientfix close this case with the pending-line roll-forward (ADR 0012 H1/N1), which is not ported to Finance yet.
