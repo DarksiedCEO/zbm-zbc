@@ -159,15 +159,19 @@ mutation-checked on a copy: removing it fails at least one test.
 | S1-L1 (Low) | Any worker could mark a proposal won, creating a client and an invoice draft | Won needs Andre (dashboard + his token) or the client's acceptance of THIS proposal (Legal acceptance or e-sign envelope) confirmed through the Legal port (stand-in: `LEGAL_UNAVAILABLE`); `proposal_won` is a typed ledger event |
 | S1-L2 (Low) | A STOP or reply refused with 503 (ledger down) is lost unless the relay retries | Stated adapter requirement (below) |
 | S1-L3 (Low) | `SALES_NON_PRODUCTION=1` with a data directory wrote a durable log under the fixed test key | A real key is required whenever `SALES_DATA_DIR` is set |
-| S1-L4 (Low) | Accepted as a residual by the reviewer | Recorded below |
+| S1-L4 (Low) | A late-landing anchor for a pending line set aside at restart, after its sequence number was reused, leaves the integrity check failing permanently | Accepted residual (below), as in security-py ADR 0012 round 4 |
 
 **Adapter requirement (S1-L2).** The provider-events relay (bounces, complaints, replies) and the hub (unsubscribe,
 consent revocation) MUST retry a 503 with the same `request_id` until it is answered 2xx or 4xx, with backoff and an
 alert after 15 minutes. A STOP must never be dropped because the ledger was briefly down; the service refuses rather
 than suppress unrecorded, so the retry is what makes the opt-out land.
 
-**Residuals (accepted).** S1-L4 was accepted by the round-1 review as a residual; its text did not reach this fix
-pass, and the integration lead records its description here. Splitting a deal across several opportunities of one
+**Residuals (accepted).** S1-L4: a late-landing anchor for a pending line set aside at restart, after its sequence
+number was reused, leaves the integrity check failing permanently (fail-closed, sev1-class; an operator reconciles).
+Same design and residual as security-py ADR 0012 round 4: if the process stops while an anchor is in flight AND a new
+line is committed before that anchor lands, the ledger holds two anchors for one sequence number; the integrity
+check reports it, every write stops (503 `INTEGRITY_UNVERIFIED`) and nothing is sent until the operator reconciles.
+Splitting a deal across several opportunities of one
 account (each needs its own qualified lead) is not summed (S1-H2 is per opportunity, as the review asked). The
 merge-value rule is ASCII-only: a contact whose first name or company carries other letters (José, Zoë) gets no
 template that uses that field (refused, never altered).
@@ -210,3 +214,20 @@ guard was mutation-checked.
 
 Accepted: every reply except the fixed machine texts creates a review task for Andre; the hold never blocks email, and
 a held contact can still be reached by a person. Texts and calls are limited to +1 numbers.
+
+## Amendment — AEGIS round 4 (Oct 5 2026): NOT BLOCKING, every finding fixed anyway
+
+Regressions: `services/sales-py/tests/test_aegis_r4.py` (the reviewer's cases). Every new guard was mutation-checked.
+
+| Id | Finding | Fix |
+|---|---|---|
+| S4-M1 (Medium, treated as Critical) | US area codes that span two time zones were mapped to one, so "the stricter wins" was false: an 850 (Florida panhandle) number with a Chicago zone was texted at 21:30 Eastern, a 928 Navajo Nation number with a Phoenix zone at 21:30 Mountain daylight | Every area code that spans zones lists every zone it covers: 850/448 ET+CT; 928 Arizona+Mountain (Navajo daylight time); 541/458 and 775 Pacific+Mountain; 208/986 Mountain+Pacific; 308, 605, 701, 785, 620, 915, 432, 580 Central+Mountain; 219, 574, 812, 930, 270, 364, 606, 423, 931, 906, 334/483 Eastern+Central; 907 Alaska+Hawaii-Aleutian; Canada's 236/250/257/672/778, 306/639/474, 367/418/581, 807, 709/879, 867. The window must hold in the recorded zone and in every listed zone, so the claim is now true; a test checks each spanning code lists zones with different UTC offsets |
+| S4-M2 (Medium) | A reply that could not be tied to a contact sometimes opened no task (opt-outs) and never looked at the numbers or addresses in its body, so "this is Jane, stop texting 310 555 0100" from another phone left Jane's texts running | An unresolved reply ALWAYS opens a `review_reply` task, opt-outs included. Numbers in the body are held (and suppressed when the reply is an opt-out); an address in the body resolves to its contact, whose numbers are held (`i02_identity.phones_in` / `emails_in`, at most five each). One commit records every typed event first (suppression and hold) |
+| S4-L1 (Low) | The area-code table missed geographic codes (208, 812, 423, 270, 606, 308, 915, 458, 986, 906, 930, ...) and listed the non-geographic 456 | Rebuilt from the NANPA geographic NPA list by state, province and territory (overlays included); 456 removed. A test asserts every code is a geographic NPA (`[2-9][0-8][0-9]`, not N11, not 37X/96X, not 456/5XX/600/622/700/710/8XX toll-free/900) and the named codes are present. An unlisted code is still refused (`AREA_CODE_UNKNOWN`) |
+| S1-L4 (Low, round 1) | Its text had not reached the fix pass | Recorded in the round-1 residuals above |
+
+Accepted (S4-M2): an unattributed reply that names no number or address we know (for example "this is Jane from
+Acme, quit texting my cell" from a personal address) cannot be tied to anyone; it opens a review task for a person,
+and its sender's own address or number is suppressed if it is an opt-out, but texts to the contact it meant keep
+their current state until the person acts. Area codes added to the plan after this table was built are refused until
+the table is updated (fail closed).

@@ -73,3 +73,27 @@ def keyed(key: bytes, kind: str, value: str) -> str:
 def key_fingerprint(key: bytes) -> str:
     """Bound in the log at first start: a changed key would silently empty the suppression list (refused)."""
     return hmac.new(key, b"sales-py pii key fingerprint", hashlib.sha256).hexdigest()[:32]
+
+
+# AEGIS S4-M2: a reply that cannot be tied to a contact may still name a number or an address in its body ("this is
+# Jane, stop texting 310 555 0100"). These pull them out (at most five of each) so the number is held or suppressed.
+_PHONE_IN_TEXT = re.compile(r"(?<![\d+])(?:\+?1[\s.-]?)?\(?[2-9]\d{2}\)?[\s.-]?[2-9]\d{2}[\s.-]?\d{4}(?!\d)")
+_EMAIL_IN_TEXT = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}")
+
+
+def phones_in(text: str) -> list[str]:
+    out = []
+    for m in _PHONE_IN_TEXT.findall(text or "")[:20]:
+        p = phone(m)
+        if p and p not in out:
+            out.append(p)
+    return out[:5]
+
+
+def emails_in(text: str) -> list[str]:
+    out = []
+    for m in _EMAIL_IN_TEXT.findall(text or "")[:20]:
+        e = email(m)
+        if e and e not in out:
+            out.append(e)
+    return out[:5]

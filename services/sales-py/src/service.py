@@ -124,8 +124,8 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
             at = iso(self.now())
             data = {**data, "actor": data.get("actor", actor)}   # the anchor's actor is read back from the line
             actor = data["actor"]
-            if evidence is not None:
-                event_type, subject_id, payload, id_parts = evidence
+            for event_type, subject_id, payload, id_parts in (evidence if isinstance(evidence, list) else
+                                                              [evidence] if evidence is not None else []):
                 try:
                     self.rec.record(derived_id("evd", event_type, *id_parts), event_type, actor, subject_id, payload,
                                     f"{event_type} {subject_id}")

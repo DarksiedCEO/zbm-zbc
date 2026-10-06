@@ -750,51 +750,80 @@ class OutreachMixin:
             text_sha = hashlib.sha256(body["text"].encode("utf-8")).hexdigest()
             data = {"reply_id": reply_id, "channel": body["channel"], "message_id": body.get("message_id"),
                     "contact_id": contact_id, "class": cls, "text_sha256": text_sha}
-            ev = None
+            target = f"contact:{contact_id}" if contact_id else f"reply:{reply_id}"
+            # every number tied to the reply: the contact's, the message's, the sender's
+            phones = {h for h in (phone_h, msg["to_hash"] if msg and msg["channel"] != "email" else None,
+                                  c.get("phone_hash") if c else None) if h}
+            # AEGIS S4-M2: an UNRESOLVED reply may name its sender in the body. A number in the body is held (and
+            # suppressed if the reply is an opt-out); an address in the body resolves to a contact whose numbers are
+            # held. A person always reviews an unresolved reply.
+            body_phones: set = set()
+            named_phones: set = set()
+            if contact_id is None:
+                for p in i02_identity.phones_in(body["text"]):
+                    ph = i02_identity.keyed(self.pii_key, "phone", p)
+                    body_phones.add(ph)
+                    named = self.contacts.get(self.phone_index.get(ph) or "")
+                    if named and named.get("phone_hash"):
+                        named_phones.add(named["phone_hash"])
+                for e in i02_identity.emails_in(body["text"]):
+                    named = self.contacts.get(self.email_index.get(i02_identity.keyed(self.pii_key, "email", e)) or "")
+                    if named and named.get("phone_hash"):
+                        named_phones.add(named["phone_hash"])
+            evidence = []
+            hold_phones: set = set()
+            auto = False
             if cls == "unsubscribe":
                 # an opt-out on any channel is honoured everywhere: every address and number we can tie to the sender
                 # is suppressed, and any phone's consents are revoked (ADR 0013 decision 13)
                 hashes = {h for h in (email_h, phone_h, msg["to_hash"] if msg else None,
                                       c.get("email_hash") if c else None, c.get("phone_hash") if c else None) if h}
-                phones = sorted(h for h in hashes if h.startswith("phone:"))
-                if phones:
-                    data["revoke_keys"] = [k for ph in phones for k in self._all_consent_keys(ph)]
-                if not hashes:
+                hashes |= body_phones
+                if not hashes and not named_phones:
                     raise Invalid(R("REPLY_SENDER_REQUIRED"))
-                data.update(hashes=sorted(hashes), reason="stop_reply")
-                ev = ("suppression_added", f"reply:{reply_id}", {"hashes": sorted(hashes), "reason": "stop_reply"},
-                      (caller, rk))
+                if hashes:
+                    phs = sorted(h for h in hashes if h.startswith("phone:"))
+                    if phs:
+                        data["revoke_keys"] = [k for ph in phs for k in self._all_consent_keys(ph)]
+                    data.update(hashes=sorted(hashes), reason="stop_reply")
+                    evidence.append(("suppression_added", f"reply:{reply_id}",
+                                     {"hashes": sorted(hashes), "reason": "stop_reply"}, (caller, rk)))
+                hold_phones = named_phones - hashes          # a contact named by address: held for a person
             else:
                 # AEGIS S3-C1/C2/H1: no interpretation on any path that can lead to another text or call. ANY reply,
                 # on any channel, holds phone outreach (SMS and voice, both brands) for every number of the resolved
                 # contact and the number it came from — "yes" and "interested" included (a person follows up and
                 # Andre releases). The ONE exception is a reply whose raw body, trimmed and lower-cased only, is
                 # exactly one of the fixed auto-reply texts (i10_replies.AUTO_REPLIES): no person's words in it.
-                phones = {h for h in (phone_h, msg["to_hash"] if msg and msg["channel"] != "email" else None,
-                                      c.get("phone_hash") if c else None) if h}
                 auto = i10_replies.exact_auto_reply(body["text"])
                 if auto:
                     cls = data["class"] = "out_of_office"
                 if body["channel"] in ("sms", "voice") and not phones:
                     raise Invalid(R("REPLY_SENDER_REQUIRED"))
-                target = f"contact:{contact_id}" if contact_id else f"reply:{reply_id}"
-                if phones and not auto:
-                    hold_id = derived_id("hld", reply_id)
-                    task_id = derived_id("tsk", "review_reply", reply_id)
-                    data["hold"] = {"hold_id": hold_id, "hashes": sorted(phones), "reply_id": reply_id,
-                                    "task_id": task_id}
-                    data["task"] = {"task_id": task_id, "kind": "review_reply", "hold_id": hold_id, "target": target,
-                                    "due_on": self.today()}
-                    ev = ("phone_hold_applied", f"hold:{hold_id}", {"hold_id": hold_id, "hashes": sorted(phones),
-                                                                      "reply_id": reply_id, "class": cls},
-                          (caller, rk))
-                else:
-                    kind, due = {"interested": ("book_call", self.today()),
-                                 "out_of_office": ("reschedule", (self.now() + timedelta(days=RESCHEDULE_DAYS))
-                                                   .date().isoformat()),
-                                 "review": ("review_reply", self.today())}[cls]
-                    data["task"] = {"task_id": derived_id("tsk", kind, reply_id), "kind": kind, "target": target,
-                                    "due_on": due}
+                hold_phones = set() if auto else phones | body_phones | named_phones
+            if hold_phones:
+                hold_id = derived_id("hld", reply_id)
+                task_id = derived_id("tsk", "review_reply", reply_id)
+                data["hold"] = {"hold_id": hold_id, "hashes": sorted(hold_phones), "reply_id": reply_id,
+                                "task_id": task_id}
+                data["task"] = {"task_id": task_id, "kind": "review_reply", "hold_id": hold_id, "target": target,
+                                "due_on": self.today()}
+                evidence.append(("phone_hold_applied", f"hold:{hold_id}", {"hold_id": hold_id,
+                                                                            "hashes": sorted(hold_phones),
+                                                                            "reply_id": reply_id, "class": cls},
+                                 (caller, rk)))
+            elif contact_id is None:
+                # S4-M2: an unresolved reply always reaches a person, opt-outs included
+                data["task"] = {"task_id": derived_id("tsk", "review_reply", reply_id), "kind": "review_reply",
+                                "target": target, "due_on": self.today()}
+            elif cls != "unsubscribe":
+                kind, due = {"interested": ("book_call", self.today()),
+                             "out_of_office": ("reschedule", (self.now() + timedelta(days=RESCHEDULE_DAYS))
+                                               .date().isoformat()),
+                             "review": ("review_reply", self.today())}[cls]
+                data["task"] = {"task_id": derived_id("tsk", kind, reply_id), "kind": kind, "target": target,
+                                "due_on": due}
+            ev = evidence or None
             answer = {"reply_id": reply_id, "class": cls, "suppressed": bool(data.get("hashes")),
                       "held": bool(data.get("hold")),
                       "task_id": (data.get("task") or {}).get("task_id")}
