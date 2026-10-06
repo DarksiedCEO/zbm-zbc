@@ -124,20 +124,42 @@ def _zone_holds(z: str, inside: bool, at: datetime) -> bool:
                for m in range(0, int(ZONE_MARGIN.total_seconds() // 60) + 1))
 
 
+def _pick(at: datetime) -> tuple[str | None, str | None]:
+    day = next((z for z in ZONES if _zone_holds(z, True, at)), None)
+    night = next((z for z in ZONES if _zone_holds(z, False, at)), None)
+    return day, night
+
+
 def zones_for_now() -> tuple[str | None, str | None]:
-    """A zone inside 08:00-21:00 and one outside it, each stable for ZONE_MARGIN, or None. NANP has daily gaps with
-    neither: about 11:00-11:30 UTC on standard time no zone is inside (Guam past 21:00, Newfoundland before 08:00),
-    and about 22:00-23:30 UTC (to 00:30 on standard time) every zone is inside. The live run uses the real clock, so
-    in a gap the matching check is reported as not exercisable; pytest covers the window on a fixed clock."""
+    """A zone inside 08:00-21:00 and one outside it, each stable for ZONE_MARGIN, or None for a side in a real gap.
+
+    NANP has daily gaps (checked minute by minute against i07.allowed and AREA_ZONES): no zone inside about
+    11:00-12:00 UTC on standard time (area code 709 also covers Goose Bay, Atlantic), and every zone inside about
+    22:00-23:30 UTC (to 00:30 on standard time); the 3-minute margin opens each gap 3 minutes early. The run uses the
+    real clock, so in a gap the matching check is reported as not exercisable; pytest covers the window on a fixed
+    clock. A skip must never hide a bug (AEGIS F1), so the picker fails the run unless: every zone gets a definite
+    answer from the service, the two gaps are not both open (they never overlap), and a side missing now is found
+    within 3 hours either way (real gaps last at most about 2h33m)."""
     now = datetime.now(timezone.utc)
-    day = next((z for z in ZONES if _zone_holds(z, True, now)), None)
-    night = next((z for z in ZONES if _zone_holds(z, False, now)), None)
+    unknown = [z for z in ZONES if quiet.allowed(now, z, phone_for(z, "0000")) is None]
+    if unknown:
+        raise RuntimeError(f"the service gives no quiet-hours answer for {unknown}: a bug, not a gap")
+    day, night = _pick(now)
+    if day is None and night is None:
+        raise RuntimeError("neither a daytime nor a night zone: impossible on a real clock, so a bug")
+    for side, found in (("daytime", day), ("night", night)):
+        if found is None:
+            near = [now + timedelta(minutes=m) for m in range(-180, 181, 5)]
+            if not any(_pick(t)[0 if side == "daytime" else 1] for t in near):
+                raise RuntimeError(f"no {side} zone within 3 hours of {now:%H:%M}Z: a bug, not a gap")
     return day, night
 
 
 def not_exercisable(name: str, why: str) -> None:
     NOT_EXERCISABLE.append(name)
     say(f"  NOT EXERCISABLE NOW: {name} ({why}; covered by pytest on a fixed clock)")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::warning title=sales-py live run::not exercisable at this hour: {name} ({why})", flush=True)
 
 
 class Api:
