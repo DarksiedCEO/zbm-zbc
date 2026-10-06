@@ -49,7 +49,9 @@ class OutreachMixin:
             if reason == "REPLY_HOLD" and msg.get("purpose") == "confirmation":
                 continue            # a confirmation answers the creator's own request; a hold stops outreach only
             inf = self.influencers.get(msg["influencer_id"]) or {}
-            if msg["influencer_id"] == influencer_id or msg["to_hash"] in hashes \
+            # AEGIS R5-M1: an influencer id matches only when there is one (None == None matched every link mail
+            # for a new address, so an unrelated opt-out cancelled them all)
+            if (influencer_id is not None and msg["influencer_id"] == influencer_id) or msg["to_hash"] in hashes \
                     or hashes & set(i04_suppression.hashes_of(inf)):
                 msg.update(status="cancelled", reason=reason, updated_at=at)
 
@@ -163,8 +165,9 @@ class OutreachMixin:
         resolved to AND every address and handle it names, so an unresolved reply still holds whoever they turn out
         to be."""
         hs = set(i04_suppression.hashes_of(inf))
-        return any(h["status"] == "active" and (h.get("influencer_id") == inf["influencer_id"] or hs & set(h["hashes"]))
-                   for h in self.holds.values())
+        iid = inf.get("influencer_id")
+        return any(h["status"] == "active" and ((iid is not None and h.get("influencer_id") == iid)
+                                                or hs & set(h["hashes"])) for h in self.holds.values())
 
     def _outreach_problem(self, inf: dict) -> Optional[str]:
         if inf.get("blocked"):
@@ -724,11 +727,13 @@ class OutreachMixin:
             # nothing resolved: still a hold (a review entry for Andre), even for an exact auto-reply
             hold_id = None
             if not auto or not named:
-                # AEGIS R4-L1': a reply with the same target and the same text as an ACTIVE hold attaches to that hold
-                # (one decision lifts it) instead of opening a duplicate that would keep holding after Andre decides
+                # AEGIS R4-L1': a reply with the same target, text and class as an ACTIVE hold attaches to that hold
+                # (one decision lifts it) instead of opening a duplicate that would keep holding after Andre decides.
+                # The influencer id may be None on both sides ON PURPOSE (R5-M1 audit): two unresolved replies with
+                # the same text and the same (empty or named) hashes are one review entry; the hashes still decide
                 same = next((h for h in self.holds.values() if h["status"] == "active"
                              and h.get("influencer_id") == iid and h["hashes"] == sorted(named)
-                             and h.get("text_sha256") == data["text_sha256"]), None)
+                             and h.get("text_sha256") == data["text_sha256"] and h.get("class") == cls), None)
                 if same is not None:
                     hold_id = data["attach"] = same["hold_id"]
                     evidence.append(("outreach_hold_reply_attached", f"hold:{hold_id}",

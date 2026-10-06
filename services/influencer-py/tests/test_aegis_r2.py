@@ -73,10 +73,12 @@ def test_n1_a_repeat_request_waits_a_day_for_its_mail(w):
 
 
 def test_n1_the_confirmation_queue_is_bounded(tmp_path):
+    # amended in round 5 (R5-M2): a full new-address queue evicts its oldest mail instead of refusing the new link
     h = Harness(tmp_path, ports=wired_ports(), INF_CONFIRMATION_QUEUE_MAX="2")
     h.ok(h.link("a1@example.test"), 201)
     h.ok(h.link("a2@example.test"), 201)
-    h.code(h.link("a3@example.test"), 429, "QUEUE_FULL")
+    h.ok(h.link("a3@example.test"), 201)
+    assert sum(1 for m in h.svc.messages.values() if m["status"] == "queued") == 2
 
 
 # ------------------------------------------------------------------------------------------------ N2

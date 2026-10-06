@@ -233,6 +233,15 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
 8. A CCPA erasure design for the local log that keeps the hash chain and the suppression hashes.
 9. Wiring into CI (`ci.yml`, the hygiene checker's `PY_SERVICES`) and `docs/test-counts.md` (left to the integration
    lead).
+10. **A creator who lost their mailbox** (AEGIS R5 Info). There is NO route today to change a record's email or move
+    its payee: the address on the record is the only way into a creator session, and the dedupe index never moves an
+    address. Until it is built the operator procedure is: Andre verifies the person out of band (Finance's KYC on the
+    existing payee, or the platform accounts on the record), then a NEW application from the new address creates a new
+    record (handles the old record holds are not moved), the old record is blocked or suppressed by Andre, and the new
+    record goes through its own tax reference, Finance verification and the per-person aggregation (Finance's person
+    key links the two for the $5,000 rule). To build: an Andre-only route `POST /inf/v1/influencers/{id}/email` that
+    binds the change to the SHA-256 of {record id, old address hash, new address hash, payee reference hash}, resets
+    the payee to unverified, mails a notice to BOTH addresses, and is recorded on the ledger.
 
 ## Hub requirements (the creator portal / public forms)
 
@@ -245,6 +254,11 @@ nothing is ever paid, and no department or agent calls this service yet. Not wir
   to this service; the link page receives the creator session token and keeps it for the session's forms only (never
   in a URL, a log or analytics), and sends it with the application and tax-reference forms.
 - The hub submits content only for the creator signed in to the portal.
+- *(AEGIS round 5.)* Per-IP AND per-session rate limits on the public form, the link page and the session forms, plus a
+  CAPTCHA (or equivalent) on the public form (R5-M2). The link page `/c/<token>` confirms only on an explicit button
+  press, never on a GET, so mail scanners and prefetchers cannot use up the single-use link; the hub derives the
+  `request_id` of the click from the token so repeat clicks and retries return the same session (R5-L1). Both are in
+  `services/influencer-py/README.md`, "Contract with the hub".
 
 ## Settings
 
@@ -337,6 +351,19 @@ ledger (`creator_session_used`) and visible to the creator, and for a verified p
 Andre. A creator who mistypes a reference opens a new session; that cost is small next to a token that could rewrite
 the payout destination repeatedly for an hour.
 
-Accepted: a global flood of distinct junk addresses can fill the confirmation queue (429 `QUEUE_FULL`) or use the
+Accepted: a global flood of distinct junk addresses can fill the confirmation queue (429 `QUEUE_FULL`; since round 5,
+R5-M2, the oldest new-address mail is evicted instead and mail for a record we hold is never refused) or use the
 day's new-address share; that delays, never binds, and per-IP limits are the hub's (above). The link proves control of
 the mailbox, not identity; identity remains Finance's KYC, matched against the confirmed address.
+
+## Amendment — AEGIS round 5 (Oct 6 2026, on bb073dc): NOT BLOCKING, every item fixed
+
+Regressions: `services/influencer-py/tests/test_aegis_r5.py` (each fails on bb073dc and passes after the fix).
+
+| Id | Finding | Fix |
+|---|---|---|
+| R5-M1 | `_cancel_queued` compared `msg["influencer_id"] == influencer_id` with both `None`: an unrelated opt-out cancelled every queued link mail for a new address | The id matches only when there is one (`influencer_id is not None and ...`). Audit of every comparison of an optional id: `_held` hardened the same way (the record's id is never None today); the reply-attach rule compares `None == None` ON PURPOSE (two unresolved replies with the same text, class and hashes are one review entry — the hashes still decide) and now also requires the same class; the link checks in `svc_confirm` were already guarded (`c.get("influencer_id") and ...`); person keys, payee references and tax-reference hashes are only compared when present (`_person_keys` adds none that are empty); the query filters are `x is None or ...`; every other `==` compares ids that are always set (campaign, deal, brief, draft, message ids) |
+| R5-M2 | The global link queue could be filled with junk so a creator's link was refused 429 | A link mail is never refused. `INF_CONFIRMATION_QUEUE_MAX` bounds NEW-address link mails only; mail for an address we hold a record for has its own share (bounded by the records: one open link and one queued mail per address). When the new-address share is full the OLDEST queued new-address mail is evicted (`QUEUE_EVICTED`; ledger `confirmation_mail_evicted`, anchored with the line that queues the new mail); its link stays valid and a repeat request mails it again. Per-IP and per-session limits and a CAPTCHA are the hub's (above) |
+| R5-L1 | A mail scanner or prefetcher could use up the single-use link | Hub contract (above and in the README): the link page confirms only on a button press; the click's `request_id` is derived from the token, so repeat clicks get the same session |
+| R5-L2 / L3 | A record created for the address between the click and the submit (a prospect, an import) got a DUPLICATE record from the session's application | The application looks the address up again under the lock and BINDS to the record it finds (the tax route resolves the session's record the same way). Chosen over refusing `STATE_CHANGED` because the click proved control of that very address, which is exactly what binds an existing record when it exists at click time; the application only adds the attestation and the handles no other record holds and never overwrites the record's identity fields (address, name, source, existing handles); refusing would force a new click (and a day's wait for the mail) for a race the creator cannot see. A declared minor in such a session freezes the record found |
+| Info | No procedure for a creator who lost their mailbox | Unlock item 10: the operator procedure today, and the Andre-only, hash-bound route to build (not built) |

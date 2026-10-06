@@ -56,7 +56,7 @@ ledger as `founder_approval_refused`).
 | `INF_DAILY_SEND_CAP` | 50 | outreach emails per outreach domain per UTC day (1..200); over it they wait |
 | `INF_QUEUE_MAX_PER_CALLER` | 500 | queued outreach messages one caller may have waiting (1..5000); past it `429 QUEUE_FULL` |
 | `INF_CONFIRMATION_DAILY_CAP` | 200 | confirmation mails per outreach domain per UTC day, apart from outreach (1..1000) |
-| `INF_CONFIRMATION_QUEUE_MAX` | 2000 | confirmation mails waiting at once (1..20000); past it `429 QUEUE_FULL` |
+| `INF_CONFIRMATION_QUEUE_MAX` | 2000 | link mails for NEW addresses waiting at once (1..20000); past it the oldest is evicted (`QUEUE_EVICTED`, on the ledger as `confirmation_mail_evicted`; its link stays valid), never a refusal. Mail for an address we hold a record for has its own share and is never refused |
 | `INF_CONFIRMATION_NEW_ADDRESS_PERCENT` | 25 | share of the daily confirmation cap reserved for NEW addresses (0..90); records we hold use the rest |
 | `INF_ANDRE_REVIEW_DAILY_CAP` | 20 | new items a day in Andre's review queue (1..1000); past it they wait in his digest (`awaiting_andre_digest`), never dropped |
 | `INF_UNRESOLVED_HOLD_DAYS` | 30 | days an unresolved reply hold (one that names nobody) lasts before `hold-expiry` closes it (1..365); one classified `unsubscribe` or `review` goes into Andre's digest at that age instead and is closed 7 days later if he has not decided it |
@@ -117,6 +117,20 @@ All under `/inf/v1` except `/health`. "worker" = `dashboard` or `influencer_agen
 Every body is refused 422 before it is parsed when it carries a raw tax id (`TAX_ID_REFUSED` with the `field` that
 tripped it, never the value: a key naming one, or a value shaped like one) or a date of birth, age, government id, payment, bank, IP, device or protected-trait key
 (`FORBIDDEN_FIELD`). Money is a canonical two-decimal string; a JSON number is refused.
+
+## Contract with the hub (creator portal and the link page)
+
+- **The link page needs a button press.** `/c/<token>` on the outreach domain shows a page with a "Continue" button and
+  calls `POST /inf/v1/confirmations` only when the person presses it — never on a GET — so a mail scanner or link
+  prefetcher that opens the link cannot use it up (the link is single use; a new mail waits a day from the last send).
+- **Repeat clicks are one request.** The hub derives the `request_id` of that call from the token (for example
+  `c-` + the first 40 hex of SHA-256 of the token): a double click or a retry after a lost answer gets the SAME session
+  back instead of `409 CONFIRMATION_USED`.
+- **The session token** stays in the page's memory for the session's forms only (never in a URL, a cookie readable by
+  scripts of other origins, a log or analytics) and is sent as `session_token` with the application and tax forms.
+- **Rate limits and CAPTCHA are the hub's.** Per IP and per session on the public form, the link page and the session
+  forms, plus a CAPTCHA (or equivalent) on the public form: this service never sees the caller's IP and, by design,
+  never refuses a repeat request for an address (any per-address limit before the click locks the real creator out).
 
 ## Contract with the reply relay (`provider_events`)
 

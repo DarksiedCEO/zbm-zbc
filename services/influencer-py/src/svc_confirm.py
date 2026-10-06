@@ -33,7 +33,7 @@ from datetime import timedelta
 from typing import Optional
 
 from clock import iso, parse_iso
-from errors import Conflict, Forbidden, Invalid, NotFound, Throttled
+from errors import Conflict, Forbidden, Invalid, NotFound
 from intelligences import i01_intake, i04_suppression, i05_templates
 from ledger import derived_id, payload_sha256
 from reasons import R
@@ -64,13 +64,15 @@ class ConfirmMixin:
                  review_day=at[:10] if c["status"] in REVIEW else None)
         self.confirmations[c["conf_id"]] = c
         if d.get("message"):
-            self._queue_confirmation_mail(d["message"], d["actor"], at)
+            self._queue_confirmation_mail(d["message"], d["actor"], at, d.get("evict"))
 
     def _a_confirmation_remailed(self, d, at):
         self.confirmations[d["conf_id"]]["message_id"] = d["message"]["message_id"]
-        self._queue_confirmation_mail(d["message"], d["actor"], at)
+        self._queue_confirmation_mail(d["message"], d["actor"], at, d.get("evict"))
 
-    def _queue_confirmation_mail(self, msg: dict, actor: str, at: str) -> None:
+    def _queue_confirmation_mail(self, msg: dict, actor: str, at: str, evict: Optional[str] = None) -> None:
+        if evict:                                    # AEGIS R5-M2: the oldest new-address link mail makes room
+            self.messages[evict].update(status="cancelled", reason="QUEUE_EVICTED", updated_at=at)
         self._a_message_queued({**msg, "actor": actor}, at)
 
     def _reviews_today(self) -> int:
@@ -80,7 +82,7 @@ class ConfirmMixin:
     def _a_confirmation_send_approved(self, d, at):
         c = self.confirmations[d["conf_id"]]
         c.update(status="pending", andre_send=True, expires_at=d["expires_at"], message_id=d["message"]["message_id"])
-        self._queue_confirmation_mail(d["message"], d["actor"], at)
+        self._queue_confirmation_mail(d["message"], d["actor"], at, d.get("evict"))
 
     def _close_mail(self, c: dict, at: str) -> None:
         m = self.messages.get(c.get("message_id") or "")
@@ -105,7 +107,9 @@ class ConfirmMixin:
     def _a_session_application(self, d, at):
         if d.get("record"):
             self._a_influencer_created(d["record"], at)
-        self._apply_application(self.influencers[d["influencer_id"]], d["payload"], at)
+        inf = self.influencers[d["influencer_id"]]
+        self._apply_application(inf, d["payload"], at)
+        self.sessions[d["session_id"]]["influencer_id"] = d["influencer_id"]   # R5-L2: bound to the record it found
         self._use_session(d)
 
     def _a_tax_change_applied(self, d, at):
@@ -162,15 +166,30 @@ class ConfirmMixin:
 
     # ------------------------------------------------------------------------------------------------ the link
 
-    def _confirmation_mail(self, cid: str, iid: Optional[str], eh: str, existing_record: bool) -> dict:
+    def _confirmation_mail(self, cid: str, iid: Optional[str], eh: str, existing_record: bool) -> tuple[dict, list]:
         """The queued link mail: on its own queue and daily cap (AEGIS R2-N1); the send-queue job sends at most one per
-        address per RESEND_HOURS, counted from SEND time."""
-        queued = sum(1 for m in self.messages.values() if m["status"] == "queued" and m.get("purpose") == "confirmation")
-        if queued >= self.settings.confirmation_queue_max:
-            raise Throttled(R("QUEUE_FULL"))
-        return {"message_id": derived_id("msg", "confirm", cid, self.now().isoformat()), "channel": "email",
-                "purpose": "confirmation", "confirmation_id": cid, "influencer_id": iid, "to_hash": eh, "brand": None,
-                "from_domain": self.settings.outreach_domain, "existing_record": existing_record}
+        address per RESEND_HOURS, counted from SEND time.
+
+        AEGIS R5-M2: a link mail is never refused. ``INF_CONFIRMATION_QUEUE_MAX`` bounds NEW-address link mails only;
+        mail for an address we already hold a record for has its own share, bounded by the records themselves (one
+        open link and one queued mail per address), so a flood of junk addresses can never crowd it out. When the
+        new-address share is full, the OLDEST queued new-address mail is evicted (recorded on the ledger and anchored
+        with the line that queues the new one); its link stays valid, and a repeat request mails it again.
+        Returns (message, [evidence])."""
+        msg = {"message_id": derived_id("msg", "confirm", cid, self.now().isoformat()), "channel": "email",
+               "purpose": "confirmation", "confirmation_id": cid, "influencer_id": iid, "to_hash": eh, "brand": None,
+               "from_domain": self.settings.outreach_domain, "existing_record": existing_record}
+        if existing_record:
+            return msg, []
+        new = [m for m in self.messages.values() if m["status"] == "queued"            # queue order (the log's)
+               and m.get("purpose") == "confirmation" and not m.get("existing_record")]
+        if len(new) < self.settings.confirmation_queue_max:
+            return msg, []
+        old = new[0]
+        msg["evict"] = old["message_id"]
+        return msg, [("confirmation_mail_evicted", f"msg:{old['message_id']}",
+                      {"message_id": old["message_id"], "conf_id": old["confirmation_id"],
+                       "for_message_id": msg["message_id"]}, ("evict", old["message_id"], msg["message_id"]))]
 
     def _open_link(self, eh: str) -> Optional[dict]:
         """The one open, unexpired address link of this canonical address, if any."""
@@ -204,12 +223,13 @@ class ConfirmMixin:
             if c is not None:
                 m = self.messages.get(c.get("message_id") or "")
                 if c["status"] == "pending" and deliverable and (m is None or m["status"] != "queued"):
-                    msg = self._confirmation_mail(c["conf_id"], existing_id, eh, existing is not None)
-                    self._commit("confirmation_remailed", self._req({"conf_id": c["conf_id"], "message": msg}, caller,
-                                                                    rk, body, c["conf_id"]), caller,
-                                 evidence=("confirmation_remailed", f"confirmation:{c['conf_id']}",
-                                           {"conf_id": c["conf_id"], "message_id": msg["message_id"],
-                                            "email_hash": eh}, (caller, rk)))
+                    msg, evicted = self._confirmation_mail(c["conf_id"], existing_id, eh, existing is not None)
+                    evict = msg.pop("evict", None)
+                    self._commit("confirmation_remailed", self._req({"conf_id": c["conf_id"], "message": msg,
+                                                                     "evict": evict}, caller, rk, body, c["conf_id"]),
+                                 caller, evidence=[("confirmation_remailed", f"confirmation:{c['conf_id']}",
+                                                    {"conf_id": c["conf_id"], "message_id": msg["message_id"],
+                                                     "email_hash": eh}, (caller, rk))] + evicted)
                 return self._link_answer(c)            # otherwise nothing changes: nothing is written
             cid = derived_id("cnf", caller, rk)
             conf = {"conf_id": cid, "influencer_id": existing_id, "kind": "address",
@@ -219,7 +239,7 @@ class ConfirmMixin:
                     "brand": body.get("brand")}
             suppressed = eh in self.suppression or i04_suppression.suppressed(
                 self.suppression, i04_suppression.hashes_of(existing or {}))
-            msg = None
+            msg, evict, evicted = None, None, []
             if not deliverable:
                 conf["status"] = "undeliverable"
             elif suppressed:
@@ -229,13 +249,14 @@ class ConfirmMixin:
                 conf["content_sha256"] = confirmation_sha256(conf)
             else:
                 conf["status"] = "pending"
-                msg = self._confirmation_mail(cid, existing_id, eh, existing is not None)
+                msg, evicted = self._confirmation_mail(cid, existing_id, eh, existing is not None)
+                evict = msg.pop("evict", None)
                 conf["message_id"] = msg["message_id"]
             ev = ("confirmation_requested", f"confirmation:{cid}", {"conf_id": cid, "influencer_id": existing_id,
                                                                     "kind": "address", "email_hash": eh,
                                                                     "status": conf["status"]}, (caller, rk))
-            self._commit("confirmation_requested", self._req({"confirmation": conf, "message": msg}, caller, rk, body,
-                                                             cid), caller, evidence=ev)
+            self._commit("confirmation_requested", self._req({"confirmation": conf, "message": msg, "evict": evict},
+                                                             caller, rk, body, cid), caller, evidence=[ev] + evicted)
             return self._link_answer(self.confirmations[cid])
 
     def render_confirmation(self, msg: dict, conf: dict) -> dict:
@@ -338,10 +359,15 @@ class ConfirmMixin:
             raise Forbidden(R("SESSION_INVALID"))
         return s
 
+    def _session_record_id(self, s: dict) -> str:
+        """AEGIS R5-L2/L3: the record of the session's address, looked up again NOW (under the lock): a record created
+        for that address after the click (a prospect, an import) is the one the session acts on, never a duplicate."""
+        return self.email_index.get(s["email_hash"]) or s["influencer_id"]
+
     def _session_usable(self, s: dict, action: str, influencer_id: Optional[str] = None) -> None:
         if self.now() > parse_iso(s["expires_at"]):
             raise Forbidden(R("SESSION_EXPIRED"))
-        if influencer_id is not None and influencer_id != s["influencer_id"]:
+        if influencer_id is not None and influencer_id != self._session_record_id(s):
             raise Forbidden(R("SESSION_RECORD_MISMATCH"))
         if action in s["used"]:
             raise Conflict(R("SESSION_ACTION_USED"))
@@ -364,7 +390,7 @@ class ConfirmMixin:
                     raise Invalid(R(prev[1]["refused"]))
                 return self.influencer_view(self.influencers[prev[1]])
             self._session_usable(s, "application")
-            iid = s["influencer_id"]
+            iid = self._session_record_id(s)
             inf = self.influencers.get(iid)
             if inf is not None and inf.get("blocked"):
                 raise Forbidden(R("INFLUENCER_BLOCKED"))
@@ -490,7 +516,7 @@ class ConfirmMixin:
                 raise Forbidden(R("INFLUENCER_BLOCKED"))
             if c["status"] in REVIEW:
                 expires = iso(self.now() + timedelta(days=CONFIRM_DAYS))
-                msg = self._confirmation_mail(conf_id, iid, c["email_hash"], True)
+                msg, _ = self._confirmation_mail(conf_id, iid, c["email_hash"], True)   # Andre's own: never evicts
                 self._commit("confirmation_send_approved", self._req(
                     {"conf_id": conf_id, "message": msg, "expires_at": expires}, "andre", rk, body, conf_id), "andre",
                     evidence=("confirmation_send_approved", subject,
