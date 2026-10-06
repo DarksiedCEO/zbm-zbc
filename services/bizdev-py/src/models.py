@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import AfterValidator, BeforeValidator, BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from clock import parse_iso
 
@@ -79,7 +79,13 @@ def _unique(v: list) -> list:
 Id = Annotated[StrictStr, Field(pattern=r"^[A-Za-z0-9._:-]{1,128}$")]
 # AEGIS round 2 N1: a request id is opaque and of one fixed shape — a UUID (with or without hyphens) or 16..64
 # lowercase hex characters — so it can never be a field anything is typed into (no digit counting needed)
-RequestId = Annotated[StrictStr, Field(pattern=r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|"
+def _lower(v):
+    """AEGIS round 3 Info: a UUID / hex request id in any case is lower-cased BEFORE the shape check and before the
+    request key is built, so ``ABCD...`` and ``abcd...`` are one request."""
+    return v.lower() if isinstance(v, str) else v
+
+
+RequestId = Annotated[StrictStr, BeforeValidator(_lower), Field(pattern=r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|"
                                                r"[0-9a-f]{16,64})$")]
 # finance-py's OWN generated ids (services/finance-py/src/models.py OWN_ID_RE: ``service.rid`` is
 # fin-<prefix>-<26 Crockford base32>, ``ledger.derived_id`` is fin-<prefix>-<40 hex>), exactly
@@ -399,4 +405,5 @@ class Suppress(Strict):
 class HoldDecision(Strict):
     request_id: RequestId
     decision: Literal["resume", "opt_out"]
+    state_sha256: Sha256
 

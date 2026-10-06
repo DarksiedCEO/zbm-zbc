@@ -393,13 +393,23 @@ class ResponsesMixin:
             return
         summary["unknown"] += 1
         # AEGIS round 2 N2: every unknown tick is counted (durably); after NBD_UNKNOWN_TICKS_BEFORE_TASK of them, and
-        # whenever the deadline has passed, ONE task for Andre each, deadline or not
-        tasks = [t for t in (self._unknown_past_deadline_task(sid), self._stuck_task(
-            f"submission:{sid}", s.get("unknown_ticks", 0) + 1, "SUBMISSION_STUCK")) if t is not None]
+        # whenever the deadline has passed, ONE task for Andre each, deadline or not. AEGIS round 3 Low: once the
+        # stuck task is open the counter stops and no tick line is written (only a deadline task may still open)
+        ticks = s.get("unknown_ticks", 0)
+        deadline_task = self._unknown_past_deadline_task(sid)
+        if ticks >= self.settings.unknown_ticks_before_task:
+            if deadline_task is not None:
+                self._commit("submission_flagged", {"submission_id": sid, "tasks": [deadline_task]}, "scheduler",
+                             evidence=("submission_outcome_unknown", f"submission:{sid}",
+                                       {"submission_id": sid, "code": "SUBMISSION_OUTCOME_UNKNOWN",
+                                        "tasks": [deadline_task["task_id"]]}, (sid, "unknown", "deadline")))
+            return
+        tasks = [t for t in (deadline_task, self._stuck_task(f"submission:{sid}", ticks + 1, "SUBMISSION_STUCK"))
+                 if t is not None]
         self._commit("submission_unknown_tick", {"submission_id": sid, "tasks": tasks}, "scheduler",
                      evidence=("submission_outcome_unknown", f"submission:{sid}",
                                {"submission_id": sid, "code": "SUBMISSION_OUTCOME_UNKNOWN",
-                                "tasks": [t["task_id"] for t in tasks]}, (sid, "unknown", s.get("unknown_ticks", 0)))
+                                "tasks": [t["task_id"] for t in tasks]}, (sid, "unknown", ticks))
                      if tasks else None)
 
     def _stuck_task(self, target: str, ticks: int, code: str) -> Optional[dict]:
@@ -408,18 +418,26 @@ class ResponsesMixin:
         t = self._task("stuck_unknown", target, code, code)
         return None if t["task_id"] in self.tasks else t
 
-    @staticmethod
-    def submission_state_sha256(sub: dict) -> str:
-        return i04_assembly.sha({k: sub.get(k) for k in ("submission_id", "status", "pursuit_id", "response_id",
-                                                         "version", "content_sha256", "unknown_ticks")})
+    def _ticks_for_state(self, ticks: int):
+        """AEGIS round 3 Low: the counter is part of a state hash only below the threshold; at it, ``stuck``, so
+        ticks can never starve Andre's reconcile."""
+        return ticks if ticks < self.settings.unknown_ticks_before_task else "stuck"
+
+    def submission_state_sha256(self, sub: dict) -> str:
+        state = {k: sub.get(k) for k in ("submission_id", "status", "pursuit_id", "response_id", "version",
+                                         "content_sha256")}
+        state["unknown_ticks"] = self._ticks_for_state(sub.get("unknown_ticks", 0))
+        return i04_assembly.sha(state)
 
     def reconcile_submission(self, sid: str, body: dict) -> dict:
         """Andre settles a submission stuck in ``sending`` (AEGIS round 2 N2), naming its exact state hash:
         ``delivered`` -> ``submitted``; ``not_delivered`` -> ``not_delivered``, and the response may be submitted
-        again."""
-        with self.lock:
-            self._gate()
-            rk = self.rk("submission_reconcile", sid, body)
+        again. Before ``not_delivered`` the port is asked once, outside the lock, under the reconcile rules (AEGIS
+        round 3 Info): if it says delivered, that answer is applied and the call is refused 409 PORT_SAYS_DELIVERED;
+        anything else (the stand-in's ``unknown`` included) leaves Andre's call standing."""
+        rk = self.rk("submission_reconcile", sid, body)
+
+        def check():
             if self._idem("andre", rk, body):
                 return self._submission_view(self.submissions[sid])
             sub = self._get(self.submissions, sid, "SUBMISSION_NOT_FOUND")
@@ -427,9 +445,33 @@ class ResponsesMixin:
                 raise Conflict(R("SUBMISSION_NOT_SENDING"))
             if body["state_sha256"] != self.submission_state_sha256(sub):
                 raise Conflict(R("STATE_HASH_MISMATCH"))
-            status = "submitted" if body["outcome"] == "delivered" else "not_delivered"
-            data = {"submission_id": sid, "status": status, "outcome": body["outcome"],
-                    "state_sha256": body["state_sha256"]}
+            return None
+
+        with self.lock:
+            self._gate()
+            done = check()
+            if done is not None:
+                return done
+        if body["outcome"] == "not_delivered":
+            try:
+                ans = self.ports.submission.submission_status(sid)          # outside the lock
+                status, ref = ans.status, ans.provider_ref
+            except Exception:      # noqa: BLE001 - unreadable: unknown, Andre's call stands
+                status, ref = "unknown", None
+        else:
+            status, ref = "unknown", None
+        with self.lock:
+            self._gate()
+            done = check()
+            if done is not None:
+                return done
+            sub = self.submissions[sid]
+            if status == "accepted" and ref:
+                self._settle_submission(sid, "accepted", ref, {"submitted": 0, "refused": 0, "unknown": 0})
+                raise Conflict(R("PORT_SAYS_DELIVERED"))
+            new = "submitted" if body["outcome"] == "delivered" else "not_delivered"
+            data = {"submission_id": sid, "status": new, "outcome": body["outcome"],
+                    "state_sha256": body["state_sha256"], "port_answer": status}
             self._commit("submission_reconciled", self._req(data, "andre", rk, body, sid), "andre",
                          evidence=("submission_reconciled", f"submission:{sid}", data, ("andre", rk)))
             return self._submission_view(sub)

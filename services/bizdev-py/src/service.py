@@ -287,6 +287,11 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
         for t in d.get("tasks") or ():
             if t["task_id"] not in self.tasks:
                 self.tasks[t["task_id"]] = {**t, "status": "open", "opened_at": at, "closed_at": None, "outcome": None}
+        h = d.get("hold") if kind == "reply_received" else None
+        if h and h["task_id"] in self.tasks:          # link a task opened in this same line to its hold
+            ids = self.tasks[h["task_id"]].setdefault("hold_ids", [])
+            if h["hold_id"] not in ids:
+                ids.append(h["hold_id"])
         if d.get("request_id") and d.get("actor"):
             self.requests[(d["actor"], d["request_id"])] = (d.get("request_sha"), d.get("_obj"))
 

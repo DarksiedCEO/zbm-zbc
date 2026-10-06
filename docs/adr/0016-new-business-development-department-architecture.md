@@ -76,7 +76,10 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     durably; after `NBD_UNKNOWN_TICKS_BEFORE_TASK` of them (default 6, counted in job runs, never wall hours) one
     `SUBMISSION_STUCK` task opens, deadline or not, and Andre settles it at `POST /submissions/{id}/reconcile`, naming
     its exact `state_sha256`: `delivered` makes it `submitted`; `not_delivered` makes the response resubmittable
-    (AEGIS round 2 N2). `deadline-sweep` cancels late queued submissions and
+    (AEGIS round 2 N2). Once the stuck task is open the counter stops and no tick line is written, and the state hash
+    carries `stuck` instead of the count, so ticks cannot starve the reconcile; before `not_delivered` the port is
+    asked once, and if it says delivered its answer is applied and the call refused `409 PORT_SAYS_DELIVERED` (the
+    stand-in answers `unknown`, so Andre's call stands) (AEGIS round 3). `deadline-sweep` cancels late queued submissions and
     opens one task per pursuit whose deadline passed.
 12. **Government bids (fail closed).** Every government bid carries i05's baseline items (SAM registration,
     debarment / suspension, independent price determination, authority to bind, conflict of interest, gifts and
@@ -139,7 +142,9 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     held payout at `POST /payouts/{id}/reconcile` by its exact `state_sha256`: `paid`, or `not_paid` (requeued after
     the shortfall is applied, its refusal count reset). The shortfall is DERIVED — `max(0, settled - accrued)` — so a
     later payment that restores the accrual absorbs it, and its open task is closed as `absorbed` the moment it
-    reaches 0.00 (AEGIS round 2 N2, L3).
+    reaches 0.00 (AEGIS round 2 N2, L3). The tick and port rules of decision 11 apply to payouts the same way: the
+    counter stops at the task, and `not_paid` first asks `payout_status` (Finance holds it: applied, `409
+    PORT_SAYS_DELIVERED`) (AEGIS round 3).
 18. **Deal approval, aggregated.** The gate of a pursuit or partner deal is the SUM of the values of every deal in
     its counterparty group (pursuits and partner deals, both brands) that still counts: every OPEN deal whatever its
     age, and — opened within `NBD_AGGREGATION_WINDOW_DAYS` — won deals and any pursuit whose submission was delivered
@@ -177,8 +182,12 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     count), are held — never suppressed — whoever sent the reply, and matched against existing contacts. Every reply
     opens a review task, even with nothing resolvable. The reply text is never stored (SHA-256). AEGIS round 2: every
     address in the body that is an existing contact is held (the cap of five applies only to addresses that are not
-    contacts, L1); one review task per sender per day, and a new hold only for what is not already held — active
-    holds are indexed by address hash and by contact (L2).
+    contacts, L1); one review task per sender per day; active holds are indexed by address hash and by contact (L2).
+    AEGIS round 3 H1: EVERY reply creates its own hold (only the task is deduped, and it lists every hold it
+    covers). Andre decides a hold's GROUP — every active hold sharing a contact or an address hash with it,
+    transitively — naming its `state_sha256` (the group's hold ids, their replies and their count); a reply that
+    arrives after he looked changes it and his decision is refused 409. The decision lifts (or opts out) every hold
+    of the group and closes every review task tied to them; no review task is left without an active hold.
 22. **Ports** (`src/ports.py`, `src/legal_client.py`): email, submission, bid source, Onboarding and Finance hand-offs,
     Finance payouts, Legal agreements. Each stand-in fails closed and says so in `/status`; a port that raises is
     unavailable; no port is called with the lock held.
@@ -206,8 +215,9 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     `/health` is 503 `closed`, and the integrity and job routes answer `503 SERVICE_CLOSED`. The ledger's chain
     `verify()` (an HTTP call) runs **outside** the service lock; its verdict is reported exactly as returned
     (`ledger_valid` is `True` only for a real `True`), and the integrity result and log length are read fresh after it.
-27. **Idempotency.** Every write carries a `request_id` — a UUID (with or without hyphens) or 16..64 lowercase hex,
-    nothing else (AEGIS round 2 N1); the request key is `op|target|request_id` per actor, with
+27. **Idempotency.** Every write carries a `request_id` — a UUID (with or without hyphens) or 16..64 hex, any
+    case, lower-cased before the shape check and before the key is built, nothing else (AEGIS rounds 2 N1, 3); the
+    request key is `op|target|request_id` per actor, with
     the SHA-256 of the body: the same body answers what the first call did (across restarts), a different body is
     `409 REQUEST_ID_REUSED`. Ledger event ids are derived from the same identity, so a retry records nothing twice.
 28. **Jobs** (caller `scheduler`, idempotent per request id, one at a time — `409 JOB_RUNNING`): `send-queue`,
@@ -311,3 +321,18 @@ Regression tests: `services/bizdev-py/tests/test_aegis_r2.py` (each fails on 5e1
   closes when absorbed. **L4** domains are IDNA-encoded before hashing and matching (decisions 9, 17, 21).
 - **Gitleaks** the round-1 test literal `west-1234-56789` (a fake tax id) is now built from parts; `.gitleaks.toml`
   carries an exact-string allowlist entry for the copy left in history (22fe413).
+
+## Amendment — AEGIS round 3 (Oct 6 2026, on 63bef23): BLOCKING (one High), every item fixed
+
+Regression tests: `services/bizdev-py/tests/test_aegis_r3.py` (each fails on 63bef23). The reviewer's money fuzz is
+kept as a property test, `tests/test_fuzz_payouts.py`.
+
+- **R3-H1** a second reply was folded into the first reply's hold, so Andre's decision on the first released the
+  contact. Every reply has its own hold; a decision names the group's state hash (stale after any new reply: 409),
+  covers every hold of the group and closes every review task tied to them (decision 21).
+- **Low** unknown ticks were counted and written for ever and could starve a reconcile; counting stops at the task
+  and the state hash no longer carries the count past the threshold (decisions 11, 17).
+- **Info** uppercase UUID / hex request ids are lower-cased before the shape check and the key (decision 27; the
+  contract is in the README).
+- **Info** `not_delivered` / `not_paid` ask the port once first; a delivered / paid answer is applied and the call
+  refused `409 PORT_SAYS_DELIVERED` (decisions 11, 17).

@@ -510,11 +510,14 @@ class PartnersMixin:
             summary["refused"] += 1
         else:
             summary["unknown"] += 1
-            t = self._stuck_task(f"payout:{pay_id}", p.get("unknown_ticks", 0) + 1, "PAYOUT_STUCK")
+            ticks = p.get("unknown_ticks", 0)
+            if ticks >= self.settings.unknown_ticks_before_task:
+                return                                  # AEGIS round 3 Low: the task is open; stop counting
+            t = self._stuck_task(f"payout:{pay_id}", ticks + 1, "PAYOUT_STUCK")
             self._commit("payout_unknown_tick", {"payout_id": pay_id, "tasks": [t] if t else []}, "scheduler",
                          evidence=("payout_outcome_unknown", f"payout:{pay_id}",
                                    {"payout_id": pay_id, "code": "PAYOUT_STUCK"},
-                                   (pay_id, "unknown", p.get("unknown_ticks", 0))) if t else None)
+                                   (pay_id, "unknown", ticks)) if t else None)
 
     def _requeue_payout(self, p: dict, actor: str, req: Optional[tuple], refused: bool, outcome: Optional[str] = None,
                         extra: Optional[dict] = None) -> None:
@@ -539,17 +542,20 @@ class PartnersMixin:
         self._commit("payout_result", self._req(data, actor, req[0], req[2], p["payout_id"]) if req else data, actor,
                      evidence=ev)
 
-    @staticmethod
-    def payout_state_sha256(p: dict) -> str:
-        return i04_assembly.sha({k: p.get(k) for k in ("payout_id", "deal_id", "status", "amount", "refusals",
-                                                       "unknown_ticks")})
+    def payout_state_sha256(self, p: dict) -> str:
+        state = {k: p.get(k) for k in ("payout_id", "deal_id", "status", "amount", "refusals")}
+        state["unknown_ticks"] = self._ticks_for_state(p.get("unknown_ticks", 0))
+        return i04_assembly.sha(state)
 
     def reconcile_payout(self, pay_id: str, body: dict) -> dict:
         """Andre settles a payout stuck in ``sending`` or ``held`` (AEGIS round 2 N2), naming its exact state hash:
-        ``paid`` -> ``paid`` (Finance holds or paid it); ``not_paid`` -> requeued after the shortfall is applied."""
-        with self.lock:
-            self._gate()
-            rk = self.rk("payout_reconcile", pay_id, body)
+        ``paid`` -> ``paid`` (Finance holds or paid it); ``not_paid`` -> requeued after the shortfall is applied.
+        Before ``not_paid`` the Finance port is asked once, outside the lock (AEGIS round 3 Info): if it says Finance
+        holds it, that is applied and the call is refused 409 PORT_SAYS_DELIVERED; anything else leaves Andre's call
+        standing (the stand-in answers ``unknown``)."""
+        rk = self.rk("payout_reconcile", pay_id, body)
+
+        def check():
             if self._idem("andre", rk, body):
                 return self._payout_view(self.payouts[pay_id])
             p = self._get(self.payouts, pay_id, "PAYOUT_NOT_FOUND")
@@ -557,6 +563,32 @@ class PartnersMixin:
                 raise Conflict(R("PAYOUT_NOT_STUCK"))
             if body["state_sha256"] != self.payout_state_sha256(p):
                 raise Conflict(R("STATE_HASH_MISMATCH"))
+            return None
+
+        with self.lock:
+            self._gate()
+            done = check()
+            if done is not None:
+                return done
+        status, ref = "unknown", None
+        if body["outcome"] == "not_paid":
+            try:
+                ans = self.ports.payouts.payout_status(pay_id)              # outside the lock
+                status, ref = ans.status, ans.reference
+            except Exception:      # noqa: BLE001
+                status, ref = "unknown", None
+        with self.lock:
+            self._gate()
+            done = check()
+            if done is not None:
+                return done
+            p = self.payouts[pay_id]
+            if status == "with_finance" and ref:
+                self._commit("payout_result", {"payout_id": pay_id, "status": "with_finance", "finance_ref": ref,
+                                               "outcome": "with_finance"}, "scheduler",
+                             evidence=("payout_result", f"payout:{pay_id}",
+                                       {"payout_id": pay_id, "status": "with_finance"}, (pay_id, "result", ref)))
+                raise Conflict(R("PORT_SAYS_DELIVERED"))
             if body["outcome"] == "paid":
                 data = {"payout_id": pay_id, "status": "paid", "finance_ref": None, "outcome": "paid",
                         "state_sha256": body["state_sha256"]}
@@ -566,7 +598,7 @@ class PartnersMixin:
                                        ("andre", rk)))
             else:
                 self._requeue_payout(p, "andre", (rk, ("andre", rk), body), refused=False, outcome="not_paid",
-                                     extra={"state_sha256": body["state_sha256"]})
+                                     extra={"state_sha256": body["state_sha256"], "port_answer": status})
             return self._payout_view(p)
 
     def _payout_view(self, p: dict) -> dict:

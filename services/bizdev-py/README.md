@@ -36,7 +36,11 @@ cd src && python3 -m api                                # NBD_BIND_ADDR (127.0.0
 Live run against the real ledger binary and this production entrypoint:
 `LEDGER_BIN=<ledger-rust>/target/release/server python3 devtools/live_run.py` (no check depends on the time of day).
 
-Every write carries a `request_id`: a UUID (with or without hyphens) or 16..64 lowercase hex. Finance's ids
+**Request-id contract.** Every write carries a `request_id`: a UUID (with or without hyphens) or 16..64 hex
+characters, in any case — it is lower-cased before the shape check and before the request key is built, so
+`ABCD…` and `abcd…` are the same request. Nothing else is accepted (422). The request key is
+`op|target|request_id` per caller, with the SHA-256 of the body: the same body is answered as the first time (also
+after a restart), a different body under the same key is `409 REQUEST_ID_REUSED`. Finance's ids
 (`finance_event_id`, `finance_ref`) are finance-py's own generated ids (`fin-<prefix>-<40 hex>` or 26 Crockford).
 
 Headers: `Authorization: Bearer <service token>` on every route but `/health`; `X-NBD-Caller-Token` everywhere
@@ -94,7 +98,7 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /responses`, `/responses/{id}/versions`; `GET /responses/{id}` | worker | a response or pitch from approved blocks + custom text |
 | `POST /responses/{id}/approve` | Andre | exact version and hash, naming exactly the sensitivity flags raised |
 | `POST /responses/{id}/submit` | worker | every gate; queued for the submission port |
-| `POST /submissions/{id}/reconcile` | Andre | settle a stuck `sending` submission by its `state_sha256`: `delivered` or `not_delivered` |
+| `POST /submissions/{id}/reconcile` | Andre | settle a stuck `sending` submission by its `state_sha256`: `delivered` or `not_delivered` (the port is asked first; if it says delivered: `409 PORT_SAYS_DELIVERED`) |
 | `GET /submissions`; `POST /submissions/{id}/cancel` | worker | the submission queue (`queued`, `sending` — outcome unknown, reconciled, never resubmittable — `submitted`, `refused`, `cancelled`) |
 | `POST /partners`; `GET /partners`, `/partners/{id}` | worker | referral, agency_alliance, white_label |
 | `POST /partners/{id}/rate`; `/rate/approve` | worker; Andre | versioned commission rate (0.01..50.00 %) |
@@ -105,7 +109,7 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /partner-deals/{id}/deal-approval`; `/won` | Andre | won needs an approved rate and a Legal agreement in force |
 | `POST /finance/events` | finance_31 | a client payment, refund or chargeback on a won partner deal |
 | `POST /finance/payouts/{id}/paid` | finance_31 | Finance paid a payout it took (a payout whose answer was lost stays `sending` and is reconciled by `payout-request`) |
-| `POST /payouts/{id}/reconcile` | Andre | settle a stuck `sending` or `held` payout by its `state_sha256`: `paid` or `not_paid` |
+| `POST /payouts/{id}/reconcile` | Andre | settle a stuck `sending` or `held` payout by its `state_sha256`: `paid` or `not_paid` (the port is asked first; if Finance holds it: `409 PORT_SAYS_DELIVERED`) |
 | `GET /payouts` | dashboard, finance_31 | payout requests (no tax reference shown) |
 | `POST /contacts`; `GET /contacts/{id}` | worker | email-only contacts of partners and pursuits |
 | `POST /contacts/{id}/merge-fields` | dashboard | the only values `{{first_name}}` / `{{company}}` render |
@@ -116,7 +120,7 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /events/email`; `POST /replies` | provider_events | bounces, complaints; replies (always recorded, never refused for its sender; any reply holds the contact) |
 | `POST /unsubscribe` | hub | the one-click link's token |
 | `POST /suppressions`; `GET /suppressions` | dashboard, bizdev_agent, provider_events; dashboard, compliance_38 | append-only, both brands |
-| `GET /holds`; `POST /holds/{id}/decision` | dashboard; Andre | `resume` or `opt_out` |
+| `GET /holds`; `POST /holds/{id}/decision` | dashboard; Andre | `resume` or `opt_out` for the hold's whole group, naming its `state_sha256` (a reply that arrives after Andre looked makes it stale: 409) |
 | `GET /tasks`; `POST /tasks/{id}/close` | dashboard; Andre | Andre's review queue |
 | `POST /jobs/{send-queue,submission-queue,deadline-sweep,handoff-retry,payout-request,integrity}/run` | scheduler | jobs, one at a time (`409 JOB_RUNNING`) |
 | `GET /audit/integrity`, `/audit/export` | dashboard, compliance_38 | ledger verdict as returned; export with emails as keyed hashes, text as SHA-256 |

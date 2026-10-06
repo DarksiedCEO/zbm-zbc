@@ -20,7 +20,7 @@ import hmac
 from typing import Optional
 
 from errors import Conflict, Forbidden, Invalid, NotFound, Throttled, Unavailable
-from intelligences import i02_identity, i08_templates, i09_replies, i10_suppression
+from intelligences import i02_identity, i04_assembly, i08_templates, i09_replies, i10_suppression
 from ledger import derived_id
 from reasons import R
 
@@ -101,6 +101,11 @@ class OutreachMixin:
                 self.hold_by_hash.setdefault(x, set()).add(h["hold_id"])
             for c in h["contact_ids"]:
                 self.hold_by_contact.setdefault(c, set()).add(h["hold_id"])
+            t = self.tasks.get(h["task_id"])          # AEGIS round 3 H1: the (deduped) task lists every hold it covers
+            if t is not None:
+                t.setdefault("hold_ids", [])
+                if h["hold_id"] not in t["hold_ids"]:
+                    t["hold_ids"].append(h["hold_id"])
             self._cancel_held(h, at)
 
     def _cancel_held(self, h: dict, at: str) -> None:
@@ -108,6 +113,16 @@ class OutreachMixin:
         for m in self.messages.values():
             if m["status"] == "queued" and (m["contact_id"] in cids or m["to_hash"] in hs):
                 m.update(status="cancelled", reason="CONTACT_HELD", updated_at=at)
+
+    def _a_holds_decided(self, d, at):
+        """AEGIS round 3 H1: one decision covers every active hold of the group it named by state hash; every review
+        task tied to those holds closes (none is left orphaned)."""
+        for hid in d["hold_ids"]:
+            self._a_hold_decided({**d, "hold_id": hid}, at)
+        for t in self.tasks.values():
+            if t["status"] == "open" and t["kind"] == "review_reply" and \
+                    all(self.holds[x]["status"] != "active" for x in t.get("hold_ids", ()) if x in self.holds):
+                t.update(status="closed", closed_at=at, outcome=d["decision"])
 
     def _a_hold_decided(self, d, at):
         h = self.holds[d["hold_id"]]
@@ -559,18 +574,14 @@ class OutreachMixin:
             if existing is not None and existing["status"] != "open":
                 task = self._task("review_reply", sender_key, f"{self.today()}|{reply_id}", cls)
                 existing = None
-            new_cids = {x for x in hold_cids if not self.hold_by_contact.get(x)}
-            new_hashes = {x for x in hold_hashes if not self.hold_by_hash.get(x)}
-            covering = sorted(self._holds_of(c, *hold_hashes))
-            if new_cids or new_hashes or not covering:
-                hold_id = derived_id("hld", reply_id)
-                data["hold"] = {"hold_id": hold_id, "contact_ids": sorted(new_cids), "hashes": sorted(new_hashes),
-                                "reply_id": reply_id, "task_id": task["task_id"]}
-                evidence.append(("reply_hold_applied", f"hold:{hold_id}",
-                                 {"hold_id": hold_id, "contact_ids": sorted(new_cids), "hashes": sorted(new_hashes),
-                                  "reply_id": reply_id, "class": cls}, (caller, rk)))
-            else:
-                hold_id = covering[0]
+            # AEGIS round 3 H1: EVERY reply creates its own hold (only the review task is deduped), so a decision taken
+            # on an earlier reply can never release what a later one holds
+            hold_id = derived_id("hld", reply_id)
+            data["hold"] = {"hold_id": hold_id, "contact_ids": sorted(hold_cids), "hashes": sorted(hold_hashes),
+                            "reply_id": reply_id, "task_id": task["task_id"]}
+            evidence.append(("reply_hold_applied", f"hold:{hold_id}",
+                             {"hold_id": hold_id, "contact_ids": sorted(hold_cids), "hashes": sorted(hold_hashes),
+                              "reply_id": reply_id, "class": cls}, (caller, rk)))
             data["tasks"] = [] if existing is not None else [task]
             answer = {"reply_id": reply_id, "class": cls, "suppressed": bool(data.get("hashes")), "held": True,
                       "hold_id": hold_id, "task_id": task["task_id"], "sender_resolved": bool(sender)}
@@ -579,23 +590,60 @@ class OutreachMixin:
 
     def holds_view(self, status: Optional[str]) -> list[dict]:
         with self.lock:
-            return [dict(h) for h in self.holds.values() if status is None or h["status"] == status][:2000]
+            return [self.hold_view(h) for h in self.holds.values() if status is None or h["status"] == status][:2000]
+
+    def hold_group(self, hold_id: str) -> list[str]:
+        """Every ACTIVE hold sharing a contact or an address hash with ``hold_id``, transitively (index lookups)."""
+        h = self.holds[hold_id]
+        group, frontier = set(), [hold_id] if h["status"] == "active" else []
+        while frontier:
+            x = frontier.pop()
+            if x in group:
+                continue
+            group.add(x)
+            hx = self.holds[x]
+            for c in hx["contact_ids"]:
+                frontier.extend(self.hold_by_contact.get(c, ()))
+            for k in hx["hashes"]:
+                frontier.extend(self.hold_by_hash.get(k, ()))
+        return sorted(group)
+
+    def hold_state_sha256(self, hold_id: str) -> str:
+        """What Andre saw: every active hold of the group, the replies behind them and their count. A reply that
+        arrives after he looked changes it, so his decision is stale (409)."""
+        group = self.hold_group(hold_id)
+        return i04_assembly.sha({"hold_id": hold_id, "active_holds": group,
+                                 "replies": sorted(self.holds[x]["reply_id"] for x in group), "reply_count": len(group)})
+
+    def hold_view(self, h: dict) -> dict:
+        out = dict(h)
+        if h["status"] == "active":
+            out["group"] = self.hold_group(h["hold_id"])
+            out["state_sha256"] = self.hold_state_sha256(h["hold_id"])
+        return out
 
     def decide_hold(self, hold_id: str, body: dict) -> dict:
-        """Andre's decision: ``resume`` lifts the hold and nothing else (a suppression stays exactly as it was);
-        ``opt_out`` suppresses every address the hold covers."""
+        """Andre's decision on a hold's whole group, naming its exact state hash (AEGIS round 3 H1): ``resume`` lifts
+        every hold of the group and nothing else (a suppression stays exactly as it was); ``opt_out`` suppresses every
+        address they cover. Every review task tied to them closes."""
         with self.lock:
             self._gate()
             rk = self.rk("hold_decision", hold_id, body)
             if self._idem("andre", rk, body):
-                return dict(self.holds[hold_id])
+                return self.hold_view(self.holds[hold_id])
             h = self._get(self.holds, hold_id, "HOLD_NOT_FOUND")
             if h["status"] != "active":
                 raise Conflict(R("HOLD_CLOSED"))
-            data = {"hold_id": hold_id, "decision": body["decision"]}
-            evidence = [("hold_decided", f"hold:{hold_id}", data, ("andre", rk))]
-            if body["decision"] == "opt_out" and h["hashes"]:
+            if body["state_sha256"] != self.hold_state_sha256(hold_id):
+                raise Conflict(R("STATE_HASH_MISMATCH"))
+            group = self.hold_group(hold_id)
+            hashes = sorted({x for g in group for x in self.holds[g]["hashes"]})
+            data = {"hold_id": hold_id, "hold_ids": group, "decision": body["decision"],
+                    "state_sha256": body["state_sha256"]}
+            evidence = [("hold_decided", f"hold:{hold_id}", {k: data[k] for k in ("hold_ids", "decision",
+                                                                                    "state_sha256")}, ("andre", rk))]
+            if body["decision"] == "opt_out" and hashes:
                 evidence.append(("suppression_added", f"hold:{hold_id}",
-                                 {"hashes": h["hashes"], "reason": "andre_opt_out"}, ("andre", rk)))
-            self._commit("hold_decided", self._req(data, "andre", rk, body, hold_id), "andre", evidence=evidence)
-            return dict(h)
+                                 {"hashes": hashes, "reason": "andre_opt_out"}, ("andre", rk)))
+            self._commit("holds_decided", self._req(data, "andre", rk, body, hold_id), "andre", evidence=evidence)
+            return self.hold_view(h)

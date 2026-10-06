@@ -123,11 +123,10 @@ def test_any_reply_holds_until_andre_decides(tmp_path):
     assert by_id[queued["message_id"]]["status"] == "cancelled"
     assert by_id[queued["message_id"]]["reason"] == "CONTACT_HELD"
     h.refused(h.queue(c, t), 403, "CONTACT_HELD")
-    h.refused(h.post(f"/holds/{ans['hold_id']}/decision", {"request_id": rid(), "decision": "resume"},
-                     caller="dashboard"), 403)
-    h.ok(h.post(f"/holds/{ans['hold_id']}/decision", {"request_id": rid(), "decision": "resume"}, andre=True))
+    h.refused(h.decide(ans["hold_id"], "resume", andre=False), 403)
+    h.ok(h.decide(ans["hold_id"], "resume"))
     assert h.ok(h.queue(c, t), 201)["status"] == "queued"
-    h.refused(h.post(f"/holds/{ans['hold_id']}/decision", {"request_id": rid(), "decision": "opt_out"}, andre=True),
+    h.refused(h.decide(ans["hold_id"], "opt_out", state="0" * 64),
               409, "HOLD_CLOSED")
 
 
@@ -149,7 +148,7 @@ def test_opt_out_wording_suppresses_across_brands(tmp_path):
     ans = h.ok(h.post("/replies", {"request_id": rid(), "message_id": m["message_id"],
                                    "text": "Please r.e.m.o.v.e me -- not interested"}, caller="provider_events"), 201)
     assert ans["suppressed"] is True
-    h.ok(h.post(f"/holds/{ans['hold_id']}/decision", {"request_id": rid(), "decision": "resume"}, andre=True))
+    h.ok(h.decide(ans["hold_id"], "resume"))
     h.refused(h.queue(c, h.template(key="second")), 403, "SUPPRESSED")
     c2 = h.contact(email="other@westagency.test", brand="zbc")
     assert c2["suppressed"] is False                         # suppression is per address, never per domain
@@ -162,7 +161,7 @@ def test_opt_out_decision_suppresses(tmp_path):
     h.ok(h.job("send-queue"))
     ans = h.ok(h.post("/replies", {"request_id": rid(), "message_id": m["message_id"], "text": "who is this?"},
                       caller="provider_events"), 201)
-    h.ok(h.post(f"/holds/{ans['hold_id']}/decision", {"request_id": rid(), "decision": "opt_out"}, andre=True))
+    h.ok(h.decide(ans["hold_id"], "opt_out"))
     assert h.ok(h.get(f"/contacts/{c['contact_id']}"))["suppressed"] is True
 
 

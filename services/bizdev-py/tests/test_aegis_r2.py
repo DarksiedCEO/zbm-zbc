@@ -67,7 +67,7 @@ def test_n1_names_are_scanned_not_capped(h):
 
 
 def test_n1_request_ids_have_one_opaque_shape(h):
-    for bad in ("r-abc", "123-45-6789", "ABCDEF0123456789", "0123456789abcde", "a" * 65, "west-1234"):
+    for bad in ("r-abc", "123-45-6789", "0123456789abcde", "a" * 65, "west-1234"):   # (uppercase hex: round 3)
         r = h.post("/partners", {"request_id": bad, "partner_key": "shape", "kind": "referral", "brands": ["zbm"],
                                  "name": "Shape", "domain": "shape.test"})
         assert r.status_code == 422, bad
@@ -110,7 +110,7 @@ def test_n2_a_stuck_pitch_without_a_deadline_reaches_andre_after_n_ticks(tmp_pat
         h.ok(h.job("submission-queue"))
     stuck = [t for t in h.ok(h.get("/tasks?status=open")) if t["kind"] == "stuck_unknown"]
     assert len(stuck) == 1 and stuck[0]["code"] == "SUBMISSION_STUCK"
-    assert h.ok(h.get("/submissions"))[0]["unknown_ticks"] == 5
+    assert h.ok(h.get("/submissions"))[0]["unknown_ticks"] == 3      # counting stops at the task (round 3 Low)
 
 
 def test_n2_andre_reconciles_a_stuck_submission(tmp_path):
@@ -195,7 +195,7 @@ def test_l2_one_task_and_one_hold_per_sender_per_day(tmp_path):
         h.ok(h.post("/replies", {"request_id": rid(), "from_email": "spam1@evil.test", "text": "buy now"},
                     caller="provider_events"), 201)
     assert len([t for t in h.ok(h.get("/tasks")) if t["kind"] == "review_reply"]) == 1
-    assert len(h.ok(h.get("/holds"))) == 1
+    assert len(h.ok(h.get("/holds"))) == 5                             # one hold per reply since round 3 H1
     h.clock.advance(days=1)
     h.ok(h.post("/replies", {"request_id": rid(), "from_email": "spam1@evil.test", "text": "again"},
                 caller="provider_events"), 201)

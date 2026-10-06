@@ -358,6 +358,15 @@ class Harness:
                                              "deal_id": deal_id, "kind": kind, "amount": amount, "currency": "USD"},
                          caller="finance_31")
 
+    def hold_state(self, hold_id: str) -> str:
+        return next(x for x in self.ok(self.get("/holds")) if x["hold_id"] == hold_id).get("state_sha256", "0" * 64)
+
+    def decide(self, hold_id: str, decision: str, caller: str = "dashboard", andre: bool = True,
+               state: Optional[str] = None):
+        return self.post(f"/holds/{hold_id}/decision", {"request_id": rid(), "decision": decision,
+                                                        "state_sha256": state or self.hold_state(hold_id)},
+                         caller=caller, andre=andre)
+
     # --- builders: outreach
     def contact(self, email: str = "pat@westagency.test", brand: str = "zbm", verify: bool = True, **extra) -> dict:
         c = self.ok(self.post("/contacts", {"request_id": rid(), "brand": brand, "email": email, "name": "Pat Lee",
