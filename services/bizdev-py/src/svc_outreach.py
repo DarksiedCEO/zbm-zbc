@@ -24,6 +24,8 @@ from intelligences import i02_identity, i08_templates, i09_replies, i10_suppress
 from ledger import derived_id
 from reasons import R
 
+BODY_STRANGERS_MAX = 5           # addresses in a reply body that are NOT contacts, held at most this many
+
 
 class OutreachMixin:
     # ------------------------------------------------------------------------------------------------ replay
@@ -95,6 +97,10 @@ class OutreachMixin:
         h = d.get("hold")
         if h:
             self.holds[h["hold_id"]] = {**h, "status": "active", "at": at, "decided_at": None, "decision": None}
+            for x in h["hashes"]:                     # AEGIS round 2 L2: active holds indexed by hash and contact
+                self.hold_by_hash.setdefault(x, set()).add(h["hold_id"])
+            for c in h["contact_ids"]:
+                self.hold_by_contact.setdefault(c, set()).add(h["hold_id"])
             self._cancel_held(h, at)
 
     def _cancel_held(self, h: dict, at: str) -> None:
@@ -106,8 +112,13 @@ class OutreachMixin:
     def _a_hold_decided(self, d, at):
         h = self.holds[d["hold_id"]]
         h.update(status="lifted" if d["decision"] == "resume" else "opted_out", decided_at=at, decision=d["decision"])
+        for x in h["hashes"]:
+            self.hold_by_hash.get(x, set()).discard(h["hold_id"])
+        for c in h["contact_ids"]:
+            self.hold_by_contact.get(c, set()).discard(h["hold_id"])
         t = self.tasks.get(h["task_id"])
-        if t is not None and t["status"] == "open":
+        still = any(o["status"] == "active" and o["task_id"] == h["task_id"] for o in self.holds.values())
+        if t is not None and t["status"] == "open" and not still:
             t.update(status="closed", closed_at=at, outcome=d["decision"])
         if d["decision"] == "opt_out":
             self._suppress_apply(h["hashes"], "andre_opt_out", d["actor"], at)
@@ -115,10 +126,15 @@ class OutreachMixin:
     # ------------------------------------------------------------------------------------------------ checks
 
     def _held(self, contact: Optional[dict], email_hash: Optional[str] = None) -> bool:
-        cid = contact["contact_id"] if contact else None
-        hs = {x for x in (email_hash, contact.get("email_hash") if contact else None) if x}
-        return any(h["status"] == "active" and (cid in h["contact_ids"] or hs & set(h["hashes"]))
-                   for h in self.holds.values())
+        return bool(self._holds_of(contact, email_hash))
+
+    def _holds_of(self, contact: Optional[dict], *hashes) -> set:
+        """Active holds covering a contact or any of the hashes (index lookups, AEGIS round 2 L2)."""
+        out = set(self.hold_by_contact.get(contact["contact_id"], ())) if contact else set()
+        for x in {*(h for h in hashes if h), *([contact["email_hash"]] if contact and contact.get("email_hash")
+                                               else [])}:
+            out |= self.hold_by_hash.get(x, set())
+        return out
 
     def _suppressed(self, contact: dict, *more) -> bool:
         return any(i10_suppression.suppressed(self.suppression, h) for h in (contact.get("email_hash"), *more) if h)
@@ -521,25 +537,41 @@ class OutreachMixin:
             sender = {h for h in (from_h, m["to_hash"] if m else None, c.get("email_hash") if c else None) if h}
             hold_cids = {c["contact_id"]} if c is not None else set()
             hold_hashes = set(sender) | ({raw_h} if raw_h else set())
-            for e in i02_identity.emails_in(body["text"]):          # named in the body: held, never suppressed
+            strangers = 0
+            for e in i02_identity.all_emails_in(body["text"]):   # named in the body: held, never suppressed
                 eh = i02_identity.keyed(self.pii_key, "email", e)
-                hold_hashes.add(eh)
                 named = by_email.get(eh)
-                if named:
+                if named:                                        # AEGIS round 2 L1: EVERY contact named is held
                     hold_cids.add(named)
+                    hold_hashes.add(eh)
+                elif strangers < BODY_STRANGERS_MAX:             # the cap applies to addresses that are not contacts
+                    strangers += 1
+                    hold_hashes.add(eh)
             evidence = []
             if cls == "unsubscribe" and sender:
                 data.update(hashes=sorted(sender), reason="stop_reply")
                 evidence.append(("suppression_added", f"reply:{reply_id}",
                                  {"hashes": sorted(sender), "reason": "stop_reply"}, (caller, rk)))
-            hold_id = derived_id("hld", reply_id)
-            task = self._task("review_reply", f"contact:{cid}" if cid else f"reply:{reply_id}", reply_id, cls)
-            data["hold"] = {"hold_id": hold_id, "contact_ids": sorted(hold_cids), "hashes": sorted(hold_hashes),
-                            "reply_id": reply_id, "task_id": task["task_id"]}
-            data["tasks"] = [task]
-            evidence.append(("reply_hold_applied", f"hold:{hold_id}",
-                             {"hold_id": hold_id, "contact_ids": sorted(hold_cids), "hashes": sorted(hold_hashes),
-                              "reply_id": reply_id, "class": cls}, (caller, rk)))
+            # AEGIS round 2 L2: one open review task per sender per day; a hold only for what is not already held
+            sender_key = f"contact:{cid}" if cid else (from_h or raw_h or f"reply:{reply_id}")
+            task = self._task("review_reply", sender_key, self.today(), cls)
+            existing = self.tasks.get(task["task_id"])
+            if existing is not None and existing["status"] != "open":
+                task = self._task("review_reply", sender_key, f"{self.today()}|{reply_id}", cls)
+                existing = None
+            new_cids = {x for x in hold_cids if not self.hold_by_contact.get(x)}
+            new_hashes = {x for x in hold_hashes if not self.hold_by_hash.get(x)}
+            covering = sorted(self._holds_of(c, *hold_hashes))
+            if new_cids or new_hashes or not covering:
+                hold_id = derived_id("hld", reply_id)
+                data["hold"] = {"hold_id": hold_id, "contact_ids": sorted(new_cids), "hashes": sorted(new_hashes),
+                                "reply_id": reply_id, "task_id": task["task_id"]}
+                evidence.append(("reply_hold_applied", f"hold:{hold_id}",
+                                 {"hold_id": hold_id, "contact_ids": sorted(new_cids), "hashes": sorted(new_hashes),
+                                  "reply_id": reply_id, "class": cls}, (caller, rk)))
+            else:
+                hold_id = covering[0]
+            data["tasks"] = [] if existing is not None else [task]
             answer = {"reply_id": reply_id, "class": cls, "suppressed": bool(data.get("hashes")), "held": True,
                       "hold_id": hold_id, "task_id": task["task_id"], "sender_resolved": bool(sender)}
             self._commit("reply_received", self._req(data, caller, rk, body, answer), caller, evidence=evidence)

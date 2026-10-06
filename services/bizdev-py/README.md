@@ -36,6 +36,9 @@ cd src && python3 -m api                                # NBD_BIND_ADDR (127.0.0
 Live run against the real ledger binary and this production entrypoint:
 `LEDGER_BIN=<ledger-rust>/target/release/server python3 devtools/live_run.py` (no check depends on the time of day).
 
+Every write carries a `request_id`: a UUID (with or without hyphens) or 16..64 lowercase hex. Finance's ids
+(`finance_event_id`, `finance_ref`) are finance-py's own generated ids (`fin-<prefix>-<40 hex>` or 26 Crockford).
+
 Headers: `Authorization: Bearer <service token>` on every route but `/health`; `X-NBD-Caller-Token` everywhere
 else; Andre's routes also `X-Andre-Approval-Token`, accepted only through the `dashboard` caller.
 
@@ -55,6 +58,8 @@ else; Andre's routes also `X-Andre-Approval-Token`, accepted only through the `d
 | `NBD_POSTAL_ADDRESS` | — | required with an outreach domain; printed in every email (CAN-SPAM) |
 | `NBD_OUTREACH_FROM_LOCAL` | `partners` | the From mailbox (must accept replies; `noreply` refused) |
 | `NBD_DAILY_SEND_CAP` | 50 | outreach emails per UTC date (1..200), counted by the service clock's date |
+| `NBD_UNKNOWN_TICKS_BEFORE_TASK` | 6 | job runs a submission or payout may stay `sending` with an unknown outcome before one task opens for Andre (1..1000) |
+| `NBD_PAYOUT_MAX_REFUSALS` | 3 | refusals by Finance after which a payout is `held` (never resent) with a task for Andre (1..20) |
 | `NBD_QUEUE_MAX_PER_CALLER` | 500 | queued messages or submissions one caller may have waiting (1..5000); past it `429 QUEUE_FULL` |
 | `NBD_EMAIL_PROVIDER`, `NBD_SUBMISSION_PROVIDER`, `NBD_BID_SOURCE_PROVIDER`, `NBD_ONBOARDING_URL`, `NBD_FINANCE_URL`, `NBD_LEGAL_URL`, `NBD_SALES_SUPPRESSION_URL` | unset | not built: setting one refuses start |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | — | unset = every write refused (fail closed) |
@@ -89,6 +94,7 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /responses`, `/responses/{id}/versions`; `GET /responses/{id}` | worker | a response or pitch from approved blocks + custom text |
 | `POST /responses/{id}/approve` | Andre | exact version and hash, naming exactly the sensitivity flags raised |
 | `POST /responses/{id}/submit` | worker | every gate; queued for the submission port |
+| `POST /submissions/{id}/reconcile` | Andre | settle a stuck `sending` submission by its `state_sha256`: `delivered` or `not_delivered` |
 | `GET /submissions`; `POST /submissions/{id}/cancel` | worker | the submission queue (`queued`, `sending` — outcome unknown, reconciled, never resubmittable — `submitted`, `refused`, `cancelled`) |
 | `POST /partners`; `GET /partners`, `/partners/{id}` | worker | referral, agency_alliance, white_label |
 | `POST /partners/{id}/rate`; `/rate/approve` | worker; Andre | versioned commission rate (0.01..50.00 %) |
@@ -99,6 +105,7 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `POST /partner-deals/{id}/deal-approval`; `/won` | Andre | won needs an approved rate and a Legal agreement in force |
 | `POST /finance/events` | finance_31 | a client payment, refund or chargeback on a won partner deal |
 | `POST /finance/payouts/{id}/paid` | finance_31 | Finance paid a payout it took (a payout whose answer was lost stays `sending` and is reconciled by `payout-request`) |
+| `POST /payouts/{id}/reconcile` | Andre | settle a stuck `sending` or `held` payout by its `state_sha256`: `paid` or `not_paid` |
 | `GET /payouts` | dashboard, finance_31 | payout requests (no tax reference shown) |
 | `POST /contacts`; `GET /contacts/{id}` | worker | email-only contacts of partners and pursuits |
 | `POST /contacts/{id}/merge-fields` | dashboard | the only values `{{first_name}}` / `{{company}}` render |

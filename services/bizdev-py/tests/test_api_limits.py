@@ -3,7 +3,7 @@ size and shape limits, no-store, and error bodies that never echo the request.""
 
 import json
 
-from helpers import CALLERS, SERVICE_TOKEN, rid
+from helpers import fin_id, CALLERS, SERVICE_TOKEN, rid
 
 
 def test_bearer_required(h):
@@ -16,7 +16,7 @@ def test_caller_required_and_scoped(h):
     r = h.client.get("/nbd/v1/status", headers={"Authorization": f"Bearer {SERVICE_TOKEN}"})
     assert r.status_code == 403 and r.json()["detail"] == "CALLER_UNKNOWN"
     h.refused(h.get("/status", caller="bizdev_agent"), 403, "CALLER_NOT_ALLOWED")
-    h.refused(h.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:ev-1",
+    h.refused(h.post("/finance/events", {"request_id": rid(), "finance_event_id": fin_id(),
                                          "deal_id": "nb-pdl-" + "0" * 40, "kind": "payment", "amount": "1.00",
                                          "currency": "USD"}, caller="bizdev_agent"), 403, "CALLER_NOT_ALLOWED")
     h.refused(h.post("/outreach/email", {"request_id": rid(), "contact_id": "nb-cnt-" + "0" * 40,

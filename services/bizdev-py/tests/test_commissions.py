@@ -5,8 +5,11 @@ commission first; payouts are requests to Finance through a port, never Stripe, 
 from decimal import Decimal
 
 import money
-from helpers import Harness, RecordingPayouts, rid, wired_ports
+from helpers import fin_id, Harness, RecordingPayouts, rid, wired_ports
 from intelligences import i11_commission
+
+
+DUP = "fin-evt-" + "ab" * 20
 
 
 def _h(tmp_path, **over):
@@ -24,7 +27,7 @@ def test_payment_events_only_from_finance_and_only_on_won_deals(tmp_path):
     h = _h(tmp_path)
     p = h.partner()
     d = h.deal(p["partner_id"])
-    r = h.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:ev-1", "deal_id": d["deal_id"],
+    r = h.post("/finance/events", {"request_id": rid(), "finance_event_id": fin_id(), "deal_id": d["deal_id"],
                                    "kind": "payment", "amount": "10.00", "currency": "USD"})
     h.refused(r, 403, "CALLER_NOT_ALLOWED")
     h.refused(h.money_event(d["deal_id"], "payment", "10.00"), 409, "DEAL_NOT_WON")
@@ -65,10 +68,10 @@ def test_floats_and_bad_amounts_refused(tmp_path):
     h = _h(tmp_path)
     d = h.won_deal()
     for bad in (10.0, 10, "10", "0.00", "-5.00", "1e2", "10.001"):
-        r = h.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:ev-x", "deal_id": d["deal_id"],
+        r = h.post("/finance/events", {"request_id": rid(), "finance_event_id": fin_id(), "deal_id": d["deal_id"],
                                        "kind": "payment", "amount": bad, "currency": "USD"}, caller="finance_31")
         assert r.status_code == 422, bad
-    r = h.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:ev-x", "deal_id": d["deal_id"],
+    r = h.post("/finance/events", {"request_id": rid(), "finance_event_id": fin_id(), "deal_id": d["deal_id"],
                                    "kind": "payment", "amount": "1.00", "currency": "EUR"}, caller="finance_31")
     assert r.status_code == 422
 
@@ -76,11 +79,11 @@ def test_floats_and_bad_amounts_refused(tmp_path):
 def test_finance_event_id_is_unique(tmp_path):
     h = _h(tmp_path)
     d = h.won_deal()
-    h.ok(h.money_event(d["deal_id"], "payment", "100.00", ev="fin:ev-dup"))
-    d2 = h.ok(h.money_event(d["deal_id"], "payment", "100.00", ev="fin:ev-dup"))     # same facts: once
+    h.ok(h.money_event(d["deal_id"], "payment", "100.00", ev=DUP))
+    d2 = h.ok(h.money_event(d["deal_id"], "payment", "100.00", ev=DUP))     # same facts: once
     assert d2["commission"]["client_paid"] == "100.00"
-    h.refused(h.money_event(d["deal_id"], "payment", "999.00", ev="fin:ev-dup"), 409, "FINANCE_EVENT_REUSED")
-    h.refused(h.money_event(d["deal_id"], "refund", "100.00", ev="fin:ev-dup"), 409, "FINANCE_EVENT_REUSED")
+    h.refused(h.money_event(d["deal_id"], "payment", "999.00", ev=DUP), 409, "FINANCE_EVENT_REUSED")
+    h.refused(h.money_event(d["deal_id"], "refund", "100.00", ev=DUP), 409, "FINANCE_EVENT_REUSED")
 
 
 def test_refund_claws_back_unpaid(tmp_path):
@@ -140,12 +143,12 @@ def test_payout_needs_payee_and_finance_confirms_paid(tmp_path):
     h.ok(h.payee(p["partner_id"]))
     assert h.ok(h.job("payout-request"))["with_finance"] == 1
     pay = h.ok(h.get("/payouts"))[0]
-    h.refused(h.post(f"/finance/payouts/{pay['payout_id']}/paid", {"request_id": rid(), "finance_ref": "fin:paid-1"}),
+    h.refused(h.post(f"/finance/payouts/{pay['payout_id']}/paid", {"request_id": rid(), "finance_ref": fin_id("pay")}),
               403)
-    paid = h.ok(h.post(f"/finance/payouts/{pay['payout_id']}/paid", {"request_id": rid(), "finance_ref": "fin:paid-1"},
+    paid = h.ok(h.post(f"/finance/payouts/{pay['payout_id']}/paid", {"request_id": rid(), "finance_ref": fin_id("pay")},
                        caller="finance_31"))
     assert paid["status"] == "paid"
-    h.refused(h.post(f"/finance/payouts/{pay['payout_id']}/paid", {"request_id": rid(), "finance_ref": "fin:paid-2"},
+    h.refused(h.post(f"/finance/payouts/{pay['payout_id']}/paid", {"request_id": rid(), "finance_ref": fin_id("pay")},
                      caller="finance_31"), 409, "PAYOUT_NOT_WITH_FINANCE")
 
 

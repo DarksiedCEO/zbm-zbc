@@ -76,10 +76,9 @@ def test_raw_tax_id_shapes():
                 "taxpayer id 1 23 45 6789", "123_45_6789", "12/3456789", "123|45|6789", "12 : 3456789",
                 "１２３-４５-６７８９"):
         assert i12_tax_refs.raw_tax_id(raw), raw
-    for ok in ("Suite 400, Los Angeles 90001", "partner since 2019", "12345678", "1 2 3 4 5 6 7 8"):
-        assert not i12_tax_refs.raw_tax_id(ok), ok
-    for longer in ("+1 310 555 0100", "1234567890", "310-555-0100"):      # nine digits in a row once separators go
-        assert i12_tax_refs.raw_tax_id(longer), longer
+    for ok in ("Suite 400, Los Angeles 90001", "partner since 2019", "12345678", "1 2 3 4 5 6 7 8",
+               "+1 310 555 0100", "1234567890", "310-555-0100", "hubspot:12345678901"):
+        assert not i12_tax_refs.raw_tax_id(ok), ok          # a run of exactly nine digits only (AEGIS round 2 N1)
     assert i12_tax_refs.ref_ok("vault:tax:AbCdEf_123-45-xyz") is True
     assert i12_tax_refs.ref_ok("vault:tax:12345678901234567") is False
     assert i12_tax_refs.ref_ok("vault:tax:1a2b3c4d5e6f7g8h9i") is False          # nine digits however arranged

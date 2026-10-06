@@ -175,6 +175,8 @@ class Settings:
     queue_max_per_caller: int = 500
     deal_approval_threshold: Decimal = DEAL_APPROVAL_CEILING
     aggregation_window_days: int = 365
+    unknown_ticks_before_task: int = 6
+    payout_max_refusals: int = 3
     bind_addr: str = "127.0.0.1"
     port: int = 8490
 
@@ -325,6 +327,9 @@ def load(env: Optional[dict] = None) -> Settings:
                            "lowered)")
     s.deal_approval_threshold = threshold
     s.aggregation_window_days = _int(env, "NBD_AGGREGATION_WINDOW_DAYS", 365, 90, 3650)
+    # AEGIS round 2 N2 / L3: counted in job runs (ticks), never wall hours
+    s.unknown_ticks_before_task = _int(env, "NBD_UNKNOWN_TICKS_BEFORE_TASK", 6, 1, 1000)
+    s.payout_max_refusals = _int(env, "NBD_PAYOUT_MAX_REFUSALS", 3, 1, 20)
     s.bind_addr = (env.get("NBD_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "NBD_PORT", 8490, 1024, 65535)
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it

@@ -105,12 +105,14 @@ def iso_in(seconds: float) -> str:
         .replace("+00:00", "Z")
 
 
-_NO_DIGITS = str.maketrans("0123456789", "ghijklmnop")
-
-
 def rid() -> str:
-    """No digits: partner and deal request ids may hold at most eight (ADR 0016 decision 16)."""
-    return "live-" + uuid.uuid4().hex.translate(_NO_DIGITS)
+    """A UUID: the one opaque request-id shape the service accepts (ADR 0016 decision 27)."""
+    return str(uuid.uuid4())
+
+
+def fin_id(prefix: str = "evt") -> str:
+    """A finance-py generated id (``ledger.derived_id``: fin-<prefix>-<40 hex>)."""
+    return f"fin-{prefix}-" + uuid.uuid4().hex + uuid.uuid4().hex[:8]
 
 
 class Api:
@@ -318,10 +320,10 @@ def _main(work: Path) -> int:
         check("agreements and partner wins are refused LEGAL_UNAVAILABLE while Legal is a stand-in",
               agr.status_code == 503 and agr.json()["detail"] == "LEGAL_UNAVAILABLE"
               and won.status_code == 503 and won.json()["detail"] == "LEGAL_UNAVAILABLE")
-        pay = a.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:live-ev-a",
+        pay = a.post("/finance/events", {"request_id": rid(), "finance_event_id": fin_id(),
                                          "deal_id": deal["deal_id"], "kind": "payment", "amount": "100.00",
                                          "currency": "USD"}, caller="finance_31")
-        flt = a.post("/finance/events", {"request_id": rid(), "finance_event_id": "fin:live-ev-b",
+        flt = a.post("/finance/events", {"request_id": rid(), "finance_event_id": fin_id(),
                                          "deal_id": deal["deal_id"], "kind": "payment", "amount": 100.0,
                                          "currency": "USD"}, caller="finance_31")
         check("no commission without a won deal; a float amount is refused",

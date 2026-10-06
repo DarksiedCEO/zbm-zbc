@@ -25,8 +25,27 @@ _SUFFIXES = ("incorporated", "corporation", "company", "limited", "inc", "corp",
              "plc", "gmbh", "sa", "ag", "pc", "the")
 
 
+def idna(dom: str) -> Optional[str]:
+    """AEGIS round 2 L4: a domain IDNA-encoded (``münchen.de`` -> ``xn--mnchen-3ya.de``) before it is hashed or
+    matched, so the Unicode and punycode spellings are one key. None when it cannot be encoded."""
+    d = unicodedata.normalize("NFKC", dom).strip().lower().rstrip(".")
+    if d.isascii():
+        return d
+    try:
+        return d.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return None
+
+
 def email(raw: str) -> Optional[str]:
-    v = raw.strip().lower()
+    v = raw.strip()
+    if "@" in v:
+        local, dom = v.rsplit("@", 1)
+        dom = idna(dom)
+        if dom is None:
+            return None
+        v = f"{local}@{dom}"
+    v = v.lower()
     if len(v) > 254 or not _EMAIL.fullmatch(v):
         return None
     local, dom = v.rsplit("@", 1)
@@ -43,7 +62,9 @@ def raw_address(raw: str) -> str:
 
 
 def domain(raw: str) -> Optional[str]:
-    v = raw.strip().lower().rstrip(".")
+    v = idna(raw)
+    if v is None:
+        return None
     v = v[4:] if v.startswith("www.") else v
     return v if len(v) <= 253 and _DOMAIN.fullmatch(v) else None
 
@@ -77,6 +98,18 @@ def key_fingerprint(key: bytes) -> str:
 
 
 _EMAIL_IN_TEXT = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.(?:[A-Za-z]{2,24}|xn--[A-Za-z0-9-]{1,59})")
+
+
+def all_emails_in(text: str, limit: int = 2000) -> list[str]:
+    """Every distinct canonical address written in a text (after NFKC), up to ``limit``."""
+    out: list[str] = []
+    seen = set()
+    for m in _EMAIL_IN_TEXT.findall(unicodedata.normalize("NFKC", text or ""))[:limit]:
+        e = email(m)
+        if e and e not in seen:
+            seen.add(e)
+            out.append(e)
+    return out
 
 
 def emails_in(text: str) -> list[str]:

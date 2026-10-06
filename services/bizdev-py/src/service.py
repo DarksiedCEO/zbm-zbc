@@ -95,6 +95,8 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
         self.messages: dict[str, dict] = {}
         self.suppression: dict[str, dict] = {}
         self.holds: dict[str, dict] = {}
+        self.hold_by_hash: dict[str, set] = {}          # active holds by keyed address hash (AEGIS round 2 L2)
+        self.hold_by_contact: dict[str, set] = {}
         self.tasks: dict[str, dict] = {}
         self.sent_per_day: dict[str, int] = {}
         self.requests: dict[tuple, tuple] = {}

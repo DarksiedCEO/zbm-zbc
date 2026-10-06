@@ -57,7 +57,7 @@ def test_restart_keeps_everything(hd):
 
 
 def test_idempotent_replay_survives_restart(hd):
-    body = {"request_id": "same-one", "partner_key": "west", "kind": "referral", "brands": ["zbm"], "name": "West",
+    body = {"request_id": "6f0f2b1e-0000-4000-8000-00000000a001", "partner_key": "west", "kind": "referral", "brands": ["zbm"], "name": "West",
             "domain": "west.test"}
     first = hd.ok(hd.post("/partners", body), 201)
     h2 = hd.restart()
@@ -67,11 +67,11 @@ def test_idempotent_replay_survives_restart(hd):
 
 def test_request_key_is_actor_op_target_request_id(h):
     p = h.partner()
-    body = {"request_id": "rk-1", "version": 1, "rate_pct": "10.00"}
+    body = {"request_id": "6f0f2b1e-0000-4000-8000-00000000a003", "version": 1, "rate_pct": "10.00"}
     h.ok(h.post(f"/partners/{p['partner_id']}/rate", body))
     h.ok(h.post(f"/partners/{p['partner_id']}/rate", body))                  # replay: same answer
-    assert ("bizdev_agent", f"rate_propose|{p['partner_id']}|rk-1") in h.svc.requests
-    assert ("dashboard", f"rate_propose|{p['partner_id']}|rk-1") not in h.svc.requests
+    assert ("bizdev_agent", f"rate_propose|{p['partner_id']}|6f0f2b1e-0000-4000-8000-00000000a003") in h.svc.requests
+    assert ("dashboard", f"rate_propose|{p['partner_id']}|6f0f2b1e-0000-4000-8000-00000000a003") not in h.svc.requests
 
 
 def test_every_line_is_anchored_and_typed_events_come_first(h):
@@ -245,7 +245,7 @@ def test_a_lost_ledger_answer_stops_writes_and_is_rolled_forward(tmp_path):
     led.after = True
     h = Harness(tmp_path, data_dir=str(tmp_path / "d"), ledger=led)
     led.lose = 2
-    body = {"request_id": "once", "partner_key": "lost-one", "kind": "referral", "brands": ["zbm"], "name": "L",
+    body = {"request_id": "6f0f2b1e-0000-4000-8000-00000000a002", "partner_key": "lost-one", "kind": "referral", "brands": ["zbm"], "name": "L",
             "domain": "l.test"}
     h.refused(h.post("/partners", body), 503, "LEDGER_UNAVAILABLE")
     assert h.svc.integrity["ok"] is False

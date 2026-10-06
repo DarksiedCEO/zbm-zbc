@@ -6,7 +6,8 @@ chargebacks, never below 0.00 and never above the won deal value. Commission acc
 rate)``: exact, ONE half-up quantize (finance-py's ``q``), always on the CUMULATIVE base so rounding never drifts.
 Money is "settled" once it is moved into a payout request. A clawback (accrued falls) is taken first from the unpaid
 balance, then from payout requests Finance has not yet taken (newest first, cancelled at 0.00); whatever is left is a
-SHORTFALL on money already with Finance or paid, recorded for Andre and never recovered here. Never: pays anything."""
+SHORTFALL on money already with Finance or paid, recorded for Andre and never recovered here. The shortfall is always
+``max(0, settled - accrued)`` (AEGIS round 2 L3), so a later payment that restores the accrual absorbs it. Never: pays anything."""
 
 from __future__ import annotations
 
@@ -49,7 +50,7 @@ def apply(state: dict, kind: str, amount: str, rate_pct: str, deal_value: str, o
     new_acc = money.commission_total(base, rate)
     delta = money.q(new_acc - old_acc)
     settled = money.D(state["settled"])
-    cuts, short = [], money.ZERO
+    cuts = []
     if delta < 0:
         owed_back = -delta
         free = money.q(old_acc - settled)                   # unpaid before this event (may be negative: shortfall)
@@ -63,8 +64,15 @@ def apply(state: dict, kind: str, amount: str, rate_pct: str, deal_value: str, o
                 cuts.append({"payout_id": p["payout_id"], "amount": money.fmt(cut)})
                 settled = money.q(settled - cut)
                 owed_back = money.q(owed_back - cut)
-        short = owed_back
+    old_short = money.D(state["shortfall"])
+    new_short = shortfall_of(new_acc, settled)
     st = {"client_paid": money.fmt(paid), "client_reversed": money.fmt(rev), "base": money.fmt(base),
-          "accrued": money.fmt(new_acc), "settled": money.fmt(settled),
-          "shortfall": money.fmt(money.q(money.D(state["shortfall"]) + short))}
-    return {"state": st, "accrued_delta": money.sfmt(delta), "payout_cuts": cuts, "shortfall_delta": money.fmt(short)}
+          "accrued": money.fmt(new_acc), "settled": money.fmt(settled), "shortfall": money.fmt(new_short)}
+    grew = money.q(new_short - old_short) if new_short > old_short else money.ZERO
+    return {"state": st, "accrued_delta": money.sfmt(delta), "payout_cuts": cuts, "shortfall_delta": money.fmt(grew)}
+
+
+def shortfall_of(accrued, settled) -> "Decimal":
+    """AEGIS round 2 L3: the shortfall is DERIVED, never accumulated: what has been settled (moved into payout
+    requests) beyond what is accrued now, floored at 0.00. A later payment that restores the accrual absorbs it."""
+    return max(money.ZERO, money.q(money.D(settled) - money.D(accrued)))

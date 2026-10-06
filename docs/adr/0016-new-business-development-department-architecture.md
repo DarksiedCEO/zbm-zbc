@@ -46,7 +46,8 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
    `unknown` on one is `needs_andre`, otherwise `bid` needs five yeses. **`bid` is always Andre's** and names the
    exact qualification hash he saw (a re-qualification makes it stale); `no_bid` may be recorded by the agent.
 9. **Counterparty identity.** Three keys per deal: the caller's ref, the registrable domain (sales-py's rule plus
-   common `.gov` two-level suffixes) and the organisation name normalised by i02 (NFKC, accents dropped, Cyrillic /
+   common `.gov` two-level suffixes; every domain and email domain is IDNA-encoded first, so `münchen.de` is
+   `xn--mnchen-3ya.de`, AEGIS round 2 L4) and the organisation name normalised by i02 (NFKC, accents dropped, Cyrillic /
    Greek lookalikes folded with sales-py's confusables table, legal suffixes such as Inc / LLC / Incorporated / The
    dropped).
 10. **Responses and pitches.** Boilerplate blocks and responses are versioned and **immutable**: a change is a new
@@ -71,7 +72,11 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     stays `sending` — never `failed`, never resent, never resubmittable (it may have been delivered) — and each run
     reconciles it through the port's `submission_status` (the stand-in answers `unknown`). If its deadline passes
     while it is still unknown, the queue job or `deadline-sweep` opens ONE task for Andre
-    (`SUBMISSION_OUTCOME_UNKNOWN`); it is never auto-failed. (AEGIS round 1 follow-up.) `deadline-sweep` cancels late queued submissions and
+    (`SUBMISSION_OUTCOME_UNKNOWN`); it is never auto-failed. (AEGIS round 1 follow-up.) Every unknown run is counted
+    durably; after `NBD_UNKNOWN_TICKS_BEFORE_TASK` of them (default 6, counted in job runs, never wall hours) one
+    `SUBMISSION_STUCK` task opens, deadline or not, and Andre settles it at `POST /submissions/{id}/reconcile`, naming
+    its exact `state_sha256`: `delivered` makes it `submitted`; `not_delivered` makes the response resubmittable
+    (AEGIS round 2 N2). `deadline-sweep` cancels late queued submissions and
     opens one task per pursuit whose deadline passed.
 12. **Government bids (fail closed).** Every government bid carries i05's baseline items (SAM registration,
     debarment / suspension, independent price determination, authority to bind, conflict of interest, gifts and
@@ -95,21 +100,22 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     against a counterparty and goes through the deal gate (decision 18). Only Andre marks a partner deal won, and only
     with an approved rate (snapshotted into the deal: later rate changes do not touch it) and an agreement Legal (37)
     shows in force (asked outside the lock; the stand-in answers `unavailable`: `503 LEGAL_UNAVAILABLE`).
-16. **Tax information** is a reference only, by structure first and by scanning second (corrected in AEGIS round
-    1, M2: at 2d398f8 a nine-digit id still fit in `partner_key`, `counterparty.ref` and `request_id`, and
-    separators such as `x1-23456789` or `1 2 3 4 5 6 7 8 9` beat the scan). (1) Partner records carry NO free text
-    (no notes field on a partner or a partner deal; unknown fields are 422). (2) Every caller-chosen string of a
-    partner, partner-deal, deal-approval, loss, agreement and Finance request — `request_id`, `partner_key`,
-    `counterparty.ref`, `finance_event_id`, `finance_ref`, `finance_payee_ref` and the tax reference — holds at most
-    EIGHT digits in total (`models._max8_digits`), and every name and domain at most six, so no nine-digit id fits in
-    any arrangement. sales-py does not require UUID request ids, so neither does this service; the cap applies
-    instead. Server-issued `nb-…` ids are exempt: they are accepted only when they name an existing record. (3) A
-    tax reference is exactly `vault:tax:<16..64>` or `tok:<16..64>`, the Finance payee reference `fin:<4..120>`. (4)
-    As a second layer, i12 NFKC-normalises every string of a partner body, drops EVERY non-alphanumeric character
-    and refuses nine digits in a row (`422 TAX_ID_RAW_REFUSED`, never echoed); request_id is no longer skipped (only
-    money values, versions, hashes and server-issued ids are). Keys named `tin`, `ssn`, `ein`, `itin`, `tax_id`,
-    `taxpayer_id` (and the other spellings in `api.FORBIDDEN_KEYS`) are refused 422 in every body. The payee is set
-    by Andre only, never shown back, and digested in the audit export.
+16. **Tax information** is a reference only, by structure first and by scanning second (as corrected in AEGIS
+    rounds 1 and 2). (1) Partner records carry NO free text (no notes field on a partner or a partner deal; unknown
+    fields are 422). (2) Request ids are opaque and of one shape — a UUID with or without hyphens, or 16..64
+    lowercase hex — so nothing can be typed into one (round 2 N1; the round-1 digit cap on them over-refused UUIDs).
+    Finance's ids (`finance_event_id`, a payout's `finance_ref`) must be exactly finance-py's own generated ids,
+    `fin-<prefix>-<26 Crockford base32>` (`service.rid`) or `fin-<prefix>-<40 hex>` (`ledger.derived_id`), as
+    `OWN_ID_RE` in `services/finance-py/src/models.py` defines them. (3) Human-entered fields — every key (`partner_key`),
+    counterparty `ref` (pursuits and partner deals alike), name and domain — are SCANNED, not capped: NFKC-normalised
+    with every separator dropped, a run of exactly nine digits (an SSN / ITIN / EIN) or any other i12 tax-id shape is
+    refused 422, while a longer run such as `hubspot:12345678901` is accepted. (4) A tax reference is exactly
+    `vault:tax:<16..64>` or `tok:<16..64>` and the Finance payee reference `fin:<4..120>`, each with at most eight
+    digits in total. (5) As a second layer, i12 scans every string of a partner body the same way (`422
+    TAX_ID_RAW_REFUSED`, never echoed), skipping only money values, versions, hashes, server-issued ids, Finance's
+    ids and the opaque request id. Keys named `tin`, `ssn`, `ein`, `itin`, `tax_id`, `taxpayer_id` (and the other
+    spellings in `api.FORBIDDEN_KEYS`) are refused 422 in every body. The payee is set by Andre only, never shown back,
+    and digested in the audit export.
 17. **Commissions, clawbacks, payouts.** Commission accrues only on money Finance (31) reports as actually paid by the
     client (`POST /finance/events`, caller `finance_31`, kinds `payment`, `refund`, `chargeback`, USD), on a won
     deal. The commissionable base is net client money, floored at 0.00 and capped at the won value. Accrued =
@@ -127,7 +133,13 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     Only `delivered` with a Finance reference moves a payout to `with_finance`; only an explicit `refused` requeues
     it, after taking from it any outstanding shortfall of its deal. A timeout, an exception or any other answer is an
     UNKNOWN outcome: the payout stays `sending` (never resent, never cut by a clawback) and each `payout-request`
-    run reconciles it through the port's `payout_status` (the stand-in answers `unknown`). (AEGIS round 1 M1.)
+    run reconciles it through the port's `payout_status` (the stand-in answers `unknown`). (AEGIS round 1 M1.) After
+    `NBD_UNKNOWN_TICKS_BEFORE_TASK` unknown runs one `PAYOUT_STUCK` task opens; after `NBD_PAYOUT_MAX_REFUSALS`
+    refusals (default 3) the payout is `held`, never resent, with one `PAYOUT_REFUSED` task. Andre settles a stuck or
+    held payout at `POST /payouts/{id}/reconcile` by its exact `state_sha256`: `paid`, or `not_paid` (requeued after
+    the shortfall is applied, its refusal count reset). The shortfall is DERIVED — `max(0, settled - accrued)` — so a
+    later payment that restores the accrual absorbs it, and its open task is closed as `absorbed` the moment it
+    reaches 0.00 (AEGIS round 2 N2, L3).
 18. **Deal approval, aggregated.** The gate of a pursuit or partner deal is the SUM of the values of every deal in
     its counterparty group (pursuits and partner deals, both brands) that still counts: every OPEN deal whatever its
     age, and — opened within `NBD_AGGREGATION_WINDOW_DAYS` — won deals and any pursuit whose submission was delivered
@@ -163,7 +175,10 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     not parse (quoted or UTF-8 local part, over 64 characters) is held under the keyed hash of its normalised raw form;
     an unknown message id is recorded, not refused. Addresses written in the body, after NFKC (fullwidth forms
     count), are held — never suppressed — whoever sent the reply, and matched against existing contacts. Every reply
-    opens a hold record and a review task, even with nothing resolvable. The reply text is never stored (SHA-256).
+    opens a review task, even with nothing resolvable. The reply text is never stored (SHA-256). AEGIS round 2: every
+    address in the body that is an existing contact is held (the cap of five applies only to addresses that are not
+    contacts, L1); one review task per sender per day, and a new hold only for what is not already held — active
+    holds are indexed by address hash and by contact (L2).
 22. **Ports** (`src/ports.py`, `src/legal_client.py`): email, submission, bid source, Onboarding and Finance hand-offs,
     Finance payouts, Legal agreements. Each stand-in fails closed and says so in `/status`; a port that raises is
     unavailable; no port is called with the lock held.
@@ -191,7 +206,8 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     `/health` is 503 `closed`, and the integrity and job routes answer `503 SERVICE_CLOSED`. The ledger's chain
     `verify()` (an HTTP call) runs **outside** the service lock; its verdict is reported exactly as returned
     (`ledger_valid` is `True` only for a real `True`), and the integrity result and log length are read fresh after it.
-27. **Idempotency.** Every write carries a `request_id`; the request key is `op|target|request_id` per actor, with
+27. **Idempotency.** Every write carries a `request_id` — a UUID (with or without hyphens) or 16..64 lowercase hex,
+    nothing else (AEGIS round 2 N1); the request key is `op|target|request_id` per actor, with
     the SHA-256 of the body: the same body answers what the first call did (across restarts), a different body is
     `409 REQUEST_ID_REUSED`. Ledger event ids are derived from the same identity, so a retry records nothing twice.
 28. **Jobs** (caller `scheduler`, idempotent per request id, one at a time — `409 JOB_RUNNING`): `send-queue`,
@@ -280,3 +296,18 @@ in fact arrived could be submitted twice. Now an unknown outcome stays `sending`
 is reconciled through the new `SubmissionPort.submission_status`, only an explicit refusal makes the response
 resubmittable, and a deadline passing while the outcome is unknown opens one task for Andre (decision 11).
 Regression tests: `services/bizdev-py/tests/test_aegis_r1b.py` (each fails on 22fe413).
+
+## Amendment — AEGIS round 2 (Oct 6 2026, on 5e16d09): NOT BLOCKING, every item fixed
+
+Regression tests: `services/bizdev-py/tests/test_aegis_r2.py` (each fails on 5e16d09).
+
+- **N1** the eight-digit cap over-refused (UUID request ids, finance-py ids, CRM refs). Request ids now have one
+  opaque shape; Finance's ids match finance-py's `OWN_ID_RE`; keys, refs, names and domains are scanned for a run of
+  exactly nine digits instead of capped (decisions 16, 27).
+- **N2** a submission or payout could stay `sending` with nobody told. A durable unknown-run counter opens one task
+  after `NBD_UNKNOWN_TICKS_BEFORE_TASK`; Andre-only reconcile routes bound by state hash settle them (decisions 11, 17).
+- **L1** every contact named in a reply body is held. **L2** one task per sender per day; holds indexed by hash.
+  **L3** a payout refused `NBD_PAYOUT_MAX_REFUSALS` times is held with a task; the shortfall is derived and its task
+  closes when absorbed. **L4** domains are IDNA-encoded before hashing and matching (decisions 9, 17, 21).
+- **Gitleaks** the round-1 test literal `west-1234-56789` (a fake tax id) is now built from parts; `.gitleaks.toml`
+  carries an exact-string allowlist entry for the copy left in history (22fe413).

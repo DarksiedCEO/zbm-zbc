@@ -78,9 +78,29 @@ class ResponsesMixin:
             p = self.pursuits[s["pursuit_id"]]
             if p["stage"] == "responding":
                 p.update(stage="submitted", updated_at=at)
+        for t in self.tasks.values():                  # a stuck / unknown task is settled by the port's answer
+            if t["status"] == "open" and t["target"] == f"submission:{d['submission_id']}":
+                t.update(status="closed", closed_at=at, outcome=d["status"])
 
     def _a_submission_flagged(self, d, at):
         pass                                           # its task is applied by _apply
+
+    def _a_submission_unknown_tick(self, d, at):
+        sub = self.submissions[d["submission_id"]]
+        sub["unknown_ticks"] = sub.get("unknown_ticks", 0) + 1
+        sub["updated_at"] = at
+
+    def _a_submission_reconciled(self, d, at):
+        sub = self.submissions[d["submission_id"]]
+        sub.update(status=d["status"], updated_at=at, reason="ANDRE_RECONCILED",
+                   provider_ref=None)
+        if d["status"] == "submitted":
+            p = self.pursuits[sub["pursuit_id"]]
+            if p["stage"] == "responding":
+                p.update(stage="submitted", updated_at=at)
+        for t in self.tasks.values():
+            if t["status"] == "open" and t["target"] == f"submission:{d['submission_id']}":
+                t.update(status="closed", closed_at=at, outcome=d["outcome"])
 
     def _a_submission_cancelled(self, d, at):
         self.submissions[d["submission_id"]].update(status="cancelled", reason=d["reason"], updated_at=at)
@@ -281,8 +301,8 @@ class ResponsesMixin:
 
     def submissions_view(self, status: Optional[str]) -> list[dict]:
         with self.lock:
-            return [dict(s) for s in sorted(self.submissions.values(), key=lambda x: (x["queued_at"],
-                                                                                      x["submission_id"]))
+            return [self._submission_view(s) for s in sorted(self.submissions.values(),
+                                                             key=lambda x: (x["queued_at"], x["submission_id"]))
                     if status is None or s["status"] == status][:1000]
 
     def submit(self, caller: str, resp_id: str, body: dict) -> dict:
@@ -372,11 +392,53 @@ class ResponsesMixin:
             summary["submitted" if final == "submitted" else "refused"] += 1
             return
         summary["unknown"] += 1
-        t = self._unknown_past_deadline_task(sid)
-        if t is not None:
-            self._commit("submission_flagged", {"submission_id": sid, "tasks": [t]}, "scheduler",
-                         evidence=("submission_outcome_unknown", f"submission:{sid}",
-                                   {"submission_id": sid, "code": "SUBMISSION_OUTCOME_UNKNOWN"}, (sid, "unknown")))
+        # AEGIS round 2 N2: every unknown tick is counted (durably); after NBD_UNKNOWN_TICKS_BEFORE_TASK of them, and
+        # whenever the deadline has passed, ONE task for Andre each, deadline or not
+        tasks = [t for t in (self._unknown_past_deadline_task(sid), self._stuck_task(
+            f"submission:{sid}", s.get("unknown_ticks", 0) + 1, "SUBMISSION_STUCK")) if t is not None]
+        self._commit("submission_unknown_tick", {"submission_id": sid, "tasks": tasks}, "scheduler",
+                     evidence=("submission_outcome_unknown", f"submission:{sid}",
+                               {"submission_id": sid, "code": "SUBMISSION_OUTCOME_UNKNOWN",
+                                "tasks": [t["task_id"] for t in tasks]}, (sid, "unknown", s.get("unknown_ticks", 0)))
+                     if tasks else None)
+
+    def _stuck_task(self, target: str, ticks: int, code: str) -> Optional[dict]:
+        if ticks < self.settings.unknown_ticks_before_task:
+            return None
+        t = self._task("stuck_unknown", target, code, code)
+        return None if t["task_id"] in self.tasks else t
+
+    @staticmethod
+    def submission_state_sha256(sub: dict) -> str:
+        return i04_assembly.sha({k: sub.get(k) for k in ("submission_id", "status", "pursuit_id", "response_id",
+                                                         "version", "content_sha256", "unknown_ticks")})
+
+    def reconcile_submission(self, sid: str, body: dict) -> dict:
+        """Andre settles a submission stuck in ``sending`` (AEGIS round 2 N2), naming its exact state hash:
+        ``delivered`` -> ``submitted``; ``not_delivered`` -> ``not_delivered``, and the response may be submitted
+        again."""
+        with self.lock:
+            self._gate()
+            rk = self.rk("submission_reconcile", sid, body)
+            if self._idem("andre", rk, body):
+                return self._submission_view(self.submissions[sid])
+            sub = self._get(self.submissions, sid, "SUBMISSION_NOT_FOUND")
+            if sub["status"] != "sending":
+                raise Conflict(R("SUBMISSION_NOT_SENDING"))
+            if body["state_sha256"] != self.submission_state_sha256(sub):
+                raise Conflict(R("STATE_HASH_MISMATCH"))
+            status = "submitted" if body["outcome"] == "delivered" else "not_delivered"
+            data = {"submission_id": sid, "status": status, "outcome": body["outcome"],
+                    "state_sha256": body["state_sha256"]}
+            self._commit("submission_reconciled", self._req(data, "andre", rk, body, sid), "andre",
+                         evidence=("submission_reconciled", f"submission:{sid}", data, ("andre", rk)))
+            return self._submission_view(sub)
+
+    def _submission_view(self, sub: dict) -> dict:
+        out = dict(sub)
+        out.setdefault("unknown_ticks", 0)
+        out["state_sha256"] = self.submission_state_sha256(sub)
+        return out
 
     def submission_tick(self) -> dict:
         """The ``submission-queue`` job: one submission at a time. Under the lock every gate is re-checked from

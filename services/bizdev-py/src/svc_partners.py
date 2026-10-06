@@ -92,11 +92,23 @@ class PartnersMixin:
             if money.D(p["amount"]) == 0:
                 p["status"] = "cancelled"
             p["updated_at"] = at
+        self._close_absorbed_shortfall(d["deal_id"], at)
+
+    def _close_absorbed_shortfall(self, deal_id: str, at: str) -> None:
+        """AEGIS round 2 L3: the shortfall field and its task never disagree — once the (derived) shortfall is 0.00,
+        every open shortfall task of the deal is closed as ``absorbed``."""
+        c = self.partner_deals[deal_id]["commission"]
+        c["shortfall"] = money.fmt(i11_commission.shortfall_of(c["accrued"], c["settled"]))
+        if money.D(c["shortfall"]) == 0:
+            for t in self.tasks.values():
+                if t["status"] == "open" and t["kind"] == "clawback_shortfall" and t["target"] == f"deal:{deal_id}":
+                    t.update(status="closed", closed_at=at, outcome="absorbed")
 
     def _a_payout_requested(self, d, at):
         self.payouts[d["payout_id"]] = {**{k: d[k] for k in ("payout_id", "deal_id", "partner_id", "amount",
                                                              "finance_payee_ref", "tax_info_ref")},
-                                        "status": "queued", "requested_at": at, "updated_at": at, "finance_ref": None}
+                                        "status": "queued", "requested_at": at, "updated_at": at, "finance_ref": None,
+                                        "refusals": 0, "unknown_ticks": 0}
         deal = self.partner_deals[d["deal_id"]]
         deal["commission"]["settled"] = money.fmt(money.q(money.D(deal["commission"]["settled"]) +
                                                           money.D(d["amount"])))
@@ -107,14 +119,27 @@ class PartnersMixin:
     def _a_payout_result(self, d, at):
         p = self.payouts[d["payout_id"]]
         p.update(status=d["status"], finance_ref=d.get("finance_ref"), updated_at=at)
+        if d.get("refused"):
+            p["refusals"] = p.get("refusals", 0) + 1
+        if d.get("reset_refusals"):
+            p["refusals"] = 0
         cut = money.D(d.get("shortfall_cut") or "0.00")
         if cut > 0:                                    # a refused payout absorbs its deal's outstanding shortfall
             c = self.partner_deals[p["deal_id"]]["commission"]
             p["amount"] = money.fmt(money.q(money.D(p["amount"]) - cut))
             c["settled"] = money.fmt(money.q(money.D(c["settled"]) - cut))
-            c["shortfall"] = money.fmt(money.q(money.D(c["shortfall"]) - cut))
-        if d["status"] == "queued" and money.D(p["amount"]) == 0:
+        if d["status"] in ("queued", "held") and money.D(p["amount"]) == 0:
             p["status"] = "cancelled"
+        if d.get("outcome"):
+            for t in self.tasks.values():
+                if t["status"] == "open" and t["target"] == f"payout:{p['payout_id']}":
+                    t.update(status="closed", closed_at=at, outcome=d["outcome"])
+        self._close_absorbed_shortfall(p["deal_id"], at)
+
+    def _a_payout_unknown_tick(self, d, at):
+        p = self.payouts[d["payout_id"]]
+        p["unknown_ticks"] = p.get("unknown_ticks", 0) + 1
+        p["updated_at"] = at
 
     def _a_payout_paid(self, d, at):
         self.payouts[d["payout_id"]].update(status="paid", finance_ref=d["finance_ref"], updated_at=at)
@@ -153,7 +178,7 @@ class PartnersMixin:
 
     def payouts_view(self, status: Optional[str]) -> list[dict]:
         with self.lock:
-            return [{k: v for k, v in p.items() if k != "tax_info_ref"} for p in self.payouts.values()
+            return [self._payout_view(p) for p in self.payouts.values()
                     if status is None or p["status"] == status][:2000]
 
     # ------------------------------------------------------------------------------------------------ partners
@@ -474,24 +499,82 @@ class PartnersMixin:
         if p["status"] != "sending":
             return
         if status == "with_finance" and ref:
-            self._commit("payout_result", {"payout_id": pay_id, "status": "with_finance", "finance_ref": ref},
+            self._commit("payout_result", {"payout_id": pay_id, "status": "with_finance", "finance_ref": ref,
+                                           "outcome": "with_finance"},
                          "scheduler", evidence=("payout_result", f"payout:{pay_id}",
                                                 {"payout_id": pay_id, "status": "with_finance"},
                                                 (pay_id, "result", ref)))
             summary["with_finance"] += 1
         elif status == "refused":
-            deal = self.partner_deals[p["deal_id"]]
-            cut = min(money.D(deal["commission"]["shortfall"]), money.D(p["amount"]))
-            data = {"payout_id": pay_id, "status": "queued", "finance_ref": None, "shortfall_cut": money.fmt(cut)}
-            self._commit("payout_result", data, "scheduler",
-                         evidence=("payout_result", f"payout:{pay_id}",
-                                   {"payout_id": pay_id, "status": "refused",
-                                    "terms_sha256": i04_assembly.sha({"shortfall_cut": data["shortfall_cut"],
-                                                                      "amount": p["amount"]})},
-                                   (pay_id, "refused", p["amount"])))
+            self._requeue_payout(p, "scheduler", None, refused=True)
             summary["refused"] += 1
         else:
             summary["unknown"] += 1
+            t = self._stuck_task(f"payout:{pay_id}", p.get("unknown_ticks", 0) + 1, "PAYOUT_STUCK")
+            self._commit("payout_unknown_tick", {"payout_id": pay_id, "tasks": [t] if t else []}, "scheduler",
+                         evidence=("payout_outcome_unknown", f"payout:{pay_id}",
+                                   {"payout_id": pay_id, "code": "PAYOUT_STUCK"},
+                                   (pay_id, "unknown", p.get("unknown_ticks", 0))) if t else None)
+
+    def _requeue_payout(self, p: dict, actor: str, req: Optional[tuple], refused: bool, outcome: Optional[str] = None,
+                        extra: Optional[dict] = None) -> None:
+        """Requeue a payout Finance certainly does not hold, after its deal's outstanding (derived) shortfall is
+        taken from it. A payout refused NBD_PAYOUT_MAX_REFUSALS times is ``held`` instead (never resent) with one
+        task for Andre (AEGIS round 2 L3); Andre's ``not_paid`` reconcile requeues it and resets the count."""
+        c = self.partner_deals[p["deal_id"]]["commission"]
+        cut = min(i11_commission.shortfall_of(c["accrued"], c["settled"]), money.D(p["amount"]))
+        refusals = p.get("refusals", 0) + (1 if refused else 0)
+        held = refused and refusals >= self.settings.payout_max_refusals
+        tasks = []
+        if held:
+            t = self._task("payout_refused", f"payout:{p['payout_id']}", f"refusals:{refusals}", "PAYOUT_REFUSED")
+            tasks = [] if t["task_id"] in self.tasks else [t]
+        data = {"payout_id": p["payout_id"], "status": "held" if held else "queued", "finance_ref": None,
+                "shortfall_cut": money.fmt(cut), "refused": refused, "reset_refusals": not refused,
+                "tasks": tasks, **({"outcome": outcome} if outcome else {}), **(extra or {})}
+        ev = ("payout_result", f"payout:{p['payout_id']}",
+              {"payout_id": p["payout_id"], "status": data["status"], "refused": refused,
+               "terms_sha256": i04_assembly.sha({"shortfall_cut": data["shortfall_cut"], "amount": p["amount"]})},
+              req[1] if req else (p["payout_id"], "refused", p["amount"], refusals))
+        self._commit("payout_result", self._req(data, actor, req[0], req[2], p["payout_id"]) if req else data, actor,
+                     evidence=ev)
+
+    @staticmethod
+    def payout_state_sha256(p: dict) -> str:
+        return i04_assembly.sha({k: p.get(k) for k in ("payout_id", "deal_id", "status", "amount", "refusals",
+                                                       "unknown_ticks")})
+
+    def reconcile_payout(self, pay_id: str, body: dict) -> dict:
+        """Andre settles a payout stuck in ``sending`` or ``held`` (AEGIS round 2 N2), naming its exact state hash:
+        ``paid`` -> ``paid`` (Finance holds or paid it); ``not_paid`` -> requeued after the shortfall is applied."""
+        with self.lock:
+            self._gate()
+            rk = self.rk("payout_reconcile", pay_id, body)
+            if self._idem("andre", rk, body):
+                return self._payout_view(self.payouts[pay_id])
+            p = self._get(self.payouts, pay_id, "PAYOUT_NOT_FOUND")
+            if p["status"] not in ("sending", "held"):
+                raise Conflict(R("PAYOUT_NOT_STUCK"))
+            if body["state_sha256"] != self.payout_state_sha256(p):
+                raise Conflict(R("STATE_HASH_MISMATCH"))
+            if body["outcome"] == "paid":
+                data = {"payout_id": pay_id, "status": "paid", "finance_ref": None, "outcome": "paid",
+                        "state_sha256": body["state_sha256"]}
+                self._commit("payout_result", self._req(data, "andre", rk, body, pay_id), "andre",
+                             evidence=("payout_reconciled", f"payout:{pay_id}",
+                                       {"payout_id": pay_id, "outcome": "paid", "state_sha256": body["state_sha256"]},
+                                       ("andre", rk)))
+            else:
+                self._requeue_payout(p, "andre", (rk, ("andre", rk), body), refused=False, outcome="not_paid",
+                                     extra={"state_sha256": body["state_sha256"]})
+            return self._payout_view(p)
+
+    def _payout_view(self, p: dict) -> dict:
+        out = {k: v for k, v in p.items() if k != "tax_info_ref"}
+        out.setdefault("refusals", 0)
+        out.setdefault("unknown_ticks", 0)
+        out["state_sha256"] = self.payout_state_sha256(p)
+        return out
 
     def payout_tick(self) -> dict:
         """The ``payout-request`` job. For each won deal with an unpaid balance and a partner payee, a payout request

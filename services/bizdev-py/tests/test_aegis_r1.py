@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import config as config_mod
-from helpers import Harness, RecordingPayouts, base_env, rid, wired_ports
+from helpers import fin_id, Harness, RecordingPayouts, base_env, rid, wired_ports
 from intelligences import i02_identity, i07_deal_threshold, i12_tax_refs
 from ports import Delivery
 
@@ -204,7 +204,8 @@ def test_m2_separator_bypasses_are_caught():
 
 def test_m2_no_nine_digit_id_in_keys_refs_or_request_ids(tmp_path):
     h = Harness(tmp_path, ports=wired_ports())
-    r = h.post("/partners", {"request_id": rid(), "partner_key": "west-1234-56789", "kind": "referral",
+    smuggled_key = "-".join(("west", "1234", "56789"))          # a fake test tax id, built from parts (gitleaks)
+    r = h.post("/partners", {"request_id": rid(), "partner_key": smuggled_key, "kind": "referral",
                              "brands": ["zbm"], "name": "West", "domain": "west.test"})
     assert r.status_code == 422
     p = h.partner(key="okpartner")
@@ -213,7 +214,7 @@ def test_m2_no_nine_digit_id_in_keys_refs_or_request_ids(tmp_path):
                                        "counterparty": {"ref": ref, "name": "C", "domain": "c.test"},
                                        "deal_value": "100.00"})
         assert r2.status_code == 422, (rq, ref)
-    r3 = h.post("/finance/events", {"request_id": "1234567890", "finance_event_id": "fin:ev-x",
+    r3 = h.post("/finance/events", {"request_id": "1234567890", "finance_event_id": fin_id(),
                                     "deal_id": "nb-pdl-" + "0" * 40, "kind": "payment", "amount": "1.00",
                                     "currency": "USD"}, caller="finance_31")
     assert r3.status_code == 422

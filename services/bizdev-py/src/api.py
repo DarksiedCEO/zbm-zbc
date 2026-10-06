@@ -502,9 +502,14 @@ def create_app(service: BizDevService, settings: config_mod.Settings) -> FastAPI
 
     @app.get(P + "/submissions", dependencies=auth)
     def submissions(status_: Optional[str] = Query(default=None, alias="status",
-                                                   pattern="^(queued|sending|submitted|refused|cancelled)$"),
+                                                   pattern="^(queued|sending|submitted|refused|not_delivered|cancelled)$"),
                     who: str = Depends(worker)) -> list:
         return svc.submissions_view(status_)
+
+    @app.post(P + "/submissions/{sid}/reconcile", dependencies=auth)
+    def reconcile_submission(sid: str, req: dict = Depends(body(m.SubmissionReconcile)),
+                             who: str = Depends(andre)) -> dict:
+        return svc.reconcile_submission(_id(sid), req)
 
     @app.post(P + "/submissions/{sid}/cancel", dependencies=auth)
     def cancel_submission(sid: str, req: dict = Depends(body(m.RequestOnly)), who: str = Depends(worker)) -> dict:
@@ -577,9 +582,13 @@ def create_app(service: BizDevService, settings: config_mod.Settings) -> FastAPI
     def payout_paid(pay_id: str, req: dict = Depends(body(m.PayoutPaid)), who: str = Depends(caller("finance_31"))):
         return svc.payout_paid(who, _id(pay_id), req)
 
+    @app.post(P + "/payouts/{pay_id}/reconcile", dependencies=auth)
+    def reconcile_payout(pay_id: str, req: dict = Depends(body(m.PayoutReconcile)), who: str = Depends(andre)) -> dict:
+        return svc.reconcile_payout(_id(pay_id), req)
+
     @app.get(P + "/payouts", dependencies=auth)
     def payouts(status_: Optional[str] = Query(default=None, alias="status",
-                                               pattern="^(queued|sending|with_finance|paid|cancelled)$"),
+                                               pattern="^(queued|sending|held|with_finance|paid|cancelled)$"),
                 who: str = Depends(caller("dashboard", "finance_31"))) -> list:
         return svc.payouts_view(status_)
 

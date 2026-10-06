@@ -39,12 +39,14 @@ T0 = datetime(2026, 10, 6, 18, 0, tzinfo=timezone.utc)
 DEADLINE = iso(T0 + timedelta(days=14))
 
 
-_NO_DIGITS = str.maketrans("0123456789", "ghijklmnop")
-
-
 def rid() -> str:
-    """A request id with no digits (partner and deal request ids may hold at most eight, AEGIS round 1 M2)."""
-    return "r-" + uuid.uuid4().hex.translate(_NO_DIGITS)
+    """A request id: a UUID (the one opaque shape the service accepts, with 16..64 lowercase hex)."""
+    return str(uuid.uuid4())
+
+
+def fin_id(prefix: str = "evt") -> str:
+    """A finance-py generated id (``ledger.derived_id``: fin-<prefix>-<40 hex>)."""
+    return f"fin-{prefix}-" + uuid.uuid4().hex + uuid.uuid4().hex[:8]
 
 
 class FakeLedger:
@@ -139,7 +141,7 @@ class RecordingPayouts:
 
     def request_payout(self, payout_id, payload):
         self.calls.append((payout_id, payload))
-        return Delivery(self.status, f"fin:payout-{len(self.calls)}" if self.status == "delivered" else None)
+        return Delivery(self.status, fin_id("pay") if self.status == "delivered" else None)
 
     def payout_status(self, payout_id):
         self.reconciled = getattr(self, "reconciled", []) + [payout_id]
@@ -352,7 +354,7 @@ class Harness:
                                  {"request_id": rid(), "agreement_kind": "referral_agreement"}, andre=True))
 
     def money_event(self, deal_id: str, kind: str, amount: str, ev: Optional[str] = None):
-        return self.post("/finance/events", {"request_id": rid(), "finance_event_id": ev or f"fin:ev-{rid()}",
+        return self.post("/finance/events", {"request_id": rid(), "finance_event_id": ev or fin_id(),
                                              "deal_id": deal_id, "kind": kind, "amount": amount, "currency": "USD"},
                          caller="finance_31")
 
