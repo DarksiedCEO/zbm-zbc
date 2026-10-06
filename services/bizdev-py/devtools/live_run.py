@@ -374,6 +374,12 @@ def _main(work: Path) -> int:
         integ = a.get("/audit/integrity", caller="compliance_38").json()
         check("the integrity route reports the ledger's real verdict", integ["ledger_valid"] is True
               and integ["integrity"]["ok"] is True)
+        evd = a.get("/audit/evidence?limit=1000", caller="compliance_38").json()
+        done = [(e["event_type"], e["rk"]) for e in evd["evidence"] if e["status"] == "committed"]
+        say(f"evidence view: {evd['committed']} committed, {evd['attempted']} attempted")
+        check("the evidence view marks each logical action committed exactly once against the real ledger",
+              evd["committed"] > 0 and evd["total"] <= 1000 and len(done) == len(set(done)) == evd["committed"]
+              and evd["rule"] == "unanchored evidence = attempted, not done")
 
         # --- a truncated log is caught ----------------------------------------------------------------------------
         stop(sp, "service")

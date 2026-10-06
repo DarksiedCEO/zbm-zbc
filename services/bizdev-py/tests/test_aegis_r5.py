@@ -57,11 +57,18 @@ def test_m1_a_resolved_sender_holds_at_most_ten_named_contacts(tmp_path):
 
 
 def test_low_evidence_id_includes_the_payload_hash(h):
+    # round 6: the payload also carries rk and the intended seq, so distinct commits always get distinct ids; a retry
+    # of the SAME commit (same seq, same payload) dedupes; a different payload is a new id
     rec = (("x", "rk-1"),)
-    h.svc._commit("job_ran", {"job": "a"}, "scheduler", evidence=("probe_event", "probe:1", {"v": 1}, rec[0]))
-    h.svc._commit("job_ran", {"job": "b"}, "scheduler", evidence=("probe_event", "probe:1", {"v": 2}, rec[0]))
-    h.svc._commit("job_ran", {"job": "c"}, "scheduler", evidence=("probe_event", "probe:1", {"v": 2}, rec[0]))
-    assert len(h.ledger.of_type("probe_event")) == 2                  # same payload: deduped; new payload: new id
+    h.ledger.fail_types = {"log_anchor"}
+    for _ in range(2):
+        with pytest.raises(Unavailable):
+            h.svc._commit("job_ran", {"job": "a"}, "scheduler", evidence=("probe_event", "probe:1", {"v": 1}, rec[0]))
+    assert len(h.ledger.of_type("probe_event")) == 1                  # same payload, same seq: deduped
+    with pytest.raises(Unavailable):
+        h.svc._commit("job_ran", {"job": "a"}, "scheduler", evidence=("probe_event", "probe:1", {"v": 2}, rec[0]))
+    assert len(h.ledger.of_type("probe_event")) == 2                  # new payload: new id, never a 409
+    h.ledger.fail_types = set()
 
 
 def test_low_a_retry_after_the_state_changed_is_not_a_lasting_conflict(tmp_path):

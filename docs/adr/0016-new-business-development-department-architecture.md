@@ -180,7 +180,8 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     every reply makes its OWN holds and they never merge — one SENDER hold (the contact resolved through the message
     or the sender's address, the addresses resolving to them, the raw form of an unparseable sender), and — only when
     the sender resolves to a known contact or the reply names a message (round 5 M1) — one NAMED hold for each
-    contact written in the body (NFKC, fullwidth forms count; at most ten) covering only that contact, plus one for
+    contact written in the body (NFKC, fullwidth forms count; at most ten per reply and ten per sender per day,
+    round 6) covering only that contact, plus one for
     each other body address (at most five) covering only that address. An unresolved outsider's body holds nobody;
     the task records `sender_resolved` and `body_addresses_truncated`. One evidence event per reply lists its hold
     ids; a review task holds at most 50 holds, then a numbered part opens. All of a reply's holds are linked to
@@ -204,7 +205,9 @@ stay queued, won hand-offs stay `pending_delivery`, and agreements are refused `
     stored hash is dropped) and names, notes, labels and free text by SHA-256 (i13).
 25. **Record first.** Every state change is one `_commit`: its typed evidence events are recorded on the ledger
     first (each event id derived from the request key PLUS the payload hash, round 5: a retry with the same payload
-    dedupes, a retry after the state changed gets a new id, never a lasting 409), then the exact log line is fsynced aside (pending line), anchored on the ledger, appended (exact-size: the
+    dedupes, a retry after the state changed gets a new id, never a lasting 409; round 6: each payload carries `rk` and
+    the intended log `seq`, and only evidence named by an anchored line is `committed` in `GET /audit/evidence` —
+    unanchored evidence = attempted, not done), then the exact log line is fsynced aside (pending line), anchored on the ledger, appended (exact-size: the
     file must be exactly the in-memory lines; a blank line is never written and refuses start), and only then
     applied by the same `_apply` that replays the log at start. Typed evidence payloads carry ids, codes and hashes
     only: amounts, rates and values enter as `terms_sha256` (the SHA-256 of the canonical terms); emails as keyed
@@ -369,3 +372,26 @@ Regression tests: `services/bizdev-py/tests/test_aegis_r5.py` (each fails on 425
 - **Low** evidence ids include the payload hash (decision 25). **Low** `decide_holds` refuses duplicate hold ids
   itself. **Low** a review task is split into numbered parts past 50 holds. **Low** the README states what the
   dashboard must show for named holds and what opting out a task does.
+
+## Amendment — AEGIS round 6 (Oct 6 2026, on af94543): NOT BLOCKING, every item fixed
+
+Regression tests: `services/bizdev-py/tests/test_aegis_r6.py` (each fails on af94543).
+
+- **R6-M1** a retry after a state change recorded two typed evidence events for one logical action: record-first
+  (decision 25) puts the first attempt's evidence on the ledger even though its line was never anchored, and the
+  retry's payload differs so it gets a new id. Record-first stays (the house pattern); the evidence is made
+  verifiable. Every evidence payload carries `rk` (the request key; `bizdev|<kind>` for internal commits) and `seq`
+  (the log line it is meant for; the commit refuses if the prepared line's seq differs), and the line names its
+  events in `data.evidence` (event id, type, subject and the payload itself — ids, codes and hashes only). `GET
+  /nbd/v1/audit/evidence` (dashboard, compliance_38; paginated; optional `event_type`) reads the ledger outside the
+  service lock and marks an event `committed` only when a local line with that `seq` names it, the ledger holds that
+  line's `log_anchor`, and the payload's `rk`, `seq` and SHA-256 match; every other event is `attempted`.
+  **Unanchored evidence = attempted, not done.** This is the view Compliance (38) and auditors use; raw ledger
+  events of department `bizdev` are never counted as things that happened. Tested with both of the reviewer's
+  sequences (reply, Finance money event): exactly one `committed` event per logical action.
+- **Low** a resolved recipient could hold every contact, ten per reply: named-contact holds are capped at ten per
+  sender per DAY across all its replies (`NAMED_HOLDS_DAY_MAX`, kept per `sender|day` and rebuilt by replay); the
+  rest are counted in `body_addresses_truncated` (decision 21).
+- **Low** the review-task part lookup walked every part from 1 on each reply (O(parts²) per sender per day): the
+  current part per sender per day is remembered (`task_part`, rebuilt by replay) and the search starts there.
+- **Follow-up (not changed here)** sales-py and service-py: see the round-6 report; the coordinator opens it.

@@ -100,6 +100,8 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
         self.contact_by_hash: dict[str, str] = {}       # keyed email hash -> contact (AEGIS round 4: no full scans)
         self.msgs_by_key: dict[str, set] = {}           # to_hash / contact id -> message ids
         self.tasks: dict[str, dict] = {}
+        self.named_per_day: dict[str, int] = {}         # "sender_key|day" -> named-contact holds (AEGIS round 6)
+        self.task_part: dict[str, int] = {}             # "sender_key|day" -> current review-task part (AEGIS round 6)
         self.sent_per_day: dict[str, int] = {}
         self.requests: dict[tuple, tuple] = {}
         # memory only
@@ -181,16 +183,28 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
             at = iso(self.now())
             data = {**data, "actor": data.get("actor", actor)}   # the anchor's actor is read back from the line
             actor = data["actor"]
+            # AEGIS round 6 M1: every typed evidence event carries the request key and the log seq it is meant for,
+            # and the line names it (``evidence``). Record-first stays; an event whose line never made it into the
+            # anchored log is visible as ``attempted`` (never ``committed``) in /audit/evidence.
+            seq = len(self.log) + 1
+            rk = data.get("request_id") or f"{INTERNAL}|{kind}"
+            named = []
             for event_type, subject_id, payload, id_parts in (evidence if isinstance(evidence, list) else
                                                               [evidence] if evidence is not None else []):
+                payload = {**payload, "rk": rk, "seq": seq}
+                # AEGIS round 5: the id is the request key PLUS the payload hash — a retry with the same payload
+                # dedupes on the ledger, a retry after the state changed gets a new id (never a lasting 409)
+                eid = derived_id("evd", event_type, *id_parts, payload_sha256(payload))
                 try:
-                    # AEGIS round 5: the id is the request key PLUS the payload hash — a retry with the same payload
-                    # dedupes on the ledger, a retry after the state changed gets a new id (never a lasting 409)
-                    self._record_twice(derived_id("evd", event_type, *id_parts, payload_sha256(payload)), event_type,
-                                       actor, subject_id, payload, f"{event_type} {subject_id}")
+                    self._record_twice(eid, event_type, actor, subject_id, payload, f"{event_type} {subject_id}")
                 except LedgerRecordError:
                     raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+                named.append({"event_id": eid, "event_type": event_type, "subject_id": subject_id, "payload": payload})
+            if named:
+                data["evidence"] = named
             rec, line = self.log.prepare(kind, at, data)
+            if rec["seq"] != seq:                           # the log moved under us: never anchor a mislabelled line
+                raise Unavailable(R("STORE_UNAVAILABLE"))
             line_sha = sha256_hex(line)
             epoch = self.log.epoch or line_sha[:16]
             eid, payload = self._anchor_ids(epoch, rec["seq"], line_sha)
@@ -299,6 +313,10 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
                 t = self.tasks[note["task_id"]]
                 t["body_addresses_truncated"] = t.get("body_addresses_truncated", 0) + note["body_addresses_truncated"]
                 t["sender_resolved"] = note["sender_resolved"]
+            if note and note.get("sender_day"):          # AEGIS round 6: per sender per day, rebuilt by replay
+                k = note["sender_day"]
+                self.named_per_day[k] = self.named_per_day.get(k, 0) + note.get("named", 0)
+                self.task_part[k] = max(self.task_part.get(k, 1), note.get("part", 1))
         if d.get("request_id") and d.get("actor"):
             self.requests[(d["actor"], d["request_id"])] = (d.get("request_sha"), d.get("_obj"))
 
@@ -559,6 +577,60 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
             self._tick_lock.release()
 
     # ================================================================================================ audit
+
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+        """``/nbd/v1/audit/evidence`` — the view Compliance (38) and auditors use (AEGIS round 6 M1). Every typed
+        evidence event this department holds on the ledger, each marked:
+
+        * ``committed`` — a local log line with seq ``s`` names the event (``data.evidence``), the ledger holds that
+          line's anchor (``log_anchor`` for epoch, ``s`` and the line's SHA-256), the event's payload carries
+          ``rk`` = the line's request key and ``seq`` = ``s``, and the ledger's ``payload_sha256`` is that payload's;
+        * ``attempted`` — anything else: recorded first (record-first commit), but its state change never reached the
+          anchored log (a refused or failed commit, or a retry that was later committed under another seq).
+
+        Unanchored evidence = attempted, not done. Exactly one ``committed`` event exists per logical action. The ledger
+        read and the checks run OUTSIDE the service lock (a snapshot of the log is taken under it)."""
+        with self.lock:
+            if self._closed:
+                raise Unavailable(R("SERVICE_CLOSED"))
+            records = list(self.log.iter_records())
+            shas = self.log.line_shas()
+            epoch = self.log.epoch
+        try:
+            entries = self.rec.client.entries()
+        except LedgerQueryFailed:
+            raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+        mine = [e for e in entries if e.get("department") == DEPARTMENT]
+        anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == "log_anchor"}
+        named: dict[str, tuple] = {}                     # event_id -> (seq, rk, payload, log kind) of an anchored line
+        for r, line_sha in zip(records, shas):
+            evs = r["data"].get("evidence")
+            if not evs:
+                continue
+            aid, apayload = self._anchor_ids(epoch, r["seq"], line_sha)
+            a = anchors.get(aid)
+            if a is None or a.get("payload_sha256") != payload_sha256(apayload) or a.get("subject_id") != f"log:{epoch}":
+                continue
+            line_rk = r["data"].get("request_id") or f"{INTERNAL}|{r['kind']}"
+            for ev in evs:
+                named[ev["event_id"]] = (r["seq"], line_rk, ev.get("payload") or {}, r["kind"])
+        out, counts = [], {"committed": 0, "attempted": 0}
+        for e in mine:
+            if e.get("event_type") == "log_anchor" or (event_type is not None and e.get("event_type") != event_type):
+                continue
+            row = {"event_id": e.get("event_id"), "event_type": e.get("event_type"), "subject_id": e.get("subject_id"),
+                   "ledger_seq": e.get("seq"), "payload_sha256": e.get("payload_sha256"), "status": "attempted",
+                   "seq": None, "rk": None, "log_kind": None}
+            hit = named.get(e.get("event_id"))
+            if hit is not None:
+                seq, line_rk, payload, log_kind = hit
+                if payload.get("seq") == seq and payload.get("rk") == line_rk \
+                        and payload_sha256(payload) == e.get("payload_sha256"):
+                    row.update(status="committed", seq=seq, rk=line_rk, log_kind=log_kind)
+            counts[row["status"]] += 1
+            out.append(row)
+        return {"rule": "unanchored evidence = attempted, not done", "total": len(out), **counts,
+                "limit": limit, "offset": offset, "evidence": out[offset:offset + limit], "log_length": len(records)}
 
     def audit_export(self, since_seq: int, limit: int) -> dict:
         """The local log, personal data minimised (i13): emails as keyed hashes, names, notes and text as SHA-256."""

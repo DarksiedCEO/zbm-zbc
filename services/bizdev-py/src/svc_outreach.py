@@ -27,6 +27,7 @@ from reasons import R
 BODY_STRANGERS_MAX = 5           # addresses in a reply body that are NOT contacts, held at most this many
 BODY_CONTACTS_MAX = 10           # contacts named in one reply body that get their own hold (AEGIS round 5 M1)
 TASK_HOLDS_MAX = 50              # holds linked to one review task; past it a numbered part is opened (round 5)
+NAMED_HOLDS_DAY_MAX = 10         # named-contact holds one sender can cause per day, all replies together (AEGIS round 6)
 
 
 class OutreachMixin:
@@ -575,6 +576,9 @@ class OutreachMixin:
                                  {"hashes": sender, "reason": "stop_reply"}, (caller, rk)))
             sender_key = f"contact:{cid}" if cid else (from_h or raw_h or f"reply:{reply_id}")
             resolved = c is not None or m is not None
+            sender_day = f"{sender_key}|{self.today()}"
+            # AEGIS round 6: named-contact holds are capped per sender per DAY (all replies together), not only per reply
+            named_cap = min(BODY_CONTACTS_MAX, max(0, NAMED_HOLDS_DAY_MAX - self.named_per_day.get(sender_day, 0)))
             body_holds, truncated, strangers, named_n = [], 0, 0, 0
             for e in i02_identity.all_emails_in(body["text"]):     # body addresses: each its own hold, never merged
                 eh = i02_identity.keyed(self.pii_key, "email", e)
@@ -583,7 +587,7 @@ class OutreachMixin:
                 named = self.contact_by_hash.get(eh)
                 # AEGIS round 5 M1: an unresolved outsider's body holds nobody; a resolved sender's holds at most
                 # BODY_CONTACTS_MAX contacts and BODY_STRANGERS_MAX other addresses; the rest are counted
-                if not resolved or (named and named_n >= BODY_CONTACTS_MAX) or \
+                if not resolved or (named and named_n >= named_cap) or \
                         (not named and strangers >= BODY_STRANGERS_MAX):
                     truncated += 1
                     continue
@@ -593,13 +597,14 @@ class OutreachMixin:
                     strangers += 1
                 body_holds.append({"hold_id": derived_id("hld", reply_id, eh), "reply_id": reply_id, "kind": "named",
                                    "contact_ids": [named] if named else [], "hashes": [eh], "suppress_hashes": [eh]})
-            task, existing = self._review_task(sender_key, cls, 1 + len(body_holds), reply_id)
+            task, existing = self._review_task(sender_key, cls, 1 + len(body_holds), reply_id, sender_day)
             tid = task["task_id"]
             holds = [{"hold_id": derived_id("hld", reply_id), "reply_id": reply_id, "kind": "sender",
                       "contact_ids": [cid] if cid else [], "hashes": sorted(set(sender) | ({raw_h} if raw_h else set())),
                       "suppress_hashes": sender, "task_id": tid}] + [{**x, "task_id": tid} for x in body_holds]
             data["holds"] = holds
-            data["task_note"] = {"task_id": tid, "body_addresses_truncated": truncated, "sender_resolved": resolved}
+            data["task_note"] = {"task_id": tid, "body_addresses_truncated": truncated, "sender_resolved": resolved,
+                                 "sender_day": sender_day, "part": task.get("part", 1), "named": named_n}
             # AEGIS round 5 M1: ONE evidence event per reply, listing its hold ids
             evidence.append(("reply_holds_applied", f"reply:{reply_id}",
                              {"reply_id": reply_id, "class": cls, "hold_ids": [x["hold_id"] for x in holds],
@@ -611,11 +616,15 @@ class OutreachMixin:
             self._commit("reply_received", self._req(data, caller, rk, body, answer), caller, evidence=evidence)
             return answer
 
-    def _review_task(self, sender_key: str, cls: str, adding: int, reply_id: str) -> tuple[dict, Optional[dict]]:
+    def _review_task(self, sender_key: str, cls: str, adding: int, reply_id: str,
+                     sender_day: str) -> tuple[dict, Optional[dict]]:
         """The review task for this sender today (AEGIS round 2 L2): the first OPEN part with room for ``adding``
-        more holds; past TASK_HOLDS_MAX a numbered part is opened (round 5). Returns (task, existing-or-None)."""
+        more holds; past TASK_HOLDS_MAX a numbered part is opened (round 5). Returns (task, existing-or-None).
+        AEGIS round 6: the search starts at the sender's CURRENT part for the day (``task_part``, kept by replay) —
+        every earlier part is full or closed and never takes holds again — so a lookup is O(1), not O(parts)."""
         today = self.today()
-        for part in range(1, 100_000):
+        start = self.task_part.get(sender_day, 1)
+        for part in range(start, start + 100_000):
             ident = today if part == 1 else f"{today}|part{part}"
             task = self._task("review_reply", sender_key, ident, cls)
             task["part"] = part

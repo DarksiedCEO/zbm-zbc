@@ -45,7 +45,8 @@ after a restart), a different body under the same key is `409 REQUEST_ID_REUSED`
 
 **Hold decisions.** Every reply makes its own holds: one for its sender (the contact resolved through the message
 or the sender's address) and — only when the sender resolves to a known contact or the reply names a message — one
-for each contact named in its body (at most ten) and each other body address (at most five), never merged. An
+for each contact named in its body (at most ten per reply, and at most ten per sender per day across all its
+replies) and each other body address (at most five per reply), never merged. An
 unresolved outsider's body holds nobody. The review task (one per sender per day, split into numbered `part`s of at
 most 50 holds) shows `sender_resolved` and `body_addresses_truncated` (the body addresses that got no hold). Andre decides exactly the holds he names: `decision_sha256` is the SHA-256 of the canonical JSON
 (`sort_keys`, separators `,` `:`, UTF-8) of `{"decision": <resume|opt_out>, "holds": sorted([[hold_id, reply_id,
@@ -55,6 +56,16 @@ the decided hold may suppress: a sender hold its resolved sender addresses, a na
 The dashboard MUST show `kind: named` holds distinctly from the sender's hold (they are other people the sender
 wrote about), and must make clear that opting out a whole task opts out EVERY named hold in it — each of those
 contacts is suppressed for good.
+
+**Evidence: committed vs attempted.** A commit records its typed evidence events on the ledger FIRST, then anchors
+and appends the log line. So a commit that fails after its evidence landed — and a retry after the state changed,
+which records again under a new id — leaves evidence on the ledger for a state change that never happened.
+Unanchored evidence = attempted, not done. Every evidence payload carries `rk` (the request key) and `seq` (the log
+line it was meant for), and the line lists the events it carries (`data.evidence`). `GET /nbd/v1/audit/evidence`
+(paginated, optional `event_type`) marks an event `committed` only when a local log line with that `seq` names it,
+the ledger holds that line's anchor, and the payload's `rk` and `seq` are that line's (its `payload_sha256` matching
+the ledger's); every other event is `attempted`. Exactly one event per logical action is `committed`. This is the
+view Compliance (38) and auditors use; never count raw ledger events of department `bizdev` as things that happened.
 
 Headers: `Authorization: Bearer <service token>` on every route but `/health`; `X-NBD-Caller-Token` everywhere
 else; Andre's routes also `X-Andre-Approval-Token`, accepted only through the `dashboard` caller.
@@ -138,5 +149,6 @@ All under `/nbd/v1` except `/health`. "worker" = `dashboard` or `bizdev_agent`; 
 | `GET /tasks`; `POST /tasks/{id}/close` | dashboard; Andre | Andre's review queue |
 | `POST /jobs/{send-queue,submission-queue,deadline-sweep,handoff-retry,payout-request,integrity}/run` | scheduler | jobs, one at a time (`409 JOB_RUNNING`) |
 | `GET /audit/integrity`, `/audit/export` | dashboard, compliance_38 | ledger verdict as returned; export with emails as keyed hashes, text as SHA-256 |
+| `GET /audit/evidence?limit=&offset=&event_type=` | dashboard, compliance_38 | every typed evidence event on the ledger, `committed` (an anchored line names it, same `rk` and `seq`) or `attempted` — the view Compliance (38) and auditors use |
 
-A closed instance (after `close()`) answers the integrity and job routes `503 SERVICE_CLOSED` and writes nothing.
+A closed instance (after `close()`) answers the integrity, audit and job routes `503 SERVICE_CLOSED` and writes nothing.
