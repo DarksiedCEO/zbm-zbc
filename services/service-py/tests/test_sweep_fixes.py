@@ -612,3 +612,15 @@ def test_m9_call_wording_alone_never_revokes_sms():
     import channels
     for t in ("Never call before 9 please", "Do not call the buzzer, it is broken"):
         assert channels.opt_out_level(t) != "exact", t
+
+
+def test_hh_call_or_email_opt_outs_revoke_email(tmp_path):
+    import channels
+    for t in ("Do not call or email me", "Please don't call or email me", "dont call or email",
+              "Please do not call me or email me about this", "Never call or email me again",
+              "Dont call me or email me anymore", "Don't call, text, or email me"):
+        assert channels.email_opt_out_decision(t) == "revoke", t
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    r = h.ok(_email(h, "owner@acme.test", "Do not call or email me"), 201)
+    assert r.get("email_opted_out") is True and _consents(h, cid)["email"] == "revoked"

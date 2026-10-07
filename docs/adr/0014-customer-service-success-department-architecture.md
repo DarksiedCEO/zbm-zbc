@@ -374,3 +374,10 @@ phrase from all rounds is pinned in `test_scope_corpus_all_rounds_at_once`.
 |---|---|---|
 | H-G (High, regression) | "Don't text, email me instead" was joined into "don't text or email me" and revoked email | A comma joins channels only in a real list of three or more ("call, text or email"); two items are two clauses |
 | M-9 | "Never call before 9 please" revoked SMS | Call wording is scope-only (`SCOPE_ONLY_TERMS`): it names a channel for the scope but is never an exact SMS opt-out; "Do not call, text or email me" revokes email and pauses SMS with `SMS_OPT_OUT_SUSPECTED` for Andre |
+
+### Sweep A follow-up — AEGIS re-review of f63a9b2 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-H (High) | "Do not call or email me" (no SMS wording, so no opt-out level) kept email with no signal | Every inbound email gets an email decision; a scope-only call phrase whose reach names email revokes email (`consent_changed` evidence) and raises `SMS_OPT_OUT_SUSPECTED` |
+| M-11 | Oxford comma "call, text, or email" was not a list | ", or / , and" between channels joins the list |

@@ -329,7 +329,8 @@ _SCOPE_SEGMENT = re.compile(r"[\n\r.!?;,]+")
 # "Do not call, text or email me": a comma inside a list of channels is not a clause end
 _CH = r"(?:call|text|txt|message|email|e-mail|mail|sms)"
 # AEGIS H-G: only a real list of three or more ("call, text or email") — "Don't text, email me instead" is two clauses
-_CHANNEL_LIST_COMMA = re.compile(r"\b(" + _CH[3:-1] + r")\s*,\s*(?=" + _CH + r"(?:\s*,\s*" + _CH + r")*\s+(?:or|and|nor)\s+"
+_OXFORD_COMMA = re.compile(r"\b(" + _CH[3:-1] + r")\s*,\s*(?=(?:or|and|nor)\s+" + _CH + r"\b)", re.IGNORECASE)
+_CHANNEL_LIST_COMMA = re.compile(r"\b(" + _CH[3:-1] + r")\s*,\s*(?=" + _CH + r"(?:\s*,\s*" + _CH + r")*\s*,?\s+(?:or|and|nor)\s+"
                                  + _CH + r"\b)", re.IGNORECASE)
 _AFTER_EMAIL_REQUEST = frozenset({"instead", "if", "only", "rather", "anytime", "whenever", "is", "are", "fine", "ok",
                                   "okay", "works", "address", "at"})
@@ -429,6 +430,7 @@ def opt_out_scope(text: Optional[str]) -> Optional[str]:
     found, generic = False, False
     terms = [normalise(t).split() for t in OPT_OUT_TERMS + SCOPE_ONLY_TERMS]
     whole = _CHANNEL_LIST_COMMA.sub(r"\1 or ", html_as_text(text))
+    whole = _OXFORD_COMMA.sub(r"\1 ", whole)    # "call or text, or email" (AEGIS M-11)
     for single, seg in [(False, whole)] + [(True, x) for x in _SCOPE_SEGMENT.split(whole)]:
         if not seg.strip():
             continue
@@ -471,7 +473,7 @@ def email_opt_out_decision(text: Optional[str], subject: Optional[str] = None) -
     scopes = {opt_out_scope(own), opt_out_scope(subject)} - {None}
     if not exact and not typo:
         # a scope-only phrase ("do not call, text or email me") decides only with an email channel in it
-        return "revoke" if "all" in scopes and any(opt_out_level(t) for t in (own, subject) if t) else None
+        return "revoke" if "all" in scopes else None      # AEGIS H-H: "do not call or email me"
     if not scopes or "all" in scopes:
         return "revoke"
     return "ask" if "ask" in scopes else "keep"
