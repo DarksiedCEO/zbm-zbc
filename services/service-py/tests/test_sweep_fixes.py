@@ -433,3 +433,51 @@ def test_r7_a_literal_rekeyed_id_with_another_body_is_never_refused(tmp_path):
     h.ok(h.post("/svc/v1/inbound/email", {**base, "request_id": rk, "text": "UNSUBSCRIBE"},
                 caller="email_gateway"), 201)
     assert _both_revoked(h, cid)
+
+
+# ------------------------------------------------------------------ AEGIS re-review of d1477aa (REVISE)
+
+def test_ha_asking_to_be_reached_by_email_keeps_email_consent():
+    import channels
+    for t in ("Stop texting me. Email me instead.", "Please stop texting me, I prefer email.",
+              "stop texting me, my email is a@b.com", "stop texting me, only use email"):
+        assert channels.email_opt_out(t) is False, t
+    for t in ("stop texting me, same for email", "stop texting me and emailing me too",
+              "unsubscribe me from texts as well as emails", "stop texting me and spamming my inbox"):
+        assert channels.email_opt_out(t) is True, t
+
+
+def test_hb_an_outlook_header_block_is_a_quote_header(tmp_path):
+    text = ("Sounds good, thanks!\n\nFrom: Acme Support <help@acme.test>\nDate: Monday, October 5, 2026\n"
+            "To: owner@acme.test\nSubject: Your order\n\nYou can cancel or change your order any time.")
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    h.ok(_email(h, "owner@acme.test", text, subject="Re: Your order"), 201)
+    assert _consents(h, cid) == {"email": "active", "sms": "active"}
+    assert not any(a["code"] == "OPT_OUT_IN_QUOTED_TEXT" for a in h.svc.alerts.values())
+
+
+def test_m1_ordinary_words_in_our_quoted_mail_do_not_alert():
+    import channels
+    for quoted in ("It ships by the end of the week.", "You can cancel anytime.", "No more than one update a day."):
+        assert channels.quoted_tail_opt_out(_OUTLOOK.replace("How was your visit?", quoted) + "ok") is None, quoted
+
+
+def test_m2_a_forwarded_newsletter_is_never_an_opt_out():
+    import channels
+    for header in ("---------- Forwarded message ---------", "Begin forwarded message:"):
+        t = "Is this from you?\n\n" + header + "\nFrom: News\n\nTo unsubscribe click here."
+        assert channels.email_opt_out(t) is False, header
+        assert channels.quoted_tail_opt_out(t) is None, header
+
+
+def test_email_angle_bracket_stop_is_an_opt_out():
+    import channels
+    for t in ("<STOP>", "Please <unsubscribe> me", "<p>STOP</p>"):
+        assert channels.email_opt_out(t) is True, t
+
+
+def test_l2_a_blank_footer_entry_is_ignored(monkeypatch):
+    import channels
+    monkeypatch.setattr(channels, "OWN_FOOTER_LINES", ("", "   "))
+    assert channels.quoted_tail_opt_out(_OUTLOOK + "UNSUBSCRIBE") == "revoke"

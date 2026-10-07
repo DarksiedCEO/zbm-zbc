@@ -126,11 +126,19 @@ SCOPE_CONNECTORS = frozenset({"me", "us", "from", "your", "our", "the", "all", "
                               "of", "to", "with", "sending", "send", "receiving", "getting", "get", "please", "pls",
                               "plz", "more", "future", "and", "or", "nor", "plus", "also", "both", "either", "e"})
 SCOPE_LOOKAHEAD = 8
+_EMAIL_WIDENERS = frozenset({"too", "also", "same", "well", "either", "both", "spamming", "spam", "inbox", "and", "or",
+                             "nor", "plus", "everything", "all"})
+_EMAIL_PREFERENCE = frozenset({"instead", "prefer", "rather", "only", "use", "reach", "contact"})
 # a phone word followed by these is a label for an address ("Cell: 310 ...", "my number is ..."), not a channel
 _ADDRESS_LABEL_NEXT = frozenset({"is", "was", "changed", "here"})
 _QUOTE_HEADER = re.compile(r"^\s*(on\b.{0,300}\bwrote\s*:|el\b.{0,300}\bescribi[oó]\s*:|le\b.{0,300}\ba [eé]crit\s*:|"
                            r"am\b.{0,300}\bschrieb.{0,100}:|em\b.{0,300}\bescreveu\s*:|"
-                           r"-{2,}\s*(original message|forwarded message)\s*-{2,}|_{5,})\s*$", re.IGNORECASE)
+                           r"-{2,}\s*(original message|forwarded message)\s*-{2,}|begin forwarded message\s*:|_{5,})\s*$",
+                           re.IGNORECASE)
+_FORWARD_HEADER = re.compile(r"^\s*(-{2,}\s*forwarded message\s*-{2,}|begin forwarded message\s*:)\s*$", re.IGNORECASE)
+# AEGIS H-B: Outlook for Mac / new Outlook quote a message with a header block and no "Original Message" line
+_HDR_FROM = re.compile(r"^\s*\**(from|de|von)\s*:\**\s+\S", re.IGNORECASE)
+_HDR_DATE = re.compile(r"^\s*\**(sent|date|enviado|fecha|gesendet|datum|envoy[eé])\s*:\**\s+\S", re.IGNORECASE)
 _SIG_DELIM = re.compile(r"^\s*(--|__)\s*$")
 _SENT_FROM = re.compile(r"^\s*sent from (my|mail for|outlook|yahoo|gmail)\b", re.IGNORECASE)
 _SIGN_OFF = re.compile(r"^\s*(thanks|thank you|many thanks|thx|regards|best|best regards|kind regards|warm regards|"
@@ -141,7 +149,10 @@ _BLOCKQUOTE = re.compile(r"<\s*blockquote\b[^<>]{0,500}>(?:(?!<\s*blockquote\b).
                          re.IGNORECASE | re.DOTALL)
 _BLOCKQUOTE_OPEN = re.compile(r"<\s*blockquote\b[^<>]{0,500}>", re.IGNORECASE)
 _BLOCK_TAG = re.compile(r"<\s*/?\s*(br|p|div|li|tr|h[1-6]|table|ul|ol|hr)\b[^<>]{0,500}>", re.IGNORECASE)
-_ANY_TAG = re.compile(r"<[^<>]{0,500}>")
+_HTML_TAGS = ("a|abbr|b|big|blockquote|body|center|cite|code|col|colgroup|dd|del|dfn|dl|dt|em|font|footer|head|header|"
+              "html|i|img|ins|kbd|label|link|main|mark|meta|nav|o:p|pre|q|s|section|small|span|strike|strong|style|sub|"
+              "sup|tbody|td|tfoot|th|thead|title|tt|u|var|wbr|v:[a-z]+|w:[a-z]+")
+_ANY_TAG = re.compile(r"<!--.{0,2000}?-->|<\s*/?\s*(?:" + _HTML_TAGS + r")\b[^<>]{0,500}>", re.IGNORECASE | re.DOTALL)
 _SEGMENT_SPLIT = re.compile(r"[\n\r.!?;]+")
 # Opt-out wording strong enough to honour even inside the unmarked part of a reply (an Outlook "Original Message"
 # block, or "On ... wrote:" with no ">" lines) — it cannot be told apart from a reply typed below the quote. Our own
@@ -151,6 +162,9 @@ OPT_OUT_STRONG = ("unsubscribe", "unsub", "stopall", "do not email", "dont email
                   "stop emailing", "remove my email", "no more emails", "no more email", "any more emails", "anymore emails", "take me off your list",
                   "take me off your mailing list", "remove me from your list", "remove me from your mailing list")
 TAIL_LAST_LINE_MAX_WORDS = 4
+# AEGIS M-1: in the quoted tail only an opt-out PHRASE alerts Andre — single words ("end", "cancel", "stop") and
+# loose pairs ("no more than one update") turn up in our own quoted mail and would wear the alert down
+_TAIL_ALERT_EXCLUDED = frozenset({"no more", "who is this", "wrong person"})
 # a short last line below an unmarked quote revokes only when it is nothing but stop / unsubscribe (and courtesy words):
 # "Cancel anytime." or "Offer ends soon." as the last line of our own quoted message must never opt anyone out
 _TAIL_LAST_LINE_CORE = frozenset({"stop", "stopall", "unsubscribe", "unsub"})
@@ -188,10 +202,17 @@ def split_reply(text: str) -> tuple[str, str]:
     own: list[str] = []
     tail: list[str] = []
     in_tail = False
+    forwarded = False
     for idx, line in enumerate(lines):
         if in_tail:
             tail.append(line)
             continue
+        if _HDR_FROM.match(line) and any(_HDR_DATE.match(nl) for nl in lines[idx + 1:idx + 4]):
+            in_tail = True                    # AEGIS H-B: "From: ... / Date: ... / To: ... / Subject: ..." block
+            continue
+        if _FORWARD_HEADER.match(line):
+            forwarded = True                  # AEGIS M-2: a forwarded message is someone else's words, never read
+            break
         joined = (line.rstrip() + " " + lines[idx + 1].strip()) if idx + 1 < len(lines) else ""
         if _QUOTE_HEADER.match(line) or (joined and not _QUOTE_HEADER.match(lines[idx + 1])
                                            and _QUOTE_HEADER.match(joined)):
@@ -205,7 +226,7 @@ def split_reply(text: str) -> tuple[str, str]:
         if line.lstrip().startswith(">"):
             continue
         own.append(line)
-    if unclosed_tail.strip():
+    if unclosed_tail.strip() and not forwarded:
         tail.append(unclosed_tail)
     return "\n".join(own), "\n".join(tail)
 
@@ -250,7 +271,7 @@ def quoted_tail_opt_out(text: Optional[str]) -> Optional[str]:
     if not tail.strip():
         return None
     body = tail
-    for f in OWN_FOOTER_LINES:                  # substring match on the joined tail survives re-wrapping
+    for f in (f for f in OWN_FOOTER_LINES if f.split()):   # substring match survives re-wrapping; never blank
         body = re.sub(r"\s+".join(map(re.escape, f.split())), " ", body, flags=re.IGNORECASE)
     variants = {normalise(body), normalise(body.translate(_LEET))}
     variants |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(variants)}
@@ -262,7 +283,9 @@ def quoted_tail_opt_out(text: Optional[str]) -> Optional[str]:
     if toks and len(toks) <= TAIL_LAST_LINE_MAX_WORDS and set(toks) <= _TAIL_LAST_LINE_WORDS \
             and set(toks) & _TAIL_LAST_LINE_CORE:
         return "revoke"
-    return "alert" if opt_out_level(body) is not None else None
+    norms = {normalise(body)}
+    norms |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(norms)}
+    return "alert" if any(f" {p} " in n for n in norms for p in _TAIL_ALERT_PHRASES) else None
 
 
 def _typo_tokens(norm: str) -> list[int]:
@@ -299,6 +322,9 @@ def _phone_scoped(toks: list[str], i: int, j: int) -> bool:
     while k < len(toks) and skipped < SCOPE_LOOKAHEAD:
         t = toks[k]
         if t in EMAIL_SCOPE_WORDS:
+            nxt = toks[k + 1] if k + 1 < len(toks) else ""
+            if nxt in _ADDRESS_LABEL_NEXT or nxt in ("address", "me"):
+                break                         # "my email is ...", "email me instead": an address or a preference
             email = True
         elif t in PHONE_SCOPE_WORDS:
             phone = phone or _phone_hit(toks, k)
@@ -341,10 +367,18 @@ def opt_out_scope(text: Optional[str]) -> Optional[str]:
                 generic = generic or not _phone_scoped(toks, i, i + 1)
     if not found:
         return None
-    # AEGIS R3: an email word anywhere in the person's own words ("stop texting me, same for email") widens it
-    if any(t in EMAIL_SCOPE_WORDS for t in normalise(whole).split()):
+    if generic:
         return "all"
-    return "all" if generic else "sms"
+    # AEGIS R3 / H-A: an email word elsewhere in the person's words widens an SMS-only opt-out when it ADDS email
+    # ("same for email", "email too", "texts as well as emails", "spamming my inbox") — never when the person asks to be
+    # reached by email ("email me instead", "I prefer email", "my email is a@b.com")
+    toks = normalise(whole).split()
+    if not any(t in EMAIL_SCOPE_WORDS for t in toks):
+        return "sms"
+    if any(p in toks for p in _EMAIL_PREFERENCE) or " email me " in f" {' '.join(toks)} " \
+            or re.search(r"\b(e ?mail|email address) (is|its|at)\b", " ".join(toks)):
+        return "sms"
+    return "all" if any(t in _EMAIL_WIDENERS for t in toks) else "sms"
 
 
 def email_opt_out(text: Optional[str], subject: Optional[str] = None) -> bool:
@@ -408,3 +442,9 @@ def check(channel: str, contact: dict, consent_for: Callable[[str], Optional[dic
     if channel == "chat":
         return None
     return "CHANNEL_NOT_OUTBOUND"
+
+
+# AEGIS M-1 (see _TAIL_ALERT_EXCLUDED): the multi-word opt-out phrases that alert Andre from a quoted tail
+_TAIL_ALERT_PHRASES = tuple(sorted({normalise(t).strip() for t in OPT_OUT_TERMS if len(normalise(t).split()) >= 2}
+                                   - _TAIL_ALERT_EXCLUDED) + ["opt me out", "stop sending", "take me off",
+                                   "cancel my subscription", "cancel my account", "cancel my membership"])

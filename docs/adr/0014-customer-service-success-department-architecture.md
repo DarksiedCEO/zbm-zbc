@@ -313,3 +313,15 @@ Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "A
 | R5 (Medium) | A Gmail header wrapped over two lines, forwarded and localized headers were read as the person's own words | Header matched on a line or a line joined with the next; "Forwarded message", Spanish, French, German, Portuguese forms added |
 | R6 (High, pre-existing, SMS) | `<STOP>`, "i <3 u but stop texting me >:(" read no opt-out (angle brackets stripped as tags) | Opt-out checks also read the text with `<` `>` as spaces |
 | R7 (Low) | A literal re-keyed id with another body got an uncaught 409 | Re-key is `<id[:80]>.r<sha8(id)>.b<sha16(body)>`; a second conflict falls back to `rk.<sha256(body)>`. Accepted residual: a redelivery differing only in whitespace is a second message |
+
+### Sweep A follow-up — AEGIS re-review of d1477aa (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-A (High) | "Stop texting me. Email me instead." / "I prefer email" / "my email is ..." revoked email | An email word widens an SMS-only opt-out only with an adding word (too, also, same, as well, and/or, spam, inbox); a preference (instead, prefer, rather, only, use, reach) or an address ("email is", "email me") keeps it SMS-only |
+| H-B (High, pre-existing) | Outlook for Mac / new Outlook "From: / Date: / To: / Subject:" quote block read as the person's words | A `From:` line with a `Sent:`/`Date:` line within the next three starts the quoted tail (English, Spanish, French, German forms) |
+| M-1 | Common words in our quoted mail ("end of the week", "cancel anytime") alerted Andre | The tail alerts only on multi-word opt-out phrases (plus "cancel my subscription / account / membership", "opt me out", "stop sending", "take me off"); "no more", "who is this", "wrong person" excluded |
+| M-2 | A forwarded newsletter's "To unsubscribe click here" revoked | Text below "Forwarded message" / "Begin forwarded message:" is never read for an opt-out |
+| R6 by email | `<STOP>` by email was stripped as a tag | Only known HTML tag names (and comments) are tags |
+| L-2 | A blank `OWN_FOOTER_LINES` entry would disable tail detection | Blank entries skipped |
+| L-1 (accepted) | "On second thought / ... my wife wrote:" can be read as a wrapped header | Accepted: contrived; the message still goes to a human and pauses SMS |
