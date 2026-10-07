@@ -35,16 +35,24 @@ OPT_OUT_TERMS = ("stop", "stopall", "unsubscribe", "unsub", "cancel", "cancelled
                  "remove my number", "my number off", "lose my number", "take my number", "delete my number",
                  "didnt sign up", "did not sign up", "never signed up", "who is this", "wrong number", "wrong person",
                  "not interested",
-                 # AEGIS round 12 (pre-existing gaps)
-                 "opt me out", "removed from your", "remove me from your", "dont want to hear from you",
-                 "do not want to hear from you", "delete my info", "delete my information", "delete my data",
-                 "enough with the emails", "enough with the texts", "rather not receive",
+
                  # sweep A: email wording ("do not email me" was not an opt-out at all)
                  "dont email", "do not email", "dont e mail", "do not e mail", "never email", "stop emailing",
                  "quit emailing", "stop sending emails", "remove my email", "take my email", "delete my email",
                  "alto", "parar", "pare", "cancelar", "baja", "darme de baja", "no me escriban", "no mas mensajes",
                  "numero equivocado", "arrete", "arreter", "desabonner", "sair", "cancele", "descadastrar",
                  "parem", "nao quero")
+# AEGIS re-review of 94b4dde (H-L): wording that is often an opt-out but often not ("removed from your page", "opt me
+# out of the warranty", "I'd rather not receive a partial shipment") never changes consent on its own: it raises
+# OPT_OUT_POSSIBLE for Andre. New wording found later goes HERE, not into OPT_OUT_TERMS, unless it cannot mean
+# anything else.
+OPT_OUT_POSSIBLE_TERMS = ("opt me out", "removed from your", "remove me from your", "dont want to hear from you",
+                          "do not want to hear from you", "delete my info", "delete my information", "delete my data",
+                          "enough with the emails", "enough with the texts", "rather not receive", "want out of your",
+                          "done with these emails", "done with your emails", "done with these texts", "dont reach out",
+                          "do not reach out", "no further contact", "cease all communication", "cease communication",
+                          "didnt ask for these", "did not ask for these", "never asked for these", "stop reaching out",
+                          "take me off", "remove me from", "dont want your", "do not want your")
 # V2-H3: one typo away from these (on 4+ letter tokens, after repeated letters are collapsed and leet undone)
 OPT_OUT_FUZZY = ("stop", "unsubscribe", "stopall")
 OPT_OUT_SYMBOLS = ("\U0001F6D1", "\u26D4", "\U0001F6AB", "\u270B")      # stop sign, no entry, prohibited, raised hand
@@ -336,7 +344,8 @@ def typo_opt_out(text: Optional[str]) -> bool:
 SCOPE_ONLY_TERMS = ("do not call", "dont call", "never call", "stop calling")
 # AEGIS H-J: "I don't want your emails", "I no longer want to receive your emails", "I do not want calls or emails"
 _NEG_WANT = re.compile(r"\b(?:dont|do not|no longer|never|dont ever) (?:want|wish)(?: to (?:receive|get))?"
-                       r"(?: (?:any|your|these|those|more|any more|anymore|further|the|from|you|of))*"
+                       r"(?: (?:any|your|these|those|more|any more|anymore|further|the|from|you|of|marketing|promotional|promo|"
+                       r"sales))*"
                        r" ((?:emails?|e mails?|calls?|texts?|txts?|messages?|newsletters?|mail|sms)"
                        r"(?: (?:or|and|nor) (?:emails?|e mails?|calls?|texts?|txts?|messages?|newsletters?|mail|sms))*)"
                        # AEGIS H-K: the channel must end the clause or be followed by from you / anymore / again —
@@ -518,6 +527,19 @@ def _direct_no_contact(text: Optional[str]) -> bool:
         return False
     whole = _OXFORD_COMMA.sub(r"\1 ", _CHANNEL_LIST_COMMA.sub(r"\1 or ", html_as_text(text)))
     return any(_DIRECT_NO_CONTACT.match(normalise(c).strip()) for c in _SCOPE_SEGMENT.split(whole) if c.strip())
+
+
+def possible_opt_out(text: Optional[str]) -> bool:
+    """Wording that may be an opt-out but may as well be something else (``OPT_OUT_POSSIBLE_TERMS``): Andre reads
+    it (``OPT_OUT_POSSIBLE``); no consent changes on it alone."""
+    if not text:
+        return False
+    for clause in _SCOPE_SEGMENT.split(html_as_text(text)):
+        norm = " " + " ".join(_collapse(w) for w in normalise(clause).split()) + " "
+        plain = normalise(clause)
+        if any(f" {normalise(t).strip()} " in v for v in (norm, plain) for t in OPT_OUT_POSSIBLE_TERMS):
+            return True
+    return False
 
 
 def email_opt_out(text: Optional[str], subject: Optional[str] = None) -> bool:

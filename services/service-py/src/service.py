@@ -1201,6 +1201,11 @@ class SupportService:
             email_revoke = decision in ("revoke", "revoke_direct")
             if decision == "ask":        # AEGIS H-F: an unclear email scope is never guessed: SMS only, Andre decides
                 effects.append(self._alert_effect("EMAIL_OPT_OUT_UNCLEAR", contact["contact_id"], rid))
+            elif level is None and not tail_opt_out and tail != "alert" and (
+                    channels.possible_opt_out(own) or channels.possible_opt_out(body.get("subject"))):
+                # AEGIS H-L: wording that may be an opt-out ("opt me out", "remove me from your ...") changes no
+                # consent; Andre reads it
+                effects.append(self._alert_effect("OPT_OUT_POSSIBLE", contact["contact_id"], rid))
             email_effect = {"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "email",
                             "via": ("stop_by_email" if level == "exact" else "suspected_stop_by_email" if level
                                     else "request_by_email"),

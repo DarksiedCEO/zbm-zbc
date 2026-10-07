@@ -683,9 +683,31 @@ def test_hk_other_things_named_email_text_or_mail_are_not_opt_outs(tmp_path):
     assert _consents(h, cid) == {"email": "active", "sms": "active"}
 
 
-def test_pre_existing_opt_out_wordings_are_honoured():
+def test_pre_existing_opt_out_wordings_are_honoured_or_surfaced(tmp_path):
     import channels
-    for t in ("I want to be removed from your email list", "Opt me out", "I don't want to hear from you again",
-              "Delete my info", "Enough with the emails", "I'd rather not receive these",
-              "I don't want your emails, they're spam"):
+    for t in ("I don't want your emails, they're spam", "I don't want your marketing emails"):
         assert channels.email_opt_out_decision(t) == "revoke", t
+    for t in ("I want to be removed from your email list", "Opt me out", "I don't want to hear from you again",
+              "Delete my info", "Enough with the emails", "I'd rather not receive these", "I want out of your mailing list",
+              "I'm done with these emails", "Please don't reach out again", "I want no further contact",
+              "Cease all communication", "I didn't ask for these emails"):
+        assert channels.possible_opt_out(t) or channels.email_opt_out_decision(t) == "revoke", t
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    h.ok(_email(h, "owner@acme.test", "Opt me out"), 201)
+    assert _consents(h, cid) == {"email": "active", "sms": "active"}
+    assert any(a["code"] == "OPT_OUT_POSSIBLE" for a in h.svc.alerts.values())
+
+
+def test_hl_ordinary_mail_with_list_like_words_changes_no_consent(tmp_path):
+    import channels
+    for i, t in enumerate(("My review was removed from your page, why?",
+                           "I got removed from your rewards program by mistake!",
+                           "Can you opt me out of the extended warranty?", "I'd rather not receive a partial shipment",
+                           "Was the charge removed from your system yet?", "Please delete my data from the old account",
+                           "Delete my info from the order notes")):
+        assert channels.opt_out_level(t) is None and channels.email_opt_out_decision(t) is None, t
+        h = Harness(tmp_path / str(i))
+        cid = _with_consents(h)
+        h.ok(_email(h, "owner@acme.test", t), 201)
+        assert _consents(h, cid) == {"email": "active", "sms": "active"}, t

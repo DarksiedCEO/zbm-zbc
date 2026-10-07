@@ -400,3 +400,12 @@ phrase from all rounds is pinned in `test_scope_corpus_all_rounds_at_once`.
 |---|---|---|
 | H-K (High, regression) | "I don't need the email receipt", "I don't want the mail carrier to ...", "... the text on the banner" revoked consent | `_NEG_WANT` takes only want / wish (to receive / get), read per clause, and the channel must end the clause or be followed by from you / anymore / again / please |
 | Pre-existing gaps | "Opt me out", "removed from your email list", "I don't want to hear from you again", "Delete my info", "Enough with the emails", "I'd rather not receive these" were neither honoured nor surfaced | Added to the opt-out terms (no phone word, so scope `all`) |
+
+### Sweep A follow-up — AEGIS re-review of 94b4dde (REVISE): stop growing the revoke list
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-L (High, regression) | Round-12 terms as bare substrings revoked ordinary mail ("removed from your page", "opt me out of the warranty", "rather not receive a partial shipment") | Decision: the exact-revoke list (`OPT_OUT_TERMS`) is closed to context-dependent wording. Such wording (`OPT_OUT_POSSIBLE_TERMS`: "opt me out", "remove me from your ...", "don't want to hear from you", "delete my info", "cease all communication", "no further contact", ...) changes no consent and raises `OPT_OUT_POSSIBLE` for Andre. New wording found later goes there unless it cannot mean anything else. "marketing / promotional" allowed in the negated-want rule ("I don't want your marketing emails" revokes) |
+
+Operational dependency (Andre): `OPT_OUT_POSSIBLE`, `EMAIL_OPT_OUT_UNCLEAR` and `OPT_OUT_IN_QUOTED_TEXT` alerts must be
+worked within days — CAN-SPAM requires an email opt-out honoured within 10 business days.
