@@ -199,3 +199,13 @@ Round 5 confirmed R4-1, R4-2 and R4-3 closed and found no Critical or High. One 
 
 Accepted trade-off (Info): anyone who sees a freeze challenge id on the request path can use it up with a bad
 signature; Andre asks for a new one. Ids are HMAC-protected and cannot be guessed.
+
+## Amendment — AEGIS sweep A (Oct 6 2026, on 5d49ee9): every finding fixed
+
+Regressions: `services/security-py/tests/test_sweep_fixes.py` (each one fails on 5d49ee9).
+
+| Id | Finding | Fix |
+|---|---|---|
+| Sweep-A release order | `release_hold` released every preserved system externally FIRST, under the lock, then committed: a ledger failure answered 503 with the data no longer preserved and the hold still `active` | The release is committed first (`hold_released` carries `release_pending`, the preserved systems). Then each is released externally, outside the lock, retried until the adapter confirms: 3 tries in the request, then the new `hold-release-retry` job; each confirmation is its own line (`hold_release_confirmed`). Pending releases survive a restart. The answer of a released hold names `release_pending` |
+| Sweep-A adapter exceptions | An exception from a preservation adapter in `preserve` was a 500 | It is a `failed` preservation: the hold is recorded, the answer says `delivered: false` with the failed systems in `reason`, and the PRESERVATION_NOT_CONNECTED incident is opened as for an unconnected system. An adapter release that raises is unconfirmed and retried |
+| Sweep-A clock | Emergency (freeze) challenges used `time.time()`, and the test harness ran on the system clock unless a test passed one | Emergency challenges (issue, check, used-set expiry) use `self.clock`. The test harness defaults to a `FixedClock` (2026-10-06 12:00 UTC); the tests that read the wall clock read the harness clock, and the expired-freeze-challenge test advances it instead of monkeypatching `time.time` |
