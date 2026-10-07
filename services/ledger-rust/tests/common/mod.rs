@@ -140,7 +140,12 @@ pub fn read_response(stream: &mut TcpStream) -> std::io::Result<Response> {
     let mut head = Vec::new();
     let mut byte = [0u8; 1];
     while !head.ends_with(b"\r\n\r\n") {
-        let n = stream.read(&mut byte)?;
+        // AEGIS N4: a signal under load interrupts a raw read (EINTR); retry it
+        // (read_exact / read_to_end / write_all below already do).
+        let n = match stream.read(&mut byte) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            r => r?,
+        };
         if n == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -230,4 +235,26 @@ pub fn write_head_for(log: &std::path::Path) {
     let mut name = log.file_name().unwrap().to_os_string();
     name.push(".head");
     std::fs::write(log.with_file_name(name), format!("{head}\n")).expect("head file");
+}
+
+/// AEGIS N1: applies a one-shot operator override the way an operator does:
+/// runs the server binary once with `name=value` on `log`; it must apply the
+/// override and exit 0 without serving. Returns its stderr.
+pub fn apply_override(log: &std::path::Path, token: &str, name: &str, value: &str) -> String {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_server"))
+        .env("LEDGER_SERVICE_TOKEN", token)
+        .env("LEDGER_LOG_PATH", log.to_str().unwrap())
+        .env("LEDGER_PORT", "0")
+        .env_remove("LEDGER_PORT_FILE")
+        .env_remove("LEDGER_CALLERS_FILE")
+        .env_remove("LEDGER_ALLOW_SHARED_TOKEN")
+        .env_remove("LEDGER_ALLOW_RESET")
+        .env_remove("LEDGER_MIGRATE_LEGACY")
+        .env(name, value)
+        .output()
+        .expect("run ledger-rust");
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert_eq!(out.status.code(), Some(0), "{name}={value} was not applied:\n{err}");
+    assert!(err.contains("applied") && err.contains("Exiting without serving"), "{err}");
+    err
 }

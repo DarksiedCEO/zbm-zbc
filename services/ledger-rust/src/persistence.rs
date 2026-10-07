@@ -209,20 +209,55 @@ pub struct TornTailRecovery {
 /// number of entries the log held after the last acknowledged append;
 /// `head_seq` is `entries - 1` (null when empty) and `head_hash` that entry's
 /// hash (the genesis hash when empty). Also the body of `GET /ledger/head`.
+///
+/// AEGIS N1 (Oct 7 2026): `migrated_from` / `reset_from` record, durably and
+/// for good, that the chain before this ledger's checkpoint history began was
+/// accepted by an operator override: the `log_binding` of the log a
+/// `LEDGER_MIGRATE_LEGACY` migrated, and the `reset_binding` a
+/// `LEDGER_ALLOW_RESET` accepted. Both are omitted when absent, so the
+/// checkpoint of a ledger that never needed an override is byte-identical to
+/// before.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HeadCheckpoint {
     pub entries: u64,
     pub head_seq: Option<u64>,
     pub head_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrated_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_from: Option<String>,
+}
+
+/// AEGIS N1: the override history carried by every checkpoint write.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Provenance {
+    migrated_from: Option<String>,
+    reset_from: Option<String>,
 }
 
 impl HeadCheckpoint {
     fn of(ledger: &Ledger) -> HeadCheckpoint {
         match ledger.entries().last() {
-            None => HeadCheckpoint { entries: 0, head_seq: None, head_hash: genesis_hash() },
-            Some(e) => HeadCheckpoint { entries: ledger.len() as u64, head_seq: Some(e.seq()), head_hash: e.hash().to_string() },
+            None => HeadCheckpoint { entries: 0, head_seq: None, head_hash: genesis_hash(), migrated_from: None, reset_from: None },
+            Some(e) => HeadCheckpoint {
+                entries: ledger.len() as u64,
+                head_seq: Some(e.seq()),
+                head_hash: e.hash().to_string(),
+                migrated_from: None,
+                reset_from: None,
+            },
         }
+    }
+
+    fn with(mut self, p: &Provenance) -> HeadCheckpoint {
+        self.migrated_from = p.migrated_from.clone();
+        self.reset_from = p.reset_from.clone();
+        self
+    }
+
+    fn provenance(&self) -> Provenance {
+        Provenance { migrated_from: self.migrated_from.clone(), reset_from: self.reset_from.clone() }
     }
 
     fn is_well_formed(&self) -> bool {
@@ -231,7 +266,9 @@ impl HeadCheckpoint {
             None => self.entries == 0,
             Some(s) => self.entries > 0 && s == self.entries - 1,
         };
-        hex && seq_ok
+        let migrated_ok = self.migrated_from.as_deref().is_none_or(is_log_binding);
+        let reset_ok = self.reset_from.as_deref().is_none_or(is_reset_binding);
+        hex && seq_ok && migrated_ok && reset_ok
     }
 }
 
@@ -256,6 +293,11 @@ pub struct LedgerOpenOptions {
     /// binding (`log_binding`), and the checkpoint is then created from it.
     pub migrate: Option<String>,
 }
+
+// AEGIS N1: a value that is set but matches no refusal of THIS open refuses
+// the open (`open_with_sink`), and the server exits after an override is
+// applied (`bin/server.rs`), so a server never serves with either set — a
+// value left behind cannot re-arm itself when an old backup is restored.
 
 /// What `open` did about the head checkpoint (AEGIS M1-M3).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -526,6 +568,8 @@ pub struct PersistentLedger {
     path: PathBuf,
     torn_tail: Option<TornTailRecovery>,
     report: OpenReport,
+    /// AEGIS N1: carried into every checkpoint write.
+    provenance: Provenance,
     poisoned: Option<String>,
     /// Holds the exclusive flock on `<log>.lock` for as long as this value
     /// lives (sweep F-1). Never read; dropping it releases the lock.
@@ -711,11 +755,12 @@ fn check_against_head(
     ledger: &Ledger,
     head: HeadState,
     opts: &LedgerOpenOptions,
-) -> Result<(bool, OpenReport), PersistError> {
+) -> Result<(bool, OpenReport, Provenance), PersistError> {
     let n = ledger.len() as u64;
     let log_head = HeadCheckpoint::of(ledger);
     let log_bind = log_binding(n, &log_head.head_hash);
     let head_file = head_path_for(path);
+    let mut kept = Provenance::default();
     let (refusal, from): (String, String) = match head {
         HeadState::Missing if n == 0 => {
             log_startup_event(
@@ -727,7 +772,7 @@ fn check_against_head(
                     "entries": 0,
                 }),
             );
-            return Ok((true, OpenReport { created: true, ..OpenReport::default() }));
+            return Ok((true, OpenReport { created: true, ..OpenReport::default() }, Provenance::default()));
         }
         HeadState::Missing => {
             if opts.migrate.as_deref() == Some(log_bind.as_str()) {
@@ -747,7 +792,8 @@ fn check_against_head(
                     head_file.display(),
                     path.display()
                 );
-                return Ok((true, OpenReport { migrate_used: true, ..OpenReport::default() }));
+                let p = Provenance { migrated_from: Some(log_bind.clone()), reset_from: None };
+                return Ok((true, OpenReport { migrate_used: true, ..OpenReport::default() }, p));
             }
             let given = match &opts.migrate {
                 Some(v) => format!(" (LEDGER_MIGRATE_LEGACY={v:?} does not match this log)"),
@@ -766,6 +812,7 @@ fn check_against_head(
         }
         HeadState::Bad { reason, digest16 } => (reason, format!("unreadable:{digest16}")),
         HeadState::Present(cp) => {
+            kept = cp.provenance();
             let from = log_binding(cp.entries, &cp.head_hash);
             let reason = if !log_existed {
                 format!(
@@ -810,7 +857,7 @@ fn check_against_head(
                             "head_hash": log_head.head_hash,
                         }),
                     );
-                    return Ok((true, OpenReport { moved_up: true, ..OpenReport::default() }));
+                    return Ok((true, OpenReport { moved_up: true, ..OpenReport::default() }, kept));
                 } else if n > cp.entries {
                     format!(
                         "the log {} holds {n} entries, {} more than the head checkpoint ({}): an interrupted append \
@@ -821,7 +868,7 @@ fn check_against_head(
                         cp.entries
                     )
                 } else {
-                    return Ok((false, OpenReport::default()));
+                    return Ok((false, OpenReport::default(), kept));
                 }
             };
             (reason, from)
@@ -847,7 +894,8 @@ fn check_against_head(
                  LEDGER_ALLOW_RESET now.",
                 head_file.display()
             );
-            Ok((true, OpenReport { reset_used: true, ..OpenReport::default() }))
+            let p = Provenance { migrated_from: kept.migrated_from, reset_from: Some(accept) };
+            Ok((true, OpenReport { reset_used: true, ..OpenReport::default() }, p))
         }
         given => {
             let given = match given {
@@ -989,7 +1037,22 @@ impl PersistentLedger {
         ledger.verify_chain().map_err(PersistError::ChainInvalid)?;
 
         // F-6: every refusal happens before anything on disk is modified.
-        let (write_checkpoint, report) = check_against_head(&path, existed, &ledger, head, &opts)?;
+        let (write_checkpoint, report, provenance) = check_against_head(&path, existed, &ledger, head, &opts)?;
+        // AEGIS N1: an override that is set but was not needed by this state
+        // refuses the open (before anything on disk changes): it is a leftover
+        // that a later restore of an old backup would silently re-arm.
+        for (name, set, used) in [
+            ("LEDGER_MIGRATE_LEGACY", &opts.migrate, report.migrate_used),
+            ("LEDGER_ALLOW_RESET", &opts.reset, report.reset_used),
+        ] {
+            if let (Some(v), false) = (set, used) {
+                return Err(PersistError::Checkpoint(format!(
+                    "{name}={v} is set but this log does not need it (the log reaches its head checkpoint, or the \
+                     value matches another state). An operator override is one-shot: refusing to start while it \
+                     is set, so a leftover value can never accept a later rollback. Unset {name} and restart."
+                )));
+            }
+        }
 
         // Only now — every complete line parsed and the whole chain verified —
         // is an unterminated tail treated as a torn, unacknowledged write.
@@ -1018,7 +1081,7 @@ impl PersistentLedger {
             fsync_dir(&path)?;
         }
         if write_checkpoint {
-            match write_head(&path, &HeadCheckpoint::of(&ledger)) {
+            match write_head(&path, &HeadCheckpoint::of(&ledger).with(&provenance)) {
                 Ok(()) => {}
                 Err(HeadWriteError::BeforeRename(e)) | Err(HeadWriteError::DirSync(e)) => {
                     return Err(PersistError::Io(e));
@@ -1036,6 +1099,7 @@ impl PersistentLedger {
             path,
             torn_tail,
             report,
+            provenance,
             poisoned: None,
             _lock: lock,
             #[cfg(test)]
@@ -1093,7 +1157,7 @@ impl PersistentLedger {
     /// The current head (equal to the durable checkpoint after every
     /// acknowledged append; sweep F-6, `GET /ledger/head`).
     pub fn head(&self) -> HeadCheckpoint {
-        HeadCheckpoint::of(&self.ledger)
+        HeadCheckpoint::of(&self.ledger).with(&self.provenance)
     }
 
     pub fn verify_chain(&self) -> Result<(), LedgerError> {
@@ -1138,7 +1202,10 @@ impl PersistentLedger {
                     entries: entry.seq() + 1,
                     head_seq: Some(entry.seq()),
                     head_hash: entry.hash().to_string(),
-                };
+                    migrated_from: None,
+                    reset_from: None,
+                }
+                .with(&self.provenance);
                 match self.write_head_checked(&head) {
                     Ok(()) => None,
                     Err(HeadWriteError::BeforeRename(e)) => Some(io::Error::new(
@@ -2024,7 +2091,7 @@ mod tests {
         let path = scratch_path("head_follows");
         let _cleanup = ScratchFile(path.clone());
         let mut pl = PersistentLedger::open(&path).unwrap();
-        assert_eq!(head_on_disk(&path), HeadCheckpoint { entries: 0, head_seq: None, head_hash: crate::genesis_hash() });
+        assert_eq!(head_on_disk(&path), HeadCheckpoint { entries: 0, head_seq: None, head_hash: crate::genesis_hash(), migrated_from: None, reset_from: None });
         pl.append(sample_record("f-0", "1.00")).unwrap();
         pl.append_event(sample_event("onb-1", "s")).unwrap();
         let h = head_on_disk(&path);
@@ -2177,18 +2244,65 @@ mod tests {
         let stale = LedgerOpenOptions { migrate: Some("1:0000000000000000".into()), ..LedgerOpenOptions::default() };
         assert!(matches!(PersistentLedger::open_with(&path, stale), Err(PersistError::Checkpoint(_))));
         let opts = LedgerOpenOptions { migrate: Some(v.clone()), ..LedgerOpenOptions::default() };
-        let mut pl = PersistentLedger::open_with(&path, opts.clone()).unwrap();
+        let pl = PersistentLedger::open_with(&path, opts.clone()).unwrap();
         assert!(pl.open_report().migrate_used);
         assert_eq!(head_on_disk(&path), pl.head());
-        pl.append(sample_record("f-2", "1.00")).unwrap();
+        assert_eq!(pl.head().migrated_from.as_deref(), Some(v.as_str()), "AEGIS N1: the migration is recorded");
         drop(pl);
-        // Consumed: once the checkpoint exists the value is not used, and
-        // after an append it can never match this log again.
-        let pl = PersistentLedger::open_with(&path, opts.clone()).unwrap();
-        assert!(!pl.open_report().migrate_used);
+        // AEGIS N1: left set, it refuses every open (it is not needed now), so
+        // nothing can be appended while it is armed.
+        match PersistentLedger::open_with(&path, opts.clone()) {
+            Err(PersistError::Checkpoint(r)) => assert!(r.contains("does not need it"), "{r}"),
+            other => panic!("a leftover migrate value must refuse the open: {other:?}"),
+        }
+        let mut pl = PersistentLedger::open(&path).unwrap();
+        pl.append(sample_record("f-2", "1.00")).unwrap();
+        assert_eq!(head_on_disk(&path).migrated_from.as_deref(), Some(v.as_str()), "kept by every append");
         drop(pl);
         std::fs::remove_file(head_path_for(&path)).unwrap();
         assert!(matches!(PersistentLedger::open_with(&path, opts), Err(PersistError::Checkpoint(_))));
+    }
+
+    /// AEGIS N1 repro: migrate a 3-entry log (keeping a backup of the
+    /// directory as it was), append 7, restore the backup. Before: with the
+    /// migrate value still set, the restored 3-entry log started and the 7
+    /// acknowledged entries were gone. Now the value cannot stay set across
+    /// the appends (a start with it set and not needed is refused), and the
+    /// restored backup is refused again (no checkpoint).
+    #[test]
+    fn a_restored_pre_migration_backup_is_refused_again() {
+        let path = scratch_path("n1_migrate");
+        let _cleanup = ScratchFile(path.clone());
+        {
+            let mut pl = PersistentLedger::open(&path).unwrap();
+            for i in 0..3 {
+                pl.append(sample_record(&format!("f-{i}"), "1.00")).unwrap();
+            }
+        }
+        std::fs::remove_file(head_path_for(&path)).unwrap();
+        let backup = std::fs::read(&path).unwrap();
+        let v = match PersistentLedger::open(&path) {
+            Err(PersistError::Checkpoint(r)) => advised(&r, "LEDGER_MIGRATE_LEGACY"),
+            other => panic!("{other:?}"),
+        };
+        let opts = LedgerOpenOptions { migrate: Some(v), ..LedgerOpenOptions::default() };
+        drop(PersistentLedger::open_with(&path, opts.clone()).unwrap());
+        // The value left set: the next open (where the 7 appends would happen) is refused.
+        assert!(matches!(PersistentLedger::open_with(&path, opts.clone()), Err(PersistError::Checkpoint(_))));
+        {
+            let mut pl = PersistentLedger::open(&path).unwrap();
+            for i in 3..10 {
+                pl.append(sample_record(&format!("f-{i}"), "1.00")).unwrap();
+            }
+        }
+        // Restore the pre-migration directory (log without its head file).
+        std::fs::write(&path, &backup).unwrap();
+        std::fs::remove_file(head_path_for(&path)).unwrap();
+        match PersistentLedger::open(&path) {
+            Err(PersistError::Checkpoint(r)) => assert!(r.contains("NO head checkpoint"), "{r}"),
+            other => panic!("the restored backup must be refused: {other:?}"),
+        }
+        assert!(!head_path_for(&path).exists(), "the refusal wrote nothing");
     }
 
     /// AEGIS M3: a reset value is bound to the exact (checkpoint, log head)
@@ -2218,19 +2332,33 @@ mod tests {
             Err(PersistError::Checkpoint(r)) => assert!(r.contains("does not match this state"), "{r}"),
             other => panic!("a stale reset value must not accept another state: {other:?}"),
         }
-        // The state it was printed for: accepted, once.
+        // The state it was printed for: accepted, once, and recorded.
+        let refused_head = std::fs::read(head_path_for(&path)).unwrap();
         std::fs::write(&path, format!("{}\n", lines[0])).unwrap();
         let pl = PersistentLedger::open_with(&path, opts.clone()).unwrap();
         assert!(pl.open_report().reset_used);
         assert_eq!(pl.len(), 1);
+        assert_eq!(head_on_disk(&path).reset_from.as_deref(), Some(v1.as_str()));
         drop(pl);
-        // Left set afterwards it is unused, and a later rollback is still refused.
-        let mut pl = PersistentLedger::open_with(&path, opts.clone()).unwrap();
-        assert!(!pl.open_report().reset_used);
+        // AEGIS N1: left set afterwards, it refuses the open (not needed).
+        match PersistentLedger::open_with(&path, opts.clone()) {
+            Err(PersistError::Checkpoint(r)) => assert!(r.contains("does not need it"), "{r}"),
+            other => panic!("a leftover reset value must refuse the open: {other:?}"),
+        }
+        let mut pl = PersistentLedger::open(&path).unwrap();
         pl.append(sample_record("f-9", "1.00")).unwrap();
         drop(pl);
+        // AEGIS N1 (reset variant): restoring EXACTLY the earlier refused state
+        // (the 3-entry checkpoint and the 1-entry log) is refused without the
+        // value; the value would have to be set again, by hand.
+        let reset_head = std::fs::read(head_path_for(&path)).unwrap();
+        assert!(String::from_utf8_lossy(&reset_head).contains("reset_from"));
         std::fs::write(&path, format!("{}\n", lines[0])).unwrap();
-        assert!(matches!(PersistentLedger::open_with(&path, opts), Err(PersistError::Checkpoint(_))));
+        std::fs::write(head_path_for(&path), &refused_head).unwrap();
+        match PersistentLedger::open(&path) {
+            Err(PersistError::Checkpoint(r)) => assert!(r.contains("holds 1 entries but the head checkpoint records 3"), "{r}"),
+            other => panic!("the restored refused state must be refused again: {other:?}"),
+        }
     }
 
     #[test]

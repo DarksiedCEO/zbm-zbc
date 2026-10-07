@@ -194,7 +194,8 @@ fn start(log: &Scratch, fsize: Option<Fsize>) -> ServerHandle {
 /// A legacy (pre-checkpoint) log needs the one-shot migrate value (AEGIS M2).
 fn start_migrating(log: &Scratch) -> ServerHandle {
     let binding = common::migrate_binding(&log.0);
-    start_with(log, None, &[("LEDGER_MIGRATE_LEGACY", &binding)])
+    common::apply_override(&log.0, TOKEN, "LEDGER_MIGRATE_LEGACY", &binding);
+    start_with(log, None, &[])
 }
 
 fn start_with(log: &Scratch, fsize: Option<Fsize>, env: &[(&str, &str)]) -> ServerHandle {

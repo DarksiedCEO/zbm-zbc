@@ -240,6 +240,7 @@ fn read_until_closed(s: &mut TcpStream, since: Instant) -> (String, Duration) {
     let mut buf = [0u8; 8192];
     loop {
         match s.read(&mut buf) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue, // AEGIS N4
             Ok(0) | Err(_) => break,
             Ok(n) => out.extend_from_slice(&buf[..n]),
         }
@@ -547,7 +548,12 @@ fn close_outcome(port: u16, raw: &[u8]) -> (u16, String, Option<std::io::Error>)
     let _ = c.write_all(raw);
     let resp = common::read_response(&mut c).unwrap();
     let mut rest = [0u8; 256];
-    let after = match c.read(&mut rest) {
+    let after = match loop {
+        match c.read(&mut rest) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue, // AEGIS N4
+            r => break r,
+        }
+    } {
         Ok(0) => "eof".to_string(),
         Ok(n) => format!("{n} extra bytes"),
         Err(e) => format!("read error: {e}"),

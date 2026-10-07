@@ -238,8 +238,9 @@ fn f6_a_deleted_log_refuses_restart_and_only_an_explicit_reset_starts_fresh() {
         assert_eq!(refused(&log, &[("LEDGER_ALLOW_RESET", Some(bad))]).unwrap_or_else(|e| panic!("{e}")), 1, "{bad}");
     }
     let v = advised(&log.stderr(), "LEDGER_ALLOW_RESET");
-    let s = start(&log, &[("LEDGER_ALLOW_RESET", Some(&v))]);
-    assert!(log.stderr().contains("OPERATOR RESET"), "{}", log.stderr());
+    let err = common::apply_override(&log.0, TOKEN, "LEDGER_ALLOW_RESET", &v);
+    assert!(err.contains("OPERATOR RESET"), "{err}");
+    let s = start(&log, &[]);
     assert_eq!(get_json(s.port, "/ledger/verify"), json!({"valid": true, "entries": 0}));
 }
 
@@ -713,14 +714,49 @@ fn aegis_m2_a_log_without_a_checkpoint_needs_the_bound_one_shot_migrate() {
     }
     let v = advised(&log.stderr(), "LEDGER_MIGRATE_LEGACY");
     assert_eq!(v, common::migrate_binding(&log.0));
-    let s = start(&log, &[("LEDGER_MIGRATE_LEGACY", Some(&v))]);
-    assert!(log.stderr().contains("\"event\":\"legacy_log_migrated\""), "{}", log.stderr());
-    assert_eq!(get_json(s.port, "/ledger/head")["entries"], 1);
-    fill(s.port, 1);
-    drop(s);
-    // Left set, it is not needed again and says so; it can never match this log again.
-    let _s = start(&log, &[("LEDGER_MIGRATE_LEGACY", Some(&v))]);
-    assert!(log.stderr().contains("LEDGER_MIGRATE_LEGACY=") && log.stderr().contains("was not needed"), "{}", log.stderr());
+    let err = common::apply_override(&log.0, TOKEN, "LEDGER_MIGRATE_LEGACY", &v);
+    assert!(err.contains("\"event\":\"legacy_log_migrated\""), "{err}");
+    // AEGIS N1: left set, it refuses the start (it is not needed any more).
+    assert_eq!(refused(&log, &[("LEDGER_MIGRATE_LEGACY", Some(&v))]).unwrap_or_else(|e| panic!("{e}")), 1);
+    assert!(log.stderr().contains("does not need it"), "{}", log.stderr());
+    let s = start(&log, &[]);
+    let head = get_json(s.port, "/ledger/head");
+    assert_eq!(head["entries"], 1);
+    assert_eq!(head["migrated_from"], v.as_str(), "the migration is recorded in the checkpoint");
+}
+
+/// AEGIS N1 repro over the real binary: migrate a 3-entry log (backup of the
+/// directory kept), append 7, restore the backup. With d69f64a and the
+/// migrate value left set, the server started on 3 entries and the 7
+/// acknowledged ones were lost. Now no start succeeds while the value is set,
+/// so it cannot be set at the restore; and without it the backup is refused.
+#[test]
+fn aegis_n1_a_restored_pre_migration_backup_is_refused() {
+    let log = Scratch::new("n1");
+    {
+        let s = start(&log, &[]);
+        fill(s.port, 3);
+    }
+    std::fs::remove_file(log.head_path()).unwrap();
+    let backup = std::fs::read(&log.0).unwrap();
+    let v = common::migrate_binding(&log.0);
+    common::apply_override(&log.0, TOKEN, "LEDGER_MIGRATE_LEGACY", &v);
+    assert_eq!(refused(&log, &[("LEDGER_MIGRATE_LEGACY", Some(&v))]).unwrap_or_else(|e| panic!("{e}")), 1);
+    {
+        let s = start(&log, &[]);
+        for i in 3..10 {
+            assert_eq!(post_finding(s.port, TOKEN, &[], &finding_body(&format!("f-{i}"), "1.00")).0, 201);
+        }
+    }
+    std::fs::write(&log.0, &backup).unwrap();
+    std::fs::remove_file(log.head_path()).unwrap();
+    assert_eq!(refused(&log, &[]).unwrap_or_else(|e| panic!("{e}")), 1);
+    assert!(log.stderr().rfind("NO head checkpoint").is_some(), "{}", log.stderr());
+    // Re-setting the value by hand is an explicit, logged re-migration (the backup has no checkpoint and is
+    // indistinguishable from a legacy log, ADR 0003 section 13 N1 residual): it is applied and the server still
+    // exits without serving.
+    let err = common::apply_override(&log.0, TOKEN, "LEDGER_MIGRATE_LEGACY", &v);
+    assert!(err.contains("\"event\":\"legacy_log_migrated\""), "{err}");
 }
 
 /// M3: LEDGER_ALLOW_RESET=1 left in the environment stayed armed: any later
@@ -737,9 +773,13 @@ fn aegis_m3_a_stale_reset_value_does_not_accept_a_later_rollback() {
     std::fs::write(&log.0, format!("{}\n{}\n", lines[0], lines[1])).unwrap();
     assert_eq!(refused(&log, &[]).unwrap_or_else(|e| panic!("{e}")), 1);
     let v = advised(&log.stderr(), "LEDGER_ALLOW_RESET");
+    let err = common::apply_override(&log.0, TOKEN, "LEDGER_ALLOW_RESET", &v);
+    assert!(err.contains("\"event\":\"operator_reset\""), "{err}");
+    // AEGIS N1: left set, it refuses the start; served only once it is unset.
+    assert_eq!(refused(&log, &[("LEDGER_ALLOW_RESET", Some(&v))]).unwrap_or_else(|e| panic!("{e}")), 1);
     {
-        let s = start(&log, &[("LEDGER_ALLOW_RESET", Some(&v))]);
-        assert!(log.stderr().contains("\"event\":\"operator_reset\""), "{}", log.stderr());
+        let s = start(&log, &[]);
+        assert!(get_json(s.port, "/ledger/head")["reset_from"].as_str().is_some_and(|r| r == v));
         fill(s.port, 2);
     }
     // The same value still in the environment; a new rollback.
@@ -813,7 +853,8 @@ fn aegis_m4_reads_are_scoped_by_department() {
 }
 
 /// M4: a read caller must say what it reads; read_all and read_departments
-/// are exclusive; read_departments is for write callers.
+/// are exclusive; read_departments is for write callers. N3: read_all is for
+/// read-only callers only (a write caller with it was silently accepted).
 #[test]
 fn aegis_m4_a_read_scope_must_be_explicit() {
     let log = Scratch::new("m4_bad");
@@ -824,6 +865,8 @@ fn aegis_m4_a_read_scope_must_be_explicit() {
         json!({&h: {"caller": "d", "scope": "read", "departments": ["sales"], "read_departments": ["x"]}}),
         json!({&h: {"caller": "d", "scope": "write", "departments": ["sales"], "read_departments": ["Bad"]}}),
         json!({&h: {"caller": "d", "scope": "read", "read_all": "yes"}}),
+        // AEGIS N3: read_all on a write caller.
+        json!({&h: {"caller": "d", "scope": "write", "departments": ["sales"], "read_all": true}}),
     ] {
         std::fs::write(log.callers_path(), content.to_string()).unwrap();
         let path = log.callers_path().to_str().unwrap().to_string();

@@ -1570,6 +1570,18 @@ fn load_callers(path: &str) -> HashMap<String, Arc<Caller>> {
         if c.scope == Scope::Write && c.departments.is_empty() {
             refuse(format!("LEDGER_CALLERS_FILE: write caller {:?} lists no departments", c.caller));
         }
+        // AEGIS N3: read-everything is a read-only role (dashboard, compliance,
+        // audit). A write caller that also reads every department would be an
+        // ambiguous, over-broad token: refused. Give such a service a second,
+        // read-only token with read_all.
+        if c.scope == Scope::Write && c.read_all {
+            refuse(format!(
+                "LEDGER_CALLERS_FILE: write caller {:?} sets read_all: read_all is for read-only callers \
+                 (dashboard, compliance, audit). List the extra departments it reads in read_departments, or give \
+                 it a separate read-only token with read_all",
+                c.caller
+            ));
+        }
         // AEGIS M4: every caller's read scope is explicit.
         if c.read_all && !c.read_departments.is_empty() {
             refuse(format!(
@@ -1753,18 +1765,20 @@ fn main() {
                 l.len(),
                 serde_json::to_string(&l.head()).unwrap_or_default()
             );
-            for (name, v, used) in [
-                ("LEDGER_ALLOW_RESET", &reset, l.open_report().reset_used),
-                ("LEDGER_MIGRATE_LEGACY", &migrate, l.open_report().migrate_used),
-            ] {
-                if let Some(v) = v {
-                    if !used {
-                        ledger_log!(
-                            "ledger-rust: WARNING — {name}={v} is set but was not needed (it matches no refusal of \
-                             this start, so it did nothing); unset it"
-                        );
-                    }
-                }
+            // AEGIS N1: an applied override is one-shot. The checkpoint now
+            // matches the accepted log, so the server exits instead of serving
+            // with the variable still set (the next start refuses while it is
+            // set): no entry is ever acknowledged under an armed override, and
+            // a later restore of the pre-override backup is refused again.
+            let report = l.open_report();
+            if report.reset_used || report.migrate_used {
+                let name = if report.reset_used { "LEDGER_ALLOW_RESET" } else { "LEDGER_MIGRATE_LEGACY" };
+                ledger_log!(
+                    "ledger-rust: operator override {name} applied; head checkpoint now {}. Exiting without \
+                     serving: unset {name} and start again (a start with it still set is refused).",
+                    serde_json::to_string(&l.head()).unwrap_or_default()
+                );
+                std::process::exit(0);
             }
             l
         }

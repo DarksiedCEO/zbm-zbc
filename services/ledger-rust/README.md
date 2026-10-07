@@ -19,8 +19,8 @@ cargo run --release --bin server
 | `LEDGER_CALLERS_FILE` | unset | Per-caller tokens with department scopes (below). Unset: the shared token can do everything, and a startup WARNING says so. Set but empty: refuses to start. |
 | `LEDGER_ALLOW_SHARED_TOKEN` | unset | `1`: with `LEDGER_CALLERS_FILE` set, still accept the shared token (unscoped). |
 | `LEDGER_LOG_PATH` | `ledger_data/ledger.jsonl` | The log. `<log>.lock` and `<log>.head` live next to it. |
-| `LEDGER_ALLOW_RESET` | unset | Operator override, bound to one exact state: `<checkpoint>/<log head>` as printed by the refusal it answers (e.g. `3:1f0c…/1:9a2e…`). Accepts a log that does not reach its head checkpoint (logged). A value that matches nothing does nothing (logged); `1` refuses to start. |
-| `LEDGER_MIGRATE_LEGACY` | unset | One-shot, bound to one log: `<entries>:<16 hex of the head hash>` as printed by the refusal. Creates the head checkpoint for a non-empty log that has none (written by a binary older than Oct 6 2026, or a deleted head file). |
+| `LEDGER_ALLOW_RESET` | unset | One-shot operator override, bound to one exact state: `<checkpoint>/<log head>` as printed by the refusal it answers (e.g. `3:1f0c…/1:9a2e…`). Accepts a log that does not reach its head checkpoint, records `reset_from` in the checkpoint, logs it and **exits without serving**; start again with it unset. Set when not needed (or `1`): refuses to start. |
+| `LEDGER_MIGRATE_LEGACY` | unset | One-shot, bound to one log: `<entries>:<16 hex of the head hash>` as printed by the refusal. Creates the head checkpoint (with `migrated_from`) for a non-empty log that has none (written by a binary older than Oct 6 2026, or a deleted head file), logs it and **exits without serving**. Set when not needed: refuses to start. |
 | `LEDGER_PORT` / `LEDGER_BIND_ADDR` | `8090` / `127.0.0.1` | Listen address. `LEDGER_PORT=0` picks a free port. |
 | `LEDGER_PORT_FILE` | unset | Receives the bound port (a hint: check `GET /health`; ADR 0003 sections 9-11). |
 | `LEDGER_MAX_CONNECTIONS` | `512` | Concurrent connections; beyond it an immediate 503. |
@@ -40,7 +40,7 @@ Every route except `GET /health` needs `Authorization: Bearer <token>` (401 othe
 | `POST /ledger/events` | A department event, idempotent on `event_id`: 201 new, 200 identical retry, 409 conflicting content, 400 invalid. |
 | `GET /ledger/entries` | No query: every entry the caller may read, as a JSON array (the whole ledger for the shared token and `read_all` callers, byte-identical to before). `?after_seq=&limit=&department=&event_type=`: entries with `seq > after_seq`, at most `limit` (default 1000, max 10000), filters match events only; the next page is `after_seq=<last seq>`, and fewer than `limit` entries means the end. Served from a per-department / per-event-type index (a page costs O(page + log n), not a scan). Unknown/repeated/malformed parameters: 400; a `department` outside the caller's read scope: 403. |
 | `GET /ledger/verify` | 200 `{"valid":true,"entries":N}` / 409 `{"valid":false,"error":…}`. Incremental (verifies only what is new since the last verified head; the whole chain is verified at every start); `?full=1` re-verifies the whole in-memory chain AND re-reads and re-hashes the log from disk, which must end at the in-memory head. |
-| `GET /ledger/head` | `{"entries":N,"head_seq":N-1,"head_hash":"…"}` — the durable head checkpoint. |
+| `GET /ledger/head` | `{"entries":N,"head_seq":N-1,"head_hash":"…"}` — the durable head checkpoint (plus `migrated_from` / `reset_from` when an operator override was ever applied). |
 
 With `LEDGER_CALLERS_FILE` set: 403 when a caller writes an event for a department it is not scoped to, writes a
 finding without the `revenue_recovery` department, (read-only caller) calls any POST, or filters
@@ -65,7 +65,8 @@ A JSON object keyed by the lowercase hex SHA-256 of each caller's token (the fil
 
 `printf %s "$TOKEN" | sha256sum` gives a key. A write caller must list at least one department (`[a-z0-9_]{1,64}`);
 it writes and reads those, and may read `read_departments` too. A read caller reads its `departments`, or
-everything with `"read_all": true` (dashboard, compliance, audit); one with neither refuses the start, as do
+everything with `"read_all": true` (dashboard, compliance, audit; read-only callers only — a write caller with
+`read_all` refuses the start); one with neither refuses the start, as do
 `read_all` together with `read_departments`, `read_departments` on a read caller, the same token hash listed twice,
 unknown fields, an empty map or a malformed entry. The file is read once at start (rotate = edit + restart); the
 startup log names every caller with what it writes and reads. Migration: list every caller, start with
