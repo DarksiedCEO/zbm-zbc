@@ -18,9 +18,10 @@ from typing import Optional
 import chart as C
 import money as M
 import reasons as R
-from clock import iso
+from clock import iso, parse_iso
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
+from intelligences import i04_payout_run as I4
 from intelligences import i06_tax as I6
 from intelligences import i07_reconciliation as I7
 from intelligences import i08_treasury as T
@@ -586,6 +587,14 @@ class ReconMixin:
             # call) is asked again with the SAME key, never left stuck
             if t is None or t["status"] not in ("approved", "bank_unknown", "executing"):
                 return {"op_id": tid, "status": t["status"] if t else "unknown"}
+            if tid in self.xfer_in_flight:
+                # AEGIS 5a56a3a M2: another caller (a retry run, or the request that approved it) is asking the bank
+                # for this operation right now; a second ask is never sent in parallel. That caller records the answer.
+                return {"op_id": tid, "status": t["status"], "in_flight": True}
+            if t["status"] in ("executing", "bank_unknown"):
+                expired = self._bank_window_expired(tid, t)
+                if expired is not None:
+                    return expired
             memo, lines, (src, dst) = self._transfer_lines(t)
             if t["status"] == "approved":
                 n = t.get("attempts", 0) + 1
@@ -623,17 +632,51 @@ class ReconMixin:
                           f"{t['kind']} posted and anchored before the bank instruction (attempt {n})")
                 self._commit(op)
             n = t["attempts"]
-        bank = self.ports.bank
-        g = Gather(self, f"xfer|{tid}|{n}|{t.get('asks', 0) + 1}", "intel_08_treasury", tid)
-        ans = g.call("bank_feed", "transfer", ("zbc", src, dst, t["amount"], tid),
-                     lambda: bank.transfer("zbc", src, dst, t["amount"], tid), BankTransfer("unknown"))
-        outcome = ans.outcome if isinstance(ans, BankTransfer) else "unknown"
+            self.xfer_in_flight.add(tid)        # AEGIS 5a56a3a M2: claimed under the lock, released below
         try:
-            return self._transfer_outcome(tid, n, t, g, ans, outcome, memo)
-        except Unavailable as exc:
-            if outcome in ("refused", "unavailable"):
-                raise
-            raise self._money_unknown(exc, f"bank transfer {tid}") from None
+            bank = self.ports.bank
+            g = Gather(self, f"xfer|{tid}|{n}|{t.get('asks', 0) + 1}", "intel_08_treasury", tid)
+            ans = g.call("bank_feed", "transfer", ("zbc", src, dst, t["amount"], tid),
+                         lambda: bank.transfer("zbc", src, dst, t["amount"], tid), BankTransfer("unknown"))
+            outcome = ans.outcome if isinstance(ans, BankTransfer) else "unknown"
+            try:
+                return self._transfer_outcome(tid, n, t, g, ans, outcome, memo)
+            except Unavailable as exc:
+                if outcome in ("refused", "unavailable"):
+                    raise
+                raise self._money_unknown(exc, f"bank transfer {tid}") from None
+        finally:
+            with self.lock:
+                self.xfer_in_flight.discard(tid)
+
+    def _bank_window_expired(self, tid: str, t: dict) -> Optional[dict]:
+        """AEGIS 5a56a3a M2 (under the lock). An operation whose bank outcome is unknown (``executing`` or
+        ``bank_unknown``) is asked again with the same key only while the bank's idempotency window can still
+        de-duplicate it: ``RETRY_WINDOW_H`` (23 h, the payout rails' window) from the first ask of this attempt
+        (``posted_at``: the posting is committed immediately before that ask). After it, a re-ask could move the
+        money a second time, so Finance stops asking: the operation is marked ``retry_window_expired`` (it stays
+        ``bank_unknown``, its posting kept and its amount still reserved) and a break tells Andre to check the bank.
+        The bank port has no read-back of a transfer by key (no bank chosen), so there is no lookup to switch to."""
+        started = t.get("posted_at")
+        if t.get("retry_window_expired"):
+            return {"op_id": tid, "status": t["status"], "retry_window_expired": True}
+        if started is None or self._now() - parse_iso(started) < timedelta(hours=I4.RETRY_WINDOW_H):
+            return None
+        op = Op(self, f"xfer|{tid}|{t.get('attempts', 0)}|expired", "intel_08_treasury", tid)
+        bid = rid("brk", "xfer-expired", tid)
+        op.put("treasury_ops", tid, {**t, "status": "bank_unknown", "retry_window_expired": True,
+                                     "retry_window_expired_at": iso(self._now())})
+        if bid not in self.db["breaks"]:
+            op.put("breaks", bid, {"break_id": bid, "leg": "L1", "subject": f"transfer:{tid}", "difference": t["amount"],
+                                   "opened_at": iso(self._now()), "opened_on": self._today_la().isoformat(),
+                                   "owner": "andre", "explanation_code": "unknown", "status": "open",
+                                   "resolution": None, "kind": "bank_retry_window_expired"})
+            op.record(derived_id("brk", bid), "break_opened", I7.ACTOR, bid,
+                      {"break_id": bid, "leg": "L1", "subject": f"transfer:{tid}", "difference": t["amount"],
+                       "kind": "bank_retry_window_expired"},
+                      "Break opened: bank outcome unknown past the retry window; Finance stops asking the bank")
+        self._commit(op)
+        return {"op_id": tid, "status": "bank_unknown", "retry_window_expired": True, "break_id": bid}
 
     def _transfer_outcome(self, tid: str, n: int, t: dict, g: Gather, ans, outcome: str, memo: str) -> dict:
         with self.lock:
@@ -684,13 +727,19 @@ class ReconMixin:
             return {"op_id": tid, "status": "bank_unknown", "break_id": bid}
 
     def retry_transfers(self) -> int:
+        """Re-drive open treasury operations (rail-sync job). Returns how many asked the bank or were settled now;
+        one in flight elsewhere or past its retry window is skipped (AEGIS 5a56a3a M2)."""
+        with self.lock:            # a snapshot under the lock: a concurrent commit never changes the dict mid-iteration
+            todo = sorted(tid for tid, t in self.db["treasury_ops"].items()
+                          if t["status"] in ("approved", "bank_unknown", "executing") and tid not in self.xfer_in_flight
+                          and not t.get("retry_window_expired"))
         n = 0
-        for tid, t in list(self.db["treasury_ops"].items()):
-            if t["status"] in ("approved", "bank_unknown", "executing"):
-                try:
-                    self._execute_transfer(tid)
-                except (Unavailable, IntegrityRefused):
-                    continue            # sweep B-F2: one stuck operation never blocks the others
+        for tid in todo:
+            try:
+                res = self._execute_transfer(tid)
+            except (Unavailable, IntegrityRefused):
+                continue                # sweep B-F2: one stuck operation never blocks the others
+            if not (res.get("in_flight") or res.get("retry_window_expired")):
                 n += 1
         return n
 

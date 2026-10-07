@@ -198,7 +198,9 @@ def test_n17_2_unknown_bank_outcome_keeps_the_posting_opens_a_break_and_retries_
     assert t["operation"]["status"] == "bank_unknown"
     assert any(b.get("kind") == "bank_state_unknown" for b in h.svc.db["breaks"].values())
     h.bank.transfer = real
-    h.clock.advance(days=1)
+    # inside the bank's 23 h idempotency window (AEGIS 5a56a3a M2: past it Finance stops asking; see
+    # test_sweep_followup.py::test_m2_unknown_transfer_past_the_window_is_never_asked_again)
+    h.clock.advance(hours=22)
     h.ok(h.post("/fin/v1/jobs/rail-sync/run", {"request_id": rid()}, caller="scheduler"))
     assert h.svc.db["treasury_ops"][a["op_id"]]["status"] == "done"
     assert len([e for e in h.svc.entries if e["memo_code"] == "F8"]) == 1            # never posted twice

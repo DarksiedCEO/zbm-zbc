@@ -313,6 +313,10 @@ class FinanceService:
         self.pay_by_cert: dict[str, str] = {}
         self.integrity_findings: list[str] = []
         self.findings: dict[str, dict] = {}
+        # AEGIS 5a56a3a M4: held rail events indexed by item id (rail_events key set), kept by ``_apply``
+        self.held_by_item: dict[str, set[str]] = {}
+        # AEGIS 5a56a3a M2: treasury operations whose bank call is in flight in THIS process (under ``self.lock``)
+        self.xfer_in_flight: set[str] = set()
         self.idem:"OrderedDict[tuple[str, str], dict]" = OrderedDict()
         self._ledger_conflict = False
         self.instance_id = secrets.token_hex(8)
@@ -446,6 +450,8 @@ class FinanceService:
                         self.integrity_findings.append(f"{f} {v[:60]} is bound to two payables")
                         continue
                     idx[v] = r["id"]
+            if r["coll"] == "rail_events":
+                self._index_rail_event(r["id"], r["rec"])
             self.db[r["coll"]][r["id"]] = r["rec"]
         elif kind == "journal":
             self.entries.append(r)
@@ -472,6 +478,18 @@ class FinanceService:
                 self.versions.append(RU.Version(v["version"], v["created_at"], v["approved_by"], tuple(v["proposal_ids"]),
                                                 v["rows_sha256"], v["prev_version_sha256"], tuple(v["rows"])))
         # lease, reconcile, founder_refused, injection, audit: evidence only
+
+    def _index_rail_event(self, key: str, rec: dict) -> None:
+        """AEGIS 5a56a3a M4: keep ``held_by_item`` in step with ``db["rail_events"]`` (replay and every commit)."""
+        prev = self.db["rail_events"].get(key)
+        old_item = (prev or {}).get("item_id")
+        if old_item and old_item in self.held_by_item:
+            self.held_by_item[old_item].discard(key)
+            if not self.held_by_item[old_item]:
+                del self.held_by_item[old_item]
+        item = rec.get("item_id") if isinstance(rec, dict) else None
+        if isinstance(item, str) and rec.get("held"):
+            self.held_by_item.setdefault(item, set()).add(key)
 
     # --- adapter answers (AEGIS N17-3) ---------------------------------------------------------------------------------
 
@@ -608,7 +626,8 @@ class FinanceService:
             d = rec["data"]
             lines.append((rec["seq"], s, bool(d.get("anchored"))))
             referenced.update(d.get("ledger_event_ids") or [])
-            named.update((n.get("rk"), n.get("event_type")) for n in d.get("evidence") or [])
+            # AEGIS 5a56a3a L1: each committed action carries the seq of its line (its anchor's ledger position)
+            named.update((n.get("rk"), n.get("event_type"), rec["seq"]) for n in d.get("evidence") or [])
             for kind, r in d.get("ops", []):
                 if kind == "lease":
                     leases.append((rec["seq"], r.get("instance_id"), r.get("lease_event_id")))

@@ -568,27 +568,53 @@ class StripeMixin:
             raise Invalid("Stripe reported less refunded on a payment than Finance already booked")
         if total > M.D(rc["amount"]):
             raise Invalid("Stripe reported a refund above the payment")
-        if rc["status"] not in ("matched", "unapplied", "refunded"):
+        if rc["status"] not in ("matched", "partially_refunded", "unapplied", "refunded", "charged_back"):
             raise Invalid(f"Stripe reported a refund on a payment Finance holds as {rc['status']}")
         delta = M.q(total - done)
         inv = op.get("invoices", rc["invoice_id"]) if rc.get("invoice_id") else None
-        matched = rc["status"] in ("matched", "refunded") and inv is not None
-        debit = J.dr("1100", delta, f"client:{inv['client_id']}") if matched else J.dr("2070", delta)
+        full = total == M.D(rc["amount"])
+        # AEGIS 5a56a3a L2: every receipt state ends in a booked, correct status (the money left the Stripe balance
+        # whatever Finance thought of the payment; a refusal here would leave 1060 overstated for good):
+        #   matched / partially_refunded -> Dr 1100 A/R[client]; ``partially_refunded`` or, in full, ``refunded``
+        #   unapplied                    -> Dr 2070; stays ``unapplied`` while unapplied cash remains, ``refunded``
+        #                                   once it is all refunded
+        #   charged_back                 -> the payment was already taken back (F7l): a refund on top is the
+        #                                   client's over-recovery, Dr 1100 A/R[client] (Dr 5030 if no invoice is
+        #                                   known); the status stays, the break names it for Andre
+        prior = rc["status"]
+        reversed_before = prior == "charged_back"
+        matched = prior in ("matched", "partially_refunded", "refunded") and inv is not None
+        if matched or (reversed_before and inv is not None):
+            debit = J.dr("1100", delta, f"client:{inv['client_id']}")
+        elif reversed_before:
+            debit = J.dr("5030", delta)
+        else:
+            debit = J.dr("2070", delta)
         e = self._post(op, "zbm", [debit, J.cr("1060", delta)], "F7r", {"kind": "stripe_refund", "id": rct},
                        f"F7r|{p.payment_intent}|{M.fmt(total)}", actor=ACTOR, fact=True)
-        full = total == M.D(rc["amount"])
         st = dict(rc.get("stripe") or {})
         st.update(refunded=M.fmt(total), refund_entry_ids=list(st.get("refund_entry_ids") or []) + [e["entry_id"]])
-        op.put("receipts", rct, {**rc, "stripe": st, **({"status": "refunded"} if full and matched else {})})
+        if reversed_before:
+            status = prior
+        elif full:
+            status = "refunded"
+        else:
+            status = "partially_refunded" if matched else "unapplied"
+        op.put("receipts", rct, {**rc, "stripe": st, "status": status})
+        if matched and prior != "refunded":
+            # the client receipt states the full amount paid: no longer true after any refund (never sent; one
+            # already sent is marked withdrawn_after_send)
+            self._withdraw_client_receipt(op, rct)
         if matched and inv["status"] == "paid":
             if full:
                 op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None,
                                                        "refunded": M.fmt(total)})
-                self._withdraw_client_receipt(op, rct)
                 if inv["kind"] == I2.MEDIA_KIND:
                     self._media_unpaid(op, inv, rct, "the client was refunded at Stripe", break_key=f"refund:{rct}")
             else:
                 op.put("invoices", inv["invoice_id"], {**inv, "refunded": M.fmt(total)})
+        elif reversed_before and inv is not None:
+            op.put("invoices", inv["invoice_id"], {**inv, "refunded": M.fmt(total)})
         if inv is not None and inv["kind"] == I2.MEDIA_KIND:
             buy = op.get("media_buys", inv["media_buy_id"])
             if buy is not None:
@@ -619,8 +645,8 @@ class StripeMixin:
             raise Invalid("Stripe reported a payment failure that took no money back")
         inv = op.get("invoices", rc["invoice_id"]) if rc.get("invoice_id") else None
         src = {"kind": "receipt_return", "id": rc["receipt_id"]}
-        debit = J.dr("1100", amt, f"client:{inv['client_id']}") if (inv and rc["status"] == "matched") \
-            else J.dr("2070", amt)
+        live = rc["status"] in ("matched", "partially_refunded")      # AEGIS 5a56a3a L2: still the client's payment
+        debit = J.dr("1100", amt, f"client:{inv['client_id']}") if (inv and live) else J.dr("2070", amt)
         e = self._post(op, "zbm", [debit, J.cr("1060", amt)], "F13x", src, f"F13x|{p.payment_intent}", actor=ACTOR,
                        fact=True)
         ff = M.D(p.failure_fee) if p.failure_fee is not None else M.ZERO
@@ -634,7 +660,7 @@ class StripeMixin:
             "cause": "stripe_payment_failed", "failure_txn": p.failure_txn, "entry_id": e["entry_id"],
             "at": iso(self._now())}})
         exposed = M.ZERO
-        if inv and rc["status"] == "matched":
+        if inv and live and inv["status"] == "paid":
             op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None})
             self._withdraw_client_receipt(op, rc["receipt_id"])
             if inv["kind"] == I2.MEDIA_KIND:
@@ -656,7 +682,7 @@ class StripeMixin:
         rct = rid("rct", "stripe", d.payment_intent) if d.payment_intent else None
         rc = op.get("receipts", rct) if rct else None
         inv = op.get("invoices", rc["invoice_id"]) if rc and rc.get("invoice_id") else None
-        matched = rc is not None and rc["status"] == "matched" and inv is not None
+        matched = rc is not None and rc["status"] in ("matched", "partially_refunded") and inv is not None
         src = {"kind": "stripe_dispute", "id": did}
         held = M.D(rec["held"])
         posted = list(rec["posted_txns"])

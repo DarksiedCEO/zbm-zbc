@@ -39,6 +39,10 @@ class StoreWriteError(RuntimeError):
     pass
 
 
+class _ShortWrite(OSError):
+    """``pwrite`` wrote fewer bytes than asked (AEGIS 5a56a3a M1): handled like any other write failure."""
+
+
 def _line_sha(line: bytes) -> str:
     return hashlib.sha256(line).hexdigest()
 
@@ -163,8 +167,13 @@ class RecordLog:
                     elif size != expected:
                         raise StoreWriteError("the log file and memory disagree; refusing to write")
                     else:
+                        payload = line + b"\n"
                         try:
-                            os.pwrite(fd, line + b"\n", expected)
+                            written = os.pwrite(fd, payload, expected)
+                            if written != len(payload):
+                                # AEGIS 5a56a3a M1: a short write (disk full, quota, a signal) would leave a partial
+                                # line that memory does not hold. Fail closed: cut back to the previous length.
+                                raise _ShortWrite(f"short write: {written} of {len(payload)} bytes")
                             os.fsync(fd)
                         except OSError as exc:
                             try:
@@ -172,7 +181,8 @@ class RecordLog:
                                 os.fsync(fd)
                             except OSError:
                                 pass
-                            raise StoreWriteError(f"local log write failed: {type(exc).__name__}") from exc
+                            detail = f" ({exc})" if isinstance(exc, _ShortWrite) else ""
+                            raise StoreWriteError(f"local log write failed: {type(exc).__name__}{detail}") from exc
                 except OSError as exc:
                     raise StoreWriteError(f"local log write failed: {type(exc).__name__}") from exc
                 finally:

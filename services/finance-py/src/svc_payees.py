@@ -577,9 +577,12 @@ class PayeesMixin:
         job. Returns how many were applied; an unavailable ledger stops the pass (the rest stay held)."""
         n = 0
         with self.lock:
-            held = sorted((k, dict(r)) for k, r in self.db["rail_events"].items() if r.get("held")
-                          and (item_id is None or r.get("item_id") == item_id)
-                          and (self.db["items"].get(r.get("item_id") or "") or {}).get("status") != "submitting")
+            # AEGIS 5a56a3a M4: only held events are visited, through ``held_by_item`` (kept by ``_apply``), never a
+            # scan of every rail event ever received: O(held events) under the service lock, not O(all events)
+            items = [item_id] if item_id is not None else sorted(self.held_by_item)
+            held = sorted((k, dict(self.db["rail_events"][k])) for i in items
+                          if (self.db["items"].get(i) or {}).get("status") != "submitting"
+                          for k in self.held_by_item.get(i, ()))
             for k, r in held:
                 op = Op(self, f"{op_prefix}|held|{k}|{len(self.log)}", "intel_04_payout_run", f"rail:{r['rail']}")
                 try:

@@ -958,8 +958,17 @@ class PayoutsMixin:
         iid = it["item_id"]
         rail = self._rail(it["rail"])
         ref = (self.db["payees"].get(it["payee_id"]) or {}).get("rail_account_ref")
+        # AEGIS 5a56a3a M3: a signed rail event held for this item is the rail's own word, read BEFORE any resubmit.
+        # ``paid``: the rail took it and paid it -- book the acceptance (the held event is then applied: F4e); never
+        # submit it again. ``failed``: the rail took it -- never resubmit; look it up only (read-only), and if the
+        # rail does not confirm it, open a break for Andre.
+        with self.lock:
+            held_types = {self.db["rail_events"][k]["type"] for k in self.held_by_item.get(iid, ())}
+        if "paid" in held_types:
+            return self._held_paid(op_prefix, iid)
+        held_failed = "failed" in held_types
         age = self._now() - parse_iso(it["first_submitted_at"])
-        lookup_mode = it["rail"] == "trolley" or age >= timedelta(hours=I4.RETRY_WINDOW_H)
+        lookup_mode = held_failed or it["rail"] == "trolley" or age >= timedelta(hours=I4.RETRY_WINDOW_H)
         with self.lock:
             n = it.get("attempts", 1) + 1
             op = Op(self, f"{op_prefix}|drive|{iid}|{n}", I4.ACTOR, iid)
@@ -981,6 +990,8 @@ class PayoutsMixin:
                                       RailLookup(False), actor=I4.ACTOR, subject=iid)
         if lk.available and lk.found:
             return self._record_outcome(iid, RailSubmit("accepted", lk.rail_ref))
+        elif held_failed:
+            return self._held_failed_break(op_prefix, it, lk)
         elif lk.available and not lk.found and it.get("resubmits", 0) == 0:
             with self.lock:
                 op = Op(self, f"{op_prefix}|resub|{iid}", I4.ACTOR, iid)
@@ -1006,6 +1017,44 @@ class PayoutsMixin:
                                                                  "item stays submitted-unknown")
                     self._commit(op)
             return {"item_id": iid, "status": "submitting", "break": "rail_state_unknown"}
+
+    def _held_paid(self, op_prefix: str, iid: str) -> dict:
+        """AEGIS 5a56a3a M3: the rail's signed ``paid`` event is held for this ``submitting`` item. The rail took the
+        item and paid it, so its acceptance is booked now (F4d) -- the held event is applied right after (F4e) -- and
+        nothing is sent to the rail again."""
+        with self.lock:
+            cur = self.db["items"][iid]
+            if cur["status"] != "submitting":
+                return {"item_id": iid, "status": cur["status"]}
+            if cur.get("accepted_via") != "held_paid_event":
+                keys = sorted(k for k in self.held_by_item.get(iid, ()) if self.db["rail_events"][k]["type"] == "paid")
+                op = Op(self, f"{op_prefix}|heldpaid|{iid}", I4.ACTOR, iid)
+                op.record(derived_id("iacc", iid, "held_paid"), "item_accepted_from_rail_event", I4.ACTOR, iid,
+                          {"item_id": iid, "rail_event_keys": keys},
+                          "Item accepted on the rail's own paid event (held): booked, never submitted again")
+                op.put("items", iid, {**cur, "accepted_via": "held_paid_event"})
+                self._commit(op)
+        return self._record_outcome(iid, RailSubmit("accepted", None))
+
+    def _held_failed_break(self, op_prefix: str, it: dict, lk: RailLookup) -> dict:
+        """AEGIS 5a56a3a M3: the rail's signed ``failed`` event is held for this item and the rail did not confirm the
+        item on lookup (not found, or unreadable). It is never resubmitted (the rail had it); a break tells Andre."""
+        iid = it["item_id"]
+        with self.lock:
+            bid = rid("brk", "rfh", iid)
+            if bid not in self.db["breaks"]:
+                op = Op(self, f"{op_prefix}|rfh|{iid}", I4.ACTOR, iid)
+                op.put("breaks", bid, {"break_id": bid, "leg": "L3", "subject": f"item:{iid}",
+                                       "difference": it["net"], "opened_at": iso(self._now()),
+                                       "opened_on": self._today_la().isoformat(), "owner": "andre",
+                                       "explanation_code": "unknown", "status": "open", "resolution": None,
+                                       "kind": "rail_failed_unconfirmed",
+                                       "lookup": "not_found" if lk.available else "unavailable"})
+                op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                          {"break_id": bid, "leg": "L3", "difference": it["net"], "kind": "rail_failed_unconfirmed"},
+                          "Break opened: the rail sent a failed event for an item it does not confirm; never resubmitted")
+                self._commit(op)
+        return {"item_id": iid, "status": "submitting", "break": "rail_failed_unconfirmed"}
 
     def _settle_batch(self, op: Op, batch_id: str) -> None:
         b = op.get("batches", batch_id)

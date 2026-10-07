@@ -210,17 +210,32 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
         out.void_lines.add(seq)
         out.void_event_ids.add(eid)
     # N15-2: rulings of this department on the ledger (since this log's first anchor) that the local log lacks
-    by_kind: dict[tuple[str, str], list[str]] = {}
-    for rk, et in committed_actions:
-        if isinstance(rk, str) and isinstance(et, str):
-            by_kind.setdefault((evidence_id(rk, et, "").rsplit("-", 1)[0], et), []).append(rk)
+    # AEGIS 5a56a3a L1: the exemption is bound by ledger POSITION. An earlier attempt is recorded BEFORE the anchor of
+    # the local line that committed its action (record-first); a matching ruling recorded after that anchor is not an
+    # earlier attempt (a second effect: another instance, a replay) and stays a ghost. ``committed_actions`` items are
+    # (rk, type, seq of the committing line); an item without a position, or whose line has no anchor here, exempts
+    # nothing.
+    line_sha40 = {seq: sha[:40] for seq, sha, _ in lines}
+    by_kind: dict[tuple[str, str], dict[str, int]] = {}
+    for act in committed_actions:
+        if not isinstance(act, tuple) or len(act) != 3:
+            continue
+        rk, et, seq = act
+        if not (isinstance(rk, str) and isinstance(et, str) and isinstance(seq, int)):
+            continue
+        anchor = mine.get((seq, line_sha40.get(seq, "")))
+        if anchor is None or anchor not in index:
+            continue
+        slot = by_kind.setdefault((evidence_id(rk, et, "").rsplit("-", 1)[0], et), {})
+        slot[rk] = max(slot.get(rk, -1), index[anchor])
 
-    def attempted(eid: str, et: str, psha: str) -> bool:
-        return any(evidence_id(rk, et, psha) == eid for rk in by_kind.get((eid.rsplit("-", 1)[0], et), ()))
+    def attempted(i: int, eid: str, et: str, psha: str) -> bool:
+        return any(i < pos and evidence_id(rk, et, psha) == eid
+                   for rk, pos in by_kind.get((eid.rsplit("-", 1)[0], et), {}).items())
 
     ghost = [eid for i, eid, et, psha in rulings if first_anchor is not None and i > first_anchor
              and eid not in local_rulings and eid not in referenced_ids and eid not in voided
-             and not attempted(eid, et, psha)]
+             and not attempted(i, eid, et, psha)]
     if ghost:
         out.voidable.append(f"{len(ghost)} ruling(s) on the ledger since this log's first anchor are not in the "
                             f"local log (first: {ghost[0]}): a second instance, or a ruling whose commit failed")
