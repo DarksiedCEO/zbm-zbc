@@ -294,3 +294,66 @@ def test_m4_audit_evidence_reads_only_this_department_page_by_page(tmp_path):
     _with_consents(h)
     ev = h.ok(h.get("/svc/v1/audit/evidence?event_type=consent_changed", caller="compliance_38"))
     assert ev["committed"] == 2 and calls == [("service", "log_anchor"), ("service", "consent_changed")]
+
+
+# ------------------------------------------------------------------ AEGIS re-review of 1e709a0 (REVISE)
+
+def test_n1_an_opt_out_typed_below_the_quote_is_honoured(tmp_path):
+    cases = ["On Mon, Oct 5, 2026 at 9:00 AM Acme <help@acme.test> wrote:\n> How was your visit?\n\nunsubscribe",
+             "-----Original Message-----\nFrom: Acme\nSent: Monday\n\nHow was your visit?\n\nUNSUBSCRIBE",
+             "On Mon, Oct 5, 2026 Acme wrote:\nHow was your visit?\n\nstop",
+             "Hi,\n<blockquote>How was your visit?</blockquote>\nplease unsubscribe me"]
+    for i, text in enumerate(cases):
+        h = Harness(tmp_path / str(i))
+        cid = _with_consents(h)
+        r = h.ok(_email(h, "owner@acme.test", text, subject="Re: hello"), 201)
+        assert r.get("email_opted_out") is True and _both_revoked(h, cid), text
+    # the tail case tells Andre (it may have been quoted text)
+    h = Harness(tmp_path / "alert")
+    _with_consents(h)
+    h.ok(_email(h, "owner@acme.test", cases[1], subject="Re: hello"), 201)
+    assert any(a["code"] == "OPT_OUT_IN_QUOTED_TEXT" for a in h.svc.alerts.values())
+
+
+def test_n1_our_own_quoted_words_never_opt_anyone_out(tmp_path):
+    cases = ["Thanks, see you Friday!\n\nOn Mon, Oct 5, 2026 Acme wrote:\n> You can cancel anytime. Offer ends soon.\n"
+             "> Not interested? Reply and let us know.",
+             "Sounds good.\n\n-----Original Message-----\nFrom: Acme\n\nYour plan renews at the end of the month. "
+             "Cancel anytime.",
+             "Sounds good.\n<blockquote>Cancel anytime. Stop by our office.</blockquote>"]
+    for i, text in enumerate(cases):
+        h = Harness(tmp_path / str(i))
+        cid = _with_consents(h)
+        r = h.ok(_email(h, "owner@acme.test", text, subject="Re: hello"), 201)
+        assert r.get("action") != "opted_out" and _consents(h, cid) == {"email": "active", "sms": "active"}, text
+
+
+def test_h1_residual_an_email_word_in_the_phrase_makes_it_an_email_opt_out():
+    import channels
+    for t in ("unsubscribe me from your texts and emails", "stop sending me texts or emails",
+              "remove my number and my email", "Unsubscribe from texts.\nThanks,\nAlso stop the newsletters",
+              "STOP\nmy number is 310-555-1212", "Stop. My number changed", "Unsubscribe - Cell: 310 555 1212",
+              "take me off your list"):
+        assert channels.email_opt_out(t) is True, t
+    for t in ("stop texting me", "remove my number", "unsubscribe from texts", "unsubscribe me from your texts",
+              "please no more texts", "stop sending me texts"):
+        assert channels.email_opt_out(t) is False, t
+
+
+def test_n4_html_tags_never_merge_words():
+    import channels
+    for t in ("Unsubscribe<br>Sent from my iPhone", "<p>Unsubscribe</p><p>Cell: 310 555 1212</p>",
+              "<div>STOP</div>", "please&nbsp;unsubscribe<br/>thanks"):
+        assert channels.opt_out_level(t) == "exact", t
+        assert channels.email_opt_out(t) is True, t
+
+
+def test_n3_a_reused_request_id_with_another_body_is_never_refused(tmp_path):
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    base = {"brand": "zbm", "to_address": ZBM_EMAIL, "from_address": "owner@acme.test", "request_id": "dup-1"}
+    h.ok(h.post("/svc/v1/inbound/email", {**base, "text": "is my order shipped?"}, caller="email_gateway"), 201)
+    r = h.ok(h.post("/svc/v1/inbound/email", {**base, "text": "UNSUBSCRIBE"}, caller="email_gateway"), 201)
+    assert r.get("email_opted_out") is True and _both_revoked(h, cid)
+    again = h.ok(h.post("/svc/v1/inbound/email", {**base, "text": "UNSUBSCRIBE"}, caller="email_gateway"), 201)
+    assert again == r                                    # the re-keyed message is itself idempotent

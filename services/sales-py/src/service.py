@@ -525,8 +525,10 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
                     cache["epoch"] = line_sha[:16]
                 evs = r["data"].get("ledger_evidence")
                 if evs:
-                    rk = self._evidence_rk(r["data"].get("request_id") or f"{INTERNAL}|{r['kind']}")
-                    cache["lines"].append((r["seq"], line_sha, rk, r["kind"], evs))
+                    raw_rk = r["data"].get("request_id") or f"{INTERNAL}|{r['kind']}"
+                    # AEGIS re-review N2: a line written before L4 carries the raw request key as rk; it is the same
+                    # anchored line, so it still counts — the row shows only the keyed form
+                    cache["lines"].append((r["seq"], line_sha, (self._evidence_rk(raw_rk), raw_rk), r["kind"], evs))
                 cache["n"] += 1
             epoch, lines, n_lines = cache["epoch"], list(cache["lines"]), cache["n"]
         try:                                             # outside the service lock (AEGIS M4: filtered, paged)
@@ -557,9 +559,9 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
             hit = named.get(e.get("event_id"))
             if hit is not None:
                 seq, line_rk, payload, log_kind = hit
-                if payload.get("seq") == seq and payload.get("rk") == line_rk \
+                if payload.get("seq") == seq and payload.get("rk") in line_rk \
                         and payload_sha256(payload) == e.get("payload_sha256"):
-                    row.update(status="committed", seq=seq, rk=line_rk, log_kind=log_kind)
+                    row.update(status="committed", seq=seq, rk=line_rk[0], log_kind=log_kind)
             counts[row["status"]] += 1
             out.append(row)
         return {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle",

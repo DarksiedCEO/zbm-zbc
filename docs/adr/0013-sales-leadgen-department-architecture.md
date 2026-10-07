@@ -279,3 +279,9 @@ accepted false positives (L1) are pinned in `services/bizdev-py/tests/test_sweep
 | L2 | A reply was cut to 20,000 characters before it was classified | Head and the last 2,000 characters are kept |
 | L4 | `_commit` put the raw request id on the ledger as `rk` | `rk` = `rk-` + HMAC-SHA-256 under the PII hash key (`SALES_PII_HASH_KEY_FILE`, whose fingerprint is bound in the log at first start: a different key refuses to start, so `rk` stays stable) |
 | L1 (accepted) | The collapse and `unsub\w*` rules over-match ("stoop", "unsubtle") | Accepted as is (over-suppressing is the safe side); pinned by tests in bizdev-py and influencer-py so a change is deliberate |
+
+### Sweep A follow-up — AEGIS re-review of 1e709a0: fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| N2 (Medium) | Evidence written before L4 (raw `rk`) read as `attempted` after the upgrade | `/audit/evidence` accepts the line's raw request key or its keyed form for the same anchored line; the row always shows the keyed `rk-` form. Regression: `test_n2_evidence_written_before_the_keyed_rk_still_reads_committed` |

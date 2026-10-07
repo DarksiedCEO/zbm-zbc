@@ -257,3 +257,21 @@ def test_m4_paged_filtered_ledger_read_with_fallbacks(tmp_path):
     calls.clear()
     assert _evidence(h, "suppression_added")["committed"] == 1
     assert calls == [("sales", "log_anchor"), ("sales", "suppression_added")]
+
+
+# ------------------------------------------------------------------ AEGIS re-review of 1e709a0 (REVISE)
+
+def test_n2_evidence_written_before_the_keyed_rk_still_reads_committed(tmp_path, monkeypatch):
+    import service
+    led = FakeLedger()
+    orig = service.SalesService._evidence_rk
+    monkeypatch.setattr(service.SalesService, "_evidence_rk", lambda self, k: k)     # the pre-L4 raw rk
+    h = Harness(tmp_path, data_dir=str(tmp_path / "data"), ledger=led, ports=wired_ports())
+    h.vlead(email="jane@acme-shop.test", phone=None, tz=None)
+    h.ok(h.post("/sales/v1/replies", {"request_id": rid(), "channel": "email", "from_email": "jane@acme-shop.test",
+                                      "text": "STOP"}, caller="provider_events"), 201)
+    monkeypatch.setattr(service.SalesService, "_evidence_rk", orig)
+    h2 = h.restart()
+    ev = _evidence(h2, "suppression_added")
+    assert ev["committed"] == 1 and ev["attempted"] == 0
+    assert all(r["rk"] is None or r["rk"].startswith("rk-") for r in ev["evidence"])

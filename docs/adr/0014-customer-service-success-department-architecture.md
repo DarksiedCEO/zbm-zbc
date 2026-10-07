@@ -290,3 +290,14 @@ Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "A
 | L2 | The text was cut to the cap before it was classified: an opt-out past 20,000 characters was lost | A text over the cap keeps its head and its last 2,000 characters (`models.cut_head_tail`) |
 | L3 | `audit/events` exported `ledger_evidence[].payload.rk` unchanged, so two exports could be joined on it | `rk` is re-keyed with the export's own HMAC key |
 | L5 | `dispatch_side_effects` checked closed at the top of each iteration, not right before the port call | The check sits immediately before each port call. Residual window (documented in the docstring, accepted): a `close()` between that check and the call cannot stop that one call; holding the lock across a provider call would stall every request, and the alert and handoff ids are the providers' idempotency keys |
+
+### Sweep A follow-up — AEGIS re-review of 1e709a0 (REVISE): fixed
+
+Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "AEGIS re-review of 1e709a0").
+
+| Id | Finding | Fix |
+|---|---|---|
+| N1 (High, regression) | `strip_quoted` dropped everything after a reply header, so an opt-out typed below the quote was lost on both channels | `channels.split_reply`: `>` lines and a `<blockquote>` are dropped; a header followed by `>` lines is dropped and the lines after the quoted block stay the person's own. A header followed by unmarked lines (Outlook "Original Message", "On ... wrote:" without `>`) starts the quoted tail, which is read only for strong opt-out wording (`OPT_OUT_STRONG`) or a bare stop / unsubscribe last line; a hit revokes (over-suppressing is the safe side) and raises `OPT_OUT_IN_QUOTED_TEXT` for Andre. The whole message is NOT scanned: our own quoted words ("cancel anytime", "ends soon") would opt every replier out. A future marketing footer must be listed in `OWN_FOOTER_LINES` |
+| H1 residual (High) | `_phone_scoped` ignored an email word in the same phrase, crossed line breaks, and the sign-off cut dropped later opt-outs | An email word (`EMAIL_SCOPE_WORDS`) in the phrase's reach makes it an email opt-out; each line and sentence is read alone; a phone word followed by a number or "is" is an address label, not a channel; the scope is read on the person's own words without the signature cut |
+| N4 (High, pre-existing) | HTML tags were deleted without a space, merging "Unsubscribe<br>Sent" into one word | `channels.html_as_text` before every opt-out check: block tags end a line, other tags are a space |
+| N3 (Medium) | A gateway reusing a request id for another body got 409, losing that message (an opt-out) | On the email and SMS gateway routes the message is re-keyed `<id>.b<body sha16>` and processed; chat (our own hub) still answers 409. Accepted residual: with NO request id, an identical body is the same message (the id is the body hash) |

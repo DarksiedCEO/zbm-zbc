@@ -1135,7 +1135,15 @@ class SupportService:
             self._gate()
             brand = body["brand"]
             target = f"{brand}:{channel}"
-            prev = self._idem(actor, f"inbound_{channel}", target, body)
+            try:
+                prev = self._idem(actor, f"inbound_{channel}", target, body)
+            except Conflict:
+                if channel not in ("email", "sms"):
+                    raise                     # our own hub (chat) reusing an id is a caller bug: 409 as before
+                # AEGIS re-review N3: a gateway that reuses a request id for another message must not get that
+                # message (an opt-out, say) refused: it is re-keyed with its own body hash, as sales-py does
+                body = {**body, "request_id": f"{body['request_id'][:100]}.b{body_sha(body)[:16]}"}
+                prev = self._idem(actor, f"inbound_{channel}", target, body)
             if prev is not None:
                 return prev
             effects: list = []
@@ -1168,6 +1176,12 @@ class SupportService:
             levels = {channels.opt_out_level(own), channels.opt_out_level(body["subject"]) if body.get("subject")
                       else None}
             level = "exact" if "exact" in levels else ("suspected" if "suspected" in levels else None)
+            # AEGIS re-review of 1e709a0 (N1): strong opt-out wording in the unmarked quoted tail (an Outlook
+            # "Original Message" block, "On ... wrote:" with no ">" lines) may be a reply typed below the quote: it is
+            # honoured (over-suppressing is the safe side) and Andre is told, since it may be quoted text
+            tail_opt_out = channel == "email" and level != "exact" and channels.quoted_tail_opt_out(text)
+            if tail_opt_out:
+                level = "exact"
             revoke = level == "exact" or (level == "suspected" and channel == "sms")
             sms_number = body["from_number"] if channel == "sms" else contact.get("phone")
             named = self._named_contacts(brand, text + " " + (body.get("subject") or ""), contact["contact_id"])
@@ -1190,6 +1204,8 @@ class SupportService:
                     effects.append(email_effect)
                     resp["email_opted_out"] = True
                 resp["action"] = "opted_out"
+                if tail_opt_out:
+                    effects.append(self._alert_effect("OPT_OUT_IN_QUOTED_TEXT", contact["contact_id"], rid))
                 if had:     # V3-C3: the one confirmation goes ONLY to the number that sent the STOP
                     conf = channels.OPT_OUT_CONFIRMATION.replace("{brand_name}", BRAND_NAMES[brand])
                     cmid = self._did("msg", actor, "opt_out_confirmation", target, rid)

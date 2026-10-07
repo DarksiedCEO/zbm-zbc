@@ -29,8 +29,8 @@ the check.
 | `python:influencer-py` | 437 | pytest collection | — |
 | `python:legal-py` | 308 | pytest collection | — |
 | `python:onboarding-py` | 763 | pytest collection | — |
-| `python:sales-py` | 559 | pytest collection | — |
+| `python:sales-py` | 560 | pytest collection | — |
 | `python:security-py` | 188 | pytest collection | — |
-| `python:service-py` | 628 | pytest collection | — |
+| `python:service-py` | 633 | pytest collection | — |
 | `python:verification-py` | 299 | pytest collection | — |
 | `rust:ledger-rust` | 117 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |
