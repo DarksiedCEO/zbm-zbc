@@ -77,7 +77,8 @@ def test_preservation_adapter_exception_is_a_failed_preservation(tmp_path):
     assert r.status_code == 201, r.text                                      # was 500
     a = r.json()
     assert a["delivered"] is False and a["systems"] == {"drive": "failed"} and "failed" in a["reason"]
-    assert any(i["subject"] == "hold:h2" for i in h.svc.incidents.values())
+    codes = {i["code"] for i in h.svc.incidents.values() if i["subject"] == "hold:h2"}
+    assert codes == {"PRESERVATION_FAILED"}                                     # AEGIS L6: not "not connected"
 
 
 # ------------------------------------------------------------------ 3. fixed clock; emergency challenges on self.clock
@@ -93,3 +94,50 @@ def test_an_emergency_challenge_expires_on_the_service_clock(hk):
     hk.clock.advance(seconds=301)                       # no wall-clock time passes: only the service clock moves
     r = hk.post("/sec/v1/freezes", {**body, "approval": hk.keys[0].assert_(ch)})
     assert r.json()["detail"] == "APPROVAL_CHALLENGE_EXPIRED"
+
+
+# ------------------------------------------------------------------ AEGIS M3: one release in flight per (hold, system)
+
+def test_m3_concurrent_retries_release_and_confirm_once(tmp_path):
+    import threading
+
+    class SlowDrive(Drive):
+        def __init__(self):
+            super().__init__(release_fails=3)           # the request's own tries fail: the release stays pending
+            self.entered, self.go = threading.Event(), threading.Event()
+
+        def release(self, hold_id):
+            if self.release_fails:
+                return super().release(hold_id)
+            self.entered.set()
+            assert self.go.wait(10)
+            return super().release(hold_id)
+    ports = Ports.default()
+    drive = ports.preservation["drive"] = SlowDrive()
+    h = Harness(tmp_path, ports=ports)
+    _hold(h)
+    assert h.ok(h.post("/sec/v1/holds/h1/release", {"request_id": rid()}, caller="legal_37"))["release_pending"] == \
+        ["drive"]
+    first: dict = {}
+    t = threading.Thread(target=lambda: first.update(h.svc.retry_hold_releases()))
+    t.start()
+    assert drive.entered.wait(10)                       # the job's release is in flight ...
+    second = h.svc.retry_hold_releases("h1")            # ... a concurrent retry skips the same (hold, system)
+    drive.go.set()
+    t.join(10)
+    assert second == {"confirmed": 0, "unconfirmed": []} and first["confirmed"] == 1
+    assert drive.release_calls == 4                     # 3 failed tries in the request, then exactly one
+    assert sum(1 for r in h.svc.log.iter_records() if r["kind"] == "hold_release_confirmed") == 1
+    assert h.svc.retry_hold_releases() == {"confirmed": 0, "unconfirmed": []}
+
+
+def test_m3_a_confirmation_is_never_committed_twice(tmp_path):
+    ports = Ports.default()
+    ports.preservation["drive"] = Drive(release_fails=3)
+    h = Harness(tmp_path, ports=ports)
+    _hold(h)
+    h.ok(h.post("/sec/v1/holds/h1/release", {"request_id": rid()}, caller="legal_37"))
+    # the pending system was confirmed meanwhile (another path): the result of a stale release commits nothing
+    assert h.svc._release_external([("h1", "drive")])["confirmed"] == 1
+    assert h.svc._release_external([("h1", "drive")])["confirmed"] == 0
+    assert sum(1 for r in h.svc.log.iter_records() if r["kind"] == "hold_release_confirmed") == 1

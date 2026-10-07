@@ -139,6 +139,7 @@ class SecurityService:
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
         self._last_integrity_try = 0.0
         self._outbox: list[AlertMessage] = []
+        self._releasing: set = set()        # (hold_id, system) releases in flight (AEGIS M3), memory only
         self._unrecorded_alerted: set = set()
         self._em_key = os.urandom(32)
         self._em_used: dict[str, int] = {}
@@ -1360,8 +1361,10 @@ class SecurityService:
                                            "subject_refs": sorted(set(body["subject_refs"])), "outcome": outcome,
                                            "actor": caller, "request_id": rk,
                                            "request_sha": request_sha(body), "_obj": body["hold_id"]}, caller)
-            if any(v != "preserved" for v in outcome.values()):
+            if any(v == "not_connected" for v in outcome.values()):
                 self._open_incident("sev3", "PRESERVATION_NOT_CONNECTED", f"hold:{body['hold_id']}"[:140], DETECTOR)
+            if any(v == "failed" for v in outcome.values()):      # AEGIS L6: an adapter that raised
+                self._open_incident("sev3", "PRESERVATION_FAILED", f"hold:{body['hold_id']}"[:140], DETECTOR)
             out = self._hold_answer(self.holds[body["hold_id"]])
         self.flush_alerts()
         return out
@@ -1406,10 +1409,23 @@ class SecurityService:
 
     def retry_hold_releases(self, hold_id: Optional[str] = None) -> dict:
         """Release externally every committed release not yet confirmed (outside the lock; an adapter that raises or
-        answers anything but True is unconfirmed and tried again later). Release is idempotent on the adapter."""
+        answers anything but True is unconfirmed and tried again later). Release is idempotent on the adapter.
+
+        AEGIS M3: a (hold, system) release in flight (the request's own tries, or the hold-release-retry job) is
+        claimed under the lock and skipped by any concurrent caller; a confirmation is committed only while the system
+        is still pending (re-checked under the lock), so it is never committed twice."""
         with self.lock:
             todo = [(hid, s) for hid, h in sorted(self.holds.items()) if h["status"] == "released"
-                    and (hold_id is None or hid == hold_id) for s in h.get("release_pending") or ()]
+                    and (hold_id is None or hid == hold_id) for s in h.get("release_pending") or ()
+                    if (hid, s) not in self._releasing]
+            self._releasing |= set(todo)
+        try:
+            return self._release_external(todo)
+        finally:
+            with self.lock:
+                self._releasing -= set(todo)
+
+    def _release_external(self, todo: list) -> dict:
         confirmed, unconfirmed = [], []
         for hid, sysname in todo:
             adapter = self.ports.preservation.get(sysname)
@@ -1425,6 +1441,8 @@ class SecurityService:
         recorded = 0
         for hid, sysname in confirmed:
             with self.lock:
+                if sysname not in (self.holds[hid].get("release_pending") or ()):
+                    continue                # already confirmed: never a second line
                 try:
                     self._commit("hold_release_confirmed", {"hold_id": hid, "system": sysname, "actor": INTERNAL},
                                  INTERNAL)
