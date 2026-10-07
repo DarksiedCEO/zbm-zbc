@@ -25,7 +25,7 @@ from ledger import ledger_rust_accepts
 from test_fix_wave5 import _stop, _wait_health
 
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN = "fake-vs-rust-test-token"
+TOKEN = "fake-vs-rust-test-token-padded-to-32b"  # ledger-rust needs >= 32 bytes (sweep F-12)
 GOOD = dict(event_id="onb-x", department="onboarding", event_type="client_started", actor="zbm_onboarding",
             subject_id="client_0001", payload_sha256="0123456789abcdef" * 4, summary="ok")
 
