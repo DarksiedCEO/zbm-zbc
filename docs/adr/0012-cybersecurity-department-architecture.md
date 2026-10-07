@@ -209,3 +209,12 @@ Regressions: `services/security-py/tests/test_sweep_fixes.py` (each one fails on
 | Sweep-A release order | `release_hold` released every preserved system externally FIRST, under the lock, then committed: a ledger failure answered 503 with the data no longer preserved and the hold still `active` | The release is committed first (`hold_released` carries `release_pending`, the preserved systems). Then each is released externally, outside the lock, retried until the adapter confirms: 3 tries in the request, then the new `hold-release-retry` job; each confirmation is its own line (`hold_release_confirmed`). Pending releases survive a restart. The answer of a released hold names `release_pending` |
 | Sweep-A adapter exceptions | An exception from a preservation adapter in `preserve` was a 500 | It is a `failed` preservation: the hold is recorded, the answer says `delivered: false` with the failed systems in `reason`, and the PRESERVATION_NOT_CONNECTED incident is opened as for an unconnected system. An adapter release that raises is unconfirmed and retried |
 | Sweep-A clock | Emergency (freeze) challenges used `time.time()`, and the test harness ran on the system clock unless a test passed one | Emergency challenges (issue, check, used-set expiry) use `self.clock`. The test harness defaults to a `FixedClock` (2026-10-06 12:00 UTC); the tests that read the wall clock read the harness clock, and the expired-freeze-challenge test advances it instead of monkeypatching `time.time` |
+
+### Sweep A follow-up — AEGIS review of 17cda6a (REVISE): fixed
+
+Regressions: `services/security-py/tests/test_sweep_fixes.py`.
+
+| Id | Finding | Fix |
+|---|---|---|
+| M3 | The in-request retry and the `hold-release-retry` job could release the same (hold, system) concurrently and commit two confirmations | Each (hold, system) release is claimed under the service lock while in flight (`_releasing`, memory only); a concurrent caller skips it. The confirmation is committed only while the system is still pending (re-checked under the lock). The regression blocks an adapter mid-release and runs a second retry against it: one external release, one `hold_release_confirmed` line |
+| L6 | An adapter that raised opened PRESERVATION_NOT_CONNECTED | It opens PRESERVATION_FAILED; PRESERVATION_NOT_CONNECTED stays for a system with no adapter |

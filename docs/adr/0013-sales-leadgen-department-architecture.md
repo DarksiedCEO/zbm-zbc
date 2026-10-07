@@ -266,3 +266,16 @@ import in `test_import_through_a_wired_port_keeps_source_and_evidence_and_refuse
 | Sweep-A replies refused | A resolvable STOP was refused 422 for a `Jane Doe <jane@…>` sender or a text over 10,000 characters (a quoted thread); an unknown message id was 404, an unreadable sender 422, no sender 422, the same request id with another body 409 | influencer-py's raw-body approach (its AEGIS R1-M4 / R2-N3): every reply field is optional and of any type, unknown fields are ignored and never stored, no forbidden-key scan (nothing raw is stored). `Name <addr>` is read as `addr`; the text is cut to 20,000 characters before it is classified and hashed; an unknown message id or unreadable address / number is ignored and named in `ignored`; an unknown channel is `other` (the lower phone opt-out bar); a missing request id is the body's SHA-256; the request key includes the body's hash (another body = another reply). Nothing resolving is recorded as a review task for a person, never refused |
 | Sweep-A import idempotency | `/leads/import` never recorded anything under its own request key: the same request id with another body ran a second, different import (`already_ran` could never be answered) | The result is committed under the import's request key (`lead_import_ran`): the same body answers the first result with `already_ran`, another body is 409 `REQUEST_ID_REUSED`. Items committed before a failure part-way keep their own keys and are skipped on the retry |
 | Sweep-A close | sales-py had no `close()` | bizdev-py's inert `close()`: under the service lock the instance and its log are marked closed; every commit, gated route, job and audit route answers 503 `SERVICE_CLOSED`; the log refuses writes and clears; `verify_integrity` returns the closed result with no ledger I/O. The data-directory flock stays the process's (sales has no per-instance claim; that port is not part of this sweep) |
+
+### Sweep A follow-up — AEGIS review of 17cda6a (REVISE): fixed
+
+Regressions: `services/sales-py/tests/test_sweep_fixes.py` (the tests after "AEGIS review of 17cda6a"); the
+accepted false positives (L1) are pinned in `services/bizdev-py/tests/test_sweep_fixes.py` and
+`services/influencer-py/tests/test_sweep_fixes.py`.
+
+| Id | Finding | Fix |
+|---|---|---|
+| M4 | `/sales/v1/audit/evidence` read the whole ledger on every call | As service-py (ADR 0014): this department's entries only, paged with ledger-rust's filtered read when it has one (fix-ledger); at 5d49ee9 the ledger answers 404 to a query and is read in full and filtered, bounded by `LEDGER_ENTRIES_MAX_BYTES` |
+| L2 | A reply was cut to 20,000 characters before it was classified | Head and the last 2,000 characters are kept |
+| L4 | `_commit` put the raw request id on the ledger as `rk` | `rk` = `rk-` + HMAC-SHA-256 under the PII hash key (`SALES_PII_HASH_KEY_FILE`, whose fingerprint is bound in the log at first start: a different key refuses to start, so `rk` stays stable) |
+| L1 (accepted) | The collapse and `unsub\w*` rules over-match ("stoop", "unsubtle") | Accepted as is (over-suppressing is the safe side); pinned by tests in bizdev-py and influencer-py so a change is deliberate |
