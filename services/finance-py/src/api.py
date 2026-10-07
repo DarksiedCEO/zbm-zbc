@@ -674,6 +674,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                        req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.decide_treasury(req.request_id, "funding", _id(op_id), dump(req))
 
+    @app.post("/fin/v1/treasury/operations/{op_id}/settlement", dependencies=auth)
+    def treasury_settle(op_id: str, _: str = Depends(andre("treasury/settlement")),
+                        req: m.TreasurySettlement = Depends(body(m.TreasurySettlement))) -> dict:
+        return svc.settle_treasury(req.request_id, _id(op_id), dump(req))
+
     @app.post("/fin/v1/treasury/top-ups", dependencies=auth)
     def top_up(_: str = Depends(andre("treasury/top-ups")), req: m.TopUp = Depends(body(m.TopUp))) -> dict:
         return svc.top_up(req.request_id, dump(req))

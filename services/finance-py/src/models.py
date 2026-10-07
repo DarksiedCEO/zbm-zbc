@@ -501,6 +501,15 @@ class BreakResolution(Strict):
     evidence: list[Evidence] = Field(default_factory=list, max_length=20)
 
 
+class TreasurySettlement(Strict):
+    """Andre settles a treasury operation whose bank outcome is unknown (AEGIS f751017 M-N1)."""
+    request_id: Id
+    content_sha256: Sha
+    outcome: Literal["moved", "not_moved"]
+    bank_ref: Optional[Id] = None
+    note: Optional[Note] = None
+
+
 class SweepProposal(Strict):
     request_id: Id
     amount: PositiveMoney

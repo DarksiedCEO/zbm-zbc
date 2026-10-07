@@ -591,12 +591,17 @@ class ReconMixin:
                 # AEGIS 5a56a3a M2: another caller (a retry run, or the request that approved it) is asking the bank
                 # for this operation right now; a second ask is never sent in parallel. That caller records the answer.
                 return {"op_id": tid, "status": t["status"], "in_flight": True}
-            if t["status"] in ("executing", "bank_unknown"):
-                expired = self._bank_window_expired(tid, t)
-                if expired is not None:
-                    return expired
+            # AEGIS f751017 C1: a re-entry into ``executing`` / ``bank_unknown`` means an earlier ask's outcome was
+            # never recorded: money may have moved. From then on a refusal is never read as "nothing moved".
+            reentry = t["status"] in ("executing", "bank_unknown")
+            stop = self._bank_window_check(tid, t)
+            if stop is not None:
+                return stop
             memo, lines, (src, dst) = self._transfer_lines(t)
             if t["status"] == "approved":
+                if t.get("outcome_unknown"):
+                    # never a new attempt (a new posting and a new ask) once money may have moved (AEGIS f751017 C1)
+                    return {"op_id": tid, "status": t["status"], "outcome_unknown": True}
                 n = t.get("attempts", 0) + 1
                 op = Op(self, f"xfer|{tid}|{n}", "intel_08_treasury", tid)
                 reasons = self._execution_reasons(t)
@@ -625,13 +630,21 @@ class ReconMixin:
                     raise IntegrityRefused(f"treasury operation {tid}: attempt {n} would re-use a reversed posting; "
                                            "nothing was sent to the bank")
                 t = {**t, "status": "executing", "attempts": n, "entry_id": e["entry_id"],
-                     "posted_at": iso(self._now())}
+                     "posted_at": iso(self._now()),
+                     # AEGIS f751017 C1: the bank's de-duplication window runs from the FIRST ask ever, carried
+                     # across attempts and never reset
+                     "first_asked_at": t.get("first_asked_at") or iso(self._now())}
                 op.put("treasury_ops", tid, t)
                 op.record(derived_id("trxp", tid, n), "treasury_posting_committed", "intel_08_treasury", tid,
                           {"op_id": tid, "entry_id": e["entry_id"], "attempt": n},
                           f"{t['kind']} posted and anchored before the bank instruction (attempt {n})")
                 self._commit(op)
             n = t["attempts"]
+            if reentry and not t.get("outcome_unknown"):
+                op = Op(self, f"xfer|{tid}|{n}|taint", "intel_08_treasury", tid)
+                t = {**t, "outcome_unknown": True}
+                op.put("treasury_ops", tid, t)
+                self._commit(op)
             self.xfer_in_flight.add(tid)        # AEGIS 5a56a3a M2: claimed under the lock, released below
         try:
             bank = self.ports.bank
@@ -649,34 +662,45 @@ class ReconMixin:
             with self.lock:
                 self.xfer_in_flight.discard(tid)
 
-    def _bank_window_expired(self, tid: str, t: dict) -> Optional[dict]:
-        """AEGIS 5a56a3a M2 (under the lock). An operation whose bank outcome is unknown (``executing`` or
-        ``bank_unknown``) is asked again with the same key only while the bank's idempotency window can still
-        de-duplicate it: ``RETRY_WINDOW_H`` (23 h, the payout rails' window) from the first ask of this attempt
-        (``posted_at``: the posting is committed immediately before that ask). After it, a re-ask could move the
-        money a second time, so Finance stops asking: the operation is marked ``retry_window_expired`` (it stays
-        ``bank_unknown``, its posting kept and its amount still reserved) and a break tells Andre to check the bank.
-        The bank port has no read-back of a transfer by key (no bank chosen), so there is no lookup to switch to."""
-        started = t.get("posted_at")
+    def _bank_window_check(self, tid: str, t: dict) -> Optional[dict]:
+        """Under the lock: None when the bank may be asked now; else why not (AEGIS 5a56a3a M2, f751017 C1/M-N2).
+
+        The bank de-duplicates a key only for a while, so once money may have moved Finance re-asks it only within
+        ``RETRY_WINDOW_H`` (23 h) of the FIRST ask ever (``first_asked_at``, set once, carried across attempts).
+        Records written before ``first_asked_at`` existed fall back to ``posted_at`` when only one attempt was made
+        (that posting WAS the first ask); with no usable anchor the window counts as expired. Past the window the
+        operation is marked ``retry_window_expired`` and a break tells Andre, who settles it (``settle_treasury``).
+        A clock that reads earlier than the anchor never re-asks (it never extends the window)."""
         if t.get("retry_window_expired"):
             return {"op_id": tid, "status": t["status"], "retry_window_expired": True}
-        if started is None or self._now() - parse_iso(started) < timedelta(hours=I4.RETRY_WINDOW_H):
+        # only an operation that may already have moved money is bounded: re-entry into ``executing`` /
+        # ``bank_unknown``, or any earlier unknown answer. While every answer so far was a clean refusal nothing
+        # moved, so there is no earlier move for a re-sent key to duplicate (a new attempt is a first payment).
+        if t["status"] not in ("executing", "bank_unknown") and not t.get("outcome_unknown"):
             return None
+        anchor = t.get("first_asked_at") or (t.get("posted_at") if t.get("attempts", 0) <= 1 else None)
+        now = self._now()
+        if anchor is not None:
+            age = now - parse_iso(anchor)
+            if age < timedelta(0):
+                return {"op_id": tid, "status": t["status"], "clock_behind": True}
+            if age < timedelta(hours=I4.RETRY_WINDOW_H):
+                return None
         op = Op(self, f"xfer|{tid}|{t.get('attempts', 0)}|expired", "intel_08_treasury", tid)
         bid = rid("brk", "xfer-expired", tid)
-        op.put("treasury_ops", tid, {**t, "status": "bank_unknown", "retry_window_expired": True,
-                                     "retry_window_expired_at": iso(self._now())})
+        op.put("treasury_ops", tid, {**t, "retry_window_expired": True, "retry_window_expired_at": iso(now),
+                                     "window_anchor": anchor})
         if bid not in self.db["breaks"]:
             op.put("breaks", bid, {"break_id": bid, "leg": "L1", "subject": f"transfer:{tid}", "difference": t["amount"],
-                                   "opened_at": iso(self._now()), "opened_on": self._today_la().isoformat(),
+                                   "opened_at": iso(now), "opened_on": self._today_la().isoformat(),
                                    "owner": "andre", "explanation_code": "unknown", "status": "open",
                                    "resolution": None, "kind": "bank_retry_window_expired"})
             op.record(derived_id("brk", bid), "break_opened", I7.ACTOR, bid,
                       {"break_id": bid, "leg": "L1", "subject": f"transfer:{tid}", "difference": t["amount"],
                        "kind": "bank_retry_window_expired"},
-                      "Break opened: bank outcome unknown past the retry window; Finance stops asking the bank")
+                      "Break opened: bank retry window passed; Finance stops asking the bank (Andre settles)")
         self._commit(op)
-        return {"op_id": tid, "status": "bank_unknown", "retry_window_expired": True, "break_id": bid}
+        return {"op_id": tid, "status": t["status"], "retry_window_expired": True, "break_id": bid}
 
     def _transfer_outcome(self, tid: str, n: int, t: dict, g: Gather, ans, outcome: str, memo: str) -> dict:
         with self.lock:
@@ -687,21 +711,10 @@ class ReconMixin:
             e = self.entries_by_id[t["entry_id"]]
             asks = t.get("asks", 0) + 1
             if outcome == "accepted":
-                op.put("treasury_ops", tid, {**t, "status": "done", "bank_ref": ans.ref, "asks": asks,
-                                             "done_at": iso(self._now())})
-                if t["kind"] == "refund_payment":
-                    r = self.db["refunds"][t["ref_id"]]
-                    op.put("refunds", r["refund_id"], {**r, "status": "paid", "paid_at": iso(self._now())})
-                    prof = self.db["profiles"].get(r["campaign_id"])
-                    if prof:
-                        op.put("profiles", r["campaign_id"], {**prof, "status": "closed"})
-                    op.record(derived_id("rfdpd", r["refund_id"]), "refund_paid", "intel_08_treasury", r["refund_id"],
-                              {"refund_id": r["refund_id"], "amount": r["amount"]}, f"Refund paid: {r['amount']}")
-                if t["kind"] == "top_up" and t.get("shortfall_id"):
-                    self._close_shortfall(op, t["shortfall_id"], tid)
+                self._transfer_done(op, {**t, "asks": asks}, ans.ref)
                 self._commit(op)
                 return {"op_id": tid, "status": "done", "entry_id": e["entry_id"]}
-            if outcome in ("refused", "unavailable"):
+            if outcome in ("refused", "unavailable") and not t.get("outcome_unknown"):
                 rev = self._post(op, "zbc", J.reversal_lines(e), memo, {"kind": t["kind"], "id": tid},
                                  f"{memo}rev|{tid}|{n}", approval_ref=tid, reverses=e["entry_id"],
                                  actor="intel_08_treasury", fact=True)
@@ -713,8 +726,12 @@ class ReconMixin:
                            "outcome": outcome}, f"Bank {outcome} the {t['kind']}: posting reversed (recorded)")
                 self._commit(op)
                 return {"op_id": tid, "status": "approved", "transfer": outcome, "reversal_entry_id": rev["entry_id"]}
+            # an unknown outcome -- or a refusal after an earlier unknown one (AEGIS f751017 C1: the earlier ask may
+            # have moved the money; the bank's later "refused" / "unavailable" says nothing about it): the posting is
+            # kept, the operation stays ``bank_unknown`` and only Andre settles it
             bid = rid("brk", "xfer-unknown", tid)
-            op.put("treasury_ops", tid, {**t, "status": "bank_unknown", "asks": asks, "last_outcome": "unknown"})
+            op.put("treasury_ops", tid, {**t, "status": "bank_unknown", "asks": asks, "last_outcome": outcome,
+                                         "outcome_unknown": True})
             if bid not in self.db["breaks"]:
                 op.put("breaks", bid, {"break_id": bid, "leg": "L1", "subject": f"transfer:{tid}", "difference": t["amount"],
                                        "opened_at": iso(self._now()), "opened_on": self._today_la().isoformat(),
@@ -724,7 +741,81 @@ class ReconMixin:
                           {"break_id": bid, "leg": "L1", "subject": f"transfer:{tid}", "difference": t["amount"],
                            "kind": "bank_state_unknown"}, "Break opened: bank outcome of a posted transfer unknown")
             self._commit(op)
-            return {"op_id": tid, "status": "bank_unknown", "break_id": bid}
+            return {"op_id": tid, "status": "bank_unknown", "break_id": bid, "transfer": outcome}
+
+    def _transfer_done(self, op: Op, t: dict, bank_ref: Optional[str], **extra) -> None:
+        """The money moved: the posting stands and the operation is ``done`` (its side effects with it)."""
+        tid = t["op_id"]
+        op.put("treasury_ops", tid, {**t, "status": "done", "bank_ref": bank_ref, "done_at": iso(self._now()), **extra})
+        if t["kind"] == "refund_payment":
+            r = self.db["refunds"][t["ref_id"]]
+            op.put("refunds", r["refund_id"], {**r, "status": "paid", "paid_at": iso(self._now())})
+            prof = self.db["profiles"].get(r["campaign_id"])
+            if prof:
+                op.put("profiles", r["campaign_id"], {**prof, "status": "closed"})
+            op.record(derived_id("rfdpd", r["refund_id"]), "refund_paid", "intel_08_treasury", r["refund_id"],
+                      {"refund_id": r["refund_id"], "amount": r["amount"]}, f"Refund paid: {r['amount']}")
+        if t["kind"] == "top_up" and t.get("shortfall_id"):
+            self._close_shortfall(op, t["shortfall_id"], tid)
+
+    SETTLEABLE = ("executing", "bank_unknown")
+
+    def settle_treasury(self, request_id: str, op_id: str, body: dict) -> dict:
+        """AEGIS f751017 M-N1: Andre settles a treasury operation whose bank outcome Finance cannot know (an unknown
+        answer, a refusal after one, or the retry window passed). He checked the bank statement:
+          * ``moved``     -> the posting stands, the operation is ``done`` (bank_ref recorded);
+          * ``not_moved`` -> the posting is reversed by a recorded reversal entry and the operation ends
+                             ``not_moved`` (no longer reserved; a new proposal is needed to try again).
+        Its open bank breaks are resolved with it. Andre-only (route), recorded, idempotent per request_id, bound to
+        the operation's ``content_sha256``; refused while a bank call for it is in flight."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, f"treasury-settle/{op_id}",
+                                     {k: str(v) for k, v in body.items()})
+            if ent:
+                return ent["response"]
+            self.require_rules()
+            t = self.db["treasury_ops"].get(op_id)
+            if t is None:
+                raise NotFound("no such treasury operation")
+            if body["content_sha256"] != t["content_sha256"]:
+                raise Conflict("operation changed since you read it (content_sha256 mismatch)")
+            if t["status"] not in self.SETTLEABLE or not t.get("entry_id"):
+                raise Conflict(f"only an operation whose bank outcome is unknown can be settled (it is {t['status']})")
+            if op_id in self.xfer_in_flight:
+                raise Conflict("a bank call for this operation is in flight; settle it once it returns")
+            outcome = body["outcome"]
+            op = Op(self, f"trsettle|{request_id}", "andre", op_id)
+            e = self.entries_by_id[t["entry_id"]]
+            settled = {"settled_by": "andre", "settled_at": iso(self._now()), "settled_outcome": outcome,
+                       "settle_note": body.get("note")}
+            rev_id = None
+            if outcome == "moved":
+                self._transfer_done(op, t, body.get("bank_ref"), **settled)
+            else:
+                memo = e["memo_code"]
+                rev = self._post(op, "zbc", J.reversal_lines(e), memo, {"kind": t["kind"], "id": op_id},
+                                 f"{memo}rev|{op_id}|settle", approval_ref=request_id, reverses=e["entry_id"],
+                                 actor="andre", fact=True)
+                rev_id = rev["entry_id"]
+                op.put("treasury_ops", op_id, {**t, "status": "not_moved", "entry_id": None, **settled,
+                                               "reversed_entry_ids": (t.get("reversed_entry_ids") or [])
+                                               + [e["entry_id"], rev_id]})
+            for kind in ("xfer-unknown", "xfer-expired"):
+                bid = rid("brk", kind, op_id)
+                b = self.db["breaks"].get(bid)
+                if b is not None and b["status"] != "resolved":
+                    op.put("breaks", bid, {**b, "status": "resolved", "resolution": {
+                        "entry_id": rev_id or e["entry_id"], "approved_by": "andre", "at": iso(self._now()),
+                        "settled_outcome": outcome}})
+            op.record(derived_id("trset", op_id), "treasury_settled_by_andre", "andre", op_id,
+                      {"op_id": op_id, "outcome": outcome, "entry_id": e["entry_id"], "reversal_entry_id": rev_id,
+                       "bank_ref": body.get("bank_ref")},
+                      f"Andre settled a {t['kind']} whose bank outcome was unknown: {outcome}")
+            resp = {"operation": op.get("treasury_ops", op_id), "reversal_entry_id": rev_id,
+                    "ledger_event_ids": op.events, "request_id": request_id}
+            self._idem_add(op, key, h, resp)
+            self._commit(op)
+            return resp
 
     def retry_transfers(self) -> int:
         """Re-drive open treasury operations (rail-sync job). Returns how many asked the bank or were settled now;
@@ -732,14 +823,16 @@ class ReconMixin:
         with self.lock:            # a snapshot under the lock: a concurrent commit never changes the dict mid-iteration
             todo = sorted(tid for tid, t in self.db["treasury_ops"].items()
                           if t["status"] in ("approved", "bank_unknown", "executing") and tid not in self.xfer_in_flight
-                          and not t.get("retry_window_expired"))
+                          and not t.get("retry_window_expired")
+                          and not (t["status"] == "approved" and t.get("outcome_unknown")))
         n = 0
         for tid in todo:
             try:
                 res = self._execute_transfer(tid)
             except (Unavailable, IntegrityRefused):
                 continue                # sweep B-F2: one stuck operation never blocks the others
-            if not (res.get("in_flight") or res.get("retry_window_expired")):
+            if not (res.get("in_flight") or res.get("retry_window_expired") or res.get("clock_behind")
+                    or res.get("outcome_unknown")):
                 n += 1
         return n
 

@@ -594,8 +594,13 @@ class StripeMixin:
                        f"F7r|{p.payment_intent}|{M.fmt(total)}", actor=ACTOR, fact=True)
         st = dict(rc.get("stripe") or {})
         st.update(refunded=M.fmt(total), refund_entry_ids=list(st.get("refund_entry_ids") or []) + [e["entry_id"]])
+        # AEGIS f751017 L-N1, the other order: a partly lost dispute first, then a refund of the rest
+        charged = M.D((inv or {}).get("charged_back") or "0.00") if matched else M.ZERO
+        net_reversed = matched and charged > 0 and total + charged == M.D(rc["amount"])
         if reversed_before:
             status = prior
+        elif net_reversed:
+            status = "charged_back"
         elif full:
             status = "refunded"
         else:
@@ -606,7 +611,7 @@ class StripeMixin:
             # already sent is marked withdrawn_after_send)
             self._withdraw_client_receipt(op, rct)
         if matched and inv["status"] == "paid":
-            if full:
+            if full or net_reversed:
                 op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None,
                                                        "refunded": M.fmt(total)})
                 if inv["kind"] == I2.MEDIA_KIND:
@@ -743,8 +748,12 @@ class StripeMixin:
                 self._post(op, "zbm", [line, J.cr("1300", held)], "F7l", src, f"F7l|{did}", actor=ACTOR, fact=True)
                 rec["held"] = "0.00"
                 if matched:
-                    if held == M.D(inv["total"]):
-                        op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None})
+                    # AEGIS f751017 L-N1: a charge whose refunds and chargeback together take back the whole payment
+                    # is fully reversed, whatever the order (e.g. 300 refunded, then a 700 dispute lost)
+                    refunded = M.D((rc.get("stripe") or {}).get("refunded") or "0.00")
+                    if held == M.D(inv["total"]) or (refunded > 0 and held + refunded == M.D(rc["amount"])):
+                        op.put("invoices", inv["invoice_id"], {**inv, "status": "issued", "paid_at": None,
+                                                               "charged_back": M.fmt(held)})
                         op.put("receipts", rct, {**rc, "status": "charged_back"})
                         self._withdraw_client_receipt(op, rct)
                         if inv["kind"] == I2.MEDIA_KIND:

@@ -51,7 +51,7 @@ LEASE_TYPE = "instance_lease"
 RULING_TYPES = ("journal_entry_posted", "payable_accrued", "batch_approved_by_andre", "item_submitted",
                 "rate_card_published", "callback_recorded", "invoice_issued", "sweep_approved", "funding_approved",
                 "refund_approved", "top_up_approved", "clawback_written_off", "media_vendor_payment_recorded",
-                "media_buy_delivered")
+                "media_buy_delivered", "treasury_settled_by_andre")
 LOG_SUBJECT = "fin-log"
 DEPT = "finance"
 _ANCHOR_RE = re.compile(r"fin-log-([0-9a-f]{16})-([0-9]{1,12})-([0-9a-f]{40})")
