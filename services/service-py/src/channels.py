@@ -96,8 +96,9 @@ def opt_out_level(text: str) -> Optional[str]:
     email only ``exact`` revokes, ``suspected`` pauses proactive SMS and asks Andre (V3 Info)."""
     if any(sym in text for sym in OPT_OUT_SYMBOLS):
         return "exact"
+    raw = text.replace("<", " ").replace(">", " ")   # AEGIS R6: "<STOP>", "<3 ... stop texting me >:(" on SMS
     text = html_as_text(text)                    # AEGIS re-review N4: "Unsubscribe<br>Sent ..." is two words
-    variants = {normalise(text), normalise(text.translate(_LEET))}
+    variants = {normalise(text), normalise(text.translate(_LEET)), normalise(raw), normalise(raw.translate(_LEET))}
     variants |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(variants)}
     suspected = False
     for norm in variants:
@@ -127,15 +128,18 @@ SCOPE_CONNECTORS = frozenset({"me", "us", "from", "your", "our", "the", "all", "
 SCOPE_LOOKAHEAD = 8
 # a phone word followed by these is a label for an address ("Cell: 310 ...", "my number is ..."), not a channel
 _ADDRESS_LABEL_NEXT = frozenset({"is", "was", "changed", "here"})
-_QUOTE_HEADER = re.compile(r"^\s*(on\b.{0,300}\bwrote\s*:|-{2,}\s*original message\s*-{2,}|_{5,})\s*$",
-                           re.IGNORECASE)
+_QUOTE_HEADER = re.compile(r"^\s*(on\b.{0,300}\bwrote\s*:|el\b.{0,300}\bescribi[oó]\s*:|le\b.{0,300}\ba [eé]crit\s*:|"
+                           r"am\b.{0,300}\bschrieb.{0,100}:|em\b.{0,300}\bescreveu\s*:|"
+                           r"-{2,}\s*(original message|forwarded message)\s*-{2,}|_{5,})\s*$", re.IGNORECASE)
 _SIG_DELIM = re.compile(r"^\s*(--|__)\s*$")
 _SENT_FROM = re.compile(r"^\s*sent from (my|mail for|outlook|yahoo|gmail)\b", re.IGNORECASE)
 _SIGN_OFF = re.compile(r"^\s*(thanks|thank you|many thanks|thx|regards|best|best regards|kind regards|warm regards|"
                        r"cheers|sincerely|yours truly|respectfully)\s*[,.!]*\s*$", re.IGNORECASE)
 # AEGIS re-review of 1e709a0 (N4): HTML is read as text before anything else — a block tag ends a line, any other tag
 # is a space (deleting it merged "Unsubscribe<br>Sent" into one word), a <blockquote> is the quoted thread
-_BLOCKQUOTE = re.compile(r"<\s*blockquote\b[^>]{0,500}>(.*)<\s*/\s*blockquote\s*>", re.IGNORECASE | re.DOTALL)
+_BLOCKQUOTE = re.compile(r"<\s*blockquote\b[^<>]{0,500}>(?:(?!<\s*blockquote\b).)*?<\s*/\s*blockquote\s*>",
+                         re.IGNORECASE | re.DOTALL)
+_BLOCKQUOTE_OPEN = re.compile(r"<\s*blockquote\b[^<>]{0,500}>", re.IGNORECASE)
 _BLOCK_TAG = re.compile(r"<\s*/?\s*(br|p|div|li|tr|h[1-6]|table|ul|ol|hr)\b[^<>]{0,500}>", re.IGNORECASE)
 _ANY_TAG = re.compile(r"<[^<>]{0,500}>")
 _SEGMENT_SPLIT = re.compile(r"[\n\r.!?;]+")
@@ -143,11 +147,16 @@ _SEGMENT_SPLIT = re.compile(r"[\n\r.!?;]+")
 # block, or "On ... wrote:" with no ">" lines) — it cannot be told apart from a reply typed below the quote. Our own
 # outbound email carries none of these today. A future marketing footer must be listed in OWN_FOOTER_LINES, or every
 # reply quoting it would opt the contact out.
-OPT_OUT_STRONG = ("unsubscribe", "unsub", "stopall", "optout", "opt out", "remove me", "take me off", "do not email",
-                  "dont email", "do not e mail", "dont e mail", "stop emailing", "remove my email", "do not contact",
-                  "dont contact", "never contact", "leave me alone")
+OPT_OUT_STRONG = ("unsubscribe", "unsub", "stopall", "do not email", "dont email", "do not e mail", "dont e mail",
+                  "stop emailing", "remove my email", "no more emails", "no more email", "any more emails", "anymore emails", "take me off your list",
+                  "take me off your mailing list", "remove me from your list", "remove me from your mailing list")
+TAIL_LAST_LINE_MAX_WORDS = 4
+# a short last line below an unmarked quote revokes only when it is nothing but stop / unsubscribe (and courtesy words):
+# "Cancel anytime." or "Offer ends soon." as the last line of our own quoted message must never opt anyone out
+_TAIL_LAST_LINE_CORE = frozenset({"stop", "stopall", "unsubscribe", "unsub"})
+_TAIL_LAST_LINE_WORDS = _TAIL_LAST_LINE_CORE | {"please", "pls", "plz", "thanks", "thank", "you", "thx", "now", "me",
+                                                "it", "already", "ok", "okay"}
 OWN_FOOTER_LINES: tuple[str, ...] = ()
-_STRONG_LAST_LINE = ("stop", "stopall", "unsubscribe", "unsub", "optout", "opt out", "stop please", "please stop")
 
 
 def html_as_text(text: str) -> str:
@@ -165,8 +174,16 @@ def split_reply(text: str) -> tuple[str, str]:
     "-----Original Message-----", "On ... wrote:" without ``>``) starts the tail: what follows cannot be told apart
     from our own quoted message, and is read only for strong opt-out wording (``quoted_tail_opt_out``)."""
     t = text or ""
+    unclosed_tail = ""
     if "<" in t and ">" in t:
-        t = _BLOCKQUOTE.sub("\n", t)
+        for _ in range(50):                   # innermost first: nested quotes, and text between two quotes, kept right
+            u = _BLOCKQUOTE.sub("\n", t)
+            if u == t:
+                break
+            t = u
+        m = _BLOCKQUOTE_OPEN.search(t)        # an unclosed quote: the rest is the quoted tail
+        if m:
+            t, unclosed_tail = t[:m.start()], html_as_text(t[m.end():])
     lines = html_as_text(t).splitlines()
     own: list[str] = []
     tail: list[str] = []
@@ -175,7 +192,11 @@ def split_reply(text: str) -> tuple[str, str]:
         if in_tail:
             tail.append(line)
             continue
-        if _QUOTE_HEADER.match(line):
+        joined = (line.rstrip() + " " + lines[idx + 1].strip()) if idx + 1 < len(lines) else ""
+        if _QUOTE_HEADER.match(line) or (joined and not _QUOTE_HEADER.match(lines[idx + 1])
+                                           and _QUOTE_HEADER.match(joined)):
+            if not _QUOTE_HEADER.match(line):
+                lines[idx + 1] = ""           # the header's second line (Gmail wraps "... <a@b>\nwrote:")
             nxt = next((nl for nl in lines[idx + 1:] if nl.strip()), "")
             if nxt.lstrip().startswith(">"):
                 continue                       # a marked quote follows: drop the header, keep reading
@@ -184,6 +205,8 @@ def split_reply(text: str) -> tuple[str, str]:
         if line.lstrip().startswith(">"):
             continue
         own.append(line)
+    if unclosed_tail.strip():
+        tail.append(unclosed_tail)
     return "\n".join(own), "\n".join(tail)
 
 
@@ -206,21 +229,40 @@ def strip_signature(text: str) -> str:
     return "\n".join(out)
 
 
-def quoted_tail_opt_out(text: Optional[str]) -> bool:
-    """AEGIS re-review N1: strong opt-out wording in the unmarked quoted tail of an email ("-----Original Message-----
-    ... UNSUBSCRIBE"), or a tail whose last line is a bare stop / unsubscribe. Lines of our own footers are ignored."""
+def _tail_without_signature(lines: list[str]) -> list[str]:
+    out = []
+    for line in lines:
+        if _SIG_DELIM.match(line) or (_SIGN_OFF.match(line) and any(o.strip() for o in out)):
+            break
+        if _SENT_FROM.match(line):
+            continue
+        out.append(line)
+    return out
+
+
+def quoted_tail_opt_out(text: Optional[str]) -> Optional[str]:
+    """AEGIS re-reviews of 1e709a0 / 91f5b8b (N1, R2, R4): the unmarked quoted tail of an email (an Outlook "Original
+    Message" block, "On ... wrote:" without ``>``) cannot be told apart from a reply typed below it. ``"revoke"``:
+    strong unsubscribe wording (``OPT_OUT_STRONG``) anywhere in it, or a short last line (signature removed) that is
+    an exact opt-out ("STOP", "STOP. Thanks", "stop please"). ``"alert"``: any other opt-out wording — Andre reads
+    it (it may be a third party's quoted words). None: nothing. Lines of our own footers are ignored."""
     tail = split_reply(text or "")[1]
     if not tail.strip():
-        return False
-    own_footer = {normalise(f).strip() for f in OWN_FOOTER_LINES}
-    kept = [ln for ln in tail.splitlines() if normalise(ln).strip() not in own_footer]
-    body = "\n".join(kept)
+        return None
+    body = tail
+    for f in OWN_FOOTER_LINES:                  # substring match on the joined tail survives re-wrapping
+        body = re.sub(r"\s+".join(map(re.escape, f.split())), " ", body, flags=re.IGNORECASE)
     variants = {normalise(body), normalise(body.translate(_LEET))}
     variants |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(variants)}
     if any(f" {normalise(t).strip()} " in v for v in variants for t in OPT_OUT_STRONG):
-        return True
-    last = next((normalise(ln).strip() for ln in reversed(kept) if normalise(ln).strip()), "")
-    return last in _STRONG_LAST_LINE or _collapse(last) in _STRONG_LAST_LINE
+        return "revoke"
+    kept = [ln for ln in _tail_without_signature(body.splitlines()) if normalise(ln).strip()]
+    last = kept[-1] if kept else ""
+    toks = [_collapse(t) for t in normalise(last).split()]
+    if toks and len(toks) <= TAIL_LAST_LINE_MAX_WORDS and set(toks) <= _TAIL_LAST_LINE_WORDS \
+            and set(toks) & _TAIL_LAST_LINE_CORE:
+        return "revoke"
+    return "alert" if opt_out_level(body) is not None else None
 
 
 def _typo_tokens(norm: str) -> list[int]:
@@ -234,7 +276,8 @@ def typo_opt_out(text: Optional[str]) -> bool:
     if not text:
         return False
     t = html_as_text(text)
-    return any(_typo_tokens(v) for v in (normalise(t), normalise(t.translate(_LEET))))
+    raw = text.replace("<", " ").replace(">", " ")
+    return any(_typo_tokens(v) for v in (normalise(t), normalise(t.translate(_LEET)), normalise(raw)))
 
 
 def _phone_hit(toks: list[str], k: int) -> bool:
@@ -298,6 +341,9 @@ def opt_out_scope(text: Optional[str]) -> Optional[str]:
                 generic = generic or not _phone_scoped(toks, i, i + 1)
     if not found:
         return None
+    # AEGIS R3: an email word anywhere in the person's own words ("stop texting me, same for email") widens it
+    if any(t in EMAIL_SCOPE_WORDS for t in normalise(whole).split()):
+        return "all"
     return "all" if generic else "sms"
 
 
@@ -313,7 +359,7 @@ def email_opt_out(text: Optional[str], subject: Optional[str] = None) -> bool:
     own = strip_quoted(text or "")
     exact = any(t and opt_out_level(t) == "exact" for t in (own, subject))
     typo = typo_opt_out(own) or typo_opt_out(subject)
-    if quoted_tail_opt_out(text):
+    if quoted_tail_opt_out(text) == "revoke":
         return True
     if not exact and not typo:
         return False

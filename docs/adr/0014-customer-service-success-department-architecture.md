@@ -301,3 +301,15 @@ Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "A
 | H1 residual (High) | `_phone_scoped` ignored an email word in the same phrase, crossed line breaks, and the sign-off cut dropped later opt-outs | An email word (`EMAIL_SCOPE_WORDS`) in the phrase's reach makes it an email opt-out; each line and sentence is read alone; a phone word followed by a number or "is" is an address label, not a channel; the scope is read on the person's own words without the signature cut |
 | N4 (High, pre-existing) | HTML tags were deleted without a space, merging "Unsubscribe<br>Sent" into one word | `channels.html_as_text` before every opt-out check: block tags end a line, other tags are a space |
 | N3 (Medium) | A gateway reusing a request id for another body got 409, losing that message (an opt-out) | On the email and SMS gateway routes the message is re-keyed `<id>.b<body sha16>` and processed; chat (our own hub) still answers 409. Accepted residual: with NO request id, an identical body is the same message (the id is the body hash) |
+
+### Sweep A follow-up — AEGIS re-review of 91f5b8b (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| R1 (High, regression) | A greedy `<blockquote>` match ate the person's text between two quotes | Quotes removed innermost first, non-greedy; an unclosed quote starts the quoted tail |
+| R2 (High) | Common wording below an unmarked quote ("no more emails", "STOP. Thanks", "stop / Sent from my iPhone") was ignored | Tail: `OPT_OUT_STRONG` (widened) revokes; a last line (signature removed) that is only stop / unsubscribe plus courtesy words revokes; any other opt-out wording raises `OPT_OUT_IN_QUOTED_TEXT` for Andre instead of being dropped |
+| R3 (High) | "stop texting me, same for email" stayed SMS-only | An email word anywhere in the person's own words makes the opt-out `all` |
+| R4 (Medium) | Third-party wording in a quote ("do not contact the carrier", "opt out of the warranty") revoked | The strong list holds only unsubscribe / email wording; a short last line must be stop / unsubscribe itself ("Cancel anytime." never revokes); `OWN_FOOTER_LINES` matched as re-wrap-tolerant substrings. Before any proactive email with an unsubscribe notice ships, its text must be added there |
+| R5 (Medium) | A Gmail header wrapped over two lines, forwarded and localized headers were read as the person's own words | Header matched on a line or a line joined with the next; "Forwarded message", Spanish, French, German, Portuguese forms added |
+| R6 (High, pre-existing, SMS) | `<STOP>`, "i <3 u but stop texting me >:(" read no opt-out (angle brackets stripped as tags) | Opt-out checks also read the text with `<` `>` as spaces |
+| R7 (Low) | A literal re-keyed id with another body got an uncaught 409 | Re-key is `<id[:80]>.r<sha8(id)>.b<sha16(body)>`; a second conflict falls back to `rk.<sha256(body)>`. Accepted residual: a redelivery differing only in whitespace is a second message |

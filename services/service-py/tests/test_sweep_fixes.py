@@ -357,3 +357,79 @@ def test_n3_a_reused_request_id_with_another_body_is_never_refused(tmp_path):
     assert r.get("email_opted_out") is True and _both_revoked(h, cid)
     again = h.ok(h.post("/svc/v1/inbound/email", {**base, "text": "UNSUBSCRIBE"}, caller="email_gateway"), 201)
     assert again == r                                    # the re-keyed message is itself idempotent
+
+
+# ------------------------------------------------------------------ AEGIS re-review of 91f5b8b (REVISE)
+
+_OUTLOOK = "-----Original Message-----\nFrom: Acme\nSent: Monday\nSubject: hello\n\nHow was your visit?\n\n"
+
+
+def test_r2_opt_outs_below_an_unmarked_quote():
+    import channels
+    for reply in ("no more emails", "do not send me any more emails\nThanks", "STOP. Thanks", "stop\nSent from my iPhone",
+                  "STOP\n--\nJane", "Stop\nThanks", "STOP STOP", "please unsubscribe me"):
+        assert channels.quoted_tail_opt_out(_OUTLOOK + reply) == "revoke", reply
+        assert channels.email_opt_out(_OUTLOOK + reply) is True, reply
+    for reply in ("cancel my subscription", "stop sending me these please, I asked twice already"):
+        assert channels.quoted_tail_opt_out(_OUTLOOK + reply) == "alert", reply   # Andre reads it
+
+
+def test_r2_weaker_wording_below_an_unmarked_quote_alerts_andre(tmp_path):
+    h = Harness(tmp_path)
+    _with_consents(h)
+    h.ok(_email(h, "owner@acme.test", _OUTLOOK + "cancel my subscription", subject="Re: hello"), 201)
+    assert any(a["code"] == "OPT_OUT_IN_QUOTED_TEXT" for a in h.svc.alerts.values())
+
+
+def test_r4_third_party_words_in_a_quote_never_revoke():
+    import channels
+    for quoted in ("Please do not contact the carrier directly.", "Can you remove me from the cc?",
+                   "You may opt out of the warranty.", "Cancel anytime. Offer ends soon."):
+        text = "Sounds good, thanks.\n\n-----Original Message-----\nFrom: Vendor\n\n" + quoted + "\nRegards"
+        assert channels.email_opt_out(text) is False, quoted
+
+
+def test_r1_text_between_two_html_quotes_is_the_persons_own():
+    import channels
+    for t in ("<div>Hi</div><blockquote>A</blockquote><div>please stop emailing me</div><blockquote>B</blockquote>",
+              "<blockquote>A<blockquote>nested</blockquote>B</blockquote><p>unsubscribe</p>"):
+        assert channels.email_opt_out(t) is True, t
+    assert channels.email_opt_out("<p>Thanks!</p><blockquote>Cancel anytime<blockquote>end</blockquote></blockquote>") \
+        is False
+
+
+def test_r3_an_email_word_anywhere_in_the_persons_words_widens_the_opt_out():
+    import channels
+    for t in ("unsubscribe me from texts as well as emails", "Stop texting me - that goes for email too",
+              "stop texting me, same for email", "stop texting me and spamming my inbox",
+              "stop texting me my number is 3105551212 and my email too"):
+        assert channels.email_opt_out(t) is True, t
+
+
+def test_r5_wrapped_forwarded_and_localized_headers_are_quote_headers():
+    import channels
+    for header in ("On Mon, Oct 5, 2026 at 9:00 AM Acme Support Team <help@acme.test>\nwrote:",
+                   "---------- Forwarded message ---------", "El lun, 5 oct 2026, Acme escribió:",
+                   "Le lun. 5 oct. 2026, Acme a écrit :"):
+        assert channels.email_opt_out("Thanks, see you then!\n\n" + header + "\nCancel anytime.") is False, header
+
+
+def test_r6_angle_brackets_are_not_tags_for_an_opt_out():
+    import channels
+    for t in ("<STOP>", "<<STOP>>", "<unsubscribe me>", "i <3 u but stop texting me >:("):
+        assert channels.opt_out_level(t) == "exact", t
+
+
+def test_r7_a_literal_rekeyed_id_with_another_body_is_never_refused(tmp_path):
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    base = {"brand": "zbm", "to_address": ZBM_EMAIL, "from_address": "owner@acme.test", "request_id": "dup-2"}
+    h.ok(h.post("/svc/v1/inbound/email", {**base, "text": "hello"}, caller="email_gateway"), 201)
+    second = {**base, "text": "how are you"}
+    h.ok(h.post("/svc/v1/inbound/email", second, caller="email_gateway"), 201)
+    import hashlib as _h
+    from service import body_sha
+    rk = f"dup-2.r{_h.sha256(b'dup-2').hexdigest()[:8]}.b{body_sha(second)[:16]}"
+    h.ok(h.post("/svc/v1/inbound/email", {**base, "request_id": rk, "text": "UNSUBSCRIBE"},
+                caller="email_gateway"), 201)
+    assert _both_revoked(h, cid)

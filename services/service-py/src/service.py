@@ -1142,8 +1142,14 @@ class SupportService:
                     raise                     # our own hub (chat) reusing an id is a caller bug: 409 as before
                 # AEGIS re-review N3: a gateway that reuses a request id for another message must not get that
                 # message (an opt-out, say) refused: it is re-keyed with its own body hash, as sales-py does
-                body = {**body, "request_id": f"{body['request_id'][:100]}.b{body_sha(body)[:16]}"}
-                prev = self._idem(actor, f"inbound_{channel}", target, body)
+                orig = body["request_id"]
+                rid_h = hashlib.sha256(orig.encode("utf-8", "surrogatepass")).hexdigest()[:8]
+                body = {**body, "request_id": f"{orig[:80]}.r{rid_h}.b{body_sha(body)[:16]}"}
+                try:
+                    prev = self._idem(actor, f"inbound_{channel}", target, body)
+                except Conflict:              # AEGIS R7: a literal id of that shape with yet another body
+                    body = {**body, "request_id": f"rk.{body_sha(body)}"}
+                    prev = self._idem(actor, f"inbound_{channel}", target, body)
             if prev is not None:
                 return prev
             effects: list = []
@@ -1179,7 +1185,8 @@ class SupportService:
             # AEGIS re-review of 1e709a0 (N1): strong opt-out wording in the unmarked quoted tail (an Outlook
             # "Original Message" block, "On ... wrote:" with no ">" lines) may be a reply typed below the quote: it is
             # honoured (over-suppressing is the safe side) and Andre is told, since it may be quoted text
-            tail_opt_out = channel == "email" and level != "exact" and channels.quoted_tail_opt_out(text)
+            tail = channels.quoted_tail_opt_out(text) if channel == "email" and level != "exact" else None
+            tail_opt_out = tail == "revoke"
             if tail_opt_out:
                 level = "exact"
             revoke = level == "exact" or (level == "suspected" and channel == "sms")
@@ -1220,7 +1227,9 @@ class SupportService:
                                                  "request": self._req(actor, f"inbound_{channel}", target, body),
                                                  "response": resp}, actor)
                     return resp
-            elif level == "suspected":
+            elif tail == "alert":            # AEGIS R2/R4: opt-out wording in the quoted tail: Andre reads it
+                effects.append(self._alert_effect("OPT_OUT_IN_QUOTED_TEXT", contact["contact_id"], rid))
+            if not revoke and level == "suspected":
                 if email_revoke:             # AEGIS M1: err toward honouring; consent_changed is its typed evidence
                     effects.append(email_effect)
                     resp["email_opted_out"] = True
