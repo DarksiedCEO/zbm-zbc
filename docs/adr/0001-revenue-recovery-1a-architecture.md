@@ -114,9 +114,9 @@ whole upstream bodies into its log lines.
 
 | Limit | Value | Answer | Why this size |
 |---|---|---|---|
-| Items per request list (orders, subscriptions, events, touchpoints, statuses, terms, findings) | 1000 | 422 `too_long` | Same batch cap as fulfillment-py. The orchestrator sends the fixture pools (≤ 7 items) and ≤ ~10 findings. |
-| Every field of every request model (`src/zbm_schema/limits.py`) | ids 64 chars; finding_id/entity_id 128; labels 32; agent_id, SKU, discount code 64; cause_description 1024; line items per order 50; discounts per order 10; every int bounded | 422 naming the field | See "Body limit sizing" below. |
-| Request body, per route | orders routes 36 MiB; `/correlation/overlaps` 11 MiB; subscriptions, contract terms 2 MiB; events, touchpoints, platform statuses 1 MiB; any path without a body 64 KiB | 413, before any parsing | The computed worst case of the route's largest legal batch + 25%, rounded up to a MiB (below). Checked from `Content-Length` without reading the body, and as a running total for a chunked body. |
+| Items per request list (orders, subscriptions, events, touchpoints, statuses, terms, findings) | 1000 | 422 `too_long` | Same batch cap as fulfillment-py. Since Oct 6 2026 (E-6) the orchestrator batches: detect calls of at most 500 items, correlation calls of at most 700 findings, never splitting one entity's findings or one order's touchpoints. |
+| Every field of every request model (`src/zbm_schema/limits.py`) | ids 1-64 chars of `[A-Za-z0-9._:/@+#-]`, first alphanumeric; client_id 1-64 of `[A-Za-z0-9._:-]`; finding_id `rrf1-` + 40 hex; entity_id 64; period_label 16; agent_id 32; methodology_id 24; methodology 600; labels 1-32 (status and platform normalized slugs); SKU, discount code 64; cause_description 1024; line items per order 50; discounts per order 10; every int bounded | 422 naming the field | See "Body limit sizing" below, and "Revenue Recovery fix wave" for the Oct 6 2026 changes. |
+| Request body, per route | orders routes 35 MiB; `/correlation/overlaps` 13 MiB; subscriptions, events, touchpoints, platform statuses, contract terms 1 MiB; any path without a body 64 KiB | 413, before any parsing | The computed worst case of the route's largest legal batch + 25%, rounded up to a MiB (below). Checked from `Content-Length` without reading the body, and as a running total for a chunked body. Oct 6 2026: identifier fields are ASCII-safe, so their worst case is 1 byte per character (orders 36 -> 35 MiB); findings carry more fields (11 -> 13 MiB). |
 | Large requests in progress | 1 (a body declared > 256 KiB, or chunked) | 503 + `Retry-After: 1`, before the body is read | Parsing, agents and serialization hold the GIL; a second large batch only delays the event loop. Smaller requests (every orchestrator scan) are never capped. The slot is held from the request head to the end of the response. A request without a valid token is answered 401 before its body is read, so it holds the slot only for that (checked on a real socket); a caller with a valid token that sends its body slowly holds it for at most the 30 s body deadline. |
 | Body delivery | 30 s | 408 | A 36 MiB body on a 100 Mbit/s link takes ~3 s. |
 | Request line + headers | 16 KiB | 400 (h11 parser, while reading); 431 (middleware, any launcher) | Callers send a few short headers. |
@@ -238,7 +238,7 @@ httptools).
 | Request body | 64 KiB (`MaxBytesReader`; 413) | No route takes a body. Any body is read and discarded **before** routing, so a scan never starts until its whole request has arrived (a slow body gets 408 at `ReadTimeout`). |
 | Upstream call | 10 s total (unchanged), dial 5 s, response headers 10 s | |
 | Upstream response headers | 64 KiB | |
-| detection-py response body | 8 MiB | its largest response was ~1 MiB (one finding per item, ≤ 1000 items); since fix wave 1 LOW-C it can reach 8.6 MiB for a 1,000-finding correlation call (see detection-py above) |
+| detection-py response body | 8 MiB | its largest response was ~1 MiB (one finding per item, ≤ 1000 items); since fix wave 1 LOW-C it can reach 8.6 MiB for a 1,000-finding correlation call (see detection-py above). Since Oct 6 2026 the orchestrator sends at most 700 findings per correlation call: ~7.1 MiB at the worst case of every field, under the cap (a real finding is ~1.3 KB). |
 | ledger-rust response body | 64 MiB | `GET /ledger/entries` returns the whole ledger (no pagination); a finding entry is ~470–500 bytes, so this is ~130,000 entries (~13,000 fixture scans). Beyond that, reads fail closed (502; the log says "response body exceeds"). **Known limit until the ledger paginates.** |
 | Upstream text in errors/logs | 2 KiB | |
 
@@ -281,3 +281,129 @@ cut off at 5 s / 15 s while `/health` keeps answering and no scan starts;
 see a connection reset instead of the 413: both servers answer and close
 without reading the rest of the body, which is the point. `curl` (which
 reads while sending) sees the 413.
+
+## Revenue Recovery fix wave (Oct 6 2026) — finding identity, tenant, evidence class, scan records
+
+Amends Decision 6 and the sections above. Source: the backend bug sweep of
+integration 5d49ee9 (findings E-1 to E-15, probes in `scratchpad/sweep-E`).
+Every probe that reproduced is now a regression test that fails on 5d49ee9:
+`services/detection-py/tests/test_revrec_fix_wave.py` and
+`services/orchestrator-go/cmd/orchestrator/revrec_fix_wave_test.go`. How a
+scan is written to the ledger is ADR 0003 section 13.
+
+### Finding identity and the correlation key (E-3, E-10)
+
+- **Tenant.** Every detect request names `client_id`, the ZBM client whose
+  data it is (required; 1-64 characters of `[A-Za-z0-9._:-]`, so it can be a
+  ledger `subject_id`). Every `Finding` carries it. A contract term or
+  platform status whose own `client_id` is another client's is a 422 for
+  that item, never a finding under the wrong tenant.
+- **finding_id** = `"rrf1-"` + the first 40 hex digits of
+  SHA-256(`"rrf1\n" + client_id + "\n" + agent_id + "\n" + entity_type + "\n"
+  + entity_id + "\n" + period_label`), period empty when absent. No field's
+  charset allows a newline, so the preimage is unambiguous; the old ids were
+  concatenations and collided (two minimum-spend terms of one client and
+  period; client "a-b" + platform "c" vs client "a" + platform "b-c").
+  `Finding` validates that its id is derived; orchestrator-go recomputes it
+  for every finding it receives and every record it reads back. `period_label`
+  is part of the identity: a contract term's billing period, a missed
+  renewal's due date (UTC), absent for one-off entities.
+- **entity_type** is one of `order`, `subscription`, `contract_term`,
+  `platform`; a platform finding's entity is the platform itself (the client
+  is `client_id`).
+- **Correlation key** = (client_id, entity_type, entity_id), as
+  `"client|entity_type|entity_id"` (`|` is in none of the charsets). An
+  overlap needs **more than one distinct agent**: the same agent reporting
+  one entity twice is not double-counting (E-10). Duplicate input rows give
+  one finding; two different rows sharing an identifier are a 422
+  (`duplicate_entity`) rather than one silently winning.
+- **Fixture tenant.** The fixture pool is one store, tenant `fixture-pool`
+  (`fixtures_loader.FIXTURE_CLIENT_ID`); its tier 2 rows now carry that
+  client id. orchestrator-go defaults a scan with no `client_id` to it, and
+  only to it, and records `tenant_defaulted`. Any other tenant is refused
+  (422) until a live data source exists: fixture data is never attributed to
+  a real client.
+
+### Evidence class and methodology (E-4)
+
+Every finding carries `evidence_class` and a `methodology_id` + `methodology`
+note. `OBSERVED`: read off recorded transactions/terms with exact arithmetic.
+`ESTIMATED`: observed inputs plus a stated assumption. `MODELED`: from a
+statistical/attribution model (no agent emits it yet). `UNKNOWN`: no
+defensible dollar figure — required exactly when `recoverable_value` is null,
+and then the text states no dollar figure either (Hallucination Agent rule).
+
+Every agent was reviewed for the overstatement the sweep found in three of
+them. What each one claims now, and what it claimed before (the shared
+fixture pool, one scan):
+
+| Agent | Before (5d49ee9) | Now | Evidence | Why |
+|---|---|---|---|---|
+| discount-misuse | whole stacked discount: ord_1003 $128.00, ord_1007 $54.38 (OBSERVED/VERY_HIGH) | the excess over the most valuable single code: $48.00, $16.88 (OBSERVED/HIGH) | OBSERVED | The best single code was the customer's to use; only what the stack gave beyond it breaches the one-code policy. Each code is assumed individually valid (the customer-favourable reading), so the figure is a floor. Confidence HIGH, not VERY_HIGH: the one-code policy is the agent's assumption, not read from the store's promotion rules. |
+| affiliate-coupon-extension | whole order subtotal: ord_1002 $120.00, ord_1007 $150.00 (ATTRIBUTED/HIGH) | subtotal x the affiliate's `commission_rate_percent` when known: ord_1002 $12.00 (10%, ATTRIBUTED/MEDIUM); no figure without a rate (ord_1007) | ESTIMATED / UNKNOWN | What leaks is the commission paid on the order, not the order. It is ESTIMATED because the payout itself is not in the data. A negative click-to-order gap (order before click, E-14) is now an UNCERTAIN finding with no figure; it used to pass as "within the window". |
+| server-side-attribution | whole order value: ord_3001 $210.00 (OBSERVED/HIGH) | no figure | UNKNOWN | The order was real and paid; the gap is attribution visibility, not lost revenue (the agent's own docstring said so). |
+| abandoned-cart-coverage | whole cart value: ord_1005 $89.99 (INCREMENTAL/MEDIUM) | no figure | UNKNOWN | Only the share a recovery flow wins back is recoverable, and no store-measured recovery rate exists in the data. The cart value is the ceiling of the opportunity, not a recoverable amount. A measured rate is the input that would allow an ESTIMATED figure. |
+| renewal-never-triggered | one cycle at plan price: sub_2001 $39.00 (OBSERVED/HIGH) | unchanged amount and labels | ESTIMATED | The charge that should have been attempted, not inflated; ESTIMATED because whether it would have succeeded is not in the data. A renewal now counts only if due at or before the scan's `as_of` (E-13). |
+| contract-pricing-term-drift | contracted minimum minus billed: $900.00 (OBSERVED/VERY_HIGH) | unchanged | OBSERVED | Exact arithmetic on the contract and the invoice. |
+| cross-channel-attribution | no figure | no figure | UNKNOWN | Needs a multi-touch model (not built). |
+| platform-integration | no figure | no figure | UNKNOWN | A coverage gap, not a transaction. |
+
+Fixture pool total of claimed dollars: $1,691.37 before, $1,015.88 now; of
+which contract drift is $900.00 in both. Without it: $791.37 before, $115.88
+now.
+
+### Other input rules (E-11, E-12, E-13)
+
+- `Order.status` and `PlatformConnectionStatus.platform` are normalized
+  (trimmed, lowercased, whitespace and `-` runs to `_`; raw text at most 32
+  characters): `"Abandoned_Cart"` is `abandoned_cart` instead of a silent
+  miss. `Subscription.status` is normalized the same way before its enum.
+- Identifiers are never empty and use the safe charset above (an empty
+  `order_id` made every finding collide on entity `""`).
+- `placed_at`, `last_renewal_at`, `next_renewal_due_at`, `Customer.created_at`
+  and the renewal route's `as_of` must be timezone-aware. The renewal route
+  requires `as_of` (orchestrator-go passes the scan's instant; `?as_of=` on
+  the scan route overrides it, RFC 3339 with an offset), and a lapsed
+  subscription counts only if its renewal was due at or before it.
+
+### Scans (E-1, E-2, E-6, E-8)
+
+- A store with no leaks is a 200 with `findings: []`: lists are never sent
+  as JSON `null`, and the correlation call is skipped when nothing can
+  overlap (it used to make every clean-store scan a 502).
+- `POST /revenue-recovery/scan[?client_id=][&as_of=]` — one scan at a time
+  per orchestrator process; a concurrent request is 409 with `Retry-After`
+  and runs nothing. (One process per deployment, like the ledger: the lock
+  is in-process. Two orchestrators would still each record only complete,
+  separately identified scans.) Every finding is checked before anything is
+  written (tenant, agent, derived id, field bounds); every scan has a
+  `scan_id` and is recorded as started -> findings -> completed ledger events
+  (ADR 0003 section 13). `GET /revenue-recovery/findings` counts only
+  completed scans and lists the others under `excluded_scans` with a reason;
+  each row carries `scan_id`, `client_id`, `evidence_class`,
+  `present_in_latest_scan`; pre-fix-wave ledger finding entries are counted
+  as `legacy_finding_entries_ignored`, never shown.
+- Detect calls are batched (500 items) and correlation is batched by key
+  (700 findings), so a store with more than 1,000 orders or findings no
+  longer fails the whole scan.
+- E-8: a scan writes each finding once (retries and concurrent requests no
+  longer duplicate). Each completed scan still records every finding it saw,
+  by design: that is what lets a reader prove from the ledger alone that a
+  scan is complete. `GET /findings` still reads the whole ledger, through one
+  function (`Orchestrator.entryPages`); paginated ledger reads
+  (`?after_seq=&department=&event_type=`, a separate branch) replace that
+  function's body only.
+
+### Timing-sensitive tests (E-15)
+
+`detection-py tests/test_request_limits_live.py`: 90% of `/health` probes
+under 16 concurrent worst-case batches must meet the 0.5 s bound outright,
+and the single worst may exceed it by the idle server's own worst probe,
+measured just before on the same box (one 0.62 s outlier under unrelated
+machine load failed the sweep run). The 1 s bound beside large bodies is
+likewise relative to the idle worst. Parsing on the event loop — the
+regression these guard — held `/health` for seconds on every probe and fails
+both. `orchestrator-go internal/client/limits_test.go`: the response-size
+tests lift the 10 s call timeout (moving 64 MiB over loopback exceeded it
+under load); the timeout itself is covered by its own test.
+

@@ -204,9 +204,14 @@ Design:
   and fsync'd before it enters memory; a disk failure returns 500 and the
   caller must treat the event as not recorded.
 - No Go client method for events: the orchestrator does not record events.
+  **Superseded Oct 6 2026 (section 13):** orchestrator-go records every
+  Revenue Recovery scan as events (`LedgerClient.AppendEvent`) and no longer
+  calls `POST /ledger/append`.
 - Reading is not writing (fix wave 1): orchestrator-go's
   `GET /revenue-recovery/findings` reads `GET /ledger/entries` (entries of
-  kind `"finding"`; events are counted, not shown) plus `GET /ledger/verify`
+  kind `"finding"`; events are counted, not shown — **amended Oct 6 2026,
+  section 13:** it now shows the `revenue_recovery` events of completed
+  scans and counts legacy `"finding"` entries as ignored) plus `GET /ledger/verify`
   and never calls a ledger write endpoint. The dashboard renders that route.
   A scan — which records every finding it detects — is only
   `POST /revenue-recovery/scan`; any other method is 405. Before this, each
@@ -701,6 +706,66 @@ these tests therefore also exercise; the integration tests still write fixed-pre
 directory (`std::env::temp_dir()`, which honours TMPDIR — under the hygiene wrapper that is the run's private TMPDIR,
 so a crashed test's leftovers fail rule R3 instead of accumulating in /tmp; the 735 `ledger_test_*` logs in this
 machine's /tmp are from earlier waves' code and are not removed by this wave — other sessions' files).
+
+## 13. Revenue Recovery scans are recorded as events (Oct 6 2026)
+
+Backend bug sweep of 5d49ee9, E-2 / E-8: the orchestrator appended one
+`kind: "finding"` entry per finding with `POST /ledger/append`, which has no
+idempotency key and no notion of a scan. A failed scan left the findings it
+had written (the caller was told it failed); a retry after a lost answer
+wrote the finding twice; five concurrent scans wrote everything five times;
+nothing distinguished a complete scan from a partial one. The ledger is not
+changed by this fix (an optional `finding_id` uniqueness index and paginated
+reads are on a separate branch, and nothing here depends on them):
+orchestrator-go now uses the existing idempotent `POST /ledger/events`.
+
+A scan is these events, department `revenue_recovery`, actor
+`orchestrator_go`, all ids deterministic (`<scan_id>` is 32 random hex):
+
+| event_id | event_type | subject_id | payload_sha256 | summary |
+|---|---|---|---|---|
+| `rr.<scan_id>.started` | `rr_scan_started` | client_id | SHA-256 of {scan_id, client_id, as_of, data_source, fixture, tenant_defaulted, agents} | `rrs1 src=fixtures fixture=1 defaulted=1 asof=<RFC 3339> agents=8` |
+| `rr.<scan_id>.f.<finding_id>` (one per finding) | `rr_finding` | finding_id | SHA-256 of the finding's full JSON as detection-py returned it | `rrf1 a=<agent_id> l=<leak_category> t=<entity_type> e=<entity_id> p=<period\|-> v=<amount\|-> x=<evidence_class> k=<classification\|-> n=<confidence\|-> m=<methodology_id>` |
+| `rr.<scan_id>.completed` | `rr_scan_completed` | client_id | SHA-256 of the manifest: scan_id, client_id and every finding event's (event_id, payload_sha256, summary), sorted by event_id | `rrc1 n=<number of findings>` |
+| `rr.<scan_id>.aborted` (best effort, on failure after writing began) | `rr_scan_aborted` | client_id | SHA-256 of the reason | `rra1 <step> failed: <public reason>` |
+
+- **Order and checks.** Every finding is validated and every event built
+  before the first write, so a bad finding fails the scan with nothing
+  written. Then started, the findings, completed; then `GET /ledger/verify`.
+- **Retries cannot duplicate.** Each append is retried (4 attempts, 250 ms /
+  500 ms / 1 s back-off) on no answer, a timeout, a cut-off answer or a 5xx,
+  always with the identical body; the ledger answers 200 for an event it
+  already committed and appends nothing. A 409 (same id, different content)
+  is never retried. Measured live: a 500 after commit and a 12 s answer delay
+  (past the 10 s call timeout) each completed the scan with every finding
+  recorded once (`ledger_events_already_present: 1`).
+- **Only completed scans count.** `GET /revenue-recovery/findings` folds the
+  `revenue_recovery` events by scan and counts a scan only if it has started
+  and completed events for the same client, no aborted event, every finding
+  event between them, a finding count equal to `n`, every finding id equal to
+  the hash of its recorded fields (ADR 0001), every summary well-formed, and
+  a manifest hash equal to the completed event's `payload_sha256` — so the
+  completion record commits to every recorded amount and label. Anything else
+  is listed in `excluded_scans` with a reason and contributes nothing.
+- **The summary is the record.** The ledger keeps no payload, so the
+  findings view is built from the summary. Every value's charset excludes
+  space and `=`, and none can be `-` (first character alphanumeric), so the
+  encoding is unambiguous; amounts are canonical money strings, passed
+  through exactly. The field bounds (agent_id 32, entity_id 64, period 16,
+  methodology_id 24, leak_category 33) make the worst case 272 characters,
+  under the 280-character limit — tested in Go
+  (`internal/orchestrator/ledger_record_test.go`) and pinned in Python
+  (`tests/test_revrec_fix_wave.py`). A finding that would not fit fails the
+  scan; nothing is truncated.
+- **Legacy entries.** `kind: "finding"` entries written before this change
+  (no scan, no tenant, colliding ids, pre-E-4 amounts) stay in the chain and
+  verify as before; the findings view counts them as
+  `legacy_finding_entries_ignored` and never shows them.
+- **Reads (E-8).** The view still reads the whole ledger, through one
+  function (`Orchestrator.entryPages`, over `LedgerClient.Entries`). When
+  paginated reads land, that function pages with `after_seq` (and
+  `department=revenue_recovery`) and the fold is unchanged. A scan appends
+  N + 2 entries; retries and concurrent requests no longer add any.
 
 ## Verification
 

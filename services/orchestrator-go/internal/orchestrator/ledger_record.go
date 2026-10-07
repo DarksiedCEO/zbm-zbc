@@ -17,7 +17,8 @@ package orchestrator
 // scan fails after it started writing). A scan COUNTS only once its
 // completed event exists and agrees with what precedes it: the completed
 // event's payload_sha256 is the hash of the scan's manifest (every finding
-// event id with its payload hash) and its summary the finding count, so a
+// event id with its payload hash and summary) and its summary the finding
+// count, so a
 // reader can prove from the ledger alone that it sees exactly the scan's
 // findings — no partial scan is ever counted (recorded.go).
 //
