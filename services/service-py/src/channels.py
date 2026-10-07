@@ -34,7 +34,7 @@ OPT_OUT_TERMS = ("stop", "stopall", "unsubscribe", "unsub", "cancel", "cancelled
                  "do not send", "never text", "never message", "never contact", "stop texting", "quit texting",
                  "remove my number", "my number off", "lose my number", "take my number", "delete my number",
                  "didnt sign up", "did not sign up", "never signed up", "who is this", "wrong number", "wrong person",
-                 "not interested", "do not call", "dont call", "never call", "stop calling",
+                 "not interested",
                  # sweep A: email wording ("do not email me" was not an opt-out at all)
                  "dont email", "do not email", "dont e mail", "do not e mail", "never email", "stop emailing",
                  "quit emailing", "stop sending emails", "remove my email", "take my email", "delete my email",
@@ -322,10 +322,15 @@ def typo_opt_out(text: Optional[str]) -> bool:
     return any(_typo_tokens(v) for v in (normalise(t), normalise(t.translate(_LEET)), normalise(raw)))
 
 
+# AEGIS M-9: call wording names a channel for the scope ("do not call, text or email me") but is not an SMS opt-out
+# on its own ("Never call before 9 please"): it reaches a suspected level through negated_channel at most
+SCOPE_ONLY_TERMS = ("do not call", "dont call", "never call", "stop calling")
 _SCOPE_SEGMENT = re.compile(r"[\n\r.!?;,]+")
 # "Do not call, text or email me": a comma inside a list of channels is not a clause end
-_CHANNEL_LIST_COMMA = re.compile(r"\b(call|text|txt|message|email|e-mail|mail|sms)\s*,\s*(?=(?:or |and )?(?:call|text|txt|"
-                                 r"message|email|e-mail|mail|sms)\b)", re.IGNORECASE)
+_CH = r"(?:call|text|txt|message|email|e-mail|mail|sms)"
+# AEGIS H-G: only a real list of three or more ("call, text or email") — "Don't text, email me instead" is two clauses
+_CHANNEL_LIST_COMMA = re.compile(r"\b(" + _CH[3:-1] + r")\s*,\s*(?=" + _CH + r"(?:\s*,\s*" + _CH + r")*\s+(?:or|and|nor)\s+"
+                                 + _CH + r"\b)", re.IGNORECASE)
 _AFTER_EMAIL_REQUEST = frozenset({"instead", "if", "only", "rather", "anytime", "whenever", "is", "are", "fine", "ok",
                                   "okay", "works", "address", "at"})
 
@@ -422,7 +427,7 @@ def opt_out_scope(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
     found, generic = False, False
-    terms = [normalise(t).split() for t in OPT_OUT_TERMS]
+    terms = [normalise(t).split() for t in OPT_OUT_TERMS + SCOPE_ONLY_TERMS]
     whole = _CHANNEL_LIST_COMMA.sub(r"\1 or ", html_as_text(text))
     for single, seg in [(False, whole)] + [(True, x) for x in _SCOPE_SEGMENT.split(whole)]:
         if not seg.strip():
@@ -463,9 +468,10 @@ def email_opt_out_decision(text: Optional[str], subject: Optional[str] = None) -
         return "revoke"
     exact = any(t and opt_out_level(t) == "exact" for t in (own, subject))
     typo = typo_opt_out(own) or typo_opt_out(subject)
-    if not exact and not typo:
-        return None
     scopes = {opt_out_scope(own), opt_out_scope(subject)} - {None}
+    if not exact and not typo:
+        # a scope-only phrase ("do not call, text or email me") decides only with an email channel in it
+        return "revoke" if "all" in scopes and any(opt_out_level(t) for t in (own, subject) if t) else None
     if not scopes or "all" in scopes:
         return "revoke"
     return "ask" if "ask" in scopes else "keep"

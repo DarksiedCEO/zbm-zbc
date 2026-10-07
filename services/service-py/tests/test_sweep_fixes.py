@@ -596,3 +596,19 @@ def test_scope_corpus_all_rounds_at_once():
         assert channels.email_opt_out_decision(t) == "revoke", t
     for t in keep:
         assert channels.email_opt_out_decision(t) == "keep", t
+
+
+# ------------------------------------------------------------------ AEGIS re-review of 7d58d7b (REVISE)
+
+def test_hg_a_two_item_comma_is_two_clauses():
+    import channels
+    for t in ("Don't text, email me instead", "Please don't text, email me", "Don't text, email is better",
+              "don't text, e-mail me", "Don't text, email me if there's a problem", "Do not text, email me at jane@x.com"):
+        assert channels.email_opt_out_decision(t) in ("keep", "ask"), t
+    assert channels.email_opt_out_decision("Do not call, text or email me") == "revoke"
+
+
+def test_m9_call_wording_alone_never_revokes_sms():
+    import channels
+    for t in ("Never call before 9 please", "Do not call the buzzer, it is broken"):
+        assert channels.opt_out_level(t) != "exact", t

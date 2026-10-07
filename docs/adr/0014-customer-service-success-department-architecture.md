@@ -367,3 +367,10 @@ cases and asks Andre about the rest, so a wrong guess becomes an alert, never a 
 
 "do not call", "dont call", "never call", "stop calling" added to the opt-out terms (phone scope). The corpus of every
 phrase from all rounds is pinned in `test_scope_corpus_all_rounds_at_once`.
+
+### Sweep A follow-up — AEGIS re-review of 7d58d7b (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-G (High, regression) | "Don't text, email me instead" was joined into "don't text or email me" and revoked email | A comma joins channels only in a real list of three or more ("call, text or email"); two items are two clauses |
+| M-9 | "Never call before 9 please" revoked SMS | Call wording is scope-only (`SCOPE_ONLY_TERMS`): it names a channel for the scope but is never an exact SMS opt-out; "Do not call, text or email me" revokes email and pauses SMS with `SMS_OPT_OUT_SUSPECTED` for Andre |
