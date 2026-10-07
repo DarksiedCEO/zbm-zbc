@@ -1162,7 +1162,10 @@ class SupportService:
             # anywhere; "suspected" (a typo, a negation near text/sms/phone) revokes on SMS and, on chat or email,
             # pauses proactive SMS and asks Andre. Any inbound the bot does not answer pauses proactive SMS to every
             # phone of the resolved contact and of any contact the message names (V3-C1, V3-M2).
-            levels = {channels.opt_out_level(text), channels.opt_out_level(body["subject"]) if body.get("subject")
+            # sweep A (AEGIS H1): an email is classified on the person's own words — quoted lines and the quoted
+            # thread below a reply header are someone else's (often our own footer)
+            own = channels.strip_quoted(text) if channel == "email" else text
+            levels = {channels.opt_out_level(own), channels.opt_out_level(body["subject"]) if body.get("subject")
                       else None}
             level = "exact" if "exact" in levels else ("suspected" if "suspected" in levels else None)
             revoke = level == "exact" or (level == "suspected" and channel == "sms")
@@ -1170,17 +1173,21 @@ class SupportService:
             named = self._named_contacts(brand, text + " " + (body.get("subject") or ""), contact["contact_id"])
             pause = self._pause_effects([contact] + named, extra_phone=sms_number)
             resp = {"contact_id": contact["contact_id"]}
+            # sweep A (AEGIS H1, M1): an opt-out received BY EMAIL revokes EMAIL consent unless every opt-out phrase in
+            # the person's own words names the phone; a typo of unsubscribe / stop by email revokes it too
+            email_revoke = bool(channel == "email" and contact.get("email") and level
+                                and channels.email_opt_out(text, body.get("subject")))
+            email_effect = {"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "email",
+                            "via": "stop_by_email" if level == "exact" else "suspected_stop_by_email",
+                            "request_id": rid, "address": contact.get("email")}
             if revoke:
                 had = channel == "sms" and channels.consent_matches(
                     self.consents.get((contact["contact_id"], "sms")), sms_number)
                 effects.append({"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "sms",
                                 "via": "stop_keyword" if channel == "sms" else f"stop_by_{channel}",
                                 "request_id": rid, "address": sms_number})
-                if channel == "email" and contact.get("email") and channels.email_opt_out(text, body.get("subject")):
-                    # sweep A (High): an opt-out received BY EMAIL revokes EMAIL consent too (it only revoked SMS:
-                    # proactive email — NPS surveys, check-ins, offers — still went out after "UNSUBSCRIBE")
-                    effects.append({"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "email",
-                                    "via": "stop_by_email", "request_id": rid, "address": contact["email"]})
+                if email_revoke:
+                    effects.append(email_effect)
                     resp["email_opted_out"] = True
                 resp["action"] = "opted_out"
                 if had:     # V3-C3: the one confirmation goes ONLY to the number that sent the STOP
@@ -1198,6 +1205,9 @@ class SupportService:
                                                  "response": resp}, actor)
                     return resp
             elif level == "suspected":
+                if email_revoke:             # AEGIS M1: err toward honouring; consent_changed is its typed evidence
+                    effects.append(email_effect)
+                    resp["email_opted_out"] = True
                 effects.append(self._alert_effect("SMS_OPT_OUT_SUSPECTED", contact["contact_id"], rid))
             ticket, is_new = self._ticket_for(actor, contact, brand, channel, body.get("ticket_id"), rid, effects,
                                               new_contact)
@@ -1970,7 +1980,13 @@ class SupportService:
 
         Sweep A: a CLOSED instance dispatches nothing — ``_closed`` is checked at the snapshot and again, under the
         lock, right before each port call. Before, it called the ports and only the result commit was refused, so the
-        instance that now owns the data directory sent the same alert or handoff again."""
+        instance that now owns the data directory sent the same alert or handoff again.
+
+        Residual window (AEGIS L5, accepted and documented): the port is called outside the lock, so a ``close()``
+        that lands between the last check and the call cannot stop that one call; its result commit is then refused
+        and the next instance may send it once more. Holding the lock across a provider call would stall every
+        request, so the window is kept to the call itself; the alert and handoff ids are the providers' idempotency
+        keys."""
         with self.lock:
             if self._closed:
                 return
@@ -1984,11 +2000,11 @@ class SupportService:
             self._in_flight |= {h["handoff_id"] for h in hofs} | {a["alert_id"] for a in alerts}
         try:
             for h in hofs:
-                if not self._still_open():
-                    return
                 t = self.tickets[h["ticket_id"]]
                 req = HandoffRequest(h["handoff_id"], h["ticket_id"], t["brand"], h["category"], h["kind"],
                                      t["account_id"])
+                if not self._still_open():          # AEGIS L5: checked immediately before the port call
+                    return
                 res = _safe(lambda: self.ports.handoffs[h["department"]].handoff(req))
                 status = res.status if res is not None and res.status in ("delivered", "refused", "unavailable") \
                     else "unavailable"
@@ -2000,9 +2016,10 @@ class SupportService:
                 except Unavailable:
                     break
             for a in alerts:
-                if not self._still_open():
+                msg = Alert(a["alert_id"], a["code"], a["subject"])
+                if not self._still_open():          # AEGIS L5: checked immediately before the port call
                     return
-                res = _safe(lambda: self.ports.alerts.send(Alert(a["alert_id"], a["code"], a["subject"])))
+                res = _safe(lambda: self.ports.alerts.send(msg))
                 status = res if res in ("delivered", "failed") else "failed"
                 try:
                     self._commit("alert_result", {"effects": [{"op": "alert_result", "alert_id": a["alert_id"],
@@ -2231,6 +2248,16 @@ class SupportService:
                     for m in sorted(self.messages.values(), key=lambda x: (x["at"], x["message_id"]))
                     if m["dir"] == "out" and (status is None or m["status"] == status)]
 
+    def _department_entries(self, event_type: Optional[str] = None) -> list[dict]:
+        """This department's ledger entries (of one event type, if given): the ledger's filtered, paged read when the
+        client has it (``entries_filtered``), else the whole ledger filtered here (an older client or a test fake)."""
+        client = self.rec.client
+        paged = getattr(client, "entries_filtered", None)
+        if paged is not None:
+            return paged(DEPARTMENT, event_type)
+        return [e for e in client.entries() if e.get("department") == DEPARTMENT
+                and (event_type is None or e.get("event_type") == event_type)]
+
     def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
         """``/svc/v1/audit/evidence`` (sweep A R6-M1, bizdev-py's round-6 view) — every typed evidence event this
         department holds on the ledger, each marked:
@@ -2263,12 +2290,16 @@ class SupportService:
                     cache["lines"].append((r["seq"], line_sha, self._rk(r["kind"], r["data"]), r["kind"], evs))
                 cache["n"] += 1
             epoch, lines, n_lines = cache["epoch"], list(cache["lines"]), cache["n"]
-        try:
-            entries = self.rec.client.entries()
+        try:                                             # outside the service lock (AEGIS M4: filtered, paged)
+            if event_type is None:
+                mine = self._department_entries()
+                anchor_rows = [e for e in mine if e.get("event_type") == "log_anchor"]
+            else:
+                anchor_rows = self._department_entries("log_anchor")
+                mine = self._department_entries(event_type) if event_type != "log_anchor" else []
         except LedgerQueryFailed:
             raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
-        mine = [e for e in entries if e.get("department") == DEPARTMENT]
-        anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == "log_anchor"}
+        anchors = {e.get("event_id"): e for e in anchor_rows}
         named: dict[str, tuple] = {}
         for seq, line_sha, line_rk, kind, evs in lines:
             aid, apayload = self._anchor_ids(epoch, seq, line_sha)
@@ -2304,7 +2335,12 @@ class SupportService:
         key = os.urandom(32)
         out = []
         for r in self.log.iter_records(max(1, since_seq)):
-            d = _minimise({k: v for k, v in r["data"].items() if k not in ("response", "request")}, key)
+            data = {k: v for k, v in r["data"].items() if k not in ("response", "request")}
+            if data.get("ledger_evidence"):          # AEGIS L3: rk re-keyed per export (two exports cannot be joined)
+                data["ledger_evidence"] = [{**ev, "payload": {**ev["payload"], "rk": _hmac(key, str(ev["payload"]
+                                                                                                    .get("rk")))}}
+                                           for ev in data["ledger_evidence"]]
+            d = _minimise(data, key)
             if r["data"].get("request"):            # the key names a contact ref or address
                 d["request_hmac"] = _hmac(key, json.dumps(r["data"]["request"], sort_keys=True))
             out.append({"seq": r["seq"], "kind": r["kind"], "at": r["at"], "data": d})

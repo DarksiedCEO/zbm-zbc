@@ -128,15 +128,23 @@ class ChatIn(Strict):
     text: Text
 
 
-# Sweep A: an inbound message from the email / SMS gateway is never refused for its shape (an opt-out in it would be
-# lost). Before the strict checks, ``_lenient_inbound`` lowercases the addresses (and reads ``Name <addr>`` as
-# ``addr``), replaces control characters in the subject with spaces (a folded header carries a tab) and drops a
-# subject that is then blank, removes control characters other than newline / tab from the text and truncates it,
-# and accepts an empty text (a subject-only or media-only message).
+# Sweep A (+ AEGIS M2, L2): an inbound message from the email / SMS gateway is never refused for its shape (an opt-out
+# in it would be lost) — sales-py's raw-body approach. Before the strict checks, ``_lenient_inbound`` keeps only the
+# known fields (extras are ignored, never stored), replaces a missing or unusable request id (a Message-ID such as
+# ``<abc@host>``) with the SHA-256 of the body (the gateway's retry of the same body is the same message),
+# lowercases the addresses (``Name <addr>`` read as ``addr``), reads a non-string subject as text (a number) or as
+# absent, replaces control characters in the subject with spaces (a folded header carries a tab) and drops a subject
+# that is then blank, drops an unusable ticket id, reads a null text as empty, removes control characters other than
+# newline / tab from the text, and cuts a text over the cap to its head and its TAIL (so an opt-out at the end of a
+# long message is still read). The route's byte cap is unchanged.
 INBOUND_EMAIL_TEXT_MAX = 20000
 INBOUND_SMS_TEXT_MAX = 1600
+INBOUND_TAIL = 2000
 SUBJECT_MAX = 300
-_NAMED = __import__("re").compile(r"^[^<>]{0,200}<\s*([^<>\s]{3,254})\s*>\s*$")
+_re = __import__("re")
+_NAMED = _re.compile(r"^[^<>]{0,200}<\s*([^<>\s]{3,254})\s*>\s*$")
+_ID = _re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_SV_ID = _re.compile(r"^sv-[a-z]{3}-[0-9a-f]{40}$")
 
 
 def _bad_char(c: str, keep: str) -> bool:
@@ -144,24 +152,47 @@ def _bad_char(c: str, keep: str) -> bool:
     return (o < 0x20 and c not in keep) or 0x7F <= o <= 0x9F or 0xD800 <= o <= 0xDFFF
 
 
-def _lenient_inbound(d, text_max: int, addresses: tuple = (), subject: bool = False):
+def cut_head_tail(text: str, cap: int, tail: int = INBOUND_TAIL) -> str:
+    """At most ``cap`` characters: the head and the last ``tail`` characters, joined by a newline (AEGIS L2)."""
+    if len(text) <= cap:
+        return text
+    tail = min(tail, cap // 2)
+    return text[:cap - tail - 1] + "\n" + text[-tail:]
+
+
+def _lenient_inbound(d, text_max: int, fields: tuple, addresses: tuple = (), subject: bool = False):
     if not isinstance(d, dict):
         return d
-    d = dict(d)
+    import hashlib
+    import json
+    raw = d
+    d = {k: v for k, v in d.items() if k in fields}
+    rq = d.get("request_id")
+    if not (isinstance(rq, str) and _ID.fullmatch(rq)):
+        d["request_id"] = "h-" + hashlib.sha256(json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str)
+                                                .encode("utf-8", "surrogatepass")).hexdigest()[:40]
     for k in addresses:
         v = d.get(k)
         if isinstance(v, str):
             v = v.strip()
             m = _NAMED.fullmatch(v)
             d[k] = (m.group(1) if m else v).lower()
-    if subject and isinstance(d.get("subject"), str):
-        v = " ".join("".join(" " if _bad_char(c, "") else c for c in d["subject"]).split())[:SUBJECT_MAX].strip()
-        if v:
+    if "ticket_id" in d and not (isinstance(d["ticket_id"], str) and _SV_ID.fullmatch(d["ticket_id"])):
+        d.pop("ticket_id")
+    if subject and "subject" in d:
+        v = d["subject"]
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            v = str(v)
+        if isinstance(v, str):
+            v = " ".join("".join(" " if _bad_char(c, "") else c for c in v).split())[:SUBJECT_MAX].strip()
+        if isinstance(v, str) and v:
             d["subject"] = v
         else:
             d.pop("subject")
+    if d.get("text") is None:
+        d["text"] = ""
     if isinstance(d.get("text"), str):
-        d["text"] = "".join(" " if _bad_char(c, "\n\r\t") else c for c in d["text"])[:text_max]
+        d["text"] = cut_head_tail("".join(" " if _bad_char(c, "\n\r\t") else c for c in d["text"]), text_max)
     return d
 
 
@@ -181,7 +212,8 @@ class EmailIn(Strict):
     @model_validator(mode="before")
     @classmethod
     def _lenient(cls, d):
-        return _lenient_inbound(d, INBOUND_EMAIL_TEXT_MAX, ("to_address", "from_address"), subject=True)
+        return _lenient_inbound(d, INBOUND_EMAIL_TEXT_MAX, tuple(cls.model_fields), ("to_address", "from_address"),
+                                subject=True)
 
 
 class SmsIn(Strict):
@@ -194,7 +226,7 @@ class SmsIn(Strict):
     @model_validator(mode="before")
     @classmethod
     def _lenient(cls, d):
-        return _lenient_inbound(d, INBOUND_SMS_TEXT_MAX)
+        return _lenient_inbound(d, INBOUND_SMS_TEXT_MAX, tuple(cls.model_fields))
 
 
 class CallIn(Strict):

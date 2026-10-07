@@ -111,22 +111,114 @@ def opt_out_level(text: str) -> Optional[str]:
     return "suspected" if suspected else None
 
 
-SMS_ONLY_WORDS = ("text", "texts", "texting", "txt", "txts", "txting", "sms", "number", "cell", "mobile", "phone")
-EMAIL_WORDS = ("email", "emails", "emailing", "emailed", "mail", "mails", "mailing", "newsletter", "newsletters")
+# Sweep A, AEGIS H1 / M1: what an opt-out received BY EMAIL revokes is decided from the opt-out phrase itself, in the
+# person's own words (quoted lines and signatures stripped first), never from other words elsewhere in the message.
+PHONE_SCOPE_WORDS = frozenset({"text", "texts", "texting", "texted", "txt", "txts", "txting", "sms", "mms", "number",
+                               "numbers", "cell", "mobile", "phone", "call", "calls", "calling"})
+# words that may sit between an opt-out word and the channel it names ("unsubscribe me from your texts")
+SCOPE_CONNECTORS = frozenset({"me", "us", "from", "your", "our", "the", "all", "any", "these", "those", "this", "my",
+                              "of", "to", "with", "sending", "send", "receiving", "getting", "get", "please", "pls",
+                              "plz", "more", "future"})
+SCOPE_LOOKAHEAD = 4
+_QUOTE_HEADER = re.compile(r"^\s*(on\b.{0,300}\bwrote\s*:|-{2,}\s*original message\s*-{2,}|_{5,})\s*$", re.I)
+_SIG_DELIM = re.compile(r"^\s*(--|__)\s*$")
+_SENT_FROM = re.compile(r"^\s*sent from (my|mail for|outlook|yahoo|gmail)\b", re.I)
+_SIGN_OFF = re.compile(r"^\s*(thanks|thank you|many thanks|thx|regards|best|best regards|kind regards|warm regards|"
+                       r"cheers|sincerely|yours truly|respectfully)\s*[,.!]*\s*$", re.I)
 
 
-def email_opt_out(*texts: Optional[str]) -> bool:
-    """Sweep A (High): an ``exact`` opt-out received BY EMAIL also revokes the contact's EMAIL consent — unless its
-    words name only the phone ("stop texting me", "remove my number"): that one stays an SMS opt-out (the existing
-    rule) and the person's ticket can still be answered by email. "UNSUBSCRIBE", "STOP", "do not email me" and
-    anything that names email, or no channel at all, revoke email."""
-    if not any(t and opt_out_level(t) == "exact" for t in texts):
+def strip_quoted(text: str) -> str:
+    """The person's own text of an email: quoted lines (``>``) dropped, and everything from a reply header ("On ...
+    wrote:", "-----Original Message-----") on."""
+    out = []
+    for line in (text or "").splitlines():
+        if _QUOTE_HEADER.match(line):
+            break
+        if line.lstrip().startswith(">"):
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def strip_signature(text: str) -> str:
+    """``strip_quoted`` and then the signature: everything from a ``--`` delimiter or a sign-off line ("Thanks,",
+    "Best regards") on, and "Sent from my ..." lines."""
+    out = []
+    for line in strip_quoted(text).splitlines():
+        if _SIG_DELIM.match(line) or (_SIGN_OFF.match(line) and out):
+            break
+        if _SENT_FROM.match(line):
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _typo_tokens(norm: str) -> list[int]:
+    toks = norm.split()
+    return [i for i, t in enumerate(toks) if len(t) >= 4 and t not in OPT_OUT_FUZZY
+            and any(_one_edit(t, stem) for stem in OPT_OUT_FUZZY)]
+
+
+def typo_opt_out(text: Optional[str]) -> bool:
+    """A word one typo from stop / unsubscribe / stopall ("unsubcribe", "unsubscibe"): the ``suspected`` level."""
+    if not text:
         return False
-    toks = set()
-    for t in texts:
-        if t:
-            toks |= set(normalise(t).split()) | {_collapse(w) for w in normalise(t).split()}
-    return bool(toks & set(EMAIL_WORDS)) or not (toks & set(SMS_ONLY_WORDS))
+    return any(_typo_tokens(v) for v in (normalise(text), normalise(text.translate(_LEET))))
+
+
+def _phone_scoped(toks: list[str], i: int, j: int) -> bool:
+    if any(t in PHONE_SCOPE_WORDS for t in toks[i:j]):
+        return True
+    k, skipped = j, 0
+    while k < len(toks) and toks[k] in SCOPE_CONNECTORS and skipped < SCOPE_LOOKAHEAD:
+        k, skipped = k + 1, skipped + 1
+    return k < len(toks) and toks[k] in PHONE_SCOPE_WORDS
+
+
+def opt_out_scope(text: Optional[str]) -> Optional[str]:
+    """The scope of the opt-out phrases in ``text`` (already stripped to the person's own words): ``"sms"`` when
+    every phrase found names the phone channel itself ("stop texting", "remove my number", "unsubscribe from
+    texts"), ``"all"`` when at least one does not ("unsubscribe", "stop", "do not email me", a typo of either, a
+    bare "no"), None when no phrase is found."""
+    if not text:
+        return None
+    found, generic = False, False
+    variants = {normalise(text), normalise(text.translate(_LEET))}
+    variants |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(variants)}
+    terms = [normalise(t).split() for t in OPT_OUT_TERMS]
+    for norm in variants:
+        toks = norm.split()
+        if norm.strip() in OPT_OUT_SHORT:
+            found = generic = True
+        for tt in terms:
+            n = len(tt)
+            for i in range(len(toks) - n + 1):
+                if toks[i:i + n] == tt:
+                    found = True
+                    generic = generic or not _phone_scoped(toks, i, i + n)
+        for i in _typo_tokens(norm):
+            found = True
+            generic = generic or not _phone_scoped(toks, i, i + 1)
+    if not found:
+        return None
+    return "all" if generic else "sms"
+
+
+def email_opt_out(text: Optional[str], subject: Optional[str] = None) -> bool:
+    """Sweep A (AEGIS H1, M1): does an email revoke the contact's EMAIL consent? Yes when, in the person's own words
+    (quoted lines and the signature stripped) or the subject, there is an exact opt-out or a typo of stop /
+    unsubscribe, unless EVERY opt-out phrase found names the phone itself ("stop texting me", "remove my number",
+    "unsubscribe from texts"): that one stays an SMS opt-out and the ticket can still be answered by email. Other
+    words elsewhere ("Cell: 310 ...", "Sent from my phone", a quoted "call our phone line", a subject "Re: Text us
+    anytime") never narrow it. An exact opt-out whose phrase is not found in the stripped text (only in the
+    signature, a symbol, a negation near a channel word) revokes email too: err toward honouring."""
+    own = strip_quoted(text or "")
+    exact = any(t and opt_out_level(t) == "exact" for t in (own, subject))
+    typo = typo_opt_out(own) or typo_opt_out(subject)
+    if not exact and not typo:
+        return False
+    scopes = {opt_out_scope(strip_signature(own)), opt_out_scope(subject)} - {None}
+    return scopes != {"sms"}
 
 
 def is_opt_out(text: str) -> bool:

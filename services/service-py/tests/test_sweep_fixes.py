@@ -172,3 +172,125 @@ def test_closed_instance_sends_no_alert_or_handoff(tmp_path):
     h2.svc.dispatch_side_effects()
     ids = [a.alert_id for a in alerts.sent]
     assert len(ids) == len(pending) and len(set(ids)) == len(ids)                # each alert exactly once
+
+
+# ------------------------------------------------------------------ AEGIS review of 17cda6a (REVISE)
+
+def _both_revoked(h, cid):
+    return _consents(h, cid) == {"email": "revoked", "sms": "revoked"}
+
+
+def test_h1_other_phone_words_in_the_message_never_narrow_an_unsubscribe(tmp_path):
+    cases = [("Unsubscribe\n\nJohn Smith\nCell: 310-555-1212", "Re: hello"),
+             ("UNSUBSCRIBE\n\nSent from my phone", "Re: hello"),
+             ("unsubscribe\n> ...call our phone line", "Re: hello"),
+             ("Please unsubscribe me", "Re: Text us anytime")]
+    for i, (text, subject) in enumerate(cases):
+        h = Harness(tmp_path / str(i))
+        cid = _with_consents(h)
+        r = h.ok(_email(h, "owner@acme.test", text, subject=subject), 201)
+        assert r.get("email_opted_out") is True and _both_revoked(h, cid), (text, subject)
+
+
+def test_h1_scope_comes_from_the_phrase_itself():
+    import channels
+    for t in ("stop texting me", "remove my number", "unsubscribe from texts", "unsubscribe me from your texts",
+              "please no more texts"):
+        assert channels.email_opt_out(t) is False, t
+    for t in ("unsubscribe", "stop", "do not email me", "unsubscribe from texts and emails\n\nunsubscribe",
+              "Thanks,\nSTOP"):
+        assert channels.email_opt_out(t) is True, t
+    assert channels.email_opt_out("> STOP\nthanks for the help") is False          # only in the quoted thread
+    assert channels.strip_signature("stop\n-- \nJohn\nCell: 310 555 1212") == "stop"
+
+
+def test_m1_a_misspelled_unsubscribe_by_email_revokes_email(tmp_path):
+    for i, t in enumerate(("unsubcribe", "unsubscibe me please")):
+        led = FakeLedger()
+        h = Harness(tmp_path / str(i), ledger=led)
+        cid = _with_consents(h)
+        r = h.ok(_email(h, "owner@acme.test", t), 201)
+        assert r.get("email_opted_out") is True, t
+        cons = _consents(h, cid)
+        assert cons["email"] == "revoked" and cons["sms"] == "active", t       # SMS: paused + alert, as before
+        assert any(a["code"] == "SMS_OPT_OUT_SUSPECTED" for a in h.svc.alerts.values())
+        assert any(e["_payload"].get("channel") == "email" for e in led.of_type("consent_changed"))   # evidence
+
+
+def test_m2_inbound_shape_never_refuses(tmp_path):
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    base = {"brand": "zbm", "to_address": ZBM_EMAIL, "from_address": "owner@acme.test"}
+    for body in ({**base, "text": "hello", "x_gateway_ip": "198.51.100.7", "headers": {"a": 1}},   # extras
+                 {**base, "text": "hello again"},                                                   # no request_id
+                 {**base, "request_id": "<CAF=abc@mail.example.test>", "text": "and again"},        # Message-ID
+                 {**base, "request_id": rid(), "text": None, "subject": "unsubscribe"},             # null text
+                 {**base, "request_id": rid(), "text": "x", "subject": 12345},                      # number subject
+                 {**base, "request_id": rid(), "text": "x", "subject": ["a"], "ticket_id": "nope"}):
+        r = h.post("/svc/v1/inbound/email", body, caller="email_gateway")
+        assert r.status_code == 201, (body, r.text)
+    sms = {"brand": "zbm", "to_number": ZBM_SMS, "from_number": "+13105551234", "text": None, "carrier": "x"}
+    assert h.post("/svc/v1/inbound/sms", sms, caller="sms_gateway").status_code == 201
+    # the same body with no request id is the same message (the id is the body's hash)
+    a = h.ok(h.post("/svc/v1/inbound/email", {**base, "text": "same"}, caller="email_gateway"), 201)
+    b = h.ok(h.post("/svc/v1/inbound/email", {**base, "text": "same"}, caller="email_gateway"), 201)
+    assert a == b
+    assert b"198.51.100.7" not in b"".join(h.svc.log.raw_lines())
+    assert _consents(h, cid)["email"] == "revoked"                       # the null-text "unsubscribe" was honoured
+
+
+def test_l2_an_opt_out_past_the_cap_is_still_read(tmp_path):
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    text = "Here is the long story. " * 1200 + "\n\nUNSUBSCRIBE"
+    assert len(text) > 25_000
+    h.ok(_email(h, "owner@acme.test", text), 201)
+    assert _both_revoked(h, cid)
+
+
+def test_l3_exports_cannot_be_joined_on_rk(tmp_path):
+    h = Harness(tmp_path)
+    _with_consents(h)
+    a = h.ok(h.get("/svc/v1/audit/events", caller="compliance_38"))
+    b = h.ok(h.get("/svc/v1/audit/events", caller="compliance_38"))
+    raw = {ev["payload"]["rk"] for r in h.svc.log.iter_records() for ev in r["data"].get("ledger_evidence", [])}
+
+    def rks(x):
+        return {ev["payload"]["rk_hmac" if "rk_hmac" in ev["payload"] else "rk"]
+                for e in x["events"] for ev in e["data"].get("ledger_evidence", [])}
+    assert raw and rks(a) and not (rks(a) & rks(b)) and not (rks(a) & raw)
+
+
+def _paging_ledger(entries, honours_query=True, refuses=False):
+    import httpx
+
+    def handler(request):
+        q = dict(request.url.params)
+        if refuses and q:                    # 400: a strict ledger; 404: ledger-rust before fix-ledger
+            return httpx.Response(404 if refuses == 404 else 400, json={"error": "not found"})
+        if not honours_query or not q:
+            return httpx.Response(200, json=entries)
+        after, limit = int(q.get("after_seq", -1)), int(q["limit"])
+        out = [e for e in entries if e["seq"] > after and e.get("department") == q.get("department", e.get(
+            "department")) and e.get("event_type") == q.get("event_type", e.get("event_type"))]
+        return httpx.Response(200, json=out[:limit])
+    return httpx.MockTransport(handler)
+
+
+def test_m4_audit_evidence_reads_only_this_department_page_by_page(tmp_path):
+    from ledger import HttpLedgerClient
+    entries = [{"seq": i, "kind": "event", "department": "service" if i % 3 else "finance",
+                "event_type": "log_anchor" if i % 2 else "consent_changed", "event_id": f"e{i}"} for i in range(25)]
+    want = [e for e in entries if e["department"] == "service"]
+    for honours, refuses in ((True, False), (False, False), (True, True), (True, 404)):
+        c = HttpLedgerClient("http://ledger.test", "t" * 32, transport=_paging_ledger(entries, honours, refuses))
+        assert c.entries_filtered("service", page_size=4) == want
+        assert c.entries_filtered("service", "log_anchor", page_size=4) == \
+            [e for e in want if e["event_type"] == "log_anchor"]
+    h = Harness(tmp_path)
+    calls = []
+    h.ledger.entries_filtered = lambda d, t=None: calls.append((d, t)) or [
+        e for e in h.ledger.entries() if e["department"] == d and (t is None or e["event_type"] == t)]
+    _with_consents(h)
+    ev = h.ok(h.get("/svc/v1/audit/evidence?event_type=consent_changed", caller="compliance_38"))
+    assert ev["committed"] == 2 and calls == [("service", "log_anchor"), ("service", "consent_changed")]
