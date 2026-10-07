@@ -884,14 +884,14 @@ after a partial refund).
 | M4 | `replay_held_rail_events` scanned every rail event ever received, under the lock. | `_apply` keeps `held_by_item` (item id to the keys of its held events). The index is rebuilt on replay and updated on every commit. The replay visits only held events. Test: `test_m4_*` uses a `db["rail_events"]` that refuses iteration and counts keyed reads. With 5,000 settled events present it allows at most 10 reads, then 0 when nothing is held. It also checks that the index survives a restart. |
 | L1 | The ghost-ruling exemption ignored ledger position. | `assess_log` passes `(rk, type, seq)` for every committed action. `i10.assess` resolves the anchor of line `seq` to its ledger index, and exempts a matching ruling only when it sits before that anchor (record-first: an earlier attempt). A matching ruling after the anchor is still a ghost and stays voidable. So is an action without a position, or one whose line has no anchor. Tests: `test_l1_*` (positive, negative, and no-position). |
 | L2 | Refund status leftovers. | `_stripe_refund` now always books F7r and leaves a correct status. Matched payment, partial refund: `partially_refunded` (a new status), and the client receipt, which states the full amount, is withdrawn. Matched payment, full refund: `refunded`. Unapplied receipt: Dr 2070; the status stays `unapplied` while cash remains, then becomes `refunded`. `charged_back` receipt: before this fix the refund was refused (`Invalid`), which left 1060 overstated for good. It now books Dr 1100 A/R[client], or Dr 5030 with no invoice, keeps the `charged_back` status, records `invoice.refunded` and opens the `stripe_refund` break. A refund on a `returned` receipt is still refused. Stripe cannot refund a charge whose payment failed. `partially_refunded` counts as live wherever `matched` did for Stripe receipts (`_stripe_payment_failed`, `_stripe_dispute`). Tests: `test_l2_*`, each asserting that every entry and both trial balances balance. |
-| L3 | Missing tests. | `tests/test_sweep_followup.py` (17 tests). The finance suite goes from 538 at integration to 559 at 5a56a3a to 576 here. |
+| L3 | Missing tests. | `tests/test_sweep_followup.py` (17 tests at f751017). The finance suite goes from 538 at integration to 559 at 5a56a3a to 576 here. |
 
 The live run (`devtools/live_run.py` against a real ledger-rust built from this tree) is still 54/54. No live check was
 added, because each of these paths needs a fault the live server cannot inject without a new devtools hook.
 
 ## Sweep follow-up 2 — AEGIS REVISE of f751017: fixed
 
-AEGIS returned REVISE on f751017. The regression tests are in `tests/test_aegis_f751017.py` (17 tests). The C1 tests
+AEGIS returned REVISE on f751017. The regression tests are in `tests/test_aegis_f751017.py` (17 tests at c0869c4). The C1 tests
 port the reviewer's probe `test_probe_m2b.py`. Its fake bank de-duplicates a key for 24 h from first sight and moves
 money for real on each move.
 
@@ -907,7 +907,7 @@ Suite: 593 (was 576). Live run: still 54/54.
 ## Sweep follow-up 3 — AEGIS re-review of c0869c4: fixed
 
 AEGIS closed C1, M-N2 and L-N1. M-N1 was only partly closed. The regression tests are in `tests/test_aegis_c0869c4.py`
-(18 tests). The H-N1 tests port the reviewer's probe `test_probe_v2r.py`. The two new Andre routes are added to
+(18 tests at 25290ee). The H-N1 tests port the reviewer's probe `test_probe_v2r.py`. The two new Andre routes are added to
 `ANDRE_ROUTES` in `test_auth_limits_idempotency.py`, so every other identity is refused.
 
 | Id | Finding | Fix |
