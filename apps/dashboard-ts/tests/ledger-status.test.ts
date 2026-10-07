@@ -14,8 +14,14 @@ import type { RecordedFindingsResult } from "../src/types/finding.ts";
 const base: RecordedFindingsResult = {
   findings: [],
   overlapping_claims: {},
+  scans: [],
+  excluded_scans: [],
   ledger_entries_total: 0,
+  ledger_total_source: "head",
+  ledger_entries_read: 0,
   finding_entries_total: 0,
+  legacy_finding_entries_ignored: 0,
+  legacy_findings: [],
   ledger_verify: { valid: true, entries: 0, error: "" },
   non_live_data_source: true,
 };
