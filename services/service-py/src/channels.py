@@ -120,11 +120,12 @@ SCOPE_CONNECTORS = frozenset({"me", "us", "from", "your", "our", "the", "all", "
                               "of", "to", "with", "sending", "send", "receiving", "getting", "get", "please", "pls",
                               "plz", "more", "future"})
 SCOPE_LOOKAHEAD = 4
-_QUOTE_HEADER = re.compile(r"^\s*(on\b.{0,300}\bwrote\s*:|-{2,}\s*original message\s*-{2,}|_{5,})\s*$", re.I)
+_QUOTE_HEADER = re.compile(r"^\s*(on\b.{0,300}\bwrote\s*:|-{2,}\s*original message\s*-{2,}|_{5,})\s*$",
+                           re.IGNORECASE)
 _SIG_DELIM = re.compile(r"^\s*(--|__)\s*$")
-_SENT_FROM = re.compile(r"^\s*sent from (my|mail for|outlook|yahoo|gmail)\b", re.I)
+_SENT_FROM = re.compile(r"^\s*sent from (my|mail for|outlook|yahoo|gmail)\b", re.IGNORECASE)
 _SIGN_OFF = re.compile(r"^\s*(thanks|thank you|many thanks|thx|regards|best|best regards|kind regards|warm regards|"
-                       r"cheers|sincerely|yours truly|respectfully)\s*[,.!]*\s*$", re.I)
+                       r"cheers|sincerely|yours truly|respectfully)\s*[,.!]*\s*$", re.IGNORECASE)
 
 
 def strip_quoted(text: str) -> str:
