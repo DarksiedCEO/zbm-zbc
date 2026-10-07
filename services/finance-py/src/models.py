@@ -501,6 +501,12 @@ class BreakResolution(Strict):
     evidence: list[Evidence] = Field(default_factory=list, max_length=20)
 
 
+class RefundRepay(Strict):
+    """Andre pays a refund again after its payment was settled ``not_moved`` (AEGIS c0869c4 H-N1)."""
+    request_id: Id
+    content_sha256: Sha
+
+
 class TreasurySettlement(Strict):
     """Andre settles a treasury operation whose bank outcome is unknown (AEGIS f751017 M-N1)."""
     request_id: Id

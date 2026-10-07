@@ -227,7 +227,10 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
         if anchor is None or anchor not in index:
             continue
         slot = by_kind.setdefault((evidence_id(rk, et, "").rsplit("-", 1)[0], et), {})
-        slot[rk] = max(slot.get(rk, -1), index[anchor])
+        # AEGIS c0869c4 L1: the FIRST line that committed the action is the bound -- once committed, an action is
+        # never attempted again, so a matching ruling after that anchor is a second effect even if a later line
+        # names the same rk
+        slot[rk] = min(slot.get(rk, index[anchor]), index[anchor])
 
     def attempted(i: int, eid: str, et: str, psha: str) -> bool:
         return any(i < pos and evidence_id(rk, et, psha) == eid

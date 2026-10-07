@@ -35,6 +35,7 @@ REPEATABLE_JOBS = ("stripe-sessions",)        # safe to run many times a day (AE
 PENDING_SWEEP = ("proposed", "approved", "executing", "bank_unknown")      # reserved when a sweep is proposed
 LIVE_SWEEP = ("approved", "executing", "bank_unknown")                     # reserved at approval and execution
 OPEN_OPS = ("proposed", "approved", "executing", "bank_unknown")
+REFUND_OWED = ("approved", "paid", "payment_not_moved")   # a refund whose F6 posting stands (2010 -> 2050)
 TRANSFER_FLOWS = {"sweep": ("F8", "1010", "1020"), "top_up": ("F5c", "1020", "1010")}
 
 
@@ -78,7 +79,7 @@ class ReconMixin:
             if p["status"] not in ("pending_checks", "over_budget_hold"):
                 add("2010", f"campaign:{p['campaign_id']}", -M.D(p["current_revenue"]))
         for r in self.db["refunds"].values():
-            if r["status"] in ("approved", "paid"):
+            if r["status"] in REFUND_OWED:
                 add("2010", f"campaign:{r['campaign_id']}", -M.D(r["amount"]))
         return out
 
@@ -376,7 +377,8 @@ class ReconMixin:
                                                    self._reserved_sweeps(PENDING_SWEEP))),
                     "independent": (last or {}).get("treasury", {}).get("independent"),
                     "account_title": C.DEPOSITS_ACCOUNT_TITLE, "custody_model": "own_deposit",
-                    "open_operations": [o for o in self.db["treasury_ops"].values() if o["status"] in OPEN_OPS],
+                    "open_operations": [{**o, "content_sha256": self.treasury_op_sha(o)}
+                                        for o in self.db["treasury_ops"].values() if o["status"] in OPEN_OPS],
                     "shortfalls": [x for x in self.db["shortfalls"].values() if x["status"] == "open"]}
 
     def _reserved_sweeps(self, statuses: tuple, exclude: Optional[str] = None) -> Decimal:
@@ -394,6 +396,13 @@ class ReconMixin:
                                                      f"{when} (other approved sweeps included)"))
         return reasons
 
+    @staticmethod
+    def treasury_op_sha(t: dict) -> str:
+        """The content hash Andre approves a treasury operation by: SHA-256 over its identity (op id, kind, entity,
+        amount, reference). Stored on the record when it is created; computed the same way, deterministically, for a
+        record written without one (refund payments before AEGIS c0869c4 H-N1)."""
+        return t.get("content_sha256") or sha({k: t.get(k) for k in ("op_id", "kind", "entity", "amount", "ref_id")})
+
     def _new_treasury_op(self, op: Op, kind: str, amount, ref_id: Optional[str], by: str, request_id: str) -> dict:
         tid = rid("trx", kind, by, request_id)
         if op.get("treasury_ops", tid) is not None:
@@ -403,7 +412,7 @@ class ReconMixin:
                            "never re-created")
         t = {"op_id": tid, "kind": kind, "entity": "zbc", "amount": M.fmt(amount), "ref_id": ref_id,
              "status": "proposed", "proposed_by": by, "proposed_at": iso(self._now()), "attempts": 0}
-        t["content_sha256"] = sha({k: t[k] for k in ("op_id", "kind", "entity", "amount", "ref_id")})
+        t["content_sha256"] = self.treasury_op_sha(t)
         op.put("treasury_ops", tid, t)
         return t
 
@@ -512,7 +521,7 @@ class ReconMixin:
                 raise NotFound("no such treasury operation")
             if t["status"] != "proposed":
                 raise Conflict(f"operation is already {t['status']}")
-            if body["content_sha256"] != t["content_sha256"]:
+            if body["content_sha256"] != self.treasury_op_sha(t):
                 raise Conflict("operation changed since you read it (content_sha256 mismatch)")
             op = Op(self, f"trd|{request_id}", "andre", op_id)
             if body["decision"] == "reject":
@@ -766,7 +775,8 @@ class ReconMixin:
           * ``moved``     -> the posting stands, the operation is ``done`` (bank_ref recorded);
           * ``not_moved`` -> the posting is reversed by a recorded reversal entry and the operation ends
                              ``not_moved`` (no longer reserved; a new proposal is needed to try again).
-        Its open bank breaks are resolved with it. Andre-only (route), recorded, idempotent per request_id, bound to
+        A refund payment settled ``not_moved`` leaves its refund ``payment_not_moved`` (the client is still owed;
+        ``repay_refund`` pays it again). Its open bank breaks are resolved with it. Andre-only (route), recorded, idempotent per request_id, bound to
         the operation's ``content_sha256``; refused while a bank call for it is in flight."""
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"treasury-settle/{op_id}",
@@ -777,9 +787,11 @@ class ReconMixin:
             t = self.db["treasury_ops"].get(op_id)
             if t is None:
                 raise NotFound("no such treasury operation")
-            if body["content_sha256"] != t["content_sha256"]:
-                raise Conflict("operation changed since you read it (content_sha256 mismatch)")
-            if t["status"] not in self.SETTLEABLE or not t.get("entry_id"):
+            want = self.treasury_op_sha(t)
+            if not isinstance(body.get("content_sha256"), str) or body["content_sha256"] != want:
+                raise Conflict("operation changed since you read it (content_sha256 mismatch: read it again from "
+                               "GET /fin/v1/treasury)")
+            if t["status"] not in self.SETTLEABLE or not t.get("entry_id") or t["entry_id"] not in self.entries_by_id:
                 raise Conflict(f"only an operation whose bank outcome is unknown can be settled (it is {t['status']})")
             if op_id in self.xfer_in_flight:
                 raise Conflict("a bank call for this operation is in flight; settle it once it returns")
@@ -800,6 +812,11 @@ class ReconMixin:
                 op.put("treasury_ops", op_id, {**t, "status": "not_moved", "entry_id": None, **settled,
                                                "reversed_entry_ids": (t.get("reversed_entry_ids") or [])
                                                + [e["entry_id"], rev_id]})
+                if t["kind"] == "refund_payment":
+                    # the client is still owed (F6 stands in 2050): the refund waits for Andre's repay
+                    r = self.db["refunds"][t["ref_id"]]
+                    op.put("refunds", r["refund_id"], {**r, "status": "payment_not_moved",
+                                                       "payment_not_moved_at": iso(self._now())})
             for kind in ("xfer-unknown", "xfer-expired"):
                 bid = rid("brk", kind, op_id)
                 b = self.db["breaks"].get(bid)

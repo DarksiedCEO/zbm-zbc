@@ -81,6 +81,7 @@ class RecordLog:
         self.path: Optional[str] = None
         self.fail_next_append = False  # tests: simulate a disk failure
         self.closed = False            # V5r-Info: set by the service's close(); every write then refuses
+        self.fault: Optional[str] = None   # AEGIS c0869c4 M1: a failed write could not be cut back (fail closed)
         if data_dir:
             os.makedirs(data_dir, mode=0o700, exist_ok=True)
             self.path = os.path.join(data_dir, LOG_NAME)
@@ -179,8 +180,12 @@ class RecordLog:
                             try:
                                 os.ftruncate(fd, expected)
                                 os.fsync(fd)
-                            except OSError:
-                                pass
+                            except OSError as texc:
+                                # the partial bytes may still be on disk: every later append refuses (the file and
+                                # memory disagree) -- fail closed, and say why so Andre sees it (integrity, /health)
+                                self.fault = (f"a failed log write could not be cut back ({type(exc).__name__}, then "
+                                              f"{type(texc).__name__} on truncate): the log refuses writes until the "
+                                              f"file is inspected and its torn tail removed (line {rec['seq']})")
                             detail = f" ({exc})" if isinstance(exc, _ShortWrite) else ""
                             raise StoreWriteError(f"local log write failed: {type(exc).__name__}{detail}") from exc
                 except OSError as exc:

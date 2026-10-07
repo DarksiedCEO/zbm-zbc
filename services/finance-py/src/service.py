@@ -657,6 +657,8 @@ class FinanceService:
                 problems.append(f"ledger unreadable: {exc}")
             if not self.log.verify():
                 problems.append("local log hash chain does not verify")
+            if self.log.fault:
+                problems.append(f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}")
             jp = J.verify_chain(self.entries)
             if jp:
                 problems.append(jp)
@@ -1061,7 +1063,7 @@ class FinanceService:
         return {"status": "ok", "service": "finance-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "entities": list(C.ENTITIES), "reconcile_mode": self.reconcile_mode,
-                "reconcile_required": bool(self.reconcile_required),
+                "reconcile_required": bool(self.reconcile_required), "log_write_fault": bool(self.log.fault),
                 "stripe_incoming": {"wired": self.cfg.stripe_incoming, "livemode": self.cfg.stripe_livemode}}
 
 

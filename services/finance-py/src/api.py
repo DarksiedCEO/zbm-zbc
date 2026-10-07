@@ -571,6 +571,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
         return svc.propose_refund(who, req.request_id, _id(campaign_id))
 
+    @app.post("/fin/v1/refunds/{refund_id}/repay", dependencies=auth)
+    def refund_repay(refund_id: str, _: str = Depends(andre("refunds/repay")),
+                     req: m.RefundRepay = Depends(body(m.RefundRepay))) -> dict:
+        return svc.repay_refund(req.request_id, _id(refund_id), dump(req))
+
     @app.post("/fin/v1/refunds/{refund_id}/decision", dependencies=auth)
     def refund_decide(refund_id: str, _: str = Depends(andre("refunds/decision")),
                       req: m.Decision = Depends(body(m.Decision))) -> dict:

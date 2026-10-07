@@ -596,6 +596,7 @@ class StripeMixin:
         st.update(refunded=M.fmt(total), refund_entry_ids=list(st.get("refund_entry_ids") or []) + [e["entry_id"]])
         # AEGIS f751017 L-N1, the other order: a partly lost dispute first, then a refund of the rest
         charged = M.D((inv or {}).get("charged_back") or "0.00") if matched else M.ZERO
+        self._over_recovery_break(op, rct, rc, total, self._charged_back_total(rc, inv))
         net_reversed = matched and charged > 0 and total + charged == M.D(rc["amount"])
         if reversed_before:
             status = prior
@@ -639,6 +640,32 @@ class StripeMixin:
                    "invoice_id": inv["invoice_id"] if inv else None},
                   f"Stripe refund booked: {M.fmt(delta)} (total refunded {M.fmt(total)})")
         return "refund_booked"
+
+    @staticmethod
+    def _charged_back_total(rc: dict, inv: Optional[dict]) -> Decimal:
+        """What lost disputes took back on this payment (receipt record; invoices before c0869c4 carry it only)."""
+        v = (rc.get("stripe") or {}).get("charged_back")
+        if v is None and inv is not None and rc.get("status") in ("charged_back", "matched", "partially_refunded"):
+            v = inv.get("charged_back")
+        return M.D(v or "0.00")
+
+    def _over_recovery_break(self, op: Op, rct: str, rc: dict, refunded: Decimal, charged: Decimal) -> None:
+        """AEGIS c0869c4 L-N2: refunds plus lost chargebacks above the payment -- the client got more back than it
+        paid. Booked as Stripe reports it (the money left the balance), and a break tells Andre (once per total)."""
+        over = M.q(refunded + charged - M.D(rc["amount"]))
+        if over <= 0:
+            return
+        bid = rid("brk", "over_recovery", rct, M.fmt(refunded), M.fmt(charged))
+        if op.get("breaks", bid) is not None:
+            return
+        op.put("breaks", bid, {"break_id": bid, "leg": "stripe_over_recovery", "subject": f"zbm:1060:{rct}"[:160],
+                               "difference": M.fmt(over), "opened_at": iso(self._now()),
+                               "opened_on": self._today_la().isoformat(), "owner": "andre",
+                               "explanation_code": "unknown", "status": "open", "receipt_id": rct,
+                               "resolution": None, "refunded": M.fmt(refunded), "charged_back": M.fmt(charged)})
+        op.record(derived_id("brk", bid), "break_opened", "intel_07_reconciliation", bid,
+                  {"break_id": bid, "leg": "stripe_over_recovery", "difference": M.fmt(over)},
+                  f"Break opened: refunded plus charged back exceeds the payment by {M.fmt(over)}")
 
     def _stripe_payment_failed(self, op: Op, rc: dict, p: StripePayment) -> str:
         """A payment Finance booked as succeeded failed afterwards (an ACH debit can): the money left the Stripe
@@ -747,6 +774,12 @@ class StripeMixin:
                     line = J.dr("5030", held)            # a payment Finance never booked: a loss Andre explains
                 self._post(op, "zbm", [line, J.cr("1300", held)], "F7l", src, f"F7l|{did}", actor=ACTOR, fact=True)
                 rec["held"] = "0.00"
+                if rc is not None:
+                    prior_cb = M.D((rc.get("stripe") or {}).get("charged_back") or "0.00")
+                    st_rc = {**(rc.get("stripe") or {}), "charged_back": M.fmt(prior_cb + held)}
+                    rc = {**rc, "stripe": st_rc}
+                    op.put("receipts", rct, rc)
+                    self._over_recovery_break(op, rct, rc, M.D(st_rc.get("refunded") or "0.00"), prior_cb + held)
                 if matched:
                     # AEGIS f751017 L-N1: a charge whose refunds and chargeback together take back the whole payment
                     # is fully reversed, whatever the order (e.g. 300 refunded, then a 700 dispute lost)

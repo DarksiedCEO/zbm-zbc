@@ -903,3 +903,18 @@ money for real on each move.
 | L-N1 | A $300 partial refund followed by a lost $700 chargeback left the receipt `partially_refunded` and the invoice `paid`. | `_stripe_dispute`: a lost dispute whose amount plus what was already refunded equals the payment is a full reversal. The receipt becomes `charged_back`, the invoice goes back to `issued` (with `charged_back` recorded), and the client receipt is withdrawn. No `dispute_receivable` break opens. The other order (partial chargeback, then a refund of the rest) is caught in `_stripe_refund` the same way. Tests: `test_ln1_*`, both orders plus a control where the two together do not cover the payment. |
 
 Suite: 593 (was 576). Live run: still 54/54.
+
+## Sweep follow-up 3 — AEGIS re-review of c0869c4: fixed
+
+AEGIS closed C1, M-N2 and L-N1. M-N1 was only partly closed. The regression tests are in `tests/test_aegis_c0869c4.py`
+(18 tests). The H-N1 tests port the reviewer's probe `test_probe_v2r.py`. The two new Andre routes are added to
+`ANDRE_ROUTES` in `test_auth_limits_idempotency.py`, so every other identity is refused.
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-N1 (High) | Refund-payment treasury ops were created without `content_sha256`. Settling one crashed with a 500, the treasury view showed no hash, and a refund stuck at `bank_unknown` could never be settled. | `ReconMixin.treasury_op_sha` is the one canonical form: SHA-256 over `op_id, kind, entity, amount, ref_id`. It is used by `_new_treasury_op` and by `svc_books._refund_payment_op` (refund payments now store it), and for a record without a stored hash it is computed at read time, deterministically. `treasury_view` returns it for every open operation. `settle_treasury` and `decide_treasury` compare against it, so there is never a `KeyError`: a missing or wrong hash is a 409 that tells the caller to re-read. A refund payment settled `not_moved` reverses F6p and sets the refund to `payment_not_moved`. F6 stays booked (the client is still owed in 2050), and reconciliation L4 counts the refund as spoken for (`REFUND_OWED`). New Andre-only route `POST /fin/v1/refunds/{id}/repay` (`content_sha256` of the refund) creates a NEW refund-payment operation with its own key, never the old one. `moved` closes the refund as `paid`. Tests: `test_hn1_*`, including a test parametrised over sweep, top_up (with a shortfall), funding and refund_payment × moved / not_moved, a legacy record with no hash, and a restart. |
+| L-N2 (Low) | Refunded plus charged back above the payment was booked silently. | `_over_recovery_break` opens a `stripe_over_recovery` break for Andre, once per (refunded, charged-back) total, from either path (refund or lost dispute). The receipt records `stripe.charged_back`. Tests: `test_ln2_*` (both orders, plus an exact full reversal that opens none). |
+| L1 carry-over | The exemption bound took the last line naming an rk. | The bound is now the first committing line (`min`): an action is never attempted again after it commits. Test: `test_l1_the_first_committing_line_bounds_the_exemption`. |
+| M1 carry-over | A truncate that failed after a failed write left the log refusing writes with no visible reason. | `RecordLog.fault` records the reason. `/fin/v1/integrity` turns red with `LOCAL_LOG_WRITE_FAULT: …`, and `/health` reports `log_write_fault: true` (a boolean only, since that route is open). Writes still refuse (fail closed). Test: `test_m1_a_truncate_that_fails_is_reported_not_silent`. |
+
+Suite: 611 (was 593). Live run: still 54/54.

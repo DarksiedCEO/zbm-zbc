@@ -131,7 +131,8 @@ ANDRE_ROUTES = ["/fin/v1/payees/clip-a/callbacks", "/fin/v1/payees/clip-a/tax/b-
                 "/fin/v1/clawbacks/clip-a/write-off", "/fin/v1/close/zbc/2026-09/approve", "/fin/v1/journal/zbc/corrections",
                 "/fin/v1/rules/proposals", "/fin/v1/rules/decisions", "/fin/v1/tax/readiness", "/fin/v1/reconcile",
                 "/fin/v1/receipts/fin-rct-X/apply", "/fin/v1/media-buys", "/fin/v1/media-buys/fin-mb-X/vendor-payments",
-                "/fin/v1/media-buys/fin-mb-X/delivery", "/fin/v1/media-buys/fin-mb-X/cancel"]
+                "/fin/v1/media-buys/fin-mb-X/delivery", "/fin/v1/media-buys/fin-mb-X/cancel",
+                "/fin/v1/treasury/operations/fin-trx-X/settlement", "/fin/v1/refunds/fin-rfd-X/repay"]
 
 
 def test_andre_routes_refuse_every_other_identity(hr):

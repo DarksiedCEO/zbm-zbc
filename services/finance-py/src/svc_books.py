@@ -832,9 +832,49 @@ class BooksMixin:
             new = {**r, "status": "approved", "approved_at": iso(self._now()), "entry_ids": [e["entry_id"]]}
             op.put("refunds", refund_id, new)
             tid = rid("trx", "refund", refund_id)
-            op.put("treasury_ops", tid, {"op_id": tid, "kind": "refund_payment", "entity": "zbc", "from": "1020",
-                                         "to": f"client:{r['client_id']}", "amount": r["amount"], "status": "approved",
-                                         "ref_id": refund_id, "approved_at": iso(self._now()), "attempts": 0})
+            op.put("treasury_ops", tid, self._refund_payment_op(tid, r))
+            self._commit(op)
+        paid = self._execute_transfer(tid)
+        resp = {"refund": self.db["refunds"][refund_id], "payment": paid, "ledger_event_ids": op.events,
+                "request_id": request_id}
+        with self.lock:
+            return self._idem_mem(key, h, resp)
+
+    def _refund_payment_op(self, tid: str, r: dict) -> dict:
+        t = {"op_id": tid, "kind": "refund_payment", "entity": "zbc", "from": "1020", "to": f"client:{r['client_id']}",
+             "amount": r["amount"], "status": "approved", "ref_id": r["refund_id"], "approved_at": iso(self._now()),
+             "approved_by": "andre", "attempts": 0}
+        t["content_sha256"] = self.treasury_op_sha(t)        # AEGIS c0869c4 H-N1: same canonical form as other ops
+        return t
+
+    def repay_refund(self, request_id: str, refund_id: str, body: dict) -> dict:
+        """Andre pays a refund again after he settled its payment ``not_moved`` (AEGIS c0869c4 H-N1): a NEW refund
+        payment operation (its own key, never the old one), bound to the refund's ``content_sha256``."""
+        key, h, ent = self._idem("andre", request_id, f"refund-repay/{refund_id}", body)
+        if ent:
+            return ent["response"]
+        with self.lock:
+            self.require_rules()
+            r = self.db["refunds"].get(refund_id)
+            if r is None:
+                raise NotFound("no such refund")
+            if r["status"] != "payment_not_moved":
+                raise Conflict(f"only a refund whose payment Andre settled as not moved is paid again (it is "
+                               f"{r['status']})")
+            if body["content_sha256"] != r["content_sha256"]:
+                raise Conflict("refund changed since you read it (content_sha256 mismatch)")
+            n = int(r.get("payments", 1)) + 1
+            tid = rid("trx", "refund", refund_id, n)
+            if tid in self.db["treasury_ops"]:
+                raise Conflict("that refund payment already exists; it is never re-created")
+            op = Op(self, f"rfdrp|{request_id}", "andre", refund_id)
+            op.put("treasury_ops", tid, self._refund_payment_op(tid, r))
+            op.put("refunds", refund_id, {**r, "status": "approved", "payments": n, "payment_op_id": tid})
+            op.record(derived_id("rfdrp", refund_id, n), "refund_approved", "andre", refund_id,
+                      {"refund_id": refund_id, "amount": r["amount"], "payment": n, "op_id": tid},
+                      f"Andre approved paying a refund again (payment {n}): {r['amount']}")
+            self._idem_add(op, key, h, {"refund": op.get("refunds", refund_id), "payment": None,
+                                        "ledger_event_ids": op.events, "request_id": request_id})
             self._commit(op)
         paid = self._execute_transfer(tid)
         resp = {"refund": self.db["refunds"][refund_id], "payment": paid, "ledger_event_ids": op.events,
