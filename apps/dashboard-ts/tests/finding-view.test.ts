@@ -15,8 +15,10 @@ import {
   EXCLUDED_STATUS_TEXT,
   findingBadges,
   findingCounts,
+  localQuotable,
   orderFindings,
-  quotable,
+  quoteVerdict,
+  scanAsOfLabel,
 } from "../src/lib/finding-view.ts";
 import type { RecordedFinding, RecordedFindingsResult } from "../src/types/finding.ts";
 
@@ -28,17 +30,18 @@ const ROW: RecordedFinding = {
   value_classification: "observed", decision_confidence: "high", evidence_class: "OBSERVED", methodology_id: "m",
   scan_id: "1".repeat(32), payload_sha256: "0".repeat(64), recorded_at: "t", prev_hash: "p", hash: "h",
   amount_out_of_contract: false, first_seq: 1, times_recorded: 1, amounts_differ_across_records: false,
-  present_in_latest_scan: true, value_basis: null, labels_exceed_evidence: null,
+  present_in_latest_scan: true, value_basis: null, labels_exceed_evidence: null, quotable: true,
 };
 const STALE_EST: RecordedFinding = {
   ...ROW, seq: 0, entity_id: "o2", evidence_class: "ESTIMATED", value_classification: "attributed",
   decision_confidence: "medium", amount_usd: "12.00", present_in_latest_scan: false,
-  value_basis: { base_usd: "120.00", rate_percent: "10" },
+  value_basis: { base_usd: "120.00", rate_percent: "10" }, quotable: false,
 };
 const NO_FIGURE: RecordedFinding = {
   ...ROW, seq: 2, amount_usd: null, value_classification: null, decision_confidence: null, evidence_class: "UNKNOWN",
+  quotable: false,
 };
-const OVER: RecordedFinding = { ...ROW, seq: 3, evidence_class: "ESTIMATED", labels_exceed_evidence: "classification observed needs OBSERVED evidence" };
+const OVER: RecordedFinding = { ...ROW, seq: 3, evidence_class: "ESTIMATED", labels_exceed_evidence: "classification observed needs OBSERVED evidence", quotable: false };
 
 test("M1: a stale finding is badged stale; a current one is not", () => {
   assert.deepEqual(findingBadges(STALE_EST), ["stale", "estimated"]);
@@ -66,17 +69,29 @@ test("M1: counts split current/stale and observed/estimated/no figure", () => {
   });
 });
 
-test("only a current, non-over-claiming figure is quotable", () => {
-  assert.equal(quotable(ROW), true);
-  assert.equal(quotable(STALE_EST), false);
-  assert.equal(quotable(NO_FIGURE), false);
-  assert.equal(quotable(OVER), false);
-  assert.equal(quotable({ ...ROW, amount_out_of_contract: true }), false);
+test("N4: the served quotable flag decides; the local rule is only a consistency check", () => {
+  assert.equal(quoteVerdict(ROW), "quotable");
+  for (const f of [STALE_EST, NO_FIGURE, OVER]) assert.equal(quoteVerdict(f), "not-quotable");
+  // An ESTIMATED current figure is not quotable as recorded (same rule as orchestrator-go).
+  const est = { ...STALE_EST, present_in_latest_scan: true };
+  assert.equal(localQuotable(est), false);
+  // Served true but the local rule disagrees: shown as a mismatch, never as quotable.
+  assert.equal(quoteVerdict({ ...est, quotable: true }), "mismatch");
+  assert.equal(quoteVerdict({ ...ROW, present_in_latest_scan: false }), "mismatch");
+  // Served false where the local rule would allow it: also a mismatch, shown as not quotable.
+  assert.equal(quoteVerdict({ ...ROW, quotable: false }), "mismatch");
+});
+
+test("N3: a backdated scan's as_of is flagged", () => {
+  const scan = { scan_id: "s", client_id: "c", data_source: "fixtures", fixture: true, tenant_defaulted: true,
+    as_of: "2026-09-01T00:00:00Z", findings: 1, started_seq: 0, completed_seq: 2, backdated: false };
+  assert.equal(scanAsOfLabel(scan), "2026-09-01T00:00:00Z");
+  assert.match(scanAsOfLabel({ ...scan, backdated: true }), /^2026-09-01T00:00:00Z — BACKDATED/);
 });
 
 test("L3: every excluded-scan status has a label, abandoned included", () => {
-  for (const s of ["running", "incomplete", "abandoned", "aborted", "inconsistent"] as const) {
-    assert.ok(EXCLUDED_STATUS_TEXT[s].startsWith(s.toUpperCase()), s);
+  for (const s of ["running", "incomplete", "abandoned", "aborted", "inconsistent", "unsupported_format"] as const) {
+    assert.ok(EXCLUDED_STATUS_TEXT[s].startsWith(s.toUpperCase().replace("_", " ")), s);
   }
 });
 
@@ -97,6 +112,7 @@ const BODY: RecordedFindingsResult = {
     amount_out_of_contract: false, value_classification: "observed", decision_confidence: "high", recorded_at: "t", hash: "h" }],
   ledger_verify: { valid: true, entries: 9, error: "" },
   non_live_data_source: true,
+  latest_scan_uncounted: {},
 };
 function respond(body: unknown): typeof fetch {
   return (async () => new Response(JSON.stringify(body), { status: 200 })) as typeof fetch;
@@ -114,7 +130,7 @@ test("M1/M4: the new fields are consumed from the API", async () => {
 });
 
 test("M1: a body whose findings lack staleness / evidence / tenant / scan is refused (502), not shown as current", async () => {
-  for (const drop of ["present_in_latest_scan", "evidence_class", "client_id", "scan_id", "period_label"] as const) {
+  for (const drop of ["present_in_latest_scan", "evidence_class", "client_id", "scan_id", "period_label", "quotable"] as const) {
     const row: Record<string, unknown> = { ...ROW };
     delete row[drop];
     const o = await loadRecordedFindings(ENV, respond({ ...BODY, findings: [row] }));
@@ -128,9 +144,17 @@ test("M1: a body whose findings lack staleness / evidence / tenant / scan is ref
 });
 
 test("M4: a body without excluded_scans or legacy_findings is refused", async () => {
-  for (const drop of ["excluded_scans", "legacy_findings", "legacy_finding_entries_ignored"] as const) {
+  for (const drop of ["excluded_scans", "legacy_findings", "legacy_finding_entries_ignored", "scans", "latest_scan_uncounted"] as const) {
     const body: Record<string, unknown> = { ...BODY };
     delete body[drop];
     assert.equal((await loadRecordedFindings(ENV, respond(body))).ok, false, drop);
   }
+});
+
+test("N3: scans without as_of/backdated are refused", async () => {
+  const scan = { scan_id: "s", client_id: "c", data_source: "f", fixture: true, tenant_defaulted: true,
+    as_of: "2026-10-01T00:00:00Z", findings: 1, started_seq: 0, completed_seq: 2, backdated: false };
+  assert.equal((await loadRecordedFindings(ENV, respond({ ...BODY, scans: [scan] }))).ok, true);
+  const { backdated: _b, ...noFlag } = scan;
+  assert.equal((await loadRecordedFindings(ENV, respond({ ...BODY, scans: [noFlag] }))).ok, false);
 });

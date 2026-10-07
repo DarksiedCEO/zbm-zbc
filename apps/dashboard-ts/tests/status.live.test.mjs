@@ -51,7 +51,7 @@ const ROW = {
   methodology_id: "disc_excess_best_code", scan_id: "1".repeat(32), payload_sha256: "0".repeat(64),
   recorded_at: "2026-09-24T00:00:00Z", prev_hash: "0", hash: "h1", amount_out_of_contract: false, first_seq: 1,
   times_recorded: 1, amounts_differ_across_records: false, present_in_latest_scan: true, value_basis: null,
-  labels_exceed_evidence: null,
+  labels_exceed_evidence: null, quotable: true,
 };
 
 const VERIFIED = {
@@ -67,6 +67,7 @@ const VERIFIED = {
   legacy_findings: [],
   ledger_verify: { valid: true, entries: 1, error: "" },
   non_live_data_source: true,
+  latest_scan_uncounted: {},
 };
 
 // AEGIS M1/M4/L3 (Oct 7 2026): a stale ESTIMATED finding with its commission
@@ -80,20 +81,28 @@ const MIXED = {
       ...ROW, seq: 3, finding_id: "rrf1-" + "c".repeat(40), entity_id: "ORD-STALE", agent_id: "affiliate-coupon-extension-v1",
       leak_category: "affiliate_coupon_extension", amount_usd: "12.00", value_classification: "attributed",
       decision_confidence: "medium", evidence_class: "ESTIMATED", present_in_latest_scan: false,
-      value_basis: { base_usd: "120.00", rate_percent: "10" },
+      value_basis: { base_usd: "120.00", rate_percent: "10" }, quotable: false,
     },
     {
       ...ROW, seq: 10, finding_id: "rrf1-" + "d".repeat(40), entity_type: "subscription", entity_id: "SUB-OVER",
       period_label: "2026-05-15", amount_usd: "39.00", evidence_class: "ESTIMATED",
-      labels_exceed_evidence: "classification observed needs OBSERVED evidence, the figure is ESTIMATED",
+      labels_exceed_evidence: "classification observed needs OBSERVED evidence, the figure is ESTIMATED", quotable: false,
     },
     { ...ROW, seq: 11, finding_id: "rrf1-" + "e".repeat(40), entity_id: "ORD-NOFIG", amount_usd: null,
-      value_classification: null, decision_confidence: null, evidence_class: "UNKNOWN" },
+      value_classification: null, decision_confidence: null, evidence_class: "UNKNOWN", quotable: false },
+  ],
+  scans: [
+    { scan_id: "4".repeat(32), client_id: "fixture-pool", data_source: "fixtures", fixture: true, tenant_defaulted: true,
+      as_of: "2026-10-06T00:00:00Z", findings: 2, started_seq: 1, completed_seq: 4, backdated: false },
+    { scan_id: "5".repeat(32), client_id: "fixture-pool", data_source: "fixtures", fixture: true, tenant_defaulted: true,
+      as_of: "2026-09-01T00:00:00Z", findings: 2, started_seq: 5, completed_seq: 8, backdated: true },
   ],
   excluded_scans: [
     { scan_id: "2".repeat(32), client_id: "fixture-pool", finding_events: 4, reason: "not completed (failed, or still running)", status: "abandoned", started_at: "2026-10-06T00:00:00Z" },
     { scan_id: "3".repeat(32), client_id: "fixture-pool", finding_events: 1, reason: "aborted before completion", status: "aborted", started_at: "2026-10-06T01:00:00Z" },
+    { scan_id: "6".repeat(32), client_id: "fixture-pool", finding_events: 1, reason: "unreadable scan_completed record: rrc3: completion record format is newer", status: "unsupported_format", started_at: "2026-10-07T01:00:00Z" },
   ],
+  latest_scan_uncounted: { "fixture-pool": "6".repeat(32) },
   legacy_finding_entries_ignored: 1,
   legacy_findings: [
     { seq: 0, finding_id: "disc-ord_1007", agent_id: "discount-misuse-v1", entity_id: "ORD-LEGACY", leak_category: "discount_misuse",
@@ -323,11 +332,21 @@ test("upstream rejects the token / errors / ledger invalid / times out -> 502/50
   assert.match(rowOf("SUB-OVER"), /LABELS EXCEED EVIDENCE/);
   assert.match(rowOf("ORD-NOFIG"), /NO FIGURE/);
   assert.match(page.body, /1(<!-- -->)? stale/);
-  assert.match(page.body, /Excluded scans \((<!-- -->)?2(<!-- -->)?\)/);
+  assert.match(page.body, /Excluded scans \((<!-- -->)?3(<!-- -->)?\)/);
   assert.match(page.body, /ABANDONED — never finished/);
   assert.match(page.body, /ABORTED — the scan failed/);
   assert.match(page.body, /Legacy ledger findings \((<!-- -->)?1(<!-- -->)?\) — LEGACY, not counted/);
   assert.match(rowOf("ORD-LEGACY"), /data-legacy="true"/);
+  // N4: the served quotable flag is shown.
+  assert.match(current, /data-quote="quotable"/);
+  assert.match(stale, /data-quote="not-quotable"/);
+  // N3: as_of per scan, the backdated one flagged.
+  assert.match(page.body, /2026-10-06T00:00:00Z/);
+  assert.match(page.body, /data-backdated="true"/);
+  assert.match(page.body, /2026-09-01T00:00:00Z — BACKDATED/);
+  // N1: a newer-format latest scan is refused loudly.
+  assert.match(page.body, /UNSUPPORTED FORMAT — written by a newer orchestrator-go/);
+  assert.match(page.body, /The latest scan could not be counted/);
 
   // A pre-fix-wave body is not the contract: refused (502), never shown as current.
   mode = "pre-fix-wave";

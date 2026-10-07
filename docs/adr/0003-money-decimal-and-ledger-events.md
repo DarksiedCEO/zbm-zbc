@@ -727,7 +727,7 @@ A scan is these events, department `revenue_recovery`, actor
 | `rr.<scan_id>.started` | `rr_scan_started` | client_id | SHA-256 of {scan_id, client_id, as_of, data_source, fixture, tenant_defaulted, agents} | `rrs1 src=fixtures fixture=1 defaulted=1 asof=<RFC 3339> agents=8` |
 | `rr.<scan_id>.f.<finding_id>` (one per finding) | `rr_finding` | finding_id | SHA-256 of the finding's full JSON as detection-py returned it | `rrf1 a=<agent_id> l=<leak_category> t=<entity_type> e=<entity_id> p=<period\|-> v=<amount\|-> x=<evidence_class> k=<classification\|-> n=<confidence\|-> m=<methodology_id>` |
 | `rr.<scan_id>.b.<finding_id>` (Oct 7 2026, AEGIS L1; right after its finding, only for a rate-derived figure) | `rr_value_basis` | finding_id | SHA-256 of the value_basis JSON | `rrb1 base=<money> rate=<rate percent>` |
-| `rr.<scan_id>.completed` | `rr_scan_completed` | client_id | SHA-256 of the manifest: scan_id, client_id and every finding and value-basis event's (event_id, payload_sha256, summary), sorted by event_id | `rrc1 n=<number of findings>` |
+| `rr.<scan_id>.completed` | `rr_scan_completed` | client_id | SHA-256 of the manifest: scan_id, client_id and every finding and value-basis event's (event_id, payload_sha256, summary), sorted by event_id | `rrc2 n=<number of findings>` (`rrc1` before Oct 7 2026: no value-basis events) |
 | `rr.<scan_id>.aborted` (best effort, on failure after writing began) | `rr_scan_aborted` | client_id | SHA-256 of the reason | `rra1 <step> failed: <public reason>` |
 
 - **Order and checks.** Every finding is validated and every event built
@@ -770,6 +770,15 @@ A scan is these events, department `revenue_recovery`, actor
   rate / 100, half-up, exact rational arithmetic); otherwise the scan is
   excluded as inconsistent. Scans recorded before it have none and their
   manifest hash is unchanged.
+- **Completion format and rollback (Oct 7 2026, AEGIS N1).** Scans written
+  since 6b0f0ad+1 complete as `rrc2`; `rrc1` scans still count. A reader
+  meeting a newer format excludes the scan as `unsupported_format` and makes
+  nothing of that client current. **Runbook: once any `rrc2` scan is in the
+  ledger, orchestrator-go cannot be rolled back to 8bdebde or earlier** — that
+  reader excludes rrc2 scans and silently presents the previous rrc1 scan's
+  findings as current (verified). Roll forward instead; if a rollback is
+  unavoidable, take the dashboard offline until the newer orchestrator-go is
+  back.
 - **Ledger size (Oct 7 2026).** `ledger_entries_total` comes from `GET
   /ledger/head` (ledger-rust sweep F), else from the verify verdict — never
   from the size of orchestrator-go's own (possibly filtered) read.

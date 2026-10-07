@@ -286,3 +286,143 @@ func TestLedgerTotal_BadHeadIsAnErrorAndInvalidChainFallsBackToTheRead(t *testin
 		t.Fatalf("invalid chain without head: %+v %v", res, err)
 	}
 }
+
+// --- AEGIS re-review of 45bc33c (N1-N4) -------------------------------------------
+
+// N1: scans are completed as rrc2. A reader meets a NEWER completion format
+// only after a rollback: it must refuse that scan loudly (unsupported_format,
+// explicit reason) and must not present the older counted scan as latest.
+func TestN1_NewerCompletionFormatIsRefusedLoudlyAndNeverFallsBack(t *testing.T) {
+	old := validFinding("discount-misuse-v1", "order", "o1", "", "4.50")
+	c := &chain{}
+	c.writeScan(t, scanID(1), []client.Finding{old}, nil)
+	c.writeScan(t, scanID(2), []client.Finding{validFinding("discount-misuse-v1", "order", "o2", "", "5.00")},
+		func(evs []client.EventInput) []client.EventInput {
+			evs[len(evs)-1].Summary = "rrc3 n=1" // written by a later orchestrator-go
+			return evs
+		})
+	res, _ := readRecorded(t, c.json(t))
+	if len(res.ExcludedScans) != 1 || res.ExcludedScans[0].Status != ScanStatusUnsupportedFormat ||
+		!strings.Contains(res.ExcludedScans[0].Reason, "cannot be rolled back") {
+		t.Fatalf("excluded: %+v", res.ExcludedScans)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].PresentInLatestScan || res.Findings[0].Quotable {
+		t.Errorf("the older scan's finding is presented as current: %+v", res.Findings)
+	}
+	if res.LatestScanUncounted[FixtureClientID] != scanID(2) {
+		t.Errorf("latest_scan_uncounted: %v", res.LatestScanUncounted)
+	}
+}
+
+// N1: this version writes rrc2 and still reads 8bdebde's rrc1 scans; an rrc1
+// scan carrying a value-basis event is inconsistent (no rrc1 writer made one).
+func TestN1_WritesRrc2ReadsRrc1(t *testing.T) {
+	f := validFinding("discount-misuse-v1", "order", "o1", "", "4.50")
+	ev, _ := findingEvent(scanID(1), f)
+	if c := completedEvent(scanID(1), FixtureClientID, 1, [][3]string{{ev.EventID, ev.PayloadSHA256, ev.Summary}}); !strings.HasPrefix(c.Summary, "rrc2 n=1") {
+		t.Fatalf("completion summary %q", c.Summary)
+	}
+	c := &chain{}
+	c.writeScan(t, scanID(1), []client.Finding{f}, func(evs []client.EventInput) []client.EventInput {
+		evs[len(evs)-1].Summary = "rrc1 n=1" // an 8bdebde scan: same manifest rule, no basis events
+		return evs
+	})
+	b := basisFinding("120.00", "10", "12.00")
+	c.writeScan(t, scanID(2), []client.Finding{b}, func(evs []client.EventInput) []client.EventInput {
+		evs[len(evs)-1].Summary = "rrc1 n=1"
+		return evs
+	})
+	res, _ := readRecorded(t, c.json(t))
+	if len(res.Scans) != 1 || res.Scans[0].ScanID != scanID(1) {
+		t.Errorf("rrc1 scan not read: %+v", res.Scans)
+	}
+	if len(res.ExcludedScans) != 1 || res.ExcludedScans[0].Status != ScanStatusInconsistent ||
+		!strings.Contains(res.ExcludedScans[0].Reason, "rrc1 scan cannot have value basis") {
+		t.Errorf("rrc1 + basis: %+v", res.ExcludedScans)
+	}
+	// An inconsistent scan completed after the counted one: the counted one is not "latest" either.
+	if res.Findings[0].PresentInLatestScan || res.LatestScanUncounted[FixtureClientID] != scanID(2) {
+		t.Errorf("fell back to the older scan: %+v %v", res.Findings[0], res.LatestScanUncounted)
+	}
+}
+
+// N2: unknown labels are refused on write and flagged on read.
+func TestN2_UnknownLabelsRefusedOnWriteFlaggedOnRead(t *testing.T) {
+	for _, lbl := range [][2]string{{"verified", "medium"}, {"observed", "certain"}, {"verified", "certain"}} {
+		f := validFinding("discount-misuse-v1", "order", "o1", "", "4.50") // OBSERVED evidence
+		f.RecoverableValue.Classification, f.RecoverableValue.Confidence = lbl[0], lbl[1]
+		if err := checkFinding(f, FixtureClientID, f.AgentID); err == nil || !strings.Contains(err.Error(), "not a known value label") {
+			t.Errorf("%v accepted on write: %v", lbl, err)
+		}
+		c := &chain{}
+		c.writeScan(t, scanID(1), []client.Finding{f}, nil) // a record some other writer made
+		res, _ := readRecorded(t, c.json(t))
+		if len(res.Findings) != 1 || res.Findings[0].LabelsExceedEvidence == nil ||
+			!strings.Contains(*res.Findings[0].LabelsExceedEvidence, "not a known value label") || res.Findings[0].Quotable {
+			t.Errorf("%v not flagged on read: %+v", lbl, res.Findings)
+		}
+	}
+}
+
+// N4: the served quotable flag — current, OBSERVED, known labels within
+// evidence, valid value basis.
+func TestN4_QuotableIsServedPerFinding(t *testing.T) {
+	obs := validFinding("discount-misuse-v1", "order", "o1", "", "4.50")
+	est := basisFinding("120.00", "10", "12.00")
+	none := validFinding("abandoned-cart-coverage-v1", "order", "o3", "", "")
+	over := validFinding("renewal-never-triggered-v1", "subscription", "s1", "2026-05-15", "39.00")
+	over.EvidenceClass = "ESTIMATED"
+	staleF := validFinding("discount-misuse-v1", "order", "o9", "", "7.00")
+	c := &chain{}
+	c.writeScan(t, scanID(1), []client.Finding{staleF}, nil)
+	c.writeScan(t, scanID(2), []client.Finding{obs, est, none, over}, nil)
+	res, _ := readRecorded(t, c.json(t))
+	want := map[string]bool{obs.FindingID: true, est.FindingID: false, none.FindingID: false, over.FindingID: false, staleF.FindingID: false}
+	for _, f := range res.Findings {
+		if f.Quotable != want[f.FindingID] {
+			t.Errorf("%s %s: quotable %v", f.AgentID, f.EntityID, f.Quotable)
+		}
+	}
+	b, _ := json.Marshal(res.Findings[0])
+	if !strings.Contains(string(b), `"quotable":`) {
+		t.Errorf("quotable not on the wire: %s", b)
+	}
+	// A value basis that no longer reproduces the amount is never quotable.
+	amt := client.MustParseMoney("4.50")
+	r := RecordedFinding{AmountUSD: &amt, PresentInLatestScan: true, EvidenceClass: "OBSERVED",
+		ValueClassification: strp("observed"), DecisionConfidence: strp("high"),
+		ValueBasis: &client.ValueBasis{BaseUSD: client.MustParseMoney("400.00"), RatePercent: "10"}}
+	if r.isQuotable() {
+		t.Error("a bad value basis is quotable")
+	}
+	r.ValueBasis = nil
+	if !r.isQuotable() {
+		t.Error("a plain observed figure is not quotable")
+	}
+}
+
+// N3: a scan whose as_of is earlier than the previous scan's as_of is backdated.
+func TestN3_BackdatedScanIsFlagged(t *testing.T) {
+	c := &chain{}
+	f := validFinding("discount-misuse-v1", "order", "o1", "", "4.50")
+	asOf := func(v string) func([]client.EventInput) []client.EventInput {
+		return func(evs []client.EventInput) []client.EventInput {
+			id := strings.Split(evs[0].EventID, ".")[1]
+			evs[0] = startedEvent(startedPayload{ScanID: id, ClientID: FixtureClientID, AsOf: v, DataSource: "fixtures",
+				Fixture: true, TenantDefaulted: true, Agents: []string{"x"}})
+			return evs
+		}
+	}
+	c.writeScan(t, scanID(1), []client.Finding{f}, asOf("2026-10-05T00:00:00Z"))
+	c.writeScan(t, scanID(2), []client.Finding{f}, asOf("2026-10-06T00:00:00Z"))
+	c.writeScan(t, scanID(3), []client.Finding{f}, asOf("2026-09-01T00:00:00Z"))
+	c.writeScan(t, scanID(4), []client.Finding{f}, asOf("2026-10-06T00:00:00Z"))
+	res, _ := readRecorded(t, c.json(t))
+	got := []bool{}
+	for _, s := range res.Scans {
+		got = append(got, s.Backdated)
+	}
+	if len(got) != 4 || got[0] || got[1] || !got[2] || got[3] {
+		t.Errorf("backdated flags %v", got)
+	}
+}

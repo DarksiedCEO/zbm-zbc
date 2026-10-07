@@ -56,6 +56,7 @@ function looksLikeRecordedFinding(v: unknown): boolean {
     typeof f.scan_id === "string" &&
     (f.period_label === null || typeof f.period_label === "string") &&
     typeof f.present_in_latest_scan === "boolean" &&
+    typeof f.quotable === "boolean" &&
     EVIDENCE_CLASSES.has(f.evidence_class) &&
     (f.amount_usd === null) === (f.evidence_class === "UNKNOWN")
   );
@@ -70,6 +71,10 @@ function looksLikeFindings(v: unknown): v is RecordedFindingsResult {
     !!o.overlapping_claims &&
     typeof o.overlapping_claims === "object" &&
     Array.isArray(o.excluded_scans) &&
+    Array.isArray(o.scans) &&
+    (o.scans as unknown[]).every((x) => !!x && typeof x === "object" && typeof (x as Record<string, unknown>).backdated === "boolean" && typeof (x as Record<string, unknown>).as_of === "string") &&
+    !!o.latest_scan_uncounted &&
+    typeof o.latest_scan_uncounted === "object" &&
     Array.isArray(o.legacy_findings) &&
     typeof o.legacy_finding_entries_ignored === "number" &&
     typeof o.ledger_entries_total === "number" &&

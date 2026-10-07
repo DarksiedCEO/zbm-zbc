@@ -101,6 +101,9 @@ export interface RecordedFinding {
   // Set when the recorded labels claim more than the recorded evidence class
   // supports (a record from before the Oct 7 2026 invariant): the reason.
   labels_exceed_evidence: string | null;
+  // AEGIS N4: orchestrator-go's verdict (recorded.go isQuotable) that this
+  // figure may go in a quote as recorded. The dashboard shows this field.
+  quotable: boolean;
 }
 
 // One completed, consistent scan.
@@ -114,9 +117,17 @@ export interface ScanSummary {
   findings: number;
   started_seq: number;
   completed_seq: number;
+  // AEGIS N3: its as_of is earlier than the previous scan's as_of.
+  backdated: boolean;
 }
 
-export type ExcludedScanStatus = "running" | "incomplete" | "abandoned" | "aborted" | "inconsistent";
+export type ExcludedScanStatus =
+  | "running"
+  | "incomplete"
+  | "abandoned"
+  | "aborted"
+  | "inconsistent"
+  | "unsupported_format";
 
 // A scan in the ledger that does not count (AEGIS M4/L3).
 export interface ExcludedScan {
@@ -160,4 +171,8 @@ export interface RecordedFindingsResult {
   legacy_findings: LegacyFinding[];
   ledger_verify: LedgerVerifyResult | null;
   non_live_data_source: boolean;
+  // AEGIS N1: client -> a scan that completed after the client's latest
+  // counted scan but could not be counted; none of that client's findings
+  // is current.
+  latest_scan_uncounted: Record<string, string>;
 }

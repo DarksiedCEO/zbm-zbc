@@ -6,12 +6,14 @@ import {
   findingBadges,
   findingCounts,
   orderFindings,
+  quoteVerdict,
+  scanAsOfLabel,
   type FindingBadge,
 } from "@/lib/finding-view";
 import { decodeHandoff, HANDOFF_HEADER } from "@/lib/handoff";
 import { ledgerState } from "@/lib/ledger-status";
 import { formatUsd, isPositiveMoneyString } from "@/lib/money";
-import type { ExcludedScan, LegacyFinding, RecordedFinding, RecordedFindingsResult } from "@/types/finding";
+import type { ExcludedScan, LegacyFinding, RecordedFinding, RecordedFindingsResult, ScanSummary } from "@/types/finding";
 
 // Always render per request, never at build time (fix wave 1). Without this,
 // Next.js prerendered "/" as a static page during `next build`: built without
@@ -97,6 +99,57 @@ function AmountCell({ finding }: { finding: RecordedFinding }) {
   );
 }
 
+// AEGIS N4: orchestrator-go decides quotability; a disagreement with the
+// local restatement of the rule is shown and treated as not quotable.
+function QuoteCell({ finding }: { finding: RecordedFinding }) {
+  const v = quoteVerdict(finding);
+  const text =
+    v === "quotable" ? "QUOTABLE" : v === "mismatch" ? "QUOTE CHECK MISMATCH — not quotable" : "not quotable";
+  const color = v === "quotable" ? "#3fa34d" : v === "mismatch" ? "#e5534b" : "#8a8f98";
+  return (
+    <div data-quote={v} style={{ fontSize: 11, fontWeight: v === "not-quotable" ? 400 : 700, color, marginTop: 2 }}>
+      {text}
+    </div>
+  );
+}
+
+// AEGIS N3: every counted scan with its as_of; a backdated one is flagged.
+function Scans({ scans }: { scans: ScanSummary[] }) {
+  if (scans.length === 0) return null;
+  return (
+    <section id="scans" style={SECTION_BOX}>
+      <h2 style={{ fontSize: 15, margin: "0 0 10px" }}>Completed scans ({scans.length})</h2>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ textAlign: "left", color: "#8a8f98", fontSize: 12 }}>
+            <th style={{ padding: "4px 8px" }}>Scan</th>
+            <th style={{ padding: "4px 8px" }}>Client</th>
+            <th style={{ padding: "4px 8px" }}>As of</th>
+            <th style={{ padding: "4px 8px" }}>Findings</th>
+            <th style={{ padding: "4px 8px" }}>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {scans.map((x) => (
+            <tr key={x.scan_id} data-backdated={x.backdated ? "true" : "false"} style={{ borderTop: "1px solid #1f2328" }}>
+              <td style={{ padding: "6px 8px", fontFamily: "monospace" }}>{x.scan_id}</td>
+              <td style={{ padding: "6px 8px" }}>{x.client_id}</td>
+              <td style={{ padding: "6px 8px", color: x.backdated ? "#f0b429" : undefined, fontWeight: x.backdated ? 700 : 400 }}>
+                {scanAsOfLabel(x)}
+              </td>
+              <td style={{ padding: "6px 8px", fontVariantNumeric: "tabular-nums" }}>{x.findings}</td>
+              <td style={{ padding: "6px 8px", color: "#8a8f98" }}>
+                {x.data_source}
+                {x.fixture ? " (fixture)" : ""}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function FindingRow({ finding }: { finding: RecordedFinding }) {
   const stale = !finding.present_in_latest_scan;
   const vb = finding.value_basis;
@@ -113,6 +166,7 @@ function FindingRow({ finding }: { finding: RecordedFinding }) {
         {finding.labels_exceed_evidence && (
           <div style={{ fontSize: 11, color: "#e5534b", marginTop: 2 }}>{finding.labels_exceed_evidence}</div>
         )}
+        <QuoteCell finding={finding} />
       </td>
       <td style={{ padding: "10px 12px", fontFamily: "monospace", fontSize: 13 }}>
         {finding.entity_id}
@@ -332,6 +386,19 @@ export default async function Page() {
             ESTIMATED / MODELED figures rest on a stated assumption (&quot;est.&quot;); only OBSERVED figures are
             exact arithmetic on recorded data.
           </p>
+          {Object.keys(result.latest_scan_uncounted).length > 0 && (
+            <div
+              id="latest-uncounted"
+              style={{ padding: 16, background: "#3a1f1f", border: "1px solid #6b2b2b", borderRadius: 8, marginBottom: 20, fontSize: 13 }}
+            >
+              <strong>The latest scan could not be counted</strong> for{" "}
+              {Object.entries(result.latest_scan_uncounted)
+                .map(([client, scan]) => `${client} (scan ${scan})`)
+                .join(", ")}
+              . No finding of that client is current or quotable until it is resolved — see Excluded scans. If its
+              status is UNSUPPORTED FORMAT, this orchestrator-go is older than the one that wrote it: roll forward.
+            </div>
+          )}
           {counts.overclaim > 0 && (
             <div
               style={{ padding: 16, background: "#3a1f1f", border: "1px solid #6b2b2b", borderRadius: 8, marginBottom: 20, fontSize: 13 }}
@@ -380,6 +447,7 @@ export default async function Page() {
             </tbody>
           </table>
 
+          <Scans scans={result.scans} />
           <ExcludedScans scans={result.excluded_scans} />
           <LegacyFindings rows={result.legacy_findings} count={result.legacy_finding_entries_ignored} />
         </>

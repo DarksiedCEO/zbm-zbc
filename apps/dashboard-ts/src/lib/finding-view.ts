@@ -1,4 +1,4 @@
-import type { ExcludedScan, RecordedFinding } from "../types/finding.ts";
+import type { ExcludedScan, RecordedFinding, ScanSummary } from "../types/finding.ts";
 
 // AEGIS M1/M4/L3 (Oct 7 2026): what the findings page must make visible, as
 // pure functions the tests pin. The page used to show every recorded finding
@@ -44,11 +44,27 @@ export const BADGE_TEXT: Record<FindingBadge, string> = {
   overclaim: "LABELS EXCEED EVIDENCE",
 };
 
-// A figure a quote may use as recorded: present in the latest scan and its
-// labels do not exceed its evidence. (Overlaps are a separate gate,
-// Decision 3, shown on the page.)
-export function quotable(f: RecordedFinding): boolean {
-  return f.amount_usd !== null && !f.amount_out_of_contract && f.present_in_latest_scan && !f.labels_exceed_evidence;
+// AEGIS N4: whether a figure may go in a quote is orchestrator-go's decision
+// (the served `quotable`). localQuotable restates the same rule only as a
+// consistency check: the served flag is what the page shows, and a served
+// "quotable" the local rule cannot confirm is shown as NOT quotable with a
+// mismatch flag (fail closed). Overlaps are a separate gate (Decision 3).
+export function localQuotable(f: RecordedFinding): boolean {
+  return (
+    f.amount_usd !== null &&
+    !f.amount_out_of_contract &&
+    f.present_in_latest_scan &&
+    f.evidence_class === "OBSERVED" &&
+    !f.labels_exceed_evidence &&
+    f.value_basis === null // an OBSERVED figure is never rate-derived today
+  );
+}
+
+export type QuoteVerdict = "quotable" | "not-quotable" | "mismatch";
+
+export function quoteVerdict(f: RecordedFinding): QuoteVerdict {
+  if (f.quotable !== localQuotable(f)) return "mismatch";
+  return f.quotable ? "quotable" : "not-quotable";
 }
 
 // Current findings first (by seq), then stale ones (by seq): a stale row is
@@ -88,4 +104,11 @@ export const EXCLUDED_STATUS_TEXT: Record<ExcludedScan["status"], string> = {
   abandoned: "ABANDONED — never finished",
   aborted: "ABORTED — the scan failed",
   inconsistent: "INCONSISTENT — ledger records disagree",
+  unsupported_format: "UNSUPPORTED FORMAT — written by a newer orchestrator-go (rolled back?)",
 };
+
+// AEGIS N3: a scan's as_of, and whether it is backdated (earlier than the
+// previous scan's as_of).
+export function scanAsOfLabel(s: ScanSummary): string {
+  return s.backdated ? `${s.as_of} — BACKDATED (earlier than the previous scan's as_of)` : s.as_of;
+}

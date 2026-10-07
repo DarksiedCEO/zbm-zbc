@@ -172,15 +172,18 @@ func TestStartedAndCompletedSummariesRoundTrip(t *testing.T) {
 		t.Fatalf("%q -> %+v %v", ev.Summary, info, err)
 	}
 	c := completedEvent(strings.Repeat("a", 32), FixtureClientID, 2, [][3]string{{"b", "1", "s"}, {"a", "2", "t"}})
-	if n, err := decodeCompletedSummary(c.Summary); err != nil || n != 2 {
+	if n, v, err := decodeCompletedSummary(c.Summary); err != nil || n != 2 || v != 2 || !strings.HasPrefix(c.Summary, "rrc2 ") {
 		t.Fatalf("%q -> %d %v", c.Summary, n, err)
 	}
 	// The manifest does not depend on write order.
 	if c.PayloadSHA256 != manifestHash(strings.Repeat("a", 32), FixtureClientID, [][3]string{{"a", "2", "t"}, {"b", "1", "s"}}) {
 		t.Error("manifest hash depends on order")
 	}
-	for _, bad := range []string{"rrc1 n=", "rrc1 n=-1", "rrc1 n=01", "rrc1 n=1 x"} {
-		if _, err := decodeCompletedSummary(bad); err == nil {
+	if n, v, err := decodeCompletedSummary("rrc1 n=3"); err != nil || n != 3 || v != 1 {
+		t.Errorf("an 8bdebde rrc1 record no longer reads: %d %d %v", n, v, err)
+	}
+	for _, bad := range []string{"rrc1 n=", "rrc1 n=-1", "rrc1 n=01", "rrc1 n=1 x", "rrc2 n=", "rrc0 n=1", "rrc n=1", "rrc3 n=1"} {
+		if _, _, err := decodeCompletedSummary(bad); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
 	}

@@ -24,6 +24,7 @@ const base: RecordedFindingsResult = {
   legacy_findings: [],
   ledger_verify: { valid: true, entries: 0, error: "" },
   non_live_data_source: true,
+  latest_scan_uncounted: {},
 };
 
 test("empty and valid -> empty", () => {

@@ -69,9 +69,16 @@ const (
 
 	findingSummaryVersion = "rrf1"
 	startedSummaryVersion = "rrs1"
-	doneSummaryVersion    = "rrc1"
-	abortSummaryVersion   = "rra1"
-	basisSummaryVersion   = "rrb1"
+	// Completion-record formats (AEGIS N1, Oct 7 2026). rrc1: 8bdebde, no
+	// value-basis events. rrc2: written by this version — the manifest may
+	// cover rr_value_basis events. A reader before 6b0f0ad cannot read rrc2
+	// and excludes the scan with "unreadable scan_completed record: not an
+	// rrc1 summary"; this reader refuses any newer format the same way and
+	// never lets an older scan stand in as the latest (recorded.go).
+	doneSummaryVersion       = "rrc2"
+	legacyDoneSummaryVersion = "rrc1"
+	abortSummaryVersion      = "rra1"
+	basisSummaryVersion      = "rrb1"
 
 	// Field bounds — detection-py zbm_schema/limits.py.
 	maxIDChars            = 64
@@ -127,8 +134,24 @@ var (
 	highConfidences            = map[string]bool{"high": true, "very_high": true}
 )
 
-// labelsExceedEvidence says why the labels overclaim, or "" if they do not.
+// AEGIS N2: the only label values that exist (detection-py
+// ValueClassification / DecisionConfidence). Anything else is refused on
+// write and flagged on read — an unknown label ("verified", "certain") could
+// otherwise slip past the evidence rule above.
+var (
+	knownClassifications = map[string]bool{"observed": true, "attributed": true, "incremental": true, "financially_verified": true}
+	knownConfidences     = map[string]bool{"low": true, "medium": true, "high": true, "very_high": true}
+)
+
+// labelsExceedEvidence says why the labels overclaim (or are not labels at
+// all), or "" if they do not.
 func labelsExceedEvidence(evidence, classification, confidence string) string {
+	if !knownClassifications[classification] {
+		return fmt.Sprintf("classification %.24q is not a known value label", classification)
+	}
+	if !knownConfidences[confidence] {
+		return fmt.Sprintf("confidence %.24q is not a known value label", confidence)
+	}
 	if evidence == "OBSERVED" || evidence == "UNKNOWN" {
 		return ""
 	}
@@ -516,16 +539,34 @@ func completedEvent(scanID, clientID string, n int, events [][3]string) client.E
 	}
 }
 
-func decodeCompletedSummary(s string) (int, error) {
-	rest, ok := strings.CutPrefix(s, doneSummaryVersion+" n=")
+// ErrNewerCompletionFormat: a completion record in a format newer than this
+// reader knows (written by a later orchestrator-go). Its scan is refused,
+// and no older scan of that client may be presented as the latest.
+var ErrNewerCompletionFormat = fmt.Errorf("completion record format is newer than this orchestrator-go reads (%s); "+
+	"upgrade orchestrator-go — it cannot be rolled back past the version that wrote this scan", doneSummaryVersion)
+
+var completionVersionRE = regexp.MustCompile(`^rrc([1-9][0-9]*) `)
+
+// decodeCompletedSummary returns the finding count and the format version
+// (1 or 2).
+func decodeCompletedSummary(s string) (int, int, error) {
+	m := completionVersionRE.FindStringSubmatch(s)
+	if m == nil {
+		return 0, 0, fmt.Errorf("not an %s or %s summary", legacyDoneSummaryVersion, doneSummaryVersion)
+	}
+	version, _ := strconv.Atoi(m[1])
+	if version > 2 {
+		return 0, version, fmt.Errorf("rrc%d: %w", version, ErrNewerCompletionFormat)
+	}
+	rest, ok := strings.CutPrefix(s, m[0]+"n=")
 	if !ok {
-		return 0, fmt.Errorf("not an %s summary", doneSummaryVersion)
+		return 0, version, fmt.Errorf("completed summary has no n=")
 	}
 	n, err := strconv.Atoi(rest)
 	if err != nil || n < 0 || strconv.Itoa(n) != rest {
-		return 0, fmt.Errorf("completed summary count is not a number")
+		return 0, version, fmt.Errorf("completed summary count is not a number")
 	}
-	return n, nil
+	return n, version, nil
 }
 
 // abortedEvent marks a scan that failed after it began writing. Informative

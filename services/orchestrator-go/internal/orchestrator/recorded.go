@@ -56,6 +56,28 @@ type RecordedFinding struct {
 	// ESTIMATED but labeled observed/high). Shown with the reason, never
 	// silently relabelled; such a figure must not be quoted as recorded.
 	LabelsExceedEvidence *string `json:"labels_exceed_evidence"`
+	// Quotable (AEGIS N4): this recorded figure may be put in a client
+	// quote as recorded — isQuotable(). The dashboard uses this field.
+	Quotable bool `json:"quotable"`
+}
+
+// isQuotable is the one rule for whether a recorded figure may go in a quote:
+// it has a valid amount, the client's latest scan still found it, its
+// evidence is OBSERVED (exact arithmetic on recorded data — ESTIMATED,
+// MODELED and UNKNOWN figures are not quoted as recorded), its labels are
+// known and within that evidence, and any value basis it carries reproduces
+// it. (Overlapping claims are a separate gate, Decision 3.)
+func (f *RecordedFinding) isQuotable() bool {
+	if f.AmountUSD == nil || !f.AmountUSD.IsPositive() || f.AmountOutOfContract || !f.PresentInLatestScan {
+		return false
+	}
+	if f.EvidenceClass != "OBSERVED" || f.LabelsExceedEvidence != nil || f.ValueClassification == nil || f.DecisionConfidence == nil {
+		return false
+	}
+	if labelsExceedEvidence(f.EvidenceClass, *f.ValueClassification, *f.DecisionConfidence) != "" {
+		return false
+	}
+	return f.ValueBasis == nil || checkValueBasis(f.ValueBasis, f.AmountUSD) == nil
 }
 
 // ScanSummary is one completed, consistent scan.
@@ -69,6 +91,10 @@ type ScanSummary struct {
 	Findings        int    `json:"findings"`
 	StartedSeq      uint64 `json:"started_seq"`
 	CompletedSeq    uint64 `json:"completed_seq"`
+	// Backdated (AEGIS N3): its as_of is earlier than the as_of of the same
+	// client's previous completed scan (completion order) — a scan "as of"
+	// an older instant recorded after a newer one.
+	Backdated bool `json:"backdated"`
 }
 
 // ExcludedScan is a scan that is in the ledger but does not count: it never
@@ -88,6 +114,8 @@ type ExcludedScan struct {
 	//                 ScanAbandonedAfter ago: it will never complete
 	//   aborted       the scan recorded that it failed
 	//   inconsistent  the ledger's records of it disagree with each other
+	//   unsupported_format  completed by a newer orchestrator-go in a format
+	//                 this one cannot read (N1: a rollback)
 	Status string `json:"status"`
 	// StartedAt: when the ledger recorded its start ("" if it has none).
 	StartedAt string `json:"started_at"`
@@ -100,6 +128,9 @@ const (
 	ScanStatusAbandoned    = "abandoned"
 	ScanStatusAborted      = "aborted"
 	ScanStatusInconsistent = "inconsistent"
+	// AEGIS N1: completed in a completion-record format newer than this
+	// reader (written by a later orchestrator-go — this one was rolled back).
+	ScanStatusUnsupportedFormat = "unsupported_format"
 )
 
 // RecordedFindingsResult is the read-only view served by
@@ -130,6 +161,12 @@ type RecordedFindingsResult struct {
 	LegacyFindings              []client.LegacyFindingEntry `json:"legacy_findings"`
 	LedgerVerify                *client.LedgerVerifyResult  `json:"ledger_verify"`
 	NonLiveDataSource           bool                        `json:"non_live_data_source"`
+	// LatestScanUncounted (AEGIS N1): client -> a scan that completed AFTER
+	// that client's latest counted scan but cannot be counted (a newer
+	// format after a rollback, or records that disagree). For such a client
+	// no finding is present_in_latest_scan or quotable: an older scan is
+	// never presented as the latest.
+	LatestScanUncounted map[string]string `json:"latest_scan_uncounted"`
 }
 
 type scanEvents struct {
@@ -218,6 +255,11 @@ func (s *scanEvents) validate() (*ScanSummary, []RecordedFinding, string, string
 	if reason == "" {
 		return sum, rows, "", ""
 	}
+	if s.completed != nil {
+		if _, _, err := decodeCompletedSummary(s.completed.Summary); errors.Is(err, ErrNewerCompletionFormat) {
+			return nil, nil, reason, ScanStatusUnsupportedFormat
+		}
+	}
 	switch {
 	case s.completed == nil && s.aborted:
 		return nil, nil, reason, ScanStatusAborted
@@ -247,9 +289,14 @@ func (s *scanEvents) check() (*ScanSummary, []RecordedFinding, string) {
 	if err != nil {
 		return nil, nil, "unreadable scan_started record: " + err.Error()
 	}
-	n, err := decodeCompletedSummary(s.completed.Summary)
+	n, version, err := decodeCompletedSummary(s.completed.Summary)
 	if err != nil {
 		return nil, nil, "unreadable scan_completed record: " + err.Error()
+	}
+	if version == 1 && len(s.bases) > 0 {
+		// rrc1 predates value-basis events: one in an rrc1 scan was not
+		// written by any orchestrator-go.
+		return nil, nil, "an rrc1 scan cannot have value basis events"
 	}
 	if n != len(s.findings) {
 		return nil, nil, "finding count does not match the completion record"
@@ -377,6 +424,8 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 	}
 	var scans []counted
 	excluded := []ExcludedScan{}
+	countedIDs := map[string]struct{}{}
+	supersededBy := map[string]string{} // client -> the uncountable later scan
 	for _, id := range fold.order {
 		s := fold.scans[id]
 		sum, rows, reason, status := s.validate()
@@ -393,6 +442,7 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 			continue
 		}
 		scans = append(scans, counted{sum, rows})
+		countedIDs[id] = struct{}{}
 	}
 	// Completion order: a later-completed scan's record is the latest.
 	sort.SliceStable(scans, func(i, j int) bool { return scans[i].sum.CompletedSeq < scans[j].sum.CompletedSeq })
@@ -401,12 +451,42 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 	for _, c := range scans {
 		latestScan[c.sum.ClientID] = c.sum.ScanID
 	}
+	// AEGIS N1: a scan that HAS a completion record but cannot be counted
+	// (a newer format, or records that disagree) and completed after the
+	// latest counted scan of its client means that counted scan is NOT the
+	// latest: nothing of that client is current. Never fall back to an
+	// older scan as "latest".
+	latestSeq := map[string]uint64{}
+	for _, c := range scans {
+		latestSeq[c.sum.ClientID] = c.sum.CompletedSeq
+	}
+	for _, id := range fold.order {
+		sc := fold.scans[id]
+		if sc.started == nil || sc.completed == nil {
+			continue
+		}
+		cl := sc.started.SubjectID
+		if _, counted := latestScan[cl]; !counted || sc.completed.Seq <= latestSeq[cl] {
+			continue
+		}
+		if _, ok := countedIDs[id]; !ok {
+			latestScan[cl] = id // an uncounted scan: no counted finding carries its id
+			supersededBy[cl] = id
+		}
+	}
 
 	findings := []RecordedFinding{}
 	index := map[string]int{}
 	summaries := []ScanSummary{}
 	findingTotal := 0
+	prevAsOf := map[string]time.Time{} // client -> as_of of its previous completed scan
 	for _, c := range scans {
+		if t, err := time.Parse(time.RFC3339Nano, c.sum.AsOf); err == nil {
+			if p, ok := prevAsOf[c.sum.ClientID]; ok && t.Before(p) {
+				c.sum.Backdated = true
+			}
+			prevAsOf[c.sum.ClientID] = t
+		}
 		summaries = append(summaries, *c.sum)
 		findingTotal += len(c.rows)
 		for _, rec := range c.rows {
@@ -426,6 +506,7 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 	}
 	for i := range findings {
 		findings[i].PresentInLatestScan = findings[i].ScanID == latestScan[findings[i].ClientID]
+		findings[i].Quotable = findings[i].isQuotable()
 	}
 
 	byEntity := map[string][]RecordedFinding{}
@@ -458,6 +539,7 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 		LegacyFindings:              fold.legacyRows,
 		LedgerVerify:                verify,
 		NonLiveDataSource:           true,
+		LatestScanUncounted:         supersededBy,
 	}, nil
 }
 
