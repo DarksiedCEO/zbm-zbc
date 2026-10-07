@@ -34,7 +34,7 @@ OPT_OUT_TERMS = ("stop", "stopall", "unsubscribe", "unsub", "cancel", "cancelled
                  "do not send", "never text", "never message", "never contact", "stop texting", "quit texting",
                  "remove my number", "my number off", "lose my number", "take my number", "delete my number",
                  "didnt sign up", "did not sign up", "never signed up", "who is this", "wrong number", "wrong person",
-                 "not interested",
+                 "not interested", "do not call", "dont call", "never call", "stop calling",
                  # sweep A: email wording ("do not email me" was not an opt-out at all)
                  "dont email", "do not email", "dont e mail", "do not e mail", "never email", "stop emailing",
                  "quit emailing", "stop sending emails", "remove my email", "take my email", "delete my email",
@@ -124,16 +124,18 @@ EMAIL_SCOPE_WORDS = frozenset({"email", "emails", "emailing", "emailed", "mail",
 # words that may sit between an opt-out word and the channel it names ("unsubscribe me from your texts")
 SCOPE_CONNECTORS = frozenset({"me", "us", "from", "your", "our", "the", "all", "any", "these", "those", "this", "my",
                               "of", "to", "with", "sending", "send", "receiving", "getting", "get", "please", "pls",
-                              "plz", "more", "future", "and", "or", "nor", "plus", "also", "both", "either", "e"})
+                              "plz", "more", "future", "and", "or", "nor", "plus", "also", "both", "either", "e", "as", "well",
+                              "spamming", "bothering", "any"})
 SCOPE_LOOKAHEAD = 8
-_EMAIL_WIDENERS = frozenset({"too", "also", "same", "well", "either", "both", "spamming", "spam", "inbox", "and", "or",
-                             "nor", "plus", "everything", "all"})
-_NEG_EMAIL = re.compile(r"\b(not|dont|never|stop|quit|no more)(?: (?:me|sending|send|receiving|getting|any|more|your|"
-                        r"the|with|to|me any)){0,3} (e ?mail|emails|emailing|inbox)\b")
-_NEG_TEXT_OR_EMAIL = re.compile(r"\b(not|dont|never|stop|quit)\b(?: \w+){0,4}? (text|texts|texting|txt|call|calling|"
-                                r"messag\w*)(?: me)? (?:(?:or|nor) (?:me )?(?:e ?mail|emails|emailing)|and emailing)\b"
-                                r"(?! (?:me )?(?:instead|if|only|rather|anytime|whenever)\b)")
-_EMAIL_PREFERENCE = frozenset({"instead", "prefer", "rather", "only", "use", "reach", "contact"})
+# AEGIS re-review of b7cc067 (H-F): scope is decided only when clear. Outside a phrase's own reach, these ADD email
+# ("same for email", "email too"), these ask to be reached by email ("email me instead", "you can call or email",
+# "emails are fine", "my email is ..."); anything else with an email word is unclear: SMS only, and Andre decides.
+_EMAIL_ADDERS = frozenset({"too", "also", "same", "either", "neither", "both", "spamming", "spam", "everything"})
+_EMAIL_PREFERENCE = frozenset({"instead", "prefer", "rather", "only", "use", "reach", "contact", "can", "could", "if",
+                               "fine", "ok", "okay", "works", "better", "anytime", "whenever", "best", "good",
+                               "welcome"})
+_NEG_EMAIL = re.compile(r"\b(not|dont|never|stop|quit|no more|no)(?: (?:me|sending|send|receiving|getting|any|more|your|"
+                        r"the|with|to|me any|sending me)){0,3} (e ?mail|emails|emailing|inbox|newsletters?)\b")
 # a phone word followed by these is a label for an address ("Cell: 310 ...", "my number is ..."), not a channel
 _ADDRESS_LABEL_NEXT = frozenset({"is", "was", "changed", "here"})
 _QUOTE_HEADER = re.compile(r"^\s*(on\b.{0,300}\bwrote\s*:|el\b.{0,300}\bescribi[oó]\s*:|le\b.{0,300}\ba [eé]crit\s*:|"
@@ -320,32 +322,12 @@ def typo_opt_out(text: Optional[str]) -> bool:
     return any(_typo_tokens(v) for v in (normalise(t), normalise(t.translate(_LEET)), normalise(raw)))
 
 
-_PREFERENCE_AFTER = frozenset({"instead", "if", "only", "rather", "anytime", "whenever", "about", "at"})
-
-
-def _email_word_adds(toks: list[str], k: int) -> Optional[bool]:
-    """AEGIS rounds H-A / H-C / H-D / M-6, grammatical: does the email word at ``k`` (inside an opt-out phrase's
-    reach) ADD email to the opt-out? None = stop reading (an address, a preference). "text OR email me" / "nor" carry
-    the negation over; "and emailing" (the same verb form as "stop texting") too; "and email me" is a request, so are
-    "email me instead / if ...", "emails are fine", "my email is ..."."""
-    nxt = toks[k + 1] if k + 1 < len(toks) else ""
-    nxt2 = toks[k + 2] if k + 2 < len(toks) else ""
-    prev = toks[k - 1] if k > 0 else ""
-    if nxt in _ADDRESS_LABEL_NEXT or nxt in ("address", "are", "ok", "okay", "fine", "good", "works"):
-        return None
-    if prev in ("and", "or", "nor") and toks[k] in ("emailing", "mailing"):
-        return True                           # "stop texting me and emailing me, instead call me"
-    if prev in ("or", "nor"):
-        # AEGIS H-E: a parallel form carries the negation whatever follows ("do not text or email me please / if you
-        # can help it / only call"); a base-form "email" after a gerund ("stop texting me or email me if you must") is
-        # a request
-        phone = next((toks[i] for i in range(k - 1, -1, -1) if toks[i] in PHONE_SCOPE_WORDS), "")
-        return not (phone.endswith("ing") and toks[k] in ("email", "mail"))
-    if nxt in _PREFERENCE_AFTER or (nxt == "me" and nxt2 in _PREFERENCE_AFTER):
-        return None
-    if prev == "and":
-        return toks[k] in ("emailing", "emails", "mailing", "newsletters", "inbox")
-    return nxt != "me"
+_SCOPE_SEGMENT = re.compile(r"[\n\r.!?;,]+")
+# "Do not call, text or email me": a comma inside a list of channels is not a clause end
+_CHANNEL_LIST_COMMA = re.compile(r"\b(call|text|txt|message|email|e-mail|mail|sms)\s*,\s*(?=(?:or |and )?(?:call|text|txt|"
+                                 r"message|email|e-mail|mail|sms)\b)", re.IGNORECASE)
+_AFTER_EMAIL_REQUEST = frozenset({"instead", "if", "only", "rather", "anytime", "whenever", "is", "are", "fine", "ok",
+                                  "okay", "works", "address", "at"})
 
 
 def _phone_hit(toks: list[str], k: int) -> bool:
@@ -355,42 +337,94 @@ def _phone_hit(toks: list[str], k: int) -> bool:
     return not (nxt.isdigit() or nxt in _ADDRESS_LABEL_NEXT)
 
 
-def _phone_scoped(toks: list[str], i: int, j: int) -> bool:
-    """True only when the phrase toks[i:j] names the phone channel (in the phrase or within SCOPE_LOOKAHEAD
-    connector / channel words after it) and names no email channel in that same reach. Segments never cross a line
-    or a sentence end (``opt_out_scope``)."""
-    phone = email = False
+def _in_reach_email(toks: list[str], k: int) -> Optional[bool]:
+    """An email word met inside an opt-out phrase's reach (same clause, only connector / channel words between).
+    True: it is part of the opt-out ("texts and emails", "text or email me please", "texting and emailing me").
+    None: it is not clear (a request may follow — "stop texting me or email me if you must", "... and email me
+    instead"); the caller then reads the whole text. Grammatical, not keyword-guessing: after "or / nor / and", a
+    base-form "email" following a gerund ("texting") or followed by a request word starts a new, positive request."""
+    word = toks[k]
+    nxt = toks[k + 1] if k + 1 < len(toks) else ""
+    nxt2 = toks[k + 2] if k + 2 < len(toks) else ""
+    prev = toks[k - 1] if k > 0 else ""
+    if word in ("emailing", "mailing", "emails", "newsletters", "newsletter", "inbox", "mails", "mailings"):
+        return True if nxt not in _AFTER_EMAIL_REQUEST else None
+    # base form "email" / "mail"
+    request_after = nxt in _AFTER_EMAIL_REQUEST or (nxt == "me" and nxt2 in _AFTER_EMAIL_REQUEST)
+    if prev in ("or", "nor"):
+        phone = next((toks[i] for i in range(k - 1, -1, -1) if toks[i] in PHONE_SCOPE_WORDS), "")
+        if phone.endswith("ing"):
+            return None                       # "stop texting me or email me ..." — a request
+        return True                           # "do not text or email me (please / if you can help it)"
+    if prev == "and":
+        return None if request_after or nxt == "me" else True
+    return None if request_after else True
+
+
+def _scan_phrase(toks: list[str], i: int, j: int) -> tuple[bool, Optional[bool]]:
+    """(phone named, email named) for the phrase toks[i:j] and its reach (SCOPE_LOOKAHEAD connector / channel words
+    after it). email: True part of the opt-out, None unclear, False not named."""
+    phone, email = False, False
     for k in range(i, j):
         phone = phone or _phone_hit(toks, k)
-        email = email or toks[k] in EMAIL_SCOPE_WORDS
+        if toks[k] in EMAIL_SCOPE_WORDS:
+            email = True
     k, skipped = j, 0
     while k < len(toks) and skipped < SCOPE_LOOKAHEAD:
         t = toks[k]
         if t in EMAIL_SCOPE_WORDS:
-            adds = _email_word_adds(toks, k)
-            if adds is None:
-                break                         # an address or a preference ("email me instead", "emails are fine")
-            email = email or adds
+            got = _in_reach_email(toks, k)
+            if got is None:
+                return phone, (None if email is not True else True)
+            email = True
         elif t in PHONE_SCOPE_WORDS:
             phone = phone or _phone_hit(toks, k)
         elif t not in SCOPE_CONNECTORS:
             break
         k, skipped = k + 1, skipped + 1
-    return phone and not email
+    return phone, email
+
+
+def _phone_scoped(toks: list[str], i: int, j: int) -> bool:
+    phone, email = _scan_phrase(toks, i, j)
+    return phone and email is not True
+
+
+def _outside_email(whole: str) -> str:
+    """For an SMS-only opt-out whose text also has an email word outside the phrases' reach: ``"all"`` (an explicit
+    negated email phrase in one clause, or an adding word: "same for email", "email too"), ``"sms"`` (a request to be
+    reached by email: "email me instead", "you can call or email", "emails are fine", "my email is ..."), else
+    ``"ask"`` (unclear: SMS only, Andre decides)."""
+    clauses = [normalise(c).strip() for c in _SCOPE_SEGMENT.split(whole) if c.strip()]
+    if any(_NEG_EMAIL.search(c) for c in clauses):
+        return "all"
+    email_clauses = [c.split() for c in clauses if any(t in EMAIL_SCOPE_WORDS for t in c.split())]
+    if not email_clauses:
+        return "sms"
+    adds = any(set(c) & _EMAIL_ADDERS or " as well" in f" {' '.join(c)} " for c in email_clauses)
+    asks = any(set(c) & _EMAIL_PREFERENCE or re.search(r"\b(e ?mail me|e ?mail (address )?is|e ?mails? (is|are))\b",
+                                                       " ".join(c)) for c in email_clauses)
+    if adds and not asks:
+        return "all"
+    if asks and not adds:
+        return "sms"
+    return "ask"
 
 
 def opt_out_scope(text: Optional[str]) -> Optional[str]:
-    """The scope of the opt-out phrases in ``text`` (already the person's own words): ``"sms"`` when every phrase
-    found names the phone channel itself and no email channel ("stop texting", "remove my number", "unsubscribe from
-    texts"), ``"all"`` when at least one does not ("unsubscribe", "stop", "do not email me", "unsubscribe from texts and
-    emails", a typo of either, a bare "no"), None when no phrase is found. Each line and each sentence is read on its
-    own, so a phone word on the next line ("STOP / my number is ...") never narrows it."""
+    """The scope of the opt-out phrases in ``text`` (the person's own words): ``"all"``, ``"sms"``, ``"ask"`` or None
+    (no phrase). ``"all"``: a phrase that names no phone channel ("unsubscribe", "stop", "do not email me", a typo, a
+    bare "no"), or one whose reach also names email ("unsubscribe me from your texts and emails", "do not text or
+    email me please", "stop texting and emailing me"). ``"sms"``: every phrase names only the phone ("stop texting
+    me", "remove my number") and nothing else names email, or the rest asks to be reached by email. ``"ask"``: an SMS
+    opt-out with email mentioned in a way that is not clear — SMS only, Andre decides (AEGIS H-F: never guess silently).
+    Each clause (line, sentence, comma) is read on its own."""
     if not text:
         return None
     found, generic = False, False
     terms = [normalise(t).split() for t in OPT_OUT_TERMS]
-    whole = html_as_text(text)
-    for single, seg in [(False, whole)] + [(True, s) for s in _SEGMENT_SPLIT.split(whole)]:
+    whole = _CHANNEL_LIST_COMMA.sub(r"\1 or ", html_as_text(text))
+    for single, seg in [(False, whole)] + [(True, x) for x in _SCOPE_SEGMENT.split(whole)]:
         if not seg.strip():
             continue
         variants = {normalise(seg), normalise(seg.translate(_LEET))}
@@ -400,53 +434,46 @@ def opt_out_scope(text: Optional[str]) -> Optional[str]:
             if norm.strip() in OPT_OUT_SHORT:
                 found = generic = True
             if not single:
-                continue                    # the whole text only for a bare short reply; phrases are read per segment
-            for tt in terms:
-                n = len(tt)
-                for i in range(len(toks) - n + 1):
-                    if toks[i:i + n] == tt:
-                        found = True
-                        generic = generic or not _phone_scoped(toks, i, i + n)
-            for i in _typo_tokens(norm):
+                continue
+            hits = [(i, i + len(tt)) for tt in terms for i in range(len(toks) - len(tt) + 1)
+                    if toks[i:i + len(tt)] == tt] + [(i, i + 1) for i in _typo_tokens(norm)]
+            for i, j in hits:
                 found = True
-                generic = generic or not _phone_scoped(toks, i, i + 1)
+                phone, email = _scan_phrase(toks, i, j)
+                if not phone or email is True:
+                    generic = True
     if not found:
         return None
     if generic:
         return "all"
-    # AEGIS R3 / H-A: an email word elsewhere in the person's words widens an SMS-only opt-out when it ADDS email
-    # ("same for email", "email too", "texts as well as emails", "spamming my inbox") — never when the person asks to be
-    # reached by email ("email me instead", "I prefer email", "my email is a@b.com")
-    toks = normalise(whole).split()
-    if not any(t in EMAIL_SCOPE_WORDS for t in toks):
-        return "sms"
-    joined = " ".join(toks)
-    if _NEG_EMAIL.search(joined) or _NEG_TEXT_OR_EMAIL.search(joined):
-        return "all"                          # AEGIS M-3: an explicit email opt-out wins over a preference word
-    if any(p in toks for p in _EMAIL_PREFERENCE) or " email me " in f" {joined} " \
-            or re.search(r"\b(e ?mail|email address) (is|its|at)\b", " ".join(toks)):
-        return "sms"
-    return "all" if any(t in _EMAIL_WIDENERS for t in toks) else "sms"
+    return _outside_email(whole)              # "unclear" phrases are settled by the whole text, or asked
+
+
+def email_opt_out_decision(text: Optional[str], subject: Optional[str] = None) -> Optional[str]:
+    """Sweep A (AEGIS H1, M1 and the re-reviews of 1e709a0 .. b7cc067): what an email does to the contact's EMAIL
+    consent. ``"revoke"``: an exact opt-out or a typo of stop / unsubscribe in the person's own words (``split_reply``)
+    or the subject whose scope is ``all``, or strong opt-out wording in the unmarked quoted tail. ``"ask"``: an SMS
+    opt-out whose email scope is unclear — email consent is kept and Andre is asked (``EMAIL_OPT_OUT_UNCLEAR``).
+    ``"keep"``: an SMS-only opt-out ("stop texting me", "... email me instead"). None: no opt-out. Other words
+    elsewhere ("Cell: 310 ...", "Sent from my phone", a quoted "call our phone line", a subject "Re: Text us anytime",
+    a phone word on the next line) never narrow it. An exact opt-out whose phrase is not found in the text (a symbol,
+    a negation near a channel word) revokes email too: err toward honouring."""
+    own = strip_quoted(text or "")
+    if quoted_tail_opt_out(text) == "revoke":
+        return "revoke"
+    exact = any(t and opt_out_level(t) == "exact" for t in (own, subject))
+    typo = typo_opt_out(own) or typo_opt_out(subject)
+    if not exact and not typo:
+        return None
+    scopes = {opt_out_scope(own), opt_out_scope(subject)} - {None}
+    if not scopes or "all" in scopes:
+        return "revoke"
+    return "ask" if "ask" in scopes else "keep"
 
 
 def email_opt_out(text: Optional[str], subject: Optional[str] = None) -> bool:
-    """Sweep A (AEGIS H1, M1; re-review of 1e709a0): does an email revoke the contact's EMAIL consent? Yes when, in
-    the person's own words (``split_reply``: ``>`` lines and the quoted tail out, text typed below a marked quote IN)
-    or the subject, there is an exact opt-out or a typo of stop / unsubscribe, or the unmarked quoted tail carries
-    strong opt-out wording — unless EVERY opt-out phrase found names the phone itself and no email channel ("stop
-    texting me", "remove my number", "unsubscribe from texts"): that one stays an SMS opt-out. Other words elsewhere
-    ("Cell: 310 ...", "Sent from my phone", a quoted "call our phone line", a subject "Re: Text us anytime", a phone
-    word on the next line) never narrow it. An exact opt-out whose phrase is not found in the text (a symbol, a
-    negation near a channel word) revokes email too: err toward honouring."""
-    own = strip_quoted(text or "")
-    exact = any(t and opt_out_level(t) == "exact" for t in (own, subject))
-    typo = typo_opt_out(own) or typo_opt_out(subject)
-    if quoted_tail_opt_out(text) == "revoke":
-        return True
-    if not exact and not typo:
-        return False
-    scopes = {opt_out_scope(own), opt_out_scope(subject)} - {None}
-    return scopes != {"sms"}
+    """Does an email revoke EMAIL consent (``email_opt_out_decision`` is ``"revoke"``)?"""
+    return email_opt_out_decision(text, subject) == "revoke"
 
 
 def is_opt_out(text: str) -> bool:

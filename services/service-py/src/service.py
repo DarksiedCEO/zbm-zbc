@@ -1196,8 +1196,11 @@ class SupportService:
             resp = {"contact_id": contact["contact_id"]}
             # sweep A (AEGIS H1, M1): an opt-out received BY EMAIL revokes EMAIL consent unless every opt-out phrase in
             # the person's own words names the phone; a typo of unsubscribe / stop by email revokes it too
-            email_revoke = bool(channel == "email" and contact.get("email") and level
-                                and channels.email_opt_out(text, body.get("subject")))
+            decision = (channels.email_opt_out_decision(text, body.get("subject"))
+                        if channel == "email" and contact.get("email") and level else None)
+            email_revoke = decision == "revoke"
+            if decision == "ask":        # AEGIS H-F: an unclear email scope is never guessed: SMS only, Andre decides
+                effects.append(self._alert_effect("EMAIL_OPT_OUT_UNCLEAR", contact["contact_id"], rid))
             email_effect = {"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "email",
                             "via": "stop_by_email" if level == "exact" else "suspected_stop_by_email",
                             "request_id": rid, "address": contact.get("email")}

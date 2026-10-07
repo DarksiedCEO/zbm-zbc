@@ -352,3 +352,18 @@ Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "A
 |---|---|---|
 | H-E (High, regression) | "Do not text or email me please" / "... if you can help it" / "..., only call" revoked SMS only | "please" is not a preference word; after "or / nor" email is added unless a base-form "email" follows a gerund ("stop texting me or email me if you must" stays a request) |
 | M-8 | A preference word in a later sentence narrowed an explicit opt-out | The preference check runs only when no phrase already reached an email word; "...the emails please. I prefer you call." is `all` |
+
+### Sweep A follow-up — AEGIS re-review of b7cc067 (REVISE): decide only the clear cases
+
+The email scope of an SMS opt-out flipped on every round from d1477aa to b7cc067 (H-A, H-C, H-D, H-E, H-F): word-level
+guessing cannot settle every phrasing. Decision (`channels.email_opt_out_decision`): the code decides only the clear
+cases and asks Andre about the rest, so a wrong guess becomes an alert, never a silent error.
+
+| Outcome | When |
+|---|---|
+| `revoke` (email and SMS) | A phrase that names no phone ("unsubscribe", "stop", "do not email me"); a phrase whose own clause reach names email ("text or email me please", "texts and emails", "texting and emailing", "call, text or email" — a comma inside a channel list is not a clause end); an explicit negated email clause elsewhere; an adding word with email ("same for email", "email too"); strong wording in the unmarked quoted tail |
+| `keep` (SMS only) | Every phrase names only the phone and no email word appears, or the email clause is a request ("email me instead", "you can call or email", "emails are fine", "my email is ...", "call or email me", "or email me if you must") |
+| `ask` (SMS only + `EMAIL_OPT_OUT_UNCLEAR` alert) | An SMS-only opt-out with an email word that is neither adding nor a request, or both |
+
+"do not call", "dont call", "never call", "stop calling" added to the opt-out terms (phone scope). The corpus of every
+phrase from all rounds is pinned in `test_scope_corpus_all_rounds_at_once`.

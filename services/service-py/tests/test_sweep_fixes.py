@@ -550,3 +550,49 @@ def test_he_a_polite_or_qualified_text_or_email_opt_out_keeps_email():
         assert channels.email_opt_out(t) is True, t
     for t in ("Stop texting me or email me if you must", "stop texting me and email me instead"):
         assert channels.email_opt_out(t) is False, t
+
+
+# ------------------------------------------------------------------ AEGIS re-review of b7cc067 (REVISE): decide only clear
+
+def test_hf_a_request_to_be_called_or_emailed_keeps_email():
+    import channels
+    for t in ("Stop texting me, call or email me instead", "Please stop texting. Call or email if needed",
+              "stop texting me, you can call or email", "stop texting me, email or mail is fine"):
+        assert channels.email_opt_out_decision(t) == "keep", t
+
+
+def test_hf_unclear_email_scope_asks_andre(tmp_path):
+    import channels
+    assert channels.email_opt_out_decision("Do not text me, call or email me") == "keep"     # a request
+    for t in ("Stop texting me. Email or regular mail please", "Do not call, text or email me",
+              "stop texting me. emails"):
+        assert channels.email_opt_out_decision(t) in ("ask", "revoke"), t
+    assert channels.email_opt_out_decision("stop texting me. emails") == "ask"
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    h.ok(_email(h, "owner@acme.test", "stop texting me. emails"), 201)
+    assert _consents(h, cid) == {"email": "active", "sms": "revoked"}
+    assert any(a["code"] == "EMAIL_OPT_OUT_UNCLEAR" for a in h.svc.alerts.values())
+
+
+def test_scope_corpus_all_rounds_at_once():
+    import channels
+    revoke = ("Do not text or email me", "dont text or email me again", "Please don't text or email me anymore.",
+              "Do not text or email me please", "Dont text or email me if you can help it",
+              "Do not text or email me, only call", "please stop texting and emailing me",
+              "please stop texting me and emailing me, instead call me", "stop texting me, same for email",
+              "Stop texting me - that goes for email too", "unsubscribe me from your texts and emails",
+              "unsubscribe me from texts as well as emails", "stop sending me texts or emails",
+              "remove my number and my email", "stop texting me and spamming my inbox",
+              "Stop the texts and the emails please. I would rather not hear from you.",
+              "Stop the texts and the emails please. I prefer you call.", "unsubscribe", "STOP", "do not email me")
+    keep = ("stop texting me", "remove my number", "unsubscribe from texts", "please no more texts",
+            "Stop texting me. Email me instead.", "Please stop texting me, I prefer email.",
+            "stop texting me, my email is a@b.com", "stop texting me, only use email",
+            "stop texting me and email me instead", "Please stop texting and email me instead",
+            "Stop texting me or email me if you must", "stop the texts, emails are fine",
+            "Stop texting me, call or email me instead", "stop texting me, you can call or email")
+    for t in revoke:
+        assert channels.email_opt_out_decision(t) == "revoke", t
+    for t in keep:
+        assert channels.email_opt_out_decision(t) == "keep", t
