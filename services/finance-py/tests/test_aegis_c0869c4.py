@@ -23,10 +23,14 @@ from test_stripe_incoming import CANCEL, SUCCESS, _secret, make, paid_rr, sent
 from test_sweep_followup import _charge, _decide, _rct, _sweep, balanced
 
 
-def settle(h, tid, outcome, sha=None, request_id=None):
-    return h.post(f"/fin/v1/treasury/operations/{tid}/settlement",
-                  {"request_id": request_id or rid(), "content_sha256": sha or view_sha(h, tid), "outcome": outcome},
-                  andre=ANDRE_TOKEN)
+NOT_MOVED_REF = "stmt-2026-10-07#L42"
+
+
+def settle(h, tid, outcome, sha=None, request_id=None, bank_ref=NOT_MOVED_REF):
+    body = {"request_id": request_id or rid(), "content_sha256": sha or view_sha(h, tid), "outcome": outcome}
+    if bank_ref is not None:
+        body["bank_ref"] = bank_ref
+    return h.post(f"/fin/v1/treasury/operations/{tid}/settlement", body, andre=ANDRE_TOKEN)
 
 
 def view_sha(h, tid):
@@ -293,3 +297,61 @@ def test_m1_a_truncate_that_fails_is_reported_not_silent(tmp_path, monkeypatch):
     assert r.status_code == 503                                     # still fail closed
 
 
+
+
+# --------------------------------------------------------------------------------------------- M-N3 (AEGIS 25290ee)
+
+@pytest.mark.parametrize("bad", [None, "", "x" * 129, "stmt line 4", "<b>ref</b>", "ref\n2"])
+def test_mn3_not_moved_needs_valid_bank_evidence(hr, bad):
+    rf, tid, _ = refund_unknown(hr)
+    r = settle(hr, tid, "not_moved", bank_ref=bad)
+    assert r.status_code in (409, 422), r.text
+    if r.status_code == 409:
+        assert "BANK_EVIDENCE_REQUIRED" in r.text
+    assert op_of(hr, tid)["status"] == "bank_unknown"
+    assert hr.svc.db["refunds"][rf["refund_id"]]["status"] == "approved"
+    assert not hr.ledger.of_type("treasury_settled_by_andre")
+
+
+def test_mn3_not_moved_without_bank_ref_at_the_service_is_refused_with_a_reason(hr):
+    """The model already refuses a missing ref (422); the service refuses too, with a reason (defence in depth)."""
+    from service import Refused
+    rf, tid, _ = refund_unknown(hr)
+    with pytest.raises(Refused) as ei:
+        hr.svc.settle_treasury(rid(), tid, {"content_sha256": view_sha(hr, tid), "outcome": "not_moved",
+                                            "bank_ref": None, "note": None})
+    assert "BANK_EVIDENCE_REQUIRED" in str(ei.value.body)
+
+
+def test_mn3_moved_may_omit_bank_ref(hr):
+    rf, tid, _ = refund_unknown(hr)
+    assert hr.ok(settle(hr, tid, "moved", bank_ref=None))["operation"]["status"] == "done"
+
+
+def test_mn3_bank_ref_is_recorded_shown_and_required_for_repay(hr):
+    rf, tid, _ = refund_unknown(hr)
+    hr.ok(settle(hr, tid, "not_moved"))
+    ev = [e for e in hr.ledger.of_type("treasury_settled_by_andre")]
+    assert len(ev) == 1 and ev[0]["payload"]["bank_ref"] == NOT_MOVED_REF and ev[0]["payload"]["outcome"] == "not_moved"
+    shown = {o["op_id"]: o for o in hr.ok(hr.get("/fin/v1/treasury"))["settled_operations"]}
+    assert shown[tid]["settled_bank_ref"] == NOT_MOVED_REF and shown[tid]["settled_outcome"] == "not_moved"
+    assert hr.svc.db["refunds"][rf["refund_id"]]["not_moved_bank_ref"] == NOT_MOVED_REF
+    rp = hr.ok(hr.post(f"/fin/v1/refunds/{rf['refund_id']}/repay",
+                       {"request_id": rid(), "content_sha256": rf["content_sha256"]}, andre=ANDRE_TOKEN))
+    assert rp["attested"] == {"not_moved_op_id": tid, "bank_ref": NOT_MOVED_REF}
+    assert rp["refund"]["repaid_on_bank_ref"] == NOT_MOVED_REF
+    assert hr.ledger.of_type("refund_approved")[-1]["payload"]["not_moved_bank_ref"] == NOT_MOVED_REF
+
+
+def test_mn3_repay_refused_when_the_settlement_has_no_recorded_bank_ref(hr):
+    """A refund left payment_not_moved by a settlement recorded without evidence (e.g. before 25290ee M-N3)."""
+    rf, tid, _ = refund_unknown(hr)
+    hr.ok(settle(hr, tid, "not_moved"))
+    r = hr.svc.db["refunds"][rf["refund_id"]]
+    hr.svc.db["refunds"][rf["refund_id"]] = {k: v for k, v in r.items() if k != "not_moved_bank_ref"}
+    t = op_of(hr, tid)
+    hr.svc.db["treasury_ops"][tid] = {**t, "settled_bank_ref": None}
+    rp = hr.post(f"/fin/v1/refunds/{rf['refund_id']}/repay",
+                 {"request_id": rid(), "content_sha256": rf["content_sha256"]}, andre=ANDRE_TOKEN)
+    assert rp.status_code == 409 and "BANK_EVIDENCE_REQUIRED" in rp.text
+    assert hr.svc.db["refunds"][rf["refund_id"]]["status"] == "payment_not_moved"

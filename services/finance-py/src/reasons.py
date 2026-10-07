@@ -37,6 +37,8 @@ CATALOG: dict[str, str] = {
     "CARD_NOT_ALLOWED": "FIN-31", "COLLECT_BEFORE_PAY": "FIN-31",
     # Stripe incoming (ADR 0009 amendment, Oct 5 2026)
     "STRIPE_NOT_ALLOWED": "FIN-31",
+    # treasury settlement by Andre (AEGIS 25290ee M-N3)
+    "BANK_EVIDENCE_REQUIRED": "FIN-18",
 }
 MESSAGE_MAX = 200
 LINE_MAX = 400

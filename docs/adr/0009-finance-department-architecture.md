@@ -918,3 +918,9 @@ AEGIS closed C1, M-N2 and L-N1. M-N1 was only partly closed. The regression test
 | M1 carry-over | A truncate that failed after a failed write left the log refusing writes with no visible reason. | `RecordLog.fault` records the reason. `/fin/v1/integrity` turns red with `LOCAL_LOG_WRITE_FAULT: …`, and `/health` reports `log_write_fault: true` (a boolean only, since that route is open). Writes still refuse (fail closed). Test: `test_m1_a_truncate_that_fails_is_reported_not_silent`. |
 
 Suite: 611 (was 593). Live run: still 54/54.
+
+## Sweep follow-up 4 — AEGIS condition M-N3 of 25290ee: fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| M-N3 | `settle_treasury` `not_moved` accepted Andre's word alone. A wrong attestation would let `/refunds/{id}/repay` pay the client twice. | `not_moved` requires `bank_ref` on every op kind: the bank statement line or trace reference, 1-128 characters of `[A-Za-z0-9._:/#-]` (`models.BANK_REF_RE`). The model refuses a missing or bad value with 422. The service checks it again and refuses with 409 `BANK_EVIDENCE_REQUIRED` (FIN-18). `moved` keeps it optional. The ref is stored on the operation (`settled_bank_ref`), in the recorded `treasury_settled_by_andre` evidence, and on the refund (`not_moved_bank_ref`). `repay_refund` refuses (409 `BANK_EVIDENCE_REQUIRED`) unless the settlement it relies on was `not_moved` with that recorded ref. The repay response (`attested`), its `refund_approved` evidence, and `GET /fin/v1/treasury` (`settled_operations`) show the attested ref. Tests: `test_mn3_*` in `tests/test_aegis_c0869c4.py` (bad or missing refs refused, the service-level reason, `moved` without a ref, ref recorded and shown and required for repay, repay refused without a recorded ref). Existing settle tests now send a ref. Suite: 621. Live run: 54/54. |

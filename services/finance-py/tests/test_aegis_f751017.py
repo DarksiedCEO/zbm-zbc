@@ -163,6 +163,8 @@ def test_c1_the_window_runs_from_the_first_ask_ever_across_attempts(hr):
 
 def _settle(h, tid, outcome, andre=ANDRE_TOKEN, request_id=None, **kw):
     t = op_of(h, tid)
+    if outcome == "not_moved":
+        kw.setdefault("bank_ref", "stmt-2026-10-07#L7")          # AEGIS 25290ee M-N3: evidence required
     body = {"request_id": request_id or rid(), "content_sha256": t["content_sha256"], "outcome": outcome, **kw}
     return h.post(f"/fin/v1/treasury/operations/{tid}/settlement", body, andre=andre)
 

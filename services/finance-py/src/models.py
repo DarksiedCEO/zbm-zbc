@@ -507,12 +507,19 @@ class RefundRepay(Strict):
     content_sha256: Sha
 
 
+# AEGIS 25290ee M-N3: the bank evidence Andre attests a settlement by (a statement line, a bank trace / confirmation
+# number): 1-128 characters of a safe charset, no spaces or markup
+BANK_REF_RE = re.compile(r"^[A-Za-z0-9._:/#-]{1,128}$")
+BankRef = Annotated[str, StringConstraints(pattern=BANK_REF_RE.pattern)]
+
+
 class TreasurySettlement(Strict):
-    """Andre settles a treasury operation whose bank outcome is unknown (AEGIS f751017 M-N1)."""
+    """Andre settles a treasury operation whose bank outcome is unknown (AEGIS f751017 M-N1). ``bank_ref`` is
+    REQUIRED for ``not_moved`` (AEGIS 25290ee M-N3: it lets the client be paid again), optional for ``moved``."""
     request_id: Id
     content_sha256: Sha
     outcome: Literal["moved", "not_moved"]
-    bank_ref: Optional[Id] = None
+    bank_ref: Optional[BankRef] = None
     note: Optional[Note] = None
 
 

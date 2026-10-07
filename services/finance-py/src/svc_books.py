@@ -863,22 +863,34 @@ class BooksMixin:
                                f"{r['status']})")
             if body["content_sha256"] != r["content_sha256"]:
                 raise Conflict("refund changed since you read it (content_sha256 mismatch)")
+            prev = self.db["treasury_ops"].get(r.get("not_moved_op_id") or "") or {}
+            evidence = r.get("not_moved_bank_ref") or prev.get("settled_bank_ref")
+            if not evidence or prev.get("settled_outcome") != "not_moved" or \
+                    prev.get("settled_bank_ref") != evidence:
+                # AEGIS 25290ee M-N3: never pay a client again unless the bank evidence that the first payment did
+                # not move is recorded with the settlement
+                raise Refused("repay refused", [R.item(
+                    "BANK_EVIDENCE_REQUIRED", "the earlier payment's not_moved settlement has no recorded bank_ref; "
+                    "settle it with the bank evidence first")])
             n = int(r.get("payments", 1)) + 1
             tid = rid("trx", "refund", refund_id, n)
             if tid in self.db["treasury_ops"]:
                 raise Conflict("that refund payment already exists; it is never re-created")
             op = Op(self, f"rfdrp|{request_id}", "andre", refund_id)
             op.put("treasury_ops", tid, self._refund_payment_op(tid, r))
-            op.put("refunds", refund_id, {**r, "status": "approved", "payments": n, "payment_op_id": tid})
+            op.put("refunds", refund_id, {**r, "status": "approved", "payments": n, "payment_op_id": tid,
+                                          "repaid_on_bank_ref": evidence})
             op.record(derived_id("rfdrp", refund_id, n), "refund_approved", "andre", refund_id,
-                      {"refund_id": refund_id, "amount": r["amount"], "payment": n, "op_id": tid},
+                      {"refund_id": refund_id, "amount": r["amount"], "payment": n, "op_id": tid,
+                       "not_moved_op_id": prev["op_id"], "not_moved_bank_ref": evidence},
                       f"Andre approved paying a refund again (payment {n}): {r['amount']}")
             self._idem_add(op, key, h, {"refund": op.get("refunds", refund_id), "payment": None,
-                                        "ledger_event_ids": op.events, "request_id": request_id})
+                                        "ledger_event_ids": op.events, "request_id": request_id,
+                                        "attested": {"not_moved_op_id": prev["op_id"], "bank_ref": evidence}})
             self._commit(op)
         paid = self._execute_transfer(tid)
         resp = {"refund": self.db["refunds"][refund_id], "payment": paid, "ledger_event_ids": op.events,
-                "request_id": request_id}
+                "attested": {"not_moved_op_id": prev["op_id"], "bank_ref": evidence}, "request_id": request_id}
         with self.lock:
             return self._idem_mem(key, h, resp)
 

@@ -22,6 +22,7 @@ from clock import iso, parse_iso
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from intelligences import i01_journal as J
 from intelligences import i04_payout_run as I4
+from models import BANK_REF_RE
 from intelligences import i06_tax as I6
 from intelligences import i07_reconciliation as I7
 from intelligences import i08_treasury as T
@@ -379,7 +380,11 @@ class ReconMixin:
                     "account_title": C.DEPOSITS_ACCOUNT_TITLE, "custody_model": "own_deposit",
                     "open_operations": [{**o, "content_sha256": self.treasury_op_sha(o)}
                                         for o in self.db["treasury_ops"].values() if o["status"] in OPEN_OPS],
-                    "shortfalls": [x for x in self.db["shortfalls"].values() if x["status"] == "open"]}
+                    "shortfalls": [x for x in self.db["shortfalls"].values() if x["status"] == "open"],
+                    # AEGIS 25290ee M-N3: what Andre attested for each settled operation (the bank evidence)
+                    "settled_operations": [{k: o.get(k) for k in ("op_id", "kind", "amount", "status",
+                                                                  "settled_outcome", "settled_bank_ref", "settled_at")}
+                                           for o in self.db["treasury_ops"].values() if o.get("settled_by")]}
 
     def _reserved_sweeps(self, statuses: tuple, exclude: Optional[str] = None) -> Decimal:
         """AEGIS N17-2: sweeps already proposed/approved/in flight are spoken for; ``sweepable`` subtracts them."""
@@ -796,13 +801,20 @@ class ReconMixin:
             if op_id in self.xfer_in_flight:
                 raise Conflict("a bank call for this operation is in flight; settle it once it returns")
             outcome = body["outcome"]
+            bank_ref = body.get("bank_ref")
+            if outcome == "not_moved" and not (isinstance(bank_ref, str) and BANK_REF_RE.fullmatch(bank_ref)):
+                # AEGIS 25290ee M-N3: "not moved" releases the money for another payment (a refund can be paid
+                # again): Andre's word alone is not enough, the bank evidence he checked is recorded with it
+                raise Refused("settlement refused", [R.item(
+                    "BANK_EVIDENCE_REQUIRED", "settling as not_moved needs bank_ref: the bank statement line or "
+                    "trace reference showing the money did not move (1-128 of [A-Za-z0-9._:/#-])")])
             op = Op(self, f"trsettle|{request_id}", "andre", op_id)
             e = self.entries_by_id[t["entry_id"]]
             settled = {"settled_by": "andre", "settled_at": iso(self._now()), "settled_outcome": outcome,
-                       "settle_note": body.get("note")}
+                       "settle_note": body.get("note"), "settled_bank_ref": bank_ref}
             rev_id = None
             if outcome == "moved":
-                self._transfer_done(op, t, body.get("bank_ref"), **settled)
+                self._transfer_done(op, t, bank_ref, **settled)
             else:
                 memo = e["memo_code"]
                 rev = self._post(op, "zbc", J.reversal_lines(e), memo, {"kind": t["kind"], "id": op_id},
@@ -816,7 +828,8 @@ class ReconMixin:
                     # the client is still owed (F6 stands in 2050): the refund waits for Andre's repay
                     r = self.db["refunds"][t["ref_id"]]
                     op.put("refunds", r["refund_id"], {**r, "status": "payment_not_moved",
-                                                       "payment_not_moved_at": iso(self._now())})
+                                                       "payment_not_moved_at": iso(self._now()),
+                                                       "not_moved_op_id": op_id, "not_moved_bank_ref": bank_ref})
             for kind in ("xfer-unknown", "xfer-expired"):
                 bid = rid("brk", kind, op_id)
                 b = self.db["breaks"].get(bid)
@@ -826,7 +839,7 @@ class ReconMixin:
                         "settled_outcome": outcome}})
             op.record(derived_id("trset", op_id), "treasury_settled_by_andre", "andre", op_id,
                       {"op_id": op_id, "outcome": outcome, "entry_id": e["entry_id"], "reversal_entry_id": rev_id,
-                       "bank_ref": body.get("bank_ref")},
+                       "bank_ref": bank_ref},
                       f"Andre settled a {t['kind']} whose bank outcome was unknown: {outcome}")
             resp = {"operation": op.get("treasury_ops", op_id), "reversal_entry_id": rev_id,
                     "ledger_event_ids": op.events, "request_id": request_id}
