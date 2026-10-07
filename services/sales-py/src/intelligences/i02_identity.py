@@ -34,6 +34,18 @@ def email(raw: str) -> Optional[str]:
     return f"{local}@{dom}"
 
 
+_NAMED = re.compile(r"^[^<>]{0,200}<\s*([^<>\s]{3,254})\s*>\s*$")
+
+
+def sender_email(raw) -> Optional[str]:
+    """A reply's From (influencer-py's, AEGIS R1-M4): a bare address or ``Name <addr>``; None when no address can be
+    read (never an error)."""
+    if not isinstance(raw, str):
+        return None
+    m = _NAMED.fullmatch(raw.strip())
+    return email(m.group(1) if m else raw)
+
+
 def phone(raw: str) -> Optional[str]:
     v = re.sub(r"[\s().-]", "", raw.strip())
     if re.fullmatch(r"[0-9]{10}", v):

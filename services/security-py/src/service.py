@@ -56,7 +56,9 @@ DENIED_LIMIT, DENIED_WINDOW_S = 3, 600
 APPROVAL_FAIL_LIMIT, APPROVAL_FAIL_WINDOW_S = 3, 600
 RECENT_ACCESS = 1000
 ALL = "all"
-JOBS = ("rotate-signing-key", "compliance-report", "rotation-due", "findings-due", "alerts-retry", "integrity")
+JOBS = ("rotate-signing-key", "compliance-report", "rotation-due", "findings-due", "alerts-retry", "integrity",
+        "hold-release-retry")
+RELEASE_ATTEMPTS = 3        # sweep A: in-request tries of an adapter release; the hold-release-retry job keeps trying
 
 
 def _maybe(exc: Unavailable) -> Unavailable:
@@ -137,6 +139,7 @@ class SecurityService:
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
         self._last_integrity_try = 0.0
         self._outbox: list[AlertMessage] = []
+        self._releasing: set = set()        # (hold_id, system) releases in flight (AEGIS M3), memory only
         self._unrecorded_alerted: set = set()
         self._em_key = os.urandom(32)
         self._em_used: dict[str, int] = {}
@@ -313,11 +316,17 @@ class SecurityService:
     def _a_hold_recorded(self, d, at):
         self.holds[d["hold_id"]] = {"hold_id": d["hold_id"], "systems": d["systems"], "subject_refs": d["subject_refs"],
                                     "outcome": d["outcome"], "status": "active", "recorded_at": at,
-                                    "released_at": None}
+                                    "released_at": None, "release_pending": []}
 
     def _a_hold_released(self, d, at):
         h = self.holds[d["hold_id"]]
         h["status"], h["released_at"] = "released", at
+        # sweep A: the systems still to release externally (a line written before this field: released before it)
+        h["release_pending"] = list(d.get("release_pending") or [])
+
+    def _a_hold_release_confirmed(self, d, at):
+        h = self.holds[d["hold_id"]]
+        h["release_pending"] = [s for s in h.get("release_pending", []) if s != d["system"]]
 
     def _a_incident_opened(self, d, at):
         self.incidents[d["incident_id"]] = {
@@ -688,7 +697,7 @@ class SecurityService:
                         + expires.to_bytes(8, "big"), hashlib.sha256).digest()
 
     def _em_challenge(self, action_sha: str) -> tuple[str, bytes]:
-        nonce, expires = os.urandom(16), int(time.time()) + CHALLENGE_TTL_S
+        nonce, expires = os.urandom(16), int(self.now().timestamp()) + CHALLENGE_TTL_S   # sweep A: self.clock
         raw = nonce + expires.to_bytes(8, "big") + self._em_mac(action_sha, nonce, expires)
         return "em-" + webauthn.b64url_encode(raw), raw
 
@@ -702,7 +711,7 @@ class SecurityService:
         nonce, expires, mac = raw[:16], int.from_bytes(raw[16:24], "big"), raw[24:]
         if not hmac.compare_digest(mac, self._em_mac(action_sha, nonce, expires)):
             return "APPROVAL_ACTION_MISMATCH", None      # forged, or issued for another action/body
-        now = int(time.time())
+        now = int(self.now().timestamp())
         for k in [k for k, exp in self._em_used.items() if exp <= now]:
             del self._em_used[k]
         if expires <= now:
@@ -749,7 +758,7 @@ class SecurityService:
             else:
                 code, raw = self._em_check(appr["challenge_id"], self.action_sha(action, target, body))
             if code is None:     # R4-3: a MAC-valid attempt uses the challenge up, whatever happens next
-                self._em_used[appr["challenge_id"]] = int(time.time()) + CHALLENGE_TTL_S + 60
+                self._em_used[appr["challenge_id"]] = int(self.now().timestamp()) + CHALLENGE_TTL_S + 60
             ch = None if code else {"challenge": raw, "kind": "get", "used": False, "expires": float("inf"),
                                     "action_sha": self.action_sha(action, target, body), "em": appr["challenge_id"]}
             if code:
@@ -1340,26 +1349,44 @@ class SecurityService:
             outcome = {}
             for sysname in systems:
                 adapter = self.ports.preservation.get(sysname)
-                outcome[sysname] = "preserved" if adapter is not None and adapter.preserve(
-                    body["hold_id"], body["subject_refs"]) else "not_connected"
+                if adapter is None:
+                    outcome[sysname] = "not_connected"
+                    continue
+                try:
+                    ok = adapter.preserve(body["hold_id"], body["subject_refs"])
+                except Exception:  # noqa: BLE001 - sweep A: a raising adapter is a failed preservation, never a 500
+                    ok = None
+                outcome[sysname] = "preserved" if ok is True else ("not_connected" if ok is False else "failed")
             self._commit("hold_recorded", {"hold_id": body["hold_id"], "systems": systems,
                                            "subject_refs": sorted(set(body["subject_refs"])), "outcome": outcome,
                                            "actor": caller, "request_id": rk,
                                            "request_sha": request_sha(body), "_obj": body["hold_id"]}, caller)
-            if any(v != "preserved" for v in outcome.values()):
+            if any(v == "not_connected" for v in outcome.values()):
                 self._open_incident("sev3", "PRESERVATION_NOT_CONNECTED", f"hold:{body['hold_id']}"[:140], DETECTOR)
+            if any(v == "failed" for v in outcome.values()):      # AEGIS L6: an adapter that raised
+                self._open_incident("sev3", "PRESERVATION_FAILED", f"hold:{body['hold_id']}"[:140], DETECTOR)
             out = self._hold_answer(self.holds[body["hold_id"]])
         self.flush_alerts()
         return out
 
     @staticmethod
     def _hold_answer(h: dict) -> dict:
-        missing = sorted(s for s, v in h["outcome"].items() if v != "preserved")
-        return {"hold_id": h["hold_id"], "delivered": not missing,
-                "reason": "" if not missing else "not connected to Cybersecurity (22) yet: " + ", ".join(missing),
-                "reference": derived_id("hld", h["hold_id"]), "systems": dict(h["outcome"]), "status": h["status"]}
+        missing = sorted(s for s, v in h["outcome"].items() if v == "not_connected")
+        failed = sorted(s for s, v in h["outcome"].items() if v not in ("preserved", "not_connected"))
+        reason = "; ".join(x for x in (
+            "not connected to Cybersecurity (22) yet: " + ", ".join(missing) if missing else "",
+            "the preservation adapter failed: " + ", ".join(failed) if failed else "") if x)
+        out = {"hold_id": h["hold_id"], "delivered": not missing and not failed, "reason": reason,
+               "reference": derived_id("hld", h["hold_id"]), "systems": dict(h["outcome"]), "status": h["status"]}
+        if h["status"] == "released":
+            out["release_pending"] = list(h.get("release_pending") or [])
+        return out
 
     def release_hold(self, caller: str, hold_id: str, body: dict) -> dict:
+        """Sweep A: the release is COMMITTED first, then each preserved system is released externally, outside the
+        lock, retried until the adapter confirms (RELEASE_ATTEMPTS here, then the hold-release-retry job); each
+        confirmation is its own line (``hold_release_confirmed``). Before, the external release ran first, under the
+        lock: a ledger failure then answered 503 with the data no longer preserved and the hold still ``active``."""
         with self.lock:
             self._gate()
             self._check_caller(caller)
@@ -1372,12 +1399,57 @@ class SecurityService:
                 raise NotFound(R("HOLD_NOT_FOUND"))
             if h["status"] != "active":
                 raise Conflict(R("HOLD_RELEASED"))
-            for sysname, adapter in self.ports.preservation.items():
-                if h["outcome"].get(sysname) == "preserved":
-                    adapter.release(hold_id)
-            self._commit("hold_released", {"hold_id": hold_id, "actor": caller, "request_id": rk,
-                                           "request_sha": request_sha(body), "_obj": hold_id}, caller)
-            return self._hold_answer(h)
+            pending = sorted(s for s, v in h["outcome"].items() if v == "preserved")
+            self._commit("hold_released", {"hold_id": hold_id, "release_pending": pending, "actor": caller,
+                                           "request_id": rk, "request_sha": request_sha(body), "_obj": hold_id},
+                         caller)
+        self.retry_hold_releases(hold_id)
+        with self.lock:
+            return self._hold_answer(self.holds[hold_id])
+
+    def retry_hold_releases(self, hold_id: Optional[str] = None) -> dict:
+        """Release externally every committed release not yet confirmed (outside the lock; an adapter that raises or
+        answers anything but True is unconfirmed and tried again later). Release is idempotent on the adapter.
+
+        AEGIS M3: a (hold, system) release in flight (the request's own tries, or the hold-release-retry job) is
+        claimed under the lock and skipped by any concurrent caller; a confirmation is committed only while the system
+        is still pending (re-checked under the lock), so it is never committed twice."""
+        with self.lock:
+            todo = [(hid, s) for hid, h in sorted(self.holds.items()) if h["status"] == "released"
+                    and (hold_id is None or hid == hold_id) for s in h.get("release_pending") or ()
+                    if (hid, s) not in self._releasing]
+            self._releasing |= set(todo)
+        try:
+            return self._release_external(todo)
+        finally:
+            with self.lock:
+                self._releasing -= set(todo)
+
+    def _release_external(self, todo: list) -> dict:
+        confirmed, unconfirmed = [], []
+        for hid, sysname in todo:
+            adapter = self.ports.preservation.get(sysname)
+            ok = False
+            for _ in range(RELEASE_ATTEMPTS if adapter is not None else 0):
+                try:
+                    ok = adapter.release(hid) is True
+                except Exception:  # noqa: BLE001 - a raising adapter is an unconfirmed release, tried again later
+                    ok = False
+                if ok:
+                    break
+            (confirmed if ok else unconfirmed).append((hid, sysname))
+        recorded = 0
+        for hid, sysname in confirmed:
+            with self.lock:
+                if sysname not in (self.holds[hid].get("release_pending") or ()):
+                    continue                # already confirmed: never a second line
+                try:
+                    self._commit("hold_release_confirmed", {"hold_id": hid, "system": sysname, "actor": INTERNAL},
+                                 INTERNAL)
+                    recorded += 1
+                except Unavailable:
+                    break               # confirmed again (idempotently) at the next try
+        return {"confirmed": recorded, "unconfirmed": [f"{h}:{s}" for h, s in unconfirmed]}
 
     # ================================================================================================ incidents
 
@@ -1617,6 +1689,10 @@ class SecurityService:
             return {"job": name, "integrity": res, "ledger_valid": ledger_ok}
         if name == "compliance-report":
             return self._compliance_report(body)
+        if name == "hold-release-retry":
+            with self.lock:
+                self._gate()
+            return {"job": name, **self.retry_hold_releases()}
         with self.lock:
             self._gate()
             prev = self._idem("scheduler", f"{name}:{body['request_id']}", body)

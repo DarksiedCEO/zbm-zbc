@@ -17,6 +17,8 @@ from fastapi.testclient import TestClient
 
 import api
 import config as config_mod
+from datetime import datetime, timezone
+
 from clock import FixedClock
 from ledger import LedgerConflict, LedgerNotRecorded, LedgerQueryFailed, Recorder, payload_sha256
 from ports import Ports
@@ -198,6 +200,10 @@ def base_env(tmp, **over) -> dict:
     return env
 
 
+# sweep A: every harness runs on a fixed clock unless a test passes its own (no test depends on the wall clock)
+DEFAULT_NOW = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
+
+
 class Harness:
     def __init__(self, tmp, data_dir: Optional[str] = None, ledger: Optional[FakeLedger] = None,
                  clock: Optional[FixedClock] = None, ports: Optional[Ports] = None, kms=None, **env_over):
@@ -205,11 +211,11 @@ class Harness:
         self.env = base_env(tmp, SEC_DATA_DIR=data_dir, **env_over)
         self.settings = config_mod.load(self.env)
         self.ledger = ledger or FakeLedger()
-        self.clock = clock
+        self.clock = clock or FixedClock(DEFAULT_NOW)
         self.ports = ports or Ports.default()
         self.kms = kms or api.build_kms(self.settings)
         self.svc = SecurityService(self.settings, Recorder(self.ledger), RecordLog(self.settings.data_dir),
-                                   SealedStore(self.settings.data_dir), self.kms, self.ports, clock)
+                                   SealedStore(self.settings.data_dir), self.kms, self.ports, self.clock)
         self.client = TestClient(api._wrap(api.create_app(self.svc, self.settings)), raise_server_exceptions=False)
         self.keys: list[Authenticator] = []
 

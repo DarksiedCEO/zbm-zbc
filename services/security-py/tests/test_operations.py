@@ -33,12 +33,12 @@ def freeze(hk, kind, target, code="TEST_FREEZE"):
 def test_mint_and_verify_a_service_token(hk):
     t = hk.ok(hk.post("/sec/v1/identity/tokens", {"audience": "legal_37"}, caller="finance_31"), 201)
     jwks = tokens.jwks_map(hk.ok(hk.get("/sec/v1/identity/jwks", caller="legal_37"))["keys"])
-    v = tokens.verify(t["token"], jwks, "legal_37", int(datetime.now(timezone.utc).timestamp()))
+    v = tokens.verify(t["token"], jwks, "legal_37", int(hk.clock.now().timestamp()))
     assert v.subject == "finance_31" and v.scope == ()
-    assert t["expires_at"] - int(datetime.now(timezone.utc).timestamp()) <= tokens.MAX_TTL_S
+    assert t["expires_at"] - int(hk.clock.now().timestamp()) <= tokens.MAX_TTL_S
     assert hk.ledger.of_type("credential_issued")
     with pytest.raises(tokens.TokenInvalid) as e:
-        tokens.verify(t["token"], jwks, "compliance_38", int(datetime.now(timezone.utc).timestamp()))
+        tokens.verify(t["token"], jwks, "compliance_38", int(hk.clock.now().timestamp()))
     assert e.value.code == "TOKEN_AUDIENCE_REFUSED"
 
 
@@ -70,7 +70,7 @@ def test_token_tampering(hk, mutate, code):
     t = hk.ok(hk.post("/sec/v1/identity/tokens", {"audience": "legal_37"}, caller="finance_31"), 201)["token"]
     jwks = tokens.jwks_map(hk.svc.jwks()["keys"])
     with pytest.raises(tokens.TokenInvalid) as e:
-        tokens.verify(mutate(t), jwks, "legal_37", int(datetime.now(timezone.utc).timestamp()))
+        tokens.verify(mutate(t), jwks, "legal_37", int(hk.clock.now().timestamp()))
     assert e.value.code == code
 
 
@@ -266,7 +266,7 @@ def test_same_detection_twice_is_one_incident(hk):
 # ------------------------------------------------------------------------------------------------ findings
 
 def scan(hk, source, findings, when=None):
-    when = when or datetime.now(timezone.utc)
+    when = when or hk.clock.now()
     return hk.post("/sec/v1/scans", {"request_id": rid(), "source": source, "tool": "pip-audit@2.9.0",
                                      "scanned_at": when.isoformat(), "findings": findings}, caller="scheduler")
 
@@ -289,7 +289,7 @@ def test_scan_opens_and_fixes_findings(hk):
 def test_sla_by_severity(hk):
     hk.ok(scan(hk, "python:legal-py", [F1, F2]), 201)
     due = {f["severity"]: f["due_by"] for f in hk.svc.findings.values()}
-    today = datetime.now(timezone.utc).date()
+    today = hk.clock.now().date()
     assert due["critical"] == (today + timedelta(days=7)).isoformat()
     assert due["low"] == (today + timedelta(days=180)).isoformat()
 
@@ -297,7 +297,7 @@ def test_sla_by_severity(hk):
 def test_accept_risk_is_bounded_and_needs_passkey(hk):
     hk.ok(scan(hk, "python:legal-py", [F2]), 201)
     fid = next(iter(hk.svc.findings))
-    today = datetime.now(timezone.utc).date()
+    today = hk.clock.now().date()
     too_long = {"request_id": rid(), "until": (today + timedelta(days=91)).isoformat(), "reason_code": "NO_FIX_YET"}
     assert hk.post(f"/sec/v1/findings/{fid}/accept", hk.approved("RISK_ACCEPT", fid, too_long)).status_code == 422
     ok = {"request_id": rid(), "until": (today + timedelta(days=30)).isoformat(), "reason_code": "NO_FIX_YET"}
@@ -307,13 +307,13 @@ def test_accept_risk_is_bounded_and_needs_passkey(hk):
 
 def test_scans_only_from_scheduler_or_dashboard(hk):
     r = hk.post("/sec/v1/scans", {"request_id": rid(), "source": "python:x", "tool": "pip-audit@1",
-                                  "scanned_at": datetime.now(timezone.utc).isoformat(), "findings": []},
+                                  "scanned_at": hk.clock.now().isoformat(), "findings": []},
                 caller="finance_31")
     assert r.status_code == 403
 
 
 def test_future_scan_refused(hk):
-    assert scan(hk, "python:x", [], datetime.now(timezone.utc) + timedelta(hours=1)).status_code == 422
+    assert scan(hk, "python:x", [], hk.clock.now() + timedelta(hours=1)).status_code == 422
 
 
 def test_overdue_findings_job(tmp_path):

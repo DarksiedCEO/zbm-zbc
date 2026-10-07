@@ -15,6 +15,8 @@ The deciding rules are in intelligences/ (deterministic, one job each).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
 import threading
@@ -37,6 +39,11 @@ from svc_outreach import OutreachMixin
 INTEGRITY_RETRY_S = 15
 FORCED_MIN_S = 10
 JOBS = ("send-queue", "warmup-reset", "handoff-retry", "stale-leads", "integrity")
+INTERNAL = "sales"
+
+
+def _parse_line(line: bytes) -> dict:
+    return json.loads(line)
 
 
 def _maybe(exc: Unavailable) -> Unavailable:
@@ -92,6 +99,11 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
         self._last_integrity_try = 0
         self._own_pending: Optional[bytes] = None
         self.handoff_attempts: dict[str, dict] = {}
+        # /audit/evidence cache (bizdev-py AEGIS round 7): lines parsed so far, keyed by log length; never touched
+        # under self.lock
+        self._evidence_lock = threading.Lock()
+        self._evidence_cache: dict = {"n": 0, "epoch": None, "lines": []}
+        self._closed = False
         self._init_pricebook()
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
@@ -100,6 +112,20 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
                                "with: every suppression, consent and dedupe hash would stop matching. Refusing to "
                                "start; restore the original key")
         self.verify_integrity(force=True)
+
+    def close(self) -> None:
+        """Sweep A (bizdev-py's ``close()``): a closed instance is inert. Its log refuses every write, every commit is
+        refused 503 SERVICE_CLOSED, ``verify_integrity`` does no ledger I/O, and the job and audit routes answer 503
+        SERVICE_CLOSED. Taken under the service lock, so it never interleaves with a commit. The data-directory flock
+        is the process's (api.build holds it), not the instance's: it is not released here."""
+        with self.lock:
+            self._closed = True
+            with self.log.lock:
+                self.log.closed = True
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
 
     # ================================================================================================ plumbing
 
@@ -113,25 +139,42 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
         payload = {"epoch": epoch, "seq": seq, "line_sha256": line_sha}
         return derived_id("anc", epoch, seq, line_sha), payload
 
-    def _commit(self, kind: str, data: dict, actor: str, evidence: Optional[tuple] = None) -> dict:
+    def _commit(self, kind: str, data: dict, actor: str, evidence=None) -> dict:
         """Typed evidence first (when the change needs one), then the ledger anchor, then the local log, then
-        memory (fail closed at every step). ``evidence`` = (event_type, subject_id, payload, id_parts): the payload
-        carries ids and hashes only, never a raw email, phone or name, and no time (a retry records the same
-        event, which the ledger answers 200)."""
+        memory (fail closed at every step). ``evidence`` = (event_type, subject_id, payload, id_parts) or a list of
+        them: the payload carries ids and hashes only, never a raw email, phone or name, and no time (a retry with
+        the same payload records the same event, which the ledger answers 200)."""
         with self.lock:
+            if self._closed:
+                raise Unavailable(R("SERVICE_CLOSED"))
             if not self.integrity["ok"]:
                 raise Unavailable(R("INTEGRITY_UNVERIFIED"))
             at = iso(self.now())
             data = {**data, "actor": data.get("actor", actor)}   # the anchor's actor is read back from the line
             actor = data["actor"]
+            # Sweep A R6-M1 (bizdev-py's round-6 pattern): every typed evidence event carries the request key and the
+            # log seq it is meant for, its id includes the payload's hash, and the line names it (``ledger_evidence``: a
+            # lead's own ``evidence`` key is another thing).
+            # Record-first stays; an event whose line never reached the anchored log is ``attempted`` (never
+            # ``committed``) in /audit/evidence, and a retry after the state changed gets a NEW id instead of a
+            # lasting 409 (LedgerConflict -> 503 for ever).
+            seq = len(self.log) + 1
+            rk = self._evidence_rk(data.get("request_id") or f"{INTERNAL}|{kind}")
+            named = []
             for event_type, subject_id, payload, id_parts in (evidence if isinstance(evidence, list) else
                                                               [evidence] if evidence is not None else []):
+                payload = {**payload, "rk": rk, "seq": seq}
+                eid = derived_id("evd", event_type, *id_parts, payload_sha256(payload))
                 try:
-                    self.rec.record(derived_id("evd", event_type, *id_parts), event_type, actor, subject_id, payload,
-                                    f"{event_type} {subject_id}")
+                    self._record_twice(eid, event_type, actor, subject_id, payload, f"{event_type} {subject_id}")
                 except LedgerRecordError:
                     raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+                named.append({"event_id": eid, "event_type": event_type, "subject_id": subject_id, "payload": payload})
+            if named:
+                data["ledger_evidence"] = named
             rec, line = self.log.prepare(kind, at, data)
+            if rec["seq"] != seq:                           # the log moved under us: never anchor a mislabelled line
+                raise Unavailable(R("STORE_UNAVAILABLE"))
             line_sha = sha256_hex(line)
             epoch = self.log.epoch or line_sha[:16]
             eid, payload = self._anchor_ids(epoch, rec["seq"], line_sha)
@@ -163,15 +206,25 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
             self._apply(kind, data, at)
             return rec
 
-    def _anchor(self, eid: str, actor: str, epoch: str, payload: dict, kind: str, seq: int) -> None:
-        """Record the anchor; one retry of the SAME event when the answer was lost (the ledger is idempotent on
-        identical content, so the retry either records it or confirms it is there)."""
+    def _evidence_rk(self, request_key: str) -> str:
+        """The request key as the ledger sees it (AEGIS L4): a keyed HMAC under the PII hash key
+        (SALES_PII_HASH_KEY_FILE, whose fingerprint is bound in the log at first start: another key refuses to start),
+        never the raw key — a request id is the caller's, and may carry anything."""
+        return "rk-" + hmac.new(self.pii_key, b"sales evidence rk\x00" + request_key.encode("utf-8", "surrogatepass"),
+                                hashlib.sha256).hexdigest()[:40]
+
+    def _record_twice(self, eid, event_type, actor, subject, payload, summary) -> None:
+        """One retry of the SAME event when the answer was lost (the ledger is idempotent on identical content, so
+        the retry either records it or confirms it is there)."""
         try:
-            self.rec.record(eid, "log_anchor", actor, f"log:{epoch}", payload, f"{kind} #{seq}")
+            self.rec.record(eid, event_type, actor, subject, payload, summary)
         except LedgerRecordError as exc:
             if exc.took_effect is False or isinstance(exc, LedgerConflict):
                 raise
-            self.rec.record(eid, "log_anchor", actor, f"log:{epoch}", payload, f"{kind} #{seq}")
+            self.rec.record(eid, event_type, actor, subject, payload, summary)
+
+    def _anchor(self, eid: str, actor: str, epoch: str, payload: dict, kind: str, seq: int) -> None:
+        self._record_twice(eid, "log_anchor", actor, f"log:{epoch}", payload, f"{kind} #{seq}")
 
     def _drop_pending(self) -> bool:
         """True when the pending line is certainly gone. Otherwise writes stop until the next integrity check."""
@@ -199,6 +252,8 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
         return {**data, "actor": actor, "request_id": rk, "request_sha": request_sha(body), "_obj": obj}
 
     def _gate(self) -> None:
+        if self._closed:
+            raise Unavailable(R("SERVICE_CLOSED"))
         if not self.verify_integrity()["ok"]:
             raise Unavailable(R("INTEGRITY_UNVERIFIED"))
 
@@ -230,6 +285,9 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
         """Complete or set aside the pending line, then check every local line's anchor on the ledger, and that
         the ledger holds no anchor this log lacks (a truncated, rolled back, deleted or replaced log)."""
         with self.lock:
+            if self._closed:                              # sweep A: no ledger I/O from a closed instance
+                return {"ok": False, "checked_at": self.integrity.get("checked_at"),
+                        "problem": "this service instance is closed"}
             mono = time.monotonic()
             if not force and (self.integrity["ok"] or mono - self._last_integrity_try < INTEGRITY_RETRY_S):
                 return dict(self.integrity)
@@ -391,6 +449,8 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
     def run_job(self, name: str, body: dict) -> dict:
         if name not in JOBS:
             raise NotFound(R("JOB_UNKNOWN"))
+        if self._closed:
+            raise Unavailable(R("SERVICE_CLOSED"))
         if name == "integrity":
             res = self.verify_integrity(force=True, always=True)   # the job always reads the ledger
             return {"job": name, "integrity": res, "ledger_valid": self.rec.client.verify()}
@@ -415,6 +475,9 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
     def audit_export(self, since_seq: int, limit: int) -> dict:
         """The local log, personal data minimised (i12): emails and phones as keyed hashes, names and notes as
         SHA-256."""
+        with self.lock:
+            if self._closed:
+                raise Unavailable(R("SERVICE_CLOSED"))
         out = []
         for r in self.log.iter_records(max(1, since_seq)):
             d = {k: v for k, v in r["data"].items() if k not in ("_obj", "request_sha")}
@@ -422,3 +485,85 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
             if len(out) >= limit:
                 break
         return {"events": out, "log_length": len(self.log)}
+
+    def _department_entries(self, event_type: Optional[str] = None) -> list[dict]:
+        """This department's ledger entries (of one event type, if given): the ledger's filtered, paged read when the
+        client has it (``entries_filtered``), else the whole ledger filtered here (an older client or a test fake)."""
+        client = self.rec.client
+        paged = getattr(client, "entries_filtered", None)
+        if paged is not None:
+            return paged(DEPARTMENT, event_type)
+        return [e for e in client.entries() if e.get("department") == DEPARTMENT
+                and (event_type is None or e.get("event_type") == event_type)]
+
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+        """``/sales/v1/audit/evidence`` (sweep A R6-M1, bizdev-py's round-6 view) — every typed evidence event this
+        department holds on the ledger, each marked:
+
+        * ``committed`` — a local log line with seq ``s`` names the event (``data.ledger_evidence``), the ledger holds that
+          line's anchor (``log_anchor`` for epoch, ``s`` and the line's SHA-256), the event's payload carries
+          ``rk`` = the line's request key and ``seq`` = ``s``, and the ledger's ``payload_sha256`` is that payload's;
+        * ``attempted`` — anything else: recorded first (record-first commit), but its state change never reached the
+          anchored log (a refused or failed commit, or a retry that was later committed under another seq).
+
+        Unanchored evidence = attempted, not done. Under the service lock only the raw lines not yet seen are copied;
+        they are parsed and hashed outside it and cached by log length. Eventually consistent: a commit in flight
+        while it is read may show as ``attempted``; re-read to settle."""
+        with self._evidence_lock:
+            with self.lock:
+                if self._closed:
+                    raise Unavailable(R("SERVICE_CLOSED"))
+                cache = self._evidence_cache
+                n = len(self.log)
+                if n < cache["n"]:                       # never within one instance (append-only), but stay correct
+                    cache = self._evidence_cache = {"n": 0, "epoch": None, "lines": []}
+                new = self.log.raw_lines(cache["n"])
+            for raw in new:                              # outside the service lock: parse and hash only new lines
+                r = _parse_line(raw)
+                line_sha = sha256_hex(raw)
+                if cache["epoch"] is None:
+                    cache["epoch"] = line_sha[:16]
+                evs = r["data"].get("ledger_evidence")
+                if evs:
+                    raw_rk = r["data"].get("request_id") or f"{INTERNAL}|{r['kind']}"
+                    # AEGIS re-review N2: a line written before L4 carries the raw request key as rk; it is the same
+                    # anchored line, so it still counts — the row shows only the keyed form
+                    cache["lines"].append((r["seq"], line_sha, (self._evidence_rk(raw_rk), raw_rk), r["kind"], evs))
+                cache["n"] += 1
+            epoch, lines, n_lines = cache["epoch"], list(cache["lines"]), cache["n"]
+        try:                                             # outside the service lock (AEGIS M4: filtered, paged)
+            if event_type is None:
+                mine = self._department_entries()
+                anchor_rows = [e for e in mine if e.get("event_type") == "log_anchor"]
+            else:
+                anchor_rows = self._department_entries("log_anchor")
+                mine = self._department_entries(event_type) if event_type != "log_anchor" else []
+        except LedgerQueryFailed:
+            raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
+        anchors = {e.get("event_id"): e for e in anchor_rows}
+        named: dict[str, tuple] = {}                     # event_id -> (seq, rk, payload, log kind) of an anchored line
+        for seq, line_sha, line_rk, kind, evs in lines:
+            aid, apayload = self._anchor_ids(epoch, seq, line_sha)
+            a = anchors.get(aid)
+            if a is None or a.get("payload_sha256") != payload_sha256(apayload) or a.get("subject_id") != f"log:{epoch}":
+                continue
+            for ev in evs:
+                named[ev["event_id"]] = (seq, line_rk, ev.get("payload") or {}, kind)
+        out, counts = [], {"committed": 0, "attempted": 0}
+        for e in mine:
+            if e.get("event_type") == "log_anchor" or (event_type is not None and e.get("event_type") != event_type):
+                continue
+            row = {"event_id": e.get("event_id"), "event_type": e.get("event_type"), "subject_id": e.get("subject_id"),
+                   "ledger_seq": e.get("seq"), "payload_sha256": e.get("payload_sha256"), "status": "attempted",
+                   "seq": None, "rk": None, "log_kind": None}
+            hit = named.get(e.get("event_id"))
+            if hit is not None:
+                seq, line_rk, payload, log_kind = hit
+                if payload.get("seq") == seq and payload.get("rk") in line_rk \
+                        and payload_sha256(payload) == e.get("payload_sha256"):
+                    row.update(status="committed", seq=seq, rk=line_rk[0], log_kind=log_kind)
+            counts[row["status"]] += 1
+            out.append(row)
+        return {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle",
+                "total": len(out), **counts, "limit": limit, "offset": offset,
+                "evidence": out[offset:offset + limit], "log_length": n_lines}

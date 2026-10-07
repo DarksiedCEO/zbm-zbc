@@ -84,6 +84,7 @@ a date of birth, government id, card or bank account number, IP address or devic
 | `POST /svc/v1/outbound/{message_id}/resolve` | Andre | a message held as `sending` (send outcome unknown after a restart): `sent`, `requeue` or `cancel` |
 | `POST /svc/v1/jobs/{sla-sweep,health-recompute,save-plan-tick,outbound-tick,handoff-retries,integrity}/run` | scheduler | the jobs (idempotent per request id) |
 | `GET /svc/v1/audit/integrity`, `/audit/events` | dashboard, compliance_38 | integrity against the ledger, plus `ledger_valid` (the ledger's own chain check, always reported as returned); the log with personal data replaced by HMAC under a key made for that export (returned once with it) |
+| `GET /svc/v1/audit/evidence` | dashboard, compliance_38 | every typed ledger event, `committed` (named by an anchored log line) or `attempted` (sweep A R6-M1) |
 
 ## The HMAC key
 

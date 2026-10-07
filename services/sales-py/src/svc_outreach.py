@@ -18,11 +18,23 @@ from clock import parse_iso
 from errors import Conflict, Forbidden, Invalid, NotFound, Throttled, Unavailable
 from intelligences import i02_identity, i05_suppression, i06_consent, i07_quiet_hours, i08_templates, i09_send_cap, \
     i10_replies
-from ledger import derived_id
+import re
+
+from ledger import derived_id, payload_sha256
 from reasons import R
 
 SMS_MAX = 400
 RESCHEDULE_DAYS = 7
+REPLY_TEXT_MAX = 20_000            # sweep A: a longer reply (a quoted thread) is cut to this, never refused
+REPLY_CHANNELS = ("email", "sms", "voice")
+REPLY_TAIL = 2000                  # AEGIS L2: a cut text keeps its last characters too (an opt-out at the end)
+
+
+def _head_tail(text: str) -> str:
+    """At most REPLY_TEXT_MAX characters: the head and the last REPLY_TAIL, joined by a newline (AEGIS L2)."""
+    if len(text) <= REPLY_TEXT_MAX:
+        return text
+    return text[:REPLY_TEXT_MAX - REPLY_TAIL - 1] + "\n" + text[-REPLY_TAIL:]
 CONSENT_FUTURE_SKEW = timedelta(minutes=5)
 
 
@@ -719,37 +731,68 @@ class OutreachMixin:
             self._commit("message_event", self._req(data, caller, rk, body, msg["message_id"]), caller, evidence=ev)
             return self.message_view(msg)
 
-    def reply(self, caller: str, body: dict) -> dict:
+    @staticmethod
+    def _reply_fields(body: dict, raw: dict) -> dict:
+        """What the service reads from a provider's reply (sweep A; influencer-py's AEGIS R2-N3): never an error. A
+        text of any length is cut to REPLY_TEXT_MAX characters BEFORE it is classified and hashed; a field of the
+        wrong type is absent; an unknown channel is ``other`` (the lower phone opt-out bar applies); an unreadable
+        request id is replaced by the SHA-256 of the body (the relay's retry of the same body is the same reply)."""
+        def text_of(v, n):
+            return v[:n] if isinstance(v, str) else None
+        rq = body.get("request_id")
+        if not (isinstance(rq, str) and re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", rq)):
+            rq = "h-" + payload_sha256(raw)[:40]
+        ch = body.get("channel")
+        return {"request_id": rq, "channel": ch if ch in REPLY_CHANNELS else "other",
+                "message_id": text_of(body.get("message_id"), 1000), "from_email": text_of(body.get("from_email"), 1000),
+                "from_phone": text_of(body.get("from_phone"), 1000),
+                "text": _head_tail(body.get("text")) if isinstance(body.get("text"), str) else ""}
+
+    def reply(self, caller: str, raw_body: dict, raw: Optional[dict] = None) -> dict:
+        body = self._reply_fields(raw_body, raw if raw is not None else raw_body)
+        idem_body = {**{k: v for k, v in body.items() if k != "text"},
+                     "text_sha256": hashlib.sha256(body["text"].encode("utf-8", "surrogatepass")).hexdigest()}
+        return self._reply(caller, body, idem_body)
+
+    def _reply(self, caller: str, body: dict, idem_body: dict) -> dict:
+        """A reply on any channel. It is NEVER refused for what the provider sent (sweep A; influencer-py's AEGIS
+        R1-M4): an unknown message id, a sender address or number that cannot be read are each ignored (named in
+        ``ignored``), ``Name <addr>`` is read as ``addr``, and whatever does resolve is used; when nothing resolves
+        the reply is still recorded, as a review task for a person (S4-M2)."""
         with self.lock:
             self._gate()
-            rk = f"reply|{body.get('message_id') or 'direct'}|{body['request_id']}"
-            prev = self._idem(caller, rk, body)
+            # influencer-py AEGIS R3-L1: the key is the request id AND the body's hash: the same id with another body
+            # is another reply (never a 409 that drops an opt-out); the same body again is the same reply
+            target = payload_sha256({k: v for k, v in idem_body.items() if k != "request_id"})[:40]
+            rk = f"reply|{target}|{body['request_id']}"
+            prev = self._idem(caller, rk, idem_body)
             if prev:
                 return dict(prev[1])
-            msg = None
-            if body.get("message_id") is not None:
-                msg = self._get(self.messages, body["message_id"], "MESSAGE_NOT_FOUND")
+            ignored = []
+            msg = self.messages.get(body.get("message_id") or "")
+            if body.get("message_id") is not None and msg is None:
+                ignored.append("message_id")
             email_h = phone_h = None
             if body.get("from_email") is not None:
-                e = i02_identity.email(body["from_email"])
-                if e is None:
-                    raise Invalid(R("EMAIL_INVALID"))
-                email_h = i02_identity.keyed(self.pii_key, "email", e)
+                e = i02_identity.sender_email(body["from_email"])
+                if e is not None:
+                    email_h = i02_identity.keyed(self.pii_key, "email", e)
+                else:
+                    ignored.append("from_email")
             if body.get("from_phone") is not None:
                 p = i02_identity.phone(body["from_phone"])
-                if p is None:
-                    raise Invalid(R("PHONE_INVALID"))
-                phone_h = i02_identity.keyed(self.pii_key, "phone", p)
-            if msg is None and email_h is None and phone_h is None:
-                raise Invalid(R("REPLY_SENDER_REQUIRED"))
+                if p is not None:
+                    phone_h = i02_identity.keyed(self.pii_key, "phone", p)
+                else:
+                    ignored.append("from_phone")
             contact_id = msg["contact_id"] if msg else (self.email_index.get(email_h) if email_h else None) or \
                 (self.phone_index.get(phone_h) if phone_h else None)
             c = self.contacts.get(contact_id) if contact_id else None
             cls = i10_replies.classify(body["text"], body["channel"])
             reply_id = derived_id("rpl", caller, rk)
-            text_sha = hashlib.sha256(body["text"].encode("utf-8")).hexdigest()
-            data = {"reply_id": reply_id, "channel": body["channel"], "message_id": body.get("message_id"),
-                    "contact_id": contact_id, "class": cls, "text_sha256": text_sha}
+            text_sha = idem_body["text_sha256"]
+            data = {"reply_id": reply_id, "channel": body["channel"], "message_id": msg["message_id"] if msg else None,
+                    "contact_id": contact_id, "class": cls, "text_sha256": text_sha, "ignored": ignored}
             target = f"contact:{contact_id}" if contact_id else f"reply:{reply_id}"
             # every number tied to the reply: the contact's, the message's, the sender's
             phones = {h for h in (phone_h, msg["to_hash"] if msg and msg["channel"] != "email" else None,
@@ -779,9 +822,8 @@ class OutreachMixin:
                 hashes = {h for h in (email_h, phone_h, msg["to_hash"] if msg else None,
                                       c.get("email_hash") if c else None, c.get("phone_hash") if c else None) if h}
                 # S5-L2: only the SENDER's own address and number (and the resolved contact's) get the automatic
-                # opt-out; a number merely written in the body is held for a person, never suppressed or revoked
-                if not hashes and not named_phones and not body_phones:
-                    raise Invalid(R("REPLY_SENDER_REQUIRED"))
+                # opt-out; a number merely written in the body is held for a person, never suppressed or revoked.
+                # Sweep A: nothing resolving is never a refusal — the reply reaches a person as a review task.
                 if hashes:
                     phs = sorted(h for h in hashes if h.startswith("phone:"))
                     if phs:
@@ -799,8 +841,6 @@ class OutreachMixin:
                 auto = i10_replies.exact_auto_reply(body["text"])
                 if auto:
                     cls = data["class"] = "out_of_office"
-                if body["channel"] in ("sms", "voice") and not phones:
-                    raise Invalid(R("REPLY_SENDER_REQUIRED"))
                 hold_phones = set() if auto else phones | body_phones | named_phones
             if hold_phones:
                 hold_id = derived_id("hld", reply_id)
@@ -827,8 +867,8 @@ class OutreachMixin:
             ev = evidence or None
             answer = {"reply_id": reply_id, "class": cls, "suppressed": bool(data.get("hashes")),
                       "held": bool(data.get("hold")),
-                      "task_id": (data.get("task") or {}).get("task_id")}
-            self._commit("reply_received", self._req(data, caller, rk, body, answer), caller, evidence=ev)
+                      "task_id": (data.get("task") or {}).get("task_id"), "ignored": ignored}
+            self._commit("reply_received", self._req(data, caller, rk, idem_body, answer), caller, evidence=ev)
             return answer
 
     def decide_hold(self, task_id: str, body: dict) -> dict:

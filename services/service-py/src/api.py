@@ -347,6 +347,21 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
                 ) from None
         return parse
 
+    def inbound_body(model: type[BaseModel]) -> Callable:
+        """Sweep A (AEGIS M2): an inbound email / SMS from the gateway is read leniently (models._lenient_inbound) and
+        has no forbidden-key scan: unknown fields are dropped before validation and never stored, so a gateway field
+        named like an IP or a device cannot get an opt-out refused. A body that is not a JSON object is read as empty."""
+        def parse(payload: Any = Body(default=None)) -> dict:
+            raw = payload if isinstance(payload, dict) else {}
+            try:
+                return model.model_validate(raw).model_dump(mode="json")
+            except ValidationError as exc:
+                raise RequestValidationError(
+                    [{**e, "loc": ("body", *e.get("loc", ()))} for e in exc.errors(include_url=False,
+                                                                                   include_input=False)]
+                ) from None
+        return parse
+
     @app.exception_handler(RequestValidationError)
     def _validation(_: Request, exc: RequestValidationError):
         return JSONResponse(status_code=422, content=_sanitize(exc.errors()))
@@ -417,11 +432,11 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
         return svc.thread(_id(ticket_id, SV_ID), _id(contact_ref, CONTACT_REF), _id(brand, BRAND))
 
     @app.post("/svc/v1/inbound/email", dependencies=auth, status_code=201)
-    def email_in(req: dict = Depends(body(m.EmailIn)), who: str = Depends(caller("email_gateway"))) -> dict:
+    def email_in(req: dict = Depends(inbound_body(m.EmailIn)), who: str = Depends(caller("email_gateway"))) -> dict:
         return svc.inbound(who, "email", req)
 
     @app.post("/svc/v1/inbound/sms", dependencies=auth, status_code=201)
-    def sms_in(req: dict = Depends(body(m.SmsIn)), who: str = Depends(caller("sms_gateway"))) -> dict:
+    def sms_in(req: dict = Depends(inbound_body(m.SmsIn)), who: str = Depends(caller("sms_gateway"))) -> dict:
         return svc.inbound(who, "sms", req)
 
     # ------------------------------------------------------------------ phone (plumbing; no voice provider)
@@ -574,6 +589,13 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
     def audit_events(since: int = Query(default=1, ge=1, le=10_000_000), limit: int = Query(default=200, ge=1, le=1000),
                      who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
         return svc.audit_events(since, limit)
+
+    @app.get("/svc/v1/audit/evidence", dependencies=auth)
+    def audit_evidence(limit: int = Query(default=200, ge=1, le=1000), offset: int = Query(default=0, ge=0, le=10_000_000),
+                       event_type: Optional[str] = Query(default=None, pattern=r"^[a-z_]{1,64}$"),
+                       who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
+        """Sweep A R6-M1: the evidence view Compliance (38) and auditors use; unanchored evidence = attempted."""
+        return svc.audit_evidence(limit, offset, event_type)
 
     return app
 

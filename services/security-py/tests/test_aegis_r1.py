@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
 
 import pytest
 
@@ -117,7 +116,7 @@ def test_m3_a_frozen_caller_can_do_nothing_anywhere(hk):
                    caller="legal_37").status_code == 403
     assert hk.post("/sec/v1/jobs/rotation-due/run", {"request_id": rid()}, caller="scheduler").status_code == 403
     scan = {"request_id": rid(), "source": "python:x", "tool": "pip-audit@1",
-            "scanned_at": datetime.now(timezone.utc).isoformat(), "findings": []}
+            "scanned_at": hk.clock.now().isoformat(), "findings": []}
     assert hk.post("/sec/v1/scans", scan, caller="scheduler").status_code == 403
     assert hk.get(f"/sec/v1/secrets/{REF}", caller="finance_31").status_code == 403
     # the integrity check and the dashboard still work during a lockdown
@@ -239,7 +238,7 @@ def test_l5_a_large_pending_line_is_settled_at_start(tmp_path):
                  "severity": "low"} for i in range(700)]
     h.svc.log.fail_next_append = True
     r = h.post("/sec/v1/scans", {"request_id": rid(), "source": "python:big", "tool": "pip-audit@2",
-                                 "scanned_at": datetime.now(timezone.utc).isoformat(), "findings": findings},
+                                 "scanned_at": h.clock.now().isoformat(), "findings": findings},
                caller="scheduler")
     assert r.status_code == 503 and os.path.getsize(os.path.join(d, "pending.line")) > 1024 * 1024
     h2 = h.restart()

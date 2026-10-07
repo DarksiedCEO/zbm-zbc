@@ -252,3 +252,36 @@ numbers are held; it never suppresses that address (there is no email hold: emai
 own address, the address the message went to, or an address a person suppresses). A genuine person who writes from a
 personal account and names their work address is therefore not automatically removed from email; the review task
 shows the reply to a person, who suppresses it.
+
+## Amendment — AEGIS sweep A (Oct 6 2026, on 5d49ee9): every finding fixed
+
+Regressions: `services/sales-py/tests/test_sweep_fixes.py` (each one fails on 5d49ee9). Two existing tests changed
+contract with the fixes: `test_reply_without_a_sender_refused` (now recorded for a person, not 422) and the retried
+import in `test_import_through_a_wired_port_keeps_source_and_evidence_and_refuses_bad_records` (now answers the first result, `already_ran`).
+
+| Id | Finding | Fix |
+|---|---|---|
+| R6-M1 (High) | The typed evidence id was `derived_id("evd", type, caller, rk)` with no payload hash, and it was recorded before the anchor: a STOP whose anchor failed left an orphan `suppression_added`; once the sender resolved (or a time zone changed under a retried request) the retry carried another payload under the same id, the ledger answered 409, and every retry was a 503 for ever — the STOP was never honoured | bizdev-py's round-6 pattern: every evidence payload carries `rk` (the line's request key) and `seq` (the log seq it is meant for), the id includes `payload_sha256(payload)`, and the log line names its events (`ledger_evidence`; sales lines already use `evidence` for a lead's own evidence). A retry after a state change gets a new id. `GET /sales/v1/audit/evidence` (dashboard, compliance_38) marks each event `committed` (named by an anchored line, rk and seq match) or `attempted` (unanchored evidence = attempted, not done): exactly one `committed` event per logical action |
+| Sweep-A opt-out wording | `please_unsubscribe`, `STOP_please`, `S_T_O_P` (underscore is a word character), `stoooop` (repeated letters) and `unsub` were not opt-outs on email | `i10_replies.normalise` treats `_` as a separator; `classify` also tests the repeated-letters-collapsed form for opt-out wording only (service-py's `channels._collapse`); `unsub\w*` replaces `unsubscrib\w*`. The normaliser is identical in bizdev-py (`i09_replies`) and influencer-py (`i07_replies`): the same change is applied there, with a regression in each `tests/test_sweep_fixes.py`. Accepted: collapsing can over-match (`stoop` reads as `stop`); over-suppressing is the safe side |
+| Sweep-A replies refused | A resolvable STOP was refused 422 for a `Jane Doe <jane@…>` sender or a text over 10,000 characters (a quoted thread); an unknown message id was 404, an unreadable sender 422, no sender 422, the same request id with another body 409 | influencer-py's raw-body approach (its AEGIS R1-M4 / R2-N3): every reply field is optional and of any type, unknown fields are ignored and never stored, no forbidden-key scan (nothing raw is stored). `Name <addr>` is read as `addr`; the text is cut to 20,000 characters before it is classified and hashed; an unknown message id or unreadable address / number is ignored and named in `ignored`; an unknown channel is `other` (the lower phone opt-out bar); a missing request id is the body's SHA-256; the request key includes the body's hash (another body = another reply). Nothing resolving is recorded as a review task for a person, never refused |
+| Sweep-A import idempotency | `/leads/import` never recorded anything under its own request key: the same request id with another body ran a second, different import (`already_ran` could never be answered) | The result is committed under the import's request key (`lead_import_ran`): the same body answers the first result with `already_ran`, another body is 409 `REQUEST_ID_REUSED`. Items committed before a failure part-way keep their own keys and are skipped on the retry |
+| Sweep-A close | sales-py had no `close()` | bizdev-py's inert `close()`: under the service lock the instance and its log are marked closed; every commit, gated route, job and audit route answers 503 `SERVICE_CLOSED`; the log refuses writes and clears; `verify_integrity` returns the closed result with no ledger I/O. The data-directory flock stays the process's (sales has no per-instance claim; that port is not part of this sweep) |
+
+### Sweep A follow-up — AEGIS review of 17cda6a (REVISE): fixed
+
+Regressions: `services/sales-py/tests/test_sweep_fixes.py` (the tests after "AEGIS review of 17cda6a"); the
+accepted false positives (L1) are pinned in `services/bizdev-py/tests/test_sweep_fixes.py` and
+`services/influencer-py/tests/test_sweep_fixes.py`.
+
+| Id | Finding | Fix |
+|---|---|---|
+| M4 | `/sales/v1/audit/evidence` read the whole ledger on every call | As service-py (ADR 0014): this department's entries only, paged with ledger-rust's filtered read when it has one (fix-ledger); at 5d49ee9 the ledger answers 404 to a query and is read in full and filtered, bounded by `LEDGER_ENTRIES_MAX_BYTES` |
+| L2 | A reply was cut to 20,000 characters before it was classified | Head and the last 2,000 characters are kept |
+| L4 | `_commit` put the raw request id on the ledger as `rk` | `rk` = `rk-` + HMAC-SHA-256 under the PII hash key (`SALES_PII_HASH_KEY_FILE`, whose fingerprint is bound in the log at first start: a different key refuses to start, so `rk` stays stable) |
+| L1 (accepted) | The collapse and `unsub\w*` rules over-match ("stoop", "unsubtle") | Accepted as is (over-suppressing is the safe side); pinned by tests in bizdev-py and influencer-py so a change is deliberate |
+
+### Sweep A follow-up — AEGIS re-review of 1e709a0: fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| N2 (Medium) | Evidence written before L4 (raw `rk`) read as `attempted` after the upgrade | `/audit/evidence` accepts the line's raw request key or its keyed form for the same anchored line; the row always shows the keyed `rk-` form. Regression: `test_n2_evidence_written_before_the_keyed_rk_still_reads_committed` |

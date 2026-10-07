@@ -18,7 +18,7 @@ the check.
 |---|---|---|---|
 | `go:orchestrator-go` | 71 | go test -v | — |
 | `node:dashboard-ts` | 27 | node --test | — |
-| `python:bizdev-py` | 281 | pytest collection | — |
+| `python:bizdev-py` | 283 | pytest collection | — |
 | `python:clipper-network-py` | 368 | pytest collection | — |
 | `python:compliance-py` | 636 | pytest collection | — |
 | `python:creative-py` | 821 | pytest collection | — |
@@ -26,11 +26,11 @@ the check.
 | `python:detection-py` | 504 | pytest collection | — |
 | `python:finance-py` | 538 | pytest collection | — |
 | `python:fulfillment-py` | 1105 | pytest collection | — |
-| `python:influencer-py` | 435 | pytest collection | — |
+| `python:influencer-py` | 437 | pytest collection | — |
 | `python:legal-py` | 308 | pytest collection | — |
 | `python:onboarding-py` | 763 | pytest collection | — |
-| `python:sales-py` | 543 | pytest collection | — |
-| `python:security-py` | 181 | pytest collection | — |
-| `python:service-py` | 614 | pytest collection | — |
+| `python:sales-py` | 560 | pytest collection | — |
+| `python:security-py` | 188 | pytest collection | — |
+| `python:service-py` | 669 | pytest collection | — |
 | `python:verification-py` | 299 | pytest collection | — |
 | `rust:ledger-rust` | 117 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |

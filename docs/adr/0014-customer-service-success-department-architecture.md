@@ -264,3 +264,155 @@ Regressions: `services/service-py/tests/test_aegis_r4b.py`; each new guard mutat
 | a5dd261-M1, L2, L3, L4, I5, I6, I7 (AEGIS review of a5dd261) | A closed instance still ran `verify_integrity` (integrity job, audit route) and re-recorded its own pending line on the ledger, leaving the live instance's integrity permanently not ok; the audit route answered a cached ok after close; `claim`/`holds`/`release_claim` were not atomic; a claim token could be adopted by two services; `BodyStore()` swept `bodies/*.tmp` before the claim was verified; a test assertion was vacuous; `/health` answered 200 when closed | `verify_integrity` returns the closed result first, under the service lock, with no ledger I/O. The integrity job and `/svc/v1/audit/integrity` (`audit_integrity`) refuse 503 `SERVICE_CLOSED` when closed. `DataDirLock` guards `claim`/`holds`/`adopt`/`release_claim` with one `threading.Lock`. Adoption is single-use (a second service with the same token is refused `DataDirBusy`). Constructing a `BodyStore` deletes nothing: the service calls `sweep_tmp()` only after adopting the claim. The r5c test asserts both conditions. `/health` returns 503 `{"status": "closed"}` when closed; `degraded` stays 200 as before. Regressions: `tests/test_aegis_r5d.py`, `tests/test_aegis_r5c.py` |
 | cc27b69-L1, cc27b69-Info (AEGIS review of cc27b69, not blocking) | The ledger's chain `verify()` (an HTTP call, up to the client timeout) ran inside the service lock, so every request waited on it; the claimer's token could still release a claim a service had adopted | The integrity job and `/svc/v1/audit/integrity` share `_integrity_and_ledger`. Under the lock it refuses if closed and snapshots the integrity result and the log length; it releases the lock and calls `verify()`; then it re-takes the lock and re-checks. If the instance closed meanwhile: 503 `SERVICE_CLOSED`, nothing written. Superseded by db08ff1-M (next row): the retry and the `ledger_valid: null` path are gone. `DataDirLock.adopt` issues a new token that only the adopting service holds: the claimer's token no longer releases the claim. Regressions: `tests/test_aegis_r5e.py` |
 | db08ff1-M, db08ff1-Info (AEGIS review of db08ff1) | When the log changed during the ledger check, the `verify()` verdict was dropped and a `False` became `ledger_valid: null`: a broken ledger chain was never reported on a busy service, and any caller able to commit could hide it | `verify()` checks the ledger's own chain, independent of the local log, so its verdict is always reported as returned. The `null` path and the retry are removed. After `verify()` (still outside the lock) the lock is re-taken, closed is re-checked (503 `SERVICE_CLOSED`, nothing written), and `integrity` and `log_length` are read fresh. The integrity job raised no ledger alert or incident for `ledger_valid: false` before cc27b69-L1 (checked at 4f10b5f), and it still raises none: the verdict is reported only. Remaining stall (Info, accepted): `verify_integrity` still reads the ledger's `entries()` under the service lock, so a slow ledger read can still hold up requests. Regressions: `tests/test_aegis_r5e.py` |
+
+## Amendment — AEGIS sweep A (Oct 6 2026, on 5d49ee9): every finding fixed
+
+Regressions: `services/service-py/tests/test_sweep_fixes.py` (each one fails on 5d49ee9).
+
+| Id | Finding | Fix |
+|---|---|---|
+| Sweep-A email opt-out (High) | An opt-out received by email ("UNSUBSCRIBE") revoked only SMS consent: proactive email (an NPS survey, a check-in, an offer) still went out. "do not email me" and "dont email me" were not opt-outs at all | An `exact` opt-out received by email also revokes the contact's EMAIL consent (`consent_revoked`, via `stop_by_email`, for the contact's address), unless its words name only the phone ("stop texting me", "remove my number"): that stays an SMS opt-out (the existing rule) and the ticket can still be answered by email (`channels.email_opt_out`). SMS is revoked as before. `dont email`, `do not email`, `stop emailing`, `quit emailing`, `never email`, `remove my email` and kin are exact opt-out terms |
+| R6-M1 | Typed events were recorded before the anchor and their id included the payload hash, so a retry after a state change (a STOP whose anchor failed, retried once the contact existed) recorded a second `consent_changed` event; nothing told the committed one from the orphan | bizdev-py's round-6 pattern: every payload also carries `rk` (a keyed HMAC of the request key, which can name an address: never the key itself) and `seq`; the id includes that payload's hash; the line names its events (`ledger_evidence`). `GET /svc/v1/audit/evidence` (dashboard, compliance_38) marks each event `committed` or `attempted`: exactly one committed event per logical action. Events recorded before this change carry no rk / seq and read as `attempted` |
+| Sweep-A inbound refused | An inbound email from `Owner@Acme.test`, with a tab in the subject (a folded header) or a text over 20,000 characters was refused 422, its opt-out lost | Before the strict checks, inbound email and SMS bodies are read leniently: addresses lowercased (`Name <addr>` read as `addr`), control characters in the subject replaced by spaces (a subject blank after that is dropped), control characters other than newline / tab removed from the text, the text truncated (20,000 email, 1,600 SMS) and an empty text accepted (a subject-only or media-only message) |
+| Sweep-A health recompute | `_health_compute` rescanned every ticket twice and every survey for EACH account with the service lock held: O(accounts x tickets) | `_health_aggregates` computes complaints in 30 days, open escalations and the latest NPS per account in one pass over the tickets and one over the surveys. The regression counts `_ticket_account` calls (at most one per ticket); no wall-clock bound |
+| Sweep-A closed dispatch | A closed instance still called the alert and handoff ports in `dispatch_side_effects` (only the result commit was refused), so the instance that then owned the data directory sent the same alert again | `_closed` is checked at the snapshot and again, under the lock, right before each port call: a closed instance dispatches nothing |
+
+### Sweep A follow-up — AEGIS review of 17cda6a (REVISE): fixed
+
+Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "AEGIS review of 17cda6a").
+
+| Id | Finding | Fix |
+|---|---|---|
+| H1 (High) | `email_opt_out` scanned the whole body and subject for phone words: "Unsubscribe" with a signature "Cell: 310-555-1212", "UNSUBSCRIBE / Sent from my phone", "unsubscribe" above a quoted "call our phone line", or "Please unsubscribe me" under the subject "Re: Text us anytime" kept email consent | The scope comes from each matched opt-out phrase itself (`channels.opt_out_scope`), in the person's own words: quoted lines and the quoted thread (`strip_quoted`: `>` lines, "On ... wrote:", "-----Original Message-----") and the signature (`strip_signature`: a `--` delimiter, a sign-off line, "Sent from my ...") are removed first. Email consent is kept only when EVERY phrase found names the phone itself ("stop texting", "remove my number", "unsubscribe from texts": a phone word in the phrase, or right after it past connector words such as "me from your"). An exact opt-out whose phrase is not found in the stripped text revokes email too (err toward honouring). Inbound email is classified on the quote-stripped text, so our own quoted footer no longer reads as an opt-out |
+| M1 | A typo of unsubscribe ("unsubcribe", "unsubscibe") by email scored `suspected` and only raised an alert | A typo of stop / unsubscribe received by email revokes EMAIL consent (`consent_revoked` via `suspected_stop_by_email`, recorded as `consent_changed` evidence); SMS keeps the existing rule (pause and SMS_OPT_OUT_SUSPECTED alert) |
+| M2 | EmailIn / SmsIn were strict: extra fields, a missing or Message-ID-style request_id, a null text or a non-string subject were refused 422 | sales-py's raw-body approach: the two inbound routes read leniently (`api.inbound_body`, no forbidden-key scan: unknown fields are dropped before validation and never stored), a missing or unusable request_id becomes `h-` + the body's SHA-256 (the gateway's retry of the same body is the same message), a null text is "", a numeric subject is text and any other non-string subject is dropped, an unusable ticket_id is dropped. The byte cap is unchanged. A body without brand or addresses is still 422: it cannot be routed |
+| M4 | `/svc/v1/audit/evidence` read the whole ledger on every call | It reads only this department's entries (and one event type when asked), page by page, through `HttpLedgerClient.entries_filtered` with ledger-rust's `?after_seq=&limit=&department=&event_type=` (fix-ledger, sweep F-2). At 5d49ee9 ledger-rust has no such query (it answers 404 to any path with a query, checked against the real binary): the client then reads the whole ledger once and filters it, bounded by `LEDGER_ENTRIES_MAX_BYTES` like `entries()`; a ledger that ignores the query is recognised (more than a page, or a page that does not move past `after_seq`). Outside the service lock as before |
+| L2 | The text was cut to the cap before it was classified: an opt-out past 20,000 characters was lost | A text over the cap keeps its head and its last 2,000 characters (`models.cut_head_tail`) |
+| L3 | `audit/events` exported `ledger_evidence[].payload.rk` unchanged, so two exports could be joined on it | `rk` is re-keyed with the export's own HMAC key |
+| L5 | `dispatch_side_effects` checked closed at the top of each iteration, not right before the port call | The check sits immediately before each port call. Residual window (documented in the docstring, accepted): a `close()` between that check and the call cannot stop that one call; holding the lock across a provider call would stall every request, and the alert and handoff ids are the providers' idempotency keys |
+
+### Sweep A follow-up — AEGIS re-review of 1e709a0 (REVISE): fixed
+
+Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "AEGIS re-review of 1e709a0").
+
+| Id | Finding | Fix |
+|---|---|---|
+| N1 (High, regression) | `strip_quoted` dropped everything after a reply header, so an opt-out typed below the quote was lost on both channels | `channels.split_reply`: `>` lines and a `<blockquote>` are dropped; a header followed by `>` lines is dropped and the lines after the quoted block stay the person's own. A header followed by unmarked lines (Outlook "Original Message", "On ... wrote:" without `>`) starts the quoted tail, which is read only for strong opt-out wording (`OPT_OUT_STRONG`) or a bare stop / unsubscribe last line; a hit revokes (over-suppressing is the safe side) and raises `OPT_OUT_IN_QUOTED_TEXT` for Andre. The whole message is NOT scanned: our own quoted words ("cancel anytime", "ends soon") would opt every replier out. A future marketing footer must be listed in `OWN_FOOTER_LINES` |
+| H1 residual (High) | `_phone_scoped` ignored an email word in the same phrase, crossed line breaks, and the sign-off cut dropped later opt-outs | An email word (`EMAIL_SCOPE_WORDS`) in the phrase's reach makes it an email opt-out; each line and sentence is read alone; a phone word followed by a number or "is" is an address label, not a channel; the scope is read on the person's own words without the signature cut |
+| N4 (High, pre-existing) | HTML tags were deleted without a space, merging "Unsubscribe<br>Sent" into one word | `channels.html_as_text` before every opt-out check: block tags end a line, other tags are a space |
+| N3 (Medium) | A gateway reusing a request id for another body got 409, losing that message (an opt-out) | On the email and SMS gateway routes the message is re-keyed `<id>.b<body sha16>` and processed; chat (our own hub) still answers 409. Accepted residual: with NO request id, an identical body is the same message (the id is the body hash) |
+
+### Sweep A follow-up — AEGIS re-review of 91f5b8b (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| R1 (High, regression) | A greedy `<blockquote>` match ate the person's text between two quotes | Quotes removed innermost first, non-greedy; an unclosed quote starts the quoted tail |
+| R2 (High) | Common wording below an unmarked quote ("no more emails", "STOP. Thanks", "stop / Sent from my iPhone") was ignored | Tail: `OPT_OUT_STRONG` (widened) revokes; a last line (signature removed) that is only stop / unsubscribe plus courtesy words revokes; any other opt-out wording raises `OPT_OUT_IN_QUOTED_TEXT` for Andre instead of being dropped |
+| R3 (High) | "stop texting me, same for email" stayed SMS-only | An email word anywhere in the person's own words makes the opt-out `all` |
+| R4 (Medium) | Third-party wording in a quote ("do not contact the carrier", "opt out of the warranty") revoked | The strong list holds only unsubscribe / email wording; a short last line must be stop / unsubscribe itself ("Cancel anytime." never revokes); `OWN_FOOTER_LINES` matched as re-wrap-tolerant substrings. Before any proactive email with an unsubscribe notice ships, its text must be added there |
+| R5 (Medium) | A Gmail header wrapped over two lines, forwarded and localized headers were read as the person's own words | Header matched on a line or a line joined with the next; "Forwarded message", Spanish, French, German, Portuguese forms added |
+| R6 (High, pre-existing, SMS) | `<STOP>`, "i <3 u but stop texting me >:(" read no opt-out (angle brackets stripped as tags) | Opt-out checks also read the text with `<` `>` as spaces |
+| R7 (Low) | A literal re-keyed id with another body got an uncaught 409 | Re-key is `<id[:80]>.r<sha8(id)>.b<sha16(body)>`; a second conflict falls back to `rk.<sha256(body)>`. Accepted residual: a redelivery differing only in whitespace is a second message |
+
+### Sweep A follow-up — AEGIS re-review of d1477aa (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-A (High) | "Stop texting me. Email me instead." / "I prefer email" / "my email is ..." revoked email | An email word widens an SMS-only opt-out only with an adding word (too, also, same, as well, and/or, spam, inbox); a preference (instead, prefer, rather, only, use, reach) or an address ("email is", "email me") keeps it SMS-only |
+| H-B (High, pre-existing) | Outlook for Mac / new Outlook "From: / Date: / To: / Subject:" quote block read as the person's words | A `From:` line with a `Sent:`/`Date:` line within the next three starts the quoted tail (English, Spanish, French, German forms) |
+| M-1 | Common words in our quoted mail ("end of the week", "cancel anytime") alerted Andre | The tail alerts only on multi-word opt-out phrases (plus "cancel my subscription / account / membership", "opt me out", "stop sending", "take me off"); "no more", "who is this", "wrong person" excluded |
+| M-2 | A forwarded newsletter's "To unsubscribe click here" revoked | Text below "Forwarded message" / "Begin forwarded message:" is never read for an opt-out |
+| R6 by email | `<STOP>` by email was stripped as a tag | Only known HTML tag names (and comments) are tags |
+| L-2 | A blank `OWN_FOOTER_LINES` entry would disable tail detection | Blank entries skipped |
+| L-1 (accepted) | "On second thought / ... my wife wrote:" can be read as a wrapped header | Accepted: contrived; the message still goes to a human and pauses SMS |
+
+### Sweep A follow-up — AEGIS re-review of 3c89631 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-C (High, regression) | "Do not text or email me" revoked SMS only | "email me" after or / and / nor adds email; an explicit negated email phrase ("don't ... email", "text or email me") always widens to `all`, whatever preference word is present (M-3) |
+| M-3 | A preference word narrowed an explicit email opt-out to SMS | As H-C |
+| M-4 | "Stop!" above a name sign-off below an unmarked quote raised nothing | A short stop / unsubscribe / quit line among the tail's last three lines alerts Andre; "stop contacting", "quit it", "stop messaging" alert |
+| M-5 | A customer's own "From: / Date:" lines were read as a quote header | The header block also needs an address on the From: line or a To: / Cc: / Subject: line |
+| L-4 | `<style>` / `<script>` content was read as the person's words | Removed before reading |
+| L-3, L-5 (accepted) | Text typed below a forward is not read; unrelated quoted phrases ("not interested in ...") may alert | Accepted: rare; the message still reaches a human and pauses SMS; an alert is the safe side |
+
+### Sweep A follow-up — AEGIS re-review of ffe7ede (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-D (High, regression) | "stop texting me and email me instead", "... or email me if you must" revoked email | One grammatical rule (`channels._email_word_adds`) used by the lookahead and the negation regex: "or / nor" + email carries the negation; "and emailing" (the same verb form as "stop texting") too; "and email me", "email me instead / if / only", "emails are fine", "my email is" are requests or addresses and never widen |
+| M-6 | "stop the texts, emails are fine" revoked email | As H-D |
+| M-7 | An unclosed `<style>` flood cost ~1.6 s per message under the lock | Style / script removed only when a closing tag exists, with a bounded pattern |
+| L-6 | Our quoted "Stop by anytime!" alerted | The short-line tail alert needs a line of only stop / quit / unsubscribe and courtesy words |
+
+### Sweep A follow-up — AEGIS re-review of 37eff26 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-E (High, regression) | "Do not text or email me please" / "... if you can help it" / "..., only call" revoked SMS only | "please" is not a preference word; after "or / nor" email is added unless a base-form "email" follows a gerund ("stop texting me or email me if you must" stays a request) |
+| M-8 | A preference word in a later sentence narrowed an explicit opt-out | The preference check runs only when no phrase already reached an email word; "...the emails please. I prefer you call." is `all` |
+
+### Sweep A follow-up — AEGIS re-review of b7cc067 (REVISE): decide only the clear cases
+
+The email scope of an SMS opt-out flipped on every round from d1477aa to b7cc067 (H-A, H-C, H-D, H-E, H-F): word-level
+guessing cannot settle every phrasing. Decision (`channels.email_opt_out_decision`): the code decides only the clear
+cases and asks Andre about the rest, so a wrong guess becomes an alert, never a silent error.
+
+| Outcome | When |
+|---|---|
+| `revoke` (email and SMS) | A phrase that names no phone ("unsubscribe", "stop", "do not email me"); a phrase whose own clause reach names email ("text or email me please", "texts and emails", "texting and emailing", "call, text or email" — a comma inside a channel list is not a clause end); an explicit negated email clause elsewhere; an adding word with email ("same for email", "email too"); strong wording in the unmarked quoted tail |
+| `keep` (SMS only) | Every phrase names only the phone and no email word appears, or the email clause is a request ("email me instead", "you can call or email", "emails are fine", "my email is ...", "call or email me", "or email me if you must") |
+| `ask` (SMS only + `EMAIL_OPT_OUT_UNCLEAR` alert) | An SMS-only opt-out with an email word that is neither adding nor a request, or both |
+
+"do not call", "dont call", "never call", "stop calling" added to the opt-out terms (phone scope). The corpus of every
+phrase from all rounds is pinned in `test_scope_corpus_all_rounds_at_once`.
+
+### Sweep A follow-up — AEGIS re-review of 7d58d7b (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-G (High, regression) | "Don't text, email me instead" was joined into "don't text or email me" and revoked email | A comma joins channels only in a real list of three or more ("call, text or email"); two items are two clauses |
+| M-9 | "Never call before 9 please" revoked SMS | Call wording is scope-only (`SCOPE_ONLY_TERMS`): it names a channel for the scope but is never an exact SMS opt-out; "Do not call, text or email me" revokes email and pauses SMS with `SMS_OPT_OUT_SUSPECTED` for Andre |
+
+### Sweep A follow-up — AEGIS re-review of f63a9b2 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-H (High) | "Do not call or email me" (no SMS wording, so no opt-out level) kept email with no signal | Every inbound email gets an email decision; a scope-only call phrase whose reach names email revokes email (`consent_changed` evidence) and raises `SMS_OPT_OUT_SUSPECTED` |
+| M-11 | Oxford comma "call, text, or email" was not a list | ", or / , and" between channels joins the list |
+
+### Sweep A follow-up — AEGIS re-review of 2018cd2 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-I (High, regression) | With the email decision on every inbound email, complaints ("why do you never call or email back?") and time limits ("don't call or email before 9am") revoked email under an SMS alert code | With no opt-out level, email is revoked only for a clause that is nothing but a direct command not to contact the sender by two or more channels ("Please do not call or email me again"): `revoke_direct`, evidence via `request_by_email`, alert `EMAIL_OPTED_OUT_BY_REQUEST`. Any other no-level case is `ask` (`EMAIL_OPT_OUT_UNCLEAR`) |
+
+### Sweep A follow-up — AEGIS re-review of b3725e9 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-J (High, pre-existing) | "I don't want your emails", "I no longer want to receive your emails", "I do not want calls or emails" were not opt-outs | `_NEG_WANT`: a negated want / wish / need (to receive / get / hear) of emails, texts, messages or newsletters is an exact opt-out; its channels decide the scope (email or messages → `all`, texts only → SMS). Calls alone are not an SMS opt-out |
+
+### Sweep A follow-up — AEGIS re-review of 9c55872 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-K (High, regression) | "I don't need the email receipt", "I don't want the mail carrier to ...", "... the text on the banner" revoked consent | `_NEG_WANT` takes only want / wish (to receive / get), read per clause, and the channel must end the clause or be followed by from you / anymore / again / please |
+| Pre-existing gaps | "Opt me out", "removed from your email list", "I don't want to hear from you again", "Delete my info", "Enough with the emails", "I'd rather not receive these" were neither honoured nor surfaced | Added to the opt-out terms (no phone word, so scope `all`) |
+
+### Sweep A follow-up — AEGIS re-review of 94b4dde (REVISE): stop growing the revoke list
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-L (High, regression) | Round-12 terms as bare substrings revoked ordinary mail ("removed from your page", "opt me out of the warranty", "rather not receive a partial shipment") | Decision: the exact-revoke list (`OPT_OUT_TERMS`) is closed to context-dependent wording. Such wording (`OPT_OUT_POSSIBLE_TERMS`: "opt me out", "remove me from your ...", "don't want to hear from you", "delete my info", "cease all communication", "no further contact", ...) changes no consent and raises `OPT_OUT_POSSIBLE` for Andre. New wording found later goes there unless it cannot mean anything else. "marketing / promotional" allowed in the negated-want rule ("I don't want your marketing emails" revokes) |
+
+Operational dependency (Andre): `OPT_OUT_POSSIBLE`, `EMAIL_OPT_OUT_UNCLEAR` and `OPT_OUT_IN_QUOTED_TEXT` alerts must be
+worked within days — CAN-SPAM requires an email opt-out honoured within 10 business days.
+
+### Sweep A follow-up — AEGIS re-review of 48eedfd (APPROVE WITH CONDITIONS): condition fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-M (High-class, pre-existing; the approval's condition) | Bare "remove me" / "take me off" revoked "take me off hold please", "remove me from the order as the contact" | `_REMOVE_ME`: exact only at the end of a clause ("Remove me.", "remove me please") or bound to a list / texts / emails / messages / contacts / database ("take me off your mailing list"); other uses fall to `OPT_OUT_POSSIBLE` |
+| H-N (High, regression from the H-M fix) | "Stop texting me. Take me off your email list" kept email: `_REMOVE_ME` was read by the level only, not the scope | The scope reads `_REMOVE_ME` too; its object decides (email / list / messages / contacts → `all`, texts only → SMS); "text and email lists" accepted as an object; "remove me" alerts from a quoted tail |

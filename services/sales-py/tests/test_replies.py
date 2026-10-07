@@ -95,9 +95,12 @@ def test_reply_text_is_never_stored_or_exported(tmp_path):
     assert "867 5309" not in json.dumps(h.ledger.events)
 
 
-def test_reply_without_a_sender_refused(h):
-    h.refused(h.post("/sales/v1/replies", {"request_id": rid(), "channel": "email", "text": "stop"},
-                     "provider_events"), 422, "REPLY_SENDER_REQUIRED")
+def test_reply_without_a_sender_is_recorded_for_a_person(h):
+    # sweep A: a reply is never refused (was 422 REPLY_SENDER_REQUIRED); nothing resolves, so a person reviews it
+    r = h.ok(h.post("/sales/v1/replies", {"request_id": rid(), "channel": "email", "text": "stop"},
+                    "provider_events"), 201)
+    assert r["class"] == "unsubscribe" and r["suppressed"] is False and r["task_id"]
+    assert h.svc.tasks[r["task_id"]]["kind"] == "review_reply" and not h.svc.suppression
 
 
 def test_only_the_provider_relay_posts_replies(h):

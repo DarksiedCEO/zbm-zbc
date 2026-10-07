@@ -72,6 +72,7 @@ class RecordLog:
         self._lines: list[bytes] = []
         self.path: Optional[str] = None
         self.fail_next_append = False  # tests: simulate a disk failure
+        self.closed = False            # sweep A (bizdev-py's): set by the service's close(); every write then refuses
         if data_dir:
             os.makedirs(data_dir, mode=0o700, exist_ok=True)
             self.path = os.path.join(data_dir, LOG_NAME)
@@ -94,6 +95,15 @@ class RecordLog:
 
     def __len__(self) -> int:
         return len(self._lines)
+
+    def raw_lines(self, start: int = 0) -> list[bytes]:
+        """The raw lines from index ``start`` on (no parsing: cheap enough to take under the service lock)."""
+        with self.lock:
+            return list(self._lines[start:])
+
+    def _refuse_if_closed(self) -> None:
+        if self.closed:
+            raise StoreWriteError("this service instance is closed; its log refuses writes")
 
     def iter_records(self, start_seq: int = 1) -> Iterator[dict]:
         with self.lock:
@@ -130,6 +140,7 @@ class RecordLog:
         already ends with exactly this line (a write that reached the disk before an fsync error), it is adopted
         instead of written twice."""
         with self.lock:
+            self._refuse_if_closed()        # inside the lock: close() takes it too (bizdev-py round 5c item 2)
             if self.fail_next_append:
                 self.fail_next_append = False
                 raise StoreWriteError("simulated local store failure")
@@ -195,20 +206,26 @@ class RecordLog:
 
     def write_pending(self, line: bytes) -> None:
         """Fsync the exact next line aside before its ledger anchor is recorded."""
-        if not self.data_dir:
-            self._mem_pending = line
-            return
-        _write_file(self.pending_path, line, "pending line")
+        with self.lock:
+            self._refuse_if_closed()
+            if not self.data_dir:
+                self._mem_pending = line
+                return
+            _write_file(self.pending_path, line, "pending line")
 
     def clear_pending(self) -> None:
-        self._mem_pending = None
-        if self.data_dir:
-            try:
-                os.unlink(self.pending_path)
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                raise StoreWriteError(f"pending line could not be removed: {type(exc).__name__}") from exc
+        """Remove the pending line. A closed instance refuses: it must never delete a file the instance that now
+        owns the data directory wrote (round 5c item 2)."""
+        with self.lock:
+            self._refuse_if_closed()
+            self._mem_pending = None
+            if self.data_dir:
+                try:
+                    os.unlink(self.pending_path)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise StoreWriteError(f"pending line could not be removed: {type(exc).__name__}") from exc
 
     # a pending line found at start whose anchor is not on the ledger is kept aside, not trusted (AEGIS R4-1):
     # if the ledger later shows its anchor (it was in flight when the process stopped), it is appended then
@@ -216,10 +233,12 @@ class RecordLog:
     _mem_discarded: Optional[bytes] = None
 
     def write_discarded(self, line: bytes) -> None:
-        if not self.data_dir:
-            self._mem_discarded = line
-            return
-        _write_file(os.path.join(self.data_dir, DISCARDED_NAME), line, "discarded line")
+        with self.lock:
+            self._refuse_if_closed()
+            if not self.data_dir:
+                self._mem_discarded = line
+                return
+            _write_file(os.path.join(self.data_dir, DISCARDED_NAME), line, "discarded line")
 
     def read_discarded(self) -> Optional[bytes]:
         if not self.data_dir:
@@ -231,14 +250,16 @@ class RecordLog:
             return None
 
     def clear_discarded(self) -> None:
-        self._mem_discarded = None
-        if self.data_dir:
-            try:
-                os.unlink(os.path.join(self.data_dir, DISCARDED_NAME))
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                raise StoreWriteError(f"discarded line could not be removed: {type(exc).__name__}") from exc
+        with self.lock:
+            self._refuse_if_closed()        # a closed instance never deletes the live instance's file (round 5c)
+            self._mem_discarded = None
+            if self.data_dir:
+                try:
+                    os.unlink(os.path.join(self.data_dir, DISCARDED_NAME))
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise StoreWriteError(f"discarded line could not be removed: {type(exc).__name__}") from exc
 
     def read_pending(self) -> Optional[bytes]:
         if not self.data_dir:
