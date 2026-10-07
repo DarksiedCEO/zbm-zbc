@@ -8,3 +8,13 @@ def test_underscore_repeated_letters_and_unsub_are_opt_outs():
     for t in ("please_unsubscribe", "STOP_please", "S_T_O_P", "unsub", "stoooop", "UNSUBBBSCRIBE"):
         assert i09_replies.classify(t, "email") == "unsubscribe", t
     assert i09_replies.classify("hello there", "email") == "review"
+
+
+def test_l1_accepted_false_positives_are_pinned():
+    """AEGIS L1 (accepted): over-matching on the honouring side. Collapsing repeated letters reads "stoop" as
+    "stop", and unsub\\w* matches "unsubtle"; both are labelled opt-outs (a person can lift the result). A change
+    to either behaviour must be deliberate: these pin it."""
+    for t in ("I'll be on the stoop at noon", "that was an unsubtle hint", "steeeeppp stoooop"):
+        assert i09_replies.classify(t, "email") == "unsubscribe", t
+    for t in ("my stopwatch broke", "unsure about the timing", "subscribe me please"):
+        assert i09_replies.classify(t, "email") != "unsubscribe", t
