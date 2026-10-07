@@ -14,6 +14,9 @@ Extra routes (service bearer required), mounted only here:
   POST /devtools/compliance/rule    {"ruling_id", "subject_id"}
   POST /devtools/bank/deposit       {"entity", "account", "amount"}      the bank side of a receipt
   POST /devtools/rail/paid          {"rail", "idempotency_key"}          the rail pays (funds leave the platform)
+  POST /devtools/ledger/drop-anchor-after-f4d  {}    arm a one-shot fault: the next log anchor after an F4d journal
+                                                    event never reaches the ledger (sweep B-F2 recovery check)
+  GET  /devtools/ledger/faults                       {"armed", "fired"}
   GET  /devtools/now
 The fakes and the clock offset are pickled to FIN_DEVTOOLS_STATE_FILE after every request, so a restart of this
 server continues the same simulated world (that is how the live run's restart leg works).
@@ -87,7 +90,36 @@ def main() -> None:
         ports.stripe_in = StripeIncoming(settings.stripe_secret_key.reveal(), settings.stripe_webhook_secret.reveal(),
                                          settings.stripe_livemode, settings.stripe_success_url,
                                          settings.stripe_cancel_url, transport=sim.transport(), clock=clock)
-    svc = api.build_service(settings, clock, ports)
+    from ledger import HttpLedgerClient, LedgerNotRecorded
+
+    class FaultyLedger:
+        """The real HTTP ledger client with one switchable, one-shot fault (sweep B-F2): after a journal event for an
+        F4d posting, the next ``local_log_appended`` is refused before it is sent (as if the ledger were unreachable),
+        so the rail has accepted a payout whose booking line was never anchored."""
+
+        def __init__(self, inner):
+            self.inner = inner
+            self.armed = False
+            self.seen = False
+            self.fired = 0
+
+        def record_event(self, event_id, department, event_type, actor, subject_id, payload, summary):
+            if self.armed and self.seen and event_type == "local_log_appended":
+                self.armed = self.seen = False
+                self.fired += 1
+                raise LedgerNotRecorded("devtools fault: anchor dropped before it reached the ledger")
+            if self.armed and event_type == "journal_entry_posted" and payload.get("flow") == "F4d":
+                self.seen = True
+            return self.inner.record_event(event_id, department, event_type, actor, subject_id, payload, summary)
+
+        def verify(self):
+            return self.inner.verify()
+
+        def entries(self):
+            return self.inner.entries()
+
+    faulty = FaultyLedger(HttpLedgerClient(settings.ledger_url, settings.ledger_token))
+    svc = api.build_service(settings, clock, ports, faulty)
     app = api.create_app(svc, settings)
     auth = Depends(api.make_require_auth(settings.service_token))
 
@@ -98,6 +130,15 @@ def main() -> None:
         tmp.write_bytes(pickle.dumps(world))
         os.replace(tmp, state)
         return resp
+
+    @app.post("/devtools/ledger/drop-anchor-after-f4d", dependencies=[auth])
+    def drop_anchor() -> dict:
+        faulty.armed, faulty.seen = True, False
+        return {"armed": True}
+
+    @app.get("/devtools/ledger/faults", dependencies=[auth])
+    def faults() -> dict:
+        return {"armed": faulty.armed, "fired": faulty.fired}
 
     @app.get("/devtools/now", dependencies=[auth])
     def now() -> dict:

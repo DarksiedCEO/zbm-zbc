@@ -779,3 +779,148 @@ Not changed:
   the door on invoices, ZBC commercial profiles, media buys and billing profiles, instead of failing every contract
   check later.
 - **L9.** stripe-gateway caps deliveries in flight at 32. The next one is answered 503 at once, and Stripe retries.
+
+## Amendment: bug sweep fixes (Oct 6 2026, branch `fix-finance`)
+
+The Oct 6 backend bug sweep (project doc `bug-sweep-2026-10-06`) found that a payout Stripe had accepted could end up
+never booked (B-F2, Critical), and that bank receipts and Stripe payments had the same root cause (B-F1, B-F3). It
+also found a top-up replay bug (B-F4), an unbooked Stripe Dashboard refund (X-6), tokens in `repr(Settings)` (X-8),
+an unbounded lock map (X-10), the old `store.py` fsync bug (F-3/E-5), and the ledger `verify()` running under the
+service lock. Each reproducing probe is now a regression test in `tests/test_sweep_fixes.py`; every one fails on
+integration 5d49ee9 and passes here.
+
+**Root cause (B-F1..F3).** The journal evidence was recorded under a fixed id, `derived_id("je", entity, key)`, but
+its payload carried `entry_sha256`. That hash covers `posted_at` and the chain head, so any retry after a lost anchor
+sent a different payload under the same id, and the ledger answered 409 forever.
+
+**Decisions.**
+1. **Evidence ids (the bizdev R6 pattern).** Every typed event goes through `Op.record`.
+   - The caller's derived id is the action's request key, `rk`.
+   - The recorded payload is the caller's payload plus `rk` and `seq` (the log line it is meant for). It never
+     carries the wall clock.
+   - The recorded id is `i10.evidence_id(rk, type, payload_sha256)`.
+   - So the same action, with the same content, for the same line, is the same id and the same payload: the retry
+     gets the ledger's 200. Anything else gets a new id, never a lasting 409.
+   - Journal evidence binds `content_sha256` over the entity, lines, flow, source, key, reversal and approval. It
+     leaves out `posted_at`, the chain head and the effective date. The full entry, `entry_sha256` included, is in
+     the anchored log line.
+   - Instance leases and reconciles keep their exact ids (`raw=True`), because i10 parses them.
+2. **Committed vs attempted.** Each log line names its typed evidence (`data.evidence`: id, type, rk, payload hash).
+   - `_commit` refuses (503) if the log moved between an operation's evidence and its commit, so a line is never
+     mislabelled.
+   - `GET /fin/v1/audit/evidence` marks each Finance ledger event:
+     - `committed`: named by an anchored line, payload hash matching;
+     - `cited`: a crossing, lease, version or reconcile listed by an anchored line;
+     - `attempted`: anything else.
+3. **No ghost refusal for a retried action.** `i10.assess` no longer counts a ruling that no line cites as a ghost
+   when its id is `evidence_id(rk, type, its payload_sha256)` for an `(rk, type)` that a local line committed. That
+   ruling is an earlier attempt at a committed action. Without this, every retried booking would block the next
+   start until Andre reconciled. A ghost whose action was never committed is still voidable, as before.
+4. **Payout booking (B-F2).**
+   - In `_release`, a failure recorded after an item reached the rail is per item: the item answers
+     `outcome: unknown_reconciling`, `took_effect: "unknown"`, and the other items go on.
+   - `drive_open_items` catches `Unavailable` per item, and so does `retry_transfers` per operation.
+   - A 503 raised once money may have moved, in a release or in a bank transfer after the bank call, says
+     `took_effect: "unknown"` and `outcome: "unknown_reconciling"`. Only a 503 raised before anything could move
+     money says `false`; the API sets `false` only when the error does not say otherwise.
+   - A rail `paid` or `failed` event for an item still `submitting` is held (`held_submitting`, recorded as
+     `rail_event_held`). It is never acked and dropped.
+   - A redelivery of the same event re-applies it instead of answering `duplicate`. Finance also applies it itself:
+     right after the item's acceptance is booked, and in every rail-sync job (`replay_held_rail_events`). Each held
+     event is applied in its own operation.
+   - Treasury operations left `executing` (the bank answered, but the booking could not be recorded) are asked again
+     by the rail-sync job with the same key.
+5. **Top-up replay (B-F4).**
+   - The top-up answer is persisted with the approval commit (`_idem_add`), and so is a treasury decision's.
+   - A replay answers the operation's current state.
+   - An existing treasury operation is never re-created, so `attempts` is never reset.
+   - A posting that was already reversed is never the one a new bank instruction relies on.
+6. **Stripe Dashboard refunds (X-6).**
+   - `StripePayment.amount_refunded` is the charge's `amount_refunded`.
+   - Any increase over what Finance booked posts **F7r**, keyed by the new cumulative total, so it posts once:
+     Dr 1100 A/R[client] (2070 if the receipt was unapplied) / Cr 1060.
+   - A break `stripe_refund` opens for Andre.
+   - A full refund reopens the invoice and withdraws the client receipt (media: `_media_unpaid`).
+   - Any refund over 0 on a media prepayment sets `payment_refunded`, which blocks vendor payments (COLLECT_BEFORE_PAY)
+     until a new prepayment lands.
+7. **X-8.** Every token and key in `Settings` is `repr=False`.
+8. **X-10.** The per-batch release mutex is dropped when the batch does not exist or is terminal (settled, failed,
+   expired, rejected).
+9. **Store (F-3/E-5).** `store.py` is clientfix-py's, without the pending line:
+   - exact-size `pwrite` with adopt-if-present and `ftruncate` on failure;
+   - `O_NOFOLLOW`;
+   - an empty line refuses start;
+   - `DataDirLock`: a per-process `flock` taken by `config.load`, claimed once by `api.build_service`, and adopted
+     with a single-use token by the service;
+   - an inert `close()`: a closed instance refuses every ledger record and commit.
+10. **`verify()` outside the lock.** `integrity()` calls the ledger's `GET /ledger/verify` before it takes the
+    service lock.
+
+**Live run.** `devtools/live_server.py` gains a one-shot fault (`POST /devtools/ledger/drop-anchor-after-f4d`). The
+week-2 release now runs with it armed, so the rail accepts the payout and the anchor of its F4d booking line never
+reaches the ledger. Two checks follow:
+- the item is booked on the retry within the same release;
+- `/fin/v1/audit/evidence` shows that booking committed exactly once, and the lost try as attempted.
+
+The restart leg then verifies every anchor with the attempt still on the ledger. The run is 54/54 checks (was 52).
+
+**Known limitation (not changed).** These fixes cover an anchor that never reached the ledger. A different case
+remains: an anchor the ledger DID record, whose answer was lost, followed by a failed local append. That leaves a
+stray anchor, which is voidable at the next start and needs Andre's recorded reconcile, as before. bizdev, influencer
+and clientfix close this case with the pending-line roll-forward (ADR 0012 H1/N1), which is not ported to Finance yet.
+
+## Sweep follow-up — AEGIS conditions of 5a56a3a: fixed
+
+AEGIS approved 5a56a3a with conditions (Medium M1-M4, Low L1-L3). Each is fixed below, and each has a regression test
+in `tests/test_sweep_followup.py`. 14 of those 17 tests fail on 5a56a3a. The other 3 are positive controls: they pin
+behaviour that must not change (a same-key re-ask inside the window, a held failure the rail confirms, and a failure
+after a partial refund).
+
+| Id | Finding | Fix |
+|---|---|---|
+| M1 | `store.py` ignored a short `pwrite`, leaving a partial line on disk that memory did not hold. | `RecordLog.append_prepared` compares the bytes written with the line length. A short write is handled like any write error: `ftruncate` back to the previous length, `fsync`, then `StoreWriteError` ("short write: n of m bytes"), which reaches the caller as a 503 with nothing taking effect. Tests: `test_m1_*` (service level and store unit level). |
+| M2 | `svc_recon.retry_transfers` could ask the bank twice. | (1) **Age limit.** `_bank_window_expired`: an `executing` / `bank_unknown` operation is re-asked with its key only within `RETRY_WINDOW_H` (23 h) of `posted_at`. `posted_at` is the posting committed immediately before the first ask of that attempt. After the window Finance stops asking. The operation is flagged `retry_window_expired` and stays `bank_unknown`, so its posting is kept and its amount stays reserved. A break `bank_retry_window_expired` goes to Andre. The bank port has no read-back of a transfer by key, so there is no lookup to switch to; the break is the fallback the finding allows. (2) **In-flight guard.** `xfer_in_flight` is a set held under the service lock. `_execute_transfer` claims it before the bank call and releases it in `finally`. A second caller sees the claim and returns `in_flight` without calling the bank. That covers a retry run, or the request path racing a retry. `retry_transfers` takes its snapshot under the lock and skips claimed or expired operations. The guard is per process; the data-directory flock (sweep F-3/E-5) keeps it to one process per log. Tests: `test_m2_*`, including a three-thread race that asks the bank exactly once. `test_aegis_r17::...retries_with_the_same_key` now retries at +22 h, inside the window, instead of +24 h. |
+| M3 | `_drive_item` resubmitted on Trolley an item whose `paid` / `failed` rail event was held. | Before any resubmit, `_drive_item` reads the item's held events through `held_by_item`. If a `paid` event is held, `_held_paid` records `item_accepted_from_rail_event`, books the acceptance (F4d), and then the held event is applied (F4e). Nothing is sent to the rail. If a `failed` event is held, the item goes to lookup only. When the rail confirms the item, the acceptance is booked and the failure applied (F4f). When the rail does not confirm it, `_held_failed_break` opens a `rail_failed_unconfirmed` break for Andre and the item is never resubmitted. Tests: `test_m3_*`. |
+| M4 | `replay_held_rail_events` scanned every rail event ever received, under the lock. | `_apply` keeps `held_by_item` (item id to the keys of its held events). The index is rebuilt on replay and updated on every commit. The replay visits only held events. Test: `test_m4_*` uses a `db["rail_events"]` that refuses iteration and counts keyed reads. With 5,000 settled events present it allows at most 10 reads, then 0 when nothing is held. It also checks that the index survives a restart. |
+| L1 | The ghost-ruling exemption ignored ledger position. | `assess_log` passes `(rk, type, seq)` for every committed action. `i10.assess` resolves the anchor of line `seq` to its ledger index, and exempts a matching ruling only when it sits before that anchor (record-first: an earlier attempt). A matching ruling after the anchor is still a ghost and stays voidable. So is an action without a position, or one whose line has no anchor. Tests: `test_l1_*` (positive, negative, and no-position). |
+| L2 | Refund status leftovers. | `_stripe_refund` now always books F7r and leaves a correct status. Matched payment, partial refund: `partially_refunded` (a new status), and the client receipt, which states the full amount, is withdrawn. Matched payment, full refund: `refunded`. Unapplied receipt: Dr 2070; the status stays `unapplied` while cash remains, then becomes `refunded`. `charged_back` receipt: before this fix the refund was refused (`Invalid`), which left 1060 overstated for good. It now books Dr 1100 A/R[client], or Dr 5030 with no invoice, keeps the `charged_back` status, records `invoice.refunded` and opens the `stripe_refund` break. A refund on a `returned` receipt is still refused. Stripe cannot refund a charge whose payment failed. `partially_refunded` counts as live wherever `matched` did for Stripe receipts (`_stripe_payment_failed`, `_stripe_dispute`). Tests: `test_l2_*`, each asserting that every entry and both trial balances balance. |
+| L3 | Missing tests. | `tests/test_sweep_followup.py` (17 tests at f751017). The finance suite goes from 538 at integration to 559 at 5a56a3a to 576 here. |
+
+The live run (`devtools/live_run.py` against a real ledger-rust built from this tree) is still 54/54. No live check was
+added, because each of these paths needs a fault the live server cannot inject without a new devtools hook.
+
+## Sweep follow-up 2 — AEGIS REVISE of f751017: fixed
+
+AEGIS returned REVISE on f751017. The regression tests are in `tests/test_aegis_f751017.py` (17 tests at c0869c4). The C1 tests
+port the reviewer's probe `test_probe_m2b.py`. Its fake bank de-duplicates a key for 24 h from first sight and moves
+money for real on each move.
+
+| Id | Finding | Fix |
+|---|---|---|
+| C1 (Critical, pre-existing) | After an `unknown` bank outcome, a later `refused` / `unavailable` answer was read as "nothing moved". The posting was reversed, the operation went back to `approved`, and the next attempt took a fresh `posted_at` (restarting the window) and re-sent the key. Result: a top-up paid twice and booked once, or a sweep that moved money but was booked at net 0.00 and ended `refused_at_execution`. | `_execute_transfer` marks the operation `outcome_unknown` as soon as an ask's outcome is not recorded: a re-entry into `executing` / `bank_unknown`, or an unknown answer. From then on `_transfer_outcome` never reverses on `refused` / `unavailable`. The operation stays `bank_unknown`, keeps its posting and its break, and records `last_outcome`. An `approved` operation flagged `outcome_unknown` never starts a new attempt. `first_asked_at` is set once and carried across attempts, never reset. `_bank_window_check` measures the 23 h window from it, and past the window nothing is asked or started. A clean refusal with no earlier unknown outcome still reverses and retries, because nothing moved (unchanged). Tests: `test_c1_*` (probes a-d, both orders of refusal, the first-ask anchor, and the clean-refusal control). |
+| M-N1 | A `bank_unknown` operation could never close, and stayed reserved in LIVE_SWEEP / OPEN_OPS for good. | `POST /fin/v1/treasury/operations/{op_id}/settlement` is Andre-only, through the existing FounderGate `andre()` dependency (`X-Andre-Approval-Token`). Body: `{request_id, content_sha256, outcome: moved\|not_moved, bank_ref?, note?}`. `moved`: the posting stands and the operation becomes `done`, with the same side effects as a bank acceptance (refund paid, shortfall closed). `not_moved`: a recorded reversal entry and status `not_moved`, so the amount is released. Either way the operation's bank breaks are resolved and `treasury_settled_by_andre` is recorded (added to the ruling types). The action is idempotent per request_id, bound to `content_sha256`, and refused (409) while a bank call is in flight or when the operation is not settleable. Tests: `test_mn1_*` (moved, not_moved, wrong token and service caller refused, content mismatch, replay, survives a restart). |
+| M-N2 | A missing `posted_at` (operations from before 420b488) counted as inside the window, so it was re-asked forever. A backward clock jump extended the window. | The anchor is `first_asked_at`. A legacy record falls back to `posted_at` only when it made a single attempt, where that posting was the first ask. No usable anchor counts as expired: a break goes to Andre and nothing is asked. A `now` earlier than the anchor never re-asks (`clock_behind`). Tests: `test_mn2_*`. |
+| L-N1 | A $300 partial refund followed by a lost $700 chargeback left the receipt `partially_refunded` and the invoice `paid`. | `_stripe_dispute`: a lost dispute whose amount plus what was already refunded equals the payment is a full reversal. The receipt becomes `charged_back`, the invoice goes back to `issued` (with `charged_back` recorded), and the client receipt is withdrawn. No `dispute_receivable` break opens. The other order (partial chargeback, then a refund of the rest) is caught in `_stripe_refund` the same way. Tests: `test_ln1_*`, both orders plus a control where the two together do not cover the payment. |
+
+Suite: 593 (was 576). Live run: still 54/54.
+
+## Sweep follow-up 3 — AEGIS re-review of c0869c4: fixed
+
+AEGIS closed C1, M-N2 and L-N1. M-N1 was only partly closed. The regression tests are in `tests/test_aegis_c0869c4.py`
+(18 tests at 25290ee). The H-N1 tests port the reviewer's probe `test_probe_v2r.py`. The two new Andre routes are added to
+`ANDRE_ROUTES` in `test_auth_limits_idempotency.py`, so every other identity is refused.
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-N1 (High) | Refund-payment treasury ops were created without `content_sha256`. Settling one crashed with a 500, the treasury view showed no hash, and a refund stuck at `bank_unknown` could never be settled. | `ReconMixin.treasury_op_sha` is the one canonical form: SHA-256 over `op_id, kind, entity, amount, ref_id`. It is used by `_new_treasury_op` and by `svc_books._refund_payment_op` (refund payments now store it), and for a record without a stored hash it is computed at read time, deterministically. `treasury_view` returns it for every open operation. `settle_treasury` and `decide_treasury` compare against it, so there is never a `KeyError`: a missing or wrong hash is a 409 that tells the caller to re-read. A refund payment settled `not_moved` reverses F6p and sets the refund to `payment_not_moved`. F6 stays booked (the client is still owed in 2050), and reconciliation L4 counts the refund as spoken for (`REFUND_OWED`). New Andre-only route `POST /fin/v1/refunds/{id}/repay` (`content_sha256` of the refund) creates a NEW refund-payment operation with its own key, never the old one. `moved` closes the refund as `paid`. Tests: `test_hn1_*`, including a test parametrised over sweep, top_up (with a shortfall), funding and refund_payment × moved / not_moved, a legacy record with no hash, and a restart. |
+| L-N2 (Low) | Refunded plus charged back above the payment was booked silently. | `_over_recovery_break` opens a `stripe_over_recovery` break for Andre, once per (refunded, charged-back) total, from either path (refund or lost dispute). The receipt records `stripe.charged_back`. Tests: `test_ln2_*` (both orders, plus an exact full reversal that opens none). |
+| L1 carry-over | The exemption bound took the last line naming an rk. | The bound is now the first committing line (`min`): an action is never attempted again after it commits. Test: `test_l1_the_first_committing_line_bounds_the_exemption`. |
+| M1 carry-over | A truncate that failed after a failed write left the log refusing writes with no visible reason. | `RecordLog.fault` records the reason. `/fin/v1/integrity` turns red with `LOCAL_LOG_WRITE_FAULT: …`, and `/health` reports `log_write_fault: true` (a boolean only, since that route is open). Writes still refuse (fail closed). Test: `test_m1_a_truncate_that_fails_is_reported_not_silent`. |
+
+Suite: 611 (was 593). Live run: still 54/54.
+
+## Sweep follow-up 4 — AEGIS condition M-N3 of 25290ee: fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| M-N3 | `settle_treasury` `not_moved` accepted Andre's word alone. A wrong attestation would let `/refunds/{id}/repay` pay the client twice. | `not_moved` requires `bank_ref` on every op kind: the bank statement line or trace reference, 1-128 characters of `[A-Za-z0-9._:/#-]` (`models.BANK_REF_RE`). The model refuses a missing or bad value with 422. The service checks it again and refuses with 409 `BANK_EVIDENCE_REQUIRED` (FIN-18). `moved` keeps it optional. The ref is stored on the operation (`settled_bank_ref`), in the recorded `treasury_settled_by_andre` evidence, and on the refund (`not_moved_bank_ref`). `repay_refund` refuses (409 `BANK_EVIDENCE_REQUIRED`) unless the settlement it relies on was `not_moved` with that recorded ref. The repay response (`attested`), its `refund_approved` evidence, and `GET /fin/v1/treasury` (`settled_operations`) show the attested ref. Tests: `test_mn3_*` in `tests/test_aegis_c0869c4.py` (bad or missing refs refused, the service-level reason, `moved` without a ref, ref recorded and shown and required for repay, repay refused without a recorded ref). Existing settle tests now send a ref. Suite: 621. Live run: 54/54. |

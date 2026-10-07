@@ -294,6 +294,8 @@ class StripeIncoming:
                 failure_txn=ft.get("id") if ft else None,
                 failure_amount=from_cents(ft["amount"]) if ft else None,
                 failure_fee=from_cents(ft["fee"]) if ft else None,
+                amount_refunded=from_cents(ch["amount_refunded"]) if isinstance(ch.get("amount_refunded"), int)
+                and ch["amount_refunded"] >= 0 else None,
                 livemode=doc.get("livemode") is True)
         except (KeyError, TypeError, ValueError, AttributeError):
             return StripePayment(False, reason="stripe answer not understood")

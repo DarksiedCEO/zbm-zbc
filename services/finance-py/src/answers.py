@@ -251,6 +251,7 @@ class StripePaymentM(_S):
     failure_txn: Optional[StripeId] = None
     failure_amount: Optional[Money] = None
     failure_fee: Optional[Money] = None
+    amount_refunded: Optional[PosMoney] = None
     livemode: bool = False
     reason: Reason = ""
 

@@ -152,6 +152,10 @@ class MediaMixin:
             today = self._today_la()
             clears = self._media_clears_on(buy)
             reasons = []
+            if buy.get("payment_refunded"):
+                reasons.append(R.item("COLLECT_BEFORE_PAY", "part or all of the client's prepayment was refunded at "
+                                                            "Stripe; the vendor is not paid until Andre settles it "
+                                                            "(founder M3; sweep X-6)"))
             if buy.get("payment_disputed"):
                 reasons.append(R.item("COLLECT_BEFORE_PAY", "the client disputed the prepayment at Stripe; the vendor "
                                                             "is not paid while that dispute is open (founder M3)"))
@@ -302,7 +306,8 @@ class MediaMixin:
             status = "prepaid"
         else:
             status = "vendor_paid" if M.D(buy["vendor_paid"]) == M.D(buy["media_cost"]) else "vendor_partially_paid"
-        op.put("media_buys", buy["buy_id"], {**buy, "status": status, "prepayment": pre, "payment_returned": False})
+        op.put("media_buys", buy["buy_id"], {**buy, "status": status, "prepayment": pre, "payment_returned": False,
+                                             "payment_refunded": False})
 
     def _media_return(self, op: Op, rc: dict, inv: dict, body: dict) -> dict:
         """The bank returned a ZBM media prepayment (F12x, a FACT flow). The client owes again. If the vendor was

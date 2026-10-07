@@ -438,6 +438,7 @@ class StripePayment:
     failure_txn: Optional[str] = None           # the charge's failure balance transaction, if it failed after success
     failure_amount: Optional[str] = None        # signed (negative)
     failure_fee: Optional[str] = None           # signed
+    amount_refunded: Optional[str] = None       # the charge's amount_refunded (>= 0; sweep X-6), None = not read
     livemode: bool = False
     reason: str = ""
 
