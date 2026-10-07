@@ -27,6 +27,14 @@ SMS_MAX = 400
 RESCHEDULE_DAYS = 7
 REPLY_TEXT_MAX = 20_000            # sweep A: a longer reply (a quoted thread) is cut to this, never refused
 REPLY_CHANNELS = ("email", "sms", "voice")
+REPLY_TAIL = 2000                  # AEGIS L2: a cut text keeps its last characters too (an opt-out at the end)
+
+
+def _head_tail(text: str) -> str:
+    """At most REPLY_TEXT_MAX characters: the head and the last REPLY_TAIL, joined by a newline (AEGIS L2)."""
+    if len(text) <= REPLY_TEXT_MAX:
+        return text
+    return text[:REPLY_TEXT_MAX - REPLY_TAIL - 1] + "\n" + text[-REPLY_TAIL:]
 CONSENT_FUTURE_SKEW = timedelta(minutes=5)
 
 
@@ -738,7 +746,7 @@ class OutreachMixin:
         return {"request_id": rq, "channel": ch if ch in REPLY_CHANNELS else "other",
                 "message_id": text_of(body.get("message_id"), 1000), "from_email": text_of(body.get("from_email"), 1000),
                 "from_phone": text_of(body.get("from_phone"), 1000),
-                "text": text_of(body.get("text"), REPLY_TEXT_MAX) or ""}
+                "text": _head_tail(body.get("text")) if isinstance(body.get("text"), str) else ""}
 
     def reply(self, caller: str, raw_body: dict, raw: Optional[dict] = None) -> dict:
         body = self._reply_fields(raw_body, raw if raw is not None else raw_body)

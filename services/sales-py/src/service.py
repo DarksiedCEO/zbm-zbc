@@ -15,6 +15,8 @@ The deciding rules are in intelligences/ (deterministic, one job each).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
 import threading
@@ -157,7 +159,7 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
             # ``committed``) in /audit/evidence, and a retry after the state changed gets a NEW id instead of a
             # lasting 409 (LedgerConflict -> 503 for ever).
             seq = len(self.log) + 1
-            rk = data.get("request_id") or f"{INTERNAL}|{kind}"
+            rk = self._evidence_rk(data.get("request_id") or f"{INTERNAL}|{kind}")
             named = []
             for event_type, subject_id, payload, id_parts in (evidence if isinstance(evidence, list) else
                                                               [evidence] if evidence is not None else []):
@@ -203,6 +205,13 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
             self._drop_pending()
             self._apply(kind, data, at)
             return rec
+
+    def _evidence_rk(self, request_key: str) -> str:
+        """The request key as the ledger sees it (AEGIS L4): a keyed HMAC under the PII hash key
+        (SALES_PII_HASH_KEY_FILE, whose fingerprint is bound in the log at first start: another key refuses to start),
+        never the raw key — a request id is the caller's, and may carry anything."""
+        return "rk-" + hmac.new(self.pii_key, b"sales evidence rk\x00" + request_key.encode("utf-8", "surrogatepass"),
+                                hashlib.sha256).hexdigest()[:40]
 
     def _record_twice(self, eid, event_type, actor, subject, payload, summary) -> None:
         """One retry of the SAME event when the answer was lost (the ledger is idempotent on identical content, so
@@ -477,6 +486,16 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
                 break
         return {"events": out, "log_length": len(self.log)}
 
+    def _department_entries(self, event_type: Optional[str] = None) -> list[dict]:
+        """This department's ledger entries (of one event type, if given): the ledger's filtered, paged read when the
+        client has it (``entries_filtered``), else the whole ledger filtered here (an older client or a test fake)."""
+        client = self.rec.client
+        paged = getattr(client, "entries_filtered", None)
+        if paged is not None:
+            return paged(DEPARTMENT, event_type)
+        return [e for e in client.entries() if e.get("department") == DEPARTMENT
+                and (event_type is None or e.get("event_type") == event_type)]
+
     def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
         """``/sales/v1/audit/evidence`` (sweep A R6-M1, bizdev-py's round-6 view) — every typed evidence event this
         department holds on the ledger, each marked:
@@ -506,16 +525,20 @@ class SalesService(LeadsMixin, OutreachMixin, DealsMixin):
                     cache["epoch"] = line_sha[:16]
                 evs = r["data"].get("ledger_evidence")
                 if evs:
-                    rk = r["data"].get("request_id") or f"{INTERNAL}|{r['kind']}"
+                    rk = self._evidence_rk(r["data"].get("request_id") or f"{INTERNAL}|{r['kind']}")
                     cache["lines"].append((r["seq"], line_sha, rk, r["kind"], evs))
                 cache["n"] += 1
             epoch, lines, n_lines = cache["epoch"], list(cache["lines"]), cache["n"]
-        try:
-            entries = self.rec.client.entries()
+        try:                                             # outside the service lock (AEGIS M4: filtered, paged)
+            if event_type is None:
+                mine = self._department_entries()
+                anchor_rows = [e for e in mine if e.get("event_type") == "log_anchor"]
+            else:
+                anchor_rows = self._department_entries("log_anchor")
+                mine = self._department_entries(event_type) if event_type != "log_anchor" else []
         except LedgerQueryFailed:
             raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
-        mine = [e for e in entries if e.get("department") == DEPARTMENT]
-        anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == "log_anchor"}
+        anchors = {e.get("event_id"): e for e in anchor_rows}
         named: dict[str, tuple] = {}                     # event_id -> (seq, rk, payload, log kind) of an anchored line
         for seq, line_sha, line_rk, kind, evs in lines:
             aid, apayload = self._anchor_ids(epoch, seq, line_sha)

@@ -54,7 +54,7 @@ def test_r6m1_evidence_names_rk_and_seq_and_an_orphan_is_attempted(tmp_path):
     assert h.andre(path, body).status_code == 503
     led.fail_types = set()
     p = led.of_type("template_approved")[0]["_payload"]
-    assert body["request_id"] in p["rk"] and isinstance(p["seq"], int)
+    assert p["rk"].startswith("rk-") and body["request_id"] not in p["rk"] and isinstance(p["seq"], int)   # AEGIS L4
     ev = _evidence(h, "template_approved")
     assert ev["attempted"] == 1 and ev["committed"] == 0
     assert h.svc.verify_integrity(force=True, always=True)["ok"]
@@ -194,3 +194,66 @@ def test_a_closed_instance_is_inert(tmp_path):
     for path in ("/sales/v1/audit/integrity", "/sales/v1/audit/evidence", "/sales/v1/audit/export"):
         h.refused(h.get(path, "compliance_38"), 503, "SERVICE_CLOSED")
     assert len(led.events) == n_events and len(h.svc.log) == n_lines
+
+
+# ------------------------------------------------------------------ AEGIS review of 17cda6a (REVISE)
+
+def test_l4_the_ledger_never_sees_a_raw_request_id(tmp_path):
+    led = FakeLedger()
+    h = Harness(tmp_path, ledger=led, ports=wired_ports())
+    r_id = "r-caller-chosen-" + rid()[2:]
+    h.vlead(email="jane@acme-shop.test", phone=None, tz=None)
+    h.ok(h.post("/sales/v1/replies", {"request_id": r_id, "channel": "email", "from_email": "jane@acme-shop.test",
+                                      "text": "STOP"}, caller="provider_events"), 201)
+    assert r_id not in str([e["_payload"] for e in led.events]) and r_id not in str([e for e in led.entries()])
+    assert all(e["_payload"]["rk"].startswith("rk-") for e in led.events if "rk" in e["_payload"])
+    assert _evidence(h, "suppression_added")["committed"] == 1
+
+
+def test_l2_an_opt_out_past_the_reply_cap_is_still_read(tmp_path):
+    h = Harness(tmp_path, ports=wired_ports())
+    h.vlead(email="jane@acme-shop.test", phone=None, tz=None)
+    text = "A long story about our order. " * 1000 + "\n\nUNSUBSCRIBE"
+    assert len(text) > 25_000
+    r = h.ok(h.post("/sales/v1/replies", {"request_id": rid(), "channel": "email", "from_email": "jane@acme-shop.test",
+                                          "text": text}, caller="provider_events"), 201)
+    assert r["class"] == "unsubscribe" and r["suppressed"] is True
+
+
+def _paging_ledger(entries, honours_query=True, refuses=None):
+    import httpx
+
+    def handler(request):
+        q = dict(request.url.params)
+        if refuses and q:                    # 400: a strict ledger; 404: ledger-rust before fix-ledger
+            return httpx.Response(refuses, json={"error": "no"})
+        if not honours_query or not q:
+            return httpx.Response(200, json=entries)
+        after, limit = int(q.get("after_seq", -1)), int(q["limit"])
+        out = [e for e in entries if e["seq"] > after and e.get("department") == q["department"]
+               and e.get("event_type") == q.get("event_type", e.get("event_type"))]
+        return httpx.Response(200, json=out[:limit])
+    return httpx.MockTransport(handler)
+
+
+def test_m4_paged_filtered_ledger_read_with_fallbacks(tmp_path):
+    from ledger import HttpLedgerClient
+    entries = [{"seq": i, "kind": "event", "department": "sales" if i % 3 else "finance",
+                "event_type": "log_anchor" if i % 2 else "suppression_added", "event_id": f"e{i}"} for i in range(25)]
+    want = [e for e in entries if e["department"] == "sales"]
+    for honours, refuses in ((True, None), (False, None), (True, 400), (True, 404)):
+        c = HttpLedgerClient("http://ledger.test", "t" * 32, transport=_paging_ledger(entries, honours, refuses))
+        assert c.entries_filtered("sales", page_size=4) == want, (honours, refuses)
+        assert c.entries_filtered("sales", "log_anchor", page_size=4) == \
+            [e for e in want if e["event_type"] == "log_anchor"]
+    led = FakeLedger()
+    calls = []
+    led.entries_filtered = lambda d, t=None: calls.append((d, t)) or [
+        e for e in led.entries() if e["department"] == d and (t is None or e["event_type"] == t)]
+    h = Harness(tmp_path, ledger=led, ports=wired_ports())
+    h.vlead(email="jane@acme-shop.test", phone=None, tz=None)
+    h.ok(h.post("/sales/v1/replies", {"request_id": rid(), "channel": "email", "from_email": "jane@acme-shop.test",
+                                      "text": "STOP"}, caller="provider_events"), 201)
+    calls.clear()
+    assert _evidence(h, "suppression_added")["committed"] == 1
+    assert calls == [("sales", "log_anchor"), ("sales", "suppression_added")]

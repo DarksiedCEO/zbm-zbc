@@ -50,6 +50,10 @@ class LedgerQueryFailed(Exception):
     """The ledger could not be READ (GET /ledger/entries): nothing can be verified against it."""
 
 
+class LedgerPagingUnsupported(LedgerQueryFailed):
+    """The ledger refused the paged, filtered read (an older ledger-rust): read it in full instead."""
+
+
 class LedgerNotRecorded(LedgerRecordError):
     took_effect = False
 
@@ -89,6 +93,7 @@ def clean_summary(summary: str) -> str:
     return cleaned[:SUMMARY_MAX]
 
 
+ENTRIES_PAGE_SIZE = 1000
 LEDGER_ENTRIES_MAX_BYTES = 256 * 1024 * 1024
 LEDGER_SHED_BODY = {"error": "ledger-rust is at its connection limit; retry shortly"}
 
@@ -176,6 +181,63 @@ class HttpLedgerClient:
         if not isinstance(data, list) or not all(isinstance(e, dict) for e in data):
             raise LedgerQueryFailed("ledger entries were not a list of objects")
         return data
+
+
+    def _get_list(self, params: dict | None) -> list[dict]:
+        try:
+            with httpx.Client(timeout=max(self._timeout, 30), transport=self._transport) as client:
+                with client.stream("GET", f"{self._base_url}/ledger/entries", params=params,
+                                   headers={"Authorization": f"Bearer {self._token}"}) as resp:
+                    # a ledger before fix-ledger (sweep F-2) matches the path WITH its query: 404; a stricter one: 400
+                    if resp.status_code in (400, 404, 405) and params:
+                        raise LedgerPagingUnsupported("the ledger has no paged read")
+                    if resp.status_code != 200:
+                        raise LedgerQueryFailed(f"ledger could not be read: HTTP {resp.status_code}")
+                    chunks, size = [], 0
+                    for chunk in resp.iter_bytes():
+                        size += len(chunk)
+                        if size > LEDGER_ENTRIES_MAX_BYTES:
+                            raise LedgerQueryFailed("ledger entries larger than the read cap")
+                        chunks.append(chunk)
+            data = json.loads(b"".join(chunks))
+        except LedgerQueryFailed:
+            raise
+        except (httpx.HTTPError, ValueError, RecursionError) as exc:
+            raise LedgerQueryFailed(f"ledger could not be read: {type(exc).__name__}") from None
+        if not isinstance(data, list) or not all(isinstance(e, dict) for e in data):
+            raise LedgerQueryFailed("ledger entries were not a list of objects")
+        return data
+
+    def entries_filtered(self, department: str, event_type: str | None = None,
+                         page_size: int = ENTRIES_PAGE_SIZE) -> list[dict]:
+        """Sweep A (AEGIS M4): this department's entries (of one event type, if given), read page by page with
+        ledger-rust's ``GET /ledger/entries?after_seq=&limit=&department=&event_type=`` (fix-ledger, sweep F-2).
+        An older ledger that ignores the query answers the whole ledger: recognised (more than a page, or a page
+        that does not move past ``after_seq``) and filtered here; one that has no paged read (404 before
+        fix-ledger, or 400) is read in full, filtered here, bounded by LEDGER_ENTRIES_MAX_BYTES like ``entries()``."""
+        def keep(e):
+            return e.get("department") == department and (event_type is None or e.get("event_type") == event_type)
+        out: list[dict] = []
+        after = None
+        while True:
+            params = {"limit": str(page_size), "department": department}
+            if event_type is not None:
+                params["event_type"] = event_type
+            if after is not None:
+                params["after_seq"] = str(after)
+            try:
+                page = self._get_list(params)
+            except LedgerPagingUnsupported:
+                return [e for e in self.entries() if keep(e)]
+            seqs = [e.get("seq") for e in page]
+            if not all(isinstance(q, int) and not isinstance(q, bool) for q in seqs):
+                raise LedgerQueryFailed("ledger entries carry no integer seq")
+            if len(page) > page_size or (after is not None and page and seqs[0] <= after):
+                return [e for e in page if keep(e)]           # an older ledger ignored the query: the whole ledger
+            out += [e for e in page if keep(e)]
+            if len(page) < page_size:
+                return out
+            after = seqs[-1]
 
 
 class UnconfiguredLedgerClient:
