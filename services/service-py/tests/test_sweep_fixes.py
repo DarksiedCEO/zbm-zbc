@@ -665,3 +665,27 @@ def test_hj_not_wanting_emails_is_an_email_opt_out(tmp_path):
     cid = _with_consents(h)
     h.ok(_email(h, "owner@acme.test", "I don't want your emails"), 201)
     assert _both_revoked(h, cid)
+
+
+# ------------------------------------------------------------------ AEGIS re-review of 9c55872 (REVISE)
+
+def test_hk_other_things_named_email_text_or_mail_are_not_opt_outs(tmp_path):
+    import channels
+    for t in ("we don't need the emails you sent re: invoice", "I don't need the email receipt, the paper one is fine",
+              "I don't want any messages on the gift card", "I don't want the mail carrier to leave it outside",
+              "I do not need the email again, found it", "I don't want the text on the banner changed",
+              "We don't need more texts for the engraving"):
+        assert channels.opt_out_level(t) != "exact", t
+        assert channels.email_opt_out_decision(t) != "revoke", t
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    h.ok(_email(h, "owner@acme.test", "I don't want the mail carrier to leave it outside"), 201)
+    assert _consents(h, cid) == {"email": "active", "sms": "active"}
+
+
+def test_pre_existing_opt_out_wordings_are_honoured():
+    import channels
+    for t in ("I want to be removed from your email list", "Opt me out", "I don't want to hear from you again",
+              "Delete my info", "Enough with the emails", "I'd rather not receive these",
+              "I don't want your emails, they're spam"):
+        assert channels.email_opt_out_decision(t) == "revoke", t

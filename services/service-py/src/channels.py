@@ -35,6 +35,10 @@ OPT_OUT_TERMS = ("stop", "stopall", "unsubscribe", "unsub", "cancel", "cancelled
                  "remove my number", "my number off", "lose my number", "take my number", "delete my number",
                  "didnt sign up", "did not sign up", "never signed up", "who is this", "wrong number", "wrong person",
                  "not interested",
+                 # AEGIS round 12 (pre-existing gaps)
+                 "opt me out", "removed from your", "remove me from your", "dont want to hear from you",
+                 "do not want to hear from you", "delete my info", "delete my information", "delete my data",
+                 "enough with the emails", "enough with the texts", "rather not receive",
                  # sweep A: email wording ("do not email me" was not an opt-out at all)
                  "dont email", "do not email", "dont e mail", "do not e mail", "never email", "stop emailing",
                  "quit emailing", "stop sending emails", "remove my email", "take my email", "delete my email",
@@ -96,6 +100,10 @@ def opt_out_level(text: str) -> Optional[str]:
     email only ``exact`` revokes, ``suspected`` pauses proactive SMS and asks Andre (V3 Info)."""
     if any(sym in text for sym in OPT_OUT_SYMBOLS):
         return "exact"
+    for clause in _SCOPE_SEGMENT.split(html_as_text(text)):
+        m = _NEG_WANT.search(normalise(clause).strip())
+        if m and not set(m.group(1).split()) <= {"call", "calls"}:
+            return "exact"
     raw = text.replace("<", " ").replace(">", " ")   # AEGIS R6: "<STOP>", "<3 ... stop texting me >:(" on SMS
     text = html_as_text(text)                    # AEGIS re-review N4: "Unsubscribe<br>Sent ..." is two words
     variants = {normalise(text), normalise(text.translate(_LEET)), normalise(raw), normalise(raw.translate(_LEET))}
@@ -104,9 +112,7 @@ def opt_out_level(text: str) -> Optional[str]:
     for norm in variants:
         if any(f" {normalise(t).strip()} " in norm for t in OPT_OUT_TERMS):
             return "exact"
-        m = _NEG_WANT.search(norm)
-        if m and not set(m.group(1).split()) <= {"call", "calls"}:
-            return "exact"
+
         if norm.strip() in OPT_OUT_SHORT:
             return "exact"
         for tok in norm.split():
@@ -329,10 +335,13 @@ def typo_opt_out(text: Optional[str]) -> bool:
 # on its own ("Never call before 9 please"): it reaches a suspected level through negated_channel at most
 SCOPE_ONLY_TERMS = ("do not call", "dont call", "never call", "stop calling")
 # AEGIS H-J: "I don't want your emails", "I no longer want to receive your emails", "I do not want calls or emails"
-_NEG_WANT = re.compile(r"\b(?:dont|do not|no longer|never|dont ever) (?:want|wish|need|like)(?: to (?:receive|get|hear))?"
+_NEG_WANT = re.compile(r"\b(?:dont|do not|no longer|never|dont ever) (?:want|wish)(?: to (?:receive|get))?"
                        r"(?: (?:any|your|these|those|more|any more|anymore|further|the|from|you|of))*"
                        r" ((?:emails?|e mails?|calls?|texts?|txts?|messages?|newsletters?|mail|sms)"
-                       r"(?: (?:or|and|nor) (?:emails?|e mails?|calls?|texts?|txts?|messages?|newsletters?|mail|sms))*)\b")
+                       r"(?: (?:or|and|nor) (?:emails?|e mails?|calls?|texts?|txts?|messages?|newsletters?|mail|sms))*)"
+                       # AEGIS H-K: the channel must end the clause or be followed by from you / anymore / again —
+                       # "I don't want the mail carrier to ...", "... the text on the banner" are other things
+                       r"(?= *$| (?:from (?:you|your|this|acme|us)|anymore|any more|again|ever|please|thanks|thank you)\b)")
 _SCOPE_SEGMENT = re.compile(r"[\n\r.!?;,]+")
 # "Do not call, text or email me": a comma inside a list of channels is not a clause end
 _CH = r"(?:call|text|txt|message|email|e-mail|mail|sms)"
@@ -457,7 +466,7 @@ def opt_out_scope(text: Optional[str]) -> Optional[str]:
                 phone, email = _scan_phrase(toks, i, j)
                 if not phone or email is True:
                     generic = True
-            for m in _NEG_WANT.finditer(norm):
+            for m in _NEG_WANT.finditer(norm.strip()):
                 chans = set(m.group(1).split())
                 if chans & (EMAIL_SCOPE_WORDS | {"e", "mails"}) or chans & {"message", "messages"}:
                     found = generic = True

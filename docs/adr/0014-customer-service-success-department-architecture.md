@@ -393,3 +393,10 @@ phrase from all rounds is pinned in `test_scope_corpus_all_rounds_at_once`.
 | Id | Finding | Fix |
 |---|---|---|
 | H-J (High, pre-existing) | "I don't want your emails", "I no longer want to receive your emails", "I do not want calls or emails" were not opt-outs | `_NEG_WANT`: a negated want / wish / need (to receive / get / hear) of emails, texts, messages or newsletters is an exact opt-out; its channels decide the scope (email or messages → `all`, texts only → SMS). Calls alone are not an SMS opt-out |
+
+### Sweep A follow-up — AEGIS re-review of 9c55872 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-K (High, regression) | "I don't need the email receipt", "I don't want the mail carrier to ...", "... the text on the banner" revoked consent | `_NEG_WANT` takes only want / wish (to receive / get), read per clause, and the channel must end the clause or be followed by from you / anymore / again / please |
+| Pre-existing gaps | "Opt me out", "removed from your email list", "I don't want to hear from you again", "Delete my info", "Enough with the emails", "I'd rather not receive these" were neither honoured nor surfaced | Added to the opt-out terms (no phone word, so scope `all`) |
