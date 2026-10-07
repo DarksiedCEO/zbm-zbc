@@ -509,3 +509,32 @@ def test_m5_a_customers_own_from_date_lines_are_not_a_quote_header():
 def test_l4_style_and_script_are_not_the_persons_words():
     import channels
     assert channels.email_opt_out("<style>.unsubscribe{color:red}</style><p>Thanks, see you Friday</p>") is False
+
+
+# ------------------------------------------------------------------ AEGIS re-review of ffe7ede (REVISE)
+
+def test_hd_asking_to_be_emailed_is_not_an_email_opt_out():
+    import channels
+    for t in ("stop texting me and email me instead", "Please stop texting and email me instead",
+              "Stop texting me or email me if you must", "stop the texts, emails are fine",
+              "Stop texting me. Email me instead.", "stop texting me, my email is a@b.com"):
+        assert channels.email_opt_out(t) is False, t
+    for t in ("Do not text or email me", "please stop texting and emailing me", "dont text me nor email me",
+              "stop texting me, same for email"):
+        assert channels.email_opt_out(t) is True, t
+
+
+def test_l6_our_quoted_short_lines_do_not_alert():
+    import channels
+    for line in ("Stop by anytime!", "Stop in today", "Don't stop now!", "Non-stop support"):
+        assert channels.quoted_tail_opt_out(_OUTLOOK.replace("How was your visit?", "Hi") + line + "\n\nAcme Team") \
+            is None, line
+
+
+def test_m7_an_unclosed_style_flood_is_cheap():
+    import time
+    import channels
+    t = "<style>" * 2800
+    start = time.perf_counter()
+    channels.html_as_text(t)
+    assert time.perf_counter() - start < 0.05

@@ -131,7 +131,8 @@ _EMAIL_WIDENERS = frozenset({"too", "also", "same", "well", "either", "both", "s
 _NEG_EMAIL = re.compile(r"\b(not|dont|never|stop|quit|no more)(?: (?:me|sending|send|receiving|getting|any|more|your|"
                         r"the|with|to|me any)){0,3} (e ?mail|emails|emailing|inbox)\b")
 _NEG_TEXT_OR_EMAIL = re.compile(r"\b(not|dont|never|stop|quit)\b(?: \w+){0,4}? (text|texts|texting|txt|call|calling|"
-                                r"messag\w*)(?: me)? (or|and|nor) (?:me )?(e ?mail|emails|emailing)\b")
+                                r"messag\w*)(?: me)? (?:(?:or|nor) (?:me )?(?:e ?mail|emails|emailing)|and emailing)\b"
+                                r"(?! (?:me )?(?:instead|if|only|rather|please|anytime|whenever)\b)")
 _EMAIL_PREFERENCE = frozenset({"instead", "prefer", "rather", "only", "use", "reach", "contact"})
 # a phone word followed by these is a label for an address ("Cell: 310 ...", "my number is ..."), not a channel
 _ADDRESS_LABEL_NEXT = frozenset({"is", "was", "changed", "here"})
@@ -154,7 +155,8 @@ _BLOCKQUOTE = re.compile(r"<\s*blockquote\b[^<>]{0,500}>(?:(?!<\s*blockquote\b).
                          re.IGNORECASE | re.DOTALL)
 _BLOCKQUOTE_OPEN = re.compile(r"<\s*blockquote\b[^<>]{0,500}>", re.IGNORECASE)
 _BLOCK_TAG = re.compile(r"<\s*/?\s*(br|p|div|li|tr|h[1-6]|table|ul|ol|hr)\b[^<>]{0,500}>", re.IGNORECASE)
-_STYLE_SCRIPT = re.compile(r"<\s*(style|script)\b[^<>]{0,500}>.{0,50000}?<\s*/\s*\1\s*>", re.IGNORECASE | re.DOTALL)
+_STYLE_SCRIPT = re.compile(r"<(style|script)\b[^<>]{0,500}>[^<]{0,50000}(?:<(?!/\1)[^<]{0,50000}){0,200}</\1\s*>",
+                           re.IGNORECASE)
 _HTML_TAGS = ("a|abbr|b|big|blockquote|body|center|cite|code|col|colgroup|dd|del|dfn|dl|dt|em|font|footer|head|header|"
               "html|i|img|ins|kbd|label|link|main|mark|meta|nav|o:p|pre|q|s|section|small|span|strike|strong|style|sub|"
               "sup|tbody|td|tfoot|th|thead|title|tt|u|var|wbr|v:[a-z]+|w:[a-z]+")
@@ -184,7 +186,9 @@ def html_as_text(text: str) -> str:
     ``normalise`` (triage.clean unescapes them). Plain text without a tag is returned unchanged."""
     if not text or "<" not in text or ">" not in text:
         return text or ""
-    text = _STYLE_SCRIPT.sub(" ", text)
+    low = text.lower()
+    if "</style" in low or "</script" in low:      # AEGIS M-7: never scan an unclosed flood
+        text = _STYLE_SCRIPT.sub(" ", text)
     return _ANY_TAG.sub(" ", _BLOCK_TAG.sub("\n", text))
 
 
@@ -293,7 +297,8 @@ def quoted_tail_opt_out(text: Optional[str]) -> Optional[str]:
         return "revoke"
     for ln in kept[-3:]:                      # AEGIS M-4: "Stop!" above a name sign-off ("Jane Doe / CEO, Acme")
         lt = [_collapse(t) for t in normalise(ln).split()]
-        if lt and len(lt) <= TAIL_LAST_LINE_MAX_WORDS and set(lt) & (_TAIL_LAST_LINE_CORE | {"quit"}):
+        if lt and len(lt) <= TAIL_LAST_LINE_MAX_WORDS and set(lt) <= (_TAIL_LAST_LINE_WORDS | {"quit"}) \
+                and set(lt) & (_TAIL_LAST_LINE_CORE | {"quit"}):    # AEGIS L-6: "Stop by anytime!" never alerts
             return "alert"
     norms = {normalise(body)}
     norms |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(norms)}
@@ -315,6 +320,31 @@ def typo_opt_out(text: Optional[str]) -> bool:
     return any(_typo_tokens(v) for v in (normalise(t), normalise(t.translate(_LEET)), normalise(raw)))
 
 
+_PREFERENCE_AFTER = frozenset({"instead", "if", "only", "rather", "please", "pls", "plz", "anytime", "whenever",
+                               "about", "at"})
+
+
+def _email_word_adds(toks: list[str], k: int) -> Optional[bool]:
+    """AEGIS rounds H-A / H-C / H-D / M-6, grammatical: does the email word at ``k`` (inside an opt-out phrase's
+    reach) ADD email to the opt-out? None = stop reading (an address, a preference). "text OR email me" / "nor" carry
+    the negation over; "and emailing" (the same verb form as "stop texting") too; "and email me" is a request, so are
+    "email me instead / if ...", "emails are fine", "my email is ..."."""
+    nxt = toks[k + 1] if k + 1 < len(toks) else ""
+    nxt2 = toks[k + 2] if k + 2 < len(toks) else ""
+    prev = toks[k - 1] if k > 0 else ""
+    if nxt in _ADDRESS_LABEL_NEXT or nxt in ("address", "are", "ok", "okay", "fine", "good", "works"):
+        return None
+    if prev in ("and", "or", "nor") and toks[k] in ("emailing", "mailing"):
+        return True                           # "stop texting me and emailing me, instead call me"
+    if nxt in _PREFERENCE_AFTER or (nxt == "me" and nxt2 in _PREFERENCE_AFTER):
+        return None
+    if prev in ("or", "nor"):
+        return True
+    if prev == "and":
+        return toks[k] in ("emailing", "emails", "mailing", "newsletters", "inbox")
+    return nxt != "me"
+
+
 def _phone_hit(toks: list[str], k: int) -> bool:
     if toks[k] not in PHONE_SCOPE_WORDS:
         return False
@@ -334,11 +364,10 @@ def _phone_scoped(toks: list[str], i: int, j: int) -> bool:
     while k < len(toks) and skipped < SCOPE_LOOKAHEAD:
         t = toks[k]
         if t in EMAIL_SCOPE_WORDS:
-            nxt = toks[k + 1] if k + 1 < len(toks) else ""
-            prev = toks[k - 1] if k > 0 else ""
-            if nxt in _ADDRESS_LABEL_NEXT or nxt == "address" or (nxt == "me" and prev not in ("or", "and", "nor")):
-                break                         # "my email is ...", "email me instead"; "text or email me" adds email
-            email = True
+            adds = _email_word_adds(toks, k)
+            if adds is None:
+                break                         # an address or a preference ("email me instead", "emails are fine")
+            email = email or adds
         elif t in PHONE_SCOPE_WORDS:
             phone = phone or _phone_hit(toks, k)
         elif t not in SCOPE_CONNECTORS:

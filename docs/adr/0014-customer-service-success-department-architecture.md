@@ -336,3 +336,12 @@ Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "A
 | M-5 | A customer's own "From: / Date:" lines were read as a quote header | The header block also needs an address on the From: line or a To: / Cc: / Subject: line |
 | L-4 | `<style>` / `<script>` content was read as the person's words | Removed before reading |
 | L-3, L-5 (accepted) | Text typed below a forward is not read; unrelated quoted phrases ("not interested in ...") may alert | Accepted: rare; the message still reaches a human and pauses SMS; an alert is the safe side |
+
+### Sweep A follow-up — AEGIS re-review of ffe7ede (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-D (High, regression) | "stop texting me and email me instead", "... or email me if you must" revoked email | One grammatical rule (`channels._email_word_adds`) used by the lookahead and the negation regex: "or / nor" + email carries the negation; "and emailing" (the same verb form as "stop texting") too; "and email me", "email me instead / if / only", "emails are fine", "my email is" are requests or addresses and never widen |
+| M-6 | "stop the texts, emails are fine" revoked email | As H-D |
+| M-7 | An unclosed `<style>` flood cost ~1.6 s per message under the lock | Style / script removed only when a closing tag exists, with a bounded pattern |
+| L-6 | Our quoted "Stop by anytime!" alerted | The short-line tail alert needs a line of only stop / quit / unsubscribe and courtesy words |
