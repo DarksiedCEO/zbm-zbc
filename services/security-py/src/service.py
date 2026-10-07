@@ -1353,7 +1353,7 @@ class SecurityService:
                     continue
                 try:
                     ok = adapter.preserve(body["hold_id"], body["subject_refs"])
-                except Exception:          # sweep A: an adapter that raises is a failed preservation, never a 500
+                except Exception:  # noqa: BLE001 - sweep A: a raising adapter is a failed preservation, never a 500
                     ok = None
                 outcome[sysname] = "preserved" if ok is True else ("not_connected" if ok is False else "failed")
             self._commit("hold_recorded", {"hold_id": body["hold_id"], "systems": systems,
@@ -1417,7 +1417,7 @@ class SecurityService:
             for _ in range(RELEASE_ATTEMPTS if adapter is not None else 0):
                 try:
                     ok = adapter.release(hid) is True
-                except Exception:
+                except Exception:  # noqa: BLE001 - a raising adapter is an unconfirmed release, tried again later
                     ok = False
                 if ok:
                     break

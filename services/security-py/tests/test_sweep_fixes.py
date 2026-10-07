@@ -1,8 +1,9 @@
 """AEGIS sweep A (on 5d49ee9) — regression tests for the security-py findings. Each one failed on 5d49ee9 and passes
 after the fix (the probes in sweep-A/security passed while the bug existed)."""
 
-from clock import FixedClock
 from helpers import FakeLedger, Harness, rid
+
+from clock import FixedClock
 from ports import Ports
 
 
