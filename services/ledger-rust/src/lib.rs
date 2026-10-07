@@ -42,8 +42,8 @@ mod persistence;
 pub use event::{EventInput, EventValidationError};
 pub use money::{deserialize_persisted_amount, Money, MoneyError, MAX_MONEY};
 pub use persistence::{
-    head_path_for, lock_path_for, AppendOutcome, EventAppendOutcome, HeadCheckpoint, LedgerOpenOptions, PersistError,
-    PersistentLedger, TornTailRecovery,
+    head_path_for, is_log_binding, is_reset_binding, verify_log_file, EntryFilter, FINDINGS_DEPARTMENT, lock_path_for, log_binding, reset_binding, AppendOutcome,
+    EventAppendOutcome, HeadCheckpoint, LedgerOpenOptions, OpenReport, PersistError, PersistentLedger, TornTailRecovery,
 };
 
 pub const GENESIS_HASH_SEED: &str = "ZBM-REVENUE-RECOVERY-LEDGER-GENESIS-2026";

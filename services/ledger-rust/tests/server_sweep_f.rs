@@ -233,10 +233,12 @@ fn f6_a_deleted_log_refuses_restart_and_only_an_explicit_reset_starts_fresh() {
     assert_eq!(refused(&log, &[]).unwrap_or_else(|e| panic!("{e}")), 1);
     assert!(log.stderr().contains("MISSING"), "{}", log.stderr());
     assert!(!log.0.exists(), "a refused start creates no log");
-    for bad in ["true", "yes"] {
+    // AEGIS M3: the bare "1" of sweep F (and any other unbound value) is refused; the refusal names the value.
+    for bad in ["true", "yes", "1"] {
         assert_eq!(refused(&log, &[("LEDGER_ALLOW_RESET", Some(bad))]).unwrap_or_else(|e| panic!("{e}")), 1, "{bad}");
     }
-    let s = start(&log, &[("LEDGER_ALLOW_RESET", Some("1"))]);
+    let v = advised(&log.stderr(), "LEDGER_ALLOW_RESET");
+    let s = start(&log, &[("LEDGER_ALLOW_RESET", Some(&v))]);
     assert!(log.stderr().contains("OPERATOR RESET"), "{}", log.stderr());
     assert_eq!(get_json(s.port, "/ledger/verify"), json!({"valid": true, "entries": 0}));
 }
@@ -437,6 +439,8 @@ fn write_big_log(path: &Path, n: usize) {
         writeln!(out, "{}", serde_json::to_string(&ledger.entries()[i]).unwrap()).unwrap();
     }
     out.flush().unwrap();
+    drop(out);
+    common::write_head_for(path);
 }
 
 /// Probe P6/scale: full reads held the one mutex while serializing, on a
@@ -495,10 +499,18 @@ fn write_callers(log: &Scratch) -> String {
         sha256_hex(SALES_TOKEN): {"caller": "sales-py", "departments": ["sales"], "scope": "write"},
         sha256_hex(FINANCE_TOKEN): {"caller": "finance-py", "departments": ["finance", "treasury"], "scope": "write"},
         sha256_hex(RR_TOKEN): {"caller": "orchestrator-go", "departments": ["revenue_recovery"], "scope": "write"},
-        sha256_hex(READER_TOKEN): {"caller": "dashboard", "scope": "read"},
+        sha256_hex(READER_TOKEN): {"caller": "dashboard", "scope": "read", "read_all": true},
     });
     std::fs::write(log.callers_path(), callers.to_string()).unwrap();
     log.callers_path().to_str().unwrap().to_string()
+}
+
+/// The value an operator is told to set, taken from the LAST refusal in a
+/// server's stderr (AEGIS M2/M3: overrides are bound to the exact state).
+pub(crate) fn advised(stderr: &str, name: &str) -> String {
+    let at = stderr.rfind(&format!("restart ONCE with {name}=")).unwrap_or_else(|| panic!("no {name} advice in:\n{stderr}"));
+    let rest = &stderr[at + "restart ONCE with ".len() + name.len() + 1..];
+    rest.split_whitespace().next().unwrap().to_string()
 }
 
 /// Probe P5 "cross-department write": any holder of the one token could
@@ -518,8 +530,9 @@ fn f4_a_cross_department_write_is_refused() {
     assert_eq!(post_finding(s.port, SALES_TOKEN, &[], &finding_body("f-1", "1.00")).0, 403);
     assert_eq!(post_finding(s.port, RR_TOKEN, &[], &finding_body("f-1", "1.00")).0, 201);
     assert_eq!(post_event(s.port, RR_TOKEN, &event_body("rr-1", "sales", "note")).0, 403);
-    let entries = http(s.port, "GET", "/ledger/entries", Some(SALES_TOKEN), &[], "");
-    assert_eq!(entries.0, 200, "a write caller can read");
+    // AEGIS M4: a write caller reads its own department; the read_all dashboard reads everything.
+    let entries = http(s.port, "GET", "/ledger/entries", Some(READER_TOKEN), &[], "");
+    assert_eq!(entries.0, 200, "the read_all caller can read");
     let ids: Vec<String> = serde_json::from_str::<Value>(&entries.1)
         .unwrap()
         .as_array()
@@ -646,4 +659,235 @@ fn a_failed_bind_exits_with_a_message_not_a_panic() {
     assert!(err.contains("REFUSING TO START") && err.contains("cannot bind"), "{err}");
     assert!(!err.contains("panicked"), "{err}");
     drop(taken);
+}
+
+// --- AEGIS review of d6b1cd9 (Oct 7 2026): M1-M4, L1-L5 ----------------------------
+//
+// Each test fails against the d6b1cd9 binary.
+
+/// M1: only a log exactly ONE entry ahead of its checkpoint (the crash window
+/// between the log fsync and the checkpoint rename) starts; two ahead used to
+/// start too, silently adopting entries no append acknowledged.
+#[test]
+fn aegis_m1_only_one_entry_ahead_of_the_checkpoint_starts() {
+    let log = Scratch::new("m1");
+    let mut heads = Vec::new();
+    {
+        let s = start(&log, &[]);
+        for i in 0..3 {
+            heads.push(std::fs::read(log.head_path()).unwrap());
+            assert_eq!(post_finding(s.port, TOKEN, &[], &finding_body(&format!("f-{i}"), "1.00")).0, 201);
+        }
+    }
+    std::fs::write(log.head_path(), &heads[1]).unwrap(); // two behind the log
+    assert_eq!(refused(&log, &[]).unwrap_or_else(|e| panic!("{e}")), 1);
+    assert!(log.stderr().contains("at most ONE entry past the checkpoint"), "{}", log.stderr());
+    assert_eq!(std::fs::read(log.head_path()).unwrap(), heads[1], "the refusal changed nothing");
+    std::fs::write(log.head_path(), &heads[2]).unwrap(); // one behind: the crash window
+    let s = start(&log, &[]);
+    assert!(log.stderr().contains("\"event\":\"checkpoint_moved_up\""), "{}", log.stderr());
+    assert_eq!(get_json(s.port, "/ledger/head")["entries"], 3);
+}
+
+/// M2: a non-empty log without a checkpoint (an old binary's log, or a deleted
+/// head file) used to start and get a fresh checkpoint: deleting the head file
+/// and truncating the log read as an upgrade. Now it needs the one-shot,
+/// log-bound LEDGER_MIGRATE_LEGACY; a new ledger is logged as a structured event.
+#[test]
+fn aegis_m2_a_log_without_a_checkpoint_needs_the_bound_one_shot_migrate() {
+    let log = Scratch::new("m2");
+    {
+        let s = start(&log, &[]);
+        fill(s.port, 3);
+    }
+    let created = log.stderr();
+    assert_eq!(created.matches("\"event\":\"ledger_created\"").count(), 1, "{created}");
+    std::fs::remove_file(log.head_path()).unwrap();
+    let text = std::fs::read_to_string(&log.0).unwrap();
+    std::fs::write(&log.0, text.lines().next().unwrap().to_string() + "\n").unwrap(); // and roll the log back
+    assert_eq!(refused(&log, &[]).unwrap_or_else(|e| panic!("{e}")), 1);
+    assert!(log.stderr().contains("NO head checkpoint"), "{}", log.stderr());
+    assert!(!log.head_path().exists());
+    for bad in ["1", "yes", "1:zz", "2:0000000000000000"] {
+        assert_eq!(refused(&log, &[("LEDGER_MIGRATE_LEGACY", Some(bad))]).unwrap_or_else(|e| panic!("{e}")), 1, "{bad}");
+    }
+    let v = advised(&log.stderr(), "LEDGER_MIGRATE_LEGACY");
+    assert_eq!(v, common::migrate_binding(&log.0));
+    let s = start(&log, &[("LEDGER_MIGRATE_LEGACY", Some(&v))]);
+    assert!(log.stderr().contains("\"event\":\"legacy_log_migrated\""), "{}", log.stderr());
+    assert_eq!(get_json(s.port, "/ledger/head")["entries"], 1);
+    fill(s.port, 1);
+    drop(s);
+    // Left set, it is not needed again and says so; it can never match this log again.
+    let _s = start(&log, &[("LEDGER_MIGRATE_LEGACY", Some(&v))]);
+    assert!(log.stderr().contains("LEDGER_MIGRATE_LEGACY=") && log.stderr().contains("was not needed"), "{}", log.stderr());
+}
+
+/// M3: LEDGER_ALLOW_RESET=1 left in the environment stayed armed: any later
+/// rollback started silently. Now the value is bound to (checkpoint, log head).
+#[test]
+fn aegis_m3_a_stale_reset_value_does_not_accept_a_later_rollback() {
+    let log = Scratch::new("m3");
+    {
+        let s = start(&log, &[]);
+        fill(s.port, 3);
+    }
+    let full = std::fs::read_to_string(&log.0).unwrap();
+    let lines: Vec<&str> = full.lines().collect();
+    std::fs::write(&log.0, format!("{}\n{}\n", lines[0], lines[1])).unwrap();
+    assert_eq!(refused(&log, &[]).unwrap_or_else(|e| panic!("{e}")), 1);
+    let v = advised(&log.stderr(), "LEDGER_ALLOW_RESET");
+    {
+        let s = start(&log, &[("LEDGER_ALLOW_RESET", Some(&v))]);
+        assert!(log.stderr().contains("\"event\":\"operator_reset\""), "{}", log.stderr());
+        fill(s.port, 2);
+    }
+    // The same value still in the environment; a new rollback.
+    std::fs::write(&log.0, format!("{}\n", lines[0])).unwrap();
+    assert_eq!(refused(&log, &[("LEDGER_ALLOW_RESET", Some(&v))]).unwrap_or_else(|e| panic!("{e}")), 1);
+    assert!(log.stderr().contains("does not match this state"), "{}", log.stderr());
+}
+
+const COMPLIANCE_TOKEN: &str = "aegis-compliance-reader-test-token-01";
+const SALES_PLUS_TOKEN: &str = "aegis-sales-reads-finance-test-token-1";
+
+fn write_scoped_callers(log: &Scratch) -> String {
+    let callers = json!({
+        sha256_hex(SALES_TOKEN): {"caller": "sales-py", "departments": ["sales"], "scope": "write"},
+        sha256_hex(FINANCE_TOKEN): {"caller": "finance-py", "departments": ["finance"], "scope": "write"},
+        sha256_hex(RR_TOKEN): {"caller": "orchestrator-go", "departments": ["revenue_recovery"], "scope": "write"},
+        sha256_hex(SALES_PLUS_TOKEN): {"caller": "sales-reporting", "departments": ["sales"], "scope": "write",
+                                       "read_departments": ["finance"]},
+        sha256_hex(READER_TOKEN): {"caller": "dashboard", "scope": "read", "read_all": true},
+        sha256_hex(COMPLIANCE_TOKEN): {"caller": "compliance-auditor", "scope": "read", "departments": ["sales", "finance"]},
+    });
+    std::fs::write(log.callers_path(), callers.to_string()).unwrap();
+    log.callers_path().to_str().unwrap().to_string()
+}
+
+fn seqs_as(port: u16, token: &str, path: &str) -> Vec<u64> {
+    let (st, text) = http(port, "GET", path, Some(token), &[], "");
+    assert_eq!(st, 200, "{path}: {text}");
+    serde_json::from_str::<Value>(&text).unwrap().as_array().unwrap().iter().map(|e| e["seq"].as_u64().unwrap()).collect()
+}
+
+/// M4: every caller could read every department's evidence. Now a caller
+/// reads its own departments (plus `read_departments`), a `read_all` caller
+/// (dashboard, compliance, audit) reads everything, findings are visible to
+/// `revenue_recovery` readers, and a filter outside the scope is a 403.
+#[test]
+fn aegis_m4_reads_are_scoped_by_department() {
+    let log = Scratch::new("m4");
+    let callers = write_scoped_callers(&log);
+    let s = start(&log, &[("LEDGER_CALLERS_FILE", Some(&callers))]);
+    // seq 0 sales/note, 1 finance/payout, 2 finding, 3 sales/call
+    assert_eq!(post_event(s.port, SALES_TOKEN, &event_body("s-0", "sales", "note")).0, 201);
+    assert_eq!(post_event(s.port, FINANCE_TOKEN, &event_body("f-1", "finance", "payout")).0, 201);
+    assert_eq!(post_finding(s.port, RR_TOKEN, &[], &finding_body("rr-2", "1.00")).0, 201);
+    assert_eq!(post_event(s.port, SALES_TOKEN, &event_body("s-3", "sales", "call")).0, 201);
+
+    assert_eq!(seqs_as(s.port, SALES_TOKEN, "/ledger/entries"), [0, 3]);
+    assert_eq!(seqs_as(s.port, FINANCE_TOKEN, "/ledger/entries"), [1]);
+    assert_eq!(seqs_as(s.port, RR_TOKEN, "/ledger/entries"), [2], "findings belong to revenue_recovery");
+    assert_eq!(seqs_as(s.port, SALES_PLUS_TOKEN, "/ledger/entries"), [0, 1, 3]);
+    assert_eq!(seqs_as(s.port, COMPLIANCE_TOKEN, "/ledger/entries"), [0, 1, 3]);
+    assert_eq!(seqs_as(s.port, READER_TOKEN, "/ledger/entries"), [0, 1, 2, 3]);
+    // The dashboard's unscoped full read is byte-identical to the shared-token read of earlier binaries.
+    let (_, all) = http(s.port, "GET", "/ledger/entries", Some(READER_TOKEN), &[], "");
+    let (_, paged) = http(s.port, "GET", "/ledger/entries?limit=10000", Some(READER_TOKEN), &[], "");
+    assert_eq!(all, paged);
+    // Paging and filters inside the scope.
+    assert_eq!(seqs_as(s.port, SALES_TOKEN, "/ledger/entries?after_seq=0&limit=1"), [3]);
+    assert_eq!(seqs_as(s.port, SALES_TOKEN, "/ledger/entries?department=sales&event_type=call"), [3]);
+    assert_eq!(seqs_as(s.port, SALES_TOKEN, "/ledger/entries?event_type=payout"), Vec::<u64>::new());
+    assert_eq!(seqs_as(s.port, SALES_PLUS_TOKEN, "/ledger/entries?department=finance"), [1]);
+    // A department outside the scope is refused, not answered with an empty page.
+    let (st, body) = http(s.port, "GET", "/ledger/entries?department=finance", Some(SALES_TOKEN), &[], "");
+    assert_eq!(st, 403, "{body}");
+    assert!(body.contains("sales-py") && body.contains("finance"), "{body}");
+    // verify and head carry no department data: every authenticated caller keeps them.
+    assert_eq!(entry_count_as(s.port, SALES_TOKEN), 4);
+    assert_eq!(http(s.port, "GET", "/ledger/head", Some(SALES_TOKEN), &[], "").0, 200);
+    let err = log.stderr();
+    assert!(err.contains("sales-py (Write: sales; reads: sales)") && err.contains("dashboard (Read: ; reads: all)"), "{err}");
+}
+
+/// M4: a read caller must say what it reads; read_all and read_departments
+/// are exclusive; read_departments is for write callers.
+#[test]
+fn aegis_m4_a_read_scope_must_be_explicit() {
+    let log = Scratch::new("m4_bad");
+    let h = sha256_hex(READER_TOKEN);
+    for content in [
+        json!({&h: {"caller": "dashboard", "scope": "read"}}),
+        json!({&h: {"caller": "d", "scope": "write", "departments": ["sales"], "read_all": true, "read_departments": ["x"]}}),
+        json!({&h: {"caller": "d", "scope": "read", "departments": ["sales"], "read_departments": ["x"]}}),
+        json!({&h: {"caller": "d", "scope": "write", "departments": ["sales"], "read_departments": ["Bad"]}}),
+        json!({&h: {"caller": "d", "scope": "read", "read_all": "yes"}}),
+    ] {
+        std::fs::write(log.callers_path(), content.to_string()).unwrap();
+        let path = log.callers_path().to_str().unwrap().to_string();
+        assert_eq!(refused(&log, &[("LEDGER_CALLERS_FILE", Some(&path))]).unwrap_or_else(|e| panic!("{content}: {e}")), 1, "{content}");
+    }
+}
+
+/// L1: the same token hash twice was accepted (the last entry silently won).
+#[test]
+fn aegis_l1_a_duplicate_token_hash_refuses_to_start() {
+    let log = Scratch::new("l1");
+    let h = sha256_hex(SALES_TOKEN);
+    let a = json!({"caller": "sales-py", "departments": ["sales"], "scope": "write"});
+    let b = json!({"caller": "finance-py", "departments": ["finance"], "scope": "write"});
+    std::fs::write(log.callers_path(), format!("{{\"{h}\": {a}, \"{h}\": {b}}}")).unwrap();
+    let path = log.callers_path().to_str().unwrap().to_string();
+    assert_eq!(refused(&log, &[("LEDGER_CALLERS_FILE", Some(&path))]).unwrap_or_else(|e| panic!("{e}")), 1);
+    assert!(log.stderr().contains("listed more than once"), "{}", log.stderr());
+}
+
+/// L2: LEDGER_CALLERS_FILE="" fell back to the shared token (unscoped).
+#[test]
+fn aegis_l2_an_empty_callers_file_variable_refuses_to_start() {
+    let log = Scratch::new("l2");
+    for empty in ["", "  "] {
+        assert_eq!(refused(&log, &[("LEDGER_CALLERS_FILE", Some(empty))]).unwrap_or_else(|e| panic!("{e}")), 1);
+    }
+    assert!(log.stderr().contains("LEDGER_CALLERS_FILE is set but empty"), "{}", log.stderr());
+}
+
+/// L3: a caller token's length could not be checked (only its hash is
+/// configured); now it is checked when presented: under 32 bytes is a 401.
+#[test]
+fn aegis_l3_a_short_caller_token_is_refused_when_presented() {
+    let log = Scratch::new("l3");
+    let short = "short-caller-token";
+    let callers = json!({
+        sha256_hex(short): {"caller": "weak", "departments": ["sales"], "scope": "write"},
+        sha256_hex(SALES_TOKEN): {"caller": "sales-py", "departments": ["sales"], "scope": "write"},
+    });
+    std::fs::write(log.callers_path(), callers.to_string()).unwrap();
+    let path = log.callers_path().to_str().unwrap().to_string();
+    let s = start(&log, &[("LEDGER_CALLERS_FILE", Some(&path))]);
+    assert_eq!(post_event(s.port, short, &event_body("w-1", "sales", "note")).0, 401);
+    assert_eq!(http(s.port, "GET", "/ledger/verify", Some(short), &[], "").0, 401);
+    assert_eq!(post_event(s.port, SALES_TOKEN, &event_body("s-1", "sales", "note")).0, 201);
+    assert!(log.stderr().contains("\"weak\" presented a configured token of 18 bytes"), "{}", log.stderr());
+}
+
+/// L4: `?full=1` re-verified memory only, so a log rewritten on disk under a
+/// running ledger still verified "valid" until the next restart.
+#[test]
+fn aegis_l4_full_verify_rereads_the_log_from_disk() {
+    let log = Scratch::new("l4");
+    let s = start(&log, &[]);
+    fill(s.port, 3);
+    assert_eq!(get_json(s.port, "/ledger/verify?full=1"), json!({"valid": true, "entries": 3}));
+    let good = std::fs::read_to_string(&log.0).unwrap();
+    std::fs::write(&log.0, good.replacen("\"1.00\"", "\"9.00\"", 1)).unwrap();
+    assert_eq!(get_json(s.port, "/ledger/verify"), json!({"valid": true, "entries": 3}), "incremental: memory only");
+    let (st, body) = get(s.port, "/ledger/verify?full=1");
+    assert_eq!(st, 409, "{body}");
+    assert!(body.contains("log on disk") && body.contains("line 1"), "{body}");
+    assert!(log.stderr().contains("CRITICAL"), "{}", log.stderr());
+    std::fs::write(&log.0, &good).unwrap();
+    assert_eq!(get_json(s.port, "/ledger/verify?full=1"), json!({"valid": true, "entries": 3}));
 }

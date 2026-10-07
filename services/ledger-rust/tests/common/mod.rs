@@ -202,3 +202,32 @@ pub fn raw_request(method: &str, path: &str, auth: Option<&str>, body: &str) -> 
     )
     .into_bytes()
 }
+
+/// AEGIS M2: the `LEDGER_MIGRATE_LEGACY` value for a pre-checkpoint log —
+/// `<entries>:<first 16 hex of the last entry's hash>`, what the server's
+/// refusal prints. A test that serves a legacy fixture passes it, exactly as
+/// an operator would once per legacy log.
+pub fn migrate_binding(log: &std::path::Path) -> String {
+    let text = std::fs::read_to_string(log).expect("legacy log");
+    let lines: Vec<&str> = text.lines().collect();
+    let last: serde_json::Value = serde_json::from_str(lines.last().expect("non-empty log")).expect("json line");
+    format!("{}:{}", lines.len(), &last["hash"].as_str().expect("hash")[..16])
+}
+
+/// Writes `<log>.head` for a log a test synthesized with the library (as the
+/// server writes it after every append), so the server opens it as its own
+/// log rather than as a pre-checkpoint one (AEGIS M2).
+pub fn write_head_for(log: &std::path::Path) {
+    let text = std::fs::read_to_string(log).expect("log");
+    let lines: Vec<&str> = text.lines().collect();
+    let head = match lines.last() {
+        None => serde_json::json!({"entries": 0, "head_seq": null, "head_hash": ledger_rust::genesis_hash()}),
+        Some(l) => {
+            let last: serde_json::Value = serde_json::from_str(l).expect("json line");
+            serde_json::json!({"entries": lines.len(), "head_seq": lines.len() - 1, "head_hash": last["hash"]})
+        }
+    };
+    let mut name = log.file_name().unwrap().to_os_string();
+    name.push(".head");
+    std::fs::write(log.with_file_name(name), format!("{head}\n")).expect("head file");
+}

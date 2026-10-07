@@ -62,13 +62,12 @@
 //!   only after that. On open the log must reach the checkpoint: a missing
 //!   log, a log with fewer entries than the checkpoint, or a log whose entry
 //!   at `head_seq` does not carry `head_hash` is refused
-//!   (`PersistError::Checkpoint`) unless the operator passes `allow_reset`
-//!   (`LEDGER_ALLOW_RESET=1`), which is logged loudly. A log AHEAD of the
-//!   checkpoint is accepted (a crash between the log fsync and the head
-//!   rename leaves it one ahead; every extra entry still has to verify on the
-//!   chain) and the checkpoint is moved up. A log with no head file at all is
-//!   a log written by an older binary: the checkpoint is created from the
-//!   verified log, with a warning. The head file lives next to the log, so
+//!   (`PersistError::Checkpoint`) unless the operator passes the bound reset
+//!   (AEGIS M3, below), which is logged loudly. A log exactly one entry AHEAD
+//!   of the checkpoint is accepted (a crash between the log fsync and the
+//!   head rename; the entry still has to verify on the chain) and the
+//!   checkpoint is moved up. (Before AEGIS M1/M2: any number ahead, and a
+//!   non-empty log with no head file, opened.) The head file lives next to the log, so
 //!   whoever can rewrite the log can rewrite it too: it catches accidental
 //!   deletion, truncation and restores of an old copy, not a deliberate
 //!   forger with write access — a signed, externally published head is
@@ -80,6 +79,14 @@
 //!   itself valid JSON, so such a tail is an entry whose newline was removed
 //!   after the fact, not a crash. Only a genuinely partial final line is still
 //!   preserved and truncated as above.
+//! - AEGIS M1-M3 (Oct 7 2026): only a log exactly ONE entry ahead of the
+//!   checkpoint opens (the crash window); a non-empty log with no checkpoint
+//!   opens only with `LedgerOpenOptions::migrate` equal to its `log_binding`;
+//!   the operator reset only with `reset` equal to the `reset_binding` of the
+//!   exact (checkpoint, log head) pair the refusal names — so a value left in
+//!   the environment never stays armed. See `check_against_head`.
+//! - AEGIS L4/L5: `verify_log_file` re-reads and re-hashes the log from disk;
+//!   `ReadIndex` answers filtered / scoped reads without a scan.
 //! - F-7: an optional `finding_id` index (`append_finding_idempotent`), the
 //!   same semantics as `event_id`, used only when the caller asks for it. A
 //!   log may legitimately hold the same `finding_id` several times (every
@@ -229,14 +236,76 @@ impl HeadCheckpoint {
 }
 
 /// Options for `PersistentLedger::open_with`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+///
+/// AEGIS M2/M3 (Oct 7 2026): both operator overrides are BOUND to the exact
+/// state they accept, so a value left in the environment after use is never
+/// armed for a later, different situation. The value an override needs is
+/// printed by the refusal it answers (`reset_binding` / `log_binding`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LedgerOpenOptions {
-    /// Sweep F-6 operator override (`LEDGER_ALLOW_RESET=1`): accept a log
-    /// that does not reach the head checkpoint (or a missing / unreadable
+    /// Sweep F-6 operator override, `LEDGER_ALLOW_RESET=<binding>`: accept a
+    /// log that does not reach its head checkpoint (or a malformed
     /// checkpoint) and move the checkpoint to whatever the verified log
-    /// holds. Never skips chain verification, the single-writer lock or any
-    /// corruption check.
-    pub allow_reset: bool,
+    /// holds — only when the value equals `<checkpoint>/<log head>` of THIS
+    /// refusal (see `reset_binding`). Never skips chain verification, the
+    /// single-writer lock or any corruption check.
+    pub reset: Option<String>,
+    /// AEGIS M2, `LEDGER_MIGRATE_LEGACY=<binding>`: a non-empty log with no
+    /// head checkpoint (written by a binary older than sweep F, or whose head
+    /// file was deleted) opens only when the value equals the log's own head
+    /// binding (`log_binding`), and the checkpoint is then created from it.
+    pub migrate: Option<String>,
+}
+
+/// What `open` did about the head checkpoint (AEGIS M1-M3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OpenReport {
+    /// No log entries and no checkpoint: a new ledger (logged `ledger_created`).
+    pub created: bool,
+    /// The log was exactly one entry ahead; the checkpoint was moved up.
+    pub moved_up: bool,
+    /// `LEDGER_ALLOW_RESET` matched and the checkpoint was reset.
+    pub reset_used: bool,
+    /// `LEDGER_MIGRATE_LEGACY` matched and the checkpoint was created.
+    pub migrate_used: bool,
+}
+
+/// AEGIS M2/M3: `<entries>:<first 16 hex of the head hash>` — the binding of
+/// a log (or checkpoint) head. Not a secret: it only ties an operator's
+/// override to one exact state.
+pub fn log_binding(entries: u64, head_hash: &str) -> String {
+    format!("{entries}:{}", &head_hash[..head_hash.len().min(16)])
+}
+
+/// AEGIS M3: the `LEDGER_ALLOW_RESET` value that accepts moving the
+/// checkpoint `from` (a `log_binding`, or `unreadable:<16 hex of the head
+/// file's SHA-256>`) to the verified log head `to` (a `log_binding`).
+pub fn reset_binding(from: &str, to: &str) -> String {
+    format!("{from}/{to}")
+}
+
+fn is_hex16(s: &str) -> bool {
+    s.len() == 16 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn is_count(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// True when `v` has the shape of a `log_binding` (`<digits>:<16 hex>`).
+pub fn is_log_binding(v: &str) -> bool {
+    matches!(v.split_once(':'), Some((n, h)) if is_count(n) && is_hex16(h))
+}
+
+/// True when `v` has the shape of a `reset_binding`.
+pub fn is_reset_binding(v: &str) -> bool {
+    match v.split_once('/') {
+        Some((from, to)) => {
+            let from_ok = is_log_binding(from) || matches!(from.split_once(':'), Some(("unreadable", h)) if is_hex16(h));
+            from_ok && is_log_binding(to)
+        }
+        None => false,
+    }
 }
 
 /// `<log>` + `suffix` in the same directory (`<log>.lock`, `<log>.head`).
@@ -260,6 +329,188 @@ fn head_tmp_path_for(log: &Path) -> PathBuf {
     sibling(log, ".head.tmp")
 }
 
+/// The department findings (`POST /ledger/append`) are recorded for (sweep
+/// F-4). A read scope that includes it sees findings (AEGIS M4).
+pub const FINDINGS_DEPARTMENT: &str = "revenue_recovery";
+
+/// AEGIS L5/M4: which entries a filtered or scoped read returns.
+///
+/// `department` / `event_type` are the query filters of
+/// `GET /ledger/entries` and match events only (a finding has neither;
+/// unchanged from sweep F-2). `scope` is the caller's read scope: `None`
+/// reads everything; `Some(departments)` reads only events of those
+/// departments, plus findings when it includes `revenue_recovery`. A
+/// `department` filter outside the scope is the caller's error (the server
+/// answers 403 before it gets here); here it simply selects nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EntryFilter {
+    pub department: Option<String>,
+    pub event_type: Option<String>,
+    pub scope: Option<Vec<String>>,
+}
+
+impl EntryFilter {
+    /// True when the filter selects every entry (the plain range read).
+    pub fn is_everything(&self) -> bool {
+        self.department.is_none() && self.event_type.is_none() && self.scope.is_none()
+    }
+}
+
+/// AEGIS L5: seq-ordered position lists per department, per event type, per
+/// (department, event type), and of findings — so a filtered page costs
+/// O(log n) to find its start in each list it reads plus O(page · log k) to
+/// merge k lists, instead of a scan of every entry after `after_seq`. Rebuilt
+/// on open; extended by every append. Positions equal `seq`.
+#[derive(Debug, Default)]
+struct ReadIndex {
+    findings: Vec<usize>,
+    by_department: HashMap<String, Vec<usize>>,
+    by_type: HashMap<String, Vec<usize>>,
+    by_department_type: HashMap<String, HashMap<String, Vec<usize>>>,
+}
+
+impl ReadIndex {
+    fn add(&mut self, pos: usize, entry: &LedgerEntry) {
+        match entry {
+            LedgerEntry::Finding(_) => self.findings.push(pos),
+            LedgerEntry::Event(ev) => {
+                self.by_department.entry(ev.department.clone()).or_default().push(pos);
+                self.by_type.entry(ev.event_type.clone()).or_default().push(pos);
+                self.by_department_type
+                    .entry(ev.department.clone())
+                    .or_default()
+                    .entry(ev.event_type.clone())
+                    .or_default()
+                    .push(pos);
+            }
+        }
+    }
+
+    /// The position lists whose union (they are disjoint) is what `f` selects;
+    /// None means "every position" (no filter, no scope).
+    fn sources<'a>(&'a self, f: &EntryFilter) -> Option<Vec<&'a [usize]>> {
+        const NONE: &[usize] = &[];
+        let dept = |d: &str| self.by_department.get(d).map_or(NONE, Vec::as_slice);
+        let dept_type = |d: &str, t: &str| {
+            self.by_department_type.get(d).and_then(|m| m.get(t)).map_or(NONE, Vec::as_slice)
+        };
+        let in_scope = |d: &str| f.scope.as_ref().is_none_or(|s| s.iter().any(|x| x == d));
+        Some(match (&f.department, &f.event_type, &f.scope) {
+            (None, None, None) => return None,
+            (Some(d), _, _) if !in_scope(d) => vec![],
+            (Some(d), None, _) => vec![dept(d)],
+            (Some(d), Some(t), _) => vec![dept_type(d, t)],
+            (None, Some(t), None) => vec![self.by_type.get(t.as_str()).map_or(NONE, Vec::as_slice)],
+            (None, Some(t), Some(scope)) => scope.iter().map(|d| dept_type(d, t)).collect(),
+            (None, None, Some(scope)) => {
+                let mut v: Vec<&[usize]> = scope.iter().map(|d| dept(d)).collect();
+                if scope.iter().any(|d| d == FINDINGS_DEPARTMENT) {
+                    v.push(&self.findings);
+                }
+                v
+            }
+        })
+    }
+
+    /// Positions `p` with `from <= p < to` selected by `f`, ascending, at most
+    /// `max`. `work` counts the steps taken (list starts found + positions
+    /// merged), for the complexity guard in the tests.
+    fn select(&self, f: &EntryFilter, from: usize, to: usize, max: usize, work: &mut usize) -> Vec<usize> {
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+        let Some(lists) = self.sources(f) else {
+            let end = to.min(from.saturating_add(max));
+            *work += end.saturating_sub(from);
+            return (from..end.max(from)).collect();
+        };
+        let mut heap = BinaryHeap::new();
+        let mut cursors: Vec<usize> = Vec::with_capacity(lists.len());
+        for (k, list) in lists.iter().enumerate() {
+            let i = list.partition_point(|&p| p < from);
+            *work += 1;
+            cursors.push(i);
+            if let Some(&p) = list.get(i) {
+                heap.push(Reverse((p, k)));
+            }
+        }
+        let mut out = Vec::new();
+        while out.len() < max {
+            let Some(Reverse((p, k))) = heap.pop() else { break };
+            *work += 1;
+            if p >= to {
+                break;
+            }
+            out.push(p);
+            cursors[k] += 1;
+            if let Some(&next) = lists[k].get(cursors[k]) {
+                heap.push(Reverse((next, k)));
+            }
+        }
+        out
+    }
+}
+
+/// Longest log line `verify_log_file` accepts (an entry is a few KiB at most;
+/// request bodies are capped at 64 KiB).
+const MAX_LOG_LINE_BYTES: usize = 1024 * 1024;
+
+/// AEGIS L4: re-reads the first `log_bytes` bytes of the log at `path` from
+/// disk, parses every line with the same strictness as `open` (UTF-8, no
+/// blank line, no unknown field), re-hashes the chain from the genesis hash
+/// and checks that it holds exactly `entries` entries ending at `head_hash`.
+/// Streams line by line (memory bounded by the longest line); takes no lock,
+/// so the caller runs it outside the ledger mutex. Entries appended after the
+/// snapshot (beyond `log_bytes`) are not read.
+pub fn verify_log_file(path: &Path, log_bytes: u64, entries: usize, head_hash: &str) -> Result<(), String> {
+    use std::io::BufRead;
+    let file = File::open(path).map_err(|e| format!("cannot open {} to re-verify it: {e}", path.display()))?;
+    let on_disk = file.metadata().map_err(|e| format!("cannot stat {}: {e}", path.display()))?.len();
+    if on_disk < log_bytes {
+        return Err(format!(
+            "{} holds {on_disk} bytes on disk, fewer than the {log_bytes} bytes of the {entries} acknowledged entries",
+            path.display()
+        ));
+    }
+    let mut reader = io::BufReader::new(file.take(log_bytes));
+    let mut prev = genesis_hash();
+    let mut n = 0usize;
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let got = (&mut reader)
+            .take(MAX_LOG_LINE_BYTES as u64 + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|e| format!("read error at line {}: {e}", n + 1))?;
+        if got == 0 {
+            break;
+        }
+        if line.last() != Some(&b'\n') {
+            return Err(if line.len() > MAX_LOG_LINE_BYTES {
+                format!("line {} is longer than {MAX_LOG_LINE_BYTES} bytes", n + 1)
+            } else {
+                format!("line {} is not newline-terminated within the acknowledged bytes", n + 1)
+            });
+        }
+        let text = std::str::from_utf8(&line[..line.len() - 1]).map_err(|e| format!("line {} is not UTF-8: {e}", n + 1))?;
+        if text.trim().is_empty() {
+            return Err(format!("line {} is blank", n + 1));
+        }
+        let entry: LedgerEntry = serde_json::from_str(text).map_err(|e| format!("line {} does not parse: {e}", n + 1))?;
+        crate::verify_entry(&entry, n as u64, &prev).map_err(|e| format!("line {}: {e:?}", n + 1))?;
+        prev = entry.hash().to_string();
+        n += 1;
+    }
+    if n != entries {
+        return Err(format!("the log on disk holds {n} entries in its acknowledged bytes, memory holds {entries}"));
+    }
+    if prev != head_hash {
+        return Err(format!(
+            "the log on disk ends at hash {prev}, the in-memory head is {head_hash} (the file was rewritten)"
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct PersistentLedger {
     ledger: Ledger,
@@ -267,9 +518,14 @@ pub struct PersistentLedger {
     /// finding_id -> every position holding it (sweep F-7; duplicates are
     /// legal in a log, see module docs).
     finding_index: HashMap<String, Vec<usize>>,
+    /// AEGIS L5: per-department / per-event-type positions.
+    read_index: ReadIndex,
+    /// Bytes of the log that hold the acknowledged entries (AEGIS L4).
+    log_bytes: u64,
     file: Box<dyn LogSink>,
     path: PathBuf,
     torn_tail: Option<TornTailRecovery>,
+    report: OpenReport,
     poisoned: Option<String>,
     /// Holds the exclusive flock on `<log>.lock` for as long as this value
     /// lives (sweep F-1). Never read; dropping it releases the lock.
@@ -314,20 +570,57 @@ fn acquire_writer_lock(log: &Path) -> Result<File, PersistError> {
     Ok(file)
 }
 
-/// Reads `<log>.head`: Ok(None) when it does not exist.
-fn read_head(log: &Path) -> Result<Option<HeadCheckpoint>, PersistError> {
+/// What `<log>.head` holds (sweep F-6; AEGIS M3 adds the digest of an
+/// unreadable checkpoint, which the operator reset is bound to).
+#[derive(Debug)]
+enum HeadState {
+    Missing,
+    Present(HeadCheckpoint),
+    /// Unreadable or malformed: why, and the first 16 hex of the SHA-256 of
+    /// its bytes (of no bytes when it cannot be read at all).
+    Bad { reason: String, digest16: String },
+}
+
+fn sha256_hex16(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// Reads `<log>.head`.
+fn read_head(log: &Path) -> HeadState {
     let p = head_path_for(log);
-    let text = match std::fs::read_to_string(&p) {
-        Ok(t) => t,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(PersistError::Checkpoint(format!("cannot read {}: {e}", p.display()))),
+    let bytes = match std::fs::read(&p) {
+        Ok(b) => b,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return HeadState::Missing,
+        Err(e) => {
+            return HeadState::Bad { reason: format!("cannot read {}: {e}", p.display()), digest16: sha256_hex16(b"") }
+        }
     };
-    let head: HeadCheckpoint = serde_json::from_str(text.trim_end_matches('\n'))
-        .map_err(|e| PersistError::Checkpoint(format!("{} is not a head checkpoint: {e}", p.display())))?;
-    if !head.is_well_formed() {
-        return Err(PersistError::Checkpoint(format!("{} is not a well-formed head checkpoint: {text:?}", p.display())));
+    let digest16 = sha256_hex16(&bytes);
+    let text = match std::str::from_utf8(&bytes) {
+        Ok(t) => t,
+        Err(_) => return HeadState::Bad { reason: format!("{} is not UTF-8", p.display()), digest16 },
+    };
+    match serde_json::from_str::<HeadCheckpoint>(text.trim_end_matches('\n')) {
+        Err(e) => HeadState::Bad { reason: format!("{} is not a head checkpoint: {e}", p.display()), digest16 },
+        Ok(head) if !head.is_well_formed() => HeadState::Bad {
+            reason: format!("{} is not a well-formed head checkpoint: {text:?}", p.display()),
+            digest16,
+        },
+        Ok(head) => HeadState::Present(head),
     }
-    Ok(Some(head))
+}
+
+/// AEGIS M2: one structured (single-line JSON) startup record for an event
+/// an operator must be able to find and alert on: a new ledger created, a
+/// legacy log migrated, an operator reset, a checkpoint moved up.
+pub(crate) fn log_startup_event(event: &str, fields: serde_json::Value) {
+    let mut obj = serde_json::Map::new();
+    obj.insert("event".into(), event.into());
+    if let serde_json::Value::Object(f) = fields {
+        obj.extend(f);
+    }
+    crate::ledger_log!("ledger-rust: EVENT {}", serde_json::Value::Object(obj));
 }
 
 /// Where a head-file write failed.
@@ -400,38 +693,86 @@ fn recover_torn_tail(path: &Path, complete_len: u64, torn: &[u8]) -> Result<Torn
     Ok(TornTailRecovery { torn_bytes: torn.len(), truncated_to: complete_len, preserved_at: side })
 }
 
-/// Sweep F-6: compares the verified log with the head checkpoint. Ok(true)
-/// when the checkpoint must be (re)written, Ok(false) when it already matches.
+/// Sweep F-6 (and AEGIS M1-M3): compares the verified log with the head
+/// checkpoint. Ok(true) when the checkpoint must be (re)written, Ok(false)
+/// when it already matches. Every refusal names the exact override value
+/// that would accept the state it refuses, and nothing else accepts it.
+///
+/// | log vs checkpoint | result |
+/// |---|---|
+/// | equal | opens |
+/// | exactly one entry ahead (crash between log fsync and checkpoint rename) | opens, checkpoint moved up |
+/// | more than one ahead, behind, different entry at the head, log missing, checkpoint malformed | refused unless `reset` equals `reset_binding(checkpoint, log)` |
+/// | no checkpoint, empty log (fresh install) | opens, checkpoint created, `ledger_created` logged |
+/// | no checkpoint, non-empty log (pre-sweep-F binary, or a deleted head file) | refused unless `migrate` equals `log_binding(log)` |
 fn check_against_head(
     path: &Path,
     log_existed: bool,
     ledger: &Ledger,
-    head: Result<Option<HeadCheckpoint>, PersistError>,
-    opts: LedgerOpenOptions,
-) -> Result<bool, PersistError> {
+    head: HeadState,
+    opts: &LedgerOpenOptions,
+) -> Result<(bool, OpenReport), PersistError> {
     let n = ledger.len() as u64;
-    let refusal: String = match head {
-        Err(PersistError::Checkpoint(reason)) => reason,
-        Err(other) => return Err(other),
-        Ok(None) => {
-            if n > 0 {
-                crate::ledger_log!(
-                    "ledger-rust: WARNING — {} has {n} verified entries but no head checkpoint ({}); this log was \
-                     written by a binary older than the checkpoint (sweep F-6). Creating the checkpoint now at \
-                     entries={n}. Deletion or rollback BEFORE this point cannot be detected.",
-                    path.display(),
-                    head_path_for(path).display()
-                );
-            }
-            return Ok(true);
+    let log_head = HeadCheckpoint::of(ledger);
+    let log_bind = log_binding(n, &log_head.head_hash);
+    let head_file = head_path_for(path);
+    let (refusal, from): (String, String) = match head {
+        HeadState::Missing if n == 0 => {
+            log_startup_event(
+                "ledger_created",
+                serde_json::json!({
+                    "log": path.display().to_string(),
+                    "log_existed": log_existed,
+                    "head": head_file.display().to_string(),
+                    "entries": 0,
+                }),
+            );
+            return Ok((true, OpenReport { created: true, ..OpenReport::default() }));
         }
-        Ok(Some(cp)) => {
-            if !log_existed {
+        HeadState::Missing => {
+            if opts.migrate.as_deref() == Some(log_bind.as_str()) {
+                log_startup_event(
+                    "legacy_log_migrated",
+                    serde_json::json!({
+                        "log": path.display().to_string(),
+                        "entries": n,
+                        "head_hash": log_head.head_hash,
+                        "binding": log_bind,
+                    }),
+                );
+                crate::ledger_log!(
+                    "ledger-rust: WARNING — LEDGER_MIGRATE_LEGACY={log_bind}: creating the head checkpoint {} for \
+                     {} ({n} verified entries). Deletion or rollback BEFORE this point cannot be detected. Unset \
+                     LEDGER_MIGRATE_LEGACY now (it can never match this log again once an entry is appended).",
+                    head_file.display(),
+                    path.display()
+                );
+                return Ok((true, OpenReport { migrate_used: true, ..OpenReport::default() }));
+            }
+            let given = match &opts.migrate {
+                Some(v) => format!(" (LEDGER_MIGRATE_LEGACY={v:?} does not match this log)"),
+                None => String::new(),
+            };
+            return Err(PersistError::Checkpoint(format!(
+                "{} holds {n} verified entries but has NO head checkpoint ({}){given}: either it was written by a \
+                 binary older than the checkpoint (sweep F-6), or the checkpoint was deleted — the two cannot be \
+                 told apart, and deleting the checkpoint is how a rollback would hide. Refusing to start (fail \
+                 closed). If this log is the one you expect (its head: entries={n}, head_hash={}), restart ONCE with \
+                 LEDGER_MIGRATE_LEGACY={log_bind} to create the checkpoint from it, then unset it.",
+                path.display(),
+                head_file.display(),
+                log_head.head_hash
+            )));
+        }
+        HeadState::Bad { reason, digest16 } => (reason, format!("unreadable:{digest16}")),
+        HeadState::Present(cp) => {
+            let from = log_binding(cp.entries, &cp.head_hash);
+            let reason = if !log_existed {
                 format!(
                     "the log file {} is MISSING but the head checkpoint {} records {} entries (head hash {}): \
                      the log was deleted or moved",
                     path.display(),
-                    head_path_for(path).display(),
+                    head_file.display(),
                     cp.entries,
                     cp.head_hash
                 )
@@ -444,7 +785,11 @@ fn check_against_head(
                     cp.head_hash
                 )
             } else {
-                let at = if cp.entries == 0 { genesis_hash() } else { ledger.entries()[(cp.entries - 1) as usize].hash().to_string() };
+                let at = if cp.entries == 0 {
+                    genesis_hash()
+                } else {
+                    ledger.entries()[(cp.entries - 1) as usize].hash().to_string()
+                };
                 if at != cp.head_hash {
                     format!(
                         "the log {} does not contain the checkpointed head: entry {:?} has hash {at}, the head \
@@ -453,34 +798,70 @@ fn check_against_head(
                         cp.head_seq,
                         cp.head_hash
                     )
+                } else if n == cp.entries + 1 {
+                    // AEGIS M1: the one crash window an append has (log fsynced,
+                    // checkpoint not yet renamed) leaves exactly one entry.
+                    log_startup_event(
+                        "checkpoint_moved_up",
+                        serde_json::json!({
+                            "log": path.display().to_string(),
+                            "from_entries": cp.entries,
+                            "to_entries": n,
+                            "head_hash": log_head.head_hash,
+                        }),
+                    );
+                    return Ok((true, OpenReport { moved_up: true, ..OpenReport::default() }));
                 } else if n > cp.entries {
-                    crate::ledger_log!(
-                        "ledger-rust: note — {} holds {n} verified entries, {} more than the head checkpoint ({}); \
-                         an append was interrupted between the log fsync and the checkpoint write. Moving the \
-                         checkpoint up.",
+                    format!(
+                        "the log {} holds {n} entries, {} more than the head checkpoint ({}): an interrupted append \
+                         leaves at most ONE entry past the checkpoint, so entries were added outside this ledger \
+                         (or the checkpoint was replaced by an older copy)",
                         path.display(),
                         n - cp.entries,
                         cp.entries
-                    );
-                    return Ok(true);
+                    )
                 } else {
-                    return Ok(false);
+                    return Ok((false, OpenReport::default()));
                 }
-            }
+            };
+            (reason, from)
         }
     };
-    if !opts.allow_reset {
-        return Err(PersistError::Checkpoint(format!(
-            "{refusal}. Refusing to start (fail closed). Restore the log from backup; or, if you accept the log \
-             as it is now, restart once with LEDGER_ALLOW_RESET=1 (logged) to move the checkpoint to it."
-        )));
+    let accept = reset_binding(&from, &log_bind);
+    match opts.reset.as_deref() {
+        Some(v) if v == accept => {
+            log_startup_event(
+                "operator_reset",
+                serde_json::json!({
+                    "log": path.display().to_string(),
+                    "from": from,
+                    "to": log_bind,
+                    "entries": n,
+                    "head_hash": log_head.head_hash,
+                    "reason": refusal,
+                }),
+            );
+            crate::ledger_log!(
+                "ledger-rust: WARNING — LEDGER_ALLOW_RESET={accept}: OPERATOR RESET of the head checkpoint. \
+                 {refusal}. Accepting the verified log as it is now ({n} entries) and rewriting {}. Unset \
+                 LEDGER_ALLOW_RESET now.",
+                head_file.display()
+            );
+            Ok((true, OpenReport { reset_used: true, ..OpenReport::default() }))
+        }
+        given => {
+            let given = match given {
+                Some(v) => format!(" LEDGER_ALLOW_RESET={v:?} does not match this state (it is bound to one exact \
+                                   checkpoint and log head)."),
+                None => String::new(),
+            };
+            Err(PersistError::Checkpoint(format!(
+                "{refusal}.{given} Refusing to start (fail closed). Restore the log from backup; or, if you accept \
+                 the log as it is now, restart ONCE with LEDGER_ALLOW_RESET={accept} (logged) to move the \
+                 checkpoint to it, then unset it."
+            )))
+        }
     }
-    crate::ledger_log!(
-        "ledger-rust: WARNING — LEDGER_ALLOW_RESET=1: OPERATOR RESET of the head checkpoint. {refusal}. Accepting \
-         the verified log as it is now ({n} entries) and rewriting {}.",
-        head_path_for(path).display()
-    );
-    Ok(true)
 }
 
 impl PersistentLedger {
@@ -543,6 +924,7 @@ impl PersistentLedger {
         let mut entries: Vec<LedgerEntry> = Vec::new();
         let mut event_index: HashMap<String, usize> = HashMap::new();
         let mut finding_index: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut read_index = ReadIndex::default();
         let mut line_no = 0;
         for (i, raw) in bytes[..complete_len].split_inclusive(|&b| b == b'\n').enumerate() {
             line_no = i + 1;
@@ -574,6 +956,7 @@ impl PersistentLedger {
                 }
                 LedgerEntry::Finding(f) => finding_index.entry(f.finding_id.clone()).or_default().push(entries.len()),
             }
+            read_index.add(entries.len(), &entry);
             entries.push(entry);
         }
 
@@ -606,7 +989,7 @@ impl PersistentLedger {
         ledger.verify_chain().map_err(PersistError::ChainInvalid)?;
 
         // F-6: every refusal happens before anything on disk is modified.
-        let write_checkpoint = check_against_head(&path, existed, &ledger, head, opts)?;
+        let (write_checkpoint, report) = check_against_head(&path, existed, &ledger, head, &opts)?;
 
         // Only now — every complete line parsed and the whole chain verified —
         // is an unterminated tail treated as a torn, unacknowledged write.
@@ -647,14 +1030,22 @@ impl PersistentLedger {
             ledger,
             event_index,
             finding_index,
+            read_index,
+            log_bytes: complete_len as u64,
             file: wrap(file),
             path,
             torn_tail,
+            report,
             poisoned: None,
             _lock: lock,
             #[cfg(test)]
             fail_next_head_write: false,
         })
+    }
+
+    /// What `open` did about the head checkpoint (AEGIS M1-M3).
+    pub fn open_report(&self) -> OpenReport {
+        self.report
     }
 
     /// Set when `open` truncated a torn final line (see module docs).
@@ -672,6 +1063,26 @@ impl PersistentLedger {
 
     pub fn entries(&self) -> &[LedgerEntry] {
         self.ledger.entries()
+    }
+
+    /// AEGIS L5/M4: clones the entries at positions `from..to` that `filter`
+    /// selects, ascending, at most `max` (see `EntryFilter`).
+    pub fn select(&self, filter: &EntryFilter, from: usize, to: usize, max: usize) -> Vec<LedgerEntry> {
+        let mut work = 0;
+        self.select_counted(filter, from, to, max, &mut work)
+    }
+
+    /// `select`, counting the index steps taken (the complexity guard).
+    pub fn select_counted(&self, filter: &EntryFilter, from: usize, to: usize, max: usize, work: &mut usize) -> Vec<LedgerEntry> {
+        let to = to.min(self.ledger.len());
+        let entries = self.ledger.entries();
+        self.read_index.select(filter, from, to, max, work).into_iter().map(|p| entries[p].clone()).collect()
+    }
+
+    /// AEGIS L4: the number of bytes of the log holding the acknowledged
+    /// entries (what `verify_log_file` re-reads).
+    pub fn log_bytes(&self) -> u64 {
+        self.log_bytes
     }
 
     /// Clones entries `from..to` (clamped); see `Ledger::clone_range`.
@@ -763,6 +1174,9 @@ impl PersistentLedger {
             return Err(PersistError::Io(write_err));
         }
 
+        let pos = self.ledger.len();
+        self.read_index.add(pos, &entry);
+        self.log_bytes = pre_len + line.len() as u64;
         self.ledger.push_entry(entry);
         Ok(self.ledger.entries().last().expect("just pushed"))
     }
@@ -1190,7 +1604,7 @@ mod tests {
         assert_eq!(torn_side_files(&path), 0, "nothing moved to a side file");
         // Even an operator reset does not discard it (it is corruption, not a checkpoint question).
         assert!(matches!(
-            PersistentLedger::open_with(&path, LedgerOpenOptions { allow_reset: true }),
+            PersistentLedger::open_with(&path, LedgerOpenOptions { reset: Some("2:0000000000000000/2:0000000000000000".into()), ..LedgerOpenOptions::default() }),
             Err(PersistError::Corrupt { line: 2, .. })
         ));
         // Restoring the newline restores the ledger.
@@ -1266,7 +1680,7 @@ mod tests {
         for raw in ["\"amount_usd\":-0.0,", "\"amount_usd\":-5.0,", "\"amount_usd\":-0.001,", "\"amount_usd\":-1e-9,"] {
             assert!(original.contains(raw), "fixture must contain {raw}");
         }
-        let mut pl = PersistentLedger::open(&path).expect("every log the old binary wrote must load");
+        let mut pl = open_migrated(&path).expect("every log the old binary wrote must load");
         assert_eq!(pl.len(), 15);
         assert_eq!(pl.verify_chain(), Ok(()));
         let amounts: Vec<Option<&str>> = pl
@@ -1416,7 +1830,7 @@ mod tests {
         assert!(!original.contains("\"kind\""));
 
         {
-            let mut pl = PersistentLedger::open(&path).expect("legacy file must open and verify");
+            let mut pl = open_migrated(&path).expect("legacy file must open and verify");
             assert_eq!(pl.len(), 11);
             let amounts: Vec<Option<String>> = pl
                 .entries()
@@ -1535,7 +1949,7 @@ mod tests {
             let path = scratch_path("fixture_fields");
             let _cleanup = ScratchFile(path.clone());
             std::fs::copy(&fixture, &path).unwrap();
-            let pl = PersistentLedger::open(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let pl = open_migrated(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(pl.len(), n, "{name}");
             assert_eq!(pl.verify_chain(), Ok(()), "{name}");
         }
@@ -1552,8 +1966,27 @@ mod tests {
 
     // --- sweep F (Oct 6 2026) ----------------------------------------------------
 
+    /// Any reset value (for refusals that come before the checkpoint check).
     fn reset() -> LedgerOpenOptions {
-        LedgerOpenOptions { allow_reset: true }
+        LedgerOpenOptions { reset: Some("0:0000000000000000/0:0000000000000000".into()), ..LedgerOpenOptions::default() }
+    }
+
+    /// The `NAME=<value>` an operator is told to use, taken from a refusal.
+    fn advised(reason: &str, name: &str) -> String {
+        let at = reason.find(&format!("{name}=")).unwrap_or_else(|| panic!("no {name} advice in: {reason}"));
+        reason[at + name.len() + 1..].split_whitespace().next().unwrap().to_string()
+    }
+
+    /// AEGIS M3: the reset is accepted only with the value the refusal printed.
+    fn reset_as_advised(path: &Path) -> PersistentLedger {
+        let reason = match PersistentLedger::open(path) {
+            Err(PersistError::Checkpoint(r)) => r,
+            other => panic!("expected a Checkpoint refusal, got {other:?}"),
+        };
+        let v = advised(&reason, "LEDGER_ALLOW_RESET");
+        assert!(is_reset_binding(&v), "{v}");
+        PersistentLedger::open_with(path, LedgerOpenOptions { reset: Some(v), ..LedgerOpenOptions::default() })
+            .expect("the advised reset value opens")
     }
 
     fn head_on_disk(path: &Path) -> HeadCheckpoint {
@@ -1622,7 +2055,10 @@ mod tests {
             other => panic!("expected Checkpoint refusal, got {other:?}"),
         }
         assert!(!path.exists(), "the refusal did not create a fresh log");
-        let pl = PersistentLedger::open_with(&path, reset()).expect("operator reset");
+        assert!(matches!(PersistentLedger::open_with(&path, reset()), Err(PersistError::Checkpoint(_))), "an unbound reset value does nothing");
+        assert!(!path.exists());
+        let pl = reset_as_advised(&path);
+        assert!(pl.open_report().reset_used);
         assert!(pl.is_empty());
         assert_eq!(head_on_disk(&path).entries, 0);
         drop(pl);
@@ -1665,35 +2101,136 @@ mod tests {
             Err(PersistError::Checkpoint(reason)) => assert!(reason.contains("does not contain the checkpointed head"), "{reason}"),
             other => panic!("expected Checkpoint refusal, got {other:?}"),
         }
-        let pl = PersistentLedger::open_with(&path, reset()).unwrap();
+        let pl = reset_as_advised(&path);
         assert_eq!(pl.head(), head_on_disk(&path));
         assert_eq!(pl.entries()[0].as_finding().unwrap().finding_id, "g-0");
     }
 
-    /// F-6: a crash between the log fsync and the checkpoint rename leaves
-    /// the log one entry ahead; that is accepted (every entry still verifies)
-    /// and the checkpoint moves up. A log written before checkpoints existed
-    /// (no head file) gets one.
+    /// F-6 / AEGIS M1: a crash between the log fsync and the checkpoint
+    /// rename leaves the log exactly ONE entry ahead; that is accepted and
+    /// the checkpoint moves up. Two or more ahead is not a crash window (an
+    /// append is acknowledged only once its checkpoint is durable, and the
+    /// next append writes its own): refused, and only the bound reset accepts it.
     #[test]
-    fn a_log_ahead_of_its_checkpoint_or_without_one_opens_and_is_checkpointed() {
+    fn only_a_log_exactly_one_entry_ahead_of_its_checkpoint_opens() {
         let path = scratch_path("ahead");
         let _cleanup = ScratchFile(path.clone());
-        let behind;
+        let mut heads = Vec::new();
         {
             let mut pl = PersistentLedger::open(&path).unwrap();
-            pl.append(sample_record("f-0", "1.00")).unwrap();
-            behind = std::fs::read(head_path_for(&path)).unwrap();
-            pl.append(sample_record("f-1", "1.00")).unwrap();
+            for i in 0..3 {
+                heads.push(std::fs::read(head_path_for(&path)).unwrap());
+                pl.append(sample_record(&format!("f-{i}"), "1.00")).unwrap();
+            }
         }
-        std::fs::write(head_path_for(&path), &behind).unwrap();
-        let pl = PersistentLedger::open(&path).expect("one entry ahead is a crash window, not tampering");
+        // heads[k] is the checkpoint at k entries; the log holds 3.
+        std::fs::write(head_path_for(&path), &heads[2]).unwrap();
+        let pl = PersistentLedger::open(&path).expect("one entry ahead is the crash window, not tampering");
+        assert!(pl.open_report().moved_up);
         assert_eq!(head_on_disk(&path), pl.head());
-        assert_eq!(pl.head().entries, 2);
+        assert_eq!(pl.head().entries, 3);
         drop(pl);
 
+        for (k, label) in [(1usize, "two ahead"), (0, "three ahead (empty checkpoint)")] {
+            std::fs::write(head_path_for(&path), &heads[k]).unwrap();
+            let log_before = std::fs::read(&path).unwrap();
+            match PersistentLedger::open(&path) {
+                Err(PersistError::Checkpoint(r)) => {
+                    assert!(r.contains("at most ONE entry past the checkpoint"), "{label}: {r}")
+                }
+                other => panic!("{label}: expected a refusal, got {other:?}"),
+            }
+            assert_eq!(std::fs::read(head_path_for(&path)).unwrap(), heads[k], "{label}: checkpoint untouched");
+            assert_eq!(std::fs::read(&path).unwrap(), log_before, "{label}: log untouched");
+        }
+        let pl = reset_as_advised(&path);
+        assert_eq!(pl.head().entries, 3);
+    }
+
+    /// AEGIS M2: a non-empty log with no checkpoint (a pre-sweep-F log, or a
+    /// deleted head file — indistinguishable) used to open and silently get a
+    /// new checkpoint. Now refused unless the one-shot migrate value bound to
+    /// this log's head is given; a fresh, empty ledger is created and says so.
+    #[test]
+    fn a_log_without_a_checkpoint_needs_the_bound_one_shot_migrate() {
+        let path = scratch_path("no_head");
+        let _cleanup = ScratchFile(path.clone());
+        {
+            let pl = PersistentLedger::open(&path).unwrap();
+            assert!(pl.open_report().created, "a new ledger is reported");
+        }
+        {
+            let mut pl = PersistentLedger::open(&path).unwrap();
+            assert!(!pl.open_report().created, "an existing empty ledger with its checkpoint is not new");
+            pl.append(sample_record("f-0", "1.00")).unwrap();
+            pl.append(sample_record("f-1", "1.00")).unwrap();
+        }
         std::fs::remove_file(head_path_for(&path)).unwrap();
-        let pl = PersistentLedger::open(&path).expect("a pre-checkpoint log still opens");
+        let reason = match PersistentLedger::open(&path) {
+            Err(PersistError::Checkpoint(r)) => r,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert!(reason.contains("NO head checkpoint"), "{reason}");
+        assert!(!head_path_for(&path).exists(), "the refusal wrote no checkpoint");
+        let v = advised(&reason, "LEDGER_MIGRATE_LEGACY");
+        // A value for another state (a stale one) does nothing.
+        let stale = LedgerOpenOptions { migrate: Some("1:0000000000000000".into()), ..LedgerOpenOptions::default() };
+        assert!(matches!(PersistentLedger::open_with(&path, stale), Err(PersistError::Checkpoint(_))));
+        let opts = LedgerOpenOptions { migrate: Some(v.clone()), ..LedgerOpenOptions::default() };
+        let mut pl = PersistentLedger::open_with(&path, opts.clone()).unwrap();
+        assert!(pl.open_report().migrate_used);
         assert_eq!(head_on_disk(&path), pl.head());
+        pl.append(sample_record("f-2", "1.00")).unwrap();
+        drop(pl);
+        // Consumed: once the checkpoint exists the value is not used, and
+        // after an append it can never match this log again.
+        let pl = PersistentLedger::open_with(&path, opts.clone()).unwrap();
+        assert!(!pl.open_report().migrate_used);
+        drop(pl);
+        std::fs::remove_file(head_path_for(&path)).unwrap();
+        assert!(matches!(PersistentLedger::open_with(&path, opts), Err(PersistError::Checkpoint(_))));
+    }
+
+    /// AEGIS M3: a reset value is bound to the exact (checkpoint, log head)
+    /// pair it was printed for; a stale value left armed accepts nothing else.
+    #[test]
+    fn a_reset_value_accepts_only_the_state_it_was_printed_for() {
+        let path = scratch_path("reset_bound");
+        let _cleanup = ScratchFile(path.clone());
+        {
+            let mut pl = PersistentLedger::open(&path).unwrap();
+            for i in 0..3 {
+                pl.append(sample_record(&format!("f-{i}"), "1.00")).unwrap();
+            }
+        }
+        let full = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = full.lines().collect();
+        std::fs::write(&path, format!("{}\n", lines[0])).unwrap();
+        let reason = match PersistentLedger::open(&path) {
+            Err(PersistError::Checkpoint(r)) => r,
+            other => panic!("{other:?}"),
+        };
+        let v1 = advised(&reason, "LEDGER_ALLOW_RESET");
+        // A different truncation: v1 does not accept it.
+        std::fs::write(&path, format!("{}\n{}\n", lines[0], lines[1])).unwrap();
+        let opts = LedgerOpenOptions { reset: Some(v1.clone()), ..LedgerOpenOptions::default() };
+        match PersistentLedger::open_with(&path, opts.clone()) {
+            Err(PersistError::Checkpoint(r)) => assert!(r.contains("does not match this state"), "{r}"),
+            other => panic!("a stale reset value must not accept another state: {other:?}"),
+        }
+        // The state it was printed for: accepted, once.
+        std::fs::write(&path, format!("{}\n", lines[0])).unwrap();
+        let pl = PersistentLedger::open_with(&path, opts.clone()).unwrap();
+        assert!(pl.open_report().reset_used);
+        assert_eq!(pl.len(), 1);
+        drop(pl);
+        // Left set afterwards it is unused, and a later rollback is still refused.
+        let mut pl = PersistentLedger::open_with(&path, opts.clone()).unwrap();
+        assert!(!pl.open_report().reset_used);
+        pl.append(sample_record("f-9", "1.00")).unwrap();
+        drop(pl);
+        std::fs::write(&path, format!("{}\n", lines[0])).unwrap();
+        assert!(matches!(PersistentLedger::open_with(&path, opts), Err(PersistError::Checkpoint(_))));
     }
 
     #[test]
@@ -1708,7 +2245,7 @@ mod tests {
             std::fs::write(head_path_for(&path), bad).unwrap();
             assert!(matches!(PersistentLedger::open(&path), Err(PersistError::Checkpoint(_))), "{bad:?}");
         }
-        let pl = PersistentLedger::open_with(&path, reset()).unwrap();
+        let pl = reset_as_advised(&path);
         assert_eq!(head_on_disk(&path), pl.head());
     }
 
@@ -1816,7 +2353,7 @@ mod tests {
     #[test]
     fn idempotent_finding_append_matches_legacy_entries() {
         let (path, _c) = fixture_copy("legacy_ledger_v1.jsonl");
-        let mut pl = PersistentLedger::open(&path).unwrap();
+        let mut pl = open_migrated(&path).unwrap();
         let f = pl.entries()[0].as_finding().unwrap().clone();
         let same = LedgerRecordInput {
             finding_id: f.finding_id.clone(),
@@ -1829,6 +2366,126 @@ mod tests {
         };
         assert!(matches!(pl.append_finding_idempotent(same).unwrap(), AppendOutcome::Existing(e) if e.seq() == 0));
         assert_eq!(pl.len(), 11);
+    }
+
+    /// AEGIS L5: a filtered page is answered from the per-department /
+    /// per-event-type index: the work is O(lists + page), not a scan of the
+    /// entries after `after_seq` (20 000 entries, the rare department last:
+    /// a scan would take ~20 000 steps). And the index selects exactly what
+    /// a naive filter over every entry selects, for every filter shape.
+    #[test]
+    fn filtered_pages_come_from_the_index_and_match_a_naive_scan() {
+        let path = scratch_path("index");
+        let _cleanup = ScratchFile(path.clone());
+        {
+            let mut l = Ledger::new();
+            let mut out = io::BufWriter::new(File::create(&path).unwrap());
+            for i in 0..20_000usize {
+                let (dept, et) = match i % 1000 {
+                    999 => ("rare", "ping"),
+                    n if n % 7 == 0 => ("sales", "call"),
+                    n if n % 3 == 0 => ("finance", "payout"),
+                    _ => ("sales", "note"),
+                };
+                if i % 11 == 0 {
+                    l.append(sample_record(&format!("f-{i}"), "1.00"));
+                } else {
+                    let mut e = sample_event(&format!("e-{i}"), "s");
+                    e.department = dept.into();
+                    e.event_type = et.into();
+                    l.append_event(e);
+                }
+                writeln!(out, "{}", serde_json::to_string(&l.entries()[i]).unwrap()).unwrap();
+            }
+            out.flush().unwrap();
+            drop(out);
+            write_head(&path, &HeadCheckpoint::of(&l)).unwrap();
+        }
+        let pl = PersistentLedger::open(&path).unwrap();
+        assert_eq!(pl.len(), 20_000);
+
+        let f = |d: Option<&str>, t: Option<&str>, scope: Option<&[&str]>| EntryFilter {
+            department: d.map(str::to_string),
+            event_type: t.map(str::to_string),
+            scope: scope.map(|s| s.iter().map(|x| x.to_string()).collect()),
+        };
+        // The guard: the rare department's 20 entries, from the start of the log.
+        let mut work = 0;
+        let page = pl.select_counted(&f(Some("rare"), None, None), 0, pl.len(), 10, &mut work);
+        assert_eq!(page.len(), 10);
+        assert!(work <= 16, "a filtered page took {work} steps");
+        let mut work = 0;
+        let page = pl.select_counted(&f(None, Some("ping"), Some(&["rare", "finance"])), 15_000, pl.len(), 100, &mut work);
+        assert_eq!(page.iter().map(|e| e.seq()).collect::<Vec<_>>(), [15_999, 16_999, 17_999, 18_999, 19_999]);
+        assert!(work <= 12, "a scoped, filtered page took {work} steps");
+
+        let naive = |flt: &EntryFilter, from: usize, max: usize| -> Vec<u64> {
+            pl.entries()[from..]
+                .iter()
+                .filter(|e| match e {
+                    LedgerEntry::Finding(_) => {
+                        flt.department.is_none()
+                            && flt.event_type.is_none()
+                            && flt.scope.as_ref().is_none_or(|s| s.iter().any(|d| d == FINDINGS_DEPARTMENT))
+                    }
+                    LedgerEntry::Event(ev) => {
+                        flt.department.as_ref().is_none_or(|d| *d == ev.department)
+                            && flt.event_type.as_ref().is_none_or(|t| *t == ev.event_type)
+                            && flt.scope.as_ref().is_none_or(|s| s.contains(&ev.department))
+                    }
+                })
+                .take(max)
+                .map(|e| e.seq())
+                .collect()
+        };
+        let scopes: [Option<&[&str]>; 4] =
+            [None, Some(&["sales"]), Some(&["finance", "revenue_recovery"]), Some(&["nobody"])];
+        for scope in scopes {
+            for d in [None, Some("sales"), Some("finance"), Some("rare"), Some("none")] {
+                for t in [None, Some("note"), Some("call"), Some("payout"), Some("ping")] {
+                    let flt = f(d, t, scope);
+                    for (from, max) in [(0, 25), (12_345, 7), (19_990, 1000), (0, 3000)] {
+                        let got: Vec<u64> = pl.select(&flt, from, pl.len(), max).iter().map(|e| e.seq()).collect();
+                        assert_eq!(got, naive(&flt, from, max), "{flt:?} from {from} max {max}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// AEGIS L4: `verify_log_file` re-reads and re-hashes the log on disk and
+    /// compares it with the in-memory head; any change to the acknowledged
+    /// bytes is caught, and bytes past the snapshot are not read.
+    #[test]
+    fn the_disk_reverify_catches_any_change_to_the_acknowledged_bytes() {
+        let path = scratch_path("disk_verify");
+        let _cleanup = ScratchFile(path.clone());
+        let mut pl = PersistentLedger::open(&path).unwrap();
+        for i in 0..5 {
+            pl.append(sample_record(&format!("f-{i}"), "1.00")).unwrap();
+        }
+        let (n, head, bytes) = (pl.len(), pl.head().head_hash, pl.log_bytes());
+        assert_eq!(bytes, std::fs::metadata(&path).unwrap().len());
+        assert_eq!(verify_log_file(&path, bytes, n, &head), Ok(()));
+        let good = std::fs::read(&path).unwrap();
+        let text = String::from_utf8(good.clone()).unwrap();
+        // An append by someone else after the snapshot is outside it.
+        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"{\"not\":\"read\"}\n").unwrap();
+        assert_eq!(verify_log_file(&path, bytes, n, &head), Ok(()));
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("amount rewritten", text.replacen("\"1.00\"", "\"9.00\"", 1).into_bytes()),
+            ("truncated", good[..good.len() - 10].to_vec()),
+            ("a line removed", text.lines().skip(1).map(|l| format!("{l}\n")).collect::<String>().into_bytes()),
+            ("blank line", text.replacen('\n', "\n\n", 1).into_bytes()),
+        ];
+        for (name, content) in cases {
+            std::fs::write(&path, &content).unwrap();
+            assert!(verify_log_file(&path, bytes, n, &head).is_err(), "{name}");
+        }
+        // Another valid chain of the same shape: caught by the head comparison.
+        std::fs::write(&path, &good).unwrap();
+        assert!(verify_log_file(&path, bytes, n, &"0".repeat(64)).unwrap_err().contains("rewritten"));
     }
 
     /// RAII cleanup for the scratch files these tests write to /tmp: the log
@@ -1847,6 +2504,21 @@ mod tests {
     /// A scratch copy of a checked-in fixture: opening takes `<log>.lock`
     /// and may write `<log>.head` next to the log (sweep F), which must never
     /// land in tests/fixtures.
+    /// AEGIS M2: a pre-checkpoint log opens only with the advised one-shot
+    /// migrate value (what an operator does once per legacy log).
+    fn open_migrated(path: &Path) -> Result<PersistentLedger, PersistError> {
+        match PersistentLedger::open(path) {
+            Err(PersistError::Checkpoint(r)) if r.contains("NO head checkpoint") => {
+                let v = advised(&r, "LEDGER_MIGRATE_LEGACY");
+                assert!(is_log_binding(&v), "{v}");
+                let pl = PersistentLedger::open_with(path, LedgerOpenOptions { migrate: Some(v), ..LedgerOpenOptions::default() })?;
+                assert!(pl.open_report().migrate_used);
+                Ok(pl)
+            }
+            other => other,
+        }
+    }
+
     fn fixture_copy(name: &str) -> (PathBuf, ScratchFile) {
         let fixture = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
         let path = scratch_path("fixture_copy");

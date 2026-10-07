@@ -129,9 +129,14 @@ mod sys {
 /// file-size limit applied in the child between fork and exec. Fix wave 21
 /// (N20-M-3): the server binds port 0 and reports the port in a port file.
 fn spawn(log: &Scratch, fsize: Option<Fsize>) -> Spawned {
+    spawn_with(log, fsize, &[])
+}
+
+fn spawn_with(log: &Scratch, fsize: Option<Fsize>, env: &[(&str, &str)]) -> Spawned {
     let port_file = PortFile::new("hardening");
     let bin = env!("CARGO_BIN_EXE_server");
     let mut cmd = Command::new(bin);
+    cmd.envs(env.iter().copied());
     if let Some(Fsize { bytes, ignore_sigxfsz }) = fsize {
         // SAFETY: only async-signal-safe syscalls run in the forked child.
         unsafe {
@@ -183,7 +188,17 @@ fn wait_up(child: &mut Child, port_file: &PortFile) -> Result<u16, String> {
 }
 
 fn start(log: &Scratch, fsize: Option<Fsize>) -> ServerHandle {
-    let Spawned { mut child, port_file } = spawn(log, fsize);
+    start_with(log, fsize, &[])
+}
+
+/// A legacy (pre-checkpoint) log needs the one-shot migrate value (AEGIS M2).
+fn start_migrating(log: &Scratch) -> ServerHandle {
+    let binding = common::migrate_binding(&log.0);
+    start_with(log, None, &[("LEDGER_MIGRATE_LEGACY", &binding)])
+}
+
+fn start_with(log: &Scratch, fsize: Option<Fsize>, env: &[(&str, &str)]) -> ServerHandle {
+    let Spawned { mut child, port_file } = spawn_with(log, fsize, env);
     match wait_up(&mut child, &port_file) {
         Ok(port) => ServerHandle { child, port },
         Err(e) => {
@@ -298,8 +313,11 @@ fn f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers() {
     let log = scratch("torn_kill");
     let mut acked = 0usize;
     {
-        let s = start(&log, Some(Fsize { bytes: 1024, ignore_sigxfsz: false }));
-        for i in 0..10 {
+        // The limit applies to every file the server writes, its captured stderr included: 4 KiB leaves room for
+        // the startup lines (AEGIS M2 added a structured `ledger_created` line; macOS temp paths are long) and is
+        // still reached by the log within the first dozen events.
+        let s = start(&log, Some(Fsize { bytes: 4096, ignore_sigxfsz: false }));
+        for i in 0..40 {
             match request(s.port, "POST", "/ledger/events", Some(&format!("Bearer {TOKEN}")), Some(&event(&format!("e{i}")))) {
                 Ok((201, _)) => acked += 1,
                 _ => break, // process killed by SIGXFSZ mid-write: no response
@@ -456,7 +474,7 @@ fn f6_legacy_log_with_negative_amounts_from_old_binary_is_served_and_extended() 
     std::fs::copy(fixture, &log.0).unwrap();
     let original = std::fs::read(&log.0).unwrap();
 
-    let s = start(&log, None);
+    let s = start_migrating(&log);
     let (st, v) = authed(s.port, "GET", "/ledger/verify", None);
     assert_eq!(st, 200);
     assert_eq!(v, json!({"valid": true, "entries": 15}));
@@ -723,7 +741,7 @@ fn money_bound_log_with_over_bound_strings_from_previous_binary_still_loads() {
     std::fs::copy(fixture, &log.0).unwrap();
     let original = std::fs::read(&log.0).unwrap();
 
-    let s = start(&log, None);
+    let s = start_migrating(&log);
     assert_eq!(authed(s.port, "GET", "/ledger/verify", None).1, json!({"valid": true, "entries": 4}));
     let (_, entries) = authed(s.port, "GET", "/ledger/entries", None);
     let amounts: Vec<Value> = entries.as_array().unwrap().iter().map(|e| e["amount_usd"].clone()).collect();

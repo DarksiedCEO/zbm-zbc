@@ -401,6 +401,7 @@ fn write_big_log(log: &Scratch, n: usize) {
         out.push('\n');
     }
     std::fs::write(&log.0, out).unwrap();
+    common::write_head_for(&log.0);
 }
 
 /// A client asks for the whole (multi-MB) ledger and never reads the

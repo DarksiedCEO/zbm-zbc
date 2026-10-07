@@ -173,6 +173,23 @@
 //!     the shared token is then accepted only with LEDGER_ALLOW_SHARED_TOKEN=1.
 //!     Unset: unchanged, with a startup warning.
 //!   - A failed bind (or runtime start) exits 1 with a message, never a panic.
+//!
+//! AEGIS review of d6b1cd9, Oct 7 2026 (docs/adr/0003 section 13; persistence.rs
+//! for M1-M3, L4, L5):
+//!   - M1/M2/M3: only a log exactly one entry past its checkpoint starts; a
+//!     non-empty log without a checkpoint needs LEDGER_MIGRATE_LEGACY, and an
+//!     operator reset LEDGER_ALLOW_RESET, each set to the value the refusal
+//!     prints (bound to that exact state; `load_binding`). Checkpoint decisions
+//!     are structured `EVENT {json}` lines (a new ledger: `ledger_created`).
+//!   - M4: reads are scoped (`Principal::read_scope`): a caller reads its
+//!     departments (+ `read_departments`), `read_all` reads everything; a
+//!     `department` filter outside the scope is a 403.
+//!   - L1/L2/L3: a duplicate token hash or an empty LEDGER_CALLERS_FILE refuses
+//!     to start; a configured caller token under 32 bytes is a 401.
+//!   - L4: `GET /ledger/verify?full=1` also re-reads and re-hashes the log from
+//!     disk (`verify_log_file`) outside the lock.
+//!   - L5: filtered / scoped pages come from the per-department index
+//!     (`entries_selected`), not a scan.
 use std::convert::Infallible;
 use std::ffi::CString;
 use std::future::Future;
@@ -194,8 +211,9 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use ledger_rust::{
-    genesis_hash, ledger_log, verify_entry, AppendOutcome, EventAppendOutcome, EventInput, LedgerEntry, LedgerError,
-    LedgerOpenOptions, LedgerRecordInput, PersistError, PersistentLedger,
+    genesis_hash, is_log_binding, is_reset_binding, ledger_log, verify_entry, verify_log_file, AppendOutcome,
+    EntryFilter, EventAppendOutcome, EventInput, LedgerEntry, LedgerError, LedgerOpenOptions, LedgerRecordInput,
+    PersistError, PersistentLedger, FINDINGS_DEPARTMENT,
 };
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -262,8 +280,6 @@ const READ_CHUNK: usize = 2048;
 /// `limit`, and the largest `limit` accepted.
 const DEFAULT_PAGE: usize = 1000;
 const MAX_PAGE: usize = 10_000;
-/// Sweep F-4: the department a finding (POST /ledger/append) is written for.
-const FINDINGS_DEPARTMENT: &str = "revenue_recovery";
 /// Sweep F-4: largest LEDGER_CALLERS_FILE accepted.
 const MAX_CALLERS_FILE_BYTES: u64 = 1024 * 1024;
 
@@ -323,9 +339,18 @@ impl WriterPriority {
 #[serde(deny_unknown_fields)]
 struct Caller {
     caller: String,
+    /// Write caller: the departments it writes (and reads). Read caller: the
+    /// departments it reads.
     #[serde(default)]
     departments: Vec<String>,
     scope: Scope,
+    /// AEGIS M4: further departments a write caller may READ (not write).
+    #[serde(default)]
+    read_departments: Vec<String>,
+    /// AEGIS M4: reads every department and every finding (dashboard,
+    /// compliance, audit). Exclusive with `read_departments`.
+    #[serde(default)]
+    read_all: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
@@ -365,6 +390,22 @@ impl Principal {
             Principal::Caller(c) => &c.caller,
         }
     }
+
+    /// AEGIS M4: the departments this principal may read; None = everything
+    /// (the shared token, or a caller with `read_all`). Findings are visible
+    /// when the scope includes `revenue_recovery`.
+    fn read_scope(&self) -> Option<Vec<String>> {
+        match self {
+            Principal::Shared => None,
+            Principal::Caller(c) if c.read_all => None,
+            Principal::Caller(c) => {
+                let mut v: Vec<String> = c.departments.iter().chain(c.read_departments.iter()).cloned().collect();
+                v.sort();
+                v.dedup();
+                Some(v)
+            }
+        }
+    }
 }
 
 /// Authentication configuration (sweep F-4, F-12).
@@ -381,6 +422,18 @@ impl Auth {
             // Looked up by the token's SHA-256: lookup timing can only reveal
             // something about a hash, never about the token itself.
             if let Some(c) = callers.get(&hex_sha256(token.as_bytes())) {
+                // AEGIS L3: the file holds only a hash, so a caller token's
+                // length can be checked only when it is presented. A short
+                // token is refused even though its hash is configured.
+                if token.len() < MIN_TOKEN_BYTES {
+                    ledger_log!(
+                        "ledger-rust: WARNING — caller {:?} presented a configured token of {} bytes; tokens must be \
+                         at least {MIN_TOKEN_BYTES} bytes (refused, 401). Issue it a new token.",
+                        c.caller,
+                        token.len()
+                    );
+                    return None;
+                }
                 return Some(Principal::Caller(Arc::clone(c)));
             }
         }
@@ -698,39 +751,41 @@ fn parse_entries_query(query: &str) -> Result<EntriesQuery, String> {
     Ok(q)
 }
 
-/// GET /ledger/entries?... : entries with seq > after_seq, in seq order, at
-/// most `limit` of them, matching the filters (department / event_type match
-/// events only; a finding has neither, so a filtered read never returns one).
-/// A JSON array of entries, as without a query. Fewer than `limit` entries
-/// means the end of the ledger was reached; otherwise the next page is
-/// `after_seq=<seq of the last entry>`.
-fn entries_page(app: &App, q: EntriesQuery) -> (u16, String) {
+/// GET /ledger/entries?... (and a scoped caller's GET /ledger/entries):
+/// entries with seq > after_seq, in seq order, at most `max` of them, that
+/// `filter` selects (department / event_type match events only; a finding has
+/// neither, so a filtered read never returns one; a read scope limits it to
+/// the caller's departments, AEGIS M4). A JSON array of entries, as without a
+/// query. Fewer than `limit` entries means the end of the ledger was reached;
+/// otherwise the next page is `after_seq=<seq of the last entry>`.
+///
+/// AEGIS L5: the entries come from the per-department / per-event-type index
+/// (`PersistentLedger::select`), at most READ_CHUNK per lock hold, so a page
+/// costs O(page + log n) per list read, not a scan of every entry after
+/// `after_seq`.
+fn entries_selected(app: &App, after_seq: Option<u64>, max: usize, filter: &EntryFilter) -> (u16, String) {
     let len = app.gate.read(&app.ledger, |l| l.len());
-    let from = match q.after_seq {
+    let mut from = match after_seq {
         None => 0,
         Some(s) => usize::try_from(s).map(|s| s.saturating_add(1)).unwrap_or(usize::MAX).min(len),
     };
-    let keep = |e: &LedgerEntry| match (&q.department, &q.event_type) {
-        (None, None) => true,
-        (dept, et) => e.as_event().is_some_and(|ev| {
-            dept.as_ref().is_none_or(|d| *d == ev.department) && et.as_ref().is_none_or(|t| *t == ev.event_type)
-        }),
-    };
     let mut out: Vec<u8> = vec![b'['];
     let mut n = 0usize;
-    for_each_chunk(app, from, len, |_, chunk| {
-        for e in chunk.iter().filter(|e| keep(e)) {
+    while n < max && from < len {
+        let want = (max - n).min(READ_CHUNK);
+        let chunk = app.gate.read(&app.ledger, |l| l.select(filter, from, len, want));
+        for e in &chunk {
             if n > 0 {
                 out.push(b',');
             }
             serde_json::to_writer(&mut out, e).unwrap();
             n += 1;
-            if n == q.limit {
-                return false;
-            }
         }
-        true
-    });
+        match chunk.last() {
+            Some(last) if chunk.len() == want => from = last.seq() as usize + 1,
+            _ => break,
+        }
+    }
     out.push(b']');
     (200, json_text(out))
 }
@@ -758,8 +813,17 @@ fn verify_range(app: &App, from: usize, to: usize, prev: String) -> Result<Strin
 /// at start (and by every successful verify since) is not verified again.
 /// Same responses as before: 200 {"valid":true,"entries":N} or
 /// 409 {"valid":false,"error":...}.
+///
+/// AEGIS L4: `?full=1` re-verifies the whole in-memory chain AND re-reads the
+/// log from disk (`verify_log_file`: every acknowledged line parsed with the
+/// open-time rules and re-hashed from the genesis hash), then checks that the
+/// disk chain ends at the in-memory head of the same snapshot. Both run
+/// outside the ledger mutex (the snapshot — length, head hash, acknowledged
+/// byte length — is taken in one short lock hold); the disk read streams line
+/// by line, so memory is bounded by the longest line.
 fn verify(app: &App, full: bool) -> (u16, String) {
-    let len = app.gate.read(&app.ledger, |l| l.len());
+    let (len, head_hash, log_bytes, path) =
+        app.gate.read(&app.ledger, |l| (l.len(), l.head().head_hash, l.log_bytes(), l.path().to_path_buf()));
     let (from, prev) = if full {
         (0, genesis_hash())
     } else {
@@ -768,6 +832,24 @@ fn verify(app: &App, full: bool) -> (u16, String) {
     };
     match verify_range(app, from, len, prev) {
         Ok(hash) => {
+            if full {
+                if hash != head_hash {
+                    return (
+                        409,
+                        serde_json::json!({"valid": false, "error": format!(
+                            "in-memory chain ends at {hash}, the head is {head_hash}"
+                        )})
+                        .to_string(),
+                    );
+                }
+                if let Err(e) = verify_log_file(&path, log_bytes, len, &head_hash) {
+                    ledger_log!("ledger-rust: CRITICAL — GET /ledger/verify?full=1: the log on disk does not verify: {e}");
+                    return (
+                        409,
+                        serde_json::json!({"valid": false, "error": format!("log on disk: {e}")}).to_string(),
+                    );
+                }
+            }
             let mut v = app.verified.lock().unwrap_or_else(PoisonError::into_inner);
             if len > v.len {
                 *v = Verified { len, hash };
@@ -864,11 +946,37 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
     match (method, path, query) {
         (Method::GET, "/health", None) => (200, serde_json::json!({"status": "ok", "service": "ledger-rust"}).to_string()),
 
-        (Method::GET, "/ledger/entries", None) => on_ledger_read(&app, entries_all).await,
-        (Method::GET, "/ledger/entries", Some(q)) => match parse_entries_query(q) {
-            Err(e) => error_json(400, e),
-            Ok(q) => on_ledger_read(&app, move |app| entries_page(app, q)).await,
-        },
+        (Method::GET, "/ledger/entries", q) => {
+            let scope = principal.as_ref().expect("authenticated above").read_scope();
+            let q = match q.map(parse_entries_query) {
+                None => None,
+                Some(Err(e)) => return error_json(400, e),
+                Some(Ok(q)) => Some(q),
+            };
+            // AEGIS M4: a filter for a department outside the read scope is
+            // refused, never answered with an (indistinguishable) empty page.
+            if let (Some(scope), Some(Some(d))) = (&scope, q.as_ref().map(|q| &q.department)) {
+                if !scope.contains(d) {
+                    return forbidden(format!(
+                        "caller {:?} may not read department {d:?} (its read scope: {})",
+                        principal.as_ref().map(Principal::name).unwrap_or_default(),
+                        scope.join(",")
+                    ));
+                }
+            }
+            match (q, scope) {
+                // The whole ledger, byte-identical to every earlier binary.
+                (None, None) => on_ledger_read(&app, entries_all).await,
+                (q, scope) => {
+                    let (after_seq, max, department, event_type) = match q {
+                        None => (None, usize::MAX, None, None),
+                        Some(q) => (q.after_seq, q.limit, q.department, q.event_type),
+                    };
+                    let filter = EntryFilter { department, event_type, scope };
+                    on_ledger_read(&app, move |app| entries_selected(app, after_seq, max, &filter)).await
+                }
+            }
+        }
 
         (Method::GET, "/ledger/verify", q) => {
             let full = match q {
@@ -1403,6 +1511,30 @@ fn load_shared_token(required: bool) -> Option<String> {
     }
 }
 
+/// The callers map as written, keys in file order with duplicates kept
+/// (AEGIS L1: serde's HashMap keeps the last of two equal keys silently).
+struct CallersFile(Vec<(String, Caller)>);
+
+impl<'de> serde::Deserialize<'de> for CallersFile {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = CallersFile;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object mapping token hashes to callers")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut m: A) -> Result<CallersFile, A::Error> {
+                let mut v = Vec::new();
+                while let Some((k, c)) = m.next_entry::<String, Caller>()? {
+                    v.push((k, c));
+                }
+                Ok(CallersFile(v))
+            }
+        }
+        d.deserialize_map(V)
+    }
+}
+
 /// Sweep F-4: LEDGER_CALLERS_FILE, a JSON object mapping the lowercase hex
 /// SHA-256 of a caller's bearer token to
 /// `{"caller": "<name>", "departments": ["<dept>", ...], "scope": "write"|"read"}`.
@@ -1416,8 +1548,9 @@ fn load_callers(path: &str) -> HashMap<String, Arc<Caller>> {
         refuse(format!("LEDGER_CALLERS_FILE={path:?} is larger than {MAX_CALLERS_FILE_BYTES} bytes"));
     }
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| refuse(format!("LEDGER_CALLERS_FILE={path:?}: {e}")));
-    let raw: HashMap<String, Caller> = serde_json::from_str(&text)
+    let raw: CallersFile = serde_json::from_str(&text)
         .unwrap_or_else(|e| refuse(format!("LEDGER_CALLERS_FILE={path:?} is not a callers map: {e}")));
+    let raw = raw.0;
     if raw.is_empty() {
         refuse(format!("LEDGER_CALLERS_FILE={path:?} names no callers"));
     }
@@ -1431,11 +1564,41 @@ fn load_callers(path: &str) -> HashMap<String, Arc<Caller>> {
         if c.caller.trim().is_empty() || c.caller.len() > 128 || c.caller.chars().any(char::is_control) {
             refuse(format!("LEDGER_CALLERS_FILE: caller name {:?} must be 1-128 printable characters", c.caller));
         }
-        if let Some(d) = c.departments.iter().find(|d| !is_slug(d)) {
+        if let Some(d) = c.departments.iter().chain(c.read_departments.iter()).find(|d| !is_slug(d)) {
             refuse(format!("LEDGER_CALLERS_FILE: caller {:?}: department {d:?} is not [a-z0-9_]{{1,64}}", c.caller));
         }
         if c.scope == Scope::Write && c.departments.is_empty() {
             refuse(format!("LEDGER_CALLERS_FILE: write caller {:?} lists no departments", c.caller));
+        }
+        // AEGIS M4: every caller's read scope is explicit.
+        if c.read_all && !c.read_departments.is_empty() {
+            refuse(format!(
+                "LEDGER_CALLERS_FILE: caller {:?} sets both read_all and read_departments (one or the other)",
+                c.caller
+            ));
+        }
+        if c.scope == Scope::Read && !c.read_all && c.departments.is_empty() {
+            refuse(format!(
+                "LEDGER_CALLERS_FILE: read caller {:?} reads nothing: list its \"departments\" or set \"read_all\": true",
+                c.caller
+            ));
+        }
+        if c.scope == Scope::Read && !c.read_departments.is_empty() {
+            refuse(format!(
+                "LEDGER_CALLERS_FILE: read caller {:?}: read_departments is for write callers (a read caller's \
+                 \"departments\" are the departments it reads)",
+                c.caller
+            ));
+        }
+        // AEGIS L1: the same token hash twice (two callers sharing one token,
+        // or a copy-paste) is refused: which entry won would be arbitrary.
+        if out.contains_key(&hash) {
+            refuse(format!(
+                "LEDGER_CALLERS_FILE: token hash {hash} is listed more than once (callers {:?} and {:?}); every \
+                 caller needs its own token",
+                out.get(&hash).map(|c: &Arc<Caller>| c.caller.clone()).unwrap_or_default(),
+                c.caller
+            ));
         }
         out.insert(hash, Arc::new(c));
     }
@@ -1444,7 +1607,17 @@ fn load_callers(path: &str) -> HashMap<String, Arc<Caller>> {
 
 /// Sweep F-4 / F-12: the authentication configuration.
 fn load_auth() -> Auth {
-    let callers_file = std::env::var("LEDGER_CALLERS_FILE").ok().filter(|v| !v.is_empty());
+    // AEGIS L2: set-but-empty is a misconfiguration (a templating gap), not
+    // "unset": it refuses the start instead of falling back to the shared token.
+    let callers_file = match std::env::var("LEDGER_CALLERS_FILE") {
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => refuse("LEDGER_CALLERS_FILE is not valid UTF-8".to_string()),
+        Ok(v) if v.trim().is_empty() => refuse(
+            "LEDGER_CALLERS_FILE is set but empty; unset it to use the shared token, or point it at the callers file"
+                .to_string(),
+        ),
+        Ok(v) => Some(v),
+    };
     let allow_shared = load_flag("LEDGER_ALLOW_SHARED_TOKEN");
     match callers_file {
         None => {
@@ -1481,7 +1654,13 @@ fn load_auth() -> Auth {
             };
             let mut names: Vec<String> = callers
                 .values()
-                .map(|c| format!("{} ({:?}: {})", c.caller, c.scope, c.departments.join(",")))
+                .map(|c| {
+                    let reads = match Principal::Caller(Arc::clone(c)).read_scope() {
+                        None => "all".to_string(),
+                        Some(d) => d.join(","),
+                    };
+                    format!("{} ({:?}: {}; reads: {reads})", c.caller, c.scope, c.departments.join(","))
+                })
                 .collect();
             names.sort();
             ledger_log!("ledger-rust: per-caller tokens from {path}: {}", names.join("; "));
@@ -1503,10 +1682,40 @@ fn load_max_connections() -> usize {
     }
 }
 
+/// AEGIS M2/M3: an operator override bound to one exact ledger state. Unset,
+/// "" or "0" is off; otherwise the value must have the shape `valid` accepts
+/// (the refusal it answers prints the exact value), or the start is refused.
+/// The bare "1" of sweep F is refused with an explanation: an unbound switch
+/// left in the environment stayed armed for every later start.
+fn load_binding(name: &str, valid: fn(&str) -> bool, shape: &str) -> Option<String> {
+    match std::env::var(name) {
+        Err(_) => None,
+        Ok(v) => match v.as_str() {
+            "" | "0" => None,
+            "1" => refuse(format!(
+                "{name}=1 is no longer accepted: the override is bound to one exact ledger state ({shape}) so a \
+                 value left in the environment never stays armed. Start without it; the refusal prints the exact \
+                 value to use."
+            )),
+            v if valid(v) => Some(v.to_string()),
+            other => refuse(format!("{name}={other:?} is not {shape} (or 0/unset for off)")),
+        },
+    }
+}
+
 fn main() {
     let auth = load_auth();
     let max_connections = load_max_connections();
-    let allow_reset = load_flag("LEDGER_ALLOW_RESET");
+    let reset = load_binding(
+        "LEDGER_ALLOW_RESET",
+        is_reset_binding,
+        "<checkpoint entries>:<16 hex>/<log entries>:<16 hex>, as printed by the refusal",
+    );
+    let migrate = load_binding(
+        "LEDGER_MIGRATE_LEGACY",
+        is_log_binding,
+        "<log entries>:<first 16 hex of the head hash>, as printed by the refusal",
+    );
     let port = std::env::var("LEDGER_PORT").unwrap_or_else(|_| "8090".to_string());
     let log_path = std::env::var("LEDGER_LOG_PATH")
         .unwrap_or_else(|_| "ledger_data/ledger.jsonl".to_string());
@@ -1536,18 +1745,26 @@ fn main() {
         }
     }
 
-    let ledger = match PersistentLedger::open_with(&log_path, LedgerOpenOptions { allow_reset }) {
+    let opts = LedgerOpenOptions { reset: reset.clone(), migrate: migrate.clone() };
+    let ledger = match PersistentLedger::open_with(&log_path, opts) {
         Ok(l) => {
             ledger_log!(
                 "ledger-rust: loaded {} existing entries from {log_path}, chain verified, head checkpoint {}",
                 l.len(),
                 serde_json::to_string(&l.head()).unwrap_or_default()
             );
-            if allow_reset {
-                ledger_log!(
-                    "ledger-rust: WARNING — started with LEDGER_ALLOW_RESET=1 (operator reset of the head \
-                     checkpoint allowed); unset it for the next start"
-                );
+            for (name, v, used) in [
+                ("LEDGER_ALLOW_RESET", &reset, l.open_report().reset_used),
+                ("LEDGER_MIGRATE_LEGACY", &migrate, l.open_report().migrate_used),
+            ] {
+                if let Some(v) = v {
+                    if !used {
+                        ledger_log!(
+                            "ledger-rust: WARNING — {name}={v} is set but was not needed (it matches no refusal of \
+                             this start, so it did nothing); unset it"
+                        );
+                    }
+                }
             }
             l
         }
