@@ -481,3 +481,31 @@ def test_l2_a_blank_footer_entry_is_ignored(monkeypatch):
     import channels
     monkeypatch.setattr(channels, "OWN_FOOTER_LINES", ("", "   "))
     assert channels.quoted_tail_opt_out(_OUTLOOK + "UNSUBSCRIBE") == "revoke"
+
+
+# ------------------------------------------------------------------ AEGIS re-review of 3c89631 (REVISE)
+
+def test_hc_text_or_email_me_is_an_email_opt_out():
+    import channels
+    for t in ("Do not text or email me", "dont text or email me again", "Please don't text or email me anymore.",
+              "please stop texting me and emailing me, instead call me",
+              "stop texting and emailing me, I only want to be contacted by mail"):
+        assert channels.email_opt_out(t) is True, t
+    assert channels.email_opt_out("Stop texting me. Email me instead.") is False
+
+
+def test_m4_a_short_stop_above_a_name_signoff_alerts():
+    import channels
+    for reply in ("Stop!\n\nJane Doe\nCEO, Acme", "STOP\nJane", "Stop contacting me", "Quit it"):
+        assert channels.quoted_tail_opt_out(_OUTLOOK + reply) in ("alert", "revoke"), reply
+
+
+def test_m5_a_customers_own_from_date_lines_are_not_a_quote_header():
+    import channels
+    t = "From: Jane Smith\nDate: Oct 1\nItem: blue mug\nAlso please stop texting me."
+    assert channels.opt_out_level(channels.strip_quoted(t)) == "exact"
+
+
+def test_l4_style_and_script_are_not_the_persons_words():
+    import channels
+    assert channels.email_opt_out("<style>.unsubscribe{color:red}</style><p>Thanks, see you Friday</p>") is False

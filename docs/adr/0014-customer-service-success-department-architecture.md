@@ -325,3 +325,14 @@ Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "A
 | R6 by email | `<STOP>` by email was stripped as a tag | Only known HTML tag names (and comments) are tags |
 | L-2 | A blank `OWN_FOOTER_LINES` entry would disable tail detection | Blank entries skipped |
 | L-1 (accepted) | "On second thought / ... my wife wrote:" can be read as a wrapped header | Accepted: contrived; the message still goes to a human and pauses SMS |
+
+### Sweep A follow-up — AEGIS re-review of 3c89631 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-C (High, regression) | "Do not text or email me" revoked SMS only | "email me" after or / and / nor adds email; an explicit negated email phrase ("don't ... email", "text or email me") always widens to `all`, whatever preference word is present (M-3) |
+| M-3 | A preference word narrowed an explicit email opt-out to SMS | As H-C |
+| M-4 | "Stop!" above a name sign-off below an unmarked quote raised nothing | A short stop / unsubscribe / quit line among the tail's last three lines alerts Andre; "stop contacting", "quit it", "stop messaging" alert |
+| M-5 | A customer's own "From: / Date:" lines were read as a quote header | The header block also needs an address on the From: line or a To: / Cc: / Subject: line |
+| L-4 | `<style>` / `<script>` content was read as the person's words | Removed before reading |
+| L-3, L-5 (accepted) | Text typed below a forward is not read; unrelated quoted phrases ("not interested in ...") may alert | Accepted: rare; the message still reaches a human and pauses SMS; an alert is the safe side |
