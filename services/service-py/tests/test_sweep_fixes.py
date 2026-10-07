@@ -725,3 +725,13 @@ def test_hm_remove_me_and_take_me_off_need_a_list_or_the_clause_end(tmp_path):
     for t in ("Remove me", "remove me please", "Take me off your mailing list", "take me off the list now",
               "Remove me from your texts"):
         assert channels.opt_out_level(t) == "exact", t
+
+
+def test_hn_take_me_off_your_email_list_widens_to_email():
+    import channels
+    for t in ("Stop texting me. Take me off your email list, I prefer regular mail",
+              "Stop the texts. Take me off your list.", "stop texting me and take me off your mailing list",
+              "Remove me from text and email lists please", "Take me off your email list"):
+        assert channels.email_opt_out_decision(t) == "revoke", t
+    assert channels.email_opt_out_decision("Remove me from your texts") == "keep"
+    assert channels.quoted_tail_opt_out(_OUTLOOK + "Please remove me from this list") in ("alert", "revoke")

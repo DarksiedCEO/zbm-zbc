@@ -415,3 +415,4 @@ worked within days — CAN-SPAM requires an email opt-out honoured within 10 bus
 | Id | Finding | Fix |
 |---|---|---|
 | H-M (High-class, pre-existing; the approval's condition) | Bare "remove me" / "take me off" revoked "take me off hold please", "remove me from the order as the contact" | `_REMOVE_ME`: exact only at the end of a clause ("Remove me.", "remove me please") or bound to a list / texts / emails / messages / contacts / database ("take me off your mailing list"); other uses fall to `OPT_OUT_POSSIBLE` |
+| H-N (High, regression from the H-M fix) | "Stop texting me. Take me off your email list" kept email: `_REMOVE_ME` was read by the level only, not the scope | The scope reads `_REMOVE_ME` too; its object decides (email / list / messages / contacts → `all`, texts only → SMS); "text and email lists" accepted as an object; "remove me" alerts from a quoted tail |

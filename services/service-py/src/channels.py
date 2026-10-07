@@ -355,8 +355,8 @@ _NEG_WANT = re.compile(r"\b(?:dont|do not|no longer|never|dont ever) (?:want|wis
                        r"(?= *$| (?:from (?:you|your|this|acme|us)|anymore|any more|again|ever|please|thanks|thank you)\b)")
 # AEGIS H-M: "remove me" / "take me off" revoke only at the end of a clause ("Remove me.", "take me off please") or
 # bound to a list or channel ("take me off your mailing list"); "take me off hold", "remove me from the order" do not
-_REMOVE_ME = re.compile(r"\b(?:remove me|take me off)(?: (?:(?:from|of) )?(?:your|the|this|these|all|any|that)(?: \w+){0,2}?"
-                        r" (?:list|lists|texts|emails|messages|contacts|database|distribution))?"
+_REMOVE_ME = re.compile(r"\b(?:remove me|take me off)(?: (?:(?:from|of) )?(?:(?:your|the|this|these|all|any|that) )?"
+                        r"((?:\w+ ){0,3}?)(list|lists|texts|emails|messages|contacts|database|distribution))?"
                         r"(?: (?:please|now|thanks|thank you|asap|immediately))* *$")
 _SCOPE_SEGMENT = re.compile(r"[\n\r.!?;,]+")
 # "Do not call, text or email me": a comma inside a list of channels is not a clause end
@@ -482,6 +482,12 @@ def opt_out_scope(text: Optional[str]) -> Optional[str]:
                 phone, email = _scan_phrase(toks, i, j)
                 if not phone or email is True:
                     generic = True
+            rm = _REMOVE_ME.search(norm.strip())
+            if rm:                                # AEGIS H-N: the object decides ("your email list" -> all)
+                found = True
+                obj = set(((rm.group(1) or "") + " " + (rm.group(2) or "")).split())
+                if not (obj & PHONE_SCOPE_WORDS) or obj & (EMAIL_SCOPE_WORDS | {"messages", "contacts", "database"}):
+                    generic = True
             for m in _NEG_WANT.finditer(norm.strip()):
                 chans = set(m.group(1).split())
                 if chans & (EMAIL_SCOPE_WORDS | {"e", "mails"}) or chans & {"message", "messages"}:
@@ -599,6 +605,6 @@ def check(channel: str, contact: dict, consent_for: Callable[[str], Optional[dic
 
 # AEGIS M-1 (see _TAIL_ALERT_EXCLUDED): the multi-word opt-out phrases that alert Andre from a quoted tail
 _TAIL_ALERT_PHRASES = tuple(sorted({normalise(t).strip() for t in OPT_OUT_TERMS if len(normalise(t).split()) >= 2}
-                                   - _TAIL_ALERT_EXCLUDED) + ["opt me out", "stop sending", "take me off",
+                                   - _TAIL_ALERT_EXCLUDED) + ["opt me out", "stop sending", "take me off", "remove me",
                                    "cancel my subscription", "cancel my account", "cancel my membership",
                                    "stop contacting", "quit it", "stop messaging"])
