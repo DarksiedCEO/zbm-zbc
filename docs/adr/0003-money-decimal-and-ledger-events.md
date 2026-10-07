@@ -726,7 +726,8 @@ A scan is these events, department `revenue_recovery`, actor
 |---|---|---|---|---|
 | `rr.<scan_id>.started` | `rr_scan_started` | client_id | SHA-256 of {scan_id, client_id, as_of, data_source, fixture, tenant_defaulted, agents} | `rrs1 src=fixtures fixture=1 defaulted=1 asof=<RFC 3339> agents=8` |
 | `rr.<scan_id>.f.<finding_id>` (one per finding) | `rr_finding` | finding_id | SHA-256 of the finding's full JSON as detection-py returned it | `rrf1 a=<agent_id> l=<leak_category> t=<entity_type> e=<entity_id> p=<period\|-> v=<amount\|-> x=<evidence_class> k=<classification\|-> n=<confidence\|-> m=<methodology_id>` |
-| `rr.<scan_id>.completed` | `rr_scan_completed` | client_id | SHA-256 of the manifest: scan_id, client_id and every finding event's (event_id, payload_sha256, summary), sorted by event_id | `rrc1 n=<number of findings>` |
+| `rr.<scan_id>.b.<finding_id>` (Oct 7 2026, AEGIS L1; right after its finding, only for a rate-derived figure) | `rr_value_basis` | finding_id | SHA-256 of the value_basis JSON | `rrb1 base=<money> rate=<rate percent>` |
+| `rr.<scan_id>.completed` | `rr_scan_completed` | client_id | SHA-256 of the manifest: scan_id, client_id and every finding and value-basis event's (event_id, payload_sha256, summary), sorted by event_id | `rrc1 n=<number of findings>` |
 | `rr.<scan_id>.aborted` (best effort, on failure after writing began) | `rr_scan_aborted` | client_id | SHA-256 of the reason | `rra1 <step> failed: <public reason>` |
 
 - **Order and checks.** Every finding is validated and every event built
@@ -752,7 +753,8 @@ A scan is these events, department `revenue_recovery`, actor
   space and `=`, and none can be `-` (first character alphanumeric), so the
   encoding is unambiguous; amounts are canonical money strings, passed
   through exactly. The field bounds (agent_id 32, entity_id 64, period 16,
-  methodology_id 24, leak_category 33) make the worst case 272 characters,
+  methodology_id 24, leak_category 33) make the worst case 271 characters
+  (272 before Oct 7 2026: ESTIMATED may no longer carry the longest labels),
   under the 280-character limit — tested in Go
   (`internal/orchestrator/ledger_record_test.go`) and pinned in Python
   (`tests/test_revrec_fix_wave.py`). A finding that would not fit fails the
@@ -760,7 +762,17 @@ A scan is these events, department `revenue_recovery`, actor
 - **Legacy entries.** `kind: "finding"` entries written before this change
   (no scan, no tenant, colliding ids, pre-E-4 amounts) stay in the chain and
   verify as before; the findings view counts them as
-  `legacy_finding_entries_ignored` and never shows them.
+  `legacy_finding_entries_ignored` and, since Oct 7 2026 (AEGIS M4), lists
+  them under `legacy_findings`, labelled and never counted.
+- **Value basis (Oct 7 2026, AEGIS L1).** A value-basis event must name a
+  finding of its scan that has an amount, at most once, lie between the
+  scan's start and completion, and reproduce that amount exactly (base x
+  rate / 100, half-up, exact rational arithmetic); otherwise the scan is
+  excluded as inconsistent. Scans recorded before it have none and their
+  manifest hash is unchanged.
+- **Ledger size (Oct 7 2026).** `ledger_entries_total` comes from `GET
+  /ledger/head` (ledger-rust sweep F), else from the verify verdict — never
+  from the size of orchestrator-go's own (possibly filtered) read.
 - **Reads (E-8).** The view still reads the whole ledger, through one
   function (`Orchestrator.entryPages`, over `LedgerClient.Entries`). When
   paginated reads land, that function pages with `after_seq` (and
