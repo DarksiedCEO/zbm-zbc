@@ -181,7 +181,8 @@ entry format, every existing log loads, `GET /ledger/entries` with no query retu
 behaviour that could refuse an existing client is opt-in.
 - F-1: one server per log (`<log>.lock`); a second refuses to start.
 - F-6: head checkpoint `<log>.head` after every append; a deleted, truncated or replaced log refuses to start
-  unless `LEDGER_ALLOW_RESET=1` (logged). `GET /ledger/head`. A signed, external head is future work.
+  unless `LEDGER_ALLOW_RESET=<the value the refusal prints>` (logged; since Oct 7 2026 bound to that exact state,
+  ADR 0003 section 13). `GET /ledger/head`. A signed, external head is future work.
 - F-13: a blank line, or an unterminated final line that is a complete entry, refuses to start (only a genuinely
   torn line is still moved aside).
 - F-7: `Idempotency-Key: <finding_id>` on `POST /ledger/append` makes it idempotent (201/200/409); opt-in.
@@ -191,6 +192,11 @@ behaviour that could refuse an existing client is opt-in.
 - F-4: optional `LEDGER_CALLERS_FILE` (per-caller tokens, department scopes, read-only scope); unset = unchanged,
   with a startup warning.
 - A failed bind exits 1 with a message instead of panicking.
+- Oct 7 2026 (AEGIS review of the above, ADR 0003 section 13): only a log exactly one entry past its checkpoint
+  starts; a non-empty log without a checkpoint needs the one-shot `LEDGER_MIGRATE_LEGACY=<printed value>`; reads are
+  scoped by department per caller (`read_all` for dashboard/compliance/audit); duplicate or empty callers
+  configuration refuses to start; short caller tokens are refused; `?full=1` re-reads the log from disk; filtered
+  pages come from an index.
 
 ## What's built
 
