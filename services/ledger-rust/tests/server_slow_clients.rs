@@ -49,7 +49,7 @@ use std::time::{Duration, Instant};
 use common::PortFile;
 use serde_json::{json, Value};
 
-const TOKEN: &str = "slow-clients-test-token";
+const TOKEN: &str = "slow-clients-test-token-0123456789abcdef";
 /// Server deadlines (src/bin/server.rs, ADR 0003 section 7).
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -74,7 +74,7 @@ impl Drop for ServerHandle {
 struct Scratch(PathBuf);
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        common::remove_ledger_files(&self.0);
     }
 }
 
@@ -240,6 +240,7 @@ fn read_until_closed(s: &mut TcpStream, since: Instant) -> (String, Duration) {
     let mut buf = [0u8; 8192];
     loop {
         match s.read(&mut buf) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue, // AEGIS N4
             Ok(0) | Err(_) => break,
             Ok(n) => out.extend_from_slice(&buf[..n]),
         }
@@ -401,6 +402,7 @@ fn write_big_log(log: &Scratch, n: usize) {
         out.push('\n');
     }
     std::fs::write(&log.0, out).unwrap();
+    common::write_head_for(&log.0);
 }
 
 /// A client asks for the whole (multi-MB) ledger and never reads the
@@ -546,7 +548,12 @@ fn close_outcome(port: u16, raw: &[u8]) -> (u16, String, Option<std::io::Error>)
     let _ = c.write_all(raw);
     let resp = common::read_response(&mut c).unwrap();
     let mut rest = [0u8; 256];
-    let after = match c.read(&mut rest) {
+    let after = match loop {
+        match c.read(&mut rest) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue, // AEGIS N4
+            r => break r,
+        }
+    } {
         Ok(0) => "eof".to_string(),
         Ok(n) => format!("{n} extra bytes"),
         Err(e) => format!("read error: {e}"),

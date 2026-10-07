@@ -173,6 +173,31 @@ survive restart. Field rules are in ADR 0003.
   socket `0100007F` (127.0.0.1); ledger down → scan 502 in <1 ms with 0
   detection calls and no address in the body; empty ledger verify → 200.
 
+## Oct 6 2026 — ledger-rust bug sweep F (single writer, head checkpoint, scoped callers, paged reads)
+
+Fixes for the sweep's ledger findings (ADR 0003 section 13; operator notes in
+[services/ledger-rust/README.md](services/ledger-rust/README.md)). Backward compatible: unchanged hash chain and
+entry format, every existing log loads, `GET /ledger/entries` with no query returns the same bytes, and every new
+behaviour that could refuse an existing client is opt-in.
+- F-1: one server per log (`<log>.lock`); a second refuses to start.
+- F-6: head checkpoint `<log>.head` after every append; a deleted, truncated or replaced log refuses to start
+  unless `LEDGER_ALLOW_RESET=<the value the refusal prints>` (logged; since Oct 7 2026 bound to that exact state,
+  ADR 0003 section 13). `GET /ledger/head`. A signed, external head is future work.
+- F-13: a blank line, or an unterminated final line that is a complete entry, refuses to start (only a genuinely
+  torn line is still moved aside).
+- F-7: `Idempotency-Key: <finding_id>` on `POST /ledger/append` makes it idempotent (201/200/409); opt-in.
+- F-12: `LEDGER_SERVICE_TOKEN` must be at least 32 bytes.
+- F-2: `GET /ledger/entries?after_seq=&limit=&department=&event_type=`; reads copy in chunks and serialize outside
+  the lock; appends go ahead of readers; `/ledger/verify` is incremental (`?full=1` for a full pass).
+- F-4: optional `LEDGER_CALLERS_FILE` (per-caller tokens, department scopes, read-only scope); unset = unchanged,
+  with a startup warning.
+- A failed bind exits 1 with a message instead of panicking.
+- Oct 7 2026 (AEGIS review of the above, ADR 0003 section 13): only a log exactly one entry past its checkpoint
+  starts; a non-empty log without a checkpoint needs the one-shot `LEDGER_MIGRATE_LEGACY=<printed value>`; reads are
+  scoped by department per caller (`read_all` for dashboard/compliance/audit); duplicate or empty callers
+  configuration refuses to start; short caller tokens are refused; `?full=1` re-reads the log from disk; filtered
+  pages come from an index.
+
 ## What's built
 
 **Tier 1 (rule-based, low-hanging fruit):**
@@ -224,8 +249,8 @@ examples only, not defaults baked into the code.
 # 1. Evidence ledger (Rust) — separate terminal. Start this first: the
 #    other two call it.
 cd services/ledger-rust
-export LEDGER_SERVICE_TOKEN=<your-shared-secret>
-cargo run --bin server   # LEDGER_PORT (default 8090), LEDGER_BIND_ADDR (default 127.0.0.1)
+export LEDGER_SERVICE_TOKEN=<your-shared-secret>   # at least 32 bytes (Oct 6 2026, sweep F-12)
+cargo run --bin server   # LEDGER_PORT (default 8090), LEDGER_BIND_ADDR (default 127.0.0.1); more: services/ledger-rust/README.md
 
 # 2. Detection service (Python) — separate terminal
 cd services/detection-py
@@ -281,7 +306,8 @@ cd services/orchestrator-go && go vet ./... && go test -count=1 ./...
 
 # Rust (the integration tests spawn the real compiled binary and talk to it
 # over a real TCP socket — tests/server_auth.rs, server_events.rs,
-# server_hardening.rs, server_port_file.rs, server_slow_clients.rs)
+# server_hardening.rs, server_port_file.rs, server_slow_clients.rs,
+# server_sweep_f.rs)
 cd services/ledger-rust && cargo test && cargo clippy --all-targets -- -D warnings
 
 # Dashboard (the live tests start the built server on a port it picks:
@@ -351,6 +377,9 @@ attaches later without touching agent logic.
 - Single shared-secret bearer tokens across all three services, not a
   real auth system (no per-caller identity, no rotation, no scoping) —
   adequate for a private network, not for anything internet-facing.
+  (Oct 6 2026: ledger-rust now OPTIONALLY takes per-caller tokens with
+  department scopes, `LEDGER_CALLERS_FILE`; the callers still send the one
+  shared token until each is given its own.)
 - This is one review pass (Sep 22 2026). A second, independent reviewer
   looking at the same code might find different things — see
   `fulfillment-py`'s README for the same caveat stated about that build.

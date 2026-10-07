@@ -61,6 +61,18 @@ pub fn scratch_dir() -> PathBuf {
         .clone()
 }
 
+/// Removes a scratch ledger log and the files the server keeps next to it
+/// (sweep F: the single-writer `<log>.lock`, the head checkpoint `<log>.head`
+/// and a `<log>.head.tmp` an interrupted checkpoint write can leave).
+pub fn remove_ledger_files(log: &std::path::Path) {
+    let _ = std::fs::remove_file(log);
+    for suffix in [".lock", ".head", ".head.tmp"] {
+        let mut name = log.file_name().unwrap().to_os_string();
+        name.push(suffix);
+        let _ = std::fs::remove_file(log.with_file_name(name));
+    }
+}
+
 /// A port file next to the test's scratch files; removed on drop.
 pub struct PortFile(pub PathBuf);
 
@@ -128,7 +140,12 @@ pub fn read_response(stream: &mut TcpStream) -> std::io::Result<Response> {
     let mut head = Vec::new();
     let mut byte = [0u8; 1];
     while !head.ends_with(b"\r\n\r\n") {
-        let n = stream.read(&mut byte)?;
+        // AEGIS N4: a signal under load interrupts a raw read (EINTR); retry it
+        // (read_exact / read_to_end / write_all below already do).
+        let n = match stream.read(&mut byte) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            r => r?,
+        };
         if n == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -189,4 +206,55 @@ pub fn raw_request(method: &str, path: &str, auth: Option<&str>, body: &str) -> 
         body.len()
     )
     .into_bytes()
+}
+
+/// AEGIS M2: the `LEDGER_MIGRATE_LEGACY` value for a pre-checkpoint log —
+/// `<entries>:<first 16 hex of the last entry's hash>`, what the server's
+/// refusal prints. A test that serves a legacy fixture passes it, exactly as
+/// an operator would once per legacy log.
+pub fn migrate_binding(log: &std::path::Path) -> String {
+    let text = std::fs::read_to_string(log).expect("legacy log");
+    let lines: Vec<&str> = text.lines().collect();
+    let last: serde_json::Value = serde_json::from_str(lines.last().expect("non-empty log")).expect("json line");
+    format!("{}:{}", lines.len(), &last["hash"].as_str().expect("hash")[..16])
+}
+
+/// Writes `<log>.head` for a log a test synthesized with the library (as the
+/// server writes it after every append), so the server opens it as its own
+/// log rather than as a pre-checkpoint one (AEGIS M2).
+pub fn write_head_for(log: &std::path::Path) {
+    let text = std::fs::read_to_string(log).expect("log");
+    let lines: Vec<&str> = text.lines().collect();
+    let head = match lines.last() {
+        None => serde_json::json!({"entries": 0, "head_seq": null, "head_hash": ledger_rust::genesis_hash()}),
+        Some(l) => {
+            let last: serde_json::Value = serde_json::from_str(l).expect("json line");
+            serde_json::json!({"entries": lines.len(), "head_seq": lines.len() - 1, "head_hash": last["hash"]})
+        }
+    };
+    let mut name = log.file_name().unwrap().to_os_string();
+    name.push(".head");
+    std::fs::write(log.with_file_name(name), format!("{head}\n")).expect("head file");
+}
+
+/// AEGIS N1: applies a one-shot operator override the way an operator does:
+/// runs the server binary once with `name=value` on `log`; it must apply the
+/// override and exit 0 without serving. Returns its stderr.
+pub fn apply_override(log: &std::path::Path, token: &str, name: &str, value: &str) -> String {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_server"))
+        .env("LEDGER_SERVICE_TOKEN", token)
+        .env("LEDGER_LOG_PATH", log.to_str().unwrap())
+        .env("LEDGER_PORT", "0")
+        .env_remove("LEDGER_PORT_FILE")
+        .env_remove("LEDGER_CALLERS_FILE")
+        .env_remove("LEDGER_ALLOW_SHARED_TOKEN")
+        .env_remove("LEDGER_ALLOW_RESET")
+        .env_remove("LEDGER_MIGRATE_LEGACY")
+        .env(name, value)
+        .output()
+        .expect("run ledger-rust");
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert_eq!(out.status.code(), Some(0), "{name}={value} was not applied:\n{err}");
+    assert!(err.contains("applied") && err.contains("Exiting without serving"), "{err}");
+    err
 }

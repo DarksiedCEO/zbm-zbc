@@ -13,7 +13,7 @@ use std::time::Duration;
 use common::PortFile;
 use serde_json::{json, Value};
 
-const TOKEN: &str = "events-test-token";
+const TOKEN: &str = "events-test-token-0123456789abcdef";
 
 struct ServerHandle {
     child: Child,
@@ -31,7 +31,7 @@ impl Drop for ServerHandle {
 struct ScratchFile(PathBuf);
 impl Drop for ScratchFile {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        common::remove_ledger_files(&self.0);
     }
 }
 
@@ -43,8 +43,20 @@ fn scratch_log(label: &str) -> ScratchFile {
 
 /// Fix wave 21 (N20-M-3): LEDGER_PORT=0 + LEDGER_PORT_FILE, no free_port() race.
 fn start_server_at(log_path: &Path) -> ServerHandle {
+    start_server_with(log_path, &[])
+}
+
+/// A legacy (pre-checkpoint) log needs the one-shot migrate value (AEGIS M2).
+fn start_server_migrating(log_path: &Path) -> ServerHandle {
+    let binding = common::migrate_binding(log_path);
+    common::apply_override(log_path, TOKEN, "LEDGER_MIGRATE_LEGACY", &binding);
+    start_server_with(log_path, &[])
+}
+
+fn start_server_with(log_path: &Path, env: &[(&str, &str)]) -> ServerHandle {
     let pf = PortFile::new("events");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_server"));
+    cmd.envs(env.iter().copied());
     cmd.env("LEDGER_SERVICE_TOKEN", TOKEN)
         .env("LEDGER_LOG_PATH", log_path.to_str().unwrap())
         .stdout(std::process::Stdio::null())
@@ -362,7 +374,7 @@ fn tampered_event_on_disk_refuses_to_start() {
 fn legacy_log_from_old_binary_is_served_and_extended() {
     let log = scratch_log("legacy");
     std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/legacy_ledger_v1.jsonl"), &log.0).unwrap();
-    let s = start_server_at(&log.0);
+    let s = start_server_migrating(&log.0);
 
     let (st, v) = authed(s.port, "GET", "/ledger/verify", None);
     assert_eq!(st, 200);

@@ -59,7 +59,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 REPO = ROOT.parents[1]
 AUTH = {"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"}
-LEDGER_TOKEN = "wave6-ledger-test-token"
+LEDGER_TOKEN = "wave6-ledger-test-token-padded-to-32b"  # ledger-rust needs >= 32 bytes (sweep F-12)
 # Pinned here independently of src/ledger.py: what bin/server.rs ``shed`` writes.
 LEDGER_SHED_BODY = {"error": "ledger-rust is at its connection limit; retry shortly"}
 

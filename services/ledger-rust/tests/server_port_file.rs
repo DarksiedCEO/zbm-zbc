@@ -47,7 +47,7 @@ impl Drop for Srv {
 
 fn server(dir: &Path, pf: &Path, log: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_server"));
-    cmd.env("LEDGER_SERVICE_TOKEN", "port-file-test-token-0123456789")
+    cmd.env("LEDGER_SERVICE_TOKEN", "port-file-test-token-0123456789abcdef")
         .env("LEDGER_PORT", "0")
         .env("LEDGER_PORT_FILE", pf)
         .env("LEDGER_LOG_PATH", log)
@@ -91,7 +91,7 @@ fn a_symlink_planted_at_the_predictable_temp_name_is_never_followed() {
         .arg("ln -s \"$VICTIM\" \"$LEDGER_PORT_FILE.tmp-$$\" && exec \"$SERVER\"")
         .env("VICTIM", &victim)
         .env("SERVER", env!("CARGO_BIN_EXE_server"))
-        .env("LEDGER_SERVICE_TOKEN", "port-file-test-token-0123456789")
+        .env("LEDGER_SERVICE_TOKEN", "port-file-test-token-0123456789abcdef")
         .env("LEDGER_PORT", "0")
         .env("LEDGER_PORT_FILE", &pf.0)
         .env("LEDGER_LOG_PATH", &log)

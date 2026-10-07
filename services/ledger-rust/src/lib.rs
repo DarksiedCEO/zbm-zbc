@@ -41,7 +41,10 @@ mod money;
 mod persistence;
 pub use event::{EventInput, EventValidationError};
 pub use money::{deserialize_persisted_amount, Money, MoneyError, MAX_MONEY};
-pub use persistence::{EventAppendOutcome, PersistError, PersistentLedger, TornTailRecovery};
+pub use persistence::{
+    head_path_for, is_log_binding, is_reset_binding, verify_log_file, EntryFilter, FINDINGS_DEPARTMENT, lock_path_for, log_binding, reset_binding, AppendOutcome,
+    EventAppendOutcome, HeadCheckpoint, LedgerOpenOptions, OpenReport, PersistError, PersistentLedger, TornTailRecovery,
+};
 
 pub const GENESIS_HASH_SEED: &str = "ZBM-REVENUE-RECOVERY-LEDGER-GENESIS-2026";
 
@@ -203,6 +206,21 @@ pub struct EventEntry {
 }
 
 impl FindingEntry {
+    /// True when this stored finding carries exactly the same caller-supplied
+    /// content as `input` (sweep F-7: the opt-in finding idempotency test,
+    /// mirroring `EventEntry::same_content_as`). Amounts compare as their
+    /// canonical money strings, so a legacy numeric amount loaded from an old
+    /// log compares equal to the same amount sent as a string today.
+    pub fn same_content_as(&self, input: &LedgerRecordInput) -> bool {
+        self.finding_id == input.finding_id
+            && self.agent_id == input.agent_id
+            && self.entity_id == input.entity_id
+            && self.leak_category == input.leak_category
+            && self.amount_usd.as_ref().map(Money::as_str) == input.amount_usd.as_ref().map(Money::as_str)
+            && self.value_classification == input.value_classification
+            && self.decision_confidence == input.decision_confidence
+    }
+
     fn string_fields(&self) -> [(&'static str, Option<&str>, bool); 6] {
         finding_string_fields(
             &self.finding_id,
@@ -613,49 +631,68 @@ impl Ledger {
     /// GET /ledger/verify reported as 409 {"valid":false}.
     pub fn verify_chain(&self) -> Result<(), LedgerError> {
         let mut expected_prev = genesis_hash();
-
         for (i, entry) in self.entries.iter().enumerate() {
-            if entry.seq() != i as u64 {
-                return Err(LedgerError::ChainBroken {
-                    at_seq: entry.seq(),
-                    reason: format!("seq {} found at position {i}", entry.seq()),
-                });
-            }
-
-            if entry.prev_hash() != expected_prev {
-                return Err(LedgerError::ChainBroken {
-                    at_seq: entry.seq(),
-                    reason: "prev_hash does not match the actual previous entry's hash".into(),
-                });
-            }
-
-            // AEGIS F7: a hash only means something if exactly one entry
-            // maps to its canonical string. Checked here as well as on load
-            // so an in-memory ledger and /ledger/verify enforce it too.
-            let ambiguity = match entry {
-                LedgerEntry::Finding(f) => finding_ambiguity(&f.string_fields()),
-                LedgerEntry::Event(e) => e
-                    .to_input()
-                    .validate()
-                    .err()
-                    .map(|err| format!("ambiguous canonical form: invalid event field: {err}")),
-            };
-            if let Some(reason) = ambiguity {
-                return Err(LedgerError::ChainBroken { at_seq: entry.seq(), reason });
-            }
-
-            if entry.recompute_hash() != entry.hash() {
-                return Err(LedgerError::ChainBroken {
-                    at_seq: entry.seq(),
-                    reason: "stored hash does not match recomputed hash — entry was altered".into(),
-                });
-            }
-
+            verify_entry(entry, i as u64, &expected_prev)?;
             expected_prev = entry.hash().to_string();
         }
-
         Ok(())
     }
+
+    /// Clones the entries at positions `from..to` (clamped to the ledger's
+    /// length). Entries are immutable once pushed and the ledger only grows,
+    /// so a reader that copies `0..len` in several short chunks gets exactly
+    /// the snapshot it would have got in one long copy (sweep F-2: readers
+    /// copy under the lock in chunks and serialize/verify outside it).
+    pub fn clone_range(&self, from: usize, to: usize) -> Vec<LedgerEntry> {
+        let to = to.min(self.entries.len());
+        let from = from.min(to);
+        self.entries[from..to].to_vec()
+    }
+}
+
+/// One step of `Ledger::verify_chain`: checks that `entry` sits at position
+/// `expected_seq`, chains to `expected_prev`, has an unambiguous canonical
+/// form and a hash that matches its own fields. `verify_chain` is exactly
+/// this applied from the genesis hash to the last entry; the server's
+/// incremental and chunked verification (sweep F-2) applies the same step to
+/// a range, starting from a hash it verified earlier.
+pub fn verify_entry(entry: &LedgerEntry, expected_seq: u64, expected_prev: &str) -> Result<(), LedgerError> {
+    if entry.seq() != expected_seq {
+        return Err(LedgerError::ChainBroken {
+            at_seq: entry.seq(),
+            reason: format!("seq {} found at position {expected_seq}", entry.seq()),
+        });
+    }
+
+    if entry.prev_hash() != expected_prev {
+        return Err(LedgerError::ChainBroken {
+            at_seq: entry.seq(),
+            reason: "prev_hash does not match the actual previous entry's hash".into(),
+        });
+    }
+
+    // AEGIS F7: a hash only means something if exactly one entry
+    // maps to its canonical string. Checked here as well as on load
+    // so an in-memory ledger and /ledger/verify enforce it too.
+    let ambiguity = match entry {
+        LedgerEntry::Finding(f) => finding_ambiguity(&f.string_fields()),
+        LedgerEntry::Event(e) => e
+            .to_input()
+            .validate()
+            .err()
+            .map(|err| format!("ambiguous canonical form: invalid event field: {err}")),
+    };
+    if let Some(reason) = ambiguity {
+        return Err(LedgerError::ChainBroken { at_seq: entry.seq(), reason });
+    }
+
+    if entry.recompute_hash() != entry.hash() {
+        return Err(LedgerError::ChainBroken {
+            at_seq: entry.seq(),
+            reason: "stored hash does not match recomputed hash — entry was altered".into(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

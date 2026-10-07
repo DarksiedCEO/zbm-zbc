@@ -32,7 +32,7 @@ impl Drop for ServerHandle {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let _ = std::fs::remove_file(&self.log_path);
+        common::remove_ledger_files(&self.log_path);
     }
 }
 
@@ -61,7 +61,7 @@ fn start_server(token: &str, bind_addr: Option<&str>) -> ServerHandle {
         Err(e) => {
             let _ = child.kill();
             let _ = child.wait();
-            let _ = std::fs::remove_file(&log_path);
+            common::remove_ledger_files(&log_path);
             panic!("{e}");
         }
     };
@@ -100,14 +100,14 @@ fn raw_http_request(
 
 #[test]
 fn health_is_open_with_no_token() {
-    let server = start_server("test-token-123", None);
+    let server = start_server("test-token-123-padded-to-32-bytes-min", None);
     let (status, _) = raw_http_request("127.0.0.1", server.port, "GET", "/health", None).unwrap();
     assert_eq!(status, 200);
 }
 
 #[test]
 fn ledger_entries_rejects_missing_token() {
-    let server = start_server("test-token-123", None);
+    let server = start_server("test-token-123-padded-to-32-bytes-min", None);
     let (status, _) =
         raw_http_request("127.0.0.1", server.port, "GET", "/ledger/entries", None).unwrap();
     assert_eq!(status, 401);
@@ -115,7 +115,7 @@ fn ledger_entries_rejects_missing_token() {
 
 #[test]
 fn ledger_entries_rejects_wrong_token() {
-    let server = start_server("test-token-123", None);
+    let server = start_server("test-token-123-padded-to-32-bytes-min", None);
     let (status, _) = raw_http_request(
         "127.0.0.1",
         server.port,
@@ -129,13 +129,13 @@ fn ledger_entries_rejects_wrong_token() {
 
 #[test]
 fn ledger_entries_accepts_correct_token() {
-    let server = start_server("test-token-123", None);
+    let server = start_server("test-token-123-padded-to-32-bytes-min", None);
     let (status, _) = raw_http_request(
         "127.0.0.1",
         server.port,
         "GET",
         "/ledger/entries",
-        Some("Bearer test-token-123"),
+        Some("Bearer test-token-123-padded-to-32-bytes-min"),
     )
     .unwrap();
     assert_eq!(status, 200);
@@ -146,7 +146,7 @@ fn ledger_append_rejects_missing_token() {
     // CONFIRMED finding: this was the most dangerous unauthenticated
     // route — a caller with no credentials at all could previously write
     // fabricated entries into the tamper-evident evidence ledger.
-    let server = start_server("test-token-123", None);
+    let server = start_server("test-token-123-padded-to-32-bytes-min", None);
     let (status, _) =
         raw_http_request("127.0.0.1", server.port, "POST", "/ledger/append", None).unwrap();
     assert_eq!(status, 401);
@@ -154,13 +154,13 @@ fn ledger_append_rejects_missing_token() {
 
 #[test]
 fn malformed_authorization_header_is_rejected() {
-    let server = start_server("test-token-123", None);
+    let server = start_server("test-token-123-padded-to-32-bytes-min", None);
     let (status, _) = raw_http_request(
         "127.0.0.1",
         server.port,
         "GET",
         "/ledger/entries",
-        Some("test-token-123"), // no "Bearer " prefix
+        Some("test-token-123-padded-to-32-bytes-min"), // no "Bearer " prefix
     )
     .unwrap();
     assert_eq!(status, 401);
@@ -175,14 +175,14 @@ fn default_bind_is_loopback_not_all_interfaces() {
     // (start_server's own health-check poll already proves this connects
     // on 127.0.0.1; this test exists so the default is asserted by name,
     // not just incidentally relied on by every other test in this file).
-    let server = start_server("test-token-123", None);
+    let server = start_server("test-token-123-padded-to-32-bytes-min", None);
     let (status, _) = raw_http_request("127.0.0.1", server.port, "GET", "/health", None).unwrap();
     assert_eq!(status, 200);
 }
 
 #[test]
 fn explicit_bind_addr_override_still_works() {
-    let server = start_server("test-token-123", Some("127.0.0.1"));
+    let server = start_server("test-token-123-padded-to-32-bytes-min", Some("127.0.0.1"));
     let (status, _) = raw_http_request("127.0.0.1", server.port, "GET", "/health", None).unwrap();
     assert_eq!(status, 200);
 }
