@@ -14,7 +14,14 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from zbm_schema.limits import MAX_TOUCHPOINT_SEQUENCE, Id, Label
+from zbm_schema.limits import (
+    MAX_TOUCHPOINT_SEQUENCE,
+    ClientId,
+    Id,
+    Label,
+    PeriodLabel,
+    Slug,
+)
 from zbm_schema.money import Money, PositiveMoney, money_context, quantize_money
 
 
@@ -36,8 +43,10 @@ class ChannelTouchpoint(BaseModel):
 
 
 class PlatformConnectionStatus(BaseModel):
-    client_id: Id
-    platform: Label
+    client_id: ClientId
+    # Normalized (E-11): "TikTok Shop" is tiktok_shop. It is the finding's
+    # entity_id, so it must be a clean identifier.
+    platform: Slug
     client_reports_using_it: bool  # client told onboarding they use this platform
     integration_connected: bool  # ZBM actually has a working data connection to it
 
@@ -50,11 +59,11 @@ class ContractTermType(str, Enum):
 
 class ContractTerm(BaseModel):
     term_id: Id  # unique per contract line — a client can have multiple terms of the same type/period
-    client_id: Id
+    client_id: ClientId
     term_type: ContractTermType
     contracted_value_usd: PositiveMoney
     actual_billed_value_usd: Money
-    period_label: Label  # e.g. "2026-06"
+    period_label: PeriodLabel  # e.g. "2026-06"; part of the finding identity (E-3)
 
     @property
     def drift_usd(self) -> Decimal:

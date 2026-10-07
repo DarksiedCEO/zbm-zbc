@@ -198,6 +198,23 @@ behaviour that could refuse an existing client is opt-in.
   configuration refuses to start; short caller tokens are refused; `?full=1` re-reads the log from disk; filtered
   pages come from an index.
 
+## Oct 6 2026 — Revenue Recovery fix wave (backend bug sweep E-1 to E-15)
+
+Details and the full before/after money table: ADR 0001 "Revenue Recovery fix wave" and ADR 0003 section 13.
+
+- **Clean store works:** a scan with no findings is 200 with `findings: []` (it was a 502).
+- **Scans are atomic in the ledger:** each scan has a `scan_id` and is written as started -> findings -> completed
+  events with deterministic ids on the idempotent `POST /ledger/events`; retries never duplicate; only completed
+  scans count in `GET /revenue-recovery/findings`; one scan at a time (409 + `Retry-After`).
+- **Tenant and identity:** `?client_id=` on the scan route (default: the fixture tenant `fixture-pool`, recorded as
+  defaulted; other tenants are 422 until a live data source exists). `finding_id` is a hash of (client, agent,
+  entity type, entity, period); overlaps need two distinct agents on (client, entity type, entity).
+- **Quote-affecting amounts:** discount stacking claims only the excess over the best single code; affiliate claims
+  commission (subtotal x known rate) or nothing; server-side attribution and abandoned cart claim no figure; every
+  finding carries `evidence_class` (OBSERVED / ESTIMATED / MODELED / UNKNOWN) and a methodology note.
+- **Scale:** detect calls batched (500), correlation batched by entity (700); renewals judged as of the scan's
+  `as_of`; timezone-less timestamps, empty ids and unnormalized statuses are refused or normalized.
+
 ## What's built
 
 **Tier 1 (rule-based, low-hanging fruit):**
@@ -283,7 +300,8 @@ ORCHESTRATOR_URL=http://localhost:8080 ORCHESTRATOR_SERVICE_TOKEN=<same as above
 # default 10000, bounds the orchestrator call).
 ```
 
-Or just run the full pipeline once without the dashboard:
+Or just run the full pipeline once without the dashboard (optional `?client_id=fixture-pool` — the only tenant
+with data until a live connector exists — and `&as_of=<RFC 3339 with offset>`, default now):
 ```bash
 curl -s -X POST -H "Authorization: Bearer $ORCHESTRATOR_SERVICE_TOKEN" \
   http://localhost:8080/revenue-recovery/scan | python3 -m json.tool

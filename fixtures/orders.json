@@ -10,14 +10,15 @@
     }
   },
   {
-    "_fixture_note": "LEAK — affiliate/coupon extension. Click is 11 DAYS before the order, way outside any honest attribution window, but an affiliate coupon was still honored on checkout. This is the fraud pattern: an affiliate cookie/coupon stretched far past any legitimate window.",
+    "_fixture_note": "LEAK — affiliate/coupon extension. Click is 11 DAYS before the order, way outside any honest attribution window, but an affiliate coupon was still honored on checkout. This is the fraud pattern: an affiliate cookie/coupon stretched far past any legitimate window. The affiliate's 10% commission rate is known, so the commission at risk is $12.00 (not the $120.00 order).",
     "order_id": "ord_1002", "customer_id": "cust_2", "placed_at": "2026-06-12T10:00:00Z",
     "status": "completed", "source_platform": "shopify",
     "line_items": [{"sku": "SKU-210", "unit_price_usd": 120.00, "quantity": 1}],
     "discounts": [{"code": "AFF-EXTEND10", "percent_off": 10}],
     "affiliate": {
       "affiliate_id": "aff_stale_3", "click_timestamp": "2026-06-01T09:00:00Z",
-      "order_timestamp": "2026-06-12T10:00:00Z", "attribution_window_hours": 24
+      "order_timestamp": "2026-06-12T10:00:00Z", "attribution_window_hours": 24,
+      "commission_rate_percent": 10
     }
   },
   {
@@ -50,7 +51,7 @@
     "line_items": [{"sku": "SKU-660", "unit_price_usd": 55.00, "quantity": 1}]
   },
   {
-    "_fixture_note": "LEAK — same order as ord_1002 conceptually reused for correlation testing (separate id): a completed order with BOTH an affiliate anomaly and a stacked discount, to prove the orchestration layer's double-count correlation (Decision 3 / Failure Mode #2) catches two agents both claiming ord_1007 before either value is counted twice. Not asserted in tonight's per-agent unit tests — flagged for the orchestrator integration test.",
+    "_fixture_note": "LEAK — same order as ord_1002 conceptually reused for correlation testing (separate id): a completed order with BOTH an affiliate anomaly and a stacked discount, to prove the orchestration layer's double-count correlation (Decision 3 / Failure Mode #2) catches two agents both claiming ord_1007 before either value is counted twice. Not asserted in tonight's per-agent unit tests — flagged for the orchestrator integration test. No commission rate is known for this order, so the affiliate finding carries no dollar figure (evidence UNKNOWN).",
     "order_id": "ord_1007", "customer_id": "cust_3", "placed_at": "2026-06-07T08:00:00Z",
     "status": "completed", "source_platform": "shopify",
     "line_items": [{"sku": "SKU-770", "unit_price_usd": 150.00, "quantity": 1}],

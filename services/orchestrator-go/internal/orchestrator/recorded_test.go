@@ -2,10 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+
+	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/client"
 )
 
 // fakeLedger serves GET /ledger/entries and GET /ledger/verify and records
@@ -16,6 +21,9 @@ type fakeLedger struct {
 	entries    string
 	verify     string
 	verifyCode int
+	// head: the GET /ledger/head body; "" answers 404 like a ledger-rust
+	// from before sweep F (which has no head route).
+	head string
 }
 
 func (f *fakeLedger) server(t *testing.T) *httptest.Server {
@@ -33,6 +41,13 @@ func (f *fakeLedger) server(t *testing.T) *httptest.Server {
 				w.WriteHeader(f.verifyCode)
 			}
 			_, _ = w.Write([]byte(f.verify))
+		case r.Method == http.MethodGet && r.URL.Path == "/ledger/head":
+			if f.head == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"not found"}`))
+				return
+			}
+			_, _ = w.Write([]byte(f.head))
 		default:
 			t.Errorf("read path made a non-read ledger request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusTeapot)
@@ -52,123 +67,237 @@ func failingDetection(t *testing.T) *httptest.Server {
 	return srv
 }
 
-const twoScansOfEntries = `[
- {"kind":"finding","seq":0,"finding_id":"aff-ord_1007","agent_id":"affiliate-coupon-extension-v1","entity_id":"ord_1007","leak_category":"affiliate_coupon_extension","amount_usd":"150.00","value_classification":"attributed","decision_confidence":"high","recorded_at":"t0","prev_hash":"g","hash":"h0"},
- {"kind":"finding","seq":1,"finding_id":"disc-ord_1007","agent_id":"discount-misuse-v1","entity_id":"ord_1007","leak_category":"discount_misuse","amount_usd":"54.38","value_classification":"observed","decision_confidence":"very_high","recorded_at":"t1","prev_hash":"h0","hash":"h1"},
- {"kind":"event","seq":2,"event_id":"e","department":"onboarding","event_type":"x","actor":"a","subject_id":"s","payload_sha256":"00","summary":"s","recorded_at":"t2","prev_hash":"h1","hash":"h2"},
- {"kind":"finding","seq":3,"finding_id":"aff-ord_1007","agent_id":"affiliate-coupon-extension-v1","entity_id":"ord_1007","leak_category":"affiliate_coupon_extension","amount_usd":"150.00","value_classification":"attributed","decision_confidence":"high","recorded_at":"t3","prev_hash":"h2","hash":"h3"},
- {"kind":"finding","seq":4,"finding_id":"disc-ord_1007","agent_id":"discount-misuse-v1","entity_id":"ord_1007","leak_category":"discount_misuse","amount_usd":"54.39","value_classification":"observed","decision_confidence":"very_high","recorded_at":"t4","prev_hash":"h3","hash":"h4"},
- {"kind":"finding","seq":5,"finding_id":"renew-sub_1","agent_id":"renewal-never-triggered-v1","entity_id":"sub_1","leak_category":"renewal_never_triggered","amount_usd":"39.00","value_classification":"observed","decision_confidence":"high","recorded_at":"t5","prev_hash":"h4","hash":"h5"},
- {"kind":"finding","seq":6,"finding_id":"renew-sub_1","agent_id":"renewal-never-triggered-v1","entity_id":"sub_1","leak_category":"renewal_never_triggered","amount_usd":"39.00","value_classification":"observed","decision_confidence":"high","recorded_at":"t6","prev_hash":"h5","hash":"h6"}
-]`
+// chain builds ledger entries (as GET /ledger/entries serves them) from
+// events, numbering seq and chaining hashes.
+type chain struct{ entries []map[string]any }
 
-func TestRecordedFindings_ReadsLedgerOnlyAndNeverWritesOrScans(t *testing.T) {
-	fl := &fakeLedger{entries: twoScansOfEntries, verify: `{"valid":true,"entries":7}`}
+func (c *chain) event(ev client.EventInput) {
+	b, _ := json.Marshal(ev)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	c.raw(m, "event")
+}
+
+func (c *chain) raw(m map[string]any, kind string) {
+	seq := len(c.entries)
+	m["kind"], m["seq"], m["recorded_at"] = kind, seq, fmt.Sprintf("t%d", seq)
+	m["prev_hash"], m["hash"] = fmt.Sprintf("h%d", seq-1), fmt.Sprintf("h%d", seq)
+	c.entries = append(c.entries, m)
+}
+
+func (c *chain) json(t *testing.T) string {
+	t.Helper()
+	b, err := json.Marshal(c.entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func scanID(n int) string { return fmt.Sprintf("%032x", n) }
+
+// writeScan appends one whole scan; mutate (optional) edits the event list
+// before it is appended, to build broken scans.
+func (c *chain) writeScan(t *testing.T, id string, fs []client.Finding, mutate func([]client.EventInput) []client.EventInput) {
+	t.Helper()
+	evs := []client.EventInput{startedEvent(startedPayload{ScanID: id, ClientID: FixtureClientID,
+		AsOf: "2026-10-06T00:00:00Z", DataSource: "fixtures", Fixture: true, TenantDefaulted: true, Agents: []string{"x"}})}
+	var manifest [][3]string
+	for _, f := range fs {
+		ev, err := findingEvent(id, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		evs = append(evs, ev)
+		manifest = append(manifest, [3]string{ev.EventID, ev.PayloadSHA256, ev.Summary})
+		if f.ValueBasis != nil {
+			bev, err := basisEvent(id, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			evs = append(evs, bev)
+			manifest = append(manifest, [3]string{bev.EventID, bev.PayloadSHA256, bev.Summary})
+		}
+	}
+	evs = append(evs, completedEvent(id, FixtureClientID, len(fs), manifest))
+	if mutate != nil {
+		evs = mutate(evs)
+	}
+	for _, ev := range evs {
+		c.event(ev)
+	}
+}
+
+// readRecorded serves entries and a valid verify verdict that counts them
+// (and no head route, like ledger-rust on this branch).
+func readRecorded(t *testing.T, entries string) (*RecordedFindingsResult, *fakeLedger) {
+	t.Helper()
+	var all []json.RawMessage
+	_ = json.Unmarshal([]byte(entries), &all)
+	fl := &fakeLedger{entries: entries, verify: fmt.Sprintf(`{"valid":true,"entries":%d}`, len(all))}
 	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-
 	res, err := o.RecordedFindings(context.Background())
 	if err != nil {
 		t.Fatalf("recorded findings: %v", err)
 	}
+	return res, fl
+}
+
+var (
+	discO1  = validFinding("discount-misuse-v1", "order", "o1", "", "4.50")
+	cartO1  = validFinding("abandoned-cart-coverage-v1", "order", "o1", "", "")
+	renewS1 = validFinding("renewal-never-triggered-v1", "subscription", "s1", "2026-05-15", "39.00")
+)
+
+func TestRecordedFindings_ReadsLedgerOnlyAndNeverWritesOrScans(t *testing.T) {
+	c := &chain{}
+	c.raw(map[string]any{"finding_id": "disc-ord_1007", "amount_usd": "54.38"}, "finding") // pre-fix-wave
+	c.raw(map[string]any{"event_id": "onb-1", "department": "onboarding", "event_type": "x", "actor": "a",
+		"subject_id": "s", "payload_sha256": "00", "summary": "s"}, "event")
+	c.writeScan(t, scanID(1), []client.Finding{discO1, cartO1, renewS1}, nil)
+	res, fl := readRecorded(t, c.json(t))
 	for _, req := range fl.requests {
-		if req != "GET /ledger/entries" && req != "GET /ledger/verify" {
+		if req != "GET /ledger/entries" && req != "GET /ledger/verify" && req != "GET /ledger/head" {
 			t.Errorf("unexpected ledger request %q", req)
 		}
 	}
-	if res.LedgerEntriesTotal != 7 || res.FindingEntriesTotal != 6 {
-		t.Errorf("totals: entries %d findings %d", res.LedgerEntriesTotal, res.FindingEntriesTotal)
+	if len(fl.requests) != 3 {
+		t.Errorf("one read of each, got %v", fl.requests)
 	}
-	if res.LedgerVerify == nil || !res.LedgerVerify.Valid || res.LedgerVerify.Entries != 7 {
-		t.Errorf("verify not carried through: %+v", res.LedgerVerify)
+	if res.LedgerEntriesTotal != 7 || res.LedgerTotalSource != "verify" || res.LedgerEntriesRead != 7 ||
+		res.FindingEntriesTotal != 3 || res.LegacyFindingEntriesIgnored != 1 {
+		t.Errorf("totals: %+v", res)
 	}
-	if !res.NonLiveDataSource {
-		t.Error("non_live_data_source must be true (fixture-only pipeline)")
+	// M4: the legacy entry is listed (never counted as a finding).
+	if len(res.LegacyFindings) != 1 || res.LegacyFindings[0].FindingID != "disc-ord_1007" ||
+		res.LegacyFindings[0].AmountUSD.String() != "54.38" {
+		t.Errorf("legacy findings: %+v", res.LegacyFindings)
+	}
+	if len(res.Scans) != 1 || res.Scans[0].Findings != 3 || !res.Scans[0].Fixture || len(res.ExcludedScans) != 0 {
+		t.Fatalf("scans: %+v excluded %+v", res.Scans, res.ExcludedScans)
+	}
+	var renew *RecordedFinding
+	for i := range res.Findings {
+		if res.Findings[i].AgentID == "renewal-never-triggered-v1" {
+			renew = &res.Findings[i]
+		}
+	}
+	if renew == nil || renew.FindingID != renewS1.FindingID || renew.AmountUSD.String() != "39.00" ||
+		*renew.PeriodLabel != "2026-05-15" || renew.EvidenceClass != "OBSERVED" || renew.ScanID != scanID(1) ||
+		renew.ClientID != FixtureClientID || renew.TimesRecorded != 1 || !renew.PresentInLatestScan {
+		t.Errorf("renewal row: %+v", renew)
+	}
+	if fs := res.OverlappingClaims["fixture-pool|order|o1"]; len(fs) != 2 || len(res.OverlappingClaims) != 1 {
+		t.Errorf("overlaps: %v", res.OverlappingClaims)
 	}
 }
 
-func TestRecordedFindings_OneRowPerFindingIDLatestRecordWins(t *testing.T) {
-	fl := &fakeLedger{entries: twoScansOfEntries, verify: `{"valid":true,"entries":7}`}
-	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-	res, err := o.RecordedFindings(context.Background())
-	if err != nil {
-		t.Fatalf("recorded findings: %v", err)
+// E-2: only a completed, self-consistent scan counts. Every way a scan can
+// be partial or inconsistent excludes it — and only it.
+func TestRecordedFindings_PartialOrInconsistentScansAreExcluded(t *testing.T) {
+	drop := func(i int) func([]client.EventInput) []client.EventInput {
+		return func(evs []client.EventInput) []client.EventInput { return append(evs[:i:i], evs[i+1:]...) }
 	}
-	if len(res.Findings) != 3 {
-		t.Fatalf("want 3 distinct findings, got %d: %+v", len(res.Findings), res.Findings)
+	cases := map[string]func([]client.EventInput) []client.EventInput{
+		"no completion (failed midway)": func(evs []client.EventInput) []client.EventInput { return evs[:2] },
+		"no start":                      drop(0),
+		"a finding missing":             drop(1),
+		"aborted": func(evs []client.EventInput) []client.EventInput {
+			return append(evs[:len(evs)-1:len(evs)-1], abortedEvent(scanID(2), FixtureClientID, "x"))
+		},
+		"finding after completion": func(evs []client.EventInput) []client.EventInput {
+			n := len(evs)
+			return append(append(evs[:1:1], evs[2:n]...), evs[1])
+		},
+		"payload hash altered": func(evs []client.EventInput) []client.EventInput {
+			evs[1].PayloadSHA256 = strings.Repeat("0", 64)
+			return evs
+		},
+		"amount altered": func(evs []client.EventInput) []client.EventInput {
+			evs[1].Summary = strings.Replace(evs[1].Summary, "v=4.50", "v=45.00", 1)
+			return evs
+		},
+		"entity altered (id no longer derived)": func(evs []client.EventInput) []client.EventInput {
+			evs[1].Summary = strings.Replace(evs[1].Summary, "e=o1", "e=o2", 1)
+			return evs
+		},
+		"count altered": func(evs []client.EventInput) []client.EventInput {
+			evs[len(evs)-1].Summary = "rrc1 n=1"
+			return evs
+		},
+		"other client on completion": func(evs []client.EventInput) []client.EventInput {
+			evs[len(evs)-1].SubjectID = "someone-else"
+			return evs
+		},
 	}
-	want := []struct {
-		id      string
-		seq     uint64
-		first   uint64
-		times   int
-		amount  string
-		differs bool
-	}{
-		{"aff-ord_1007", 3, 0, 2, "150.00", false},
-		{"disc-ord_1007", 4, 1, 2, "54.39", true},
-		{"renew-sub_1", 6, 5, 2, "39.00", false},
-	}
-	for i, w := range want {
-		f := res.Findings[i]
-		if f.FindingID != w.id || f.Seq != w.seq || f.FirstSeq != w.first || f.TimesRecorded != w.times ||
-			f.AmountUSD == nil || f.AmountUSD.String() != w.amount || f.AmountsDifferAcrossRecords != w.differs {
-			t.Errorf("row %d = %+v, want %+v", i, f, w)
+	for name, mutate := range cases {
+		c := &chain{}
+		c.writeScan(t, scanID(1), []client.Finding{renewS1}, nil)
+		c.writeScan(t, scanID(2), []client.Finding{discO1, cartO1}, mutate)
+		res, _ := readRecorded(t, c.json(t))
+		if len(res.Scans) != 1 || res.Scans[0].ScanID != scanID(1) {
+			t.Errorf("%s: counted scans %+v", name, res.Scans)
+		}
+		if len(res.ExcludedScans) != 1 || res.ExcludedScans[0].ScanID != scanID(2) {
+			t.Errorf("%s: excluded %+v", name, res.ExcludedScans)
+		}
+		if len(res.Findings) != 1 || res.Findings[0].FindingID != renewS1.FindingID || len(res.OverlappingClaims) != 0 {
+			t.Errorf("%s: a partial scan's findings are visible: %+v", name, res.Findings)
 		}
 	}
 }
 
-func TestRecordedFindings_OverlapsAreDistinctAgentsOnOneEntityNotRepeatedScans(t *testing.T) {
-	fl := &fakeLedger{entries: twoScansOfEntries, verify: `{"valid":true,"entries":7}`}
-	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-	res, err := o.RecordedFindings(context.Background())
-	if err != nil {
-		t.Fatalf("recorded findings: %v", err)
+func TestRecordedFindings_LatestCompletedScanWinsAndCountsScans(t *testing.T) {
+	disc2 := discO1
+	disc2.RecoverableValue = &client.LabeledValue{AmountUSD: client.MustParseMoney("4.51"), Classification: "observed", Confidence: "high"}
+	c := &chain{}
+	c.writeScan(t, scanID(1), []client.Finding{discO1, renewS1}, nil)
+	c.writeScan(t, scanID(2), []client.Finding{disc2}, func(evs []client.EventInput) []client.EventInput { return evs[:2] }) // failed
+	c.writeScan(t, scanID(3), []client.Finding{disc2}, nil)
+	res, _ := readRecorded(t, c.json(t))
+	if len(res.Findings) != 2 || len(res.Scans) != 2 || len(res.ExcludedScans) != 1 {
+		t.Fatalf("findings %d scans %d excluded %d", len(res.Findings), len(res.Scans), len(res.ExcludedScans))
 	}
-	if len(res.OverlappingClaims) != 1 || len(res.OverlappingClaims["ord_1007"]) != 2 {
-		t.Fatalf("want exactly ord_1007 with 2 claims, got %+v", res.OverlappingClaims)
-	}
-	if _, ok := res.OverlappingClaims["sub_1"]; ok {
-		t.Error("sub_1 was recorded twice by ONE agent (two scans) — that is not an overlapping claim")
+	for _, f := range res.Findings {
+		switch f.FindingID {
+		case discO1.FindingID:
+			if f.TimesRecorded != 2 || f.AmountUSD.String() != "4.51" || !f.AmountsDifferAcrossRecords ||
+				f.ScanID != scanID(3) || !f.PresentInLatestScan || f.FirstSeq >= f.Seq {
+				t.Errorf("discount row: %+v", f)
+			}
+		case renewS1.FindingID:
+			// Not found by the latest completed scan: shown, but flagged.
+			if f.TimesRecorded != 1 || f.PresentInLatestScan {
+				t.Errorf("renewal row: %+v", f)
+			}
+		}
 	}
 }
 
-// Fix wave 3: ledger-rust now answers an empty ledger with 200
-// {"valid":true,"entries":0} (it used to be 409 {"valid":false,"error":"Empty"},
-// which this test fed in and every caller had to special-case).
 func TestRecordedFindings_EmptyLedgerIsNotAnError(t *testing.T) {
-	fl := &fakeLedger{entries: `[]`, verify: `{"valid":true,"entries":0}`}
-	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
-	res, err := o.RecordedFindings(context.Background())
-	if err != nil {
-		t.Fatalf("empty ledger: %v", err)
-	}
-	if len(res.Findings) != 0 || res.Findings == nil || res.OverlappingClaims == nil || res.LedgerEntriesTotal != 0 {
-		t.Errorf("empty result should be empty (non-nil) collections: %+v", res)
-	}
-	if res.LedgerVerify == nil || !res.LedgerVerify.Valid || res.LedgerVerify.Entries != 0 {
-		t.Errorf("an empty ledger is a valid chain: %+v", res.LedgerVerify)
+	res, _ := readRecorded(t, `[]`)
+	if res.Findings == nil || len(res.Findings) != 0 || res.OverlappingClaims == nil || res.ExcludedScans == nil ||
+		res.LegacyFindings == nil || res.LedgerEntriesTotal != 0 {
+		t.Fatalf("empty ledger: %+v", res)
 	}
 }
 
 func TestRecordedFindings_TamperedChainIsReportedNotHidden(t *testing.T) {
-	fl := &fakeLedger{entries: twoScansOfEntries, verify: `{"valid":false,"error":"HashMismatch { seq: 3 }"}`, verifyCode: http.StatusConflict}
+	fl := &fakeLedger{entries: `[]`, verify: `{"valid":false,"entries":7,"error":"ChainBroken { at_seq: 3 }"}`, verifyCode: http.StatusConflict}
 	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
 	res, err := o.RecordedFindings(context.Background())
 	if err != nil {
-		t.Fatalf("recorded findings: %v", err)
+		t.Fatalf("a failed verify verdict must be returned, not an error: %v", err)
 	}
-	if res.LedgerVerify == nil || res.LedgerVerify.Valid || res.LedgerVerify.Error == "" {
-		t.Fatalf("tamper verdict must be carried to the caller: %+v", res.LedgerVerify)
+	if res.LedgerVerify == nil || res.LedgerVerify.Valid || !strings.Contains(res.LedgerVerify.Error, "ChainBroken") {
+		t.Errorf("verify verdict not surfaced: %+v", res.LedgerVerify)
 	}
 }
 
 func TestRecordedFindings_LedgerErrorIsAnError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	defer srv.Close()
-	o := New(failingDetection(t).URL, "d", srv.URL, "l")
+	fl := &fakeLedger{entries: `not json`, verify: `{"valid":true,"entries":0}`}
+	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
 	if _, err := o.RecordedFindings(context.Background()); err == nil {
-		t.Fatal("expected an error when the ledger refuses the read")
+		t.Fatal("an unreadable ledger must be an error")
 	}
 }

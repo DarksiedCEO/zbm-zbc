@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+from _fx import AS_OF, TENANT, make_finding
+
 from agents import (
     abandoned_cart_coverage,
     affiliate_coupon_extension,
@@ -24,7 +26,6 @@ from zbm_schema import (
     DecisionConfidence,
     Finding,
     LabeledValue,
-    LeakCategory,
     ValueClassification,
 )
 
@@ -40,14 +41,14 @@ def test_every_real_agent_output_passes_the_hallucination_check():
     subs = load_subscriptions()
 
     all_findings: list[Finding] = []
-    all_findings += affiliate_coupon_extension.detect(orders)
-    all_findings += discount_misuse.detect(orders)
-    all_findings += abandoned_cart_coverage.detect(orders)
-    all_findings += renewal_never_triggered.detect(subs)
-    all_findings += server_side_attribution.detect(load_server_side_events())
-    all_findings += cross_channel_attribution.detect(load_channel_touchpoints())
-    all_findings += platform_integration.detect(load_platform_connections())
-    all_findings += contract_pricing_term_drift.detect(load_contract_terms())
+    all_findings += affiliate_coupon_extension.detect(orders, client_id=TENANT)
+    all_findings += discount_misuse.detect(orders, client_id=TENANT)
+    all_findings += abandoned_cart_coverage.detect(orders, client_id=TENANT)
+    all_findings += renewal_never_triggered.detect(subs, client_id=TENANT, as_of=AS_OF)
+    all_findings += server_side_attribution.detect(load_server_side_events(), client_id=TENANT)
+    all_findings += cross_channel_attribution.detect(load_channel_touchpoints(), client_id=TENANT)
+    all_findings += platform_integration.detect(load_platform_connections(), client_id=TENANT)
+    all_findings += contract_pricing_term_drift.detect(load_contract_terms(), client_id=TENANT)
 
     assert len(all_findings) > 0, "sanity check: fixtures should produce findings"
 
@@ -56,9 +57,7 @@ def test_every_real_agent_output_passes_the_hallucination_check():
 
 
 def test_catches_a_fabricated_unbacked_dollar_claim():
-    bad_finding = Finding(
-        finding_id="bad-1", agent_id="test-agent", leak_category=LeakCategory.DISCOUNT_MISUSE,
-        entity_type="order", entity_id="ord_x", customer_id="cust_x",
+    bad_finding = make_finding(
         cause_certainty=CauseCertainty.NAMED,
         cause_description="This order leaked $500.00 in discounts.",  # claims a number
         recoverable_value=None,  # ...but no LabeledValue backs it up
@@ -69,9 +68,7 @@ def test_catches_a_fabricated_unbacked_dollar_claim():
 
 
 def test_catches_a_mismatched_dollar_figure():
-    bad_finding = Finding(
-        finding_id="bad-2", agent_id="test-agent", leak_category=LeakCategory.DISCOUNT_MISUSE,
-        entity_type="order", entity_id="ord_x", customer_id="cust_x",
+    bad_finding = make_finding(
         cause_certainty=CauseCertainty.NAMED,
         cause_description="This order leaked $500.00 in discounts.",
         recoverable_value=LabeledValue(
@@ -84,9 +81,7 @@ def test_catches_a_mismatched_dollar_figure():
 
 
 def test_matching_dollar_figure_passes():
-    good_finding = Finding(
-        finding_id="good-1", agent_id="test-agent", leak_category=LeakCategory.DISCOUNT_MISUSE,
-        entity_type="order", entity_id="ord_x", customer_id="cust_x",
+    good_finding = make_finding(
         cause_certainty=CauseCertainty.NAMED,
         cause_description="This order leaked $75.00 in discounts.",
         recoverable_value=LabeledValue(

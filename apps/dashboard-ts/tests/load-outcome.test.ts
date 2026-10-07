@@ -16,10 +16,17 @@ const ENV = { ORCHESTRATOR_URL: "http://127.0.0.1:1", ORCHESTRATOR_SERVICE_TOKEN
 const OK_BODY = {
   findings: [],
   overlapping_claims: {},
+  scans: [],
+  excluded_scans: [],
   ledger_entries_total: 0,
+  ledger_total_source: "head" as const,
+  ledger_entries_read: 0,
   finding_entries_total: 0,
+  legacy_finding_entries_ignored: 0,
+  legacy_findings: [],
   ledger_verify: { valid: true, entries: 0, error: "" },
   non_live_data_source: true,
+  latest_scan_uncounted: {},
 };
 
 function respond(status: number, body: unknown): typeof fetch {

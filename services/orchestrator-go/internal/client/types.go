@@ -45,28 +45,63 @@ func (lv *LabeledValue) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Finding mirrors zbm_schema.Finding field for field (Revenue Recovery fix
+// wave, Oct 6 2026: client_id, period_label, evidence_class, methodology_id
+// and methodology added). The orchestrator sends findings back to
+// detection-py (/correlation/overlaps), which re-validates every field —
+// including that finding_id is the hash of (client_id, agent_id,
+// entity_type, entity_id, period_label) — so nothing may be dropped here.
 type Finding struct {
 	FindingID        string        `json:"finding_id"`
+	ClientID         string        `json:"client_id"`
 	AgentID          string        `json:"agent_id"`
 	LeakCategory     string        `json:"leak_category"`
 	EntityType       string        `json:"entity_type"`
 	EntityID         string        `json:"entity_id"`
+	PeriodLabel      *string       `json:"period_label"`
 	CustomerID       string        `json:"customer_id"`
 	CauseCertainty   string        `json:"cause_certainty"`
 	CauseDescription string        `json:"cause_description"`
 	RecoverableValue *LabeledValue `json:"recoverable_value"`
-	DetectedAt       string        `json:"detected_at"`
+	// EvidenceClass: OBSERVED, ESTIMATED, MODELED or UNKNOWN (UNKNOWN exactly
+	// when RecoverableValue is nil). MethodologyID/Methodology say how the
+	// figure (or its absence) was arrived at. ADR 0001 "Evidence class and
+	// methodology".
+	EvidenceClass string `json:"evidence_class"`
+	MethodologyID string `json:"methodology_id"`
+	Methodology   string `json:"methodology"`
+	// ValueBasis (AEGIS L1, Oct 7 2026): the base and rate a rate-derived
+	// figure was computed from (the affiliate commission: order subtotal x
+	// commission rate). Nil for figures not derived from a rate. Recorded in
+	// the ledger as its own scan event (orchestrator ledger_record.go).
+	ValueBasis *ValueBasis `json:"value_basis"`
+	DetectedAt string      `json:"detected_at"`
+}
+
+// ValueBasis mirrors zbm_schema.ValueBasis. RatePercent is the exact decimal
+// text of the rate (no exponent); the orchestrator checks it and recomputes
+// the amount before recording.
+type ValueBasis struct {
+	BaseUSD     Money  `json:"base_usd"`
+	RatePercent string `json:"rate_percent"`
 }
 
 type findingsResponse struct {
 	Findings []Finding `json:"findings"`
 }
 
+// Every detect request names the tenant (E-3). The list fields are never
+// nil when marshaled: nonNil (client.go) turns a nil slice into [] so the
+// wire never carries `null` for a list (E-1: detection-py answers 422 to
+// {"findings":null}, which made every clean-store scan fail with 502).
 type ordersRequest struct {
-	Orders []Order `json:"orders"`
+	ClientID string  `json:"client_id"`
+	Orders   []Order `json:"orders"`
 }
 
 type subscriptionsRequest struct {
+	ClientID      string         `json:"client_id"`
+	AsOf          string         `json:"as_of"`
 	Subscriptions []Subscription `json:"subscriptions"`
 }
 

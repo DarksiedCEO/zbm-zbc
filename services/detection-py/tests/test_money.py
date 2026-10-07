@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
+from conftest import TEST_SERVICE_TOKEN
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -28,7 +30,6 @@ from agents import (
     server_side_attribution,
 )
 from api import app
-from conftest import TEST_SERVICE_TOKEN
 from fixtures_loader import (
     load_contract_terms,
     load_orders,
@@ -42,7 +43,6 @@ from zbm_schema import (
     DiscountApplication,
     Finding,
     LabeledValue,
-    LeakCategory,
     Order,
     OrderLineItem,
     ValueClassification,
@@ -70,9 +70,8 @@ def _order(items: list[tuple[str, int]], discounts=None, oid="ord_t") -> Order:
 
 
 def _finding(desc: str, amount) -> Finding:
-    return Finding(
-        finding_id="t-1", agent_id="test", leak_category=LeakCategory.DISCOUNT_MISUSE,
-        entity_type="order", entity_id="ord_t", customer_id="cust_t",
+    return make_finding(
+        agent_id="test", entity_id="ord_t", customer_id="cust_t",
         cause_certainty=CauseCertainty.NAMED, cause_description=desc,
         recoverable_value=None if amount is None else _lv(amount),
     )
@@ -129,7 +128,7 @@ def test_positive_money_rejects_non_finite_malformed_zero_and_negative(bad):
 
 
 def test_non_positive_money_field_accepts_zero():
-    term = ContractTerm(term_id="t", client_id="c", term_type="minimum_spend",
+    term = ContractTerm(term_id="t", client_id=TENANT, term_type="minimum_spend",
                         contracted_value_usd="10.00", actual_billed_value_usd=0, period_label="p")
     assert term.actual_billed_value_usd == Decimal("0.00")
     assert term.model_dump(mode="json")["actual_billed_value_usd"] == "0.00"
@@ -175,10 +174,12 @@ def test_percent_of_rounds_half_up_exactly():
 
 
 def test_stacked_percent_discounts_are_exact_and_quantized_per_line():
-    # ord_1007 fixture: 150.00, 15% -> 22.50 given (127.50 left), 25% of 127.50 = 31.875 -> 31.88
-    finding = [f for f in discount_misuse.detect(load_orders()) if f.entity_id == "ord_1007"][0]
-    assert finding.recoverable_value.amount_usd == Decimal("54.38")
-    assert "$54.38" in finding.cause_description
+    # ord_1007 fixture: 150.00, 15% -> 22.50 given (127.50 left), 25% of 127.50 = 31.875 -> 31.88;
+    # 54.38 given in all. E-4: the best single code (25% of 150.00 = 37.50) is the customer's; the
+    # leak is the excess, 16.88.
+    finding = [f for f in discount_misuse.detect(load_orders(), client_id=TENANT) if f.entity_id == "ord_1007"][0]
+    assert finding.recoverable_value.amount_usd == Decimal("16.88")
+    assert "$54.38" in finding.cause_description and "$37.50" in finding.cause_description
 
 
 def test_amount_off_discount_is_exact_and_capped_at_remaining():
@@ -187,15 +188,22 @@ def test_amount_off_discount_is_exact_and_capped_at_remaining():
         DiscountApplication(code="B", amount_off_usd=0.07),  # 0.07 given, 9.02 left
         DiscountApplication(code="C", amount_off_usd="50.00"),  # capped at 9.02
     ])
-    f = discount_misuse.detect([o])[0]
-    assert f.recoverable_value.amount_usd == Decimal("10.10")
+    # 10.10 given in all; the best single code is C alone (50.00 capped at 10.10), so nothing was
+    # given beyond it: E-4 says no leak. Without C, A + B gave 1.08 against A's 1.01 -> 0.07.
+    o2 = _order([("10.10", 1)], discounts=[
+        DiscountApplication(code="A", percent_off=10),
+        DiscountApplication(code="B", amount_off_usd=0.07),
+    ])
+    assert discount_misuse.detect([o], client_id=TENANT) == []
+    f = discount_misuse.detect([o2], client_id=TENANT)[0]
+    assert f.recoverable_value.amount_usd == Decimal("0.07")
 
 
 def test_contract_drift_is_exact_decimal_subtraction():
-    term = ContractTerm(term_id="t", client_id="c", term_type="minimum_spend",
+    term = ContractTerm(term_id="t", client_id=TENANT, term_type="minimum_spend",
                         contracted_value_usd=0.3, actual_billed_value_usd=0.1, period_label="p")
     assert term.drift_usd == Decimal("0.20")  # float: 0.3 - 0.1 == 0.19999999999999998
-    f = contract_pricing_term_drift.detect([term])[0]
+    f = contract_pricing_term_drift.detect([term], client_id=TENANT)[0]
     assert f.recoverable_value.amount_usd == Decimal("0.20")
     assert check(f) is None
 
@@ -205,18 +213,20 @@ def test_contract_drift_is_exact_decimal_subtraction():
 def _all_money_findings():
     orders = load_orders()
     return (
-        affiliate_coupon_extension.detect(orders)
-        + discount_misuse.detect(orders)
-        + abandoned_cart_coverage.detect(orders)
-        + renewal_never_triggered.detect(load_subscriptions())
-        + server_side_attribution.detect(load_server_side_events())
-        + contract_pricing_term_drift.detect(load_contract_terms())
+        affiliate_coupon_extension.detect(orders, client_id=TENANT)
+        + discount_misuse.detect(orders, client_id=TENANT)
+        + abandoned_cart_coverage.detect(orders, client_id=TENANT)
+        + renewal_never_triggered.detect(load_subscriptions(), client_id=TENANT, as_of=AS_OF)
+        + server_side_attribution.detect(load_server_side_events(), client_id=TENANT)
+        + contract_pricing_term_drift.detect(load_contract_terms(), client_id=TENANT)
     )
 
 
 def test_every_real_finding_amount_is_decimal_and_stated_canonically_in_text():
     findings = [f for f in _all_money_findings() if f.recoverable_value is not None]
-    assert len(findings) >= 7
+    # E-4: abandoned cart, server-side attribution and ord_1007's rate-less affiliate finding no
+    # longer carry a figure; discount x2, affiliate ord_1002, renewal and contract drift do.
+    assert len(findings) >= 5
     for f in findings:
         amt = f.recoverable_value.amount_usd
         assert isinstance(amt, Decimal), f.finding_id
@@ -224,9 +234,10 @@ def test_every_real_finding_amount_is_decimal_and_stated_canonically_in_text():
         assert f"${format_money(amt)}" in f.cause_description, f.finding_id
 
 
-def test_abandoned_cart_89_99_fixture_value_is_exact():
-    f = [f for f in abandoned_cart_coverage.detect(load_orders()) if f.entity_id == "ord_1005"][0]
-    assert f.recoverable_value.amount_usd == Decimal("89.99")
+def test_abandoned_cart_89_99_fixture_value_is_not_claimed():
+    # E-4: the cart value is no longer a recoverable figure (no recovery rate is known).
+    f = [f for f in abandoned_cart_coverage.detect(load_orders(), client_id=TENANT) if f.entity_id == "ord_1005"][0]
+    assert f.recoverable_value is None
 
 
 # --- JSON ---------------------------------------------------------------------
@@ -297,13 +308,18 @@ def test_fixture_endpoints_serve_money_as_two_decimal_strings():
 
 
 def test_detect_endpoint_accepts_string_money_and_returns_string_money():
-    body = {"orders": [{
+    # Affiliate route at a 100% commission rate: commission == subtotal, exact (E-4: the
+    # abandoned-cart route no longer claims a figure).
+    body = {"client_id": TENANT, "orders": [{
         "order_id": "ord_x", "customer_id": "c", "placed_at": "2026-06-01T00:00:00Z",
-        "status": "abandoned_cart", "source_platform": "shopify",
+        "status": "completed", "source_platform": "shopify",
         "line_items": [{"sku": "a", "unit_price_usd": "0.10", "quantity": 1},
                        {"sku": "b", "unit_price_usd": "0.20", "quantity": 1}],
+        "affiliate": {"affiliate_id": "a", "click_timestamp": "2026-05-01T00:00:00Z",
+                      "order_timestamp": "2026-06-01T00:00:00Z", "attribution_window_hours": 24,
+                      "commission_rate_percent": 100},
     }]}
-    r = client.post("/agents/abandoned-cart-coverage/detect", json=body)
+    r = client.post("/agents/affiliate-coupon-extension/detect", json=body)
     assert r.status_code == 200
     f = r.json()["findings"][0]
     assert f["recoverable_value"]["amount_usd"] == "0.30"
@@ -312,7 +328,7 @@ def test_detect_endpoint_accepts_string_money_and_returns_string_money():
 
 @pytest.mark.parametrize("bad", ["NaN", "Infinity", "1e2", "12,30", "", "0.00", True])
 def test_detect_endpoint_rejects_invalid_money_with_422(bad):
-    body = {"orders": [{
+    body = {"client_id": TENANT, "orders": [{
         "order_id": "ord_x", "customer_id": "c", "placed_at": "2026-06-01T00:00:00Z",
         "status": "abandoned_cart", "source_platform": "shopify",
         "line_items": [{"sku": "a", "unit_price_usd": bad, "quantity": 1}],
@@ -323,11 +339,13 @@ def test_detect_endpoint_rejects_invalid_money_with_422(bad):
 
 def test_correlation_endpoint_round_trips_string_money_unchanged():
     orders = client.get("/fixtures/orders").json()
-    aff = client.post("/agents/affiliate-coupon-extension/detect", json={"orders": orders}).json()["findings"]
-    disc = client.post("/agents/discount-misuse/detect", json={"orders": orders}).json()["findings"]
+    aff = client.post("/agents/affiliate-coupon-extension/detect", json={"client_id": TENANT, "orders": orders}).json()["findings"]
+    disc = client.post("/agents/discount-misuse/detect", json={"client_id": TENANT, "orders": orders}).json()["findings"]
     overlaps = client.post("/correlation/overlaps", json={"findings": aff + disc}).json()
-    amounts = sorted(f["recoverable_value"]["amount_usd"] for f in overlaps["ord_1007"])
-    assert amounts == ["150.00", "54.38"]
+    amounts = sorted((f["recoverable_value"] or {}).get("amount_usd", "none")
+                     for f in overlaps[f"{TENANT}|order|ord_1007"])
+    # E-4: no commission rate is known for ord_1007 (no figure); the discount excess is 16.88.
+    assert amounts == ["16.88", "none"]
 
 
 # --- signed zero / negative inputs (found in review of the WIP draft) --------

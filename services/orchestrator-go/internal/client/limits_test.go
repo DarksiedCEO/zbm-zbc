@@ -25,7 +25,9 @@ func TestDetectionResponseOverTheLimitIsRefused(t *testing.T) {
 		_, _ = w.Write([]byte(paddedJSON(`{"findings":[]}`, maxDetectionResponseBytes)))
 	}))
 	defer srv.Close()
-	_, err := NewDetectionClient(srv.URL, "t").DetectDiscountMisuse(context.Background(), nil)
+	c := NewDetectionClient(srv.URL, "t")
+	c.httpClient.Timeout = 5 * time.Minute // E-15: a size test, not a timeout test (see below)
+	_, err := c.DetectDiscountMisuse(context.Background(), "fixture-pool", nil)
 	var ue *UpstreamError
 	if !errors.As(err, &ue) || ue.Kind != UpstreamBadResponse || !strings.Contains(ue.Detail, "exceeds") {
 		t.Fatalf("oversized detection response: got err %v, want a bad_response 'exceeds' error", err)
@@ -38,7 +40,9 @@ func TestDetectionResponseAtTheLimitIsAccepted(t *testing.T) {
 		_, _ = w.Write([]byte(paddedJSON(body, maxDetectionResponseBytes-len(body))))
 	}))
 	defer srv.Close()
-	if _, err := NewDetectionClient(srv.URL, "t").DetectDiscountMisuse(context.Background(), nil); err != nil {
+	c := NewDetectionClient(srv.URL, "t")
+	c.httpClient.Timeout = 5 * time.Minute // E-15: a size test, not a timeout test
+	if _, err := c.DetectDiscountMisuse(context.Background(), "fixture-pool", nil); err != nil {
 		t.Fatalf("response of exactly the limit must be accepted: %v", err)
 	}
 }
@@ -48,7 +52,13 @@ func TestLedgerVerifyResponseOverTheLimitIsRefused(t *testing.T) {
 		_, _ = w.Write([]byte(paddedJSON(`{"valid":true,"entries":0}`, maxLedgerResponseBytes)))
 	}))
 	defer srv.Close()
-	_, err := NewLedgerClient(srv.URL, "t").Verify(context.Background())
+	l := NewLedgerClient(srv.URL, "t")
+	// E-15 (Oct 6 2026): this test is about the SIZE limit. Moving 64 MiB over
+	// loopback took longer than the 10 s call timeout on a loaded box (the
+	// sweep run failed with "context deadline exceeded"), so the call budget
+	// is lifted here; TestClientHasExplicitTimeouts covers the timeout.
+	l.base.httpClient.Timeout = 5 * time.Minute
+	_, err := l.Verify(context.Background())
 	var ue *UpstreamError
 	if !errors.As(err, &ue) || ue.Kind != UpstreamBadResponse || !strings.Contains(ue.Detail, "exceeds") {
 		t.Fatalf("oversized verify response: got err %v, want a bad_response 'exceeds' error", err)

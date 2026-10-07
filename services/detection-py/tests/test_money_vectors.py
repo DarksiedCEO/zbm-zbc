@@ -25,6 +25,7 @@ from api import app
 from conftest import TEST_SERVICE_TOKEN
 from zbm_schema import DecisionConfidence, LabeledValue, ValueClassification, format_money, to_money
 from zbm_schema.money import MAX_MONEY, WIRE_PATTERN
+from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
 
 VECTORS = json.loads(
     (Path(__file__).resolve().parents[3] / "fixtures" / "money_vectors.json").read_text(encoding="utf-8")
@@ -69,17 +70,21 @@ def test_positive_money_verdict(vec):
 
 def _cart_body(price_json: str) -> bytes:
     return (
-        '{"orders":[{"order_id":"o","customer_id":"c","placed_at":"2026-06-01T00:00:00Z",'
+        '{"client_id":"fixture-pool","orders":[{"order_id":"o","customer_id":"c","placed_at":"2026-06-01T00:00:00Z",'
         '"status":"abandoned_cart","source_platform":"x","line_items":[{"sku":"s","unit_price_usd":'
         + price_json
-        + ',"quantity":1}]}]}'
+        + ',"quantity":1}],'
+        # E-4: the affiliate route at a 100% commission rate carries the subtotal exactly (the
+        # abandoned-cart route no longer claims a figure).
+        '"affiliate":{"affiliate_id":"a","click_timestamp":"2026-05-01T00:00:00Z",'
+        '"order_timestamp":"2026-06-01T00:00:00Z","attribution_window_hours":24,"commission_rate_percent":100}}]}'
     ).encode()
 
 
 @pytest.mark.parametrize("vec", STRINGS, ids=_ids(STRINGS, "input"))
 def test_http_route_verdict_is_200_or_422_never_500(vec):
     r = client.post(
-        "/agents/abandoned-cart-coverage/detect",
+        "/agents/affiliate-coupon-extension/detect",
         content=_cart_body(json.dumps(vec["input"])),
         headers={"Content-Type": "application/json"},
     )
@@ -95,7 +100,7 @@ def test_http_route_json_value_verdict(vec):
     """A JSON number is never money on the wire (Go and the ledger reject it
     too): accepting 12.345 as a number would silently round it."""
     r = client.post(
-        "/agents/abandoned-cart-coverage/detect",
+        "/agents/affiliate-coupon-extension/detect",
         content=_cart_body(vec["json"]),
         headers={"Content-Type": "application/json"},
     )

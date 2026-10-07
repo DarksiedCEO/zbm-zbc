@@ -41,13 +41,42 @@ function fail(kind: FailureKind, message: string, correlationId: string | null, 
   return { ok: false, kind, message, correlationId: id };
 }
 
+const EVIDENCE_CLASSES: ReadonlySet<unknown> = new Set(["OBSERVED", "ESTIMATED", "MODELED", "UNKNOWN"]);
+
+// AEGIS M1 (Oct 7 2026): every finding must say whether the latest scan still
+// found it and how its figure was obtained, and name its tenant and scan. A
+// body without them (an orchestrator from before the fix wave) is refused as
+// not the contract — never rendered with every finding looking current.
+function looksLikeRecordedFinding(v: unknown): boolean {
+  if (!v || typeof v !== "object") return false;
+  const f = v as Record<string, unknown>;
+  return (
+    typeof f.finding_id === "string" &&
+    typeof f.client_id === "string" &&
+    typeof f.scan_id === "string" &&
+    (f.period_label === null || typeof f.period_label === "string") &&
+    typeof f.present_in_latest_scan === "boolean" &&
+    typeof f.quotable === "boolean" &&
+    EVIDENCE_CLASSES.has(f.evidence_class) &&
+    (f.amount_usd === null) === (f.evidence_class === "UNKNOWN")
+  );
+}
+
 function looksLikeFindings(v: unknown): v is RecordedFindingsResult {
   if (!v || typeof v !== "object") return false;
   const o = v as Record<string, unknown>;
   return (
     Array.isArray(o.findings) &&
+    o.findings.every(looksLikeRecordedFinding) &&
     !!o.overlapping_claims &&
     typeof o.overlapping_claims === "object" &&
+    Array.isArray(o.excluded_scans) &&
+    Array.isArray(o.scans) &&
+    (o.scans as unknown[]).every((x) => !!x && typeof x === "object" && typeof (x as Record<string, unknown>).backdated === "boolean" && typeof (x as Record<string, unknown>).as_of === "string") &&
+    !!o.latest_scan_uncounted &&
+    typeof o.latest_scan_uncounted === "object" &&
+    Array.isArray(o.legacy_findings) &&
+    typeof o.legacy_finding_entries_ignored === "number" &&
     typeof o.ledger_entries_total === "number" &&
     typeof o.finding_entries_total === "number" &&
     "ledger_verify" in o

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // LedgerClient calls the Rust evidence ledger service.
@@ -27,48 +29,115 @@ func NewLedgerClient(baseURL, token string) *LedgerClient {
 	return &LedgerClient{base: newServiceClient("ledger-rust", baseURL, token, maxLedgerResponseBytes)}
 }
 
-type LedgerRecordInput struct {
-	FindingID           string `json:"finding_id"`
-	AgentID             string `json:"agent_id"`
-	EntityID            string `json:"entity_id"`
-	LeakCategory        string `json:"leak_category"`
-	AmountUSD           *Money `json:"amount_usd"` // canonical two-decimal string, or null
-	ValueClassification string `json:"value_classification"`
-	DecisionConfidence  string `json:"decision_confidence"`
+// EventInput is the body of POST /ledger/events (ADR 0003 section 3). Every
+// field is required; ledger-rust validates the charsets and lengths.
+type EventInput struct {
+	EventID       string `json:"event_id"`
+	Department    string `json:"department"`
+	EventType     string `json:"event_type"`
+	Actor         string `json:"actor"`
+	SubjectID     string `json:"subject_id"`
+	PayloadSHA256 string `json:"payload_sha256"`
+	Summary       string `json:"summary"`
 }
 
-type LedgerEntry struct {
-	Seq      uint64 `json:"seq"`
-	Hash     string `json:"hash"`
-	PrevHash string `json:"prev_hash"`
+// ErrEventConflict: the ledger already holds this event_id with DIFFERENT
+// content (409). An event id describes exactly one event, so this is never
+// retried — it means two different things were given one id.
+var ErrEventConflict = errors.New("ledger already holds this event_id with different content")
+
+// Event append retry policy (Revenue Recovery fix wave, Oct 6 2026, E-2).
+// POST /ledger/events is idempotent on event_id: an identical retry of an
+// event the ledger already committed answers 200 with the existing entry and
+// appends nothing. So a call whose answer was lost — a timeout after the
+// ledger committed (sweep live probe L3), a connection reset, a 5xx from a
+// proxy — is retried with the SAME body, and can never record the event
+// twice.
+const (
+	eventAppendAttempts = 4
+	eventRetryBaseDelay = 250 * time.Millisecond
+)
+
+// EventAppendResult says whether the ledger created the entry (201) or
+// already had it (200), and on which attempt it answered.
+type EventAppendResult struct {
+	Seq      uint64
+	Created  bool
+	Attempts int
 }
 
-// AppendFinding writes one Finding to the ledger. A Finding with no
-// RecoverableValue still gets an entry (AmountUSD/classification/
-// confidence come through null) — coverage-gap findings (Platform
-// Integration, Cross-Channel risk) are audit-worthy even with no dollar
-// figure attached.
-func (l *LedgerClient) AppendFinding(ctx context.Context, f Finding) (*LedgerEntry, error) {
-	record := LedgerRecordInput{
-		FindingID:    f.FindingID,
-		AgentID:      f.AgentID,
-		EntityID:     f.EntityID,
-		LeakCategory: f.LeakCategory,
+// AppendEvent records ev, retrying a lost or failed answer (no response,
+// timeout, 5xx) up to eventAppendAttempts times with the identical body.
+// 409 is ErrEventConflict (wrapped in the UpstreamError); any other 4xx is
+// returned at once.
+func (l *LedgerClient) AppendEvent(ctx context.Context, ev EventInput) (*EventAppendResult, error) {
+	body, err := json.Marshal(ev)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ledger event %s: %w", ev.EventID, err)
 	}
-	if f.RecoverableValue != nil {
-		// Exact pass-through of detection-py's string; no conversion.
-		amt := f.RecoverableValue.AmountUSD
-		if !amt.IsValid() {
-			return nil, fmt.Errorf("finding %s: %w: recoverable_value.amount_usd is unset", f.FindingID, ErrInvalidMoney)
+	var lastErr error
+	for attempt := 1; attempt <= eventAppendAttempts; attempt++ {
+		if attempt > 1 {
+			delay := eventRetryBaseDelay << (attempt - 2)
+			select {
+			case <-ctx.Done():
+				return nil, errors.Join(lastErr, ctx.Err())
+			case <-time.After(delay):
+			}
 		}
-		record.AmountUSD = &amt
-		record.ValueClassification = f.RecoverableValue.Classification
-		record.DecisionConfidence = f.RecoverableValue.Confidence
+		res, retry, err := l.appendEventOnce(ctx, body)
+		if err == nil {
+			res.Attempts = attempt
+			return res, nil
+		}
+		lastErr = err
+		if !retry || ctx.Err() != nil {
+			return nil, err
+		}
 	}
+	return nil, lastErr
+}
 
-	var entry LedgerEntry
-	err := l.base.doJSON(ctx, http.MethodPost, "/ledger/append", record, &entry)
-	return &entry, err
+func (l *LedgerClient) appendEventOnce(ctx context.Context, body []byte) (*EventAppendResult, bool, error) {
+	const path = "/ledger/events"
+	c := l.base
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, false, c.upstreamErr(UpstreamBadRequest, http.MethodPost, path, 0, err.Error())
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, true, c.upstreamErr(UpstreamUnreachable, http.MethodPost, path, 0, err.Error())
+	}
+	defer resp.Body.Close()
+	respBody, err := c.readBody(http.MethodPost, path, resp)
+	if err != nil {
+		return nil, true, err // the answer was cut off: the event may or may not be in; retrying is safe
+	}
+	switch {
+	case resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK:
+		var entry struct {
+			Seq *uint64 `json:"seq"`
+		}
+		if err := json.Unmarshal(respBody, &entry); err != nil || entry.Seq == nil {
+			return nil, true, c.upstreamErr(UpstreamBadResponse, http.MethodPost, path, resp.StatusCode,
+				"event response has no seq (body="+snippet(respBody)+")")
+		}
+		return &EventAppendResult{Seq: *entry.Seq, Created: resp.StatusCode == http.StatusCreated}, false, nil
+	case resp.StatusCode == http.StatusConflict:
+		return nil, false, &wrappedUpstreamError{
+			UpstreamError: c.upstreamErr(UpstreamStatus, http.MethodPost, path, resp.StatusCode, snippet(respBody)),
+			cause:         ErrEventConflict,
+		}
+	case resp.StatusCode >= 500:
+		return nil, true, c.upstreamErr(UpstreamStatus, http.MethodPost, path, resp.StatusCode, snippet(respBody))
+	default:
+		return nil, false, c.upstreamErr(UpstreamStatus, http.MethodPost, path, resp.StatusCode, snippet(respBody))
+	}
 }
 
 type LedgerVerifyResult struct {
@@ -127,50 +196,81 @@ func (l *LedgerClient) Verify(ctx context.Context) (*LedgerVerifyResult, error) 
 	return &out, nil
 }
 
-// LedgerFindingRecord is one finding entry exactly as the ledger recorded it
-// (GET /ledger/entries, "kind":"finding"). The ledger stores less than a
-// detection Finding: no cause_description or customer_id, and the labels
-// are value_classification / decision_confidence (null when the finding
-// carried no recoverable value).
-type LedgerFindingRecord struct {
+// LedgerEvent is one event entry exactly as the ledger recorded it (GET
+// /ledger/entries, "kind":"event").
+type LedgerEvent struct {
+	Seq           uint64 `json:"seq"`
+	EventID       string `json:"event_id"`
+	Department    string `json:"department"`
+	EventType     string `json:"event_type"`
+	Actor         string `json:"actor"`
+	SubjectID     string `json:"subject_id"`
+	PayloadSHA256 string `json:"payload_sha256"`
+	Summary       string `json:"summary"`
+	RecordedAt    string `json:"recorded_at"`
+	PrevHash      string `json:"prev_hash"`
+	Hash          string `json:"hash"`
+}
+
+// LegacyFindingEntry is a pre-Oct-6 "kind":"finding" ledger entry (POST
+// /ledger/append), as recorded. AmountUSD is nil when the entry has none OR
+// when what it holds is not contract money (old logs persisted negative and
+// over-bound amounts); AmountOutOfContract says which.
+type LegacyFindingEntry struct {
 	Seq                 uint64  `json:"seq"`
 	FindingID           string  `json:"finding_id"`
 	AgentID             string  `json:"agent_id"`
 	EntityID            string  `json:"entity_id"`
 	LeakCategory        string  `json:"leak_category"`
 	AmountUSD           *Money  `json:"amount_usd"`
+	AmountOutOfContract bool    `json:"amount_out_of_contract"`
 	ValueClassification *string `json:"value_classification"`
 	DecisionConfidence  *string `json:"decision_confidence"`
 	RecordedAt          string  `json:"recorded_at"`
-	PrevHash            string  `json:"prev_hash"`
 	Hash                string  `json:"hash"`
-	// AmountOutOfContract is true when the ledger holds an amount string
-	// that is not valid money under the current contract (e.g. a legacy
-	// entry above the ADR 0003 section 1a bound). AmountUSD is then null:
-	// the value is flagged, never passed on as if it were valid money.
-	AmountOutOfContract bool `json:"amount_out_of_contract"`
 }
 
-// LedgerEntriesResult is the finding view of GET /ledger/entries.
-type LedgerEntriesResult struct {
-	TotalEntries int                   // every entry, findings and events
-	Findings     []LedgerFindingRecord // finding entries, in seq order
+// LedgerEntriesPage is a run of ledger entries in seq order.
+type LedgerEntriesPage struct {
+	// Entries counts the entries this read returned, findings and events.
+	// It is NOT the ledger's size: a filtered or caller-scoped read returns
+	// a subset. The ledger's size comes from Head (or the verify verdict).
+	Entries int
+	// Events: the event entries of the page, in seq order.
+	Events []LedgerEvent
+	// LegacyFindings counts "kind":"finding" entries — what orchestrator-go
+	// wrote through POST /ledger/append before the Oct 6 2026 fix wave. They
+	// carry no scan id and no tenant, collided across clients (E-3) and were
+	// written before the E-4 amount corrections, so they are counted and
+	// shown as ignored, never presented as findings.
+	LegacyFindings int
+	// LegacyFindingRows: those entries themselves, so they can be shown
+	// (labelled as legacy and never counted) instead of only counted.
+	LegacyFindingRows []LegacyFindingEntry
+	// LastSeq is the seq of the page's last entry (valid when Entries > 0).
+	LastSeq uint64
 }
 
-// Entries reads the whole ledger (GET /ledger/entries) and returns its
-// finding entries. Read-only: it never calls a ledger write endpoint.
-// Fails closed on any entry whose kind it does not know, or a finding whose
-// amount_usd is neither a string nor null — an unexpected shape in the
+// Entries reads the whole ledger (GET /ledger/entries) as one page.
+// Read-only. Fails closed on an entry that is not an object with a known
+// kind, or an event entry that does not decode — an unexpected shape in the
 // evidence ledger is an error to surface, not something to skip.
-func (l *LedgerClient) Entries(ctx context.Context) (*LedgerEntriesResult, error) {
+//
+// E-8: this is the ONE place a ledger read happens. ledger-rust has no
+// pagination today; a paginated read (?after_seq=&department=&event_type=,
+// being added on a separate branch) replaces this body and returns pages
+// with more=true until the end — orchestrator.RecordedFindings already
+// consumes pages in a loop (see entryPages there).
+func (l *LedgerClient) Entries(ctx context.Context) (*LedgerEntriesPage, error) {
 	var raw []json.RawMessage
 	if err := l.base.doJSON(ctx, http.MethodGet, "/ledger/entries", nil, &raw); err != nil {
 		return nil, err
 	}
-	out := &LedgerEntriesResult{TotalEntries: len(raw), Findings: []LedgerFindingRecord{}}
+	out := &LedgerEntriesPage{Entries: len(raw), Events: []LedgerEvent{}, LegacyFindingRows: []LegacyFindingEntry{}}
 	for i, entry := range raw {
 		var head struct {
 			Kind *string `json:"kind"`
+			Seq  *uint64 `json:"seq"`
 		}
 		if err := json.Unmarshal(entry, &head); err != nil {
 			return nil, fmt.Errorf("ledger entry %d: %w", i, err)
@@ -178,41 +278,104 @@ func (l *LedgerClient) Entries(ctx context.Context) (*LedgerEntriesResult, error
 		if head.Kind == nil {
 			return nil, fmt.Errorf("ledger entry %d has no kind", i)
 		}
+		if head.Seq == nil {
+			return nil, fmt.Errorf("ledger entry %d has no seq", i)
+		}
+		out.LastSeq = *head.Seq
 		switch *head.Kind {
-		case "event":
-			continue
 		case "finding":
+			out.LegacyFindings++
+			row, err := decodeLegacyFinding(entry)
+			if err != nil {
+				return nil, fmt.Errorf("ledger finding entry %d: %w", i, err)
+			}
+			out.LegacyFindingRows = append(out.LegacyFindingRows, *row)
+		case "event":
+			var ev LedgerEvent
+			if err := json.Unmarshal(entry, &ev); err != nil {
+				return nil, fmt.Errorf("ledger event entry %d: %w", i, err)
+			}
+			out.Events = append(out.Events, ev)
 		default:
 			return nil, fmt.Errorf("ledger entry %d has unknown kind %q", i, snippet([]byte(*head.Kind)))
 		}
-		// amount_usd is decoded separately: an out-of-contract string must
-		// be flagged, not make the whole read fail.
-		var wire struct {
-			LedgerFindingRecord
-			AmountUSD json.RawMessage `json:"amount_usd"`
-		}
-		if err := json.Unmarshal(entry, &wire); err != nil {
-			return nil, fmt.Errorf("ledger finding entry %d: %w", i, err)
-		}
-		rec := wire.LedgerFindingRecord
-		rec.AmountUSD = nil
-		amt := bytes.TrimSpace(wire.AmountUSD)
-		switch {
-		case len(amt) == 0 || bytes.Equal(amt, []byte("null")):
-		case amt[0] == '"':
-			var s string
-			if err := json.Unmarshal(amt, &s); err != nil {
-				return nil, fmt.Errorf("ledger finding entry %d amount_usd: %w", i, err)
-			}
-			if m, err := ParseMoney(s); err == nil {
-				rec.AmountUSD = &m
-			} else {
-				rec.AmountOutOfContract = true
-			}
-		default:
-			return nil, fmt.Errorf("ledger finding entry %d: %w: amount_usd must be a string or null, got %s", i, ErrInvalidMoney, snippet(amt))
-		}
-		out.Findings = append(out.Findings, rec)
 	}
 	return out, nil
+}
+
+// decodeLegacyFinding reads a "kind":"finding" entry. Its amount is kept
+// only if it is contract money; anything else (a JSON number, a negative or
+// over-bound string — ledger-rust still loads those from old logs) is
+// reported as out of contract, never shown as dollars.
+func decodeLegacyFinding(entry json.RawMessage) (*LegacyFindingEntry, error) {
+	var f struct {
+		Seq                 uint64          `json:"seq"`
+		FindingID           string          `json:"finding_id"`
+		AgentID             string          `json:"agent_id"`
+		EntityID            string          `json:"entity_id"`
+		LeakCategory        string          `json:"leak_category"`
+		AmountUSD           json.RawMessage `json:"amount_usd"`
+		ValueClassification *string         `json:"value_classification"`
+		DecisionConfidence  *string         `json:"decision_confidence"`
+		RecordedAt          string          `json:"recorded_at"`
+		Hash                string          `json:"hash"`
+	}
+	if err := json.Unmarshal(entry, &f); err != nil {
+		return nil, err
+	}
+	row := &LegacyFindingEntry{
+		Seq: f.Seq, FindingID: f.FindingID, AgentID: f.AgentID, EntityID: f.EntityID, LeakCategory: f.LeakCategory,
+		ValueClassification: f.ValueClassification, DecisionConfidence: f.DecisionConfidence,
+		RecordedAt: f.RecordedAt, Hash: f.Hash,
+	}
+	if len(f.AmountUSD) > 0 && string(f.AmountUSD) != "null" {
+		var m Money
+		if err := json.Unmarshal(f.AmountUSD, &m); err == nil && m.IsPositive() {
+			row.AmountUSD = &m
+		} else {
+			row.AmountOutOfContract = true
+		}
+	}
+	return row, nil
+}
+
+// LedgerHead is GET /ledger/head (ledger-rust sweep F-6): the number of
+// entries in the whole ledger, the last seq and its hash — independent of
+// what any one read returned.
+type LedgerHead struct {
+	Entries  uint64  `json:"entries"`
+	HeadSeq  *uint64 `json:"head_seq"`
+	HeadHash string  `json:"head_hash"`
+}
+
+// ErrHeadUnsupported: the ledger has no GET /ledger/head (a ledger-rust from
+// before sweep F answers 404). Callers fall back to the verify verdict's
+// entry count.
+var ErrHeadUnsupported = errors.New("ledger-rust has no GET /ledger/head")
+
+// Head reads GET /ledger/head and checks its shape: head_seq is null exactly
+// when the ledger is empty and entries-1 otherwise, head_hash 64 lowercase
+// hex. A 404 is ErrHeadUnsupported (wrapped in the UpstreamError).
+func (l *LedgerClient) Head(ctx context.Context) (*LedgerHead, error) {
+	const path = "/ledger/head"
+	var h LedgerHead
+	if err := l.base.doJSON(ctx, http.MethodGet, path, nil, &h); err != nil {
+		var ue *UpstreamError
+		if errors.As(err, &ue) && ue.StatusCode == http.StatusNotFound {
+			return nil, &wrappedUpstreamError{UpstreamError: ue, cause: ErrHeadUnsupported}
+		}
+		return nil, err
+	}
+	hexOK := len(h.HeadHash) == 64
+	for _, c := range h.HeadHash {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			hexOK = false
+		}
+	}
+	seqOK := (h.HeadSeq == nil && h.Entries == 0) || (h.HeadSeq != nil && h.Entries > 0 && *h.HeadSeq == h.Entries-1)
+	if !hexOK || !seqOK {
+		return nil, l.base.upstreamErr(UpstreamBadResponse, http.MethodGet, path, http.StatusOK,
+			fmt.Sprintf("head response is not {entries, head_seq, head_hash} (entries=%d head_seq=%v)", h.Entries, h.HeadSeq))
+	}
+	return &h, nil
 }

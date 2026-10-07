@@ -16,14 +16,14 @@ the check.
 
 | Suite | Tests | Counted by | Platform-only tests |
 |---|---|---|---|
-| `go:orchestrator-go` | 71 | go test -v | — |
-| `node:dashboard-ts` | 27 | node --test | — |
+| `go:orchestrator-go` | 112 | go test -v | — |
+| `node:dashboard-ts` | 38 | node --test | — |
 | `python:bizdev-py` | 283 | pytest collection | — |
 | `python:clipper-network-py` | 368 | pytest collection | — |
 | `python:compliance-py` | 636 | pytest collection | — |
 | `python:creative-py` | 821 | pytest collection | — |
 | `python:delivery-py` | 730 | pytest collection | — |
-| `python:detection-py` | 504 | pytest collection | — |
+| `python:detection-py` | 599 | pytest collection | — |
 | `python:finance-py` | 621 | pytest collection | — |
 | `python:fulfillment-py` | 1105 | pytest collection | — |
 | `python:influencer-py` | 437 | pytest collection | — |

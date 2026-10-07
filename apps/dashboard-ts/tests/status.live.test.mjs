@@ -42,20 +42,73 @@ let STUB_PORT = 0; // set when the stub is listening
 let CLOSED_PORT = 0; // a port this process bound and closed again: nothing listens there
 const TOKEN = "live-test-token";
 
+// A finding exactly as orchestrator-go's GET /revenue-recovery/findings
+// serves one (internal/orchestrator/recorded.go RecordedFinding).
+const ROW = {
+  seq: 1, finding_id: "rrf1-" + "a".repeat(40), client_id: "fixture-pool", agent_id: "discount-misuse-v1",
+  leak_category: "discount_misuse", entity_type: "order", entity_id: "ORD-LIVE-1", period_label: null,
+  amount_usd: "12.30", value_classification: "observed", decision_confidence: "high", evidence_class: "OBSERVED",
+  methodology_id: "disc_excess_best_code", scan_id: "1".repeat(32), payload_sha256: "0".repeat(64),
+  recorded_at: "2026-09-24T00:00:00Z", prev_hash: "0", hash: "h1", amount_out_of_contract: false, first_seq: 1,
+  times_recorded: 1, amounts_differ_across_records: false, present_in_latest_scan: true, value_basis: null,
+  labels_exceed_evidence: null, quotable: true,
+};
+
 const VERIFIED = {
-  findings: [
-    {
-      seq: 1, finding_id: "f-1", agent_id: "discount_misuse", entity_id: "ORD-LIVE-1",
-      leak_category: "discount_misuse", amount_usd: "12.30", value_classification: "observed",
-      decision_confidence: "high", recorded_at: "2026-09-24T00:00:00Z", prev_hash: "0", hash: "h1",
-      amount_out_of_contract: false, first_seq: 1, times_recorded: 1, amounts_differ_across_records: false,
-    },
-  ],
+  findings: [ROW],
   overlapping_claims: {},
+  scans: [],
+  excluded_scans: [],
   ledger_entries_total: 1,
+  ledger_total_source: "head",
+  ledger_entries_read: 1,
   finding_entries_total: 1,
+  legacy_finding_entries_ignored: 0,
+  legacy_findings: [],
   ledger_verify: { valid: true, entries: 1, error: "" },
   non_live_data_source: true,
+  latest_scan_uncounted: {},
+};
+
+// AEGIS M1/M4/L3 (Oct 7 2026): a stale ESTIMATED finding with its commission
+// basis, an over-claiming pre-invariant record, an abandoned and an aborted
+// scan, and a legacy entry — every one must be visible and labelled.
+const MIXED = {
+  ...VERIFIED,
+  findings: [
+    { ...ROW, seq: 9, finding_id: "rrf1-" + "b".repeat(40), entity_id: "ORD-CURRENT" },
+    {
+      ...ROW, seq: 3, finding_id: "rrf1-" + "c".repeat(40), entity_id: "ORD-STALE", agent_id: "affiliate-coupon-extension-v1",
+      leak_category: "affiliate_coupon_extension", amount_usd: "12.00", value_classification: "attributed",
+      decision_confidence: "medium", evidence_class: "ESTIMATED", present_in_latest_scan: false,
+      value_basis: { base_usd: "120.00", rate_percent: "10" }, quotable: false,
+    },
+    {
+      ...ROW, seq: 10, finding_id: "rrf1-" + "d".repeat(40), entity_type: "subscription", entity_id: "SUB-OVER",
+      period_label: "2026-05-15", amount_usd: "39.00", evidence_class: "ESTIMATED",
+      labels_exceed_evidence: "classification observed needs OBSERVED evidence, the figure is ESTIMATED", quotable: false,
+    },
+    { ...ROW, seq: 11, finding_id: "rrf1-" + "e".repeat(40), entity_id: "ORD-NOFIG", amount_usd: null,
+      value_classification: null, decision_confidence: null, evidence_class: "UNKNOWN", quotable: false },
+  ],
+  scans: [
+    { scan_id: "4".repeat(32), client_id: "fixture-pool", data_source: "fixtures", fixture: true, tenant_defaulted: true,
+      as_of: "2026-10-06T00:00:00Z", findings: 2, started_seq: 1, completed_seq: 4, backdated: false },
+    { scan_id: "5".repeat(32), client_id: "fixture-pool", data_source: "fixtures", fixture: true, tenant_defaulted: true,
+      as_of: "2026-09-01T00:00:00Z", findings: 2, started_seq: 5, completed_seq: 8, backdated: true },
+  ],
+  excluded_scans: [
+    { scan_id: "2".repeat(32), client_id: "fixture-pool", finding_events: 4, reason: "not completed (failed, or still running)", status: "abandoned", started_at: "2026-10-06T00:00:00Z" },
+    { scan_id: "3".repeat(32), client_id: "fixture-pool", finding_events: 1, reason: "aborted before completion", status: "aborted", started_at: "2026-10-06T01:00:00Z" },
+    { scan_id: "6".repeat(32), client_id: "fixture-pool", finding_events: 1, reason: "unreadable scan_completed record: rrc3: completion record format is newer", status: "unsupported_format", started_at: "2026-10-07T01:00:00Z" },
+  ],
+  latest_scan_uncounted: { "fixture-pool": "6".repeat(32) },
+  legacy_finding_entries_ignored: 1,
+  legacy_findings: [
+    { seq: 0, finding_id: "disc-ord_1007", agent_id: "discount-misuse-v1", entity_id: "ORD-LEGACY", leak_category: "discount_misuse",
+      amount_usd: "54.38", amount_out_of_contract: false, value_classification: "observed", decision_confidence: "very_high",
+      recorded_at: "2026-09-24T10:00:00Z", hash: "h0" },
+  ],
 };
 
 // What the stub orchestrator answers next; switched per test.
@@ -69,6 +122,12 @@ const stub = createServer((req, res) => {
   switch (mode) {
     case "ok":
       return send(200, VERIFIED);
+    case "mixed":
+      return send(200, MIXED);
+    case "pre-fix-wave":
+      // An orchestrator from before the fix wave: findings without
+      // present_in_latest_scan / evidence_class. Must not render as current.
+      return send(200, { ...VERIFIED, findings: [{ ...ROW, present_in_latest_scan: undefined, evidence_class: undefined }] });
     case "invalid-ledger":
       return send(200, { ...VERIFIED, ledger_verify: { valid: false, entries: 1, error: "ChainBroken { at_seq: 1 }" } });
     case "upstream-502":
@@ -245,6 +304,55 @@ test("upstream rejects the token / errors / ledger invalid / times out -> 502/50
   let hz = await get("/healthz");
   assert.equal(hz.status, 200);
   assert.equal(JSON.parse(hz.body).status, "ok");
+
+  // AEGIS M1/M4/L3 on the wire: stale vs current, ESTIMATED vs OBSERVED,
+  // excluded scans and legacy entries are all visible and labelled.
+  mode = "mixed";
+  page = await get("/");
+  assert.equal(page.status, 200, "mixed GET /");
+  const rowOf = (entity) => {
+    const i = page.body.indexOf(`>${entity}<`);
+    assert.ok(i > 0, `${entity} missing`);
+    const start = page.body.lastIndexOf("<tr", i);
+    return page.body.slice(start, page.body.indexOf("</tr>", i));
+  };
+  const stale = rowOf("ORD-STALE");
+  assert.match(stale, /data-stale="true"/);
+  assert.match(stale, /STALE — not in latest scan/);
+  assert.match(stale, /data-evidence="ESTIMATED"/);
+  assert.match(stale, />ESTIMATED</);
+  assert.match(stale, /est\. (<!-- -->)?\$12\.00/);
+  assert.match(stale, /10(<!-- -->)?% of (<!-- -->)?\$120\.00/);
+  const current = rowOf("ORD-CURRENT");
+  assert.match(current, /data-stale="false"/);
+  assert.ok(!current.includes("STALE"), "a current finding is labelled stale");
+  assert.match(current, />OBSERVED</);
+  assert.ok(!current.includes("est."), "an OBSERVED figure is marked estimated");
+  assert.ok(page.body.indexOf(">ORD-CURRENT<") < page.body.indexOf(">ORD-STALE<"), "stale finding listed among current ones");
+  assert.match(rowOf("SUB-OVER"), /LABELS EXCEED EVIDENCE/);
+  assert.match(rowOf("ORD-NOFIG"), /NO FIGURE/);
+  assert.match(page.body, /1(<!-- -->)? stale/);
+  assert.match(page.body, /Excluded scans \((<!-- -->)?3(<!-- -->)?\)/);
+  assert.match(page.body, /ABANDONED — never finished/);
+  assert.match(page.body, /ABORTED — the scan failed/);
+  assert.match(page.body, /Legacy ledger findings \((<!-- -->)?1(<!-- -->)?\) — LEGACY, not counted/);
+  assert.match(rowOf("ORD-LEGACY"), /data-legacy="true"/);
+  // N4: the served quotable flag is shown.
+  assert.match(current, /data-quote="quotable"/);
+  assert.match(stale, /data-quote="not-quotable"/);
+  // N3: as_of per scan, the backdated one flagged.
+  assert.match(page.body, /2026-10-06T00:00:00Z/);
+  assert.match(page.body, /data-backdated="true"/);
+  assert.match(page.body, /2026-09-01T00:00:00Z — BACKDATED/);
+  // N1: a newer-format latest scan is refused loudly.
+  assert.match(page.body, /UNSUPPORTED FORMAT — written by a newer orchestrator-go/);
+  assert.match(page.body, /The latest scan could not be counted/);
+
+  // A pre-fix-wave body is not the contract: refused (502), never shown as current.
+  mode = "pre-fix-wave";
+  page = await get("/");
+  assert.equal(page.status, 502, "pre-fix-wave body GET /");
+  assert.match(page.body, /not the recorded-findings contract/);
 
   mode = "big";
   page = await get("/");

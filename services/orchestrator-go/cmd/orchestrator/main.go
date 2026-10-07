@@ -173,13 +173,46 @@ func newMux(orch *orchestrator.Orchestrator, orchestratorToken string) *http.Ser
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "orchestrator-go"})
 	})
 
+	// POST /revenue-recovery/scan[?client_id=<tenant>][&as_of=<RFC 3339>]
+	// (Revenue Recovery fix wave, Oct 6 2026). client_id omitted = the
+	// fixture tenant (the only one with a data source; recorded as
+	// tenant_defaulted). as_of omitted = now; it must carry an offset. One
+	// scan at a time: a concurrent request is 409 + Retry-After and runs
+	// nothing.
 	mux.HandleFunc("POST /revenue-recovery/scan", requireAuth(orchestratorToken, func(w http.ResponseWriter, r *http.Request) {
-		result, err := orch.RunFullScan(r.Context())
-		if err != nil {
-			writeUpstreamError(w, "POST /revenue-recovery/scan", err)
+		q := r.URL.Query()
+		for k, vs := range q {
+			if (k != "client_id" && k != "as_of") || len(vs) != 1 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only client_id and as_of may be given, once each"})
+				return
+			}
+		}
+		req := orchestrator.ScanRequest{ClientID: q.Get("client_id")}
+		if q.Has("client_id") && req.ClientID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "client_id must not be empty"})
 			return
 		}
-		writeJSON(w, http.StatusOK, result)
+		if v := q.Get("as_of"); v != "" {
+			t, err := time.Parse(time.RFC3339Nano, v)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "as_of must be an RFC 3339 timestamp with a UTC offset"})
+				return
+			}
+			req.AsOf = t
+		}
+		result, err := orch.RunFullScan(r.Context(), req)
+		var reqErr *orchestrator.RequestError
+		switch {
+		case errors.Is(err, orchestrator.ErrScanInProgress):
+			w.Header().Set("Retry-After", "5")
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		case errors.As(err, &reqErr):
+			writeJSON(w, reqErr.Status, map[string]string{"error": reqErr.Msg})
+		case err != nil:
+			writeUpstreamError(w, "POST /revenue-recovery/scan", err)
+		default:
+			writeJSON(w, http.StatusOK, result)
+		}
 	}))
 
 	mux.HandleFunc("GET /revenue-recovery/findings", requireAuth(orchestratorToken, func(w http.ResponseWriter, r *http.Request) {

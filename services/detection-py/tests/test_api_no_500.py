@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from api import app
 from conftest import TEST_SERVICE_TOKEN
+from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
 
 client = TestClient(
     app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"}, raise_server_exceptions=False
@@ -36,16 +37,16 @@ def _order(**kw):
 ])
 def test_timestamps_without_timezone_are_422_not_500(click, order):
     aff = {"affiliate_id": "a", "click_timestamp": click, "order_timestamp": order, "attribution_window_hours": 24}
-    r = client.post("/agents/affiliate-coupon-extension/detect", json={"orders": [_order(affiliate=aff)]})
+    r = client.post("/agents/affiliate-coupon-extension/detect", json={"client_id": TENANT, "orders": [_order(affiliate=aff)]})
     assert r.status_code == 422, (r.status_code, r.text[:300])
 
 
 @pytest.mark.parametrize("path,body", [
     ("/agents/abandoned-cart-coverage/detect", b"NaN"),
-    ("/agents/abandoned-cart-coverage/detect", b'{"orders": NaN}'),
-    ("/agents/abandoned-cart-coverage/detect", b'{"orders": [Infinity]}'),
+    ("/agents/abandoned-cart-coverage/detect", b'{"client_id":"fixture-pool","orders": NaN}'),
+    ("/agents/abandoned-cart-coverage/detect", b'{"client_id":"fixture-pool","orders": [Infinity]}'),
     ("/agents/discount-misuse/detect",
-     b'{"orders":[{"order_id":"o","customer_id":"c","placed_at":"2026-06-01T00:00:00Z","status":"completed",'
+     b'{"client_id":"fixture-pool","orders":[{"order_id":"o","customer_id":"c","placed_at":"2026-06-01T00:00:00Z","status":"completed",'
      b'"source_platform":"x","line_items":[{"sku":"s","unit_price_usd":"10.00","quantity":1}],'
      b'"discounts":[{"code":"a","percent_off":NaN},{"code":"b","percent_off":-Infinity}]}]}'),
     ("/correlation/overlaps", b'{"findings": [{"finding_id": NaN}]}'),
@@ -56,10 +57,10 @@ def test_nan_and_infinity_in_body_are_422_not_500(path, body):
 
 
 @pytest.mark.parametrize("body", [
-    b"", b"{", b"\xff\xfe{", b"[]", b"null", b'"x"', b'{"orders": {}}',
-    b'{"orders":[{"order_id":"o","customer_id":"c","placed_at":"2026-06-01T00:00:00Z","status":"x",'
+    b"", b"{", b"\xff\xfe{", b"[]", b"null", b'"x"', b'{"client_id":"fixture-pool","orders": {}}',
+    b'{"client_id":"fixture-pool","orders":[{"order_id":"o","customer_id":"c","placed_at":"2026-06-01T00:00:00Z","status":"x",'
     b'"source_platform":"x","line_items":[{"sku":"s","unit_price_usd":"1.00","quantity":' + b"9" * 5000 + b"}]}]}",
-    b'{"orders":' + b"[" * 100000 + b"]" * 100000 + b"}",
+    b'{"client_id":"fixture-pool","orders":' + b"[" * 100000 + b"]" * 100000 + b"}",
 ])
 def test_malformed_bodies_are_4xx_not_500(body):
     r = client.post("/agents/abandoned-cart-coverage/detect", content=body, headers=JSON)
@@ -70,7 +71,7 @@ def test_validation_errors_do_not_echo_the_input_back():
     """The 422 body names the location and the reason, not the rejected
     value itself (which is what crashed on NaN, and can be arbitrarily big)."""
     r = client.post("/agents/abandoned-cart-coverage/detect",
-                    json={"orders": [_order(line_items=[{"sku": "s", "unit_price_usd": "1" * 5000 + ".00", "quantity": 1}])]})
+                    json={"client_id": TENANT, "orders": [_order(line_items=[{"sku": "s", "unit_price_usd": "1" * 5000 + ".00", "quantity": 1}])]})
     assert r.status_code == 422
     assert "1" * 100 not in r.text
     assert len(r.text) < 2000
@@ -92,11 +93,11 @@ def test_every_post_route_rejects_an_empty_object_with_422():
 
 @pytest.mark.parametrize("ctype", ["text/plain", "application/x-www-form-urlencoded", ""])
 def test_non_json_content_type_is_415(ctype):
-    r = client.post("/agents/abandoned-cart-coverage/detect", content=b'{"orders": []}', headers={"Content-Type": ctype})
+    r = client.post("/agents/abandoned-cart-coverage/detect", content=b'{"client_id":"fixture-pool","orders": []}', headers={"Content-Type": ctype})
     assert r.status_code == 415, (r.status_code, r.text[:200])
 
 
 def test_json_content_type_with_charset_is_accepted():
-    r = client.post("/agents/abandoned-cart-coverage/detect", content=b'{"orders": []}',
+    r = client.post("/agents/abandoned-cart-coverage/detect", content=b'{"client_id":"fixture-pool","orders": []}',
                     headers={"Content-Type": "application/json; charset=utf-8"})
     assert r.status_code == 200, r.text[:200]

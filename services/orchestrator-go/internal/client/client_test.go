@@ -46,7 +46,7 @@ func TestDetectAffiliateCouponExtension_ParsesRealContractShape(t *testing.T) {
 	defer srv.Close()
 
 	c := NewDetectionClient(srv.URL, "test-token")
-	findings, err := c.DetectAffiliateCouponExtension(context.Background(), []Order{{"order_id": "ord_1002"}})
+	findings, err := c.DetectAffiliateCouponExtension(context.Background(), "fixture-pool", []Order{{"order_id": "ord_1002"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestDetectionClient_NonOKStatusReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	c := NewDetectionClient(srv.URL, "test-token")
-	_, err := c.DetectDiscountMisuse(context.Background(), nil)
+	_, err := c.DetectDiscountMisuse(context.Background(), "fixture-pool", nil)
 	if err == nil {
 		t.Fatal("expected error on 500 response, got nil")
 	}
@@ -184,7 +184,7 @@ func TestDetectionClient_EmptyTokenSendsNoAuthorizationHeader(t *testing.T) {
 // Regression test for the Sep 22 2026 independent review fix: ledger-rust
 // now requires a bearer token on every route except /health (it had none
 // before). NewLedgerClient's signature changed to take one — this proves
-// AppendFinding actually sends it, not just that the constructor compiles
+// AppendEvent actually sends it, not just that the constructor compiles
 // with a token argument. Without this, a future edit reverting
 // NewLedgerClient to send no header would go undetected until the first
 // real scan failed every ledger write with 401 in production.
@@ -198,7 +198,7 @@ func TestLedgerClient_SendsBearerTokenOnAppend(t *testing.T) {
 	defer srv.Close()
 
 	l := NewLedgerClient(srv.URL, "ledger-real-secret")
-	_, err := l.AppendFinding(context.Background(), Finding{FindingID: "f-1", AgentID: "a-1", EntityID: "e-1", LeakCategory: "test"})
+	_, err := l.AppendEvent(context.Background(), sampleEvent())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

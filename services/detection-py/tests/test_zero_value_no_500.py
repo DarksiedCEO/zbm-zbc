@@ -47,6 +47,7 @@ from zbm_schema.tier2 import (
     PlatformConnectionStatus,
     ServerSideAttributionEvent,
 )
+from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
 
 client = TestClient(
     api.app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"}, raise_server_exceptions=False
@@ -80,7 +81,7 @@ _SLIGHTLY_OUTSIDE = {"affiliate_id": "a", "click_timestamp": "2026-06-01T00:00:0
     ("0.04", [{"code": "A", "percent_off": 1.0}, {"code": "B", "percent_off": 12.4}]),
 ])
 def test_stacked_codes_that_give_away_nothing_are_200_with_no_finding(price, discounts):
-    r = client.post("/agents/discount-misuse/detect", json={"orders": [_order(price, discounts)]})
+    r = client.post("/agents/discount-misuse/detect", json={"client_id": TENANT, "orders": [_order(price, discounts)]})
     assert r.status_code == 200, (r.status_code, r.text[:300])
     assert r.json()["findings"] == []
 
@@ -88,7 +89,7 @@ def test_stacked_codes_that_give_away_nothing_are_200_with_no_finding(price, dis
 def test_zero_amount_off_codes_are_rejected_as_input_not_500():
     # amount_off_usd is positive-only money: "0.00" is invalid input (422).
     ds = [{"code": "A", "amount_off_usd": "0.00"}, {"code": "B", "amount_off_usd": "0.00"}]
-    r = client.post("/agents/discount-misuse/detect", json={"orders": [_order("50.00", ds)]})
+    r = client.post("/agents/discount-misuse/detect", json={"client_id": TENANT, "orders": [_order("50.00", ds)]})
     assert r.status_code == 422, (r.status_code, r.text[:300])
 
 
@@ -96,11 +97,12 @@ def test_zero_value_order_does_not_fail_the_rest_of_the_batch():
     ds0 = [{"code": "A", "percent_off": 0.0}, {"code": "B", "percent_off": 0.0}]
     ds1 = [{"code": "A", "percent_off": 10.0}, {"code": "B", "percent_off": 10.0}]
     orders = [_order("50.00", ds0, order_id="zero"), _order("100.00", ds1, order_id="real")]
-    r = client.post("/agents/discount-misuse/detect", json={"orders": orders})
+    r = client.post("/agents/discount-misuse/detect", json={"client_id": TENANT, "orders": orders})
     assert r.status_code == 200, (r.status_code, r.text[:300])
     fs = r.json()["findings"]
     assert [f["entity_id"] for f in fs] == ["real"]
-    assert fs[0]["recoverable_value"]["amount_usd"] == "19.00"  # 10.00 + 10% of 90.00
+    # 19.00 given (10.00 + 10% of 90.00); E-4: minus the best single code's 10.00 -> 9.00.
+    assert fs[0]["recoverable_value"]["amount_usd"] == "9.00"
 
 
 @pytest.mark.parametrize("path,order", [
@@ -111,16 +113,16 @@ def test_zero_value_order_does_not_fail_the_rest_of_the_batch():
         {"code": "A", "percent_off": 10.0}, {"code": "B", "amount_off_usd": "5.00"}])),
 ])
 def test_order_with_no_line_items_is_200_with_no_finding(path, order):
-    r = client.post(path, json={"orders": [order]})
+    r = client.post(path, json={"client_id": TENANT, "orders": [order]})
     assert r.status_code == 200, (path, r.status_code, r.text[:300])
     assert r.json()["findings"] == []
 
 
 def test_contract_drift_below_a_cent_is_not_a_finding():
     # contracted == billed: drift 0.00 -> no finding (already the rule; pinned).
-    term = {"term_id": "t", "client_id": "c", "term_type": "minimum_spend", "contracted_value_usd": "0.01",
+    term = {"term_id": "t", "client_id": TENANT, "term_type": "minimum_spend", "contracted_value_usd": "0.01",
             "actual_billed_value_usd": "0.01", "period_label": "2026-06"}
-    r = client.post("/agents/contract-pricing-term-drift/detect", json={"terms": [term]})
+    r = client.post("/agents/contract-pricing-term-drift/detect", json={"client_id": TENANT, "terms": [term]})
     assert r.status_code == 200 and r.json()["findings"] == []
 
 
@@ -131,13 +133,13 @@ _real_cross_channel_detect = cross_channel_attribution.detect
 
 
 def _boom_on(bad_entity):
-    def detect(items):
+    def detect(items, **tenant):
         out = []
         for it in items:
             key = getattr(it, "order_id", None) or getattr(it, "subscription_id", None)
             if key == bad_entity:
                 LabeledValue(amount_usd="0.00", classification="observed", confidence="high")  # raises
-            out.extend(_real_discount_detect([it]))
+            out.extend(_real_discount_detect([it], **tenant))
         return out
     return detect
 
@@ -147,7 +149,7 @@ def test_agent_validation_error_is_422_naming_the_item_not_500(monkeypatch):
     ds = [{"code": "A", "percent_off": 10.0}, {"code": "B", "percent_off": 10.0}]
     orders = [_order("100.00", ds, order_id="ok1"), _order("100.00", ds, order_id="bad"),
               _order("100.00", ds, order_id="ok2")]
-    r = client.post("/agents/discount-misuse/detect", json={"orders": orders})
+    r = client.post("/agents/discount-misuse/detect", json={"client_id": TENANT, "orders": orders})
     assert r.status_code == 422, (r.status_code, r.text[:300])
     detail = r.json()["detail"]
     assert len(detail) == 1
@@ -163,13 +165,13 @@ def test_agent_validation_error_is_422_naming_the_item_not_500(monkeypatch):
 def test_agent_non_validation_value_error_is_also_422(monkeypatch):
     from zbm_schema import MoneyRangeError
 
-    def detect(items):
+    def detect(items, **tenant):
         raise MoneyRangeError("money must be less than 10^15 dollars")
 
     monkeypatch.setattr(api.renewal_never_triggered, "detect", detect)
     sub = {"subscription_id": "s1", "customer_id": "c", "plan_price_usd": "10.00", "renewal_interval_days": 30,
            "next_renewal_due_at": "2026-06-01T00:00:00Z", "status": "lapsed_no_renewal_attempt"}
-    r = client.post("/agents/renewal-never-triggered/detect", json={"subscriptions": [sub]})
+    r = client.post("/agents/renewal-never-triggered/detect", json={"client_id": TENANT, "as_of": AS_OF_WIRE, "subscriptions": [sub]})
     assert r.status_code == 422, (r.status_code, r.text[:300])
     assert r.json()["detail"][0]["loc"] == ["body", "subscriptions", 0]
 
@@ -177,9 +179,9 @@ def test_agent_non_validation_value_error_is_also_422(monkeypatch):
 def test_cross_channel_items_are_isolated_per_order_not_per_touchpoint(monkeypatch):
     seen = []
 
-    def detect(tps):
+    def detect(tps, **tenant):
         seen.append(sorted({t.order_id for t in tps}))
-        return _real_cross_channel_detect(tps)
+        return _real_cross_channel_detect(tps, **tenant)
 
     monkeypatch.setattr(api.cross_channel_attribution, "detect", detect)
     tps = [
@@ -190,7 +192,7 @@ def test_cross_channel_items_are_isolated_per_order_not_per_touchpoint(monkeypat
         {"order_id": "A", "channel": "email", "touchpoint_sequence": 2, "is_paid_channel": False,
          "is_credited_conversion_channel": True},
     ]
-    r = client.post("/agents/cross-channel-attribution/detect", json={"touchpoints": tps})
+    r = client.post("/agents/cross-channel-attribution/detect", json={"client_id": TENANT, "touchpoints": tps})
     assert r.status_code == 200
     assert seen == [["A"], ["B"]]  # one call per order, first-appearance order
     assert [f["entity_id"] for f in r.json()["findings"]] == ["A"]  # the grouping still sees both touches
@@ -228,6 +230,8 @@ def _gen_order(rng, i):
         o["affiliate"] = {"affiliate_id": "a", "click_timestamp": click.isoformat(),
                           "order_timestamp": (click + gap).isoformat(),
                           "attribution_window_hours": rng.choice([1, 24, 72, 10 ** 6])}
+        if rng.random() < 0.7:  # E-4: a known commission rate makes the affiliate figure computable
+            o["affiliate"]["commission_rate_percent"] = rng.choice(_PERCENT_EDGES + [rng.uniform(0, 100)])
     return o
 
 
@@ -254,7 +258,7 @@ def test_every_agent_survives_generated_valid_input():
             continue
         n_orders += 1
         for agent in (affiliate_coupon_extension, discount_misuse, abandoned_cart_coverage):
-            fs = agent.detect([o])
+            fs = agent.detect([o], client_id=TENANT)
             _check(fs)
             n_findings += len(fs)
     assert n_orders > 2000 and n_findings > 500  # the generator really exercises the agents
@@ -268,20 +272,21 @@ def test_every_agent_survives_generated_valid_input():
             "order_id": f"o{i}", "channel": "meta", "order_value_usd": _money(rng),
             "pixel_attributed": rng.random() < 0.5, "server_confirmed": rng.random() < 0.5})
         term = _valid(ContractTerm, {
-            "term_id": f"t{i}", "client_id": "c", "term_type": rng.choice(["minimum_spend", "escalator", "overage_rate"]),
+            "term_id": f"t{i}", "client_id": TENANT, "term_type": rng.choice(["minimum_spend", "escalator", "overage_rate"]),
             "contracted_value_usd": _money(rng), "actual_billed_value_usd": rng.choice(["0.00", _money(rng)]),
             "period_label": "2026-06"})
-        st = PlatformConnectionStatus(client_id="c", platform="p", client_reports_using_it=rng.random() < 0.5,
+        st = PlatformConnectionStatus(client_id=TENANT, platform="p", client_reports_using_it=rng.random() < 0.5,
                                       integration_connected=rng.random() < 0.5)
         for agent, item in ((renewal_never_triggered, sub), (server_side_attribution, ev),
                             (contract_pricing_term_drift, term), (platform_integration, st)):
             if item is not None:
-                _check(agent.detect([item]))
+                extra = {"as_of": AS_OF} if agent is renewal_never_triggered else {}
+                _check(agent.detect([item], client_id=TENANT, **extra))
         tps = [ChannelTouchpoint(order_id=f"x{i}", channel=rng.choice(["meta", "google", "email"]),
                                  touchpoint_sequence=rng.randint(1, 3), is_paid_channel=rng.random() < 0.5,
                                  is_credited_conversion_channel=rng.random() < 0.5)
                for _ in range(rng.randint(0, 4))]
-        _check(cross_channel_attribution.detect(tps))
+        _check(cross_channel_attribution.detect(tps, client_id=TENANT))
 
 
 def test_generated_orders_over_http_never_500():
@@ -290,5 +295,5 @@ def test_generated_orders_over_http_never_500():
     valid = [o for o in orders if _valid(Order, o) is not None]
     for path in ("/agents/discount-misuse/detect", "/agents/abandoned-cart-coverage/detect",
                  "/agents/affiliate-coupon-extension/detect"):
-        r = client.post(path, json={"orders": valid})
+        r = client.post(path, json={"client_id": TENANT, "orders": valid})
         assert r.status_code == 200, (path, r.status_code, r.text[:300])

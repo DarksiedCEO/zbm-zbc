@@ -13,11 +13,11 @@ import (
 const ledgerEntriesBody = `[
  {"kind":"finding","seq":0,"finding_id":"disc-ord_1007","agent_id":"discount-misuse-v1","entity_id":"ord_1007","leak_category":"discount_misuse","amount_usd":"54.38","value_classification":"observed","decision_confidence":"very_high","recorded_at":"2026-09-24T10:00:00Z","prev_hash":"g","hash":"h0"},
  {"kind":"event","seq":1,"event_id":"onb-1","department":"onboarding","event_type":"x","actor":"a","subject_id":"s","payload_sha256":"00","summary":"s","recorded_at":"2026-09-24T10:00:01Z","prev_hash":"h0","hash":"h1"},
- {"kind":"finding","seq":2,"finding_id":"platform-c-x","agent_id":"platform-integration-v1","entity_id":"c:x","leak_category":"platform_integration_gap","amount_usd":null,"value_classification":null,"decision_confidence":null,"recorded_at":"2026-09-24T10:00:02Z","prev_hash":"h1","hash":"h2"},
- {"kind":"finding","seq":3,"finding_id":"legacy-big","agent_id":"old-agent-v1","entity_id":"ord_big","leak_category":"discount_misuse","amount_usd":"100000000000000000000.00","value_classification":"observed","decision_confidence":"high","recorded_at":"2026-09-24T10:00:03Z","prev_hash":"h2","hash":"h3"}
+ {"kind":"finding","seq":2,"finding_id":"legacy-big","agent_id":"old-agent-v1","entity_id":"ord_big","leak_category":"discount_misuse","amount_usd":12.5,"value_classification":"observed","decision_confidence":"high","recorded_at":"2026-09-24T10:00:03Z","prev_hash":"h1","hash":"h2"},
+ {"kind":"event","seq":3,"event_id":"rr.x","department":"revenue_recovery","event_type":"rr_finding","actor":"orchestrator_go","subject_id":"f","payload_sha256":"11","summary":"rrf1 ...","recorded_at":"2026-09-24T10:00:04Z","prev_hash":"h2","hash":"h3"}
 ]`
 
-func TestLedgerClient_EntriesDecodesFindingsSkipsEventsAndSendsAuthWithGET(t *testing.T) {
+func TestLedgerClient_EntriesDecodesEventsCountsLegacyFindingsAndSendsAuthWithGET(t *testing.T) {
 	var gotAuth, gotMethod, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth, gotMethod, gotPath = r.Header.Get("Authorization"), r.Method, r.URL.Path
@@ -33,32 +33,23 @@ func TestLedgerClient_EntriesDecodesFindingsSkipsEventsAndSendsAuthWithGET(t *te
 	if gotAuth != "Bearer ledger-secret" || gotMethod != http.MethodGet || gotPath != "/ledger/entries" {
 		t.Fatalf("request was %s %s auth=%q", gotMethod, gotPath, gotAuth)
 	}
-	if res.TotalEntries != 4 || len(res.Findings) != 3 {
-		t.Fatalf("want 4 entries / 3 findings, got %d / %d", res.TotalEntries, len(res.Findings))
+	if res.Entries != 4 || res.LegacyFindings != 2 || len(res.Events) != 2 || res.LastSeq != 3 {
+		t.Fatalf("want 4 entries / 2 legacy findings / 2 events / last seq 3, got %+v", res)
 	}
-	f0 := res.Findings[0]
-	if f0.Seq != 0 || f0.FindingID != "disc-ord_1007" || f0.AmountUSD == nil || f0.AmountUSD.String() != "54.38" ||
-		f0.ValueClassification == nil || *f0.ValueClassification != "observed" || f0.Hash != "h0" || f0.AmountOutOfContract {
-		t.Errorf("finding 0 decoded wrong: %+v", f0)
-	}
-	f1 := res.Findings[1]
-	if f1.AmountUSD != nil || f1.ValueClassification != nil || f1.DecisionConfidence != nil || f1.AmountOutOfContract {
-		t.Errorf("no-value finding decoded wrong: %+v", f1)
-	}
-	// A recorded amount outside the (amended) contract is not silently
-	// dropped or passed on as valid money: it is flagged, and amount_usd is null.
-	f2 := res.Findings[2]
-	if f2.AmountUSD != nil || !f2.AmountOutOfContract {
-		t.Errorf("out-of-contract recorded amount not flagged: %+v", f2)
+	e := res.Events[1]
+	if e.Seq != 3 || e.EventID != "rr.x" || e.Department != "revenue_recovery" || e.SubjectID != "f" ||
+		e.PayloadSHA256 != "11" || e.Summary != "rrf1 ..." || e.Hash != "h3" || e.PrevHash != "h2" {
+		t.Errorf("event decoded wrong: %+v", e)
 	}
 }
 
 func TestLedgerClient_EntriesFailsClosedOnUnexpectedShapes(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown kind":   `[{"kind":"memo","seq":0}]`,
-		"missing kind":   `[{"seq":0,"finding_id":"f"}]`,
-		"numeric amount": `[{"kind":"finding","seq":0,"finding_id":"f","amount_usd":12.3}]`,
-		"not an array":   `{"entries":[]}`,
+		"unknown kind":     `[{"kind":"memo","seq":0}]`,
+		"missing kind":     `[{"seq":0,"finding_id":"f"}]`,
+		"missing seq":      `[{"kind":"event","event_id":"e"}]`,
+		"event bad fields": `[{"kind":"event","seq":0,"summary":7}]`,
+		"not an object":    `[1]`,
 	} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(body))
@@ -66,7 +57,7 @@ func TestLedgerClient_EntriesFailsClosedOnUnexpectedShapes(t *testing.T) {
 		_, err := NewLedgerClient(srv.URL, "t").Entries(context.Background())
 		srv.Close()
 		if err == nil {
-			t.Errorf("%s: expected an error, got nil", name)
+			t.Errorf("%s: expected an error, got none", name)
 		}
 	}
 }
@@ -115,7 +106,7 @@ func TestLedgerClient_ErrorsNameLedgerRustNotDetection(t *testing.T) {
 
 	for name, base := range map[string]string{"500": failing.URL, "unreachable": deadURL} {
 		l := NewLedgerClient(base, "t")
-		_, errAppend := l.AppendFinding(context.Background(), Finding{FindingID: "f"})
+		_, errAppend := l.AppendEvent(context.Background(), sampleEvent())
 		_, errEntries := l.Entries(context.Background())
 		_, errVerify := l.Verify(context.Background())
 		for op, err := range map[string]error{"append": errAppend, "entries": errEntries, "verify": errVerify} {

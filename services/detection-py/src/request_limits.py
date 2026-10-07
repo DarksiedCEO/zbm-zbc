@@ -13,7 +13,10 @@ field at its limit:
     \\u00XX; any other character is at most 4 bytes of UTF-8) and in Go's
     encoding/json (the orchestrator's encoder; it also writes <, >, & and
     U+2028/2029 as \\uXXXX). So a batch of nothing but escaped characters
-    still fits.
+    still fits. Exception (Oct 6 2026): a string whose pattern is one of
+    limits.ASCII_SAFE_PATTERNS (identifiers, slugs, finding ids) and that has
+    no before-validator is at most 2 + N bytes — those patterns admit only
+    printable ASCII that no JSON encoder escapes.
   - enum: its longest value. bool: 5 ("false"). null: 4.
   - integer: the digits of its larger bound (every int field has one).
   - float: 24 (the longest shortest-repr of a finite double).
@@ -46,9 +49,10 @@ from datetime import datetime
 from decimal import Decimal
 
 import annotated_types
-from pydantic import AwareDatetime, BaseModel
+from pydantic import AwareDatetime, BaseModel, BeforeValidator
 from pydantic.fields import FieldInfo
 
+from zbm_schema.limits import ASCII_SAFE_PATTERNS
 from zbm_schema.money import _MAX_WIRE_LENGTH
 
 ESCAPED_CHAR_BYTES = 6
@@ -81,6 +85,14 @@ def _max_len(meta: list, where: str) -> int:
     if not lens:
         raise UnboundedField(f"{where}: no max_length")
     return min(lens)
+
+
+def _bytes_per_char(meta: list) -> int:
+    patterns = {getattr(m, "pattern", None) for m in meta}
+    transformed = any(isinstance(m, BeforeValidator) for m in meta)
+    if not transformed and patterns & ASCII_SAFE_PATTERNS:
+        return 1
+    return ESCAPED_CHAR_BYTES
 
 
 def _int_digits(meta: list, where: str) -> int:
@@ -132,7 +144,7 @@ def worst_case_json_bytes(tp, meta: list | tuple = (), where: str = "") -> int:
     if tp is bool:
         return 5
     if tp is str:
-        return 2 + ESCAPED_CHAR_BYTES * _max_len(meta, where)
+        return 2 + _bytes_per_char(meta) * _max_len(meta, where)
     if tp is int:
         return _int_digits(meta, where)
     if tp is float:

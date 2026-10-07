@@ -35,9 +35,10 @@ const (
 	// headers and body. (It existed before this fix; unchanged.)
 	upstreamCallTimeout = 10 * time.Second
 	// maxDetectionResponseBytes: detection-py accepts at most 1000 items per
-	// request (2 MiB of JSON), and its largest response — one finding
-	// (~650 bytes) per item, or the correlation map of those findings — is
-	// about 1 MiB. 8 MiB is that with generous headroom.
+	// request, and its largest response — one finding per item, or the
+	// correlation map of those findings — is about 1.5 MiB since findings
+	// carry a methodology note (~1.3 KB each, Oct 6 2026). 8 MiB is that
+	// with generous headroom.
 	maxDetectionResponseBytes = 8 << 20
 	// maxLedgerResponseBytes: GET /ledger/entries returns the WHOLE ledger
 	// (ledger-rust has no pagination). A finding entry is ~470-500 bytes, so
@@ -195,35 +196,54 @@ func (c *DetectionClient) FixtureSubscriptions(ctx context.Context) ([]Subscript
 	return out, err
 }
 
-func (c *DetectionClient) detectOrders(ctx context.Context, path string, orders []Order) ([]Finding, error) {
+// nonNil returns s, or an empty slice when s is nil: Go marshals a nil
+// slice as JSON null, and detection-py (correctly) refuses null for a list
+// field — sweep finding E-1, probe_nil_findings.py.
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
+
+func (c *DetectionClient) detectOrders(ctx context.Context, path, clientID string, orders []Order) ([]Finding, error) {
 	var out findingsResponse
-	err := c.doJSON(ctx, http.MethodPost, path, ordersRequest{Orders: orders}, &out)
+	err := c.doJSON(ctx, http.MethodPost, path, ordersRequest{ClientID: clientID, Orders: nonNil(orders)}, &out)
 	return out.Findings, err
 }
 
-func (c *DetectionClient) DetectAffiliateCouponExtension(ctx context.Context, orders []Order) ([]Finding, error) {
-	return c.detectOrders(ctx, "/agents/affiliate-coupon-extension/detect", orders)
+func (c *DetectionClient) DetectAffiliateCouponExtension(ctx context.Context, clientID string, orders []Order) ([]Finding, error) {
+	return c.detectOrders(ctx, "/agents/affiliate-coupon-extension/detect", clientID, orders)
 }
 
-func (c *DetectionClient) DetectDiscountMisuse(ctx context.Context, orders []Order) ([]Finding, error) {
-	return c.detectOrders(ctx, "/agents/discount-misuse/detect", orders)
+func (c *DetectionClient) DetectDiscountMisuse(ctx context.Context, clientID string, orders []Order) ([]Finding, error) {
+	return c.detectOrders(ctx, "/agents/discount-misuse/detect", clientID, orders)
 }
 
-func (c *DetectionClient) DetectAbandonedCartCoverage(ctx context.Context, orders []Order) ([]Finding, error) {
-	return c.detectOrders(ctx, "/agents/abandoned-cart-coverage/detect", orders)
+func (c *DetectionClient) DetectAbandonedCartCoverage(ctx context.Context, clientID string, orders []Order) ([]Finding, error) {
+	return c.detectOrders(ctx, "/agents/abandoned-cart-coverage/detect", clientID, orders)
 }
 
-func (c *DetectionClient) DetectRenewalNeverTriggered(ctx context.Context, subs []Subscription) ([]Finding, error) {
+// DetectRenewalNeverTriggered: asOf is the scan's instant (RFC 3339 with an
+// offset). A renewal counts as missed only if it was due at or before it
+// (E-13).
+func (c *DetectionClient) DetectRenewalNeverTriggered(ctx context.Context, clientID, asOf string, subs []Subscription) ([]Finding, error) {
 	var out findingsResponse
-	err := c.doJSON(ctx, http.MethodPost, "/agents/renewal-never-triggered/detect", subscriptionsRequest{Subscriptions: subs}, &out)
+	err := c.doJSON(ctx, http.MethodPost, "/agents/renewal-never-triggered/detect",
+		subscriptionsRequest{ClientID: clientID, AsOf: asOf, Subscriptions: nonNil(subs)}, &out)
 	return out.Findings, err
 }
 
 // CorrelationOverlaps calls the Decision 3 / Failure Mode #2 safeguard
 // endpoint: given a combined set of findings from multiple agents, returns
-// entity_id -> findings for every entity more than one agent claimed.
+// correlation key ("client_id|entity_type|entity_id") -> findings for every
+// entity more than one distinct agent claimed. At most 1,000 findings per
+// call (detection-py's batch cap); the orchestrator batches by key.
 func (c *DetectionClient) CorrelationOverlaps(ctx context.Context, findings []Finding) (map[string][]Finding, error) {
 	var out map[string][]Finding
-	err := c.doJSON(ctx, http.MethodPost, "/correlation/overlaps", findingsRequest{Findings: findings}, &out)
+	err := c.doJSON(ctx, http.MethodPost, "/correlation/overlaps", findingsRequest{Findings: nonNil(findings)}, &out)
+	if out == nil && err == nil {
+		out = map[string][]Finding{}
+	}
 	return out, err
 }

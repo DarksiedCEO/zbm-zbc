@@ -207,7 +207,8 @@ func TestScanRoute_LedgerAppendFailureIsLabeledLedger(t *testing.T) {
 		case strings.HasPrefix(r.URL.Path, "/fixtures/"):
 			_, _ = w.Write([]byte(`[]`))
 		case r.URL.Path == "/agents/platform-integration/detect":
-			_, _ = w.Write([]byte(`{"findings":[{"finding_id":"platform-c-x","agent_id":"platform-integration-v1","leak_category":"platform_integration_gap","entity_type":"platform","entity_id":"c:x","customer_id":"c","cause_certainty":"named","cause_description":"d","recoverable_value":null,"detected_at":"2026-09-24T00:00:00Z"}]}`))
+			_ = json.NewEncoder(w).Encode(map[string]any{"findings": []any{
+				mkFinding(tenant, "platform-integration-v1", "platform", "tiktok_shop", "")}})
 		case strings.HasSuffix(r.URL.Path, "/detect"):
 			_, _ = w.Write([]byte(`{"findings":[]}`))
 		default:
@@ -244,10 +245,16 @@ func TestScanRoute_EmptyLedgerIsValidAndTheScanRuns(t *testing.T) {
 	detRec := &recorder{}
 	det := countingDetection(t, detRec)
 	ledger := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/ledger/verify" {
+		switch {
+		case r.URL.Path == "/ledger/verify":
+			_, _ = w.Write([]byte(`{"valid":true,"entries":0}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/ledger/events":
+			// A clean store's scan records only its started and completed events.
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"seq":0}`))
+		default:
 			t.Errorf("unexpected ledger call %s %s", r.Method, r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"valid":true,"entries":0}`))
 	}))
 	t.Cleanup(ledger.Close)
 	srv := scanServer(t, det.URL, ledger.URL)

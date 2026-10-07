@@ -12,16 +12,20 @@ type PlatformConnectionStatus map[string]any
 type ContractTerm map[string]any
 
 type serverSideEventsRequest struct {
-	Events []ServerSideEvent `json:"events"`
+	ClientID string            `json:"client_id"`
+	Events   []ServerSideEvent `json:"events"`
 }
 type channelTouchpointsRequest struct {
+	ClientID    string              `json:"client_id"`
 	Touchpoints []ChannelTouchpoint `json:"touchpoints"`
 }
 type platformConnectionsRequest struct {
+	ClientID string                     `json:"client_id"`
 	Statuses []PlatformConnectionStatus `json:"statuses"`
 }
 type contractTermsRequest struct {
-	Terms []ContractTerm `json:"terms"`
+	ClientID string         `json:"client_id"`
+	Terms    []ContractTerm `json:"terms"`
 }
 
 func (c *DetectionClient) FixtureServerSideEvents(ctx context.Context) ([]ServerSideEvent, error) {
@@ -48,26 +52,26 @@ func (c *DetectionClient) FixtureContractTerms(ctx context.Context) ([]ContractT
 	return out, err
 }
 
-func (c *DetectionClient) DetectServerSideAttribution(ctx context.Context, events []ServerSideEvent) ([]Finding, error) {
+func (c *DetectionClient) DetectServerSideAttribution(ctx context.Context, clientID string, events []ServerSideEvent) ([]Finding, error) {
 	var out findingsResponse
-	err := c.doJSON(ctx, http.MethodPost, "/agents/server-side-attribution/detect", serverSideEventsRequest{Events: events}, &out)
+	err := c.doJSON(ctx, http.MethodPost, "/agents/server-side-attribution/detect", serverSideEventsRequest{ClientID: clientID, Events: nonNil(events)}, &out)
 	return out.Findings, err
 }
 
-func (c *DetectionClient) DetectCrossChannelAttribution(ctx context.Context, tps []ChannelTouchpoint) ([]Finding, error) {
+func (c *DetectionClient) DetectCrossChannelAttribution(ctx context.Context, clientID string, tps []ChannelTouchpoint) ([]Finding, error) {
 	var out findingsResponse
-	err := c.doJSON(ctx, http.MethodPost, "/agents/cross-channel-attribution/detect", channelTouchpointsRequest{Touchpoints: tps}, &out)
+	err := c.doJSON(ctx, http.MethodPost, "/agents/cross-channel-attribution/detect", channelTouchpointsRequest{ClientID: clientID, Touchpoints: nonNil(tps)}, &out)
 	return out.Findings, err
 }
 
-func (c *DetectionClient) DetectPlatformIntegration(ctx context.Context, statuses []PlatformConnectionStatus) ([]Finding, error) {
+func (c *DetectionClient) DetectPlatformIntegration(ctx context.Context, clientID string, statuses []PlatformConnectionStatus) ([]Finding, error) {
 	var out findingsResponse
-	err := c.doJSON(ctx, http.MethodPost, "/agents/platform-integration/detect", platformConnectionsRequest{Statuses: statuses}, &out)
+	err := c.doJSON(ctx, http.MethodPost, "/agents/platform-integration/detect", platformConnectionsRequest{ClientID: clientID, Statuses: nonNil(statuses)}, &out)
 	return out.Findings, err
 }
 
-func (c *DetectionClient) DetectContractPricingTermDrift(ctx context.Context, terms []ContractTerm) ([]Finding, error) {
+func (c *DetectionClient) DetectContractPricingTermDrift(ctx context.Context, clientID string, terms []ContractTerm) ([]Finding, error) {
 	var out findingsResponse
-	err := c.doJSON(ctx, http.MethodPost, "/agents/contract-pricing-term-drift/detect", contractTermsRequest{Terms: terms}, &out)
+	err := c.doJSON(ctx, http.MethodPost, "/agents/contract-pricing-term-drift/detect", contractTermsRequest{ClientID: clientID, Terms: nonNil(terms)}, &out)
 	return out.Findings, err
 }

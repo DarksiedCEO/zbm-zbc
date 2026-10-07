@@ -26,6 +26,13 @@ from zbm_schema.tier2 import (
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FIXTURES_DIR = _REPO_ROOT / "fixtures"
 
+# The tenant (ZBM client) the fixture pool belongs to (E-3, Oct 6 2026). The
+# pool is ONE store's data: the tier 2 rows that carry a client_id carry this
+# one. orchestrator-go defaults a scan with no client_id to this tenant, and
+# only to this tenant, and records the scan as a fixture scan
+# (internal/orchestrator FixtureClientID must equal it).
+FIXTURE_CLIENT_ID = "fixture-pool"
+
 
 def _strip_notes(records: list[dict]) -> list[dict]:
     return [{k: v for k, v in r.items() if k != "_fixture_note"} for r in records]
