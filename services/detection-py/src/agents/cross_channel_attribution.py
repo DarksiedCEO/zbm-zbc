@@ -10,19 +10,35 @@ NOT claim a dollar figure for the miscount, because it cannot actually
 compute what the "correct" credit split would be without that model.
 Per Failure Mode #3, it names the pattern and stops at cause_certainty
 UNCERTAIN with no recoverable_value, rather than fabricate a number.
+
+E-4 review (Oct 6 2026): no dollar figure — unchanged; now labeled UNKNOWN
+with its methodology note. A future multi-touch model's figure would be
+MODELED, never OBSERVED.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 
-from zbm_schema import CauseCertainty, Finding, LeakCategory
+from zbm_schema import (
+    CauseCertainty,
+    EntityType,
+    EvidenceClass,
+    Finding,
+    LeakCategory,
+    new_finding,
+)
 from zbm_schema.tier2 import ChannelTouchpoint
 
 AGENT_ID = "cross-channel-attribution-v1"
+METHODOLOGY_ID = "xchan_no_model"
+METHODOLOGY = (
+    "No dollar figure: how much credit the paid first touch should have received needs a multi-touch "
+    "attribution model, which is not built. The finding names the pattern only."
+)
 
 
-def detect(touchpoints: list[ChannelTouchpoint]) -> list[Finding]:
+def detect(touchpoints: list[ChannelTouchpoint], *, client_id: str) -> list[Finding]:
     by_order: dict[str, list[ChannelTouchpoint]] = defaultdict(list)
     for tp in touchpoints:
         by_order[tp.order_id].append(tp)
@@ -42,11 +58,11 @@ def detect(touchpoints: list[ChannelTouchpoint]) -> list[Finding]:
 
         if first_touch.is_paid_channel and credited.channel != first_touch.channel:
             findings.append(
-                Finding(
-                    finding_id=f"xchan-{order_id}",
+                new_finding(
+                    client_id=client_id,
                     agent_id=AGENT_ID,
                     leak_category=LeakCategory.CROSS_CHANNEL_MISATTRIBUTION_RISK,
-                    entity_type="order",
+                    entity_type=EntityType.ORDER,
                     entity_id=order_id,
                     customer_id="unknown",
                     cause_certainty=CauseCertainty.UNCERTAIN,
@@ -58,6 +74,9 @@ def detect(touchpoints: list[ChannelTouchpoint]) -> list[Finding]:
                         f"correct split, so no dollar figure is claimed here."
                     ),
                     recoverable_value=None,
+                    evidence_class=EvidenceClass.UNKNOWN,
+                    methodology_id=METHODOLOGY_ID,
+                    methodology=METHODOLOGY,
                 )
             )
 

@@ -13,6 +13,7 @@ dev/testing convenience only and are explicitly labeled non-live.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hmac
 import os
 
@@ -21,7 +22,7 @@ from typing import Callable, TypeVar
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import AwareDatetime, BaseModel, Field, TypeAdapter, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from agents import (
@@ -45,6 +46,7 @@ from fixtures_loader import (
     load_subscriptions,
 )
 from zbm_schema import Finding, Order, Subscription
+from zbm_schema.limits import ClientId
 from zbm_schema.correlation import find_overlapping_entities
 from zbm_schema.tier2 import (
     ChannelTouchpoint,
@@ -343,27 +345,40 @@ async def _validation_error_handler(request: Request, exc: RequestValidationErro
 app.add_exception_handler(RequestValidationError, _validation_error_handler)
 
 
+# Every detect request names the tenant (E-3, Oct 6 2026): the ZBM client
+# whose data the batch is. Every finding carries it (Finding.client_id) and
+# its identity includes it. Required — there is no default here; only
+# orchestrator-go's fixture path defaults it, and records that it did.
 class OrdersRequest(BaseModel):
+    client_id: ClientId
     orders: list[Order] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class SubscriptionsRequest(BaseModel):
+    client_id: ClientId
+    # E-13: the scan's instant. A renewal counts as missed only if it was due
+    # at or before it. Timezone required.
+    as_of: AwareDatetime
     subscriptions: list[Subscription] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class ServerSideEventsRequest(BaseModel):
+    client_id: ClientId
     events: list[ServerSideAttributionEvent] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class ChannelTouchpointsRequest(BaseModel):
+    client_id: ClientId
     touchpoints: list[ChannelTouchpoint] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class PlatformConnectionsRequest(BaseModel):
+    client_id: ClientId
     statuses: list[PlatformConnectionStatus] = Field(max_length=MAX_BATCH_ITEMS)
 
 
 class ContractTermsRequest(BaseModel):
+    client_id: ClientId
     terms: list[ContractTerm] = Field(max_length=MAX_BATCH_ITEMS)
 
 
@@ -507,12 +522,32 @@ def _run_agent(detect: Callable[[list[_T]], list[Finding]], items: list[_T], fie
 
     findings: list[Finding] = []
     errors: list[dict] = []
+    # E-10 / probe P8: the same input row sent twice used to produce the same
+    # finding twice. One finding per finding_id: an exact repeat (the same
+    # leak found again; detected_at aside) is dropped; two DIFFERENT findings
+    # under one id mean two different input rows share an identifier, which
+    # is refused rather than one of them silently winning.
+    seen: dict[str, tuple[int, dict]] = {}
     for indexes, members in groups:
         try:
-            findings.extend(detect(members))
+            produced = detect(members)
         except ValueError as err:
             msg = _agent_error_message(members[0], err)
             errors.extend({"type": "agent_value_error", "loc": ["body", field, i], "msg": msg} for i in indexes)
+            continue
+        for f in produced:
+            content = f.model_dump(mode="json", exclude={"detected_at"})
+            prior = seen.get(f.finding_id)
+            if prior is None:
+                seen[f.finding_id] = (indexes[0], content)
+                findings.append(f)
+            elif prior[1] != content:
+                errors.append({
+                    "type": "duplicate_entity", "loc": ["body", field, indexes[0]],
+                    "msg": (f"{_item_label(members[0])} produces a different finding for the same entity "
+                            f"as item {prior[0]} ({f.entity_type.value} {f.entity_id[:64]}): two different "
+                            f"input rows share one identifier"),
+                })
     if errors:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=errors)
     return findings
@@ -520,27 +555,29 @@ def _run_agent(detect: Callable[[list[_T]], list[Finding]], items: list[_T], fie
 
 @app.post("/agents/affiliate-coupon-extension/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_affiliate_coupon_extension(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> Response:
-    return _findings_json(_run_agent(affiliate_coupon_extension.detect, req.orders, "orders"))
+    return _findings_json(_run_agent(functools.partial(affiliate_coupon_extension.detect, client_id=req.client_id), req.orders, "orders"))
 
 
 @app.post("/agents/discount-misuse/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_discount_misuse(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> Response:
-    return _findings_json(_run_agent(discount_misuse.detect, req.orders, "orders"))
+    return _findings_json(_run_agent(functools.partial(discount_misuse.detect, client_id=req.client_id), req.orders, "orders"))
 
 
 @app.post("/agents/abandoned-cart-coverage/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_abandoned_cart_coverage(req: OrdersRequest = Depends(wire_body(OrdersRequest))) -> Response:
-    return _findings_json(_run_agent(abandoned_cart_coverage.detect, req.orders, "orders"))
+    return _findings_json(_run_agent(functools.partial(abandoned_cart_coverage.detect, client_id=req.client_id), req.orders, "orders"))
 
 
 @app.post("/agents/renewal-never-triggered/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_renewal_never_triggered(req: SubscriptionsRequest = Depends(wire_body(SubscriptionsRequest))) -> Response:
-    return _findings_json(_run_agent(renewal_never_triggered.detect, req.subscriptions, "subscriptions"))
+    return _findings_json(_run_agent(
+        functools.partial(renewal_never_triggered.detect, client_id=req.client_id, as_of=req.as_of),
+        req.subscriptions, "subscriptions"))
 
 
 @app.post("/agents/server-side-attribution/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_server_side_attribution(req: ServerSideEventsRequest = Depends(wire_body(ServerSideEventsRequest))) -> Response:
-    return _findings_json(_run_agent(server_side_attribution.detect, req.events, "events"))
+    return _findings_json(_run_agent(functools.partial(server_side_attribution.detect, client_id=req.client_id), req.events, "events"))
 
 
 @app.post("/agents/cross-channel-attribution/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
@@ -548,17 +585,18 @@ def detect_cross_channel_attribution(req: ChannelTouchpointsRequest = Depends(wi
     # This agent reasons over all touchpoints of one order together, so an
     # order's touchpoints are one item.
     return _findings_json(_run_agent(
-        cross_channel_attribution.detect, req.touchpoints, "touchpoints", group_by=lambda t: t.order_id))
+        functools.partial(cross_channel_attribution.detect, client_id=req.client_id),
+        req.touchpoints, "touchpoints", group_by=lambda t: t.order_id))
 
 
 @app.post("/agents/platform-integration/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_platform_integration(req: PlatformConnectionsRequest = Depends(wire_body(PlatformConnectionsRequest))) -> Response:
-    return _findings_json(_run_agent(platform_integration.detect, req.statuses, "statuses"))
+    return _findings_json(_run_agent(functools.partial(platform_integration.detect, client_id=req.client_id), req.statuses, "statuses"))
 
 
 @app.post("/agents/contract-pricing-term-drift/detect", response_model=FindingsResponse, dependencies=[Depends(require_auth)])
 def detect_contract_pricing_term_drift(req: ContractTermsRequest = Depends(wire_body(ContractTermsRequest))) -> Response:
-    return _findings_json(_run_agent(contract_pricing_term_drift.detect, req.terms, "terms"))
+    return _findings_json(_run_agent(functools.partial(contract_pricing_term_drift.detect, client_id=req.client_id), req.terms, "terms"))
 
 
 # --- correlation (Decision 3 / Failure Mode #2 safeguard) -------------------

@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from api import app
 from conftest import TEST_SERVICE_TOKEN
+from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
 
 anon_client = TestClient(app)  # deliberately no Authorization header
 auth_client = TestClient(app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"})
@@ -42,17 +43,17 @@ def test_fixture_endpoint_accepts_correct_token():
 
 
 def test_agent_endpoint_rejects_missing_token():
-    r = anon_client.post("/agents/affiliate-coupon-extension/detect", json={"orders": []})
+    r = anon_client.post("/agents/affiliate-coupon-extension/detect", json={"client_id": TENANT, "orders": []})
     assert r.status_code == 401
 
 
 def test_agent_endpoint_rejects_wrong_token():
-    r = wrong_token_client.post("/agents/affiliate-coupon-extension/detect", json={"orders": []})
+    r = wrong_token_client.post("/agents/affiliate-coupon-extension/detect", json={"client_id": TENANT, "orders": []})
     assert r.status_code == 401
 
 
 def test_agent_endpoint_accepts_correct_token():
-    r = auth_client.post("/agents/affiliate-coupon-extension/detect", json={"orders": []})
+    r = auth_client.post("/agents/affiliate-coupon-extension/detect", json={"client_id": TENANT, "orders": []})
     assert r.status_code == 200
 
 

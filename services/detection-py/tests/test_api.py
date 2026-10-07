@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from api import app
 from conftest import TEST_SERVICE_TOKEN
+from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
 
 client = TestClient(app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"})
 
@@ -27,7 +28,7 @@ def test_fixture_orders_endpoint_serves_the_shared_pool():
 
 def test_affiliate_agent_over_rest_matches_direct_call():
     orders = client.get("/fixtures/orders").json()
-    r = client.post("/agents/affiliate-coupon-extension/detect", json={"orders": orders})
+    r = client.post("/agents/affiliate-coupon-extension/detect", json={"client_id": TENANT, "orders": orders})
     assert r.status_code == 200
     findings = r.json()["findings"]
     flagged = {f["entity_id"] for f in findings}
@@ -37,19 +38,19 @@ def test_affiliate_agent_over_rest_matches_direct_call():
 
 def test_correlation_endpoint_catches_double_claim_over_rest():
     orders = client.get("/fixtures/orders").json()
-    aff = client.post("/agents/affiliate-coupon-extension/detect", json={"orders": orders}).json()["findings"]
-    disc = client.post("/agents/discount-misuse/detect", json={"orders": orders}).json()["findings"]
+    aff = client.post("/agents/affiliate-coupon-extension/detect", json={"client_id": TENANT, "orders": orders}).json()["findings"]
+    disc = client.post("/agents/discount-misuse/detect", json={"client_id": TENANT, "orders": orders}).json()["findings"]
 
     r = client.post("/correlation/overlaps", json={"findings": aff + disc})
     assert r.status_code == 200
     overlaps = r.json()
-    assert "ord_1007" in overlaps
-    assert len(overlaps["ord_1007"]) == 2
+    assert f"{TENANT}|order|ord_1007" in overlaps
+    assert len(overlaps[f"{TENANT}|order|ord_1007"]) == 2
 
 
 def test_renewal_agent_over_rest():
     subs = client.get("/fixtures/subscriptions").json()
-    r = client.post("/agents/renewal-never-triggered/detect", json={"subscriptions": subs})
+    r = client.post("/agents/renewal-never-triggered/detect", json={"client_id": TENANT, "as_of": AS_OF_WIRE, "subscriptions": subs})
     assert r.status_code == 200
     flagged = {f["entity_id"] for f in r.json()["findings"]}
     assert flagged == {"sub_2001"}

@@ -3,28 +3,38 @@ Agent E: Server-Side Attribution Agent (Hyros-style).
 Single job: flag orders the server confirmed as real but that client-side
 pixel tracking never recorded — the iOS/ad-blocker loss pattern. This is
 lost VISIBILITY (which channel earned credit), not lost revenue itself —
-the order happened either way — so the dollar value is labeled OBSERVED
-(the order is real) but the leak is about attribution blindness, not a
-missing dollar.
+the order happened and was paid either way.
+
+E-4 (Oct 6 2026): the agent used to put the whole order value into
+recoverable_value as OBSERVED/HIGH (probe P4: $250.00 "recoverable" on a
+$250 order) although, as this docstring always said, no revenue was lost.
+Nothing here is recoverable money; the value of fixing the gap (better ad
+optimization) is not measurable from this data. The finding now claims no
+dollar figure (evidence UNKNOWN) and its text states no amount, so the
+HIGH-confidence dollar claim is gone entirely.
 """
 
 from __future__ import annotations
 
 from zbm_schema import (
-    format_money,
     CauseCertainty,
-    DecisionConfidence,
+    EntityType,
+    EvidenceClass,
     Finding,
-    LabeledValue,
     LeakCategory,
-    ValueClassification,
+    new_finding,
 )
 from zbm_schema.tier2 import ServerSideAttributionEvent
 
 AGENT_ID = "server-side-attribution-v1"
+METHODOLOGY_ID = "ssa_visibility_gap"
+METHODOLOGY = (
+    "No dollar figure: the order was real and paid, so no revenue was lost. The gap is attribution "
+    "visibility; its value (better channel optimization) is not measurable from this data."
+)
 
 
-def detect(events: list[ServerSideAttributionEvent]) -> list[Finding]:
+def detect(events: list[ServerSideAttributionEvent], *, client_id: str) -> list[Finding]:
     findings: list[Finding] = []
 
     for event in events:
@@ -32,24 +42,23 @@ def detect(events: list[ServerSideAttributionEvent]) -> list[Finding]:
             continue  # only the "server says real, pixel missed it" case is this agent's job
 
         findings.append(
-            Finding(
-                finding_id=f"ssa-{event.order_id}",
+            new_finding(
+                client_id=client_id,
                 agent_id=AGENT_ID,
                 leak_category=LeakCategory.SERVER_SIDE_ATTRIBUTION_GAP,
-                entity_type="order",
+                entity_type=EntityType.ORDER,
                 entity_id=event.order_id,
-                customer_id="unknown",  # this event stream doesn't carry customer_id; correlation still keys on order_id
+                customer_id="unknown",  # this event stream doesn't carry customer_id; correlation still keys on the order
                 cause_certainty=CauseCertainty.NAMED,
                 cause_description=(
-                    f"Server confirmed a real ${format_money(event.order_value_usd)} order on {event.channel}, "
-                    f"but client-side pixel tracking never recorded it — likely iOS/ad-blocker loss. "
-                    f"Channel is real revenue with no attribution credit."
+                    f"Server confirmed a real order on {event.channel}, but client-side pixel tracking "
+                    f"never recorded it — likely iOS/ad-blocker loss. The revenue was received; what is "
+                    f"missing is the channel's attribution credit, so no recoverable amount is claimed."
                 ),
-                recoverable_value=LabeledValue(
-                    amount_usd=event.order_value_usd,
-                    classification=ValueClassification.OBSERVED,
-                    confidence=DecisionConfidence.HIGH,
-                ),
+                recoverable_value=None,
+                evidence_class=EvidenceClass.UNKNOWN,
+                methodology_id=METHODOLOGY_ID,
+                methodology=METHODOLOGY,
             )
         )
 

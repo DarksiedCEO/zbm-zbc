@@ -22,10 +22,11 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from agents import abandoned_cart_coverage, discount_misuse
+from agents import affiliate_coupon_extension, discount_misuse
 from api import app
 from conftest import TEST_SERVICE_TOKEN
 from zbm_schema import (
+    AffiliateAttribution,
     DiscountApplication,
     Order,
     OrderLineItem,
@@ -36,6 +37,7 @@ from zbm_schema import (
 )
 from zbm_schema.money import MONEY_CONTEXT
 from zbm_schema.tier2 import ContractTerm
+from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
 
 client = TestClient(
     app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"}, raise_server_exceptions=False
@@ -44,12 +46,20 @@ MAX = "999999999999999.99"
 OVER = "1000000000000000.00"
 
 
+_AFFILIATE_100 = {"affiliate_id": "a", "click_timestamp": "2026-05-01T00:00:00Z",
+                  "order_timestamp": "2026-06-01T00:00:00Z", "attribution_window_hours": 24,
+                  "commission_rate_percent": 100}
+
+
 def _order_json(lines, status="abandoned_cart", discounts=None):
     return {
         "order_id": "o", "customer_id": "c", "placed_at": "2026-06-01T00:00:00Z", "status": status,
         "source_platform": "x",
         "line_items": [{"sku": f"s{i}", "unit_price_usd": p, "quantity": q} for i, (p, q) in enumerate(lines)],
         "discounts": discounts or [],
+        # E-4 (Oct 6 2026): abandoned-cart findings no longer carry the cart value, so the money
+        # carrier is the affiliate route at a 100% commission rate (commission = subtotal, exact).
+        "affiliate": _AFFILIATE_100,
     }
 
 
@@ -59,6 +69,7 @@ def _order(lines, discounts=None, status="abandoned_cart"):
         source_platform="x",
         line_items=[OrderLineItem(sku=f"s{i}", unit_price_usd=p, quantity=q) for i, (p, q) in enumerate(lines)],
         discounts=discounts or [],
+        affiliate=AffiliateAttribution(**_AFFILIATE_100),
     )
 
 
@@ -70,7 +81,7 @@ def _half_up_percent(amount: str, pct: str) -> Decimal:
 
 
 def _post_cart(lines):
-    return client.post("/agents/abandoned-cart-coverage/detect", json={"orders": [_order_json(lines)]})
+    return client.post("/agents/affiliate-coupon-extension/detect", json={"client_id": TENANT, "orders": [_order_json(lines)]})
 
 
 # --- the reproduction -------------------------------------------------------
@@ -86,8 +97,8 @@ def test_huge_quantity_is_422_not_500():
 
 
 def test_huge_contract_value_is_422_not_500():
-    r = client.post("/agents/contract-pricing-term-drift/detect", json={"terms": [{
-        "term_id": "t", "client_id": "c", "term_type": "minimum_spend",
+    r = client.post("/agents/contract-pricing-term-drift/detect", json={"client_id": TENANT, "terms": [{
+        "term_id": "t", "client_id": TENANT, "term_type": "minimum_spend",
         "contracted_value_usd": "9" * 27 + ".99", "actual_billed_value_usd": "0.01", "period_label": "p"}]})
     assert r.status_code == 422, (r.status_code, r.text[:300])
 
@@ -139,7 +150,7 @@ def test_subtotal_of_many_large_lines_is_exact_and_never_raises():
     o = _order([("19999999999999.99", 1)] * 50)
     assert o.subtotal_usd == Decimal("999999999999999.50")
     assert format_money(o.subtotal_usd) == "999999999999999.50"
-    [f] = abandoned_cart_coverage.detect([o])
+    [f] = affiliate_coupon_extension.detect([o], client_id=TENANT)
     assert f.model_dump(mode="json")["recoverable_value"]["amount_usd"] == "999999999999999.50"
 
 
@@ -192,7 +203,7 @@ def test_money_arithmetic_ignores_a_hostile_ambient_decimal_context():
                             contracted_value_usd=MAX, actual_billed_value_usd="0.01", period_label="p")
         assert term.drift_usd == Decimal("999999999999999.98")
         o2 = _order([(MAX, 1)], discounts=[d, DiscountApplication(code="b", amount_off_usd="0.01")], status="completed")
-        [f] = discount_misuse.detect([o2])
+        [f] = discount_misuse.detect([o2], client_id=TENANT)
         assert f.recoverable_value.amount_usd > 0
 
 

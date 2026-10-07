@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from api import MAX_BATCH_ITEMS, MAX_BODY_BYTES, ROUTE_BODY_LIMITS, _BodyLimitMiddleware, app
 from conftest import TEST_SERVICE_TOKEN
+from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
 
 client = TestClient(app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"})
 anon = TestClient(app)
@@ -44,7 +45,9 @@ def test_limits_are_the_documented_values():
     # worst case of the route's largest legal batch (test_body_limits.py);
     # MAX_BODY_BYTES is the largest of them. It used to be a flat 2 MiB,
     # which refused 1,000 orders of 30 line items.
-    assert MAX_BODY_BYTES == 36 * 1024 * 1024
+    # Oct 6 2026: 35 MiB — identifier fields are now ASCII-safe (E-12), one byte per character in
+    # the worst case instead of six (request_limits.ASCII_SAFE_PATTERNS).
+    assert MAX_BODY_BYTES == 35 * 1024 * 1024
     assert MAX_BATCH_ITEMS == 1000
 
 
@@ -58,7 +61,7 @@ def test_batch_over_the_item_cap_is_422(path, field):
 
 def test_batch_at_the_item_cap_is_accepted():
     orders = [{**_ORDER, "order_id": f"ord_{i}"} for i in range(MAX_BATCH_ITEMS)]
-    r = client.post("/agents/discount-misuse/detect", json={"orders": orders})
+    r = client.post("/agents/discount-misuse/detect", json={"client_id": TENANT, "orders": orders})
     assert r.status_code == 200, r.text[:500]
 
 
@@ -81,7 +84,7 @@ def test_oversized_chunked_body_is_413():
 
 
 def test_body_at_the_limit_is_parsed_not_refused():
-    body = b'{"orders": []}'
+    body = b'{"client_id":"fixture-pool","orders": []}'
     body = body + b" " * (ROUTE_BODY_LIMITS["/agents/discount-misuse/detect"] - len(body))
     r = client.post("/agents/discount-misuse/detect", content=body, headers={"Content-Type": "application/json"})
     assert r.status_code == 200, r.text

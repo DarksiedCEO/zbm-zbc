@@ -22,12 +22,13 @@ Tonight's fixtures already speak this shape directly.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
-from pydantic import AwareDatetime, BaseModel, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_validator
 
 from zbm_schema.limits import (
     MAX_ATTRIBUTION_WINDOW_HOURS,
@@ -37,11 +38,17 @@ from zbm_schema.limits import (
     MAX_RENEWAL_INTERVAL_DAYS,
     AgentId,
     CauseDescription,
+    ClientId,
     DiscountCode,
     FindingRef,
     Id,
     Label,
+    Methodology,
+    MethodologyId,
+    PeriodLabel,
     Sku,
+    Slug,
+    _normalize_slug,
 )
 from zbm_schema.money import (
     CENT as CENT,
@@ -113,9 +120,9 @@ class CauseCertainty(str, Enum):
 # ---------------------------------------------------------------------------
 
 class Customer(BaseModel):
-    customer_id: str
+    customer_id: Id
     email: str
-    created_at: datetime
+    created_at: AwareDatetime
     lifetime_order_count: int = Field(ge=0)
 
 
@@ -144,6 +151,12 @@ class DiscountApplication(BaseModel):
 
 class AffiliateAttribution(BaseModel):
     affiliate_id: Id
+    # The affiliate program's commission rate for this affiliate, in percent
+    # of the order subtotal, when known (E-4, Oct 6 2026). Without it the
+    # commission actually at risk cannot be computed, and the affiliate agent
+    # claims no dollar figure at all — it used to claim the whole order
+    # subtotal (probe P5: a $400 order "at risk" when a 10% commission is $40).
+    commission_rate_percent: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
     # Timezone required (fix wave 1): the affiliate agent subtracts these
     # two, and `aware - naive` raised TypeError -> 500. A naive timestamp is
     # also an ambiguous instant, so it is rejected at validation (422).
@@ -161,8 +174,11 @@ class Order(BaseModel):
     # Field limits: zbm_schema/limits.py (LOW-C, fix wave 1).
     order_id: Id
     customer_id: Id
-    placed_at: datetime
-    status: Label  # "completed" | "abandoned_cart" | "cancelled"
+    # Timezone required (E-13, Oct 6 2026): a naive timestamp is an ambiguous
+    # instant (probe P12).
+    placed_at: AwareDatetime
+    # Normalized (E-11): "Abandoned_Cart" is abandoned_cart, see limits.Slug.
+    status: Slug  # "completed" | "abandoned_cart" | "cancelled" | anything else the platform reports
     line_items: list[OrderLineItem] = Field(max_length=MAX_LINE_ITEMS_PER_ORDER)
     discounts: list[DiscountApplication] = Field(default_factory=list, max_length=MAX_DISCOUNTS_PER_ORDER)
     affiliate: Optional[AffiliateAttribution] = None
@@ -197,6 +213,9 @@ class Order(BaseModel):
             return quantize_money(sum((li.unit_price_usd * li.quantity for li in self.line_items), Decimal("0")))
 
 
+ORDER_STATUS_ABANDONED_CART = "abandoned_cart"
+
+
 class SubscriptionStatus(str, Enum):
     ACTIVE = "active"
     PAST_DUE = "past_due"
@@ -209,9 +228,17 @@ class Subscription(BaseModel):
     customer_id: Id
     plan_price_usd: PositiveMoney
     renewal_interval_days: int = Field(gt=0, le=MAX_RENEWAL_INTERVAL_DAYS)
-    last_renewal_at: Optional[datetime] = None
-    next_renewal_due_at: datetime
+    # Timezone required (E-13): the renewal agent compares next_renewal_due_at
+    # with the scan's as-of instant, which needs both to be real instants.
+    last_renewal_at: Optional[AwareDatetime] = None
+    next_renewal_due_at: AwareDatetime
     status: SubscriptionStatus
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _normalize_status(cls, value):
+        # E-11: same normalization as limits.Slug, then the enum decides.
+        return _normalize_slug(value)
 
 
 # ---------------------------------------------------------------------------
@@ -231,22 +258,84 @@ class LeakCategory(str, Enum):
     CONTRACT_PRICING_TERM_DRIFT = "contract_pricing_term_drift"
 
 
+class EntityType(str, Enum):
+    """What a finding's entity_id names. Part of the finding identity and of
+    the correlation key (client_id, entity_type, entity_id)."""
+    ORDER = "order"
+    SUBSCRIPTION = "subscription"
+    CONTRACT_TERM = "contract_term"
+    PLATFORM = "platform"
+
+
+class EvidenceClass(str, Enum):
+    """How a finding's dollar figure was obtained (E-4, Oct 6 2026). Every
+    finding carries one, with a methodology note — ADR 0001 "Evidence class
+    and methodology".
+
+      OBSERVED  — read directly off recorded transactions/terms, exact
+                  arithmetic only (e.g. a contracted minimum minus the
+                  amount actually billed).
+      ESTIMATED — observed inputs combined with a stated assumption (e.g.
+                  subtotal x a known commission rate, assuming the
+                  commission was paid; one missed renewal at plan price,
+                  assuming the charge would have succeeded).
+      MODELED   — produced by a statistical/attribution model. No agent
+                  emits it yet; reserved so a model-derived figure can never
+                  be passed off as ESTIMATED.
+      UNKNOWN   — no defensible dollar figure exists; recoverable_value is
+                  null. Required whenever recoverable_value is null.
+    """
+    OBSERVED = "OBSERVED"
+    ESTIMATED = "ESTIMATED"
+    MODELED = "MODELED"
+    UNKNOWN = "UNKNOWN"
+
+
+FINDING_ID_PREFIX = "rrf1-"
+
+
+def compute_finding_id(client_id: str, agent_id: str, entity_type: str, entity_id: str,
+                       period_label: str | None) -> str:
+    """E-3 (Oct 6 2026): a finding's id is a hash of everything that makes it
+    a distinct leak — tenant, agent, entity and period — so two clients'
+    "ord_1" never collide, two contract terms of one client and period never
+    collide (probe P1: both were "contract-client_b2-2026-06"), and
+    "a-b"+"c" vs "a"+"b-c" can no longer concatenate to the same id (probe
+    P2). Fields are joined with a newline, which no field's charset allows, so the
+    preimage is unambiguous; a missing period is the empty string (no
+    PeriodLabel can be empty). orchestrator-go recomputes this exactly
+    (internal/orchestrator/finding_id.go) and refuses a finding whose id
+    does not match. 160 bits of SHA-256."""
+    preimage = "\n".join(("rrf1", client_id, agent_id, entity_type, entity_id, period_label or ""))
+    return FINDING_ID_PREFIX + hashlib.sha256(preimage.encode("ascii")).hexdigest()[:40]
+
+
 class Finding(BaseModel):
     """
-    One agent's output for one entity. `order_id` (or `subscription_id`)
-    is the shared entity reference required for double-count correlation
-    across agents (Failure Mode #2) — never optional.
+    One agent's output for one entity of one client. (client_id,
+    entity_type, entity_id) is the shared entity reference required for
+    double-count correlation across agents (Failure Mode #2) — never
+    optional. finding_id is derived from it (compute_finding_id) and checked.
     """
     finding_id: FindingRef
+    client_id: ClientId  # the tenant (ZBM client) whose data produced this finding
     agent_id: AgentId
     leak_category: LeakCategory
-    entity_type: Label  # "order" | "subscription"
-    entity_id: FindingRef  # order_id or subscription_id — the correlation key
+    entity_type: EntityType
+    entity_id: Id  # order_id, subscription_id, term_id or platform — the correlation key
+    # The period this finding is about when the entity recurs (a contract
+    # term's billing period, a subscription's missed renewal date); None for
+    # one-off entities such as an order. Part of the finding identity.
+    period_label: PeriodLabel | None = None
     customer_id: Id
     cause_certainty: CauseCertainty
     cause_description: CauseDescription
     recoverable_value: Optional[LabeledValue] = None
-    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # E-4: how the dollar figure (or its absence) was arrived at.
+    evidence_class: EvidenceClass
+    methodology_id: MethodologyId
+    methodology: Methodology
+    detected_at: AwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @model_validator(mode="after")
     def _uncertain_cause_has_no_confident_value(self):
@@ -259,3 +348,44 @@ class Finding(BaseModel):
                     "decision confidence — Failure Mode #3 safeguard"
                 )
         return self
+
+    @model_validator(mode="after")
+    def _evidence_class_matches_value(self):
+        # A dollar figure always has a real evidence class, and UNKNOWN never
+        # has a dollar figure — the two cannot disagree.
+        if self.recoverable_value is None and self.evidence_class != EvidenceClass.UNKNOWN:
+            raise ValueError("a finding with no recoverable_value must have evidence_class UNKNOWN")
+        if self.recoverable_value is not None and self.evidence_class == EvidenceClass.UNKNOWN:
+            raise ValueError("a finding with a recoverable_value cannot have evidence_class UNKNOWN")
+        return self
+
+    @model_validator(mode="after")
+    def _finding_id_is_derived(self):
+        expected = compute_finding_id(self.client_id, self.agent_id, self.entity_type.value,
+                                      self.entity_id, self.period_label)
+        if self.finding_id != expected:
+            raise ValueError(
+                "finding_id must be compute_finding_id(client_id, agent_id, entity_type, "
+                "entity_id, period_label)"
+            )
+        return self
+
+    @property
+    def correlation_key(self) -> str:
+        """(client_id, entity_type, entity_id) as one string. "|" is in none
+        of the three charsets, so the key is unambiguous."""
+        return f"{self.client_id}|{self.entity_type.value}|{self.entity_id}"
+
+
+def new_finding(*, client_id: str, agent_id: str, entity_type: EntityType, entity_id: str,
+                period_label: str | None = None, **fields) -> Finding:
+    """Builds a Finding with its derived finding_id. Every agent uses this."""
+    return Finding(
+        finding_id=compute_finding_id(client_id, agent_id, entity_type.value, entity_id, period_label),
+        client_id=client_id,
+        agent_id=agent_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        period_label=period_label,
+        **fields,
+    )

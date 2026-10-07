@@ -38,7 +38,9 @@ from api import (
 )
 from conftest import TEST_SERVICE_TOKEN
 from request_limits import HEADROOM, MIB, UnboundedField, body_limit_for, worst_case_json_bytes
+from zbm_schema import compute_finding_id
 from zbm_schema import limits as L
+from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
 
 client = TestClient(app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"})
 
@@ -51,16 +53,30 @@ def s(n: int) -> str:
     return ESC * n
 
 
+# Oct 6 2026: identifiers and finding fields have an ASCII-safe charset (E-12), so their worst case
+# is one byte per character (request_limits.ASCII_SAFE_PATTERNS); a normalized label (limits.Slug)
+# is still sized at six: a legal raw label is "a" padded with whitespace that JSON escapes.
+def ident(n: int) -> str:
+    return "a" * n
+
+
+def raw_slug(n: int) -> str:
+    return "a" + "\x1f" * (n - 1)
+
+
+TENANT_WORST = ident(L.ID_MAX_CHARS)
+
+
 def compact(obj) -> bytes:
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode()
 
 
 def worst_order() -> dict:
     return {
-        "order_id": s(L.ID_MAX_CHARS),
-        "customer_id": s(L.ID_MAX_CHARS),
+        "order_id": ident(L.ID_MAX_CHARS),
+        "customer_id": ident(L.ID_MAX_CHARS),
         "placed_at": DT,
-        "status": s(L.LABEL_MAX_CHARS),
+        "status": raw_slug(L.LABEL_MAX_CHARS),
         "line_items": [
             {"sku": s(L.SKU_MAX_CHARS), "unit_price_usd": MAX_PRICE_50, "quantity": 1}
             for _ in range(L.MAX_LINE_ITEMS_PER_ORDER)
@@ -70,7 +86,8 @@ def worst_order() -> dict:
             for _ in range(L.MAX_DISCOUNTS_PER_ORDER)
         ],
         "affiliate": {
-            "affiliate_id": s(L.ID_MAX_CHARS),
+            "affiliate_id": ident(L.ID_MAX_CHARS),
+            "commission_rate_percent": 1.2345678901234567e-05,
             "click_timestamp": DT,
             "order_timestamp": DT,
             "attribution_window_hours": L.MAX_ATTRIBUTION_WINDOW_HOURS,
@@ -84,41 +101,49 @@ def worst_item(field: str) -> dict:
     if field == "orders":
         return worst_order()
     if field == "subscriptions":
-        return {"subscription_id": s(L.ID_MAX_CHARS), "customer_id": s(L.ID_MAX_CHARS),
+        return {"subscription_id": ident(L.ID_MAX_CHARS), "customer_id": ident(L.ID_MAX_CHARS),
                 "plan_price_usd": "999999999999999.99", "renewal_interval_days": L.MAX_RENEWAL_INTERVAL_DAYS,
                 "last_renewal_at": DT, "next_renewal_due_at": DT, "status": "lapsed_no_renewal_attempt"}
     if field == "events":
-        return {"order_id": s(L.ID_MAX_CHARS), "channel": s(L.LABEL_MAX_CHARS),
+        return {"order_id": ident(L.ID_MAX_CHARS), "channel": s(L.LABEL_MAX_CHARS),
                 "order_value_usd": "999999999999999.99", "pixel_attributed": False, "server_confirmed": False}
     if field == "touchpoints":
-        return {"order_id": s(L.ID_MAX_CHARS), "channel": s(L.LABEL_MAX_CHARS),
+        return {"order_id": ident(L.ID_MAX_CHARS), "channel": s(L.LABEL_MAX_CHARS),
                 "touchpoint_sequence": L.MAX_TOUCHPOINT_SEQUENCE, "is_paid_channel": False,
                 "is_credited_conversion_channel": False}
     if field == "statuses":
-        return {"client_id": s(L.ID_MAX_CHARS), "platform": s(L.LABEL_MAX_CHARS),
+        return {"client_id": TENANT_WORST, "platform": raw_slug(L.LABEL_MAX_CHARS),
                 "client_reports_using_it": False, "integration_connected": False}
     if field == "terms":
-        return {"term_id": s(L.ID_MAX_CHARS), "client_id": s(L.ID_MAX_CHARS), "term_type": "overage_rate",
+        return {"term_id": ident(L.ID_MAX_CHARS), "client_id": TENANT_WORST, "term_type": "overage_rate",
                 "contracted_value_usd": "999999999999999.99", "actual_billed_value_usd": "999999999999999.99",
-                "period_label": s(L.LABEL_MAX_CHARS)}
+                "period_label": ident(L.PERIOD_LABEL_MAX_CHARS)}
     if field == "findings":
-        return {"finding_id": s(L.FINDING_REF_MAX_CHARS), "agent_id": s(L.AGENT_ID_MAX_CHARS),
-                "leak_category": "cross_channel_misattribution_risk", "entity_type": s(L.LABEL_MAX_CHARS),
-                "entity_id": s(L.FINDING_REF_MAX_CHARS), "customer_id": s(L.ID_MAX_CHARS),
+        agent, entity, period = ident(L.AGENT_ID_MAX_CHARS), ident(L.ID_MAX_CHARS), ident(L.PERIOD_LABEL_MAX_CHARS)
+        return {"finding_id": compute_finding_id(TENANT_WORST, agent, "contract_term", entity, period),
+                "client_id": TENANT_WORST, "agent_id": agent,
+                "leak_category": "cross_channel_misattribution_risk", "entity_type": "contract_term",
+                "entity_id": entity, "period_label": period, "customer_id": ident(L.ID_MAX_CHARS),
                 "cause_certainty": "uncertain", "cause_description": s(L.CAUSE_DESCRIPTION_MAX_CHARS),
                 "recoverable_value": {"amount_usd": "999999999999999.99", "classification": "financially_verified",
                                       "confidence": "medium"},
+                "evidence_class": "ESTIMATED", "methodology_id": ident(L.METHODOLOGY_ID_MAX_CHARS),
+                "methodology": s(L.METHODOLOGY_MAX_CHARS),
                 "detected_at": DT}
     raise AssertionError(field)
 
 
-FIELD_OF = {model: next(iter(model.model_fields)) for model in set(ROUTE_REQUEST_MODELS.values())}
+FIELD_OF = {model: next(f for f in model.model_fields if f not in ("client_id", "as_of"))
+            for model in set(ROUTE_REQUEST_MODELS.values())}
 _BODY_CACHE: dict[str, bytes] = {}
 
 
 def worst_body(field: str) -> bytes:
     if field not in _BODY_CACHE:
-        _BODY_CACHE[field] = compact({field: [worst_item(field)] * MAX_BATCH_ITEMS})
+        head: dict = {} if field == "findings" else {"client_id": TENANT_WORST}
+        if field == "subscriptions":
+            head["as_of"] = DT
+        _BODY_CACHE[field] = compact({**head, field: [worst_item(field)] * MAX_BATCH_ITEMS})
     return _BODY_CACHE[field]
 
 
@@ -138,7 +163,7 @@ def test_finding_repro_1000_orders_of_30_line_items_is_accepted():
                       "order_timestamp": "2026-06-12T10:00:00Z", "attribution_window_hours": 24},
         "source_platform": "shopify", "recovery_attempted": False,
     }
-    body = json.dumps({"orders": [{**order, "order_id": f"ord_{i:06d}"} for i in range(1000)]}).encode()
+    body = json.dumps({"client_id": TENANT, "orders": [{**order, "order_id": f"ord_{i:06d}"} for i in range(1000)]}).encode()
     assert len(body) > 2.1 * MIB  # the finding's 2.12 MiB
     r = post("/agents/affiliate-coupon-extension/detect", body)
     assert r.status_code == 200, (r.status_code, r.text[:300])
@@ -159,9 +184,11 @@ def test_worst_case_legal_batch_is_accepted_on_every_route(path):
     assert r.status_code == 200, (r.status_code, r.text[:500])
     if path == "/agents/discount-misuse/detect":
         # every order stacks 10 max-length codes: the longest description an
-        # agent writes still fits the Finding's own limit.
+        # agent writes still fits the Finding's own limit. The 1,000 orders are
+        # one repeated row, so they are one finding (E-10: same entity, same
+        # finding -> reported once).
         findings = r.json()["findings"]
-        assert len(findings) == MAX_BATCH_ITEMS
+        assert len(findings) == 1
         assert all(len(f["cause_description"]) <= L.CAUSE_DESCRIPTION_MAX_CHARS for f in findings)
 
 
@@ -181,9 +208,12 @@ def test_route_limits_are_the_computed_worst_case_plus_headroom():
         assert limit >= worst * HEADROOM and limit % MIB == 0 and limit < worst * HEADROOM + MIB
     assert api.MAX_BODY_BYTES == max(ROUTE_BODY_LIMITS.values())
     # The numbers as documented in ADR 0001 "Request limits".
-    assert ROUTE_BODY_LIMITS["/agents/discount-misuse/detect"] == 36 * MIB
-    assert ROUTE_BODY_LIMITS["/correlation/overlaps"] == 11 * MIB
-    assert ROUTE_BODY_LIMITS["/agents/renewal-never-triggered/detect"] == 2 * MIB
+    # Oct 6 2026: orders 36 -> 35 MiB (ASCII-safe identifiers, E-12); findings 11 -> 13 MiB (each
+    # finding now carries client_id, period_label, evidence_class and a methodology note, E-3/E-4);
+    # subscriptions 2 -> 1 MiB.
+    assert ROUTE_BODY_LIMITS["/agents/discount-misuse/detect"] == 35 * MIB
+    assert ROUTE_BODY_LIMITS["/correlation/overlaps"] == 13 * MIB
+    assert ROUTE_BODY_LIMITS["/agents/renewal-never-triggered/detect"] == 1 * MIB
     assert ROUTE_BODY_LIMITS["/agents/server-side-attribution/detect"] == 1 * MIB
 
 
@@ -219,7 +249,7 @@ def test_over_a_field_limit_is_422_naming_the_field(field, value, loc):
         order["discounts"] = order["discounts"] + [order["discounts"][0]]
     else:
         order[field] = value
-    r = post("/agents/discount-misuse/detect", compact({"orders": [order]}))
+    r = post("/agents/discount-misuse/detect", compact({"client_id": TENANT, "orders": [order]}))
     assert r.status_code == 422
     assert any(d["loc"] == loc and d["type"] in ("too_long", "string_too_long") for d in r.json()["detail"]), r.json()
 

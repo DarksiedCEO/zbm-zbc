@@ -1,8 +1,8 @@
 [
   {"_fixture_note": "LEAK — client told onboarding they run TikTok Shop, but no working integration exists. Every leak category this platform could feed (abandoned cart, discount misuse, etc.) is blind on this channel.",
-   "client_id": "client_a1", "platform": "tiktok_shop", "client_reports_using_it": true, "integration_connected": false},
+   "client_id": "fixture-pool", "platform": "tiktok_shop", "client_reports_using_it": true, "integration_connected": false},
   {"_fixture_note": "CONTROL — connected and working. Must NOT be flagged.",
-   "client_id": "client_a1", "platform": "shopify", "client_reports_using_it": true, "integration_connected": true},
+   "client_id": "fixture-pool", "platform": "shopify", "client_reports_using_it": true, "integration_connected": true},
   {"_fixture_note": "CONTROL — client doesn't use Amazon at all, so no integration is expected. Must NOT be flagged as a gap.",
-   "client_id": "client_a1", "platform": "amazon", "client_reports_using_it": false, "integration_connected": false}
+   "client_id": "fixture-pool", "platform": "amazon", "client_reports_using_it": false, "integration_connected": false}
 ]
