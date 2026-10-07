@@ -135,7 +135,7 @@ func TestFindingsRoute_ReturnsRecordedFindingsAndNeverWrites(t *testing.T) {
 		}
 	}
 	for _, r := range ledgerRec.all() {
-		if r != "GET /ledger/entries" && r != "GET /ledger/verify" {
+		if r != "GET /ledger/entries" && r != "GET /ledger/verify" && r != "GET /ledger/head" {
 			t.Errorf("unexpected ledger call %q", r)
 		}
 	}

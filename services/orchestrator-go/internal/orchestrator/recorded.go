@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/DarksiedCEO/zbm-zbc/services/orchestrator-go/internal/client"
 )
@@ -45,6 +47,15 @@ type RecordedFinding struct {
 	// PresentInLatestScan: the client's latest completed scan still found
 	// it. A quote should use only findings that are.
 	PresentInLatestScan bool `json:"present_in_latest_scan"`
+	// ValueBasis (AEGIS L1): the base and rate a rate-derived amount was
+	// computed from, as the scan recorded them; nil otherwise.
+	ValueBasis *client.ValueBasis `json:"value_basis"`
+	// LabelsExceedEvidence (AEGIS M2): non-null when the recorded labels
+	// claim more than the recorded evidence class supports — a record
+	// written before the Oct 7 2026 invariant (8bdebde's renewal finding was
+	// ESTIMATED but labeled observed/high). Shown with the reason, never
+	// silently relabelled; such a figure must not be quoted as recorded.
+	LabelsExceedEvidence *string `json:"labels_exceed_evidence"`
 }
 
 // ScanSummary is one completed, consistent scan.
@@ -61,14 +72,35 @@ type ScanSummary struct {
 }
 
 // ExcludedScan is a scan that is in the ledger but does not count: it never
-// completed (failed, aborted, or still running), or what the ledger holds
-// for it does not match its own completion record.
+// completed (failed, aborted, abandoned, or still running), or what the
+// ledger holds for it does not match its own completion record.
 type ExcludedScan struct {
 	ScanID        string `json:"scan_id"`
 	ClientID      string `json:"client_id"`
 	FindingEvents int    `json:"finding_events"`
 	Reason        string `json:"reason"`
+	// Status (AEGIS L3, Oct 7 2026) labels why it does not count:
+	//   running       this process is writing it right now
+	//   incomplete    no completion or abort record yet, started less than
+	//                 ScanAbandonedAfter ago (or its start time is unknown):
+	//                 it may still be running in another process
+	//   abandoned     no completion or abort record, started at least
+	//                 ScanAbandonedAfter ago: it will never complete
+	//   aborted       the scan recorded that it failed
+	//   inconsistent  the ledger's records of it disagree with each other
+	Status string `json:"status"`
+	// StartedAt: when the ledger recorded its start ("" if it has none).
+	StartedAt string `json:"started_at"`
 }
+
+// Excluded-scan statuses (ExcludedScan.Status).
+const (
+	ScanStatusRunning      = "running"
+	ScanStatusIncomplete   = "incomplete"
+	ScanStatusAbandoned    = "abandoned"
+	ScanStatusAborted      = "aborted"
+	ScanStatusInconsistent = "inconsistent"
+)
 
 // RecordedFindingsResult is the read-only view served by
 // GET /revenue-recovery/findings.
@@ -81,14 +113,23 @@ type RecordedFindingsResult struct {
 	OverlappingClaims map[string][]RecordedFinding `json:"overlapping_claims"`
 	Scans             []ScanSummary                `json:"scans"`
 	ExcludedScans     []ExcludedScan               `json:"excluded_scans"`
-	// LedgerEntriesTotal: every ledger entry. FindingEntriesTotal: finding
-	// events of counted scans. LegacyFindingEntriesIgnored: pre-Oct-6
-	// "kind":"finding" entries (no scan, no tenant, pre-E-4 amounts).
-	LedgerEntriesTotal          int                        `json:"ledger_entries_total"`
-	FindingEntriesTotal         int                        `json:"finding_entries_total"`
-	LegacyFindingEntriesIgnored int                        `json:"legacy_finding_entries_ignored"`
-	LedgerVerify                *client.LedgerVerifyResult `json:"ledger_verify"`
-	NonLiveDataSource           bool                       `json:"non_live_data_source"`
+	// LedgerEntriesTotal: every entry in the WHOLE ledger, every department —
+	// from GET /ledger/head, or from the verify verdict when the ledger has
+	// no head route (LedgerTotalSource says which). Never the size of this
+	// process's own read, which a filtered or caller-scoped read makes a
+	// subset (ledger review, Oct 7 2026). LedgerEntriesRead: what that read
+	// returned. FindingEntriesTotal: finding events of counted scans.
+	// LegacyFindingEntriesIgnored: pre-Oct-6 "kind":"finding" entries (no
+	// scan, no tenant, pre-E-4 amounts); LegacyFindings lists them (AEGIS
+	// M4) so they can be shown, labelled, never counted.
+	LedgerEntriesTotal          int                         `json:"ledger_entries_total"`
+	LedgerTotalSource           string                      `json:"ledger_total_source"`
+	LedgerEntriesRead           int                         `json:"ledger_entries_read"`
+	FindingEntriesTotal         int                         `json:"finding_entries_total"`
+	LegacyFindingEntriesIgnored int                         `json:"legacy_finding_entries_ignored"`
+	LegacyFindings              []client.LegacyFindingEntry `json:"legacy_findings"`
+	LedgerVerify                *client.LedgerVerifyResult  `json:"ledger_verify"`
+	NonLiveDataSource           bool                        `json:"non_live_data_source"`
 }
 
 type scanEvents struct {
@@ -97,16 +138,18 @@ type scanEvents struct {
 	completed *client.LedgerEvent
 	aborted   bool
 	findings  []client.LedgerEvent
+	bases     []client.LedgerEvent // rr_value_basis (L1)
 	firstSeq  uint64
 }
 
 // ledgerFold accumulates the revenue_recovery events of the ledger, page by
 // page, in seq order.
 type ledgerFold struct {
-	scans   map[string]*scanEvents
-	order   []string
-	entries int
-	legacy  int
+	scans      map[string]*scanEvents
+	order      []string
+	entries    int
+	legacy     int
+	legacyRows []client.LegacyFindingEntry
 }
 
 func (lf *ledgerFold) scan(id string, seq uint64) *scanEvents {
@@ -126,6 +169,7 @@ func (lf *ledgerFold) scan(id string, seq uint64) *scanEvents {
 func (lf *ledgerFold) add(page *client.LedgerEntriesPage) {
 	lf.entries += page.Entries
 	lf.legacy += page.LegacyFindings
+	lf.legacyRows = append(lf.legacyRows, page.LegacyFindingRows...)
 	for i := range page.Events {
 		ev := page.Events[i]
 		if ev.Department != ledgerDepartment {
@@ -145,6 +189,8 @@ func (lf *ledgerFold) add(page *client.LedgerEntriesPage) {
 			s.aborted = true
 		case ev.EventType == eventTypeFinding && strings.HasPrefix(suffix, "f."):
 			s.findings = append(s.findings, ev)
+		case ev.EventType == eventTypeValueBasis && strings.HasPrefix(suffix, "b."):
+			s.bases = append(s.bases, ev)
 		}
 	}
 }
@@ -164,7 +210,25 @@ func (o *Orchestrator) entryPages(ctx context.Context, fn func(*client.LedgerEnt
 }
 
 // validate decides whether a scan counts, and decodes its findings if so.
-func (s *scanEvents) validate() (*ScanSummary, []RecordedFinding, string) {
+// The second string is the excluded status: ScanStatusAborted,
+// ScanStatusInconsistent, or "" for a scan with no completion and no abort
+// record (the caller decides running / incomplete / abandoned).
+func (s *scanEvents) validate() (*ScanSummary, []RecordedFinding, string, string) {
+	sum, rows, reason := s.check()
+	if reason == "" {
+		return sum, rows, "", ""
+	}
+	switch {
+	case s.completed == nil && s.aborted:
+		return nil, nil, reason, ScanStatusAborted
+	case s.completed == nil && s.started != nil:
+		return nil, nil, reason, ""
+	default:
+		return nil, nil, reason, ScanStatusInconsistent
+	}
+}
+
+func (s *scanEvents) check() (*ScanSummary, []RecordedFinding, string) {
 	switch {
 	case s.started == nil:
 		return nil, nil, "no scan_started event"
@@ -213,14 +277,44 @@ func (s *scanEvents) validate() (*ScanSummary, []RecordedFinding, string) {
 			return nil, nil, "a finding id is not derived from its recorded fields"
 		}
 		manifest = append(manifest, [3]string{ev.EventID, ev.PayloadSHA256, ev.Summary})
-		rows = append(rows, RecordedFinding{
+		row := RecordedFinding{
 			Seq: ev.Seq, FindingID: ev.SubjectID, ClientID: tenant, AgentID: f.AgentID,
 			LeakCategory: f.LeakCategory, EntityType: f.EntityType, EntityID: f.EntityID,
 			PeriodLabel: f.PeriodLabel, AmountUSD: f.AmountUSD, ValueClassification: f.ValueClassification,
 			DecisionConfidence: f.DecisionConfidence, EvidenceClass: f.EvidenceClass,
 			MethodologyID: f.MethodologyID, ScanID: s.id, PayloadSHA256: ev.PayloadSHA256,
 			RecordedAt: ev.RecordedAt, PrevHash: ev.PrevHash, Hash: ev.Hash,
-		})
+		}
+		if f.AmountUSD != nil {
+			if why := labelsExceedEvidence(f.EvidenceClass, *f.ValueClassification, *f.DecisionConfidence); why != "" {
+				row.LabelsExceedEvidence = &why
+			}
+		}
+		rows = append(rows, row)
+	}
+	// L1: value-basis events, each for a finding of this scan that has an
+	// amount, at most one per finding, reproducing that amount exactly.
+	rowOf := map[string]int{}
+	for i := range rows {
+		rowOf[rows[i].FindingID] = i
+	}
+	for _, ev := range s.bases {
+		if ev.Seq < s.started.Seq || ev.Seq > s.completed.Seq {
+			return nil, nil, "a value basis event lies outside its scan's start and completion"
+		}
+		i, ok := rowOf[ev.SubjectID]
+		if !ok || ev.EventID != basisEventID(s.id, ev.SubjectID) || rows[i].ValueBasis != nil {
+			return nil, nil, "a value basis event does not match a finding of its scan"
+		}
+		vb, err := decodeBasisSummary(ev.Summary)
+		if err != nil {
+			return nil, nil, "unreadable value basis record: " + err.Error()
+		}
+		if err := checkValueBasis(vb, rows[i].AmountUSD); err != nil {
+			return nil, nil, "a value basis record disagrees with its finding: " + err.Error()
+		}
+		rows[i].ValueBasis = vb
+		manifest = append(manifest, [3]string{ev.EventID, ev.PayloadSHA256, ev.Summary})
 	}
 	if s.completed.Seq < s.started.Seq || manifestHash(s.id, tenant, manifest) != s.completed.PayloadSHA256 {
 		return nil, nil, "the scan's findings do not match its completion record"
@@ -241,8 +335,8 @@ func sameAmount(a, b *client.Money) bool {
 
 // RecordedFindings returns the findings of every completed scan in the
 // evidence ledger, with the ledger's own verify verdict. Strictly read-only:
-// it calls only GET /ledger/entries and GET /ledger/verify, never a ledger
-// write endpoint, and never detection-py.
+// it calls only GET /ledger/entries, GET /ledger/verify and GET
+// /ledger/head, never a ledger write endpoint, and never detection-py.
 //
 // Only completed, self-consistent scans count (E-2): a scan that failed
 // midway, was aborted, is still running, or whose findings do not match its
@@ -252,7 +346,7 @@ func sameAmount(a, b *client.Money) bool {
 // an error: the caller must be able to SEE that the chain failed
 // verification. A failed request to the ledger is an error.
 func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsResult, error) {
-	fold := &ledgerFold{scans: map[string]*scanEvents{}}
+	fold := &ledgerFold{scans: map[string]*scanEvents{}, legacyRows: []client.LegacyFindingEntry{}}
 	if err := o.entryPages(ctx, fold.add); err != nil {
 		return nil, stepErr("ledger entries", err)
 	}
@@ -260,6 +354,22 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 	if err != nil {
 		return nil, stepErr("ledger verify", err)
 	}
+	// The ledger's size, from the ledger itself — not len() of our read
+	// (ledger review: with a department-filtered or caller-scoped read that
+	// is the findings count, and disagreed with /ledger/verify). A ledger
+	// without GET /ledger/head (before ledger-rust sweep F) gives it in the
+	// verify verdict; an invalid chain's verdict has no count, so then the
+	// total is what was read, and says so.
+	total, totalSource := fold.entries, "entries_read"
+	if head, err := o.ledger.Head(ctx); err == nil {
+		total, totalSource = int(head.Entries), "head"
+	} else if !errors.Is(err, client.ErrHeadUnsupported) {
+		return nil, stepErr("ledger head", err)
+	} else if verify.Valid {
+		total, totalSource = verify.Entries, "verify"
+	}
+	now := o.now()
+	running := o.runningScan()
 
 	type counted struct {
 		sum  *ScanSummary
@@ -269,13 +379,17 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 	excluded := []ExcludedScan{}
 	for _, id := range fold.order {
 		s := fold.scans[id]
-		sum, rows, reason := s.validate()
+		sum, rows, reason, status := s.validate()
 		if reason != "" {
-			cl := ""
+			cl, startedAt := "", ""
 			if s.started != nil {
-				cl = s.started.SubjectID
+				cl, startedAt = s.started.SubjectID, s.started.RecordedAt
 			}
-			excluded = append(excluded, ExcludedScan{ScanID: id, ClientID: cl, FindingEvents: len(s.findings), Reason: reason})
+			if status == "" {
+				status = unfinishedStatus(id, startedAt, running, now)
+			}
+			excluded = append(excluded, ExcludedScan{ScanID: id, ClientID: cl, FindingEvents: len(s.findings),
+				Reason: reason, Status: status, StartedAt: startedAt})
 			continue
 		}
 		scans = append(scans, counted{sum, rows})
@@ -291,10 +405,10 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 	findings := []RecordedFinding{}
 	index := map[string]int{}
 	summaries := []ScanSummary{}
-	total := 0
+	findingTotal := 0
 	for _, c := range scans {
 		summaries = append(summaries, *c.sum)
-		total += len(c.rows)
+		findingTotal += len(c.rows)
 		for _, rec := range c.rows {
 			i, seen := index[rec.FindingID]
 			if !seen {
@@ -336,10 +450,31 @@ func (o *Orchestrator) RecordedFindings(ctx context.Context) (*RecordedFindingsR
 		OverlappingClaims:           overlaps,
 		Scans:                       summaries,
 		ExcludedScans:               excluded,
-		LedgerEntriesTotal:          fold.entries,
-		FindingEntriesTotal:         total,
+		LedgerEntriesTotal:          total,
+		LedgerTotalSource:           totalSource,
+		LedgerEntriesRead:           fold.entries,
+		FindingEntriesTotal:         findingTotal,
 		LegacyFindingEntriesIgnored: fold.legacy,
+		LegacyFindings:              fold.legacyRows,
 		LedgerVerify:                verify,
 		NonLiveDataSource:           true,
 	}, nil
+}
+
+// unfinishedStatus labels a scan with a start but no completion or abort
+// record (AEGIS L3): running in this process, abandoned once it is older
+// than any scan can run, otherwise incomplete (it may still be running in
+// another process, or its start time cannot be read).
+func unfinishedStatus(id, startedAt, running string, now time.Time) string {
+	if id == running {
+		return ScanStatusRunning
+	}
+	t, err := time.Parse(time.RFC3339Nano, startedAt)
+	if err != nil {
+		return ScanStatusIncomplete
+	}
+	if now.Sub(t) >= ScanAbandonedAfter {
+		return ScanStatusAbandoned
+	}
+	return ScanStatusIncomplete
 }

@@ -55,7 +55,9 @@ func TestFindingSummaryWorstCaseFits(t *testing.T) {
 	f.ClientID = strings.Repeat("c", maxIDChars)
 	f.FindingID = ComputeFindingID(f.ClientID, f.AgentID, f.EntityType, f.EntityID, *f.PeriodLabel)
 	f.LeakCategory = "cross_channel_misattribution_risk"
-	f.EvidenceClass = "ESTIMATED"
+	// The longest labels; since AEGIS M2 (Oct 7 2026) they need OBSERVED
+	// evidence (ESTIMATED is one character longer, but cannot carry them).
+	f.EvidenceClass = "OBSERVED"
 	f.RecoverableValue.Classification, f.RecoverableValue.Confidence = "financially_verified", "very_high"
 	f.MethodologyID = strings.Repeat("m", maxMethodologyIDChars)
 	if err := checkFinding(f, f.ClientID, f.AgentID); err != nil {
@@ -65,8 +67,8 @@ func TestFindingSummaryWorstCaseFits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s) != 272 || len(s) > maxSummaryChars {
-		t.Errorf("worst-case summary is %d characters (documented 272, max %d)", len(s), maxSummaryChars)
+	if len(s) != 271 || len(s) > maxSummaryChars {
+		t.Errorf("worst-case summary is %d characters (documented 271, max %d)", len(s), maxSummaryChars)
 	}
 }
 
@@ -169,7 +171,7 @@ func TestStartedAndCompletedSummariesRoundTrip(t *testing.T) {
 	if err != nil || !info.Fixture || !info.TenantDefaulted || info.AsOf != "2026-10-06T12:00:00Z" || info.DataSource != "fixtures" {
 		t.Fatalf("%q -> %+v %v", ev.Summary, info, err)
 	}
-	c := completedEvent(strings.Repeat("a", 32), FixtureClientID, [][3]string{{"b", "1", "s"}, {"a", "2", "t"}})
+	c := completedEvent(strings.Repeat("a", 32), FixtureClientID, 2, [][3]string{{"b", "1", "s"}, {"a", "2", "t"}})
 	if n, err := decodeCompletedSummary(c.Summary); err != nil || n != 2 {
 		t.Fatalf("%q -> %d %v", c.Summary, n, err)
 	}

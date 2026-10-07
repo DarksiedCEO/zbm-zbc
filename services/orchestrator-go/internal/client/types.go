@@ -70,7 +70,20 @@ type Finding struct {
 	EvidenceClass string `json:"evidence_class"`
 	MethodologyID string `json:"methodology_id"`
 	Methodology   string `json:"methodology"`
-	DetectedAt    string `json:"detected_at"`
+	// ValueBasis (AEGIS L1, Oct 7 2026): the base and rate a rate-derived
+	// figure was computed from (the affiliate commission: order subtotal x
+	// commission rate). Nil for figures not derived from a rate. Recorded in
+	// the ledger as its own scan event (orchestrator ledger_record.go).
+	ValueBasis *ValueBasis `json:"value_basis"`
+	DetectedAt string      `json:"detected_at"`
+}
+
+// ValueBasis mirrors zbm_schema.ValueBasis. RatePercent is the exact decimal
+// text of the rate (no exponent); the orchestrator checks it and recomputes
+// the amount before recording.
+type ValueBasis struct {
+	BaseUSD     Money  `json:"base_usd"`
+	RatePercent string `json:"rate_percent"`
 }
 
 type findingsResponse struct {

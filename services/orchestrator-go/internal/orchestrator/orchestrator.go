@@ -94,7 +94,7 @@ type ScanResult struct {
 	AgentsRun         []string                    `json:"agents_run"`
 	NonLiveDataSource bool                        `json:"non_live_data_source"`
 	// LedgerEntriesWritten: finding events recorded for this scan (one per
-	// finding). LedgerEventsCreated / LedgerEventsAlreadyPresent split every
+	// finding; value-basis events are not counted here). LedgerEventsCreated / LedgerEventsAlreadyPresent split every
 	// event of the scan (started, findings, completed) by what the ledger
 	// answered; "already present" is a retried append the ledger had already
 	// committed — recorded once, never twice.
@@ -112,6 +112,38 @@ type Orchestrator struct {
 	scanMu    sync.Mutex
 	newScanID func() (string, error)
 	now       func() time.Time
+
+	// running is the id of the scan this process is writing right now ("" when
+	// none), so the findings view can tell a scan in progress from an
+	// abandoned one (AEGIS L3).
+	runningMu sync.Mutex
+	running   string
+}
+
+// AsOfClockSkew (AEGIS M3, Oct 7 2026) is the largest amount a requested
+// as_of may lie in the future of this process's clock: renewals due after
+// the real present must never be reported as missed. detection-py applies
+// the same bound (api.AS_OF_CLOCK_SKEW) to the as_of it is sent.
+const AsOfClockSkew = 60 * time.Second
+
+// ScanAbandonedAfter (AEGIS L3): a scan that started this long ago and has
+// neither completed nor aborted cannot still be running — a scan request is
+// cut off after cmd/orchestrator handlerTimeout (60 s) and its abort record
+// is attempted within 5 s more — so it is labelled "abandoned" (the process
+// died or lost the ledger mid-scan). A younger one may still be running in
+// another orchestrator process and is labelled "incomplete".
+const ScanAbandonedAfter = 2 * time.Minute
+
+func (o *Orchestrator) setRunning(id string) {
+	o.runningMu.Lock()
+	o.running = id
+	o.runningMu.Unlock()
+}
+
+func (o *Orchestrator) runningScan() string {
+	o.runningMu.Lock()
+	defer o.runningMu.Unlock()
+	return o.running
 }
 
 func New(detectionBaseURL, detectionToken, ledgerBaseURL, ledgerToken string) *Orchestrator {
@@ -221,9 +253,17 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 		return nil, &RequestError{Status: 422, Msg: fmt.Sprintf(
 			"no live data source exists yet: only the fixture tenant (client_id=%s, the default) can be scanned", FixtureClientID)}
 	}
+	now := o.now()
 	asOf := req.AsOf
 	if asOf.IsZero() {
-		asOf = o.now()
+		asOf = now
+	}
+	if asOf.After(now.Add(AsOfClockSkew)) {
+		// M3: a future as_of would report renewals that are not due yet as
+		// missed. Refused before anything runs.
+		return nil, &RequestError{Status: 422, Msg: fmt.Sprintf(
+			"as_of %s is in the future (more than %s after this server's clock): a renewal not yet due would be reported as missed",
+			asOf.UTC().Format(time.RFC3339), AsOfClockSkew)}
 	}
 	asOfWire := asOf.UTC().Format(time.RFC3339Nano)
 
@@ -355,17 +395,31 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 		ScanID: scanID, ClientID: tenant, AsOf: asOfWire, DataSource: DataSourceFixtures,
 		Fixture: true, TenantDefaulted: defaulted, Agents: agentsRun,
 	})
+	// Each finding's event, followed (L1) by its value-basis event when its
+	// figure is rate-derived. findingOf[i] is the finding events[i] records.
 	findingEvents := make([]client.EventInput, 0, len(all))
+	findingOf := make([]string, 0, len(all))
 	manifest := make([][3]string, 0, len(all))
 	for _, f := range all {
 		ev, err := findingEvent(scanID, f)
 		if err != nil {
 			return nil, stepErr("ledger record for "+f.FindingID, fmt.Errorf("%w: %v", ErrBadFinding, err))
 		}
-		findingEvents = append(findingEvents, ev)
-		manifest = append(manifest, [3]string{ev.EventID, ev.PayloadSHA256, ev.Summary})
+		evs := []client.EventInput{ev}
+		if f.ValueBasis != nil {
+			bev, err := basisEvent(scanID, f)
+			if err != nil {
+				return nil, stepErr("ledger record for "+f.FindingID, fmt.Errorf("%w: %v", ErrBadFinding, err))
+			}
+			evs = append(evs, bev)
+		}
+		for _, e := range evs {
+			findingEvents = append(findingEvents, e)
+			findingOf = append(findingOf, f.FindingID)
+			manifest = append(manifest, [3]string{e.EventID, e.PayloadSHA256, e.Summary})
+		}
 	}
-	completed := completedEvent(scanID, tenant, manifest)
+	completed := completedEvent(scanID, tenant, len(all), manifest)
 
 	res := &ScanResult{
 		ScanID: scanID, ClientID: tenant, TenantDefaulted: defaulted, DataSource: DataSourceFixtures,
@@ -384,17 +438,21 @@ func (o *Orchestrator) RunFullScan(ctx context.Context, req ScanRequest) (*ScanR
 		res.LedgerAppendRetries += r.Attempts - 1
 		return nil
 	}
+	o.setRunning(scanID)
+	defer o.setRunning("")
 	if err := write(started); err != nil {
 		o.abort(ctx, scanID, tenant, "ledger append scan started", err)
 		return nil, stepErr("ledger append scan started", err)
 	}
 	for i, ev := range findingEvents {
 		if err := write(ev); err != nil {
-			step := "ledger append for " + all[i].FindingID
+			step := "ledger append for " + findingOf[i]
 			o.abort(ctx, scanID, tenant, step, err)
 			return nil, stepErr(step, err)
 		}
-		res.LedgerEntriesWritten++
+		if ev.EventType == eventTypeFinding {
+			res.LedgerEntriesWritten++
+		}
 	}
 	if err := write(completed); err != nil {
 		o.abort(ctx, scanID, tenant, "ledger append scan completed", err)

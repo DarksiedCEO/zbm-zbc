@@ -14,11 +14,17 @@ package orchestrator
 //	rr.<scan_id>.completed             rr_scan_completed  subject = client_id
 //
 // (plus rr.<scan_id>.aborted, rr_scan_aborted, written best-effort when a
-// scan fails after it started writing). A scan COUNTS only once its
+// scan fails after it started writing, and — AEGIS L1, Oct 7 2026 — one
+//
+//	rr.<scan_id>.b.<finding_id>        rr_value_basis     subject = finding_id
+//
+// right after each finding whose figure is derived from a rate: the base and
+// rate it was computed from, which the 280-character finding summary has no
+// room for). A scan COUNTS only once its
 // completed event exists and agrees with what precedes it: the completed
 // event's payload_sha256 is the hash of the scan's manifest (every finding
 // event id with its payload hash and summary) and its summary the finding
-// count, so a
+// count (the manifest also covers every value-basis event), so a
 // reader can prove from the ledger alone that it sees exactly the scan's
 // findings — no partial scan is ever counted (recorded.go).
 //
@@ -30,8 +36,9 @@ package orchestrator
 // The client is the scan's (started event subject) and the finding id the
 // event's subject; both are re-derived and checked on read. Every value's
 // charset excludes space and "=", and none can be "-" (first character
-// alphanumeric), so the encoding is unambiguous. Worst case 272 characters
-// (ledger_record_test.go): the field bounds in detection-py
+// alphanumeric), so the encoding is unambiguous. Worst case 271 characters
+// (ledger_record_test.go; 272 before AEGIS M2, when ESTIMATED could carry
+// financially_verified/very_high): the field bounds in detection-py
 // zbm_schema/limits.py are what make it fit.
 
 import (
@@ -39,6 +46,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"regexp"
 	"sort"
 	"strconv"
@@ -55,6 +63,7 @@ const (
 	eventTypeFinding       = "rr_finding"
 	eventTypeScanCompleted = "rr_scan_completed"
 	eventTypeScanAborted   = "rr_scan_aborted"
+	eventTypeValueBasis    = "rr_value_basis"
 
 	maxSummaryChars = 280 // ledger-rust EventInput rule
 
@@ -62,6 +71,7 @@ const (
 	startedSummaryVersion = "rrs1"
 	doneSummaryVersion    = "rrc1"
 	abortSummaryVersion   = "rra1"
+	basisSummaryVersion   = "rrb1"
 
 	// Field bounds — detection-py zbm_schema/limits.py.
 	maxIDChars            = 64
@@ -71,6 +81,7 @@ const (
 	maxMethodologyIDChars = 24
 	maxClassificationLen  = 20 // financially_verified
 	maxConfidenceLen      = 9  // very_high
+	maxRatePercentChars   = 34 // zbm_schema limits.RATE_PERCENT_MAX_CHARS
 )
 
 var (
@@ -80,6 +91,7 @@ var (
 	agentIDRE  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	findingRE  = regexp.MustCompile(`^rrf1-[0-9a-f]{40}$`)
 	scanIDRE   = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	rateRE     = regexp.MustCompile(`^(0|[1-9][0-9]{0,2})(\.[0-9]+)?$`)
 
 	entityTypes    = map[string]bool{"order": true, "subscription": true, "contract_term": true, "platform": true}
 	evidenceValues = map[string]bool{"OBSERVED": true, "ESTIMATED": true, "MODELED": true, "UNKNOWN": true}
@@ -102,6 +114,77 @@ func sha256Hex(b []byte) string {
 func scanEventID(scanID, suffix string) string { return "rr." + scanID + "." + suffix }
 
 func findingEventID(scanID, findingID string) string { return "rr." + scanID + ".f." + findingID }
+
+func basisEventID(scanID, findingID string) string { return "rr." + scanID + ".b." + findingID }
+
+// AEGIS M2 (Oct 7 2026): a value's labels can never claim more than its
+// evidence class supports — the same rule as detection-py
+// zbm_schema.labels_exceed_evidence. Only OBSERVED evidence (exact
+// arithmetic on recorded transactions/terms) supports the "observed" or
+// "financially_verified" classification or a "high"/"very_high" confidence.
+var (
+	observationClassifications = map[string]bool{"observed": true, "financially_verified": true}
+	highConfidences            = map[string]bool{"high": true, "very_high": true}
+)
+
+// labelsExceedEvidence says why the labels overclaim, or "" if they do not.
+func labelsExceedEvidence(evidence, classification, confidence string) string {
+	if evidence == "OBSERVED" || evidence == "UNKNOWN" {
+		return ""
+	}
+	if observationClassifications[classification] {
+		return fmt.Sprintf("classification %s needs OBSERVED evidence, the figure is %s", classification, evidence)
+	}
+	if highConfidences[confidence] {
+		return fmt.Sprintf("confidence %s needs OBSERVED evidence, the figure is %s", confidence, evidence)
+	}
+	return ""
+}
+
+// validRate: a rate in percent as detection-py writes it — a plain decimal,
+// 0 < rate <= 100, at most maxRatePercentChars characters.
+func validRate(s string) bool {
+	if !matches(rateRE, s, maxRatePercentChars) {
+		return false
+	}
+	r, ok := new(big.Rat).SetString(s)
+	return ok && r.Sign() > 0 && r.Cmp(big.NewRat(100, 1)) <= 0
+}
+
+// valueBasisAmount is base x rate / 100, rounded half-up to cents, as
+// canonical money text — exactly detection-py's percent_of (exact Decimal
+// arithmetic, then one half-up quantize). big.Rat is exact, so the two can
+// never disagree by a rounding step. Inputs must already be valid.
+func valueBasisAmount(base client.Money, rate string) (string, bool) {
+	b, ok1 := new(big.Rat).SetString(base.String())
+	r, ok2 := new(big.Rat).SetString(rate)
+	if !ok1 || !ok2 {
+		return "", false
+	}
+	cents := new(big.Rat).Mul(b, r) // dollars x percent = cents
+	cents.Add(cents, big.NewRat(1, 2))
+	q := new(big.Int).Quo(cents.Num(), cents.Denom()) // floor: the value is positive
+	if q.Sign() <= 0 {
+		return "", false
+	}
+	str := fmt.Sprintf("%03s", q.String())
+	return str[:len(str)-2] + "." + str[len(str)-2:], true
+}
+
+// checkValueBasis: a value basis needs a value, valid inputs, and must
+// reproduce the finding's amount exactly.
+func checkValueBasis(vb *client.ValueBasis, amount *client.Money) error {
+	if amount == nil {
+		return fmt.Errorf("value_basis without a recoverable_value")
+	}
+	if !vb.BaseUSD.IsPositive() || !validRate(vb.RatePercent) {
+		return fmt.Errorf("value_basis is out of contract")
+	}
+	if got, ok := valueBasisAmount(vb.BaseUSD, vb.RatePercent); !ok || got != amount.String() {
+		return fmt.Errorf("value_basis %s x %s%% does not reproduce the amount %s", vb.BaseUSD.String(), vb.RatePercent, amount.String())
+	}
+	return nil
+}
 
 // checkFinding verifies everything the orchestrator relies on before a
 // finding is counted, correlated or recorded: it belongs to the scanned
@@ -143,6 +226,18 @@ func checkFinding(f client.Finding, tenant, wantAgent string) error {
 	if rv := f.RecoverableValue; rv != nil {
 		if !matches(slugRE, rv.Classification, maxClassificationLen) || !matches(slugRE, rv.Confidence, maxConfidenceLen) {
 			return fmt.Errorf("finding %.80q has an invalid value label", f.FindingID)
+		}
+		if why := labelsExceedEvidence(f.EvidenceClass, rv.Classification, rv.Confidence); why != "" {
+			return fmt.Errorf("finding %.80q: its labels claim more than its evidence supports (%s)", f.FindingID, why)
+		}
+	}
+	if f.ValueBasis != nil {
+		var amount *client.Money
+		if f.RecoverableValue != nil {
+			amount = &f.RecoverableValue.AmountUSD
+		}
+		if err := checkValueBasis(f.ValueBasis, amount); err != nil {
+			return fmt.Errorf("finding %.80q: %v", f.FindingID, err)
 		}
 	}
 	if want := ComputeFindingID(f.ClientID, f.AgentID, f.EntityType, f.EntityID, period); f.FindingID != want {
@@ -274,6 +369,47 @@ func findingEvent(scanID string, f client.Finding) (client.EventInput, error) {
 	}, nil
 }
 
+// basisEvent is the rr_value_basis event of a finding checkFinding passed
+// that carries a value basis (L1). Its summary is
+//
+//	rrb1 base=<money> rate=<rate percent>
+//
+// at most 5+1+23+1+39 = 69 characters.
+func basisEvent(scanID string, f client.Finding) (client.EventInput, error) {
+	vb := f.ValueBasis
+	payload, err := json.Marshal(vb)
+	if err != nil {
+		return client.EventInput{}, fmt.Errorf("marshal value basis of %s: %w", f.FindingID, err)
+	}
+	return client.EventInput{
+		EventID:       basisEventID(scanID, f.FindingID),
+		Department:    ledgerDepartment,
+		EventType:     eventTypeValueBasis,
+		Actor:         ledgerActor,
+		SubjectID:     f.FindingID,
+		PayloadSHA256: sha256Hex(payload),
+		Summary:       basisSummaryVersion + " base=" + vb.BaseUSD.String() + " rate=" + vb.RatePercent,
+	}, nil
+}
+
+// decodeBasisSummary parses an rrb1 summary strictly.
+func decodeBasisSummary(s string) (*client.ValueBasis, error) {
+	parts := strings.Split(s, " ")
+	if len(parts) != 3 || parts[0] != basisSummaryVersion {
+		return nil, fmt.Errorf("not an %s summary", basisSummaryVersion)
+	}
+	base, ok1 := strings.CutPrefix(parts[1], "base=")
+	rate, ok2 := strings.CutPrefix(parts[2], "rate=")
+	if !ok1 || !ok2 {
+		return nil, fmt.Errorf("value basis summary fields are not base= rate=")
+	}
+	m, err := client.ParseMoney(base)
+	if err != nil || !m.IsPositive() || !validRate(rate) {
+		return nil, fmt.Errorf("value basis summary out of contract")
+	}
+	return &client.ValueBasis{BaseUSD: m, RatePercent: rate}, nil
+}
+
 // startedPayload is hashed into the started event; its summary repeats the
 // parts a reader needs.
 type startedPayload struct {
@@ -349,8 +485,9 @@ func decodeStartedSummary(s string) (*startedInfo, error) {
 }
 
 // manifestHash is the payload_sha256 of a scan's completed event: the hash
-// of the scan id, the client and, for every finding event, its event id,
-// payload hash and summary, sorted by event id. The reader recomputes it
+// of the scan id, the client and, for every finding event and every value
+// basis event (L1; a scan recorded before Oct 7 2026 has none, so its hash is
+// unchanged), its event id, payload hash and summary, sorted by event id. The reader recomputes it
 // from the finding events it actually finds for the scan, so the completion
 // record commits to every recorded amount and label, not only to the
 // (unstored) payloads.
@@ -365,7 +502,9 @@ func manifestHash(scanID, clientID string, events [][3]string) string {
 	return sha256Hex(b)
 }
 
-func completedEvent(scanID, clientID string, events [][3]string) client.EventInput {
+// completedEvent: n is the scan's finding count; events is the manifest
+// (finding and value-basis events).
+func completedEvent(scanID, clientID string, n int, events [][3]string) client.EventInput {
 	return client.EventInput{
 		EventID:       scanEventID(scanID, "completed"),
 		Department:    ledgerDepartment,
@@ -373,7 +512,7 @@ func completedEvent(scanID, clientID string, events [][3]string) client.EventInp
 		Actor:         ledgerActor,
 		SubjectID:     clientID,
 		PayloadSHA256: manifestHash(scanID, clientID, events),
-		Summary:       doneSummaryVersion + " n=" + strconv.Itoa(len(events)),
+		Summary:       doneSummaryVersion + " n=" + strconv.Itoa(n),
 	}
 }
 

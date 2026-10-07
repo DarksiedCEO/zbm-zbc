@@ -21,6 +21,9 @@ type fakeLedger struct {
 	entries    string
 	verify     string
 	verifyCode int
+	// head: the GET /ledger/head body; "" answers 404 like a ledger-rust
+	// from before sweep F (which has no head route).
+	head string
 }
 
 func (f *fakeLedger) server(t *testing.T) *httptest.Server {
@@ -38,6 +41,13 @@ func (f *fakeLedger) server(t *testing.T) *httptest.Server {
 				w.WriteHeader(f.verifyCode)
 			}
 			_, _ = w.Write([]byte(f.verify))
+		case r.Method == http.MethodGet && r.URL.Path == "/ledger/head":
+			if f.head == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"not found"}`))
+				return
+			}
+			_, _ = w.Write([]byte(f.head))
 		default:
 			t.Errorf("read path made a non-read ledger request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusTeapot)
@@ -100,8 +110,16 @@ func (c *chain) writeScan(t *testing.T, id string, fs []client.Finding, mutate f
 		}
 		evs = append(evs, ev)
 		manifest = append(manifest, [3]string{ev.EventID, ev.PayloadSHA256, ev.Summary})
+		if f.ValueBasis != nil {
+			bev, err := basisEvent(id, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			evs = append(evs, bev)
+			manifest = append(manifest, [3]string{bev.EventID, bev.PayloadSHA256, bev.Summary})
+		}
 	}
-	evs = append(evs, completedEvent(id, FixtureClientID, manifest))
+	evs = append(evs, completedEvent(id, FixtureClientID, len(fs), manifest))
 	if mutate != nil {
 		evs = mutate(evs)
 	}
@@ -110,9 +128,13 @@ func (c *chain) writeScan(t *testing.T, id string, fs []client.Finding, mutate f
 	}
 }
 
+// readRecorded serves entries and a valid verify verdict that counts them
+// (and no head route, like ledger-rust on this branch).
 func readRecorded(t *testing.T, entries string) (*RecordedFindingsResult, *fakeLedger) {
 	t.Helper()
-	fl := &fakeLedger{entries: entries, verify: `{"valid":true,"entries":1}`}
+	var all []json.RawMessage
+	_ = json.Unmarshal([]byte(entries), &all)
+	fl := &fakeLedger{entries: entries, verify: fmt.Sprintf(`{"valid":true,"entries":%d}`, len(all))}
 	o := New(failingDetection(t).URL, "d", fl.server(t).URL, "l")
 	res, err := o.RecordedFindings(context.Background())
 	if err != nil {
@@ -135,15 +157,21 @@ func TestRecordedFindings_ReadsLedgerOnlyAndNeverWritesOrScans(t *testing.T) {
 	c.writeScan(t, scanID(1), []client.Finding{discO1, cartO1, renewS1}, nil)
 	res, fl := readRecorded(t, c.json(t))
 	for _, req := range fl.requests {
-		if req != "GET /ledger/entries" && req != "GET /ledger/verify" {
+		if req != "GET /ledger/entries" && req != "GET /ledger/verify" && req != "GET /ledger/head" {
 			t.Errorf("unexpected ledger request %q", req)
 		}
 	}
-	if len(fl.requests) != 2 {
+	if len(fl.requests) != 3 {
 		t.Errorf("one read of each, got %v", fl.requests)
 	}
-	if res.LedgerEntriesTotal != 7 || res.FindingEntriesTotal != 3 || res.LegacyFindingEntriesIgnored != 1 {
+	if res.LedgerEntriesTotal != 7 || res.LedgerTotalSource != "verify" || res.LedgerEntriesRead != 7 ||
+		res.FindingEntriesTotal != 3 || res.LegacyFindingEntriesIgnored != 1 {
 		t.Errorf("totals: %+v", res)
+	}
+	// M4: the legacy entry is listed (never counted as a finding).
+	if len(res.LegacyFindings) != 1 || res.LegacyFindings[0].FindingID != "disc-ord_1007" ||
+		res.LegacyFindings[0].AmountUSD.String() != "54.38" {
+		t.Errorf("legacy findings: %+v", res.LegacyFindings)
 	}
 	if len(res.Scans) != 1 || res.Scans[0].Findings != 3 || !res.Scans[0].Fixture || len(res.ExcludedScans) != 0 {
 		t.Fatalf("scans: %+v excluded %+v", res.Scans, res.ExcludedScans)
@@ -248,7 +276,8 @@ func TestRecordedFindings_LatestCompletedScanWinsAndCountsScans(t *testing.T) {
 
 func TestRecordedFindings_EmptyLedgerIsNotAnError(t *testing.T) {
 	res, _ := readRecorded(t, `[]`)
-	if res.Findings == nil || len(res.Findings) != 0 || res.OverlappingClaims == nil || res.ExcludedScans == nil {
+	if res.Findings == nil || len(res.Findings) != 0 || res.OverlappingClaims == nil || res.ExcludedScans == nil ||
+		res.LegacyFindings == nil || res.LedgerEntriesTotal != 0 {
 		t.Fatalf("empty ledger: %+v", res)
 	}
 }

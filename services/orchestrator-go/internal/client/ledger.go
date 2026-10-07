@@ -212,9 +212,29 @@ type LedgerEvent struct {
 	Hash          string `json:"hash"`
 }
 
+// LegacyFindingEntry is a pre-Oct-6 "kind":"finding" ledger entry (POST
+// /ledger/append), as recorded. AmountUSD is nil when the entry has none OR
+// when what it holds is not contract money (old logs persisted negative and
+// over-bound amounts); AmountOutOfContract says which.
+type LegacyFindingEntry struct {
+	Seq                 uint64  `json:"seq"`
+	FindingID           string  `json:"finding_id"`
+	AgentID             string  `json:"agent_id"`
+	EntityID            string  `json:"entity_id"`
+	LeakCategory        string  `json:"leak_category"`
+	AmountUSD           *Money  `json:"amount_usd"`
+	AmountOutOfContract bool    `json:"amount_out_of_contract"`
+	ValueClassification *string `json:"value_classification"`
+	DecisionConfidence  *string `json:"decision_confidence"`
+	RecordedAt          string  `json:"recorded_at"`
+	Hash                string  `json:"hash"`
+}
+
 // LedgerEntriesPage is a run of ledger entries in seq order.
 type LedgerEntriesPage struct {
-	// Entries counts every entry in the page, findings and events.
+	// Entries counts the entries this read returned, findings and events.
+	// It is NOT the ledger's size: a filtered or caller-scoped read returns
+	// a subset. The ledger's size comes from Head (or the verify verdict).
 	Entries int
 	// Events: the event entries of the page, in seq order.
 	Events []LedgerEvent
@@ -224,6 +244,9 @@ type LedgerEntriesPage struct {
 	// written before the E-4 amount corrections, so they are counted and
 	// shown as ignored, never presented as findings.
 	LegacyFindings int
+	// LegacyFindingRows: those entries themselves, so they can be shown
+	// (labelled as legacy and never counted) instead of only counted.
+	LegacyFindingRows []LegacyFindingEntry
 	// LastSeq is the seq of the page's last entry (valid when Entries > 0).
 	LastSeq uint64
 }
@@ -243,7 +266,7 @@ func (l *LedgerClient) Entries(ctx context.Context) (*LedgerEntriesPage, error) 
 	if err := l.base.doJSON(ctx, http.MethodGet, "/ledger/entries", nil, &raw); err != nil {
 		return nil, err
 	}
-	out := &LedgerEntriesPage{Entries: len(raw), Events: []LedgerEvent{}}
+	out := &LedgerEntriesPage{Entries: len(raw), Events: []LedgerEvent{}, LegacyFindingRows: []LegacyFindingEntry{}}
 	for i, entry := range raw {
 		var head struct {
 			Kind *string `json:"kind"`
@@ -262,6 +285,11 @@ func (l *LedgerClient) Entries(ctx context.Context) (*LedgerEntriesPage, error) 
 		switch *head.Kind {
 		case "finding":
 			out.LegacyFindings++
+			row, err := decodeLegacyFinding(entry)
+			if err != nil {
+				return nil, fmt.Errorf("ledger finding entry %d: %w", i, err)
+			}
+			out.LegacyFindingRows = append(out.LegacyFindingRows, *row)
 		case "event":
 			var ev LedgerEvent
 			if err := json.Unmarshal(entry, &ev); err != nil {
@@ -273,4 +301,81 @@ func (l *LedgerClient) Entries(ctx context.Context) (*LedgerEntriesPage, error) 
 		}
 	}
 	return out, nil
+}
+
+// decodeLegacyFinding reads a "kind":"finding" entry. Its amount is kept
+// only if it is contract money; anything else (a JSON number, a negative or
+// over-bound string — ledger-rust still loads those from old logs) is
+// reported as out of contract, never shown as dollars.
+func decodeLegacyFinding(entry json.RawMessage) (*LegacyFindingEntry, error) {
+	var f struct {
+		Seq                 uint64          `json:"seq"`
+		FindingID           string          `json:"finding_id"`
+		AgentID             string          `json:"agent_id"`
+		EntityID            string          `json:"entity_id"`
+		LeakCategory        string          `json:"leak_category"`
+		AmountUSD           json.RawMessage `json:"amount_usd"`
+		ValueClassification *string         `json:"value_classification"`
+		DecisionConfidence  *string         `json:"decision_confidence"`
+		RecordedAt          string          `json:"recorded_at"`
+		Hash                string          `json:"hash"`
+	}
+	if err := json.Unmarshal(entry, &f); err != nil {
+		return nil, err
+	}
+	row := &LegacyFindingEntry{
+		Seq: f.Seq, FindingID: f.FindingID, AgentID: f.AgentID, EntityID: f.EntityID, LeakCategory: f.LeakCategory,
+		ValueClassification: f.ValueClassification, DecisionConfidence: f.DecisionConfidence,
+		RecordedAt: f.RecordedAt, Hash: f.Hash,
+	}
+	if len(f.AmountUSD) > 0 && string(f.AmountUSD) != "null" {
+		var m Money
+		if err := json.Unmarshal(f.AmountUSD, &m); err == nil && m.IsPositive() {
+			row.AmountUSD = &m
+		} else {
+			row.AmountOutOfContract = true
+		}
+	}
+	return row, nil
+}
+
+// LedgerHead is GET /ledger/head (ledger-rust sweep F-6): the number of
+// entries in the whole ledger, the last seq and its hash — independent of
+// what any one read returned.
+type LedgerHead struct {
+	Entries  uint64  `json:"entries"`
+	HeadSeq  *uint64 `json:"head_seq"`
+	HeadHash string  `json:"head_hash"`
+}
+
+// ErrHeadUnsupported: the ledger has no GET /ledger/head (a ledger-rust from
+// before sweep F answers 404). Callers fall back to the verify verdict's
+// entry count.
+var ErrHeadUnsupported = errors.New("ledger-rust has no GET /ledger/head")
+
+// Head reads GET /ledger/head and checks its shape: head_seq is null exactly
+// when the ledger is empty and entries-1 otherwise, head_hash 64 lowercase
+// hex. A 404 is ErrHeadUnsupported (wrapped in the UpstreamError).
+func (l *LedgerClient) Head(ctx context.Context) (*LedgerHead, error) {
+	const path = "/ledger/head"
+	var h LedgerHead
+	if err := l.base.doJSON(ctx, http.MethodGet, path, nil, &h); err != nil {
+		var ue *UpstreamError
+		if errors.As(err, &ue) && ue.StatusCode == http.StatusNotFound {
+			return nil, &wrappedUpstreamError{UpstreamError: ue, cause: ErrHeadUnsupported}
+		}
+		return nil, err
+	}
+	hexOK := len(h.HeadHash) == 64
+	for _, c := range h.HeadHash {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			hexOK = false
+		}
+	}
+	seqOK := (h.HeadSeq == nil && h.Entries == 0) || (h.HeadSeq != nil && h.Entries > 0 && *h.HeadSeq == h.Entries-1)
+	if !hexOK || !seqOK {
+		return nil, l.base.upstreamErr(UpstreamBadResponse, http.MethodGet, path, http.StatusOK,
+			fmt.Sprintf("head response is not {entries, head_seq, head_hash} (entries=%d head_seq=%v)", h.Entries, h.HeadSeq))
+	}
+	return &h, nil
 }
