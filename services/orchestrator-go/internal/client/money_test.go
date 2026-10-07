@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,56 +115,15 @@ func TestDetectionClient_RejectsFindingWithFloatAmountWithClearError(t *testing.
 	}))
 	defer srv.Close()
 
-	_, err := NewDetectionClient(srv.URL, "t").DetectDiscountMisuse(context.Background(), nil)
+	_, err := NewDetectionClient(srv.URL, "t").DetectDiscountMisuse(context.Background(), "fixture-pool", nil)
 	if err == nil || !strings.Contains(err.Error(), "money must be a JSON string") {
 		t.Fatalf("expected a clear money-format error, got %v", err)
 	}
 }
 
-// Exact pass-through: the amount string detection-py emitted is the exact
-// string the ledger receives — no float64 in between.
-func TestLedgerClient_AppendFindingPassesAmountThroughExactly(t *testing.T) {
-	// Fix wave 1 (F14): "12345678901234567.89" replaced by the contract
-	// maximum; 17 integer digits are now out of contract.
-	for _, amt := range []string{"0.30", "2.01", "49.99", "54.38", "999999999999999.99"} {
-		var body []byte
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, _ = io.ReadAll(r.Body)
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"seq":0,"hash":"h","prev_hash":"p"}`))
-		}))
-
-		var f Finding
-		raw := `{"finding_id":"f-1","agent_id":"a","leak_category":"c","entity_id":"e","recoverable_value":{"amount_usd":"` + amt + `","classification":"observed","confidence":"high"}}`
-		if err := json.Unmarshal([]byte(raw), &f); err != nil {
-			t.Fatalf("unmarshal finding: %v", err)
-		}
-		if _, err := NewLedgerClient(srv.URL, "t").AppendFinding(context.Background(), f); err != nil {
-			t.Fatalf("append: %v", err)
-		}
-		srv.Close()
-
-		if !bytes.Contains(body, []byte(`"amount_usd":"`+amt+`"`)) {
-			t.Errorf("ledger request body did not carry amount %q exactly: %s", amt, body)
-		}
-	}
-}
-
-func TestLedgerClient_AppendFindingWithoutValueSendsNullAmount(t *testing.T) {
-	var body []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ = io.ReadAll(r.Body)
-		_, _ = w.Write([]byte(`{"seq":0,"hash":"h","prev_hash":"p"}`))
-	}))
-	defer srv.Close()
-
-	if _, err := NewLedgerClient(srv.URL, "t").AppendFinding(context.Background(), Finding{FindingID: "f"}); err != nil {
-		t.Fatalf("append: %v", err)
-	}
-	if !bytes.Contains(body, []byte(`"amount_usd":null`)) {
-		t.Errorf("expected null amount_usd, got %s", body)
-	}
-}
+// The exact pass-through of amounts into the ledger is tested where the
+// ledger record is built: internal/orchestrator ledger_record_test.go
+// (TestFindingSummaryCarriesTheAmountExactly).
 
 // Loosely-typed pass-through payloads (fixture orders) must not lose
 // precision on any JSON number that is still a number: the client decodes

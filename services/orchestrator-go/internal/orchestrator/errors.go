@@ -47,10 +47,14 @@ func PublicMessage(err error) string {
 	var reason string
 	var upstream *client.UpstreamError
 	switch {
+	case errors.Is(err, client.ErrEventConflict):
+		reason = "ledger-rust already holds this scan event with different content (409); nothing was overwritten"
 	case errors.As(err, &upstream):
 		reason = upstream.Public()
 	case errors.Is(err, client.ErrInvalidMoney):
 		reason = "a finding carried an invalid money amount"
+	case errors.Is(err, ErrBadFinding):
+		reason = "detection returned a finding that fails the scan contract (wrong client, agent or id, or a field out of contract)"
 	default:
 		reason = "internal error"
 	}

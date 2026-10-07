@@ -7,6 +7,7 @@ package main
 // ledger already recorded; a scan is only ever an explicit POST.
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,10 +37,32 @@ func (r *recorder) all() []string {
 	return append([]string(nil), r.reqs...)
 }
 
+// recordedEntries is a real ledger's content after one completed fix-wave
+// scan (twoLeakDetection: three findings, o0 claimed by two agents), with a
+// pre-fix-wave "kind":"finding" entry in front, which must be ignored.
+func recordedEntries(t *testing.T) string {
+	t.Helper()
+	led := newMemLedger()
+	led.entries = append(led.entries, memEntry{"kind": "finding", "seq": 0, "finding_id": "disc-ord_1007",
+		"agent_id": "discount-misuse-v1", "entity_id": "ord_1007", "leak_category": "discount_misuse",
+		"amount_usd": "54.38", "value_classification": "observed", "decision_confidence": "very_high",
+		"recorded_at": "2026-09-24T10:00:00Z", "prev_hash": "g", "hash": "h0"})
+	srv := fixWaveServer(t, twoLeakDetection(), led)
+	if code, _, body := scan(t, srv, ""); code != http.StatusOK {
+		t.Fatalf("preparing ledger content: scan = %d: %s", code, body)
+	}
+	b, err := json.Marshal(led.snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 // A fake ledger that FAILS THE TEST if anything calls a write endpoint
 // (POST /ledger/append, POST /ledger/events) or uses any method but GET.
 func readOnlyLedger(t *testing.T, rec *recorder) *httptest.Server {
 	t.Helper()
+	entries := recordedEntries(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.add(r.Method + " " + r.URL.Path)
 		if r.Method != http.MethodGet || r.URL.Path == "/ledger/append" || r.URL.Path == "/ledger/events" {
@@ -50,7 +73,7 @@ func readOnlyLedger(t *testing.T, rec *recorder) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/ledger/entries":
-			_, _ = w.Write([]byte(`[{"kind":"finding","seq":0,"finding_id":"disc-ord_1007","agent_id":"discount-misuse-v1","entity_id":"ord_1007","leak_category":"discount_misuse","amount_usd":"54.38","value_classification":"observed","decision_confidence":"very_high","recorded_at":"2026-09-24T10:00:00Z","prev_hash":"g","hash":"h0"}]`))
+			_, _ = w.Write([]byte(entries))
 		case "/ledger/verify":
 			_, _ = w.Write([]byte(`{"valid":true,"entries":1}`))
 		default:
@@ -103,7 +126,9 @@ func TestFindingsRoute_ReturnsRecordedFindingsAndNeverWrites(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("GET findings = %d: %s", code, body)
 		}
-		for _, want := range []string{`"finding_id":"disc-ord_1007"`, `"amount_usd":"54.38"`, `"ledger_verify":{"valid":true`, `"times_recorded":1`} {
+		wantID := `"finding_id":"` + findingID(tenant, "discount-misuse-v1", "order", "o0", "") + `"`
+		for _, want := range []string{wantID, `"amount_usd":"4.50"`, `"ledger_verify":{"valid":true`, `"times_recorded":1`,
+			`"legacy_finding_entries_ignored":1`, `"present_in_latest_scan":true`, `"fixture-pool|order|o0"`} {
 			if !strings.Contains(body, want) {
 				t.Errorf("response missing %s: %s", want, body)
 			}
