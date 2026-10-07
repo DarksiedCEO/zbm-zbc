@@ -387,3 +387,9 @@ phrase from all rounds is pinned in `test_scope_corpus_all_rounds_at_once`.
 | Id | Finding | Fix |
 |---|---|---|
 | H-I (High, regression) | With the email decision on every inbound email, complaints ("why do you never call or email back?") and time limits ("don't call or email before 9am") revoked email under an SMS alert code | With no opt-out level, email is revoked only for a clause that is nothing but a direct command not to contact the sender by two or more channels ("Please do not call or email me again"): `revoke_direct`, evidence via `request_by_email`, alert `EMAIL_OPTED_OUT_BY_REQUEST`. Any other no-level case is `ask` (`EMAIL_OPT_OUT_UNCLEAR`) |
+
+### Sweep A follow-up — AEGIS re-review of b3725e9 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-J (High, pre-existing) | "I don't want your emails", "I no longer want to receive your emails", "I do not want calls or emails" were not opt-outs | `_NEG_WANT`: a negated want / wish / need (to receive / get / hear) of emails, texts, messages or newsletters is an exact opt-out; its channels decide the scope (email or messages → `all`, texts only → SMS). Calls alone are not an SMS opt-out |

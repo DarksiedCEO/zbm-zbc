@@ -104,6 +104,9 @@ def opt_out_level(text: str) -> Optional[str]:
     for norm in variants:
         if any(f" {normalise(t).strip()} " in norm for t in OPT_OUT_TERMS):
             return "exact"
+        m = _NEG_WANT.search(norm)
+        if m and not set(m.group(1).split()) <= {"call", "calls"}:
+            return "exact"
         if norm.strip() in OPT_OUT_SHORT:
             return "exact"
         for tok in norm.split():
@@ -325,6 +328,11 @@ def typo_opt_out(text: Optional[str]) -> bool:
 # AEGIS M-9: call wording names a channel for the scope ("do not call, text or email me") but is not an SMS opt-out
 # on its own ("Never call before 9 please"): it reaches a suspected level through negated_channel at most
 SCOPE_ONLY_TERMS = ("do not call", "dont call", "never call", "stop calling")
+# AEGIS H-J: "I don't want your emails", "I no longer want to receive your emails", "I do not want calls or emails"
+_NEG_WANT = re.compile(r"\b(?:dont|do not|no longer|never|dont ever) (?:want|wish|need|like)(?: to (?:receive|get|hear))?"
+                       r"(?: (?:any|your|these|those|more|any more|anymore|further|the|from|you|of))*"
+                       r" ((?:emails?|e mails?|calls?|texts?|txts?|messages?|newsletters?|mail|sms)"
+                       r"(?: (?:or|and|nor) (?:emails?|e mails?|calls?|texts?|txts?|messages?|newsletters?|mail|sms))*)\b")
 _SCOPE_SEGMENT = re.compile(r"[\n\r.!?;,]+")
 # "Do not call, text or email me": a comma inside a list of channels is not a clause end
 _CH = r"(?:call|text|txt|message|email|e-mail|mail|sms)"
@@ -449,6 +457,12 @@ def opt_out_scope(text: Optional[str]) -> Optional[str]:
                 phone, email = _scan_phrase(toks, i, j)
                 if not phone or email is True:
                     generic = True
+            for m in _NEG_WANT.finditer(norm):
+                chans = set(m.group(1).split())
+                if chans & (EMAIL_SCOPE_WORDS | {"e", "mails"}) or chans & {"message", "messages"}:
+                    found = generic = True
+                elif chans & PHONE_SCOPE_WORDS:
+                    found = True
     if not found:
         return None
     if generic:

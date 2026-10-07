@@ -650,3 +650,18 @@ def test_hi_a_direct_revoke_is_alerted_in_its_own_words(tmp_path):
     assert _consents(h, cid)["email"] == "revoked"
     codes = {a["code"] for a in h.svc.alerts.values()}
     assert "EMAIL_OPTED_OUT_BY_REQUEST" in codes and "SMS_OPT_OUT_SUSPECTED" not in codes
+
+
+# ------------------------------------------------------------------ AEGIS re-review of b3725e9 (REVISE)
+
+def test_hj_not_wanting_emails_is_an_email_opt_out(tmp_path):
+    import channels
+    for t in ("I don't want your emails", "I no longer want to receive your emails",
+              "I don't want any more emails from you", "I do not want calls or emails from you"):
+        assert channels.email_opt_out_decision(t) == "revoke", t
+    assert channels.email_opt_out_decision("I don't want your texts anymore") == "keep"
+    assert channels.opt_out_level("I don't want to call you back today") is None
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    h.ok(_email(h, "owner@acme.test", "I don't want your emails"), 201)
+    assert _both_revoked(h, cid)
