@@ -1198,11 +1198,12 @@ class SupportService:
             # the person's own words names the phone; a typo of unsubscribe / stop by email revokes it too
             decision = (channels.email_opt_out_decision(text, body.get("subject"))
                         if channel == "email" and contact.get("email") else None)
-            email_revoke = decision == "revoke"
+            email_revoke = decision in ("revoke", "revoke_direct")
             if decision == "ask":        # AEGIS H-F: an unclear email scope is never guessed: SMS only, Andre decides
                 effects.append(self._alert_effect("EMAIL_OPT_OUT_UNCLEAR", contact["contact_id"], rid))
             email_effect = {"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "email",
-                            "via": "stop_by_email" if level == "exact" else "suspected_stop_by_email",
+                            "via": ("stop_by_email" if level == "exact" else "suspected_stop_by_email" if level
+                                    else "request_by_email"),
                             "request_id": rid, "address": contact.get("email")}
             if revoke:
                 had = channel == "sms" and channels.consent_matches(
@@ -1233,10 +1234,11 @@ class SupportService:
             elif tail == "alert":            # AEGIS R2/R4: opt-out wording in the quoted tail: Andre reads it
                 effects.append(self._alert_effect("OPT_OUT_IN_QUOTED_TEXT", contact["contact_id"], rid))
             if email_revoke and not revoke and level != "suspected":
-                # AEGIS H-H: an email opt-out that names no SMS wording at all ("do not call or email me")
+                # AEGIS H-H / H-I: a direct "do not call or email me" with no SMS wording: email revoked, Andre told
+                # in its own words (EMAIL_OPTED_OUT_BY_REQUEST), never under an SMS code
                 effects.append(email_effect)
                 resp["email_opted_out"] = True
-                effects.append(self._alert_effect("SMS_OPT_OUT_SUSPECTED", contact["contact_id"], rid))
+                effects.append(self._alert_effect("EMAIL_OPTED_OUT_BY_REQUEST", contact["contact_id"], rid))
             if not revoke and level == "suspected":
                 if email_revoke:             # AEGIS M1: err toward honouring; consent_changed is its typed evidence
                     effects.append(email_effect)

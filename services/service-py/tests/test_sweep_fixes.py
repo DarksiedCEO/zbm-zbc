@@ -566,7 +566,7 @@ def test_hf_unclear_email_scope_asks_andre(tmp_path):
     assert channels.email_opt_out_decision("Do not text me, call or email me") == "keep"     # a request
     for t in ("Stop texting me. Email or regular mail please", "Do not call, text or email me",
               "stop texting me. emails"):
-        assert channels.email_opt_out_decision(t) in ("ask", "revoke"), t
+        assert channels.email_opt_out_decision(t) in ("ask", "revoke", "revoke_direct"), t
     assert channels.email_opt_out_decision("stop texting me. emails") == "ask"
     h = Harness(tmp_path)
     cid = _with_consents(h)
@@ -605,7 +605,7 @@ def test_hg_a_two_item_comma_is_two_clauses():
     for t in ("Don't text, email me instead", "Please don't text, email me", "Don't text, email is better",
               "don't text, e-mail me", "Don't text, email me if there's a problem", "Do not text, email me at jane@x.com"):
         assert channels.email_opt_out_decision(t) in ("keep", "ask"), t
-    assert channels.email_opt_out_decision("Do not call, text or email me") == "revoke"
+    assert channels.email_opt_out_decision("Do not call, text or email me") in ("revoke", "revoke_direct")
 
 
 def test_m9_call_wording_alone_never_revokes_sms():
@@ -619,8 +619,34 @@ def test_hh_call_or_email_opt_outs_revoke_email(tmp_path):
     for t in ("Do not call or email me", "Please don't call or email me", "dont call or email",
               "Please do not call me or email me about this", "Never call or email me again",
               "Dont call me or email me anymore", "Don't call, text, or email me"):
-        assert channels.email_opt_out_decision(t) == "revoke", t
+        assert channels.email_opt_out_decision(t) in ("revoke", "revoke_direct"), t
     h = Harness(tmp_path)
     cid = _with_consents(h)
     r = h.ok(_email(h, "owner@acme.test", "Do not call or email me"), 201)
     assert r.get("email_opted_out") is True and _consents(h, cid)["email"] == "revoked"
+
+
+
+# ------------------------------------------------------------------ AEGIS re-review of 2018cd2 (REVISE)
+
+def test_hi_complaints_and_time_limits_never_revoke_email(tmp_path):
+    import channels
+    for t in ("Why do you never call or email back? I've been waiting a week.",
+              "My order is late and you never call or email me with updates!",
+              "We never call or email asking for your password, right?",
+              "Do not call or email the old address, it's changed to j@x.com",
+              "Dont call or email me before 9am please, I work nights", "Please don't call or email after 8pm"):
+        assert channels.email_opt_out_decision(t) in (None, "ask", "keep"), t
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    h.ok(_email(h, "owner@acme.test", "Why do you never call or email back? I've been waiting a week."), 201)
+    assert _consents(h, cid)["email"] == "active"
+
+
+def test_hi_a_direct_revoke_is_alerted_in_its_own_words(tmp_path):
+    h = Harness(tmp_path)
+    cid = _with_consents(h)
+    h.ok(_email(h, "owner@acme.test", "Please do not call or email me again."), 201)
+    assert _consents(h, cid)["email"] == "revoked"
+    codes = {a["code"] for a in h.svc.alerts.values()}
+    assert "EMAIL_OPTED_OUT_BY_REQUEST" in codes and "SMS_OPT_OUT_SUSPECTED" not in codes

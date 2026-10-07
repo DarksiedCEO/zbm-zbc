@@ -381,3 +381,9 @@ phrase from all rounds is pinned in `test_scope_corpus_all_rounds_at_once`.
 |---|---|---|
 | H-H (High) | "Do not call or email me" (no SMS wording, so no opt-out level) kept email with no signal | Every inbound email gets an email decision; a scope-only call phrase whose reach names email revokes email (`consent_changed` evidence) and raises `SMS_OPT_OUT_SUSPECTED` |
 | M-11 | Oxford comma "call, text, or email" was not a list | ", or / , and" between channels joins the list |
+
+### Sweep A follow-up — AEGIS re-review of 2018cd2 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-I (High, regression) | With the email decision on every inbound email, complaints ("why do you never call or email back?") and time limits ("don't call or email before 9am") revoked email under an SMS alert code | With no opt-out level, email is revoked only for a clause that is nothing but a direct command not to contact the sender by two or more channels ("Please do not call or email me again"): `revoke_direct`, evidence via `request_by_email`, alert `EMAIL_OPTED_OUT_BY_REQUEST`. Any other no-level case is `ask` (`EMAIL_OPT_OUT_UNCLEAR`) |

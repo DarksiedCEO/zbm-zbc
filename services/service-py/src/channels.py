@@ -473,15 +473,33 @@ def email_opt_out_decision(text: Optional[str], subject: Optional[str] = None) -
     scopes = {opt_out_scope(own), opt_out_scope(subject)} - {None}
     if not exact and not typo:
         # a scope-only phrase ("do not call, text or email me") decides only with an email channel in it
-        return "revoke" if "all" in scopes else None      # AEGIS H-H: "do not call or email me"
+        # AEGIS H-H / H-I: with no opt-out level, only a direct command to us revokes ("Do not call or email me
+        # again"); "why do you never call or email back?", "don't call or email before 9am" are asked about
+        if "all" not in scopes:
+            return None
+        return "revoke_direct" if _direct_no_contact(own) or _direct_no_contact(subject) else "ask"
     if not scopes or "all" in scopes:
         return "revoke"
     return "ask" if "ask" in scopes else "keep"
 
 
+_DIRECT_NO_CONTACT = re.compile(
+    r"^(?:(?:hi|hello|hey)(?: \w+)? )?(?:please )?(?:do not|dont|never) (?:call|text|txt|email|e mail|message|contact)"
+    r"(?: me| us)?(?: (?:or|and|nor) (?:call|text|txt|email|e mail|message|contact)(?: me| us)?)+"
+    r"(?: (?:again|anymore|any more|ever again|ever|please|thanks|thank you|about this|at all))*$")
+
+
+def _direct_no_contact(text: Optional[str]) -> bool:
+    """A clause that is nothing but a command not to contact the sender by two or more channels."""
+    if not text:
+        return False
+    whole = _OXFORD_COMMA.sub(r"\1 ", _CHANNEL_LIST_COMMA.sub(r"\1 or ", html_as_text(text)))
+    return any(_DIRECT_NO_CONTACT.match(normalise(c).strip()) for c in _SCOPE_SEGMENT.split(whole) if c.strip())
+
+
 def email_opt_out(text: Optional[str], subject: Optional[str] = None) -> bool:
-    """Does an email revoke EMAIL consent (``email_opt_out_decision`` is ``"revoke"``)?"""
-    return email_opt_out_decision(text, subject) == "revoke"
+    """Does an email revoke EMAIL consent (``email_opt_out_decision`` is ``"revoke"`` / ``"revoke_direct"``)?"""
+    return email_opt_out_decision(text, subject) in ("revoke", "revoke_direct")
 
 
 def is_opt_out(text: str) -> bool:
