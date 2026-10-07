@@ -17,12 +17,13 @@ import functools
 import hmac
 import os
 
+from datetime import datetime, timedelta, timezone
 from typing import Callable, TypeVar
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from pydantic import AwareDatetime, BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import AwareDatetime, BaseModel, Field, TypeAdapter, ValidationError, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from agents import (
@@ -354,12 +355,33 @@ class OrdersRequest(BaseModel):
     orders: list[Order] = Field(max_length=MAX_BATCH_ITEMS)
 
 
+# AEGIS M3 (Oct 7 2026): the largest clock difference tolerated between the
+# caller (orchestrator-go, which passes its own clock or a caller's ?as_of=)
+# and this service. An as_of later than now + this is refused (422): a future
+# instant would report renewals that are not due yet as missed (probe P11's
+# regression, through as_of instead of the subscription). orchestrator-go
+# applies the same bound to ?as_of= (cmd/orchestrator/main.go).
+AS_OF_CLOCK_SKEW = timedelta(seconds=60)
+
+
 class SubscriptionsRequest(BaseModel):
     client_id: ClientId
     # E-13: the scan's instant. A renewal counts as missed only if it was due
-    # at or before it. Timezone required.
+    # at or before it. Timezone required; never in the future (M3).
     as_of: AwareDatetime
     subscriptions: list[Subscription] = Field(max_length=MAX_BATCH_ITEMS)
+
+    @field_validator("as_of")
+    @classmethod
+    def _as_of_not_in_the_future(cls, value: datetime) -> datetime:
+        now = datetime.now(timezone.utc)
+        if value > now + AS_OF_CLOCK_SKEW:
+            raise ValueError(
+                f"as_of is in the future ({value.isoformat()} > now {now.isoformat(timespec='seconds')} "
+                f"+ {int(AS_OF_CLOCK_SKEW.total_seconds())} s clock-skew tolerance): a renewal not yet due "
+                f"would be reported as missed"
+            )
+        return value
 
 
 class ServerSideEventsRequest(BaseModel):

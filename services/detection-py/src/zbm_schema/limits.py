@@ -38,7 +38,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Any
 
-from pydantic import BeforeValidator, StringConstraints
+from pydantic import AfterValidator, BeforeValidator, StringConstraints
 
 ID_MAX_CHARS = 64
 FINDING_REF_MAX_CHARS = 128
@@ -85,11 +85,22 @@ METHODOLOGY_MAX_CHARS = 600
 SLUG_PATTERN = r"^[a-z0-9][a-z0-9_]*$"
 AGENT_ID_PATTERN = r"^[a-z0-9][a-z0-9-]*$"
 FINDING_ID_PATTERN = r"^rrf1-[0-9a-f]{40}$"
+# AEGIS L1 (Oct 7 2026): a rate in percent as a plain decimal string, 0 < r <=
+# 100 (the bound is checked by RatePercent's validator). 34 characters (at most
+# 33 digits) hold the exact decimal text of every float rate that can still
+# yield a non-zero cent amount on a money-bounded base: such a rate is at least
+# ~5e-16 percent, i.e. "0." + at most 15 zeros + at most 17 significant digits.
+# The bound also keeps base x rate exact: 17 + 33 digits fit MONEY_CONTEXT's
+# 50, so detection-py's percent_of and orchestrator-go's big.Rat recompute
+# (ledger_record.go valueBasisAmount) cannot disagree by a rounding step.
+RATE_PERCENT_PATTERN = r"^(0|[1-9][0-9]{0,2})(\.[0-9]+)?$"
+RATE_PERCENT_MAX_CHARS = 34
 
 # Patterns that admit only printable ASCII no JSON encoder escapes (Python's
 # json and Go's encoding/json alike): a string matching one is at most one
 # byte per character on the wire (request_limits.py).
-ASCII_SAFE_PATTERNS = frozenset({ID_PATTERN, CLIENT_ID_PATTERN, SLUG_PATTERN, AGENT_ID_PATTERN, FINDING_ID_PATTERN})
+ASCII_SAFE_PATTERNS = frozenset({ID_PATTERN, CLIENT_ID_PATTERN, SLUG_PATTERN, AGENT_ID_PATTERN, FINDING_ID_PATTERN,
+                                 RATE_PERCENT_PATTERN})
 
 Id = Annotated[str, StringConstraints(min_length=1, max_length=ID_MAX_CHARS, pattern=ID_PATTERN)]
 ClientId = Annotated[str, StringConstraints(min_length=1, max_length=ID_MAX_CHARS, pattern=CLIENT_ID_PATTERN)]
@@ -102,6 +113,21 @@ AgentId = Annotated[str, StringConstraints(min_length=1, max_length=AGENT_ID_MAX
 Sku = Annotated[str, StringConstraints(max_length=SKU_MAX_CHARS)]
 DiscountCode = Annotated[str, StringConstraints(max_length=DISCOUNT_CODE_MAX_CHARS)]
 CauseDescription = Annotated[str, StringConstraints(max_length=CAUSE_DESCRIPTION_MAX_CHARS)]
+
+
+def _rate_in_range(value: str) -> str:
+    from decimal import Decimal
+
+    if not Decimal(0) < Decimal(value) <= Decimal(100):
+        raise ValueError("rate_percent must be greater than 0 and at most 100")
+    return value
+
+
+RatePercent = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=RATE_PERCENT_MAX_CHARS, pattern=RATE_PERCENT_PATTERN),
+    AfterValidator(_rate_in_range),
+]
 
 
 _SEPARATORS = re.compile(r"[\s-]+")

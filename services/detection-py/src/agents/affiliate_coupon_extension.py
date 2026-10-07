@@ -34,8 +34,10 @@ from zbm_schema import (
     LabeledValue,
     LeakCategory,
     Order,
+    ValueBasis,
     ValueClassification,
     new_finding,
+    rate_percent_text,
 )
 
 AGENT_ID = "affiliate-coupon-extension-v1"
@@ -179,6 +181,9 @@ def detect(orders: list[Order], *, client_id: str) -> list[Finding]:
                 confidence=DecisionConfidence.MEDIUM,
             ),
             evidence_class=EvidenceClass.ESTIMATED,
+            # AEGIS L1 (Oct 7 2026): the commission base and rate are recorded
+            # with the finding (and in the ledger), not only in the prose.
+            value_basis=ValueBasis(base_usd=order.subtotal_usd, rate_percent=rate_percent_text(rate)),
             methodology_id="aff_commission_x_rate",
             methodology=METHODOLOGY_COMMISSION,
         ))

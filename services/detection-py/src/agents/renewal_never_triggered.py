@@ -20,6 +20,9 @@ Revenue Recovery fix wave (Oct 6 2026):
   - E-4 review: one cycle at plan price is the charge that should have been
     attempted — not inflated, unchanged. It is ESTIMATED, not OBSERVED:
     whether that charge would have succeeded is not in the data.
+  - AEGIS M2 (Oct 7 2026): its labels said OBSERVED/HIGH while its evidence
+    said ESTIMATED; now INCREMENTAL/MEDIUM, and the Finding model refuses a
+    label above the evidence class for every agent.
 """
 
 from __future__ import annotations
@@ -80,8 +83,13 @@ def detect(subscriptions: list[Subscription], *, client_id: str, as_of: datetime
                 ),
                 recoverable_value=LabeledValue(
                     amount_usd=sub.plan_price_usd,
-                    classification=ValueClassification.OBSERVED,
-                    confidence=DecisionConfidence.HIGH,
+                    # AEGIS M2 (Oct 7 2026): was OBSERVED/HIGH on ESTIMATED
+                    # evidence. The figure is revenue a working trigger would
+                    # have added (INCREMENTAL), and whether the charge would
+                    # have succeeded is not in the data (MEDIUM). The Finding
+                    # model now refuses any label above the evidence class.
+                    classification=ValueClassification.INCREMENTAL,
+                    confidence=DecisionConfidence.MEDIUM,
                 ),
                 evidence_class=EvidenceClass.ESTIMATED,
                 methodology_id=METHODOLOGY_ID,

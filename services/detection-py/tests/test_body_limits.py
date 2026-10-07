@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from decimal import Decimal
 
 import pytest
 from fastapi import FastAPI, Request
@@ -38,7 +39,7 @@ from api import (
 )
 from conftest import TEST_SERVICE_TOKEN
 from request_limits import HEADROOM, MIB, UnboundedField, body_limit_for, worst_case_json_bytes
-from zbm_schema import compute_finding_id
+from zbm_schema import compute_finding_id, percent_of
 from zbm_schema import limits as L
 from _fx import AS_OF, AS_OF_WIRE, TENANT, make_finding  # noqa: F401
 
@@ -97,6 +98,9 @@ def worst_order() -> dict:
     }
 
 
+WORST_RATE = "99." + "9" * (L.RATE_PERCENT_MAX_CHARS - 3)
+
+
 def worst_item(field: str) -> dict:
     if field == "orders":
         return worst_order()
@@ -125,9 +129,12 @@ def worst_item(field: str) -> dict:
                 "leak_category": "cross_channel_misattribution_risk", "entity_type": "contract_term",
                 "entity_id": entity, "period_label": period, "customer_id": ident(L.ID_MAX_CHARS),
                 "cause_certainty": "uncertain", "cause_description": s(L.CAUSE_DESCRIPTION_MAX_CHARS),
-                "recoverable_value": {"amount_usd": "999999999999999.99", "classification": "financially_verified",
-                                      "confidence": "medium"},
-                "evidence_class": "ESTIMATED", "methodology_id": ident(L.METHODOLOGY_ID_MAX_CHARS),
+                # AEGIS M2 (Oct 7 2026): the longest labels (financially_verified) need OBSERVED evidence.
+                # L1: the longest value_basis (a 48-character rate) and the amount it reproduces.
+                "recoverable_value": {"amount_usd": str(percent_of(Decimal("999999999999999.99"), Decimal(WORST_RATE))),
+                                      "classification": "financially_verified", "confidence": "medium"},
+                "value_basis": {"base_usd": "999999999999999.99", "rate_percent": WORST_RATE},
+                "evidence_class": "OBSERVED", "methodology_id": ident(L.METHODOLOGY_ID_MAX_CHARS),
                 "methodology": s(L.METHODOLOGY_MAX_CHARS),
                 "detected_at": DT}
     raise AssertionError(field)

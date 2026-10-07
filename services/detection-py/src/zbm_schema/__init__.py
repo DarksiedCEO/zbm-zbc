@@ -46,6 +46,7 @@ from zbm_schema.limits import (
     Methodology,
     MethodologyId,
     PeriodLabel,
+    RatePercent,
     Sku,
     Slug,
     _normalize_slug,
@@ -291,6 +292,58 @@ class EvidenceClass(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+# ---------------------------------------------------------------------------
+# AEGIS M2 (Oct 7 2026): labels can never claim more than the evidence
+# ---------------------------------------------------------------------------
+
+# A value classification that says the figure was read off (or reconciled
+# against) the records, and the confidence bands that say "act on this".
+# Only OBSERVED evidence — exact arithmetic on recorded transactions/terms —
+# supports them. An ESTIMATED or MODELED figure rests on an assumption the
+# data cannot confirm, so it is at most ATTRIBUTED/INCREMENTAL and MEDIUM.
+# (The renewal agent shipped ESTIMATED evidence labeled OBSERVED/HIGH.)
+OBSERVATION_CLASSIFICATIONS = frozenset({ValueClassification.OBSERVED, ValueClassification.FINANCIALLY_VERIFIED})
+HIGH_CONFIDENCES = frozenset({DecisionConfidence.HIGH, DecisionConfidence.VERY_HIGH})
+
+
+def labels_exceed_evidence(evidence: EvidenceClass, value: LabeledValue | None) -> str | None:
+    """Why `value`'s labels claim more than `evidence` supports, or None.
+    orchestrator-go applies the same rule (ledger_record.go
+    labelsExceedEvidence) before recording and when reading back."""
+    if value is None or evidence == EvidenceClass.OBSERVED:
+        return None
+    if value.classification in OBSERVATION_CLASSIFICATIONS:
+        return (f"classification {value.classification.value} needs OBSERVED evidence, "
+                f"this figure is {evidence.value}")
+    if value.confidence in HIGH_CONFIDENCES:
+        return f"confidence {value.confidence.value} needs OBSERVED evidence, this figure is {evidence.value}"
+    return None
+
+
+class ValueBasis(BaseModel):
+    """AEGIS L1 (Oct 7 2026): what a rate-derived dollar figure was computed
+    from, recorded with the finding (and, by orchestrator-go, in the evidence
+    ledger as an rr_value_basis event) so a quote can show — and anyone can
+    recompute — amount = base_usd x rate_percent / 100, cent-rounded half-up.
+    Today: the affiliate agent's commission (base = order subtotal, rate =
+    the affiliate's commission rate). The Finding checks the arithmetic."""
+    model_config = {"frozen": True}
+
+    base_usd: PositiveMoney
+    # A plain decimal string (no exponent), exactly the rate the figure used.
+    rate_percent: RatePercent
+
+
+def rate_percent_text(rate: float | Decimal) -> str:
+    """The exact decimal text of a rate (15.0 -> "15", 12.5 -> "12.5",
+    1e-05 -> "0.00001"); percent_of converts floats the same way (str())."""
+    d = Decimal(str(rate)) if isinstance(rate, float) else Decimal(rate)
+    text = format(d, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
 FINDING_ID_PREFIX = "rrf1-"
 
 
@@ -333,6 +386,9 @@ class Finding(BaseModel):
     recoverable_value: Optional[LabeledValue] = None
     # E-4: how the dollar figure (or its absence) was arrived at.
     evidence_class: EvidenceClass
+    # L1: the base and rate a rate-derived figure was computed from (None for
+    # figures not derived from a rate).
+    value_basis: ValueBasis | None = None
     methodology_id: MethodologyId
     methodology: Methodology
     detected_at: AwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -357,6 +413,28 @@ class Finding(BaseModel):
             raise ValueError("a finding with no recoverable_value must have evidence_class UNKNOWN")
         if self.recoverable_value is not None and self.evidence_class == EvidenceClass.UNKNOWN:
             raise ValueError("a finding with a recoverable_value cannot have evidence_class UNKNOWN")
+        return self
+
+    @model_validator(mode="after")
+    def _labels_never_exceed_evidence(self):
+        # M2: one rule for every agent, enforced on construction.
+        reason = labels_exceed_evidence(self.evidence_class, self.recoverable_value)
+        if reason:
+            raise ValueError(f"recoverable_value labels claim more than the evidence supports: {reason}")
+        return self
+
+    @model_validator(mode="after")
+    def _value_basis_reproduces_the_amount(self):
+        if self.value_basis is None:
+            return self
+        if self.recoverable_value is None:
+            raise ValueError("value_basis without a recoverable_value")
+        expected = percent_of(self.value_basis.base_usd, Decimal(self.value_basis.rate_percent))
+        if expected != self.recoverable_value.amount_usd:
+            raise ValueError(
+                f"recoverable_value {self.recoverable_value.amount_usd} is not value_basis "
+                f"{self.value_basis.base_usd} x {self.value_basis.rate_percent}% ({expected})"
+            )
         return self
 
     @model_validator(mode="after")
