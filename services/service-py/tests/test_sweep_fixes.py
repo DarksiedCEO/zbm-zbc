@@ -531,13 +531,16 @@ def test_l6_our_quoted_short_lines_do_not_alert():
             is None, line
 
 
-def test_m7_an_unclosed_style_flood_is_cheap():
-    import time
+def test_m7_an_unclosed_style_flood_never_runs_the_style_scan(monkeypatch):
     import channels
-    t = "<style>" * 2800
-    start = time.perf_counter()
-    channels.html_as_text(t)
-    assert time.perf_counter() - start < 0.05
+
+    class Refuse:
+        def sub(self, *a, **k):
+            raise AssertionError("the style / script scan ran on an unclosed flood")
+
+    monkeypatch.setattr(channels, "_STYLE_SCRIPT", Refuse())
+    out = channels.html_as_text("<style>" * 2800 + "<p>unsubscribe</p>")
+    assert "unsubscribe" in out
 
 
 # ------------------------------------------------------------------ AEGIS re-review of 37eff26 (REVISE)
