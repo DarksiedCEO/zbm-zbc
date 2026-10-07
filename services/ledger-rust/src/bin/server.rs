@@ -144,6 +144,35 @@
 //! trusting it, and a stale `.*.tmp-*` beside it is debris to remove, never
 //! to read. The same holds for any crash that skips the handlers (an abort,
 //! a power loss).
+//!
+//! Sweep F, Oct 6 2026 (docs/adr/0003 section 13; persistence.rs for F-1, F-6,
+//! F-13):
+//!   - F-1: one writer per log (`<log>.lock`); a second server on the same
+//!     LEDGER_LOG_PATH refuses to start.
+//!   - F-6: head checkpoint `<log>.head`; a missing, truncated or replaced
+//!     log refuses to start unless LEDGER_ALLOW_RESET=1 (logged). New route
+//!     GET /ledger/head -> {"entries","head_seq","head_hash"}.
+//!   - F-7: POST /ledger/append with `Idempotency-Key: <finding_id>` (the
+//!     header value must equal the body's finding_id, else 400) is idempotent
+//!     on finding_id: 201 new / 200 identical / 409 different content.
+//!     Without the header nothing changes.
+//!   - F-12: LEDGER_SERVICE_TOKEN must be at least 32 bytes.
+//!   - F-2: GET /ledger/entries?after_seq=&limit=&department=&event_type=
+//!     (paginated, filtered; no query string = the whole ledger exactly as
+//!     before); reads copy their snapshot under the lock in chunks and
+//!     serialize outside it; at most one read per CPU (max 4) runs at once and a
+//!     waiting append goes ahead of every next reader chunk (writer
+//!     priority), so an append is never queued behind readers;
+//!     GET /ledger/verify verifies only what is new since the last verified
+//!     head (the full chain was verified at start), `?full=1` re-verifies
+//!     everything.
+//!   - F-4: optional per-caller tokens, LEDGER_CALLERS_FILE (see
+//!     `load_callers`): a write must come from a caller whose departments
+//!     include the event's department (findings: `revenue_recovery`), a
+//!     read-only caller may only GET entries/verify/head (403 otherwise), and
+//!     the shared token is then accepted only with LEDGER_ALLOW_SHARED_TOKEN=1.
+//!     Unset: unchanged, with a startup warning.
+//!   - A failed bind (or runtime start) exits 1 with a message, never a panic.
 use std::convert::Infallible;
 use std::ffi::CString;
 use std::future::Future;
@@ -152,8 +181,9 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use http_body_util::{BodyExt, Full, Limited};
@@ -163,7 +193,11 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::{TokioIo, TokioTimer};
-use ledger_rust::{ledger_log, EventAppendOutcome, EventInput, LedgerRecordInput, PersistError, PersistentLedger};
+use ledger_rust::{
+    genesis_hash, ledger_log, verify_entry, AppendOutcome, EventAppendOutcome, EventInput, LedgerEntry, LedgerError,
+    LedgerOpenOptions, LedgerRecordInput, PersistError, PersistentLedger,
+};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::Semaphore;
@@ -209,11 +243,174 @@ const DRAIN_MAX_BYTES: usize = 64 * 1024;
 /// cap so a peer slow to close never holds a serving slot.
 const DRAINS_MAX: usize = 512;
 
+/// Sweep F-12: the shared token's minimum length in bytes.
+const MIN_TOKEN_BYTES: usize = 32;
+/// Sweep F-2: reads (entries, verify) running at once: one per CPU, at most
+/// MAX_READ_SLOTS. A full read is CPU-bound (copy + serialize), so more reads
+/// than CPUs only slow every read down (measured: 6 concurrent 500k-entry
+/// reads on 2 CPUs took up to 10.1 s with 4 slots, 5.6 s with 2). The blocking
+/// pool has MAX_BLOCKING_THREADS; capping reads well below it keeps threads
+/// free for appends, which never wait for a read slot.
+const MAX_READ_SLOTS: usize = 4;
+
+fn read_slots() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, MAX_READ_SLOTS)
+}
+/// Sweep F-2: entries copied per lock hold by a reader.
+const READ_CHUNK: usize = 2048;
+/// Sweep F-2: page size of GET /ledger/entries when a query is given without
+/// `limit`, and the largest `limit` accepted.
+const DEFAULT_PAGE: usize = 1000;
+const MAX_PAGE: usize = 10_000;
+/// Sweep F-4: the department a finding (POST /ledger/append) is written for.
+const FINDINGS_DEPARTMENT: &str = "revenue_recovery";
+/// Sweep F-4: largest LEDGER_CALLERS_FILE accepted.
+const MAX_CALLERS_FILE_BYTES: u64 = 1024 * 1024;
+
 type Body = Full<Bytes>;
+
+/// Sweep F-2: writer priority on the ledger mutex. A writer announces itself
+/// before it locks; a reader, before EACH chunk it copies, waits while any
+/// writer is waiting. Readers hold the lock only for one chunk copy, so an
+/// append waits for at most the chunk being copied at that moment, however
+/// many readers there are. (std's Mutex makes no fairness promise: readers
+/// re-locking in a loop could otherwise keep winning it.)
+struct WriterPriority {
+    waiting: Mutex<usize>,
+    cv: Condvar,
+}
+
+/// Decrements the waiting-writer count when the write is done (or unwinds).
+struct WriterTurn<'a>(&'a WriterPriority);
+
+impl Drop for WriterTurn<'_> {
+    fn drop(&mut self) {
+        let mut w = self.0.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+        *w -= 1;
+        if *w == 0 {
+            self.0.cv.notify_all();
+        }
+    }
+}
+
+impl WriterPriority {
+    fn new() -> WriterPriority {
+        WriterPriority { waiting: Mutex::new(0), cv: Condvar::new() }
+    }
+
+    fn write<R>(&self, ledger: &Mutex<PersistentLedger>, f: impl FnOnce(&mut PersistentLedger) -> R) -> R {
+        *self.waiting.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        let _turn = WriterTurn(self);
+        let mut l = lock(ledger);
+        f(&mut l)
+    }
+
+    fn read<R>(&self, ledger: &Mutex<PersistentLedger>, f: impl FnOnce(&PersistentLedger) -> R) -> R {
+        {
+            let mut w = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+            while *w > 0 {
+                // Bounded wait: a missed wake-up costs at most this long.
+                w = self.cv.wait_timeout(w, Duration::from_millis(5)).unwrap_or_else(PoisonError::into_inner).0;
+            }
+        }
+        let l = lock(ledger);
+        f(&l)
+    }
+}
+
+/// Sweep F-4: one entry of LEDGER_CALLERS_FILE.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Caller {
+    caller: String,
+    #[serde(default)]
+    departments: Vec<String>,
+    scope: Scope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Scope {
+    Write,
+    Read,
+}
+
+/// Who an authenticated request is.
+#[derive(Debug, Clone)]
+enum Principal {
+    /// The shared LEDGER_SERVICE_TOKEN: every route, every department
+    /// (exactly the behaviour before sweep F-4).
+    Shared,
+    Caller(Arc<Caller>),
+}
+
+impl Principal {
+    fn can_write(&self) -> bool {
+        match self {
+            Principal::Shared => true,
+            Principal::Caller(c) => c.scope == Scope::Write,
+        }
+    }
+
+    fn may_write_department(&self, department: &str) -> bool {
+        match self {
+            Principal::Shared => true,
+            Principal::Caller(c) => c.scope == Scope::Write && c.departments.iter().any(|d| d == department),
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Principal::Shared => "the shared token",
+            Principal::Caller(c) => &c.caller,
+        }
+    }
+}
+
+/// Authentication configuration (sweep F-4, F-12).
+struct Auth {
+    /// The shared token, when it is accepted at all.
+    shared: Option<String>,
+    /// sha256(token) hex -> caller, when LEDGER_CALLERS_FILE is set.
+    callers: Option<HashMap<String, Arc<Caller>>>,
+}
+
+impl Auth {
+    fn authenticate(&self, token: &str) -> Option<Principal> {
+        if let Some(callers) = &self.callers {
+            // Looked up by the token's SHA-256: lookup timing can only reveal
+            // something about a hash, never about the token itself.
+            if let Some(c) = callers.get(&hex_sha256(token.as_bytes())) {
+                return Some(Principal::Caller(Arc::clone(c)));
+            }
+        }
+        match &self.shared {
+            Some(shared) if constant_time_eq(token, shared) => Some(Principal::Shared),
+            _ => None,
+        }
+    }
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Sweep F-2: the end of the chain prefix already verified (`len` entries,
+/// the last of which has `hash`), so GET /ledger/verify only verifies what is
+/// new.
+struct Verified {
+    len: usize,
+    hash: String,
+}
 
 struct App {
     ledger: Mutex<PersistentLedger>,
-    required_token: String,
+    gate: WriterPriority,
+    reads: Semaphore,
+    verified: Mutex<Verified>,
+    auth: Auth,
 }
 
 /// Locks the ledger. A poisoned lock means a panic happened mid-operation;
@@ -260,9 +457,8 @@ async fn read_body(request: Request<Incoming>) -> Result<String, (u16, String)> 
     String::from_utf8(bytes.to_vec()).map_err(|e| error_json(400, format!("failed to read body as UTF-8: {e}")))
 }
 
-fn handle_event(ledger: &Mutex<PersistentLedger>, input: EventInput) -> (u16, String) {
+fn handle_event(l: &mut PersistentLedger, input: EventInput) -> (u16, String) {
     let event_id = input.event_id.clone();
-    let mut l = lock(ledger);
     match l.append_event(input) {
         Ok(EventAppendOutcome::Created(entry)) => (201, serde_json::to_string(entry).unwrap()),
         Ok(EventAppendOutcome::Existing(entry)) => (200, serde_json::to_string(entry).unwrap()),
@@ -299,10 +495,27 @@ fn parse_event(body: &str) -> Result<EventInput, (u16, String)> {
     Ok(input)
 }
 
-fn handle_append(ledger: &Mutex<PersistentLedger>, record: LedgerRecordInput) -> (u16, String) {
-    let mut l = lock(ledger);
-    match l.append(record) {
-        Ok(entry) => (201, serde_json::to_string(entry).unwrap()),
+fn handle_append(l: &mut PersistentLedger, record: LedgerRecordInput, idempotent: bool) -> (u16, String) {
+    let finding_id = record.finding_id.clone();
+    let outcome = if idempotent {
+        l.append_finding_idempotent(record)
+    } else {
+        l.append(record).map(AppendOutcome::Created)
+    };
+    match outcome {
+        Ok(AppendOutcome::Created(entry)) => (201, serde_json::to_string(entry).unwrap()),
+        Ok(AppendOutcome::Existing(entry)) => (200, serde_json::to_string(entry).unwrap()),
+        Ok(AppendOutcome::Conflict(_)) => (
+            409,
+            serde_json::json!({
+                "error": format!(
+                    "finding_id {finding_id:?} is already recorded with different content; with an \
+                     Idempotency-Key a finding_id can only ever describe one finding"
+                ),
+                "finding_id": finding_id,
+            })
+            .to_string(),
+        ),
         Err(PersistError::Invalid(reason)) => (
             400,
             serde_json::json!({"error": format!("invalid LedgerRecordInput: {reason}")}).to_string(),
@@ -325,21 +538,243 @@ fn parse_append(body: &str) -> Result<LedgerRecordInput, (u16, String)> {
         .map_err(|e| (400, serde_json::json!({"error": format!("invalid LedgerRecordInput: {e}")}).to_string()))
 }
 
+/// Sweep F-7: the opt-in. No `Idempotency-Key` header: Ok(false), the
+/// unchanged non-idempotent append. One whose value is the body's finding_id:
+/// Ok(true). Anything else is a 400 (a key that names a different finding
+/// would make the caller believe in a guarantee it is not getting).
+fn idempotency_requested(key: &Option<Result<String, ()>>, record: &LedgerRecordInput) -> Result<bool, (u16, String)> {
+    match key {
+        None => Ok(false),
+        Some(Ok(k)) if *k == record.finding_id => Ok(true),
+        Some(_) => Err(error_json(
+            400,
+            "Idempotency-Key must equal the body's finding_id (it makes the append idempotent on finding_id)"
+                .to_string(),
+        )),
+    }
+}
+
+fn forbidden(msg: String) -> (u16, String) {
+    error_json(403, msg)
+}
+
 /// Runs ledger work (lock + disk) on the bounded blocking pool so a slow
 /// fsync never stalls the async workers that serve /health and move bytes.
 /// A panic inside is fatal, exactly as it was for the old single-threaded
 /// server (see `lock`).
-async fn on_ledger<F>(app: &Arc<App>, f: F) -> (u16, String)
+async fn on_blocking<F>(app: &Arc<App>, f: F) -> (u16, String)
 where
-    F: FnOnce(&Mutex<PersistentLedger>) -> (u16, String) + Send + 'static,
+    F: FnOnce(&App) -> (u16, String) + Send + 'static,
 {
     let app = Arc::clone(app);
-    match tokio::task::spawn_blocking(move || f(&app.ledger)).await {
+    match tokio::task::spawn_blocking(move || f(&app)).await {
         Ok(r) => r,
         Err(e) => {
             ledger_log!("ledger-rust: FATAL — ledger operation panicked ({e}); exiting (fail closed)");
             std::process::exit(1);
         }
+    }
+}
+
+/// A write: straight to the blocking pool (never behind a read slot), and
+/// ahead of every reader's next chunk (sweep F-2).
+async fn on_ledger_write<F>(app: &Arc<App>, f: F) -> (u16, String)
+where
+    F: FnOnce(&mut PersistentLedger) -> (u16, String) + Send + 'static,
+{
+    on_blocking(app, move |app| app.gate.write(&app.ledger, f)).await
+}
+
+/// A read: waits for one of the read slots (`read_slots`; async, so a waiting
+/// reader holds no thread), then runs on the blocking pool.
+async fn on_ledger_read<F>(app: &Arc<App>, f: F) -> (u16, String)
+where
+    F: FnOnce(&App) -> (u16, String) + Send + 'static,
+{
+    let _slot = match app.reads.acquire().await {
+        Ok(slot) => slot,
+        Err(_) => return error_json(503, "ledger-rust is shutting down".to_string()),
+    };
+    on_blocking(app, f).await
+}
+
+/// Copies entries `from..to` of the ledger in READ_CHUNK pieces, one short
+/// lock hold each (writers first), handing each piece to `each` outside the
+/// lock. Entries are immutable and append-only, so the pieces together are
+/// exactly the snapshot `from..to` (sweep F-2). `each` returns false to stop.
+fn for_each_chunk(app: &App, from: usize, to: usize, mut each: impl FnMut(usize, Vec<LedgerEntry>) -> bool) {
+    let mut at = from;
+    while at < to {
+        let end = (at + READ_CHUNK).min(to);
+        let chunk = app.gate.read(&app.ledger, |l| l.clone_range(at, end));
+        if chunk.is_empty() || !each(at, chunk) {
+            return;
+        }
+        at = end;
+    }
+}
+
+/// GET /ledger/entries with no query string: the whole ledger, the same bytes
+/// `serde_json::to_string(entries)` produced under the lock before sweep F-2.
+fn entries_all(app: &App) -> (u16, String) {
+    let len = app.gate.read(&app.ledger, |l| l.len());
+    let mut out: Vec<u8> = Vec::with_capacity(2);
+    out.push(b'[');
+    for_each_chunk(app, 0, len, |at, chunk| {
+        for (i, e) in chunk.iter().enumerate() {
+            if at + i > 0 {
+                out.push(b',');
+            }
+            serde_json::to_writer(&mut out, e).unwrap();
+        }
+        true
+    });
+    out.push(b']');
+    (200, json_text(out))
+}
+
+/// The response text of serialized JSON (serde_json writes UTF-8 only).
+fn json_text(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes).expect("serde_json writes UTF-8")
+}
+
+/// The parsed query of GET /ledger/entries (sweep F-2).
+#[derive(Debug, Default, PartialEq)]
+struct EntriesQuery {
+    after_seq: Option<u64>,
+    limit: usize,
+    department: Option<String>,
+    event_type: Option<String>,
+}
+
+fn is_slug(v: &str) -> bool {
+    !v.is_empty() && v.len() <= 64 && v.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// Strict: only `after_seq`, `limit`, `department`, `event_type`, each at
+/// most once, each with a plain value (digits / `[a-z0-9_]`); anything else is
+/// a 400, so a typo never silently widens a read.
+fn parse_entries_query(query: &str) -> Result<EntriesQuery, String> {
+    let mut q = EntriesQuery { limit: DEFAULT_PAGE, ..EntriesQuery::default() };
+    let mut seen: Vec<&str> = Vec::new();
+    for pair in query.split('&') {
+        let (k, v) = pair.split_once('=').ok_or_else(|| format!("query parameter {pair:?} has no value"))?;
+        if seen.contains(&k) {
+            return Err(format!("query parameter {k:?} given twice"));
+        }
+        seen.push(k);
+        let digits = |v: &str| -> Result<u64, String> {
+            if v.is_empty() || v.len() > 20 || !v.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(format!("{k} must be a non-negative integer"));
+            }
+            v.parse::<u64>().map_err(|_| format!("{k} is out of range"))
+        };
+        match k {
+            "after_seq" => q.after_seq = Some(digits(v)?),
+            "limit" => {
+                let n = digits(v)?;
+                if n == 0 || n > MAX_PAGE as u64 {
+                    return Err(format!("limit must be 1-{MAX_PAGE}"));
+                }
+                q.limit = n as usize;
+            }
+            "department" | "event_type" => {
+                if !is_slug(v) {
+                    return Err(format!("{k} must be 1-64 characters of [a-z0-9_]"));
+                }
+                if k == "department" {
+                    q.department = Some(v.to_string());
+                } else {
+                    q.event_type = Some(v.to_string());
+                }
+            }
+            other => {
+                return Err(format!(
+                    "unknown query parameter {other:?} (accepted: after_seq, limit, department, event_type)"
+                ))
+            }
+        }
+    }
+    Ok(q)
+}
+
+/// GET /ledger/entries?... : entries with seq > after_seq, in seq order, at
+/// most `limit` of them, matching the filters (department / event_type match
+/// events only; a finding has neither, so a filtered read never returns one).
+/// A JSON array of entries, as without a query. Fewer than `limit` entries
+/// means the end of the ledger was reached; otherwise the next page is
+/// `after_seq=<seq of the last entry>`.
+fn entries_page(app: &App, q: EntriesQuery) -> (u16, String) {
+    let len = app.gate.read(&app.ledger, |l| l.len());
+    let from = match q.after_seq {
+        None => 0,
+        Some(s) => usize::try_from(s).map(|s| s.saturating_add(1)).unwrap_or(usize::MAX).min(len),
+    };
+    let keep = |e: &LedgerEntry| match (&q.department, &q.event_type) {
+        (None, None) => true,
+        (dept, et) => e.as_event().is_some_and(|ev| {
+            dept.as_ref().is_none_or(|d| *d == ev.department) && et.as_ref().is_none_or(|t| *t == ev.event_type)
+        }),
+    };
+    let mut out: Vec<u8> = vec![b'['];
+    let mut n = 0usize;
+    for_each_chunk(app, from, len, |_, chunk| {
+        for e in chunk.iter().filter(|e| keep(e)) {
+            if n > 0 {
+                out.push(b',');
+            }
+            serde_json::to_writer(&mut out, e).unwrap();
+            n += 1;
+            if n == q.limit {
+                return false;
+            }
+        }
+        true
+    });
+    out.push(b']');
+    (200, json_text(out))
+}
+
+/// Verifies entries `from..to`, the first of which must chain to `prev`
+/// (sweep F-2: the same per-entry check as `Ledger::verify_chain`, in chunks
+/// copied under short lock holds). Ok(hash of entry to-1, or `prev`).
+fn verify_range(app: &App, from: usize, to: usize, prev: String) -> Result<String, LedgerError> {
+    let mut prev = prev;
+    let mut result = Ok(());
+    for_each_chunk(app, from, to, |at, chunk| {
+        for (i, e) in chunk.iter().enumerate() {
+            if let Err(err) = verify_entry(e, (at + i) as u64, &prev) {
+                result = Err(err);
+                return false;
+            }
+            prev = e.hash().to_string();
+        }
+        true
+    });
+    result.map(|()| prev)
+}
+
+/// GET /ledger/verify[?full=1]. Incremental by default: the prefix verified
+/// at start (and by every successful verify since) is not verified again.
+/// Same responses as before: 200 {"valid":true,"entries":N} or
+/// 409 {"valid":false,"error":...}.
+fn verify(app: &App, full: bool) -> (u16, String) {
+    let len = app.gate.read(&app.ledger, |l| l.len());
+    let (from, prev) = if full {
+        (0, genesis_hash())
+    } else {
+        let v = app.verified.lock().unwrap_or_else(PoisonError::into_inner);
+        (v.len.min(len), v.hash.clone())
+    };
+    match verify_range(app, from, len, prev) {
+        Ok(hash) => {
+            let mut v = app.verified.lock().unwrap_or_else(PoisonError::into_inner);
+            if len > v.len {
+                *v = Verified { len, hash };
+            }
+            (200, serde_json::json!({"valid": true, "entries": len}).to_string())
+        }
+        Err(e) => (409, serde_json::json!({"valid": false, "error": format!("{e:?}")}).to_string()),
     }
 }
 
@@ -400,43 +835,86 @@ async fn handle(request: Request<Incoming>, app: Arc<App>) -> (u16, String) {
     // is read (fail-closed — an unmatched or malformed Authorization header
     // never falls through to a handler). /health stays open for basic
     // liveness checks, matching detection-py/fulfillment-py.
-    if url != "/health" {
-        let authorized = match extract_bearer_token(&request) {
-            Some(token) => constant_time_eq(&token, &app.required_token),
-            None => false,
-        };
-        if !authorized {
-            return unauthorized_response();
+    let principal = if url == "/health" {
+        None
+    } else {
+        match extract_bearer_token(&request).and_then(|t| app.auth.authenticate(&t)) {
+            Some(p) => Some(p),
+            None => return unauthorized_response(),
+        }
+    };
+
+    // Sweep F-2: only GET /ledger/entries and GET /ledger/verify take a query
+    // string; every other URL is matched whole, exactly as before.
+    let (path, query) = match url.split_once('?') {
+        Some((p, q)) if p == "/ledger/entries" || p == "/ledger/verify" => (p, Some(q)),
+        _ => (url.as_str(), None),
+    };
+
+    // Sweep F-4: a read-only caller never reaches a write handler (403 before
+    // any body byte is read).
+    if method == Method::POST && matches!(path, "/ledger/events" | "/ledger/append") {
+        if let Some(p) = &principal {
+            if !p.can_write() {
+                return forbidden(format!("caller {:?} has a read-only token", p.name()));
+            }
         }
     }
 
-    match (method, url.as_str()) {
-        (Method::GET, "/health") => (200, serde_json::json!({"status": "ok", "service": "ledger-rust"}).to_string()),
+    match (method, path, query) {
+        (Method::GET, "/health", None) => (200, serde_json::json!({"status": "ok", "service": "ledger-rust"}).to_string()),
 
-        (Method::GET, "/ledger/entries") => {
-            on_ledger(&app, |ledger| (200, serde_json::to_string(lock(ledger).entries()).unwrap())).await
-        }
-
-        (Method::GET, "/ledger/verify") => {
-            on_ledger(&app, |ledger| {
-                let l = lock(ledger);
-                match l.verify_chain() {
-                    Ok(()) => (200, serde_json::json!({"valid": true, "entries": l.len()}).to_string()),
-                    Err(e) => (409, serde_json::json!({"valid": false, "error": format!("{e:?}")}).to_string()),
-                }
-            })
-            .await
-        }
-
-        (Method::POST, "/ledger/events") => match read_body(request).await.and_then(|b| parse_event(&b)) {
-            Err(resp) => resp,
-            Ok(input) => on_ledger(&app, move |ledger| handle_event(ledger, input)).await,
+        (Method::GET, "/ledger/entries", None) => on_ledger_read(&app, entries_all).await,
+        (Method::GET, "/ledger/entries", Some(q)) => match parse_entries_query(q) {
+            Err(e) => error_json(400, e),
+            Ok(q) => on_ledger_read(&app, move |app| entries_page(app, q)).await,
         },
 
-        (Method::POST, "/ledger/append") => match read_body(request).await.and_then(|b| parse_append(&b)) {
-            Err(resp) => resp,
-            Ok(record) => on_ledger(&app, move |ledger| handle_append(ledger, record)).await,
-        },
+        (Method::GET, "/ledger/verify", q) => {
+            let full = match q {
+                None | Some("full=0") => false,
+                Some("full=1") => true,
+                Some(other) => return error_json(400, format!("unknown query {other:?} (accepted: full=1)")),
+            };
+            on_ledger_read(&app, move |app| verify(app, full)).await
+        }
+
+        (Method::GET, "/ledger/head", None) => {
+            on_blocking(&app, |app| (200, serde_json::to_string(&app.gate.read(&app.ledger, |l| l.head())).unwrap()))
+                .await
+        }
+
+        (Method::POST, "/ledger/events", None) => {
+            let principal = principal.expect("authenticated above");
+            match read_body(request).await.and_then(|b| parse_event(&b)) {
+                Err(resp) => resp,
+                Ok(input) if !principal.may_write_department(&input.department) => forbidden(format!(
+                    "caller {:?} may not write events for department {:?}",
+                    principal.name(),
+                    input.department
+                )),
+                Ok(input) => on_ledger_write(&app, move |l| handle_event(l, input)).await,
+            }
+        }
+
+        (Method::POST, "/ledger/append", None) => {
+            let principal = principal.expect("authenticated above");
+            let key = request
+                .headers()
+                .get("idempotency-key")
+                .map(|v| v.to_str().map(str::to_string).map_err(|_| ()));
+            match read_body(request).await.and_then(|b| parse_append(&b)) {
+                Err(resp) => resp,
+                Ok(_) if !principal.may_write_department(FINDINGS_DEPARTMENT) => forbidden(format!(
+                    "caller {:?} may not write findings (department {FINDINGS_DEPARTMENT:?})",
+                    principal.name()
+                )),
+                Ok(record) => match idempotency_requested(&key, &record) {
+                    Err(resp) => resp,
+                    Ok(idempotent) => on_ledger_write(&app, move |l| handle_append(l, record, idempotent)).await,
+                },
+            }
+        }
 
         _ => (404, serde_json::json!({"error": "not found"}).to_string()),
     }
@@ -880,17 +1358,134 @@ impl Drop for PortFileGuard {
     }
 }
 
-fn load_required_token() -> String {
+/// Logs a refusal and exits 1 (fail closed, never a panic).
+fn refuse(msg: String) -> ! {
+    ledger_log!("ledger-rust: REFUSING TO START — {msg}");
+    std::process::exit(1);
+}
+
+/// An operator switch: unset, "" or "0" is off, "1" is on; anything else
+/// refuses the start (a "true" that silently meant "off" would hide intent).
+fn load_flag(name: &str) -> bool {
+    match std::env::var(name) {
+        Err(_) => false,
+        Ok(v) => match v.as_str() {
+            "" | "0" => false,
+            "1" => true,
+            other => refuse(format!("{name}={other:?} must be 1 (on) or 0/unset (off)")),
+        },
+    }
+}
+
+/// LEDGER_SERVICE_TOKEN: required (unless per-caller tokens replace it,
+/// below) and at least MIN_TOKEN_BYTES bytes (sweep F-12: a 1-character token
+/// used to be accepted).
+fn load_shared_token(required: bool) -> Option<String> {
     match std::env::var("LEDGER_SERVICE_TOKEN") {
-        Ok(t) if !t.is_empty() => t,
-        _ => {
+        Ok(t) if !t.is_empty() => {
+            if t.len() < MIN_TOKEN_BYTES {
+                refuse(format!(
+                    "LEDGER_SERVICE_TOKEN is {} bytes; the evidence ledger requires at least {MIN_TOKEN_BYTES} \
+                     (e.g. 32 random bytes, hex-encoded). Set the same longer value wherever this service is \
+                     called from.",
+                    t.len()
+                ));
+            }
+            Some(t)
+        }
+        _ if !required => None,
+        _ => refuse(
+            "LEDGER_SERVICE_TOKEN is not set. This is the evidence ledger; it does not start \
+             unauthenticated. Set LEDGER_SERVICE_TOKEN to a shared secret before starting ledger-rust, and \
+             set the identical value wherever this service is called from."
+                .to_string(),
+        ),
+    }
+}
+
+/// Sweep F-4: LEDGER_CALLERS_FILE, a JSON object mapping the lowercase hex
+/// SHA-256 of a caller's bearer token to
+/// `{"caller": "<name>", "departments": ["<dept>", ...], "scope": "write"|"read"}`.
+/// Every malformed entry refuses the start (fail closed): a hash that is not
+/// 64 lowercase hex characters, an empty caller name, a department that is
+/// not `[a-z0-9_]{1,64}` (the event `department` rule), a write caller with
+/// no departments, an unknown field, an empty file.
+fn load_callers(path: &str) -> HashMap<String, Arc<Caller>> {
+    let meta = std::fs::metadata(path).unwrap_or_else(|e| refuse(format!("LEDGER_CALLERS_FILE={path:?}: {e}")));
+    if meta.len() > MAX_CALLERS_FILE_BYTES {
+        refuse(format!("LEDGER_CALLERS_FILE={path:?} is larger than {MAX_CALLERS_FILE_BYTES} bytes"));
+    }
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| refuse(format!("LEDGER_CALLERS_FILE={path:?}: {e}")));
+    let raw: HashMap<String, Caller> = serde_json::from_str(&text)
+        .unwrap_or_else(|e| refuse(format!("LEDGER_CALLERS_FILE={path:?} is not a callers map: {e}")));
+    if raw.is_empty() {
+        refuse(format!("LEDGER_CALLERS_FILE={path:?} names no callers"));
+    }
+    let mut out = HashMap::new();
+    for (hash, c) in raw {
+        if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            refuse(format!(
+                "LEDGER_CALLERS_FILE: key {hash:?} is not the lowercase hex SHA-256 of a token (64 characters)"
+            ));
+        }
+        if c.caller.trim().is_empty() || c.caller.len() > 128 || c.caller.chars().any(char::is_control) {
+            refuse(format!("LEDGER_CALLERS_FILE: caller name {:?} must be 1-128 printable characters", c.caller));
+        }
+        if let Some(d) = c.departments.iter().find(|d| !is_slug(d)) {
+            refuse(format!("LEDGER_CALLERS_FILE: caller {:?}: department {d:?} is not [a-z0-9_]{{1,64}}", c.caller));
+        }
+        if c.scope == Scope::Write && c.departments.is_empty() {
+            refuse(format!("LEDGER_CALLERS_FILE: write caller {:?} lists no departments", c.caller));
+        }
+        out.insert(hash, Arc::new(c));
+    }
+    out
+}
+
+/// Sweep F-4 / F-12: the authentication configuration.
+fn load_auth() -> Auth {
+    let callers_file = std::env::var("LEDGER_CALLERS_FILE").ok().filter(|v| !v.is_empty());
+    let allow_shared = load_flag("LEDGER_ALLOW_SHARED_TOKEN");
+    match callers_file {
+        None => {
+            let shared = load_shared_token(true);
             ledger_log!(
-                "ledger-rust: REFUSING TO START — LEDGER_SERVICE_TOKEN is not set. This is \
-                 the evidence ledger; it does not start unauthenticated. Set \
-                 LEDGER_SERVICE_TOKEN to a shared secret before starting ledger-rust, and set \
-                 the identical value wherever this service is called from."
+                "ledger-rust: WARNING — LEDGER_CALLERS_FILE is not set: every holder of the shared \
+                 LEDGER_SERVICE_TOKEN can read everything and write events for ANY department (a department is \
+                 self-declared). Configure per-caller tokens with department scopes (LEDGER_CALLERS_FILE) for \
+                 production."
             );
-            std::process::exit(1);
+            if allow_shared {
+                ledger_log!("ledger-rust: note — LEDGER_ALLOW_SHARED_TOKEN=1 has no effect without LEDGER_CALLERS_FILE");
+            }
+            Auth { shared, callers: None }
+        }
+        Some(path) => {
+            let callers = load_callers(&path);
+            let shared = if allow_shared {
+                let t = load_shared_token(true);
+                ledger_log!(
+                    "ledger-rust: WARNING — LEDGER_ALLOW_SHARED_TOKEN=1: the legacy shared LEDGER_SERVICE_TOKEN is \
+                     still accepted with full access (every department) alongside the {} per-caller token(s)",
+                    callers.len()
+                );
+                t
+            } else {
+                if load_shared_token(false).is_some() {
+                    ledger_log!(
+                        "ledger-rust: note — LEDGER_SERVICE_TOKEN is set but NOT accepted: per-caller tokens are \
+                         configured and LEDGER_ALLOW_SHARED_TOKEN is not 1"
+                    );
+                }
+                None
+            };
+            let mut names: Vec<String> = callers
+                .values()
+                .map(|c| format!("{} ({:?}: {})", c.caller, c.scope, c.departments.join(",")))
+                .collect();
+            names.sort();
+            ledger_log!("ledger-rust: per-caller tokens from {path}: {}", names.join("; "));
+            Auth { shared, callers: Some(callers) }
         }
     }
 }
@@ -909,8 +1504,9 @@ fn load_max_connections() -> usize {
 }
 
 fn main() {
-    let required_token = load_required_token();
+    let auth = load_auth();
     let max_connections = load_max_connections();
+    let allow_reset = load_flag("LEDGER_ALLOW_RESET");
     let port = std::env::var("LEDGER_PORT").unwrap_or_else(|_| "8090".to_string());
     let log_path = std::env::var("LEDGER_LOG_PATH")
         .unwrap_or_else(|_| "ledger_data/ledger.jsonl".to_string());
@@ -927,25 +1523,38 @@ fn main() {
         .enable_io()
         .enable_time()
         .build()
-        .expect("failed to build the ledger-rust runtime");
+        .unwrap_or_else(|e| refuse(format!("the ledger-rust runtime could not be built: {e}")));
     restore_signal_mask(&mask);
-    let listener = runtime.block_on(async { bind(&addr) }).expect("failed to bind ledger-rust HTTP server");
+    // Sweep F: a failed bind is a clean refusal (exit 1), not a panic.
+    let listener = runtime
+        .block_on(async { bind(&addr) })
+        .unwrap_or_else(|e| refuse(format!("cannot bind {addr}: {e}")));
     let port_file = std::env::var("LEDGER_PORT_FILE").ok();
     if let Some(pf) = &port_file {
         if let Err(e) = check_port_file_path(pf) {
-            ledger_log!("ledger-rust: REFUSING TO START — LEDGER_PORT_FILE={pf:?}: {e}");
-            std::process::exit(1);
+            refuse(format!("LEDGER_PORT_FILE={pf:?}: {e}"));
         }
     }
 
-    let ledger = match PersistentLedger::open(&log_path) {
+    let ledger = match PersistentLedger::open_with(&log_path, LedgerOpenOptions { allow_reset }) {
         Ok(l) => {
             ledger_log!(
-                "ledger-rust: loaded {} existing entries from {log_path}, chain verified",
-                l.len()
+                "ledger-rust: loaded {} existing entries from {log_path}, chain verified, head checkpoint {}",
+                l.len(),
+                serde_json::to_string(&l.head()).unwrap_or_default()
             );
-            Mutex::new(l)
+            if allow_reset {
+                ledger_log!(
+                    "ledger-rust: WARNING — started with LEDGER_ALLOW_RESET=1 (operator reset of the head \
+                     checkpoint allowed); unset it for the next start"
+                );
+            }
+            l
         }
+        Err(e @ PersistError::Locked(_)) => refuse(format!(
+            "ledger log at {log_path} failed to load: {e}. Another ledger-rust is serving this log; two writers \
+             on one log fork its chain."
+        )),
         Err(e) => {
             ledger_log!(
                 "ledger-rust: REFUSING TO START — ledger log at {log_path} failed to load: {e}"
@@ -970,22 +1579,25 @@ fn main() {
         Some(pf) => {
             let port = match listener.local_addr() {
                 Ok(a) => a.port(),
-                Err(e) => {
-                    ledger_log!("ledger-rust: REFUSING TO START — the bound port cannot be read: {e}");
-                    std::process::exit(1);
-                }
+                Err(e) => refuse(format!("the bound port cannot be read: {e}")),
             };
             match publish_port_file(pf, port) {
                 Ok(g) => Some(g),
-                Err(e) => {
-                    ledger_log!("ledger-rust: REFUSING TO START — LEDGER_PORT_FILE={pf:?} could not be written: {e}");
-                    std::process::exit(1);
-                }
+                Err(e) => refuse(format!("LEDGER_PORT_FILE={pf:?} could not be written: {e}")),
             }
         }
         None => None,
     };
 
-    let app = Arc::new(App { ledger, required_token });
+    // The whole chain was verified by open: GET /ledger/verify starts from here.
+    let head = ledger.head();
+    let verified = Verified { len: head.entries as usize, hash: head.head_hash };
+    let app = Arc::new(App {
+        ledger: Mutex::new(ledger),
+        gate: WriterPriority::new(),
+        reads: Semaphore::new(read_slots()),
+        verified: Mutex::new(verified),
+        auth,
+    });
     runtime.block_on(serve(listener, app, max_connections));
 }

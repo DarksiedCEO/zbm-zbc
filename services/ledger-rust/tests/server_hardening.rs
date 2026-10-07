@@ -35,7 +35,7 @@ use std::time::Duration;
 use common::PortFile;
 use serde_json::{json, Value};
 
-const TOKEN: &str = "hardening-test-token";
+const TOKEN: &str = "hardening-test-token-0123456789abcdef";
 
 struct ServerHandle {
     child: Child,
@@ -62,7 +62,7 @@ impl Drop for Scratch {
         for f in side_files(&self.0) {
             let _ = std::fs::remove_file(f);
         }
-        let _ = std::fs::remove_file(&self.0);
+        common::remove_ledger_files(&self.0);
         let _ = std::fs::remove_file(self.stderr_path());
     }
 }
@@ -88,6 +88,13 @@ fn side_files(log: &Path) -> Vec<PathBuf> {
         .map(|e| e.path())
         .filter(|p| p.file_name().unwrap().to_str().unwrap().starts_with(&prefix))
         .collect()
+}
+
+/// The head checkpoint the server keeps next to `log` (sweep F-6).
+fn head_file(log: &Path) -> PathBuf {
+    let mut name = log.file_name().unwrap().to_os_string();
+    name.push(".head");
+    log.with_file_name(name)
 }
 
 /// A file-size limit (RLIMIT_FSIZE) for the spawned server, in BYTES.
@@ -257,18 +264,25 @@ fn file_len(p: &Path) -> u64 {
 #[test]
 fn f5_crash_mid_write_torn_tail_is_truncated_preserved_and_restart_succeeds() {
     let log = scratch("torn");
-    {
+    // Sweep F-6: an append is acknowledged only after the head checkpoint is
+    // written, so a process killed mid-write of the 4th line never wrote the
+    // checkpoint for it: the head file is the one from after the 3rd append.
+    let head_after_three = {
         let s = start(&log, None);
-        for i in 0..4 {
+        for i in 0..3 {
             assert_eq!(authed(s.port, "POST", "/ledger/events", Some(&event(&format!("e{i}")))).0, 201);
         }
-    }
+        let head = std::fs::read(head_file(&log.0)).unwrap();
+        assert_eq!(authed(s.port, "POST", "/ledger/events", Some(&event("e3"))).0, 201);
+        head
+    };
     let full = std::fs::read(&log.0).unwrap();
     let lines: Vec<&[u8]> = full.split_inclusive(|&b| b == b'\n').collect();
     assert_eq!(lines.len(), 4);
     assert!(lines.iter().all(|l| l.ends_with(b"\n")));
     let complete: usize = lines[..3].iter().map(|l| l.len()).sum();
     std::fs::write(&log.0, &full[..complete + lines[3].len() / 2]).unwrap();
+    std::fs::write(head_file(&log.0), &head_after_three).unwrap();
     assert_torn_tail_recovers(&log, 3);
 }
 

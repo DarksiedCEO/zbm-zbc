@@ -49,7 +49,7 @@ use std::time::{Duration, Instant};
 use common::PortFile;
 use serde_json::{json, Value};
 
-const TOKEN: &str = "slow-clients-test-token";
+const TOKEN: &str = "slow-clients-test-token-0123456789abcdef";
 /// Server deadlines (src/bin/server.rs, ADR 0003 section 7).
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -74,7 +74,7 @@ impl Drop for ServerHandle {
 struct Scratch(PathBuf);
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        common::remove_ledger_files(&self.0);
     }
 }
 

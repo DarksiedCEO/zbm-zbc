@@ -13,7 +13,7 @@ use std::time::Duration;
 use common::PortFile;
 use serde_json::{json, Value};
 
-const TOKEN: &str = "events-test-token";
+const TOKEN: &str = "events-test-token-0123456789abcdef";
 
 struct ServerHandle {
     child: Child,
@@ -31,7 +31,7 @@ impl Drop for ServerHandle {
 struct ScratchFile(PathBuf);
 impl Drop for ScratchFile {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        common::remove_ledger_files(&self.0);
     }
 }
 

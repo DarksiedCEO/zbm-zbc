@@ -61,6 +61,18 @@ pub fn scratch_dir() -> PathBuf {
         .clone()
 }
 
+/// Removes a scratch ledger log and the files the server keeps next to it
+/// (sweep F: the single-writer `<log>.lock`, the head checkpoint `<log>.head`
+/// and a `<log>.head.tmp` an interrupted checkpoint write can leave).
+pub fn remove_ledger_files(log: &std::path::Path) {
+    let _ = std::fs::remove_file(log);
+    for suffix in [".lock", ".head", ".head.tmp"] {
+        let mut name = log.file_name().unwrap().to_os_string();
+        name.push(suffix);
+        let _ = std::fs::remove_file(log.with_file_name(name));
+    }
+}
+
 /// A port file next to the test's scratch files; removed on drop.
 pub struct PortFile(pub PathBuf);
 
