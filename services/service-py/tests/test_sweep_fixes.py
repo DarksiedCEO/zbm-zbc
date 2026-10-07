@@ -711,3 +711,17 @@ def test_hl_ordinary_mail_with_list_like_words_changes_no_consent(tmp_path):
         cid = _with_consents(h)
         h.ok(_email(h, "owner@acme.test", t), 201)
         assert _consents(h, cid) == {"email": "active", "sms": "active"}, t
+
+
+def test_hm_remove_me_and_take_me_off_need_a_list_or_the_clause_end(tmp_path):
+    import channels
+    for t in ("Please remove me from the order as the contact, use my wife", "Take me off hold please",
+              "Can you remove me from the shipping notification?"):
+        assert channels.opt_out_level(t) != "exact", t
+        h = Harness(tmp_path / str(abs(hash(t))))
+        cid = _with_consents(h)
+        h.ok(_email(h, "owner@acme.test", t), 201)
+        assert _consents(h, cid) == {"email": "active", "sms": "active"}, t
+    for t in ("Remove me", "remove me please", "Take me off your mailing list", "take me off the list now",
+              "Remove me from your texts"):
+        assert channels.opt_out_level(t) == "exact", t

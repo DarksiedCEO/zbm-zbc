@@ -409,3 +409,9 @@ phrase from all rounds is pinned in `test_scope_corpus_all_rounds_at_once`.
 
 Operational dependency (Andre): `OPT_OUT_POSSIBLE`, `EMAIL_OPT_OUT_UNCLEAR` and `OPT_OUT_IN_QUOTED_TEXT` alerts must be
 worked within days — CAN-SPAM requires an email opt-out honoured within 10 business days.
+
+### Sweep A follow-up — AEGIS re-review of 48eedfd (APPROVE WITH CONDITIONS): condition fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-M (High-class, pre-existing; the approval's condition) | Bare "remove me" / "take me off" revoked "take me off hold please", "remove me from the order as the contact" | `_REMOVE_ME`: exact only at the end of a clause ("Remove me.", "remove me please") or bound to a list / texts / emails / messages / contacts / database ("take me off your mailing list"); other uses fall to `OPT_OUT_POSSIBLE` |

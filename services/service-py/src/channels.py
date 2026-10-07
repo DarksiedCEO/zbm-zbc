@@ -29,7 +29,7 @@ QUIET_END_HOUR = 21        # 21:00 local: first minute SMS may NOT go
 # Over-revoking only ever stops texts, never sends one.
 OPT_OUT_TERMS = ("stop", "stopall", "unsubscribe", "unsub", "cancel", "cancelled", "canceled", "end", "quit", "revoke",
                  "optout", "opt out", "halt", "desist", "stahp",
-                 "remove me", "take me off", "leave me alone", "no more", "dont text", "do not text", "dont message",
+                 "leave me alone", "no more", "dont text", "do not text", "dont message",
                  "do not message", "dont contact", "do not contact", "dont txt", "do not txt", "dont send",
                  "do not send", "never text", "never message", "never contact", "stop texting", "quit texting",
                  "remove my number", "my number off", "lose my number", "take my number", "delete my number",
@@ -109,6 +109,8 @@ def opt_out_level(text: str) -> Optional[str]:
     if any(sym in text for sym in OPT_OUT_SYMBOLS):
         return "exact"
     for clause in _SCOPE_SEGMENT.split(html_as_text(text)):
+        if _REMOVE_ME.search(normalise(clause).strip()):
+            return "exact"
         m = _NEG_WANT.search(normalise(clause).strip())
         if m and not set(m.group(1).split()) <= {"call", "calls"}:
             return "exact"
@@ -351,6 +353,11 @@ _NEG_WANT = re.compile(r"\b(?:dont|do not|no longer|never|dont ever) (?:want|wis
                        # AEGIS H-K: the channel must end the clause or be followed by from you / anymore / again —
                        # "I don't want the mail carrier to ...", "... the text on the banner" are other things
                        r"(?= *$| (?:from (?:you|your|this|acme|us)|anymore|any more|again|ever|please|thanks|thank you)\b)")
+# AEGIS H-M: "remove me" / "take me off" revoke only at the end of a clause ("Remove me.", "take me off please") or
+# bound to a list or channel ("take me off your mailing list"); "take me off hold", "remove me from the order" do not
+_REMOVE_ME = re.compile(r"\b(?:remove me|take me off)(?: (?:(?:from|of) )?(?:your|the|this|these|all|any|that)(?: \w+){0,2}?"
+                        r" (?:list|lists|texts|emails|messages|contacts|database|distribution))?"
+                        r"(?: (?:please|now|thanks|thank you|asap|immediately))* *$")
 _SCOPE_SEGMENT = re.compile(r"[\n\r.!?;,]+")
 # "Do not call, text or email me": a comma inside a list of channels is not a clause end
 _CH = r"(?:call|text|txt|message|email|e-mail|mail|sms)"
