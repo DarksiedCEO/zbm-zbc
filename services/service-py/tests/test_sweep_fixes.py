@@ -538,3 +538,15 @@ def test_m7_an_unclosed_style_flood_is_cheap():
     start = time.perf_counter()
     channels.html_as_text(t)
     assert time.perf_counter() - start < 0.05
+
+
+# ------------------------------------------------------------------ AEGIS re-review of 37eff26 (REVISE)
+
+def test_he_a_polite_or_qualified_text_or_email_opt_out_keeps_email():
+    import channels
+    for t in ("Do not text or email me please", "Stop the texts and the emails please. I would rather not hear from you.",
+              "Dont text or email me if you can help it", "Do not text or email me, only call",
+              "Stop the texts and the emails please. I prefer you call."):
+        assert channels.email_opt_out(t) is True, t
+    for t in ("Stop texting me or email me if you must", "stop texting me and email me instead"):
+        assert channels.email_opt_out(t) is False, t

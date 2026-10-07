@@ -345,3 +345,10 @@ Regressions: `services/service-py/tests/test_sweep_fixes.py` (the tests after "A
 | M-6 | "stop the texts, emails are fine" revoked email | As H-D |
 | M-7 | An unclosed `<style>` flood cost ~1.6 s per message under the lock | Style / script removed only when a closing tag exists, with a bounded pattern |
 | L-6 | Our quoted "Stop by anytime!" alerted | The short-line tail alert needs a line of only stop / quit / unsubscribe and courtesy words |
+
+### Sweep A follow-up — AEGIS re-review of 37eff26 (REVISE): fixed
+
+| Id | Finding | Fix |
+|---|---|---|
+| H-E (High, regression) | "Do not text or email me please" / "... if you can help it" / "..., only call" revoked SMS only | "please" is not a preference word; after "or / nor" email is added unless a base-form "email" follows a gerund ("stop texting me or email me if you must" stays a request) |
+| M-8 | A preference word in a later sentence narrowed an explicit opt-out | The preference check runs only when no phrase already reached an email word; "...the emails please. I prefer you call." is `all` |

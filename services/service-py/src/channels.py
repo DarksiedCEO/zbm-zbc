@@ -132,7 +132,7 @@ _NEG_EMAIL = re.compile(r"\b(not|dont|never|stop|quit|no more)(?: (?:me|sending|
                         r"the|with|to|me any)){0,3} (e ?mail|emails|emailing|inbox)\b")
 _NEG_TEXT_OR_EMAIL = re.compile(r"\b(not|dont|never|stop|quit)\b(?: \w+){0,4}? (text|texts|texting|txt|call|calling|"
                                 r"messag\w*)(?: me)? (?:(?:or|nor) (?:me )?(?:e ?mail|emails|emailing)|and emailing)\b"
-                                r"(?! (?:me )?(?:instead|if|only|rather|please|anytime|whenever)\b)")
+                                r"(?! (?:me )?(?:instead|if|only|rather|anytime|whenever)\b)")
 _EMAIL_PREFERENCE = frozenset({"instead", "prefer", "rather", "only", "use", "reach", "contact"})
 # a phone word followed by these is a label for an address ("Cell: 310 ...", "my number is ..."), not a channel
 _ADDRESS_LABEL_NEXT = frozenset({"is", "was", "changed", "here"})
@@ -320,8 +320,7 @@ def typo_opt_out(text: Optional[str]) -> bool:
     return any(_typo_tokens(v) for v in (normalise(t), normalise(t.translate(_LEET)), normalise(raw)))
 
 
-_PREFERENCE_AFTER = frozenset({"instead", "if", "only", "rather", "please", "pls", "plz", "anytime", "whenever",
-                               "about", "at"})
+_PREFERENCE_AFTER = frozenset({"instead", "if", "only", "rather", "anytime", "whenever", "about", "at"})
 
 
 def _email_word_adds(toks: list[str], k: int) -> Optional[bool]:
@@ -336,10 +335,14 @@ def _email_word_adds(toks: list[str], k: int) -> Optional[bool]:
         return None
     if prev in ("and", "or", "nor") and toks[k] in ("emailing", "mailing"):
         return True                           # "stop texting me and emailing me, instead call me"
+    if prev in ("or", "nor"):
+        # AEGIS H-E: a parallel form carries the negation whatever follows ("do not text or email me please / if you
+        # can help it / only call"); a base-form "email" after a gerund ("stop texting me or email me if you must") is
+        # a request
+        phone = next((toks[i] for i in range(k - 1, -1, -1) if toks[i] in PHONE_SCOPE_WORDS), "")
+        return not (phone.endswith("ing") and toks[k] in ("email", "mail"))
     if nxt in _PREFERENCE_AFTER or (nxt == "me" and nxt2 in _PREFERENCE_AFTER):
         return None
-    if prev in ("or", "nor"):
-        return True
     if prev == "and":
         return toks[k] in ("emailing", "emails", "mailing", "newsletters", "inbox")
     return nxt != "me"
