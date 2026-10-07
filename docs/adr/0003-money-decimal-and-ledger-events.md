@@ -702,6 +702,144 @@ directory (`std::env::temp_dir()`, which honours TMPDIR — under the hygiene wr
 so a crashed test's leftovers fail rule R3 instead of accumulating in /tmp; the 735 `ledger_test_*` logs in this
 machine's /tmp are from earlier waves' code and are not removed by this wave — other sessions' files).
 
+## 13. Bug sweep F: one writer, a durable head, strict tails, scoped callers, bounded reads (Oct 6 2026)
+
+Amendment for the Oct 6 2026 backend bug sweep (findings F-1, F-2, F-4, F-6, F-7, F-12, F-13 against integration
+5d49ee9; `claude/bug-sweep-2026-10-06.md` in the project). Every reproduced finding has a test that fails on 5d49ee9
+and passes now: `tests/server_sweep_f.rs` (real binary, real TCP) and the `sweep F` unit tests in
+`src/persistence.rs`. The hash chain, the canonical forms and the on-disk entry format are unchanged; every log any
+earlier binary wrote still loads, verifies and is extended.
+
+**F-1, single writer.** Two servers on one `LEDGER_LOG_PATH` both started and both appended seq 0, forking the
+chain on disk; the next start refused. `PersistentLedger::open` now takes an exclusive, non-blocking `flock` on
+`<log>.lock` (created mode 0600, never through a symlink) before it reads anything, and holds it for the life of the
+process. A second opener — another process or a second handle in the same one — gets `PersistError::Locked` and the
+server refuses to start (exit 1, "Another ledger-rust is serving this log"). `LEDGER_ALLOW_RESET` never bypasses it.
+The lock file is never deleted (deleting it would let a third opener lock a new inode while the holder still holds
+the old one). flock is advisory and local: it does not protect a log on a network filesystem shared by two hosts —
+"exactly one ledger replica" stays a deployment rule.
+
+**F-6, deletion and rollback.** A deleted log restarted as an empty, "valid" ledger; dropping whole acknowledged
+lines from the end verified. Now, after every append, the head checkpoint
+`{"entries":N,"head_seq":N-1,"head_hash":"…"}` (genesis hash and `null` when empty) is written to `<log>.head`:
+temp file `<log>.head.tmp` (O_EXCL, mode 0600), fsync, rename, directory fsync. An append is acknowledged only after
+both the log line and the checkpoint are durable; if the checkpoint cannot be written before its rename, the log line
+is rolled back exactly like a failed log write (and the ledger is poisoned if even that fails). On open, after the
+full chain verifies, the log must reach the checkpoint:
+
+| log vs checkpoint | result |
+|---|---|
+| log file missing, checkpoint present | refused |
+| fewer entries than the checkpoint | refused |
+| entry `head_seq` does not carry `head_hash` (rewritten / replaced log) | refused |
+| checkpoint file unreadable or malformed | refused |
+| equal | opens |
+| log ahead of the checkpoint (a crash between the log fsync and the rename; every extra entry still verifies) | opens, checkpoint moved up, logged |
+| no checkpoint file (a log written by an older binary) | opens, checkpoint created, WARNING logged |
+
+A refusal changes nothing on disk. `LEDGER_ALLOW_RESET=1` (exactly `1`; any value other than `0`/empty/unset refuses
+to start) accepts the verified log as it is and rewrites the checkpoint, with a loud `OPERATOR RESET` line naming the
+old checkpoint; it skips nothing else (lock, parsing, chain verification, the F-13 rules). `GET /ledger/head` returns
+the in-memory head, which equals the durable checkpoint after every acknowledged append.
+
+*Residual, stated:* the checkpoint sits next to the log, so whoever can rewrite the log can rewrite or delete the
+checkpoint too (deleting both reads as a fresh install; deleting the checkpoint and truncating the log reads as an
+upgrade from an older binary). It catches accidental deletion, truncation, a restore of an older copy and a swapped
+log — not a deliberate forger with write access to the directory. **Future work:** a stronger, external anchor — the
+head signed with a key the ledger host does not hold for writing, and published somewhere the host cannot rewrite
+(another service's store, a transparency log, a periodic signed export) — so that rollback is detectable off-box.
+
+**F-13, torn tail and blank lines.** The torn-tail recovery (section 5) moved ANY unterminated final segment aside,
+so deleting the one final newline of an acknowledged log silently dropped the last acknowledged entry. A crash
+mid-append leaves a strict prefix of `<json>\n`, and no strict prefix of a JSON object is valid JSON; so an
+unterminated tail that parses as a complete JSON value is now refused (`Corrupt`, file untouched — restore the
+newline or move the line aside by hand), as is an unterminated whitespace-only tail (no real line starts with
+whitespace). A blank line (empty or whitespace-only) anywhere in the log is refused; the old loader skipped it. A
+genuinely partial final line is still preserved to `<log>.torn-<nanos>` and truncated, exactly as before.
+
+**F-7, finding idempotency (opt-in).** `POST /ledger/append` appended every post, so retries made duplicates (the
+probe: 60 posts of 5 `finding_id`s, 60 entries). With an `Idempotency-Key` header whose value equals the body's
+`finding_id`, the append has `event_id` semantics: `201` new, `200` and the existing entry when an entry with that
+`finding_id` and identical content exists (amounts compared as canonical money strings, so a legacy numeric amount
+matches), `409` when only different content exists; nothing is written for `200`/`409`. A key that differs from the
+body's `finding_id` (or is not visible ASCII) is a `400`. Without the header nothing changes — the orchestrator
+re-records findings on every scan today and keeps doing so. The `finding_id → positions` index is rebuilt on open; a
+log may legitimately hold one `finding_id` several times (every earlier writer appended unconditionally), so unlike
+`event_id` a duplicate is never corruption, and the opt-in compares against every entry with that id.
+
+**F-12, token length.** `LEDGER_SERVICE_TOKEN` must be at least 32 bytes or the server refuses to start (a
+1-character token was accepted). Every live run in the repo already used ≥ 32 bytes; two onboarding-py tests that
+start the real binary used 23-byte tokens and were padded.
+
+**F-2, scale.** At ~120k entries the dashboard broke and at ~480k every caller's integrity check failed: a full
+`GET /ledger/entries` or `/ledger/verify` serialized or re-hashed the whole ledger while holding the one mutex, on a
+blocking pool readers could fill, so an append queued behind every reader in front of it (500k entries: an append
+behind 6 full reads took 5.2 s; `/ledger/verify` 1.6–2.3 s).
+
+- `GET /ledger/entries?after_seq=&limit=&department=&event_type=`: entries with `seq > after_seq`, in seq order, at
+  most `limit` (default 1000, max 10000) that match the filters; `department`/`event_type` match events only (a
+  finding has neither). Response: the same JSON array of entries. Fewer than `limit` entries means the end was
+  reached; otherwise the next page is `after_seq=<last seq>`. The query is strict: an unknown or repeated parameter,
+  an empty value, a non-numeric number, `limit` outside 1–10000 or a filter outside `[a-z0-9_]{1,64}` is a `400` — a
+  typo never silently widens a read. With no query string the response is byte-identical to before (checked at
+  500k entries: same SHA-256 of the body from both binaries).
+- Readers copy their snapshot under the mutex in chunks of 2048 entries and serialize or verify outside it; entries
+  are immutable and append-only, so the chunks are exactly the snapshot `0..len` taken at the start.
+- Writer priority: an append announces itself before it locks; a reader waits, before each chunk, while an append is
+  waiting. An append therefore waits for at most the one chunk being copied, however many readers there are.
+- Reads take one of `min(CPUs, 4)` read slots (async — a waiting reader holds no thread) before they use the blocking
+  pool (16 threads), so appends always find a thread; appends never wait for a read slot. More concurrent full reads
+  than CPUs only slowed every read (6 reads of 500k on 2 CPUs: up to 10.1 s with 4 slots, 5.6 s with 2).
+- `GET /ledger/verify` is incremental: the full chain is verified on open, and each verify checks only the entries
+  after the last verified head (`len`, hash), using the same per-entry check (`verify_entry`, now shared with
+  `Ledger::verify_chain`). `?full=1` re-verifies the whole chain on demand (chunked as above). The responses are
+  unchanged (`200 {"valid":true,"entries":N}` / `409 {"valid":false,"error":…}`); `?full=` other than `0`/`1` is a
+  `400`. Verification is of the in-memory chain, as before; the log on disk is re-verified at every start.
+- `REQUEST_DEADLINE` (15 s per connection) is unchanged and still covers the wait for a read slot.
+
+Measured (release builds, 2-CPU build box shared with other jobs — absolute numbers are noisy, the before/after
+direction was the same in every run; 500k-entry / 258 MB log; `probe_scale.py` and this wave's bench scripts, two
+runs each, quiet / loaded):
+
+| | 5d49ee9 | after |
+|---|---|---|
+| one append behind 6 concurrent full reads (`probe_scale.py`) | 5.25 s / 3.24 s | 0.73 s / 0.89 s |
+| append latency, 6 readers looping full reads, median (p95) | 5.46 s (6.36 s) / 7.33 s (8.42 s) | 8.8 ms (52 ms) / 11.9 ms (44 ms) |
+| `GET /ledger/verify` | 1.6 s / 2.5–5.0 s | 0.001–0.06 s (`?full=1`: 2.1 s / 3.1 s) |
+| `GET /ledger/entries?after_seq=…&limit=1000` | — (404) | 3 ms / 14 ms |
+| idle append, median | 4.0 ms / 1.1 ms | 12.0 ms / 16.2 ms |
+
+Costs, stated: an idle append now does three fsyncs instead of one (log, checkpoint, directory). A single full read
+is ~0.4 s slower at 500k (the copy), and several concurrent full reads take longer in aggregate than before (they ran
+one at a time under the lock; now up to one per CPU run side by side): at 500k on this box some of 6 concurrent full
+reads reach the 15 s `REQUEST_DEADLINE` with either binary, a few more with this one. The full read is kept only for
+backward compatibility; a client that needs the whole ledger repeatedly should page with `after_seq`.
+
+**F-4, per-caller tokens with department scopes (opt-in).** One shared token, and `department` self-declared: any
+service could record evidence for any other. New optional `LEDGER_CALLERS_FILE`: a JSON object mapping the lowercase
+hex SHA-256 of a caller's bearer token to `{"caller": "<name>", "departments": ["<dept>", …], "scope":
+"write"|"read"}` (unknown fields refused; a write caller must list at least one department; departments follow the
+event `department` rule; any malformed entry, an empty map, a missing or > 1 MiB file refuses the start). When it is
+set:
+
+- a token is looked up by its SHA-256 (the file holds no tokens; lookup timing can reveal nothing about a token);
+- `POST /ledger/events` needs a write caller whose `departments` include the event's `department`, else `403`
+  (checked after the body is parsed, before the lock; nothing is written);
+- `POST /ledger/append` (findings) needs the department `revenue_recovery`;
+- a `read` caller may `GET /ledger/entries`, `/ledger/verify` and `/ledger/head` only; a POST is `403` before any
+  body byte is read;
+- the shared `LEDGER_SERVICE_TOKEN` is accepted only with `LEDGER_ALLOW_SHARED_TOKEN=1` (then with its old, unscoped
+  access, and still ≥ 32 bytes); without the flag it may be unset, and if set it is ignored (logged).
+
+When `LEDGER_CALLERS_FILE` is unset nothing changes, but the server logs a startup WARNING that the shared token can
+write any department. The startup log names every configured caller with its scope and departments. *Residual:* the
+callers file is read once at start (rotation = restart); scoping is per department, not per event type; a caller
+token's length cannot be checked (only its hash is configured).
+
+**A failed bind** (port taken, bad address) panicked with exit 101; now it is a `REFUSING TO START … cannot bind`
+line and exit 1 (as are a failed runtime start, a bad `LEDGER_ALLOW_RESET` / `LEDGER_ALLOW_SHARED_TOKEN` value and
+every startup refusal above).
+
 ## Verification
 
 Current test counts: [docs/test-counts.md](../test-counts.md) (generated). The original commands and a live
