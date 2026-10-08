@@ -92,6 +92,7 @@ the `request_id` and every answer another department's thin client reads states 
 | `POST /vi/v1/jobs/{liveness,metrics,revisions,anomaly,certify,retention}/run` | scheduler | one cycle, idempotent per (job, UTC date); every clip is its own item (bug sweep C, C-1): a failed or wedged item never blocks the others |
 | `GET /vi/v1/jobs/dead-letter` | scheduler | items parked after `VI_JOB_ITEM_MAX_FAILURES` failed runs, and items waiting out a backoff |
 | `POST /vi/v1/jobs/{job}/dead-letter/{subject_id}/requeue` | Andre | put a parked item back; the next run retries it |
+| `POST /vi/v1/age/legacy-minors/{subject_id}/resolve` | Andre | mark a minor recorded before mailbox folding resolved (`legacy_minors_without_base` in /health) |
 | `GET /vi/v1/audit/evidence?event_type=&limit=&offset=` | any caller | every V&I ledger event: `committed` / `cited` / `attempted` (bug sweep C, R6) |
 | `GET /vi/v1/reconcile`, `POST /vi/v1/reconcile` | Andre | show / void the voidable log-vs-ledger mismatches |
 | `GET /vi/v1/integrity` | any caller | log chain, anchors, leases, ghost rulings, snapshot payload hashes vs the ledger |

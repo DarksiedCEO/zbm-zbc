@@ -518,6 +518,12 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
             raise Invalid("unknown job")
         return _echo(req.request_id, svc.requeue_dead_letter(req.request_id, job, _id(subject_id)))
 
+    @app.post("/vi/v1/age/legacy-minors/{subject_id}/resolve", dependencies=auth)
+    def legacy_minor_resolve(subject_id: str, _: str = Depends(andre("age/legacy-minors/resolve")),
+                             req: m.LegacyMinorResolve = Depends(body(m.LegacyMinorResolve))) -> dict:
+        """AEGIS L3-R: Andre marks a legacy minor record (identity checked before mailbox folding) resolved."""
+        return _echo(req.request_id, svc.resolve_legacy_minor(req.request_id, _id(subject_id), req.note))
+
     @app.get("/vi/v1/audit/evidence", dependencies=auth)
     def audit_evidence(_: str = Depends(caller()), limit: int = Query(default=200, ge=1, le=1000),
                        offset: int = Query(default=0, ge=0, le=10_000_000),

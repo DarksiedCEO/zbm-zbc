@@ -516,18 +516,45 @@ def test_l3_minor_lock_folds_dash_tags_and_homoglyphs(hr, variant):
     assert hr.ok(hr.age_check("kid2"))["status"] == "minor"
 
 
-def test_l3_a_minor_recorded_before_mailbox_folding_withholds_new_adult_answers_until_rechecked(hr):
-    """V&I keeps no raw address, so ``email_base`` cannot be backfilled at load for a minor checked before it
-    existed; until that identity is checked again, no other subject gets an adult answer."""
-    hr.connect("kid")
+def _legacy_minor(hr):
+    """A minor whose identity check predates email_base (as a record from before the change)."""
+    hr.connect("kid", account_id="acct-kid")
     hr.identity("kid", "kid@example.com")
     hr.age.answer = AgeProviderAnswer("minor", None, None, True, "p", "r")
     hr.ok(hr.age_check("kid", dob="2012-01-01"))
-    for k in [k for k in hr.svc.clipper_hmacs["kid"] if k[0] == "email_base"]:  # as a pre-change record
+    for k in [k for k in hr.svc.clipper_hmacs["kid"] if k[0] == "email_base"]:
         hr.svc.clipper_hmacs["kid"].discard(k)
     hr.age.answer = AgeProviderAnswer("adult", None, None, True, "p", "r2")
-    hr.identity("adult-1", "someone@example.com")
-    hr.ok(hr.age_check("adult-1"))
-    assert hr.ok(hr.get("/vi/v1/age/subjects/adult-1", caller="clipper_network"))["status"] == "unknown"
-    hr.identity("kid", "kid@example.com")                                 # the minor's identity re-checked
-    assert hr.ok(hr.get("/vi/v1/age/subjects/adult-1", caller="clipper_network"))["status"] == "adult"
+
+
+def test_l3r_a_legacy_minor_does_not_affect_an_unrelated_adult_or_a_new_clipper(hr):
+    hr.onboard("adult-0")                                                # an existing adult
+    _legacy_minor(hr)
+    assert hr.ok(hr.get("/health"))["legacy_minors_without_base"] == 1
+    assert hr.ok(hr.get("/vi/v1/integrity"))["legacy_minors_without_base"] == 1
+    assert hr.ok(hr.get("/vi/v1/age/subjects/adult-0", caller="clipper_network"))["status"] == "adult"
+    hr.onboard("newbie")                                                 # a new clipper, unrelated e-mail
+    assert hr.ok(hr.get("/vi/v1/age/subjects/newbie", caller="clipper_network"))["status"] == "adult"
+
+
+def test_l3r_a_subject_matching_the_legacy_minors_stored_hmacs_is_still_locked(hr):
+    _legacy_minor(hr)
+    hr.identity("kid-e", "kid@example.com")                              # the exact e-mail
+    assert hr.ok(hr.age_check("kid-e"))["status"] == "minor"
+    hr.finance.hmacs["kid-p"] = hr.finance.payout_identity_hmac("kid").identity_hmac
+    hr.identity("kid-p", "other@example.com")                            # the same payout identity
+    assert hr.ok(hr.age_check("kid-p"))["status"] == "minor"
+
+
+def test_l3r_andre_resolves_a_legacy_minor_record_and_nobody_else_can(hr):
+    _legacy_minor(hr)
+    path = "/vi/v1/age/legacy-minors/kid/resolve"
+    body = {"request_id": rid(), "note": "checked by hand: no other clipper is this person"}
+    assert hr.post(path, body, caller="clipper_network").status_code == 403
+    assert hr.post(path, {**body, "request_id": rid()}, andre="not-andre").status_code == 403
+    r = hr.ok(hr.post(path, {**body, "request_id": rid()}, andre=ANDRE_TOKEN))
+    assert r["resolved"] is True and r["legacy_minors_without_base"] == 0
+    assert hr.ledger.of_type("legacy_minor_resolved")
+    assert hr.ok(hr.get("/health"))["legacy_minors_without_base"] == 0
+    hr.identity("kid-e", "kid@example.com")                              # the exact-HMAC lock stays
+    assert hr.ok(hr.age_check("kid-e"))["status"] == "minor"

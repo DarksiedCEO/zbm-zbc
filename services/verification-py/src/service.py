@@ -275,6 +275,7 @@ class VIService:
         self._leaked: dict[str, int] = {}     # AEGIS L-2: timed-out calls per port still running
         self.job_items: dict[tuple[str, str], dict] = {}   # (job, subject) -> {failures, next_try} (memory only)
         self.dead_letters: dict[tuple[str, str], dict] = {}  # (job, subject) -> parked item (event-sourced)
+        self.legacy_resolved: set[str] = set()   # AEGIS L3-R: legacy minor records Andre marked resolved
         self._failed_named: list[dict] = []
         self._carry: list[str] = []          # C-1: a retried item's earlier attempts, cited by the line that commits it
         # bug sweep C (E-5/F-3, finance-py's single writer): one service instance per data directory, also within one
@@ -610,6 +611,8 @@ class VIService:
             self.job_runs[(r["job"], r["day"])] = r
         elif kind == "screen":
             self.screens[r["submission_id"]] = r
+        elif kind == "legacy_minor_resolved":
+            self.legacy_resolved.add(r["subject_id"])
         elif kind == "job_item":
             k = (r["job"], r["subject_id"])
             if "failures" in r:
@@ -712,11 +715,13 @@ class VIService:
                 problems.append("local log hash chain does not verify")
             if self.log.fault:
                 problems.append(f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}")
+            legacy = len(self._minors_without_base())
             if self.dead_letters:
                 problems.append(f"{len(self.dead_letters)} job item(s) parked in the dead-letter list for Andre "
                                 "(GET /vi/v1/jobs/dead-letter)")
             return {"status": "red" if problems else "green", "problems": problems,
-                    "log_lines": len(self.log), "rules_version": self.rules_version}
+                    "log_lines": len(self.log), "rules_version": self.rules_version,
+                    "legacy_minors_without_base": legacy}
 
     def _write_lease(self) -> None:
         with self.lock:
@@ -1092,22 +1097,52 @@ class VIService:
         for (ns, subj), aid in self.latest_age.items():
             if ns != CN_NAMESPACE or subj == exclude or self.ages[aid]["result"] != "minor":
                 continue
+            legacy = subj in self._legacy_minor_set()
             for k in self.clipper_hmacs.get(subj, set()):
-                if k[0] in IDENTITY_LOCK_KINDS:
+                # AEGIS L3-R: a minor recorded before email_base existed is matched by everything V&I keeps for it
+                # (exact e-mail and payout HMACs, and its platform account HMACs), never by a global freeze
+                if k[0] in IDENTITY_LOCK_KINDS or (legacy and k[0].startswith("account:")):
                     out.setdefault(k, aid)
         return out
 
     def _minors_without_base(self) -> list[str]:
-        """AEGIS L-3: minors whose identity check predates the canonical-mailbox HMAC (``email_base``). V&I never
-        stores a raw address, so it cannot be computed at load; until such a minor's identity is checked again, no
-        NEW identity can be proved distinct from it by mailbox, so a new subject's adult answer is withheld."""
+        """AEGIS L-3 / L3-R: Clipper Network minors whose identity check predates the canonical-mailbox HMAC
+        (``email_base``) and that Andre has not marked resolved. V&I never stores a raw address, so it cannot be
+        computed at load: such a minor is still matched by its exact e-mail / payout / account HMACs
+        (``_minor_identities``), but not by a ``+tag``/``-tag``/homoglyph variant. Reported as
+        ``legacy_minors_without_base`` (/health, /vi/v1/integrity) so Andre sees the gap."""
         out = []
         for (ns, subj), aid in self.latest_age.items():
-            if ns == CN_NAMESPACE and self.ages[aid]["result"] == "minor":
+            if ns == CN_NAMESPACE and self.ages[aid]["result"] == "minor" and subj not in self.legacy_resolved:
                 kinds = {k for k, _ in self.clipper_hmacs.get(subj, set())}
-                if "email" in kinds and "email_base" not in kinds:
+                if "email_base" not in kinds:
                     out.append(subj)
         return sorted(out)
+
+    def _legacy_minor_set(self) -> set:
+        return {subj for (ns, subj), aid in self.latest_age.items()
+                if ns == CN_NAMESPACE and self.ages[aid]["result"] == "minor"
+                and "email_base" not in {k for k, _ in self.clipper_hmacs.get(subj, set())}}
+
+    def resolve_legacy_minor(self, request_id: str, subject_id: str, note: str) -> dict:
+        """AEGIS L3-R: Andre marks a legacy minor record (no ``email_base``) resolved — e.g. after checking by hand that
+        no other clipper is the same person. Recorded evidence; the exact-HMAC lock on that minor stays."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, "age/legacy-minors/resolve", {"s": subject_id, "n": note})
+            if ent:
+                return ent["response"]
+            if subject_id not in self._minors_without_base():
+                raise NotFound("no unresolved legacy minor record for this subject")
+            op = Op(self, f"lmr|{subject_id}|{request_id}", "andre", subject_id[:128])
+            op.record(derived_id("lmr", subject_id), "legacy_minor_resolved", "andre", subject_id[:128],
+                      {"subject_id": subject_id, "note_sha256": sha_text(note)},
+                      "Andre marked a legacy minor record resolved (no mailbox HMAC)")
+            op.add("legacy_minor_resolved", {"subject_id": subject_id, "note_sha256": sha_text(note),
+                                             "at": iso(self._now())})
+            self._commit(op)
+            return self._idem_store(key, h, {"subject_id": subject_id, "resolved": True,
+                                             "legacy_minors_without_base": len(self._minors_without_base()),
+                                             "ledger_event_ids": op.events})
 
     def _identity_minor(self, subject_id: str) -> Optional[str]:
         mine = {k for k in self.clipper_hmacs.get(subject_id, set()) if k[0] in IDENTITY_LOCK_KINDS}
@@ -1137,10 +1172,6 @@ class VIService:
         if aid is None:
             return "unknown", [R.item("AGE_NOT_ASSURED", "no age attestation on file", (), rules)], None
         a = self.ages[aid]
-        if ns == CN_NAMESPACE and a["result"] == "adult" and subject_id not in self._minors_without_base() \
-                and self._minors_without_base():
-            return "unknown", [R.item("AGE_NOT_ASSURED", "a minor's identity check predates mailbox folding: "
-                                      "re-run that identity check before an adult answer", (aid,), rules)], aid
         if a["result"] == "minor":
             return "minor", [R.item("AGE_MINOR", "age attestation: under 18", (aid,), rules)], aid
         if a["result"] != "adult":
@@ -3553,4 +3584,5 @@ class VIService:
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
                 "platform_data_store_degraded": self.sidestore_degraded, "log_write_fault": bool(self.log.fault),
-                "dead_lettered": len(self.dead_letters)}
+                "dead_lettered": len(self.dead_letters),
+                "legacy_minors_without_base": len(self._minors_without_base())}
