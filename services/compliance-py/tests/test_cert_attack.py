@@ -145,7 +145,8 @@ def test_h21_injection_text_never_changes_a_ruling(hs):
     assert unmet_codes(hostile) == unmet_codes(plain)
     assert hs.ledger.of_type("injection_text_ignored")
     ev = hs.ledger.of_type("injection_text_ignored")[-1]
-    assert set(ev["payload"]) == {"rules", "count", "op"} and "approval_forgery" in ev["payload"]["rules"]
+    # bug sweep C R6: the evidence payload also names its action (rk) and log line (seq); nothing else is added
+    assert set(ev["payload"]) == {"rules", "count", "op", "rk", "seq"} and "approval_forgery" in ev["payload"]["rules"]
 
 
 def test_h21_injection_on_a_watched_page_still_needs_andre(hs):

@@ -34,13 +34,15 @@ from fetcher import FeedFetcher, FetchFailed, FetchRefused, NotWiredFetcher, Sou
 from intelligences import (i01_register, i02_activation_gate, i03_payout_gate, i04_publish_gate, i05_control_monitor,
                            i06_change_watcher, i07_jurisdiction, i08_sanctions, i10_accessibility, i11_evidence_audit)
 from intelligences.engine import Ctx, evaluate, finalize, unmet_line
-from ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
+from ledger import DEPARTMENT as LEDGER_DEPARTMENT
+from ledger import (LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, clean_summary,
+                    derived_id, payload_sha256)
 from ports import (A11yAnswer, AccessibilityChecker, AgeAttestation, ClipAttestation, DocVersion, Finance31Port,
                    Legal37Port, NotBuiltFinance31, NotBuiltLegal37, NotBuiltVerificationIntegrity,
                    NotWiredAccessibilityChecker, NotWiredSanctionsProvider, RailStatus, SanctionsScreeningProvider,
                    ScreenAnswer, TaxStatus, VerificationIntegrityPort)
 from register import Version, effective_status, rows_sha256, sha256_text
-from store import RecordLog, StoreWriteError
+from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
 
 SPEC_SEED_SHA256 = "4e3821d018a42be76ede1bf501004f0a8c5590327fa98ddd9f8c3f16845f584d"
@@ -102,7 +104,7 @@ class PortCalls:
         eid = derived_id("x", self.op_id, port, action, list(args))
         self.svc._record(eid, f"crossing_{port}_requested", self.actor, self.subject,
                          {"port": port, "action": action, "args_sha256": _sha(list(args)), "op": self.op_id},
-                         f"Request to {port}: {action}")
+                         f"Request to {port}: {action}", raw=True)
         self.events.append(eid)
         try:
             ans = fn()
@@ -171,7 +173,8 @@ class GateEnv:
 class ComplianceService:
     def __init__(self, config: Config, recorder: Recorder, log: RecordLog, seed_bytes: bytes,
                  expected_seed_sha256: str = SPEC_SEED_SHA256, ports: Optional[Ports] = None,
-                 clock: Optional[Clock] = None, sources: Optional[list[Source]] = None, reconcile_mode: bool = False):
+                 clock: Optional[Clock] = None, sources: Optional[list[Source]] = None, reconcile_mode: bool = False,
+                 dir_lock=None, lock_token: Optional[str] = None):
         """``expected_seed_sha256`` other than the spec's pinned hash marks the service NON-PRODUCTION
         (``seed_pinned: false`` in /health and in every ruling; AEGIS N14-13). config.py allows that only
         with COMPLIANCE_ALLOW_UNPINNED_SEED=1.
@@ -186,6 +189,52 @@ class ComplianceService:
         self.clock = clock or SystemClock()
         self.sources = sources if sources is not None else seeded_sources()
         self.lock = threading.RLock()
+        self.reconcile_mode = bool(reconcile_mode)
+        self._named: dict[str, dict] = {}     # bug sweep C R6: evidence recorded, until its line names it
+        # rulings recorded on the ledger and not yet named by a committed line -> the request epoch that recorded them;
+        # one left behind by an earlier request is an ATTEMPT, named by the next committed line (never a ghost)
+        self._pending_rulings: dict[str, int] = {}
+        self._op_epoch = 0
+        self._watch_lock = threading.Lock()   # bug sweep C: one Change Watcher cycle at a time (fetches run unlocked)
+        # bug sweep C (E-5/F-3, finance-py's single writer): one service instance per data directory, also within one
+        # process. api.build_service claims the flock BEFORE the log is built and passes the claim's token; this
+        # instance adopts it only if the token IS the current claim, and gives it back on close() or a failed start.
+        self._closed = False
+        self._dir_lock = dir_lock
+        self._lock_token: Optional[str] = None
+        if self._dir_lock is not None:
+            if lock_token is None:
+                lock_token = self._dir_lock.claim()
+            adopted = self._dir_lock.adopt(lock_token)
+            if adopted is None:
+                self._dir_lock = None
+                raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
+                                  "stale, another instance's, or already adopted); refusing to start")
+            self._lock_token = adopted
+        try:
+            self._start(seed_bytes, expected_seed_sha256)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Give the data directory back (a restart in the same process closes the old instance first). A closed
+        instance is inert: its log refuses every write and every ledger record is refused (503 SERVICE_CLOSED).
+        Taken under the service lock, so it never interleaves with a commit."""
+        with self.lock:
+            self._closed = True
+            with self.log.lock:
+                self.log.closed = True
+            if self._dir_lock is not None:
+                self._dir_lock.release_claim(self._lock_token)
+                self._dir_lock = None
+                self._lock_token = None
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _start(self, seed_bytes: bytes, expected_seed_sha256: str) -> None:
         seed_sha = hashlib.sha256(seed_bytes).hexdigest()
         if seed_sha != expected_seed_sha256:
             raise RuntimeError(f"seed file SHA-256 {seed_sha} does not match the expected {expected_seed_sha256}; "
@@ -215,7 +264,6 @@ class ComplianceService:
         self._wbudget: Optional[dict] = None   # Change Watcher drafting budget, set per cycle (N14-11)
         self._ledger_conflict = False          # the last _record failure was a 409 (a different record, same id)
         self.instance_id = secrets.token_hex(8)  # AEGIS N15-2: this process; its lease names it on the ledger
-        self.reconcile_mode = bool(reconcile_mode)
         self.reconcile_required: list[str] = []  # voidable problems pending Andre (at start; after a reconcile)
         self._reconciling = False
         for rec in self.log.iter_records():
@@ -254,17 +302,44 @@ class ComplianceService:
         (expiry, effective dates, SLA, freshness) is a UTC date whatever tz the clock uses."""
         return self.clock.now().astimezone(timezone.utc)
 
-    def _record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str) -> str:
+    def _record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str,
+                raw: bool = False) -> str:
+        """Record one ledger event FIRST and return the id actually recorded.
+
+        Bug sweep C (R6, the bizdev-py / finance-py pattern): ``event_id`` is the logical action's key ``rk``; the id
+        recorded is ``i11_evidence_audit.evidence_id(rk, type, payload_sha256, actor/subject/summary hash)`` over a payload
+        that also carries ``rk`` and ``seq`` (the next log line when it was recorded). The same action with the same
+        content at the same log position is the same id (the ledger answers 200 to a retry); after any state change it
+        is a NEW id, never a lasting 409. The commit that applies it names it (``data.evidence``); one that never
+        commits leaves it ``attempted`` (GET /audit/evidence). ``raw``: the id and payload are recorded exactly as
+        given — ids other code parses or hands out (port crossings, anchors, leases, reconciles, version events,
+        ruling ids)."""
         self._ledger_conflict = False
+        if self._closed:
+            raise Unavailable("SERVICE_CLOSED: this Compliance instance is closed; nothing was recorded",
+                              ledger_write="not_recorded")
+        if not raw:
+            rk = event_id
+            payload = {**payload, "rk": rk, "seq": len(self.log) + 1}
+            meta = i11_evidence_audit.meta_sha256(actor, subject, clean_summary(summary))
+            event_id = i11_evidence_audit.evidence_id(rk, event_type, payload_sha256(payload), meta)
         if self.reconcile_mode and not self._reconciling:
             raise Unavailable("reconcile mode (COMPLIANCE_RECONCILE_MODE=1): only Andre's POST /compliance/v1/reconcile "
                               "is answered; restart without it once the log is reconciled", ledger_write="not_recorded")
         try:
-            return self.recorder.record(event_id, event_type, actor, subject, payload, summary)
+            eid = self.recorder.record(event_id, event_type, actor, subject, payload, summary)
         except LedgerRecordError as exc:
             self._ledger_conflict = isinstance(exc, LedgerConflict)
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing was issued",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
+        if event_type in i11_evidence_audit.RULING_TYPES:
+            self._pending_rulings[eid] = self._op_epoch
+        if not raw:
+            if len(self._named) > 100_000:
+                self._named.clear()
+            self._named[eid] = {"event_id": eid, "event_type": event_type, "rk": rk,
+                                "payload_sha256": payload_sha256(payload)}
+        return eid
 
     def _commit(self, kind: str, record: dict, event_ids: list[str], after_anchor=None) -> dict:
         """Anchor the exact next local-log line on the ledger, append it (fsynced), then apply it.
@@ -275,15 +350,25 @@ class ComplianceService:
         A failure after the anchor leaves the anchor on the ledger: nothing on the ledger alone withdraws it;
         the next start (and C-11) reports it until Andre reconciles (N15-1). A decision line that could not be
         written is kept beside the log (``<log>.unwritten-<seq>``, best effort) so the operator can restore it."""
+        if self._closed:
+            raise Unavailable("SERVICE_CLOSED: this Compliance instance is closed; nothing took effect")
         data = {"record": record, "ledger_event_ids": list(event_ids), "register_version": self.version_number,
                 "anchored": True}
+        named = [self._named[e] for e in event_ids if e in self._named]
+        if named:
+            data["evidence"] = named
+        attempted = [e for e, ep in self._pending_rulings.items() if ep < self._op_epoch and e not in event_ids]
+        if attempted:
+            # a ruling recorded by an earlier try of this request that never committed (its id then moved to the
+            # outcome-derived one): named here, so a restart does not take it for another instance's ruling
+            data["attempted_event_ids"] = attempted
         rec, line = self.log.prepare(kind, iso(self._now()), data)
         line_sha = hashlib.sha256(line).hexdigest()
         epoch = self.log.epoch or line_sha[:16]
         self._record(i11_evidence_audit.anchor_id(epoch, rec["seq"], line_sha), i11_evidence_audit.ANCHOR_TYPE,
                      EVIDENCE_ACTOR, i11_evidence_audit.LOG_SUBJECT,
                      {"epoch": epoch, "seq": rec["seq"], "line_sha256": line_sha, "kind": kind},
-                     f"Local log line {rec['seq']} ({kind}) anchored")
+                     f"Local log line {rec['seq']} ({kind}) anchored", raw=True)
         if after_anchor is not None:
             after_anchor()
         try:
@@ -296,6 +381,9 @@ class ComplianceService:
                 except OSError:
                     pass
             raise Unavailable(f"local store write failed ({exc}); nothing was issued") from None
+        for e in list(event_ids) + list(data.get("attempted_event_ids") or []):
+            self._named.pop(e, None)
+            self._pending_rulings.pop(e, None)
         self._apply(kind, record)
         return record
 
@@ -305,12 +393,18 @@ class ComplianceService:
         if not hasattr(client, "entries"):
             raise LedgerQueryFailed("this ledger client cannot read entries")
         entries = client.entries()
+        return self._assess(entries)
+
+    def _assess(self, entries: list) -> "i11_evidence_audit.Assessment":
         shas = self.log.line_shas()
-        lines, referenced, rulings, leases, reconciles, metas = [], set(), set(), [], [], []
+        lines, referenced, rulings, leases, reconciles, metas, named = [], set(), set(), [], [], [], set()
         for rec, sha in zip(self.log.iter_records(), shas):
             d = rec["data"]
             lines.append((rec["seq"], sha, bool(d.get("anchored"))))
             referenced.update(d.get("ledger_event_ids") or [])
+            # bug sweep C R6: committed actions (with their line's seq) and the earlier attempts a line names
+            named.update((n.get("rk"), n.get("event_type"), rec["seq"]) for n in d.get("evidence") or [])
+            rulings.update(x for x in d.get("attempted_event_ids") or [] if isinstance(x, str))
             r = d.get("record") or {}
             if rec["kind"] == "decision" and r.get("version"):
                 metas.append(r["version"])
@@ -323,7 +417,8 @@ class ComplianceService:
         return i11_evidence_audit.assess(entries, self.log.epoch, lines, referenced, self.version_number or 0,
                                          strict=not self.log.in_memory, local_rulings=rulings, local_leases=leases,
                                          reconciles=reconciles,
-                                         local_versions=i11_evidence_audit.local_version_events(self.log.epoch, metas))
+                                         local_versions=i11_evidence_audit.local_version_events(self.log.epoch, metas),
+                                         committed_actions=named)
 
     def anchor_problems(self) -> list[str]:
         return self.assess_log().problems
@@ -338,7 +433,7 @@ class ComplianceService:
             eid = i11_evidence_audit.lease_id(self.log.epoch, self.instance_id, n, head)
             self._record(eid, i11_evidence_audit.LEASE_TYPE, EVIDENCE_ACTOR, i11_evidence_audit.LOG_SUBJECT,
                          {"instance_id": self.instance_id, "epoch": self.log.epoch, "head_seq": n, "head_sha256": head},
-                         f"Compliance instance lease at log line {n}")
+                         f"Compliance instance lease at log line {n}", raw=True)
             self._commit("lease", {"instance_id": self.instance_id, "lease_event_id": eid, "head_seq": n,
                                    "head_sha256": head}, [eid])
 
@@ -379,7 +474,7 @@ class ComplianceService:
             try:
                 self._record(eid, i11_evidence_audit.RECONCILE_TYPE, "andre", i11_evidence_audit.LOG_SUBJECT, payload,
                              f"Andre reconciled the local log at line {plan['head_seq']}: "
-                             f"{len(payload['void_event_ids'])} ledger event(s) declared void")
+                             f"{len(payload['void_event_ids'])} ledger event(s) declared void", raw=True)
                 self._commit("reconcile", {"payload": payload, "reconcile_event_id": eid, "request_id": request_id}, [eid])
             finally:
                 self._reconciling = False
@@ -448,6 +543,7 @@ class ComplianceService:
     def _idem_check(self, principal: str, request_id: str, route: str, body: Any) -> tuple[tuple, str, Optional[dict]]:
         if not isinstance(request_id, str) or not ID_RE.fullmatch(request_id):
             raise Invalid("request_id must be 1-128 characters of [A-Za-z0-9._:-]")
+        self._op_epoch += 1               # bug sweep C R6: a new request (see _pending_rulings)
         key = (principal, request_id)
         h = _sha({"route": route, "body": body})
         ent = self.idem.get(key)
@@ -646,7 +742,7 @@ class ComplianceService:
                 vargs = (vid, "register_version_published", i01_register.ACTOR, f"register:v{n}",
                          {k: meta[k] for k in ("version", "rows_sha256", "prev_version_sha256", "proposal_ids")},
                          f"Register version {n} published ({len(new_rows)} rows)")
-                publish_version = lambda: self._record(*vargs)  # noqa: E731 - after the line's anchor (N15-1)
+                publish_version = lambda: self._record(*vargs, raw=True)  # noqa: E731 - after the line's anchor (N15-1)
                 events.append(vid)
                 version_meta = {**meta, "rows": new_rows}
             if not row_change:
@@ -769,7 +865,7 @@ class ComplianceService:
                        f"{len(unmet)} unmet under register v{self.version_number or 0}")
             try:
                 events.append(self._record(ruling_id, GATE_EVENT[gate], actor, subject_id,
-                                           {"ruling_id": ruling_id, **outcome}, summary))
+                                           {"ruling_id": ruling_id, **outcome}, summary, raw=True))
             except Unavailable:
                 if ruling_id != base_id or not self._ledger_conflict:
                     raise
@@ -778,7 +874,7 @@ class ComplianceService:
                 # outcome-derived id instead of refusing forever (AEGIS N14-15b)
                 ruling_id = "cmp-rul-" + _b32(f"{principal}|{request_id}|{outcome_sha}")
                 events.append(self._record(ruling_id, GATE_EVENT[gate], actor, subject_id,
-                                           {"ruling_id": ruling_id, **outcome}, summary))
+                                           {"ruling_id": ruling_id, **outcome}, summary, raw=True))
             for kind, rec, eids in deferred:
                 self._commit(kind, rec, eids)
             for hold, hev in zip(new_holds, hold_events):
@@ -809,6 +905,7 @@ class ComplianceService:
         """Like ``_idem_check`` but returns the stored ENTRY (gates re-evaluate before answering from it)."""
         if not isinstance(request_id, str) or not ID_RE.fullmatch(request_id):
             raise Invalid("request_id must be 1-128 characters of [A-Za-z0-9._:-]")
+        self._op_epoch += 1               # bug sweep C R6: a new request (see _pending_rulings)
         key = (principal, request_id)
         h = _sha({"route": route, "body": body})
         ent = self.idem.get(key)
@@ -1086,10 +1183,37 @@ class ComplianceService:
             return self._idem_store(key, h, {"control": self.control_view(cid), "ledger_event_ids": events})
 
     def run_internal_controls(self, request_id: str) -> dict:
+        """Bug sweep C (slow I/O under the lock): the ledger's verify and entries (HTTP) and the local chain re-read
+        (disk) for C-11 run BEFORE the service lock is taken; the comparison runs under it."""
         with self.lock:
             key, h, cached = self._idem_check("scheduler", request_id, "controls/internal/run", {})
             if cached:
                 return cached
+        try:
+            ledger_ok_pre = bool(self.recorder.client.verify())
+        except Exception:  # noqa: BLE001
+            ledger_ok_pre = False
+        log_ok_pre = self.log.verify()
+        n0 = len(self.log)
+        try:
+            entries_pre, unreadable = self.recorder.client.entries(), None
+        except LedgerQueryFailed as exc:
+            entries_pre, unreadable = None, f"ledger entries unreadable ({exc})"
+        with self.lock:
+            key, h, cached = self._idem_check("scheduler", request_id, "controls/internal/run", {})
+            if cached:
+                return cached
+            if entries_pre is not None and len(self.log) != n0:
+                # a commit landed while the ledger was read: its anchor may be missing from that read (rare; re-read)
+                try:
+                    entries_pre = self.recorder.client.entries()
+                except LedgerQueryFailed as exc:
+                    entries_pre, unreadable = None, f"ledger entries unreadable ({exc})"
+            # AEGIS N14-4: the local log head against the ledger, as it stood when this run took the lock (the lines
+            # this run writes below are checked by the next run)
+            anchor = self._assess(entries_pre).problems if entries_pre is not None else [unreadable]
+            if self.log.fault:
+                anchor.append(f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}")
             now = self._now()
             today = now.date()
             op = f"scheduler|{request_id}"
@@ -1113,16 +1237,7 @@ class ComplianceService:
                 results["C-04"] = (False, "sanctions provider unavailable: list version unknown")
             payouts = [r for r in self.rulings.values() if r["gate"] == "payout"]
             results["C-05"] = i05_control_monitor.test_c05(payouts, now)
-            ledger_ok = False
-            try:
-                ledger_ok = bool(self.recorder.client.verify())
-            except Exception:  # noqa: BLE001
-                ledger_ok = False
-            log_ok = self.log.verify()
-            try:
-                anchor = self.anchor_problems()   # AEGIS N14-4: the local log head against the ledger
-            except LedgerQueryFailed as exc:
-                anchor = [f"ledger entries unreadable ({exc})"]
+            ledger_ok, log_ok = ledger_ok_pre, log_ok_pre
             results["C-11"] = (ledger_ok and log_ok and not anchor,
                                (f"ledger verify {'passed' if ledger_ok else 'FAILED'}; local log chain "
                                 f"{'verified' if log_ok else 'BROKEN'}; ledger anchors "
@@ -1197,6 +1312,10 @@ class ComplianceService:
         return out
 
     def watcher_run(self, request_id: str) -> dict:
+        """One Change Watcher cycle. Bug sweep C (slow I/O under the lock): the source fetches (network, each up to
+        the fetcher's own timeout) run OUTSIDE the service lock — the plan is taken under it, each fetch's crossing is
+        recorded first (record-first; a deterministic id), the pages are fetched with the lock free, and the results
+        are processed and committed under it. One cycle at a time (409 while one runs)."""
         with self.lock:
             key, h, cached = self._idem_check("scheduler", request_id, "watcher/run", {})
             if cached:
@@ -1204,40 +1323,63 @@ class ComplianceService:
             if not self.config.watcher_enabled:
                 return self._idem_store(key, h, {"ran": False, "reason": "COMPLIANCE_WATCHER_ENABLED is not 1; "
                                                  "control C-02 stays red", "proposals": []})
-            now = self._now()
-            op = f"scheduler|{request_id}"
-            events: list[str] = []
-            ok, failed, skipped, proposals, dropped, cosmetic = [], [], [], [], 0, 0
-            notices: list[str] = []
-            rows = list(self.current.rows) if self.current else []
-            # AEGIS N14-11: at most N drafted proposals per cycle and per source; the excess is summarised
-            # in ONE "source flooded" inbox item per source (kind watch_notice) for Andre
-            self._wbudget = {"cycle_left": self.config.watcher_max_proposals_per_cycle}
-            for src in self.watcher_sources():
+        if not self._watch_lock.acquire(blocking=False):
+            raise Conflict("a watcher cycle is already running; retry when it ends")
+        try:
+            with self.lock:
+                if self._closed:
+                    raise Unavailable("SERVICE_CLOSED: this Compliance instance is closed; nothing was issued")
+                now = self._now()
+                op = f"scheduler|{request_id}"
                 day = iso(now)[:10]
-                if src.method == "page" and self.page_fetches.get((src.url, day), 0) >= PAGE_FETCHES_PER_DAY:
-                    skipped.append(src.source_id)
-                    continue
+                plan, skipped = [], []
+                for src in self.watcher_sources():
+                    if src.method == "page" and self.page_fetches.get((src.url, day), 0) >= PAGE_FETCHES_PER_DAY:
+                        skipped.append(src.source_id)
+                    else:
+                        plan.append(src)
+            fetched: list[tuple] = []          # (source, crossing id, response or None, error type or None)
+            for src in plan:
                 eid = self._record(derived_id("x", op, "feed_fetch", src.url), "crossing_feed_fetch_requested",
                                    i06_change_watcher.ACTOR, f"source:{src.source_id}"[:128],
-                                   {"url_sha256": sha256_text(src.url), "method": src.method}, f"Fetch {src.method} source")
-                events.append(eid)
+                                   {"url_sha256": sha256_text(src.url), "method": src.method}, f"Fetch {src.method} source",
+                                   raw=True)
                 try:
-                    res = self.ports.fetcher.fetch(src.url)
-                    raw = res.body
+                    fetched.append((src, eid, self.ports.fetcher.fetch(src.url), None))
                 except (FetchRefused, FetchFailed) as exc:
-                    failed.append(src.source_id)
-                    events.append(self._record(derived_id("wsf", op, src.url), "watcher_source_failed",
-                                               i06_change_watcher.ACTOR, f"source:{src.source_id}"[:128],
-                                               {"url_sha256": sha256_text(src.url), "error": type(exc).__name__},
-                                               "Watcher source failed"))
-                    continue
+                    fetched.append((src, eid, None, type(exc).__name__))
                 except Exception:  # noqa: BLE001 - a fetcher bug is a failed source, never a crash
+                    fetched.append((src, eid, None, ""))
+            with self.lock:
+                key, h, cached = self._idem_check("scheduler", request_id, "watcher/run", {})
+                if cached:
+                    return cached
+                return self._watcher_apply(key, h, now, op, fetched, skipped)
+        finally:
+            self._watch_lock.release()
+
+    def _watcher_apply(self, key, h, now, op: str, fetched: list, skipped: list) -> dict:
+        events: list[str] = []
+        ok, failed, proposals, dropped, cosmetic = [], [], [], 0, 0
+        notices: list[str] = []
+        rows = list(self.current.rows) if self.current else []
+        # AEGIS N14-11: at most N drafted proposals per cycle and per source; the excess is summarised
+        # in ONE "source flooded" inbox item per source (kind watch_notice) for Andre
+        self._wbudget = {"cycle_left": self.config.watcher_max_proposals_per_cycle}
+        try:
+            for src, eid, res, err in fetched:
+                events.append(eid)
+                if res is None:
                     failed.append(src.source_id)
+                    if err:
+                        events.append(self._record(derived_id("wsf", op, src.url), "watcher_source_failed",
+                                                   i06_change_watcher.ACTOR, f"source:{src.source_id}"[:128],
+                                                   {"url_sha256": sha256_text(src.url), "error": err},
+                                                   "Watcher source failed"))
                     continue
                 self._wbudget.update(source_left=self.config.watcher_max_proposals_per_source, undrafted=0)
                 try:
-                    made, d, c = self._process_source(src, raw, res.fetched_at, rows, op, events)
+                    made, d, c = self._process_source(src, res.body, res.fetched_at, rows, op, events)
                 except (i06_change_watcher.FeedParseError, Invalid, Conflict):
                     failed.append(src.source_id)
                     events.append(self._record(derived_id("wsf", op, src.url), "watcher_source_failed",
@@ -1251,16 +1393,17 @@ class ComplianceService:
                 cosmetic += c
                 if self._wbudget["undrafted"]:
                     notices += self._flood_notice(src, self._wbudget["undrafted"], len(made), op, events)
+        finally:
             self._wbudget = None
-            cyc = {"at": iso(now), "ok": ok, "failed": failed, "skipped_rate_limit": skipped,
-                   "proposals": proposals, "dropped_unmatched": dropped, "cosmetic_discarded": cosmetic,
-                   "flood_notices": notices}
-            events.append(self._record(derived_id("wcc", op), "watcher_cycle_completed", i06_change_watcher.ACTOR,
-                                       "watcher", {"ok": len(ok), "failed": len(failed), "proposals": len(proposals),
-                                                   "dropped": dropped, "cosmetic": cosmetic, "flood_notices": len(notices)},
-                                       f"Watcher cycle: {len(ok)} ok, {len(failed)} failed, {len(proposals)} proposals"))
-            self._commit("watcher_cycle", cyc, events[-1:])
-            return self._idem_store(key, h, {"ran": True, **cyc, "ledger_event_ids": events})
+        cyc = {"at": iso(now), "ok": ok, "failed": failed, "skipped_rate_limit": skipped,
+               "proposals": proposals, "dropped_unmatched": dropped, "cosmetic_discarded": cosmetic,
+               "flood_notices": notices}
+        events.append(self._record(derived_id("wcc", op), "watcher_cycle_completed", i06_change_watcher.ACTOR,
+                                   "watcher", {"ok": len(ok), "failed": len(failed), "proposals": len(proposals),
+                                               "dropped": dropped, "cosmetic": cosmetic, "flood_notices": len(notices)},
+                                   f"Watcher cycle: {len(ok)} ok, {len(failed)} failed, {len(proposals)} proposals"))
+        self._commit("watcher_cycle", cyc, events[-1:])
+        return self._idem_store(key, h, {"ran": True, **cyc, "ledger_event_ids": events})
 
     def _process_source(self, src: Source, raw: bytes, fetched_at: str, rows: list[dict], op: str,
                         events: list[str]) -> tuple[list[str], int, int]:
@@ -1410,10 +1553,66 @@ class ComplianceService:
             return {"records": out, "next_cursor": last if more else None, "ledger_event_id": eid,
                     "register_version": self.version_number}
 
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+        """``GET /compliance/v1/audit/evidence`` (bug sweep C R6; bizdev-py / finance-py ``audit_evidence``). Every Compliance event on the
+        ledger except the log anchors, each marked ``committed`` (a local line with seq ``s`` names it in
+        ``data.evidence``, the ledger holds that line's anchor with the anchor payload's hash, and the ledger's
+        ``payload_sha256`` is the named one, which carries ``rk`` and ``seq``), ``cited`` (listed by an anchored line
+        without being typed evidence: crossings, rulings, versions, leases, reconciles, events recorded before this
+        view existed, a failed try a later line names) or ``attempted`` (anything else: recorded first, never
+        committed). Unanchored evidence = attempted, not done. Only the raw lines are copied under the service lock;
+        parsing, hashing and the ledger read happen outside it. Eventually consistent: re-read to settle."""
+        with self.lock:
+            if self._closed:
+                raise Unavailable("SERVICE_CLOSED: this Compliance instance is closed")
+            raw = self.log.raw_lines()
+        try:
+            entries = self.recorder.client.entries()
+        except LedgerQueryFailed:
+            raise Unavailable("the evidence ledger could not be read") from None
+        epoch = hashlib.sha256(raw[0]).hexdigest()[:16] if raw else None
+        mine = [e for e in entries if isinstance(e, dict) and e.get("department") == LEDGER_DEPARTMENT]
+        anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == i11_evidence_audit.ANCHOR_TYPE}
+        named: dict[str, tuple] = {}
+        cited: dict[str, int] = {}
+        for ln in raw:
+            r = json.loads(ln)
+            line_sha = hashlib.sha256(ln).hexdigest()
+            a = anchors.get(i11_evidence_audit.anchor_id(epoch, r["seq"], line_sha))
+            want = payload_sha256({"epoch": epoch, "seq": r["seq"], "line_sha256": line_sha, "kind": r["kind"]})
+            if a is None or a.get("payload_sha256") != want:
+                continue
+            for n in r["data"].get("evidence") or []:
+                named[n["event_id"]] = (r["seq"], n.get("rk"), n.get("payload_sha256"))
+            for eid in list(r["data"].get("ledger_event_ids") or []) + list(r["data"].get("attempted_event_ids") or []):
+                cited.setdefault(eid, r["seq"])
+        rows, counts = [], {"committed": 0, "cited": 0, "attempted": 0}
+        for e in mine:
+            et = e.get("event_type")
+            if et == i11_evidence_audit.ANCHOR_TYPE or (event_type is not None and et != event_type):
+                continue
+            eid = e.get("event_id")
+            n = named.get(eid)
+            meta = i11_evidence_audit.meta_sha256(str(e.get("actor")), str(e.get("subject_id")), str(e.get("summary")))
+            if n is not None and n[2] == e.get("payload_sha256") \
+                    and eid == i11_evidence_audit.evidence_id(n[1] or "", et, e.get("payload_sha256") or "", meta):
+                status, seq, rk = "committed", n[0], n[1]
+            elif n is None and eid in cited:
+                status, seq, rk = "cited", cited[eid], None
+            else:
+                status, seq, rk = "attempted", None, None
+            counts[status] += 1
+            rows.append({"event_id": eid, "event_type": et, "subject_id": e.get("subject_id"), "status": status,
+                         "seq": seq, "rk": rk, "payload_sha256": e.get("payload_sha256")})
+        return {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle",
+                "events": rows[offset:offset + limit], "total": len(rows), "counts": counts, "limit": limit,
+                "offset": offset, "log_lines": len(raw), "epoch": epoch}
+
     def health(self) -> dict:
         return {"status": "ok", "service": "compliance-py", "register_version_in_force": self.version_number,
                 "in_memory": self.log.in_memory, "seed_pinned": self.seed_pinned, "production": self.seed_pinned,
-                "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required)}
+                "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
+                "log_write_fault": bool(self.log.fault)}
 
 
 def review_reason(r: dict) -> str:

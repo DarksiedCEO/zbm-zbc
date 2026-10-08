@@ -10,6 +10,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
+
 CALLER_NAMES = ("onboarding", "creative_production", "finance_31", "verification_integrity", "legal_37",
                 "cybersecurity_22", "people_43", "vendor_33", "scheduler")
 CALLER_TOKEN_MIN = 32
@@ -27,6 +29,7 @@ class Settings:
     seed_path: str = DEFAULT_SEED_PATH
     seed_sha256: Optional[str] = None
     data_dir: Optional[str] = None
+    data_dir_lock: Optional[object] = field(default=None, repr=False)   # store.DataDirLock (load() takes it)
     sanctions_freshness_days: int = 1
     disclosure_max_offset_s: float = 3.0
     a11y_max_age_days: int = 30
@@ -71,6 +74,29 @@ def _off_only(env, name) -> None:
     if raw not in ("", "0"):
         raise RuntimeError(f"{name}={raw!r}: this option is not built in this service (default off); refusing to start")
 
+
+
+_HELD: dict = {}
+
+
+def hold_data_dir(data_dir: str) -> DataDirLock:
+    """The exclusive flock on COMPLIANCE_DATA_DIR (bug sweep C, E-5/F-3; finance-py's ``hold_data_dir``), taken once per process
+    at start-up, before the log is opened, and held for the life of the process. A second process on the same
+    directory refuses to start; a second service instance in this process must win the single claim
+    (store.DataDirLock)."""
+    key = os.path.realpath(data_dir)
+    lock = _HELD.get(key)
+    if lock is None:
+        try:
+            lock = DataDirLock(data_dir)
+        except DataDirBusy:
+            raise RuntimeError(f"{data_dir}: another compliance-py process holds this data directory (flock on "
+                               f"{LOCK_NAME}); refusing to start. Stop the other process first: two writers would "
+                               "fork the log") from None
+        except StoreCorrupt as exc:
+            raise RuntimeError(f"{data_dir}: {exc}") from None
+        _HELD[key] = lock
+    return lock
 
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ) if env is None else env
@@ -127,7 +153,7 @@ def load(env: Optional[dict] = None) -> Settings:
     if unpinned == "1" and seed_sha is None:
         raise RuntimeError("COMPLIANCE_ALLOW_UNPINNED_SEED=1 needs COMPLIANCE_SEED_SHA256 (the unpinned seed's own "
                            "hash, stated explicitly)")
-    return Settings(
+    s = Settings(
         service_token=token, caller_tokens=callers, andre_token=andre,
         seed_path=env.get("COMPLIANCE_SEED_PATH") or DEFAULT_SEED_PATH,
         seed_sha256=seed_sha,
@@ -142,3 +168,6 @@ def load(env: Optional[dict] = None) -> Settings:
         watcher_max_proposals_per_source=_int(env, "COMPLIANCE_WATCHER_MAX_PROPOSALS_PER_SOURCE", 20, 1, 10_000),
         reconcile_mode=reconcile == "1",
     )
+    # bug sweep C (E-5/F-3): the single-writer flock last, so every other refusal above leaves the directory untouched
+    s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None
+    return s
