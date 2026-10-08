@@ -8,7 +8,10 @@ UNVERIFIED facts are labelled so in comments and in ADR 0007.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, unquote, urlsplit
 
 PLATFORMS = ("youtube", "tiktok", "instagram", "x", "snapchat", "twitch")
 CERTIFIABLE = ("youtube", "tiktok", "instagram", "x")        # an adapter exists (x only behind its flag)
@@ -67,3 +70,57 @@ IG_MIN_FOLLOWERS = 100
 
 # YouTube quota cost of one list read ("usually costs 1 unit"; invalid requests cost at least 1).
 YT_UNITS_PER_READ = 1
+
+
+# --- one canonical post identity (bug sweep C, C-2) -------------------------------------------------------------
+# The same post must never be registered (and paid) under two submissions. A platform URL has many spellings
+# (www./m. hosts, query strings such as ?lang= or ?is_from_webapp=, fragments, a trailing slash, a different @handle
+# in front of the same TikTok video id, upper-case schemes and hosts), so a submission is keyed by the platform's own
+# post id when the reference names one, else by the normalized URL. A reference that names no id (a short link such
+# as vm.tiktok.com/...) is caught after the first fetch instead, by the platform's video id (service: video_owner).
+_POST_ID = {
+    "tiktok": (re.compile(r"/(?:@[^/]+/)?(?:video|photo)/([0-9A-Za-z_-]{1,64})(?:/|$)"),
+               re.compile(r"^/v/([0-9]{1,30})(?:\.html)?/?$")),
+    "youtube": (re.compile(r"^/(?:shorts|embed|live|v)/([A-Za-z0-9_-]{6,20})(?:/|$)"),),
+    "instagram": (re.compile(r"/(?:p|reel|reels|tv)/([A-Za-z0-9_-]{1,64})(?:/|$)"),),
+    "x": (re.compile(r"/status(?:es)?/([0-9]{1,30})(?:/|$)"),),
+}
+_HOST_PREFIXES = ("www.", "m.", "mobile.")
+_BARE_YT_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def post_key(platform: str, post_ref: str) -> str:
+    """``<platform>:id:<post id>`` when ``post_ref`` names the platform's post id, else ``<platform>:url:<host><path>``
+    (NFKC, scheme, case of the host, ``www.``/``m.``/``mobile.``, query, fragment and trailing slash ignored). Pure."""
+    raw = unicodedata.normalize("NFKC", post_ref or "").strip()
+    if platform == "youtube" and _BARE_YT_ID.fullmatch(raw):
+        return f"youtube:id:{raw}"
+    text = raw if "://" in raw else "https://" + raw
+    try:
+        u = urlsplit(text)
+        host = (u.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return f"{platform}:raw:{raw}"
+    for pre in _HOST_PREFIXES:
+        if host.startswith(pre):
+            host = host[len(pre):]
+    path = unquote(u.path or "/")
+    if platform == "youtube":
+        if host == "youtu.be":
+            m = re.match(r"^/([A-Za-z0-9_-]{6,20})(?:/|$)", path)
+            if m:
+                return f"youtube:id:{m.group(1)}"
+        v = parse_qs(u.query).get("v")
+        if v and re.fullmatch(r"[A-Za-z0-9_-]{6,20}", v[0]):
+            return f"youtube:id:{v[0]}"
+    if platform == "tiktok":
+        item = parse_qs(u.query).get("item_id")
+        if item and re.fullmatch(r"[0-9]{1,30}", item[0]):
+            return f"tiktok:id:{item[0]}"
+    if platform == "x" and path.startswith("/i/web/status/"):
+        path = path[len("/i/web"):]
+    for rx in _POST_ID.get(platform, ()):
+        m = rx.search(path)
+        if m:
+            return f"{platform}:id:{m.group(1)}"
+    return f"{platform}:url:{host}{path.rstrip('/') or '/'}"

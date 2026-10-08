@@ -307,6 +307,14 @@ def _main(work: Path) -> int:
                                           "rulebook_version": 1, "clipper_id": "alice", "platform": "snapchat",
                                           "post_ref": "https://snap.example/a5", "posted_at": t0, "min_days_live": 7,
                                           "collab_permitted": False}, caller="creative_production")
+        # bug sweep C (C-2): the same post again, another spelling, another campaign -> refused 409, never paid twice
+        dup = b.post("/vi/v1/submissions", {"request_id": b.rid(), "submission_id": "a1-dup", "campaign_id": "camp-2",
+                                            "rulebook_version": 1, "clipper_id": "alice", "platform": "tiktok",
+                                            "post_ref": refs["a1"].replace("https://www.", "https://m.") + "?lang=en",
+                                            "posted_at": t0, "min_days_live": 7, "collab_permitted": False,
+                                            "media_ref": "media-a1-dup"}, caller="creative_production")
+        say(f"same post re-registered under another submission -> {dup.status_code} {dup.json().get('duplicate_of')}")
+        check("one post, one submission (sweep C-2)", dup.status_code == 409 and dup.json().get("duplicate_of") == "a1")
         c_, _, _ = b.onboard("yuri", "youtube")
         refs["y1"], _ = b.clip("y1", "yuri", "youtube", post_ref="https://www.youtube.com/shorts/abcdefghijk")
         say(f"registered clips: {sorted(refs)} + a5 (snapchat) at {t0}")
@@ -416,6 +424,11 @@ def _main(work: Path) -> int:
         r = b.post("/vi/v1/identity/checks", {"request_id": b.rid(), "clipper_id": "zoe", "email": "zoe@example.com"},
                    caller="clipper_network")
         say(f"write after restart (identity check) -> {r.status_code} {r.json()['status']}")
+        ev = b.get("/vi/v1/audit/evidence", event_type="certification_issued", limit=1000).json()
+        say(f"/vi/v1/audit/evidence certification_issued: {ev['counts']}")
+        a1c = [e for e in ev["events"] if e["subject_id"] == "a1" and e["status"] == "committed"]
+        check("audit/evidence: every certification committed under a line (sweep C R6)",
+              ev["counts"]["attempted"] == 0 and len(a1c) >= 2 and all(e["rk"] and e["seq"] for e in a1c))
         del pb2
         # ------------------------------------------------------------------ ledgers
         for name, L in (("A", LA), ("B", LB)):
