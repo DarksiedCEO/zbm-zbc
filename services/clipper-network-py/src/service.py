@@ -2488,7 +2488,7 @@ class CNService:
             return True, None, False
         now = self._now()
         ends = [x.revision_watch_end for x in a.certifications if x.revision_watch_end
-                and x.status in ("pending", "certified", "revised") and parse_iso(x.revision_watch_end) > now]
+                and x.status in ("pending", "certified", "revised", "suspended") and parse_iso(x.revision_watch_end) > now]
         return bool(ends), max(ends) if ends else None, True
 
     def _exit_deadline(self, trigger: str, start: datetime) -> Optional[datetime]:

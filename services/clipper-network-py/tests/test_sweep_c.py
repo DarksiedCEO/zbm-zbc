@@ -207,3 +207,19 @@ def test_m_a_homoglyph_money_word_in_a_display_name_is_refused(hs):
 @pytest.mark.parametrize("text", ["Clip Person", "José García", "Иван Петров", "Zoë Ng", "Pay Out"])
 def test_m_ordinary_names_still_pass(text):
     assert money_or_earnings(text) == []
+
+
+def test_c3_a_suspended_vi_certification_is_read_not_refused_and_never_counts_toward_a_tier():
+    """verification-py's C-3 fix adds the ``suspended`` status (access lost after certification); the thin client
+    refused any status it did not know, so ONE suspended certification made the whole answer unavailable."""
+    import httpx
+    from httpclients import HttpVerificationIntegrity
+
+    def ok(req):
+        return httpx.Response(200, json={"clipper_id": "cn-clp-1", "rules_pinned": True, "certifications": [
+            {"certification_id": "vi-cert-A", "submission_id": "s1", "campaign_id": "c1", "platform": "tiktok",
+             "clipper_id": "cn-clp-1", "status": "suspended", "certified_views": 5000,
+             "revision_watch_end": "2026-11-01T00:00:00Z"}]})
+    vi = HttpVerificationIntegrity("http://vi.test", "svc", "caller", transport=httpx.MockTransport(ok))
+    a = vi.certifications("cn-clp-1")
+    assert a.available and a.certifications[0].status == "suspended"
