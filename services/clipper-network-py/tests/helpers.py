@@ -28,6 +28,7 @@ DELEGATES = {"maria": "test-cn-delegate-maria-0123456789abcdefghij"}
 SEED_PATH = Path(__file__).resolve().parents[1] / "seed" / "cn_rules_seed.json"
 SEED = json.loads(SEED_PATH.read_bytes())
 _ids = itertools.count(1)
+HARNESSES: list = []            # every harness built (a restart closes the old one on its data dir)
 
 
 def rid(prefix: str = "r") -> str:
@@ -62,8 +63,19 @@ class Harness:
         if data_dir:
             e["CN_DATA_DIR"] = data_dir
         self.data_dir = data_dir
+        if data_dir:
+            # a new harness on a data directory is a restart: the old instance stops first (bug sweep C, E-5/F-3: the
+            # single-writer claim refuses a second live instance on one directory)
+            import os
+            for old in list(HARNESSES):
+                svc = getattr(old, "svc", None)
+                if svc is not None and getattr(old, "_data_dir", None) and \
+                        os.path.realpath(old._data_dir) == os.path.realpath(data_dir):
+                    svc.close()
+        self._data_dir = data_dir
         self.settings = config_mod.load(e)
         self.svc = api.build_service(self.settings, self.clock, self.ports, self.ledger)
+        HARNESSES.append(self)
         self.app = api.create_app(self.svc, self.settings)
         self.client = TestClient(self.app)
 

@@ -51,3 +51,16 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", refuse)
     monkeypatch.setattr(socket.socket, "connect_ex", refuse)
     monkeypatch.setattr(socket, "create_connection", refuse)
+
+
+@pytest.fixture(autouse=True)
+def _close_harnesses():
+    """Bug sweep C (E-5/F-3): every harness a test built gives its data directory back when the test ends."""
+    import helpers
+    helpers.HARNESSES.clear()
+    yield
+    for x in list(helpers.HARNESSES):
+        svc = getattr(x, "svc", None)
+        if svc is not None:
+            svc.close()
+    helpers.HARNESSES.clear()

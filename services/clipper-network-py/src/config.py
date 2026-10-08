@@ -23,6 +23,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
+
 CALLER_NAMES = ("hub", "onboarding", "creative_production", "verification_integrity", "finance_31", "compliance_38",
                 "scheduler")
 TOKEN_MIN = 32
@@ -79,6 +81,7 @@ class Settings:
     seed_sha256: Optional[str] = None
     allow_unpinned_seed: bool = False
     data_dir: Optional[str] = None
+    data_dir_lock: Optional[object] = field(default=None, repr=False)   # store.DataDirLock (load() takes it)
     ledger_url: Optional[str] = None
     ledger_token: Optional[str] = None
     reconcile_mode: bool = False
@@ -137,6 +140,29 @@ def _client(env, prefix: str, needs_caller: bool, unpinned_flag: Optional[str]) 
                   _flag(env, unpinned_flag) if unpinned_flag else False)
 
 
+
+_HELD: dict = {}
+
+
+def hold_data_dir(data_dir: str) -> DataDirLock:
+    """The exclusive flock on CN_DATA_DIR (bug sweep C, E-5/F-3; finance-py's ``hold_data_dir``), taken once per process
+    at start-up, before the log is opened, and held for the life of the process. A second process on the same
+    directory refuses to start; a second service instance in this process must win the single claim
+    (store.DataDirLock)."""
+    key = os.path.realpath(data_dir)
+    lock = _HELD.get(key)
+    if lock is None:
+        try:
+            lock = DataDirLock(data_dir)
+        except DataDirBusy:
+            raise RuntimeError(f"{data_dir}: another clipper-network-py process holds this data directory (flock on "
+                               f"{LOCK_NAME}); refusing to start. Stop the other process first: two writers would "
+                               "fork the log") from None
+        except StoreCorrupt as exc:
+            raise RuntimeError(f"{data_dir}: {exc}") from None
+        _HELD[key] = lock
+    return lock
+
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ) if env is None else env
     token = env.get("CN_SERVICE_TOKEN")
@@ -189,7 +215,7 @@ def load(env: Optional[dict] = None) -> Settings:
     seed_path = env.get("CN_RULES_SEED_PATH") or DEFAULT_SEED_PATH
     if seed_path != DEFAULT_SEED_PATH and not unpinned:
         raise RuntimeError("CN_RULES_SEED_PATH names another seed: allowed only with CN_ALLOW_UNPINNED_SEED=1")
-    return Settings(
+    s = Settings(
         service_token=token, identity_hmac_key=key, caller_tokens=callers, delegate_tokens=delegates, andre_token=andre,
         seed_path=seed_path, seed_sha256=seed_sha, allow_unpinned_seed=unpinned,
         data_dir=env.get("CN_DATA_DIR") or None,
@@ -200,6 +226,9 @@ def load(env: Optional[dict] = None) -> Settings:
         compliance=_client(env, "CN_COMPLIANCE", True, "CN_COMPLIANCE_ACCEPT_UNPINNED"),
         creative=_client(env, "CN_CREATIVE", False, None),
     )
+    # bug sweep C (E-5/F-3): the single-writer flock last, so every other refusal above leaves the directory untouched
+    s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None
+    return s
 
 
 def check_rule_env(rule_env: dict[str, str], seed_rules: dict[str, dict]) -> None:

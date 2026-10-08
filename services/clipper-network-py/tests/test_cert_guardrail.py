@@ -151,7 +151,7 @@ def test_health_shape_and_docs_off():
     h = Harness()
     assert h.client.get("/health").json() == {"status": "ok", "service": "clipper-network-py", "rules_version": None,
                                               "in_memory": True, "rules_pinned": True, "reconcile_mode": False,
-                                              "reconcile_required": False}
+                                              "reconcile_required": False, "log_write_fault": False}   # sweep C
     for p in ("/docs", "/redoc", "/openapi.json"):
         assert h.client.get(p).status_code == 404
 

@@ -40,14 +40,15 @@ from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from intelligences import (i01_recruiting, i02_admission, i03_tiering, i04_enrolment, i05_kit_delivery, i06_comms,
                            i07_disputes, i08_discipline, i09_offboarding, i10_evidence_audit)
 from intelligences.common import Citer, finalize, item, rules_not_in_force, unavailable, unmet_line
-from ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
+from ledger import (LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, clean_summary,
+                    derived_id, payload_sha256)
 from ports import (Ack, AgeAnswer, CertificationsAnswer, CompleteAnswer, ComplianceRuling, ConnectionsAnswer,
                    DelegateAnswer, DocVersionAnswer, FindingAnswer, IdentityAnswer, IntegrityAnswer, JurisdictionAnswer,
                    KitAnswer, OpenItemsAnswer, Ports, RateCardAnswer, RulebookAnswer, SendAnswer, StartAnswer, StrikeFeed,
                    TaxAnswer)
 import rules as R
 import templates as T
-from store import RecordLog, StoreWriteError
+from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in, looks_like_phone, is_email, normalize_email
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
@@ -103,7 +104,7 @@ class PortCalls:
         eid = derived_id("x", self.op_id, port, action, list(args))
         self.svc._record(eid, f"crossing_{port}_requested", self.actor, self.subject,
                          {"port": port, "action": action, "args_sha256": _sha(list(args)), "op": self.op_id},
-                         f"Request to {port}: {action}")
+                         f"Request to {port}: {action}", raw=True)
         self.events.append(eid)
         try:
             ans = fn()
@@ -118,7 +119,8 @@ class PortCalls:
 class CNService:
     def __init__(self, config: Config, recorder: Recorder, log: RecordLog, contacts: ContactStore, seed_bytes: bytes,
                  expected_seed_sha256: str, pinned_seed_sha256: str, identity_key: str, ports: Optional[Ports] = None,
-                 clock: Optional[Clock] = None, reconcile_mode: bool = False):
+                 clock: Optional[Clock] = None, reconcile_mode: bool = False, dir_lock=None,
+                 lock_token: Optional[str] = None):
         self.config = config
         self.recorder = recorder
         self.log = log
@@ -126,6 +128,51 @@ class CNService:
         self.ports = ports or Ports()
         self.clock = clock or SystemClock()
         self.lock = threading.RLock()
+        self.reconcile_mode = bool(reconcile_mode)
+        self._named: dict[str, dict] = {}     # bug sweep C R6: evidence recorded, until its line names it
+        # rulings recorded on the ledger and not yet named by a committed line -> the request epoch that recorded them;
+        # one left behind by an earlier request is an ATTEMPT, named by the next committed line (never a ghost)
+        self._pending_rulings: dict[str, int] = {}
+        self._op_epoch = 0
+        # bug sweep C (E-5/F-3, finance-py's single writer): one service instance per data directory, also within one
+        # process. api.build_service claims the flock BEFORE the log is built and passes the claim's token; this
+        # instance adopts it only if the token IS the current claim, and gives it back on close() or a failed start.
+        self._closed = False
+        self._dir_lock = dir_lock
+        self._lock_token: Optional[str] = None
+        if self._dir_lock is not None:
+            if lock_token is None:
+                lock_token = self._dir_lock.claim()
+            adopted = self._dir_lock.adopt(lock_token)
+            if adopted is None:
+                self._dir_lock = None
+                raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
+                                  "stale, another instance's, or already adopted); refusing to start")
+            self._lock_token = adopted
+        try:
+            self._start(seed_bytes, expected_seed_sha256, pinned_seed_sha256, identity_key)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Give the data directory back (a restart in the same process closes the old instance first). A closed
+        instance is inert: its log refuses every write and every ledger record is refused (503 SERVICE_CLOSED).
+        Taken under the service lock, so it never interleaves with a commit."""
+        with self.lock:
+            self._closed = True
+            with self.log.lock:
+                self.log.closed = True
+            if self._dir_lock is not None:
+                self._dir_lock.release_claim(self._lock_token)
+                self._dir_lock = None
+                self._lock_token = None
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _start(self, seed_bytes: bytes, expected_seed_sha256: str, pinned_seed_sha256: str, identity_key: str) -> None:
         self._idkey = identity_key.encode("ascii")
         self._volatile = secrets.token_bytes(32)      # idempotency hashes of DOB / OAuth code: never persisted
         seed_sha = hashlib.sha256(seed_bytes).hexdigest()
@@ -142,7 +189,6 @@ class CNService:
         self.idem: "OrderedDict[tuple[str, str], dict]" = OrderedDict()
         self._ledger_conflict = False
         self.instance_id = secrets.token_hex(8)
-        self.reconcile_mode = bool(reconcile_mode)
         self.reconcile_required: list[str] = []
         self._reconciling = False
         self.contacts_missing: list[str] = []
@@ -188,29 +234,66 @@ class CNService:
     def _volatile_hash(self, value: str) -> str:
         return hmac.new(self._volatile, value.encode("utf-8", "surrogatepass"), hashlib.sha256).hexdigest()
 
-    def _record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str) -> str:
+    def _record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str,
+                raw: bool = False) -> str:
+        """Record one ledger event FIRST and return the id actually recorded.
+
+        Bug sweep C (R6, the bizdev-py / finance-py pattern): ``event_id`` is the logical action's key ``rk``; the id
+        recorded is ``i10_evidence_audit.evidence_id(rk, type, payload_sha256, actor/subject/summary hash)`` over a payload
+        that also carries ``rk`` and ``seq`` (the next log line when it was recorded). The same action with the same
+        content at the same log position is the same id (the ledger answers 200 to a retry); after any state change it
+        is a NEW id, never a lasting 409. The commit that applies it names it (``data.evidence``); one that never
+        commits leaves it ``attempted`` (GET /audit/evidence). ``raw``: the id and payload are recorded exactly as
+        given — ids other code parses or hands out (port crossings, anchors, leases, reconciles, version events,
+        ruling ids)."""
         self._ledger_conflict = False
+        if self._closed:
+            raise Unavailable("SERVICE_CLOSED: this Clipper Network instance is closed; nothing was recorded",
+                              ledger_write="not_recorded")
+        if not raw:
+            rk = event_id
+            payload = {**payload, "rk": rk, "seq": len(self.log) + 1}
+            meta = i10_evidence_audit.meta_sha256(actor, subject[:128], clean_summary(summary))
+            event_id = i10_evidence_audit.evidence_id(rk, event_type, payload_sha256(payload), meta)
         if self.reconcile_mode and not self._reconciling:
             raise Unavailable("reconcile mode (CN_RECONCILE_MODE=1): only Andre's POST /cn/v1/reconcile is answered; "
                               "restart without it once the log is reconciled", ledger_write="not_recorded")
         try:
-            return self.recorder.record(event_id, event_type, actor, subject[:128], payload, summary)
+            eid = self.recorder.record(event_id, event_type, actor, subject[:128], payload, summary)
         except LedgerRecordError as exc:
             self._ledger_conflict = isinstance(exc, LedgerConflict)
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing took effect",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
+        if event_type in i10_evidence_audit.RULING_TYPES:
+            self._pending_rulings[eid] = self._op_epoch
+        if not raw:
+            if len(self._named) > 100_000:
+                self._named.clear()
+            self._named[eid] = {"event_id": eid, "event_type": event_type, "rk": rk,
+                                "payload_sha256": payload_sha256(payload)}
+        return eid
 
     def _commit(self, kind: str, record: dict, event_ids: list[str], after_anchor=None) -> dict:
         """Anchor the exact next local-log line on the ledger, append it (fsynced), then apply it (N14-4/N15-1)."""
+        if self._closed:
+            raise Unavailable("SERVICE_CLOSED: this Clipper Network instance is closed; nothing took effect")
         data = {"record": record, "ledger_event_ids": list(event_ids), "register_version": self.version_number,
                 "anchored": True}
+        named = [self._named[e] for e in event_ids if e in self._named]
+        if named:
+            data["evidence"] = named
+        attempted = [e for e, ep in self._pending_rulings.items() if ep < self._op_epoch and e not in event_ids]
+        if attempted:
+            # a ruling recorded by an earlier try of this request that never committed (its id then moved to the
+            # outcome-derived one): named here, so a restart does not take it for another instance's ruling
+            data["attempted_event_ids"] = attempted
         rec, line = self.log.prepare(kind, iso(self._now()), data)
         line_sha = hashlib.sha256(line).hexdigest()
         epoch = self.log.epoch or line_sha[:16]
         self._record(i10_evidence_audit.anchor_id(epoch, rec["seq"], line_sha), i10_evidence_audit.ANCHOR_TYPE,
                      EVIDENCE_ACTOR, i10_evidence_audit.LOG_SUBJECT,
                      {"epoch": epoch, "seq": rec["seq"], "line_sha256": line_sha, "kind": kind},
-                     f"Local log line {rec['seq']} ({kind}) anchored")
+                     f"Local log line {rec['seq']} ({kind}) anchored", raw=True)
         if after_anchor is not None:
             after_anchor()
         try:
@@ -223,6 +306,9 @@ class CNService:
                 except OSError:
                     pass
             raise Unavailable(f"local store write failed ({exc}); nothing took effect") from None
+        for e in list(event_ids) + list(data.get("attempted_event_ids") or []):
+            self._named.pop(e, None)
+            self._pending_rulings.pop(e, None)
         self._apply(kind, record)
         return record
 
@@ -287,6 +373,7 @@ class CNService:
                 pass
 
     def _idem_check(self, principal: str, request_id: str, route: str, body: Any) -> tuple[tuple, str, Optional[dict]]:
+        self._op_epoch += 1               # bug sweep C R6: a new request (see _pending_rulings)
         key = (principal, request_id)
         h = _sha({"route": route, "body": body})
         ent = self.idem.get(key)
@@ -299,6 +386,7 @@ class CNService:
         return key, h, None
 
     def _idem_entry(self, principal: str, request_id: str, route: str, body: Any) -> tuple[tuple, str, Optional[dict]]:
+        self._op_epoch += 1               # bug sweep C R6: a new request (see _pending_rulings)
         key = (principal, request_id)
         h = _sha({"route": route, "body": body})
         ent = self.idem.get(key)
@@ -331,12 +419,18 @@ class CNService:
         if not hasattr(client, "entries"):
             raise LedgerQueryFailed("this ledger client cannot read entries")
         entries = client.entries()
+        return self._assess(entries)
+
+    def _assess(self, entries: list) -> "i10_evidence_audit.Assessment":
         shas = self.log.line_shas()
-        lines, referenced, rulings, leases, reconciles, metas = [], set(), set(), [], [], []
+        lines, referenced, rulings, leases, reconciles, metas, named = [], set(), set(), [], [], [], set()
         for rec, sha in zip(self.log.iter_records(), shas):
             d = rec["data"]
             lines.append((rec["seq"], sha, bool(d.get("anchored"))))
             referenced.update(d.get("ledger_event_ids") or [])
+            # bug sweep C R6: committed actions (with their line's seq) and the earlier attempts a line names
+            named.update((n.get("rk"), n.get("event_type"), rec["seq"]) for n in d.get("evidence") or [])
+            rulings.update(x for x in d.get("attempted_event_ids") or [] if isinstance(x, str))
             r = d.get("record") or {}
             if rec["kind"] == "decision" and r.get("version"):
                 metas.append(r["version"])
@@ -351,7 +445,8 @@ class CNService:
         return i10_evidence_audit.assess(entries, self.log.epoch, lines, referenced, self.version_number or 0,
                                          strict=not self.log.in_memory, local_rulings=rulings, local_leases=leases,
                                          reconciles=reconciles,
-                                         local_versions=i10_evidence_audit.local_version_events(self.log.epoch, metas))
+                                         local_versions=i10_evidence_audit.local_version_events(self.log.epoch, metas),
+                                         committed_actions=named)
 
     def _write_lease(self) -> None:
         with self.lock:
@@ -360,7 +455,7 @@ class CNService:
             eid = i10_evidence_audit.lease_id(self.log.epoch, self.instance_id, n, head)
             self._record(eid, i10_evidence_audit.LEASE_TYPE, EVIDENCE_ACTOR, i10_evidence_audit.LOG_SUBJECT,
                          {"instance_id": self.instance_id, "epoch": self.log.epoch, "head_seq": n, "head_sha256": head},
-                         f"Clipper Network instance lease at log line {n}")
+                         f"Clipper Network instance lease at log line {n}", raw=True)
             self._commit("lease", {"instance_id": self.instance_id, "lease_event_id": eid, "head_seq": n,
                                    "head_sha256": head}, [eid])
 
@@ -397,7 +492,7 @@ class CNService:
             try:
                 self._record(eid, i10_evidence_audit.RECONCILE_TYPE, "andre", i10_evidence_audit.LOG_SUBJECT, payload,
                              f"Andre reconciled the local log at line {plan['head_seq']}: "
-                             f"{len(payload['void_event_ids'])} ledger event(s) declared void")
+                             f"{len(payload['void_event_ids'])} ledger event(s) declared void", raw=True)
                 self._commit("reconcile", {"payload": payload, "reconcile_event_id": eid, "request_id": request_id}, [eid])
             finally:
                 self._reconciling = False
@@ -409,17 +504,28 @@ class CNService:
             return self._idem_store(key, h, resp)
 
     def integrity(self) -> dict:
-        with self.lock:
+        """Bug sweep C (slow I/O under the lock): the ledger's verify and entries (HTTP) and the chain re-read (disk)
+        run OUTSIDE the service lock; only the comparison runs under it."""
+        try:
+            ledger_ok = bool(self.recorder.client.verify())
+        except Exception:  # noqa: BLE001
             ledger_ok = False
-            try:
-                ledger_ok = bool(self.recorder.client.verify())
-            except Exception:  # noqa: BLE001
-                ledger_ok = False
-            log_ok = self.log.verify()
-            try:
-                problems = self.assess_log().problems
-            except LedgerQueryFailed as exc:
-                problems = [f"ledger entries unreadable ({exc})"]
+        log_ok = self.log.verify()
+        n0 = len(self.log)
+        try:
+            entries, unreadable = self.recorder.client.entries(), None
+        except LedgerQueryFailed as exc:
+            entries, unreadable = None, f"ledger entries unreadable ({exc})"
+        with self.lock:
+            if entries is not None and len(self.log) != n0:
+                # a commit landed while the ledger was read: its anchor may be missing from that read (rare; re-read)
+                try:
+                    entries = self.recorder.client.entries()
+                except LedgerQueryFailed as exc:
+                    entries, unreadable = None, f"ledger entries unreadable ({exc})"
+            problems = self._assess(entries).problems if entries is not None else [unreadable]
+            if self.log.fault:
+                problems.append(f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}")
             return {"ledger_verify": ledger_ok, "local_log_chain": log_ok, "anchor_problems": problems,
                     "contacts_missing": len(self.contacts_missing),
                     "ok": ledger_ok and log_ok and not problems}
@@ -578,7 +684,7 @@ class CNService:
                 vargs = (vid, "rules_version_published", "andre", f"rules:v{n}",
                          {k: meta[k] for k in ("version", "content_sha256", "prev_version_sha256", "proposal_ids")},
                          f"Rule version {n} published ({len(new_rules)} rules, {len(new_templates)} templates)")
-                publish = lambda: self._record(*vargs)  # noqa: E731 - after the line's anchor (N15-1)
+                publish = lambda: self._record(*vargs, raw=True)  # noqa: E731 - after the line's anchor (N15-1)
                 events.append(vid)
                 version_meta = {**meta, "rules": new_rules, "templates": new_templates}
                 if any(p["kind"].startswith("template_") for p in approvals):
@@ -588,7 +694,7 @@ class CNService:
                                                                   if p["kind"].startswith("template_"))},
                                f"Template version(s) published in rule version {n}")
                     inner = publish
-                    publish = lambda: (inner(), self._record(*tv_args))  # noqa: E731
+                    publish = lambda: (inner(), self._record(*tv_args, raw=True))  # noqa: E731
             record = {"request_id": request_id, "decided_at": iso(now),
                       "decisions": [{"proposal_id": d["proposal_id"], "decision": d["decision"], "note": d.get("note"),
                                      "acknowledged_weakening": d.get("acknowledge_weakening") is True}
@@ -1240,7 +1346,8 @@ class CNService:
                                              "minor": True, "view": {"admission_id": rid, "unmet": [u]}}))
             events.append(self._record(rid, "admission_ruling", i02_admission.ACTOR, c["clipper_id"],
                                        {"ruling_id": rid, "admitted": False, "codes": [["CN-01", "AGE_NOT_ADULT"]],
-                                        "minor": True}, "Refused: V&I attests a minor (CN-01); offboarding trigger minor"))
+                                        "minor": True}, "Refused: V&I attests a minor (CN-01); offboarding trigger minor",
+                                       raw=True))
         return puts, events
 
     def accept_agreement(self, request_id: str, clipper_id: str, body: dict) -> dict:
@@ -1400,8 +1507,18 @@ class CNService:
             if ruling_id in self.st["admissions"]:
                 return self.st["admissions"][ruling_id]["view"]
             summary = f"Admission {'admitted' if admitted else 'not admitted'}: {len(items)} unmet under rules v{self.version_number or 0}"
-            events.append(self._record(ruling_id, "admission_ruling", i02_admission.ACTOR, clipper_id,
-                                       {"ruling_id": ruling_id, **outcome}, summary))
+            # the ruling id IS the ledger event id (callers read the ruling by it): recorded raw. Bug sweep C (R6): a
+            # retry whose first try recorded a DIFFERENT outcome under the request's id (it never committed here) is
+            # issued under the outcome-derived id instead of a lasting 409 (compliance-py N14-15b)
+            try:
+                events.append(self._record(ruling_id, "admission_ruling", i02_admission.ACTOR, clipper_id,
+                                           {"ruling_id": ruling_id, **outcome}, summary, raw=True))
+            except Unavailable:
+                if ruling_id != base_id or not self._ledger_conflict:
+                    raise
+                ruling_id = "cn-adm-" + _b32(f"{op}|{outcome_sha}", 40)
+                events.append(self._record(ruling_id, "admission_ruling", i02_admission.ACTOR, clipper_id,
+                                           {"ruling_id": ruling_id, **outcome}, summary, raw=True))
             if jur is not None and jur.available:
                 events.append(self._record(derived_id("jc", ruling_id), "jurisdiction_checked", i02_admission.ACTOR,
                                            clipper_id, {"class": jur.jurisdiction_class, "resolution_id": jur.resolution_id},
@@ -1722,9 +1839,19 @@ class CNService:
             ruling_id = base_id if ent is None else "cn-enrr-" + _b32(f"{op}|{outcome_sha}", 40)
             if ruling_id in self.st["enrolment_rulings"]:
                 return self.st["enrolment_rulings"][ruling_id]["view"]
-            events.append(self._record(ruling_id, "enrolment_ruling", i04_enrolment.ACTOR, clipper_id,
-                                       {"ruling_id": ruling_id, "campaign_id": campaign_id, **outcome},
-                                       f"Enrolment {'eligible' if eligible else 'refused'}: {len(items)} unmet"))
+            try:
+                events.append(self._record(ruling_id, "enrolment_ruling", i04_enrolment.ACTOR, clipper_id,
+                                           {"ruling_id": ruling_id, "campaign_id": campaign_id, **outcome},
+                                           f"Enrolment {'eligible' if eligible else 'refused'}: {len(items)} unmet",
+                                           raw=True))
+            except Unavailable:
+                if ruling_id != base_id or not self._ledger_conflict:     # bug sweep C (R6), as admission
+                    raise
+                ruling_id = "cn-enrr-" + _b32(f"{op}|{outcome_sha}", 40)
+                events.append(self._record(ruling_id, "enrolment_ruling", i04_enrolment.ACTOR, clipper_id,
+                                           {"ruling_id": ruling_id, "campaign_id": campaign_id, **outcome},
+                                           f"Enrolment {'eligible' if eligible else 'refused'}: {len(items)} unmet",
+                                           raw=True))
             puts: list[tuple] = []
             enrolment = None
             msg = None
@@ -2669,7 +2796,9 @@ class CNService:
         with self.lock:
             self._clipper(clipper_id)
             ex = self._export(clipper_id)
-            ev = self._record(derived_id("dex", clipper_id, iso(self._now()), len(self.log)), "data_exported",
+            # bug sweep C (R6): no clock in the id (it made every retry a new, unnamed event); the content and the
+            # log position (seq, in the payload) identify the export
+            ev = self._record(derived_id("dex", clipper_id, _sha(ex)), "data_exported",
                               i09_offboarding.ACTOR, clipper_id, {"export_sha256": _sha(ex)}, "Clipper data export served")
             self._commit("evidence", {"note": "export served", "clipper_id": clipper_id, "export_sha256": _sha(ex)}, [ev])
             return {"export": ex, "export_sha256": _sha(ex), "ledger_event_id": ev}
@@ -2697,10 +2826,66 @@ class CNService:
             return {"records": out, "next_cursor": last if more else None, "ledger_event_id": eid,
                     "rules_version": self.version_number}
 
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+        """``GET /cn/v1/audit/evidence`` (bug sweep C R6; bizdev-py / finance-py ``audit_evidence``). Every Clipper Network event on the
+        ledger except the log anchors, each marked ``committed`` (a local line with seq ``s`` names it in
+        ``data.evidence``, the ledger holds that line's anchor with the anchor payload's hash, and the ledger's
+        ``payload_sha256`` is the named one, which carries ``rk`` and ``seq``), ``cited`` (listed by an anchored line
+        without being typed evidence: crossings, rulings, versions, leases, reconciles, events recorded before this
+        view existed, a failed try a later line names) or ``attempted`` (anything else: recorded first, never
+        committed). Unanchored evidence = attempted, not done. Only the raw lines are copied under the service lock;
+        parsing, hashing and the ledger read happen outside it. Eventually consistent: re-read to settle."""
+        with self.lock:
+            if self._closed:
+                raise Unavailable("SERVICE_CLOSED: this Clipper Network instance is closed")
+            raw = self.log.raw_lines()
+        try:
+            entries = self.recorder.client.entries()
+        except LedgerQueryFailed:
+            raise Unavailable("the evidence ledger could not be read") from None
+        epoch = hashlib.sha256(raw[0]).hexdigest()[:16] if raw else None
+        mine = [e for e in entries if isinstance(e, dict) and e.get("department") == "clipper_network"]
+        anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == i10_evidence_audit.ANCHOR_TYPE}
+        named: dict[str, tuple] = {}
+        cited: dict[str, int] = {}
+        for ln in raw:
+            r = json.loads(ln)
+            line_sha = hashlib.sha256(ln).hexdigest()
+            a = anchors.get(i10_evidence_audit.anchor_id(epoch, r["seq"], line_sha))
+            want = payload_sha256({"epoch": epoch, "seq": r["seq"], "line_sha256": line_sha, "kind": r["kind"]})
+            if a is None or a.get("payload_sha256") != want:
+                continue
+            for n in r["data"].get("evidence") or []:
+                named[n["event_id"]] = (r["seq"], n.get("rk"), n.get("payload_sha256"))
+            for eid in list(r["data"].get("ledger_event_ids") or []) + list(r["data"].get("attempted_event_ids") or []):
+                cited.setdefault(eid, r["seq"])
+        rows, counts = [], {"committed": 0, "cited": 0, "attempted": 0}
+        for e in mine:
+            et = e.get("event_type")
+            if et == i10_evidence_audit.ANCHOR_TYPE or (event_type is not None and et != event_type):
+                continue
+            eid = e.get("event_id")
+            n = named.get(eid)
+            meta = i10_evidence_audit.meta_sha256(str(e.get("actor")), str(e.get("subject_id")), str(e.get("summary")))
+            if n is not None and n[2] == e.get("payload_sha256") \
+                    and eid == i10_evidence_audit.evidence_id(n[1] or "", et, e.get("payload_sha256") or "", meta):
+                status, seq, rk = "committed", n[0], n[1]
+            elif n is None and eid in cited:
+                status, seq, rk = "cited", cited[eid], None
+            else:
+                status, seq, rk = "attempted", None, None
+            counts[status] += 1
+            rows.append({"event_id": eid, "event_type": et, "subject_id": e.get("subject_id"), "status": status,
+                         "seq": seq, "rk": rk, "payload_sha256": e.get("payload_sha256")})
+        return {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle",
+                "events": rows[offset:offset + limit], "total": len(rows), "counts": counts, "limit": limit,
+                "offset": offset, "log_lines": len(raw), "epoch": epoch}
+
     def health(self) -> dict:
         return {"status": "ok", "service": "clipper-network-py", "rules_version": self.version_number,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned,
-                "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required)}
+                "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
+                "log_write_fault": bool(self.log.fault)}
 
     def delegate_confirmed(self, name: str) -> None:
         """A delegate counts only when People (43) confirms it active (recorded crossing); the stand-in never does,

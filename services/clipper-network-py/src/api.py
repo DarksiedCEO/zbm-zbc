@@ -545,6 +545,13 @@ def create_app(service: CNService, settings: config_mod.Settings) -> FastAPI:
     def reconcile(req: m.ReconcileRequest = Depends(body(m.ReconcileRequest)), _: str = Depends(andre("reconcile"))) -> dict:
         return svc.reconcile(req.request_id, req.head_sha256, list(req.void_lines), list(req.void_event_ids))
 
+    @app.get("/cn/v1/audit/evidence", dependencies=auth)
+    def audit_evidence(_: str = Depends(caller()), limit: int = Query(default=200, ge=1, le=1000),
+                       offset: int = Query(default=0, ge=0, le=10_000_000),
+                       event_type: Optional[str] = Query(default=None, pattern=r"^[a-z0-9_]{1,64}$")) -> dict:
+        """Bug sweep C (R6): every Clipper Network evidence event on the ledger, committed / cited / attempted."""
+        return svc.audit_evidence(limit, offset, event_type)
+
     @app.get("/cn/v1/audit/export", dependencies=auth)
     def audit(who: str = Depends(caller()), since: Optional[str] = Query(default=None, max_length=40),
               until: Optional[str] = Query(default=None, max_length=40),
@@ -572,9 +579,16 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
         clients_from_settings(settings, ports)
     cfg = Config(channels=settings.channels, postal_address=settings.postal_address, opt_out_url=settings.opt_out_url)
     expected = settings.seed_sha256 if (settings.allow_unpinned_seed and settings.seed_sha256) else config_mod.PINNED_SEED_SHA256
-    return CNService(cfg, Recorder(ledger), RecordLog(settings.data_dir), ContactStore(settings.data_dir), seed_bytes,
-                     expected, config_mod.PINNED_SEED_SHA256, settings.identity_hmac_key, ports, clock,
-                     reconcile_mode=settings.reconcile_mode)
+    lock = settings.data_dir_lock                       # the flock, taken by config.load before the log is opened
+    token = lock.claim() if lock is not None else None  # claimed BEFORE the log is built (bug sweep C, E-5/F-3)
+    try:
+        return CNService(cfg, Recorder(ledger), RecordLog(settings.data_dir), ContactStore(settings.data_dir), seed_bytes,
+                         expected, config_mod.PINNED_SEED_SHA256, settings.identity_hmac_key, ports, clock,
+                         reconcile_mode=settings.reconcile_mode, dir_lock=lock, lock_token=token)
+    except BaseException:
+        if lock is not None:
+            lock.release_claim(token)
+        raise
 
 
 def _app_from_env() -> FastAPI:

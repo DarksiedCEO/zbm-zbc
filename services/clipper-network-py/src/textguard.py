@@ -13,6 +13,8 @@ Client-supplied text is DATA (spec §C design rules; copied from compliance-py s
 - ``money_or_earnings``: CN-26 / §0.1.8 — money strings, currency markers and
   earnings / guarantee vocabulary. A template body or variable that trips it
   is refused (422); CN never renders a money value or an earnings promise.
+  Matched after ``fold_for_matching`` (bug sweep C: NFKC, invisible characters,
+  diacritics and confusables, so homoglyphs do not bypass it).
 - ``looks_like_phone`` / ``is_email``: recruiting recipients (CN-08 / CN-09).
 Nothing here evaluates, formats or templates client text.
 """
@@ -140,13 +142,78 @@ _MONEY = [
 ]
 
 
+# Lookalike -> Latin, lower case (bug sweep C: the CN-26 money blocklist was bypassed with homoglyphs, "еarn cаsh"
+# with Cyrillic е/а). The visually near-identical Cyrillic / Greek / Armenian / Cherokee / IPA entries of Unicode
+# confusables.txt, copied from creative-py's ``shared/text.py`` CONFUSABLES (the shared table every service that folds
+# lookalikes copies; services do not import each other), plus every "LATIN ... LETTER <X> [WITH ...]" letter, generated
+# from ``unicodedata`` as creative-py does.
+CONFUSABLES: dict[str, str] = {
+    # Cyrillic
+    "а": "a", "б": "b", "в": "b", "г": "r", "д": "d", "е": "e", "ё": "e", "ж": "x", "з": "3", "и": "u",
+    "й": "u", "к": "k", "л": "n", "м": "m", "н": "h", "о": "o", "п": "n", "р": "p", "с": "c", "т": "t",
+    "у": "y", "ф": "f", "х": "x", "ц": "u", "ч": "4", "ш": "w", "щ": "w", "ъ": "b", "ы": "bi", "ь": "b",
+    "э": "e", "ю": "io", "я": "r", "ѕ": "s", "і": "i", "ї": "i", "ј": "j", "ԁ": "d", "ӏ": "l", "ԛ": "q",
+    "ԝ": "w", "һ": "h", "ҁ": "c", "ү": "y", "ұ": "y", "ґ": "r", "є": "e", "ѡ": "w", "ѵ": "v",
+    # Greek
+    "α": "a", "β": "b", "γ": "y", "δ": "d", "ε": "e", "ζ": "z", "η": "n", "θ": "o", "ι": "i", "κ": "k",
+    "λ": "l", "μ": "u", "ν": "v", "ξ": "e", "ο": "o", "π": "n", "ρ": "p", "σ": "o", "ς": "c", "τ": "t",
+    "υ": "u", "φ": "f", "χ": "x", "ψ": "w", "ω": "w", "ϲ": "c", "ϳ": "j", "ϸ": "p",
+    # Armenian
+    "ա": "w", "ց": "g", "հ": "h", "ո": "n", "ս": "u", "օ": "o", "ք": "p", "զ": "q",
+    # Latin extended / IPA lookalikes that NFKC leaves alone
+    "ɡ": "g", "ɑ": "a", "ı": "i", "ȷ": "j", "ɩ": "i", "ɪ": "i", "ʏ": "y", "ʀ": "r", "ɴ": "n", "ʜ": "h",
+    "ᴀ": "a", "ʙ": "b", "ᴄ": "c", "ᴅ": "d", "ᴇ": "e", "ꜰ": "f", "ᴊ": "j", "ᴋ": "k", "ʟ": "l", "ᴍ": "m",
+    "ᴏ": "o", "ᴘ": "p", "ꞯ": "q", "ꜱ": "s", "ᴛ": "t", "ᴜ": "u", "ᴠ": "v", "ᴡ": "w", "ᴢ": "z", "ŀ": "l",
+    "ſ": "s", "ƿ": "p", "ɢ": "g", "ʛ": "g", "ɋ": "q", "ʠ": "q", "ɾ": "r", "ɼ": "r", "ʋ": "v", "ʍ": "w",
+    "ꭇ": "r", "ꞃ": "r", "ꝛ": "r", "ᵹ": "g", "ꞅ": "s", "ꜧ": "h", "ꞇ": "t", "ꝺ": "d", "ꝼ": "f",
+    "ԍ": "g", "ԃ": "d", "ԋ": "h", "ԏ": "t", "ӡ": "3", "ҽ": "e", "ҿ": "e", "ᴫ": "n",
+    "ϝ": "f", "ϻ": "m", "ϙ": "q", "ͱ": "h", "ͷ": "n",
+    # Cherokee (after casefold Cherokee small letters U+AB70.. become U+13A0..)
+    "Ꭰ": "d", "Ꭱ": "r", "Ꭲ": "t", "Ꭵ": "i", "Ꭹ": "y", "Ꭺ": "a", "Ꭻ": "j", "Ꭼ": "e", "Ꮃ": "w",
+    "Ꮇ": "m", "Ꮋ": "h", "Ꮍ": "y", "Ꮐ": "g", "Ꮒ": "h", "Ꮓ": "z", "Ꮟ": "b", "Ꮢ": "r", "Ꮤ": "w",
+    "Ꮥ": "s", "Ꮩ": "v", "Ꮪ": "s", "Ꮮ": "l", "Ꮯ": "c", "Ꮲ": "p", "Ꮶ": "k", "Ꮷ": "d", "Ᏻ": "g",
+    "Ᏼ": "b", "Ꮻ": "o", "Ꮎ": "o",
+}
+_LATIN_NAME = re.compile(
+    r"LATIN (?:SMALL CAPITAL |SMALL |CAPITAL )?LETTER (?:SMALL CAPITAL |SCRIPT |DOTLESS |LONG )?([A-Z])(?: WITH .+)?")
+
+
+def _generated_latin_folds() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for cp in range(0x80, 0x20000):
+        ch = chr(cp)
+        m = _LATIN_NAME.fullmatch(unicodedata.name(ch, ""))
+        if m:
+            out[ch] = m.group(1).lower()
+            if len(ch.casefold()) == 1:
+                out.setdefault(ch.casefold(), m.group(1).lower())
+    return out
+
+
+_FOLD_TABLE = str.maketrans({**_generated_latin_folds(), **CONFUSABLES})
+
+
+def fold_for_matching(text: str) -> str:
+    """The text a blocklist is matched against (bug sweep C): NFKC (fullwidth, ligatures, mathematical letters),
+    every format / Default_Ignorable character removed (zero-width space and joiners, soft hyphen, bidi controls,
+    variation selectors), diacritics stripped (NFKD, combining marks dropped), casefold, lookalike letters mapped to
+    the Latin letter they imitate. Currency signs and digits are left as they are (their own patterns match them)."""
+    t = unicodedata.normalize("NFKC", text)
+    t = "".join(ch for ch in t if unicodedata.category(ch) != "Cf" and ch not in "\u034f\u115f\u1160\u3164\uffa0")
+    t = "".join(ch for ch in unicodedata.normalize("NFKD", t) if not unicodedata.combining(ch))
+    return unicodedata.normalize("NFC", t).casefold().translate(_FOLD_TABLE)
+
+
 def money_or_earnings(text: str) -> list[str]:
-    """Names of the money / earnings / guarantee patterns found in ``text`` (NFKC-normalized first, so a
-    full-width dollar sign or ligature does not slip through). Empty list = clean."""
+    """Names of the money / earnings / guarantee patterns found in ``text``. Bug sweep C: matched against
+    ``fold_for_matching(text)`` (NFKC + invisible characters dropped + diacritics + confusables), and against the plain
+    NFKC text too, so neither "еarn" (Cyrillic е), "g\u200buaranteed" (zero-width space) nor "éarn" slips through.
+    Empty list = clean."""
     if not isinstance(text, str):
         return []
-    t = unicodedata.normalize("NFKC", text[:SCAN_MAX_CHARS])
-    return [name for name, rx in _MONEY if rx.search(t)]
+    head = text[:SCAN_MAX_CHARS]
+    views = (unicodedata.normalize("NFKC", head), fold_for_matching(head))
+    return [name for name, rx in _MONEY if any(rx.search(v) for v in views)]
 
 
 # --- display names (AEGIS N16-11) -------------------------------------------------------------------------------

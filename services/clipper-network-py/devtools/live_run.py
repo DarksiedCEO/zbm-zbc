@@ -322,6 +322,10 @@ def _main(work: Path) -> int:
         ib = c.get(B + '/cn/v1/integrity', headers=h('scheduler')).json()
         say(f"B integrity: {ib}")
         expect("B integrity ok", ib.get("ok") is True and ib.get("anchor_problems") == [], ib)
+        ev = c.get(B + "/cn/v1/audit/evidence", headers=h("scheduler"), params={"limit": 1000}).json()
+        say(f"B /cn/v1/audit/evidence: {ev['counts']}")
+        expect("B audit/evidence: every typed event committed under an anchored line (sweep C R6)",
+               ev["counts"]["attempted"] == 0 and ev["counts"]["committed"] > 0, ev["counts"])
         blob = (work / "b" / "cn_log.jsonl").read_bytes() + (work / "b" / "cn_contacts.json").read_bytes() + \
             (work / "lb" / "ledger.jsonl").read_bytes()
         scan = {"code": b'LIVE-OAUTH-CODE-7c1e' in blob, "dob": b'1993-02-14' in blob, "andre_token": ANDRE.encode() in blob}

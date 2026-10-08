@@ -462,3 +462,16 @@ connection. Live run: `LEDGER_BIN=… python3 devtools/live_run.py --ports
   not CN-21). The log-tamper guardrail expects the store's `StoreCorrupt`, not any exception mentioning "hash".
 - `tests/contract_vi_runner.py` (run outside pytest, so the conftest socket guard never reached it) installs its own
   guard, as legal-py's contract runner does; the G5 seed test no longer names a literal `/tmp` path.
+
+## Bug sweep C fixes (Oct 7, 2026; sweep of integration 5d49ee9)
+
+Every fix is pinned by a test in `services/clipper-network-py/tests/test_sweep_c.py` that fails on 5d49ee9 (the
+sweep's probes were lost; each finding was re-derived from the code first). Live run: `devtools/live_run.py` adds
+one check (`GET /cn/v1/audit/evidence`: no `attempted` event after the whole walk).
+
+| Id | Finding | Fix |
+|---|---|---|
+| R6 | Evidence ids left out the payload hash (e.g. `ban_approved_by_andre`, `message_queued`): a retry after the state moved (the notice's send window, a changed outcome) got the ledger's 409 → a lasting 503. `data_exported`'s id carried the wall clock — the premise "lasting 409" does not hold there: each retry was instead a NEW, unnamed ledger event | The bizdev R6 pattern in `_record`: the given id is the action key `rk`; the recorded id is `i10_evidence_audit.evidence_id(rk, type, payload_sha256, actor/subject/summary hash)` over a payload carrying `rk` and `seq` (no clock added; `data_exported` keyed by the export's hash). The committing line names its evidence (`data.evidence`); `GET /cn/v1/audit/evidence` classifies every event `committed` / `cited` / `attempted`; `i10.assess` does not count an earlier attempt of a committed action as a ghost (bound by ledger position). Admission and enrolment ruling ids stay raw (callers read rulings by them) and, like compliance-py's N14-15b, a 409 on the request's first id issues under the outcome-derived id; a ruling recorded by a try that never committed is named by the next line (`attempted_event_ids`). Crossings, anchors, leases, reconciles and version events keep their exact ids |
+| E-5/F-3 | Old `store.py`: one fsync error left a line on disk that memory did not hold and bricked the log for good; no single-writer lock; no `close()` | finance-py's `store.py` backported (exact-size append, adopt/truncate, short-write cut-back, `fault` → `LOCAL_LOG_WRITE_FAULT`, `O_NOFOLLOW`, empty line refuses start, `DataDirLock` on `cn.lock`); `config.load` takes the flock, `api.build_service` claims it, `CNService.close()` releases it and makes the instance inert (503) |
+| M (lock) | `integrity()` ran the ledger's verify and entries (HTTP) and the chain re-read (disk) under the service lock | All three run outside the lock (re-read once if a commit landed meanwhile); only the comparison runs under it |
+| M (homoglyph) | The CN-26 money blocklist (`textguard.money_or_earnings`, templates, variables, display names) was NFKC-only: `еarn cаsh` (Cyrillic), `g​uaranteed`, `éarn`, `5 υsd` passed | `fold_for_matching`: NFKC, every format / Default_Ignorable character removed, diacritics stripped, casefold, confusables mapped to Latin (creative-py's `shared/text.py` CONFUSABLES table, copied; plus the generated "LATIN ... LETTER X WITH ..." folds). `money_or_earnings` matches the plain NFKC view AND the folded view; ordinary names in other scripts still pass |
