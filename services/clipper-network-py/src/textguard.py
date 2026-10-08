@@ -212,8 +212,41 @@ def money_or_earnings(text: str) -> list[str]:
     if not isinstance(text, str):
         return []
     head = text[:SCAN_MAX_CHARS]
-    views = (unicodedata.normalize("NFKC", head), fold_for_matching(head))
-    return [name for name, rx in _MONEY if any(rx.search(v) for v in views)]
+    folded = fold_for_matching(head)
+    views = (unicodedata.normalize("NFKC", head), folded)
+    hits = [name for name, rx in _MONEY if any(rx.search(v) for v in views)]
+    # AEGIS L-4: the WORD patterns are also matched on the obfuscation-collapsed view (sales-py S1-H3 / influencer
+    # i07 normaliser): leetspeak inside a word that also has letters ("guarant33d", "gu4r4nteed"), punctuation
+    # between letters ("e.a.r.n") and runs of 3+ single letters ("g u a r a n t e e d", "c a s h") are folded. The
+    # symbol and amount patterns are not (a "$" or "5" folded to a letter would hide or invent money)
+    word = _collapse(folded)
+    hits += [name for name, rx in _MONEY if name in _WORD_PATTERNS and name not in hits and rx.search(word)]
+    return [name for name, _ in _MONEY if name in hits]
+
+
+_WORD_PATTERNS = ("currency_code", "earnings_word", "guarantee_word")
+_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+
+def _collapse(t: str) -> str:
+    t = re.sub(r"(?<=[^\W\d_])[\u2028\u2029](?=[^\W\d_])", "", t)   # a line separator inside a word joins it
+    t = re.sub(r"[\u2028\u2029\s]+", " ", t)
+    words = []
+    for w in t.split(" "):
+        # leet inside a word that also has letters: g4in -> gain (a bare number such as 2024 stays a number)
+        words.append(w.translate(_LEET) if any(c.isalpha() for c in w) and any(c in "0134 57@$" for c in w) else w)
+    t = " ".join(words)
+    t = re.sub(r"(?<=[^\W\d_])[^\w\s]+(?=[^\W\d_])", "", t)        # e.a.r.n -> earn
+    out, run = [], []
+    for w in t.split() + [""]:                                        # g u a r a n t e e d -> guaranteed
+        if len(w) == 1 and w.isalpha():
+            run.append(w)
+            continue
+        out += ["".join(run)] if len(run) >= 3 else run
+        run = []
+        if w:
+            out.append(w)
+    return " ".join(out)
 
 
 # --- display names (AEGIS N16-11) -------------------------------------------------------------------------------

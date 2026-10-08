@@ -223,3 +223,14 @@ def test_c3_a_suspended_vi_certification_is_read_not_refused_and_never_counts_to
     vi = HttpVerificationIntegrity("http://vi.test", "svc", "caller", transport=httpx.MockTransport(ok))
     a = vi.certifications("cn-clp-1")
     assert a.available and a.certifications[0].status == "suspended"
+
+
+@pytest.mark.parametrize("text", ["guarant33d views", "g u a r a n t e e d", "e.a.r.n money", "gu4r4nteed",
+                                  "guaran teed", "c a s h"])
+def test_l4_leetspeak_letter_spacing_and_line_separators_are_folded(text):
+    assert money_or_earnings(text), text
+
+
+@pytest.mark.parametrize("text", ["Agent 47 Smith", "R2 D2 fan", "a b c clips", "Mary-Jane O'Neil", "Clip 2024"])
+def test_l4_folding_does_not_flag_ordinary_text(text):
+    assert money_or_earnings(text) == [], text

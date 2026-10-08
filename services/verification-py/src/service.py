@@ -137,6 +137,15 @@ def bounded_call(fn: Callable[[], Any], fallback: Any, timeout_s: int) -> Any:
     return box.get("v", fallback) if not t.is_alive() else fallback
 
 
+# AEGIS L-2 (re-review of 3c55104): at most this many timed-out calls of one port may still be running in the
+# background; past it the port is not called again (the item fails: backoff, then the dead-letter list) until one ends
+PORT_LEAK_CAP = 4
+
+
+class PortWedged(Unavailable):
+    """A port has PORT_LEAK_CAP calls still running after their deadline: it is not called again for now."""
+
+
 def _dt(v: str) -> datetime:
     return parse_iso(v)
 
@@ -209,7 +218,7 @@ class Op:
             except Exception:  # noqa: BLE001 - a port that raises is unavailable, never a pass; its text is dropped
                 ans = fallback
         else:
-            ans = bounded_call(fn, fallback, self.svc.cfg.port_call_timeout_s)
+            ans = self.svc._bounded(port, fn, fallback, raise_when_capped=True)
         self._memo[k] = ans
         return ans
 
@@ -262,6 +271,8 @@ class VIService:
         self._xlock = threading.Lock()         # serializes crossings recorded outside the service lock
         # bug sweep C (C-1): one run of a job at a time; items take the service lock one by one
         self._job_locks = {j: threading.Lock() for j in JOBS}
+        self._leak_lock = threading.Lock()
+        self._leaked: dict[str, int] = {}     # AEGIS L-2: timed-out calls per port still running
         self.job_items: dict[tuple[str, str], dict] = {}   # (job, subject) -> {failures, next_try} (memory only)
         self.dead_letters: dict[tuple[str, str], dict] = {}  # (job, subject) -> parked item (event-sourced)
         self._failed_named: list[dict] = []
@@ -287,6 +298,41 @@ class VIService:
         except BaseException:
             self.close()
             raise
+
+    def _bounded(self, port: str, fn: Callable[[], Any], fallback: Any, raise_when_capped: bool = False) -> Any:
+        """``bounded_call`` with a per-port cap on calls still running after their deadline (AEGIS L-2). When the
+        cap is reached the port is not called: ``PortWedged`` (a 503 for a request, a failed item for a job), or
+        ``fallback`` when ``raise_when_capped`` is False."""
+        with self._leak_lock:
+            if self._leaked.get(port, 0) >= PORT_LEAK_CAP:
+                if raise_when_capped:
+                    raise PortWedged(f"{port} has {PORT_LEAK_CAP} calls still running past their deadline; it is not "
+                                     "called again until one ends", ledger_write="not_recorded")
+                return fallback
+        box: dict = {}
+        done = threading.Event()
+        state = {"leaked": False}
+
+        def run() -> None:
+            try:
+                box["v"] = fn()
+            except BaseException:  # noqa: BLE001 - a port that raises is unavailable; its text is dropped
+                box["v"] = fallback
+            finally:
+                with self._leak_lock:
+                    done.set()
+                    if state["leaked"]:
+                        self._leaked[port] -= 1
+
+        t = threading.Thread(target=run, name=f"vi-port-{port}"[:40], daemon=True)
+        t.start()
+        t.join(self.cfg.port_call_timeout_s)
+        with self._leak_lock:
+            if not done.is_set():
+                state["leaked"] = True
+                self._leaked[port] = self._leaked.get(port, 0) + 1
+                return fallback
+        return box.get("v", fallback)
 
     def close(self) -> None:
         """Give the data directory back (a restart in the same process closes the old instance first). A closed
@@ -564,6 +610,13 @@ class VIService:
             self.job_runs[(r["job"], r["day"])] = r
         elif kind == "screen":
             self.screens[r["submission_id"]] = r
+        elif kind == "job_item":
+            k = (r["job"], r["subject_id"])
+            if "failures" in r:
+                self.job_items[k] = {"failures": r["failures"], "next_try": parse_iso(r["next_try"]),
+                                     "last_error": r.get("error", ""), "attempted": [], "persisted": True}
+            else:
+                self.job_items.pop(k, None)          # resolved (or a skipped item's attempts named)
         elif kind == "dead_letter":
             k = (r["job"], r["subject_id"])
             if r.get("cleared"):
@@ -1044,6 +1097,18 @@ class VIService:
                     out.setdefault(k, aid)
         return out
 
+    def _minors_without_base(self) -> list[str]:
+        """AEGIS L-3: minors whose identity check predates the canonical-mailbox HMAC (``email_base``). V&I never
+        stores a raw address, so it cannot be computed at load; until such a minor's identity is checked again, no
+        NEW identity can be proved distinct from it by mailbox, so a new subject's adult answer is withheld."""
+        out = []
+        for (ns, subj), aid in self.latest_age.items():
+            if ns == CN_NAMESPACE and self.ages[aid]["result"] == "minor":
+                kinds = {k for k, _ in self.clipper_hmacs.get(subj, set())}
+                if "email" in kinds and "email_base" not in kinds:
+                    out.append(subj)
+        return sorted(out)
+
     def _identity_minor(self, subject_id: str) -> Optional[str]:
         mine = {k for k in self.clipper_hmacs.get(subject_id, set()) if k[0] in IDENTITY_LOCK_KINDS}
         if not mine:
@@ -1072,6 +1137,10 @@ class VIService:
         if aid is None:
             return "unknown", [R.item("AGE_NOT_ASSURED", "no age attestation on file", (), rules)], None
         a = self.ages[aid]
+        if ns == CN_NAMESPACE and a["result"] == "adult" and subject_id not in self._minors_without_base() \
+                and self._minors_without_base():
+            return "unknown", [R.item("AGE_NOT_ASSURED", "a minor's identity check predates mailbox folding: "
+                                      "re-run that identity check before an adult answer", (aid,), rules)], aid
         if a["result"] == "minor":
             return "minor", [R.item("AGE_MINOR", "age attestation: under 18", (aid,), rules)], aid
         if a["result"] != "adult":
@@ -1231,6 +1300,13 @@ class VIService:
                                     reasons.append(R.item("ACCOUNT_SHARED", "this social account is already held by "
                                                           "another clipper identity (or is banned)",
                                                           [finding["finding_id"]] if finding else (), rules))
+                cur = self._active_connection(clipper_id, platform)
+                if cur is not None and acct_hmac is not None and cur["platform_account_id_hmac"] != acct_hmac:
+                    # AEGIS H-1: one active connection per clipper and platform. A second account would let the
+                    # revision watch read through an account that cannot see the certified post; the clipper revokes
+                    # the old one first (which suspends what it watches, C-3)
+                    reasons.append(R.item("CONNECTION_EXISTS", "another account of this platform is still connected: "
+                                          "revoke it first", (cur["connection_id"],), rules))
                 status = "active" if not reasons else "refused"
                 if status == "refused" and vref is not None:
                     op.call("vault", "destroy", (cid,), lambda: v.destroy(vref), False)
@@ -1497,7 +1573,17 @@ class VIService:
 
     # ================================================================== fetch (i01)
 
-    def _fetch(self, op: Op, sub: dict, purpose: str, metrics: tuple, now: datetime) -> dict:
+    def _bound_account(self, cert: dict) -> Optional[str]:
+        """The account HMAC a certification is bound to (AEGIS H-1): the account of the connection it was certified
+        through (or, once suspended, the account recorded at suspension)."""
+        acct = cert.get("suspended_account_hmac")
+        if acct:
+            return acct
+        con = self.connections.get(cert.get("connection_id") or "")
+        return (con or {}).get("platform_account_id_hmac")
+
+    def _fetch(self, op: Op, sub: dict, purpose: str, metrics: tuple, now: datetime,
+               account_hmac: Optional[str] = None) -> dict:
         """One adapter call for a submission (record-first). Returns the fetch record (also staged in ``op``)."""
         rules = self.rules()
         sid, platform = sub["submission_id"], sub["platform"]
@@ -1515,6 +1601,12 @@ class VIService:
         if not self._enabled(platform) or platform not in P.CERTIFIABLE:
             return fail("platform_disabled", "PLATFORM_DISABLED", f"{platform} not enabled")
         conn = self._active_connection(sub["clipper_id"], platform)
+        if account_hmac is not None:
+            # AEGIS H-1: the revision watch reads only through a connection of the certification's own account
+            cands = [c for c in self.connections.values() if c["clipper_id"] == sub["clipper_id"]
+                     and c["platform"] == platform and c["status"] == "active"
+                     and c.get("platform_account_id_hmac") == account_hmac]
+            conn = max(cands, key=lambda c: c["seq"]) if cands else None
         if conn is None:
             return fail("not_connected", "NOT_CONNECTED", "no active connection for this platform")
         base["connection_id"] = conn["connection_id"]
@@ -2164,11 +2256,12 @@ class VIService:
                 run.failures.append((subject, f"internal error ({type(exc).__name__})",
                                      [n["event_id"] for n in self._failed_named]))
                 return None
-            if out is SKIP and self._carry:
-                # the item needs nothing any more (its state moved on) but its failed tries are on the ledger: one
-                # line names them, so a restart never takes them for another instance's rulings
+            if (out is SKIP and self._carry) or (st or {}).get("persisted"):
+                # the item succeeded or needs nothing any more: its failed tries' evidence is named by one line (a
+                # restart never takes it for another instance's rulings) and a persisted failure count is cleared
                 op = Op(self, f"jis|{run.job}|{subject}|{iso(run.now)}", EVIDENCE, subject[:128])
-                op.add("job_item", {"job": run.job, "subject_id": subject, "attempted": len(self._carry)})
+                op.add("job_item", {"job": run.job, "subject_id": subject, "attempted": len(self._carry),
+                                    "cleared": True})
                 try:
                     self._commit(op)
                 except Unavailable:
@@ -2196,9 +2289,12 @@ class VIService:
                 st = self.job_items.setdefault(k, {"failures": 0, "next_try": run.now, "attempted": []})
                 st["failures"] += 1
                 st["last_error"] = why
-                st["attempted"] = (st["attempted"] + [a for a in attempted if a not in st["attempted"]])[-200:]
+                st["attempted"] = (st.get("attempted", []) + [a for a in attempted
+                                                              if a not in st.get("attempted", [])])[-200:]
                 wait = JOB_ITEM_BACKOFF_H[min(st["failures"], len(JOB_ITEM_BACKOFF_H)) - 1]
                 st["next_try"] = run.now + timedelta(hours=wait)
+                if st["failures"] < self.cfg.job_item_max_failures:
+                    self._persist_item(run.job, subject, st, run.now)
                 if st["failures"] >= self.cfg.job_item_max_failures:
                     try:
                         self._dead_letter(run.job, subject, st["failures"], why, run.now)
@@ -2209,6 +2305,23 @@ class VIService:
         if run.ok == 0 and parked == 0:
             raise Unavailable(f"the {run.job} job's only due item failed ({run.failures[0][1][:200]}); nothing was "
                               "issued; it is retried with backoff")
+
+    def _persist_item(self, job: str, subject: str, st: dict, now: datetime) -> None:
+        """AEGIS L-1: an item's failure count and backoff go to the log (rebuilt at start), so a restart does not
+        reset the count toward the dead-letter list; the line also names the failed tries' evidence. Best effort:
+        when the ledger is down too, the count stays in memory and the next failure records it."""
+        op = Op(self, f"jif|{job}|{subject}|{st['failures']}|{iso(now)}", EVIDENCE, subject[:128])
+        op.add("job_item", {"job": job, "subject_id": subject, "failures": st["failures"],
+                            "next_try": iso(st["next_try"]), "error": st.get("last_error", "")[:200]})
+        self._carry = list(st.get("attempted", []))
+        try:
+            self._commit(op)
+            st["attempted"] = []
+            st["persisted"] = True
+        except Unavailable:
+            pass
+        finally:
+            self._carry = []
 
     def _dead_letter(self, job: str, subject: str, failures: int, why: str, now: datetime) -> None:
         op = Op(self, f"dlq|{job}|{subject}|{iso(now)}", EVIDENCE, subject[:128])
@@ -2431,9 +2544,12 @@ class VIService:
             if any(f["purpose"] == "revision_watch" and f["fetched_at"][:10] == today for f in self._fetches_of(None, sid)):
                 return SKIP
             op = Op(self, f"rev|{sid}|{today}", i02.ACTOR, sid)
-            f = self._fetch(op, sub, "revision_watch", ("views",), now)
+            bound = self._bound_account(cert)
+            f = self._fetch(op, sub, "revision_watch", ("views",), now, account_hmac=bound or "")
             snap = next((x for x in self._staged(op, "snapshot") if x["fetch_id"] == f["fetch_id"]
                          and x["metric"] == P.PAYABLE_METRIC[sub["platform"]] and x["dimension"] is None), None)
+            if snap is not None and not self._good_check(f, bound, sub):
+                snap = None          # AEGIS H-1: a read of another author's (or another) video is no revision check
             result = "checked"
             if cert["status"] == "suspended":
                 if snap is not None and self._same_account_and_video(cert, sub, f):
@@ -2474,9 +2590,25 @@ class VIService:
         payable until a check succeeds again (fail closed)."""
         if f.get("cause") == "not_connected":
             return True
+        cert = self.certs[self.cert_by_sub[sid]]
+        bound, sub = self._bound_account(cert), self.submissions[sid]
         checks = sorted((x for x in self._fetches_of(op, sid) if x["purpose"] == "revision_watch"),
                         key=lambda x: (x["fetched_at"], x["fetch_id"]))[-ACCESS_LOST_AFTER_FAILED_CHECKS:]
-        return len(checks) == ACCESS_LOST_AFTER_FAILED_CHECKS and not any(x["available"] for x in checks)
+        return len(checks) == ACCESS_LOST_AFTER_FAILED_CHECKS and not any(self._good_check(x, bound, sub)
+                                                                         for x in checks)
+
+    def _good_check(self, f: dict, bound: Optional[str], sub: dict) -> bool:
+        """AEGIS H-1: a revision check that counts as access: available, and either the certified video by the bound
+        account, or the post reported gone/private through that account (ADR 0006 "M-1": a post deleted or made
+        private after settlement is, today, left certified — Andre's policy call). An answer with no video while the
+        post is said to be live, or with another author or another video, is a failed check."""
+        if not f.get("available"):
+            return False
+        v = f.get("video")
+        if v is None:
+            return f.get("live_state") in ("gone", "private")
+        return bool(bound) and v.get("author_id_hmac") == bound and \
+            (not sub.get("video_id_sha256") or v.get("video_id_sha256") == sub["video_id_sha256"])
 
     def _same_account_and_video(self, cert: dict, sub: dict, f: dict) -> bool:
         v = f.get("video") or {}

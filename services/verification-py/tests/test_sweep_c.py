@@ -427,3 +427,107 @@ def test_m_overshooting_the_view_cap_is_not_cleared():
     run_to_day(h, 15)
     assert h.svc.screens["cap"]["signals"]["cap_proximity"]["status"] == "fired"
     assert h.cert("cap")["status"] != "certified"
+
+
+# ============================================================================================ AEGIS re-review of 3c55104
+
+def test_h1_a_second_account_cannot_dodge_the_revision_watch(hr):
+    """AEGIS H-1 (reviewer probe test_probe_c3b): certify q1, connect another account (no revoke) whose fetches
+    cannot see the post, the platform strips 98% of the views: the clip must not stay certified at 5000."""
+    hr.clean_clip("q1")
+    run_to_day(hr, 14)
+    assert hr.cert("q1")["status"] == "certified"
+    second = hr.connect("clip-a", account_id="acct-other")             # no revoke; the old grant still works
+    assert second["connection"]["status"] == "refused"                 # one active connection per platform
+    ad = hr.adapters["tiktok"]
+    real, seen = ad.fetch, []
+
+    def fetch(vault, vref, acct, ref, metrics, hint):
+        seen.append(acct)
+        return real(vault, vref, acct, "x" if acct == "acct-other" else ref, metrics, hint)
+    ad.fetch = fetch
+    ad.videos["https://www.tiktok.com/@c/video/q1"]["values"]["views"] = 100
+    run_to_day(hr, 25, 15)
+    c = hr.cert("q1")
+    assert "acct-other" not in seen
+    assert c["status"] == "revised" and c["certified_views"] == 100
+
+
+def test_h1_the_watch_uses_the_certifications_own_account_and_a_wrong_author_counts_as_lost_access(hr):
+    hr.clean_clip("q2")
+    run_to_day(hr, 14)
+    hr.adapters["tiktok"].videos["https://www.tiktok.com/@c/video/q2"]["author_id"] = "someone-else"
+    run_to_day(hr, 17, 15)
+    c = hr.cert("q2")
+    assert c["status"] == "suspended"
+    assert [h["cause"] for h in hr.svc.holds.values() if h["subject_id"] == "q2" and h["status"] == "open"] \
+        == ["access_lost"]
+
+
+def test_l1_job_item_failure_counts_survive_a_restart(tmp_path):
+    x = Harness(data_dir=str(tmp_path / "d"), env={"VI_JOB_ITEM_MAX_FAILURES": "2"})
+    x.approve_rules()
+    _two_clips(x)
+    real = x.ledger.record_event
+
+    def refuse_w1(event_id, department, event_type, actor, subject_id, payload, summary):
+        if event_type == "certification_issued" and subject_id == "w1":
+            raise LedgerNotRecorded("w1's certification cannot be recorded")
+        return real(event_id, department, event_type, actor, subject_id, payload, summary)
+    x.ledger.record_event = refuse_w1
+    x.ok(x.post("/vi/v1/jobs/certify/run", {"request_id": rid()}, caller="scheduler"))
+    y = Harness(data_dir=str(tmp_path / "d"), ledger=x.ledger, clock=x.clock, fakes=x.fakes,
+                env={"VI_JOB_ITEM_MAX_FAILURES": "2"})
+    assert y.svc.job_items[("certify", "w1")]["failures"] == 1
+    y.clock.advance(days=1)
+    y.ok(y.post("/vi/v1/jobs/certify/run", {"request_id": rid()}, caller="scheduler"))
+    dead = y.ok(y.get("/vi/v1/jobs/dead-letter", caller="scheduler"))["items"]
+    assert [(d["job"], d["subject_id"]) for d in dead] == [("certify", "w1")]
+
+
+def test_l2_leaked_timed_out_calls_are_capped_per_port():
+    import service as S
+    h = Harness(env={"VI_PORT_CALL_TIMEOUT_S": "1"})
+    gate = threading.Event()
+    calls = {"n": 0}
+
+    def wedged():
+        calls["n"] += 1
+        gate.wait(60)
+        return "late"
+    try:
+        out = [h.svc._bounded("platform_tiktok", wedged, "fallback") for _ in range(S.PORT_LEAK_CAP + 3)]
+        assert all(o == "fallback" for o in out)
+        assert calls["n"] == S.PORT_LEAK_CAP                         # no new thread once the cap is reached
+        with pytest.raises(S.PortWedged):
+            h.svc._bounded("platform_tiktok", wedged, "fallback", raise_when_capped=True)
+    finally:
+        gate.set()
+
+
+@pytest.mark.parametrize("variant", ["kid-alt@example.com", "kіd@example.com", "ｋｉｄ+x@example.com"])
+def test_l3_minor_lock_folds_dash_tags_and_homoglyphs(hr, variant):
+    hr.connect("kid")
+    hr.identity("kid", "kid@example.com")
+    hr.age.answer = AgeProviderAnswer("minor", None, None, True, "p", "r")
+    hr.ok(hr.age_check("kid", dob="2012-01-01"))
+    hr.age.answer = AgeProviderAnswer("adult", None, None, True, "p", "r2")
+    hr.identity("kid2", variant)
+    assert hr.ok(hr.age_check("kid2"))["status"] == "minor"
+
+
+def test_l3_a_minor_recorded_before_mailbox_folding_withholds_new_adult_answers_until_rechecked(hr):
+    """V&I keeps no raw address, so ``email_base`` cannot be backfilled at load for a minor checked before it
+    existed; until that identity is checked again, no other subject gets an adult answer."""
+    hr.connect("kid")
+    hr.identity("kid", "kid@example.com")
+    hr.age.answer = AgeProviderAnswer("minor", None, None, True, "p", "r")
+    hr.ok(hr.age_check("kid", dob="2012-01-01"))
+    for k in [k for k in hr.svc.clipper_hmacs["kid"] if k[0] == "email_base"]:  # as a pre-change record
+        hr.svc.clipper_hmacs["kid"].discard(k)
+    hr.age.answer = AgeProviderAnswer("adult", None, None, True, "p", "r2")
+    hr.identity("adult-1", "someone@example.com")
+    hr.ok(hr.age_check("adult-1"))
+    assert hr.ok(hr.get("/vi/v1/age/subjects/adult-1", caller="clipper_network"))["status"] == "unknown"
+    hr.identity("kid", "kid@example.com")                                 # the minor's identity re-checked
+    assert hr.ok(hr.get("/vi/v1/age/subjects/adult-1", caller="clipper_network"))["status"] == "adult"

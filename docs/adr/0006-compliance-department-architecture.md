@@ -539,3 +539,12 @@ state: a crossing answered "unavailable" by a stand-in, and the audit-export ans
 | E-5/F-3 | Old `store.py`: one fsync error left a line on disk that memory did not hold and bricked the log for good; no single-writer lock; no `close()` | finance-py's `store.py` backported (exact-size append, adopt/truncate, short-write cut-back, `fault` → `LOCAL_LOG_WRITE_FAULT` in C-11 and `/health`, `O_NOFOLLOW`, empty line refuses start, `DataDirLock` on `compliance.lock`); `config.load` takes the flock, `api.build_service` claims it, `ComplianceService.close()` releases it and makes the instance inert (503). A log file changed behind the service's back now also refuses every later write ("the log file and memory disagree") |
 | M (watcher) | The Change Watcher fetched every source over the network (up to the fetcher's timeout each) while holding the service lock: every gate, screen and read waited | `watcher_run` plans under the lock, records each fetch's crossing first, fetches with the lock free, then processes and commits under it (`_watcher_apply`); one cycle at a time (409 while one runs) |
 | M (verify) | `run_internal_controls` (C-11) ran the ledger's verify and entries and the chain re-read under the service lock | All three run before the lock is taken (re-read once if a commit landed meanwhile); C-11 compares the log as it stood when the run took the lock |
+
+**M-1 note (AEGIS re-review of 3c55104; not changed — Andre's policy call).** A clip that is deleted or made private
+AFTER settlement stays `certified` at V&I, and so payable here through the HR-13 attestation, as long as its minimum
+live period (VI-06) was met: V&I's revision watch only revises a count DOWN on a lower platform value, and a "gone" /
+"private" answer through the clipper's own account is a successful read with no value, so nothing changes. Options:
+(a) keep it — the rulebook's minimum live period is the contract, and a post removed afterwards was delivered;
+(b) treat removal before `revision_watch_end` as a revision to 0 (a full clawback record, as VI-05 does for a drop);
+(c) suspend it (not payable, `access_lost`-style hold) for a human decision; (d) make it a rulebook parameter per
+campaign (`must_stay_live_until_revision_watch_end`). Each needs Andre's ruling and a Compliance/V&I rule change.

@@ -19,7 +19,7 @@ the check.
 | `go:orchestrator-go` | 71 | go test -v | — |
 | `node:dashboard-ts` | 27 | node --test | — |
 | `python:bizdev-py` | 281 | pytest collection | — |
-| `python:clipper-network-py` | 392 | pytest collection | — |
+| `python:clipper-network-py` | 403 | pytest collection | — |
 | `python:compliance-py` | 644 | pytest collection | — |
 | `python:creative-py` | 821 | pytest collection | — |
 | `python:delivery-py` | 730 | pytest collection | — |
@@ -32,5 +32,5 @@ the check.
 | `python:sales-py` | 543 | pytest collection | — |
 | `python:security-py` | 181 | pytest collection | — |
 | `python:service-py` | 614 | pytest collection | — |
-| `python:verification-py` | 320 | pytest collection | — |
+| `python:verification-py` | 328 | pytest collection | — |
 | `rust:ledger-rust` | 117 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |
