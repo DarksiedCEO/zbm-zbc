@@ -43,7 +43,8 @@ from intelligences import (i01_platform_metrics as i01, i02_view_certifier as i0
                            i04_liveness as i04, i05_age_assurance as i05, i06_engagement_anomaly as i06,
                            i07_duplicate_identity as i07, i08_stolen_content as i08, i09_strike_ledger as i09,
                            i10_evidence_audit as i10)
-from ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id, payload_sha256
+from ledger import (LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, clean_summary, derived_id,
+                    payload_sha256)
 from models import ID_RE
 from ports import (AccountAnswer, AdapterAnswer, AgeProviderAnswer, NotBuiltClipperNetwork, NotBuiltFinance31,
                    NotBuiltLegal37, NotBuiltPeople43, NotWiredAdapter, NotWiredAgeAssuranceProvider,
@@ -182,7 +183,7 @@ class Op:
         if raw:
             eid = self.svc._record(event_id, event_type, actor, subject, payload, summary)
         else:
-            eid, payload = self.svc._evidence(event_id, event_type, payload)
+            eid, payload = self.svc._evidence(event_id, event_type, payload, actor, subject, summary)
             self.svc._record(eid, event_type, actor, subject, payload, summary)
             self.named.append({"event_id": eid, "event_type": event_type, "payload": payload})
         if eid not in self.events:
@@ -414,11 +415,14 @@ class VIService:
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing was issued",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
 
-    def _evidence(self, rk: str, event_type: str, payload: dict) -> tuple[str, dict]:
+    def _evidence(self, rk: str, event_type: str, payload: dict, actor: str, subject: str,
+                  summary: str) -> tuple[str, dict]:
         """The id and payload of one typed evidence event (``Op.record``): ``rk`` and ``seq`` inside the payload, the
-        payload's SHA-256 inside the id (bug sweep C R6: bizdev-py ``_commit``, finance-py ``_evidence``)."""
+        payload's SHA-256 (and the actor, subject and summary the ledger also compares) inside the id (bug sweep C R6:
+        bizdev-py ``_commit``, finance-py ``_evidence``)."""
         p = {**payload, "rk": rk, "seq": len(self.log) + 1}
-        return i10.evidence_id(rk, event_type, payload_sha256(p)), p
+        meta = i10.meta_sha256(actor, subject, clean_summary(summary))
+        return i10.evidence_id(rk, event_type, payload_sha256(p), meta), p
 
     def _commit(self, op: Op, after_anchor: Optional[Callable] = None) -> None:
         self._failed_named = list(op.named)      # cleared on success; a failed item's attempts are cited later (C-1)
@@ -636,12 +640,19 @@ class VIService:
     def integrity(self) -> dict:
         """Bug sweep C (slow I/O under the lock): the ledger read (an HTTP call) and the local chain re-read (a disk
         read) run OUTSIDE the service lock; only the comparison runs under it."""
+        chain = self.log.verify()
+        n0 = len(self.log)
         try:
             entries = self.recorder.client.entries()
         except LedgerQueryFailed as exc:
             return {"status": "red", "problems": [f"ledger unreadable: {exc}"]}
-        chain = self.log.verify()
         with self.lock:
+            if len(self.log) != n0:
+                # a commit landed while the ledger was read: its anchor may be missing from that read (rare; re-read)
+                try:
+                    entries = self.recorder.client.entries()
+                except LedgerQueryFailed as exc:
+                    return {"status": "red", "problems": [f"ledger unreadable: {exc}"]}
             a = self.assess_log(entries)
             problems = a.problems + self.snapshot_evidence_problems(entries)
             if not chain:
@@ -3390,8 +3401,9 @@ class VIService:
                 continue
             eid = e.get("event_id")
             n = named.get(eid)
+            meta = i10.meta_sha256(str(e.get("actor")), str(e.get("subject_id")), str(e.get("summary")))
             if n is not None and n[2] == e.get("payload_sha256") \
-                    and eid == i10.evidence_id(n[1] or "", et, e.get("payload_sha256") or ""):
+                    and eid == i10.evidence_id(n[1] or "", et, e.get("payload_sha256") or "", meta):
                 status, seq, rk = "committed", n[0], n[1]
             elif n is None and eid in cited:
                 status, seq, rk = "cited", cited[eid], None

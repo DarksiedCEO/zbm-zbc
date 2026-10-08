@@ -54,14 +54,20 @@ _VERSION_RE = re.compile(r"vi-ver-([0-9a-f]{16})-([0-9]{1,9})-[0-9a-f]{32}")
 _LEASE_RE = re.compile(r"vi-lse-([0-9a-f]{16})-([0-9a-f]{16})-([0-9]{1,12})-[0-9a-f]{16}")
 
 
-def evidence_id(rk: str, event_type: str, payload_sha: str) -> str:
+def meta_sha256(actor: str, subject_id: str, summary: str) -> str:
+    """The rest of what the ledger compares on a repeated id (actor, subject, summary as recorded): bound into the
+    evidence id too, so a retry whose summary or subject moved is a new id, never a 409."""
+    return sha256_text(f"{actor}\x00{subject_id}\x00{summary}")
+
+
+def evidence_id(rk: str, event_type: str, payload_sha: str, meta_sha: str = "") -> str:
     """The id of one typed evidence event (bug sweep C R6; bizdev-py R5/R6, finance-py B-F1..F3): ``vi-<abbrev>-<40
     hex>`` over the action's key ``rk`` (itself ``vi-<abbrev>-...``, derived from the action's identity), its type and
     its payload's SHA-256. The payload carries ``rk`` and ``seq`` (the log line it is meant for): the same action, same
     content, same line is the same id (the ledger answers 200); anything else is a NEW id, never a lasting 409."""
     parts = rk.split("-")
     abbrev = parts[1] if len(parts) >= 3 and parts[0] == "vi" and re.fullmatch(r"[a-z0-9]{1,12}", parts[1]) else "evd"
-    return f"vi-{abbrev}-{sha256_text(rk + '|' + event_type + '|' + payload_sha)[:40]}"
+    return f"vi-{abbrev}-{sha256_text(rk + '|' + event_type + '|' + payload_sha + '|' + meta_sha)[:40]}"
 
 
 def anchor_id(epoch: str, seq: int, line_sha: str) -> str:
@@ -142,7 +148,8 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
             if m.group(1) == epoch:
                 leases.append((i, eid, m.group(2)))
         elif et in RULING_TYPES:
-            rulings.append((i, eid, et, str(e.get("payload_sha256"))))
+            rulings.append((i, eid, et, str(e.get("payload_sha256")),
+                            meta_sha256(str(e.get("actor")), str(e.get("subject_id")), str(e.get("summary")))))
         elif et == RECONCILE_TYPE:
             recs[eid] = str(e.get("payload_sha256"))
     if epoch is None:
@@ -220,13 +227,13 @@ def assess(entries: Iterable[dict], epoch: Optional[str], lines: list[tuple[int,
         slot = by_kind.setdefault((evidence_id(rk, et, "").rsplit("-", 1)[0], et), {})
         slot[rk] = min(slot.get(rk, index[anchor]), index[anchor])
 
-    def attempted(i: int, eid: str, et: str, psha: str) -> bool:
-        return any(i < pos and evidence_id(rk, et, psha) == eid
+    def attempted(i: int, eid: str, et: str, psha: str, msha: str) -> bool:
+        return any(i < pos and evidence_id(rk, et, psha, msha) == eid
                    for rk, pos in by_kind.get((eid.rsplit("-", 1)[0], et), {}).items())
 
-    ghost = [eid for i, eid, et, psha in rulings if first_anchor is not None and i > first_anchor
+    ghost = [eid for i, eid, et, psha, msha in rulings if first_anchor is not None and i > first_anchor
              and eid not in local_rulings and eid not in referenced_ids and eid not in voided
-             and not attempted(i, eid, et, psha)]
+             and not attempted(i, eid, et, psha, msha)]
     if ghost:
         out.voidable.append(f"{len(ghost)} ruling(s) on the ledger since this log's first anchor are not in the "
                             f"local log (first: {ghost[0]}): a second instance, or a ruling whose commit failed")

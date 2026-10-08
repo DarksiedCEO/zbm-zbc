@@ -40,6 +40,7 @@ from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from intelligences import (i01_recruiting, i02_admission, i03_tiering, i04_enrolment, i05_kit_delivery, i06_comms,
                            i07_disputes, i08_discipline, i09_offboarding, i10_evidence_audit)
 from intelligences.common import Citer, finalize, item, rules_not_in_force, unavailable, unmet_line
+from ledger import DEPARTMENT as LEDGER_DEPARTMENT
 from ledger import (LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, clean_summary,
                     derived_id, payload_sha256)
 from ports import (Ack, AgeAnswer, CertificationsAnswer, CompleteAnswer, ComplianceRuling, ConnectionsAnswer,
@@ -2844,7 +2845,7 @@ class CNService:
         except LedgerQueryFailed:
             raise Unavailable("the evidence ledger could not be read") from None
         epoch = hashlib.sha256(raw[0]).hexdigest()[:16] if raw else None
-        mine = [e for e in entries if isinstance(e, dict) and e.get("department") == "clipper_network"]
+        mine = [e for e in entries if isinstance(e, dict) and e.get("department") == LEDGER_DEPARTMENT]
         anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == i10_evidence_audit.ANCHOR_TYPE}
         named: dict[str, tuple] = {}
         cited: dict[str, int] = {}
