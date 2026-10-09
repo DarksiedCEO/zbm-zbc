@@ -109,9 +109,15 @@ def test_store_one_fsync_error_never_bricks_the_log(tmp_path, monkeypatch):
     real = os.fsync
     hit = {"n": 0}
 
+    log_path = os.path.join(d, store_mod.LOG_NAME)
+
     def flaky(fd):
-        # only the record log's fsync fails (the contact store fsyncs through the same os module)
-        if os.readlink(f"/proc/self/fd/{fd}").endswith(store_mod.LOG_NAME) and hit["n"] == 0:
+        # only the record log's fsync fails (the contact store fsyncs through the same os module); the fd is matched
+        # by inode, not /proc/self/fd (Linux only — the macOS CI leg has no /proc)
+        st = os.fstat(fd)
+        is_log = os.path.exists(log_path) and (st.st_dev, st.st_ino) == (os.stat(log_path).st_dev,
+                                                                          os.stat(log_path).st_ino)
+        if is_log and hit["n"] == 0:
             hit["n"] += 1
             raise OSError(5, "simulated EIO on fsync")
         return real(fd)
