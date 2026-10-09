@@ -330,3 +330,20 @@ Branch `fix18-fin-legal` from `integration-2026-09-24` @ `680c289`. Tests: `test
   `LEGAL_*` variable `src/` reads that README and this ADR do not name).
 - The thin-client deadline and drip tests hold the peer open / drip until released and assert the answer came
   first (were: `< 2.0` and `< 1.5` s wall-clock bounds); a no-op tamper in the G4 seed test was removed.
+
+## Amendment — Bug sweep E fixes (Oct 9 2026)
+
+Regressions: `services/legal-py/tests/test_bug_sweep_e.py` (each fails on fefd5be except one, a
+same-payload retry deduping: a positive control that held before and must keep holding).
+
+| Id | Finding | Fix |
+|---|---|---|
+| E-5 / F-3 | Old `store.py`: the log was opened `O_APPEND`; ONE fsync error left a line on disk that memory did not hold, the next append wrote after it and every later restart refused (bricked for good). No single-writer guard | `store.py` is finance-py's: exact-size `pwrite` at the expected offset, adopt a line already on disk, cut back on any failure, `O_NOFOLLOW`, an empty line refuses start, `closed` refuses writes. `DataDirLock` (`legal.lock`, flock per process, single-use claim per service instance, taken by `config.load`, claimed by `api.build_service` before the log is built) and `LegalService.close()` (inert after: no log write, no ledger record) |
+| E-M1 (finance-py AEGIS 5a56a3a M1 / c0869c4 M1) | A short `os.write` was ignored (log and blobs) | A short write is a failed write (log: cut back; blob: temp file removed). A cut-back that fails sets `fault`: integrity `LOCAL_LOG_WRITE_FAULT`, `/health` `degraded` + `log_write_fault`, every later append refused |
+| R6-M1 (bizdev-py's) | Typed evidence ids left out the payload hash, and refusal / founder-refusal / Compliance-crossing ids carried a timestamp: a retry after a state change could 409 for good, and a retried refusal recorded a second event | `Op.ev` payloads carry `rk` (the op id) and `seq` (the line they are meant for); ids hash the payload, never the time; the line names its typed evidence (`data.rk`, `data.evidence`, payloads included) and `_commit` refuses a line whose evidence names another seq. `GET /legal/v1/audit/evidence` (Compliance 38 and Andre): `committed` only when an anchored line names the event and `rk`/`seq`/payload hash match; content-derived ids (lease, reconcile, rules proposals, decisions, versions) and lines written before this change are committed when an anchored line lists them in `ledger_event_ids`; everything else is `attempted` |
+| Sweep medium (slow I/O under the lock) | `integrity()` read the ledger, re-verified the whole chain and re-hashed every blob under the service lock | All three run outside it; the log length is snapshotted and re-checked (a commit in between repeats the read, at most 3 times, then one read under the lock) |
+
+Residual (accepted, on record): `rules_proposal_decided` ids are content-derived without the note's hash, so a retried
+decision with a DIFFERENT note on the same proposal is a 409 (the decision itself is unchanged; Andre re-sends the
+original note). `log.verify()` still holds the log's own lock while it reads the file (commits wait on it, reads
+under the service lock do not).

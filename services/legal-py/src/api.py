@@ -650,6 +650,14 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         except ValueError:
             raise Invalid("since/until must be RFC 3339 timestamps with offset") from None
 
+    @app.get("/legal/v1/audit/evidence", dependencies=auth)
+    def audit_evidence(_: str = Depends(caller("compliance_38", andre_ok=True, route="audit/evidence")),
+                       limit: int = Query(default=200, ge=1, le=1000), offset: int = Query(default=0, ge=0, le=10**7),
+                       event_type: Optional[str] = Query(default=None, pattern=r"^[a-z0-9_]{1,64}$")) -> dict:
+        """Bug sweep E (bizdev-py R6-M1): the evidence view Compliance (38) and auditors use; unanchored evidence
+        = attempted, not done."""
+        return svc.audit_evidence(limit, offset, event_type)
+
     return app
 
 
@@ -674,8 +682,15 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
                   raw["retention.json"], raw["signoff_topics.json"], raw["advice_patterns.json"],
                   raw["us_federal_holidays.json"])
     pinned = hashlib.sha256(seeds.rules).hexdigest() == config_mod.PINNED_SEED_SHA256
-    return LegalService(settings, Recorder(ledger), RecordLog(settings.data_dir), BlobStore(settings.data_dir), seeds,
-                        ports or build_ports(settings), clock, pinned)
+    lock = settings.data_dir_lock              # bug sweep E: the flock, taken by config.load before the log is opened
+    token = lock.claim() if lock is not None else None   # claimed BEFORE the log is built
+    try:
+        return LegalService(settings, Recorder(ledger), RecordLog(settings.data_dir), BlobStore(settings.data_dir),
+                            seeds, ports or build_ports(settings), clock, pinned, lock_token=token)
+    except BaseException:
+        if lock is not None:
+            lock.release_claim(token)
+        raise
 
 
 def _app_from_env() -> FastAPI:

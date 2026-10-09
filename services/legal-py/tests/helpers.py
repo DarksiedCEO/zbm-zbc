@@ -6,6 +6,7 @@ import base64
 import hashlib
 import itertools
 import json
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -47,6 +48,9 @@ def base_env(**over) -> dict:
     return {k: v for k, v in env.items() if v != "__unset__"}
 
 
+_LIVE: dict = {}      # realpath(data dir) -> the Harness whose service holds it (bug sweep E)
+
+
 class Harness:
     def __init__(self, env: Optional[dict] = None, data_dir: Optional[str] = None, clock: Optional[FixedClock] = None,
                  ledger: Optional[FakeLedgerClient] = None, wired: bool = False, ports: Optional[Ports] = None):
@@ -67,8 +71,16 @@ class Harness:
         if data_dir:
             e["LEGAL_DATA_DIR"] = data_dir
         self.env = e
+        if data_dir:
+            # bug sweep E: one service instance per data directory (DataDirLock claim). A new Harness on the same
+            # directory is a restart: the old instance is closed first (as bizdev-py's Harness.restart does).
+            old = _LIVE.pop(os.path.realpath(data_dir), None)
+            if old is not None:
+                old.svc.close()
         self.settings = config_mod.load(e)
         self.svc = api.build_service(self.settings, self.clock, ports, self.ledger)
+        if data_dir:
+            _LIVE[os.path.realpath(data_dir)] = self
         self.app = api.create_app(self.svc, self.settings)
         self.client = TestClient(self.app)
 

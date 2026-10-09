@@ -78,6 +78,7 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 | `GET /legal/v1/rules`; `POST /rules/proposals`, `/rules/decisions` | any; Andre | rule register |
 | `GET`, `POST /legal/v1/reconcile` | Andre | see below |
 | `GET /legal/v1/audit/export`, `/integrity`, `/intelligences` | any | audit |
+| `GET /legal/v1/audit/evidence` (`limit`, `offset`, `event_type`) | `compliance_38`, Andre | every Legal evidence event on the ledger marked `committed` (an anchored local line names it, `rk`/`seq`/payload hash match) or `attempted`: **unanchored evidence = attempted, not done**; eventually consistent, re-read to settle |
 
 ## How the counsel gate works
 
@@ -99,6 +100,17 @@ but `/health`; `X-LEGAL-Caller-Token` for callers; `X-Andre-Approval-Token` for 
 6. Every document, fills and SOWs included, needs counsel's sign-off on its exact hash (no SOW exception). The
    advice-text guard is defense in depth, not the control (ADR 0010 amendment). No IP address is accepted in any
    string of any write route (IPv4/IPv6, embedded, with a port, URL-encoded).
+
+## Data directory and the local log (bug sweep E)
+
+`LEGAL_DATA_DIR` is held by an exclusive flock (`legal.lock`) taken at start: a second process on the same directory
+refuses to start, and a second service instance in the same process is refused until the first is `close()`d. The
+log append writes exactly the next line at the expected offset; a failed or SHORT write is cut back to the previous
+length, so one fsync error no longer bricks the log. If the cut-back itself fails, `/health` says `degraded` with
+`log_write_fault: true`, `/legal/v1/integrity` is red with `LOCAL_LOG_WRITE_FAULT`, and every write is refused:
+stop the service, inspect `legal_log.jsonl` and remove the torn tail (a line without its newline) before restarting.
+An empty line in the log refuses start (the service never writes one). `/legal/v1/integrity` reads the ledger and
+re-verifies the chain and the blobs outside the service lock.
 
 ## Reconciling the local log with the ledger
 

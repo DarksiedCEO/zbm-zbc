@@ -44,11 +44,11 @@ from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from intelligences import (i01_documents as i01, i02_playbooks as i02, i03_acceptance as i03,
                            i04_obligations as i04, i05_memo_intake as i05, i06_matters as i06, i07_takedowns as i07,
                            i08_filings as i08, i09_music_policy as i09, i10_evidence_audit as i10)
-from ledger import LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id
+from ledger import DEPARTMENT, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id, payload_sha256
 from models import ID_RE
 import answers as A
 from ports import ComplianceRow, Delivery, EnvelopeAnswer, ProposalAnswer, Ports
-from store import BlobStore, RecordLog, StoreWriteError
+from store import BlobStore, DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
@@ -133,6 +133,7 @@ class Op:
         self.ops: list[tuple[str, dict]] = []
         self.after: list[Callable[[], None]] = []
         self.idem: Optional[dict] = None
+        self.evidence: list[dict] = []   # bug sweep E (R6-M1): typed evidence this op's line names, payload included
 
     def record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str) -> str:
         self.svc._record(event_id, event_type, actor, subject[:128], payload, summary)
@@ -140,8 +141,18 @@ class Op:
         return event_id
 
     def ev(self, abbrev: str, event_type: str, subject: str, payload: dict, summary: str, actor: Optional[str] = None) -> str:
-        return self.record(derived_id(abbrev, self.op_id, event_type, subject, len(self.events)), event_type,
-                           actor or self.actor, subject, payload, summary)
+        """Typed evidence, recorded FIRST (before the line is anchored). Bug sweep E (bizdev-py R6-M1): the payload
+        carries ``rk`` (this op's request key) and ``seq`` (the log line it is meant for), the id is derived from the
+        op, the type, the subject, the position AND the payload's SHA-256 (no time): a retry with the same payload
+        dedupes on the ledger, a retry after the state changed gets a new id (never a lasting 409), and the line
+        names the event with its payload (``data.evidence``) so ``GET /legal/v1/audit/evidence`` can tell
+        ``committed`` from ``attempted``."""
+        payload = self.svc._bind(payload, self.op_id)
+        eid = derived_id(abbrev, self.op_id, event_type, subject, len(self.events), payload_sha256(payload))
+        self.record(eid, event_type, actor or self.actor, subject, payload, summary)
+        self.evidence.append({"event_id": eid, "event_type": event_type, "subject_id": subject[:128],
+                              "payload": payload})
+        return eid
 
     def add(self, kind: str, rec: dict) -> dict:
         self.ops.append((kind, rec))
@@ -214,14 +225,59 @@ class Seeds:
 
 class LegalService:
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, blobs: BlobStore, seeds: Seeds,
-                 ports: Optional[Ports] = None, clock: Optional[Clock] = None, rules_pinned: bool = True):
+                 ports: Optional[Ports] = None, clock: Optional[Clock] = None, rules_pinned: bool = True,
+                 lock_token: Optional[str] = None):
+        # bug sweep E (E-5/F-3; service-py V5-L1 / round 5c / a5dd261 L4 pattern): one service instance per data
+        # directory, also within one process. api.build_service claims BEFORE the log is built and passes the
+        # claim's token; this instance adopts that claim only if the token IS the current claim (single use), and
+        # gives it back on close() or a failed start.
+        self.lock = threading.RLock()
+        self.log = log
+        self._closed = False
+        self._evidence_lock = threading.Lock()     # /audit/evidence cache; never taken under self.lock
+        self._evidence_cache: dict = {"n": 0, "epoch": None, "lines": [], "log": log}
+        self._dir_lock = getattr(settings, "data_dir_lock", None)
+        self._lock_token: Optional[str] = None
+        if self._dir_lock is not None:
+            if lock_token is None:
+                lock_token = self._dir_lock.claim()
+            adopted = self._dir_lock.adopt(lock_token)
+            if adopted is None:
+                self._dir_lock = None
+                raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
+                                  "stale, another instance's, or already adopted); refusing to start")
+            self._lock_token = adopted
+        try:
+            self._start(settings, recorder, log, blobs, seeds, ports, clock, rules_pinned)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Give the data directory back (a restart in the same process closes the old instance first). A closed
+        instance is inert: its log refuses every write and it records nothing on the ledger. Taken under the
+        service lock, so it never interleaves with a commit."""
+        with self.lock:
+            self._closed = True
+            with self.log.lock:
+                self.log.closed = True
+            if getattr(self, "_dir_lock", None) is not None:
+                self._dir_lock.release_claim(self._lock_token)
+                self._dir_lock = None
+                self._lock_token = None
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _start(self, settings: Settings, recorder: Recorder, log: RecordLog, blobs: BlobStore, seeds: Seeds,
+               ports: Optional[Ports], clock: Optional[Clock], rules_pinned: bool) -> None:
         self.cfg = settings
         self.recorder = recorder
         self.log = log
         self.blobs = blobs
         self.ports = ports or Ports()
         self.clock = clock or SystemClock()
-        self.lock = threading.RLock()
         self.tz = ZoneInfo(settings.business_tz)
         self.seed_sha = sha_bytes(seeds.rules)
         self.rules_pinned = rules_pinned
@@ -316,7 +372,14 @@ class LegalService:
         """Legal's calendar date (LEGAL_BUSINESS_TZ): receipt dates, due dates, filing windows."""
         return self._now().astimezone(self.tz).date()
 
+    def _bind(self, payload: dict, rk: str) -> dict:
+        """Bug sweep E (bizdev-py R6-M1): the evidence payload names its request key and the log line it is meant
+        for (the next seq; the commit refuses if the prepared line's seq differs)."""
+        return {**payload, "rk": rk, "seq": len(self.log) + 1}
+
     def _record(self, event_id, event_type, actor, subject, payload, summary) -> str:
+        if self._closed:                   # bug sweep E: a closed instance records nothing
+            raise Unavailable("this service instance is closed", ledger_write="not_recorded")
         if self.reconcile_mode and not self._reconciling:
             raise Unavailable("reconcile mode (LEGAL_RECONCILE_MODE=1): only Andre's POST /legal/v1/reconcile is "
                               "answered; restart without it once the log is reconciled", ledger_write="not_recorded")
@@ -333,7 +396,14 @@ class LegalService:
                 "rules_version": self.rules_version, "anchored": True}
         if op.idem:
             data["idem"] = op.idem
+        if op.evidence:                   # bug sweep E (R6-M1): the line names its typed evidence
+            data["rk"] = op.op_id
+            data["evidence"] = op.evidence
         rec, line = self.log.prepare(op.ops[0][0], iso(self._now()), data)
+        if any(e["payload"].get("seq") != rec["seq"] for e in op.evidence):
+            # the log moved after the evidence was recorded: never anchor a line whose evidence names another seq
+            # (that evidence stays visible as ``attempted`` in /audit/evidence)
+            raise Unavailable("the local log moved while this operation was recorded; nothing took effect, retry")
         line_sha = hashlib.sha256(line).hexdigest()
         epoch = self.log.epoch or line_sha[:16]
         self._record(i10.anchor_id(epoch, rec["seq"], line_sha), i10.ANCHOR_TYPE, EVIDENCE, i10.LOG_SUBJECT,
@@ -417,13 +487,19 @@ class LegalService:
                 **extra) -> None:
         rec = None
         if not self.reconcile_mode:
-            eid = self.recorder.try_record(derived_id("ref", event_type, subject, op_id, iso(self._now()), len(self.log)),
-                                           event_type, EVIDENCE, subject[:128],
-                                           {"codes": R.codes(reasons), "rule_ids": sorted({r["rule_id"] for r in reasons}),
-                                            "op_sha256": sha(op_id)}, f"Refused: {', '.join(R.codes(reasons))[:200]}")
+            # bug sweep E (R6-M1): no time in the id -- the payload's hash (with rk and seq) is; a retry of a refusal
+            # whose line was not written records the SAME event (the ledger answers 200)
+            rk = f"refuse|{event_type}|{sha(op_id)}"
+            payload = self._bind({"codes": R.codes(reasons), "rule_ids": sorted({r["rule_id"] for r in reasons}),
+                                  "op_sha256": sha(op_id)}, rk)
+            eid = self.recorder.try_record(derived_id("ref", event_type, subject, op_id, payload_sha256(payload)),
+                                           event_type, EVIDENCE, subject[:128], payload,
+                                           f"Refused: {', '.join(R.codes(reasons))[:200]}")
             if eid:
-                op = Op(self, f"refuse|{eid}", EVIDENCE, subject)
+                op = Op(self, rk, EVIDENCE, subject)
                 op.events.append(eid)
+                op.evidence.append({"event_id": eid, "event_type": event_type, "subject_id": subject[:128],
+                                    "payload": payload})
                 op.add("refusal", {"event_type": event_type, "subject": subject[:128], "codes": R.codes(reasons),
                                    "at": iso(self._now())})
                 try:
@@ -463,11 +539,15 @@ class LegalService:
 
     # --- log vs ledger (AEGIS N14-4 / N15-1 / N15-2 / N16-7)
 
-    def assess_log(self) -> i10.Assessment:
+    def _ledger_entries(self) -> list:
         client = self.recorder.client
         if not hasattr(client, "entries"):
             raise LedgerQueryFailed("this ledger client cannot read entries")
-        entries = client.entries()
+        return client.entries()
+
+    def assess_log(self, entries: Optional[list] = None) -> i10.Assessment:
+        if entries is None:
+            entries = self._ledger_entries()
         shas = self.log.line_shas()
         lines, referenced, leases, reconciles, metas = [], set(), [], [], []
         for rec, s in zip(self.log.iter_records(), shas):
@@ -485,19 +565,53 @@ class LegalService:
                           strict=not self.log.in_memory, local_rulings=set(), local_leases=leases, reconciles=reconciles,
                           local_versions=i10.local_version_events(self.log.epoch, metas))
 
+    INTEGRITY_SNAPSHOT_TRIES = 3
+
     def integrity(self) -> dict:
+        """Bug sweep E (slow I/O under the service lock): the ledger read (an HTTP call, up to the client timeout)
+        and the local chain re-verify (a full file read and hash) run OUTSIDE the service lock; only the in-memory
+        assessment runs under it. The log length is snapshotted first and re-checked after: a commit in between would
+        pair a newer log with an older ledger read (a false red), so the read is repeated (at most
+        INTEGRITY_SNAPSHOT_TRIES times, then once under the lock, as before)."""
+        for attempt in range(self.INTEGRITY_SNAPSHOT_TRIES + 1):
+            locked = attempt == self.INTEGRITY_SNAPSHOT_TRIES
+            with self.lock:
+                if self._closed:
+                    return {"status": "red", "problems": ["this service instance is closed"]}
+                n0 = len(self.log)
+                live = [h for h, m in self.blob_meta.items() if not m.get("deleted")]
+                if locked:                       # the log kept moving: fall back to one read under the lock
+                    return self._integrity_from(*self._integrity_reads(live))
+            reads = self._integrity_reads(live)
+            with self.lock:
+                if len(self.log) == n0 and not self._closed:
+                    return self._integrity_from(*reads)
+        raise AssertionError("unreachable")
+
+    def _integrity_reads(self, live: list[str]) -> tuple:
+        """The slow reads: the ledger, the local chain, every live blob's bytes against its SHA-256."""
+        try:
+            entries = self._ledger_entries()
+        except LedgerQueryFailed as exc:
+            return None, f"ledger unreadable: {exc}", False, 0
+        bad = sum(1 for h in live if self.blobs.get(h) is None)
+        return entries, None, self.log.verify(), bad
+
+    def _integrity_from(self, entries, unreadable: Optional[str], chain: bool, bad: int) -> dict:
         with self.lock:
+            if unreadable is not None:
+                return {"status": "red", "problems": [unreadable]}
             try:
-                a = self.assess_log()
-                problems = list(a.problems)
-                chain = self.log.verify()
+                a = self.assess_log(entries)
             except LedgerQueryFailed as exc:
                 return {"status": "red", "problems": [f"ledger unreadable: {exc}"]}
+            problems = list(a.problems)
             if not chain:
                 problems.append("local log hash chain does not verify")
-            bad = [h for h, m in self.blob_meta.items() if not m.get("deleted") and self.blobs.get(h) is None]
+            if self.log.fault:                   # bug sweep E: a failed write could not be cut back
+                problems.append(f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}")
             if bad:
-                problems.append(f"{len(bad)} blob(s) missing or not matching their SHA-256")
+                problems.append(f"{bad} blob(s) missing or not matching their SHA-256")
             return {"status": "red" if problems else "green", "problems": problems, "log_lines": len(self.log),
                     "rules_version": self.rules_version}
 
@@ -704,12 +818,16 @@ class LegalService:
         with self.lock:
             if self.reconcile_mode:
                 return
-            op = Op(self, f"far|{route}|{iso(self._now())}|{len(self.log)}", EVIDENCE, "founder_gate")
-            eid = self.recorder.try_record(derived_id("far", op.op_id), "founder_approval_refused", EVIDENCE,
-                                           "founder_gate", {"route": route[:64], "reason_sha256": sha(reason)},
+            # bug sweep E (R6-M1): no time in the op or event id; the payload (with rk and seq) is hashed into it
+            op = Op(self, f"far|{route[:64]}", EVIDENCE, "founder_gate")
+            payload = self._bind({"route": route[:64], "reason_sha256": sha(reason)}, op.op_id)
+            eid = self.recorder.try_record(derived_id("far", op.op_id, payload_sha256(payload)),
+                                           "founder_approval_refused", EVIDENCE, "founder_gate", payload,
                                            "Andre approval refused")
             if eid:
                 op.events.append(eid)
+                op.evidence.append({"event_id": eid, "event_type": "founder_approval_refused",
+                                    "subject_id": "founder_gate", "payload": payload})
                 op.add("founder_refused", {"route": route[:64], "reason_sha256": sha(reason)})
                 try:
                     self._commit(op)
@@ -1839,11 +1957,13 @@ class LegalService:
                 if p is None or p["status"] != "pending_delivery" or self.reconcile_mode:
                     continue
                 body = self._cproposal_body(p)
-                xid = derived_id("x", "cpr", cp_id, p["attempts"], iso(self._now()))
+                # bug sweep E (R6-M1): no time in the id; the attempt number and the payload's hash are
+                xpay = {"port": "compliance_38", "action": "create_proposal", "cproposal_id": cp_id,
+                        "body_sha256": sha(body), "attempt": p["attempts"]}
+                xid = derived_id("x", "cpr", cp_id, p["attempts"], payload_sha256(xpay))
                 try:
                     self._record(xid, "crossing_compliance_38_requested", i05.ACTOR, f"memo:{p['memo_id']}",
-                                 {"port": "compliance_38", "action": "create_proposal", "cproposal_id": cp_id,
-                                  "body_sha256": sha(body)}, "Request to compliance_38: create_proposal")
+                                 xpay, "Request to compliance_38: create_proposal")
                 except Unavailable:
                     continue
             n += 1
@@ -2675,8 +2795,83 @@ class LegalService:
             return {"records": out, "next_cursor": last if more else None, "ledger_event_id": eid,
                     "rules_version": self.rules_version}
 
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+        """``GET /legal/v1/audit/evidence`` (bug sweep E; bizdev-py R6-M1 / R7): every evidence event this department
+        holds on the ledger, each marked
+
+        * ``committed`` -- an ANCHORED local line names it: the ledger holds that line's ``local_log_appended``
+          anchor (epoch, seq, line SHA-256, kind) and, for typed evidence the line lists in ``data.evidence``, the
+          payload carries ``rk`` = the line's request key and ``seq`` = the line's seq, and the ledger's
+          ``payload_sha256`` is that payload's. Events with a content-derived id (lease, reconcile, rules proposals,
+          decisions and versions) and lines written before this change are named by ``ledger_event_ids`` only:
+          committed when that anchored line names them and the ledger holds the event;
+        * ``attempted`` -- anything else: recorded first, but its state change never reached the anchored log.
+
+        Unanchored evidence = attempted, not done. Under the service lock only the raw lines not yet seen are
+        copied; they are parsed and hashed outside it and cached by log length; the ledger is read outside it.
+        Eventually consistent: a commit in flight may show as ``attempted``; re-read to settle."""
+        with self._evidence_lock:
+            with self.lock:
+                if self._closed:
+                    raise Unavailable("this service instance is closed")
+                cache = self._evidence_cache
+                if len(self.log) < cache["n"] or cache.get("log") is not self.log:
+                    cache = self._evidence_cache = {"n": 0, "epoch": None, "lines": [], "log": self.log}
+                new = self.log.raw_lines(cache["n"])
+            for raw in new:
+                r = json.loads(raw)
+                line_sha = sha_bytes(raw)
+                if cache["epoch"] is None:
+                    cache["epoch"] = line_sha[:16]
+                d = r.get("data") or {}
+                cache["lines"].append((r["seq"], line_sha, r.get("kind"), d.get("rk"), d.get("evidence") or [],
+                                       list(d.get("ledger_event_ids") or [])))
+                cache["n"] += 1
+            epoch, lines, n_lines = cache["epoch"], list(cache["lines"]), cache["n"]
+        try:
+            entries = self._ledger_entries()
+        except LedgerQueryFailed:
+            raise Unavailable("the evidence ledger cannot be read") from None
+        mine = [e for e in entries if e.get("department") == DEPARTMENT]
+        anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == i10.ANCHOR_TYPE}
+        typed: dict[str, tuple] = {}      # event id -> (seq, rk, payload, kind) from an anchored line's evidence
+        named: dict[str, tuple] = {}      # event id -> (seq, kind) from an anchored line's ledger_event_ids
+        for seq, line_sha, kind, line_rk, evs, ids in lines:
+            a = anchors.get(i10.anchor_id(epoch, seq, line_sha))
+            want = {"epoch": epoch, "seq": seq, "line_sha256": line_sha, "kind": kind}
+            if a is None or a.get("payload_sha256") != payload_sha256(want) or a.get("subject_id") != i10.LOG_SUBJECT:
+                continue
+            for ev in evs:
+                typed[ev.get("event_id")] = (seq, line_rk, ev.get("payload") or {}, kind)
+            for eid in ids:
+                named.setdefault(eid, (seq, kind))
+        out, counts = [], {"committed": 0, "attempted": 0}
+        for e in mine:
+            et = e.get("event_type")
+            if et == i10.ANCHOR_TYPE or (event_type is not None and et != event_type):
+                continue
+            row = {"event_id": e.get("event_id"), "event_type": et, "subject_id": e.get("subject_id"),
+                   "ledger_seq": e.get("seq"), "payload_sha256": e.get("payload_sha256"), "status": "attempted",
+                   "seq": None, "rk": None, "log_kind": None}
+            eid = e.get("event_id")
+            if eid in typed:
+                seq, line_rk, payload, kind = typed[eid]
+                if payload.get("seq") == seq and payload.get("rk") == line_rk \
+                        and payload_sha256(payload) == e.get("payload_sha256"):
+                    row.update(status="committed", seq=seq, rk=line_rk, log_kind=kind)
+            elif eid in named:
+                seq, kind = named[eid]
+                row.update(status="committed", seq=seq, log_kind=kind)
+            counts[row["status"]] += 1
+            out.append(row)
+        return {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle",
+                "total": len(out), **counts, "limit": limit, "offset": offset,
+                "evidence": out[offset:offset + limit], "log_length": n_lines}
+
     def health(self) -> dict:
-        return {"status": "ok", "service": "legal-py", "rules_version": self.rules_version,
+        status = "closed" if self._closed else ("degraded" if self.log.fault else "ok")   # bug sweep E
+        return {"status": status, "service": "legal-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned,
+                "log_write_fault": bool(self.log.fault),
                 "counsel_channel_wired": not type(self.ports.counsel).__name__.startswith("NotWired"),
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required)}

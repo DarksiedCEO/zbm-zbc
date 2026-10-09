@@ -59,6 +59,31 @@ class Settings:
     filing_alert_days: int = 60
     esign_consent_required: bool = True
     business_tz: str = "America/Los_Angeles"
+    data_dir_lock: Optional[object] = field(default=None, repr=False, compare=False)   # bug sweep E: the flock
+
+
+_HELD: dict = {}
+
+
+def hold_data_dir(data_dir: str):
+    """Bug sweep E (E-5/F-3; service-py's): the exclusive flock on LEGAL_DATA_DIR, taken once per process at start-up
+    before the log is opened, held for the life of the process (the kernel releases it at exit). A second process on
+    the same directory refuses to start; a second service instance in the same process must ``claim()`` it and is
+    refused while one holds it."""
+    from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
+    key = os.path.realpath(data_dir)
+    lock = _HELD.get(key)
+    if lock is None:
+        try:
+            lock = DataDirLock(data_dir)
+        except DataDirBusy:
+            raise RuntimeError(f"{data_dir}: another legal-py process holds this data directory (flock on "
+                               f"{LOCK_NAME}); refusing to start. Stop the other process first: two writers would "
+                               "fork the log") from None
+        except StoreCorrupt as exc:
+            raise RuntimeError(f"{data_dir}: {exc}") from None
+        _HELD[key] = lock
+    return lock
 
 
 def _int(env, name, default, lo, hi) -> int:
@@ -147,7 +172,7 @@ def load(env: Optional[dict] = None) -> Settings:
         ZoneInfo(tz)
     except Exception:  # noqa: BLE001 - any failure: refuse (no silent UTC fallback)
         raise RuntimeError(f"LEGAL_BUSINESS_TZ={tz!r} is not a known IANA time zone on this host") from None
-    return Settings(
+    s = Settings(
         service_token=token, caller_tokens=callers, andre_token=andre,
         seed_dir=env.get("LEGAL_SEED_DIR") or SEED_DIR, seed_sha256=seed_sha, allow_unpinned_seed=unpinned,
         data_dir=env.get("LEGAL_DATA_DIR") or None,
@@ -162,6 +187,8 @@ def load(env: Optional[dict] = None) -> Settings:
         esign_consent_required=_flag(env, "LEGAL_ESIGN_CONSENT_REQUIRED", True),
         business_tz=tz,
     )
+    s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it
+    return s
 
 
 def read_seeds(settings: Settings) -> dict[str, bytes]:

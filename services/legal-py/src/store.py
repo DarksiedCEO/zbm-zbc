@@ -15,6 +15,13 @@ exact line before it is written) on the ledger first (AEGIS N14-4,
 caller lets the record take effect. At start the whole chain is verified;
 any mismatch (edited, deleted, reordered or torn line) refuses start-up.
 
+Bug sweep E (Oct 9 2026; sweep E-5/F-3): the append path and the data-directory lock are finance-py's (itself
+clientfix-py's / service-py's, AEGIS rounds 1-5): exact-size append at the expected offset with adopt / cut back,
+``O_NOFOLLOW``, a short write is a failed write, an empty line refuses start, a closed instance refuses every write,
+and a cut-back that fails sets ``fault`` (LOCAL_LOG_WRITE_FAULT). Before it, the log was opened ``O_APPEND``: ONE
+fsync error left a line on disk that memory did not hold, the next append wrote after it, and every later restart
+refused (the chain broke): the log was bricked for good.
+
 Without a data dir the log lives in memory (``in_memory = True``, reported
 by /health) and nothing survives a restart — after a restart no rule
 version and no document is in force (fail closed).
@@ -38,6 +45,10 @@ class StoreCorrupt(RuntimeError):
 
 class StoreWriteError(RuntimeError):
     pass
+
+
+class _ShortWrite(OSError):
+    """``pwrite`` / ``write`` wrote fewer bytes than asked (finance-py AEGIS 5a56a3a M1): a failed write."""
 
 
 def _line_sha(line: bytes) -> str:
@@ -69,6 +80,7 @@ def verify_lines(lines: list[bytes]) -> list[dict]:
     return out
 
 
+
 class RecordLog:
     def __init__(self, data_dir: Optional[str]):
         self.lock = threading.RLock()
@@ -77,15 +89,21 @@ class RecordLog:
         self._lines: list[bytes] = []
         self.path: Optional[str] = None
         self.fail_next_append = False  # tests: simulate a disk failure
+        self.closed = False            # V5r-Info: set by the service's close(); every write then refuses
+        self.fault: Optional[str] = None   # AEGIS c0869c4 M1: a failed write could not be cut back (fail closed)
         if data_dir:
-            os.makedirs(data_dir, exist_ok=True)
+            os.makedirs(data_dir, mode=0o700, exist_ok=True)
             self.path = os.path.join(data_dir, LOG_NAME)
             if os.path.exists(self.path):
                 with open(self.path, "rb") as fh:
                     raw = fh.read()
                 if raw and not raw.endswith(b"\n"):
                     raise StoreCorrupt("log ends with a torn line; refusing to start (inspect the file)")
-                self._lines = [ln for ln in raw.split(b"\n") if ln] if raw else []
+                parts = raw.split(b"\n")[:-1] if raw else []
+                if any(not ln for ln in parts):
+                    raise StoreCorrupt(f"log has an empty line (line {parts.index(b'') + 1}); refusing to start: "
+                                       "remove it (the service never writes one)")
+                self._lines = parts
                 verify_lines(self._lines)
 
     @property
@@ -101,6 +119,11 @@ class RecordLog:
             lines = list(self._lines[max(0, start_seq - 1):])
         for ln in lines:
             yield json.loads(ln)
+
+    def raw_lines(self, start: int = 0) -> list[bytes]:
+        """The raw lines from index ``start`` on (no parsing: cheap enough to take under the service lock)."""
+        with self.lock:
+            return list(self._lines[start:])
 
     @property
     def epoch(self) -> Optional[str]:
@@ -125,23 +148,61 @@ class RecordLog:
         rec, line = self.prepare(kind, at, data)
         return self.append_prepared(rec, line)
 
+    def _refuse_if_closed(self) -> None:
+        if self.closed:
+            raise StoreWriteError("this service instance is closed; its log refuses writes")
+
     def append_prepared(self, rec: dict, line: bytes) -> dict:
+        """Append one line. The file must be exactly the in-memory lines before the write (else refused); a
+        failed write is cut back to that size, so a line is never half in (AEGIS round 3, R3-3). If the file
+        already ends with exactly this line (a write that reached the disk before an fsync error), it is adopted
+        instead of written twice."""
         with self.lock:
+            self._refuse_if_closed()        # inside the lock: close() takes it too (round 5c item 2)
             if self.fail_next_append:
                 self.fail_next_append = False
                 raise StoreWriteError("simulated local store failure")
             if rec["seq"] != len(self._lines) + 1:
                 raise StoreWriteError("log moved on since the line was prepared")
+            if self.fault:
+                raise StoreWriteError(f"LOCAL_LOG_WRITE_FAULT: {self.fault}")
             if self.path:
+                expected = sum(len(ln) + 1 for ln in self._lines)
                 try:
-                    fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-                    try:
-                        os.write(fd, line + b"\n")
-                        os.fsync(fd)
-                    finally:
-                        os.close(fd)
+                    fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+                except OSError as exc:
+                    raise StoreWriteError(f"local log open failed: {type(exc).__name__}") from exc
+                try:
+                    size = os.fstat(fd).st_size
+                    if size == expected + len(line) + 1 and os.pread(fd, len(line) + 1, expected) == line + b"\n":
+                        os.fsync(fd)                  # already on disk: adopt it
+                    elif size != expected:
+                        raise StoreWriteError("the log file and memory disagree; refusing to write")
+                    else:
+                        payload = line + b"\n"
+                        try:
+                            written = os.pwrite(fd, payload, expected)
+                            if written != len(payload):
+                                # AEGIS 5a56a3a M1: a short write (disk full, quota, a signal) would leave a partial
+                                # line that memory does not hold. Fail closed: cut back to the previous length.
+                                raise _ShortWrite(f"short write: {written} of {len(payload)} bytes")
+                            os.fsync(fd)
+                        except OSError as exc:
+                            try:
+                                os.ftruncate(fd, expected)
+                                os.fsync(fd)
+                            except OSError as texc:
+                                # the partial bytes may still be on disk: every later append refuses (the file and
+                                # memory disagree) -- fail closed, and say why so Andre sees it (integrity, /health)
+                                self.fault = (f"a failed log write could not be cut back ({type(exc).__name__}, then "
+                                              f"{type(texc).__name__} on truncate): the log refuses writes until the "
+                                              f"file is inspected and its torn tail removed (line {rec['seq']})")
+                            detail = f" ({exc})" if isinstance(exc, _ShortWrite) else ""
+                            raise StoreWriteError(f"local log write failed: {type(exc).__name__}{detail}") from exc
                 except OSError as exc:
                     raise StoreWriteError(f"local log write failed: {type(exc).__name__}") from exc
+                finally:
+                    os.close(fd)
             self._lines.append(line)
             return rec
 
@@ -154,8 +215,8 @@ class RecordLog:
                         raw = fh.read()
                     if raw and not raw.endswith(b"\n"):
                         return False
-                    lines = [ln for ln in raw.split(b"\n") if ln]
-                    if len(lines) != len(self._lines):
+                    lines = raw.split(b"\n")[:-1] if raw else []
+                    if len(lines) != len(self._lines) or any(not ln for ln in lines):   # R4-2: no empty line
                         return False
                 else:
                     lines = self._lines
@@ -163,6 +224,7 @@ class RecordLog:
                 return True
             except (OSError, StoreCorrupt):
                 return False
+
 
 
 BLOB_DIR = "blobs"
@@ -214,12 +276,18 @@ class BlobStore:
             try:
                 fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                 try:
-                    os.write(fd, data)
+                    written = os.write(fd, data)
+                    if written != len(data):   # bug sweep E: a short write never becomes a blob
+                        raise _ShortWrite(f"short write: {written} of {len(data)} bytes")
                     os.fsync(fd)
                 finally:
                     os.close(fd)
                 os.replace(tmp, path)
             except OSError as exc:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
                 raise StoreWriteError(f"blob write failed: {type(exc).__name__}") from exc
             return sha
 
@@ -252,3 +320,111 @@ class BlobStore:
                 return True
             except FileNotFoundError:
                 return False
+
+
+LOCK_NAME = "legal.lock"
+
+
+class DataDirBusy(StoreCorrupt):
+    """Another holder has this data directory (another process's flock, or another service instance's claim)."""
+
+
+BUSY = "another legal-py process holds this data directory; refusing to start"
+
+
+class DataDirLock:
+    """One process per data directory (fcntl.flock, released by the kernel when the process ends). A second
+    instance on the same directory refuses to start: two writers would fork the log.
+
+    AEGIS round 5 (V5-L1): the flock is per PROCESS (config.load caches it); each service instance must ``claim()``
+    it, once: a second claim in the same process is refused like a second process, and ``release_claim()`` (the
+    service's ``close()``) gives it back. V5-I1: ``legal.lock`` must be a regular file (``lstat``: a symlink, FIFO
+    or directory planted there refuses with a clear message, never a raw OSError)."""
+
+    def __init__(self, data_dir: Optional[str]):
+        self._fd = None
+        self.claimed = False
+        self._token: Optional[str] = None
+        self._adopted = False
+        self._mutex = threading.Lock()   # AEGIS a5dd261 L3: claim / holds / adopt / release_claim are atomic
+        if not data_dir:
+            return
+        import fcntl
+        import stat as stat_mod
+        os.makedirs(data_dir, mode=0o700, exist_ok=True)
+        path = os.path.join(data_dir, LOCK_NAME)
+        not_regular = StoreCorrupt(f"{LOCK_NAME} in the data directory is not a regular file (a symlink, FIFO, device "
+                                   "or directory); refusing to start: remove it (the service creates it)")
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            st = None
+        if st is not None and not stat_mod.S_ISREG(st.st_mode):
+            raise not_regular
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        except OSError:
+            raise not_regular from None
+        if not stat_mod.S_ISREG(os.fstat(fd).st_mode):
+            os.close(fd)
+            raise not_regular
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            raise DataDirBusy(BUSY)
+        self._fd = fd
+
+    def claim(self) -> Optional[str]:
+        """Claim the directory for one service instance; returns the claim's ownership token (None when there is no
+        data directory). Only the holder of the token can release the claim or hand it to a service."""
+        if self._fd is None:
+            return None
+        import secrets
+        with self._mutex:
+            if self.claimed:
+                raise DataDirBusy("another service instance in this process already holds this data directory; "
+                                  "refusing to start (close the first instance)")
+            self._token = secrets.token_hex(16)
+            self._adopted = False
+            self.claimed = True
+            return self._token
+
+    def _holds(self, token: Optional[str]) -> bool:
+        import hmac as hmac_mod
+        current = self._token
+        return bool(self.claimed and token and current and hmac_mod.compare_digest(token, current))
+
+    def holds(self, token: Optional[str]) -> bool:
+        """True only for the token of the CURRENT claim (AEGIS round 5c item 1)."""
+        with self._mutex:
+            return self._holds(token)
+
+    def adopt(self, token: Optional[str]) -> Optional[str]:
+        """Hand the current claim to ONE service instance: only for the current claim's token, and only once
+        (AEGIS a5dd261 L4: a second service handed the same token is refused). Returns a NEW token that only the
+        adopting service holds; the claimer's token stops working, so it can no longer release the adopted claim
+        (AEGIS cc27b69 Info). None when refused."""
+        import secrets
+        with self._mutex:
+            if self._adopted or not self._holds(token):
+                return None
+            self._adopted = True
+            self._token = secrets.token_hex(16)
+            return self._token
+
+    def release_claim(self, token: Optional[str] = None) -> bool:
+        """Give the claim back. Only the current claim's token releases it: a stale or wrong token is a no-op (it
+        never releases another instance's claim). Returns whether it released."""
+        with self._mutex:
+            if not self._holds(token):
+                return False
+            self.claimed = False
+            self._token = None
+            self._adopted = False
+            return True
+
+    def release(self) -> None:
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
