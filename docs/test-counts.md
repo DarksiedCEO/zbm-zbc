@@ -21,14 +21,14 @@ the check.
 | `python:bizdev-py` | 281 | pytest collection | — |
 | `python:clipper-network-py` | 368 | pytest collection | — |
 | `python:compliance-py` | 636 | pytest collection | — |
-| `python:creative-py` | 828 | pytest collection | — |
+| `python:creative-py` | 830 | pytest collection | — |
 | `python:delivery-py` | 735 | pytest collection | — |
 | `python:detection-py` | 504 | pytest collection | — |
 | `python:finance-py` | 538 | pytest collection | — |
-| `python:fulfillment-py` | 1112 | pytest collection | — |
+| `python:fulfillment-py` | 1115 | pytest collection | — |
 | `python:influencer-py` | 435 | pytest collection | — |
 | `python:legal-py` | 308 | pytest collection | — |
-| `python:onboarding-py` | 772 | pytest collection | — |
+| `python:onboarding-py` | 791 | pytest collection | — |
 | `python:sales-py` | 543 | pytest collection | — |
 | `python:security-py` | 181 | pytest collection | — |
 | `python:service-py` | 614 | pytest collection | — |

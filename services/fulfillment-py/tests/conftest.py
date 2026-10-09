@@ -47,4 +47,6 @@ def _fresh_outbound_gate(monkeypatch):
         monkeypatch.setattr(api, "_ledger", FakeLedgerClient())
         monkeypatch.setattr(api, "_journal", api._make_journal(RecordLog(None)))
         monkeypatch.setattr(api, "_resolutions", {})
+        monkeypatch.setattr(api, "_unresolved", {})
+        monkeypatch.setattr(api, "_resolving", set())
     yield

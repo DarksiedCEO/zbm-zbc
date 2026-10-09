@@ -138,6 +138,7 @@ def _restart(monkeypatch, d: str) -> None:
     monkeypatch.setattr(api, "_GATE", api._build_gate())
     monkeypatch.setattr(api, "_attempted_task_ids", api._new_dedupe())
     monkeypatch.setattr(api, "_resolutions", {})
+    monkeypatch.setattr(api, "_unresolved", {})
     monkeypatch.setattr(api, "_journal", api._make_journal(RecordLog(d)))
     api._restore_from_log()
 

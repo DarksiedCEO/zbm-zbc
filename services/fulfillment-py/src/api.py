@@ -1736,6 +1736,9 @@ _evidence_lock = threading.RLock()
 # entity key ("call|call_1001") -> the record of its SUCCESSFUL write-back: a retried /resolve answers it and writes
 # nothing (bug sweep D). Replayed from the log at start; bounded, fail closed at the cap.
 _resolutions: dict[str, ResolutionRecord] = {}
+# AEGIS F-1: entity key -> what is known of a write-back whose result is unknown (restored at start; reconcile clears)
+_unresolved: dict[str, dict] = {}
+_resolving: set[str] = set()      # AEGIS F-2: write-backs in flight (the evidence lock is free while they run)
 _MAX_RESOLUTIONS = 1_000_000
 
 
@@ -1828,61 +1831,118 @@ def _resolution_id(ev: TerminalEvent) -> str:
     return f"res-{ev.entity_type}-{ev.entity_id}-{h.hexdigest()[:12]}"
 
 
+def _failed(ev: TerminalEvent, rid: str, detail: str) -> ResolutionRecord:
+    return ResolutionRecord(resolution_id=rid, entity_type=ev.entity_type, entity_id=ev.entity_id,
+                            customer_id=ev.customer_id, resolution_type=ev.resolution_type,
+                            write_back_status=WriteBackStatus.FAILED, write_back_detail=detail)
+
+
 def _resolve_events(events: list[TerminalEvent]) -> list[ResolutionRecord]:
     """Bug sweep D (M): idempotent, record-first write-back. An entity whose write-back already SUCCEEDED answers that
     record and writes nothing (a different resolution for it is not written back: FAILED, with the reason); every
     other write-back is recorded and its line anchored BEFORE the system of record is called, the result after. The
-    resolution id is deterministic (entity + resolution), so a retried write-back carries the same id."""
+    resolution id is deterministic (entity + resolution), so a retried write-back carries the same id.
+
+    AEGIS F-1: an entity whose earlier write-back was requested but whose result no line records (a restart came
+    between them) is NOT written again until it is reconciled (POST /agents/resolution-writeback/reconcile).
+    AEGIS F-2: the evidence lock is released around the outside write-back; the entity is held in ``_resolving``
+    meanwhile (a concurrent request for it is answered FAILED "in progress", never written twice)."""
     out: list[ResolutionRecord] = []
     for ev in events:
         key = f"{ev.entity_type}|{ev.entity_id}"
         rid = _resolution_id(ev)
+        subj = _subject(ev.entity_type, ev.entity_id)
+        rk = f"resolve|{key}"
+        base = {"entity_type": ev.entity_type, "entity_id": ev.entity_id, "resolution_id": rid,
+                "resolution_type": ev.resolution_type.value}
         with _evidence_lock:
             prev = _resolutions.get(key)
             if prev is not None:
                 if prev.resolution_type == ev.resolution_type and prev.customer_id == ev.customer_id:
                     out.append(prev)
                 else:
-                    out.append(ResolutionRecord(
-                        resolution_id=rid, entity_type=ev.entity_type, entity_id=ev.entity_id,
-                        customer_id=ev.customer_id, resolution_type=ev.resolution_type,
-                        write_back_status=WriteBackStatus.FAILED,
-                        write_back_detail=(f"conflict: this {ev.entity_type} was already resolved as "
-                                           f"{prev.resolution_type.value} ({prev.resolution_id}); not written back")))
+                    out.append(_failed(ev, rid, f"conflict: this {ev.entity_type} was already resolved as "
+                                                f"{prev.resolution_type.value} ({prev.resolution_id}); not written back"))
+                continue
+            if key in _unresolved:
+                out.append(_failed(ev, rid, "an earlier write-back of this entity was requested and its result is "
+                                            "unknown (a restart came in between); not written again until it is "
+                                            "reconciled (POST /agents/resolution-writeback/reconcile)"))
+                continue
+            if key in _resolving:
+                out.append(_failed(ev, rid, "a write-back of this entity is in progress; not written twice — retry"))
                 continue
             if len(_resolutions) >= _MAX_RESOLUTIONS:
                 raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "60"},
                                     detail="write-back dedupe state is full (fail closed); nothing written back")
-            subj = _subject(ev.entity_type, ev.entity_id)
-            rk = f"resolve|{key}"
-            base = {"entity_type": ev.entity_type, "entity_id": ev.entity_id, "resolution_id": rid,
-                    "resolution_type": ev.resolution_type.value}
             try:
                 _commit("resolution_requested", rk, "resolution_writeback",
-                        [("resolution_writeback_requested", subj, base, "Write-back requested")], {"key": key},
-                        before_effect=True)
+                        [("resolution_writeback_requested", subj, base, "Write-back requested")],
+                        {"key": key, "resolution_id": rid, "resolution_type": ev.resolution_type.value,
+                         "customer_id": ev.customer_id}, before_effect=True)
             except EvidenceUnavailable as exc:
-                out.append(ResolutionRecord(
-                    resolution_id=rid, entity_type=ev.entity_type, entity_id=ev.entity_id, customer_id=ev.customer_id,
-                    resolution_type=ev.resolution_type, write_back_status=WriteBackStatus.FAILED,
-                    write_back_detail=f"{exc}; not written back (fail closed) — retry"))
+                out.append(_failed(ev, rid, f"{exc}; not written back (fail closed) — retry"))
                 continue
+            _resolving.add(key)
+        try:
             [record] = resolution_writeback.resolve_and_writeback([ev], _system_of_record, resolution_ids=[rid])
-            ok = record.write_back_status == WriteBackStatus.SUCCESS
-            _commit("resolution", rk, "resolution_writeback",
-                    [("resolution_writeback_result", subj, {**base, "status": record.write_back_status.value},
-                      f"Write-back {record.write_back_status.value}")],
-                    {"key": key, "record": record.model_dump(mode="json") if ok else None}, before_effect=False)
-            if ok:
-                _resolutions[key] = record
-            out.append(record)
+        except BaseException:
+            with _evidence_lock:
+                _resolving.discard(key)
+                _unresolved[key] = {"resolution_id": rid, "resolution_type": ev.resolution_type.value,
+                                    "customer_id": ev.customer_id, "why": "the write-back raised"}
+            raise
+        ok = record.write_back_status == WriteBackStatus.SUCCESS
+        with _evidence_lock:
+            try:
+                _commit("resolution", rk, "resolution_writeback",
+                        [("resolution_writeback_result", subj, {**base, "status": record.write_back_status.value},
+                          f"Write-back {record.write_back_status.value}")],
+                        {"key": key, "record": record.model_dump(mode="json") if ok else None}, before_effect=False)
+                if ok:
+                    _resolutions[key] = record
+            finally:
+                _resolving.discard(key)
+        out.append(record)
     return out
+
+
+def _reconcile_writeback(entity_type: str, entity_id: str, outcome: str) -> dict:
+    """AEGIS F-1: the operator's ruling on a write-back whose result is unknown, after checking the client's system of
+    record: ``written`` (it is there: answered as written from now on, never written again) or ``not_written`` (the
+    next /resolve writes it). Recorded first (evidence + anchored line), like every write-back."""
+    key = f"{entity_type}|{entity_id}"
+    with _evidence_lock:
+        info = _unresolved.get(key)
+        if info is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="no write-back of this entity is awaiting reconcile")
+        rec = None
+        if outcome == "written":
+            rec = {"resolution_id": info["resolution_id"], "entity_type": entity_type, "entity_id": entity_id,
+                   "customer_id": info.get("customer_id"), "resolution_type": info["resolution_type"],
+                   "write_back_status": WriteBackStatus.SUCCESS.value,
+                   "write_back_detail": "reconciled: confirmed in the system of record"}
+        try:
+            _commit("resolution", f"resolve|{key}", "resolution_writeback",
+                    [("resolution_writeback_reconciled", _subject(entity_type, entity_id),
+                      {"entity_type": entity_type, "entity_id": entity_id, "resolution_id": info["resolution_id"],
+                       "outcome": outcome}, f"Write-back reconciled: {outcome}")],
+                    {"key": key, "record": rec, "reconciled": outcome}, before_effect=True)
+        except EvidenceUnavailable as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"{exc}; nothing changed") \
+                from None
+        _unresolved.pop(key, None)
+        if rec is not None:
+            _resolutions[key] = ResolutionRecord(**rec)
+        return {"key": key, "outcome": outcome}
 
 
 def _restore_from_log() -> None:
     """Bug sweep D (M): what must survive a restart, replayed from the local log -- the gate's attempt history (call
     limits), the dial dedupe, and the successful write-backs."""
     now = _now()
+    requested: dict[str, dict] = {}
     for r in _journal.log.iter_records():
         d = r.get("data") or {}
         if r["kind"] == "dial" and d.get("attempt_keys"):
@@ -1890,8 +1950,18 @@ def _restore_from_log() -> None:
             _GATE.restore_attempt(d["attempt_keys"], at)
             if at > now - _DEDUPE_TTL and _attempted_task_ids.room(now) > 0:
                 _attempted_task_ids.put(d["task_id"], True, at)
-        elif r["kind"] == "resolution" and d.get("record"):
-            _resolutions[d["key"]] = ResolutionRecord(**d["record"])
+        elif r["kind"] == "resolution_requested" and d.get("key"):
+            requested[d["key"]] = {"resolution_id": d.get("resolution_id"), "resolution_type": d.get("resolution_type"),
+                                   "customer_id": d.get("customer_id")}
+        elif r["kind"] == "resolution" and d.get("key"):
+            requested.pop(d["key"], None)                 # its result (or a reconcile) is recorded
+            if d.get("record"):
+                _resolutions[d["key"]] = ResolutionRecord(**d["record"])
+    # AEGIS F-1: requested, no result line: the write-back may have happened. Never written again until reconciled.
+    for key, info in requested.items():
+        if key in _resolutions:
+            continue
+        _unresolved[key] = {**info, "why": "restart between the request and its result"}
 
 
 _restore_from_log()
@@ -2255,6 +2325,19 @@ def _update_dossiers(req: DossierUpdateRequest) -> DossiersResponse:
             )
         _dossiers.update(changed)
     return DossiersResponse(dossiers=list(changed.values()))
+
+
+class ReconcileWritebackRequest(_Req):
+    entity_type: Literal["call", "appointment", "task"]
+    entity_id: TaskId
+    outcome: Literal["written", "not_written"]
+
+
+@app.post("/agents/resolution-writeback/reconcile", dependencies=[Depends(require_auth)])
+async def reconcile_writeback(request: Request) -> Response:
+    """AEGIS F-1: rule on a write-back whose result is unknown (after checking the client's system of record)."""
+    return await _off_loop(request, ReconcileWritebackRequest,
+                           lambda req: _reconcile_writeback(req.entity_type, req.entity_id, req.outcome))
 
 
 @app.post("/agents/resolution-writeback/resolve", dependencies=[Depends(require_auth)])

@@ -1013,3 +1013,12 @@ local, hash-chained, anchored log (`src/store.py`, backported from compliance-py
 
 Not changed (recorded): a dial whose request line was written but whose dialer then refused (window re-check, not
 wired) still counts as an attempt after a restart (conservative: limits only narrow); dossiers stay in memory.
+
+### AEGIS re-review of bug sweep D (37a2830) — fixes
+
+Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
+
+| Id | Finding | Fix |
+|---|---|---|
+| F-1 | A write-back whose result line was owed at a restart was written to the client's system again | `_restore_from_log`: a `resolution_requested` line with no later `resolution` line is restored into `_unresolved` (result unknown); `_resolve_events` never writes such an entity again until `POST /agents/resolution-writeback/reconcile` (`written`: answered as written from then on; `not_written`: the next /resolve writes), recorded first and replayed. The same applies in-process when the write-back raised. The reconcile is gated by the service token (this service has no Andre key). |
+| F-2 | The outside write-back ran under the evidence lock | The lock is released around the write-back; the entity is held in `_resolving` (a concurrent request for it is answered `failed`, "in progress") and the result is committed under the lock again. |
