@@ -357,7 +357,7 @@ class HttpVerificationIntegrity:
                 views = c["certified_views"]
                 if not (_is_id(c["certification_id"]) and _is_id(c["submission_id"]) and _is_id(c["campaign_id"])
                         and isinstance(c["platform"], str) and c.get("clipper_id") == clipper_id
-                        and c["status"] in ("pending", "certified", "not_certified", "revised", "voided")
+                        and c["status"] in ("pending", "certified", "not_certified", "revised", "voided", "suspended")
                         and (views is None or (isinstance(views, int) and not isinstance(views, bool) and views >= 0))):
                     return CertificationsAnswer(False, reason="V&I certifications inconsistent")
                 rwe = c.get("revision_watch_end")

@@ -143,7 +143,7 @@ export CN_IDENTITY_HMAC_KEY=<>=32 chars, secret>          # required (email HMAC
 export CN_ANDRE_APPROVAL_TOKEN=<Andre's own secret>      # unset = no approvals possible
 export CN_CALLER_TOKENS='{"hub":"<>=32 chars>","onboarding":"...","creative_production":"...","scheduler":"..."}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>   # unset = nothing recorded
-export CN_DATA_DIR=/var/lib/clipper-network             # unset = in memory; nothing in force after restart
+export CN_DATA_DIR=/var/lib/clipper-network             # unset = in memory; nothing in force after restart (flocked: cn.lock, one writer)
 python3 -m api                                          # CN_BIND_ADDR (127.0.0.1), CN_PORT (8400)
 ```
 
@@ -236,3 +236,10 @@ N16-10). It stops only the processes it started.
 ## Gaps
 
 See ADR 0008 "Spec items not built", "Known limitations" and "Unlock list".
+
+## Bug sweep C (Oct 7, 2026)
+
+`GET /cn/v1/audit/evidence?event_type=&limit=&offset=` (any caller): every Clipper Network ledger event, `committed`
+(named by an anchored local line), `cited` or `attempted` (recorded first, never committed: unanchored evidence =
+attempted, not done). `/health` adds `log_write_fault`. The data directory is single-writer (`cn.lock`). The CN-26 money
+blocklist folds homoglyphs and invisible characters before matching. Details: ADR 0008, "Bug sweep C fixes".

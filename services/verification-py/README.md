@@ -89,7 +89,11 @@ the `request_id` and every answer another department's thin client reads states 
 | `POST /vi/v1/holds/{id}/decision`, `POST /vi/v1/findings/{id}/decision` | Andre or confirmed reviewer | release / uphold / overturn |
 | `POST /vi/v1/bans` | clipper_network **and** Andre | propagate an Andre-approved ban (V&I never bans by itself). Clipper Network passes through the token Andre sent on its ban-decision request, so `VI_ANDRE_APPROVAL_TOKEN` must be Andre's same token as `CN_ANDRE_APPROVAL_TOKEN` |
 | `GET /vi/v1/rules`; `POST /vi/v1/rules/proposals`; `POST /vi/v1/rules/decisions` | any; Andre; Andre | rule register |
-| `POST /vi/v1/jobs/{liveness,metrics,revisions,anomaly,certify,retention}/run` | scheduler | one cycle, idempotent per (job, UTC date) |
+| `POST /vi/v1/jobs/{liveness,metrics,revisions,anomaly,certify,retention}/run` | scheduler | one cycle, idempotent per (job, UTC date); every clip is its own item (bug sweep C, C-1): a failed or wedged item never blocks the others |
+| `GET /vi/v1/jobs/dead-letter` | scheduler | items parked after `VI_JOB_ITEM_MAX_FAILURES` failed runs, and items waiting out a backoff |
+| `POST /vi/v1/jobs/{job}/dead-letter/{subject_id}/requeue` | Andre | put a parked item back; the next run retries it |
+| `POST /vi/v1/age/legacy-minors/{subject_id}/resolve` | Andre | mark a minor recorded before mailbox folding resolved (`legacy_minors_without_base` in /health) |
+| `GET /vi/v1/audit/evidence?event_type=&limit=&offset=` | any caller | every V&I ledger event: `committed` / `cited` / `attempted` (bug sweep C, R6) |
 | `GET /vi/v1/reconcile`, `POST /vi/v1/reconcile` | Andre | show / void the voidable log-vs-ledger mismatches |
 | `GET /vi/v1/integrity` | any caller | log chain, anchors, leases, ghost rulings, snapshot payload hashes vs the ledger |
 | `GET /vi/v1/audit/export?since=&until=&cursor=` | any caller | ordered records with ledger ids; identities as HMACs, free text as SHA-256 |
@@ -134,11 +138,25 @@ provider's check time; then a re-check is required, AEGIS N16-8), `VI_MINOR_PURG
 `VI_FEED_YOUTUBE_ENABLED` (0), `VI_EVIDENCE_RETENTION_DAYS` (2557), `VI_LIVENESS_MAX_GAP_DAYS` (0),
 `VI_OEMBED_ENABLED` (0), `VI_OEMBED_MAX_CONSECUTIVE_DAYS` (2), `VI_YT_DAILY_UNITS` (10000),
 `VI_YT_RESERVE_UNITS` (1000), `VI_TT_MAX_PER_MIN` (500), `VI_IG_MAX_RPS` (1), `VI_X_MONTHLY_RESOURCE_BUDGET`
-(0), `VI_OEMBED_MAX_RPS` (1, at most 10: oEmbed calls per second), `VI_REVIEWER_TOKENS` (empty). `VI_VAULT`, `VI_HASHER`, `VI_AGE_PROVIDER`, `VI_MEDIA_INTAKE`,
+(0), `VI_OEMBED_MAX_RPS` (1, at most 10: oEmbed calls per second), `VI_REVIEWER_TOKENS` (empty),
+`VI_PORT_CALL_TIMEOUT_S` (20, 1..120: a platform, vault, hasher or other port call that has not answered by then is
+unavailable for that item; bug sweep C, C-1), `VI_JOB_ITEM_MAX_FAILURES` (3, 1..50: failed runs in a row before a job
+item is parked in the dead-letter list for Andre). `VI_VAULT`, `VI_HASHER`, `VI_AGE_PROVIDER`, `VI_MEDIA_INTAKE`,
 `VI_<P>_APP_CREDENTIALS_REF` and `VI_DEVICE_SIGNALS_ENABLED=1` refuse to start: nothing is built behind them.
 The seed is pinned: `VI_SEED_PATH` / `VI_SEED_SHA256` may name another seed only with
 `VI_ALLOW_UNPINNED_SEED=1` (then `rules_pinned: false, production: false` everywhere).
 Server tuning, read once at start by `src/serve.py` (a non-numeric or non-positive value refuses to start): `VI_REQUEST_HEAD_TIMEOUT_SECONDS` (10: a request head must arrive within this many seconds of connect), `VI_KEEP_ALIVE_TIMEOUT_SECONDS` (5), `VI_LIMIT_CONCURRENCY` (128 open connections; beyond it a connection is answered 503), `VI_SWITCH_INTERVAL_SECONDS` (0.001, the interpreter's thread switch interval; only 0.0001 .. 0.05 starts, checked in force and printed: the check shared by every launcher, `src/launch_guard.py`, fix wave 26b) and `VI_DRAINS_MAX` (512 concurrent graceful-close drains; `src/graceful_close.py`). (Wave 25: these were documented only in `serve.py`'s docstring.)
+
+One post, one certification (bug sweep C, C-2): a submission whose post is already registered (any URL spelling:
+`www.`/`m.` hosts, query strings, fragments, another `@handle` before the same video id; any submission, any clipper)
+is refused 409 with `duplicate_of`; a post that resolves to the same platform video only after a fetch (a short link)
+is `not_certified` with `DUPLICATE_POST`. Access lost after certification (C-3): a revoked connection, or two revision
+checks in a row that cannot read the post, moves the certification to `suspended` (not payable: Finance pays only
+`certified`/`revised`) with an `access_lost` hold for Andre; a later revision check through the SAME account that
+reads the same video reinstates it, and so does Andre's release of the hold.
+
+The single-writer lock (bug sweep C, E-5/F-3): `VI_DATA_DIR/vi.lock` is flocked at start; a second process (or a
+second service instance in this process) on the same directory refuses to start.
 
 ## Reconciling the local log with the ledger
 

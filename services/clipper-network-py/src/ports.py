@@ -139,7 +139,7 @@ class Certification:
     submission_id: str
     campaign_id: str
     platform: str
-    status: str                             # pending | certified | not_certified | revised | voided
+    status: str                             # pending | certified | not_certified | revised | voided | suspended
     certified_views: Optional[int]
     revision_watch_end: Optional[str] = None
 

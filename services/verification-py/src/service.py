@@ -43,14 +43,15 @@ from intelligences import (i01_platform_metrics as i01, i02_view_certifier as i0
                            i04_liveness as i04, i05_age_assurance as i05, i06_engagement_anomaly as i06,
                            i07_duplicate_identity as i07, i08_stolen_content as i08, i09_strike_ledger as i09,
                            i10_evidence_audit as i10)
-from ledger import LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, derived_id, payload_sha256
+from ledger import (LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, canonical, clean_summary, derived_id,
+                    payload_sha256)
 from models import ID_RE
 from ports import (AccountAnswer, AdapterAnswer, AgeProviderAnswer, NotBuiltClipperNetwork, NotBuiltFinance31,
                    NotBuiltLegal37, NotBuiltPeople43, NotWiredAdapter, NotWiredAgeAssuranceProvider,
                    NotWiredCompliance, NotWiredMediaIntake, NotWiredOEmbed, NotWiredPerceptualHasher,
                    NotWiredTokenVault, PayoutIdentity, RegisterRow, TakedownAnswer, VaultStore, ViewCap)
 from sidestore import PlatformDataStore, SideStoreError
-from store import RecordLog, StoreWriteError
+from store import DataDirBusy, RecordLog, StoreWriteError
 from textguard import injection_rules_in
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
@@ -72,9 +73,21 @@ COMPLIANCE_PREFETCH_BUDGET_S = 12.0
 # none and land in "legacy", which no caller reads (fail closed: a re-check is needed).
 CN_NAMESPACE = "clipper_network"
 LEGACY_NAMESPACE = "legacy"
-IDENTITY_LOCK_KINDS = ("email", "payout")     # the identity HMACs a minor lock follows (spec C.5, VI-CQ-03)
+# the identity HMACs a minor lock follows (spec C.5, VI-CQ-03); bug sweep C: "email_base" is the HMAC of the canonical
+# mailbox (plus-tag dropped; Gmail dots folded), so kid+1@ cannot split off from a minor's kid@
+IDENTITY_LOCK_KINDS = ("email", "payout", "email_base")
+FINAL_OR_WATCHED = ("certified", "revised", "voided", "suspended")    # the certify job leaves these alone
 _SHA64 = re.compile(r"[0-9a-f]{64}")
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+# Bug sweep C (C-1): a port call (platform, vault, hasher, ...) that does not answer within VI_PORT_CALL_TIMEOUT_S is
+# unavailable for that item; the job moves on. Calls whose effect must not be left half-done in the background are
+# not bounded: the vault's grant exchange and destroy (a timed-out destroy would leave a live grant).
+UNBOUNDED_CALLS = {("vault", "exchange_and_store"), ("vault", "destroy")}
+# Bug sweep C (C-1): a job item that failed this many runs in a row is parked in the dead-letter list for Andre
+JOB_ITEM_MAX_FAILURES_DEFAULT = 3
+JOB_ITEM_BACKOFF_H = (0, 1, 4, 24)     # hours before the item is tried again, by failure
+# Bug sweep C (C-3): revision checks that may fail in a row before a certified clip is suspended (access lost)
+ACCESS_LOST_AFTER_FAILED_CHECKS = 2
 HOLD_CODES_FROM_FINDING = {"bought_engagement": "BOUGHT_ENGAGEMENT", "platform_stripped": "PLATFORM_STRIPPED",
                            "duplicate_identity": "DUPLICATE_IDENTITY", "account_shared": "ACCOUNT_SHARED",
                            "stolen_content": "STOLEN_MATCH"}
@@ -104,6 +117,33 @@ def facts_sha256(facts: Any) -> str:
     """What the thin clients compute over what they sent: sorted keys, compact separators, ASCII escapes."""
     return hashlib.sha256(json.dumps(facts, sort_keys=True, separators=(",", ":"), default=str)
                           .encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def bounded_call(fn: Callable[[], Any], fallback: Any, timeout_s: int) -> Any:
+    """Run ``fn`` in a daemon thread and wait at most ``timeout_s`` (bug sweep C, C-1: one wedged platform call never
+    holds the service lock or the job). A call that raises or does not answer in time is ``fallback`` (unavailable,
+    never a pass); a late answer is dropped. The thread is a daemon: a wedged call never keeps the process alive."""
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["v"] = fn()
+        except BaseException:  # noqa: BLE001 - a port that raises is unavailable; its text is dropped
+            box["v"] = fallback
+
+    t = threading.Thread(target=run, name="vi-port-call", daemon=True)
+    t.start()
+    t.join(timeout_s)
+    return box.get("v", fallback) if not t.is_alive() else fallback
+
+
+# AEGIS L-2 (re-review of 3c55104): at most this many timed-out calls of one port may still be running in the
+# background; past it the port is not called again (the item fails: backoff, then the dead-letter list) until one ends
+PORT_LEAK_CAP = 4
+
+
+class PortWedged(Unavailable):
+    """A port has PORT_LEAK_CAP calls still running after their deadline: it is not called again for now."""
 
 
 def _dt(v: str) -> datetime:
@@ -136,12 +176,28 @@ class Op:
         self._memo: dict = {}
         self.key: Optional[bytes] = None
         self._key_asked = False
+        self.named: list[dict] = []          # typed evidence this operation recorded (named by its log line)
 
     # --- ledger + records
-    def record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str) -> str:
-        self.svc._record(event_id, event_type, actor, subject, payload, summary)
-        self.events.append(event_id)
-        return event_id
+    def record(self, event_id: str, event_type: str, actor: str, subject: str, payload: dict, summary: str,
+               raw: bool = False) -> str:
+        """Record one typed evidence event FIRST (record-first) and return the id actually recorded.
+
+        Bug sweep C (R6, the bizdev-py / finance-py pattern): ``event_id`` is the logical action's key ``rk`` (derived
+        from its identity); the id recorded is ``i10.evidence_id(rk, type, payload_sha256)`` over a payload that also
+        carries ``rk`` and ``seq`` (the log line it is meant for). The same action, same content, same line is the same
+        id (the ledger answers 200 to a retry); a retry after the log or the content moved is a NEW id -- never a
+        lasting 409 -- and the earlier try stays on the ledger as ``attempted`` (GET /vi/v1/audit/evidence).
+        ``raw``: the id and payload are recorded exactly as given (port crossings, whose payload their id fixes)."""
+        if raw:
+            eid = self.svc._record(event_id, event_type, actor, subject, payload, summary)
+        else:
+            eid, payload = self.svc._evidence(event_id, event_type, payload, actor, subject, summary)
+            self.svc._record(eid, event_type, actor, subject, payload, summary)
+            self.named.append({"event_id": eid, "event_type": event_type, "payload": payload})
+        if eid not in self.events:
+            self.events.append(eid)
+        return eid
 
     def add(self, kind: str, rec: dict) -> dict:
         self.ops.append((kind, rec))
@@ -155,11 +211,14 @@ class Op:
         eid = derived_id("x", self.op_id, port, action, list(args), len(self.events))
         self.record(eid, f"crossing_{port}_requested", self.actor, self.subject[:128],
                     {"port": port, "action": action, "args_sha256": sha(list(args)), "op": self.op_id},
-                    f"Request to {port}: {action}")
-        try:
-            ans = fn()
-        except Exception:  # noqa: BLE001 - a port that raises is unavailable, never a pass; its text is dropped
-            ans = fallback
+                    f"Request to {port}: {action}", raw=True)
+        if (port, action) in UNBOUNDED_CALLS:
+            try:
+                ans = fn()
+            except Exception:  # noqa: BLE001 - a port that raises is unavailable, never a pass; its text is dropped
+                ans = fallback
+        else:
+            ans = self.svc._bounded(port, fn, fallback, raise_when_capped=True)
         self._memo[k] = ans
         return ans
 
@@ -172,10 +231,35 @@ class Op:
         return self.key
 
 
+SKIP = object()          # a job item with nothing to do this run
+
+
+class JobRun:
+    """What one scheduler run did, item by item (bug sweep C, C-1)."""
+
+    def __init__(self, job: str, now: datetime):
+        self.job, self.now = job, now
+        self.ok = 0
+        self.deferred = 0
+        self.parked_seen = 0
+        self.parked = 0
+        self.failures: list[tuple[str, str, list]] = []
+
+    @property
+    def incomplete(self) -> bool:
+        """A run with a failed, waiting or parked item does not close the (job, day): the next call runs the job
+        again (its per-item steps are idempotent, ADR 0007 #32), so an item Andre requeues is retried the same day."""
+        return bool(self.failures or self.deferred or self.parked_seen)
+
+    def counts(self) -> dict:
+        out = {"failed": len(self.failures), "deferred": self.deferred, "dead_lettered": self.parked_seen + self.parked}
+        return {k: v for k, v in out.items() if v}
+
+
 class VIService:
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, side: PlatformDataStore,
                  seed_bytes: bytes, expected_seed_sha256: str, ports: Optional[Ports] = None,
-                 clock: Optional[Clock] = None, pinned_sha256: Optional[str] = None):
+                 clock: Optional[Clock] = None, pinned_sha256: Optional[str] = None, lock_token: Optional[str] = None):
         self.cfg = settings
         self.recorder = recorder
         self.log = log
@@ -185,6 +269,91 @@ class VIService:
         self.lock = threading.RLock()
         self._tls = threading.local()          # N16-1: the Compliance snapshot of the current request / job run
         self._xlock = threading.Lock()         # serializes crossings recorded outside the service lock
+        # bug sweep C (C-1): one run of a job at a time; items take the service lock one by one
+        self._job_locks = {j: threading.Lock() for j in JOBS}
+        self._leak_lock = threading.Lock()
+        self._leaked: dict[str, int] = {}     # AEGIS L-2: timed-out calls per port still running
+        self.job_items: dict[tuple[str, str], dict] = {}   # (job, subject) -> {failures, next_try} (memory only)
+        self.dead_letters: dict[tuple[str, str], dict] = {}  # (job, subject) -> parked item (event-sourced)
+        self.legacy_resolved: set[str] = set()   # AEGIS L3-R: legacy minor records Andre marked resolved
+        self._failed_named: list[dict] = []
+        self._carry: list[str] = []          # C-1: a retried item's earlier attempts, cited by the line that commits it
+        # bug sweep C (E-5/F-3, finance-py's single writer): one service instance per data directory, also within one
+        # process. api.build_service claims the flock BEFORE the log is built and passes the claim's token; this
+        # instance adopts that claim only if the token IS the current claim, and gives it back on close() or a
+        # failed start.
+        self._closed = False
+        self._dir_lock = getattr(settings, "data_dir_lock", None)
+        self._lock_token: Optional[str] = None
+        if self._dir_lock is not None:
+            if lock_token is None:
+                lock_token = self._dir_lock.claim()
+            adopted = self._dir_lock.adopt(lock_token)
+            if adopted is None:
+                self._dir_lock = None
+                raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
+                                  "stale, another instance's, or already adopted); refusing to start")
+            self._lock_token = adopted
+        try:
+            self._start(settings, seed_bytes, expected_seed_sha256, pinned_sha256)
+        except BaseException:
+            self.close()
+            raise
+
+    def _bounded(self, port: str, fn: Callable[[], Any], fallback: Any, raise_when_capped: bool = False) -> Any:
+        """``bounded_call`` with a per-port cap on calls still running after their deadline (AEGIS L-2). When the
+        cap is reached the port is not called: ``PortWedged`` (a 503 for a request, a failed item for a job), or
+        ``fallback`` when ``raise_when_capped`` is False."""
+        with self._leak_lock:
+            if self._leaked.get(port, 0) >= PORT_LEAK_CAP:
+                if raise_when_capped:
+                    raise PortWedged(f"{port} has {PORT_LEAK_CAP} calls still running past their deadline; it is not "
+                                     "called again until one ends", ledger_write="not_recorded")
+                return fallback
+        box: dict = {}
+        done = threading.Event()
+        state = {"leaked": False}
+
+        def run() -> None:
+            try:
+                box["v"] = fn()
+            except BaseException:  # noqa: BLE001 - a port that raises is unavailable; its text is dropped
+                box["v"] = fallback
+            finally:
+                with self._leak_lock:
+                    done.set()
+                    if state["leaked"]:
+                        self._leaked[port] -= 1
+
+        t = threading.Thread(target=run, name=f"vi-port-{port}"[:40], daemon=True)
+        t.start()
+        t.join(self.cfg.port_call_timeout_s)
+        with self._leak_lock:
+            if not done.is_set():
+                state["leaked"] = True
+                self._leaked[port] = self._leaked.get(port, 0) + 1
+                return fallback
+        return box.get("v", fallback)
+
+    def close(self) -> None:
+        """Give the data directory back (a restart in the same process closes the old instance first). A closed
+        instance is inert: its log refuses every write and every ledger record is refused (503 SERVICE_CLOSED), so
+        it can never write over the instance that now owns the directory. Taken under the service lock."""
+        with self.lock:
+            self._closed = True
+            with self.log.lock:
+                self.log.closed = True
+            if self._dir_lock is not None:
+                self._dir_lock.release_claim(self._lock_token)
+                self._dir_lock = None
+                self._lock_token = None
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _start(self, settings: Settings, seed_bytes: bytes, expected_seed_sha256: str,
+               pinned_sha256: Optional[str]) -> None:
         seed_sha = hashlib.sha256(seed_bytes).hexdigest()
         if seed_sha != expected_seed_sha256:
             raise RuntimeError(f"rules seed SHA-256 {seed_sha} does not match the expected {expected_seed_sha256}; "
@@ -221,6 +390,14 @@ class VIService:
         self.attestations: dict[str, dict] = {}
         self.job_runs: dict[tuple[str, str], dict] = {}
         self.screens: dict[str, dict] = {}
+        # bug sweep C (C-2): one canonical post identity -> the FIRST submission that holds it
+        self.post_owner: dict[str, str] = {}                 # sha256(platforms.post_key) -> submission id
+        self.video_owner: dict[tuple[str, str], str] = {}    # (platform, video_id_sha256) -> submission id
+        self.media_owner: dict[str, str] = {}                # submitted file SHA-256 -> first submission id
+        # bug sweep C (velocity baselines): certified submissions by platform and by (clipper, platform), in order
+        self.certified_by_platform: dict[str, list[str]] = {}
+        self.certified_by_clipper: dict[tuple[str, str], list[str]] = {}
+        self._peaks: dict[str, tuple[int, Optional[int]]] = {}   # sid -> (snapshots seen, peak 24-h gain)
         self.quota = i01.QuotaBook(settings)
         self.idem: "OrderedDict[tuple[str, str], dict]" = OrderedDict()
         self.sidestore_degraded = False
@@ -234,6 +411,13 @@ class VIService:
             for kind, r in rec["data"].get("ops", []):
                 self._apply(kind, r)
         self._replaying = False
+        # C-2: submissions registered before the post identity existed are indexed from their raw post reference
+        # (the purgeable side store), when it is still held and matches the log's hash
+        for sid, sub in sorted(self.submissions.items(), key=lambda kv: kv[1]["received_seq"]):
+            if sub.get("post_key_sha256") is None:
+                ref = self.side.get(f"{sid}:post_ref")
+                if isinstance(ref, str) and sha_text(ref) == sub["post_ref_sha256"]:
+                    self.post_owner.setdefault(sha_text(P.post_key(sub["platform"], ref)), sid)
         if not self.log.in_memory:
             try:
                 a = self.assess_log()
@@ -265,6 +449,9 @@ class VIService:
 
     def _record(self, event_id, event_type, actor, subject, payload, summary) -> str:
         self._ledger_conflict = False
+        if self._closed:
+            raise Unavailable("SERVICE_CLOSED: this V&I instance is closed; nothing was recorded",
+                              ledger_write="not_recorded")
         if self.reconcile_mode and not self._reconciling:
             raise Unavailable("reconcile mode (VI_RECONCILE_MODE=1): only Andre's POST /vi/v1/reconcile is answered; "
                               "restart without it once the log is reconciled", ledger_write="not_recorded")
@@ -275,12 +462,38 @@ class VIService:
             raise Unavailable(f"evidence ledger write failed ({type(exc).__name__}); nothing was issued",
                               ledger_write="unknown" if exc.took_effect != False else "not_recorded") from None  # noqa: E712
 
+    def _evidence(self, rk: str, event_type: str, payload: dict, actor: str, subject: str,
+                  summary: str) -> tuple[str, dict]:
+        """The id and payload of one typed evidence event (``Op.record``): ``rk`` and ``seq`` inside the payload, the
+        payload's SHA-256 (and the actor, subject and summary the ledger also compares) inside the id (bug sweep C R6:
+        bizdev-py ``_commit``, finance-py ``_evidence``)."""
+        p = {**payload, "rk": rk, "seq": len(self.log) + 1}
+        meta = i10.meta_sha256(actor, subject, clean_summary(summary))
+        return i10.evidence_id(rk, event_type, payload_sha256(p), meta), p
+
     def _commit(self, op: Op, after_anchor: Optional[Callable] = None) -> None:
+        self._failed_named = list(op.named)      # cleared on success; a failed item's attempts are cited later (C-1)
         if not op.ops:
             return
+        if self._closed:
+            raise Unavailable("SERVICE_CLOSED: this V&I instance is closed; nothing was issued")
+        seq = len(self.log) + 1
+        if any(n["payload"]["seq"] != seq for n in op.named):
+            # the log moved between this operation's evidence and its commit: never anchor a mislabelled line
+            raise Unavailable("the local log moved under this operation; nothing was issued (retry)")
         data = {"ops": [[k, r] for k, r in op.ops], "ledger_event_ids": list(op.events),
                 "rules_version": self.rules_version, "anchored": True}
+        carry = [e for e in self._carry if e not in op.events]
+        if carry:
+            # C-1: the evidence a retried item's failed tries recorded (never committed): named here so a restart
+            # does not take them for another instance's rulings; /vi/v1/audit/evidence shows them as attempted
+            data["attempted_event_ids"] = carry
+        if op.named:
+            data["evidence"] = [{"event_id": n["event_id"], "event_type": n["event_type"], "rk": n["payload"]["rk"],
+                                 "payload_sha256": payload_sha256(n["payload"])} for n in op.named]
         rec, line = self.log.prepare(op.ops[0][0], iso(self._now()), data)
+        if rec["seq"] != seq:
+            raise Unavailable("the local log moved under this operation; nothing was issued (retry)")
         line_sha = hashlib.sha256(line).hexdigest()
         epoch = self.log.epoch or line_sha[:16]
         self._record(i10.anchor_id(epoch, rec["seq"], line_sha), i10.ANCHOR_TYPE, EVIDENCE, i10.LOG_SUBJECT,
@@ -297,7 +510,11 @@ class VIService:
                         fh.write(line + b"\n")
                 except OSError:
                     pass
-            raise Unavailable(f"local store write failed ({exc}); nothing was issued") from None
+            err = Unavailable(f"local store write failed ({exc}); nothing was issued")
+            err.systemic = True          # C-1: a disk failure is not one item's fault: the job stops (503)
+            raise err from None
+        self._failed_named = []
+        self._carry = []
         for kind, r in op.ops:
             self._apply(kind, r)
         if op.side:
@@ -327,8 +544,18 @@ class VIService:
                 self.clipper_hmacs.setdefault(r["clipper_id"], set()).add(key)
         elif kind == "submission":
             self.submissions[r["submission_id"]] = r
+            if r.get("post_key_sha256"):
+                self.post_owner.setdefault(r["post_key_sha256"], r["submission_id"])
+            if r.get("media_sha256"):
+                self.media_owner.setdefault(r["media_sha256"], r["submission_id"])
         elif kind == "submission_update":
             self.submissions[r["submission_id"]].update(r["fields"])
+            sub = self.submissions[r["submission_id"]]
+            if sub.get("video_id_sha256"):
+                vk = (sub["platform"], sub["video_id_sha256"])
+                cur = self.video_owner.get(vk)
+                if cur is None or self.submissions[cur]["received_seq"] > sub["received_seq"]:
+                    self.video_owner[vk] = sub["submission_id"]
         elif kind == "fingerprint":
             self.fingerprints[r["submission_id"]] = r
         elif kind == "fetch":
@@ -344,6 +571,11 @@ class VIService:
         elif kind == "certification":
             self.certs[r["certification_id"]] = r
             self.cert_by_sub[r["submission_id"]] = r["certification_id"]
+            if r["status"] in ("certified", "revised"):
+                lst = self.certified_by_platform.setdefault(r["platform"], [])
+                if r["submission_id"] not in lst:
+                    lst.append(r["submission_id"])
+                    self.certified_by_clipper.setdefault((r["clipper_id"], r["platform"]), []).append(r["submission_id"])
         elif kind == "clawback":
             self.clawbacks[r["clawback_id"]] = r
         elif kind == "hold":
@@ -379,7 +611,22 @@ class VIService:
             self.job_runs[(r["job"], r["day"])] = r
         elif kind == "screen":
             self.screens[r["submission_id"]] = r
-        # lease, reconcile, founder_refused, injection, retention, audit: evidence only
+        elif kind == "legacy_minor_resolved":
+            self.legacy_resolved.add(r["subject_id"])
+        elif kind == "job_item":
+            k = (r["job"], r["subject_id"])
+            if "failures" in r:
+                self.job_items[k] = {"failures": r["failures"], "next_try": parse_iso(r["next_try"]),
+                                     "last_error": r.get("error", ""), "attempted": [], "persisted": True}
+            else:
+                self.job_items.pop(k, None)          # resolved (or a skipped item's attempts named)
+        elif kind == "dead_letter":
+            k = (r["job"], r["subject_id"])
+            if r.get("cleared"):
+                self.dead_letters.pop(k, None)
+            else:
+                self.dead_letters[k] = r
+        # lease, reconcile, founder_refused, injection, retention, audit, age_answer (old logs): evidence only
 
     def _apply_quota(self, q: dict) -> None:
         at = parse_iso(q["at"])
@@ -409,17 +656,21 @@ class VIService:
 
     # --- log vs ledger (AEGIS N14-4 / N15-1 / N15-2 pattern)
 
-    def assess_log(self) -> i10.Assessment:
-        client = self.recorder.client
-        if not hasattr(client, "entries"):
-            raise LedgerQueryFailed("this ledger client cannot read entries")
-        entries = client.entries()
+    def assess_log(self, entries: Optional[list] = None) -> i10.Assessment:
+        if entries is None:
+            client = self.recorder.client
+            if not hasattr(client, "entries"):
+                raise LedgerQueryFailed("this ledger client cannot read entries")
+            entries = client.entries()
         shas = self.log.line_shas()
-        lines, referenced, leases, reconciles, metas = [], set(), [], [], []
+        lines, referenced, leases, reconciles, metas, named, attempted = [], set(), [], [], [], set(), set()
         for rec, s in zip(self.log.iter_records(), shas):
             d = rec["data"]
             lines.append((rec["seq"], s, bool(d.get("anchored"))))
             referenced.update(d.get("ledger_event_ids") or [])
+            # bug sweep C R6: each committed action carries the seq of its line (its anchor's ledger position)
+            named.update((n.get("rk"), n.get("event_type"), rec["seq"]) for n in d.get("evidence") or [])
+            attempted.update(x for x in d.get("attempted_event_ids") or [] if isinstance(x, str))
             for kind, r in d.get("ops", []):
                 if kind == "lease":
                     leases.append((rec["seq"], r.get("instance_id"), r.get("lease_event_id")))
@@ -428,8 +679,9 @@ class VIService:
                 elif kind == "decision" and r.get("version"):
                     metas.append(r["version"])
         return i10.assess(entries, self.log.epoch, lines, referenced, self.rules_version or 0,
-                          strict=not self.log.in_memory, local_rulings=set(), local_leases=leases, reconciles=reconciles,
-                          local_versions=i10.local_version_events(self.log.epoch, metas))
+                          strict=not self.log.in_memory, local_rulings=attempted, local_leases=leases,
+                          reconciles=reconciles,
+                          local_versions=i10.local_version_events(self.log.epoch, metas), committed_actions=named)
 
     def snapshot_evidence_problems(self, entries: Optional[list] = None) -> list[str]:
         """A1: every snapshot's ledger event must carry the SHA-256 of the snapshot record the log holds."""
@@ -438,22 +690,38 @@ class VIService:
         held = {e.get("event_id"): e.get("payload_sha256") for e in entries
                 if isinstance(e, dict) and e.get("department") == "verification_integrity"}
         bad = [s["snapshot_id"] for s in self.snapshots.values()
-               if held.get(s["ledger_event_id"]) != payload_sha256(self._snapshot_payload(s))]
+               if held.get(s["ledger_event_id"]) != payload_sha256(self._snapshot_ledger_payload(s))]
         return [f"{len(bad)} snapshot(s) whose ledger payload hash differs or is missing (first {bad[0]})"] if bad else []
 
     def integrity(self) -> dict:
+        """Bug sweep C (slow I/O under the lock): the ledger read (an HTTP call) and the local chain re-read (a disk
+        read) run OUTSIDE the service lock; only the comparison runs under it."""
+        chain = self.log.verify()
+        n0 = len(self.log)
+        try:
+            entries = self.recorder.client.entries()
+        except LedgerQueryFailed as exc:
+            return {"status": "red", "problems": [f"ledger unreadable: {exc}"]}
         with self.lock:
-            try:
-                entries = self.recorder.client.entries()
-                a = self.assess_log()
-                problems = a.problems + self.snapshot_evidence_problems(entries)
-                chain = self.log.verify()
-            except LedgerQueryFailed as exc:
-                return {"status": "red", "problems": [f"ledger unreadable: {exc}"]}
+            if len(self.log) != n0:
+                # a commit landed while the ledger was read: its anchor may be missing from that read (rare; re-read)
+                try:
+                    entries = self.recorder.client.entries()
+                except LedgerQueryFailed as exc:
+                    return {"status": "red", "problems": [f"ledger unreadable: {exc}"]}
+            a = self.assess_log(entries)
+            problems = a.problems + self.snapshot_evidence_problems(entries)
             if not chain:
                 problems.append("local log hash chain does not verify")
+            if self.log.fault:
+                problems.append(f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}")
+            legacy = len(self._minors_without_base())
+            if self.dead_letters:
+                problems.append(f"{len(self.dead_letters)} job item(s) parked in the dead-letter list for Andre "
+                                "(GET /vi/v1/jobs/dead-letter)")
             return {"status": "red" if problems else "green", "problems": problems,
-                    "log_lines": len(self.log), "rules_version": self.rules_version}
+                    "log_lines": len(self.log), "rules_version": self.rules_version,
+                    "legacy_minors_without_base": legacy}
 
     def _write_lease(self) -> None:
         with self.lock:
@@ -463,7 +731,7 @@ class VIService:
             op = Op(self, f"lease|{self.instance_id}", EVIDENCE, i10.LOG_SUBJECT)
             op.record(eid, i10.LEASE_TYPE, EVIDENCE, i10.LOG_SUBJECT,
                       {"instance_id": self.instance_id, "epoch": self.log.epoch, "head_seq": n, "head_sha256": head},
-                      f"V&I instance lease at log line {n}")
+                      f"V&I instance lease at log line {n}", raw=True)
             op.add("lease", {"instance_id": self.instance_id, "lease_event_id": eid, "head_seq": n, "head_sha256": head})
             self._commit(op)
 
@@ -501,7 +769,7 @@ class VIService:
                 op = Op(self, f"reconcile|{eid}", "andre", i10.LOG_SUBJECT)
                 op.record(eid, i10.RECONCILE_TYPE, "andre", i10.LOG_SUBJECT, payload,
                           f"Andre reconciled the local log at line {plan['head_seq']}: "
-                          f"{len(payload['void_event_ids'])} ledger event(s) declared void")
+                          f"{len(payload['void_event_ids'])} ledger event(s) declared void", raw=True)
                 op.add("reconcile", {"payload": payload, "reconcile_event_id": eid, "request_id": request_id})
                 self._commit(op)
             finally:
@@ -729,15 +997,17 @@ class VIService:
         if not oids or self.reconcile_mode:
             return out
         c = self.ports.compliance
-        nonce = secrets.token_hex(8)
+        # bug sweep C (reads must not write): one crossing per row per UTC day (a deterministic id, so a repeat read
+        # is the same event: the ledger answers 200 and stores nothing); before, every read recorded a new one
+        day = self._now().date().isoformat()
         eids: dict[str, str] = {}
         for oid in oids:
-            eid = derived_id("x", "compliance_prefetch", nonce, oid)
+            eid = derived_id("x", "compliance_prefetch", day, oid)
             try:
                 with self._xlock:           # record-first: the crossing is on the ledger before the call is made
                     self.recorder.record(eid, "crossing_compliance_38_requested", EVIDENCE, "compliance_38",
                                          {"port": "compliance_38", "action": "register_row",
-                                          "args_sha256": sha([oid]), "op": f"prefetch|{nonce}"},
+                                          "args_sha256": sha([oid]), "op": f"prefetch|{day}"},
                                          "Request to compliance_38: register_row")
             except LedgerRecordError:
                 out[oid] = (RegisterRow(False, oid), None)      # not recorded: not asked, unavailable
@@ -827,10 +1097,52 @@ class VIService:
         for (ns, subj), aid in self.latest_age.items():
             if ns != CN_NAMESPACE or subj == exclude or self.ages[aid]["result"] != "minor":
                 continue
+            legacy = subj in self._legacy_minor_set()
             for k in self.clipper_hmacs.get(subj, set()):
-                if k[0] in IDENTITY_LOCK_KINDS:
+                # AEGIS L3-R: a minor recorded before email_base existed is matched by everything V&I keeps for it
+                # (exact e-mail and payout HMACs, and its platform account HMACs), never by a global freeze
+                if k[0] in IDENTITY_LOCK_KINDS or (legacy and k[0].startswith("account:")):
                     out.setdefault(k, aid)
         return out
+
+    def _minors_without_base(self) -> list[str]:
+        """AEGIS L-3 / L3-R: Clipper Network minors whose identity check predates the canonical-mailbox HMAC
+        (``email_base``) and that Andre has not marked resolved. V&I never stores a raw address, so it cannot be
+        computed at load: such a minor is still matched by its exact e-mail / payout / account HMACs
+        (``_minor_identities``), but not by a ``+tag``/``-tag``/homoglyph variant. Reported as
+        ``legacy_minors_without_base`` (/health, /vi/v1/integrity) so Andre sees the gap."""
+        out = []
+        for (ns, subj), aid in self.latest_age.items():
+            if ns == CN_NAMESPACE and self.ages[aid]["result"] == "minor" and subj not in self.legacy_resolved:
+                kinds = {k for k, _ in self.clipper_hmacs.get(subj, set())}
+                if "email_base" not in kinds:
+                    out.append(subj)
+        return sorted(out)
+
+    def _legacy_minor_set(self) -> set:
+        return {subj for (ns, subj), aid in self.latest_age.items()
+                if ns == CN_NAMESPACE and self.ages[aid]["result"] == "minor"
+                and "email_base" not in {k for k, _ in self.clipper_hmacs.get(subj, set())}}
+
+    def resolve_legacy_minor(self, request_id: str, subject_id: str, note: str) -> dict:
+        """AEGIS L3-R: Andre marks a legacy minor record (no ``email_base``) resolved — e.g. after checking by hand that
+        no other clipper is the same person. Recorded evidence; the exact-HMAC lock on that minor stays."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, "age/legacy-minors/resolve", {"s": subject_id, "n": note})
+            if ent:
+                return ent["response"]
+            if subject_id not in self._minors_without_base():
+                raise NotFound("no unresolved legacy minor record for this subject")
+            op = Op(self, f"lmr|{subject_id}|{request_id}", "andre", subject_id[:128])
+            op.record(derived_id("lmr", subject_id), "legacy_minor_resolved", "andre", subject_id[:128],
+                      {"subject_id": subject_id, "note_sha256": sha_text(note)},
+                      "Andre marked a legacy minor record resolved (no mailbox HMAC)")
+            op.add("legacy_minor_resolved", {"subject_id": subject_id, "note_sha256": sha_text(note),
+                                             "at": iso(self._now())})
+            self._commit(op)
+            return self._idem_store(key, h, {"subject_id": subject_id, "resolved": True,
+                                             "legacy_minors_without_base": len(self._minors_without_base()),
+                                             "ledger_event_ids": op.events})
 
     def _identity_minor(self, subject_id: str) -> Optional[str]:
         mine = {k for k in self.clipper_hmacs.get(subject_id, set()) if k[0] in IDENTITY_LOCK_KINDS}
@@ -1010,12 +1322,22 @@ class VIService:
                                                           "account with at least 100 followers", (), rules))
                             kind = f"account:{platform}"
                             other = self.hmac_owner.get((kind, acct_hmac))
-                            if (kind, acct_hmac) in self.banned or (other is not None and other != clipper_id):
+                            banned = (kind, acct_hmac) in self.banned
+                            if banned or (other is not None and other != clipper_id):
                                 finding, held = self._identity_finding(op, "account_shared", "ACCOUNT_SHARED", clipper_id,
                                                                        other, kind, now, (cid,))
-                                reasons.append(R.item("ACCOUNT_SHARED", "this social account is already held by another "
-                                                      "clipper identity (or is banned)",
-                                                      [finding["finding_id"]] if finding else (), rules))
+                                # bug sweep C: Andre's overturn of this exact finding stands (never for a banned account)
+                                if banned or finding["status"] != "overturned":
+                                    reasons.append(R.item("ACCOUNT_SHARED", "this social account is already held by "
+                                                          "another clipper identity (or is banned)",
+                                                          [finding["finding_id"]] if finding else (), rules))
+                cur = self._active_connection(clipper_id, platform)
+                if cur is not None and acct_hmac is not None and cur["platform_account_id_hmac"] != acct_hmac:
+                    # AEGIS H-1: one active connection per clipper and platform. A second account would let the
+                    # revision watch read through an account that cannot see the certified post; the clipper revokes
+                    # the old one first (which suspends what it watches, C-3)
+                    reasons.append(R.item("CONNECTION_EXISTS", "another account of this platform is still connected: "
+                                          "revoke it first", (cur["connection_id"],), rules))
                 status = "active" if not reasons else "refused"
                 if status == "refused" and vref is not None:
                     op.call("vault", "destroy", (cid,), lambda: v.destroy(vref), False)
@@ -1053,8 +1375,11 @@ class VIService:
         id of the check or connection that found the match (a finding Clipper Network can resolve, N16-6)."""
         rules = self.rules()
         fid = rid("fnd", kind, newer, older, hmac_kind)
-        existing = self.findings.get(fid)
-        if existing and existing["status"] == "open":
+        existing = self.findings.get(fid) or next((r for k, r in reversed(op.ops)
+                                                   if k == "finding" and r["finding_id"] == fid), None)
+        if existing is not None:
+            # bug sweep C: the same match was already found and, if decided, Andre's (or a delegate's) decision
+            # stands: an overturned finding is never reopened by re-running the check on the same evidence
             return existing, []
         f = {"finding_id": fid, "kind": kind, "code": code, "subject_kind": "clipper", "subject_id": newer,
              "clipper_id": newer, "other_clipper_id": older, "status": "open", "evidence_ids": list(evidence),
@@ -1110,6 +1435,9 @@ class VIService:
         op.record(derived_id("con", c["connection_id"], "revoked"), "connection_revoked", i01.ACTOR, c["clipper_id"],
                   {"connection_id": c["connection_id"], "why_sha256": sha_text(why)}, "Connection revoked")
         op.add("connection", dict(c, status="revoked", revoked_at=iso(now), vault_ref=None))
+        # bug sweep C (C-3): no revision watch is possible without the grant: certified clips of this connection's
+        # platform still inside their watch are suspended (not payable) and Andre is alerted (an access_lost hold)
+        self._suspend_for_revocation(op, c, now, why)
         # §B.5 VI-15b: every non-statistics datum fetched through this connection goes now (well within 24 h)
         subs = [s for s in self.submissions.values() if s["clipper_id"] == c["clipper_id"]
                 and s["platform"] == c["platform"]]
@@ -1160,6 +1488,13 @@ class VIService:
                     raise Conflict("submission already registered with different facts")
                 resp = {"submission_id": sid, "certification_id": self.cert_by_sub.get(sid), "already_registered": True}
                 return self._idem_store(key, h, resp)
+            # bug sweep C (C-2): one canonical post identity. The same post (any URL spelling, any submission, any
+            # clipper) is registered once; a second registration is refused, so it can never be certified (paid) twice
+            pk_sha = sha_text(P.post_key(body["platform"], body["post_ref"]))
+            owner = self.post_owner.get(pk_sha)
+            if owner is not None:
+                raise Conflict(f"this post is already registered as submission {owner}: one post is certified once "
+                               "(VI-20)", duplicate_of=owner)
             op = Op(self, f"sub|{sid}", i08.ACTOR, sid)
             self._injection(op, {"post_ref": body["post_ref"], "media_ref": body.get("media_ref"),
                                  "seed_media_refs": body.get("seed_media_refs")})
@@ -1181,22 +1516,35 @@ class VIService:
                        "media_sha256": s.get("media_sha256"), "signature": s.get("media_signature"),
                        "received_seq": s["received_seq"]}
                       for s in self.submissions.values() if s["clipper_id"] != body["clipper_id"]]
-            match_fn = lambda a, b: hs.match(a, b)  # noqa: E731
-            stolen = i08.check(media_sha, sig, others, seeds, lambda a, b: op.call(
-                "hasher", "match", (sha(a), sha(b)), lambda: match_fn(a, b), None))
+            # bug sweep C (quadratic stolen check): every perceptual comparison this registration needs goes to the
+            # hasher as ONE recorded crossing (one ledger event, one bounded call) instead of one recorded crossing
+            # per earlier clip: the ledger no longer grows with the square of the submissions
+            cands = [o["signature"] for o in others if o.get("signature") is not None
+                     and not (media_sha is not None and o.get("media_sha256") == media_sha)]
+            cands += [x["signature"] for x in seeds if x.get("signature") is not None]
+            verdicts: dict[str, Optional[bool]] = {}
+            if sig is not None and cands:
+                uniq = list({sha(c): c for c in cands}.items())
+
+                def match_all(sig=sig, uniq=uniq):
+                    return [hs.match(sig, c) for _, c in uniq]
+                got = op.call("hasher", "match_batch", (sha(sig), [k for k, _ in uniq]), match_all, None)
+                if isinstance(got, list) and len(got) == len(uniq):
+                    verdicts = {k: (v if isinstance(v, bool) else None) for (k, _), v in zip(uniq, got)}
+            stolen = i08.check(media_sha, sig, others, seeds, lambda a, b: verdicts.get(sha(b)))
             if not body.get("media_ref"):
                 stolen = {"status": "incomplete", "matched": [], "presumed_original": None,
                           "why": "no media_ref (the submitted file is not available to V&I)"}
             sub = {"submission_id": sid, **{k: body.get(k) for k in ("campaign_id", "rulebook_version", "clipper_id",
                                                                     "platform", "posted_at", "min_days_live",
                                                                     "collab_permitted", "target_regions")},
-                   "post_ref_sha256": facts["post_ref_sha256"], "facts_sha256": sha(facts),
+                   "post_ref_sha256": facts["post_ref_sha256"], "post_key_sha256": pk_sha, "facts_sha256": sha(facts),
                    "media_sha256": media_sha, "media_signature": sig, "stolen_check": stolen["status"],
                    "registered_at": iso(now), "received_seq": len(self.submissions) + 1, "create_time": None,
                    "video_id_sha256": None}
             op.record(derived_id("sub", sid, sub["facts_sha256"]), "submission_registered", i08.ACTOR, sid,
                       {"submission_id": sid, "facts_sha256": sub["facts_sha256"], "platform": body["platform"],
-                       "stolen_check": stolen["status"], "rules_version": self.rules_version},
+                       "post_key_sha256": pk_sha, "stolen_check": stolen["status"], "rules_version": self.rules_version},
                       f"Submission registered ({body['platform']}); stolen-content check {stolen['status']}")
             op.add("submission", sub)
             holds = []
@@ -1223,8 +1571,9 @@ class VIService:
             first = (R.item("RULES_NOT_IN_FORCE", "no V&I rule version is in force", (), rules) if self.current is None
                      else R.item("NOT_YET_SETTLED", "registered; not yet evaluated", (), rules))
             cert.update(reasons=[first], reason_lines=R.lines([first]))
-            op.record(derived_id("cer", cert["certification_id"], "pending", 0), "certification_issued", i02.ACTOR, sid,
-                      self._cert_payload(cert), "Certification record opened: pending")
+            cert["ledger_event_id"] = op.record(derived_id("cer", cert["certification_id"], "pending", 0),
+                                                "certification_issued", i02.ACTOR, sid, self._cert_payload(cert),
+                                                "Certification record opened: pending")
             op.add("certification", cert)
             if body["platform"] in P.CERTIFIABLE:
                 rule = P.RAW_RETENTION_RULE[body["platform"]]
@@ -1255,7 +1604,17 @@ class VIService:
 
     # ================================================================== fetch (i01)
 
-    def _fetch(self, op: Op, sub: dict, purpose: str, metrics: tuple, now: datetime) -> dict:
+    def _bound_account(self, cert: dict) -> Optional[str]:
+        """The account HMAC a certification is bound to (AEGIS H-1): the account of the connection it was certified
+        through (or, once suspended, the account recorded at suspension)."""
+        acct = cert.get("suspended_account_hmac")
+        if acct:
+            return acct
+        con = self.connections.get(cert.get("connection_id") or "")
+        return (con or {}).get("platform_account_id_hmac")
+
+    def _fetch(self, op: Op, sub: dict, purpose: str, metrics: tuple, now: datetime,
+               account_hmac: Optional[str] = None) -> dict:
         """One adapter call for a submission (record-first). Returns the fetch record (also staged in ``op``)."""
         rules = self.rules()
         sid, platform = sub["submission_id"], sub["platform"]
@@ -1273,6 +1632,12 @@ class VIService:
         if not self._enabled(platform) or platform not in P.CERTIFIABLE:
             return fail("platform_disabled", "PLATFORM_DISABLED", f"{platform} not enabled")
         conn = self._active_connection(sub["clipper_id"], platform)
+        if account_hmac is not None:
+            # AEGIS H-1: the revision watch reads only through a connection of the certification's own account
+            cands = [c for c in self.connections.values() if c["clipper_id"] == sub["clipper_id"]
+                     and c["platform"] == platform and c["status"] == "active"
+                     and c.get("platform_account_id_hmac") == account_hmac]
+            conn = max(cands, key=lambda c: c["seq"]) if cands else None
         if conn is None:
             return fail("not_connected", "NOT_CONNECTED", "no active connection for this platform")
         base["connection_id"] = conn["connection_id"]
@@ -1370,10 +1735,11 @@ class VIService:
                              ans.source_endpoint,
                              ans.source_response_sha256, ADAPTER_VERSION, until, stats_rule)
             s["fetch_id"] = fid
-            eid = derived_id("snp", snp)
-            s["ledger_event_id"] = eid
-            op.record(eid, "metric_snapshot_recorded", i01.ACTOR, sid, self._snapshot_payload(s),
-                      f"{platform} {metric} snapshot: {val}")
+            rk = derived_id("snp", snp)
+            s["ledger_event_id"] = op.record(rk, "metric_snapshot_recorded", i01.ACTOR, sid, self._snapshot_payload(s),
+                                             f"{platform} {metric} snapshot: {val}")
+            if s["ledger_event_id"] != rk:     # bug sweep C R6: the ledger payload carries rk and seq
+                s["evidence_rk"], s["evidence_seq"] = rk, len(self.log) + 1
             op.add("snapshot", s)
             rec["snapshot_ids"].append(snp)
         op.record(derived_id("fch", fid), "platform_fetched", i01.ACTOR, sid,
@@ -1391,6 +1757,15 @@ class VIService:
             op.add("submission_update", {"submission_id": sid, "fields": {
                 "create_time": rec["video"]["create_time"], "video_id_sha256": rec["video"]["video_id_sha256"]}})
         return rec
+
+    @classmethod
+    def _snapshot_ledger_payload(cls, s: dict) -> dict:
+        """What the snapshot's ledger event hashed: the snapshot record, plus (bug sweep C R6) its ``rk`` and ``seq``
+        when it was recorded under an evidence id (snapshots recorded before carry neither)."""
+        p = cls._snapshot_payload(s)
+        if s.get("evidence_rk"):
+            p = {**p, "rk": s["evidence_rk"], "seq": s["evidence_seq"]}
+        return p
 
     @staticmethod
     def _snapshot_payload(s: dict) -> dict:
@@ -1512,7 +1887,7 @@ class VIService:
         rules = self.rules()
         sid = sub["submission_id"]
         cert = dict(self.certs[self.cert_by_sub[sid]])
-        if cert["status"] in ("certified", "revised", "voided"):
+        if cert["status"] in FINAL_OR_WATCHED:
             return cert
         gathered: list[dict] = []
         lag, source, reg_version, lag_reasons = self._lag(op)
@@ -1555,7 +1930,7 @@ class VIService:
                 gathered.append(R.item("METRIC_UNAVAILABLE", "settlement fetch returned no views value",
                                        (sfetch["fetch_id"],), rules))
             if snap is not None and entries_held is not None and \
-                    entries_held.get(snap["ledger_event_id"]) != payload_sha256(self._snapshot_payload(snap)) and \
+                    entries_held.get(snap["ledger_event_id"]) != payload_sha256(self._snapshot_ledger_payload(snap)) and \
                     snap["ledger_event_id"] not in op.events:
                 gathered.append(R.item("SETTLEMENT_SNAPSHOT_MISSING", "settlement snapshot evidence does not match the "
                                        "ledger", (snap["snapshot_id"],), rules))
@@ -1601,6 +1976,10 @@ class VIService:
             if sub.get("min_days_live") is None:
                 gathered.append(R.item("MIN_LIVE_UNKNOWN", "the rulebook's minimum live days were not registered", (),
                                        rules))
+        dup = self._duplicate_post_of(op, sid)
+        if dup is not None:
+            gathered.append(R.item("DUPLICATE_POST", f"same platform post as submission {dup} (one post is certified "
+                                   "once)", (dup,), rules))
         # holds, findings, age, identity
         for hh in self._open_holds([("clip", sid), ("clipper", sub["clipper_id"])]) + \
                 [x for x in self._staged(op, "hold") if x["status"] == "open"
@@ -1624,6 +2003,25 @@ class VIService:
             new["evidence_ids"] = sorted({snap["snapshot_id"], snap["fetch_id"]} | set(new["evidence_ids"]))
         return new
 
+    def _duplicate_post_of(self, op: Optional[Op], sid: str) -> Optional[str]:
+        """C-2: another submission of the same platform video (learned at a fetch: a short link, another spelling
+        the registration check could not see). The one already certified (or suspended) wins; else the one received
+        first. Returns that submission's id when ``sid`` is not it."""
+        sub = self._sub_now(op, sid) if op is not None else self.submissions[sid]
+        vid = sub.get("video_id_sha256")
+        if not vid:
+            return None
+        same = [x for x in self.submissions.values()
+                if x["submission_id"] != sid and x["platform"] == sub["platform"] and x.get("video_id_sha256") == vid]
+        if not same:
+            return None
+        paid = [x for x in same if self.certs[self.cert_by_sub[x["submission_id"]]]["status"]
+                in ("certified", "revised", "suspended")]
+        if paid:
+            return min(paid, key=lambda x: x["received_seq"])["submission_id"]
+        first = min(same, key=lambda x: x["received_seq"])
+        return first["submission_id"] if first["received_seq"] < sub["received_seq"] else None
+
     def _cert_update(self, cert: dict, status: str, reasons: list[dict], views: Optional[int], w: Optional[dict],
                      source: str, reg_version: Optional[int], now: datetime) -> dict:
         new = dict(cert, status=status, reasons=reasons, reason_lines=R.lines(reasons), certified_views=views,
@@ -1640,12 +2038,13 @@ class VIService:
 
     def _issue_cert(self, op: Op, new: dict, now: datetime) -> dict:
         new = dict(new, evaluation=new["evaluation"] + 1)
-        eid = derived_id("cer", new["certification_id"], new["evaluation"], new["status"], sha(new["reasons"]))
-        new["ledger_event_id"] = eid
-        op.record(eid, "certification_issued", i02.ACTOR, new["submission_id"], self._cert_payload(new),
-                  f"Certification {new['status']}" + (f": {new['certified_views']} {new['metric_name']}"
-                                                      if new["certified_views"] is not None else
-                                                      f" ({len(new['reasons'])} reasons)"))
+        rk = derived_id("cer", new["certification_id"], new["evaluation"], new["status"], sha(new["reasons"]))
+        new["ledger_event_id"] = op.record(rk, "certification_issued", i02.ACTOR, new["submission_id"],
+                                           self._cert_payload(new),
+                                           f"Certification {new['status']}" + (
+                                               f": {new['certified_views']} {new['metric_name']}"
+                                               if new["certified_views"] is not None else
+                                               f" ({len(new['reasons'])} reasons)"))
         op.add("certification", new)
         self._integrity_findings(op, new, now)
         return new
@@ -1746,27 +2145,24 @@ class VIService:
         country = {s["dimension"]["country"]: s["value"] for s in snaps if s["metric"] == "country_views" and s["dimension"]}
         fetch = settlement[1] if settlement else None
         duration = ((fetch or {}).get("video") or {}).get("duration_ms")
-        peaks = []
-        for c in self.certs.values():
-            if c["clipper_id"] != sub["clipper_id"] or c["submission_id"] == sid or c["platform"] != sub["platform"] \
-                    or c["status"] not in ("certified", "revised"):
-                continue
-            other = self.submissions[c["submission_id"]]
-            if other.get("create_time") is None or not i06.baseline_ok(sub["platform"], ct, other["create_time"]):
-                continue
-            ser = sorted((int(parse_iso(s["fetched_at"]).timestamp()), s["value"]) for s in self._snapshots_of(None, c["submission_id"])
-                         if s["metric"] == "views" and s["dimension"] is None)
-            pk = i06.peak_daily_gain(ser)
-            if pk is not None:
-                peaks.append(pk)
+        # velocity baseline: the clipper's own certified clips (last 20); bug sweep C: a NEW identity (fewer than
+        # VI_ANOM_MIN_HISTORY of its own) is measured against the platform's certified clips instead (last 50) —
+        # before, a fresh account had no baseline, so its velocity signal was never evaluated
+        peaks = self._baseline(self.certified_by_clipper.get((sub["clipper_id"], sub["platform"]), []), sid,
+                               sub["platform"], ct, 20)
+        baseline = "clipper"
+        if len(peaks) < self.cfg.anom_min_history:
+            peaks = self._baseline(self.certified_by_platform.get(sub["platform"], []), sid, sub["platform"], ct, 50)
+            baseline = "platform"
         cn = self.ports.clipper_network
         cap = op.call("clipper_network", "view_cap", (sub["campaign_id"],), lambda: cn.view_cap(sub["campaign_id"]),
                       ViewCap(False))
         cap = cap if isinstance(cap, ViewCap) else ViewCap(False)
         x = i06.ScreenInput(sub["platform"], ct, series, latest.get("views"), latest.get("likes"),
                             latest.get("avg_view_percentage"), latest.get("reels_avg_watch_time_ms"), duration, country,
-                            sub.get("target_regions"), peaks[-20:], cap.available,
-                            cap.cap if isinstance(cap.cap, int) and not isinstance(cap.cap, bool) else None)
+                            sub.get("target_regions"), peaks, cap.available,
+                            cap.cap if isinstance(cap.cap, int) and not isinstance(cap.cap, bool) else None,
+                            baseline=baseline)
         res = i06.screen(x, self.cfg, self.rules(), (sid,))
         scr = {"screen_id": rid("scr", sid, iso(now)), "submission_id": sid, "at": iso(now), "decision": res["decision"],
                "signals": res["signals"], "decision_rate": res["decision_rate"], "reasons": res["reasons"]}
@@ -1781,30 +2177,218 @@ class VIService:
                             key=",".join(R.codes(res["reasons"])))
         return scr
 
+    def _peak(self, sid: str, op: Optional[Op] = None) -> Optional[int]:
+        """Peak 24-h views gain of a submission, cached by its snapshot count (bug sweep C: screens no longer re-read
+        every snapshot of every baseline clip each time)."""
+        snaps = self._snapshots_of(op, sid)
+        if op is None:
+            hit = self._peaks.get(sid)
+            if hit is not None and hit[0] == len(snaps):
+                return hit[1]
+        ser = sorted((int(parse_iso(x["fetched_at"]).timestamp()), x["value"]) for x in snaps
+                     if x["metric"] == "views" and x["dimension"] is None)
+        pk = i06.peak_daily_gain(ser)
+        if op is None:
+            self._peaks[sid] = (len(snaps), pk)
+        return pk
+
+    def _baseline(self, sids: list[str], exclude: str, platform: str, ct: int, n: int) -> list[int]:
+        out: list[int] = []
+        for other_id in reversed(sids):
+            if len(out) >= n:
+                break
+            other = self.submissions[other_id]
+            if other_id == exclude or other.get("create_time") is None \
+                    or not i06.baseline_ok(platform, ct, other["create_time"]):
+                continue
+            pk = self._peak(other_id)
+            if pk is not None:
+                out.append(pk)
+        return list(reversed(out))
+
     # ================================================================== jobs
 
     def run_job(self, principal: str, request_id: str, job: str) -> dict:
+        """One cycle of a scheduler job. Bug sweep C (C-1): every clip is its own item, under the service lock only
+        while that item runs (never for the whole job), with its port calls bounded (VI_PORT_CALL_TIMEOUT_S). An item
+        that fails is retried with backoff (next run, then 1 h, 4 h, 24 h) and never stops the items after it; after
+        VI_JOB_ITEM_MAX_FAILURES failed runs in a row it is parked in the dead-letter list (``job_item_dead_lettered``,
+        /vi/v1/integrity red) until Andre requeues it. A failure that is not the item's (the local store, or every
+        item of the run failing) answers 503 and parks nothing. The (job, day) ``job_run`` record is written only by
+        a run in which nothing failed or waited."""
         if job not in JOBS:
             raise NotFound("no such job")
+        with self.lock:
+            ran = (job, self._now().date().isoformat()) in self.job_runs
         oids: set[str] = set()
-        if job == "certify" and (job, self._now().date().isoformat()) not in self.job_runs:
+        if job == "certify" and not ran:
             oids = self._basis_oids(CERTIFY_RULES) | {"HR-13"}      # once per job run, outside the lock (N16-1)
-        with self._compliance_snapshot(oids), self.lock:
-            key, h, ent = self._idem(principal, request_id, f"jobs/{job}", {})
+        jl = self._job_locks[job]
+        if not jl.acquire(blocking=False):
+            raise Conflict(f"the {job} job is already running; retry when it ends")
+        try:
+            with self._compliance_snapshot(oids):
+                with self.lock:
+                    key, h, ent = self._idem(principal, request_id, f"jobs/{job}", {})
+                    if ent:
+                        return ent["response"]
+                    if self._closed:
+                        raise Unavailable("SERVICE_CLOSED: this V&I instance is closed; nothing was issued")
+                    now = self._now()
+                    day = now.date().isoformat()
+                    done = self.job_runs.get((job, day))
+                    if done is not None:
+                        return self._idem_store(key, h, {"job": job, "day": day, "already_ran": True,
+                                                         "summary": done["summary"]})
+                held = self._ledger_held() if job == "certify" else None   # a ledger read: outside the lock
+                run = JobRun(job, now)
+                summary = getattr(self, f"_job_{job}")(now, run, held)
+                self._settle_run(run)
+                with self.lock:
+                    summary = {**summary, **run.counts()}
+                    if run.incomplete:
+                        return self._idem_store(key, h, {"job": job, "day": day, "already_ran": False,
+                                                         "complete": False, "summary": summary})
+                    op = Op(self, f"job|{job}|{day}", i01.ACTOR, f"job:{job}")
+                    op.record(derived_id("job", job, day), "job_cycle_completed", EVIDENCE, f"job:{job}",
+                              {"job": job, "day": day, "summary_sha256": sha(summary)},
+                              f"Scheduler job {job} ran for {day}")
+                    op.add("job_run", {"job": job, "day": day, "at": iso(now), "summary": summary})
+                    self._commit(op)
+                    return self._idem_store(key, h, {"job": job, "day": day, "already_ran": False, "summary": summary,
+                                                     "ledger_event_ids": op.events})
+        finally:
+            jl.release()
+
+    def _item(self, run: "JobRun", subject: str, fn: Callable[[], Any]) -> Any:
+        """Run one job item under the service lock (bug sweep C, C-1). Returns ``fn()``'s value, or None when the
+        item is parked, waiting out its backoff, or failed (recorded on ``run``; never raised, unless systemic)."""
+        k = (run.job, subject)
+        with self.lock:
+            if k in self.dead_letters:
+                run.parked_seen += 1
+                return None
+            st = self.job_items.get(k)
+            if st is not None and st["next_try"] > run.now:
+                run.deferred += 1
+                return None
+            self._failed_named = []
+            self._carry = list((st or {}).get("attempted", []))
+            try:
+                out = fn()
+            except Unavailable as exc:
+                self._carry = []
+                if getattr(exc, "systemic", False):
+                    raise
+                run.failures.append((subject, exc.reason, [n["event_id"] for n in self._failed_named]))
+                return None
+            except Exception as exc:  # noqa: BLE001 - one item's bug never blocks the others; it is parked, visibly
+                self._carry = []
+                run.failures.append((subject, f"internal error ({type(exc).__name__})",
+                                     [n["event_id"] for n in self._failed_named]))
+                return None
+            if (out is SKIP and self._carry) or (st or {}).get("persisted"):
+                # the item succeeded or needs nothing any more: its failed tries' evidence is named by one line (a
+                # restart never takes it for another instance's rulings) and a persisted failure count is cleared
+                op = Op(self, f"jis|{run.job}|{subject}|{iso(run.now)}", EVIDENCE, subject[:128])
+                op.add("job_item", {"job": run.job, "subject_id": subject, "attempted": len(self._carry),
+                                    "cleared": True})
+                try:
+                    self._commit(op)
+                except Unavailable:
+                    self._carry = []
+                    return None
+            self._carry = []
+            self.job_items.pop(k, None)
+            if out is SKIP:
+                return None
+            run.ok += 1
+            return out
+
+    def _settle_run(self, run: "JobRun") -> None:
+        """Count the run's item failures (backoff, then the dead-letter list) — or, when the run achieved nothing
+        and more than one item failed, treat it as systemic (the ledger, not the items): 503, nothing counted."""
+        if not run.failures:
+            return
+        if run.ok == 0 and len(run.failures) >= 2:
+            raise Unavailable(f"every item of the {run.job} job failed ({run.failures[0][1][:200]}); nothing was "
+                              "issued; the job can run again")
+        parked = 0
+        with self.lock:
+            for subject, why, attempted in run.failures:
+                k = (run.job, subject)
+                st = self.job_items.setdefault(k, {"failures": 0, "next_try": run.now, "attempted": []})
+                st["failures"] += 1
+                st["last_error"] = why
+                st["attempted"] = (st.get("attempted", []) + [a for a in attempted
+                                                              if a not in st.get("attempted", [])])[-200:]
+                wait = JOB_ITEM_BACKOFF_H[min(st["failures"], len(JOB_ITEM_BACKOFF_H)) - 1]
+                st["next_try"] = run.now + timedelta(hours=wait)
+                if st["failures"] < self.cfg.job_item_max_failures:
+                    self._persist_item(run.job, subject, st, run.now)
+                if st["failures"] >= self.cfg.job_item_max_failures:
+                    try:
+                        self._dead_letter(run.job, subject, st["failures"], why, run.now)
+                        parked += 1
+                    except Unavailable:
+                        pass         # the ledger is down too: the item stays counted and is retried first
+        run.parked = parked
+        if run.ok == 0 and parked == 0:
+            raise Unavailable(f"the {run.job} job's only due item failed ({run.failures[0][1][:200]}); nothing was "
+                              "issued; it is retried with backoff")
+
+    def _persist_item(self, job: str, subject: str, st: dict, now: datetime) -> None:
+        """AEGIS L-1: an item's failure count and backoff go to the log (rebuilt at start), so a restart does not
+        reset the count toward the dead-letter list; the line also names the failed tries' evidence. Best effort:
+        when the ledger is down too, the count stays in memory and the next failure records it."""
+        op = Op(self, f"jif|{job}|{subject}|{st['failures']}|{iso(now)}", EVIDENCE, subject[:128])
+        op.add("job_item", {"job": job, "subject_id": subject, "failures": st["failures"],
+                            "next_try": iso(st["next_try"]), "error": st.get("last_error", "")[:200]})
+        self._carry = list(st.get("attempted", []))
+        try:
+            self._commit(op)
+            st["attempted"] = []
+            st["persisted"] = True
+        except Unavailable:
+            pass
+        finally:
+            self._carry = []
+
+    def _dead_letter(self, job: str, subject: str, failures: int, why: str, now: datetime) -> None:
+        op = Op(self, f"dlq|{job}|{subject}|{iso(now)}", EVIDENCE, subject[:128])
+        # the evidence its failed tries recorded (never committed) is named by this line: never taken for a ghost
+        self._carry = list(self.job_items.get((job, subject), {}).get("attempted", []))
+        op.record(derived_id("dlq", job, subject, iso(now)), "job_item_dead_lettered", EVIDENCE, subject[:128],
+                  {"job": job, "subject_id": subject, "failures": failures, "error_sha256": sha_text(why)},
+                  f"Job {job}: item parked for Andre after {failures} failed runs")
+        op.add("dead_letter", {"job": job, "subject_id": subject, "failures": failures, "error": why[:200],
+                               "parked_at": iso(now)})
+        self._commit(op)
+        self.job_items.pop((job, subject), None)
+
+    def dead_letter_list(self) -> dict:
+        with self.lock:
+            return {"items": [dict(v) for _, v in sorted(self.dead_letters.items())],
+                    "retrying": [{"job": j, "subject_id": s, "failures": st["failures"], "next_try": iso(st["next_try"]),
+                                  "error": st.get("last_error", "")[:200]}
+                                 for (j, s), st in sorted(self.job_items.items())]}
+
+    def requeue_dead_letter(self, request_id: str, job: str, subject: str) -> dict:
+        """Andre puts a parked item back (bug sweep C, C-1): the next run of the job retries it."""
+        with self.lock:
+            key, h, ent = self._idem("andre", request_id, "jobs/dead-letter/requeue", {"job": job, "subject": subject})
             if ent:
                 return ent["response"]
+            if (job, subject) not in self.dead_letters:
+                raise NotFound("no such parked item")
             now = self._now()
-            day = now.date().isoformat()
-            done = self.job_runs.get((job, day))
-            if done is not None:
-                return self._idem_store(key, h, {"job": job, "day": day, "already_ran": True, "summary": done["summary"]})
-            summary = getattr(self, f"_job_{job}")(now)
-            op = Op(self, f"job|{job}|{day}", i01.ACTOR, f"job:{job}")
-            op.record(derived_id("job", job, day), "job_cycle_completed", EVIDENCE, f"job:{job}",
-                      {"job": job, "day": day, "summary_sha256": sha(summary)}, f"Scheduler job {job} ran for {day}")
-            op.add("job_run", {"job": job, "day": day, "at": iso(now), "summary": summary})
+            op = Op(self, f"dlr|{job}|{subject}|{request_id}", "andre", subject[:128])
+            op.record(derived_id("dlr", job, subject, request_id), "job_item_requeued", "andre", subject[:128],
+                      {"job": job, "subject_id": subject}, f"Andre requeued a parked {job} item")
+            op.add("dead_letter", {"job": job, "subject_id": subject, "cleared": True, "by": "andre", "at": iso(now)})
             self._commit(op)
-            return self._idem_store(key, h, {"job": job, "day": day, "already_ran": False, "summary": summary,
+            self.job_items.pop((job, subject), None)
+            return self._idem_store(key, h, {"job": job, "subject_id": subject, "requeued": True,
                                              "ledger_event_ids": op.events})
 
     def _in_watch(self, sub: dict, now: datetime) -> bool:
@@ -1821,19 +2405,27 @@ class VIService:
             end = max(end, w["min_live_end"])
         return start <= now <= end
 
-    def _job_liveness(self, now: datetime) -> dict:
+    def _subs_in_order(self, key=None) -> list[str]:
+        with self.lock:
+            subs = sorted(self.submissions.values(), key=lambda x: x["received_seq"])
+            if key is not None:
+                subs = sorted(subs, key=key)
+            return [x["submission_id"] for x in subs]
+
+    def _job_liveness(self, now: datetime, run: JobRun, held: Optional[dict]) -> dict:
         today = now.date().isoformat()
         out = {"checked": 0, "live": 0, "not_live": 0, "unknown": 0}
-        subs = sorted(self.submissions.values(), key=lambda s: s["received_seq"])
+
         # priority: clips inside their min-live period first (§C.1)
-        def in_min_live(s):
-            if not s.get("create_time") or not s.get("min_days_live"):
+        def in_min_live(x):
+            if not x.get("create_time") or not x.get("min_days_live"):
                 return 1
-            return 0 if now <= datetime.fromtimestamp(s["create_time"], timezone.utc) + timedelta(days=s["min_days_live"]) else 1
-        for sub in sorted(subs, key=in_min_live):
-            sid = sub["submission_id"]
+            return 0 if now <= datetime.fromtimestamp(x["create_time"], timezone.utc) + timedelta(days=x["min_days_live"]) else 1
+
+        def item(sid: str):
+            sub = self.submissions[sid]
             if (sid, today) in self.liveness or not self._in_watch(sub, now):
-                continue
+                return SKIP
             op = Op(self, f"liv|{sid}|{today}", i04.ACTOR, sid)
             purpose = "liveness" if in_min_live(sub) == 0 else "revision"
             f = self._fetch(op, self._sub_now(op, sid), purpose, ("views", "likes"), now)
@@ -1852,26 +2444,40 @@ class VIService:
             chk = rid("liv", sid, today)
             rec = {"check_id": chk, "submission_id": sid, "day": today, "state": state, "cause": cause,
                    "fetch_id": f["fetch_id"], "checked_at": iso(now)}
-            op.record(derived_id("liv", chk, iso(now)), "liveness_checked", i04.ACTOR, sid,
+            op.record(derived_id("liv", chk), "liveness_checked", i04.ACTOR, sid,
                       {"check_id": chk, "day": today, "state": state, "cause": cause}, f"Liveness {today}: {state}")
             op.add("liveness", rec)
             self._commit(op)
+            return state
+
+        with self.lock:
+            order = self._subs_in_order(key=lambda x: in_min_live(x))
+        for sid in order:
+            state = self._item(run, sid, lambda sid=sid: item(sid))
+            if state is None:
+                continue
             out["checked"] += 1
             out["live" if state in i04.OK_STATES else ("unknown" if state == "unknown" else "not_live")] += 1
         return out
 
-    def _job_metrics(self, now: datetime) -> dict:
+    def _job_metrics(self, now: datetime, run: JobRun, held: Optional[dict]) -> dict:
         today = now.date().isoformat()
         out = {"fetched": 0, "unavailable": 0}
-        for sub in sorted(self.submissions.values(), key=lambda s: s["received_seq"]):
-            sid = sub["submission_id"]
+
+        def item(sid: str):
+            sub = self.submissions[sid]
             if not self._in_watch(sub, now) or any(f["purpose"] == "metrics" and f["fetched_at"][:10] == today
                                                    for f in self._fetches_of(None, sid)):
-                continue
+                return SKIP
             op = Op(self, f"met|{sid}|{today}", i01.ACTOR, sid)
             f = self._fetch(op, sub, "metrics", tuple(P.AVAILABLE_METRICS.get(sub["platform"], ())), now)
             self._commit(op)
-            out["fetched" if f["available"] else "unavailable"] += 1
+            return f["available"]
+
+        for sid in self._subs_in_order():
+            ok = self._item(run, sid, lambda sid=sid: item(sid))
+            if ok is not None:
+                out["fetched" if ok else "unavailable"] += 1
         return out
 
     def _ledger_held(self) -> dict:
@@ -1882,14 +2488,14 @@ class VIService:
         return {e.get("event_id"): e.get("payload_sha256") for e in entries
                 if isinstance(e, dict) and e.get("department") == "verification_integrity"}
 
-    def _job_certify(self, now: datetime) -> dict:
-        held = self._ledger_held()
+    def _job_certify(self, now: datetime, run: JobRun, held: Optional[dict]) -> dict:
         out = {"evaluated": 0, "changed": 0, "certified": 0}
-        for sub in sorted(self.submissions.values(), key=lambda s: s["received_seq"]):
-            sid = sub["submission_id"]
+
+        def item(sid: str):
+            sub = self.submissions[sid]
             cert = self.certs[self.cert_by_sub[sid]]
-            if cert["status"] in ("certified", "revised", "voided"):
-                continue
+            if cert["status"] in FINAL_OR_WATCHED:
+                return SKIP
             op = Op(self, f"cer|{sid}|{iso(now)}", i02.ACTOR, sid)
             new = self._evaluate(op, self._sub_now(op, sid), now, True, held)
             if new["status"] in ("not_certified", "certified") and new.get("window"):
@@ -1899,19 +2505,26 @@ class VIService:
                     scr = self._screen(op, self._sub_now(op, sid), now, (snap, sf))
                     if scr and scr["decision"] == "hold":
                         new = self._evaluate(op, self._sub_now(op, sid), now, False, held)
-            out["evaluated"] += 1
-            if self._cert_changed(cert, new):
+            changed = self._cert_changed(cert, new)
+            if changed:
                 new = self._issue_cert(op, new, now)
-                out["changed"] += 1
-                out["certified"] += new["status"] == "certified"
             self._commit(op)
+            return changed, new["status"] == "certified" and changed
+
+        for sid in self._subs_in_order():
+            res = self._item(run, sid, lambda sid=sid: item(sid))
+            if res is None:
+                continue
+            out["evaluated"] += 1
+            out["changed"] += res[0]
+            out["certified"] += res[1]
         return out
 
     def _should_screen(self, op: Op, sub: dict, cert: dict) -> bool:
         """Screen once per settlement (an anomaly hold is released only by a human, then not re-opened)."""
         sid = sub["submission_id"]
         prev = self.screens.get(sid)
-        staged = [s for s in self._staged(op, "screen") if s["submission_id"] == sid]
+        staged = [x for x in self._staged(op, "screen") if x["submission_id"] == sid]
         if staged:
             return False
         if prev is None:
@@ -1919,52 +2532,174 @@ class VIService:
         settle = cert["window"]["settle_at"]
         return prev["at"] < settle
 
-    def _job_anomaly(self, now: datetime) -> dict:
+    def _job_anomaly(self, now: datetime, run: JobRun, held: Optional[dict]) -> dict:
         today = now.date().isoformat()
         out = {"screened": 0, "held": 0}
-        for sub in sorted(self.submissions.values(), key=lambda s: s["received_seq"]):
-            sid = sub["submission_id"]
+
+        def item(sid: str):
+            sub = self.submissions[sid]
             cert = self.certs[self.cert_by_sub[sid]]
             if cert["status"] != "pending" or not sub.get("create_time") or sub["platform"] not in P.CERTIFIABLE:
-                continue
+                return SKIP
             if (self.screens.get(sid) or {}).get("at", "")[:10] == today:
-                continue
-            series = sorted((int(parse_iso(s["fetched_at"]).timestamp()), s["value"]) for s in self._snapshots_of(None, sid)
-                            if s["metric"] == "views" and s["dimension"] is None)
-            if i06.peak_daily_gain(series) is None:
-                continue          # not screenable yet: no two snapshots ~24 h apart (the settlement screen still runs)
+                return SKIP
+            if self._peak(sid) is None:
+                return SKIP        # not screenable yet: no two snapshots ~24 h apart (the settlement screen still runs)
             op = Op(self, f"ano|{sid}|{today}", i06.ACTOR, sid)
             scr = self._screen(op, sub, now, None)
             self._commit(op)
+            return bool(scr and scr["decision"] == "hold")
+
+        for sid in self._subs_in_order():
+            res = self._item(run, sid, lambda sid=sid: item(sid))
+            if res is None:
+                continue
             out["screened"] += 1
-            out["held"] += bool(scr and scr["decision"] == "hold")
+            out["held"] += res
         return out
 
-    def _job_revisions(self, now: datetime) -> dict:
+    def _job_revisions(self, now: datetime, run: JobRun, held: Optional[dict]) -> dict:
+        """The revision watch (§C.2) and, bug sweep C (C-3), the ACCESS watch: a certified clip whose clipper revoked
+        the OAuth grant (or whose grant stopped working: VI_ACCESS_LOST... see ``ACCESS_LOST_AFTER_FAILED_CHECKS``)
+        can no longer be watched for revisions, so it is ``suspended`` (not payable) with an ``access_lost`` hold for
+        Andre, until a revision check through a connection of the SAME account reads the same video again."""
         today = now.date().isoformat()
-        out = {"checked": 0, "revised": 0, "unavailable": 0}
-        for sub in sorted(self.submissions.values(), key=lambda s: s["received_seq"]):
-            sid = sub["submission_id"]
+        out = {"checked": 0, "revised": 0, "unavailable": 0, "suspended": 0, "reinstated": 0}
+
+        def item(sid: str):
+            sub = self.submissions[sid]
             cert = self.certs[self.cert_by_sub[sid]]
-            if cert["status"] not in ("certified", "revised") or now > parse_iso(cert["window"]["revision_watch_end"]):
-                continue
+            if cert["status"] not in ("certified", "revised", "suspended") or not cert.get("window") \
+                    or now > parse_iso(cert["window"]["revision_watch_end"]):
+                return SKIP
             if any(f["purpose"] == "revision_watch" and f["fetched_at"][:10] == today for f in self._fetches_of(None, sid)):
-                continue
+                return SKIP
             op = Op(self, f"rev|{sid}|{today}", i02.ACTOR, sid)
-            f = self._fetch(op, sub, "revision_watch", ("views",), now)
-            out["checked"] += 1
-            snap = next((s for s in self._staged(op, "snapshot") if s["fetch_id"] == f["fetch_id"]
-                         and s["metric"] == P.PAYABLE_METRIC[sub["platform"]] and s["dimension"] is None), None)
-            if snap is None:
-                out["unavailable"] += 1
+            bound = self._bound_account(cert)
+            f = self._fetch(op, sub, "revision_watch", ("views",), now, account_hmac=bound or "")
+            snap = next((x for x in self._staged(op, "snapshot") if x["fetch_id"] == f["fetch_id"]
+                         and x["metric"] == P.PAYABLE_METRIC[sub["platform"]] and x["dimension"] is None), None)
+            if snap is not None and not self._good_check(f, bound, sub):
+                snap = None          # AEGIS H-1: a read of another author's (or another) video is no revision check
+            result = "checked"
+            if cert["status"] == "suspended":
+                if snap is not None and self._same_account_and_video(cert, sub, f):
+                    cert = self._reinstate(op, cert, "access re-verified through the same account", "auto", now)
+                    result = "reinstated"
+                else:
+                    self._commit(op)
+                    return "unavailable"
+            elif snap is None:
+                if self._access_lost(op, sid, f):
+                    self._suspend(op, cert, f, now)
+                    self._commit(op)
+                    return "suspended"
                 self._commit(op)
-                continue
+                return "unavailable"
             rv = i02.revision(cert["certified_views"], cert["original_views"], snap["value"], self.cfg.strip_share)
             if rv is not None:
                 self._revise(op, cert, rv, snap, "platform_revision_down", now)
-                out["revised"] += 1
+                result = "revised" if result == "checked" else result
             self._commit(op)
+            return result
+
+        for sid in self._subs_in_order():
+            res = self._item(run, sid, lambda sid=sid: item(sid))
+            if res is None:
+                continue
+            out["checked"] += 1
+            if res != "checked":
+                out[res] += 1
         return out
+
+    # --- C-3: access lost after certification ---------------------------------------------------------------------
+
+    def _access_lost(self, op: Op, sid: str, f: dict) -> bool:
+        """No active connection at all (revoked, minor, ban) → lost now. Otherwise the last
+        ``ACCESS_LOST_AFTER_FAILED_CHECKS`` revision checks all failed to read the post (a grant that stopped working,
+        an account made private to the app) → lost. A platform outage looks the same and is treated the same: not
+        payable until a check succeeds again (fail closed)."""
+        if f.get("cause") == "not_connected":
+            return True
+        cert = self.certs[self.cert_by_sub[sid]]
+        bound, sub = self._bound_account(cert), self.submissions[sid]
+        checks = sorted((x for x in self._fetches_of(op, sid) if x["purpose"] == "revision_watch"),
+                        key=lambda x: (x["fetched_at"], x["fetch_id"]))[-ACCESS_LOST_AFTER_FAILED_CHECKS:]
+        return len(checks) == ACCESS_LOST_AFTER_FAILED_CHECKS and not any(self._good_check(x, bound, sub)
+                                                                         for x in checks)
+
+    def _good_check(self, f: dict, bound: Optional[str], sub: dict) -> bool:
+        """AEGIS H-1: a revision check that counts as access: available, and either the certified video by the bound
+        account, or the post reported gone/private through that account (ADR 0006 "M-1": a post deleted or made
+        private after settlement is, today, left certified — Andre's policy call). An answer with no video while the
+        post is said to be live, or with another author or another video, is a failed check."""
+        if not f.get("available"):
+            return False
+        v = f.get("video")
+        if v is None:
+            return f.get("live_state") in ("gone", "private")
+        return bool(bound) and v.get("author_id_hmac") == bound and \
+            (not sub.get("video_id_sha256") or v.get("video_id_sha256") == sub["video_id_sha256"])
+
+    def _same_account_and_video(self, cert: dict, sub: dict, f: dict) -> bool:
+        v = f.get("video") or {}
+        acct = cert.get("suspended_account_hmac")
+        return bool(f.get("available") and f.get("live_state") == "live" and acct and v.get("author_id_hmac") == acct
+                    and sub.get("video_id_sha256") and v.get("video_id_sha256") == sub["video_id_sha256"])
+
+    def _suspend(self, op: Op, cert: dict, f: Optional[dict], now: datetime, why: str = "") -> dict:
+        rules = self.rules()
+        con = self.connections.get(cert.get("connection_id") or "") or {}
+        cause = why or (f"revision watch cannot read the post ({(f or {}).get('cause') or 'no access'})")
+        reasons = [R.item("CONNECTION_REVOKED", f"access lost after certification: {cause}; not payable until "
+                          "re-verified", [x for x in (cert.get("connection_id"), (f or {}).get("fetch_id")) if x], rules)]
+        new = dict(cert, status="suspended", suspended_from=cert["status"], suspended_at=iso(now),
+                   suspended_account_hmac=con.get("platform_account_id_hmac"), reasons=reasons,
+                   reason_lines=R.lines(reasons), evaluation=cert["evaluation"] + 1, evaluated_at=iso(now))
+        eid = op.record(derived_id("csp", cert["certification_id"], new["evaluation"]), "certification_suspended",
+                        i02.ACTOR, cert["submission_id"], self._cert_payload(new),
+                        "Certification suspended: access lost after certification")
+        new["ledger_event_id"] = eid
+        op.add("certification", new)
+        self._open_hold(op, "clip", cert["submission_id"], "access_lost", reasons, now,
+                        key=f"{cert['certification_id']}|{new['evaluation']}")
+        return new
+
+    def _reinstate(self, op: Op, cert: dict, why: str, who: str, now: datetime, skip_hold: Optional[str] = None) -> dict:
+        back = cert.get("suspended_from") or "certified"
+        reasons = []
+        if back == "revised" and cert.get("revisions"):
+            last = cert["revisions"][-1]
+            reasons = [R.item("REVISED_DOWN", f"{last['old_views']} -> {last['new_views']} ({last['cause']})",
+                              [x for x in (last.get("snapshot_id"),) if x], self.rules())]
+        new = {k: v for k, v in cert.items() if k not in ("suspended_from", "suspended_at", "suspended_account_hmac")}
+        new.update(status=back, reasons=reasons, reason_lines=R.lines(reasons), evaluation=cert["evaluation"] + 1,
+                   evaluated_at=iso(now))
+        eid = op.record(derived_id("crn", cert["certification_id"], new["evaluation"]), "certification_reinstated",
+                        i02.ACTOR if who == "auto" else who, cert["submission_id"], self._cert_payload(new),
+                        f"Certification reinstated: {why}"[:200])
+        new["ledger_event_id"] = eid
+        op.add("certification", new)
+        for hh in self.holds.values():
+            if hh["subject_kind"] == "clip" and hh["subject_id"] == cert["submission_id"] and hh["cause"] == "access_lost" \
+                    and hh["status"] == "open" and hh["hold_id"] != skip_hold:
+                op.record(derived_id("hld", hh["hold_id"], "reinstated"), "hold_decided", EVIDENCE, hh["subject_id"],
+                          {"hold_id": hh["hold_id"], "decision": "lapsed", "cause": "access_reverified"},
+                          "Access-lost hold lapsed: access re-verified")
+                op.add("hold", dict(hh, status="released", released_by=f"auto: {why}"[:80], released_at=iso(now)))
+        return new
+
+    def _suspend_for_revocation(self, op: Op, c: dict, now: datetime, why: str) -> None:
+        """C-3: the connection a certification was watched through is revoked: every certification of that clipper
+        and platform still inside its revision watch is suspended at once (not payable, Andre alerted)."""
+        staged = {x["certification_id"]: x for x in self._staged(op, "certification")}
+        for cert in list(self.certs.values()):
+            cert = staged.get(cert["certification_id"], cert)
+            if cert["clipper_id"] != c["clipper_id"] or cert["platform"] != c["platform"] \
+                    or cert["status"] not in ("certified", "revised") or not cert.get("window") \
+                    or now > parse_iso(cert["window"]["revision_watch_end"]):
+                continue
+            self._suspend(op, cert, None, now, why=f"connection {why}")
 
     def _revise(self, op: Op, cert: dict, rv: dict, snap: Optional[dict], cause: str, now: datetime) -> dict:
         rules = self.rules()
@@ -1983,12 +2718,10 @@ class VIService:
         new = dict(cert, status=status, certified_views=rv["new_views"], revisions=cert["revisions"] + [revision],
                    clawback_ids=cert["clawback_ids"] + [clb], reasons=reasons, reason_lines=R.lines(reasons),
                    evaluation=cert["evaluation"] + 1, evaluated_at=iso(now))
-        eid = derived_id("crv", cert["certification_id"], n)
-        new["ledger_event_id"] = eid
-        op.record(eid, "certification_revised", i02.ACTOR, cert["submission_id"],
-                  {**self._cert_payload(new), "revision_no": n, "old_views": rv["old_views"],
-                   "new_views": rv["new_views"], "cause": cause}, f"Certification {status}: {rv['old_views']} -> "
-                                                                  f"{rv['new_views']}")
+        new["ledger_event_id"] = op.record(
+            derived_id("crv", cert["certification_id"], n), "certification_revised", i02.ACTOR, cert["submission_id"],
+            {**self._cert_payload(new), "revision_no": n, "old_views": rv["old_views"], "new_views": rv["new_views"],
+             "cause": cause}, f"Certification {status}: {rv['old_views']} -> {rv['new_views']}")
         op.record(derived_id("clb", clb), "clawback_issued", i02.ACTOR, cert["submission_id"],
                   {k: clawback[k] for k in ("clawback_id", "certification_id", "views_delta", "cause", "rule_id",
                                             "snapshot_id")}, f"Clawback record: {rv['views_delta']} views (counts only)")
@@ -2009,7 +2742,11 @@ class VIService:
                 self._strike(op, f, now)
         return new
 
-    def _job_retention(self, now: datetime) -> dict:
+    def _job_retention(self, now: datetime, run: JobRun, held: Optional[dict]) -> dict:
+        out = self._item(run, "retention", lambda: self._retention_pass(now))
+        return out if out is not None else {"purged": 0, "by_cause": {}}
+
+    def _retention_pass(self, now: datetime) -> dict:
         op = Op(self, f"ret|{iso(now)}", EVIDENCE, "retention")
         doomed: dict[str, str] = {}
         for k, e in self.side.all():
@@ -2121,8 +2858,7 @@ class VIService:
             if att_id in self.attestations:
                 return self.attestations[att_id]["response"]
             answer = dict(answer, attestation_id=att_id)
-            eid = derived_id("att", att_id)
-            op.record(eid, event_type, i10.ACTOR, subject[:128],
+            eid = op.record(derived_id("att", att_id), event_type, i10.ACTOR, subject[:128],
                       {"attestation_id": att_id, "request_id_sha256": sha_text(request_id),
                        "facts_sha256": answer.get("facts_sha256"), "outcome_sha256": outcome_sha,
                        "codes": R.codes(reasons), "rule_ids": sorted({r["rule_id"] for r in reasons}),
@@ -2430,11 +3166,12 @@ class VIService:
                    "reasons": reasons, "reason_lines": R.lines(reasons),
                    "reason": (f"adult under V&I rules v{self.rules_version}" if status == "adult" else
                               "; ".join(R.lines(reasons)) or status)[:1000]}
+            # ADR 0007 choice 23: the answer is recorded on the ledger before it is given (id from the answer itself,
+            # so the same answer read again is the same event: 200, nothing new). Bug sweep C: a READ writes no local
+            # log line (before, every GET appended a line and its anchor: the log grew with the read traffic)
             op.record(derived_id("aga", attestation_id, sha(ans)), "age_answer_issued", i05.ACTOR, a["subject_id"],
                       {"attestation_id": attestation_id, "status": status, "codes": R.codes(reasons),
-                       "rules_version": self.rules_version}, f"Age attestation answered: {status}")
-            op.add("age_answer", {"attestation_id": attestation_id, "status": status, "at": iso(self._now())})
-            self._commit(op)
+                       "rules_version": self.rules_version}, f"Age attestation answered: {status}", raw=True)
             return ans
 
     def age_subject(self, principal: str, subject_id: str) -> dict:
@@ -2449,9 +3186,7 @@ class VIService:
                    "detail": aid or "no attestation", "subject_id": subject_id, "rules_pinned": self.rules_pinned}
             op.record(derived_id("ags", ns, subject_id, sha(ans)), "age_answer_issued", i05.ACTOR, subject_id,
                       {"attestation_id": aid, "namespace": ns, "status": status, "codes": R.codes(reasons),
-                       "rules_version": self.rules_version}, f"Age status answered: {status}")
-            op.add("age_answer", {"attestation_id": aid, "namespace": ns, "status": status, "at": iso(self._now())})
-            self._commit(op)
+                       "rules_version": self.rules_version}, f"Age status answered: {status}", raw=True)
             return ans
 
     # ================================================================== identity (i07)
@@ -2471,25 +3206,29 @@ class VIService:
                           lambda: fin.payout_identity_hmac(clipper_id), PayoutIdentity(False))
             pay = pay if isinstance(pay, PayoutIdentity) else PayoutIdentity(False)
             why = []
-            hm = {"email": None, "payout": None}
+            hm = {"email": None, "payout": None, "email_base": None}
             if key_b is None:
                 why.append("identity HMAC key unavailable (vault)")
             else:
                 hm["email"] = i07.hmac_hex(key_b, "email", i07.normalize_email(email))
+                hm["email_base"] = i07.hmac_hex(key_b, "email_base", i07.mailbox_base(email))
             if pay.available and isinstance(pay.identity_hmac, str) and len(pay.identity_hmac) == 64:
                 hm["payout"] = pay.identity_hmac
             else:
                 why.append("Finance 31 payout identity unavailable")
             found = []
-            for kind, hv, other in i07.matches(hm, self.hmac_owner, clipper_id):
+            exact = {k: hm[k] for k in ("email", "payout")}     # duplicate-identity findings: exact HMACs (spec C.7)
+            for kind, hv, other in i07.matches(exact, self.hmac_owner, clipper_id):
                 f, _ = self._identity_finding(op, "duplicate_identity", "DUPLICATE_IDENTITY", clipper_id, other, kind, now,
                                               (chk,))
-                found.append(f["finding_id"])
+                if f["status"] != "overturned":
+                    found.append(f["finding_id"])
             for kind, hv in hm.items():
                 if hv and (kind, hv) in self.banned and not found:
                     f, _ = self._identity_finding(op, "duplicate_identity", "DUPLICATE_IDENTITY", clipper_id, None,
                                                   kind, now, (chk,))
-                    found.append(f["finding_id"])
+                    if f["status"] != "overturned":
+                        found.append(f["finding_id"])
             status = "finding" if found else ("incomplete" if why else "clear")
             rec = {"check_id": chk, "clipper_id": clipper_id, "status": status, "why": "; ".join(why),
                    "hmacs": {k: v for k, v in hm.items() if v}, "findings": found, "checked_at": iso(now)}
@@ -2539,6 +3278,12 @@ class VIService:
             op.add("hold", new)
             if decision == "uphold":
                 self._uphold_effects(op, hold, who, reason, now)
+            elif hold["cause"] == "access_lost" and hold["subject_kind"] == "clip":
+                # bug sweep C (C-3): Andre's (or a confirmed delegate's) release of an access-lost hold is the human
+                # break: the suspended certification is reinstated as it was (its count and revisions unchanged)
+                cert = self.certs[self.cert_by_sub[hold["subject_id"]]]
+                if cert["status"] == "suspended":
+                    self._reinstate(op, cert, f"released by {who}", who, now, skip_hold=hold["hold_id"])
             self._commit(op)
             return self._idem_store(key, h, {"hold": new, "ledger_event_ids": op.events})
 
@@ -2565,7 +3310,7 @@ class VIService:
         cert = self.certs[self.cert_by_sub[sid]]
         staged = [c for c in self._staged(op, "certification") if c["certification_id"] == cert["certification_id"]]
         cert = staged[-1] if staged else cert
-        if cert["status"] in ("certified", "revised") and cert["certified_views"]:
+        if cert["status"] in ("certified", "revised", "suspended") and cert["certified_views"]:
             self._revise(op, cert, {"old_views": cert["certified_views"], "new_views": 0,
                                     "views_delta": -cert["certified_views"], "stripped": False}, None,
                          "void_upheld_fraud", now)
@@ -2676,7 +3421,9 @@ class VIService:
 
     def feed_verified(self, cursor: int) -> dict:
         def pick(kind, r):
-            if kind != "certification" or r["status"] not in ("certified", "revised", "voided"):
+            # bug sweep C (C-3): a suspension (and its reinstatement) is published too, so a consumer of the
+            # verified-results feed never keeps a certification that is no longer payable
+            if kind != "certification" or r["status"] not in ("certified", "revised", "voided", "suspended"):
                 return None
             if r["platform"] == "youtube" and not self.cfg.feed_youtube_enabled:
                 return None
@@ -2771,8 +3518,71 @@ class VIService:
             return {"records": out, "next_cursor": last if more else None, "ledger_event_id": eid,
                     "rules_version": self.rules_version}
 
+    def audit_evidence(self, limit: int, offset: int, event_type: Optional[str] = None) -> dict:
+        """``GET /vi/v1/audit/evidence`` (bug sweep C R6; bizdev-py / finance-py ``audit_evidence``). Every V&I event on
+        the ledger except the log anchors, each marked:
+
+        * ``committed`` -- a local log line with seq ``s`` names it (``data.evidence``), the ledger holds that line's
+          anchor (with the anchor payload's hash), and the ledger's ``payload_sha256`` is the named payload's (which
+          carries ``rk`` and ``seq`` = ``s``);
+        * ``cited`` -- not typed evidence, but listed by an anchored line (a port crossing, a lease, a rules version,
+          a reconcile, an evidence event recorded before this view existed, or a failed try that a later line cites);
+        * ``attempted`` -- anything else: recorded first (record-first), its state change never reached the anchored
+          log under this id (a refused or failed commit, or a retry later committed under another seq), or an answer
+          (``age_answer_issued``, ``audit_export_issued``) that no state change follows.
+
+        Unanchored evidence = attempted, not done. Only the raw lines are copied under the service lock; parsing,
+        hashing and the ledger read happen outside it. Eventually consistent: re-read to settle a commit in flight."""
+        with self.lock:
+            if self._closed:
+                raise Unavailable("SERVICE_CLOSED: this V&I instance is closed")
+            raw = self.log.raw_lines()
+        try:
+            entries = self.recorder.client.entries()
+        except LedgerQueryFailed:
+            raise Unavailable("the evidence ledger could not be read") from None
+        epoch = hashlib.sha256(raw[0]).hexdigest()[:16] if raw else None
+        mine = [e for e in entries if isinstance(e, dict) and e.get("department") == "verification_integrity"]
+        anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == i10.ANCHOR_TYPE}
+        named: dict[str, tuple] = {}
+        cited: dict[str, int] = {}
+        for ln in raw:
+            r = json.loads(ln)
+            line_sha = hashlib.sha256(ln).hexdigest()
+            a = anchors.get(i10.anchor_id(epoch, r["seq"], line_sha))
+            want = payload_sha256({"epoch": epoch, "seq": r["seq"], "line_sha256": line_sha, "kind": r["kind"]})
+            if a is None or a.get("payload_sha256") != want:
+                continue
+            for n in r["data"].get("evidence") or []:
+                named[n["event_id"]] = (r["seq"], n.get("rk"), n.get("payload_sha256"))
+            for eid in r["data"].get("ledger_event_ids") or []:
+                cited.setdefault(eid, r["seq"])
+        rows, counts = [], {"committed": 0, "cited": 0, "attempted": 0}
+        for e in mine:
+            et = e.get("event_type")
+            if et == i10.ANCHOR_TYPE or (event_type is not None and et != event_type):
+                continue
+            eid = e.get("event_id")
+            n = named.get(eid)
+            meta = i10.meta_sha256(str(e.get("actor")), str(e.get("subject_id")), str(e.get("summary")))
+            if n is not None and n[2] == e.get("payload_sha256") \
+                    and eid == i10.evidence_id(n[1] or "", et, e.get("payload_sha256") or "", meta):
+                status, seq, rk = "committed", n[0], n[1]
+            elif n is None and eid in cited:
+                status, seq, rk = "cited", cited[eid], None
+            else:
+                status, seq, rk = "attempted", None, None
+            counts[status] += 1
+            rows.append({"event_id": eid, "event_type": et, "subject_id": e.get("subject_id"), "status": status,
+                         "seq": seq, "rk": rk, "payload_sha256": e.get("payload_sha256")})
+        return {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle",
+                "events": rows[offset:offset + limit], "total": len(rows), "counts": counts, "limit": limit,
+                "offset": offset, "log_lines": len(raw), "epoch": epoch}
+
     def health(self) -> dict:
         return {"status": "ok", "service": "verification-py", "rules_version": self.rules_version,
                 "in_memory": self.log.in_memory, "rules_pinned": self.rules_pinned, "production": self.rules_pinned,
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
-                "platform_data_store_degraded": self.sidestore_degraded}
+                "platform_data_store_degraded": self.sidestore_degraded, "log_write_fault": bool(self.log.fault),
+                "dead_lettered": len(self.dead_letters),
+                "legacy_minors_without_base": len(self._minors_without_base())}

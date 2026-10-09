@@ -24,7 +24,8 @@ def test_retention_after_revision_watch_end_only_hashes_remain(hr):
     assert len(sub["post_ref_sha256"]) == 64 and len(sub["video_id_sha256"]) == 64
     assert hr.cert("rt1")["certified_views"] == cert["certified_views"]
     ev = hr.ledger.of_type("retention_purged")
-    assert ev and all(set(e["payload"]) == {"cause", "counts", "keys_sha256"} for e in ev)
+    # bug sweep C R6: the evidence payload also names its action (rk) and log line (seq); nothing else is added
+    assert ev and all(set(e["payload"]) == {"cause", "counts", "keys_sha256", "rk", "seq"} for e in ev)
     assert "tiktok.com" not in json.dumps([e["payload"] for e in ev])
 
 

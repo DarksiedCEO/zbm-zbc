@@ -229,6 +229,7 @@ def _main(work: Path) -> int:
         say(f"compliance A restarted, health: {wait_health(A + '/health')}")
         r = c.post(A + "/compliance/v1/controls/internal/run", headers=h("scheduler"), json={"request_id": rid()}).json()
         say(f"after restart C-11: {r['results']['C-11']['result']} ({r['results']['C-11']['detail'][:160]})")
+        c11_after_restart = r["results"]["C-11"]["result"]
         g = HttpCompliance38(A, SVC_TOKEN, CALLERS["creative_production"]).review(
             "zbm_work", "work-live-2", {**pub, "client_id": "client-live-2"})
         say(f"GATE publish via creative thin client (full site facts, client-live-2 activated for youtube only): "
@@ -275,6 +276,17 @@ def _main(work: Path) -> int:
         vb = c.get(LB + "/ledger/verify", headers={"Authorization": f"Bearer {LEDGER_TOKEN}"})
         say(f"GET /ledger/verify (ledger B) -> {vb.status_code} {vb.text}")
         ok = all(x.status_code == 200 and x.json().get("valid") is True for x in (v, vb))
+        # bug sweep C (R6): every typed evidence event of A is committed under an anchored local line; and C-11 held
+        # after the restart (the restart leg above)
+        ev = c.get(A + "/compliance/v1/audit/evidence", headers=h("scheduler"), params={"limit": 1000}).json()
+        # attempted = recorded, never named by an anchored line. In this fault-free run the only such events are
+        # answers that change no state: a port crossing whose answer was "unavailable" (C-04 with the provider stand-in)
+        # and the audit-export answer. Any other attempted event would be a state change that never committed.
+        stray = [e for e in ev["events"] if e["status"] == "attempted"
+                 and not (e["event_type"].startswith("crossing_") or e["event_type"] == "audit_export_issued")]
+        say(f"A /compliance/v1/audit/evidence: {ev['counts']}; attempted state changes: {len(stray)}")
+        ok = ok and not stray and ev["counts"]["committed"] > 0 and c11_after_restart == "pass"
+        say(f"RESULT: {'PASS' if ok else 'FAIL'} (both ledgers verify; C-11 after restart; every state change committed)")
         return 0 if ok else 1
     finally:
         for p in PROCS:

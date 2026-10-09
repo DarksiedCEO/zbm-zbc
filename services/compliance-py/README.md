@@ -129,7 +129,7 @@ export COMPLIANCE_SERVICE_TOKEN=<secret>                     # required
 export COMPLIANCE_ANDRE_APPROVAL_TOKEN=<Andre's own secret>  # unset = no approvals possible
 export COMPLIANCE_CALLER_TOKENS='{"onboarding":"<>=32 chars>","creative_production":"...","legal_37":"...","scheduler":"...", ...}'
 export LEDGER_SERVICE_URL=http://127.0.0.1:8090 LEDGER_SERVICE_TOKEN=<ledger secret>   # unset = nothing can be recorded
-export COMPLIANCE_DATA_DIR=/var/lib/compliance              # unset = in memory; nothing in force after restart
+export COMPLIANCE_DATA_DIR=/var/lib/compliance              # unset = in memory; nothing in force after restart (flocked: compliance.lock, one writer)
 # with a data dir, start-up reads GET /ledger/entries and refuses if the log does not match the ledger
 # (COMPLIANCE_RECONCILE_MODE=1 starts a log with only voidable mismatches for Andre to reconcile; see below)
 python3 -m api      # COMPLIANCE_BIND_ADDR (127.0.0.1), COMPLIANCE_PORT (8380)
@@ -255,3 +255,10 @@ exist; the caller changes of spec §F.2 are not made (the spec says not to in
 this build); OpenStates/Regulations.gov adapters, the Competition Bureau feed
 and the TikTok newsroom are not configured; there is no evidence field for
 AI/synthetic disclosure, so those clips and assets stay blocked.
+
+## Bug sweep C (Oct 7, 2026)
+
+`GET /compliance/v1/audit/evidence?event_type=&limit=&offset=` (any caller): every Compliance ledger event, `committed`
+(named by an anchored local line), `cited` or `attempted` (recorded first, never committed: unanchored evidence =
+attempted, not done). `/health` adds `log_write_fault`. The data directory is single-writer (`compliance.lock`). The
+Change Watcher's fetches and C-11's ledger reads run outside the service lock. Details: ADR 0006, "Bug sweep C fixes".

@@ -506,6 +506,31 @@ def create_app(service: VIService, settings: config_mod.Settings) -> FastAPI:
             raise Invalid("unknown job")
         return _echo(req.request_id, svc.run_job(who, req.request_id, job))
 
+    @app.get("/vi/v1/jobs/dead-letter", dependencies=auth)
+    def dead_letter(_: str = Depends(caller("scheduler"))) -> dict:
+        """Bug sweep C (C-1): job items parked after repeated failures (and items waiting out a backoff)."""
+        return svc.dead_letter_list()
+
+    @app.post("/vi/v1/jobs/{job}/dead-letter/{subject_id}/requeue", dependencies=auth)
+    def requeue(job: str, subject_id: str, _: str = Depends(andre("jobs/dead-letter/requeue")),
+                req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        if job not in JOBS:
+            raise Invalid("unknown job")
+        return _echo(req.request_id, svc.requeue_dead_letter(req.request_id, job, _id(subject_id)))
+
+    @app.post("/vi/v1/age/legacy-minors/{subject_id}/resolve", dependencies=auth)
+    def legacy_minor_resolve(subject_id: str, _: str = Depends(andre("age/legacy-minors/resolve")),
+                             req: m.LegacyMinorResolve = Depends(body(m.LegacyMinorResolve))) -> dict:
+        """AEGIS L3-R: Andre marks a legacy minor record (identity checked before mailbox folding) resolved."""
+        return _echo(req.request_id, svc.resolve_legacy_minor(req.request_id, _id(subject_id), req.note))
+
+    @app.get("/vi/v1/audit/evidence", dependencies=auth)
+    def audit_evidence(_: str = Depends(caller()), limit: int = Query(default=200, ge=1, le=1000),
+                       offset: int = Query(default=0, ge=0, le=10_000_000),
+                       event_type: Optional[str] = Query(default=None, pattern=r"^[a-z0-9_]{1,64}$")) -> dict:
+        """Bug sweep C (R6): every V&I evidence event on the ledger, committed / cited / attempted."""
+        return svc.audit_evidence(limit, offset, event_type)
+
     @app.get("/vi/v1/reconcile", dependencies=auth)
     def reconcile_plan(_: str = Depends(andre("reconcile"))) -> dict:
         return svc.reconcile_plan()
@@ -549,8 +574,16 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
         seed_bytes = fh.read()
     expected = settings.seed_sha256 if (settings.allow_unpinned_seed and settings.seed_sha256) else \
         config_mod.PINNED_SEED_SHA256
-    return VIService(settings, Recorder(ledger), RecordLog(settings.data_dir), PlatformDataStore(settings.data_dir),
-                     seed_bytes, expected, ports or build_ports(settings), clock, config_mod.PINNED_SEED_SHA256)
+    lock = settings.data_dir_lock                       # the flock, taken by config.load before the log is opened
+    token = lock.claim() if lock is not None else None  # claimed BEFORE the log is built (bug sweep C, E-5/F-3)
+    try:
+        return VIService(settings, Recorder(ledger), RecordLog(settings.data_dir), PlatformDataStore(settings.data_dir),
+                         seed_bytes, expected, ports or build_ports(settings), clock, config_mod.PINNED_SEED_SHA256,
+                         lock_token=token)
+    except BaseException:
+        if lock is not None:
+            lock.release_claim(token)
+        raise
 
 
 def _app_from_env() -> FastAPI:

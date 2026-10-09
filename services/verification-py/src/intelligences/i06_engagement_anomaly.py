@@ -44,6 +44,7 @@ class ScreenInput:
     baseline_peaks: list = field(default_factory=list)   # peak 24-h gains of the clipper's certified clips
     cap_available: bool = False
     cap: Optional[int] = None
+    baseline: str = "clipper"               # "clipper" (its own certified clips) | "platform" (a new identity)
 
 
 def peak_daily_gain(series: list) -> Optional[int]:
@@ -77,12 +78,15 @@ def screen(x: ScreenInput, cfg, rules: dict, evidence: tuple = ()) -> dict:
         if peak is None:
             put("velocity", "unavailable", "no pair of daily view snapshots ~24 h apart")
         elif len(x.baseline_peaks) < cfg.anom_min_history:
-            put("velocity", "insufficient_history", f"{len(x.baseline_peaks)} certified clip(s) in the baseline")
+            # bug sweep C: the service falls back to the platform's certified clips for a new identity, so this is
+            # reached only while the PLATFORM itself has too little certified history (bootstrap)
+            put("velocity", "insufficient_history", f"{len(x.baseline_peaks)} certified clip(s) in the {x.baseline} "
+                "baseline")
         else:
             base = max(median_low(x.baseline_peaks), 1)
             fired = peak > cfg.anom_velocity_multiple * base
             put("velocity", "fired" if fired else "clear", f"peak 24-h gain {peak} vs {cfg.anom_velocity_multiple} x "
-                f"median {base}")
+                f"{x.baseline} median {base}")
     # near-zero engagement
     if yt_blocked:
         put("near_zero_engagement", "not_evaluated", "YouTube derived signals off (VI-CQ-01)")
@@ -136,8 +140,12 @@ def screen(x: ScreenInput, cfg, rules: dict, evidence: tuple = ()) -> dict:
     elif x.views is None:
         put("cap_proximity", "unavailable", "views missing")
     else:
-        fired = x.cap <= x.views <= x.cap + x.cap * cfg.anom_cap_proximity
-        put("cap_proximity", "fired" if fired else "clear", f"views {x.views} vs cap {x.cap}")
+        # bug sweep C: landing at or just above the cap fires; so does OVERSHOOTING it (views past cap + margin were
+        # "clear" before: a clip that blew straight through the payout cap was the least suspicious of all)
+        fired = x.views >= x.cap
+        put("cap_proximity", "fired" if fired else "clear",
+            f"views {x.views} vs cap {x.cap}" + (" (overshoot)" if x.views > x.cap + x.cap * cfg.anom_cap_proximity
+                                                 else ""))
     put("platform_stripping", "not_applicable", "evaluated by the revision watch (C.2)")
 
     applicable = [n for n, s in sig.items() if s["status"] != "not_applicable"]

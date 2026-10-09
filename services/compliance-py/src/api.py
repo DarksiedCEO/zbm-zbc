@@ -479,6 +479,13 @@ def create_app(service: ComplianceService, settings: config_mod.Settings) -> Fas
     def watcher(req: m.RunRequest = Depends(body(m.RunRequest)), _: str = Depends(caller("scheduler"))) -> dict:
         return svc.watcher_run(req.request_id)
 
+    @app.get("/compliance/v1/audit/evidence", dependencies=auth)
+    def audit_evidence(_: str = Depends(caller()), limit: int = Query(default=200, ge=1, le=1000),
+                       offset: int = Query(default=0, ge=0, le=10_000_000),
+                       event_type: Optional[str] = Query(default=None, pattern=r"^[a-z0-9_]{1,64}$")) -> dict:
+        """Bug sweep C (R6): every Compliance evidence event on the ledger, committed / cited / attempted."""
+        return svc.audit_evidence(limit, offset, event_type)
+
     @app.get("/compliance/v1/audit/export", dependencies=auth)
     def audit(who: str = Depends(caller()), since: Optional[str] = Query(default=None, max_length=40),
               until: Optional[str] = Query(default=None, max_length=40),
@@ -520,8 +527,15 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
                  watcher_max_proposals_per_source=settings.watcher_max_proposals_per_source)
     # AEGIS N14-13: the pinned hash, unless the operator explicitly opted into an unpinned (non-production) seed
     expected = settings.seed_sha256 if (settings.allow_unpinned_seed and settings.seed_sha256) else SPEC_SEED_SHA256
-    return ComplianceService(cfg, Recorder(ledger), RecordLog(settings.data_dir), seed_bytes, expected, ports, clock,
-                             reconcile_mode=settings.reconcile_mode)
+    lock = settings.data_dir_lock                       # the flock, taken by config.load before the log is opened
+    token = lock.claim() if lock is not None else None  # claimed BEFORE the log is built (bug sweep C, E-5/F-3)
+    try:
+        return ComplianceService(cfg, Recorder(ledger), RecordLog(settings.data_dir), seed_bytes, expected, ports, clock,
+                                 reconcile_mode=settings.reconcile_mode, dir_lock=lock, lock_token=token)
+    except BaseException:
+        if lock is not None:
+            lock.release_claim(token)
+        raise
 
 
 def _app_from_env() -> FastAPI:

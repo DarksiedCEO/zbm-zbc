@@ -336,7 +336,8 @@ def test_a8_injection_in_application_is_logged_and_changes_nothing():
     assert j1["admitted"] == j2["admitted"] is True
     assert dirty.ledger.of_type("injection_text_ignored") and not clean.ledger.of_type("injection_text_ignored")
     ev = dirty.ledger.of_type("injection_text_ignored")[0]["payload"]
-    assert set(ev) == {"rules", "count", "op"} and "approval_forgery" in ev["rules"]
+    # bug sweep C R6: the evidence payload also names its action (rk) and log line (seq); nothing personal is added
+    assert set(ev) == {"rules", "count", "op", "rk", "seq"} and "approval_forgery" in ev["rules"]
     # a blocked applicant stays blocked whatever its statement says
     d = Harness().ready()
     c3 = d.ready_applicant("j@example.com", statement=INJECTION)

@@ -19,8 +19,8 @@ the check.
 | `go:orchestrator-go` | 112 | go test -v | — |
 | `node:dashboard-ts` | 38 | node --test | — |
 | `python:bizdev-py` | 283 | pytest collection | — |
-| `python:clipper-network-py` | 368 | pytest collection | — |
-| `python:compliance-py` | 636 | pytest collection | — |
+| `python:clipper-network-py` | 403 | pytest collection | — |
+| `python:compliance-py` | 644 | pytest collection | — |
 | `python:creative-py` | 821 | pytest collection | — |
 | `python:delivery-py` | 730 | pytest collection | — |
 | `python:detection-py` | 599 | pytest collection | — |
@@ -32,5 +32,5 @@ the check.
 | `python:sales-py` | 560 | pytest collection | — |
 | `python:security-py` | 188 | pytest collection | — |
 | `python:service-py` | 669 | pytest collection | — |
-| `python:verification-py` | 299 | pytest collection | — |
+| `python:verification-py` | 330 | pytest collection | — |
 | `rust:ledger-rust` | 159 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |

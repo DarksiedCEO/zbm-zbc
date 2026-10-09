@@ -182,9 +182,14 @@ def test_h30_tampered_log_refuses_to_start_and_runtime_tamper_turns_c11_red(tmp_
     assert y.run_controls()["results"]["C-11"]["result"] == "pass"
     ylog = y_dir / "compliance_log.jsonl"
     data = ylog.read_bytes()
-    ylog.write_bytes(data.replace(b'"approved_by":"andre"', b'"approved_by":"mallory"', 1))
+    # same length (bug sweep C store backport: a tamper that changes the file's length is caught earlier still --
+    # every later write refuses because the file and memory disagree, see below)
+    ylog.write_bytes(data.replace(b'"approved_by":"andre"', b'"approved_by":"malor"', 1))
     assert y.run_controls()["results"]["C-11"]["result"] == "fail"
     assert y.get("/compliance/v1/controls/C-11").json()["status"] == "red"
+    ylog.write_bytes(ylog.read_bytes() + b"{}\n")                     # a line appended behind the service's back
+    r = y.post("/compliance/v1/controls/internal/run", {"request_id": rid("ctl")}, caller="scheduler")
+    assert r.status_code == 503 and "disagree" in r.text            # fail closed: nothing is written past it
 
 
 def test_h30_deleted_or_reordered_lines_refuse_to_start(tmp_path):
@@ -209,7 +214,8 @@ def test_persistence_replays_versions_rulings_and_holds(tmp_path):
     y = Harness(data_dir=str(tmp_path), clock=x.clock, ledger=x.ledger)
     assert y.get("/health").json() == {"status": "ok", "service": "compliance-py", "register_version_in_force": 1,
                                        "in_memory": False, "seed_pinned": True, "production": True,
-                                       "reconcile_mode": False, "reconcile_required": False}   # AEGIS N15-1
+                                       "reconcile_mode": False, "reconcile_required": False,   # AEGIS N15-1
+                                       "log_write_fault": False}                                # bug sweep C
     assert y.get(f"/compliance/v1/rulings/{a['ruling_id']}").json()["allowed"] is True
     assert y.svc.control_state["C-11"]["last_result"] == "pass"
 

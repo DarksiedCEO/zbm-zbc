@@ -75,6 +75,11 @@ class RunRequest(Strict):
     request_id: Id
 
 
+class LegacyMinorResolve(Strict):
+    request_id: Id
+    note: Text
+
+
 class ConnectionStart(Strict):
     request_id: Id
     clipper_id: Id

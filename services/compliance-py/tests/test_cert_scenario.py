@@ -37,7 +37,8 @@ def test_h02_seed_approved_with_andre_token_is_version_1(h):
     body = h.get("/health").json()
     assert body == {"status": "ok", "service": "compliance-py", "register_version_in_force": 1, "in_memory": True,
                     "seed_pinned": True, "production": True,   # AEGIS N14-13
-                    "reconcile_mode": False, "reconcile_required": False}   # AEGIS N15-1
+                    "reconcile_mode": False, "reconcile_required": False,   # AEGIS N15-1
+                    "log_write_fault": False}                                # bug sweep C
     assert len(h.ledger.of_type("register_version_published")) == 1
     assert len(h.ledger.of_type("seed_loaded")) == 1
 
