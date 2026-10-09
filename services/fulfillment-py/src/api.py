@@ -88,6 +88,8 @@ from integrations.system_of_record import (
     SystemOfRecordPort,
 )
 from agents.resolution_writeback import TerminalEvent
+from founder import HEADER as ANDRE_HEADER
+from founder import FounderGate, FounderRefused
 from journal import EvidenceJournal
 from ledger import (DEPARTMENT, LedgerQueryFailed, LedgerRecordError, is_ledger_id, is_ledger_name, ledger_from_env,
                     payload_sha256)
@@ -114,6 +116,9 @@ def _load_required_token() -> str:
 
 
 _REQUIRED_TOKEN = _load_required_token()
+# AEGIS re-review of bug sweep D: Andre's approval token (the write-back reconcile); unset or equal to the service
+# token = not configured = every reconcile refused (fail closed)
+_FOUNDER = FounderGate.build(os.environ.get("FULFILLMENT_ANDRE_APPROVAL_TOKEN") or None, _REQUIRED_TOKEN)
 _log = logging.getLogger("fulfillment")
 
 
@@ -1933,6 +1938,7 @@ def _reconcile_writeback(entity_type: str, entity_id: str, outcome: str) -> dict
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"{exc}; nothing changed") \
                 from None
         _unresolved.pop(key, None)
+        _log.warning("write-back reconcile by Andre: %s -> %s", key, outcome)
         if rec is not None:
             _resolutions[key] = ResolutionRecord(**rec)
         return {"key": key, "outcome": outcome}
@@ -2335,7 +2341,13 @@ class ReconcileWritebackRequest(_Req):
 
 @app.post("/agents/resolution-writeback/reconcile", dependencies=[Depends(require_auth)])
 async def reconcile_writeback(request: Request) -> Response:
-    """AEGIS F-1: rule on a write-back whose result is unknown (after checking the client's system of record)."""
+    """AEGIS F-1: rule on a write-back whose result is unknown (after checking the client's system of record). Andre
+    only: ``X-Andre-Approval-Token`` (the service token every department holds is never enough), checked before the
+    body is read."""
+    try:
+        _FOUNDER.verify(request.headers.get(ANDRE_HEADER))
+    except FounderRefused as exc:
+        return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": str(exc)})
     return await _off_loop(request, ReconcileWritebackRequest,
                            lambda req: _reconcile_writeback(req.entity_type, req.entity_id, req.outcome))
 

@@ -30,7 +30,11 @@ system of record is recorded on the evidence ledger FIRST (`LEDGER_SERVICE_URL`
 by a local log line (`FULFILLMENT_DATA_DIR`, else in memory) anchored on the
 ledger before the action. `GET /audit/evidence` marks each record `committed`
 or `attempted`. The call limits, the dial dedupe and successful write-backs are
-replayed from the log after a restart; `/resolve` is idempotent. See ADR 0002
+replayed from the log after a restart; `/resolve` is idempotent. A write-back whose result is
+unknown after a restart is never written again until Andre rules on it with
+`POST /agents/resolution-writeback/reconcile` (header `X-Andre-Approval-Token`
+= `FULFILLMENT_ANDRE_APPROVAL_TOKEN`; unset or equal to the service token =
+every reconcile refused). See ADR 0002
 "Bug sweep D fixes" and `tests/test_sweep_d.py`.
 
 ## What this actually is

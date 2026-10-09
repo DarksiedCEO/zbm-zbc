@@ -748,3 +748,9 @@ client/creator), not a false record: every ledger event of the old process stays
 `/onboarding/audit/evidence`. Plan: make the log state-bearing — each operation's line carries the state change it
 applied (the bizdev-py `_apply` pattern) and start-up replays it — department by department, with a migration that
 treats pre-replay lines as evidence only.
+
+| Id | Finding (AEGIS, second pass) | Fix |
+|---|---|---|
+| O-2b | Replay kept only the FIRST intent per payment id: an attempt that died before its ledger call, then a retry under a new boot (new event id) recorded on the ledger with its line owed, left the total at 0 after a second restart | `_replay_payments` keeps every intent per payment id and applies the payment once if ANY of its event ids is on the ledger (`test_o2b_*`, the exact two-restart repro, with and without the first restart closing the dead intent). |
+| M | Open intents were never closed: every start read the whole ledger (and past its 256 MB read cap onboarding could never start) | An intent is closed at the start that resolves it: a `payment_intent_resolved` line names its event ids (`applied`, carrying the payment; or `not_on_ledger` -- the process that wrote it is gone, nothing of it is in flight), so the ledger is read only while an intent is open. ledger-rust has no filtered or paged read (`GET /ledger/entries` only); a failed close leaves the intent open for the next start. |
+| L | First-cut `pk-` keys on disk | Start-up refuses with a clear reason if any payment line holds a `pk-` key (this build never wrote one). |

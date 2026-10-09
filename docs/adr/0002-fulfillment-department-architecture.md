@@ -1022,3 +1022,7 @@ Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
 |---|---|---|
 | F-1 | A write-back whose result line was owed at a restart was written to the client's system again | `_restore_from_log`: a `resolution_requested` line with no later `resolution` line is restored into `_unresolved` (result unknown); `_resolve_events` never writes such an entity again until `POST /agents/resolution-writeback/reconcile` (`written`: answered as written from then on; `not_written`: the next /resolve writes), recorded first and replayed. The same applies in-process when the write-back raised. The reconcile is gated by the service token (this service has no Andre key). |
 | F-2 | The outside write-back ran under the evidence lock | The lock is released around the write-back; the entity is held in `_resolving` (a concurrent request for it is answered `failed`, "in progress") and the result is committed under the lock again. |
+
+| Id | Finding (AEGIS, second pass) | Fix |
+|---|---|---|
+| M | The write-back reconcile was gated by the service token: any department could trigger a second client write or record a false success | `src/founder.py` (finance-py's `FounderGate`, ported minimally): `POST /agents/resolution-writeback/reconcile` needs `X-Andre-Approval-Token` = `FULFILLMENT_ANDRE_APPROVAL_TOKEN`, checked before the body is read; unset or equal to the service token = not configured = refused (403). |

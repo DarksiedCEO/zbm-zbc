@@ -447,14 +447,27 @@ class OnboardingService:
         (the operation's line was owed when the process stopped, or its reply was lost) is applied exactly when the
         ledger holds its event. Deduplicated by payment id. Unresolved intents with an unreadable ledger refuse
         start-up: a total that may be short is never served."""
-        intents: dict[str, dict] = {}
+        # AEGIS O-2b: EVERY intent per payment id (each attempt -- another boot, another day -- has its own event id);
+        # the payment counts once if ANY of them is on the ledger. Intents are CLOSED once resolved (a line naming
+        # their event ids), so the whole-ledger read below happens only while some intent is open.
+        intents: dict[str, list[dict]] = {}
+        closed: set[str] = set()
         for r in self.log.iter_records():
             d = r.get("data") or {}
+            for pk in (d.get("payment") or {}, (d.get("payment_intent") or {}).get("payment") or {}):
+                if pk.get("person_key", "").startswith("pk-"):
+                    raise RuntimeError(f"refusing to start: local log line {r['seq']} holds a first-cut 1099 person "
+                                       "key (pk-), which the current key (pk2-, AEGIS O-1) cannot be matched with; "
+                                       "this build never wrote one -- inspect the log before starting")
             if d.get("payment"):
                 self._apply_payment(d["payment"])
-            elif d.get("payment_intent"):
-                intents.setdefault(d["payment_intent"]["request_id"], d["payment_intent"])
-        open_ = {rid: it for rid, it in intents.items() if rid not in self._payment_rids}
+            if d.get("payment_intent"):
+                intents.setdefault(d["payment_intent"]["request_id"], []).append(d["payment_intent"])
+            if d.get("payment_intents_closed"):
+                closed.update(d["payment_intents_closed"])
+        open_ = {rid: [i for i in its if i["event_id"] not in closed] for rid, its in intents.items()
+                 if rid not in self._payment_rids}
+        open_ = {rid: its for rid, its in open_.items() if its}
         if not open_:
             return
         try:
@@ -464,9 +477,20 @@ class OnboardingService:
             raise RuntimeError(f"refusing to start: {len(open_)} creator payment(s) may be on the ledger without a "
                                f"committed local line, and the ledger cannot be read ({exc}); the 1099 totals would "
                                "be short") from None
-        for it in open_.values():
-            if it["event_id"] in held:
-                self._apply_payment(it["payment"])
+        for rid, its in sorted(open_.items()):
+            hit = next((i for i in its if i["event_id"] in held), None)
+            ids = [i["event_id"] for i in its]
+            extra: dict = {"payment_intents_closed": ids}
+            if hit is not None:
+                self._apply_payment(hit["payment"])
+                extra["payment"] = hit["payment"]           # applied: replayed as a committed payment from now on
+            extra["outcome"] = "applied" if hit is not None else "not_on_ledger"
+            try:
+                # resolved at THIS start (the process that wrote the intents is gone: nothing of it is in flight)
+                self.journal.commit("payment_intent_resolved", self.now().isoformat(), f"payment|{rid}", [], extra)
+            except (LedgerWriteError, StoreWriteError) as exc:
+                log.warning("payment intent %s left open (%s); resolved again at the next start", rid,
+                            type(exc).__name__)
 
     # --- infrastructure --------------------------------------------------------
 
