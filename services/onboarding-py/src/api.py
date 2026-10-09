@@ -67,7 +67,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Callable, Optional
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
@@ -78,7 +78,8 @@ from integrations.compliance38 import compliance_from_env
 from integrations.departments import Departments, InMemoryContractStorage
 from integrations.revenue_recovery import HttpRevenueRecoveryClient, NotConfiguredRevenueRecovery
 from intelligences import registry
-from ledger import HttpLedgerClient, LedgerWriteAfterEffects, LedgerWriteError, UnconfiguredLedgerClient
+from ledger import EvidenceLineOwed, HttpLedgerClient, LedgerWriteAfterEffects, LedgerWriteError, UnconfiguredLedgerClient
+from store import LOCK_NAME, DataDirBusy, DataDirLock, RecordLog, StoreCorrupt
 from onboarding_schema import AccessGrantIn, ClipperApplication
 from onboarding_schema import requests as rq
 from redaction import ScanBudgetExceeded, cap_text, install_log_scrubbing, scan_budget, scan_memo, scrub, scrub_obj
@@ -140,8 +141,39 @@ class _ScrubbedResponses:
         return call
 
 
+_HELD: dict = {}
+
+
+def hold_data_dir(data_dir: str) -> DataDirLock:
+    """The exclusive flock on ONBOARDING_DATA_DIR (bug sweep D, E-5/F-3; finance-py's ``hold_data_dir``), taken once
+    per process before the log is opened and held for the life of the process. A second process on the same
+    directory refuses to start; a second service instance in this process must win the single claim."""
+    key = os.path.realpath(data_dir)
+    lock = _HELD.get(key)
+    if lock is None:
+        try:
+            lock = DataDirLock(data_dir)
+        except DataDirBusy:
+            raise RuntimeError(f"{data_dir}: another onboarding-py process holds this data directory (flock on "
+                               f"{LOCK_NAME}); refusing to start. Stop the other process first: two writers would "
+                               "fork the log") from None
+        except StoreCorrupt as exc:
+            raise RuntimeError(f"{data_dir}: {exc}") from None
+        _HELD[key] = lock
+    return lock
+
+
+def refuse_shared_andre_key(andre_key: Optional[str], service_token: Optional[str]) -> None:
+    """Bug sweep D (M): Andre's approval key must not be the service token. Every caller holding the token (every
+    department that calls this service) could otherwise approve as Andre. Refuse to start."""
+    if andre_key and service_token and hmac.compare_digest(andre_key.encode(), service_token.encode()):
+        raise RuntimeError("ONBOARDING_ANDRE_APPROVAL_KEY equals ONBOARDING_SERVICE_TOKEN: every caller with the "
+                           "service token could approve as Andre. Refusing to start; set a separate Andre key")
+
+
 def build_service_from_env(env: dict | None = None) -> OnboardingService:
     env = dict(os.environ) if env is None else env
+    refuse_shared_andre_key(env.get("ONBOARDING_ANDRE_APPROVAL_KEY"), env.get("ONBOARDING_SERVICE_TOKEN"))
     config = load_config(env)
     if env.get("LEDGER_SERVICE_URL") and env.get("LEDGER_SERVICE_TOKEN"):
         ledger = HttpLedgerClient(env["LEDGER_SERVICE_URL"], env["LEDGER_SERVICE_TOKEN"])
@@ -157,7 +189,19 @@ def build_service_from_env(env: dict | None = None) -> OnboardingService:
     depts.compliance = compliance_from_env(env)
     if env.get("ONBOARDING_CONTRACT_STORAGE") == "in_memory":
         depts.contracts = InMemoryContractStorage()
-    return OnboardingService(config, ledger, rr, departments=depts, andre_approval_key=env.get("ONBOARDING_ANDRE_APPROVAL_KEY") or None)
+    # Bug sweep D (D-1, E-5/F-3): the local evidence log. ONBOARDING_DATA_DIR unset = in memory (/health says so).
+    data_dir = env.get("ONBOARDING_DATA_DIR") or None
+    lock = hold_data_dir(data_dir) if data_dir else None
+    token = lock.claim() if lock is not None else None
+    try:
+        log_ = RecordLog(data_dir)
+        return OnboardingService(config, ledger, rr, departments=depts,
+                                 andre_approval_key=env.get("ONBOARDING_ANDRE_APPROVAL_KEY") or None,
+                                 log=log_, dir_lock=lock, lock_token=token)
+    except BaseException:
+        if lock is not None:
+            lock.release_claim(token)
+        raise
 
 
 def _sanitize_validation_errors(errors: list[dict]) -> list[dict]:
@@ -407,6 +451,7 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
+    refuse_shared_andre_key(getattr(service, "_andre_key", None), required_token)
     auth = [Depends(make_require_auth(required_token))]
     app.state.service = service
     cfg = service.config
@@ -502,6 +547,19 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
             return {"ledger_write": "unknown", "retry": exc.retry_hint or retry_identical}
         return {"ledger_write": "not_recorded"}
 
+    @app.exception_handler(EvidenceLineOwed)
+    def _evidence_owed(_: Request, exc: EvidenceLineOwed):
+        # Bug sweep D (D-1): the action TOOK EFFECT (state applied, ledger events written); only the local line that
+        # names its evidence is owed. Never "did not proceed", and never "retry" (a repeat would act twice).
+        log.error("evidence line owed (%s)", exc.outcome)
+        return JSONResponse(status_code=503, headers={"Retry-After": "1"}, content={
+            "detail": ("the action took effect; the local evidence line naming its ledger records could not be "
+                       "written yet and is written before the next action (until then its evidence reads "
+                       "'attempted' in /onboarding/audit/evidence)"),
+            "proceeded": True, "completed": True, "evidence": "pending", "outside_effects_done": list(exc.effects),
+            "ledger_write": exc.outcome, "retry": "do not repeat this action; it took effect",
+        })
+
     @app.exception_handler(LedgerWriteAfterEffects)
     def _ledger_after_effects(_: Request, exc: LedgerWriteAfterEffects):
         # Honest partial result: outside effects already happened (each was
@@ -560,7 +618,14 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return {"status": "ok", "service": "onboarding-py", "data_source": "non-live"}
+        return {"status": "ok", "service": "onboarding-py", "data_source": "non-live", **service.store_health()}
+
+    @app.get("/onboarding/audit/evidence", dependencies=auth)
+    def audit_evidence(limit: int = Query(default=200, ge=1, le=1000), offset: int = Query(default=0, ge=0, le=10_000_000),
+                       event_type: Optional[str] = Query(default=None, pattern=r"^[a-z0-9_]{1,64}$")) -> dict:
+        """Bug sweep D (D-1): every Onboarding event on the ledger, committed (named by an anchored local line) or
+        attempted (recorded first, never committed)."""
+        return svc.audit_evidence(limit, offset, event_type)
 
     @app.get("/intelligences", dependencies=auth)
     def intelligences() -> list[dict]:

@@ -446,7 +446,7 @@ def test_w9_required_before_payout_activation():
     assert r["activation"]["activated"] is False
     assert "compliance_15/w9_on_file_p8: W-9 not on file (P8): required before payout activation" in r["activation"]["unmet"]
     assert svc.depts.payouts.activated == []
-    assert c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "50.00"}).status_code == 409
+    assert c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-449", "amount_usd": "50.00"}).status_code == 409
     _ok(c.post("/zbc/creators/clip_1/w9", json={"received": True}))
     act = _ok(c.post("/zbc/creators/clip_1/activate"))
     assert act["activated"] is True and svc.depts.payouts.activated == ["clip_1"]
@@ -471,18 +471,18 @@ def test_1099_threshold_is_configuration():
     svc = make_service(all_fakes=True, clock=clock)
     c = client_for(svc)
     _ok(c.post("/zbc/creators/applications", json=_app(date_of_birth="2000-01-01")), 201)
-    r1 = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "1999.99"}))
+    r1 = _ok(c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-474", "amount_usd": "1999.99"}))
     assert r1["year"] == 2026 and r1["threshold_usd"] == "2000.00" and r1["form_1099_required"] is False
     clock.advance(days=31)
-    r2 = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "0.01"}))
+    r2 = _ok(c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-477", "amount_usd": "0.01"}))
     assert r2["paid_to_date_usd"] == "2000.00" and r2["form_1099_required"] is True
     clock.t = datetime(2027, 1, 2, 17, 0, tzinfo=timezone.utc)
-    r3 = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "5.00"}))
+    r3 = _ok(c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-480", "amount_usd": "5.00"}))
     assert r3["year"] == 2027 and r3["threshold_usd"] is None and r3["form_1099_required"] is True and "accountant" in r3["detail"]
     # 07:30 UTC on Jan 1 is still Dec 31 in Los Angeles: the 2026 tax year.
     clock.t = datetime(2027, 1, 1, 7, 30, tzinfo=timezone.utc)
-    assert _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "1.00"}))["year"] == 2026
-    assert c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "1.00", "paid_on": "2025-12-31"}).status_code == 422
+    assert _ok(c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-484", "amount_usd": "1.00"}))["year"] == 2026
+    assert c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-485", "amount_usd": "1.00", "paid_on": "2025-12-31"}).status_code == 422
     cfg = load_config({"ONBOARDING_1099_THRESHOLDS": '{"2026": "2000.00", "2027": "2100.00"}'})
     assert cfg.threshold_1099(2027) == Decimal("2100.00")
 

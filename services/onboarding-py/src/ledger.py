@@ -73,6 +73,20 @@ class LedgerWriteAfterEffects(LedgerWriteError):
         self.effects = list(effects)
 
 
+class EvidenceLineOwed(LedgerWriteAfterEffects):
+    """Bug sweep D (D-1): the operation COMPLETED (its state is applied, its ledger events are written) but the local
+    evidence line that names those events could not be anchored or appended. The line is owed: the next operation
+    writes it first and is refused while it cannot. Until then the events read ``attempted`` in /audit/evidence.
+    The API never asks for a retry of the operation itself (it took effect)."""
+
+
+class LedgerQueryFailed(RuntimeError):
+    """The ledger could not be read (GET /ledger/entries)."""
+
+
+LEDGER_ENTRIES_MAX_BYTES = 256 * 1024 * 1024
+
+
 def payload_sha256(payload: dict) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -269,6 +283,27 @@ class HttpLedgerClient:
                                    "nothing was recorded")
         raise LedgerWriteError(f"ledger answered HTTP {r.status_code}; the event may or may not be recorded", UNKNOWN)
 
+    def entries(self) -> list[dict]:
+        """GET /ledger/entries (ledger-rust has no filtered read), size-capped (bug sweep D: /audit/evidence)."""
+        try:
+            with self._client.stream("GET", "/ledger/entries", timeout=max(self._client.timeout.read or 5.0, 30.0)) as r:
+                if r.status_code != 200:
+                    raise LedgerQueryFailed(f"ledger could not be read: HTTP {r.status_code}")
+                chunks, size = [], 0
+                for chunk in r.iter_bytes():
+                    size += len(chunk)
+                    if size > LEDGER_ENTRIES_MAX_BYTES:
+                        raise LedgerQueryFailed("ledger entries larger than the read cap")
+                    chunks.append(chunk)
+            data = json.loads(b"".join(chunks))
+        except LedgerQueryFailed:
+            raise
+        except (httpx.HTTPError, ValueError, RecursionError) as exc:
+            raise LedgerQueryFailed(f"ledger could not be read: {type(exc).__name__}") from None
+        if not isinstance(data, list) or not all(isinstance(e, dict) for e in data):
+            raise LedgerQueryFailed("ledger entries were not a list of objects")
+        return data
+
 
 class UnconfiguredLedgerClient:
     """Default when LEDGER_SERVICE_URL / LEDGER_SERVICE_TOKEN are unset:
@@ -279,6 +314,9 @@ class UnconfiguredLedgerClient:
             "ledger not configured (LEDGER_SERVICE_URL / LEDGER_SERVICE_TOKEN unset); "
             "refusing to proceed without an evidence record"
         )
+
+    def entries(self) -> list[dict]:
+        raise LedgerQueryFailed("ledger not configured")
 
 
 @dataclass
@@ -309,3 +347,9 @@ class FakeLedgerClient:
 
     def types(self) -> list[str]:
         return [e["event_type"] for e in self.events]
+
+    def entries(self) -> list[dict]:
+        """What GET /ledger/entries answers (the stored bodies, in ledger order, with their 1-based seq)."""
+        if self.fail:
+            raise LedgerQueryFailed("fake ledger configured to fail")
+        return [{**e, "seq": i + 1} for i, e in enumerate(self.events)]

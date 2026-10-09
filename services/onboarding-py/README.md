@@ -37,6 +37,14 @@ status says it is not certified.
 
 ## What is enforced in code (and the test that proves it)
 
+- **Committed vs attempted evidence (bug sweep D).** Every operation's ledger
+  events are named by one local log line (`ONBOARDING_DATA_DIR`, else in
+  memory), anchored on the ledger before it is appended.
+  `GET /onboarding/audit/evidence` marks each event `committed` (named by an
+  anchored line) or `attempted` (recorded first, never committed). See
+  `test_sweep_d.py` and ADR 0004 "Bug sweep D fixes". Creator payments need a
+  `request_id`, and the 1099 total is kept per person, not per creator id.
+
 - **Activation needs both gates (14 and 15).** A blocked activation returns
   409 with the exact unmet list. No handoff or payout crossing happens until
   both pass. See `test_cert_guardrail.py::test_activation_*` and `test_gate_1[45]_fails_alone*`.
