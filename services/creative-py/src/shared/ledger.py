@@ -467,25 +467,28 @@ class EvidenceRecorder:
                 self._written, self._calls = [], []
             self._depth += 1
             ok, partial = False, False
+            partial_exc: OutcomeNotRecorded | None = None
             try:
                 yield
                 ok = True
             except CreativeError:
                 ok = True                    # a refusal is a decision: its records (if any) are committed
                 raise
-            except OutcomeNotRecorded:
+            except OutcomeNotRecorded as exc:
                 partial = True               # an outside call was made: what was recorded is named
+                partial_exc = exc
                 raise
             except LedgerRecordError as exc:
                 if outer and self._calls:
                     # bug sweep D (D-2): an outside department WAS called before this record failed: never "did not
                     # take effect" -- the request went out; the answer is not applied
                     partial = True
-                    raise OutcomeNotRecorded(
+                    partial_exc = OutcomeNotRecorded(
                         f"{', '.join(self._calls)} WAS called (its request recorded first), then a record failed "
                         f"({exc}); the answer is not applied in this service",
                         {"outside_calls_made": len(self._calls), "departments": list(self._calls),
-                         "failed_record": "not_recorded" if exc.took_effect is False else "unknown"}) from exc
+                         "failed_record": "not_recorded" if exc.took_effect is False else "unknown"})
+                    raise partial_exc from exc
                 raise
             finally:
                 self._depth -= 1
@@ -497,7 +500,12 @@ class EvidenceRecorder:
                         self._commit_line(name, partial=False, ids_only=True)   # a burned id survives a restart
                     self._written, self._calls = [], []
                 if pending is not None:
-                    raise pending
+                    if partial_exc is not None:
+                        # AEGIS C-1: the decision only PARTLY took effect (the answer is not applied): that stays the
+                        # error; the owed evidence line is a note on it, never a "took effect, do not repeat"
+                        partial_exc.effect["evidence"] = "pending"
+                    else:
+                        raise pending
 
     def _flush_owed(self) -> None:
         if not self.journal.owed:

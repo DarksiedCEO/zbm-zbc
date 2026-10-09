@@ -735,6 +735,11 @@ def build_app(
         saved = (r.get("data") or {}).get("counters") or saved
     zbm._n = max(zbm._n, int(saved.get("zbm", 1)))
     zbc._n = max(zbc._n, int(saved.get("zbc", 1)))
+    # AEGIS C-2: and past every server-assigned id ALREADY on the ledger -- an attempt whose reply was lost (the id
+    # burned) and whose line was still owed when the process stopped is on the ledger only
+    floor = ledger_id_floor(ledger)
+    zbm._n = max(zbm._n, floor["zbm"])
+    zbc._n = max(zbc._n, floor["zbc"])
     recorder.counters = {"zbm": lambda: zbm._n, "zbc": lambda: zbc._n}
     recorder._saved_counters = recorder._counters_now()
 
@@ -1231,6 +1236,29 @@ def build_app(
 
 
 _HELD: dict = {}
+_SERVER_ID = re.compile(r"(brief|job|work|kit)-([0-9]{4,9})")
+
+
+def ledger_id_floor(ledger) -> dict:
+    """The next free server-assigned id number per workflow, from this department's events on the ledger (AEGIS C-2).
+    An unconfigured ledger records nothing (nothing can collide); a configured one that cannot be read refuses
+    start-up: an id it may already hold could be handed out again."""
+    if isinstance(ledger, UnconfiguredLedgerClient) or not hasattr(ledger, "entries"):
+        return {"zbm": 1, "zbc": 1}
+    try:
+        entries = ledger.entries()
+    except LedgerQueryFailed as exc:
+        raise RuntimeError(f"refusing to start: the evidence ledger cannot be read to resume server-assigned ids past "
+                           f"the ones it holds ({exc})") from None
+    floor = {"zbm": 1, "zbc": 1}
+    for e in entries:
+        if not isinstance(e, dict) or e.get("department") != "creative_production":
+            continue
+        m = _SERVER_ID.fullmatch(str(e.get("subject_id") or ""))
+        if m:
+            k = "zbc" if m.group(1) == "kit" else "zbm"
+            floor[k] = max(floor[k], int(m.group(2)) + 1)
+    return floor
 
 
 def hold_data_dir(data_dir: str) -> DataDirLock:

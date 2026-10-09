@@ -1727,3 +1727,17 @@ bizdev-py / compliance-py R6 pattern). Pinned by `tests/test_sweep_d.py`.
 
 See `services/creative-py/README.md` for the exact commands, test
 counts and live-run evidence. This ADR records decisions, not results.
+
+### AEGIS re-review of bug sweep D (37a2830) — fixes
+
+Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
+
+| Id | Finding | Fix |
+|---|---|---|
+| C-1 | A partial decision (the Compliance answer's record failed) whose evidence line was then owed was answered "took effect, do not repeat" | `EvidenceRecorder.op`: the partial `OutcomeNotRecorded` stays the error; the owed line is a note on it (`effect.evidence: "pending"`). |
+| C-2 | An id burned by a lost reply, its line owed at a restart, was reissued for another client | `api.ledger_id_floor`: at start the counters also resume past every server-assigned id (`brief-`/`job-`/`work-`/`kit-NNNN`) this department already holds on the ledger; a configured ledger that cannot be read refuses start-up. |
+
+**M-1 (recorded, not changed now).** Briefs, jobs, work, rulebooks, kits and decisions are still in-process: after a
+restart they are gone (ids no longer collide, C-2), and every ledger event of the old process stays visible as
+committed or attempted in `GET /audit/evidence`. Plan: make the log state-bearing (each decision's line carries the
+state it applied; start-up replays it), workflow by workflow, pre-replay lines kept as evidence only.
