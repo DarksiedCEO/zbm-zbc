@@ -84,11 +84,10 @@ from intelligences import (
     i14_contract_obligation as i14,
     i15_compliance as i15,
 )
-import unicodedata
-
 from journal import EvidenceJournal
 from ledger import (DEPARTMENT, EvidenceLineOwed, LedgerClient, LedgerQueryFailed, LedgerWriteAfterEffects,
                     LedgerWriteError, build_body, derive_event_id, payload_sha256)
+from name_key import name_key_text
 from store import DataDirBusy, RecordLog, StoreWriteError
 from memory import (
     AndreApprovalError,
@@ -265,13 +264,15 @@ class CreatorRecord:
 
 
 def person_key(legal_name: str, date_of_birth) -> str:
-    """Bug sweep D (M, 1099 split): one key per PERSON, from the legal name (NFKC, casefolded, whitespace collapsed)
-    and the date of birth. Onboarding holds no tax identifier (P8, minimum data), so this is the identity the 1099
-    total is kept against: two creator ids for the same person share one total. A different spelling of the legal
-    name is a different key (the W-9 holder at ZBC payouts/tax reconciles those). Only the hash is kept."""
-    name = " ".join(unicodedata.normalize("NFKC", legal_name).casefold().split())
+    """Bug sweep D (M, 1099 split; AEGIS O-1): one key per PERSON, from the legal name and the date of birth.
+    Onboarding holds no tax identifier (P8, minimum data), so this is the identity the 1099 total is kept against: two
+    creator ids for the same person share one total. The name is canonicalised by ``name_key.name_key_text`` (format
+    characters removed, NFKC, casefold, apostrophe / dash variants folded, lookalike letters folded with creative-py's
+    confusables table), so a zero-width space, a soft hyphen, a curly apostrophe or a Cyrillic "а" never splits a
+    person. Only the hash is kept. ``pk2-``: the first cut's ``pk-`` keys were never deployed (no data to migrate)."""
     dob = date_of_birth.isoformat() if date_of_birth is not None else ""
-    return "pk-" + hashlib.sha256(json.dumps(["onboarding-1099-person", name, dob]).encode()).hexdigest()[:32]
+    material = json.dumps(["onboarding-1099-person-v2", name_key_text(legal_name), dob])
+    return "pk2-" + hashlib.sha256(material.encode()).hexdigest()[:32]
 
 
 def _hhmm(s: Optional[str], default: time) -> time:
@@ -409,11 +410,8 @@ class OnboardingService:
                 payload_hash=lambda p: payload_sha256(scrub_obj(p)), id_prefix="onb-anc-")
             # 1099 totals and payment idempotency survive a restart: they are replayed from the log (bug sweep D, M)
             self._paid: dict[tuple[str, int], Decimal] = {}
-            self._payment_rids: dict[tuple[str, str], dict] = {}
-            for r in self.log.iter_records():
-                pay = (r.get("data") or {}).get("payment")
-                if pay:
-                    self._apply_payment(pay)
+            self._payment_rids: dict[str, dict] = {}       # payment id (request_id) -> the payment (AEGIS O-3)
+            self._replay_payments()
         except BaseException:
             self.close()
             raise
@@ -436,9 +434,39 @@ class OnboardingService:
         return self._closed
 
     def _apply_payment(self, pay: dict) -> None:
+        if pay["request_id"] in self._payment_rids:      # one payment id counts once, whatever replays it
+            return
         k = (pay["person_key"], int(pay["year"]))
         self._paid[k] = self._paid.get(k, Decimal("0.00")) + Decimal(pay["amount_usd"])
-        self._payment_rids[(pay["creator_id"], pay["request_id"])] = pay
+        self._payment_rids[pay["request_id"]] = pay
+
+    def _replay_payments(self) -> None:
+        """AEGIS O-2: the 1099 totals match the LEDGER. Every payment writes a ``payment_intent`` line (anchored, with
+        the ``creator_payment_tracked`` event id it is about to record) BEFORE its ledger record, and the operation's
+        line names the payment after. At start, committed payments are applied; an intent no committed line names
+        (the operation's line was owed when the process stopped, or its reply was lost) is applied exactly when the
+        ledger holds its event. Deduplicated by payment id. Unresolved intents with an unreadable ledger refuse
+        start-up: a total that may be short is never served."""
+        intents: dict[str, dict] = {}
+        for r in self.log.iter_records():
+            d = r.get("data") or {}
+            if d.get("payment"):
+                self._apply_payment(d["payment"])
+            elif d.get("payment_intent"):
+                intents.setdefault(d["payment_intent"]["request_id"], d["payment_intent"])
+        open_ = {rid: it for rid, it in intents.items() if rid not in self._payment_rids}
+        if not open_:
+            return
+        try:
+            held = {e.get("event_id") for e in self.ledger.entries()  # type: ignore[attr-defined]
+                    if isinstance(e, dict) and e.get("event_type") == "creator_payment_tracked"}
+        except (LedgerQueryFailed, AttributeError) as exc:
+            raise RuntimeError(f"refusing to start: {len(open_)} creator payment(s) may be on the ledger without a "
+                               f"committed local line, and the ledger cannot be read ({exc}); the 1099 totals would "
+                               "be short") from None
+        for it in open_.values():
+            if it["event_id"] in held:
+                self._apply_payment(it["payment"])
 
     # --- infrastructure --------------------------------------------------------
 
@@ -2041,10 +2069,12 @@ class OnboardingService:
         same id with another amount is 409), and the 1099 total is kept per PERSON (``person_key``), not per creator
         id, and replayed from the local log at start (it survives a restart)."""
         with self._op("creator_payment"):
-            prev = self._payment_rids.get((creator_id, req.request_id))
+            prev = self._payment_rids.get(req.request_id)
             if prev is not None:
-                if Decimal(prev["amount_usd"]) != req.amount_usd:
-                    raise Conflict("request_id already used for a different payment amount; nothing was recorded")
+                # AEGIS O-3: the payment id alone is the key -- the same id under another creator is another payment
+                if prev["creator_id"] != creator_id or Decimal(prev["amount_usd"]) != req.amount_usd:
+                    raise Conflict("request_id already used for a different payment (another creator or amount); "
+                                   "nothing was recorded")
                 return dict(prev["status"])
             rec = self._creator(creator_id)
             # Owner ruling (fix wave 4, P1: refuse): payments are tracked only
@@ -2067,13 +2097,22 @@ class OnboardingService:
             pk = rec.person_key or person_key(rec.application.legal_name, rec.application.date_of_birth)
             paid = self._paid.get((pk, year), Decimal("0.00")) + req.amount_usd
             status = creator_tax.form_1099_status(year, paid, self.config.form_1099_thresholds_usd)
-            self._record("creator_payment_tracked", "practice_p8_tax", rec.creator_id,
-                         {"year": year, "recorded_on": paid_on.isoformat(), "amount_usd": money_str(req.amount_usd),
-                          "paid_to_date_usd": status["paid_to_date_usd"], "form_1099_required": status["form_1099_required"],
-                          "person_key": pk, "request_id": req.request_id},
-                         f"1099 tracking {year}: {status['detail']}"[:280])
+            payload = {"year": year, "recorded_on": paid_on.isoformat(), "amount_usd": money_str(req.amount_usd),
+                       "paid_to_date_usd": status["paid_to_date_usd"], "form_1099_required": status["form_1099_required"],
+                       "person_key": pk, "request_id": req.request_id}
             pay = {"creator_id": rec.creator_id, "request_id": req.request_id, "person_key": pk, "year": year,
                    "amount_usd": money_str(req.amount_usd), "status": scrub_obj(dict(status))}
+            eid = self._event_id("creator_payment_tracked", rec.creator_id, payload)
+            # AEGIS O-2: the intent (with the event id) is anchored and in the local log BEFORE the ledger record, so a
+            # restart can count this payment exactly when the ledger holds it, whatever happens to the op's own line
+            try:
+                self.journal.commit("payment_intent", self.now().isoformat(), "creator_payment", [],
+                                    {"payment_intent": {"request_id": req.request_id, "event_id": eid, "payment": pay}})
+            except StoreWriteError as exc:
+                raise LedgerWriteError(f"the payment intent could not be written to the local log ({exc}); nothing "
+                                       "was recorded") from None
+            self._write(eid, "creator_payment_tracked", "practice_p8_tax", rec.creator_id, payload,
+                        f"1099 tracking {year}: {status['detail']}"[:280])
             # the payment is part of the operation's evidence line (replayed at start); applied when the op completes
             self._op_extra = {"payment": pay}
             self._apply_payment(pay)

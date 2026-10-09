@@ -730,3 +730,21 @@ store; `src/journal.py`, the bizdev-py / compliance-py R6 pattern). Pinned by `t
 Not changed (recorded): client and creator state is still in-process (ADR "Event ids"); the log replays only the 1099
 totals and payment ids. An owed line is lost if the process stops before the next operation writes it (its events
 then stay `attempted`).
+
+### AEGIS re-review of bug sweep D (37a2830) — fixes
+
+Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
+
+| Id | Finding | Fix |
+|---|---|---|
+| O-1 | `person_key` split one person: a zero-width space, a soft hyphen, a curly apostrophe or a lookalike letter gave a new key (1099 under-reported) | `src/name_key.py` `name_key_text`: Unicode Cf and other default-ignorables removed, NFKC, casefold, apostrophe and hyphen/dash variants folded, lookalikes folded with creative-py's confusables table (copied: services share no code); keys are `pk2-` (the `pk-` keys were never deployed). `ClipperApplication.legal_name` refuses any format character (422). |
+| O-2 | A payment whose operation line was owed at a restart was not counted (the ledger held 3 payments, the total counted 2) | `creator_payment` anchors and appends a `payment_intent` line (with the `creator_payment_tracked` event id) BEFORE the ledger record; `_replay_payments` at start applies committed payments, then every intent no committed line names exactly when the ledger holds its event; deduplicated by payment id. Unresolved intents with an unreadable ledger refuse start-up. |
+| O-3 | One `request_id` under two creator ids counted twice | Idempotency and replay are keyed on the payment id alone; the same id under another creator or amount is 409. |
+
+**M-1 (recorded, not changed now).** Client, creator, escalation and campaign state is still in-process: after a restart
+creators must re-apply, open escalations and commitments are gone, and only the 1099 totals and payment ids are
+replayed (from the log, reconciled with the ledger). The consequence is operational (work restarts from the
+client/creator), not a false record: every ledger event of the old process stays visible as committed or attempted in
+`/onboarding/audit/evidence`. Plan: make the log state-bearing — each operation's line carries the state change it
+applied (the bizdev-py `_apply` pattern) and start-up replays it — department by department, with a migration that
+treats pre-replay lines as evidence only.

@@ -500,6 +500,14 @@ def _dob_not_before_1900(v: date) -> date:
     return v
 
 
+def _no_format_chars(v: str) -> str:
+    from name_key import has_format_chars
+    if has_format_chars(v):
+        raise ValueError("legal_name contains an invisible format character (e.g. a zero-width space or soft "
+                         "hyphen); send the name without it")
+    return v
+
+
 class ClipperApplication(Inbound):
     """A ZBC clipper application. There is deliberately NO guardian /
     parental-consent field (18+ is written in stone, no guardian process)
@@ -507,7 +515,9 @@ class ClipperApplication(Inbound):
     Onboarding only records that it was received (P8, minimum data)."""
 
     creator_id: SubjectId
-    legal_name: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    # AEGIS O-1: a legal name with an invisible format character (zero-width space, soft hyphen, bidi control...)
+    # is refused here: it would key the 1099 total apart from the same name without it
+    legal_name: Annotated[str, StringConstraints(min_length=1, max_length=200), AfterValidator(_no_format_chars)]
     # Plausibility (fix wave 4, D1): a date before 1900 is refused here (422);
     # an age above MAX_PLAUSIBLE_AGE_YEARS on the SERVER's date is refused by
     # the service (it owns the clock) — "0001-01-01" was approved as 2025.
