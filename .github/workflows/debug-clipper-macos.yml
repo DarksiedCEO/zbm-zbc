@@ -1,6 +1,7 @@
 name: debug-clipper-macos
 on:
-  workflow_dispatch:
+  push:
+    branches: [debug-clipper-macos]
 permissions:
   contents: read
 jobs:
