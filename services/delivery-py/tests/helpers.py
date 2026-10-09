@@ -359,6 +359,15 @@ class Harness:
                  gate_report=None, ledger: Optional[FakeLedgerClient] = None, service: str = "toy-py",
                  pct_repro: bool = True, extra_files: Optional[dict] = None):
         self.owns_tmp = tmp is None
+        if tmp is not None:
+            # bug sweep D (E-5/F-3): a new harness on a temp dir is a RESTART -- the old instance stops first (the
+            # single-writer claim refuses a second live instance on one data directory)
+            for old in list(HARNESSES):
+                if getattr(old, "tmp", None) == tmp and getattr(old, "svc", None) is not None:
+                    try:
+                        old.close()
+                    except Exception:  # noqa: BLE001 - already closed
+                        pass
         self.tmp = tmp or tempfile.mkdtemp(prefix="dlv-test-")
         if self.owns_tmp:
             _OWNED_TMP.append(self.tmp)

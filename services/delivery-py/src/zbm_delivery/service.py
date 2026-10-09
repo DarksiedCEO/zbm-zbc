@@ -53,7 +53,7 @@ from zbm_delivery.models import ID_RE
 from zbm_delivery.ports import NoChatBackend
 from zbm_delivery.gitport import GitRefused
 from zbm_delivery.runner import detect_framework, node_id_in_text, reproduction_problem, same_test
-from zbm_delivery.store import RecordLog, StoreWriteError
+from zbm_delivery.store import DataDirBusy, RecordLog, StoreWriteError
 
 IDEMPOTENCY_WINDOW = timedelta(minutes=15)
 IDEMPOTENCY_MAX = 200_000
@@ -144,7 +144,35 @@ class DeliveryService:
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, *, gate_report, docker, egress,
                  chat_backend, git, harness_factory: Optional[Callable], provider_factory: Optional[Callable],
                  prompts: dict, policy_seed: dict, test_seed: dict, clock: Optional[Clock] = None,
-                 docker_available: Optional[Callable[[], bool]] = None):
+                 docker_available: Optional[Callable[[], bool]] = None, dir_lock=None, lock_token: Optional[str] = None):
+        # bug sweep D (E-5/F-3, finance-py's single writer): one service instance per data directory, also within one
+        # process; api.build_service claims the flock's single claim and hands its token here; stop() gives it back
+        self._dir_lock = None
+        self._lock_token: Optional[str] = None
+        if dir_lock is not None:
+            adopted = dir_lock.adopt(lock_token if lock_token is not None else dir_lock.claim())
+            if adopted is None:
+                raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
+                                  "stale, another instance's, or already adopted); refusing to start")
+            self._dir_lock, self._lock_token = dir_lock, adopted
+        try:
+            self._init(settings, recorder, log, gate_report=gate_report, docker=docker, egress=egress,
+                       chat_backend=chat_backend, git=git, harness_factory=harness_factory,
+                       provider_factory=provider_factory, prompts=prompts, policy_seed=policy_seed, test_seed=test_seed,
+                       clock=clock, docker_available=docker_available)
+        except BaseException:
+            self._release_dir()
+            raise
+
+    def _release_dir(self) -> None:
+        if self._dir_lock is not None:
+            self._dir_lock.release_claim(self._lock_token)
+            self._dir_lock, self._lock_token = None, None
+
+    def _init(self, settings: Settings, recorder: Recorder, log: RecordLog, *, gate_report, docker, egress,
+              chat_backend, git, harness_factory: Optional[Callable], provider_factory: Optional[Callable],
+              prompts: dict, policy_seed: dict, test_seed: dict, clock: Optional[Clock] = None,
+              docker_available: Optional[Callable[[], bool]] = None) -> None:
         self.cfg = settings
         self.recorder = recorder
         self.log = log
@@ -204,6 +232,10 @@ class DeliveryService:
         self._engine = None
         self._worker: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        # bug sweep D: runs whose engine is between a recorded ``commit_attempted`` and its recorded outcome right now
+        # (in flight, not orphans); evidence files an operation could not write after its line was committed
+        self._committing: set[str] = set()
+        self.evidence_unwritten: dict[str, str] = {}
         for rec in self.log.iter_records():
             for kind, r in rec["data"].get("ops", []):
                 self._apply(kind, r)
@@ -236,6 +268,7 @@ class DeliveryService:
                 self._write_lease()
             except Unavailable as exc:
                 raise RuntimeError(f"refusing to start: the instance lease could not be recorded ({exc.reason})") from None
+        self._reconcile_commit_attempts()
         self._fail_live_runs_at_start()
         self._rescan_legacy_runs()
         self._reap("start")
@@ -311,7 +344,13 @@ class DeliveryService:
         for kind, r in op.ops:
             self._apply(kind, r)
         for run_id, ev_id, content in op.files:
-            self._write_evidence_file(run_id, ev_id, content)
+            try:
+                self._write_evidence_file(run_id, ev_id, content)
+            except OSError as exc:
+                # bug sweep D: the line (and its anchor) already took effect; the file is content-addressed, so it is
+                # kept in memory and surfaced (/health ``evidence_unwritten``) instead of an error after the commit
+                self._evidence_mem[ev_id] = content
+                self.evidence_unwritten[ev_id] = f"{run_id}: {type(exc).__name__}"
 
     def _apply(self, kind: str, r: dict) -> None:
         if kind == "run":
@@ -566,6 +605,7 @@ class DeliveryService:
     def stop(self) -> None:
         self._stop.set()
         self._reap("stop")
+        self._release_dir()            # bug sweep D: the data directory is free for the next instance
 
     def _reap(self, where: str) -> None:
         """R6: remove every container/volume carrying our run label (a crash, a failed destroy); each is recorded
@@ -599,6 +639,8 @@ class DeliveryService:
                 "prompts_manifest_sha256": self.gate.prompts_manifest_sha256, "policy_version": POLICY_VERSION,
                 "deerflow_commit": self.gate.deerflow_commit or self.cfg.deerflow_commit,
                 "reconcile_mode": self.reconcile_mode, "reconcile_required": bool(self.reconcile_required),
+                "log_write_fault": bool(self.log.fault), "orphan_commits": len(self.orphan_commits()),
+                "evidence_unwritten": len(self.evidence_unwritten),
                 "runs_live": sum(1 for r in self.runs.values() if r["status"] in states.LIVE or r["status"] in ("received", "preparing", "reporting"))}
 
     def policy_view(self) -> dict:
@@ -1252,6 +1294,89 @@ class DeliveryService:
 
     def run_finished(self, run_id: str) -> None:
         return None
+
+    # --- git commit: record-first (bug sweep D) ---------------------------------------------------------------------------
+
+    def commit_attempt(self, run_id: str, finding_id: str, attempt: dict) -> str:
+        """Record the commit BEFORE ``git commit`` runs: ``commit_attempted`` (parent sha, message hash, staged files)
+        on the ledger and the run's ``pending_commit`` in the same anchored local line. Until its outcome is recorded
+        the attempt is in flight (this engine) or an ORPHAN (``orphan_commits``, /health, GET /dlv/v1/commits/orphans)."""
+        with self.lock:
+            pending = {**attempt, "finding_id": finding_id, "at": self.now_iso()}
+            eid = self.finding_update(run_id, finding_id, "commit_attempted",
+                                      {"run_id": run_id, "finding_id": finding_id, **attempt},
+                                      f"Commit attempt for {finding_id} ({run_id})", run_fields={"pending_commit": pending})
+            self._committing.add(run_id)
+            return eid
+
+    def commit_outcome(self, run_id: str, finding_id: str, outcome: str, commit_sha: Optional[str], why: str = "") -> Optional[str]:
+        """The outcome of a recorded attempt that did NOT end in ``commit_recorded``: ``not_committed`` (git refused;
+        the branch head is still the parent) or ``orphaned`` (a commit exists that no ``commit_recorded`` names: the
+        steps after it failed). Recorded whatever the run's status (a cancelled or failed run's orphan is evidence
+        too); the run's ``pending_commit`` is cleared and an orphan is kept in ``orphan_commits``. Returns None when
+        it could not be recorded (the attempt then stays pending, and so visible as an orphan)."""
+        with self.lock:
+            self._committing.discard(run_id)
+            run = self.runs.get(run_id)
+            if run is None or not run.get("pending_commit"):
+                return None
+            pend = run["pending_commit"]
+            n = len(run["ledger_event_ids"])
+            payload = {"run_id": run_id, "finding_id": finding_id, "outcome": outcome, "sha": commit_sha,
+                       "parent_sha": pend.get("parent_sha"), "why": why[:160]}
+            op = Op(self, f"commit-outcome|{run_id}|{finding_id}|{n}", ENGINE, run_id)
+            try:
+                eid = op.record(derived_id("cmo", run_id, finding_id, n, sha(payload)), "commit_attempt_outcome", ENGINE,
+                                f"{run_id}:{finding_id}", payload,
+                                f"Commit attempt for {finding_id}: {outcome}{' ' + commit_sha[:12] if commit_sha else ''} ({run_id})")
+                new_run = json.loads(json.dumps(run))
+                new_run["ledger_event_ids"].append(eid)
+                new_run["pending_commit"] = None
+                if outcome == "orphaned":
+                    new_run["orphan_commits"] = list(run.get("orphan_commits") or []) + [
+                        {"finding_id": finding_id, "sha": commit_sha, "parent_sha": pend.get("parent_sha"), "why": why[:160]}]
+                op.add("run", new_run)
+                self._commit(op)
+                return eid
+            except Unavailable:
+                return None
+
+    def commit_done(self, run_id: str) -> None:
+        with self.lock:
+            self._committing.discard(run_id)
+
+    def orphan_commits(self) -> list[dict]:
+        """Every commit attempt with no recorded success, surfaced continuously (bug sweep D): an attempt still
+        pending while no engine is working on it, and every recorded orphan."""
+        with self.lock:
+            out = []
+            for run_id, run in self.runs.items():
+                pend = run.get("pending_commit")
+                if pend and run_id not in self._committing:
+                    out.append({"run_id": run_id, "finding_id": pend.get("finding_id"), "status": "attempt_unresolved",
+                                "parent_sha": pend.get("parent_sha"), "sha": None, "run_status": run.get("status")})
+                for o in run.get("orphan_commits") or []:
+                    out.append({"run_id": run_id, "finding_id": o.get("finding_id"), "status": "orphaned",
+                                "parent_sha": o.get("parent_sha"), "sha": o.get("sha"), "run_status": run.get("status")})
+            return out
+
+    def _reconcile_commit_attempts(self) -> None:
+        """At start: every attempt the log left pending is resolved against the branch -- its head still the parent:
+        ``not_committed``; anything else: ``orphaned`` with the head's sha. A branch that cannot be read leaves the
+        attempt pending (an orphan in /health until it can be resolved)."""
+        for run_id, run in sorted(self.runs.items()):
+            pend = run.get("pending_commit")
+            if not pend or self.git is None or not run.get("branch"):
+                continue
+            try:
+                head = self.git.rev_parse(run["branch"], run_id=run_id)
+            except Exception:  # noqa: BLE001 - GitRefused, a missing branch: stays pending (visible)
+                continue
+            if head == pend.get("parent_sha"):
+                self.commit_outcome(run_id, pend.get("finding_id") or "-", "not_committed", None, "restart: no commit")
+            else:
+                self.commit_outcome(run_id, pend.get("finding_id") or "-", "orphaned", head,
+                                    "restart: the branch moved past the attempt's parent; no commit_recorded names it")
 
     def mark_failed_unrecorded(self, run_id: str, reason: dict) -> None:
         """The ledger is down: the in-memory run is failed so the loop stops; the state is NOT persisted (a

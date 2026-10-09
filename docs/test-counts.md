@@ -22,7 +22,7 @@ the check.
 | `python:clipper-network-py` | 368 | pytest collection | — |
 | `python:compliance-py` | 636 | pytest collection | — |
 | `python:creative-py` | 828 | pytest collection | — |
-| `python:delivery-py` | 730 | pytest collection | — |
+| `python:delivery-py` | 735 | pytest collection | — |
 | `python:detection-py` | 504 | pytest collection | — |
 | `python:finance-py` | 538 | pytest collection | — |
 | `python:fulfillment-py` | 1112 | pytest collection | — |
