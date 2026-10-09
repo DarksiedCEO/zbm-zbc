@@ -120,9 +120,9 @@ def test_f1_no_other_caller_supplied_date_can_move_a_decision():
     assert c.post("/onboarding/clients", json=body).status_code == 422
     # the 1099 tax year comes from the server's clock, never from a caller date
     _ok(c.post("/zbc/creators/applications", json=_app()), 201)
-    r = c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "10.00", "paid_on": "2025-12-31"})
+    r = c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-123", "amount_usd": "10.00", "paid_on": "2025-12-31"})
     assert r.status_code == 422, r.text
-    p = _ok(c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "10.00"}))
+    p = _ok(c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-125", "amount_usd": "10.00"}))
     assert p["year"] == 2026
 
 
@@ -401,7 +401,9 @@ def test_f9_record_first_at_every_write_position(name, setup, action):
         before = {w for k, w in clean_log[:i] if k == "write"}
         need = AUTHORIZED_BY[what]
         if need is None:
-            assert all(k != "write" for k, _ in clean_log[i + 1:]), (name, "memory write before a later record", clean_log)
+            # bug sweep D: the evidence line's anchor names records already written; it authorizes nothing
+            assert all(k != "write" or w == "log_anchor" for k, w in clean_log[i + 1:]), \
+                (name, "memory write before a later record", clean_log)
         else:
             assert before & need, (name, what, clean_log)
         if what in MUST_ALSO_FOLLOW:
@@ -415,6 +417,11 @@ def test_f9_record_first_at_every_write_position(name, setup, action):
         assert all(kind != "effect" for kind, _ in log[idx + 1:]), (name, k, log)
         assert r.status_code == 503, (name, k, r.status_code, r.text)
         body = r.json()
+        if log[idx][1] == "log_anchor":
+            # bug sweep D (D-1): the operation's evidence line (its LAST write) failed: the action took effect, its
+            # line is owed (written before the next action); never "did not proceed", never "retry"
+            assert body["proceeded"] is True and body["completed"] is True and body["evidence"] == "pending", body
+            continue
         if not done:
             assert body["proceeded"] is False, (name, k, body)
         else:
@@ -732,7 +739,7 @@ def test_l1_audit_with_detection_down_records_the_failure():
     _ok(c.post("/onboarding/clients", json=start_body()), 201)
     r = c.post("/onboarding/clients/client_a/audit", json={"account_data": {"orders": [{"order_id": "o1"}]}})
     assert r.status_code == 502
-    types = svc.ledger.types()
+    types = [t for t in svc.ledger.types() if t != "log_anchor"]  # bug sweep D: the evidence line's anchor
     assert types[-2:] == ["revenue_recovery_request", "revenue_recovery_failed"]
 
 

@@ -710,3 +710,47 @@ The WIP commit was replaced; it doesn't remain in history.
   consumed them. A legacy float finding is now rejected, not converted. Section 1 allows
   the float fallback for fixtures, but findings from another service are held to the
   canonical wire form.
+
+## Bug sweep D fixes (Oct 9 2026, sweep at integration 5d49ee9)
+
+The ledger was this department's only store. Every decision is recorded first, so an operation that recorded its
+ruling and then stopped left ledger evidence indistinguishable from evidence of an action that happened. Onboarding
+now keeps a local, hash-chained, anchored evidence log (`src/store.py`, backported from compliance-py's bug sweep C
+store; `src/journal.py`, the bizdev-py / compliance-py R6 pattern). Pinned by `tests/test_sweep_d.py`.
+
+| Id | Finding | Fix |
+|---|---|---|
+| D-1 | Ledger evidence exists for actions that never happened; no local log or anchor | `service._op` collects every event an operation writes (`_write`) and, when its state is applied, `_commit_line` names them in ONE local line that is anchored on the ledger (`log_anchor`) before it is appended. `GET /onboarding/audit/evidence` (`audit_evidence`, `journal.EvidenceJournal.audit`): `committed` only when an anchored line names the event with the same type, subject and payload hash, else `attempted`. A line whose anchor or append fails after the state was applied is owed (503 `proceeded: true, completed: true, evidence: "pending"`, never "retry"): the next operation writes it first and is refused while it cannot; in-process effects (bus, memory) wait for it. A refused or failed operation's records stay `attempted`; its retry (same deterministic ids) is named by the retry's line. |
+| E-5/F-3 | (no store) a single fsync error would brick a log; no single-writer guard | `store.RecordLog` (exact-size append, adopt / truncate, short write cut back, `fault`, `O_NOFOLLOW`, closed refuses) and `DataDirLock` (flock + single in-process claim); `ONBOARDING_DATA_DIR` (unset = in memory, `/health` says so); `api.hold_data_dir`, `OnboardingService.close()`. |
+| M | 1099 split across two creator ids | `person_key` (NFKC/casefold/whitespace-collapsed legal name + date of birth, hashed): the 1099 total is kept per person (`_paid`), and replayed from the log at start, so it also survives a restart. |
+| M | Payment replay | `CreatorPaymentRequest.request_id` is required (422 without); a replay answers the first result and records nothing; the same id with another amount is 409. Replayed from the log at start. |
+| M | Andre key could equal the service token | `api.refuse_shared_andre_key`, in `build_service_from_env` and `create_app`: refuses to start. |
+| M | Slow I/O under the service lock | Premise partly wrong at 5d49ee9: onboarding had no disk I/O at all. The new log's append is part of the operation's commit (ordered, so under the lock); the evidence view copies raw lines under the lock and parses, hashes and reads the ledger outside it; `verify_log` uses the log's own lock. |
+
+Not changed (recorded): client and creator state is still in-process (ADR "Event ids"); the log replays only the 1099
+totals and payment ids. An owed line is lost if the process stops before the next operation writes it (its events
+then stay `attempted`).
+
+### AEGIS re-review of bug sweep D (37a2830) — fixes
+
+Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
+
+| Id | Finding | Fix |
+|---|---|---|
+| O-1 | `person_key` split one person: a zero-width space, a soft hyphen, a curly apostrophe or a lookalike letter gave a new key (1099 under-reported) | `src/name_key.py` `name_key_text`: Unicode Cf and other default-ignorables removed, NFKC, casefold, apostrophe and hyphen/dash variants folded, lookalikes folded with creative-py's confusables table (copied: services share no code); keys are `pk2-` (the `pk-` keys were never deployed). `ClipperApplication.legal_name` refuses any format character (422). |
+| O-2 | A payment whose operation line was owed at a restart was not counted (the ledger held 3 payments, the total counted 2) | `creator_payment` anchors and appends a `payment_intent` line (with the `creator_payment_tracked` event id) BEFORE the ledger record; `_replay_payments` at start applies committed payments, then every intent no committed line names exactly when the ledger holds its event; deduplicated by payment id. Unresolved intents with an unreadable ledger refuse start-up. |
+| O-3 | One `request_id` under two creator ids counted twice | Idempotency and replay are keyed on the payment id alone; the same id under another creator or amount is 409. |
+
+**M-1 (recorded, not changed now).** Client, creator, escalation and campaign state is still in-process: after a restart
+creators must re-apply, open escalations and commitments are gone, and only the 1099 totals and payment ids are
+replayed (from the log, reconciled with the ledger). The consequence is operational (work restarts from the
+client/creator), not a false record: every ledger event of the old process stays visible as committed or attempted in
+`/onboarding/audit/evidence`. Plan: make the log state-bearing — each operation's line carries the state change it
+applied (the bizdev-py `_apply` pattern) and start-up replays it — department by department, with a migration that
+treats pre-replay lines as evidence only.
+
+| Id | Finding (AEGIS, second pass) | Fix |
+|---|---|---|
+| O-2b | Replay kept only the FIRST intent per payment id: an attempt that died before its ledger call, then a retry under a new boot (new event id) recorded on the ledger with its line owed, left the total at 0 after a second restart | `_replay_payments` keeps every intent per payment id and applies the payment once if ANY of its event ids is on the ledger (`test_o2b_*`, the exact two-restart repro, with and without the first restart closing the dead intent). |
+| M | Open intents were never closed: every start read the whole ledger (and past its 256 MB read cap onboarding could never start) | An intent is closed at the start that resolves it: a `payment_intent_resolved` line names its event ids (`applied`, carrying the payment; or `not_on_ledger` -- the process that wrote it is gone, nothing of it is in flight), so the ledger is read only while an intent is open. ledger-rust has no filtered or paged read (`GET /ledger/entries` only); a failed close leaves the intent open for the next start. |
+| L | First-cut `pk-` keys on disk | Start-up refuses with a clear reason if any payment line holds a `pk-` key (this build never wrote one). |

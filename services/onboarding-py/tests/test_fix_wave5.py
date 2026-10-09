@@ -653,9 +653,10 @@ def test_new4_unknown_on_a_later_operation_then_retry_resolves_it_without_duplic
     assert svc.memory.get("client_a", "messages", []) == []  # staged, not committed
     r = c.post("/onboarding/clients/client_a/messages", json=msg)
     assert r.status_code == 200 and r.json()["intent"] == "guarantee_request", r.text
-    assert lossy.codes[-1] == 200  # the retry's event was already recorded: the ledger's 200
+    # the retry's event was already recorded: the ledger's 200 (then the new evidence line's anchor, bug sweep D)
+    assert lossy.codes[-2] == 200
     new = list(lossy.store.values())[n:]
-    assert [b["event_type"] for b in new] == ["client_intent_ruling"], new
+    assert [b["event_type"] for b in new if b["event_type"] != "log_anchor"] == ["client_intent_ruling"], new
     assert len(svc.memory.get("client_a", "messages", [])) == 2
 
 

@@ -21,7 +21,11 @@ auth = TestClient(app, headers={"Authorization": f"Bearer {TEST_SERVICE_TOKEN}"}
 
 
 def test_health_is_open():
-    assert anon.get("/health").json() == {"status": "ok", "service": "onboarding-py", "data_source": "non-live"}
+    h = anon.get("/health").json()
+    assert {k: h[k] for k in ("status", "service", "data_source")} == {"status": "ok", "service": "onboarding-py",
+                                                                       "data_source": "non-live"}
+    # bug sweep D: the local evidence log's state (no data dir configured here: in memory)
+    assert h["in_memory"] is True and h["evidence_lines_owed"] == 0 and h["log_write_fault"] is False
 
 
 @pytest.mark.parametrize("method,path", [

@@ -129,14 +129,17 @@ from shared.errors import (
 )
 from shared.founder import FounderGate
 from shared.ledger import (
+    EvidenceLinePending,
     EvidenceRecorder,
     HttpLedgerClient,
     LedgerClient,
     LedgerConflict,
+    LedgerQueryFailed,
     LedgerRecordError,
     OutcomeNotRecorded,
     UnconfiguredLedgerClient,
 )
+from shared.store import LOCK_NAME, DataDirBusy, DataDirLock, RecordLog, StoreCorrupt
 from shared.registry import PlatformRulesRegistry, RegistryRow, check_usable, seeded_registry
 from shared.rights import CampaignLicense, ClearanceRecord, RightsRegistry, record_clearance, record_license
 from shared.types import BOUNDED_ID_PATTERN, MAX_RULEBOOK_VERSION, SAFE_ID_PATTERN
@@ -692,6 +695,8 @@ def build_app(
     rights: RightsRegistry | None = None,
     superseded_grace_hours: int = DEFAULT_SUPERSEDED_GRACE_HOURS,
     actor_tokens: dict[str, str] | None = None,
+    data_dir: str | None = None,
+    dir_lock: DataDirLock | None = None,
 ) -> FastAPI:
     if not service_token:
         raise RuntimeError("service token required (fail closed)")
@@ -703,6 +708,19 @@ def build_app(
     registry = registry if registry is not None else seeded_registry()
     rights = rights if rights is not None else RightsRegistry()
     recorder = EvidenceRecorder(ledger)
+    # Bug sweep D (D-2, E-5/F-3): the local anchored evidence log (CREATIVE_DATA_DIR; unset = in memory) under the
+    # single-writer claim; claimed BEFORE the log is opened, given back by app.state.close() or a failed start
+    lock_token = None
+    if dir_lock is not None:
+        lock_token = dir_lock.adopt(dir_lock.claim())
+        if lock_token is None:
+            raise DataDirBusy("the data-directory claim is not held; refusing to start")
+    try:
+        recorder.journal = recorder.make_journal(RecordLog(data_dir))
+    except BaseException:
+        if dir_lock is not None:
+            dir_lock.release_claim(lock_token)
+        raise
     founder = FounderGate.build(founder_token, service_token)
     actor_digests = _check_actor_tokens(dict(actor_tokens or {}), actors, service_token, founder_token)
     common = dict(registry=registry, rights=rights, actors=actors, recorder=recorder, clock=clock,
@@ -710,6 +728,29 @@ def build_app(
     zbm = ZbmWorkflow(**common)
     zbc = ZbcWorkflow(**common, superseded_grace_hours=superseded_grace_hours)
     lock = recorder.lock
+    # Bug sweep D (M): server-assigned ids (brief-0001, kit-0001...) resume past every id a committed line recorded,
+    # so a restart never hands out an id the ledger already holds for other content
+    saved: dict = {}
+    for r in recorder.journal.log.iter_records():
+        saved = (r.get("data") or {}).get("counters") or saved
+    zbm._n = max(zbm._n, int(saved.get("zbm", 1)))
+    zbc._n = max(zbc._n, int(saved.get("zbc", 1)))
+    # AEGIS C-2: and past every server-assigned id ALREADY on the ledger -- an attempt whose reply was lost (the id
+    # burned) and whose line was still owed when the process stopped is on the ledger only
+    floor = ledger_id_floor(ledger)
+    zbm._n = max(zbm._n, floor["zbm"])
+    zbc._n = max(zbc._n, floor["zbc"])
+    recorder.counters = {"zbm": lambda: zbm._n, "zbc": lambda: zbc._n}
+    recorder._saved_counters = recorder._counters_now()
+
+    def close() -> None:
+        """Give the data directory back; a closed instance records nothing (bug sweep D, E-5/F-3)."""
+        with recorder.lock:
+            recorder.closed = True
+            with recorder.journal.log.lock:
+                recorder.journal.log.closed = True
+            if dir_lock is not None:
+                dir_lock.release_claim(lock_token)
 
     def require_auth(authorization: str | None = Header(default=None)) -> None:
         # non-ASCII str: compare_digest raises; anything it can't compare is not the token (401, never 500)
@@ -861,6 +902,14 @@ def build_app(
 
     @app.exception_handler(LedgerRecordError)
     async def _ledger_error(_: Request, exc: LedgerRecordError):
+        if isinstance(exc, EvidenceLinePending):
+            # bug sweep D (D-2): it took effect; only the local line naming its records is owed
+            return JSONResponse(status_code=503, headers={"Retry-After": "1"}, content={
+                "detail": "decision TOOK EFFECT; the local evidence line naming its ledger records could not be written "
+                          "yet and is written before the next decision (until then its records read 'attempted' in "
+                          "GET /audit/evidence). Do not repeat it",
+                "error": "EvidenceLinePending", "took_effect": True, "evidence": "pending",
+                "outside_calls_made": exc.outside_calls})
         if isinstance(exc, OutcomeNotRecorded):
             return JSONResponse(status_code=503, content={
                 "detail": f"decision PARTLY took effect: {exc}",
@@ -888,9 +937,26 @@ def build_app(
 
     @app.get("/health")
     def health() -> dict:
+        log_ = recorder.journal.log
         return {"status": "ok", "service": "creative-py", "department": "creative_production",
                 "ledger_configured": not isinstance(ledger, UnconfiguredLedgerClient),
-                "founder_token_configured": founder.configured}
+                "founder_token_configured": founder.configured, "in_memory": log_.in_memory,
+                "evidence_lines_owed": len(recorder.journal.owed), "log_write_fault": bool(log_.fault)}
+
+    @app.get("/audit/evidence", dependencies=[Depends(require_auth)])
+    def audit_evidence(limit: int = Query(default=200, ge=1, le=1000), offset: int = Query(default=0, ge=0, le=10_000_000),
+                       event_type: str | None = Query(default=None, pattern=r"^[a-z0-9_]{1,64}$")) -> dict:
+        """Bug sweep D (D-2): every Creative Production event on the ledger, ``committed`` (named by an anchored
+        local line, same type, subject and payload hash) or ``attempted`` (recorded first, never committed). Only the
+        raw lines are copied under the service lock; parsing, hashing and the ledger read run outside it."""
+        with lock:
+            raw = recorder.journal.log.raw_lines()
+        try:
+            entries = ledger.entries()  # type: ignore[attr-defined]
+        except (LedgerQueryFailed, AttributeError):
+            return JSONResponse(status_code=503, content={"detail": "the evidence ledger could not be read",
+                                                          "error": "LedgerQueryFailed"})
+        return recorder.journal.audit(raw, entries, limit, offset, event_type)
 
     # --- shared: Platform Rules Registry ------------------------------------------------
     def _row_view(row: RegistryRow) -> dict:
@@ -1161,14 +1227,60 @@ def build_app(
         return {"winners": [w.model_dump(mode="json") for w in zbc.memory.winners(vertical, platform)]}
 
     # after every route exists: the per-route member caps come from the routes' body models
+    app.state.close = close
+    app.state.recorder = recorder
     app.state.member_limits = route_member_limits(app)
     app.add_middleware(BodyLimit, limit=MAX_BODY_BYTES, member_limits=app.state.member_limits,
                        service_token=service_token)
     return app
 
 
+_HELD: dict = {}
+_SERVER_ID = re.compile(r"(brief|job|work|kit)-([0-9]{4,9})")
+
+
+def ledger_id_floor(ledger) -> dict:
+    """The next free server-assigned id number per workflow, from this department's events on the ledger (AEGIS C-2).
+    An unconfigured ledger records nothing (nothing can collide); a configured one that cannot be read refuses
+    start-up: an id it may already hold could be handed out again."""
+    if isinstance(ledger, UnconfiguredLedgerClient) or not hasattr(ledger, "entries"):
+        return {"zbm": 1, "zbc": 1}
+    try:
+        entries = ledger.entries()
+    except LedgerQueryFailed as exc:
+        raise RuntimeError(f"refusing to start: the evidence ledger cannot be read to resume server-assigned ids past "
+                           f"the ones it holds ({exc})") from None
+    floor = {"zbm": 1, "zbc": 1}
+    for e in entries:
+        if not isinstance(e, dict) or e.get("department") != "creative_production":
+            continue
+        m = _SERVER_ID.fullmatch(str(e.get("subject_id") or ""))
+        if m:
+            k = "zbc" if m.group(1) == "kit" else "zbm"
+            floor[k] = max(floor[k], int(m.group(2)) + 1)
+    return floor
+
+
+def hold_data_dir(data_dir: str) -> DataDirLock:
+    """The exclusive flock on CREATIVE_DATA_DIR (bug sweep D, E-5/F-3; finance-py's ``hold_data_dir``), taken once per
+    process and held for its life: a second process on the directory refuses to start."""
+    key = os.path.realpath(data_dir)
+    held = _HELD.get(key)
+    if held is None:
+        try:
+            held = DataDirLock(data_dir)
+        except DataDirBusy:
+            raise RuntimeError(f"{data_dir}: another creative-py process holds this data directory (flock on "
+                               f"{LOCK_NAME}); refusing to start: two writers would fork the log") from None
+        except StoreCorrupt as exc:
+            raise RuntimeError(f"{data_dir}: {exc}") from None
+        _HELD[key] = held
+    return held
+
+
 def _app_from_env() -> FastAPI:
     token = _load_required_token()
+    data_dir = os.environ.get("CREATIVE_DATA_DIR") or None
     # Compliance (38): the HTTP client only when COMPLIANCE_SERVICE_URL, _TOKEN and
     # COMPLIANCE_CALLER_TOKEN are all set; otherwise the fail-closed stand-in.
     return build_app(
@@ -1179,6 +1291,8 @@ def _app_from_env() -> FastAPI:
         actors=ActorRegistry.from_env(),
         superseded_grace_hours=grace_hours_from_env(),
         actor_tokens=actor_tokens_from_env(),
+        data_dir=data_dir,
+        dir_lock=hold_data_dir(data_dir) if data_dir else None,
     )
 
 

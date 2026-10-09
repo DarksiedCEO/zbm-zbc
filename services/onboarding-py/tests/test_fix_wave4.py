@@ -656,7 +656,7 @@ def test_p1_payment_for_a_declined_minor_is_refused_and_not_recorded():
     c = client_for(svc)
     r = c.post("/zbc/creators/applications", json=_app(date_of_birth=_minor_dob(svc), w9_received=True))
     assert r.status_code == 201 and r.json()["vetting"]["outcome"] == "decline"
-    r = c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "50.00"})
+    r = c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-659", "amount_usd": "50.00"})
     assert r.status_code == 409, r.text
     assert "not activated" in r.json()["detail"] and r.json()["vetting_outcome"] == "decline"
     assert _count(svc, "creator_payment_tracked") == 0 and svc.creators["clip_1"].payments == []
@@ -667,7 +667,7 @@ def test_p1_payment_with_w9_but_activation_incomplete_is_refused():
     c = client_for(svc)
     r = c.post("/zbc/creators/applications", json=_app())
     assert r.json()["vetting"]["outcome"] == "approve" and r.json()["activation"]["activated"] is False
-    r = c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "50.00"})
+    r = c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-670", "amount_usd": "50.00"})
     assert r.status_code == 409 and "activation is complete" in r.json()["detail"], r.text
     assert _count(svc, "creator_payment_tracked") == 0
 
@@ -676,7 +676,7 @@ def test_p1_payment_for_an_activated_creator_is_tracked():
     svc = make_service(all_fakes=True)
     c = client_for(svc)
     assert c.post("/zbc/creators/applications", json=_app()).json()["activation"]["activated"] is True
-    r = c.post("/zbc/creators/clip_1/payments", json={"amount_usd": "50.00"})
+    r = c.post("/zbc/creators/clip_1/payments", json={"request_id": "pay-679", "amount_usd": "50.00"})
     assert r.status_code == 200 and _count(svc, "creator_payment_tracked") == 1
 
 
@@ -711,21 +711,26 @@ def test_d1_dob_implying_age_over_120_is_422_and_120_is_accepted():
 # =============================================================================
 
 
+def _non_anchor(ledger) -> int:
+    """Bug sweep D: the evidence line's ``log_anchor`` is not one of the operation's own events."""
+    return sum(1 for e in ledger.events if e["event_type"] != "log_anchor")
+
+
 def test_i1_restarted_process_retry_of_start_dedupes_and_later_events_never_collide():
     ledger = FakeLedgerClient()
     first = make_service(all_fakes=True, ledger=ledger)
     c1 = client_for(first)
     assert c1.post("/onboarding/clients", json=start_body()).status_code == 201
     assert c1.post("/onboarding/clients/client_a/messages", json={"text": "can you change my budget"}).status_code == 200
-    n = len(ledger.events)
+    n = _non_anchor(ledger)
     # "restart": a new process, same ONBOARDING_INSTANCE_ID (default), same ledger
     second = make_service(all_fakes=True, ledger=ledger)
     c2 = client_for(second)
     assert c2.post("/onboarding/clients", json=start_body()).status_code == 201
-    assert len(ledger.events) == n, "the restarted process's retry of the same start was recorded twice"
+    assert _non_anchor(ledger) == n, "the restarted process's retry of the same start was recorded twice"
     # a NEW event at the same position of the new history is recorded, not deduped
     assert c2.post("/onboarding/clients/client_a/messages", json={"text": "please pause my ads"}).status_code == 200
-    assert len(ledger.events) == n + 1
+    assert _non_anchor(ledger) == n + 1
     ids = [e["event_id"] for e in ledger.events]
     assert len(ids) == len(set(ids))
 

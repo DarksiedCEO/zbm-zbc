@@ -6,7 +6,7 @@ clientfix-py's, service-py's and security-py's, AEGIS rounds 1-5): exact-size ap
 short-write handling (cut back and refuse; ``fault`` set when the cut-back itself fails), ``O_NOFOLLOW``, an empty
 line refuses start, a closed instance refuses every write, and the flock with a single-use adopt token and a mutex.
 
-``DLV_DATA_DIR/dlv_log.jsonl``: one JSON object per line,
+``ONBOARDING_DATA_DIR/onboarding_log.jsonl``: one JSON object per line,
 ``{"seq", "kind", "at", "data", "prev_line_sha256", "record_sha256"}``, where ``prev_line_sha256`` is the SHA-256 of
 the previous line's exact bytes (the first line carries 64 zeros) and ``record_sha256`` is the line's own hash
 (without that field). The chain detects edits, deletions, reordering and torn writes; a whole-file rewrite with
@@ -26,7 +26,7 @@ import threading
 from typing import Iterator, Optional
 
 GENESIS = "0" * 64
-LOG_NAME = "dlv_log.jsonl"
+LOG_NAME = "onboarding_log.jsonl"
 
 
 class StoreCorrupt(RuntimeError):
@@ -213,14 +213,14 @@ class RecordLog:
                 return False
 
 
-LOCK_NAME = "dlv.lock"
+LOCK_NAME = "onboarding.lock"
 
 
 class DataDirBusy(StoreCorrupt):
     """Another holder has this data directory (another process's flock, or another service instance's claim)."""
 
 
-BUSY = "another delivery-py process holds this data directory; refusing to start"
+BUSY = "another onboarding-py process holds this data directory; refusing to start"
 
 
 class DataDirLock:
@@ -229,7 +229,7 @@ class DataDirLock:
 
     AEGIS round 5 (V5-L1): the flock is per PROCESS (config.load caches it); each service instance must ``claim()``
     it, once: a second claim in the same process is refused like a second process, and ``release_claim()`` (the
-    service's ``close()``) gives it back. V5-I1: ``dlv.lock`` must be a regular file (``lstat``: a symlink, FIFO
+    service's ``close()``) gives it back. V5-I1: ``onboarding.lock`` must be a regular file (``lstat``: a symlink, FIFO
     or directory planted there refuses with a clear message, never a raw OSError)."""
 
     def __init__(self, data_dir: Optional[str]):

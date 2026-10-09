@@ -8,6 +8,13 @@ pre-review state.
 Architecture and the reasons behind it: `docs/adr/0005-creative-production-architecture.md`.
 Spec: Creative Production rev 1, locked by Andre on Sep 24, 2026.
 
+
+**Committed vs attempted evidence (bug sweep D).** Every decision's ledger
+records are named by one local log line (`CREATIVE_DATA_DIR`, else in memory),
+anchored on the ledger before it is appended. `GET /audit/evidence` marks each
+record `committed` or `attempted`. See ADR 0005 "Bug sweep D fixes" and
+`tests/test_sweep_d.py`.
+
 ## What this is
 
 One department, two structurally separate intelligence layers that share

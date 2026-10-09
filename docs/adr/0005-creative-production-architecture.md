@@ -1707,7 +1707,37 @@ Test-only passing fakes live in `tests/fakes.py`, never in `src/`.
     assertion message. Linux only so far; macOS is decided by the CI entry
     `python-tests (creative-py, 3.13, macos-14)`.
 
+## Bug sweep D fixes (Oct 9 2026, sweep at integration 5d49ee9)
+
+The ledger was this department's only store, so a record of a decision that never took effect (a lost reply, a
+later record that failed) looked like the record of one that did. Creative now keeps a local, hash-chained, anchored
+evidence log (`src/shared/store.py`, backported from compliance-py's bug sweep C store; `src/shared/journal.py`, the
+bizdev-py / compliance-py R6 pattern). Pinned by `tests/test_sweep_d.py`.
+
+| Id | Finding | Fix |
+|---|---|---|
+| D-2 | Ledger evidence exists for decisions that never took effect; no local log or anchor | `shared.ledger.EvidenceRecorder.op` (every `serialized` decision) collects the records it writes and, when it returns or refuses (or partly took effect), names them in ONE local line anchored on the ledger (`log_anchor`) before it is appended; a record outside any decision gets its own line. `GET /audit/evidence`: `committed` only when an anchored line names the record (same type, subject, payload hash), else `attempted`. A line that cannot be written after the decision took effect is owed (503 `took_effect: true, evidence: "pending"`, never "retry"); the next decision writes it first and is refused while it cannot. |
+| D-2 | The 503 said "did NOT take effect" after the Compliance (38) call had gone out | `RecordedPort` notes every outside call (`note_call`); a record that fails after one is reported as `OutcomeNotRecorded` (`took_effect: "partial"`, `effect.departments`, `effect.failed_record` = `not_recorded` / `unknown`). "did NOT take effect" is said only when no outside call was made and the record was certainly not recorded. |
+| E-5/F-3 | (no store) one fsync error would brick a log; no single-writer guard | `shared.store.RecordLog` + `DataDirLock`; `CREATIVE_DATA_DIR` (unset = in memory, `/health` says so); `api.hold_data_dir`, `app.state.close()`. |
+| M | Server-assigned ids (brief-0001, job-, work-, kit-) reused after a restart | Every line carries the id counters (`counters`); `build_app` resumes past the last committed ones. An id burned by a failed attempt is saved in an `ids` line. In memory (no data dir) a restart still starts at 0001 (recorded risk). |
+| M | Retrying a kit build unsigned the kit | `ZbcWorkflow.build_kit`: a kit Andre signed for the live version stands; the identical request answers it, a different one is refused (409, recorded refusal). |
+| M | Slow I/O under the service lock | Premise partly wrong at 5d49ee9: creative had no disk I/O and `FounderGate.verify` is a constant-time compare. The new log's append is part of the decision's commit (under the lock); the evidence view copies raw lines under the lock and parses, hashes and reads the ledger outside it. Outside-department calls (Compliance, V&I, agents) still run under the lock, bounded by their clients' deadlines (not changed). |
+
 ## Verified
 
 See `services/creative-py/README.md` for the exact commands, test
 counts and live-run evidence. This ADR records decisions, not results.
+
+### AEGIS re-review of bug sweep D (37a2830) — fixes
+
+Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
+
+| Id | Finding | Fix |
+|---|---|---|
+| C-1 | A partial decision (the Compliance answer's record failed) whose evidence line was then owed was answered "took effect, do not repeat" | `EvidenceRecorder.op`: the partial `OutcomeNotRecorded` stays the error; the owed line is a note on it (`effect.evidence: "pending"`). |
+| C-2 | An id burned by a lost reply, its line owed at a restart, was reissued for another client | `api.ledger_id_floor`: at start the counters also resume past every server-assigned id (`brief-`/`job-`/`work-`/`kit-NNNN`) this department already holds on the ledger; a configured ledger that cannot be read refuses start-up. |
+
+**M-1 (recorded, not changed now).** Briefs, jobs, work, rulebooks, kits and decisions are still in-process: after a
+restart they are gone (ids no longer collide, C-2), and every ledger event of the old process stays visible as
+committed or attempted in `GET /audit/evidence`. Plan: make the log state-bearing (each decision's line carries the
+state it applied; start-up replays it), workflow by workflow, pre-replay lines kept as evidence only.

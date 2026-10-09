@@ -996,3 +996,33 @@ See `services/fulfillment-py/README.md` for the actual test count, what
 was run, and the full honest-gaps list — this ADR records the
 architecture decisions, not the test results, so it doesn't go stale
 independently of the code.
+
+## Bug sweep D fixes (Oct 9 2026, sweep at integration 5d49ee9)
+
+This department recorded nothing on the evidence ledger, and the call limits, the dial dedupe and the write-back
+dedupe lived only in memory. It now records first with the R6 pattern (bizdev-py / compliance-py) and keeps a
+local, hash-chained, anchored log (`src/store.py`, backported from compliance-py's bug sweep C store;
+`src/journal.py`; `src/ledger.py`). Pinned by `tests/test_sweep_d.py`.
+
+| Id | Finding | Fix |
+|---|---|---|
+| H | No ledger evidence for consequential actions | `api._EvidencedDialer.place_call`: `callback_dial_requested` is recorded and ONE local line naming it is anchored (`log_anchor`) and appended BEFORE the dialer is called (a failure = `ContactRefused`, not dialed); `callback_dial_result` after. `api._resolve_events`: `resolution_writeback_requested` + its line before the system of record is called, `resolution_writeback_result` after. Event ids = request key + type + subject + payload hash; the payload carries `rk` and `seq`, no timestamp (`api._commit`). `GET /audit/evidence`: `committed` vs `attempted`. With no `LEDGER_SERVICE_URL` nothing is dialed or written back (fail closed). |
+| M | `/resolve` not idempotent, no evidence | `_resolve_events`: an entity whose write-back SUCCEEDED answers that record and writes nothing; a different resolution for it is not written back (`failed`, reason named); the resolution id is derived from the entity and its resolution, so a retry carries the same id (supersedes the Sep 22 uuid4 ids: different entities and resolutions still never share an id). The exhausted-escalation write-back goes through it too. |
+| M | Call limits reset on restart | Each dial's line carries the attempt's history keys (hashed: `OutboundContactGate._keys` now keys by hash, `ContactAuthorization.attempt_keys`) and time, written BEFORE the dial; `_restore_from_log` replays them into the gate (`restore_attempt`) and the dial dedupe, and the successful write-backs into `_resolutions`, at start. |
+| E-5/F-3 | (no store) one fsync error would brick a log; no single writer | `store.RecordLog` + `DataDirLock`; `FULFILLMENT_DATA_DIR` (unset = in memory, `/health` says so); `api._hold_data_dir`. |
+
+Not changed (recorded): a dial whose request line was written but whose dialer then refused (window re-check, not
+wired) still counts as an attempt after a restart (conservative: limits only narrow); dossiers stay in memory.
+
+### AEGIS re-review of bug sweep D (37a2830) — fixes
+
+Pinned by `tests/test_sweep_d_aegis.py` (ported from the reviewer's probes).
+
+| Id | Finding | Fix |
+|---|---|---|
+| F-1 | A write-back whose result line was owed at a restart was written to the client's system again | `_restore_from_log`: a `resolution_requested` line with no later `resolution` line is restored into `_unresolved` (result unknown); `_resolve_events` never writes such an entity again until `POST /agents/resolution-writeback/reconcile` (`written`: answered as written from then on; `not_written`: the next /resolve writes), recorded first and replayed. The same applies in-process when the write-back raised. The reconcile is gated by the service token (this service has no Andre key). |
+| F-2 | The outside write-back ran under the evidence lock | The lock is released around the write-back; the entity is held in `_resolving` (a concurrent request for it is answered `failed`, "in progress") and the result is committed under the lock again. |
+
+| Id | Finding (AEGIS, second pass) | Fix |
+|---|---|---|
+| M | The write-back reconcile was gated by the service token: any department could trigger a second client write or record a false success | `src/founder.py` (finance-py's `FounderGate`, ported minimally): `POST /agents/resolution-writeback/reconcile` needs `X-Andre-Approval-Token` = `FULFILLMENT_ANDRE_APPROVAL_TOKEN`, checked before the body is read; unset or equal to the service token = not configured = refused (403). |

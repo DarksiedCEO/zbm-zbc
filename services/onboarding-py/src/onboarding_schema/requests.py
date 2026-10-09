@@ -167,6 +167,9 @@ class CreatorPaymentRequest(Inbound):
     # No payment-date field: the 1099 tax year is the SERVER's date
     # (America/Los_Angeles) when the payment is recorded (fix wave 1, F1 sweep).
     amount_usd: PositiveMoney
+    # Bug sweep D (M, payment replay): REQUIRED. A replay of the same request_id answers the first result and
+    # records nothing; the same id with a different amount is 409. Without it a lost reply retried was counted twice.
+    request_id: SubjectId
 
 
 class CaptionRequest(Inbound):

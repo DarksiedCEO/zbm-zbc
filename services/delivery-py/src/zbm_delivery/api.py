@@ -41,7 +41,7 @@ from zbm_delivery.errors import DlvError, Forbidden, FounderRefused, Invalid, Un
 from zbm_delivery.founder import FounderGate
 from zbm_delivery.ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
 from zbm_delivery.service import DeliveryService
-from zbm_delivery.store import RecordLog
+from zbm_delivery.store import LOCK_NAME, DataDirBusy, DataDirLock, RecordLog, StoreCorrupt
 
 log = logging.getLogger("delivery.api")
 
@@ -366,6 +366,13 @@ def create_app(service: DeliveryService, settings: config_mod.Settings) -> FastA
                req: m.CancelRequest = Depends(body(m.CancelRequest))) -> dict:
         return svc.cancel(who, _run_id(run_id), dump(req))
 
+    @app.get("/dlv/v1/commits/orphans", dependencies=auth)
+    def orphan_commits(_: str = Depends(caller())) -> dict:
+        """Bug sweep D: every git commit attempt with no recorded success -- pending with no engine on it, or
+        recorded ``orphaned`` (a commit exists that no ``commit_recorded`` names). Continuous, not only at restart."""
+        out = svc.orphan_commits()
+        return {"orphans": out, "count": len(out)}
+
     @app.get("/dlv/v1/policy", dependencies=auth)
     def policy(_: str = Depends(caller())) -> dict:
         return svc.policy_view()
@@ -424,7 +431,6 @@ def build_service(settings: config_mod.Settings, env: Optional[dict] = None, *, 
                           llm_read_timeout_s=settings.egress_llm_read_timeout_s, env=env)
     if chat_backend is None:
         chat_backend = backend_from_settings(settings, egress, NotWiredVault(), env)
-    log_ = RecordLog(settings.data_dir)
     if git is None:
         git = GitPort(settings.repo_path, record=lambda *a, **k: None)
     data_dir = settings.data_dir or _memory_home()
@@ -435,10 +441,21 @@ def build_service(settings: config_mod.Settings, env: Optional[dict] = None, *, 
             harness_factory = lambda thread_id, mws: harness.make_client(settings, thread_id, mws, manifest_skill_names=gate_report.manifest_skill_names)  # noqa: E731
         if provider_factory is None:
             provider_factory = harness.provider
-    svc = DeliveryService(settings, recorder, log_, gate_report=gate_report, docker=docker, egress=egress,
-                          chat_backend=chat_backend, git=git, harness_factory=harness_factory,
-                          provider_factory=provider_factory, prompts=prompts, policy_seed=policy_seed,
-                          test_seed=test_seed, clock=clock, docker_available=docker_available)
+    # bug sweep D (E-5/F-3): the single-writer flock (per process) and its single in-process claim, BEFORE the log
+    # opens; the service adopts the claim (and gives it back on stop() or a failed start)
+    dir_lock = hold_data_dir(settings.data_dir) if settings.data_dir else None
+    lock_token = dir_lock.claim() if dir_lock is not None else None
+    try:
+        log_ = RecordLog(settings.data_dir)
+        svc = DeliveryService(settings, recorder, log_, gate_report=gate_report, docker=docker, egress=egress,
+                              chat_backend=chat_backend, git=git, harness_factory=harness_factory,
+                              provider_factory=provider_factory, prompts=prompts, policy_seed=policy_seed,
+                              test_seed=test_seed, clock=clock, docker_available=docker_available,
+                              dir_lock=dir_lock, lock_token=lock_token)
+    except BaseException:
+        if dir_lock is not None:
+            dir_lock.release_claim(lock_token)   # a no-op once the service adopted it (it released its own)
+        raise
     # the egress client and the git port record through the service (record-first), now that it exists
     egress.record = svc._record_plain
     git.record = svc._record_plain
@@ -446,6 +463,26 @@ def build_service(settings: config_mod.Settings, env: Optional[dict] = None, *, 
 
 
 _MEMORY_HOME: list = []
+_HELD: dict = {}
+
+
+def hold_data_dir(data_dir: str) -> DataDirLock:
+    """The exclusive flock on DLV_DATA_DIR (bug sweep D, E-5/F-3; finance-py's ``hold_data_dir``), taken once per
+    process and held for its life: a second process on the same directory refuses to start (two writers would fork
+    the log); a second service instance in this process must win the single claim (``DeliveryService.stop`` frees
+    it)."""
+    key = os.path.realpath(data_dir)
+    held = _HELD.get(key)
+    if held is None:
+        try:
+            held = DataDirLock(data_dir)
+        except DataDirBusy:
+            raise RuntimeError(f"refusing to start: another delivery-py process holds {data_dir} (flock on "
+                               f"{LOCK_NAME}); two writers would fork the log") from None
+        except StoreCorrupt as exc:
+            raise RuntimeError(f"refusing to start: {exc}") from None
+        _HELD[key] = held
+    return held
 
 
 def _memory_home() -> str:

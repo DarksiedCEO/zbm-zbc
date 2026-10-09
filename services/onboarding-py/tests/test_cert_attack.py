@@ -234,7 +234,7 @@ def _routes():
         ("post", "/zbc/creators/clip_ok/w9", {"received": True}),
         ("post", "/zbc/creators/clip_ok/disclosure-training", {"received": True}),
         ("post", "/zbc/creators/clip_ok/activate", {}),
-        ("post", "/zbc/creators/clip_ok/payments", {"amount_usd": "10.00", "paid_on": "2026-09-24"}),
+        ("post", "/zbc/creators/clip_ok/payments", {"request_id": "pay-237", "amount_usd": "10.00", "paid_on": "2026-09-24"}),
         ("post", "/zbc/creators/clip_ok/posts/check", {"caption": "#ad new clip"}),
         ("post", "/zbc/brands/brand_1/campaigns", {"campaign_id": "camp_s", "regulated": False}),
         ("post", "/zbc/brands/brand_1/campaigns/camp_1/approve", {"brand_yes_campaign_id": "camp_1", "plan_digest": "0" * 32}),

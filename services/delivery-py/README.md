@@ -4,6 +4,13 @@ Built from `DEPT28_SPEC.md` rev 1 and the AEGIS audit of deer-flow v2.1.0 / Supe
 pinned hash, the 28 choices made where the spec was silent, and what is not proven on this box:
 `docs/adr/0011-delivery-department-architecture.md`.
 
+
+**Commits are recorded first (bug sweep D).** Every fix commit is recorded
+(`commit_attempted`) before `git commit` runs and its outcome after; a commit
+no record names is an orphan, listed at once by `GET /dlv/v1/commits/orphans`
+and counted in `/health`, and resolved at restart. One process and one service
+instance per `DLV_DATA_DIR` (flock). See ADR 0011 "Bug sweep D fixes".
+
 ## What it does
 
 `POST /dlv/v1/fix-runs` takes an AEGIS findings document. The engine (never the agent) verifies the base commit,

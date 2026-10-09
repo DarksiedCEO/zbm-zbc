@@ -1095,28 +1095,52 @@ class FixEngine:
         body = "Class hint: %s\nSweep sites: %s\nChanged tests: %s" % (
             f.get("class_hint") or "-", ", ".join(f"{s['file']}:{s['line']}" for s in sites) or "-",
             ", ".join(sorted(reply.changed_tests)) or "-")
-        sha = self.git.commit(worktree, subject, body, run_id)
-        files = self.git.diff_name_only(worktree, run_id=run_id, commit=sha)
         message_sha = _sha_text(subject + "\n\n" + body)
-        commit_diff = self._commit_diff(worktree, sha, run_id)
-        ev_diff = self.svc.evidence_put(run_id, "diff", commit_diff.encode("utf-8", "surrogatepass"))
-        committed = self._base_tree(sha, service, run_id)
+        # bug sweep D: record-first. The attempt (parent, message hash, staged files) is recorded -- ledger event and
+        # the run's ``pending_commit`` in one anchored local line -- BEFORE ``git commit`` runs; its outcome after:
+        # ``commit_recorded`` on success, ``commit_attempt_outcome`` (not_committed / orphaned) on any failure, so a
+        # commit nothing records is visible at once (GET /dlv/v1/commits/orphans, /health), not only after a restart.
+        parent = self.git.rev_parse("HEAD", worktree, run_id)
+        self.svc.commit_attempt(run_id, fid, {"parent_sha": parent, "message_sha256": message_sha,
+                                              "staged": sorted(changed)[:200]})
+        sha: Optional[str] = None
         try:
-            commit_tree_sha = _tree_digest(committed, self._reviewer_paths(run_id))
+            sha = self.git.commit(worktree, subject, body, run_id)
+            files = self.git.diff_name_only(worktree, run_id=run_id, commit=sha)
+            commit_diff = self._commit_diff(worktree, sha, run_id)
+            ev_diff = self.svc.evidence_put(run_id, "diff", commit_diff.encode("utf-8", "surrogatepass"))
+            committed = self._base_tree(sha, service, run_id)
+            try:
+                commit_tree_sha = _tree_digest(committed, self._reviewer_paths(run_id))
+            finally:
+                _drop_temp(os.path.dirname(os.path.dirname(committed)))
+            run_now = self.svc.run_get(run_id)
+            commits = list(run_now.get("commits") or []) + [{"sha": sha, "message_sha256": message_sha, "files": files,
+                                                             "finding_id": fid, "diff_evidence_id": ev_diff, "tree_sha256": commit_tree_sha}]
+            self.svc.finding_update(run_id, fid, "commit_recorded", {"run_id": run_id, "finding_id": fid, "sha": sha,
+                                                                     "message_sha256": message_sha, "files": files[:200],
+                                                                     "evidence_id": ev_diff, "tree_sha256": commit_tree_sha,
+                                                                     "suite_tree_sha256": tree_sha},
+                                    f"Commit {sha[:12]} recorded for {fid} ({run_id})",
+                                    {"commit_sha": sha, "commit_files": files, "commit_tree_sha256": commit_tree_sha,
+                                     "changed_tests": [{"path": p, "why": w[:400], "why_sha256": _sha_text(w)} for p, w in sorted(reply.changed_tests.items())],
+                                     "agent": dict(agent)},
+                                    run_fields={"commits": commits, "pending_commit": None})
+        except BaseException as exc:
+            outcome: Optional[str] = "orphaned" if sha is not None else None
+            if sha is None:
+                try:
+                    head = self.git.rev_parse("HEAD", worktree, run_id)
+                except Exception:  # noqa: BLE001 - unreadable: the attempt stays pending (an orphan until resolved)
+                    head = None
+                if head is not None:
+                    outcome, sha = ("not_committed", None) if head == parent else ("orphaned", head)
+            if outcome is not None:
+                self.svc.commit_outcome(run_id, fid, outcome, sha,
+                                        f"{type(exc).__name__} {'after' if sha else 'in'} git commit")
+            raise
         finally:
-            _drop_temp(os.path.dirname(os.path.dirname(committed)))
-        run_now = self.svc.run_get(run_id)
-        commits = list(run_now.get("commits") or []) + [{"sha": sha, "message_sha256": message_sha, "files": files,
-                                                         "finding_id": fid, "diff_evidence_id": ev_diff, "tree_sha256": commit_tree_sha}]
-        self.svc.finding_update(run_id, fid, "commit_recorded", {"run_id": run_id, "finding_id": fid, "sha": sha,
-                                                                 "message_sha256": message_sha, "files": files[:200],
-                                                                 "evidence_id": ev_diff, "tree_sha256": commit_tree_sha,
-                                                                 "suite_tree_sha256": tree_sha},
-                                f"Commit {sha[:12]} recorded for {fid} ({run_id})",
-                                {"commit_sha": sha, "commit_files": files, "commit_tree_sha256": commit_tree_sha,
-                                 "changed_tests": [{"path": p, "why": w[:400], "why_sha256": _sha_text(w)} for p, w in sorted(reply.changed_tests.items())],
-                                 "agent": dict(agent)},
-                                run_fields={"commits": commits})
+            self.svc.commit_done(run_id)
         if commit_tree_sha != tree_sha:
             self._round_failed(run_id, fid, rounds, "commit_tree_mismatch", suite_tree_sha256=tree_sha, commit_tree_sha256=commit_tree_sha)
             self.svc.finding_transition(run_id, fid, "red", {}, [])

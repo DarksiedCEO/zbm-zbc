@@ -84,7 +84,11 @@ from intelligences import (
     i14_contract_obligation as i14,
     i15_compliance as i15,
 )
-from ledger import DEPARTMENT, LedgerClient, LedgerWriteAfterEffects, LedgerWriteError, derive_event_id, payload_sha256
+from journal import EvidenceJournal
+from ledger import (DEPARTMENT, EvidenceLineOwed, LedgerClient, LedgerQueryFailed, LedgerWriteAfterEffects,
+                    LedgerWriteError, build_body, derive_event_id, payload_sha256)
+from name_key import name_key_text
+from store import DataDirBusy, RecordLog, StoreWriteError
 from memory import (
     AndreApprovalError,
     ClientMemoryStore,
@@ -159,6 +163,12 @@ class Refused(OnboardingError):
 
 class Invalid(OnboardingError):
     status_code = 422
+
+
+class ServiceClosed(OnboardingError):
+    """Bug sweep D (E-5/F-3): this instance was closed (its data directory given back); nothing is done."""
+
+    status_code = 503
 
 
 class UpstreamUnavailable(OnboardingError):
@@ -249,6 +259,20 @@ class CreatorRecord:
     # effect; a retry of the same application completes it.
     apply_digest: Optional[str] = None
     apply_out: Optional[dict] = None
+    # Bug sweep D (M): the 1099 payee identity -- the same person under two creator ids aggregates (``person_key``)
+    person_key: str = ""
+
+
+def person_key(legal_name: str, date_of_birth) -> str:
+    """Bug sweep D (M, 1099 split; AEGIS O-1): one key per PERSON, from the legal name and the date of birth.
+    Onboarding holds no tax identifier (P8, minimum data), so this is the identity the 1099 total is kept against: two
+    creator ids for the same person share one total. The name is canonicalised by ``name_key.name_key_text`` (format
+    characters removed, NFKC, casefold, apostrophe / dash variants folded, lookalike letters folded with creative-py's
+    confusables table), so a zero-width space, a soft hyphen, a curly apostrophe or a Cyrillic "а" never splits a
+    person. Only the hash is kept. ``pk2-``: the first cut's ``pk-`` keys were never deployed (no data to migrate)."""
+    dob = date_of_birth.isoformat() if date_of_birth is not None else ""
+    material = json.dumps(["onboarding-1099-person-v2", name_key_text(legal_name), dob])
+    return "pk2-" + hashlib.sha256(material.encode()).hexdigest()[:32]
 
 
 def _hhmm(s: Optional[str], default: time) -> time:
@@ -306,6 +330,9 @@ class OnboardingService:
         andre_approval_key: Optional[str] = None,
         platform_knowledge: Optional[dict] = None,
         platform_writer=None,
+        log: Optional[RecordLog] = None,
+        dir_lock=None,
+        lock_token: Optional[str] = None,
     ):
         self.config = config
         self.ledger = ledger
@@ -358,6 +385,112 @@ class OnboardingService:
         self._pending: dict[str, dict[str, tuple]] = {}
         self._op_pending: list[tuple[str, str]] = []
         self._esc_plans: dict[str, "OnboardingService._EscalationPlan"] = {}
+        # Bug sweep D (D-1): the local anchored evidence log. Every ledger event an operation writes is collected
+        # (``_op_written``) and named by ONE anchored line when the operation's state is applied; an event no anchored
+        # line names is ``attempted`` (GET /onboarding/audit/evidence).
+        self._op_written: list[dict] = []
+        self._owed_deferred = []
+        self._closed = False
+        self._dir_lock = dir_lock
+        self._lock_token: Optional[str] = None
+        if self._dir_lock is not None:
+            # E-5/F-3 (finance-py's single writer): one service instance per data directory, also within a process
+            adopted = self._dir_lock.adopt(lock_token if lock_token is not None else self._dir_lock.claim())
+            if adopted is None:
+                self._dir_lock = None
+                raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
+                                  "stale, another instance's, or already adopted); refusing to start")
+            self._lock_token = adopted
+        try:
+            self.log = log if log is not None else RecordLog(None)
+            self.journal = EvidenceJournal(
+                self.log, DEPARTMENT,
+                lambda eid, et, actor, sid, payload, summary: self.ledger.record_event(eid, DEPARTMENT, et, actor, sid,
+                                                                                        payload, summary),
+                payload_hash=lambda p: payload_sha256(scrub_obj(p)), id_prefix="onb-anc-")
+            # 1099 totals and payment idempotency survive a restart: they are replayed from the log (bug sweep D, M)
+            self._paid: dict[tuple[str, int], Decimal] = {}
+            self._payment_rids: dict[str, dict] = {}       # payment id (request_id) -> the payment (AEGIS O-3)
+            self._replay_payments()
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Give the data directory back. A closed instance refuses every operation and its log every write."""
+        with self._lock:
+            self._closed = True
+            log_ = getattr(self, "log", None)
+            if log_ is not None:
+                with log_.lock:
+                    log_.closed = True
+            if self._dir_lock is not None:
+                self._dir_lock.release_claim(self._lock_token)
+                self._dir_lock = None
+                self._lock_token = None
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _apply_payment(self, pay: dict) -> None:
+        if pay["request_id"] in self._payment_rids:      # one payment id counts once, whatever replays it
+            return
+        k = (pay["person_key"], int(pay["year"]))
+        self._paid[k] = self._paid.get(k, Decimal("0.00")) + Decimal(pay["amount_usd"])
+        self._payment_rids[pay["request_id"]] = pay
+
+    def _replay_payments(self) -> None:
+        """AEGIS O-2: the 1099 totals match the LEDGER. Every payment writes a ``payment_intent`` line (anchored, with
+        the ``creator_payment_tracked`` event id it is about to record) BEFORE its ledger record, and the operation's
+        line names the payment after. At start, committed payments are applied; an intent no committed line names
+        (the operation's line was owed when the process stopped, or its reply was lost) is applied exactly when the
+        ledger holds its event. Deduplicated by payment id. Unresolved intents with an unreadable ledger refuse
+        start-up: a total that may be short is never served."""
+        # AEGIS O-2b: EVERY intent per payment id (each attempt -- another boot, another day -- has its own event id);
+        # the payment counts once if ANY of them is on the ledger. Intents are CLOSED once resolved (a line naming
+        # their event ids), so the whole-ledger read below happens only while some intent is open.
+        intents: dict[str, list[dict]] = {}
+        closed: set[str] = set()
+        for r in self.log.iter_records():
+            d = r.get("data") or {}
+            for pk in (d.get("payment") or {}, (d.get("payment_intent") or {}).get("payment") or {}):
+                if pk.get("person_key", "").startswith("pk-"):
+                    raise RuntimeError(f"refusing to start: local log line {r['seq']} holds a first-cut 1099 person "
+                                       "key (pk-), which the current key (pk2-, AEGIS O-1) cannot be matched with; "
+                                       "this build never wrote one -- inspect the log before starting")
+            if d.get("payment"):
+                self._apply_payment(d["payment"])
+            if d.get("payment_intent"):
+                intents.setdefault(d["payment_intent"]["request_id"], []).append(d["payment_intent"])
+            if d.get("payment_intents_closed"):
+                closed.update(d["payment_intents_closed"])
+        open_ = {rid: [i for i in its if i["event_id"] not in closed] for rid, its in intents.items()
+                 if rid not in self._payment_rids}
+        open_ = {rid: its for rid, its in open_.items() if its}
+        if not open_:
+            return
+        try:
+            held = {e.get("event_id") for e in self.ledger.entries()  # type: ignore[attr-defined]
+                    if isinstance(e, dict) and e.get("event_type") == "creator_payment_tracked"}
+        except (LedgerQueryFailed, AttributeError) as exc:
+            raise RuntimeError(f"refusing to start: {len(open_)} creator payment(s) may be on the ledger without a "
+                               f"committed local line, and the ledger cannot be read ({exc}); the 1099 totals would "
+                               "be short") from None
+        for rid, its in sorted(open_.items()):
+            hit = next((i for i in its if i["event_id"] in held), None)
+            ids = [i["event_id"] for i in its]
+            extra: dict = {"payment_intents_closed": ids}
+            if hit is not None:
+                self._apply_payment(hit["payment"])
+                extra["payment"] = hit["payment"]           # applied: replayed as a committed payment from now on
+            extra["outcome"] = "applied" if hit is not None else "not_on_ledger"
+            try:
+                # resolved at THIS start (the process that wrote the intents is gone: nothing of it is in flight)
+                self.journal.commit("payment_intent_resolved", self.now().isoformat(), f"payment|{rid}", [], extra)
+            except (LedgerWriteError, StoreWriteError) as exc:
+                log.warning("payment intent %s left open (%s); resolved again at the next start", rid,
+                            type(exc).__name__)
 
     # --- infrastructure --------------------------------------------------------
 
@@ -394,6 +527,10 @@ class OnboardingService:
         with self._lock:
             outer = self._depth == 0
             if outer:
+                if self._closed:
+                    raise ServiceClosed("this onboarding instance is closed; nothing was done")
+                self._flush_owed_lines()
+                self._op_written = []
                 self._op_name, self._effects, self._deferred = name, [], []
                 self._epoch = self._instance if creates_subject else f"{self._instance}:{self._boot}"
                 self._occ, self._idc, self._touched = {}, {}, set()
@@ -407,6 +544,10 @@ class OnboardingService:
                 completed = True
                 raise
             except LedgerWriteAfterEffects:
+                if outer:
+                    # outside effects happened: the events written so far (their authorizing records) are named
+                    # now; the owed result records are named by the operation that writes them
+                    self._commit_line(name, partial=True)
                 raise  # pending result records stay: the next operation writes them
             except LedgerWriteError:
                 if outer:
@@ -417,13 +558,65 @@ class OnboardingService:
                 raise
             finally:
                 self._depth -= 1
+                owed = None
                 if outer and completed:
+                    owed = self._commit_line(name)
+                    if owed is not None:
+                        # in-process effects (bus, client memory) wait for the owed line: nothing happens after a
+                        # failed record; the flush that writes the line runs them
+                        self._owed_deferred.extend(self._deferred)
+                        self._deferred = []
                     for fn in self._deferred:
                         fn()
                     for sid in self._touched:
                         self._seq[sid] = self._seq.get(sid, 0) + 1
                 if outer:
                     self._deferred = []
+                    self._op_written = []
+                    self._op_extra = None
+                if owed is not None:
+                    raise owed
+
+    _op_extra: Optional[dict] = None
+    _owed_deferred: list = []
+
+    def _flush_owed_lines(self) -> None:
+        """An owed evidence line is written before anything else happens (refused, 503, while it cannot be)."""
+        if not self.journal.owed:
+            return
+        try:
+            self.journal.flush()
+        except LedgerWriteError as exc:
+            raise LedgerWriteError(f"an owed evidence line could not be written ({exc}); nothing was done",
+                                   exc.outcome) from None
+        except StoreWriteError as exc:
+            raise LedgerWriteError(f"an owed evidence line could not be written to the local log ({exc}); nothing "
+                                   "was done") from None
+        pending, self._owed_deferred = list(self._owed_deferred), []
+        for fn in pending:
+            fn()
+
+    def _commit_line(self, name: str, partial: bool = False) -> Optional[EvidenceLineOwed]:
+        """Name every event this operation wrote in ONE anchored local line (bug sweep D, D-1). Returns the error to
+        raise when it could not be written (the line is then owed), None otherwise."""
+        if not self._op_written:
+            return None
+        extra = {"op": name, "effects": list(self._effects)}
+        if partial:
+            extra["partial"] = True
+        if self._op_extra:
+            extra.update(self._op_extra)
+        try:
+            self.journal.commit("partial" if partial else "op", self.now().isoformat(), name, self._op_written,
+                                extra, owe_on_failure=True)
+        except (LedgerWriteError, StoreWriteError) as exc:
+            outcome = getattr(exc, "outcome", "not_recorded")
+            log.error("evidence line owed after %s: %s", name, type(exc).__name__)
+            return EvidenceLineOwed(f"the action took effect; its local evidence line could not be written yet "
+                                    f"({type(exc).__name__})", list(self._effects), outcome,
+                                    "do not repeat this action: it took effect; its evidence line is written before "
+                                    "the next action")
+        return None
 
     def _event_id(self, event_type: str, subject_id: str, payload: dict) -> str:
         ph = payload_sha256(scrub_obj(payload))
@@ -437,6 +630,9 @@ class OnboardingService:
     def _write(self, eid: str, event_type: str, actor: str, subject_id: str, payload: dict, summary: str) -> None:
         try:
             self.ledger.record_event(eid, DEPARTMENT, event_type, actor, subject_id, payload, summary)
+            body = build_body(eid, DEPARTMENT, event_type, actor, subject_id, payload, summary)
+            self._op_written.append({"event_id": eid, "event_type": event_type, "subject_id": subject_id,
+                                     "payload_sha256": body["payload_sha256"]})
         except LedgerWriteAfterEffects:
             raise
         except LedgerWriteError as exc:
@@ -1786,7 +1982,7 @@ class OnboardingService:
             # Fix wave 3 (N5): the bio is client free text — kept only redacted.
             stored_app = app.model_copy(update={"bio": redact_text(app.bio)})
             rec = CreatorRecord(app.creator_id, stored_app, decision, True, app.w9_received, app.disclosure_training_completed,
-                                app.creator_agreement_signed)
+                                app.creator_agreement_signed, person_key=person_key(app.legal_name, app.date_of_birth))
             message = {
                 VettingOutcome.APPROVE: "You're approved. We're setting up your materials, tracking links and payment details now.",
                 VettingOutcome.DECLINE: ("Thank you for applying. We can't accept this application. "
@@ -1893,7 +2089,17 @@ class OnboardingService:
         return result
 
     def creator_payment(self, creator_id: str, req: rq.CreatorPaymentRequest) -> dict:
+        """Bug sweep D (M): idempotent on ``request_id`` (a replay answers the first result and records nothing; the
+        same id with another amount is 409), and the 1099 total is kept per PERSON (``person_key``), not per creator
+        id, and replayed from the local log at start (it survives a restart)."""
         with self._op("creator_payment"):
+            prev = self._payment_rids.get(req.request_id)
+            if prev is not None:
+                # AEGIS O-3: the payment id alone is the key -- the same id under another creator is another payment
+                if prev["creator_id"] != creator_id or Decimal(prev["amount_usd"]) != req.amount_usd:
+                    raise Conflict("request_id already used for a different payment (another creator or amount); "
+                                   "nothing was recorded")
+                return dict(prev["status"])
             rec = self._creator(creator_id)
             # Owner ruling (fix wave 4, P1: refuse): payments are tracked only
             # for a creator whose activation is COMPLETE (gates passed and the
@@ -1912,12 +2118,28 @@ class OnboardingService:
             # The tax year is the server's business date, never a caller date (F1 sweep).
             paid_on = self.business_date()
             year = paid_on.year
-            paid = sum((a for d, a in rec.payments if d.year == year), Decimal("0.00")) + req.amount_usd
+            pk = rec.person_key or person_key(rec.application.legal_name, rec.application.date_of_birth)
+            paid = self._paid.get((pk, year), Decimal("0.00")) + req.amount_usd
             status = creator_tax.form_1099_status(year, paid, self.config.form_1099_thresholds_usd)
-            self._record("creator_payment_tracked", "practice_p8_tax", rec.creator_id,
-                         {"year": year, "recorded_on": paid_on.isoformat(), "amount_usd": money_str(req.amount_usd),
-                          "paid_to_date_usd": status["paid_to_date_usd"], "form_1099_required": status["form_1099_required"]},
-                         f"1099 tracking {year}: {status['detail']}"[:280])
+            payload = {"year": year, "recorded_on": paid_on.isoformat(), "amount_usd": money_str(req.amount_usd),
+                       "paid_to_date_usd": status["paid_to_date_usd"], "form_1099_required": status["form_1099_required"],
+                       "person_key": pk, "request_id": req.request_id}
+            pay = {"creator_id": rec.creator_id, "request_id": req.request_id, "person_key": pk, "year": year,
+                   "amount_usd": money_str(req.amount_usd), "status": scrub_obj(dict(status))}
+            eid = self._event_id("creator_payment_tracked", rec.creator_id, payload)
+            # AEGIS O-2: the intent (with the event id) is anchored and in the local log BEFORE the ledger record, so a
+            # restart can count this payment exactly when the ledger holds it, whatever happens to the op's own line
+            try:
+                self.journal.commit("payment_intent", self.now().isoformat(), "creator_payment", [],
+                                    {"payment_intent": {"request_id": req.request_id, "event_id": eid, "payment": pay}})
+            except StoreWriteError as exc:
+                raise LedgerWriteError(f"the payment intent could not be written to the local log ({exc}); nothing "
+                                       "was recorded") from None
+            self._write(eid, "creator_payment_tracked", "practice_p8_tax", rec.creator_id, payload,
+                        f"1099 tracking {year}: {status['detail']}"[:280])
+            # the payment is part of the operation's evidence line (replayed at start); applied when the op completes
+            self._op_extra = {"payment": pay}
+            self._apply_payment(pay)
             rec.payments.append((paid_on, req.amount_usd))
             return status
 
@@ -2003,6 +2225,30 @@ class OnboardingService:
                          f"Playbook rule {req.rule_id} v{req.version} approved by Andre")
             rule = self.playbook.append(req.rule_id, req.version, req.text, self.now())
             return {"rule_id": rule.rule_id, "version": rule.version, "approved_at": rule.approved_at.isoformat()}
+
+    def audit_evidence(self, limit: int = 200, offset: int = 0, event_type: Optional[str] = None) -> dict:
+        """``GET /onboarding/audit/evidence`` (bug sweep D, D-1; bizdev-py's R6 view): every Onboarding event on the
+        ledger, ``committed`` (named by an anchored local line, same type and payload hash) or ``attempted``
+        (recorded first, never committed). Only the raw lines are copied under the service lock; parsing, hashing and
+        the ledger read run outside it (bug sweep D, slow I/O under the lock)."""
+        with self._lock:
+            if self._closed:
+                raise ServiceClosed("this onboarding instance is closed")
+            raw = self.log.raw_lines()
+        try:
+            entries = self.ledger.entries()  # type: ignore[attr-defined]
+        except (LedgerQueryFailed, AttributeError):
+            raise UpstreamUnavailable("the evidence ledger could not be read") from None
+        return self.journal.audit(raw, entries, limit, offset, event_type)
+
+    def store_health(self) -> dict:
+        """Lock-free by design: ``/health`` must answer while an operation holds the service lock."""
+        return {"in_memory": self.log.in_memory, "log_lines": len(self.log), "evidence_lines_owed": len(self.journal.owed),
+                "log_write_fault": bool(self.log.fault), "closed": self._closed}
+
+    def verify_log(self) -> bool:
+        """Re-verify the local chain from disk (outside the service lock; ``RecordLog`` has its own)."""
+        return self.log.verify()
 
     def playbook_view(self) -> dict:
         with self._lock:

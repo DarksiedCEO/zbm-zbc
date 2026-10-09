@@ -193,6 +193,7 @@ class ZbcWorkflow:
     # its exact record until resolved (bounded, see MAX_PENDING_ATTEMPTS).
     _attempts: "OrderedDict[str, _Attempt]" = field(default_factory=OrderedDict)
     _pending_new: PendingCreations = field(default_factory=PendingCreations)  # server-assigned kit ids
+    _kit_sha: dict[str, str] = field(default_factory=dict)   # campaign -> the content hash of its current kit
     # submission_id -> content hash, from the first attempt on (N1).
     _submission_content: dict[str, str] = field(default_factory=dict)
 
@@ -476,6 +477,16 @@ class ZbcWorkflow:
         if mm is None or sh is None:
             raise PreconditionFailed(f"the kit needs a Moment Map and hook sheets for {campaign_id} v{rb.version}")
         sha = content_sha256({"campaign_id": campaign_id, "version": rb.version, "request": req.model_dump(mode="json")})
+        existing = self.kits.get(campaign_id)
+        if existing is not None and existing.status == "signed" and existing.rulebook_version == rb.version:
+            # bug sweep D (M): a retry of the kit build after Andre signed it answered a NEW draft kit and replaced
+            # the signed one (the signature was lost). The signed kit stands: the identical request answers it; a
+            # different request is refused (a new kit needs a new rulebook version).
+            if self._kit_sha.get(campaign_id) == sha:
+                return existing
+            self._refuse(PreconditionFailed(
+                f"kit {existing.kit_id} for {campaign_id} v{rb.version} is signed by Andre; it is not rebuilt (a new kit "
+                "needs a new rulebook version)"), A_KIT, existing.kit_id, "kit build")
         held = self._pending_new.get("kit", sha)
         # consumed only once the kit is recorded — or its outcome is unknown (LOST sweep)
         kit_id = held[0] if held is not None else f"kit-{self._n:04d}"
@@ -489,6 +500,7 @@ class ZbcWorkflow:
             f"Kit {kit_id} for {campaign_id} v{rb.version}: {len(kit.seeds)} seed clip spec(s); "
             f"{len(kit.commissions)} commission request(s) to Enigma/Phantom Canvas follow")
         self.kits[campaign_id] = kit
+        self._kit_sha[campaign_id] = sha
         receipts = campaign_kit.commission_seeds(kit, self.departments.creative_agents)
         try:
             self.recorder.record("crossing_creative_agents", A_KIT, kit_id, {"kit_id": kit_id, "receipts": receipts},

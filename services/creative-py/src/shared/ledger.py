@@ -46,6 +46,7 @@ identical content get different ids because the sequence has advanced.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import json
@@ -59,7 +60,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from shared.errors import ValidationFailed
+from shared.errors import CreativeError, ValidationFailed
 
 DEPARTMENT = "creative_production"
 
@@ -119,11 +120,31 @@ class OutcomeNotRecorded(LedgerRecordError):
         self.effect = effect
 
 
+class EvidenceLinePending(LedgerRecordError):
+    """Bug sweep D (D-2): the decision TOOK EFFECT in this service (its records are on the ledger, its state is
+    committed) but the local evidence line naming those records could not be anchored or appended yet. The line is
+    owed: the next decision writes it first (and is refused while it cannot). Never "did not take effect", never
+    "retry" (a repeat would decide twice)."""
+
+    took_effect = True
+
+    def __init__(self, message: str, outcome: bool | str, outside_calls: list[str]):
+        super().__init__(message)
+        self.outcome = outcome
+        self.outside_calls = list(outside_calls)
+
+
 class LedgerFieldInvalid(ValidationFailed):
     """A derived ledger field (subject_id, event_type, actor, summary) would
     be rejected by ledger-rust. Raised BEFORE the ledger is called and
     before any work: a 422 about the input, never a fake "ledger failure"
     503 while the ledger is healthy."""
+
+
+def _now_iso() -> str:
+    """The line's ``at`` (local log only; never part of an event id or an event payload)."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 
 
 def payload_sha256(payload: dict) -> str:
@@ -243,6 +264,13 @@ class HttpLedgerClient:
     def find_event(self, event_id: str) -> dict | None:
         """GET /ledger/entries (ledger-rust has no by-id read) and look for
         the event. A read, so any failure is LedgerQueryFailed."""
+        for e in self.entries():
+            if isinstance(e, dict) and e.get("event_id") == event_id:
+                return e
+        return None
+
+    def entries(self) -> list[dict]:
+        """GET /ledger/entries: every entry in ledger order (bug sweep D: /audit/evidence). LedgerQueryFailed."""
         try:
             with httpx.Client(timeout=max(self._timeout, 30.0), transport=self._transport) as client:
                 resp = client.get(f"{self._base_url}/ledger/entries",
@@ -257,10 +285,7 @@ class HttpLedgerClient:
             raise LedgerQueryFailed("ledger entries were not JSON") from exc
         if not isinstance(entries, list):
             raise LedgerQueryFailed("ledger entries were not a list")
-        for e in entries:
-            if isinstance(e, dict) and e.get("event_id") == event_id:
-                return e
-        return None
+        return entries
 
 
 class UnconfiguredLedgerClient:
@@ -357,6 +382,11 @@ class FakeLedgerClient:
     def of_type(self, event_type: str) -> list[dict]:
         return [e for e in self.events if e["event_type"] == event_type]
 
+    def entries(self) -> list[dict]:
+        if self.fail_all:
+            raise LedgerQueryFailed("simulated ledger outage (test double)")
+        return [{k: v for k, v in e.items() if k != "payload"} | {"seq": i + 1} for i, e in enumerate(self.events)]
+
 
 def _clean_summary(summary: str) -> str:
     """Make any text acceptable to ledger-rust: control chars (C0, DEL, C1)
@@ -394,6 +424,124 @@ class EvidenceRecorder:
     instance_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
     _seq: dict[tuple[str, str], int] = field(default_factory=dict, repr=False)
+    # Bug sweep D (D-2): the local anchored evidence log (``shared.journal``). Every record a decision writes is
+    # collected and named by ONE anchored line when the decision returns (or refuses, or partly took effect);
+    # a record no anchored line names is ``attempted`` (GET /audit/evidence). None = an in-memory log.
+    journal: Any = field(default=None, repr=False)
+    # name -> callable returning a server-assigned id counter; every line carries them, a restart resumes past them
+    counters: dict = field(default_factory=dict, repr=False)
+    closed: bool = False
+    _depth: int = field(default=0, repr=False)
+    _written: list = field(default_factory=list, repr=False)
+    _calls: list = field(default_factory=list, repr=False)
+    _owed_after: list = field(default_factory=list, repr=False)
+    _saved_counters: dict = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.journal is None:
+            from shared.store import RecordLog
+            self.journal = self.make_journal(RecordLog(None))
+
+    def make_journal(self, log):
+        from shared.journal import EvidenceJournal
+        return EvidenceJournal(
+            log, DEPARTMENT,
+            lambda eid, et, actor, sid, payload, summary: self.client.record_event(
+                event_id=eid, department=DEPARTMENT, event_type=et, actor=actor, subject_id=sid, payload=payload,
+                summary=_clean_summary(summary)),
+            payload_hash=payload_sha256, id_prefix="cp:anc-")
+
+    def _counters_now(self) -> dict:
+        return {k: int(fn()) for k, fn in sorted(self.counters.items())}
+
+    @contextlib.contextmanager
+    def op(self, name: str):
+        """One decision (``serialized``): flush any owed line first; at the end name every record it wrote in one
+        anchored line. Nested calls join the outer decision."""
+        with self.lock:
+            outer = self._depth == 0
+            if outer:
+                if self.closed:
+                    raise LedgerNotRecorded("SERVICE_CLOSED: this creative-py instance is closed; nothing was recorded")
+                self._flush_owed()
+                self._written, self._calls = [], []
+            self._depth += 1
+            ok, partial = False, False
+            partial_exc: OutcomeNotRecorded | None = None
+            try:
+                yield
+                ok = True
+            except CreativeError:
+                ok = True                    # a refusal is a decision: its records (if any) are committed
+                raise
+            except OutcomeNotRecorded as exc:
+                partial = True               # an outside call was made: what was recorded is named
+                partial_exc = exc
+                raise
+            except LedgerRecordError as exc:
+                if outer and self._calls:
+                    # bug sweep D (D-2): an outside department WAS called before this record failed: never "did not
+                    # take effect" -- the request went out; the answer is not applied
+                    partial = True
+                    partial_exc = OutcomeNotRecorded(
+                        f"{', '.join(self._calls)} WAS called (its request recorded first), then a record failed "
+                        f"({exc}); the answer is not applied in this service",
+                        {"outside_calls_made": len(self._calls), "departments": list(self._calls),
+                         "failed_record": "not_recorded" if exc.took_effect is False else "unknown"})
+                    raise partial_exc from exc
+                raise
+            finally:
+                self._depth -= 1
+                pending = None
+                if outer:
+                    if ok or partial:
+                        pending = self._commit_line(name, partial)
+                    elif self._counters_now() != self._saved_counters:
+                        self._commit_line(name, partial=False, ids_only=True)   # a burned id survives a restart
+                    self._written, self._calls = [], []
+                if pending is not None:
+                    if partial_exc is not None:
+                        # AEGIS C-1: the decision only PARTLY took effect (the answer is not applied): that stays the
+                        # error; the owed evidence line is a note on it, never a "took effect, do not repeat"
+                        partial_exc.effect["evidence"] = "pending"
+                    else:
+                        raise pending
+
+    def _flush_owed(self) -> None:
+        if not self.journal.owed:
+            return
+        try:
+            self.journal.flush()
+        except LedgerRecordError as exc:
+            raise LedgerNotRecorded(f"an owed evidence line could not be written ({exc}); nothing was done") from None
+        except Exception as exc:  # noqa: BLE001 - StoreWriteError: the local log refused
+            raise LedgerNotRecorded(f"an owed evidence line could not be written to the local log "
+                                    f"({type(exc).__name__}); nothing was done") from None
+
+    def _commit_line(self, name: str, partial: bool, ids_only: bool = False):
+        written = [] if ids_only else list(self._written)
+        counters = self._counters_now()
+        if not written and counters == self._saved_counters:
+            return None
+        extra = {"op": name, "outside_calls": list(self._calls), "counters": counters}
+        if partial:
+            extra["partial"] = True
+        kind = "ids" if ids_only else ("partial" if partial else "decision")
+        try:
+            self.journal.commit(kind, _now_iso(), name, written, extra, owe_on_failure=True)
+        except Exception as exc:  # noqa: BLE001 - ledger or local log: the line is owed
+            if ids_only:
+                return None
+            return EvidenceLinePending(
+                f"the decision took effect; its local evidence line could not be written yet ({type(exc).__name__})",
+                getattr(exc, "took_effect", False), list(self._calls))
+        self._saved_counters = counters
+        return None
+
+    def note_call(self, department: str) -> None:
+        """RecordedPort: an outside department is about to be called (its request is already recorded)."""
+        if self._depth:
+            self._calls.append(department)
 
     def event_id_for(self, event_type: str, actor: str, subject_id: str, op: Any) -> str:
         seq = self._seq.get((event_type, subject_id), 0)
@@ -420,6 +568,10 @@ class EvidenceRecorder:
                 raise LedgerFieldInvalid(
                     f"this decision can't be recorded on the evidence ledger: {', '.join(problems)} "
                     "outside ledger-rust's field rules; nothing was recorded or changed", problems)
+            if self.closed:
+                raise LedgerNotRecorded("SERVICE_CLOSED: this creative-py instance is closed; nothing was recorded")
+            if self._depth == 0 and self.journal.owed:
+                self._flush_owed()
             self.client.record_event(
                 event_id=event_id,
                 department=DEPARTMENT,
@@ -431,6 +583,19 @@ class EvidenceRecorder:
             )
             key = (event_type, subject_id)
             self._seq[key] = self._seq.get(key, 0) + 1
+            named = {"event_id": event_id, "event_type": event_type, "subject_id": subject_id,
+                     "payload_sha256": payload_sha256(payload)}
+            if self._depth:
+                self._written.append(named)
+            else:
+                # a record outside any decision (registry / rights writes): its own line, now
+                # (the caller commits its state after this returns: a line that could not be written is owed and
+                # written before the next record, never an error that would leave the record unapplied)
+                self._written = [named]
+                try:
+                    self._commit_line(event_type, partial=False)
+                finally:
+                    self._written = []
             return event_id
 
     def try_record(self, event_type: str, actor: str, subject_id: str, payload: dict[str, Any], summary: str) -> str | None:
@@ -491,10 +656,10 @@ class PendingCreations:
 
 
 def serialized(fn):
-    """Run a workflow method under the recorder's lock."""
+    """Run a workflow method under the recorder's lock, as one decision (bug sweep D: ``EvidenceRecorder.op``)."""
     @functools.wraps(fn)
     def wrapper(self, *a, **k):
-        with self.recorder.lock:
+        with self.recorder.op(fn.__name__):
             return fn(self, *a, **k)
     return wrapper
 
@@ -520,6 +685,7 @@ class RecordedPort:
                 {"department": self._department, "action": name, "args": request,
                  "kwargs": {k: _plain(v) for k, v in kwargs.items()}},
                 f"Request to {self._department}: {name} for {self._subject}")
+            self._recorder.note_call(self._department)
             return fn(*args, **kwargs)
 
         return call

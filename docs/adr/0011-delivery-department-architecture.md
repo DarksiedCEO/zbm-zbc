@@ -1273,3 +1273,16 @@ fresh container on the double, `tests/test_round19.py` adds 39 failing-first tes
 and `tests/test_live_round19.py` one live egress-abort test on the assigned ports). Evidence:
 `services/delivery-py/docs/evidence/dept28/` (incl. the wave-19 and wave-20 live logs, `round18/` and `round19/`
 with the re-runs of the reviewers' probes) and the licence report `docs/evidence/licences-<date>.json` (current: 2026-10-01, wave 25; the 2026-09-27 one is in git history).
+
+## Bug sweep D fixes (Oct 9 2026, sweep at integration 5d49ee9)
+
+Pinned by `services/delivery-py/tests/test_sweep_d.py`.
+
+| Id | Finding | Fix |
+|---|---|---|
+| H | `git commit` ran before anything recorded the commit (only the generic `crossing_git_requested`); a failure after it left a commit no record named, invisible until a restart | `engine/loop.py` (the commit step): `DeliveryService.commit_attempt` records `commit_attempted` (parent sha, message hash, staged files) and the run's `pending_commit` in ONE anchored local line BEFORE `git commit`; the outcome after: `commit_recorded` (clears `pending_commit`), or `commit_outcome` -> `commit_attempt_outcome` (`not_committed`: the head is still the parent; `orphaned`: a commit exists that no `commit_recorded` names, with its sha, kept in the run's `orphan_commits`). |
+| H | Orphans invisible until restart; partial evidence | `DeliveryService.orphan_commits` (continuous): every attempt pending with no engine on it (`attempt_unresolved`) and every recorded orphan; `GET /dlv/v1/commits/orphans`, `/health` `orphan_commits`. At start `_reconcile_commit_attempts` resolves each pending attempt against the branch head (before live runs are failed); an unreadable branch leaves it pending (visible). An evidence file that cannot be written after its line committed is kept in memory and counted (`/health` `evidence_unwritten`) instead of raising after the state took effect. |
+| E-5/F-3 | Old `store.py`: one fsync error left a line on disk that memory did not hold; every later append and every restart then failed | `store.py` backported from compliance-py's bug sweep C store (exact-size append, adopt / truncate, short write cut back, `fault`, `O_NOFOLLOW`, closed refuses; an empty line refuses start: the old writer never wrote one) + `DataDirLock`: `api.hold_data_dir` (one process per `DLV_DATA_DIR`) and the single in-process claim, adopted by `DeliveryService` and given back by `stop()`. `/health` `log_write_fault`. |
+
+Not changed (recorded): a line whose anchor was recorded but whose append failed is still reported at the next start
+for Andre's reconcile (`evidence_audit`), as before.
