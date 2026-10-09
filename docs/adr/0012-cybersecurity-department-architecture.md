@@ -218,3 +218,12 @@ Regressions: `services/security-py/tests/test_sweep_fixes.py`.
 |---|---|---|
 | M3 | The in-request retry and the `hold-release-retry` job could release the same (hold, system) concurrently and commit two confirmations | Each (hold, system) release is claimed under the service lock while in flight (`_releasing`, memory only); a concurrent caller skips it. The confirmation is committed only while the system is still pending (re-checked under the lock). The regression blocks an adapter mid-release and runs a second retry against it: one external release, one `hold_release_confirmed` line |
 | L6 | An adapter that raised opened PRESERVATION_NOT_CONNECTED | It opens PRESERVATION_FAILED; PRESERVATION_NOT_CONNECTED stays for a system with no adapter |
+
+## Amendment — Bug sweep E fixes (Oct 9 2026)
+
+Regressions: `services/security-py/tests/test_bug_sweep_e_store.py` (each fails before the fix).
+
+| Id | Finding | Fix |
+|---|---|---|
+| E-M1 (finance-py AEGIS 5a56a3a M1 / c0869c4 M1, backported) | `RecordLog.append_prepared` ignored a short `os.pwrite` (disk full, quota, a signal): a partial line stayed on disk that memory did not hold, and the append "succeeded" | A short write is a failed write: the file is cut back to its previous length, fsynced, and `StoreWriteError` is raised. If the cut-back itself fails the log carries `fault`: integrity reports `LOCAL_LOG_WRITE_FAULT`, `/health` says `degraded`, the authenticated status view carries `log_write_fault: true`, and every later append refuses until the file is inspected |
+| E-M1b | `_write_file` (the pending-line files) ignored a short `os.write` too | A short write raises; the temp file is removed and never replaces the target |

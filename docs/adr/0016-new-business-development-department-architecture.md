@@ -410,3 +410,12 @@ Regression tests: `services/bizdev-py/tests/test_aegis_r7.py` (each fails on 090
 - **Info** log lines written before 09030da carry no `data.evidence`, so evidence recorded by those commits shows as
   `attempted`. Acceptable before launch: no production log exists, and a log started at or after 09030da has none.
 
+
+## Amendment — Bug sweep E fixes (Oct 9 2026)
+
+Regressions: `services/bizdev-py/tests/test_bug_sweep_e_store.py` (each fails before the fix).
+
+| Id | Finding | Fix |
+|---|---|---|
+| E-M1 (finance-py AEGIS 5a56a3a M1 / c0869c4 M1, backported) | `RecordLog.append_prepared` ignored a short `os.pwrite` (disk full, quota, a signal): a partial line stayed on disk that memory did not hold, and the append "succeeded" | A short write is a failed write: the file is cut back to its previous length, fsynced, and `StoreWriteError` is raised. If the cut-back itself fails the log carries `fault`: integrity reports `LOCAL_LOG_WRITE_FAULT`, `/health` says `degraded`, the authenticated status view carries `log_write_fault: true`, and every later append refuses until the file is inspected |
+| E-M1b | `_write_file` (the pending-line files) ignored a short `os.write` too | A short write raises; the temp file is removed and never replaces the target |

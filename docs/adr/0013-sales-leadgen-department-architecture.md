@@ -285,3 +285,12 @@ accepted false positives (L1) are pinned in `services/bizdev-py/tests/test_sweep
 | Id | Finding | Fix |
 |---|---|---|
 | N2 (Medium) | Evidence written before L4 (raw `rk`) read as `attempted` after the upgrade | `/audit/evidence` accepts the line's raw request key or its keyed form for the same anchored line; the row always shows the keyed `rk-` form. Regression: `test_n2_evidence_written_before_the_keyed_rk_still_reads_committed` |
+
+## Amendment — Bug sweep E fixes (Oct 9 2026)
+
+Regressions: `services/sales-py/tests/test_bug_sweep_e_store.py` (each fails before the fix).
+
+| Id | Finding | Fix |
+|---|---|---|
+| E-M1 (finance-py AEGIS 5a56a3a M1 / c0869c4 M1, backported) | `RecordLog.append_prepared` ignored a short `os.pwrite` (disk full, quota, a signal): a partial line stayed on disk that memory did not hold, and the append "succeeded" | A short write is a failed write: the file is cut back to its previous length, fsynced, and `StoreWriteError` is raised. If the cut-back itself fails the log carries `fault`: integrity reports `LOCAL_LOG_WRITE_FAULT`, `/health` says `degraded`, the authenticated status view carries `log_write_fault: true`, and every later append refuses until the file is inspected |
+| E-M1b | `_write_file` (the pending-line files) ignored a short `os.write` too | A short write raises; the temp file is removed and never replaces the target |

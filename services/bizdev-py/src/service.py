@@ -367,6 +367,8 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
             if problem is None:
                 mine = [e for e in entries if e.get("department") == DEPARTMENT and e.get("event_type") == "log_anchor"]
                 problem = self._anchor_problem(mine, {e.get("event_id"): e for e in mine})
+            if self.log.fault:                   # bug sweep E: a failed write could not be cut back
+                problem = f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}"
             self.integrity = {"ok": problem is None, "checked_at": at, "problem": problem}
             if problem is None:
                 self._after_integrity()
@@ -503,10 +505,11 @@ class BizDevService(PursuitsMixin, ResponsesMixin, PartnersMixin, OutreachMixin)
             closed = self._closed
             s = self.settings
             return {
-                "status": "closed" if closed else ("ok" if self.integrity["ok"] else "degraded"),
+                "status": "closed" if closed else ("ok" if self.integrity["ok"] and not self.log.fault else "degraded"),
                 "closed": closed,
                 "integrity": self._closed_integrity() if closed else dict(self.integrity),
                 "in_memory": self.log.in_memory,
+                "log_write_fault": bool(self.log.fault),      # bug sweep E (LOCAL_LOG_WRITE_FAULT)
                 "non_production": s.non_production,
                 "andre_approvals_configured": None,          # filled by the API (the gate lives there)
                 "email_outreach_configured": bool(s.outreach_domain and s.postal_address),

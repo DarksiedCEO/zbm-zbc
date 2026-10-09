@@ -428,6 +428,8 @@ class SecurityService:
             if problem is None:
                 mine = [e for e in entries if e.get("department") == DEPARTMENT and e.get("event_type") == "log_anchor"]
                 problem = self._anchor_problem(mine, {e.get("event_id"): e for e in mine})
+            if self.log.fault:                   # bug sweep E: a failed write could not be cut back
+                problem = f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}"
             self.integrity = {"ok": problem is None, "checked_at": at, "problem": problem}
             if problem is None:
                 self._unrecorded_alerted.clear()
@@ -572,9 +574,10 @@ class SecurityService:
         with self.lock:
             active_pk = sum(1 for p in self.passkeys.values() if p["status"] == "active")
             return {
-                "status": "ok" if self.integrity["ok"] else "degraded",
+                "status": "ok" if self.integrity["ok"] and not self.log.fault else "degraded",
                 "integrity": dict(self.integrity),
                 "in_memory": self.log.in_memory,
+                "log_write_fault": bool(self.log.fault),      # bug sweep E (LOCAL_LOG_WRITE_FAULT)
                 "non_production": self.settings.non_production,
                 "key_service": self.kms.name,
                 "vault_available": self.kms.healthy() and self.integrity["ok"],

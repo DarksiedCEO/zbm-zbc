@@ -36,6 +36,10 @@ class StoreWriteError(RuntimeError):
     pass
 
 
+class _ShortWrite(OSError):
+    """``pwrite`` / ``write`` wrote fewer bytes than asked (bug sweep E; finance-py AEGIS 5a56a3a M1)."""
+
+
 def _line_sha(line: bytes) -> str:
     return hashlib.sha256(line).hexdigest()
 
@@ -73,6 +77,7 @@ class RecordLog:
         self._lines: list[bytes] = []
         self.path: Optional[str] = None
         self.fail_next_append = False  # tests: simulate a disk failure
+        self.fault: Optional[str] = None   # bug sweep E: a failed write could not be cut back (fail closed)
         self.closed = False            # V5r-Info: set by the service's close(); every write then refuses
         if data_dir:
             os.makedirs(data_dir, mode=0o700, exist_ok=True)
@@ -147,6 +152,8 @@ class RecordLog:
                 raise StoreWriteError("simulated local store failure")
             if rec["seq"] != len(self._lines) + 1:
                 raise StoreWriteError("log moved on since the line was prepared")
+            if self.fault:
+                raise StoreWriteError(f"LOCAL_LOG_WRITE_FAULT: {self.fault}")
             if self.path:
                 expected = sum(len(ln) + 1 for ln in self._lines)
                 try:
@@ -160,16 +167,26 @@ class RecordLog:
                     elif size != expected:
                         raise StoreWriteError("the log file and memory disagree; refusing to write")
                     else:
+                        payload = line + b"\n"
                         try:
-                            os.pwrite(fd, line + b"\n", expected)
+                            written = os.pwrite(fd, payload, expected)
+                            if written != len(payload):
+                                # bug sweep E (finance-py AEGIS 5a56a3a M1): a short write (disk full, quota, a signal)
+                                # would leave a partial line that memory does not hold. Fail closed: cut back.
+                                raise _ShortWrite(f"short write: {written} of {len(payload)} bytes")
                             os.fsync(fd)
                         except OSError as exc:
                             try:
                                 os.ftruncate(fd, expected)
                                 os.fsync(fd)
-                            except OSError:
-                                pass
-                            raise StoreWriteError(f"local log write failed: {type(exc).__name__}") from exc
+                            except OSError as texc:
+                                # the partial bytes may still be on disk: every later append refuses (fail closed),
+                                # and says why so Andre sees it (integrity LOCAL_LOG_WRITE_FAULT, status view)
+                                self.fault = (f"a failed log write could not be cut back ({type(exc).__name__}, then "
+                                              f"{type(texc).__name__} on truncate): the log refuses writes until the "
+                                              f"file is inspected and its torn tail removed (line {rec['seq']})")
+                            detail = f" ({exc})" if isinstance(exc, _ShortWrite) else ""
+                            raise StoreWriteError(f"local log write failed: {type(exc).__name__}{detail}") from exc
                 except OSError as exc:
                     raise StoreWriteError(f"local log write failed: {type(exc).__name__}") from exc
                 finally:
@@ -283,7 +300,9 @@ def _write_file(path: str, data: bytes, what: str) -> None:
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         try:
-            os.write(fd, data)
+            written = os.write(fd, data)
+            if written != len(data):     # bug sweep E: a short write never becomes the file
+                raise _ShortWrite(f"short write: {written} of {len(data)} bytes")
             os.fsync(fd)
         finally:
             os.close(fd)
@@ -294,6 +313,10 @@ def _write_file(path: str, data: bytes, what: str) -> None:
         finally:
             os.close(dfd)
     except OSError as exc:
+        try:
+            os.unlink(tmp)               # never leave a partial temp file behind
+        except OSError:
+            pass
         raise StoreWriteError(f"{what} write failed: {type(exc).__name__}") from exc
 
 

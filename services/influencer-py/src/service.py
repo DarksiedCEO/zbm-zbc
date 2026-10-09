@@ -335,6 +335,8 @@ class InfluencerService(PeopleMixin, ConfirmMixin, OutreachMixin, DealsMixin, Pa
             if problem is None:
                 mine = [e for e in entries if e.get("department") == DEPARTMENT and e.get("event_type") == "log_anchor"]
                 problem = self._anchor_problem(mine, {e.get("event_id"): e for e in mine})
+            if self.log.fault:                   # bug sweep E: a failed write could not be cut back
+                problem = f"LOCAL_LOG_WRITE_FAULT: {self.log.fault}"
             self.integrity = {"ok": problem is None, "checked_at": at, "problem": problem}
             if problem is None:
                 self._after_integrity()
@@ -472,10 +474,11 @@ class InfluencerService(PeopleMixin, ConfirmMixin, OutreachMixin, DealsMixin, Pa
             s = self.settings
             closed = self._closed
             return {
-                "status": "closed" if closed else ("ok" if self.integrity["ok"] else "degraded"),
+                "status": "closed" if closed else ("ok" if self.integrity["ok"] and not self.log.fault else "degraded"),
                 "closed": closed,
                 "integrity": self._closed_integrity() if closed else dict(self.integrity),
                 "in_memory": self.log.in_memory,
+                "log_write_fault": bool(self.log.fault),      # bug sweep E (LOCAL_LOG_WRITE_FAULT)
                 "non_production": s.non_production,
                 "outreach_domain": s.outreach_domain,
                 "email_outreach_configured": bool(s.outreach_domain and s.postal_address),

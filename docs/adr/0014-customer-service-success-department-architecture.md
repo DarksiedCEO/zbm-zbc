@@ -416,3 +416,12 @@ worked within days — CAN-SPAM requires an email opt-out honoured within 10 bus
 |---|---|---|
 | H-M (High-class, pre-existing; the approval's condition) | Bare "remove me" / "take me off" revoked "take me off hold please", "remove me from the order as the contact" | `_REMOVE_ME`: exact only at the end of a clause ("Remove me.", "remove me please") or bound to a list / texts / emails / messages / contacts / database ("take me off your mailing list"); other uses fall to `OPT_OUT_POSSIBLE` |
 | H-N (High, regression from the H-M fix) | "Stop texting me. Take me off your email list" kept email: `_REMOVE_ME` was read by the level only, not the scope | The scope reads `_REMOVE_ME` too; its object decides (email / list / messages / contacts → `all`, texts only → SMS); "text and email lists" accepted as an object; "remove me" alerts from a quoted tail |
+
+## Amendment — Bug sweep E fixes (Oct 9 2026)
+
+Regressions: `services/service-py/tests/test_bug_sweep_e_store.py` (each fails before the fix).
+
+| Id | Finding | Fix |
+|---|---|---|
+| E-M1 (finance-py AEGIS 5a56a3a M1 / c0869c4 M1, backported) | `RecordLog.append_prepared` ignored a short `os.pwrite` (disk full, quota, a signal): a partial line stayed on disk that memory did not hold, and the append "succeeded" | A short write is a failed write: the file is cut back to its previous length, fsynced, and `StoreWriteError` is raised. If the cut-back itself fails the log carries `fault`: integrity reports `LOCAL_LOG_WRITE_FAULT`, `/health` says `degraded`, the authenticated status view carries `log_write_fault: true`, and every later append refuses until the file is inspected |
+| E-M1b | `_write_file` (the pending-line files) ignored a short `os.write` too | A short write raises; the temp file is removed and never replaces the target |
