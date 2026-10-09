@@ -81,6 +81,7 @@ admits a key that (c) refuses; it only refuses more.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from collections import deque
 from dataclasses import dataclass
@@ -161,6 +162,11 @@ class ContactAuthorization:
     def customer_id(self) -> str | None:
         return self._customer_id
 
+    def attempt_keys(self) -> list[list[str]]:
+        """Bug sweep D: the history keys this contact counts against (hashed: never the number), so the attempt can
+        be written to the local log BEFORE the dial and restored after a restart."""
+        return [list(k) for k in self._gate._keys(self._phone, self._customer_id)]
+
     def redeem(self, channel: TaskChannel) -> str:
         """Called by the transport immediately before contacting. Re-checks
         window and limits on the gate's clock, records the attempt, and
@@ -169,6 +175,10 @@ class ContactAuthorization:
 
     def __repr__(self) -> str:  # never print the number
         return f"ContactAuthorization(channel={self._channel.value}, redeemed={self._redeemed})"
+
+
+def _key_hash(kind: str, value: str) -> str:
+    return hashlib.sha256(f"fulfillment-gate|{kind}|{value}".encode("utf-8", "surrogatepass")).hexdigest()[:32]
 
 
 @dataclass(frozen=True)
@@ -287,11 +297,27 @@ class OutboundContactGate:
             raise ValueError("gate clock must return a timezone-aware datetime")
         return now
 
-    def _keys(self, phone: str, customer_id: str | None) -> list[tuple[str, str]]:
-        keys = [("phone number", phone)]
+    @staticmethod
+    def _keys(phone: str, customer_id: str | None) -> list[tuple[str, str]]:
+        # bug sweep D: the history is keyed by a hash of the number / customer id (the log that persists it holds
+        # no phone number); refusal messages name only the kind
+        keys = [("phone number", _key_hash("phone", phone))]
         if customer_id:
-            keys.append(("customer", customer_id))
+            keys.append(("customer", _key_hash("customer", customer_id)))
         return keys
+
+    def restore_attempt(self, keys: list, at: datetime) -> None:
+        """Bug sweep D (M, call limits reset on restart): put back one attempt read from the local log. Attempts older
+        than 24h on the gate's clock are dropped; nothing is ever removed (restoring only narrows what is allowed)."""
+        with self._lock:
+            now = self._now()
+            if at <= now - _ROLLING:
+                return
+            for kind, key in keys:
+                ts = self._attempts.setdefault((str(kind), str(key)), deque())
+                ts.append(at)
+                if len(ts) > 1 and ts[-2] > at:
+                    self._attempts[(str(kind), str(key))] = deque(sorted(ts))
 
     def _check(self, now: datetime, zones: tuple[str, ...], phone: str, customer_id: str | None) -> str | None:
         self._maybe_sweep(now)

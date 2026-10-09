@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import hashlib
 import hmac
 import json
 import logging
@@ -76,6 +77,7 @@ from fulfillment_schema import (
     TaskChannel,
     TaskId,
     TaskStatus,
+    WriteBackStatus,
 )
 from integrations.sip_dialer import InMemorySipDialer, NotWiredSipDialer, SipDialerPort
 from outbound_gate import AttemptLimits, OutboundContactGate, parse_attempt_limits
@@ -86,6 +88,11 @@ from integrations.system_of_record import (
     SystemOfRecordPort,
 )
 from agents.resolution_writeback import TerminalEvent
+from journal import EvidenceJournal
+from ledger import (DEPARTMENT, LedgerQueryFailed, LedgerRecordError, is_ledger_id, is_ledger_name, ledger_from_env,
+                    payload_sha256)
+from outbound_gate import ContactRefused
+from store import LOCK_NAME, DataDirBusy, DataDirLock, RecordLog, StoreCorrupt
 
 # --- auth ---------------------------------------------------------------
 # Fail-closed by design, matching detection-py's ZBM_SERVICE_TOKEN
@@ -1683,6 +1690,212 @@ _dial_lock = threading.Lock()
 _exhausted_resolutions: BoundedExpiringMap[str, ResolutionRecord] = _new_dedupe()
 _exhausted_lock = threading.Lock()
 
+
+# --- evidence (bug sweep D) ---------------------------------------------------
+# Before bug sweep D this department recorded nothing: a callback dial and a write-back to a client's system of
+# record left no evidence anywhere, and the call limits and the write-back dedupe lived only in memory (a restart
+# reset them). Now every consequential action is recorded on the ledger FIRST (R6: the event id is the request key,
+# the type, the subject and the payload hash; the payload carries ``rk`` and ``seq``; no timestamp), and ONE local
+# log line naming those records is anchored on the ledger and appended BEFORE the action (the dial, the write-back);
+# the result is recorded and named by a second line after it. GET /audit/evidence: committed vs attempted. The
+# log also carries what must survive a restart: each dial's attempt keys (hashed) and task id, and each successful
+# write-back (``_restore_from_log``).
+
+def _hold_data_dir(data_dir: str) -> DataDirLock:
+    """The exclusive flock on FULFILLMENT_DATA_DIR (E-5/F-3, finance-py's single writer): a second process on the same
+    directory refuses to start (two writers would fork the log)."""
+    try:
+        lock = DataDirLock(data_dir)
+    except DataDirBusy:
+        raise RuntimeError(f"{data_dir}: another fulfillment-py process holds this data directory (flock on "
+                           f"{LOCK_NAME}); refusing to start") from None
+    except StoreCorrupt as exc:
+        raise RuntimeError(f"{data_dir}: {exc}") from None
+    if lock.adopt(lock.claim()) is None:      # this process's one service instance
+        raise RuntimeError(f"{data_dir}: the data-directory claim could not be taken; refusing to start")
+    return lock
+
+
+_DATA_DIR = os.environ.get("FULFILLMENT_DATA_DIR") or None
+_DIR_LOCK = _hold_data_dir(_DATA_DIR) if _DATA_DIR else None
+_ledger = ledger_from_env()          # unset = every record fails: no dial, no write-back (fail closed)
+
+
+def _make_journal(log: RecordLog) -> EvidenceJournal:
+    return EvidenceJournal(
+        log, DEPARTMENT,
+        lambda eid, et, actor, sid, payload, summary: _ledger.record_event(eid, et, actor, sid, payload, summary),
+        payload_hash=payload_sha256, id_prefix="ful-anc-")
+
+
+try:
+    _journal: EvidenceJournal = _make_journal(RecordLog(_DATA_DIR))
+except StoreCorrupt as _exc:
+    raise RuntimeError(f"FULFILLMENT_DATA_DIR: {_exc}") from None
+_evidence_lock = threading.RLock()
+# entity key ("call|call_1001") -> the record of its SUCCESSFUL write-back: a retried /resolve answers it and writes
+# nothing (bug sweep D). Replayed from the log at start; bounded, fail closed at the cap.
+_resolutions: dict[str, ResolutionRecord] = {}
+_MAX_RESOLUTIONS = 1_000_000
+
+
+class EvidenceUnavailable(Exception):
+    """A record or the line naming it could not be written BEFORE the action: the action does not happen."""
+
+
+def _subject(prefix: str, ident: str) -> str:
+    return ident if is_ledger_id(ident, 120) else f"{prefix}-" + hashlib.sha256(ident.encode()).hexdigest()[:32]
+
+
+def _evidence_id(rk: str, event_type: str, subject_id: str, psha: str) -> str:
+    return "ful-" + hashlib.sha256(json.dumps([rk, event_type, subject_id, psha]).encode()).hexdigest()[:40]
+
+
+def _commit(kind: str, rk: str, actor: str, specs: list[tuple[str, str, dict, str]], extra: dict,
+            before_effect: bool) -> str:
+    """Record ``specs`` (record first), then anchor and append one line naming them. ``before_effect``: any failure
+    raises EvidenceUnavailable (the action must not happen). After the effect: failures never raise -- the line is
+    owed (written before the next one) and ``"pending"`` is returned."""
+    with _evidence_lock:
+        if _journal.owed:
+            try:
+                _journal.flush()
+            except Exception as exc:  # noqa: BLE001 - ledger or local log
+                if before_effect:
+                    raise EvidenceUnavailable(f"an owed evidence line could not be written ({type(exc).__name__})") \
+                        from None
+        seq = len(_journal.log) + 1 + len(_journal.owed)
+        named, missing = [], False
+        for event_type, subject_id, payload, summary in specs:
+            p = {**payload, "rk": rk, "seq": seq}
+            psha = payload_sha256(p)
+            eid = _evidence_id(rk, event_type, subject_id, psha)
+            try:
+                _ledger.record_event(eid, event_type, actor, subject_id, p, summary)
+            except LedgerRecordError as exc:
+                if before_effect:
+                    raise EvidenceUnavailable(f"evidence ledger record failed ({exc})") from None
+                missing = True
+                continue
+            named.append({"event_id": eid, "event_type": event_type, "subject_id": subject_id,
+                          "payload_sha256": psha})
+        try:
+            _journal.commit(kind, _now().isoformat(), rk, named, extra, owe_on_failure=not before_effect)
+        except Exception as exc:  # noqa: BLE001 - ledger (anchor) or local log
+            if before_effect:
+                raise EvidenceUnavailable(f"evidence line could not be written ({type(exc).__name__})") from None
+            return "pending"
+        return "pending" if missing else "committed"
+
+
+class _EvidencedDialer:
+    """Record-first around ONE task's dial: the request (with the attempt's hashed history keys) is recorded and its
+    line anchored and appended BEFORE the dialer is called; the result after. If the request cannot be recorded the
+    task is not dialed (ContactRefused: an outcome, never a 500)."""
+
+    def __init__(self, inner: SipDialerPort, task: FollowUpTask):
+        self._inner, self._task = inner, task
+
+    def place_call(self, authorization, line_id: str):
+        tid = self._task.task_id
+        subj = _subject("task", tid)
+        keys = authorization.attempt_keys()
+        rk = f"dial|{tid}"
+        try:
+            _commit("dial", rk, "callback_orchestration",
+                    [("callback_dial_requested", subj, {"task_id": tid, "line_id": line_id, "attempt_keys": keys},
+                      "Callback dial requested")],
+                    {"task_id": tid, "attempt_keys": keys, "at": _now().isoformat()}, before_effect=True)
+        except EvidenceUnavailable as exc:
+            raise ContactRefused(f"{exc} — not dialed (fail closed: no dial without its evidence)") from None
+        try:
+            result = self._inner.place_call(authorization, line_id)
+        except BaseException as exc:
+            _commit("dial_result", rk, "callback_orchestration",
+                    [("callback_dial_result", subj, {"task_id": tid, "placed": None, "error": type(exc).__name__},
+                      f"Callback dial raised {type(exc).__name__}")], {"task_id": tid}, before_effect=False)
+            raise
+        _commit("dial_result", rk, "callback_orchestration",
+                [("callback_dial_result", subj, {"task_id": tid, "placed": bool(result.placed), "call_id": result.call_id,
+                                                 "line_id": result.line_id},
+                  f"Callback dial {'placed' if result.placed else 'not placed'}")], {"task_id": tid},
+                before_effect=False)
+        return result
+
+
+def _resolution_id(ev: TerminalEvent) -> str:
+    h = hashlib.sha256(json.dumps([ev.entity_type, ev.entity_id, ev.resolution_type.value, ev.customer_id]).encode())
+    return f"res-{ev.entity_type}-{ev.entity_id}-{h.hexdigest()[:12]}"
+
+
+def _resolve_events(events: list[TerminalEvent]) -> list[ResolutionRecord]:
+    """Bug sweep D (M): idempotent, record-first write-back. An entity whose write-back already SUCCEEDED answers that
+    record and writes nothing (a different resolution for it is not written back: FAILED, with the reason); every
+    other write-back is recorded and its line anchored BEFORE the system of record is called, the result after. The
+    resolution id is deterministic (entity + resolution), so a retried write-back carries the same id."""
+    out: list[ResolutionRecord] = []
+    for ev in events:
+        key = f"{ev.entity_type}|{ev.entity_id}"
+        rid = _resolution_id(ev)
+        with _evidence_lock:
+            prev = _resolutions.get(key)
+            if prev is not None:
+                if prev.resolution_type == ev.resolution_type and prev.customer_id == ev.customer_id:
+                    out.append(prev)
+                else:
+                    out.append(ResolutionRecord(
+                        resolution_id=rid, entity_type=ev.entity_type, entity_id=ev.entity_id,
+                        customer_id=ev.customer_id, resolution_type=ev.resolution_type,
+                        write_back_status=WriteBackStatus.FAILED,
+                        write_back_detail=(f"conflict: this {ev.entity_type} was already resolved as "
+                                           f"{prev.resolution_type.value} ({prev.resolution_id}); not written back")))
+                continue
+            if len(_resolutions) >= _MAX_RESOLUTIONS:
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "60"},
+                                    detail="write-back dedupe state is full (fail closed); nothing written back")
+            subj = _subject(ev.entity_type, ev.entity_id)
+            rk = f"resolve|{key}"
+            base = {"entity_type": ev.entity_type, "entity_id": ev.entity_id, "resolution_id": rid,
+                    "resolution_type": ev.resolution_type.value}
+            try:
+                _commit("resolution_requested", rk, "resolution_writeback",
+                        [("resolution_writeback_requested", subj, base, "Write-back requested")], {"key": key},
+                        before_effect=True)
+            except EvidenceUnavailable as exc:
+                out.append(ResolutionRecord(
+                    resolution_id=rid, entity_type=ev.entity_type, entity_id=ev.entity_id, customer_id=ev.customer_id,
+                    resolution_type=ev.resolution_type, write_back_status=WriteBackStatus.FAILED,
+                    write_back_detail=f"{exc}; not written back (fail closed) — retry"))
+                continue
+            [record] = resolution_writeback.resolve_and_writeback([ev], _system_of_record, resolution_ids=[rid])
+            ok = record.write_back_status == WriteBackStatus.SUCCESS
+            _commit("resolution", rk, "resolution_writeback",
+                    [("resolution_writeback_result", subj, {**base, "status": record.write_back_status.value},
+                      f"Write-back {record.write_back_status.value}")],
+                    {"key": key, "record": record.model_dump(mode="json") if ok else None}, before_effect=False)
+            if ok:
+                _resolutions[key] = record
+            out.append(record)
+    return out
+
+
+def _restore_from_log() -> None:
+    """Bug sweep D (M): what must survive a restart, replayed from the local log -- the gate's attempt history (call
+    limits), the dial dedupe, and the successful write-backs."""
+    now = _now()
+    for r in _journal.log.iter_records():
+        d = r.get("data") or {}
+        if r["kind"] == "dial" and d.get("attempt_keys"):
+            at = datetime.fromisoformat(d["at"])
+            _GATE.restore_attempt(d["attempt_keys"], at)
+            if at > now - _DEDUPE_TTL and _attempted_task_ids.room(now) > 0:
+                _attempted_task_ids.put(d["task_id"], True, at)
+        elif r["kind"] == "resolution" and d.get("record"):
+            _resolutions[d["key"]] = ResolutionRecord(**d["record"])
+
+
+_restore_from_log()
+
 # _MAX_BATCH (1000) is defined with the JSON shape caps above.
 TimezoneName = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 
@@ -1784,7 +1997,25 @@ class ResolveResponse(BaseModel):
 async def health() -> dict:
     # A coroutine on purpose (fix wave 4): it does no work, so it must not
     # queue for a thread-pool slot behind batch requests.
-    return {"status": "ok", "service": "fulfillment-py", "data_source": "non-live"}
+    return {"status": "ok", "service": "fulfillment-py", "data_source": "non-live",
+            "in_memory": _journal.log.in_memory, "evidence_lines_owed": len(_journal.owed),
+            "log_write_fault": bool(_journal.log.fault)}
+
+
+@app.get("/audit/evidence", dependencies=[Depends(require_auth)])
+def audit_evidence(limit: int = 200, offset: int = 0, event_type: str | None = None) -> dict:
+    """Bug sweep D: every Fulfillment event on the ledger, ``committed`` (named by an anchored local line, same type,
+    subject and payload hash) or ``attempted`` (recorded first, never committed). Raw lines are copied under the
+    evidence lock; parsing, hashing and the ledger read run outside it."""
+    if not (1 <= limit <= 1000 and 0 <= offset <= 10_000_000) or (event_type is not None and not is_ledger_name(event_type)):
+        raise HTTPException(status_code=422, detail="limit 1-1000, offset 0-10000000, event_type [a-z0-9_]{1,64}")
+    with _evidence_lock:
+        raw = _journal.log.raw_lines()
+    try:
+        entries = _ledger.entries()
+    except LedgerQueryFailed:
+        raise HTTPException(status_code=503, detail="the evidence ledger could not be read") from None
+    return _journal.audit(raw, entries, limit, offset, event_type)
 
 
 # --- fixture endpoints (dev/test only, explicitly labeled) -----------------
@@ -1866,7 +2097,7 @@ def _escalate_task(req: EscalateRequest) -> dict:
                         detail="exhausted-escalation dedupe state is full (fail closed); no record written — retry later",
                         headers={"Retry-After": "60"},
                     )
-                [record] = resolution_writeback.resolve_and_writeback(
+                [record] = _resolve_events(  # bug sweep D: record-first, idempotent across restarts
                     [
                         TerminalEvent(
                             entity_type="task",
@@ -1875,7 +2106,6 @@ def _escalate_task(req: EscalateRequest) -> dict:
                             resolution_type=ResolutionType.NO_RESOLUTION,
                         )
                     ],
-                    _system_of_record,
                 )
                 _exhausted_resolutions.put(req.task.task_id, record, now)
         resolution = record.model_dump()
@@ -1929,15 +2159,27 @@ def _run_callback_orchestration(req: OrchestrateRequest) -> dict:
                 admitted.append(t)
             else:
                 over_capacity.append(t)
-        outcomes = callback_orchestration.orchestrate(
-            admitted,
-            _dialer,
-            phone_by_call_id=req.phone_by_call_id,
-            line_by_call_id=req.line_by_call_id,
-            timezone_by_call_id=req.timezone_by_call_id,
-            gate=_GATE,
-            now=now,
-        )
+        # Bug sweep D: one task at a time, each through a record-first dialer (its request recorded and its line
+        # anchored BEFORE the dial); a duplicate in the batch is answered exactly as orchestrate() answers it.
+        outcomes = []
+        seen: set[str] = set()
+        for t in admitted:
+            if t.task_id in seen:
+                outcomes.append(callback_orchestration.OrchestrationOutcome(
+                    t, False, None, "duplicate task_id in this batch — not dialed twice"))
+                continue
+            got = callback_orchestration.orchestrate(
+                [t],
+                _EvidencedDialer(_dialer, t),
+                phone_by_call_id=req.phone_by_call_id,
+                line_by_call_id=req.line_by_call_id,
+                timezone_by_call_id=req.timezone_by_call_id,
+                gate=_GATE,
+                now=now,
+            )
+            if got:
+                seen.add(t.task_id)
+            outcomes += got
         for o in outcomes:
             if o.attempted:
                 _attempted_task_ids.put(o.task.task_id, True, now)  # room reserved above
@@ -2030,8 +2272,7 @@ def _resolve_and_writeback(req: ResolveRequest) -> ResolveResponse:
         )
         for e in req.events
     ]
-    records = resolution_writeback.resolve_and_writeback(events, _system_of_record)
-    return ResolveResponse(records=records)
+    return ResolveResponse(records=_resolve_events(events))
 
 
 # --- entrypoint --------------------------------------------------------------

@@ -123,15 +123,19 @@ def test_resolution_writeback_endpoint_returns_not_configured_by_default():
 
 
 def test_resolution_writeback_ids_are_unique_across_separate_api_calls():
-    """CONFIRMED finding: resolution_id collided across separate request
-    batches because it was built from a per-batch index. Verified fixed
-    over the real API, not just the agent unit test."""
+    """CONFIRMED finding (Sep 22): resolution_id collided across separate batches because it was built from a
+    per-batch index. Bug sweep D: the id is derived from the entity AND its resolution, so different entities or
+    resolutions never share one, and a RETRY of the same resolution carries the same id (idempotent for the system
+    of record, which is what that finding's CRM concern needs)."""
     payload = {"events": [{"entity_type": "call", "entity_id": "call_1001", "customer_id": "cust_f1", "resolution_type": "booked"}]}
+    other = {"events": [{"entity_type": "call", "entity_id": "call_1002", "customer_id": "cust_f1", "resolution_type": "booked"}]}
     r1 = client.post("/agents/resolution-writeback/resolve", json=payload)
     r2 = client.post("/agents/resolution-writeback/resolve", json=payload)
+    r3 = client.post("/agents/resolution-writeback/resolve", json=other)
     id1 = r1.json()["records"][0]["resolution_id"]
     id2 = r2.json()["records"][0]["resolution_id"]
-    assert id1 != id2
+    id3 = r3.json()["records"][0]["resolution_id"]
+    assert id1 == id2 and id1 != id3
 
 
 def test_escalate_endpoint_records_a_resolution_when_sequence_exhausts():

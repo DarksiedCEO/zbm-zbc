@@ -38,4 +38,13 @@ def _fresh_outbound_gate(monkeypatch):
 
     if hasattr(api, "_build_gate"):
         monkeypatch.setattr(api, "_GATE", api._build_gate())
+    if hasattr(api, "_make_journal"):
+        # bug sweep D: every test gets its own evidence ledger (a passing fake: the module default, with no
+        # LEDGER_SERVICE_URL, refuses every record and so every dial and write-back) and its own in-memory log
+        from ledger import FakeLedgerClient
+        from store import RecordLog
+
+        monkeypatch.setattr(api, "_ledger", FakeLedgerClient())
+        monkeypatch.setattr(api, "_journal", api._make_journal(RecordLog(None)))
+        monkeypatch.setattr(api, "_resolutions", {})
     yield

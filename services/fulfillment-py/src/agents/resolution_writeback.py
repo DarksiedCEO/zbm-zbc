@@ -44,12 +44,16 @@ class TerminalEvent:
 def resolve_and_writeback(
     events: list[TerminalEvent],
     system_of_record: SystemOfRecordPort,
+    resolution_ids: list[str] | None = None,
 ) -> list[ResolutionRecord]:
+    """``resolution_ids`` (bug sweep D): the caller's deterministic ids, one per event (the API derives them from the
+    entity and its resolution, so a retried write-back carries the SAME id to the system of record)."""
     records: list[ResolutionRecord] = []
 
-    for ev in events:
+    for i, ev in enumerate(events):
         record = ResolutionRecord(
-            resolution_id=f"res-{ev.entity_type}-{ev.entity_id}-{uuid.uuid4().hex[:12]}",
+            resolution_id=(resolution_ids[i] if resolution_ids is not None
+                           else f"res-{ev.entity_type}-{ev.entity_id}-{uuid.uuid4().hex[:12]}"),
             entity_type=ev.entity_type,
             entity_id=ev.entity_id,
             customer_id=ev.customer_id,

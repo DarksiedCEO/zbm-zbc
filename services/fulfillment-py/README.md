@@ -23,6 +23,16 @@ See `docs/adr/0002-fulfillment-department-architecture.md` for why this
 department exists, what it competes against, and the architecture
 decisions behind it.
 
+
+**Evidence (bug sweep D).** Every callback dial and every write-back to a
+system of record is recorded on the evidence ledger FIRST (`LEDGER_SERVICE_URL`
+/ `LEDGER_SERVICE_TOKEN`; unset = nothing is dialed or written back) and named
+by a local log line (`FULFILLMENT_DATA_DIR`, else in memory) anchored on the
+ledger before the action. `GET /audit/evidence` marks each record `committed`
+or `attempted`. The call limits, the dial dedupe and successful write-backs are
+replayed from the log after a restart; `/resolve` is idempotent. See ADR 0002
+"Bug sweep D fixes" and `tests/test_sweep_d.py`.
+
 ## What this actually is
 
 Missed-call detection → follow-up task creation → callback orchestration

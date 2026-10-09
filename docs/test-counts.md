@@ -25,7 +25,7 @@ the check.
 | `python:delivery-py` | 730 | pytest collection | — |
 | `python:detection-py` | 504 | pytest collection | — |
 | `python:finance-py` | 538 | pytest collection | — |
-| `python:fulfillment-py` | 1105 | pytest collection | — |
+| `python:fulfillment-py` | 1112 | pytest collection | — |
 | `python:influencer-py` | 435 | pytest collection | — |
 | `python:legal-py` | 308 | pytest collection | — |
 | `python:onboarding-py` | 772 | pytest collection | — |
