@@ -1,4 +1,4 @@
-import { loadRecordedFindings } from "@/lib/api";
+import { loadRecordedFindingsCached } from "@/lib/api";
 import { healthWord, httpStatusFor } from "@/lib/load-outcome";
 
 // LOW-A (fix wave 1, Sep 24 2026): a monitoring endpoint whose status is the
@@ -10,11 +10,13 @@ import { healthWord, httpStatusFor } from "@/lib/load-outcome";
 //   502 {"status":"upstream_error","error":...,"correlation_id":...}
 //   502 {"status":"ledger_invalid","error":...}
 //
-// Read-only like "/": the orchestrator route it calls never writes.
+// Read-only like "/": the orchestrator route it calls never writes. Bug sweep
+// E: it needs a session like every route (401 without one; src/proxy.ts), and
+// it shares the brief per-process ledger cache with "/" (src/lib/api.ts).
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const outcome = await loadRecordedFindings();
+  const outcome = await loadRecordedFindingsCached();
   const status = httpStatusFor(outcome);
   const body: Record<string, unknown> = { status: healthWord(outcome) };
   if (outcome.ok) {

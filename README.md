@@ -25,7 +25,7 @@ hash chain as findings.**
 | `services/detection-py` | Python (FastAPI, pydantic) | [counts](docs/test-counts.md) | Real, REST-exposed, hardened, money is exact `Decimal`; request limits (1000 items; every field bounded; per-route body limit = computed worst-case legal batch + 25%, 1–36 MiB; 1 large request at a time, else 503 + Retry-After; async `/health`; head size/deadline — ADR 0001 "Request limits"); run with `src/serve.py` |
 | `services/orchestrator-go` | Go | [counts](docs/test-counts.md) | Real, live-tested against detection-py + ledger-rust, hardened, string-backed `Money`; server timeouts, body/header caps, bounded upstream responses (ADR 0001 "Request limits") |
 | `services/ledger-rust` | Rust | [counts](docs/test-counts.md) (unit + real-binary integration), clippy `-D warnings` clean | Real, hash-chained, tamper-evidence proven by test, authenticated, findings + events on one chain |
-| `apps/dashboard-ts` | TypeScript (Next.js 16) | [counts](docs/test-counts.md); `npm test` after `npm run build` (money vectors, loopback bind, error sanitizing, ledger status, load outcome → HTTP status, live status codes on the wire), build + typecheck clean; `npm audit` clean since fix wave 25 moved Next.js to 16.3.8 (GHSA-vcvr-r3jv-pc5j, critical, affected >=16.2.0 <16.3.6) | Real, rendered per request (`ƒ /`), binds 127.0.0.1 by default, reads recorded findings — viewing never writes; `/` and `/healthz` answer 503 (orchestrator unreachable/timeout, token unset) or 502 (token rejected, orchestrator error, ledger does not verify), 200 only when findings loaded and the ledger verified |
+| `apps/dashboard-ts` | TypeScript (Next.js 16) | [counts](docs/test-counts.md); `npm test` after `npm run build` (money vectors, loopback bind, error sanitizing, ledger status, load outcome → HTTP status, live status codes on the wire), build + typecheck clean; `npm audit` clean since fix wave 25 moved Next.js to 16.3.8 (GHSA-vcvr-r3jv-pc5j, critical, affected >=16.2.0 <16.3.6) | Real, rendered per request (`ƒ /`), binds 127.0.0.1 by default, every route behind a password session that fails closed (503 when `DASHBOARD_PASSWORD_HASH` / `DASHBOARD_SESSION_SECRET` are unset; bug sweep E, F-5), reads recorded findings — viewing never writes; `/` and `/healthz` answer 503 (orchestrator unreachable/timeout, token unset) or 502 (token rejected, orchestrator error, ledger does not verify), 200 only when findings loaded and the ledger verified |
 
 **Verified live, full-stack run** (Python + Go + Rust, real processes,
 real HTTP, no mocks, all three services requiring and presenting real
@@ -289,15 +289,27 @@ go run ./cmd/orchestrator  # DETECTION_SERVICE_URL, LEDGER_SERVICE_URL, ORCHESTR
 # 4. Dashboard (TypeScript) — separate terminal
 cd apps/dashboard-ts
 npm install
-ORCHESTRATOR_URL=http://localhost:8080 ORCHESTRATOR_SERVICE_TOKEN=<same as above> npm run dev   # http://127.0.0.1:3000
-# `npm run build && npm start` for production. Both bind 127.0.0.1 (the
-# dashboard has no auth); DASHBOARD_BIND_ADDR overrides, PORT sets the port.
+export DASHBOARD_PASSWORD_HASH="$(npm run --silent hash-password)"   # type the password, then Ctrl-D (read from stdin)
+export DASHBOARD_SESSION_SECRET="$(openssl rand -base64 48)"         # >= 32 bytes; signs the session cookie
+ORCHESTRATOR_URL=http://localhost:8080 ORCHESTRATOR_SERVICE_TOKEN=<same as above> npm run dev   # http://127.0.0.1:3000/login
+# Every route needs a session (bug sweep E, F-5): sign in at /login. Without
+# DASHBOARD_PASSWORD_HASH / DASHBOARD_SESSION_SECRET (or with a malformed one)
+# EVERY route answers 503 — never an open dashboard. The session cookie is
+# HttpOnly, Secure, SameSite=Strict (__Host- prefix), DASHBOARD_SESSION_TTL_SECONDS
+# (default 43200, 300..604800); rotating the secret or the password signs
+# every session out. Failed logins are rate limited per client and globally
+# (per process). Off loopback, serve it only behind HTTPS.
+# `npm run build && npm start` for production. Both bind 127.0.0.1 by
+# default; DASHBOARD_BIND_ADDR overrides, PORT sets the port.
 # The page shows findings already recorded in the ledger (read-only);
 # run a scan first with the POST below. `npm test` runs every dashboard test
 # (money vectors, bind, error mapping, and the live tests against the build).
 # Monitoring: GET /healthz (JSON) and GET / answer 200 only when findings
 # loaded and the ledger verified; 503/502 otherwise (ORCHESTRATOR_TIMEOUT_MS,
-# default 10000, bounds the orchestrator call).
+# default 10000, bounds the orchestrator call). Both need a session (a
+# monitor sends the cookie from POST /api/login with JSON {"password": ...});
+# both share one ledger read per DASHBOARD_LEDGER_CACHE_MS (default 5000,
+# 0..60000, 0 = off, per process; failures are never cached).
 ```
 
 Or just run the full pipeline once without the dashboard (optional `?client_id=fixture-pool` — the only tenant
@@ -386,9 +398,9 @@ attaches later without touching agent logic.
 - The events endpoint stores only a payload hash and a summary; the ledger
   cannot show what an event's payload was, only prove it has not changed.
   Callers must keep the payload themselves.
-- Dashboard has no write actions, no auth, no multi-client view — it
+- Dashboard has no write actions, one shared password (no per-user accounts; bug sweep E), no multi-client view — it
   renders recorded findings, nothing more. It binds 127.0.0.1 by default
-  for that reason; do not set DASHBOARD_BIND_ADDR to a public address.
+  for that reason; off loopback, serve it only behind HTTPS (the session cookie is Secure).
 - Tier 2's `escalator`/`overage_rate` contract-drift directionality
   rules are not implemented (only `minimum_spend` shortfall detection is
   real) — flagged in code rather than guessed at with no fixture behind it.

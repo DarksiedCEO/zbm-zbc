@@ -1,8 +1,9 @@
 // Starts `next start` / `next dev` bound to loopback by default (fix wave 3,
 // AEGIS D2). Next.js binds 0.0.0.0 — every network interface — unless given
-// -H, and this dashboard has no auth of its own, so it must not be reachable
+// -H; before bug sweep E this dashboard had no auth of its own, and it is still not reachable
 // from the network by default (build contract section 0: 127.0.0.1 by
-// default, overridable by an env var, never 0.0.0.0 by default).
+// default, overridable by an env var, never 0.0.0.0 by default). Bug sweep E
+// (F-5) added authentication (src/proxy.ts); the loopback default stays.
 //
 //   npm start                      -> next start -H 127.0.0.1   (port: PORT or 3000)
 //   DASHBOARD_BIND_ADDR=0.0.0.0 npm start   -> explicit override, with a warning
@@ -52,8 +53,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const host = args[2];
   if (!isLoopback(host)) {
     console.error(
-      `WARNING: dashboard binding ${host} (DASHBOARD_BIND_ADDR) — it has NO authentication; ` +
-        "anyone who can reach this address can read every recorded finding."
+      `WARNING: dashboard binding ${host} (DASHBOARD_BIND_ADDR) — reachable from the network; every route ` +
+        "needs a session (DASHBOARD_PASSWORD_HASH / DASHBOARD_SESSION_SECRET), but the session cookie is Secure: " +
+        "serve it only behind HTTPS."
     );
   }
   const require = createRequire(import.meta.url);

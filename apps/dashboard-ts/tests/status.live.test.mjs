@@ -26,7 +26,7 @@
 //
 // Run: npm run build && npm test
 
-import { test, before, after } from "node:test";
+import { test, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -35,12 +35,21 @@ import { once } from "node:events";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { authConfig, hashPassword, issueSession, nowSeconds, SESSION_COOKIE } from "../src/lib/auth.ts";
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const built = existsSync(join(root, ".next", "BUILD_ID"));
 let DASH_PORT = 0; // set from the dashboard child's own announcement
 let STUB_PORT = 0; // set when the stub is listening
 let CLOSED_PORT = 0; // a port this process bound and closed again: nothing listens there
 const TOKEN = "live-test-token";
+// Bug sweep E, F-5: every route needs a session now. These tests run the
+// dashboard with authentication configured and send a valid session cookie;
+// tests/auth.live.test.mjs covers the authentication itself. The ledger read
+// cache is off here (DASHBOARD_LEDGER_CACHE_MS=0): these tests switch the stub's
+// answer between requests.
+let AUTH = {};
+let COOKIE = "";
 
 // A finding exactly as orchestrator-go's GET /revenue-recovery/findings
 // serves one (internal/orchestrator/recorded.go RecordedFinding).
@@ -187,7 +196,7 @@ async function startDashboard(env) {
   dashLog = "";
   const child = spawn(process.execPath, ["scripts/serve.mjs", "start", "-p", "0"], {
     cwd: root,
-    env: { ...process.env, ...env, PORT: "0" },
+    env: { ...process.env, ...AUTH, ...env, PORT: "0" },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });
@@ -236,16 +245,28 @@ function listenOnAnyPort(server) {
 }
 
 async function get(path, headers = {}) {
-  const res = await fetch(`http://127.0.0.1:${DASH_PORT}${path}`, { headers, signal: AbortSignal.timeout(20000) });
+  const res = await fetch(`http://127.0.0.1:${DASH_PORT}${path}`, { headers: { cookie: COOKIE, ...headers }, signal: AbortSignal.timeout(20000) });
   return { status: res.status, body: await res.text() };
 }
 
 before(async () => {
   if (!built) return;
+  AUTH = {
+    DASHBOARD_PASSWORD_HASH: await hashPassword("live-test-password-1", 16384),
+    DASHBOARD_SESSION_SECRET: "live-test-session-secret-0123456789abcdef",
+    DASHBOARD_LEDGER_CACHE_MS: "0",
+  };
+  COOKIE = `${SESSION_COOKIE}=${issueSession(authConfig(AUTH), nowSeconds())}`;
   STUB_PORT = await listenOnAnyPort(stub);
   const probe = createServer();
   CLOSED_PORT = await listenOnAnyPort(probe);
   await new Promise((r) => probe.close(r));
+});
+
+// A failed assertion must never leave a dashboard running (it would hold the
+// test file open until its timeout): every test ends with the child stopped.
+afterEach(async () => {
+  await stopDashboard();
 });
 
 after(async () => {
@@ -272,9 +293,9 @@ test("orchestrator unreachable -> 503 on the wire, message and correlation id st
 
   // HEAD carries the same status (monitors often use it); other methods
   // are refused outright rather than rendering without an outcome.
-  const head = await fetch(`http://127.0.0.1:${DASH_PORT}/`, { method: "HEAD", signal: AbortSignal.timeout(20000) });
+  const head = await fetch(`http://127.0.0.1:${DASH_PORT}/`, { method: "HEAD", headers: { cookie: COOKIE }, signal: AbortSignal.timeout(20000) });
   assert.equal(head.status, 503, "HEAD / status");
-  const post = await fetch(`http://127.0.0.1:${DASH_PORT}/`, { method: "POST", signal: AbortSignal.timeout(20000) });
+  const post = await fetch(`http://127.0.0.1:${DASH_PORT}/`, { method: "POST", headers: { cookie: COOKIE }, signal: AbortSignal.timeout(20000) });
   assert.equal(post.status, 405, "POST / status");
   assert.equal(post.headers.get("allow"), "GET, HEAD");
   await stopDashboard();
@@ -400,5 +421,132 @@ test("upstream rejects the token / errors / ledger invalid / times out -> 502/50
   assert.equal(page.status, 502, "token rejected GET /");
   assert.match(page.body, /orchestrator returned 401: invalid token/);
   assert.equal((await get("/healthz")).status, 502);
+  await stopDashboard();
+});
+
+// ---------------------------------------------------------------------------
+// Bug sweep E, F-5 (Oct 9 2026): authentication on the wire (src/proxy.ts,
+// src/lib/auth.ts, src/app/api/login/route.ts). Fail closed: no session ->
+// redirect (pages) or 401 (API routes, /healthz, other methods) on every
+// route; bad password, tampered or expired cookie refused; login rate
+// limited; authentication not configured -> 503 on every route.
+
+const ROUTES_PAGES = ["/", "/login-not-a-page", "/anything/at/all"];
+const ROUTES_API = ["/healthz", "/api/whatever", "/api/login"];
+
+async function raw(path, init = {}) {
+  const res = await fetch(`http://127.0.0.1:${DASH_PORT}${path}`, { redirect: "manual", signal: AbortSignal.timeout(20000), ...init });
+  return { status: res.status, headers: res.headers, body: await res.text() };
+}
+
+function loginForm(password, xff) {
+  return raw("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": xff },
+    body: new URLSearchParams({ password }).toString(),
+  });
+}
+
+test("authentication not configured -> 503 on every route, the login page included (never open)", opts, async () => {
+  for (const missing of [
+    { DASHBOARD_PASSWORD_HASH: "" },
+    { DASHBOARD_SESSION_SECRET: "" },
+    { DASHBOARD_SESSION_SECRET: "too-short" },
+    { DASHBOARD_PASSWORD_HASH: "plain-text-password" },
+  ]) {
+    dash = await startDashboard({ ORCHESTRATOR_URL: `http://127.0.0.1:${STUB_PORT}`, ORCHESTRATOR_SERVICE_TOKEN: TOKEN, ...missing });
+    for (const path of [...ROUTES_PAGES, ...ROUTES_API, "/login"]) {
+      const r = await raw(path, { headers: { cookie: COOKIE } });
+      assert.equal(r.status, 503, `${JSON.stringify(missing)} GET ${path}`);
+      assert.ok(!r.body.includes("ORD-LIVE-1"), "a finding was served without authentication configured");
+    }
+    assert.equal((await loginForm("live-test-password-1", "10.0.0.9")).status, 503);
+    await stopDashboard();
+  }
+});
+
+test("no session -> 303 to /login for pages, 401 for API routes, /healthz and other methods", opts, async () => {
+  mode = "ok";
+  dash = await startDashboard({ ORCHESTRATOR_URL: `http://127.0.0.1:${STUB_PORT}`, ORCHESTRATOR_SERVICE_TOKEN: TOKEN });
+  for (const path of ROUTES_PAGES) {
+    for (const method of ["GET", "HEAD"]) {
+      const r = await raw(path, { method });
+      assert.equal(r.status, 303, `${method} ${path}`);
+      assert.equal(new URL(r.headers.get("location"), `http://127.0.0.1:${DASH_PORT}`).pathname, "/login");
+      assert.ok(!r.body.includes("ORD-LIVE-1"));
+    }
+  }
+  for (const path of ["/healthz", "/api/whatever"]) {
+    const r = await raw(path);
+    assert.equal(r.status, 401, `GET ${path}`);
+    assert.equal(JSON.parse(r.body).error, "authentication required");
+  }
+  assert.equal((await raw("/", { method: "POST" })).status, 401, "POST / without a session");
+  assert.equal((await raw("/api/login")).status, 401, "GET /api/login is not public");
+  const login = await raw("/login");
+  assert.equal(login.status, 200);
+  assert.match(login.body, /action="\/api\/login"/);
+  assert.ok(!login.body.includes("live-test-session-secret"), "a secret reached the page");
+  await stopDashboard();
+});
+
+test("bad password, tampered and expired cookies are refused; a good login works; logout clears", opts, async () => {
+  mode = "ok";
+  dash = await startDashboard({ ORCHESTRATOR_URL: `http://127.0.0.1:${STUB_PORT}`, ORCHESTRATOR_SERVICE_TOKEN: TOKEN });
+  const bad = await loginForm("not-the-password", "10.0.0.1");
+  assert.equal(bad.status, 303);
+  assert.equal(bad.headers.get("location"), "/login?error=1");
+  assert.equal(bad.headers.get("set-cookie"), null, "a failed login set a cookie");
+  const badJson = await raw("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-forwarded-for": "10.0.0.1" },
+    body: JSON.stringify({ password: "not-the-password" }),
+  });
+  assert.equal(badJson.status, 401);
+  assert.equal(badJson.headers.get("set-cookie"), null);
+
+  const good = await loginForm("live-test-password-1", "10.0.0.2");
+  assert.equal(good.status, 303);
+  assert.equal(good.headers.get("location"), "/");
+  const setCookie = good.headers.get("set-cookie");
+  assert.match(setCookie, new RegExp(`^${SESSION_COOKIE}=[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+;`));
+  for (const attr of [/; HttpOnly/, /; Secure/, /; SameSite=Strict/, /; Path=\//, /; Max-Age=43200/]) assert.match(setCookie, attr);
+  const fresh = setCookie.split(";")[0];
+  const page = await raw("/", { headers: { cookie: fresh } });
+  assert.equal(page.status, 200);
+  assert.match(page.body, /ORD-LIVE-1/);
+  assert.equal((await raw("/healthz", { headers: { cookie: fresh } })).status, 200);
+
+  // Tampered: one character of the payload, then of the signature.
+  const value = fresh.slice(SESSION_COOKIE.length + 1);
+  const [body, sig] = value.split(".");
+  const flip = (s, i) => s.slice(0, i) + (s[i] === "A" ? "B" : "A") + s.slice(i + 1);
+  for (const forged of [`${flip(body, 3)}.${sig}`, `${body}.${flip(sig, 5)}`, `${body}.`, body, "x.y"]) {
+    const r = await raw("/", { headers: { cookie: `${SESSION_COOKIE}=${forged}` } });
+    assert.equal(r.status, 303, `tampered cookie ${forged.slice(0, 20)} accepted`);
+    assert.equal((await raw("/healthz", { headers: { cookie: `${SESSION_COOKIE}=${forged}` } })).status, 401);
+  }
+  // Expired: signed with the right key, but its signed expiry has passed.
+  const cfg = authConfig(AUTH);
+  const expired = `${SESSION_COOKIE}=${issueSession(cfg, nowSeconds() - cfg.ttlS - 3600)}`;
+  assert.equal((await raw("/", { headers: { cookie: expired } })).status, 303, "expired cookie accepted");
+  // Signed with another secret: refused.
+  const other = authConfig({ ...AUTH, DASHBOARD_SESSION_SECRET: "another-secret-another-secret-0123456789" });
+  assert.equal((await raw("/", { headers: { cookie: `${SESSION_COOKIE}=${issueSession(other, nowSeconds())}` } })).status, 303);
+
+  const out = await raw("/api/logout", { method: "POST", headers: { cookie: fresh } });
+  assert.equal(out.status, 303);
+  assert.match(out.headers.get("set-cookie"), /Max-Age=0/);
+  await stopDashboard();
+});
+
+test("login is rate limited: after 5 failures from one client even the right password gets 429", opts, async () => {
+  dash = await startDashboard({ ORCHESTRATOR_URL: `http://127.0.0.1:${STUB_PORT}`, ORCHESTRATOR_SERVICE_TOKEN: TOKEN });
+  for (let i = 0; i < 5; i++) assert.equal((await loginForm(`wrong-${i}`, "10.0.0.7")).status, 303);
+  const blocked = await loginForm("live-test-password-1", "10.0.0.7");
+  assert.equal(blocked.status, 429);
+  assert.ok(Number(blocked.headers.get("retry-after")) >= 1);
+  assert.equal(blocked.headers.get("set-cookie"), null);
+  assert.equal((await loginForm("live-test-password-1", "10.0.0.8")).status, 303, "another client is not blocked");
   await stopDashboard();
 });

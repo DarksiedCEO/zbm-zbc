@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { newCorrelationId, type FailureKind, type LoadOutcome } from "./load-outcome.ts";
 import { describeFetchFailure, describeTimeout, parseOrchestratorFailure } from "./orchestrator-error.ts";
 import type { RecordedFindingsResult } from "../types/finding.ts";
@@ -139,4 +141,60 @@ export async function loadRecordedFindings(
     return fail("bad_response", "orchestrator returned JSON that is not the recorded-findings contract", null, body.slice(0, 2000));
   }
   return { ok: true, result: parsed };
+}
+
+// Bug sweep E, F-5 (Oct 9 2026): every page view (and every /healthz poll)
+// made the orchestrator read the whole ledger and verify its chain. A
+// successful read is now reused for DASHBOARD_LEDGER_CACHE_MS (default 5000,
+// 0..60000; 0 turns the cache off), per process, keyed by the orchestrator URL
+// and a hash of the token; concurrent requests share ONE in-flight read
+// (single flight), failures included. Failures are never cached: the next
+// request after a failed read tries again. The clock is monotonic and
+// injectable (tests never depend on wall-clock time).
+export const DEFAULT_LEDGER_CACHE_MS = 5_000;
+export const MAX_LEDGER_CACHE_MS = 60_000;
+
+export function ledgerCacheMs(env: Record<string, string | undefined>): number {
+  const raw = env.DASHBOARD_LEDGER_CACHE_MS;
+  if (raw === undefined || raw === "") return DEFAULT_LEDGER_CACHE_MS;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 && n <= MAX_LEDGER_CACHE_MS ? n : DEFAULT_LEDGER_CACHE_MS;
+}
+
+type CacheEntry = { key: string; at: number; outcome: LoadOutcome };
+let cached: CacheEntry | null = null;
+let inflight: { key: string; promise: Promise<LoadOutcome> } | null = null;
+
+function cacheKey(env: Record<string, string | undefined>): string {
+  const token = env.ORCHESTRATOR_SERVICE_TOKEN ?? "";
+  return `${env.ORCHESTRATOR_URL ?? "http://localhost:8080"}\n${createHash("sha256").update(token).digest("hex")}`;
+}
+
+export async function loadRecordedFindingsCached(
+  env: Record<string, string | undefined> = process.env,
+  fetchImpl: typeof fetch = fetch,
+  now: () => number = () => performance.now()
+): Promise<LoadOutcome> {
+  const ttl = ledgerCacheMs(env);
+  if (ttl === 0) return loadRecordedFindings(env, fetchImpl);
+  const key = cacheKey(env);
+  const t = now();
+  if (cached && cached.key === key && t - cached.at >= 0 && t - cached.at < ttl) return cached.outcome;
+  if (inflight && inflight.key === key) return inflight.promise;
+  const promise = loadRecordedFindings(env, fetchImpl).then((outcome) => {
+    if (outcome.ok) cached = { key, at: now(), outcome };
+    return outcome;
+  });
+  const mine = { key, promise };
+  inflight = mine;
+  try {
+    return await promise;
+  } finally {
+    if (inflight === mine) inflight = null;
+  }
+}
+
+export function resetLedgerCacheForTests(): void {
+  cached = null;
+  inflight = null;
 }

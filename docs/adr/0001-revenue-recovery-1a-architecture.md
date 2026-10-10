@@ -443,3 +443,17 @@ the N-tests in `apps/dashboard-ts/tests/finding-view.test.ts`, and the
 | N3 (Low) | Scan `as_of` not shown; a scan as of an earlier instant recorded after a later one was indistinguishable | `ScanSummary.backdated` (as_of earlier than the same client's previous completed scan's, completion order); the page lists completed scans with their as_of and flags "BACKDATED" |
 | N4 (Low) | Quotability was decided only in the dashboard | orchestrator-go serves `quotable` per finding (`RecordedFinding.isQuotable`: valid amount, present in the latest scan, OBSERVED, known labels within evidence, value basis reproduces the amount); the page shows the served flag, and a disagreement with its local restatement (`localQuotable`) is shown as "QUOTE CHECK MISMATCH — not quotable"; the API contract check refuses a body without it |
 
+
+## Amendment — Bug sweep E fixes: dashboard authentication (Oct 9 2026, sweep F-5)
+
+Regressions: `apps/dashboard-ts/tests/auth.test.ts` (unit, injected clocks) and the authentication cases of
+`apps/dashboard-ts/tests/status.live.test.mjs` (the built server on the wire).
+
+| Id | Finding | Fix |
+|---|---|---|
+| F-5 | The dashboard had no authentication: on a public host every Revenue Recovery finding was readable by anyone with the URL, and each page view made the orchestrator read the whole ledger and verify it | `src/proxy.ts` (the Next 16 proxy, formerly middleware; it sees every request) enforces a session on every page and route handler, `/healthz` included: no session → 303 to `/login` (page GET/HEAD) or 401 JSON (API routes, `/healthz`, other methods). Public: `GET /login`, `POST /api/login`, `POST /api/logout`, `/_next/static/`. Credentials come from the environment only: `DASHBOARD_PASSWORD_HASH` (scrypt, `npm run hash-password` reads the password from stdin; checked with `timingSafeEqual`) and `DASHBOARD_SESSION_SECRET` (≥ 32 bytes, must differ from `ORCHESTRATOR_SERVICE_TOKEN`); missing or malformed → EVERY route 503 (never open). The cookie `__Host-zbm_dashboard_session` is an HMAC-SHA-256-signed `{iat, exp, nonce}`, HttpOnly, Secure, SameSite=Strict, Max-Age = `DASHBOARD_SESSION_TTL_SECONDS` (default 43200); the expiry is checked server-side, and the signing key is derived from the secret AND the password hash, so rotating either signs every session out. Failed logins: 5 per client (first `X-Forwarded-For`) and 50 overall per 15 minutes, per process, then 429 with `Retry-After` before any scrypt work, the right password included. Login checks `Origin` when sent. Node `crypto` only: no package added. The ledger read is cached per process for `DASHBOARD_LEDGER_CACHE_MS` (default 5000, max 60000, 0 = off), single flight, keyed by orchestrator URL and token hash; failures are never cached |
+
+Known limits (accepted, on record): the rate limiter and the cache are per process — on a serverless host each
+instance has its own budget (the global budget bounds a single instance; scrypt N=2^15 bounds the rate per instance).
+Sessions are stateless: logout clears the cookie, but a copied cookie stays valid until its expiry unless the secret is
+rotated. A monitor must log in to read `/healthz`.

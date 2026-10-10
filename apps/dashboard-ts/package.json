@@ -8,8 +8,9 @@
     "build": "next build",
     "start": "node scripts/serve.mjs start",
     "lint": "tsc --noEmit",
-    "test": "node --test tests/money.test.ts tests/bind.test.mjs tests/orchestrator-error.test.ts tests/ledger-status.test.ts tests/load-outcome.test.ts tests/finding-view.test.ts tests/status.live.test.mjs",
-    "check:dynamic": "node scripts/check-dynamic.mjs"
+    "test": "node --test tests/auth.test.ts tests/money.test.ts tests/bind.test.mjs tests/orchestrator-error.test.ts tests/ledger-status.test.ts tests/load-outcome.test.ts tests/finding-view.test.ts tests/status.live.test.mjs",
+    "check:dynamic": "node scripts/check-dynamic.mjs",
+    "hash-password": "node scripts/hash-password.mjs"
   },
   "dependencies": {
     "next": "16.3.8",
