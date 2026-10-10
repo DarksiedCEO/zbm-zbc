@@ -38,6 +38,11 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   leetspeak and letter spacing are folded; a combination of two documented disguises is the same promise.
 - Replay: `clipper-network-py/R0001` (seed 1)
   and `clipper-network-py/R0002`, `clipper-network-py/R0003` (seed 2: `g ú a r a n t 3 e d`, `c 4 5 h`)
+- Status: FIXED (war room fixes, commit `WR-F002` on branch `warroom-redteam-gate`; ADR 0008 "War room fixes"):
+  `textguard._collapse` keeps a lone leet character (`0 1 3 4 5 7 @ $`) in a run of single letters, joins a run of 3+
+  only when it holds a real letter, and reads the joined run's leet as letters (spacing then leet); `fold_for_matching`
+  uses the shared lookalike fold (`src/lookalikes.py`). Numbers alone (`2 0 2 4`) stay numbers. Tests:
+  `services/clipper-network-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
 
 ## WR-F003 — onboarding-py: a final sigma in a legal name splits the 1099 total
 

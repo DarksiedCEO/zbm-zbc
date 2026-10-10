@@ -14,10 +14,11 @@
     "name": "g u 4 r 4 n 7 3 e d"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F002",
+   "known_failure": null,
    "failed": [
     "refused: application: HTTP 201, wanted one of [422]"
-   ]
+   ],
+   "fixed": "WR-F002"
   },
   {
    "replay_id": "clipper-network-py/R0002",
@@ -32,10 +33,11 @@
     "name": "g ú a r a n t 3 e d"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F002",
+   "known_failure": null,
    "failed": [
     "refused: application: HTTP 201, wanted one of [422]"
-   ]
+   ],
+   "fixed": "WR-F002"
   },
   {
    "replay_id": "clipper-network-py/R0003",
@@ -50,10 +52,11 @@
     "name": "c 4 5 h"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F002",
+   "known_failure": null,
    "failed": [
     "refused: application: HTTP 201, wanted one of [422]"
-   ]
+   ],
+   "fixed": "WR-F002"
   }
  ]
 }
