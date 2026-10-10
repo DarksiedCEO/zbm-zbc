@@ -18,6 +18,7 @@ safe to record.
 
 from __future__ import annotations
 
+import functools
 import html
 import re
 import unicodedata
@@ -137,8 +138,25 @@ CLAUSE_JOINERS = ("and", "also", "but", "plus", "then", "however", "additionally
 ROUTINE_MAX_WORDS = 25
 
 
+def _deletion_classes() -> tuple[re.Pattern, re.Pattern]:
+    """N-H1: every format character (Cf, and the soft hyphen) and every character with a non-zero canonical
+    combining class, as regex character classes (one C-level pass instead of a Python loop per character). The
+    whole code space is scanned once, so each class is exactly the per-character test it replaces."""
+    fmt, comb = [], []
+    for cp in range(0x110000):
+        ch = chr(cp)
+        if unicodedata.category(ch) == "Cf" or cp == 0xAD:
+            fmt.append(cp)
+        if unicodedata.combining(ch):
+            comb.append(cp)
+    return (re.compile("[" + lookalikes.char_class(fmt) + "]+"), re.compile("[" + lookalikes.char_class(comb) + "]+"))
+
+
+_FORMAT_CHARS, _COMBINING_CHARS = _deletion_classes()
+
+
 def _strip_format(t: str) -> str:
-    return "".join(c for c in t if unicodedata.category(c) != "Cf" and c != "\u00ad")
+    return t if t.isascii() else _FORMAT_CHARS.sub("", t)
 
 
 # War room WR-F001: the opt-out path folds every lookalike the repo's shared table and the Unicode confusables.txt
@@ -170,12 +188,40 @@ def _squeeze(w: str) -> str:
 _DISGUISE_SQUEEZED = frozenset(_squeeze(w) for w in OPT_OUT_DISGUISE_WORDS)
 
 
+def _memo(fn):
+    """N-H1: memoise a pure function of a text. Short texts (the rules' own terms and phrases, clauses) and long
+    ones (a message and its readings) get separate bounded caches, so the hundreds of short terms the rules
+    normalise for one message never push that message out, and long texts never hold more than a few messages."""
+    short = functools.lru_cache(maxsize=4096)(fn)
+    long_ = functools.lru_cache(maxsize=8)(fn)
+
+    @functools.wraps(fn)
+    def memo(text, *args):
+        return (short if len(text) <= 512 else long_)(text, *args)
+
+    def cache_clear():
+        short.cache_clear()
+        long_.cache_clear()
+    memo.cache_clear = cache_clear
+    return memo
+
+
 def opt_out_fold(text: str) -> str:
     """The opt-out path's lookalike fold of text that has had NFKC (WR-F001, WR-F006)."""
+    return _opt_out_fold(text)
+
+
+@_memo    # N-H1: different readings of one message clean to the same text; fold it once
+def _opt_out_fold(text: str) -> str:
     return _OPT_OUT_FOLD.fold(text, single_script=_opt_out_disguise)
 
 
-def clean(text: str, opt_out: bool = False) -> str:
+@_memo
+def _full_fold(text: str) -> str:
+    return _OPT_OUT_FOLD.fold(text)
+
+
+def clean(text: str, opt_out: bool | str = False) -> str:
     """V1-H1 order: format characters (zero-width, soft hyphen, bidi) out; HTML entities unescaped (repeatedly, a
     double-escaped entity too); tags stripped; NFKC (full-width letters); confusables mapped to Latin
     (``opt_out``: with the shared lookalike fold, WR-F001)."""
@@ -187,12 +233,15 @@ def clean(text: str, opt_out: bool = False) -> str:
         t = u
     t = _strip_format(_TAG.sub("", t))
     t = _strip_format(unicodedata.normalize("NFKC", t))
+    if opt_out == "full":
+        return _full_fold(t)
     return opt_out_fold(t) if opt_out else t.translate(CONFUSABLES)
 
 
 def _fold(t: str) -> str:
-    t = unicodedata.normalize("NFKD", t)
-    return "".join(c for c in t if not unicodedata.combining(c)).lower()
+    if t.isascii():
+        return t.lower()
+    return _COMBINING_CHARS.sub("", unicodedata.normalize("NFKD", t)).lower()
 
 
 def non_ascii_letters(text: str) -> bool:
@@ -201,10 +250,19 @@ def non_ascii_letters(text: str) -> bool:
     return any(c.isalpha() and ord(c) > 127 for c in _fold(clean(text)))
 
 
-def normalise(text: str, opt_out: bool = False) -> str:
+def normalise(text: str, opt_out: bool | str = False) -> str:
     """clean(), accents folded, lower case, apostrophes dropped, every other non-alphanumeric a space, runs of three
     or more single letters joined ("S T O P" -> "stop"), spaces collapsed. ``opt_out``: ``clean`` with the shared
-    lookalike fold (the opt-out rules in channels.py read text this way: WR-F001)."""
+    lookalike fold (the opt-out rules in channels.py read text this way: WR-F001); ``"full"``: that fold without the
+    WR-F006 single-script rule (``normalise_full_fold``).
+
+    N-H1: a pure function of its arguments, and the opt-out rules read the same message (and the same clauses) many
+    times over, so it is memoised: each distinct text is cleaned, folded and split once."""
+    return _normalise(text, opt_out)
+
+
+@_memo
+def _normalise(text: str, opt_out: bool | str = False) -> str:
     t = _fold(clean(text, opt_out)).replace("'", "").replace("\u2019", "")
     tokens = re.sub(r"[^a-z0-9]+", " ", t).split()
     out: list[str] = []
@@ -223,6 +281,12 @@ def normalise(text: str, opt_out: bool = False) -> str:
 def normalise_opt_out(text: str) -> str:
     """``normalise`` with the shared lookalike fold: the reading every opt-out rule uses (WR-F001)."""
     return normalise(text, opt_out=True)
+
+
+def normalise_full_fold(text: str) -> str:
+    """``normalise`` with every lookalike folded, a word wholly in one non-Latin script included (N-M1: read only
+    to surface a multi-word opt-out phrase written in another script, never to change consent)."""
+    return normalise(text, opt_out="full")
 
 
 def _has(norm: str, term: str) -> bool:

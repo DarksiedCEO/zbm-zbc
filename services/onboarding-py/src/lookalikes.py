@@ -305,7 +305,7 @@ LATIN_NAMED: dict[str, str] = _latin_named()
 class Table:
     """A service's fold: its own table over the shared layers (see the module docstring, step 5)."""
 
-    __slots__ = ("_early", "_full", "_own_early", "_own", "mapping")
+    __slots__ = ("_early", "_full", "_own_early", "_own", "_words", "mapping")
 
     def __init__(self, own: dict[str, str] | None = None) -> None:
         own = dict(own or {})
@@ -313,6 +313,7 @@ class Table:
         self._own_early = str.maketrans({k: v for k, v in own.items()
                                          if len(k) == 1 and k.lower() == k and k.casefold() != k})
         self._own = str.maketrans(own)
+        self._words: dict[tuple[str, Optional[Callable[[str], bool]]], str] = {}
         hand = {**SHARED, **own}
         # step 3: hand-table letters that casefold would turn into ANOTHER letter (the final sigma), and upper-case
         # skeleton letters whose casefold nothing maps (folding them as written cannot change an existing fold)
@@ -329,8 +330,19 @@ class Table:
         t = unicodedata.normalize("NFKC", strip_invisible(text))
         if single_script is None or t.isascii():
             return self._fold_all(t)
-        return "".join(self._fold_all(w) if not one or single_script(self._fold_all(w)) else self._fold_own(w)
-                       for w, one in words(t))
+        cache = self._words
+        if len(cache) > 50_000:                     # bounded: a hostile text of all-different words cannot grow it
+            cache.clear()
+        out = []
+        for i, p in enumerate(_WORD.split(t)):
+            key = (p, single_script if i % 2 else None)
+            got = cache.get(key)
+            if got is None:                         # N-H1: each distinct piece is classified and folded once
+                full = self._fold_all(p)
+                # between words (even index) there are no letters to choose a reading for
+                got = cache[key] = full if not i % 2 or not one_script(p) or single_script(full) else self._fold_own(p)
+            out.append(got)
+        return "".join(out)
 
     def fold_cased(self, text: str) -> str:
         """Steps 1-5: invisible characters out, NFKC, the early letters, casefold, the table."""
@@ -356,47 +368,73 @@ class Table:
         return text.translate(self._full)
 
 
-def _is_word_char(ch: str) -> bool:
-    return ch.isalnum() or unicodedata.category(ch)[0] == "M"
+def char_class(cps: list[int]) -> str:
+    """Sorted code points as a regex character class body (runs as ranges)."""
+    out, i = [], 0
+    while i < len(cps):
+        j = i
+        while j + 1 < len(cps) and cps[j + 1] == cps[j] + 1:
+            j += 1
+        out.append(re.escape(chr(cps[i])) + ("-" + re.escape(chr(cps[j])) if j > i else ""))
+        i = j + 1
+    return "".join(out)
+
+
+def _mark_ranges() -> str:
+    """Every combining mark (general category M*) as a regex class body: planes 0 and 1 hold all of them but the
+    variation selectors supplement, which ``strip_invisible`` deletes first anyway."""
+    return char_class([cp for cp in range(0x20000) if unicodedata.category(chr(cp))[0] == "M"]
+                      + list(range(0xE0100, 0xE01F0)))
+
+
+# A word: a run of letters, digits and combining marks ("_" and everything else separate words). re.split with the
+# group gives the text back as [between, word, between, word, ..., between] (N-H1: one C-level pass, not a loop).
+_WORD = re.compile(f"((?:[^\\W_]|[{_mark_ranges()}])+)")
+_SCRIPT: dict[str, str] = {}
 
 
 def _script(ch: str) -> str:
     """"LATIN" for an ASCII letter or digit and every letter Unicode names LATIN; otherwise the first word of the
     character's name (CYRILLIC, GREEK, HEBREW, ARABIC, CHEROKEE, ...); "" for a mark or a digit outside ASCII
-    (they belong to no script for this purpose)."""
-    if ch.isascii():
-        return "LATIN"
-    if unicodedata.category(ch)[0] in "MN":
-        return ""
-    return unicodedata.name(ch, "?").split(" ", 1)[0]
+    (they belong to no script for this purpose). Cached per code point."""
+    got = _SCRIPT.get(ch)
+    if got is None:
+        if ch.isascii():
+            got = "LATIN"
+        elif unicodedata.category(ch)[0] in "MN":
+            got = ""
+        else:
+            got = unicodedata.name(ch, "?").split(" ", 1)[0]
+        _SCRIPT[ch] = got
+    return got
+
+
+def one_script(word: str) -> bool:
+    """A word of two or more letters written wholly in one non-Latin script (WR-F006)."""
+    if word.isascii():
+        return False
+    scripts = {_script(c) for c in set(word)} - {""}
+    return len(scripts) == 1 and "LATIN" not in scripts and sum(c.isalpha() for c in word) >= 2
 
 
 def words(text: str) -> list[tuple[str, bool]]:
-    """``text`` cut into runs of word characters (letters, digits, marks) and the runs between them, each with
-    whether it is a word of two or more letters written wholly in one non-Latin script (WR-F006)."""
-    out: list[tuple[str, bool]] = []
-    i, n = 0, len(text)
-    while i < n:
-        j = i
-        word = _is_word_char(text[i])
-        while j < n and _is_word_char(text[j]) == word:
-            j += 1
-        piece = text[i:j]
-        one = False
-        if word and not piece.isascii():
-            scripts = {_script(c) for c in piece} - {""}
-            one = len(scripts) == 1 and "LATIN" not in scripts and sum(c.isalpha() for c in piece) >= 2
-        out.append((piece, one))
-        i = j
-    return out
+    """``text`` cut into words (runs of letters, digits and marks) and the runs between them, in order, each with
+    whether it is a word written wholly in one non-Latin script (``one_script``)."""
+    return [(p, bool(i % 2) and one_script(p)) for i, p in enumerate(_WORD.split(text)) if p]
 
 
 def is_invisible(ch: str) -> bool:
     return ch in _IGNORABLE or unicodedata.category(ch) == "Cf"
 
 
+# every format character (Cf; the whole code space scanned once) and every Default_Ignorable_Code_Point, as one
+# regex character class (N-H1: one C-level pass, not a Python loop per character)
+_INVISIBLE = re.compile("[" + char_class(sorted({ord(ch) for ch in _IGNORABLE} | {
+    cp for cp in range(0x110000) if unicodedata.category(chr(cp)) == "Cf"})) + "]+")
+
+
 def strip_invisible(text: str) -> str:
     """Every format character (Cf) and every Default_Ignorable_Code_Point deleted."""
     if text.isascii():
         return text
-    return "".join(ch for ch in text if ch not in _IGNORABLE and unicodedata.category(ch) != "Cf")
+    return _INVISIBLE.sub("", text)

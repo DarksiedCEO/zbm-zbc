@@ -205,3 +205,92 @@ def test_wr_f006_the_disguise_words_are_the_english_single_opt_out_words_of_four
 def test_wr_f006_triage_reading_unchanged():
     assert triage.normalise("Пожалуйста, отправьте код по SMS") == triage.normalise_opt_out(
         "Пожалуйста, отправьте код по SMS")
+
+
+# AEGIS N-M1: a multi-word opt-out phrase written wholly in another script surfaces the message to Andre
+# (OPT_OUT_POSSIBLE); it never changes consent.
+OTHER_SCRIPT_PHRASES = ["ԁоп'т техт ме", "по моге", "ꓠꓳ ꓟꓳꓣꓰ", "ПО МОГЕ", "ԁоп'т саӏӏ ме"]
+
+
+@pytest.mark.parametrize("text", OTHER_SCRIPT_PHRASES)
+def test_n_m1_a_multi_word_opt_out_phrase_in_another_script_is_surfaced(text):
+    assert ch.possible_opt_out(text)
+    assert ch.opt_out_level(text) is None              # never revoked on that reading
+    assert ch.email_opt_out_decision(text) is None
+
+
+@pytest.mark.parametrize("text", OTHER_SCRIPT_PHRASES[:3])
+def test_n_m1_end_to_end_alert_and_no_consent_change(h, text):
+    cid = h.contact("client:acme", email="owner@acme.test", phone="+13105551234", timezone="America/Los_Angeles")
+    h.ok(h.consent(cid, channel="sms"), 201)
+    h.ok(h.consent(cid, channel="email"), 201)
+    h.ok(h.email(text, frm="owner@acme.test"), 201)
+    cons = {c["channel"]: c["status"] for c in h.ok(h.get(f"/svc/v1/contacts/{cid}"))["consents"]}
+    assert cons == {"sms": "active", "email": "active"}
+    assert any(a["code"] == "OPT_OUT_POSSIBLE" for a in h.svc.alerts.values())
+
+
+@pytest.mark.parametrize("text", BENIGN_FOREIGN)
+def test_n_m1_benign_foreign_text_raises_no_alert(h, text):
+    cid = h.contact("client:acme", email="owner@acme.test", phone="+13105551234", timezone="America/Los_Angeles")
+    h.ok(h.consent(cid, channel="email"), 201)
+    h.ok(h.email(text, frm="owner@acme.test"), 201)
+    assert not any(a["code"].startswith("OPT_OUT") for a in h.svc.alerts.values())
+
+
+# AEGIS N-H1 (no wall clock; the work is shown to be done once): the opt-out rules read one message many times over;
+# each distinct text is cleaned and folded once (triage.normalise is memoised), and each distinct word of it is
+# classified and folded once (lookalikes.Table caches per word).
+def test_n_h1_each_distinct_text_is_folded_once_per_message(h, monkeypatch):
+    import collections
+
+    folded = collections.Counter()
+    real = triage._OPT_OUT_FOLD
+
+    class Counting:
+        def fold(self, t, single_script=None):
+            folded[(t, single_script is None)] += 1
+            return real.fold(t, single_script)
+    monkeypatch.setattr(triage, "_OPT_OUT_FOLD", Counting())
+    triage._normalise.cache_clear()
+    triage._opt_out_fold.cache_clear()
+    triage._full_fold.cache_clear()
+    ch._casefold_reading.cache_clear()
+    h.contact("client:acme", email="owner@acme.test", phone="+13105551234", timezone="America/Los_Angeles")
+    text = ("Пишу по поводу заказа " * 300) + "ﷺ" * 300
+    h.ok(h.email(text, frm="owner@acme.test", subject="Re: hi"), 201)
+    big = {k: n for k, n in folded.items() if len(k[0]) > 1000}
+    assert big and max(big.values()) == 1, sorted(big.values())
+
+
+def test_n_h1_each_distinct_word_is_classified_once(monkeypatch):
+    import collections
+
+    import lookalikes
+    seen = collections.Counter()
+    real = lookalikes.one_script
+
+    def counting(w):
+        seen[w] += 1
+        return real(w)
+    monkeypatch.setattr(lookalikes, "one_script", counting)
+    table = lookalikes.Table({"а": "a"})
+    text = "Пишу по поводу заказа " * 500
+    table.fold(text, single_script=lambda w: False)
+    table.fold(text, single_script=lambda w: False)    # another predicate object: its own cache entries
+    assert set(seen) == {"Пишу", "по", "поводу", "заказа"} and max(seen.values()) <= 2
+
+
+def test_n_h1_the_c_level_deletions_equal_the_per_character_tests_they_replace():
+    import random
+    import unicodedata as u
+
+    import lookalikes
+    rng = random.Random(7)
+    for _ in range(200):
+        t = "".join(chr(rng.choice((rng.randrange(0x110000), rng.randrange(0x3000), 0xAD, 0x200B, 0x301))) for _ in range(150))
+        t = "".join(c for c in t if not 0xD800 <= ord(c) < 0xE000)
+        assert triage._strip_format(t) == "".join(c for c in t if u.category(c) != "Cf" and c != "­")
+        assert triage._fold(t) == "".join(c for c in u.normalize("NFKD", t) if not u.combining(c)).lower()
+        assert lookalikes.strip_invisible(t) == "".join(
+            c for c in t if c not in lookalikes._IGNORABLE and u.category(c) != "Cf")

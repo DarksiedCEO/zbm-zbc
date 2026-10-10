@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import functools
 import re
 
 import unicodedata
@@ -617,8 +618,37 @@ def possible_opt_out(text: Optional[str]) -> bool:
         plain = normalise(clause)
         if any(f" {normalise(t).strip()} " in v for v in (norm, plain) for t in OPT_OUT_POSSIBLE_TERMS):
             return True
+    if _other_script_phrase(text):
+        return True
     alt = _casefold_reading(text)
     return alt is not None and (opt_out_level(alt) is not None or possible_opt_out(alt))
+
+
+def _multiword_opt_out_phrases() -> tuple[str, ...]:
+    terms = OPT_OUT_TERMS + OPT_OUT_STRONG + SCOPE_ONLY_TERMS + OPT_OUT_POSSIBLE_TERMS
+    return tuple(sorted({p for p in (normalise(t).strip() for t in terms) if " " in p}))
+
+
+# AEGIS N-M1: a multi-word opt-out phrase written wholly in another script ("ԁоп'т техт ме", "по моге", Lisu
+# "ꓠꓳ ꓟꓳꓣꓰ") reads as one only when its words are folded in full, which WR-F006 no longer does for a word wholly in
+# one non-Latin script. Such a clause surfaces the message to Andre (OPT_OUT_POSSIBLE); it never changes consent.
+# Single words ("по" -> "no") and loose pairs ("по SMS" -> "no sms") are not phrases, so they raise nothing.
+_MULTIWORD_OPT_OUT = _multiword_opt_out_phrases()
+
+
+def _other_script_phrase(text: str) -> bool:
+    if text.isascii():
+        return False
+    for clause in _SCOPE_SEGMENT.split(_read(text)):
+        if clause.isascii():
+            continue
+        full = triage.normalise_full_fold(clause)
+        if full == normalise(clause):           # no word read differently: the rules above have read it already
+            continue
+        joined = " " + " ".join(_collapse(w) for w in full.split()) + " "
+        if any(f" {p} " in v for v in (full, joined) for p in _MULTIWORD_OPT_OUT):
+            return True
+    return False
 
 
 # WR-F001: the opt-out rules read a capital lookalike as the capital it looks like (triage.CONFUSABLES: Greek "Υ" is
@@ -628,6 +658,7 @@ def possible_opt_out(text: Optional[str]) -> bool:
 _CASEFOLD_FIRST = lookalikes.Table({chr(k): v for k, v in CONFUSABLES.items() if chr(k).islower()})
 
 
+@functools.lru_cache(maxsize=8)        # N-H1: a pure function, asked more than once per message
 def _casefold_reading(text: str) -> str | None:
     """The text read casefold-first when that differs from the opt-out rules' own reading; None otherwise (ASCII
     text, or nothing to read differently)."""
@@ -636,8 +667,15 @@ def _casefold_reading(text: str) -> str | None:
     # WR-F006: a word written wholly in one non-Latin script keeps its own reading here (Russian "ПО" is not "no")
     # unless its casefold-first reading is an opt-out word; the opt-out rules then read it as they always do
     t = unicodedata.normalize("NFKC", lookalikes.strip_invisible(html_as_text(text)))
-    alt = "".join(w if one and not triage._opt_out_disguise(_CASEFOLD_FIRST.fold_cased(w))
-                  else _CASEFOLD_FIRST.fold_cased(w) for w, one in lookalikes.words(t))
+    seen: dict[str, str] = {}
+    out = []
+    for w, one in lookalikes.words(t):
+        got = seen.get(w)
+        if got is None:                     # each distinct word read once (t has had invisibles out and NFKC)
+            alt = _CASEFOLD_FIRST.map(_CASEFOLD_FIRST.casefold(w))
+            got = seen[w] = w if one and not triage._opt_out_disguise(alt) else alt
+        out.append(got)
+    alt = "".join(out)
     return alt if normalise(alt) != normalise(text) else None
 
 
