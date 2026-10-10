@@ -245,3 +245,34 @@ def test_l3_browser_identity_fetch_honours_robots_for_our_crawler(tmp_path, srv)
     about = [s for s in srv.seen if s["path"] == "/about"]
     assert about == []                                     # neither identity fetched a path our crawler may not
     assert any(s["path"] == "/" and fetch_mod.PRODUCT_TOKEN not in (s["ua"] or "") for s in srv.seen)
+
+
+# ---------------------------------------------------------------------------------------------- AEGIS 4434eeb N1, N2
+
+@pytest.mark.parametrize("held,asked", [("site.test", "shop.site.test"), ("shop.site.test", "site.test"),
+                                        ("www.site.test", "shop.site.test"), ("site.test", "www.shop.site.test")])
+def test_n1_subdomain_or_parent_of_another_tenants_domain_is_taken(tmp_path, srv, held, asked):
+    h = harness(tmp_path, srv)
+    h.tenant("acme", "client", (held,))
+    h.refused(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": [asked]}, andre=True), 409,
+              "DOMAIN_TAKEN")
+    h.ok(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": ["notsite.test"]}, andre=True))
+
+
+def test_n2_multi_member_gzip_is_decoded_whole(raw):
+    body = gzip.compress(b"<title>part one</title>") + gzip.compress(b"<p>part two</p>")
+    port = raw(_serve_body(b"Content-Type: text/html\r\nContent-Encoding: gzip\r\n", body))
+    r = _fetcher(port, timeout_s=2).fetch(f"http://x.test:{port}/", honor_robots=False)
+    assert r.state == "OK" and r.body == b"<title>part one</title><p>part two</p>"
+
+
+def test_n2_multi_member_bomb_stops_at_the_shared_budget(raw):
+    member = b"".join(_gz_stream(_zeros(4 << 20)))          # 4 MiB decoded each, small on the wire
+    port = raw(_serve_body(b"Content-Encoding: gzip\r\n", member * 40))
+    r = _fetcher(port, timeout_s=5, max_bytes=8 << 20).fetch(f"http://x.test:{port}/", honor_robots=False)
+    assert r.state == "TOO_LARGE" and r.body is None
+
+
+def test_n2_trailing_garbage_after_a_member_is_a_protocol_error(raw):
+    port = raw(_serve_body(b"Content-Encoding: gzip\r\n", gzip.compress(b"ok") + b"not gzip at all"))
+    assert _fetcher(port, timeout_s=2).fetch(f"http://x.test:{port}/", honor_robots=False).state == "PROTOCOL_ERROR"

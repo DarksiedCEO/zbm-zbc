@@ -37,8 +37,9 @@ own properties, then sold as an audit.
    INSUFFICIENT_EVIDENCE. A choice that may be a policy (blocking an AI crawler) is WATCH, never a defect.
 7. **Tenants.** `own` (ZBM's properties; the `zbm` tenant is seeded) or `client`. Andre registers each tenant's
    domains; an audit of any other domain is refused `DOMAIN_NOT_AUTHORIZED`. A domain (with its `www.` twin)
-   belongs to one tenant only: registering it to a second tenant is refused `DOMAIN_TAKEN`, so a client's site can
-   never be audited free through the own-properties tenant (AEGIS 00cc66b M2). Every object names one tenant; a
+   belongs to one tenant only: registering it, or any subdomain or parent of it, to a second tenant is refused
+   `DOMAIN_TAKEN`, so a client's site can never be audited free through the own-properties tenant (AEGIS 00cc66b
+   M2, 4434eeb N1). Every object names one tenant; a
    tenant-scoped reader asking for another tenant's object gets the same 404 as for a missing one.
 8. **Kill switches**, each with its own reason code and test: `global`, `write`, `tenant:<id>`,
    `capability:<fetch|render|ai_probe|audit|entity_write|prompt_sets>`, `provider:<web|openai|anthropic|google|
@@ -63,7 +64,8 @@ own properties, then sold as an audit.
     site-local fec0::/10, the 6to4 relay 192.88.99.0/24, IPv4-mapped / 6to4 / NAT64); the connection made to the
     checked IP with Host and SNI carrying the name (no DNS rebinding); redirects by hand with a cap; the body read
     raw and decoded here incrementally (zlib `max_length` per step against the remaining budget), at most one content
-    coding (gzip or deflate; stacked or other codings `UNSUPPORTED_ENCODING`; a MemoryError is `RESOURCE_LIMIT`,
+    coding (gzip or deflate; every member of a multi-member gzip body decoded within the same budget, trailing
+    non-gzip bytes a `PROTOCOL_ERROR`; stacked or other codings `UNSUPPORTED_ENCODING`; a MemoryError is `RESOURCE_LIMIT`,
     never an exception); one hard overall deadline over connect, TLS, headers and body for every hop, enforced on
     every socket operation by a network backend that also checks the kill switches; robots.txt (RFC 9309) honoured
     for the `ZBM-SEO-Audit` token; always identified. The browser-identity fetch used by access-diff is made only

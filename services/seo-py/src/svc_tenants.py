@@ -42,6 +42,11 @@ def _site(d: str) -> str:
     return d[4:] if d.startswith("www.") else d
 
 
+def _overlaps(a: str, b: str) -> bool:
+    """Same site, or one is a subdomain of the other."""
+    return a == b or a.endswith("." + b) or b.endswith("." + a)
+
+
 def parse_switch(name: str) -> tuple[str, Optional[str]]:
     if name in ("global", "write"):
         return name, None
@@ -198,8 +203,9 @@ class TenantsMixin:
                 return self.tenant_view(tid)
             # AEGIS M2: a domain (or its www. twin) belongs to ONE tenant, so a client's site can never be audited
             # free through the own-properties tenant (or another client's paid audit)
+            # AEGIS N1: also a subdomain or a parent of another tenant's domain (shop.site.test vs site.test)
             taken = {_site(d) for other, t in self.tenants.items() if other != tid for d in t["domains"]}
-            if any(_site(d) in taken for d in domains):
+            if any(_overlaps(_site(d), x) for d in domains for x in taken):
                 raise Conflict(R("DOMAIN_TAKEN"))
             data = {"tenant_id": tid, "domains": sorted(domains)}
             self._commit("tenant_domains_set", self._req(data, "andre", rk, body, tid), "andre",

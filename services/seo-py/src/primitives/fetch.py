@@ -261,9 +261,16 @@ class _Decoder:
             self.d = zlib.decompressobj(wbits)
         buf = data
         try:
-            while buf and not self.d.eof:
+            while buf:
                 self._add(self.d.decompress(buf, self.limit - self.n + 1))
                 buf = self.d.unconsumed_tail
+                if self.d.eof:
+                    # AEGIS N2: a gzip body may hold several members; each is decoded, all within the same budget
+                    rest = self.d.unused_data
+                    if not rest or self.enc not in ("gzip", "x-gzip"):
+                        break
+                    self.d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                    buf = rest
         except zlib.error:
             raise _Refused("PROTOCOL_ERROR", "the body could not be decoded") from None
 
