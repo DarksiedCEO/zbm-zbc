@@ -1,0 +1,271 @@
+{
+ "library": "service-py",
+ "cases": [
+  {
+   "replay_id": "service-py/R0001",
+   "scenario": "email-clear-opt-out",
+   "origin": "service-py/email-clear-opt-out#017.2@1",
+   "chain": [
+    "soft_hyphen",
+    "homoglyph"
+   ],
+   "seed_value": "unsubscribe",
+   "input": {
+    "text": "uηs­υ­bsc­riβe"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0002",
+   "scenario": "email-clear-opt-out",
+   "origin": "service-py/email-clear-opt-out#031.2@1",
+   "chain": [
+    "homoglyph",
+    "quoted_reply"
+   ],
+   "seed_value": "Please don't call or email me",
+   "input": {
+    "text": "рlеaѕe doη'т call or εмail мε\n\n> Thanks for reaching out, we will reply within a day.\n> Acme Team"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0003",
+   "scenario": "email-clear-opt-out",
+   "origin": "service-py/email-clear-opt-out#046.1@1",
+   "chain": [
+    "homoglyph",
+    "leetspeak"
+   ],
+   "seed_value": "Unsubscribe<br>Sent from my iPhone",
+   "input": {
+    "text": "Unsuβѕcr1bе<br>ѕ3ητ fr0m му 1Pн0η3"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0004",
+   "scenario": "email-possible-opt-out",
+   "origin": "service-py/email-possible-opt-out#002.2@1",
+   "chain": [
+    "homoglyph",
+    "fullwidth"
+   ],
+   "seed_value": "I don't want to hear from you again",
+   "input": {
+    "text": "ι ｄｏη＇ｔ ｗａｎｔ τｏ ｈεаｒ ｆｒｏм ｙｏｕ ａｇаіη"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0005",
+   "scenario": "chat-opt-out",
+   "origin": "service-py/chat-opt-out#004.1@1",
+   "chain": [
+    "homoglyph"
+   ],
+   "seed_value": "Dont text or email me if you can help it",
+   "input": {
+    "text": "ԁoηt τеxt or εмаil мe іf уоu cαn hεlp іт"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0006",
+   "scenario": "email-clear-opt-out",
+   "origin": "service-py/email-clear-opt-out#003.1@2",
+   "chain": [
+    "homoglyph",
+    "letter_spacing"
+   ],
+   "seed_value": "Do not text or email me please",
+   "input": {
+    "text": "Dο η o t τeχt or emaіl mе pleаѕe"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0007",
+   "scenario": "email-clear-opt-out",
+   "origin": "service-py/email-clear-opt-out#006.1@2",
+   "chain": [
+    "leetspeak",
+    "fullwidth"
+   ],
+   "seed_value": "please stop texting and emailing me",
+   "input": {
+    "text": "pleａsｅ ５７０ｐ tex７ｉｎｇ anｄ ｅm４1l1ng m３"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F004",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0008",
+   "scenario": "email-clear-opt-out",
+   "origin": "service-py/email-clear-opt-out#031.2@2",
+   "chain": [
+    "homoglyph",
+    "quoted_reply"
+   ],
+   "seed_value": "Please don't call or email me",
+   "input": {
+    "text": "Plεаѕe doη't сall оr εмail мe\n\nOn Mon, Oct 5, 2026 Acme wrote:\n> Your order has shipped and should arrive Friday."
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0009",
+   "scenario": "email-possible-opt-out",
+   "origin": "service-py/email-possible-opt-out#008.2@2",
+   "chain": [
+    "homoglyph"
+   ],
+   "seed_value": "Please don't reach out again",
+   "input": {
+    "text": "Pleaѕe ԁoη'τ reасн out agaιn"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0010",
+   "scenario": "email-possible-opt-out",
+   "origin": "service-py/email-possible-opt-out#010.2@2",
+   "chain": [
+    "homoglyph",
+    "case_flip"
+   ],
+   "seed_value": "Cease all communication",
+   "input": {
+    "text": "Ceaѕe all сOmmΥnіCATIoΗ"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0011",
+   "scenario": "sms-opt-out",
+   "origin": "service-py/sms-opt-out#042.1@2",
+   "chain": [
+    "homoglyph",
+    "soft_hyphen"
+   ],
+   "seed_value": "wrong person",
+   "input": {
+    "text": "wroη­ɡ p­e­r­soη"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0012",
+   "scenario": "sms-opt-out",
+   "origin": "service-py/sms-opt-out#058.1@2",
+   "chain": [
+    "homoglyph"
+   ],
+   "seed_value": "cancelar",
+   "input": {
+    "text": "caηcеlar"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0013",
+   "scenario": "chat-opt-out",
+   "origin": "service-py/chat-opt-out#002.1@2",
+   "chain": [
+    "homoglyph"
+   ],
+   "seed_value": "Please don't text or email me anymore.",
+   "input": {
+    "text": "Please ԁοη'τ τeχt оr емαil ме аηуmorε."
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0014",
+   "scenario": "chat-opt-out",
+   "origin": "service-py/chat-opt-out#013.1@2",
+   "chain": [
+    "leetspeak",
+    "homoglyph"
+   ],
+   "seed_value": "remove my number and my email",
+   "input": {
+    "text": "r3mον3 mу ηυmβ3r αηԁ mу ema1l"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  },
+  {
+   "replay_id": "service-py/R0015",
+   "scenario": "chat-opt-out",
+   "origin": "service-py/chat-opt-out#017.1@2",
+   "chain": [
+    "homoglyph",
+    "fullwidth"
+   ],
+   "seed_value": "unsubscribe",
+   "input": {
+    "text": "ｕnѕｕβsсrιвε"
+   },
+   "added": "2026-10-10",
+   "known_failure": "WR-F001",
+   "failed": [
+    "opt_out_honoured_or_surfaced: revoked=[] alerts=[]"
+   ]
+  }
+ ]
+}

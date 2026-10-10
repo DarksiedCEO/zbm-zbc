@@ -1,0 +1,286 @@
+{
+ "library": "onboarding-py",
+ "version": 1,
+ "department": "Onboarding (department 1), ZBC creator lane",
+ "service": "onboarding-py",
+ "driver": "onboarding_py.py",
+ "basis": "ADR 0004; bug sweep D (M) and its AEGIS re-review O-1 / O-3 (name_key.py): one person's spellings of a legal name are one 1099 payee (format characters refused at the schema, NFKC, case, apostrophe / dash variants, lookalikes and accents folded); a payment replayed with its request_id is idempotent, the id reused with another amount or under another creator is 409 and records nothing",
+ "variants_per_seed": 8,
+ "scenarios": [
+  {
+   "id": "1099-name-variant",
+   "persona": "one creator under two creator ids with a re-spelled legal name",
+   "basis": "tests/test_sweep_d.py and tests/test_sweep_d_aegis.py O-1",
+   "seeds": [
+    {
+     "literal": [
+      "Pat Young",
+      "Mary-Jane O'Neil",
+      "José García",
+      "Zoë Ng"
+     ],
+     "basis": "names of the pinned O-1 tests and clipper-network-py's ordinary-name pins"
+    }
+   ],
+   "input_field": "variant",
+   "seed_field": "base",
+   "steps": [
+    {
+     "action": "application",
+     "args": {
+      "creator_id": "clip_1",
+      "legal_name": "$base"
+     }
+    },
+    {
+     "action": "payment",
+     "as": "p1",
+     "args": {
+      "creator_id": "clip_1",
+      "request_id": "p1",
+      "amount_usd": "1500.00"
+     }
+    },
+    {
+     "action": "application",
+     "as": "variant",
+     "args": {
+      "creator_id": "clip_2",
+      "legal_name": "$variant"
+     }
+    },
+    {
+     "action": "payment",
+     "as": "p2",
+     "args": {
+      "creator_id": "clip_2",
+      "request_id": "p2",
+      "amount_usd": "600.00"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "whitespace_runs",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "homoglyph_wide",
+    "punct_variants",
+    "diacritic_toggle",
+    "letter_spacing"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "one_person_one_total",
+     "severity": "MUST",
+     "check": "refused_or_field_equals",
+     "args": {
+      "step": "variant",
+      "refused": [
+       422
+      ],
+      "then_step": "p2",
+      "field": "paid_to_date_usd",
+      "value": "2100.00"
+     }
+    },
+    {
+     "id": "first_payment_recorded",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "p1",
+      "codes": [
+       200
+      ]
+     }
+    }
+   ],
+   "downgrade": {
+    "letter_spacing": [
+     "one_person_one_total"
+    ]
+   },
+   "downgrade_basis": "a name spelled out letter by letter is not among the pinned O-1 folds"
+  },
+  {
+   "id": "payment-replay-same",
+   "persona": "a flaky payout client replaying the same payment",
+   "basis": "tests/test_sweep_d.py: a replay answers the first result and records nothing",
+   "params": {
+    "replays": [
+     1,
+     2,
+     5
+    ]
+   },
+   "variants_per_seed": 3,
+   "steps": [
+    {
+     "action": "application",
+     "args": {
+      "creator_id": "clip_1",
+      "legal_name": "Pat Young"
+     }
+    },
+    {
+     "action": "payment",
+     "as": "first",
+     "args": {
+      "creator_id": "clip_1",
+      "request_id": "pay-1",
+      "amount_usd": "1500.00"
+     }
+    },
+    {
+     "action": "payment_repeat",
+     "as": "replay",
+     "args": {
+      "creator_id": "clip_1",
+      "request_id": "pay-1",
+      "amount_usd": "1500.00",
+      "times": "$replays"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "replay_answered",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "replay",
+      "codes": [
+       200
+      ]
+     }
+    },
+    {
+     "id": "same_answer",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "replay",
+      "field": "paid_to_date_usd",
+      "value": "1500.00"
+     }
+    },
+    {
+     "id": "recorded_once",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "payment_events",
+      "value": 1
+     }
+    },
+    {
+     "id": "total_once",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "first_person_total_usd",
+      "value": "1500.00"
+     }
+    }
+   ]
+  },
+  {
+   "id": "payment-replay-tampered",
+   "persona": "a tamperer reusing a payment id with another amount or under another creator",
+   "basis": "tests/test_sweep_d.py (another amount: 409) and tests/test_sweep_d_aegis.py O-3 (another creator: 409)",
+   "seeds": [
+    {
+     "literal": [
+      "9.00",
+      "1500.01",
+      "15000.00",
+      "0.01",
+      "1499.99",
+      "1500.00"
+     ],
+     "basis": "amounts around the original 1500.00 (1500.00 itself under another creator)"
+    }
+   ],
+   "params": {
+    "replay_creator": [
+     "clip_1",
+     "clip_2"
+    ]
+   },
+   "variants_per_seed": 2,
+   "input_field": "amount",
+   "steps": [
+    {
+     "action": "application",
+     "args": {
+      "creator_id": "clip_1",
+      "legal_name": "Pat Young"
+     }
+    },
+    {
+     "action": "application",
+     "args": {
+      "creator_id": "clip_2",
+      "legal_name": "Sam Lee"
+     }
+    },
+    {
+     "action": "payment",
+     "as": "first",
+     "args": {
+      "creator_id": "clip_1",
+      "request_id": "pay-1",
+      "amount_usd": "1500.00"
+     }
+    },
+    {
+     "action": "payment",
+     "as": "replay",
+     "args": {
+      "creator_id": "$replay_creator",
+      "request_id": "pay-1",
+      "amount_usd": "$amount"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "refused_or_identical",
+     "severity": "MUST",
+     "check": "refused_or_field_equals",
+     "args": {
+      "step": "replay",
+      "refused": [
+       409
+      ],
+      "then_step": "replay",
+      "field": "paid_to_date_usd",
+      "value": "1500.00"
+     }
+    },
+    {
+     "id": "recorded_once",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "payment_events",
+      "value": 1
+     }
+    },
+    {
+     "id": "total_once",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "first_person_total_usd",
+      "value": "1500.00"
+     }
+    }
+   ]
+  }
+ ]
+}

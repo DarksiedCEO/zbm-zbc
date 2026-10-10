@@ -1,0 +1,342 @@
+{
+ "library": "verification-py",
+ "version": 1,
+ "department": "Verification & Integrity (department 33)",
+ "service": "verification-py",
+ "driver": "verification_py.py",
+ "basis": "ADR 0007; platforms.post_key (NFKC, scheme, host case, www./m./mobile., query, fragment, trailing slash and percent-encoding ignored); bug sweep C (C-2 one post certified once, H-1 one active connection per platform, M / L3 minor lock folds plus / dash tags, gmail dots and homoglyphs); A8 a shared account is refused",
+ "variants_per_seed": 30,
+ "scenarios": [
+  {
+   "id": "same-post-url-variant",
+   "persona": "a clipper re-registering one post under a re-spelled URL to be paid twice",
+   "basis": "tests/test_sweep_c.py C-2: the same post under another submission is refused whatever the URL spelling",
+   "seeds": [
+    {
+     "literal": [
+      "https://www.tiktok.com/@c/video/d1"
+     ],
+     "basis": "the post_ref Harness.clean_clip registers for submission d1"
+    }
+   ],
+   "input_field": "post_ref",
+   "steps": [
+    {
+     "action": "clean_clip",
+     "args": {
+      "sid": "d1",
+      "clipper": "clip-a"
+     }
+    },
+    {
+     "action": "register",
+     "as": "again",
+     "args": {
+      "sid": "d2",
+      "clipper": "clip-a",
+      "post_ref": "$post_ref",
+      "campaign_id": "camp-2"
+     }
+    }
+   ],
+   "transforms": [
+    "url_scheme_case",
+    "url_host_case",
+    "url_subdomain",
+    "url_tracking_query",
+    "url_fragment",
+    "url_trailing_slash",
+    "url_no_scheme",
+    "url_percent_encode",
+    "url_fullwidth"
+   ],
+   "chain_max": 3,
+   "invariants": [
+    {
+     "id": "refused_as_duplicate",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "again",
+      "codes": [
+       409
+      ]
+     }
+    },
+    {
+     "id": "names_the_original",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "again",
+      "field": "duplicate_of",
+      "value": "d1"
+     }
+    },
+    {
+     "id": "one_submission",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "submissions",
+      "value": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "same-post-other-clipper",
+   "persona": "a second clipper claiming someone else's post under a re-spelled URL",
+   "basis": "tests/test_sweep_c.py C-2 (clip-z)",
+   "seeds": [
+    {
+     "literal": [
+      "https://www.tiktok.com/@c/video/d1"
+     ],
+     "basis": "as above"
+    }
+   ],
+   "variants_per_seed": 15,
+   "input_field": "post_ref",
+   "steps": [
+    {
+     "action": "clean_clip",
+     "args": {
+      "sid": "d1",
+      "clipper": "clip-a"
+     }
+    },
+    {
+     "action": "onboard",
+     "args": {
+      "clipper": "clip-z"
+     }
+    },
+    {
+     "action": "register",
+     "as": "again",
+     "args": {
+      "sid": "d9",
+      "clipper": "clip-z",
+      "post_ref": "$post_ref",
+      "campaign_id": "camp-9"
+     }
+    }
+   ],
+   "transforms": [
+    "url_scheme_case",
+    "url_host_case",
+    "url_subdomain",
+    "url_tracking_query",
+    "url_fragment",
+    "url_trailing_slash",
+    "url_no_scheme",
+    "url_percent_encode",
+    "url_fullwidth"
+   ],
+   "chain_max": 3,
+   "invariants": [
+    {
+     "id": "refused_as_duplicate",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "again",
+      "codes": [
+       409
+      ]
+     }
+    },
+    {
+     "id": "names_the_original",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "again",
+      "field": "duplicate_of",
+      "value": "d1"
+     }
+    },
+    {
+     "id": "one_submission",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "submissions",
+      "value": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "second-connected-account",
+   "persona": "a clipper connecting a second account, and another clipper reusing the first account",
+   "basis": "tests/test_sweep_c.py H-1 (one active connection per platform) and tests/test_cert_attacks.py A8 (ACCOUNT_SHARED)",
+   "params": {
+    "platform": [
+     "tiktok",
+     "youtube",
+     "instagram"
+    ],
+    "gap_minutes": [
+     0,
+     5,
+     60,
+     1440
+    ]
+   },
+   "variants_per_seed": 12,
+   "steps": [
+    {
+     "action": "connect",
+     "as": "first",
+     "args": {
+      "clipper": "clip-a",
+      "platform": "$platform",
+      "account_id": "acct-1"
+     }
+    },
+    {
+     "action": "connect",
+     "as": "second",
+     "args": {
+      "clipper": "clip-a",
+      "platform": "$platform",
+      "account_id": "acct-other",
+      "gap_minutes": "$gap_minutes"
+     }
+    },
+    {
+     "action": "connect",
+     "as": "shared",
+     "args": {
+      "clipper": "clip-b",
+      "platform": "$platform",
+      "account_id": "acct-1",
+      "gap_minutes": "$gap_minutes"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "first_active",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "first",
+      "field": "connection.status",
+      "value": "active"
+     }
+    },
+    {
+     "id": "second_account_refused",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "second",
+      "field": "connection.status",
+      "value": "refused"
+     }
+    },
+    {
+     "id": "shared_account_refused",
+     "severity": "MUST",
+     "check": "field_equals",
+     "args": {
+      "step": "shared",
+      "field": "connection.status",
+      "value": "refused"
+     }
+    },
+    {
+     "id": "sharer_held",
+     "severity": "SHOULD",
+     "check": "state_in",
+     "args": {
+      "key": "open_holds",
+      "values": [
+       [
+        "clipper:clip-b"
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "minor-lookalike-email",
+   "persona": "a minor re-applying under a look-alike email to dodge the minor lock",
+   "basis": "tests/test_sweep_c.py M (plus tag, gmail dots, googlemail) and L3 (dash tags, homoglyphs, full-width)",
+   "seeds": [
+    {
+     "literal": [
+      "kid.name@gmail.com",
+      "kid@example.com"
+     ],
+     "basis": "the identities of the pinned minor-lock tests"
+    }
+   ],
+   "variants_per_seed": 15,
+   "input_field": "variant",
+   "seed_field": "base",
+   "steps": [
+    {
+     "action": "minor_identity",
+     "args": {
+      "clipper": "kid",
+      "email": "$base"
+     }
+    },
+    {
+     "action": "identity_then_age",
+     "as": "again",
+     "args": {
+      "clipper": "kid2",
+      "email": "$variant"
+     }
+    }
+   ],
+   "transforms": [
+    "email_case",
+    "plus_tag",
+    "dash_tag",
+    "gmail_dots",
+    "googlemail_swap",
+    "email_homoglyph",
+    "fullwidth",
+    "email_homoglyph_wide",
+    "zero_width",
+    "soft_hyphen"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "still_a_minor",
+     "severity": "MUST",
+     "check": "refused_or_field_equals",
+     "args": {
+      "step": "again",
+      "refused": [
+       422
+      ],
+      "then_step": "again",
+      "field": "status",
+      "value": "minor"
+     }
+    }
+   ],
+   "downgrade": {
+    "email_homoglyph_wide": [
+     "still_a_minor"
+    ],
+    "zero_width": [
+     "still_a_minor"
+    ],
+    "soft_hyphen": [
+     "still_a_minor"
+    ]
+   },
+   "downgrade_basis": "invisible characters and the wide lookalike set in an email address are not in the pinned minor-lock folds: scored, not gate-blocking"
+  }
+ ]
+}

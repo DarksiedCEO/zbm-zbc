@@ -319,10 +319,10 @@ def url_no_scheme(url: str, rng: random.Random) -> str:
 
 
 def url_percent_encode(url: str, rng: random.Random) -> str:
-    """One path character percent-encoded (``/video/`` -> ``/vid%65o/``); post_key unquotes the path."""
+    """One ASCII letter of the path percent-encoded (``/video/`` -> ``/vid%65o/``); post_key unquotes the path."""
     scheme, sep, rest = url.partition("://")
     host, slash, path = rest.partition("/")
-    idx = [i for i, c in enumerate(path) if c.isalpha()]
+    idx = [i for i, c in enumerate(path) if c.isascii() and c.isalpha()]
     if not idx:
         return url
     i = rng.choice(idx)
