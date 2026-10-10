@@ -61,6 +61,20 @@ class AuditCreate(Strict):
     prompt_set_id: Optional[Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]] = None
 
 
+class LogIngestCreate(Strict):
+    request_id: RequestId
+    domain: Annotated[StrictStr, Field(pattern=DOMAIN)]
+    scheme: Literal["https", "http"] = "https"
+    format: Literal["combined", "common", "jsonl"]
+
+
+class LogChunk(Strict):
+    request_id: RequestId
+    seq: Annotated[StrictInt, Field(ge=1, le=10_000_000)]
+    data_b64: Annotated[StrictStr, Field(min_length=4, max_length=120_000)]
+    last: StrictBool = False
+
+
 class PromptSetCreate(Strict):
     request_id: RequestId
     name: Annotated[StrictStr, Field(pattern=r"^[a-z0-9][a-z0-9_-]{1,63}$")]

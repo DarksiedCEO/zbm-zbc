@@ -32,6 +32,7 @@ MAX_URLS_PER_FILE = 50_000
 MAX_CHILDREN = 10
 DECOMPRESSED_MAX = 8 * 1024 * 1024
 BLOCK_SAMPLE = 500
+SAMPLE_PATHS = 500
 METHODOLOGY = ("Sitemaps discovered from robots.txt Sitemap lines on this site, else /sitemap.xml; parsed as "
                "sitemaps.org 0.9 (urlset / sitemapindex, children followed up to {c}); XML with DOCTYPE or ENTITY "
                "declarations quarantined unparsed. lastmod checked as W3C date-time against the audit clock. Up to "
@@ -179,6 +180,12 @@ def _sitemaps(ctx, facts: dict) -> list:
                                detail={"urls": file_urls, "limit": MAX_URLS_PER_FILE}))
     facts.update(sitemaps_read=read, sitemap_fetch_failures=failures, sitemap_urls=len(urls),
                  sitemap_children_followed=children_followed)
+    sample = []
+    for u, _ in urls:
+        p = urlsplit(u)
+        if p.scheme in ("http", "https") and ctx.same_site(p.hostname) and len(sample) < SAMPLE_PATHS:
+            sample.append((p.path or "/")[:300])
+    facts["sitemap_paths_sample"] = sample          # for the log task's "important but uncrawled" (Wave 2)
     out += _url_checks(ctx, urls)
     out += _lastmod_checks(ctx, lastmods)
     return out

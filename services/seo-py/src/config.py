@@ -9,6 +9,7 @@ the log is opened, NOT_BUILT switches that refuse start rather than pretend).
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -28,7 +29,7 @@ from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 KNOWN_CALLERS = ("dashboard", "seo_agent", "scheduler", "hub", "finance_31", "compliance_38")
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
-CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets")
+CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets", "logs", "schedules")
 PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity")
 
 # Pricing, locked by Andre (spec Oct 6). Config only: nothing in this service charges, quotes or invoices; payments
@@ -132,6 +133,13 @@ class Settings:
     audit_max_pages: int = 10
     probe_samples: int = 5
     bot_info_url: Optional[str] = None
+    log_hash_key: Optional[bytes] = None
+    log_max_bytes: int = 256 * 1024 * 1024
+    log_retention_days: int = 90
+    bot_verify_dns: bool = False
+    bot_verify_max: int = 200
+    schedule_budget_runs: int = 8
+    schedule_period_days: int = 30
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -173,6 +181,51 @@ NOT_BUILT = {
 }
 
 
+NON_PRODUCTION_LOG_KEY = b"seo-py non-production log ip hash key, never in production"
+
+
+def _secret_file_bytes(env, name: str, max_bytes: int = 4096) -> bytes:
+    """bizdev-py's rules: a regular file owned by this user, mode 0600/0400, no symlink, no FIFO."""
+    path = (env.get(name) or "").strip()
+    if not path or not os.path.isabs(path):
+        raise RuntimeError(f"{name} must be an absolute path to a file holding the secret")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        raise RuntimeError(f"{name}: the file cannot be opened (missing, unreadable, or a symlink)") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise RuntimeError(f"{name}: not a regular file")
+        if st.st_uid != os.geteuid():
+            raise RuntimeError(f"{name}: the file is not owned by the user running this service")
+        if st.st_mode & 0o077:
+            raise RuntimeError(f"{name}: the file is readable by group or others; chmod 600 it")
+        if st.st_size > max_bytes:
+            raise RuntimeError(f"{name}: the file is too large")
+        raw = os.read(fd, max_bytes + 1)
+    finally:
+        os.close(fd)
+    return raw.strip()
+
+
+def _hash_key(raw: bytes, name: str) -> bytes:
+    """A generated key, hex or base64, at least 32 decoded bytes, not trivially repetitive (bizdev-py's rule)."""
+    text = raw.decode("ascii", "replace").strip()
+    key = b""
+    if re.fullmatch(r"(?:[0-9a-fA-F]{2}){32,512}", text):
+        key = bytes.fromhex(text)
+    elif re.fullmatch(r"[A-Za-z0-9+/_-]{43,1024}={0,2}", text):
+        try:
+            key = base64.b64decode(text.replace("-", "+").replace("_", "/") + "=" * (-len(text) % 4), validate=True)
+        except ValueError:
+            key = b""
+    if len(key) < 32 or len(set(key)) < 8:
+        raise RuntimeError(f"{name} must hold a generated key of at least 32 bytes, hex or base64 "
+                           "(openssl rand -hex 32)")
+    return key
+
+
 def _bot_info_url(env) -> Optional[str]:
     raw = (env.get("SEO_BOT_INFO_URL") or "").strip()
     if not raw:
@@ -211,6 +264,19 @@ def load(env: Optional[dict] = None) -> Settings:
     s.audit_max_pages = _int(env, "SEO_AUDIT_MAX_PAGES", 10, 1, 25)
     s.probe_samples = _int(env, "SEO_PROBE_SAMPLES", 5, 3, 50)
     s.bot_info_url = _bot_info_url(env)
+    if env.get("SEO_LOG_HASH_KEY_FILE"):
+        s.log_hash_key = _hash_key(_secret_file_bytes(env, "SEO_LOG_HASH_KEY_FILE"), "SEO_LOG_HASH_KEY_FILE")
+    elif not non_production or s.data_dir:
+        raise RuntimeError("SEO_LOG_HASH_KEY_FILE is required whenever SEO_DATA_DIR is set (and always in "
+                           "production): client IPs from uploaded logs are only ever kept as keyed hashes")
+    else:
+        s.log_hash_key = NON_PRODUCTION_LOG_KEY
+    s.log_max_bytes = _int(env, "SEO_LOG_MAX_BYTES", 256 * 1024 * 1024, 1024 * 1024, 2 * 1024 * 1024 * 1024)
+    s.log_retention_days = _int(env, "SEO_LOG_RETENTION_DAYS", 90, 1, 365)
+    s.bot_verify_dns = _flag(env, "SEO_BOT_VERIFY_DNS")
+    s.bot_verify_max = _int(env, "SEO_BOT_VERIFY_MAX", 200, 1, 5000)
+    s.schedule_budget_runs = _int(env, "SEO_SCHEDULE_BUDGET_RUNS", 8, 1, 100)
+    s.schedule_period_days = _int(env, "SEO_SCHEDULE_PERIOD_DAYS", 30, 1, 365)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "SEO_PORT", 8500, 1024, 65535)
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None    # last: nothing above can fail after it

@@ -36,6 +36,7 @@ from reasons import R
 from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_audits import AuditsMixin
 from svc_entity import EntityMixin
+from svc_logs import LogsMixin
 from svc_tenants import TenantsMixin
 
 INTERNAL = "seo"
@@ -63,7 +64,7 @@ def request_sha(body: dict) -> str:
     return payload_sha256(body)
 
 
-class SeoService(TenantsMixin, EntityMixin, AuditsMixin):
+class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None):
         import ports as ports_mod
@@ -81,9 +82,12 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin):
         self.entities: dict[str, dict] = {}
         self.audits: dict[str, dict] = {}
         self.prompt_sets: dict[str, dict] = {}
+        self.log_ingests: dict[str, dict] = {}
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.running_audits: set = set()               # audits this process is running now
+        self._log_verify_cache: dict = {}                # ingest -> {family|ip hash: verdict} (memory only)
+        self._log_budget: dict = {}
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
         self._last_integrity_try = 0
         self._own_pending: Optional[bytes] = None

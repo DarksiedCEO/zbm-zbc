@@ -80,6 +80,15 @@ class FakeLedger:
         return [e for e in self.events if e["event_type"] == t]
 
 
+def write_key(path) -> str:
+    """A derived test-only key file, mode 0600."""
+    import os
+    if not path.exists():
+        path.write_text(derived("log ip hash key"))
+        os.chmod(path, 0o600)
+    return str(path)
+
+
 def base_env(**over) -> dict:
     env = {"SEO_SERVICE_TOKEN": SERVICE_TOKEN, "SEO_NON_PRODUCTION": "1", "SEO_ANDRE_APPROVAL_TOKEN": ANDRE,
            "SEO_CALLER_TOKENS": json.dumps(CALLERS), "SEO_TENANT_TOKENS": json.dumps(TENANT_TOKENS)}
@@ -95,6 +104,8 @@ class Harness:
     def __init__(self, tmp, data_dir: Optional[str] = None, ledger: Optional[FakeLedger] = None,
                  clock: Optional[FixedClock] = None, ports: Optional[Ports] = None, **env_over):
         self.tmp = tmp
+        if data_dir and "SEO_LOG_HASH_KEY_FILE" not in env_over:
+            env_over["SEO_LOG_HASH_KEY_FILE"] = write_key(tmp / "log.key")
         self.env = base_env(SEO_DATA_DIR=data_dir, **env_over)
         self.settings = config_mod.load(self.env)
         self.ledger = ledger or FakeLedger()

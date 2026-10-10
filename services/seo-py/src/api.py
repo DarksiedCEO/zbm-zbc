@@ -464,6 +464,30 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
                                                       "compliance_38"))) -> dict:
         return svc.audit_view(scope[1], _id(aid), full=scope[0] != "finance_31")
 
+    # ------------------------------------------------------------------ first-party log ingests (Wave 2)
+
+    LOG_CALLERS = ("dashboard", "seo_agent", "hub")
+
+    @app.post(P + "/tenants/{tid}/log-ingests", dependencies=auth, status_code=201)
+    def create_log_ingest(req: dict = Depends(body(m.LogIngestCreate)), scope: tuple = Depends(scoped(*LOG_CALLERS))):
+        return svc.create_log_ingest(scope[0], scope[1], req)
+
+    @app.post(P + "/tenants/{tid}/log-ingests/{iid}/chunks", dependencies=auth)
+    def log_chunk(iid: str, req: dict = Depends(body(m.LogChunk)), scope: tuple = Depends(scoped(*LOG_CALLERS))):
+        return svc.add_log_chunk(scope[0], scope[1], _id(iid), req)
+
+    @app.post(P + "/tenants/{tid}/log-ingests/{iid}/finish", dependencies=auth)
+    def log_finish(iid: str, req: dict = Depends(body(m.RequestOnly)), scope: tuple = Depends(scoped(*LOG_CALLERS))):
+        return svc.finish_log_ingest(scope[0], scope[1], _id(iid), req)
+
+    @app.get(P + "/tenants/{tid}/log-ingests", dependencies=auth)
+    def log_ingests(scope: tuple = Depends(scoped(*LOG_CALLERS, "compliance_38"))) -> list:
+        return svc.log_ingests_view(scope[1])
+
+    @app.get(P + "/tenants/{tid}/log-ingests/{iid}", dependencies=auth)
+    def log_ingest(iid: str, scope: tuple = Depends(scoped(*LOG_CALLERS, "compliance_38"))) -> dict:
+        return svc.log_ingest_view(scope[1], _id(iid))
+
     # ------------------------------------------------------------------ jobs and audit
 
     @app.post(P + "/jobs/{name}/run", dependencies=auth)

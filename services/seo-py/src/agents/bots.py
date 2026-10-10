@@ -10,7 +10,7 @@ meaning in place.
 
 from __future__ import annotations
 
-VERSION = "2026-10-09.1"
+VERSION = "2026-10-10.1"   # .1 of 10-10: reverse-DNS verification suffixes added
 SOURCE_NOTE = ("Operators' public crawler documentation as known on 2026-10-09; not complete; tokens and purposes "
                "change; control tokens are robots.txt-only and never appear as a User-Agent")
 
@@ -43,3 +43,20 @@ def by_token(token: str) -> dict:
         if f["token"].lower() == token.lower():
             return f
     raise KeyError(token)
+
+
+# Reverse-DNS verification (forward-confirmed): the host names the operator documents for its crawler's IPs. Only
+# these families can be verified by DNS; the others publish IP ranges instead (an IP-range port, NOT_CONNECTED), so
+# their log hits stay "claimed". Same source note as above; not complete.
+VERIFY_DNS_SUFFIXES = {
+    "Googlebot": ("googlebot.com", "google.com", "googleusercontent.com"),
+    "Bingbot": ("search.msn.com",),
+    "Applebot": ("applebot.apple.com",),
+}
+
+
+def ua_families() -> list:
+    """Tokens that appear in a crawler's User-Agent, longest first (so "Claude-SearchBot" wins over a shorter token);
+    robots.txt-only control tokens never appear in a User-Agent and are left out."""
+    toks = [f["token"] for f in FAMILIES if f["purpose"] != "training_control"]
+    return sorted(toks, key=lambda x: (-len(x), x))

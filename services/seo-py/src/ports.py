@@ -63,6 +63,61 @@ class NotConnectedSource:
         return {"state": NOT_CONNECTED, "source": self.name}
 
 
+class NotConnectedBotVerifier:
+    """No resolver configured: every claimed bot stays "claimed" (the User-Agent alone is never trusted)."""
+
+    connected = False
+
+    def verify(self, ip: str, token: str) -> str:
+        return NOT_CONNECTED
+
+
+class DnsBotVerifier:
+    """Reverse DNS, then forward-confirm (the host's own A/AAAA records must contain the IP), against the operator's
+    documented host-name suffixes (agents/bots.VERIFY_DNS_SUFFIXES). Answers: ``verified``, ``failed`` (the claim is
+    false: a spoofed crawler), ``unverifiable`` (this family has no DNS method) or ``error`` (DNS did not answer in
+    time; the hit stays claimed). The lookups are injectable; production uses the system resolver with a timeout."""
+
+    connected = True
+
+    def __init__(self, rdns=None, forward=None, timeout_s: float = 2.0):
+        import socket
+        self._rdns = rdns or (lambda ip: socket.gethostbyaddr(ip)[0])
+        self._fwd = forward or (lambda host: [i[4][0] for i in socket.getaddrinfo(host, None)])
+        self.timeout_s = timeout_s
+
+    def _call(self, fn, arg):
+        import concurrent.futures as cf
+        ex = cf.ThreadPoolExecutor(max_workers=1)
+        try:
+            return ex.submit(fn, arg).result(timeout=self.timeout_s)
+        finally:
+            ex.shutdown(wait=False)
+
+    def verify(self, ip: str, token: str) -> str:
+        from agents.bots import VERIFY_DNS_SUFFIXES
+        import ipaddress
+        suffixes = VERIFY_DNS_SUFFIXES.get(token)
+        if not suffixes:
+            return "unverifiable"
+        import socket
+        try:
+            host = str(self._call(self._rdns, ip) or "").lower().rstrip(".")
+        except socket.herror:                              # no PTR record: the operator's crawlers all have one
+            return "failed"
+        except Exception:                                  # timeout or resolver error: no claim either way
+            return "error"
+        if not any(host == s or host.endswith("." + s) for s in suffixes):
+            return "failed"
+        try:
+            addrs = self._call(self._fwd, host) or []
+            want = ipaddress.ip_address(ip)
+            ok = any(ipaddress.ip_address(a.split("%")[0]) == want for a in addrs)
+        except Exception:
+            return "error"
+        return "verified" if ok else "failed"
+
+
 @dataclass
 class Ports:
     fetcher: object = None
@@ -73,6 +128,7 @@ class Ports:
     zero_day: object = None
     orca_publish: object = None
     clientfix: object = None
+    bot_verifier: object = None
 
     @classmethod
     def default(cls, settings=None) -> "Ports":
@@ -85,7 +141,9 @@ class Ports:
                    prompt_volume=NotConnectedSource("prompt_volume"),
                    first_party={n: NotConnectedSource(n) for n in FIRST_PARTY},
                    zero_day=NotConnectedSource("zero_day"), orca_publish=NotConnectedSource("orca_publish"),
-                   clientfix=NotConnectedSource("clientfix"))
+                   clientfix=NotConnectedSource("clientfix"),
+                   bot_verifier=DnsBotVerifier() if settings is not None and settings.bot_verify_dns
+                   else NotConnectedBotVerifier())
 
     def status(self) -> dict:
         def st(p) -> str:
@@ -95,11 +153,13 @@ class Ports:
                 "answer_engines": {n: st(p) for n, p in self.engines.items()},
                 "prompt_volume": st(self.prompt_volume),
                 "first_party": {n: st(p) for n, p in self.first_party.items()},
-                "zero_day": st(self.zero_day), "orca_publish": st(self.orca_publish), "clientfix": st(self.clientfix)}
+                "zero_day": st(self.zero_day), "orca_publish": st(self.orca_publish), "clientfix": st(self.clientfix),
+                "bot_dns_verification": st(self.bot_verifier), "bot_ip_range_verification": NOT_CONNECTED}
 
     def not_connected(self) -> list:
         s = self.status()
-        out = [k for k in ("fetch", "render", "prompt_volume", "zero_day", "orca_publish", "clientfix")
+        out = [k for k in ("fetch", "render", "prompt_volume", "zero_day", "orca_publish", "clientfix",
+                           "bot_dns_verification", "bot_ip_range_verification")
                if s[k] == NOT_CONNECTED]
         out += [f"answer_engine:{n}" for n, v in s["answer_engines"].items() if v == NOT_CONNECTED]
         out += [f"first_party:{n}" for n, v in s["first_party"].items() if v == NOT_CONNECTED]
