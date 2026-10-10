@@ -149,3 +149,64 @@ export function clearedSessionCookie(): string {
 export function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
+
+// Wave F (AEGIS A-4): a device that has signed in before carries a long-lived device cookie, so the login limiter
+// can keep it a slot of its own whatever addresses a flood claims (src/lib/rate-limit.ts). Signed with a key derived
+// from the session signing key (so rotating the secret or the password retires every device cookie), HttpOnly,
+// Secure, SameSite=Strict, and re-issued with a NEW device id at every successful sign-in (rotation). It grants no
+// access: only a place in the login queue.
+export const DEVICE_COOKIE = "__Host-zbm_dashboard_device";
+export const DEVICE_TTL_S = 90 * 86_400;
+
+function deviceSign(cfg: Extract<AuthConfig, { ok: true }>, body: string): Buffer {
+  const key = createHmac("sha256", cfg.signingKey).update("zbm-dashboard-device-key/v1").digest();
+  return createHmac("sha256", key).update(`zbm-dashboard-device/v1\n${body}`).digest();
+}
+
+/** A new signed device value (a fresh random device id). */
+export function issueDevice(cfg: Extract<AuthConfig, { ok: true }>, nowS: number): string {
+  const body = Buffer.from(
+    JSON.stringify({ v: 1, d: randomBytes(16).toString("base64url"), iat: nowS, exp: nowS + DEVICE_TTL_S }),
+    "utf8"
+  ).toString("base64url");
+  return `${body}.${deviceSign(cfg, body).toString("base64url")}`;
+}
+
+/** The device id of an untampered, unexpired device cookie signed with the current key; null otherwise. */
+export function verifyDevice(cfg: Extract<AuthConfig, { ok: true }>, value: string | undefined, nowS: number): string | null {
+  if (!value || value.length > MAX_COOKIE_CHARS) return null;
+  const dot = value.indexOf(".");
+  if (dot <= 0 || dot !== value.lastIndexOf(".")) return null;
+  const body = value.slice(0, dot);
+  const sigText = value.slice(dot + 1);
+  if (!/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]+$/.test(sigText)) return null;
+  const want = deviceSign(cfg, body);
+  const got = Buffer.from(sigText, "base64url");
+  if (got.length !== want.length || !timingSafeEqual(got, want)) return null;
+  let claims: unknown;
+  try {
+    claims = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!claims || typeof claims !== "object") return null;
+  const { v, d, iat, exp } = claims as Record<string, unknown>;
+  if (v !== 1 || typeof d !== "string" || !/^[A-Za-z0-9_-]{16,64}$/.test(d)) return null;
+  if (!Number.isInteger(iat) || !Number.isInteger(exp)) return null;
+  const i = iat as number;
+  const e = exp as number;
+  return e > nowS && i <= nowS + SKEW_S && e - i <= DEVICE_TTL_S && e - i > 0 ? d : null;
+}
+
+export function deviceCookie(value: string): string {
+  return `${DEVICE_COOKIE}=${value}; Path=/; Max-Age=${DEVICE_TTL_S}; HttpOnly; Secure; SameSite=Strict`;
+}
+
+/** One cookie's value from a Cookie header (route handlers read the raw header). */
+export function cookieValue(header: string | null, name: string): string | undefined {
+  for (const part of (header ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq > 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+  }
+  return undefined;
+}

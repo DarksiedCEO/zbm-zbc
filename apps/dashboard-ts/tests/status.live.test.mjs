@@ -255,6 +255,9 @@ before(async () => {
     DASHBOARD_PASSWORD_HASH: await hashPassword("live-test-password-1", 16384),
     DASHBOARD_SESSION_SECRET: "live-test-session-secret-0123456789abcdef",
     DASHBOARD_LEDGER_CACHE_MS: "0",
+    // Wave F (AEGIS A-4): these tests stand in for one trusted proxy that appends the client to X-Forwarded-For; the
+    // A-4 test below runs without it (the socket address is the key)
+    DASHBOARD_TRUSTED_PROXY_HOPS: "1",
   };
   COOKIE = `${SESSION_COOKIE}=${issueSession(authConfig(AUTH), nowSeconds())}`;
   STUB_PORT = await listenOnAnyPort(stub);
@@ -576,5 +579,36 @@ test("AEGIS M-1/M-2/L-2: parallel guesses from one client are capped; a global f
   assert.equal(owner.status, 303);
   assert.equal(owner.headers.get("location"), "/");
   assert.match(owner.headers.get("set-cookie") ?? "", new RegExp(`^${SESSION_COOKIE}=`));
+  await stopDashboard();
+});
+
+test("AEGIS A-4: rotating X-Forwarded-For from one host is one client; a device that signed in before still gets in", opts, async () => {
+  dash = await startDashboard({
+    ORCHESTRATOR_URL: `http://127.0.0.1:${STUB_PORT}`, ORCHESTRATOR_SERVICE_TOKEN: TOKEN, DASHBOARD_TRUSTED_PROXY_HOPS: "",
+  });
+  // the owner signs in once from this device: a device cookie (HttpOnly, Secure, SameSite=Strict) comes back
+  const first = await loginForm("live-test-password-1", "10.7.0.1");
+  assert.equal(first.status, 303);
+  const device = first.headers.getSetCookie().find((c) => c.startsWith("__Host-zbm_dashboard_device="));
+  assert.ok(device, "no device cookie after a successful sign-in");
+  for (const attr of [/; HttpOnly/, /; Secure/, /; SameSite=Strict/, /; Path=\//]) assert.match(device, attr);
+  // a flood from the same host, a new X-Forwarded-For each time: it is ONE client (the socket), so after 5 failures
+  // every further attempt from it is 429, whatever address it claims
+  for (let i = 0; i < 5; i++) assert.equal((await loginForm(`wrong-${i}`, `10.7.1.${i}`)).status, 303);
+  assert.equal((await loginForm("wrong-x", "10.7.2.2")).status, 429, "a spoofed X-Forwarded-For made a new client");
+  assert.equal((await loginForm("live-test-password-1", "10.7.2.3")).status, 429, "the host without its device cookie");
+  // the owner's device (same host) is keyed by its device cookie: it signs in, and gets a rotated device cookie
+  const owner = await raw("/api/login", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "10.7.3.3",
+      origin: `http://127.0.0.1:${DASH_PORT}`, cookie: device.split(";")[0],
+    },
+    body: new URLSearchParams({ password: "live-test-password-1" }).toString(),
+  });
+  assert.equal(owner.status, 303);
+  assert.equal(owner.headers.get("location"), "/");
+  const rotated = owner.headers.getSetCookie().find((c) => c.startsWith("__Host-zbm_dashboard_device="));
+  assert.ok(rotated && rotated.split(";")[0] !== device.split(";")[0], "the device cookie was not rotated");
   await stopDashboard();
 });

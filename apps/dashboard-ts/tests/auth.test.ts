@@ -10,15 +10,29 @@ import assert from "node:assert/strict";
 
 import {
   authConfig,
+  cookieValue,
+  DEVICE_COOKIE,
+  DEVICE_TTL_S,
+  deviceCookie,
   hashPassword,
+  issueDevice,
   issueSession,
+  verifyDevice,
   parsePasswordHash,
   sessionCookie,
   verifyPassword,
   verifySession,
   DEFAULT_TTL_S,
 } from "../src/lib/auth.ts";
-import { clientKey, FailureLimiter, sameOrigin, ThrottleQueueFull } from "../src/lib/rate-limit.ts";
+import {
+  clientKey,
+  FailureLimiter,
+  PEER_HEADER,
+  PEER_HEADER_ENV,
+  sameOrigin,
+  ThrottleQueueFull,
+  trustedHops,
+} from "../src/lib/rate-limit.ts";
 import { ledgerCacheMs, loadRecordedFindingsCached, resetLedgerCacheForTests, DEFAULT_LEDGER_CACHE_MS } from "../src/lib/api.ts";
 
 const SECRET = "unit-test-session-secret-0123456789abcdef";
@@ -116,8 +130,12 @@ test("login limiter: per-client reservations are atomic (M-1); the global budget
   assert.equal(peak, 1, "checks were not serialised past the global budget");
   t += 1000;
   assert.equal(lim.globalSpent(), false);
+  // AEGIS A-4: X-Forwarded-For counts only with trusted hops, from the right; never the client's own first entry
   const h = new Headers({ "x-forwarded-for": " 203.0.113.9 , 10.0.0.1" });
-  assert.equal(clientKey(h), "203.0.113.9");
+  assert.equal(clientKey(h, 1), "10.0.0.1");
+  assert.equal(clientKey(h, 2), "203.0.113.9");
+  assert.equal(clientKey(h, 3), "unknown");
+  assert.equal(clientKey(h), "unknown", "X-Forwarded-For trusted without DASHBOARD_TRUSTED_PROXY_HOPS");
   assert.equal(clientKey(new Headers()), "unknown");
 });
 
@@ -144,7 +162,7 @@ test("Wave F M-3: the serialised login queue is bounded (429 past it) and a clea
     assert.ok(!("retryAfterS" in r) && r.clean === false, "a client with a failure is not clean");
     return lim.throttled(guess(k), r.clean);
   });
-  assert.deepEqual(lim.queued(), [3, 0]);
+  assert.deepEqual(lim.queued(), [3, 0, 0]);
   // a fourth guess from the flood is refused at once, before any check (it is not a guess)
   await assert.rejects(lim.throttled(guess("f5"), false), ThrottleQueueFull);
   assert.ok(!order.includes("f5"));
@@ -156,7 +174,7 @@ test("Wave F M-3: the serialised login queue is bounded (429 past it) and a clea
     order.push("owner");
     return true;
   }, owner.clean).then((v) => (ownerOk = v));
-  assert.deepEqual(lim.queued(), [3, 1]);
+  assert.deepEqual(lim.queued(), [3, 1, 0]);
   // a second clean client finds the clean lane full and the queue full: refused too (bounded either way)
   const other = lim.reserve("fresh");
   assert.ok(!("retryAfterS" in other) && other.clean);
@@ -166,12 +184,62 @@ test("Wave F M-3: the serialised login queue is bounded (429 past it) and a clea
   await Promise.all([running, ...queued, ownerDone]);
   assert.equal(ownerOk, true);
   assert.deepEqual(order, ["f1", "owner", "f2", "f3", "f4"], "the owner waited behind the flood");
-  assert.deepEqual(lim.queued(), [0, 0]);
+  assert.deepEqual(lim.queued(), [0, 0, 0]);
   // the per-client limit is unchanged: f2 now holds 2 reservations (1 failure + 1 still unreleased guess)
   const again = Array.from({ length: 4 }, () => lim.reserve("f2"));
   assert.ok("retryAfterS" in again[3], "the per-client limit no longer applies");
   // with the queue drained, the next check runs at once
   assert.equal(await lim.throttled(async () => "now", false), "now");
+});
+
+test("AEGIS A-4: the client key is never the client's X-Forwarded-For; a known device has a lane no flood can take", async () => {
+  // the peer header counts only when scripts/serve.mjs set it (its env flag); spoofed X-Forwarded-For never does
+  const spoof = (xff: string) => new Headers({ "x-forwarded-for": xff, [PEER_HEADER]: "198.51.100.7" });
+  assert.equal(clientKey(spoof("10.9.0.1"), 0, { [PEER_HEADER_ENV]: "1" }), "peer:198.51.100.7");
+  assert.equal(clientKey(spoof("10.9.0.2"), 0, { [PEER_HEADER_ENV]: "1" }), "peer:198.51.100.7", "rotating XFF made a new client");
+  assert.equal(clientKey(spoof("10.9.0.3"), 0, {}), "unknown", "a client-sent peer header was trusted");
+  assert.equal(trustedHops({ DASHBOARD_TRUSTED_PROXY_HOPS: "2" }), 2);
+  for (const bad of ["", "0", "6", "1.5", "x", " -1"]) assert.equal(trustedHops({ DASHBOARD_TRUSTED_PROXY_HOPS: bad }), 0, bad);
+  // rotating XFF from one host: one key, so its 6th guess is refused like any other client's
+  const lim = new FailureLimiter({ windowMs: 1000, perKey: 5, global: 2, maxKeys: 100, maxQueued: 1, cleanSlots: 1, deviceSlots: 1 }, () => 0);
+  for (let i = 0; i < 5; i++) {
+    const k = clientKey(spoof(`10.8.0.${i}`), 0, { [PEER_HEADER_ENV]: "1" });
+    assert.ok(!("retryAfterS" in lim.reserve(k)));
+    lim.fail();
+  }
+  assert.ok("retryAfterS" in lim.reserve(clientKey(spoof("10.8.9.9"), 0, { [PEER_HEADER_ENV]: "1" })));
+  // the device cookie: signed, expiring, bound to the current key
+  const AUTH = await env();
+  const cfg = ok(authConfig(AUTH));
+  const dev = issueDevice(cfg, 1000);
+  const id = verifyDevice(cfg, dev, 1001);
+  assert.ok(id && id.length >= 16);
+  assert.notEqual(verifyDevice(cfg, issueDevice(cfg, 1000), 1001), id, "a re-issued device cookie kept its id");
+  assert.equal(verifyDevice(cfg, dev.slice(0, -2) + "AA", 1001), null, "tampered");
+  assert.equal(verifyDevice(cfg, dev, 1000 + DEVICE_TTL_S), null, "expired");
+  const other = ok(authConfig({ ...AUTH, DASHBOARD_SESSION_SECRET: "another-secret-another-secret-0123456789" }));
+  assert.equal(verifyDevice(other, dev, 1001), null, "a rotated secret kept the device cookie");
+  assert.equal(verifyDevice(cfg, issueSession(cfg, 1000), 1001), null, "a session cookie passed as a device cookie");
+  assert.match(deviceCookie(dev), /^__Host-zbm_dashboard_device=.*; HttpOnly; Secure; SameSite=Strict$/);
+  assert.equal(cookieValue(`a=1; ${DEVICE_COOKIE}=${dev}; b=2`, DEVICE_COOKIE), dev);
+  // the global budget spent, one check running, the general queue and the clean lane full of flood: the known
+  // device still gets its slot and goes next
+  const order: string[] = [];
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  const run = (name: string, wait?: Promise<void>) => async () => {
+    if (wait) await wait;
+    order.push(name);
+    return true;
+  };
+  const running = lim.throttled(run("first", held), "general");
+  const flood = [lim.throttled(run("flood-general"), "general"), lim.throttled(run("flood-fresh"), "clean")];
+  await assert.rejects(lim.throttled(run("flood-3"), "clean"), ThrottleQueueFull);
+  const owner = lim.throttled(run("device"), "device");
+  assert.deepEqual(lim.queued(), [1, 1, 1]);
+  release();
+  await Promise.all([running, ...flood, owner]);
+  assert.deepEqual(order, ["first", "device", "flood-fresh", "flood-general"]);
 });
 
 test("same-origin check: Origin required, scheme and host must both match (L-1/L-2)", () => {
