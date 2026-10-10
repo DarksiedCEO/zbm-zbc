@@ -24,20 +24,13 @@ from typing import Optional
 
 from config import CAPABILITY_SWITCHES, PROVIDER_SWITCHES, TENANT_ID
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
+from primitives import Killed
 from reasons import R
 
 TENANT_KINDS = ("own", "client")
 DOMAIN = re.compile(r"(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 DOMAINS_MAX = 20
 OWN_TENANT = "zbm"
-
-
-class Killed(Exception):
-    """Raised inside a run when a kill switch is engaged; the agent's outcome becomes KILLED."""
-
-    def __init__(self, code: str):
-        super().__init__(code)
-        self.code = code
 
 
 def valid_domain(d) -> bool:

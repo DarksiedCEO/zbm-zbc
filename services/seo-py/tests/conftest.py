@@ -60,3 +60,14 @@ def _no_network(request, monkeypatch):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "local_http: the test talks to an in-process HTTP fixture on 127.0.0.1")
+
+
+@pytest.fixture
+def srv():
+    """The in-process HTTP fixture server (tests using it are marked ``local_http``)."""
+    from fixture_server import FixtureServer
+    s = FixtureServer()
+    try:
+        yield s
+    finally:
+        s.close()

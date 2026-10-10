@@ -142,7 +142,7 @@ def test_kill_provider(h):
     assert h.svc.kill_code(provider="perplexity") == "KILLED_PROVIDER"
     assert h.svc.kill_code(provider="openai") is None
     g = h.svc.guard("zbm")
-    from svc_tenants import Killed
+    from primitives import Killed
     with pytest.raises(Killed):
         g(provider="perplexity")
     g(provider="openai")

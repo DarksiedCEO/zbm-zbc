@@ -76,7 +76,10 @@ class Ports:
 
     @classmethod
     def default(cls, settings=None) -> "Ports":
-        fetcher = None      # stage B wires the fetcher
+        fetcher = None
+        if settings is not None:
+            from primitives.fetch import Fetcher
+            fetcher = Fetcher.from_settings(settings)
         return cls(fetcher=fetcher, renderer=NotConnectedRenderer(),
                    engines={n: NotConnectedEngine(n) for n in ANSWER_ENGINES},
                    prompt_volume=NotConnectedSource("prompt_volume"),
