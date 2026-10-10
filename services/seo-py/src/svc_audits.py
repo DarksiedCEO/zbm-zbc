@@ -105,52 +105,62 @@ class AuditsMixin:
     # ------------------------------------------------------------------ audits
 
     def request_audit(self, actor: str, tid: str, body: dict, andre: bool) -> dict:
-        paths = body["paths"]
-        if len(paths) > self.settings.audit_max_pages:
-            raise Invalid(R("AUDIT_TOO_LARGE"))
-        if not paths or len(set(paths)) != len(paths) or any(
-                not _PATH_OK.fullmatch(p) or p.startswith("//") or "#" in p or "\\" in p for p in paths):
-            raise Invalid(R("PAGES_INVALID"))
+        _check_paths(body["paths"], self.settings.audit_max_pages)
         with self.lock:
             self._gate()
-            t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+            self._get(self.tenants, tid, "TENANT_NOT_FOUND")
             self.check_kill(tenant=tid, capability="audit", write=True)
             actor = "andre" if andre else actor
             rk = self.rk("audit", tid, body)
             prev = self._idem(actor, rk, body)
             if prev:
                 return self.audit_view(tid, prev[1])
-            if body["domain"] not in t["domains"]:
-                raise Forbidden(R("DOMAIN_NOT_AUTHORIZED"))
-            if t["kind"] == "client":
-                if not body.get("invoice_id"):
-                    raise Conflict(R("INVOICE_REQUIRED"))
-                if not andre:
-                    raise Forbidden(R("ANDRE_APPROVAL_REQUIRED"))
-            elif body.get("invoice_id"):
-                raise Invalid(R("INVOICE_NOT_FOR_OWN_TENANT"))
-            ps = None
-            if body.get("prompt_set_id"):
-                p = self.prompt_sets.get(body["prompt_set_id"])
-                if p is None or p["tenant_id"] != tid:
-                    raise NotFound(R("PROMPT_SET_NOT_FOUND"))
-                ps = {"prompt_set_id": p["prompt_set_id"], **p["versions"][str(p["current"])]}
-            if any(a["tenant_id"] == tid and a["audit_id"] in self.running_audits for a in self.audits.values()):
-                raise Conflict(R("AUDIT_RUNNING"))
             aid = derived_id("aud", tid, actor, rk)
-            data = {"audit_id": aid, "tenant_id": tid, "tenant_kind": t["kind"], "domain": body["domain"],
-                    "scheme": body["scheme"], "paths": list(paths), "invoice_id": body.get("invoice_id"),
-                    "prompt_set": None if ps is None else {"prompt_set_id": ps["prompt_set_id"],
-                                                           "version": ps["version"], "sha256": ps["sha256"]},
-                    "andre_approved": bool(andre)}
-            ev = [("audit_requested", f"audit:{aid}",
-                   {"audit_id": aid, "tenant_id": tid, "kind": t["kind"], "domain_sha256": sha(body["domain"]),
-                    "paths_sha256": sha(paths), "invoice_id": body.get("invoice_id")}, (actor, rk))]
-            if andre:
-                ev.append(("audit_approved_by_andre", f"audit:{aid}",
-                           {"audit_id": aid, "invoice_id": body.get("invoice_id")}, ("andre", rk)))
-            self._commit("audit_requested", self._req(data, actor, rk, body, aid), actor, evidence=ev)
-            self.running_audits.add(aid)
+            ps = self._open_audit(actor, tid, rk, body, andre, aid, request=body)
+        return self._execute_audit(aid, tid, body, ps)
+
+    def _open_audit(self, actor: str, tid: str, rk: str, body: dict, andre: bool, aid: str,
+                    request: Optional[dict] = None, schedule: Optional[dict] = None) -> Optional[dict]:
+        """Under the lock: the authorisation rules, then ``audit_requested`` record-first. Returns the prompt set."""
+        t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+        if body["domain"] not in t["domains"]:
+            raise Forbidden(R("DOMAIN_NOT_AUTHORIZED"))
+        if t["kind"] == "client":
+            if not body.get("invoice_id"):
+                raise Conflict(R("INVOICE_REQUIRED"))
+            if not andre:
+                raise Forbidden(R("ANDRE_APPROVAL_REQUIRED"))
+        elif body.get("invoice_id"):
+            raise Invalid(R("INVOICE_NOT_FOR_OWN_TENANT"))
+        ps = None
+        if body.get("prompt_set_id"):
+            p = self.prompt_sets.get(body["prompt_set_id"])
+            if p is None or p["tenant_id"] != tid:
+                raise NotFound(R("PROMPT_SET_NOT_FOUND"))
+            ps = {"prompt_set_id": p["prompt_set_id"], **p["versions"][str(p["current"])]}
+        if any(a["tenant_id"] == tid and a["audit_id"] in self.running_audits for a in self.audits.values()):
+            raise Conflict(R("AUDIT_RUNNING"))
+        paths = list(body["paths"])
+        data = {"audit_id": aid, "tenant_id": tid, "tenant_kind": t["kind"], "domain": body["domain"],
+                "scheme": body["scheme"], "paths": paths, "invoice_id": body.get("invoice_id"),
+                "prompt_set": None if ps is None else {"prompt_set_id": ps["prompt_set_id"],
+                                                       "version": ps["version"], "sha256": ps["sha256"]},
+                "andre_approved": bool(andre)}
+        if schedule is not None:
+            data.update(schedule_id=schedule["schedule_id"], slot=schedule["slot"])
+        ev = [("audit_requested", f"audit:{aid}",
+               {"audit_id": aid, "tenant_id": tid, "kind": t["kind"], "domain_sha256": sha(body["domain"]),
+                "paths_sha256": sha(paths), "invoice_id": body.get("invoice_id"),
+                "schedule_id": None if schedule is None else schedule["schedule_id"]}, (actor, rk))]
+        if andre and schedule is None:
+            ev.append(("audit_approved_by_andre", f"audit:{aid}",
+                       {"audit_id": aid, "invoice_id": body.get("invoice_id")}, ("andre", rk)))
+        line = self._req(data, actor, rk, request, aid) if request is not None else {**data, "actor": actor}
+        self._commit("audit_requested", line, actor, evidence=ev)
+        self.running_audits.add(aid)
+        return ps
+
+    def _execute_audit(self, aid: str, tid: str, body: dict, ps: Optional[dict]) -> dict:
         try:
             report = self._run_audit(aid, tid, body, ps)
             with self.lock:
@@ -178,6 +188,9 @@ class AuditsMixin:
                                                                                   "request_sha", "_obj", "evidence")},
                                       "status": "running", "requested_at": at, "requested_by": d["actor"],
                                       "completed_at": None, "report": None, "report_sha256": None}
+        if d.get("schedule_id"):
+            self.schedules[d["schedule_id"]]["slots"][str(d["slot"])] = {"status": "requested",
+                                                                         "audit_id": d["audit_id"], "at": at}
 
     def _a_audit_completed(self, d, at):
         self.audits[d["audit_id"]].update(status="completed", completed_at=at, report=d["report"],
@@ -282,6 +295,14 @@ class AuditsMixin:
                              evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid}, ("interrupted", aid)))
                 n += 1
         return {"interrupted": n}
+
+
+def _check_paths(paths: list, max_pages: int) -> None:
+    if len(paths) > max_pages:
+        raise Invalid(R("AUDIT_TOO_LARGE"))
+    if not paths or len(set(paths)) != len(paths) or any(
+            not _PATH_OK.fullmatch(p) or p.startswith("//") or "#" in p or "\\" in p for p in paths):
+        raise Invalid(R("PAGES_INVALID"))
 
 
 def _skipped(agent: str, task: str, selene_env: dict) -> dict:

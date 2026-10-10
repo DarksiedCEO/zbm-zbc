@@ -37,12 +37,13 @@ from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_
 from svc_audits import AuditsMixin
 from svc_entity import EntityMixin
 from svc_logs import LogsMixin
+from svc_schedules import SchedulesMixin
 from svc_tenants import TenantsMixin
 
 INTERNAL = "seo"
 INTEGRITY_RETRY_S = 15
 FORCED_MIN_S = 10
-JOBS = ("integrity", "interrupted-audits")
+JOBS = ("integrity", "interrupted-audits", "schedule-tick")
 
 
 def _parse_line(line: bytes) -> dict:
@@ -64,7 +65,7 @@ def request_sha(body: dict) -> str:
     return payload_sha256(body)
 
 
-class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin):
+class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin, SchedulesMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None):
         import ports as ports_mod
@@ -83,6 +84,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin):
         self.audits: dict[str, dict] = {}
         self.prompt_sets: dict[str, dict] = {}
         self.log_ingests: dict[str, dict] = {}
+        self.schedules: dict[str, dict] = {}
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.running_audits: set = set()               # audits this process is running now
@@ -480,7 +482,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin):
                 prev = self._idem("scheduler", rk, body)
                 if prev:
                     return {"job": name, "already_ran": True, **(prev[1] or {})}
-            summary = self.mark_interrupted_audits()
+            summary = self.schedule_tick() if name == "schedule-tick" else self.mark_interrupted_audits()
             with self.lock:
                 self._gate()
                 self._commit("job_ran", self._req({"job": name}, "scheduler", rk, body, summary), "scheduler")

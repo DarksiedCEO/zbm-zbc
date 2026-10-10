@@ -75,6 +75,21 @@ class LogChunk(Strict):
     last: StrictBool = False
 
 
+class ScheduleCreate(Strict):
+    request_id: RequestId
+    domain: Annotated[StrictStr, Field(pattern=DOMAIN)]
+    scheme: Literal["https", "http"] = "https"
+    paths: Annotated[list[Annotated[StrictStr, Field(pattern=PATH)]], Field(max_length=25)] = ["/"]
+    every_days: Annotated[StrictInt, Field(ge=1, le=90)]
+    invoice_id: Optional[Annotated[StrictStr, Field(pattern=INVOICE)]] = None
+    prompt_set_id: Optional[Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]] = None
+
+
+class ScheduleStatus(Strict):
+    request_id: RequestId
+    status: Literal["active", "paused"]
+
+
 class PromptSetCreate(Strict):
     request_id: RequestId
     name: Annotated[StrictStr, Field(pattern=r"^[a-z0-9][a-z0-9_-]{1,63}$")]

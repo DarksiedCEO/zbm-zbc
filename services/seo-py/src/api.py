@@ -493,6 +493,26 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     def log_ingest(iid: str, scope: tuple = Depends(scoped(*LOG_CALLERS, "compliance_38"))) -> dict:
         return svc.log_ingest_view(scope[1], _id(iid))
 
+    # ------------------------------------------------------------------ scheduled re-audits (Wave 2)
+
+    @app.post(P + "/tenants/{tid}/schedules", dependencies=auth, status_code=201)
+    def create_schedule(request: Request, req: dict = Depends(body(m.ScheduleCreate)),
+                        scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        return svc.create_schedule(scope[0], scope[1], req, andre=andre_if_presented(request))
+
+    @app.post(P + "/tenants/{tid}/schedules/{sid}/status", dependencies=auth)
+    def schedule_status(request: Request, sid: str, req: dict = Depends(body(m.ScheduleStatus)),
+                        scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        return svc.set_schedule_status(scope[0], scope[1], _id(sid), req, andre=andre_if_presented(request))
+
+    @app.get(P + "/tenants/{tid}/schedules", dependencies=auth)
+    def schedules(scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "compliance_38"))) -> list:
+        return svc.schedules_view(scope[1])
+
+    @app.get(P + "/tenants/{tid}/schedules/{sid}", dependencies=auth)
+    def schedule(sid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "compliance_38"))) -> dict:
+        return svc.schedule_view(scope[1], _id(sid))
+
     # ------------------------------------------------------------------ jobs and audit
 
     @app.post(P + "/jobs/{name}/run", dependencies=auth)
