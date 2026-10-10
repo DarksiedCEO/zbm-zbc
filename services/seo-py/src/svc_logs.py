@@ -134,6 +134,8 @@ class LogsMixin:
             self._gate()
             g = self._ingest(tid, iid)
             self.check_kill(tenant=tid, capability="logs", write=True)
+            if self.agent_blocked("selene"):
+                raise Forbidden(R("AGENT_RESTRICTED"))
             rk = self.rk("log_finish", iid, body)
             if self._idem(actor, rk, body):
                 return self.log_ingest_view(tid, iid)

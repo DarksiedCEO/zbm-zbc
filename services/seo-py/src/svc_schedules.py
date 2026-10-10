@@ -184,6 +184,8 @@ class SchedulesMixin:
 
     def _record_drift(self, sid: str, aid: str) -> bool:
         with self.lock:
+            if self.agent_blocked("osei"):              # the drift comparison is Osei's
+                return False
             s = self.schedules[sid]
             done = [x["audit_id"] for x in s["slots"].values() if x.get("audit_id")
                     and self.audits[x["audit_id"]]["status"] == "completed"]

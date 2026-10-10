@@ -90,6 +90,13 @@ class ScheduleStatus(Strict):
     status: Literal["active", "paused"]
 
 
+class AgentMove(Strict):
+    request_id: RequestId
+    to: Literal["active", "watch", "retrain", "restricted", "retired"]
+    expected_state: Literal["active", "watch", "retrain", "restricted", "retired"]
+    reason: Annotated[StrictStr, Field(pattern=r"^[A-Z_]{3,40}$")]
+
+
 class PromptSetCreate(Strict):
     request_id: RequestId
     name: Annotated[StrictStr, Field(pattern=r"^[a-z0-9][a-z0-9_-]{1,63}$")]

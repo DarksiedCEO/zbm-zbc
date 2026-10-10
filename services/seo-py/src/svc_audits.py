@@ -27,6 +27,7 @@ from clock import iso
 from envelope import CAPABILITIES, DATA_CLASSES, DECISIONS, EFFECT_CLASSES, envelope, sha, worst_outcome
 from errors import Conflict, Forbidden, Invalid, NotFound
 from ledger import derived_id
+from primitives import Killed
 from primitives import diff as diff_mod
 from primitives.parse import SCHEMA_RULES_VERSION
 from reasons import R
@@ -212,15 +213,19 @@ class AuditsMixin:
             envs.append(envelope("selene", "crawlability", "NOT_CONNECTED", [], methodology="no fetcher is wired",
                                  not_connected={"fetch"}, reason="the web fetcher port is not connected"))
         else:
-            s_env, pages = selene.run(ctx)
+            s_env = _step(ctx, "selene", "crawlability", lambda: selene.run(ctx))
+            if isinstance(s_env, tuple):
+                s_env, pages = s_env
             envs.append(s_env)
-            envs.append(delia.run(ctx) if ctx.robots is not None else _skipped("delia", "sitemaps_and_llms_txt",
-                                                                              s_env))
-            envs.append(roman.run(ctx, pages))
-        envs.append(entity_check.run(ctx, pages, self.entity_for_tenant(tid)))
-        envs.append(probes.run_callum(self.ports.engines, ps, body["domain"], self.settings.probe_samples,
-                                      ctx.guard, o))
-        envs.append(probes.run_naomi(self.ports.prompt_volume, ps))
+            envs.append(_step(ctx, "delia", "sitemaps_and_llms_txt", lambda: delia.run(ctx))
+                        if ctx.robots is not None else _skipped("delia", "sitemaps_and_llms_txt", s_env))
+            envs.append(_step(ctx, "roman", "content_structure", lambda: roman.run(ctx, pages)))
+        envs.append(_step(ctx, "entity_check", "on_site_entity_consistency",
+                          lambda: entity_check.run(ctx, pages, self.entity_for_tenant(tid))))
+        envs.append(_step(ctx, "callum", "citation_sources",
+                          lambda: probes.run_callum(self.ports.engines, ps, body["domain"],
+                                                    self.settings.probe_samples, ctx.guard, o)))
+        envs.append(_step(ctx, "naomi", "prompt_volume", lambda: probes.run_naomi(self.ports.prompt_volume, ps)))
         return self._report(aid, tid, body, ps, envs, o, started, pages)
 
     def _report(self, aid, tid, body, ps, envs, o, started, pages) -> dict:
@@ -295,6 +300,18 @@ class AuditsMixin:
                              evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid}, ("interrupted", aid)))
                 n += 1
         return {"interrupted": n}
+
+
+def _step(ctx, agent: str, task: str, fn):
+    """The run guard before each agent (Wave 2, department manager): a restricted or retired agent does not run."""
+    try:
+        ctx.guard(agent=agent)
+    except Killed as k:
+        if k.code == "AGENT_RESTRICTED":
+            return envelope(agent, task, "RESTRICTED", [], reason="AGENT_RESTRICTED",
+                            methodology="not run: the department manager has restricted this agent")
+        return envelope(agent, task, "KILLED", [], reason=k.code, methodology="not run: a kill switch is engaged")
+    return fn()
 
 
 def _check_paths(paths: list, max_pages: int) -> None:

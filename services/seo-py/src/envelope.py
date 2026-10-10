@@ -23,7 +23,8 @@ import hashlib
 import json
 from typing import Any, Iterable, Optional
 
-OUTCOMES = ("OK", "PARTIAL", "NOT_CONNECTED", "BLOCKED", "FAILED", "KILLED", "QUARANTINED", "INSUFFICIENT_EVIDENCE")
+OUTCOMES = ("OK", "PARTIAL", "NOT_CONNECTED", "BLOCKED", "FAILED", "KILLED", "QUARANTINED", "INSUFFICIENT_EVIDENCE",
+            "RESTRICTED")
 DATA_CLASSES = ("measured", "estimated", "modeled", "inferred", "unknown")
 EFFECT_CLASSES = ("observed", "attributed", "incremental", "causally_supported", "financially_verified")
 DECISIONS = ("ACT", "TEST", "WATCH", "DEFER", "STOP", "DO_NOT_BUILD", "DO_NOT_PUBLISH", "DO_NOT_SPEND",
@@ -74,7 +75,7 @@ def envelope(agent: str, task: str, outcome: str, findings: Iterable[dict] = (),
     if outcome not in OUTCOMES:
         raise ValueError("outcome outside the closed vocabulary")
     fl = list(findings)
-    if outcome in ("NOT_CONNECTED", "KILLED", "QUARANTINED") and fl:
+    if outcome in ("NOT_CONNECTED", "KILLED", "QUARANTINED", "RESTRICTED") and fl:
         raise ValueError("an agent that observed nothing reports no findings")
     return {"agent": agent, "task": task, "outcome": outcome, "reason": reason,
             "findings": fl[:FINDINGS_MAX], "findings_dropped": max(0, len(fl) - FINDINGS_MAX),
@@ -92,9 +93,9 @@ def worst_outcome(outcomes: Iterable[str]) -> str:
         return "KILLED"
     if s == {"OK"}:
         return "OK"
-    if s & {"OK", "PARTIAL"} and s <= {"OK", "PARTIAL", "NOT_CONNECTED", "INSUFFICIENT_EVIDENCE"}:
+    if s & {"OK", "PARTIAL"} and s <= {"OK", "PARTIAL", "NOT_CONNECTED", "INSUFFICIENT_EVIDENCE", "RESTRICTED"}:
         return "PARTIAL"
-    for o in ("QUARANTINED", "FAILED", "BLOCKED", "INSUFFICIENT_EVIDENCE", "NOT_CONNECTED", "PARTIAL"):
+    for o in ("QUARANTINED", "FAILED", "BLOCKED", "INSUFFICIENT_EVIDENCE", "RESTRICTED", "NOT_CONNECTED", "PARTIAL"):
         if o in s:
             return o
     return "INSUFFICIENT_EVIDENCE"

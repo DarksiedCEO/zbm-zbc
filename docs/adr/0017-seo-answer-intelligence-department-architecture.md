@@ -154,6 +154,60 @@ credentials for providers are a requirement for whichever adapter is built first
 - Brotli and zstd responses are refused (`UNSUPPORTED_ENCODING`) rather than decoded; the crawler never advertises
   them, but a misconfigured server sending them anyway cannot be read.
 
+## Wave 2 (decision-free parts; built Oct 10 2026 on `seo-dept-02-wave1`)
+
+W2-1. **Crawler access from first-party logs** (P2, Selene's `log_access` task; `agents/logs.py`, `svc_logs.py`).
+   A client (hub with its tenant token) or the console uploads an access log for one of the tenant's registered
+   domains in base64 chunks that end on a line boundary (Common, Combined or JSON lines; ≤ 90,000 bytes a chunk,
+   `SEO_LOG_MAX_BYTES` an ingest). Each chunk is parsed in memory and only its aggregate delta is committed
+   record-first, idempotent by request id and sequence. Lines over 8 KiB, invalid UTF-8, malformed lines, bad IPs and
+   bad statuses are quarantined and counted. Requests are attributed to bot families by User-Agent token (versioned
+   bot list, now `2026-10-10.1` with DNS suffixes). **A User-Agent is a claim:** a hit is `verified` or `spoofed`
+   only through the bot-verification port (reverse DNS plus forward-confirm against the operator's documented host
+   names: Googlebot, Bingbot, Applebot), which is NOT_CONNECTED unless `SEO_BOT_VERIFY_DNS=1`; everything else stays
+   `claimed`. IP-range verification (how OpenAI, Anthropic, Perplexity and Common Crawl identify their crawlers) is a
+   NOT_CONNECTED port. The report: per-family volume, status mix, distinct client IPs, verified / spoofed / claimed,
+   robots-disallowed hits (today's robots.txt, fetched through the guarded fetcher), and important URLs (the latest
+   audit's sitemap sample of that domain) that no search crawler requested — missing, never invented, when there is
+   no audit.
+W2-2. **Log retention rule.** Raw lines, raw IPs and User-Agent strings are never stored. Client IPs exist only as
+   HMAC-SHA256 under `SEO_LOG_HASH_KEY_FILE` (required with a data directory), truncated; the operator rotates the key
+   every retention period, after which stored hashes cannot be linked to any IP (the log is append-only, so this is
+   the purge). An ingest older than `SEO_LOG_RETENTION_DAYS` (default 90) is served as totals only (`expired`).
+   Paths are kept without query strings.
+W2-3. **Search-truth drift** (`agents/drift.py`, Osei). Two completed audits of the same tenant and target are
+   compared finding by finding; every change gets exactly one class by the first rule whose evidence holds:
+   R1 TOOL_FAILURE, R2 MODEL_DRIFT, R3 SAMPLING_NOISE, R4 SURFACE_DRIFT, R5 REAL_CHANGE, R6 MEASUREMENT_ERROR,
+   R7 UNKNOWN (rules and their evidence in the module docstring, rules version recorded in every report). Reports
+   now carry per-page content fingerprints, rule versions and the robots.txt hash so the rules have evidence.
+W2-4. **Scheduled re-audits.** One audit per schedule per slot, the audit id derived from (schedule, slot): duplicate,
+   replayed and post-restart ticks are no-ops and a slot is never run twice; missed slots are not back-filled. A paying
+   client's schedule needs Andre and a Finance (31) invoice id at creation (one invoice id per schedule — see the
+   pending default below); resuming a paused client schedule is Andre's. Budget: `SEO_SCHEDULE_BUDGET_RUNS` per tenant
+   per `SEO_SCHEDULE_PERIOD_DAYS` window (over-budget slots recorded `BUDGET_EXHAUSTED`). Kill switches leave a due
+   slot for the next tick; a switch engaged mid-run interrupts the run. Consecutive completed runs get a recorded drift
+   report.
+W2-5. **Department manager** (`svc_manager.py`). Work queues per agent (audits running, schedule slots due, open
+   log ingests), scorecards computed only from recorded runs (runs, outcomes, findings produced, findings confirmed
+   and overturned from recorded drift reports, NOT_CONNECTED and failure rates; null over zero runs), and the
+   lifecycle active → watch → retrain → restricted → retired. Moves into or out of `restricted`, and into `retired`
+   (terminal), are Andre's alone; each move is recorded with its reason code and the scorecard's SHA-256. A
+   restricted or retired agent is refused by the run guard (outcome `RESTRICTED`, no findings; Selene's log reports
+   refused 403 `AGENT_RESTRICTED`); restricting is allowed under the write switch.
+W2-6. New capability switches `logs` and `schedules`; the run guard of a log ingest checks `logs`, of an audit
+   `audit`.
+
+Founder-pending defaults added by Wave 2: (9) a paying client's schedule carries ONE invoice id (the managed-tier
+subscription invoice) for all its runs, bounded by the budget cap — per-run invoicing is a founder decision;
+(10) the scheduler does not back-fill missed slots; (11) the drift rules (R1–R7) are this service's, versioned, and
+not calibrated against any engine.
+
+Wave 2 limitations: the log covers only what the client uploads; a User-Agent claim from a family without DNS
+verification can never be confirmed until the IP-range port is built; budget and verification caches reset with the
+process (a restarted ingest re-verifies up to its budget); a scheduled slot whose run was interrupted is consumed,
+not retried; SURFACE_DRIFT says only that the intervals separated with the same prompts and models, never why; the
+department manager's "confirmed" means "persisted in the next run", not "verified by a person".
+
 ## Unlock list
 
 Answer-engine adapters with scoped, short-lived credentials; a renderer; Search Console and Bing Webmaster; a

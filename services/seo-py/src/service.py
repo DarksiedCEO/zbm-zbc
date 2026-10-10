@@ -37,6 +37,7 @@ from store import DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_
 from svc_audits import AuditsMixin
 from svc_entity import EntityMixin
 from svc_logs import LogsMixin
+from svc_manager import ManagerMixin
 from svc_schedules import SchedulesMixin
 from svc_tenants import TenantsMixin
 
@@ -65,7 +66,7 @@ def request_sha(body: dict) -> str:
     return payload_sha256(body)
 
 
-class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin, SchedulesMixin):
+class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin, SchedulesMixin, ManagerMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None):
         import ports as ports_mod
@@ -85,6 +86,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin, SchedulesMix
         self.prompt_sets: dict[str, dict] = {}
         self.log_ingests: dict[str, dict] = {}
         self.schedules: dict[str, dict] = {}
+        self.agent_states: dict[str, dict] = {}
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.running_audits: set = set()               # audits this process is running now

@@ -513,6 +513,17 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     def schedule(sid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "compliance_38"))) -> dict:
         return svc.schedule_view(scope[1], _id(sid))
 
+    # ------------------------------------------------------------------ department manager (Wave 2)
+
+    @app.get(P + "/department", dependencies=auth)
+    def department(who: str = Depends(caller("dashboard", "compliance_38"))) -> dict:
+        return svc.department_view()
+
+    @app.post(P + "/agents/{agent}/lifecycle", dependencies=auth)
+    def agent_lifecycle(request: Request, agent: str, req: dict = Depends(body(m.AgentMove)),
+                        who: str = Depends(dashboard)) -> dict:
+        return svc.move_agent(agent, req, andre=andre_if_presented(request))
+
     # ------------------------------------------------------------------ jobs and audit
 
     @app.post(P + "/jobs/{name}/run", dependencies=auth)

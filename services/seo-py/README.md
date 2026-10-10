@@ -11,6 +11,11 @@ sources (Search Console, Bing Webmaster Tools, logs, analytics, CRM), Zero-Day, 
 clientfix are `NOT_CONNECTED` ports: they answer `NOT_CONNECTED`, never invented data, and setting any of their
 switches refuses start. This service never charges anyone and never calls Stripe.
 
+**Wave 2 (decision-free parts):** first-party log ingests (crawler access, verified / spoofed / claimed bots,
+keyed-hash IPs only), search-truth drift between audits, scheduled re-audits with drift reports, and the department
+manager (queues, scorecards, lifecycle). The bot-verification port is NOT_CONNECTED unless `SEO_BOT_VERIFY_DNS=1`;
+IP-range verification is NOT_CONNECTED. See ADR 0017, section "Wave 2".
+
 ## Run
 
 ```bash
@@ -78,7 +83,11 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 | `POST /tenants/{tid}/prompt-sets`, `GET .../{psid}` | dashboard, seo_agent | versioned prompt sets |
 | `POST /tenants/{tid}/audits` | dashboard, seo_agent (+ Andre for clients) | run an audit; `invoice_id` (Finance 31) required for a client tenant |
 | `GET /tenants/{tid}/audits[/{aid}]` | scoped (finance_31 gets status only) | audits and reports |
-| `POST /jobs/{integrity,interrupted-audits}/run` | scheduler | integrity check; record interrupted runs |
+| `POST /tenants/{tid}/log-ingests`, `.../{iid}/chunks`, `.../{iid}/finish`; `GET` both | dashboard, seo_agent, hub (own tenant) | first-party log upload in line-aligned base64 chunks; Selene's `log_access` report (Wave 2) |
+| `GET /tenants/{tid}/audits/{aid}/drift?against={aid}` | scoped | search-truth drift between two completed audits (Wave 2) |
+| `POST /tenants/{tid}/schedules`, `.../{sid}/status`; `GET` both | dashboard, seo_agent (+ Andre for clients) | scheduled re-audits; drift report per consecutive pair (Wave 2) |
+| `GET /department`, `POST /agents/{agent}/lifecycle` | dashboard (+ Andre for restricted / retired), compliance_38 reads | work queues, scorecards, lifecycle (Wave 2) |
+| `POST /jobs/{integrity,interrupted-audits,schedule-tick}/run` | scheduler | integrity check; record interrupted runs; run due scheduled slots |
 | `GET /audit/{integrity,export,evidence}` | dashboard, compliance_38 | the R6-M1 evidence view: unanchored evidence = attempted, not done |
 
 ## Layout

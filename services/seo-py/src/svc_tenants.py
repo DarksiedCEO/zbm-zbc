@@ -92,7 +92,8 @@ class TenantsMixin:
     def guard(self, tenant: str, run: str = "audit"):
         """A callable a run checks before every outbound action (raises ``Killed``). It reads live state, so a switch
         engaged mid-run stops the run at its next step."""
-        def check(capability: Optional[str] = None, provider: Optional[str] = None) -> None:
+        def check(capability: Optional[str] = None, provider: Optional[str] = None,
+                  agent: Optional[str] = None) -> None:
             with self.lock:
                 # AEGIS M3: a run also stops for the audit capability and the write switch (its result could not be
                 # recorded), checked between steps and before every socket operation
@@ -100,6 +101,8 @@ class TenantsMixin:
                     or self.kill_code(capability=run)
                 if code is None and self._closed:
                     code = "SERVICE_CLOSED"
+                if code is None and agent is not None and self.agent_blocked(agent):
+                    code = "AGENT_RESTRICTED"
             if code is not None:
                 raise Killed(code)
         return check
