@@ -187,7 +187,9 @@ def test_robots_404_allows_and_5xx_disallows(srv):
 
 
 def test_robots_unreachable_disallows(srv):
-    f = srv.fetcher(resolver=srv.resolver({"gone.test": ["127.0.0.1"]}))
+    def down(request):
+        raise httpx.ConnectError("refused")
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=lambda h, p: ["93.184.216.34"], transport=httpx.MockTransport(down))
     assert f.fetch("http://gone.test/", robots_cache={}).state == "BLOCKED_BY_ROBOTS"
 
 

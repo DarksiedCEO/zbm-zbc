@@ -190,8 +190,10 @@ class Fetcher:
 
     # ------------------------------------------------------------------ one request (no redirects)
 
-    def _one(self, url: str, ua: str, deadline: float, accept: str) -> tuple[int, dict, Optional[bytes], str]:
-        scheme, host, port, path, addrs = self._target(url)
+    def _one(self, url: str, target: tuple, ua: str, deadline: float, accept: str
+             ) -> tuple[int, dict, Optional[bytes], str]:
+        """One request to the address ``target`` already vetted (resolved once per hop: no second answer is used)."""
+        scheme, host, port, path, addrs = target
         ip = addrs[0]
         lit = f"[{ip}]" if ":" in ip else ip
         default = (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
@@ -252,10 +254,11 @@ class Fetcher:
             for hop in range(self.max_redirects + 1):
                 if guard is not None:
                     guard(capability="fetch", provider="web")
+                target = self._target(current)            # the URL and its addresses first, robots second
                 if honor_robots and robots_cache is not None and not self._robots_allows(current, robots_cache,
                                                                                          guard):
                     raise _Refused("BLOCKED_BY_ROBOTS", f"robots.txt disallows this path for {PRODUCT_TOKEN}")
-                status, headers, body, _ = self._one(current, user_agent, deadline, accept)
+                status, headers, body, _ = self._one(current, target, user_agent, deadline, accept)
                 if 300 <= status < 400 and headers.get("location"):
                     nxt = urljoin(current, headers["location"])
                     res.redirects.append({"url": current, "status": status})

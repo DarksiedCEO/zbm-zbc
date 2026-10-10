@@ -10,6 +10,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 
+import httpx
+
 from primitives import fetch as fetch_mod
 
 NAMES = ("site.test", "other.test", "www.site.test", "competitor.test")
@@ -101,10 +103,15 @@ class FixtureServer:
         """Allow exactly the fixture's NAMED hosts on its port; everything else is judged by the production policy
         (so 127.0.0.1, localhost, [::1], 169.254.169.254, decimal spellings are refused as in production)."""
         def allow(host: str, ip: str, port: int) -> bool:
-            if host in NAMES and ip == "127.0.0.1" and port == self.port:
+            if host in NAMES and ip == "127.0.0.1" and port in (self.port, 80):
                 return True
             return fetch_mod.default_policy(host, ip, port)
         return allow
+
+    def site_fetcher(self, **kw) -> fetch_mod.Fetcher:
+        """A fetcher for the audit-level tests: ``http://site.test/`` (port 80) reaches this server — a test-only
+        transport rewrites the port of a request to the CHECKED loopback address. Production code is unchanged."""
+        return self.fetcher(transport=PortRewrite(self.port), **kw)
 
     def fetcher(self, **kw) -> fetch_mod.Fetcher:
         args = {"timeout_s": 1, "max_bytes": 256 * 1024, "max_redirects": 3, "resolver": self.resolver(),
@@ -155,3 +162,45 @@ def by_ua(bot_body: str, human_body: str):
         body = bot_body if fetch_mod.PRODUCT_TOKEN in ua else human_body
         h._send(200, {"Content-Type": "text/html; charset=utf-8"}, body.encode())
     return route
+
+
+class PortRewrite(httpx.HTTPTransport):
+    def __init__(self, port: int):
+        super().__init__()
+        self.port = port
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host == "127.0.0.1" and request.url.port in (None, 80):
+            request.url = request.url.copy_with(port=self.port)
+        return super().handle_request(request)
+
+
+ORG_LD = ('{"@context":"https://schema.org","@type":"LocalBusiness","name":"Z Best Media","url":"http://site.test/",'
+          '"telephone":"(562) 248-6617","sameAs":["https://social.example/zbm"],"address":{"@type":"PostalAddress",'
+          '"streetAddress":"5318 East 2nd Street","addressLocality":"Long Beach","addressRegion":"CA"}}')
+BODY_TEXT = "<p>" + ("Z Best Media helps brands recover revenue across marketplaces. " * 12) + "</p>"
+
+
+def home_html(title: str = "Z Best Media | Revenue recovery", ld: str | None = ORG_LD, extra_head: str = "",
+              body: str = BODY_TEXT, canonical: str | None = "http://site.test/") -> str:
+    canon = f"<link rel='canonical' href='{canonical}'>" if canonical else ""
+    ld_tag = f"<script type='application/ld+json'>{ld}</script>" if ld else ""
+    return (f"<!doctype html><html lang='en'><head><title>{title}</title>"
+            f"<meta name='description' content='Revenue recovery for brands.'>{canon}{ld_tag}{extra_head}</head>"
+            f"<body><h1>Z Best Media</h1><h2>What we do</h2>{body}</body></html>")
+
+
+def install_site(srv, robots: str | None = "User-agent: *\nAllow: /\nSitemap: http://site.test/sitemap.xml\n",
+                 sitemap: str | None = None, llms: str | None = "# Z Best Media\n\n> Revenue recovery.\n\n## Pages\n"
+                 "- [Home](http://site.test/): start here\n", home: str | None = None):
+    if robots is not None:
+        srv.text("site.test", "/robots.txt", robots)
+    if sitemap is None:
+        sitemap = ("<?xml version='1.0' encoding='UTF-8'?><urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>"
+                   "<url><loc>http://site.test/</loc><lastmod>2026-10-01</lastmod></url>"
+                   "<url><loc>http://site.test/about</loc><lastmod>2026-09-12T10:00:00Z</lastmod></url></urlset>")
+    srv.text("site.test", "/sitemap.xml", sitemap, ctype="application/xml")
+    if llms is not None:
+        srv.text("site.test", "/llms.txt", llms)
+    srv.html("site.test", "/", home if home is not None else home_html())
+    srv.html("site.test", "/about", home_html(title="About Z Best Media", canonical="http://site.test/about"))
