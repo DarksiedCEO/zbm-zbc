@@ -23,7 +23,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - Replay: `service-py/R0001`, `service-py/R0002`, `service-py/R0003`, `service-py/R0004`, `service-py/R0005` (seed 1)
   and `service-py/R0006`, `service-py/R0008`, `service-py/R0009`, `service-py/R0010`, `service-py/R0011`, `service-py/R0012`, `service-py/R0013`, `service-py/R0014`, `service-py/R0015` (seed 2)
 - Suggested fix (for the department): fold `β`, `ɡ`, `η`, `ζ` (or adopt the shared table) in `triage.CONFUSABLES`.
-- Status: FIXED (war room fixes, commit `WR-F001/WR-F004` on branch `warroom-redteam-gate`; ADR 0014 "War room
+- Status: FIXED (war room fixes, commit `0969219` on branch `warroom-redteam-gate`; ADR 0014 "War room
   fixes"): every opt-out rule reads through the shared lookalike fold (`triage.normalise_opt_out`); a capital that
   only its casefold makes a lookalike (R0010) is surfaced, never revoked on. Tests:
   `services/service-py/tests/test_warroom_fixes.py`.
@@ -38,7 +38,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   leetspeak and letter spacing are folded; a combination of two documented disguises is the same promise.
 - Replay: `clipper-network-py/R0001` (seed 1)
   and `clipper-network-py/R0002`, `clipper-network-py/R0003` (seed 2: `g ú a r a n t 3 e d`, `c 4 5 h`)
-- Status: FIXED (war room fixes, commit `WR-F002` on branch `warroom-redteam-gate`; ADR 0008 "War room fixes"):
+- Status: FIXED (war room fixes, commit `774420a` on branch `warroom-redteam-gate`; ADR 0008 "War room fixes"):
   `textguard._collapse` keeps a lone leet character (`0 1 3 4 5 7 @ $`) in a run of single letters, joins a run of 3+
   only when it holds a real letter, and reads the joined run's leet as letters (spacing then leet); `fold_for_matching`
   uses the shared lookalike fold (`src/lookalikes.py`). Numbers alone (`2 0 2 4`) stay numbers. Tests:
@@ -57,7 +57,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   and `onboarding-py/R0002` (seed 2: `JoᏚé ʛaгϲíα` — the lunate sigma `ϲ` is NFKC'd to `ς`, then casefolded to `σ`)
 - Note: creative-py's `canonical()` applies its table after casefold too; the war room has no creative-py library
   yet, so whether it shows the same split is not checked here.
-- Status: FIXED (war room fixes, commit `WR-F003` on branch `warroom-redteam-gate`; ADR 0004 "War room fixes"):
+- Status: FIXED (war room fixes, commit `ebb9918` on branch `warroom-redteam-gate`; ADR 0004 "War room fixes"):
   `name_key_text` uses the shared lookalike fold (the final sigma, and a word-final capital sigma, read as `c` before
   casefolding; the confusables skeleton under the unchanged table). Tests:
   `services/onboarding-py/tests/test_warroom_fixes.py` (pinned pk2- keys: no churn for names without a sigma).
@@ -73,7 +73,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   forms are read; a combination of two documented disguises is the same promise.
 - Replay: `service-py/R0007` (seed 2), and `service-py/R0016` (seed 3, same class: a full-width full stop did not end
   a clause, so "... stop texting． Call or email if needed" revoked email; it failed on the war room's base too).
-- Status: FIXED (war room fixes, commit `WR-F001/WR-F004`; ADR 0014 "War room fixes"): the digit table runs after
+- Status: FIXED (war room fixes, commit `0969219`; ADR 0014 "War room fixes"): the digit table runs after
   NFKC (`channels._leet`), and the opt-out rules cut clauses after NFKC (`channels._read`). Tests:
   `services/service-py/tests/test_warroom_fixes.py`.
 
@@ -88,7 +88,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   bug sweep C L3 promises the minor lock folds homoglyphs.
 - Replay: `verification-py/R0001`, `verification-py/R0002` (seed 2).
 - Severity note: this one is a child-safety control; it is the most urgent of the five.
-- Status: FIXED (war room fixes, commit `WR-F005` on branch `warroom-redteam-gate`; ADR 0007 "War room fixes"):
+- Status: FIXED (war room fixes, commit `a0f14ef` on branch `warroom-redteam-gate`; ADR 0007 "War room fixes"):
   `mailbox_base` folds with the shared lookalike fold (`src/lookalikes.py`), invisible characters included (the
   SHOULD observation below, treated as MUST); a minor recorded before the fix keeps every match it had through the
   frozen pre-fix fold (`email_base_v0`). Tests: `services/verification-py/tests/test_warroom_fixes.py`. The replay
@@ -104,7 +104,7 @@ them. Each may deserve a decision.
   in it (`k­i­d.name@gmail.com`) is a different identity for the under-18 lock, so the new clipper id is attested
   adult. `mailbox_base` folds plus / dash tags, Gmail dots and lookalikes (bug sweep C) but not invisible characters.
   Example: `verification-py/minor-lookalike-email#000.1@1`.
-  FIXED with WR-F005 (treated as MUST; the scenario's downgrade is removed).
+  FIXED with WR-F005 (`a0f14ef`) (treated as MUST; the scenario's downgrade is removed).
 - **service-py opt-out in the middle of a very long message.** A text over the inbound cap (20,000 characters for
   email) is cut to its head and its tail (`models.py`, `INBOUND_TAIL`); an opt-out in the middle is dropped. The
   documented promise covers an opt-out at the end only. Not changed (not local: the cut is the gateway model's); ADR 0014 "War room fixes" records it and a
@@ -112,7 +112,7 @@ them. Each may deserve a decision.
 - **service-py opt-out wording below an unmarked quote.** Below an Outlook "Original Message" / "From: Date:" block,
   "Dont call me or email me anymore" or "I want to be removed from your email list" raises nothing (ADR 0014 R2 says
   "any other opt-out wording raises OPT_OUT_IN_QUOTED_TEXT"; the code reads only multi-word listed phrases there).
-  FIXED with WR-F001/WR-F004: the sentence-shaped opt-outs alert there (never revoke).
+  FIXED with WR-F001/WR-F004 (`0969219`): the sentence-shaped opt-outs alert there (never revoke).
 - **service-py dotted spelling.** `N.e.v.e.r call or email me again` is not read (a dot is a clause end for the scope
-  rules); spelling with spaces is. FIXED with WR-F001/WR-F004: a word spelled out with dots, hyphens or underscores is joined
+  rules); spelling with spaces is. FIXED with WR-F001/WR-F004 (`0969219`): a word spelled out with dots, hyphens or underscores is joined
   before the clause split.

@@ -6,8 +6,9 @@ legacy-record tests, which pin that the fix changes nothing that was already fol
 
 from __future__ import annotations
 
-import lookalikes
 import pytest
+
+import lookalikes
 from intelligences import i07_duplicate_identity as i07
 from ports import AgeProviderAnswer
 
