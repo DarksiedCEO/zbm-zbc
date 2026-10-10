@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import statistics
 import string
 import threading
 import time
@@ -819,9 +820,13 @@ def test_n2_repeated_junk_floods_reach_a_bounded_plateau_and_do_not_climb():
     finally:
         _stop(proc)
     half = PLATEAU_ROUNDS // 2
-    climb = per_round[-1] - per_round[half - 1]
+    # Climb = median of the second half of the rounds minus median of the first half. A single last-round sample minus
+    # a single mid-round sample swings by +/-13 MiB from allocator/OS noise when the host is loaded (CI flaked on it,
+    # Oct 7-9 2026, base and fixed code alike); the medians cancel that noise while a real per-round leak still shows
+    # up in full (5 MiB/round over 10 rounds is a 25 MiB difference of medians).
+    climb = statistics.median(per_round[half:]) - statistics.median(per_round[:half])
     plateau = max(per_round)
-    line = (f"baseline {baseline} MiB; per-round peaks {per_round}; RSS[{PLATEAU_ROUNDS}] - RSS[{half}] = {climb} MiB "
+    line = (f"baseline {baseline} MiB; per-round peaks {per_round}; median(second half) - median(first half) = {climb} MiB "
             f"(< {PLATEAU_LEAK_DELTA_MIB}); plateau - baseline = {plateau - baseline} MiB (< {PLATEAU_BUDGET_MIB}); "
             f"plateau {plateau} MiB (< {PLATEAU_CEILING_MIB}); samples {samples}")
     print("\nN2 plateau: " + line, flush=True)
