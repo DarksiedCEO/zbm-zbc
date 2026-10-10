@@ -115,8 +115,20 @@
    "variants_per_seed": 2,
    "invariants": [
     {
+     "id": "answered",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "application",
+      "codes": [
+       201,
+       422
+      ]
+     }
+    },
+    {
      "id": "accepted",
-     "severity": "SHOULD",
+     "severity": "MUST",
      "check": "status_in",
      "args": {
       "step": "application",
@@ -125,7 +137,19 @@
       ]
      }
     }
-   ]
+   ],
+   "downgrade": {
+    "case_flip": [
+     "accepted"
+    ],
+    "fullwidth": [
+     "accepted"
+    ],
+    "diacritic_toggle": [
+     "accepted"
+    ]
+   },
+   "downgrade_basis": "the pinned names are accepted as written (MUST); a case-flipped, full-width or re-accented variant is outside the pinned set, so its acceptance is SHOULD; every variant is answered, never a server error"
   }
  ]
 }

@@ -13,8 +13,9 @@ _n = itertools.count(1)
 
 
 def prepare_env(env) -> None:
-    env.setdefault("CN_SERVICE_TOKEN", "test-cn-service-token-do-not-use-0000")
-    env.setdefault("CN_IDENTITY_HMAC_KEY", "test-cn-identity-hmac-key-do-not-use-000")
+    # the war room's own test values, always: a token or key already in the environment (a real one) is never used
+    env["CN_SERVICE_TOKEN"] = "test-cn-service-token-do-not-use-0000"
+    env["CN_IDENTITY_HMAC_KEY"] = "test-cn-identity-hmac-key-do-not-use-000"
     for k in list(env):
         if k.startswith("CN_") and k not in ("CN_SERVICE_TOKEN", "CN_IDENTITY_HMAC_KEY"):
             env.pop(k, None)

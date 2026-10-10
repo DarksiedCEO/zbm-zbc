@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import importlib.util
 import sys
 import unittest
@@ -21,7 +22,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "devtools" / "lookalikes"))
 sys.path.insert(0, str(REPO / "devtools" / "warroom"))
 
-import generate
+generate = importlib.import_module("generate")
 
 SERVICES = generate.SERVICES
 # (service, file, the name of its own table, case-sensitive?)

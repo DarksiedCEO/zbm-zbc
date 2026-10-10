@@ -109,7 +109,9 @@ class Generation(unittest.TestCase):
         a, b, c = engine.generate(lib, 1, 2), engine.generate(lib, 1, 2), engine.generate(lib, 2, 2)
         self.assertEqual(a, b)
         self.assertNotEqual([x["input"] for x in a], [x["input"] for x in c])
-        base = lambda cs: [x["input"] for x in cs if x["case_id"].split("#")[1].split("@")[0].endswith(".0")]
+
+        def base(cs):
+            return [x["input"] for x in cs if x["case_id"].split("#")[1].split("@")[0].endswith(".0")]
         self.assertEqual(base(a), base(c))                  # the unmutated seeds do not depend on the chaos seed
 
     def test_case_ids_round_trip(self):
@@ -257,8 +259,8 @@ ACTIONS = {"call_out": call_out, "fine": fine}
                      {"case_id": "b", "input": {}, "steps": [{"action": "fine", "as": "x"}]}]
             p = subprocess.run([sys.executable, "-B", str(engine.HERE / "worker.py"), str(svc), str(Path(tmp) / "drv.py")],
                                input=json.dumps(cases), capture_output=True, text=True)
-            res = {json.loads(l[15:])["case_id"]: json.loads(l[15:]) for l in p.stdout.splitlines()
-                   if l.startswith("WARROOM-RESULT ")}
+            res = {json.loads(line[15:])["case_id"]: json.loads(line[15:]) for line in p.stdout.splitlines()
+                   if line.startswith("WARROOM-RESULT ")}
         self.assertIn("network access attempted", res["a"]["error"])
         self.assertIsNone(res["b"]["error"])
         self.assertEqual(res["b"]["steps"], [{"action": "x", "status": 201, "body": {"ok": True}}])

@@ -14,7 +14,7 @@ AgeProviderAnswer = None
 
 
 def prepare_env(env) -> None:
-    env.setdefault("VI_SERVICE_TOKEN", "test-vi-service-token-do-not-use-0123")
+    env["VI_SERVICE_TOKEN"] = "test-vi-service-token-do-not-use-0123"    # always the test value, never one inherited
     for k in list(env):
         if k.startswith("VI_") and k != "VI_SERVICE_TOKEN" or k in ("LEDGER_SERVICE_URL", "LEDGER_SERVICE_TOKEN"):
             env.pop(k, None)
