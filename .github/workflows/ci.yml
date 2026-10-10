@@ -193,9 +193,15 @@ jobs:
         env:
           SERVICE: ${{ matrix.service }}
         run: |
+          set +e
           python devtools/hygiene_check.py run --suite "python:$SERVICE" --kind pytest --cwd "services/$SERVICE" \
             --allow-ignored services/ledger-rust/target \
-            -- python -m pytest -q -rs -p no:cacheprovider
+            -- python -m pytest -q -rfEs -p no:cacheprovider > "$RUNNER_TEMP/out.txt" 2>&1
+          code=$?
+          tail -5 "$RUNNER_TEMP/out.txt"
+          grep -E "^(FAILED|ERROR) |HYGIENE|exited" "$RUNNER_TEMP/out.txt" | head -20 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+          grep -E "^E  " "$RUNNER_TEMP/out.txt" | head -15 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+          exit $code
 
   # ---------------------------------------------------------------------------------------------------------------
   # delivery-py is uv-managed: `uv sync --frozen` (the dev group holds pytest; the READMEs' `--no-dev` leaves no
