@@ -154,6 +154,7 @@ jobs:
           - service-py
           - influencer-py
           - bizdev-py
+          - seo-py
         # macOS (Apple Silicon): every service once, on Python 3.13
         include:
           - {os: macos-26, python: "3.13", service: detection-py}
@@ -170,6 +171,7 @@ jobs:
           - {os: macos-26, python: "3.13", service: service-py}
           - {os: macos-26, python: "3.13", service: influencer-py}
           - {os: macos-26, python: "3.13", service: bizdev-py}
+          - {os: macos-26, python: "3.13", service: seo-py}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0

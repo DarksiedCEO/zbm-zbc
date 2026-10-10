@@ -981,6 +981,32 @@ cd services/bizdev-py && python3 -m pytest -q   # count: docs/test-counts.md
 LEDGER_BIN=services/ledger-rust/target/release/server python3 services/bizdev-py/devtools/live_run.py
 ```
 
+## Search & Answer Intelligence (2) (`services/seo-py`) — Oct 9, 2026, Wave 1
+
+SEO / AEO / GEO / LLMO for ZBM: how search engines and AI answer engines can reach, read and cite a site. Wave 1 is
+the read core, machine readability, the AI-visibility probe framework and minimal proof, run first on ZBM's own
+properties and then sold as a paid audit. Spec (founder-approved Oct 6), decisions, the eight founder-pending
+defaults and the limitations: `docs/adr/0017-seo-answer-intelligence-department-architecture.md`. Routes and
+settings: `services/seo-py/README.md`. Env prefix `SEO_`, default port 8500.
+
+- **Status:** built and tested (count: docs/test-counts.md). **Not in force.** The only connected port is the web
+  fetcher; rendering, every answer engine (OpenAI, Anthropic, Google, Perplexity), prompt volume, first-party data
+  (Search Console, Bing Webmaster, logs, analytics, CRM), Zero-Day, ORCA Publish and clientfix answer
+  `NOT_CONNECTED`, never invented data. No Stripe or Finance call: a client audit takes a Finance (31) invoice id as
+  input and needs Andre's approval; ZBM's own properties need neither.
+- **Agents in Wave 1:** Selene (crawlability, robots.txt per versioned bot family list), Delia (sitemaps; llms.txt
+  as an emerging, non-standard convention), Roman (structure and structured data; per-engine checklists labelled
+  uncalibrated, never a score), the probe framework for Naomi and Callum (repeated sampling, refusal accounting,
+  Wilson intervals, Strength / Opportunity / Mentioned-Not-Cited), Osei-lite (quarantine, freshness), and the entity
+  check against the canonical record (Andre's NAP as he stated it).
+- **Fails closed:** SSRF-safe fetch (every resolved address checked, connection pinned to it, redirects re-checked,
+  size and time capped, robots.txt honoured), kill switches (global, write, tenant, capability, provider), tenant
+  isolation with cross-tenant 404s, crawled text kept as untrusted data, record-first log with the R6-M1 evidence view.
+
+```bash
+cd services/seo-py && python3 -m pytest -q   # count: docs/test-counts.md
+```
+
 ## Client Delivery & Operations (28) (`services/delivery-py`) — Sep 27, 2026, fix waves 20-26b applied
 
 The AEGIS fix engine and the agent runtime adapters around the pinned deer-flow harness (`345f08be`, v2.1.0;
