@@ -13,16 +13,54 @@
 // global failure budget is spent, password checks are serialised (one scrypt
 // at a time, per process), which bounds the guess rate from rotating or
 // spoofed client keys while the right password still gets through.
+//
+// Wave F (dashboard M-3): the serialised queue is BOUNDED. Unbounded, a flood
+// queued every guess (each one a real scrypt check) and the owner waited behind
+// all of them (25 s seen). Past ``maxQueued`` waiting checks a request is
+// answered 429 at once (no password check, not counted as a failure), and
+// ``cleanSlots`` further places are kept for clients with ZERO failures and no
+// attempt in flight (the owner): they wait in their own lane, which is served
+// first, so a flood from clients that already failed can never starve them.
+// The per-client hard limit is unchanged. A flood from ever-fresh client keys
+// looks clean too: the clean lane is bounded as well, so the worst case for the
+// owner is a prompt 429 (Retry-After: 1), never an unbounded wait.
 
-export type LimiterOptions = { windowMs: number; perKey: number; global: number; maxKeys: number };
-export const LOGIN_LIMITS: LimiterOptions = { windowMs: 15 * 60_000, perKey: 5, global: 50, maxKeys: 10_000 };
+export type LimiterOptions = {
+  windowMs: number;
+  perKey: number;
+  global: number;
+  maxKeys: number;
+  maxQueued?: number;
+  cleanSlots?: number;
+};
+export const LOGIN_LIMITS: LimiterOptions = {
+  windowMs: 15 * 60_000,
+  perKey: 5,
+  global: 50,
+  maxKeys: 10_000,
+  maxQueued: 8,
+  cleanSlots: 2,
+};
 
-export type Reservation = { key: string; at: number; released: boolean };
+/** ``clean``: this client had no failure and no attempt in flight when the reservation was taken. */
+export type Reservation = { key: string; at: number; released: boolean; clean: boolean };
+
+/** The serialised queue is full: answer 429 without checking the password. */
+export class ThrottleQueueFull extends Error {
+  constructor() {
+    super("login checks are queued at capacity; try again shortly");
+    this.name = "ThrottleQueueFull";
+  }
+}
+
+type Waiter = { go: () => void };
 
 export class FailureLimiter {
   private readonly byKey = new Map<string, Reservation[]>();
   private all: number[] = [];
-  private gate: Promise<void> = Promise.resolve();
+  private busy = false;
+  private readonly queue: Waiter[] = [];
+  private readonly cleanQueue: Waiter[] = [];
   private readonly opts: LimiterOptions;
   private readonly now: () => number;
 
@@ -48,7 +86,7 @@ export class FailureLimiter {
       const until = mine[mine.length - this.opts.perKey].at + this.opts.windowMs;
       return { retryAfterS: Math.max(1, Math.ceil((until - t) / 1000)) };
     }
-    const r: Reservation = { key, at: t, released: false };
+    const r: Reservation = { key, at: t, released: false, clean: mine.length === 0 };
     mine.push(r);
     this.byKey.delete(key); // re-insert: Map order = least recently active first
     this.byKey.set(key, mine);
@@ -65,6 +103,16 @@ export class FailureLimiter {
     this.live(r.key, this.now());
   }
 
+  /** No password was checked (the queue was full): the reservation is given back and nothing is counted. */
+  release(r: Reservation): void {
+    this.succeed(r);
+  }
+
+  /** Waiting checks: [general queue, clean lane] (tests). */
+  queued(): [number, number] {
+    return [this.queue.length, this.cleanQueue.length];
+  }
+
   /** The password was wrong: the reservation stays (it is the failure) and the global count grows. */
   fail(): void {
     this.all.push(this.now());
@@ -78,19 +126,23 @@ export class FailureLimiter {
     return this.all.length >= this.opts.global;
   }
 
-  /** Runs ``check`` directly, or one at a time once the global budget is spent (backoff, never a block). */
-  async throttled<T>(check: () => Promise<T>): Promise<T> {
-    if (!this.globalSpent()) return check();
-    const prev = this.gate;
-    let done: () => void = () => {};
-    this.gate = new Promise<void>((resolve) => {
-      done = resolve;
-    });
-    await prev;
+  /** Runs ``check`` directly, or one at a time once the global budget is spent (backoff, never a block). Past
+   * the global budget at most ``maxQueued`` checks wait (plus ``cleanSlots`` for clean clients, served first);
+   * beyond that it rejects with ``ThrottleQueueFull`` before checking anything (the caller answers 429). */
+  async throttled<T>(check: () => Promise<T>, clean = false): Promise<T> {
+    if (!this.globalSpent() && !this.busy) return check();
+    if (this.busy) {
+      const lane = clean && this.cleanQueue.length < (this.opts.cleanSlots ?? 0) ? this.cleanQueue : this.queue;
+      if (lane === this.queue && this.queue.length >= (this.opts.maxQueued ?? Infinity)) throw new ThrottleQueueFull();
+      await new Promise<void>((resolve) => lane.push({ go: resolve }));
+    }
+    this.busy = true; // held from here (or handed over by the previous check) until this check settles
     try {
       return await check();
     } finally {
-      done();
+      const next = this.cleanQueue.shift() ?? this.queue.shift();
+      if (next) next.go();
+      else this.busy = false;
     }
   }
 }

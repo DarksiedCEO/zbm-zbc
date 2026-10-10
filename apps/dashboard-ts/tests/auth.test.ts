@@ -18,7 +18,7 @@ import {
   verifySession,
   DEFAULT_TTL_S,
 } from "../src/lib/auth.ts";
-import { clientKey, FailureLimiter, sameOrigin } from "../src/lib/rate-limit.ts";
+import { clientKey, FailureLimiter, sameOrigin, ThrottleQueueFull } from "../src/lib/rate-limit.ts";
 import { ledgerCacheMs, loadRecordedFindingsCached, resetLedgerCacheForTests, DEFAULT_LEDGER_CACHE_MS } from "../src/lib/api.ts";
 
 const SECRET = "unit-test-session-secret-0123456789abcdef";
@@ -119,6 +119,59 @@ test("login limiter: per-client reservations are atomic (M-1); the global budget
   const h = new Headers({ "x-forwarded-for": " 203.0.113.9 , 10.0.0.1" });
   assert.equal(clientKey(h), "203.0.113.9");
   assert.equal(clientKey(new Headers()), "unknown");
+});
+
+test("Wave F M-3: the serialised login queue is bounded (429 past it) and a clean client (the owner) goes first", async () => {
+  const lim = new FailureLimiter({ windowMs: 1000, perKey: 5, global: 2, maxKeys: 100, maxQueued: 3, cleanSlots: 1 }, () => 0);
+  // flooding clients that already failed, and the global budget spent
+  for (const k of ["f1", "f2", "f3", "f4", "f5"]) {
+    lim.reserve(k);
+    lim.fail();
+  }
+  assert.equal(lim.globalSpent(), true);
+  const order: string[] = [];
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  const guess = (name: string, wait?: Promise<void>) => async () => {
+    if (wait) await wait;
+    order.push(name);
+    return false;
+  };
+  // one check runs (held open); three more wait: the queue is full
+  const running = lim.throttled(guess("f1", held), false);
+  const queued = ["f2", "f3", "f4"].map((k) => {
+    const r = lim.reserve(k);
+    assert.ok(!("retryAfterS" in r) && r.clean === false, "a client with a failure is not clean");
+    return lim.throttled(guess(k), r.clean);
+  });
+  assert.deepEqual(lim.queued(), [3, 0]);
+  // a fourth guess from the flood is refused at once, before any check (it is not a guess)
+  await assert.rejects(lim.throttled(guess("f5"), false), ThrottleQueueFull);
+  assert.ok(!order.includes("f5"));
+  // the owner: no failure, nothing in flight -> clean; its lane is served before the queued flood
+  const owner = lim.reserve("owner");
+  assert.ok(!("retryAfterS" in owner) && owner.clean === true);
+  let ownerOk = false;
+  const ownerDone = lim.throttled(async () => {
+    order.push("owner");
+    return true;
+  }, owner.clean).then((v) => (ownerOk = v));
+  assert.deepEqual(lim.queued(), [3, 1]);
+  // a second clean client finds the clean lane full and the queue full: refused too (bounded either way)
+  const other = lim.reserve("fresh");
+  assert.ok(!("retryAfterS" in other) && other.clean);
+  await assert.rejects(lim.throttled(guess("fresh"), other.clean), ThrottleQueueFull);
+  lim.release(other as Exclude<typeof other, { retryAfterS: number }>);
+  release();
+  await Promise.all([running, ...queued, ownerDone]);
+  assert.equal(ownerOk, true);
+  assert.deepEqual(order, ["f1", "owner", "f2", "f3", "f4"], "the owner waited behind the flood");
+  assert.deepEqual(lim.queued(), [0, 0]);
+  // the per-client limit is unchanged: f2 now holds 2 reservations (1 failure + 1 still unreleased guess)
+  const again = Array.from({ length: 4 }, () => lim.reserve("f2"));
+  assert.ok("retryAfterS" in again[3], "the per-client limit no longer applies");
+  // with the queue drained, the next check runs at once
+  assert.equal(await lim.throttled(async () => "now", false), "now");
 });
 
 test("same-origin check: Origin required, scheme and host must both match (L-1/L-2)", () => {

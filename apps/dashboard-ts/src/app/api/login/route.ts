@@ -1,5 +1,5 @@
 import { authConfig, issueSession, MAX_PASSWORD_BYTES, nowSeconds, sessionCookie, verifyPassword } from "@/lib/auth";
-import { clientKey, FailureLimiter, sameOrigin } from "@/lib/rate-limit";
+import { clientKey, FailureLimiter, sameOrigin, ThrottleQueueFull } from "@/lib/rate-limit";
 
 // Bug sweep E, F-5: POST /api/login. Public (src/proxy.ts), and refused with
 // 503 there when authentication is not configured. Accepts a form post (the
@@ -10,6 +10,9 @@ import { clientKey, FailureLimiter, sameOrigin } from "@/lib/rate-limit";
 // a client has 5 failures or attempts in flight; once the global budget is
 // spent, checks are serialised, never refused (AEGIS M-2: the owner still gets
 // in). The Origin header is required and must match scheme and host (L-2).
+// Wave F (M-3): the serialised queue is bounded: past it a request is answered
+// 429 (Retry-After: 1) without a password check, and clients with no failure
+// (the owner) have their own lane, served first.
 export const dynamic = "force-dynamic";
 
 const limiter = new FailureLimiter();
@@ -54,15 +57,26 @@ export async function POST(req: Request) {
     );
   }
   let ok = false;
+  let full = false;
   try {
     const password = await readPassword(req, isJson);
     ok =
       password !== null &&
       Buffer.byteLength(password, "utf8") <= MAX_PASSWORD_BYTES &&
-      (await limiter.throttled(() => verifyPassword(password, cfg.hash)));
+      (await limiter.throttled(() => verifyPassword(password, cfg.hash), r.clean));
+  } catch (e) {
+    if (!(e instanceof ThrottleQueueFull)) throw e;
+    full = true;
   } finally {
     if (ok) limiter.succeed(r);
+    else if (full) limiter.release(r); // nothing was checked: not a guess, not a failure
     else limiter.fail();
+  }
+  if (full) {
+    return Response.json(
+      { error: "too many login attempts in progress; try again shortly" },
+      { status: 429, headers: { ...NO_STORE, "retry-after": "1" } }
+    );
   }
   if (!ok) {
     return isJson
