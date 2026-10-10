@@ -24,6 +24,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional
 
+import lookalikes
+
 PRECEDENCE = ("privacy", "security", "contract", "money", "complaint")
 CAPS_MIN_LETTERS = 12
 CAPS_RATIO_PCT = 70
@@ -139,9 +141,17 @@ def _strip_format(t: str) -> str:
     return "".join(c for c in t if unicodedata.category(c) != "Cf" and c != "\u00ad")
 
 
-def clean(text: str) -> str:
+# War room WR-F001: the opt-out path folds every lookalike the repo's shared table and the Unicode confusables.txt
+# skeleton list (src/lookalikes.py; this module's CONFUSABLES on top, so nothing it folded changes). Triage's own
+# reading (categories, non_ascii_letters) keeps CONFUSABLES alone: a message written in another script must still
+# reach a human as one, not be read as Latin gibberish.
+_OPT_OUT_FOLD = lookalikes.Table({chr(k): v for k, v in CONFUSABLES.items()})
+
+
+def clean(text: str, opt_out: bool = False) -> str:
     """V1-H1 order: format characters (zero-width, soft hyphen, bidi) out; HTML entities unescaped (repeatedly, a
-    double-escaped entity too); tags stripped; NFKC (full-width letters); confusables mapped to Latin."""
+    double-escaped entity too); tags stripped; NFKC (full-width letters); confusables mapped to Latin
+    (``opt_out``: with the shared lookalike fold, WR-F001)."""
     t = _strip_format(text)
     for _ in range(3):
         u = html.unescape(t)
@@ -150,7 +160,7 @@ def clean(text: str) -> str:
         t = u
     t = _strip_format(_TAG.sub("", t))
     t = _strip_format(unicodedata.normalize("NFKC", t))
-    return t.translate(CONFUSABLES)
+    return _OPT_OUT_FOLD.fold(t) if opt_out else t.translate(CONFUSABLES)
 
 
 def _fold(t: str) -> str:
@@ -164,10 +174,11 @@ def non_ascii_letters(text: str) -> bool:
     return any(c.isalpha() and ord(c) > 127 for c in _fold(clean(text)))
 
 
-def normalise(text: str) -> str:
+def normalise(text: str, opt_out: bool = False) -> str:
     """clean(), accents folded, lower case, apostrophes dropped, every other non-alphanumeric a space, runs of three
-    or more single letters joined ("S T O P" -> "stop"), spaces collapsed."""
-    t = _fold(clean(text)).replace("'", "").replace("\u2019", "")
+    or more single letters joined ("S T O P" -> "stop"), spaces collapsed. ``opt_out``: ``clean`` with the shared
+    lookalike fold (the opt-out rules in channels.py read text this way: WR-F001)."""
+    t = _fold(clean(text, opt_out)).replace("'", "").replace("\u2019", "")
     tokens = re.sub(r"[^a-z0-9]+", " ", t).split()
     out: list[str] = []
     run: list[str] = []
@@ -180,6 +191,11 @@ def normalise(text: str) -> str:
         if tok:
             out.append(tok)
     return f" {' '.join(out)} "
+
+
+def normalise_opt_out(text: str) -> str:
+    """``normalise`` with the shared lookalike fold: the reading every opt-out rule uses (WR-F001)."""
+    return normalise(text, opt_out=True)
 
 
 def _has(norm: str, term: str) -> bool:

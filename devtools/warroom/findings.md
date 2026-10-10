@@ -23,6 +23,10 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - Replay: `service-py/R0001`, `service-py/R0002`, `service-py/R0003`, `service-py/R0004`, `service-py/R0005` (seed 1)
   and `service-py/R0006`, `service-py/R0008`, `service-py/R0009`, `service-py/R0010`, `service-py/R0011`, `service-py/R0012`, `service-py/R0013`, `service-py/R0014`, `service-py/R0015` (seed 2)
 - Suggested fix (for the department): fold `β`, `ɡ`, `η`, `ζ` (or adopt the shared table) in `triage.CONFUSABLES`.
+- Status: FIXED (war room fixes, commit `WR-F001/WR-F004` on branch `warroom-redteam-gate`; ADR 0014 "War room
+  fixes"): every opt-out rule reads through the shared lookalike fold (`triage.normalise_opt_out`); a capital that
+  only its casefold makes a lookalike (R0010) is surfaced, never revoked on. Tests:
+  `services/service-py/tests/test_warroom_fixes.py`.
 
 ## WR-F002 — clipper-network-py: a money word in leetspeak AND spelled out letter by letter is not caught
 
@@ -62,7 +66,11 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   is NFKC-normalised, so full-width digits never meet it.
 - Why it is a MUST failure: ADR 0014 V2-H3 / Info promise "digits read as letters", and V1-H1 promises full-width
   forms are read; a combination of two documented disguises is the same promise.
-- Replay: `service-py/R0007` (seed 2).
+- Replay: `service-py/R0007` (seed 2), and `service-py/R0016` (seed 3, same class: a full-width full stop did not end
+  a clause, so "... stop texting． Call or email if needed" revoked email; it failed on the war room's base too).
+- Status: FIXED (war room fixes, commit `WR-F001/WR-F004`; ADR 0014 "War room fixes"): the digit table runs after
+  NFKC (`channels._leet`), and the opt-out rules cut clauses after NFKC (`channels._read`). Tests:
+  `services/service-py/tests/test_warroom_fixes.py`.
 
 ## WR-F005 — verification-py: the minor lock does not fold a Greek eta (or zeta) in an email
 
@@ -94,9 +102,12 @@ them. Each may deserve a decision.
   FIXED with WR-F005 (treated as MUST; the scenario's downgrade is removed).
 - **service-py opt-out in the middle of a very long message.** A text over the inbound cap (20,000 characters for
   email) is cut to its head and its tail (`models.py`, `INBOUND_TAIL`); an opt-out in the middle is dropped. The
-  documented promise covers an opt-out at the end only.
+  documented promise covers an opt-out at the end only. Not changed (not local: the cut is the gateway model's); ADR 0014 "War room fixes" records it and a
+  way to fix it.
 - **service-py opt-out wording below an unmarked quote.** Below an Outlook "Original Message" / "From: Date:" block,
   "Dont call me or email me anymore" or "I want to be removed from your email list" raises nothing (ADR 0014 R2 says
   "any other opt-out wording raises OPT_OUT_IN_QUOTED_TEXT"; the code reads only multi-word listed phrases there).
+  FIXED with WR-F001/WR-F004: the sentence-shaped opt-outs alert there (never revoke).
 - **service-py dotted spelling.** `N.e.v.e.r call or email me again` is not read (a dot is a clause end for the scope
-  rules); spelling with spaces is.
+  rules); spelling with spaces is. FIXED with WR-F001/WR-F004: a word spelled out with dots, hyphens or underscores is joined
+  before the clause split.

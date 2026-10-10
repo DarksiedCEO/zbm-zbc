@@ -20,7 +20,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import re
 
-from triage import _one_edit, normalise
+import unicodedata
+
+import lookalikes
+from triage import CONFUSABLES, _one_edit
+from triage import normalise_opt_out as normalise     # WR-F001: every opt-out rule reads with the shared lookalike fold
 
 QUIET_START_HOUR = 8       # 08:00 local: first minute SMS may go
 QUIET_END_HOUR = 21        # 21:00 local: first minute SMS may NOT go
@@ -57,6 +61,12 @@ OPT_OUT_POSSIBLE_TERMS = ("opt me out", "removed from your", "remove me from you
 OPT_OUT_FUZZY = ("stop", "unsubscribe", "stopall")
 OPT_OUT_SYMBOLS = ("\U0001F6D1", "\u26D4", "\U0001F6AB", "\u270B")      # stop sign, no entry, prohibited, raised hand
 _LEET = str.maketrans({"0": "o", "5": "s", "1": "i", "3": "e", "4": "a", "@": "a", "$": "s", "7": "t"})
+
+
+def _leet(text: str) -> str:
+    """Digits read as letters (V2-H3), after NFKC: a full-width digit ("５７０ｐ") is a digit only once NFKC has run
+    (WR-F004: the table was applied to the raw text, so full-width digits never met it)."""
+    return unicodedata.normalize("NFKC", text).translate(_LEET)
 OPT_OUT_SHORT = ("no", "nope", "nah", "no thanks", "no thank you", "bye", "go away", "enough", "basta", "no gracias")
 OPT_OUT_CONFIRMATION = ("You are unsubscribed from {brand_name} texts and will receive no further messages. "
                         "Contact {brand_name} support by email to change this.")
@@ -108,15 +118,15 @@ def opt_out_level(text: str) -> Optional[str]:
     email only ``exact`` revokes, ``suspected`` pauses proactive SMS and asks Andre (V3 Info)."""
     if any(sym in text for sym in OPT_OUT_SYMBOLS):
         return "exact"
-    for clause in _SCOPE_SEGMENT.split(html_as_text(text)):
+    for clause in _SCOPE_SEGMENT.split(_read(text)):
         if _REMOVE_ME.search(normalise(clause).strip()):
             return "exact"
         m = _NEG_WANT.search(normalise(clause).strip())
         if m and not set(m.group(1).split()) <= {"call", "calls"}:
             return "exact"
     raw = text.replace("<", " ").replace(">", " ")   # AEGIS R6: "<STOP>", "<3 ... stop texting me >:(" on SMS
-    text = html_as_text(text)                    # AEGIS re-review N4: "Unsubscribe<br>Sent ..." is two words
-    variants = {normalise(text), normalise(text.translate(_LEET)), normalise(raw), normalise(raw.translate(_LEET))}
+    text = _read(text)                    # AEGIS re-review N4: "Unsubscribe<br>Sent ..." is two words
+    variants = {normalise(text), normalise(_leet(text)), normalise(raw), normalise(_leet(raw))}
     variants |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(variants)}
     suspected = False
     for norm in variants:
@@ -213,6 +223,20 @@ def html_as_text(text: str) -> str:
     return _ANY_TAG.sub(" ", _BLOCK_TAG.sub("\n", text))
 
 
+# A word spelled out with dots, hyphens or underscores between single letters ("N.e.v.e.r", "s-t-o-p") is joined back
+# before the text is cut into clauses (a dot ends a clause for the scope rules). Three letters or more: "e.g." and
+# "a.m." stay as they are; "www.example.com" has no single-letter run.
+_SPELLED_OUT = re.compile(r"(?<![^\W\d_])[^\W\d_](?:[._\-][^\W\d_]){2,}(?![^\W\d_])")
+
+
+def _read(text: str) -> str:
+    """``html_as_text``, NFKC (a full-width "．" or "，" ends a clause like "." and ","; war room seed 3) and then
+    spelled-out words joined: the opt-out rules' reading of a message, before it is cut into clauses."""
+    t = html_as_text(text)
+    t = t if t.isascii() else unicodedata.normalize("NFKC", t)
+    return _SPELLED_OUT.sub(lambda m: re.sub(r"[._\-]", "", m.group(0)), t) if "." in t or "-" in t or "_" in t else t
+
+
 def split_reply(text: str) -> tuple[str, str]:
     """(the person's own text, the unmarked quoted tail). ``>`` lines and a ``<blockquote>`` are dropped. A reply
     header ("On ... wrote:") followed by ``>`` lines is dropped and the lines AFTER the quoted block stay the person's
@@ -306,7 +330,7 @@ def quoted_tail_opt_out(text: Optional[str]) -> Optional[str]:
     body = tail
     for f in (f for f in OWN_FOOTER_LINES if f.split()):   # substring match survives re-wrapping; never blank
         body = re.sub(r"\s+".join(map(re.escape, f.split())), " ", body, flags=re.IGNORECASE)
-    variants = {normalise(body), normalise(body.translate(_LEET))}
+    variants = {normalise(body), normalise(_leet(body))}
     variants |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(variants)}
     if any(f" {normalise(t).strip()} " in v for v in variants for t in OPT_OUT_STRONG):
         return "revoke"
@@ -323,7 +347,21 @@ def quoted_tail_opt_out(text: Optional[str]) -> Optional[str]:
             return "alert"
     norms = {normalise(body)}
     norms |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(norms)}
-    return "alert" if any(f" {p} " in n for n in norms for p in _TAIL_ALERT_PHRASES) else None
+    if any(f" {p} " in n for n in norms for p in _TAIL_ALERT_PHRASES):
+        return "alert"
+    # ADR 0014 R2 ("any other opt-out wording raises OPT_OUT_IN_QUOTED_TEXT"; war room SHOULD observation): the
+    # sentence-shaped opt-outs the own-words rules read — a direct "don't call me or email me anymore", "remove me
+    # from your email list", "I don't want your emails", and the possible-opt-out wording — alert too (never revoke)
+    return "alert" if any(_tail_sentence_opt_out(ln) for ln in kept) else None
+
+
+def _tail_sentence_opt_out(line: str) -> bool:
+    for clause in _SCOPE_SEGMENT.split(_read(line)):
+        n = normalise(clause).strip()
+        if n and (_REMOVE_ME.search(n) or _NEG_WANT.search(n) or _DIRECT_NO_CONTACT.match(n)
+                  or _DIRECT_NO_CONTACT.match(" ".join(_collapse(w) for w in n.split()))):
+            return True
+    return possible_opt_out(line) or _direct_no_contact(line)
 
 
 def _typo_tokens(norm: str) -> list[int]:
@@ -336,9 +374,9 @@ def typo_opt_out(text: Optional[str]) -> bool:
     """A word one typo from stop / unsubscribe / stopall ("unsubcribe", "unsubscibe"): the ``suspected`` level."""
     if not text:
         return False
-    t = html_as_text(text)
+    t = _read(text)
     raw = text.replace("<", " ").replace(">", " ")
-    return any(_typo_tokens(v) for v in (normalise(t), normalise(t.translate(_LEET)), normalise(raw)))
+    return any(_typo_tokens(v) for v in (normalise(t), normalise(_leet(t)), normalise(raw)))
 
 
 # AEGIS M-9: call wording names a channel for the scope ("do not call, text or email me") but is not an SMS opt-out
@@ -462,12 +500,12 @@ def opt_out_scope(text: Optional[str]) -> Optional[str]:
         return None
     found, generic = False, False
     terms = [normalise(t).split() for t in OPT_OUT_TERMS + SCOPE_ONLY_TERMS]
-    whole = _CHANNEL_LIST_COMMA.sub(r"\1 or ", html_as_text(text))
+    whole = _CHANNEL_LIST_COMMA.sub(r"\1 or ", _read(text))
     whole = _OXFORD_COMMA.sub(r"\1 ", whole)    # "call or text, or email" (AEGIS M-11)
     for single, seg in [(False, whole)] + [(True, x) for x in _SCOPE_SEGMENT.split(whole)]:
         if not seg.strip():
             continue
-        variants = {normalise(seg), normalise(seg.translate(_LEET))}
+        variants = {normalise(seg), normalise(_leet(seg))}
         variants |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(variants)}
         for norm in variants:
             toks = norm.split()
@@ -538,21 +576,39 @@ def _direct_no_contact(text: Optional[str]) -> bool:
     """A clause that is nothing but a command not to contact the sender by two or more channels."""
     if not text:
         return False
-    whole = _OXFORD_COMMA.sub(r"\1 ", _CHANNEL_LIST_COMMA.sub(r"\1 or ", html_as_text(text)))
+    whole = _OXFORD_COMMA.sub(r"\1 ", _CHANNEL_LIST_COMMA.sub(r"\1 or ", _read(text)))
     return any(_DIRECT_NO_CONTACT.match(normalise(c).strip()) for c in _SCOPE_SEGMENT.split(whole) if c.strip())
 
 
 def possible_opt_out(text: Optional[str]) -> bool:
     """Wording that may be an opt-out but may as well be something else (``OPT_OUT_POSSIBLE_TERMS``): Andre reads
-    it (``OPT_OUT_POSSIBLE``); no consent changes on it alone."""
+    it (``OPT_OUT_POSSIBLE``); no consent changes on it alone. WR-F001: so is text that reads as an opt-out only
+    when its capital lookalikes are read as their lower-case letters (``_casefold_reading``)."""
     if not text:
         return False
-    for clause in _SCOPE_SEGMENT.split(html_as_text(text)):
+    for clause in _SCOPE_SEGMENT.split(_read(text)):
         norm = " " + " ".join(_collapse(w) for w in normalise(clause).split()) + " "
         plain = normalise(clause)
         if any(f" {normalise(t).strip()} " in v for v in (norm, plain) for t in OPT_OUT_POSSIBLE_TERMS):
             return True
-    return False
+    alt = _casefold_reading(text)
+    return alt is not None and (opt_out_level(alt) is not None or possible_opt_out(alt))
+
+
+# WR-F001: the opt-out rules read a capital lookalike as the capital it looks like (triage.CONFUSABLES: Greek "Υ" is
+# Y, "Η" is H). A capital that is the upper case of a lower-case lookalike ("сOmmΥnіCATIoΗ": upsilon for u, eta for
+# n, the case flipped) reads otherwise when casefolded first, as creative-py and the other services read text: that
+# reading never revokes anything, it only surfaces the message to Andre (possible_opt_out).
+_CASEFOLD_FIRST = lookalikes.Table({chr(k): v for k, v in CONFUSABLES.items() if chr(k).islower()})
+
+
+def _casefold_reading(text: str) -> str | None:
+    """The text read casefold-first when that differs from the opt-out rules' own reading; None otherwise (ASCII
+    text, or nothing to read differently)."""
+    if text.isascii():
+        return None
+    alt = _CASEFOLD_FIRST.fold_cased(html_as_text(text))
+    return alt if normalise(alt) != normalise(text) else None
 
 
 def email_opt_out(text: Optional[str], subject: Optional[str] = None) -> bool:
