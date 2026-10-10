@@ -136,6 +136,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin, SchedulesMix
     def _start(self) -> None:
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
+        self._sweep_ingests()                    # expired log ingests keep counts only (AEGIS 4c0a805 T4)
         self.verify_integrity(force=True)
 
     # ================================================================================================ plumbing

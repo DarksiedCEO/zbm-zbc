@@ -27,6 +27,7 @@ import ipaddress
 import json
 import math
 import re
+import unicodedata
 from typing import Callable, Optional
 from urllib.parse import unquote, urlsplit
 
@@ -48,31 +49,65 @@ _UUID = re.compile(r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]
 _HEX = re.compile(r"[0-9a-fA-F]{16,}")
 _DIGITS = re.compile(r"\d{4,}")
 _TOKENISH = re.compile(r"[A-Za-z0-9_\-=+.~]{20,}")
-TEMPLATE_RULES = ("decode once; drop query and fragment; per segment: contains '@' -> {email}; UUID -> {uuid}; "
-                  "only digits -> {id}; 16+ hex, 20+ token characters, 8+ characters mixing letters and 2+ digits, "
-                  "or over 40 characters -> {token}; any run of 4+ digits inside a kept segment -> {id}")
+TEMPLATE_RULES = ("decode once; NFKC-normalise and fold confusable at-signs; drop query and fragment; per segment: "
+                  "an e-mail in any spelling ('@', '(at)', '[at]', ' at ... dot', %40) -> {email}; UUID -> {uuid}; "
+                  "7+ digits in total, whatever separates them -> {number}; only digits -> {id}; a file name with "
+                  "a non-code extension -> {file}.ext; 16+ hex, 20+ token characters, 8+ characters mixing letters "
+                  "and 2+ digits, or over 40 characters -> {token}; any run of 4+ digits left -> {id}; short numeric "
+                  "segments next to each other with 7+ digits together -> {number}")
+
+
+_AT_WORD = re.compile(r"[(\[{<]\s*at\s*[)\]}>]|\s+at\s+|%40|&#0*64;|&commat;|\bat\b(?=[^/]*\bdot\b)", re.I)
+_FILE = re.compile(r"(.+)\.([A-Za-z0-9]{1,5})")
+STATIC_EXT = frozenset({"css", "js", "mjs", "map", "svg", "ico", "woff", "woff2", "ttf", "eot", "otf", "xml", "txt",
+                        "html", "htm", "php", "asp", "aspx", "jsp", "json", "webmanifest", "xhtml", "rss", "atom"})
+# Fold what NFKC leaves: other "at" signs to "@".
+_FOLD = str.maketrans({"\uff20": "@", "\ufe6b": "@", "\u24d0": "a"})
+
+
+def _digits(s: str) -> int:
+    return sum(c.isdigit() for c in s)
+
+
+def _segment(seg: str) -> str:
+    if not seg:
+        return ""
+    if "@" in seg or _EMAIL.search(seg) or _AT_WORD.search(seg):
+        return "{email}"
+    if _UUID.fullmatch(seg):
+        return "{uuid}"
+    if _digits(seg) >= 7:                      # phone numbers, SSNs, card numbers, long ids, across any separator
+        return "{number}"
+    if seg.isdigit():
+        return "{id}"
+    m = _FILE.fullmatch(seg)
+    if m and m.group(2).lower() not in STATIC_EXT:
+        return "{file}." + m.group(2).lower()  # a document or image file name may name a person
+    if _HEX.fullmatch(seg) or len(seg) > 40 or _TOKENISH.fullmatch(seg) or (
+            len(seg) >= 8 and _digits(seg) >= 2 and any(c.isalpha() for c in seg)):
+        return "{token}"
+    return _DIGITS.sub("{id}", seg)[:40]
 
 
 def template_path(target: str) -> Optional[str]:
-    """A path with every identifier-looking part replaced by a typed placeholder; None when not a path."""
+    """A path with every identifier-looking part replaced by a typed placeholder; None when not a path.
+    NFKC-normalised and confusables folded first (fullwidth digits and at-signs become ASCII)."""
     p = _path(target)
     if p is None:
         return None
-    out = []
-    for seg in p.split("/")[1:]:
-        if not seg:
-            out.append("")
-        elif "@" in seg or _EMAIL.search(seg):
-            out.append("{email}")
-        elif _UUID.fullmatch(seg):
-            out.append("{uuid}")
-        elif seg.isdigit():
-            out.append("{id}")
-        elif _HEX.fullmatch(seg) or len(seg) > 40 or _TOKENISH.fullmatch(seg) or (
-                len(seg) >= 8 and sum(c.isdigit() for c in seg) >= 2 and any(c.isalpha() for c in seg)):
-            out.append("{token}")
-        else:
-            out.append(_DIGITS.sub("{id}", seg)[:40])
+    p = unicodedata.normalize("NFKC", p).translate(_FOLD)
+    segs = p.split("/")[1:]
+    out = [_segment(s) for s in segs]
+    # digits split over several short numeric segments (/123/45/6789) count together
+    i = 0
+    while i < len(segs):
+        j = i
+        while j < len(segs) and segs[j].isdigit() and out[j] == "{id}":
+            j += 1
+        if j - i >= 2 and sum(_digits(segs[k]) for k in range(i, j)) >= 7:
+            for k in range(i, j):
+                out[k] = "{number}"
+        i = max(j, i + 1)
     return ("/" + "/".join(out))[:300]
 
 

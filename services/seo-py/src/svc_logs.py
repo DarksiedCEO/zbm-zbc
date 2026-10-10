@@ -58,15 +58,47 @@ def _refusal(k: Killed) -> Forbidden:
     return Forbidden(R(k.code if k.code == "AGENT_RESTRICTED" or k.code.startswith("KILLED_") else "SERVICE_CLOSED"))
 
 
+def _compact(t: dict) -> dict:
+    """What an expired ingest keeps in memory: counts only (no templates, sketches or sample indices)."""
+    return {"lines": t["lines"], "non_bot": t["non_bot"], "no_user_agent": t["no_user_agent"],
+            "quarantined": dict(t["quarantined"]),
+            "families": {k: {x: v[x] for x in ("requests", "verified", "spoofed", "claimed")}
+                         for k, v in t["families"].items()}}
+
+
 class LogsMixin:
+    # ------------------------------------------------------------------ expiry (AEGIS 4c0a805 T4)
+
+    def _ingest_expired(self, g: dict) -> bool:
+        return self.now() - parse_iso(g["created_at"]) > timedelta(days=self.settings.log_retention_days)
+
+    def _evict_ingest(self, g: dict) -> None:
+        """Past retention an ingest keeps only its counts in memory; its report, templates, sketches, robots.txt and
+        sitemap sample are dropped (and are never rebuilt at start-up: replay compacts as it goes)."""
+        if g.get("evicted"):
+            return
+        g.update(totals=_compact(g["totals"]), report=None, robots_text=None, sitemap_sample=None, evicted=True)
+        for cache in (self._log_robots, self._log_verify_cache, self._log_budget):
+            cache.pop(g["ingest_id"], None)
+
+    def _sweep_ingests(self) -> int:
+        n = 0
+        for g in self.log_ingests.values():
+            if not g.get("evicted") and self._ingest_expired(g):
+                self._evict_ingest(g)
+                n += 1
+        return n
+
     # ------------------------------------------------------------------ bounds
 
     def _check_log_caps(self, tid: str, more_bytes: int = 0, new_ingest: bool = False) -> None:
+        self._sweep_ingests()
         since = self.now() - timedelta(days=self.settings.log_retention_days)
         mine = [g for g in self.log_ingests.values() if g["tenant_id"] == tid]
         recent = [g for g in mine if parse_iso(g["created_at"]) > since]
         s = self.settings
-        if new_ingest and sum(1 for g in mine if g["status"] == "open") >= s.log_max_open_ingests:
+        if new_ingest and sum(1 for g in mine if g["status"] == "open" and not g.get("evicted")) >= \
+                s.log_max_open_ingests:
             raise Conflict(R("LOG_INGESTS_OPEN_LIMIT"))
         if new_ingest and len(recent) >= s.log_max_ingests:
             raise Conflict(R("LOG_INGESTS_LIMIT"))
@@ -193,7 +225,7 @@ class LogsMixin:
         return rb
 
     def _chunk_ok(self, g: dict, body: dict, nbytes: int) -> None:
-        if g["status"] != "open" or g["last_seen"]:
+        if g["status"] != "open" or g["last_seen"] or g.get("evicted") or self._ingest_expired(g):
             raise Conflict(R("INGEST_CLOSED"))
         if body["seq"] != g["next_seq"]:
             raise Conflict(R("CHUNK_SEQ"))
@@ -203,7 +235,20 @@ class LogsMixin:
 
     def _a_log_chunk(self, d, at):
         g = self.log_ingests[d["ingest_id"]]
-        logs_mod.merge(g["totals"], d["delta"])
+        if not g.get("evicted") and self._ingest_expired(g):
+            self._evict_ingest(g)
+        if g.get("evicted"):
+            t, c = g["totals"], _compact(d["delta"])
+            for k in ("lines", "non_bot", "no_user_agent"):
+                t[k] += c[k]
+            for r, n in c["quarantined"].items():
+                t["quarantined"][r] = t["quarantined"].get(r, 0) + n
+            for tok, f in c["families"].items():
+                tf = t["families"].setdefault(tok, {"requests": 0, "verified": 0, "spoofed": 0, "claimed": 0})
+                for k in tf:
+                    tf[k] += f[k]
+        else:
+            logs_mod.merge(g["totals"], d["delta"])
         g["next_seq"] = d["seq"] + 1
         g["bytes"] += d["bytes"]
         g["last_seen"] = bool(d["last"])
@@ -219,7 +264,7 @@ class LogsMixin:
             rk = self.rk("log_finish", iid, body)
             if self._idem(actor, rk, body):
                 return self.log_ingest_view(tid, iid)
-            if g["status"] != "open":
+            if g["status"] != "open" or g.get("evicted") or self._ingest_expired(g):
                 raise Conflict(R("INGEST_CLOSED"))
             report = self._log_report(iid, g)
             rsha = sha(report)
@@ -234,8 +279,8 @@ class LogsMixin:
 
     def _a_log_ingest_finished(self, d, at):
         g = self.log_ingests[d["ingest_id"]]
-        g.update(status="finished", finished_at=at, report=d["report"], report_sha256=d["report_sha256"],
-                 robots_text=None)                         # not needed any more: memory stays bounded
+        g.update(status="finished", finished_at=at, report=None if g.get("evicted") else d["report"],
+                 report_sha256=d["report_sha256"], robots_text=None)   # not needed any more: memory stays bounded
         self._log_robots.pop(d["ingest_id"], None)
 
     def _sitemap_sample(self, tid: str, domain: str) -> Optional[list]:
@@ -316,7 +361,9 @@ class LogsMixin:
     def log_ingest_view(self, tid: str, iid: str) -> dict:
         with self.lock:
             g = self._ingest(tid, iid)
-            expired = self.now() - parse_iso(g["created_at"]) > timedelta(days=self.settings.log_retention_days)
+            expired = self._ingest_expired(g)
+            if expired:
+                self._evict_ingest(g)
             t = g["totals"]
             out = {k: g[k] for k in ("ingest_id", "tenant_id", "domain", "scheme", "format", "key_fp", "created_at",
                                      "next_seq", "bytes", "report_sha256", "robots_status")}

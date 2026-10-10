@@ -178,7 +178,13 @@ W2-2. **Log retention rule** (amended for AEGIS 1472041 H1). Nothing identifying
    compared only in memory: against robots.txt and the public sitemap sample, both fixed when the ingest is created
    (counts and sample indices are kept). Distinct client IPs are a HyperLogLog estimate (256 registers of keyed hashes
    under `SEO_LOG_HASH_KEY_FILE`; no hash is kept). An ingest older than `SEO_LOG_RETENTION_DAYS` (default 90) is
-   served as totals only (`expired`). Crypto-shredding was not built: with no identifying data retained there is
+   served as totals only (`expired`); from then on only its counts stay in memory — report, templates, sketches,
+   robots.txt and sitemap sample are evicted, and replay at start-up compacts expired ingests as it goes instead of
+   rebuilding them (AEGIS 4c0a805 T4). Templating (AEGIS 4c0a805 T1) first NFKC-normalises and folds confusable
+   at-signs, recognises e-mails in any spelling (`@`, fullwidth / small at-signs, `(at)`, `[at]`, ` at … dot`,
+   `%40` after one decode), turns any segment with 7+ digits in total — phone numbers, SSNs, card numbers, whatever
+   separates the digits — and short numeric segments that together hold 7+ digits into `{number}`, and replaces the
+   stem of any file name with a non-code extension (`{file}.pdf`). Crypto-shredding was not built: with no identifying data retained there is
    nothing to shred, and a homemade cipher on the standard library was judged worse than not storing the data.
    **Bounds** (H2): `SEO_LOG_MAX_OPEN_INGESTS` open ingests per tenant, `SEO_LOG_MAX_INGESTS` ingests and
    `SEO_LOG_TENANT_BYTES` bytes per tenant within a retention period, `SEO_LOG_MAX_BYTES` per ingest; per-ingest state

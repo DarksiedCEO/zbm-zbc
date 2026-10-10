@@ -50,7 +50,7 @@ def send(h, iid, seq, data, last=False):
     ("/reset-password/SECRETTOKEN123", "/reset-password/{token}"),
     ("/users/jane.doe%40example.com/profile", "/users/{email}/profile"),
     ("/a/550e8400-e29b-41d4-a716-446655440000", "/a/{uuid}"),
-    ("/orders/4111111111111111", "/orders/{id}"),
+    ("/orders/4111111111111111", "/orders/{number}"),
     ("/login?user=jane.doe@example.com&pw=hunter2pass", "/login"),
     ("/s/abcdefghijklmnopqrstuvwx", "/s/{token}"),
     ("/blog/how-to-rank", "/blog/how-to-rank"),
@@ -89,7 +89,7 @@ def test_h1_reviewer_pii_paths_appear_nowhere(tmp_path, srv):
         assert not any(s in b for b in blobs), s
     fam = done["report"]["envelope"]["facts"]["families"]["Googlebot"]
     assert {t["template"] for t in fam["top_path_templates"]} >= {"/reset-password/{token}", "/users/{email}/profile",
-                                                                   "/orders/{id}", "/about"}
+                                                                   "/orders/{number}", "/about"}
     assert fam["distinct_client_ips_estimate"] == 2
     assert done["report"]["envelope"]["facts"]["uncrawled_important_paths"] == ["/"]   # /about matched exactly
 
@@ -109,9 +109,8 @@ def test_h2_open_and_retained_ingest_caps(tmp_path, srv):
     h.refused(ingest(h), 409, "LOG_INGESTS_OPEN_LIMIT")
     h.clock.advance(days=91)                                   # outside the retention period: no longer counted
     for g in list(h.svc.log_ingests.values()):
-        if g["status"] == "open":
-            h.ok(send(h, g["ingest_id"], 1, b64(["x"]), last=True))
-            h.ok(h.post(f"/tenants/zbm/log-ingests/{g['ingest_id']}/finish", {"request_id": rid()}))
+        if g["status"] == "open":                              # an expired ingest takes nothing more
+            h.refused(send(h, g["ingest_id"], 1, b64(["x"]), last=True), 409, "INGEST_CLOSED")
     for _ in range(2):
         iid = h.ok(ingest(h), 201)["ingest_id"]
         h.ok(send(h, iid, 1, b64(["x"]), last=True))
@@ -278,3 +277,68 @@ def test_l2_due_slot_is_computed_after_earlier_audits(tmp_path, srv):
     h.ok(h.post("/jobs/schedule-tick/run", {"request_id": rid()}, caller="scheduler"))
     slots = sorted(k for s in h.svc.schedules.values() for k in s["slots"])
     assert slots == ["0", "1"]
+
+
+# ---------------------------------------------------------------------------------------------- AEGIS 4c0a805 T1, T4
+
+@pytest.mark.parametrize("path,template", [
+    ("/call/555-123-4567", "/call/{number}"),
+    ("/call/(555)%20123%204567", "/call/{number}"),
+    ("/ssn/123-45-6789", "/ssn/{number}"),
+    ("/ssn/123.45.6789", "/ssn/{number}"),
+    ("/x/123/45/6789", "/x/{number}/{number}/{number}"),
+    ("/p/%EF%BC%95%EF%BC%95%EF%BC%95%EF%BC%91%EF%BC%92%EF%BC%93%EF%BC%94", "/p/{number}"),   # fullwidth digits
+    ("/u/jane%EF%BC%A0example.com", "/u/{email}"),                                              # fullwidth at
+    ("/u/jane%EF%B9%ABexample.com", "/u/{email}"),                                              # small at
+    ("/u/jane(at)example.com", "/u/{email}"), ("/u/jane[AT]example.com", "/u/{email}"),
+    ("/u/jane%2540example.com", "/u/{email}"), ("/u/jane%20at%20example%20dot%20com", "/u/{email}"),
+    ("/files/jane-doe-resume.pdf", "/files/{file}.pdf"), ("/img/jane.smith.jpg", "/img/{file}.jpg"),
+    ("/assets/site.css", "/assets/site.css"), ("/sitemap.xml", "/sitemap.xml"), ("/order/123456", "/order/{id}"),
+])
+def test_t1_pii_variants_are_templated(path, template):
+    assert logs_mod.template_path(path) == template
+
+
+T1_PII = ("555-123-4567", "123-45-6789", "jane", "resume", "smith")   # no bare digit runs: hashes contain them
+
+
+def test_t1_variants_appear_nowhere(tmp_path, srv):
+    install_site(srv)
+    data_dir = tmp_path / "data"
+    h = harness(tmp_path, srv, data_dir=str(data_dir))
+    own(h)
+    iid = h.ok(ingest(h), 201)["ingest_id"]
+    paths = ["/call/555-123-4567", "/ssn/123-45-6789", "/u/jane%EF%BC%A0example.com", "/u/jane(at)example.com",
+             "/files/jane-doe-resume.pdf", "/img/jane.smith.jpg", "/x/123/45/6789"]
+    h.ok(send(h, iid, 1, b64([clf("66.249.66.1", p) for p in paths]), last=True))
+    done = h.ok(h.post(f"/tenants/zbm/log-ingests/{iid}/finish", {"request_id": rid()}))
+    blobs = [json.dumps(done), json.dumps(h.ledger.events),
+             json.dumps(h.ok(h.get("/audit/export", caller="compliance_38")))]
+    for root, _, files in os.walk(data_dir):
+        for f in files:
+            with open(os.path.join(root, f), "rb") as fh:
+                blobs.append(fh.read().decode("utf-8", "replace"))
+    for s in T1_PII:
+        assert not any(s in b for b in blobs), s
+
+
+def test_t4_expired_ingests_keep_counts_only_and_are_not_rebuilt(tmp_path, srv):
+    install_site(srv)
+    h = harness(tmp_path, srv, data_dir=str(tmp_path / "data"))
+    own(h)
+    h.ok(audit(h), 201)
+    iid = h.ok(ingest(h), 201)["ingest_id"]
+    h.ok(send(h, iid, 1, b64([clf("66.249.66.1", f"/p/x{i}") for i in range(50)]), last=True))
+    h.ok(h.post(f"/tenants/zbm/log-ingests/{iid}/finish", {"request_id": rid()}))
+    g = h.svc.log_ingests[iid]
+    assert "templates" in g["totals"]["families"]["Googlebot"] and g["report"] is not None
+    h.clock.advance(days=91)
+    v = h.ok(h.get(f"/tenants/zbm/log-ingests/{iid}"))
+    assert v["status"] == "expired" and v["totals"]["families"]["Googlebot"]["requests"] == 50
+    g = h.svc.log_ingests[iid]
+    assert g["evicted"] and g["report"] is None and g["sitemap_sample"] is None
+    assert set(g["totals"]["families"]["Googlebot"]) == {"requests", "verified", "spoofed", "claimed"}
+    h2 = h.restart()                                            # replay on the same (advanced) clock
+    g2 = h2.svc.log_ingests[iid]
+    assert g2["evicted"] and g2["report"] is None and g2["totals"]["families"]["Googlebot"]["requests"] == 50
+    assert set(g2["totals"]["families"]["Googlebot"]) == {"requests", "verified", "spoofed", "claimed"}
