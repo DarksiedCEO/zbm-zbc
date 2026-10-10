@@ -770,3 +770,19 @@ must really destroy them, and the log is append-only; persisting them needs per-
 per-process event-id counters (`_seq`, scoped by the boot id, so new ids never collide with old ones). An operation
 whose line was still owed when the process stopped is not applied after the restart (its ledger events stay
 `attempted`; payments are recovered from their intent lines, as before); its retry runs normally.
+
+### AEGIS review of Wave F (038fa93..0928711) — fixes
+
+Pinned by `tests/test_wave_f_restart.py` (`test_f2_*`, `test_f3_*`) and `tests/test_wave_f_aegis_probes.py` (the
+reviewer's probes, ported).
+
+| Id | Finding | Fix |
+|---|---|---|
+| F-2 (Medium) | An operation whose line was owed at a crash was not applied after the restart: a W-9 revocation came back as `w9_on_file: true` (payments allowed while the ledger held the revocation); a lost creator onboarding re-opened a name-variant re-application | `journal.EvidenceJournal` appends the line to the LOCAL log first, then anchors it: a failed anchor leaves the line (and its state) on disk and only the anchor owed (re-sent before the next line; at start the last line's anchor is re-sent, `reanchor_tail`). The remaining window, the process stopping between a ledger record and its local line, is closed fail-safe: at start every event of this department on the ledger past the last scanned seq (paged filtered read, `after_seq`) that no local line names puts its subject in QUARANTINE (`_startup_ledger_checks`; a `quarantine` line carries it and the scan's high-water mark): every action on it -- payments, flags, activation, re-application, start -- is refused (409, `quarantined: true`, the event types) until Andre releases it (`POST /onboarding/quarantine/{subject_id}/resolve`, his token over `("quarantine_resolve", subject_id)`, recorded); `GET /onboarding/quarantine` lists them. The ledger holds only payload hashes, so the lost state change cannot be rebuilt from it; Andre reconciles. An operation that fails before taking effect writes an `attempt` line naming the events it left (never `committed` in the evidence view), so its events never hold anyone. With a log on disk, a ledger that cannot be read refuses start-up (this supersedes "the ledger is read only while an intent is open"). Legacy events no line names (before Wave F) are quarantined the same way. |
+| F-3 (Low) | "Not on the ledger" was final at start while a write of the stopped process could still be in flight | Start-up waits out the rest of `LEDGER_INFLIGHT_GRACE_S` (10 s, twice the ledger client's timeout) since the last line, once, through an injectable `sleep` (tests advance the test clock; no wall-clock wait or assertion), before any intent is closed `not_on_ledger` or the ledger is scanned. |
+
+Disagreement on record: the probe "same person, new creator id after a restart is refused" is not adopted. Bug sweep D
+allows one person under several creator ids and keeps the 1099 total per person; a restart now keeps the creator, so
+the SAME creator id cannot re-apply with a name variant, and the total is not split (`test_probe_person_total_*`).
+Residual: a client record is re-encoded whole when it changes (facts up to the 2 000 cap), so a fact-heavy client's
+lines are large (bounded by the cap, not quadratic in the log).

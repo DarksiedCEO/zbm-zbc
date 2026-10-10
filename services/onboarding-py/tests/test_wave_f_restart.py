@@ -13,10 +13,9 @@ import json
 import httpx
 import pytest
 
-from conftest import GOOD_GRANT, Clock, andre_resolve_body, client_for, make_service, start_body
+from conftest import ANDRE_KEY, GOOD_GRANT, Clock, andre_resolve_body, client_for, make_service, start_body
 from ledger import FakeLedgerClient, HttpLedgerClient, LedgerWriteError, select_paged
-from conftest import ANDRE_KEY
-from memory import approval_token
+from memory import andre_action_token, approval_token
 from statelog import StateReplayError
 from store import DataDirLock, RecordLog
 from test_sweep_d import _app
@@ -188,19 +187,98 @@ def test_replay_is_idempotent_restart_twice_gives_the_same_state_and_writes_noth
     assert len(box.svc.log) == lines and len(box.led.events) == events     # a replay records nothing
 
 
-def test_an_operation_whose_line_was_owed_at_a_crash_is_not_applied_after_restart_and_its_retry_runs(box):
+def test_f2_a_w9_revocation_whose_anchor_failed_survives_a_crash_and_payments_stay_refused(box):
+    """AEGIS F-2 repro: the revocation is recorded, its line's anchor fails (owed), the process dies. The line is
+    written locally FIRST, so the restart keeps the revocation: payments stay refused (they were allowed again)."""
     _ok(box.c.post("/zbc/creators/applications", json=_app()), 201)
-    before = box.svc.state_snapshot()
-    box.led.fail_type, box.led.countdown = "log_anchor", 1      # the operation's line cannot be anchored: owed
+    box.led.fail_type, box.led.countdown = "log_anchor", 1      # the operation's line cannot be anchored
     r = box.c.post("/zbc/creators/clip_1/w9", json={"received": False})
     assert r.status_code == 503 and r.json()["evidence"] == "pending"
-    assert box.svc.creators["clip_1"].w9_on_file is False       # applied in this process...
-    box.restart(check=False)                                    # ...the process dies before the line is written
-    assert box.svc.state_snapshot() == before                   # the restart holds what the log holds
-    assert box.svc.creators["clip_1"].w9_on_file is True
-    _ok(box.c.post("/zbc/creators/clip_1/w9", json={"received": False}))   # the retry runs, and now survives
-    box.restart()
+    box.restart(check=False)                                    # the process dies before the anchor is re-sent
     assert box.svc.creators["clip_1"].w9_on_file is False
+    assert box.c.post("/zbc/creators/clip_1/payments", json={"request_id": "p1", "amount_usd": "5.00"}
+                      ).status_code == 409
+    ev = _ok(box.c.get("/onboarding/audit/evidence"))           # the start re-sent the anchor: committed now
+    assert ev["counts"]["attempted"] == 0, ev
+
+
+def _crash_before_the_local_line(box):
+    """The ledger takes the operation's records, then the local append fails and the process dies."""
+    box.svc.log.fail_next_append = True
+
+
+def test_f2_a_revocation_whose_local_line_never_landed_holds_the_creator_until_andre_resolves(box):
+    _ok(box.c.post("/zbc/creators/applications", json=_app()), 201)
+    _crash_before_the_local_line(box)
+    assert box.c.post("/zbc/creators/clip_1/w9", json={"received": False}).status_code == 503
+    box.restart(check=False)
+    assert box.svc.creators["clip_1"].w9_on_file is True        # the log never had it...
+    r = box.c.post("/zbc/creators/clip_1/payments", json={"request_id": "p1", "amount_usd": "5.00"})
+    assert r.status_code == 409 and r.json()["quarantined"] is True, r.text   # ...so the creator is held
+    assert "creator_w9" in r.json()["event_types"]
+    held = _ok(box.c.get("/onboarding/quarantine"))["quarantined"]
+    assert [q["subject_id"] for q in held] == ["clip_1"]
+    box.restart()                                               # held across restarts, not rescanned twice
+    assert box.c.post("/zbc/creators/clip_1/payments", json={"request_id": "p1", "amount_usd": "5.00"}
+                      ).status_code == 409
+    assert box.c.post("/onboarding/quarantine/clip_1/resolve", json={"approval_token": "bad"}).status_code == 403
+    tok = andre_action_token(ANDRE_KEY, "quarantine_resolve", "clip_1")
+    _ok(box.c.post("/onboarding/quarantine/clip_1/resolve", json={"approval_token": tok}))
+    _ok(box.c.post("/zbc/creators/clip_1/w9", json={"received": False}))       # Andre's reconciliation
+    box.restart()
+    assert box.svc.creators["clip_1"].w9_on_file is False and box.svc._quarantine == {}
+
+
+def test_f2_a_creator_onboarding_lost_in_a_crash_cannot_be_reapplied_with_a_name_variant(box):
+    _crash_before_the_local_line(box)
+    assert box.c.post("/zbc/creators/applications", json=_app()).status_code in (201, 503)
+    box.restart(check=False)
+    assert "clip_1" not in box.svc.creators
+    r = box.c.post("/zbc/creators/applications", json=_app(legal_name="Patricia Young"))
+    assert r.status_code == 409 and r.json()["quarantined"] is True, r.text
+
+
+def test_f2_a_failed_operation_leaves_an_attempt_line_so_its_events_never_hold_anyone(box):
+    box.led.fail_type, box.led.countdown = "contract_storage_request", 1
+    assert box.c.post("/onboarding/clients", json=start_body()).status_code == 503
+    box.restart()
+    assert box.svc._quarantine == {}
+    _ok(box.c.post("/onboarding/clients", json=start_body()), 201)
+
+
+def test_f3_start_waits_out_the_in_flight_grace_before_closing_an_intent_as_not_on_the_ledger(box):
+    """A payment record still on its way to the ledger when the process stopped lands during the grace: counted."""
+    _ok(box.c.post("/zbc/creators/applications", json=_app()), 201)
+    led, svc = box.led, box.svc
+    late = []
+
+    orig = type(led).record_event
+
+    def hold(self, event_id, department, event_type, *a, **k):
+        if event_type == "creator_payment_tracked" and not late:
+            late.append((event_id, department, event_type, a, k))
+            raise LedgerWriteError("no reply (the request is still in flight)", "unknown")
+        return orig(self, event_id, department, event_type, *a, **k)
+    type(led).record_event = hold
+    try:
+        r = box.c.post("/zbc/creators/clip_1/payments", json={"request_id": "p1", "amount_usd": "7.00"})
+        assert r.status_code == 503
+    finally:
+        type(led).record_event = orig
+    svc.close()
+    waited = []
+
+    def sleep(s):                                   # the in-flight write lands while start-up waits
+        waited.append(s)
+        eid, dep, et, a, k = late[0]
+        orig(led, eid, dep, et, *a, **k)
+        box.clock.advance(seconds=s)
+    box.svc = make_service(all_fakes=True, ledger=led, clock=box.clock, log=RecordLog(box.d), dir_lock=box.lock,
+                           departments=box.depts, sleep=sleep)
+    box.c = client_for(box.svc)
+    assert waited and 0 < waited[0] <= 10
+    assert _ok(box.c.post("/zbc/creators/clip_1/payments", json={"request_id": "p2", "amount_usd": "1.00"}))[
+        "paid_to_date_usd"] == "8.00"
 
 
 def test_a_partial_start_and_its_owed_result_record_survive_a_restart_and_the_retry_completes_it(box):

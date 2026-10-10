@@ -721,6 +721,16 @@ def create_app(service: OnboardingService, required_token: str) -> FastAPI:
     def resolve(client_id: str, escalation_id: str, req: rq.EscalationResolveRequest = Depends(body(rq.EscalationResolveRequest))) -> dict:
         return svc.resolve_escalation(client_id, escalation_id, req)
 
+    @app.get("/onboarding/quarantine", dependencies=auth)
+    def quarantine_list() -> dict:
+        return svc.list_quarantine()
+
+    @app.post("/onboarding/quarantine/{subject_id}/resolve", dependencies=auth)
+    def quarantine_resolve(subject_id: str,
+                           req: rq.QuarantineResolveRequest = Depends(body(rq.QuarantineResolveRequest))) -> dict:
+        # Andre-only (Wave F, AEGIS F-2): his approval token over ("quarantine_resolve", subject_id)
+        return svc.resolve_quarantine(subject_id, req)
+
     @app.get("/onboarding/clients/{client_id}/health", dependencies=auth)
     def client_health(client_id: str) -> dict:
         return svc.health(client_id)

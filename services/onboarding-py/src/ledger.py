@@ -95,7 +95,7 @@ class LedgerPagingUnsupported(Exception):
 
 
 def select_paged(get_page, department: str, event_type: Optional[str], page_size: int = ENTRIES_PAGE_SIZE,
-                 want: Optional[set] = None, read_all=None) -> list[dict]:
+                 want: Optional[set] = None, read_all=None, after_seq: Optional[int] = None) -> list[dict]:
     """This department's entries (of one event type), page by page, in ledger order. With ``want`` (event ids) the
     read stops at the page where every wanted id has been seen, so its cost is bounded by where they are, not by the
     size of the ledger. ``get_page(params)`` raises ``LedgerPagingUnsupported`` on a ledger without the paged read:
@@ -105,7 +105,8 @@ def select_paged(get_page, department: str, event_type: Optional[str], page_size
         return isinstance(e, dict) and e.get("department") == department and (
             event_type is None or e.get("event_type") == event_type)
     out: list[dict] = []
-    after = None
+    after = after_seq
+    start = after_seq
     while True:
         params = {"limit": str(page_size), "department": department}
         if event_type is not None:
@@ -117,12 +118,13 @@ def select_paged(get_page, department: str, event_type: Optional[str], page_size
         except LedgerPagingUnsupported:
             if read_all is None:
                 raise LedgerQueryFailed("the ledger has no paged read") from None
-            return [e for e in read_all() if keep(e)]
+            return [e for e in read_all() if keep(e) and (start is None or e.get("seq", 0) > start)]
         seqs = [e.get("seq") for e in page]
         if not all(isinstance(q, int) and not isinstance(q, bool) for q in seqs):
             raise LedgerQueryFailed("ledger entries carry no integer seq")
         if len(page) > page_size or (after is not None and page and seqs[0] <= after):
-            return [e for e in page if keep(e)]           # an older ledger ignored the query: the whole ledger
+            # an older ledger ignored the query: the whole ledger
+            return [e for e in page if keep(e) and (start is None or e.get("seq", 0) > start)]
         out += [e for e in page if keep(e)]
         if len(page) < page_size:
             return out
@@ -332,10 +334,10 @@ class HttpLedgerClient:
         return self._get_list(None)
 
     def entries_filtered(self, department: str, event_type: Optional[str] = None, page_size: int = ENTRIES_PAGE_SIZE,
-                         want: Optional[set] = None) -> list[dict]:
+                         want: Optional[set] = None, after_seq: Optional[int] = None) -> list[dict]:
         """Wave F: this department's entries of one type through ledger-rust's paged, filtered read (``select_paged``);
         a ledger without it is read in full and filtered here (bounded by LEDGER_ENTRIES_MAX_BYTES)."""
-        return select_paged(self._get_list, department, event_type, page_size, want, self.entries)
+        return select_paged(self._get_list, department, event_type, page_size, want, self.entries, after_seq)
 
     def _get_list(self, params: Optional[dict]) -> list[dict]:
         try:
@@ -414,7 +416,7 @@ class FakeLedgerClient:
         return [{**e, "seq": i + 1} for i, e in enumerate(self.events)]
 
     def entries_filtered(self, department: str, event_type: Optional[str] = None, page_size: int = ENTRIES_PAGE_SIZE,
-                         want: Optional[set] = None) -> list[dict]:
+                         want: Optional[set] = None, after_seq: Optional[int] = None) -> list[dict]:
         """ledger-rust's paged filtered read, with the same paging (``pages_read`` counts the pages served)."""
         def page(params):
             if self.fail:
@@ -424,4 +426,4 @@ class FakeLedgerClient:
             sel = [e for e in ({**x, "seq": i + 1} for i, x in enumerate(self.events)) if e["seq"] > after and e["department"] == params["department"]
                    and ("event_type" not in params or e["event_type"] == params["event_type"])]
             return sel[:int(params["limit"])]
-        return select_paged(page, department, event_type, page_size, want)
+        return select_paged(page, department, event_type, page_size, want, after_seq=after_seq)

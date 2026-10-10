@@ -21,6 +21,13 @@ retry of the same operation records the same event (the ledger answers 200) and 
 
 A line whose anchor or append failed AFTER the operation's state was applied is ``owed``: the next operation writes it
 first (the identical line, so the identical anchor id) and is refused (nothing happens) while it cannot be written.
+
+Wave F (AEGIS F-2): the line is appended to the LOCAL log FIRST, then anchored. A failed anchor leaves the line on disk
+(its state survives a crash and is replayed) and only the ANCHOR owed (``owed`` holds ``(ANCHOR_OWED, rec, line)``);
+the next write re-sends that identical anchor first. Lines are never appended while an anchor is owed, so after a crash
+at most the LAST line can be unanchored: ``reanchor_tail`` re-sends its anchor at start (the ledger answers 200 when it
+already holds it). Lines of kind ``attempt`` (an operation that failed before taking effect names the events it left)
+never make an event ``committed``.
 """
 
 from __future__ import annotations
@@ -34,6 +41,14 @@ from store import RecordLog
 ANCHOR_TYPE = "log_anchor"
 ANCHOR_ACTOR = "evidence_journal"
 RULE = "unanchored evidence = attempted, not done"
+ANCHOR_OWED = "__anchor_owed__"
+ATTEMPT_KIND = "attempt"
+
+
+class _AnchorFailed(Exception):
+    def __init__(self, cause: BaseException):
+        super().__init__(str(cause))
+        self.cause = cause
 
 
 def sha256_hex(b: bytes) -> str:
@@ -77,25 +92,57 @@ class EvidenceJournal:
             self.flush()
         try:
             return self._write(kind, at, data)
+        except _AnchorFailed as exc:
+            raise exc.cause from None          # the line is on disk; only its anchor is owed
         except Exception:
             if owe_on_failure:
                 self.owed.append((kind, at, data))
             raise
 
     def flush(self) -> None:
-        """Write every owed line, oldest first (raises on the first failure: nothing else may be written)."""
+        """Write every owed line (re-send every owed anchor), oldest first (raises on the first failure: nothing else
+        may be written)."""
         while self.owed:
-            kind, at, data = self.owed[0]
-            self._write(kind, at, data)
+            head = self.owed[0]
+            if head[0] == ANCHOR_OWED:
+                self._anchor(head[1], head[2])
+            else:
+                try:
+                    self._write(*head)
+                except _AnchorFailed as exc:
+                    self.owed[0] = self.owed.pop()  # replaced below: the line is written, its anchor is owed
+                    raise exc.cause from None
             self.owed.pop(0)
+
+    def _anchor(self, rec: dict, line: bytes) -> None:
+        line_sha = sha256_hex(line)
+        epoch = self.log.epoch or line_sha[:16]
+        kind = rec["kind"]
+        self.record(anchor_id(epoch, rec["seq"], line_sha, self.id_prefix), ANCHOR_TYPE, ANCHOR_ACTOR, f"log:{epoch}",
+                    anchor_payload(epoch, rec["seq"], line_sha, kind), f"Local log line {rec['seq']} ({kind}) anchored")
 
     def _write(self, kind: str, at: str, data: dict) -> dict:
         rec, line = self.log.prepare(kind, at, data)
-        line_sha = sha256_hex(line)
-        epoch = self.log.epoch or line_sha[:16]
-        self.record(anchor_id(epoch, rec["seq"], line_sha, self.id_prefix), ANCHOR_TYPE, ANCHOR_ACTOR, f"log:{epoch}",
-                    anchor_payload(epoch, rec["seq"], line_sha, kind), f"Local log line {rec['seq']} ({kind}) anchored")
-        return self.log.append_prepared(rec, line)
+        out = self.log.append_prepared(rec, line)      # local first (F-2): a crash after this keeps the line
+        try:
+            self._anchor(rec, line)
+        except Exception as exc:  # noqa: BLE001 - the ledger refused or did not answer: the anchor is owed
+            self.owed.append((ANCHOR_OWED, rec, line))
+            raise _AnchorFailed(exc) from None
+        return out
+
+    def reanchor_tail(self) -> None:
+        """At start: the last line may be unanchored (the process stopped before its anchor landed); re-send its
+        anchor (identical: the ledger answers 200 if it holds it). On failure it stays owed (written before the next
+        line)."""
+        raw = self.log.raw_lines()
+        if not raw or self.log.in_memory:
+            return
+        rec = json.loads(raw[-1])
+        try:
+            self._anchor(rec, raw[-1])
+        except Exception:  # noqa: BLE001
+            self.owed.append((ANCHOR_OWED, rec, raw[-1]))
 
     # ---------------------------------------------------------------------------------------------- audit view
 
@@ -117,6 +164,8 @@ class EvidenceJournal:
                     self.payload_hash is not None and a.get("payload_sha256") != self.payload_hash(want)):
                 continue
             anchored_lines += 1
+            if r["kind"] == ATTEMPT_KIND:
+                continue                      # an operation that never took effect: its events stay attempted
             for n in r["data"].get("evidence") or []:
                 named[n.get("event_id")] = (r["seq"], r["data"].get("rk"), n)
         rows, counts = [], {"committed": 0, "attempted": 0}

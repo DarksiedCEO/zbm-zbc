@@ -140,6 +140,12 @@ class IssueOutcomeRequest(Inbound):
 ApprovalToken = Annotated[str, StringConstraints(max_length=128)]
 
 
+class QuarantineResolveRequest(Inbound):
+    """Wave F (AEGIS F-2): releasing a subject held because the ledger holds evidence this service never applied is
+    Andre's action: his approval token over ("quarantine_resolve", subject_id)."""
+    approval_token: Optional[ApprovalToken] = None
+
+
 class EscalationAckRequest(Inbound):
     """Acknowledging an escalation is Andre's action: it needs his approval
     token (HMAC-SHA256 keyed by ONBOARDING_ANDRE_APPROVAL_KEY over the exact

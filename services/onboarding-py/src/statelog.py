@@ -3,7 +3,8 @@ State-bearing local log (Wave F, M-1): the service's consequential state is rebu
 
 Every operation line carries the state it applied, as a DELTA of the entities it changed (``StateTracker.delta``):
 ``{"v": 1, "ops": [["set", container, key, value], ["del", container, key], ["whole", container, value],
-["append", container, [items]]]}``. Start-up
+["append", container, [items]], ["extend", container, key, [items]], ["lset", container, key, [items]],
+["ldel", container, key]]}`` (the last three: a container of per-key append-only lists). Start-up
 applies every line's delta in log order (``StateTracker.apply``), so replay is deterministic, order-preserving and
 idempotent (applying the same lines to a fresh process always gives the same state; a second restart gives the same
 state again). A line the replay cannot interpret -- an unknown state version, container, operation or type tag, a field
@@ -395,6 +396,8 @@ class StateTracker:
         self._whole_held: dict[str, str] = {}
         self.appended: dict[str, Callable[[], list]] = {}
         self._appended_held: dict[str, int] = {}
+        self.lists: dict[str, TrackedDict] = {}
+        self._lists_held: dict[str, dict[bytes, int]] = {}
 
     def add_keyed(self, name: str, owner: Any, attr: str) -> TrackedDict:
         td = TrackedDict(dict.items(getattr(owner, attr)))
@@ -404,6 +407,14 @@ class StateTracker:
 
     def add_whole(self, name: str, get: Callable[[], Any], set_: Callable[[Any], None]) -> None:
         self.whole[name] = (get, set_)
+
+    def add_keyed_lists(self, name: str, owner: Any, attr: str) -> TrackedDict:
+        """A dict of lists that only ever grow (a memory store): a line carries only each touched key's new items, so
+        its size does not grow with the store (AEGIS F-1)."""
+        td = TrackedDict(dict.items(getattr(owner, attr)))
+        setattr(owner, attr, td)
+        self.lists[name] = td
+        return td
 
     def add_append_only(self, name: str, get: Callable[[], list]) -> None:
         """A list that only ever grows (items never change once appended): a line carries only the new items."""
@@ -419,6 +430,9 @@ class StateTracker:
             self._whole_held[name] = digest(self.codec.enc(get()))
         for name, get in self.appended.items():
             self._appended_held[name] = len(get())
+        for name, td in self.lists.items():
+            self._lists_held[name] = {canonical(self.codec.enc(k)): len(td.raw_get(k)) for k in td.raw_keys()}
+            td.reset()
 
     def delta(self) -> tuple[Optional[dict], Callable[[], None]]:
         """The state change since the log was last told (None if nothing changed), and the callable that marks it
@@ -470,6 +484,35 @@ class StateTracker:
             if self._whole_held.get(name) != dg:
                 ops.append(["whole", name, ev])
                 whole_upd.append((name, dg))
+        list_upd = []
+        for name, td in self.lists.items():
+            held_n = self._lists_held.setdefault(name, {})
+            keys = td.raw_keys() if td.all else list(td.touched)
+            seen_k: set = set()
+            for k in keys:
+                ek = self.codec.enc(k)
+                kc = canonical(ek)
+                if kc in seen_k:
+                    continue
+                seen_k.add(kc)
+                if not td.raw_contains(k):
+                    if kc in held_n:
+                        ops.append(["ldel", name, ek])
+                        list_upd.append((name, kc, None))
+                    continue
+                items, n = td.raw_get(k), held_n.get(kc, 0)
+                if len(items) > n:
+                    ops.append(["extend", name, ek, [self.codec.enc(x) for x in items[n:]]])
+                elif len(items) < n:      # never in an append-only store; carried whole rather than lost
+                    ops.append(["lset", name, ek, [self.codec.enc(x) for x in items]])
+                else:
+                    continue
+                list_upd.append((name, kc, len(items)))
+            if td.all:
+                present = {canonical(self.codec.enc(k)) for k in td.raw_keys()}
+                for kc in [kc for kc in held_n if kc not in present]:
+                    ops.append(["ldel", name, json.loads(kc)])
+                    list_upd.append((name, kc, None))
         app_upd = []
         for name, get in self.appended.items():
             items, n = get(), self._appended_held.get(name, 0)
@@ -489,6 +532,11 @@ class StateTracker:
                 self._whole_held[name] = dg
             for name, n in app_upd:
                 self._appended_held[name] = n
+            for name, kc, n in list_upd:
+                if n is None:
+                    self._lists_held[name].pop(kc, None)
+                else:
+                    self._lists_held[name][kc] = n
             self.reset()
 
         if not ops:
@@ -497,6 +545,8 @@ class StateTracker:
 
     def reset(self) -> None:
         for td in self.keyed.values():
+            td.reset()
+        for td in self.lists.values():
             td.reset()
 
     def apply(self, state: Any, where: str) -> None:
@@ -513,8 +563,27 @@ class StateTracker:
             raise bad("malformed state operations")
         for op in state["ops"]:
             try:
-                if not isinstance(op, list) or not op or op[0] not in ("set", "del", "whole", "append"):
+                if not isinstance(op, list) or not op or op[0] not in ("set", "del", "whole", "append", "extend", "lset", "ldel"):
                     raise bad(f"unknown state operation {op[:1] if isinstance(op, list) else op!r}")
+                if op[0] in ("extend", "lset", "ldel"):
+                    if len(op) != (3 if op[0] == "ldel" else 4) or op[1] not in self.lists:
+                        raise bad(f"unknown keyed-list container {op[1:2]!r}")
+                    td = self.lists[op[1]]
+                    k = self.codec.dec(op[2])
+                    if canonical(self.codec.enc(k)) != canonical(op[2]):
+                        raise bad(f"a {op[1]} key does not re-encode identically")
+                    if op[0] == "ldel":
+                        td.raw_del(k)
+                        continue
+                    if not isinstance(op[3], list):
+                        raise bad(f"malformed {op[1]} items")
+                    items = [self.codec.dec(x) for x in op[3]]
+                    if [canonical(self.codec.enc(x)) for x in items] != [canonical(x) for x in op[3]]:
+                        raise bad(f"{op[1]} items do not re-encode identically")
+                    if op[0] == "lset" or not td.raw_contains(k):
+                        td.raw_set(k, [])
+                    td.raw_get(k).extend(items)
+                    continue
                 if op[0] == "append":
                     if len(op) != 3 or op[1] not in self.appended or not isinstance(op[2], list):
                         raise bad(f"unknown append-only container {op[1:2]!r}")
@@ -555,4 +624,6 @@ class StateTracker:
                for name, td in sorted(self.keyed.items())}
         out.update({f"whole:{n}": self.codec.enc(g()) for n, (g, _) in sorted(self.whole.items())})
         out.update({f"append:{n}": self.codec.enc(list(g())) for n, g in sorted(self.appended.items())})
+        out.update({f"lists:{name}": [[self.codec.enc(k), self.codec.enc(td.raw_get(k))] for k in td.raw_keys()]
+                    for name, td in sorted(self.lists.items())})
         return canonical(out)
