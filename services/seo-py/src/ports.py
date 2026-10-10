@@ -15,6 +15,7 @@ named NOT_CONNECTED port, and config.NOT_BUILT refuses to start if one is "selec
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -75,44 +76,76 @@ class NotConnectedBotVerifier:
 class DnsBotVerifier:
     """Reverse DNS, then forward-confirm (the host's own A/AAAA records must contain the IP), against the operator's
     documented host-name suffixes (agents/bots.VERIFY_DNS_SUFFIXES). Answers: ``verified``, ``failed`` (the claim is
-    false: a spoofed crawler), ``unverifiable`` (this family has no DNS method) or ``error`` (DNS did not answer in
-    time; the hit stays claimed). The lookups are injectable; production uses the system resolver with a timeout."""
+    false: a spoofed crawler), ``unverifiable`` (no DNS method for this family, or an address that is not globally
+    routable — a proxy or load-balancer address; no lookup is made) or ``error`` (DNS did not answer in time, the
+    shared pool is busy, or the global lookup cap is used up; the hit stays claimed).
+
+    AEGIS 1472041 M1: lookups run on ONE shared, bounded worker pool (POOL_WORKERS threads for the whole process); a
+    lookup is only submitted when a worker slot is free (never queued behind a hung resolver), so a timed-out lookup
+    can occupy at most its own slot; and the process makes at most ``max_lookups`` lookups in its lifetime."""
 
     connected = True
+    POOL_WORKERS = 4
+    _pool = None
+    _pool_lock = threading.Lock()
+    _slots = threading.BoundedSemaphore(POOL_WORKERS)      # shared: in flight across every instance <= workers
 
-    def __init__(self, rdns=None, forward=None, timeout_s: float = 2.0):
+    def __init__(self, rdns=None, forward=None, timeout_s: float = 2.0, max_lookups: int = 100_000):
         import socket
         self._rdns = rdns or (lambda ip: socket.gethostbyaddr(ip)[0])
         self._fwd = forward or (lambda host: [i[4][0] for i in socket.getaddrinfo(host, None)])
         self.timeout_s = timeout_s
+        self.max_lookups = max_lookups
+        self.lookups = 0
+        self._count = threading.Lock()
+
+    @classmethod
+    def _executor(cls):
+        import concurrent.futures as cf
+        with cls._pool_lock:
+            if cls._pool is None:
+                cls._pool = cf.ThreadPoolExecutor(max_workers=cls.POOL_WORKERS, thread_name_prefix="seo-dns")
+            return cls._pool
 
     def _call(self, fn, arg):
-        import concurrent.futures as cf
-        ex = cf.ThreadPoolExecutor(max_workers=1)
+        with self._count:
+            if self.lookups >= self.max_lookups:
+                raise TimeoutError("global lookup cap reached")
+            self.lookups += 1
+        if not self._slots.acquire(blocking=False):
+            raise TimeoutError("every DNS worker is busy")
         try:
-            return ex.submit(fn, arg).result(timeout=self.timeout_s)
-        finally:
-            ex.shutdown(wait=False)
+            fut = self._executor().submit(fn, arg)
+        except BaseException:
+            self._slots.release()
+            raise
+        fut.add_done_callback(lambda _f: self._slots.release())     # the slot frees when the lookup ends
+        return fut.result(timeout=self.timeout_s)
 
     def verify(self, ip: str, token: str) -> str:
         from agents.bots import VERIFY_DNS_SUFFIXES
         import ipaddress
+        import socket
         suffixes = VERIFY_DNS_SUFFIXES.get(token)
         if not suffixes:
             return "unverifiable"
-        import socket
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return "unverifiable"
+        if not addr.is_global:
+            return "unverifiable"
         try:
             host = str(self._call(self._rdns, ip) or "").lower().rstrip(".")
         except socket.herror:                              # no PTR record: the operator's crawlers all have one
             return "failed"
-        except Exception:                                  # timeout or resolver error: no claim either way
+        except Exception:                                  # timeout, busy, cap, resolver error: no claim either way
             return "error"
         if not any(host == s or host.endswith("." + s) for s in suffixes):
             return "failed"
         try:
             addrs = self._call(self._fwd, host) or []
-            want = ipaddress.ip_address(ip)
-            ok = any(ipaddress.ip_address(a.split("%")[0]) == want for a in addrs)
+            ok = any(ipaddress.ip_address(a.split("%")[0]) == addr for a in addrs)
         except Exception:
             return "error"
         return "verified" if ok else "failed"

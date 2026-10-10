@@ -41,7 +41,7 @@ def test_own_property_audit_end_to_end(tmp_path, srv):
     r = a["report"]
     assert r["report_version"] == "seo-audit-report/1" and r["outcome"] == "PARTIAL"
     agents = {e["agent"]: e for e in r["agents"]}
-    assert set(agents) == {"selene", "delia", "roman", "entity_check", "callum", "naomi"}
+    assert set(agents) == {"selene", "delia", "roman", "entity_check", "callum", "naomi", "osei"}
     assert agents["selene"]["outcome"] == "OK" and agents["delia"]["outcome"] == "OK"
     assert agents["entity_check"]["facts"]["fields"]["/#name"] == "match"
     assert agents["callum"]["outcome"] == "INSUFFICIENT_EVIDENCE" and agents["naomi"]["outcome"] == "NOT_CONNECTED"

@@ -106,7 +106,7 @@ def callum_report(aid, ps_sha, versions, cit, men, cls="STRENGTH", outcome="OK")
 
 
 @pytest.mark.parametrize("b_args,expected", [
-    (("p2", ["m@1"], [0.3, 0.9], [0.3, 0.9], "MENTIONED_NOT_CITED"), "MODEL_DRIFT"),     # prompt set changed
+    (("p2", ["m@1"], [0.3, 0.9], [0.3, 0.9], "MENTIONED_NOT_CITED"), "MEASUREMENT_ERROR"),  # the prompt set moved
     (("p1", ["m@2"], [0.3, 0.9], [0.3, 0.9], "MENTIONED_NOT_CITED"), "MODEL_DRIFT"),     # model version changed
     (("p1", ["m@1"], [0.2, 0.8], [0.4, 0.95], "MENTIONED_NOT_CITED"), "SAMPLING_NOISE"),  # overlapping bands
     (("p1", ["m@1"], [0.0, 0.2], [0.0, 0.2], "ABSENT"), "SURFACE_DRIFT"),                # disjoint bands

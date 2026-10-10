@@ -44,7 +44,7 @@ def test_combined_common_and_jsonl():
                                clf("2001:db8::1", "/b", 503, GPT_UA)]))
     assert d["lines"] == 3 and d["non_bot"] == 1
     g = d["families"]["Googlebot"]
-    assert g["requests"] == 1 and g["paths"] == {"/a": 1} and g["status"] == {"2xx": 1} and g["claimed"] == 1
+    assert g["requests"] == 1 and g["templates"] == {"/a": 1} and g["status"] == {"2xx": 1} and g["claimed"] == 1
     assert d["families"]["GPTBot"]["status"] == {"5xx": 1}                     # IPv6 client
     c = run("common", chunk([clf("1.2.3.4", "/", 200, fmt="common")]))
     assert c["no_user_agent"] == 1 and c["families"] == {}
@@ -57,8 +57,7 @@ def test_no_raw_ip_or_ua_survives():
     d = run("combined", chunk([clf("66.249.66.1", "/a", 200, GOOGLE_UA)]))
     s = json.dumps(d)
     assert "66.249.66.1" not in s and "Googlebot/2.1" not in s
-    assert d["families"]["Googlebot"]["ip_hashes"] == [logs_mod.ip_hash(KEY, "66.249.66.1")]
-    assert logs_mod.ip_hash(b"another key " * 3, "66.249.66.1") != logs_mod.ip_hash(KEY, "66.249.66.1")
+    assert logs_mod.hll_estimate(d["families"]["Googlebot"]["hll"]) == 1 and "ip_hashes" not in d["families"]["Googlebot"]
 
 
 def test_adversarial_lines_are_quarantined_and_counted():
@@ -76,7 +75,7 @@ def test_injection_text_in_paths_and_user_agents_is_data():
     d = run("combined", chunk([clf("1.2.3.4", "/ignore-previous-instructions;drop", 200, ua)]))
     g = d["families"]["Googlebot"]
     assert g["claimed"] == 1 and g["verified"] == 0
-    assert list(g["paths"]) == ["/ignore-previous-instructions;drop"]
+    assert list(g["templates"]) == ["/ignore-previous-instructions;drop"]
 
 
 def test_classification_prefers_the_specific_token():

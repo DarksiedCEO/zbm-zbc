@@ -51,6 +51,10 @@ class ManagerMixin:
             if self._closed:
                 raise Unavailable(R("SERVICE_CLOSED"))
             self._gate()
+            actor = "andre" if andre else "dashboard"
+            rk = self.rk("agent", agent, body)
+            if self._idem(actor, rk, body):                 # AEGIS L1: a replay answers before any state check
+                return self._agent_view(agent)
             cur = self.agent_state(agent)
             if body["expected_state"] != cur:
                 raise Conflict(R("AGENT_STATE_STALE"))
@@ -60,14 +64,13 @@ class ManagerMixin:
                 raise Forbidden(R("ANDRE_APPROVAL_REQUIRED"))
             if to != "restricted":
                 self.check_kill(write=True)
-            actor = "andre" if andre else "dashboard"
-            rk = self.rk("agent", agent, body)
-            if self._idem(actor, rk, body):
-                return self.department_view()["agents"][agent]
             card = self._scorecard(agent)
             data = {"agent": agent, "from": cur, "to": to, "reason": body["reason"], "scorecard_sha256": sha(card)}
             self._commit("agent_moved", self._req(data, actor, rk, body, agent), actor,
                          evidence=("agent_lifecycle", f"agent:{agent}", data, (actor, rk)))
+        return self._agent_view(agent)
+
+    def _agent_view(self, agent: str) -> dict:
         return self.department_view()["agents"][agent]
 
     def _a_agent_moved(self, d, at):
@@ -101,9 +104,6 @@ class ManagerMixin:
                 drifts += 1
                 confirmed += d["drift"]["persisted_by_agent"].get(agent, 0)
                 overturned += d["drift"]["overturned_by_agent"].get(agent, 0)
-        if agent == "osei":
-            runs += drifts
-            outcomes["OK"] = outcomes.get("OK", 0) + drifts
 
         def rate(n):
             return None if runs == 0 else round(n / runs, 4)
@@ -114,6 +114,7 @@ class ManagerMixin:
                 "not_connected_rate": rate(outcomes.get("NOT_CONNECTED", 0)),
                 "failure_rate": rate(outcomes.get("FAILED", 0)),
                 "restricted_runs": outcomes.get("RESTRICTED", 0),
+                "drift_reports_recorded": drifts if agent == "osei" else None,
                 "basis": "completed audit reports, finished log ingests and recorded drift reports"}
 
     def _queues(self, agent: str) -> dict:

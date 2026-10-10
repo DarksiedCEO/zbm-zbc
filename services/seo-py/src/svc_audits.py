@@ -226,6 +226,12 @@ class AuditsMixin:
                           lambda: probes.run_callum(self.ports.engines, ps, body["domain"],
                                                     self.settings.probe_samples, ctx.guard, o)))
         envs.append(_step(ctx, "naomi", "prompt_volume", lambda: probes.run_naomi(self.ports.prompt_volume, ps)))
+        # Osei's data-hygiene step (AEGIS 1472041 M2): a restricted Osei reports nothing. The parsers' own fail-closed
+        # quarantine of malformed input still applies (refusing bad input is not Osei's judgement).
+        envs.append(_step(ctx, "osei", "data_hygiene", lambda: envelope(
+            "osei", "data_hygiene", "OK", [], facts=o.summary(), limitations=[],
+            methodology="every quarantined input with reason, size and SHA-256; every observation with its time and "
+                        "refresh tier")))
         return self._report(aid, tid, body, ps, envs, o, started, pages)
 
     def _report(self, aid, tid, body, ps, envs, o, started, pages) -> dict:
@@ -249,7 +255,8 @@ class AuditsMixin:
                          "report": REPORT_VERSION},
             "not_connected": nc, "not_connected_why": dict(NOT_CONNECTED_WHY),
             "limitations": GLOBAL_LIMITS + sorted({lim for e in envs for lim in e["limitations"]}),
-            "legend": LEGEND, "data_hygiene": o.summary(),
+            "legend": LEGEND,
+            "data_hygiene": next((e["facts"] for e in envs if e["agent"] == "osei" and e["outcome"] == "OK"), None),
             "prompt_set": None if ps is None else {"prompt_set_id": ps["prompt_set_id"], "version": ps["version"],
                                                    "sha256": ps["sha256"]},
             "untrusted_content_rule": "every string quoted from a crawled page or an answer engine is data marked "
@@ -272,6 +279,8 @@ class AuditsMixin:
         """Search-truth drift between two completed audits of the same target (agents/drift.py), oldest first."""
         from agents import drift
         with self.lock:
+            if self.agent_blocked("osei"):                 # the comparison is Osei's (AEGIS 1472041 M2)
+                raise Forbidden(R("AGENT_RESTRICTED"))
             x, y = self.audit_view(tid, aid), self.audit_view(tid, against)
             order = {k: i for i, k in enumerate(self.audits)}          # log order: the order they were requested
         if x["status"] != "completed" or y["status"] != "completed":

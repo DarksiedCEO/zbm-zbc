@@ -6,9 +6,12 @@ parsed here, in memory, and only AGGREGATES leave this module:
   - per bot family (agents/bots.py, versioned): requests, status-code mix, distinct keyed-hash client IPs, the paths
     crawled (query strings dropped, bounded), and how many requests were verified / spoofed / merely claimed;
   - totals: lines, non-bot requests, requests without a User-Agent, quarantined lines by reason.
-Raw lines, raw IPs and User-Agent strings are never returned, stored or logged. An IP is kept only as
-HMAC-SHA256(SEO_LOG_HASH_KEY, ip), truncated; rotating that key (the retention rule, ADR 0017) makes earlier hashes
-unlinkable to any IP.
+Nothing identifying leaves this module (AEGIS 1472041 H1): raw lines, IPs, IP hashes, User-Agent strings and raw URL
+paths are never returned, stored or logged. A path is reduced to a TEMPLATE first (``template_path``: e-mail
+addresses, UUIDs, numeric ids, long hex / base64 / token-like segments replaced by {email}, {uuid}, {id}, {token};
+query strings dropped); exact paths are only compared, in memory, against the public sitemap sample fixed when the
+ingest was created (its indices are kept, not the paths) and against robots.txt rules (a count is kept). Distinct
+client IPs are estimated with a HyperLogLog sketch of keyed hashes (256 registers: no hash and no IP is kept).
 
 Verification: a User-Agent is a CLAIM. A hit counts as ``verified`` only when the bot-verification port confirmed the
 client IP (reverse DNS + forward-confirm against the operator's documented host names); ``spoofed`` when the port
@@ -22,6 +25,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import math
 import re
 from typing import Callable, Optional
 from urllib.parse import unquote, urlsplit
@@ -30,17 +34,63 @@ from agents import bots
 
 FORMATS = ("combined", "common", "jsonl")
 LINE_MAX = 8192
-PATHS_PER_FAMILY = 2000
-PATH_MAX = 300
-HASHES_PER_FAMILY = 5000
+TEMPLATES_PER_FAMILY = 500
+PATH_MAX = 2000
+HLL_M = 256
 QUARANTINE_REASONS = ("LINE_TOO_LONG", "NOT_UTF8", "MALFORMED", "BAD_IP", "BAD_STATUS")
 _CLF = re.compile(r'^(\S+) \S+ \S+ \[[^\]]{1,64}\] "([A-Z]{1,12}) (\S{1,4096})(?: HTTP/[0-9.]{1,5})?" (\d{3}) (?:\d+|-)'
                   r'(?: "([^"\\]*(?:\\.[^"\\]*)*)" "([^"\\]*(?:\\.[^"\\]*)*)")?\s*$')
 _UA_RX = {t: re.compile(r"(?<![A-Za-z0-9])" + re.escape(t) + r"(?![A-Za-z0-9])", re.I) for t in bots.ua_families()}
 
 
-def ip_hash(key: bytes, ip: str) -> str:
-    return hmac.new(key, ip.encode("ascii"), hashlib.sha256).hexdigest()[:32]
+_EMAIL = re.compile(r"[^/@\s]{1,64}@[^/@\s]{1,255}")
+_UUID = re.compile(r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}")
+_HEX = re.compile(r"[0-9a-fA-F]{16,}")
+_DIGITS = re.compile(r"\d{4,}")
+_TOKENISH = re.compile(r"[A-Za-z0-9_\-=+.~]{20,}")
+TEMPLATE_RULES = ("decode once; drop query and fragment; per segment: contains '@' -> {email}; UUID -> {uuid}; "
+                  "only digits -> {id}; 16+ hex, 20+ token characters, 8+ characters mixing letters and 2+ digits, "
+                  "or over 40 characters -> {token}; any run of 4+ digits inside a kept segment -> {id}")
+
+
+def template_path(target: str) -> Optional[str]:
+    """A path with every identifier-looking part replaced by a typed placeholder; None when not a path."""
+    p = _path(target)
+    if p is None:
+        return None
+    out = []
+    for seg in p.split("/")[1:]:
+        if not seg:
+            out.append("")
+        elif "@" in seg or _EMAIL.search(seg):
+            out.append("{email}")
+        elif _UUID.fullmatch(seg):
+            out.append("{uuid}")
+        elif seg.isdigit():
+            out.append("{id}")
+        elif _HEX.fullmatch(seg) or len(seg) > 40 or _TOKENISH.fullmatch(seg) or (
+                len(seg) >= 8 and sum(c.isdigit() for c in seg) >= 2 and any(c.isalpha() for c in seg)):
+            out.append("{token}")
+        else:
+            out.append(_DIGITS.sub("{id}", seg)[:40])
+    return ("/" + "/".join(out))[:300]
+
+
+def _hll_add(regs: list, key: bytes, ip: str) -> None:
+    x = int.from_bytes(hmac.new(key, ip.encode("ascii"), hashlib.sha256).digest()[:8], "big")
+    idx, w = x >> 56, x & ((1 << 56) - 1)
+    rank = 56 - w.bit_length() + 1
+    if rank > regs[idx]:
+        regs[idx] = rank
+
+
+def hll_estimate(regs: list) -> int:
+    m = len(regs)
+    est = (0.7213 / (1 + 1.079 / m)) * m * m / sum(2.0 ** -r for r in regs)
+    zeros = regs.count(0)
+    if est <= 2.5 * m and zeros:
+        est = m * math.log(m / zeros)
+    return int(round(est))
 
 
 def classify(ua: Optional[str]) -> Optional[str]:
@@ -71,7 +121,7 @@ def _path(target: str) -> Optional[str]:
 
 
 def parse_line(fmt: str, line: str) -> Optional[dict]:
-    """{ip, method, path, status, ua} or None (malformed)."""
+    """{ip, path, status, ua} or None (malformed). In memory only."""
     if fmt == "jsonl":
         try:
             d = json.loads(line)
@@ -103,12 +153,19 @@ def empty_delta() -> dict:
     return {"lines": 0, "non_bot": 0, "no_user_agent": 0, "quarantined": {}, "families": {}}
 
 
-def process_chunk(fmt: str, data: bytes, key: bytes, verify: Callable[[str, str], str], seen_hashes: dict,
-                  budget: dict) -> dict:
-    """One chunk -> an aggregate delta. ``verify(ip, token)`` is the port (raw IP in memory only); ``seen_hashes``
-    caches verification per hashed IP for this ingest; ``budget["left"]`` bounds port lookups."""
+def _family() -> dict:
+    return {"requests": 0, "verified": 0, "spoofed": 0, "claimed": 0, "status": {}, "templates": {},
+            "templates_dropped": 0, "hll": [0] * HLL_M, "robots_blocked": 0, "sample_hits": []}
+
+
+def process_chunk(fmt: str, data: bytes, key: bytes, verify: Callable[[str, str], str], seen: dict, budget: dict,
+                  robots=None, sample: Optional[dict] = None) -> dict:
+    """One chunk -> an aggregate delta with nothing identifying in it. ``verify(ip, token)`` is the port (raw IP in
+    memory only); ``seen`` caches verdicts in memory for this ingest; ``budget["left"]`` bounds port lookups;
+    ``robots`` the parsed robots.txt fixed at ingest creation; ``sample`` {sitemap path: index}."""
     out = empty_delta()
     q = out["quarantined"]
+    sample = sample or {}
     for raw in data.split(b"\n"):
         raw = raw.rstrip(b"\r")
         if not raw.strip():
@@ -140,19 +197,27 @@ def process_chunk(fmt: str, data: bytes, key: bytes, verify: Callable[[str, str]
         if tok is None:
             out["non_bot"] += 1
             continue
-        h = ip_hash(key, ip)
-        fam = out["families"].setdefault(tok, {"requests": 0, "verified": 0, "spoofed": 0, "claimed": 0,
-                                               "status": {}, "paths": {}, "ip_hashes": []})
+        fam = out["families"].setdefault(tok, _family())
         fam["requests"] += 1
         sc = _status_class(rec["status"])
         fam["status"][sc] = fam["status"].get(sc, 0) + 1
-        p = _path(rec["path"])
-        if p is not None and (p in fam["paths"] or len(fam["paths"]) < PATHS_PER_FAMILY):
-            fam["paths"][p] = fam["paths"].get(p, 0) + 1
-        if h not in fam["ip_hashes"] and len(fam["ip_hashes"]) < HASHES_PER_FAMILY:
-            fam["ip_hashes"].append(h)
+        exact = _path(rec["path"])
+        tpl = template_path(rec["path"])
+        if tpl is not None:
+            if tpl in fam["templates"] or len(fam["templates"]) < TEMPLATES_PER_FAMILY:
+                fam["templates"][tpl] = fam["templates"].get(tpl, 0) + 1
+            else:
+                fam["templates_dropped"] += 1
+        if exact is not None:
+            if robots is not None and not robots.allowed(tok, exact):
+                fam["robots_blocked"] += 1
+            i = sample.get(exact)
+            if i is not None and i not in fam["sample_hits"]:
+                fam["sample_hits"].append(i)
+        _hll_add(fam["hll"], key, ip)
+        h = hmac.new(key, ip.encode("ascii"), hashlib.sha256).hexdigest()[:32]
         key_v = f"{tok}|{h}"
-        v = seen_hashes.get(key_v)
+        v = seen.get(key_v)
         if v is None:
             if budget["left"] > 0:
                 budget["left"] -= 1
@@ -162,35 +227,37 @@ def process_chunk(fmt: str, data: bytes, key: bytes, verify: Callable[[str, str]
                     v = "error"
             else:
                 v = "budget"
-            seen_hashes[key_v] = v
+            if len(seen) < 100_000:            # memory bound; past it every lookup counts against the budget
+                seen[key_v] = v
         if v == "verified":
             fam["verified"] += 1
         elif v == "failed":
             fam["spoofed"] += 1
         else:
             fam["claimed"] += 1
+    for f in out["families"].values():
+        f["sample_hits"].sort()
     return out
 
 
 def merge(total: dict, delta: dict) -> dict:
-    """Fold a chunk delta into the ingest totals (pure; used by replay as well)."""
+    """Fold a chunk delta into the ingest totals (pure; used by replay as well). Bounded: templates per family,
+    256 sketch registers, sample indices bounded by the sample."""
     for k in ("lines", "non_bot", "no_user_agent"):
         total[k] += delta[k]
     for r, n in delta["quarantined"].items():
         total["quarantined"][r] = total["quarantined"].get(r, 0) + n
     for tok, f in delta["families"].items():
-        t = total["families"].setdefault(tok, {"requests": 0, "verified": 0, "spoofed": 0, "claimed": 0,
-                                               "status": {}, "paths": {}, "ip_hashes": []})
-        for k in ("requests", "verified", "spoofed", "claimed"):
+        t = total["families"].setdefault(tok, _family())
+        for k in ("requests", "verified", "spoofed", "claimed", "robots_blocked", "templates_dropped"):
             t[k] += f[k]
         for s, n in f["status"].items():
             t["status"][s] = t["status"].get(s, 0) + n
-        for p, n in f["paths"].items():
-            if p in t["paths"] or len(t["paths"]) < PATHS_PER_FAMILY:
-                t["paths"][p] = t["paths"].get(p, 0) + n
-        have = set(t["ip_hashes"])
-        for h in f["ip_hashes"]:
-            if h not in have and len(t["ip_hashes"]) < HASHES_PER_FAMILY:
-                t["ip_hashes"].append(h)
-                have.add(h)
+        for p, n in f["templates"].items():
+            if p in t["templates"] or len(t["templates"]) < TEMPLATES_PER_FAMILY:
+                t["templates"][p] = t["templates"].get(p, 0) + n
+            else:
+                t["templates_dropped"] += n
+        t["hll"] = [max(a, b) for a, b in zip(t["hll"], f["hll"])]
+        t["sample_hits"] = sorted(set(t["sample_hits"]) | set(f["sample_hits"]))
     return total

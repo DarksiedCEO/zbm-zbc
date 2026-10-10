@@ -107,7 +107,8 @@ def test_scorecards_and_queues_come_from_recorded_runs(tmp_path, srv):
     assert sc["findings_overturned"] == 0 and sc["overturn_rate"] == 0.0 and sc["failure_rate"] == 0.0
     assert d["callum"]["scorecard"]["outcomes"] == {"INSUFFICIENT_EVIDENCE": 2}
     assert d["naomi"]["scorecard"]["not_connected_rate"] == 1.0
-    assert d["osei"]["scorecard"]["runs"] == 1                   # one drift report recorded
+    assert d["osei"]["scorecard"]["runs"] == 2                   # its recorded data-hygiene envelopes
+    assert d["osei"]["scorecard"]["drift_reports_recorded"] == 1
     assert d["selene"]["queue"] == {"audits_running": 0, "schedule_slots_due": 0, "log_ingests_open": 0}
     assert h.ok(h.get(f"/tenants/zbm/schedules/{sid}"))["drifts"]
     h.refused(h.get("/department", caller="hub", tenant="zbm"), 403, "CALLER_NOT_ALLOWED")

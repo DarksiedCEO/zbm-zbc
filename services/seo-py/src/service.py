@@ -92,6 +92,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, LogsMixin, SchedulesMix
         self.running_audits: set = set()               # audits this process is running now
         self._log_verify_cache: dict = {}                # ingest -> {family|ip hash: verdict} (memory only)
         self._log_budget: dict = {}
+        self._log_robots: dict = {}                      # open ingests' parsed robots.txt (memory only)
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
         self._last_integrity_try = 0
         self._own_pending: Optional[bytes] = None

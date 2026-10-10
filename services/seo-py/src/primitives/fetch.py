@@ -467,7 +467,8 @@ class Fetcher:
             out["status_class"] = "unreachable"
             return out
         if 200 <= r.status < 300:
-            out["parsed"] = robots_mod.parse(r.body[:ROBOTS_MAX_BYTES].decode("utf-8", errors="replace"))
+            out["text"] = r.body[:ROBOTS_MAX_BYTES].decode("utf-8", errors="replace")
+            out["parsed"] = robots_mod.parse(out["text"])
             out["status_class"] = "ok"
             out["text_sha256"] = hashlib.sha256(r.body).hexdigest()
         elif 400 <= r.status < 500:

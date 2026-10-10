@@ -170,18 +170,32 @@ W2-1. **Crawler access from first-party logs** (P2, Selene's `log_access` task; 
    robots-disallowed hits (today's robots.txt, fetched through the guarded fetcher), and important URLs (the latest
    audit's sitemap sample of that domain) that no search crawler requested — missing, never invented, when there is
    no audit.
-W2-2. **Log retention rule.** Raw lines, raw IPs and User-Agent strings are never stored. Client IPs exist only as
-   HMAC-SHA256 under `SEO_LOG_HASH_KEY_FILE` (required with a data directory), truncated; the operator rotates the key
-   every retention period, after which stored hashes cannot be linked to any IP (the log is append-only, so this is
-   the purge). An ingest older than `SEO_LOG_RETENTION_DAYS` (default 90) is served as totals only (`expired`).
-   Paths are kept without query strings.
+W2-2. **Log retention rule** (amended for AEGIS 1472041 H1). Nothing identifying is retained, so the append-only log
+   holds nothing that would need shredding: raw lines, raw URL paths, query strings, IPs, IP hashes and User-Agent
+   strings never reach the log, the ledger, a report or an error. A path is reduced to a TEMPLATE before anything is
+   counted (`agents/logs.template_path`: decoded once; e-mail addresses, UUIDs, numeric ids, long hex / base64 /
+   token-like segments and letter-digit mixes replaced by `{email}`, `{uuid}`, `{id}`, `{token}`). Exact paths are
+   compared only in memory: against robots.txt and the public sitemap sample, both fixed when the ingest is created
+   (counts and sample indices are kept). Distinct client IPs are a HyperLogLog estimate (256 registers of keyed hashes
+   under `SEO_LOG_HASH_KEY_FILE`; no hash is kept). An ingest older than `SEO_LOG_RETENTION_DAYS` (default 90) is
+   served as totals only (`expired`). Crypto-shredding was not built: with no identifying data retained there is
+   nothing to shred, and a homemade cipher on the standard library was judged worse than not storing the data.
+   **Bounds** (H2): `SEO_LOG_MAX_OPEN_INGESTS` open ingests per tenant, `SEO_LOG_MAX_INGESTS` ingests and
+   `SEO_LOG_TENANT_BYTES` bytes per tenant within a retention period, `SEO_LOG_MAX_BYTES` per ingest; per-ingest state
+   is fixed-size (at most 500 templates per family, 256 registers); a finished ingest's robots.txt leaves memory.
+   **DNS verifier bounds** (M1): non-globally-routable addresses are never looked up; one shared pool of four workers
+   for the process, a lookup submitted only when a worker is free (never queued behind a hung resolver), and a
+   process-lifetime lookup cap.
 W2-3. **Search-truth drift** (`agents/drift.py`, Osei). Two completed audits of the same tenant and target are
    compared finding by finding; every change gets exactly one class by the first rule whose evidence holds:
-   R1 TOOL_FAILURE, R2 MODEL_DRIFT, R3 SAMPLING_NOISE, R4 SURFACE_DRIFT, R5 REAL_CHANGE, R6 MEASUREMENT_ERROR,
-   R7 UNKNOWN (rules and their evidence in the module docstring, rules version recorded in every report). Reports
+   R1 TOOL_FAILURE, R2 MEASUREMENT_ERROR (the ruler moved — bot list, rule table, entity record version, or the prompt
+   set — and the thing measured did not), R3 UNKNOWN (the ruler AND the thing changed: a confound, never REAL_CHANGE),
+   R4 MODEL_DRIFT, R5 SAMPLING_NOISE, R6 SURFACE_DRIFT, R7 REAL_CHANGE, R8 UNKNOWN (rules version `2026-10-10.2`,
+   amended for AEGIS 1472041 M4; the evidence of each rule is in the module docstring). Reports
    now carry per-page content fingerprints, rule versions and the robots.txt hash so the rules have evidence.
 W2-4. **Scheduled re-audits.** One audit per schedule per slot, the audit id derived from (schedule, slot): duplicate,
-   replayed and post-restart ticks are no-ops and a slot is never run twice; missed slots are not back-filled. A paying
+   replayed and post-restart ticks are no-ops and a slot is never run twice; missed slots are not back-filled; each
+   schedule's due slot is computed when its turn in the tick comes, after the earlier audits finished (L2). A paying
    client's schedule needs Andre and a Finance (31) invoice id at creation (one invoice id per schedule — see the
    pending default below); resuming a paused client schedule is Andre's. Budget: `SEO_SCHEDULE_BUDGET_RUNS` per tenant
    per `SEO_SCHEDULE_PERIOD_DAYS` window (over-budget slots recorded `BUDGET_EXHAUSTED`). Kill switches leave a due
@@ -192,8 +206,12 @@ W2-5. **Department manager** (`svc_manager.py`). Work queues per agent (audits r
    and overturned from recorded drift reports, NOT_CONNECTED and failure rates; null over zero runs), and the
    lifecycle active → watch → retrain → restricted → retired. Moves into or out of `restricted`, and into `retired`
    (terminal), are Andre's alone; each move is recorded with its reason code and the scorecard's SHA-256. A
-   restricted or retired agent is refused by the run guard (outcome `RESTRICTED`, no findings; Selene's log reports
-   refused 403 `AGENT_RESTRICTED`); restricting is allowed under the write switch.
+   restricted or retired agent is refused by the run guard everywhere (AEGIS 1472041 M2/M3): in an audit its outcome
+   is `RESTRICTED` with no findings (Osei's data-hygiene step included: the report's `data_hygiene` is then null, while
+   the parsers' own fail-closed quarantine still applies); a restricted Selene refuses log ingest creation, chunk
+   uploads and parsing, and log reports (403 `AGENT_RESTRICTED`); a restricted Osei refuses drift views and records
+   no drift. Scorecards count only recorded agent envelopes; drift reports are counted separately, never as runs.
+   An agent move replays before any state check (L1). Restricting is allowed under the write switch.
 W2-6. New capability switches `logs` and `schedules`; the run guard of a log ingest checks `logs`, of an audit
    `audit`.
 

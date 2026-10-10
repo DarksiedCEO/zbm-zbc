@@ -48,9 +48,12 @@ cd src && python3 -m api                                # SEO_BIND_ADDR (127.0.0
 | `SEO_AUDIT_MAX_PAGES` | `10` | paths per audit (1..25) |
 | `SEO_PROBE_SAMPLES` | `5` | answers sampled per prompt per engine (3..50) |
 | `SEO_BOT_INFO_URL` | unset | an https page about the crawler, added to its User-Agent |
-| `SEO_LOG_HASH_KEY_FILE` | — (required with `SEO_DATA_DIR`) | key for the keyed hashes of client IPs from uploaded logs (`openssl rand -hex 32`, mode 0600); rotate it every retention period: older hashes become unlinkable |
+| `SEO_LOG_HASH_KEY_FILE` | — (required with `SEO_DATA_DIR`) | key for the keyed hashes behind the distinct-client-IP sketch of uploaded logs (`openssl rand -hex 32`, mode 0600); no IP and no IP hash is ever stored |
 | `SEO_LOG_MAX_BYTES` | 256 MiB | bytes per log ingest (1 MiB..2 GiB) |
 | `SEO_LOG_RETENTION_DAYS` | `90` | after this an ingest is served as totals only (`expired`) |
+| `SEO_LOG_MAX_OPEN_INGESTS` | `2` | open log ingests per tenant (1..20) |
+| `SEO_LOG_MAX_INGESTS` | `30` | log ingests per tenant within a retention period (1..1000) |
+| `SEO_LOG_TENANT_BYTES` | 1 GiB | log bytes per tenant within a retention period |
 | `SEO_BOT_VERIFY_DNS` | `0` | `1` connects the bot-verification port (reverse DNS + forward-confirm with the system resolver); `0` = every bot hit stays "claimed" |
 | `SEO_BOT_VERIFY_MAX` | `200` | DNS verifications per ingest (1..5000); past it hits stay "claimed" |
 | `SEO_SCHEDULE_BUDGET_RUNS` | `8` | scheduled audits per tenant per period (1..100) |

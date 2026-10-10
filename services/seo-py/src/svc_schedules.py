@@ -136,11 +136,12 @@ class SchedulesMixin:
         summary = {"ran": 0, "already_done": 0, "budget_exhausted": 0, "killed": 0, "paused": 0, "refused": 0,
                    "drift_recorded": 0}
         with self.lock:
-            due = [(sid, self._slot(s)) for sid, s in sorted(self.schedules.items())]
-        for sid, slot in due:
+            due = sorted(self.schedules)
+        for sid in due:
             with self.lock:
                 self._gate()
                 s = self.schedules[sid]
+                slot = self._slot(s)               # AEGIS L2: computed now, after the earlier audits of this tick
                 tid = s["tenant_id"]
                 if s["status"] != "active":
                     summary["paused"] += 1
