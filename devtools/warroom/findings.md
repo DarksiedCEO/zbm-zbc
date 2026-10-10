@@ -95,6 +95,37 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   cases pass and stay as regression cases (`fixed`); the scenario no longer downgrades the wide set or invisible
   characters.
 
+## WR-F006 — service-py: a word written wholly in Cyrillic was folded into a Latin opt-out word (consent revoked)
+
+- Found by: AEGIS review of the war room fixes (2cedde8..ffd6a82, H1), not by a seeded case; a regression the WR-F001
+  fix introduced (the base did not have it).
+- Department: Customer Service & Success (14), `services/service-py/src/triage.py` `clean(..., opt_out=True)` with
+  the shared fold `src/lookalikes.py` (Cyrillic `п` -> `n`), read by every opt-out rule in `channels.py`.
+- What happens: `Пожалуйста, отправьте код по SMS` ("please send the code by SMS") revokes SMS consent: `по` ("by")
+  reads as `no` beside `sms` (`suspected`, which pauses SMS). A bare `По` is `exact` and revokes email. The same for
+  `Напишите мне по SMS…`, `Можно по телефону или по SMS?`, and Ukrainian, Bulgarian and Serbian equivalents.
+- Why it is a MUST failure: an ordinary message changes no consent (ADR 0014; `consent_unchanged`).
+- Status: FIXED (commit `47c10fc` on branch `warroom-redteam-gate`; ADR 0014 "War room fixes"): a word of two or more
+  letters written wholly in ONE non-Latin script is read with service-py's own `CONFUSABLES` alone (as at 2cedde8)
+  unless the shared layers make it an English opt-out word of four letters or more; mixed-script words and single
+  letters fold in full. Everything the base caught is still caught; Russian `стоп` was not an opt-out at the base and
+  is not one now. Tests: `services/service-py/tests/test_warroom_fixes.py` (`BENIGN_FOREIGN`). War room: MUST
+  `consent_unchanged` scenarios `service-py/foreign-script-ordinary-sms` and `-email`, and Cyrillic, Greek, Hebrew
+  and Arabic lines in `chaos.FOREIGN_LINES` (the `mixed_language` transform).
+
+## WR-F007 — verification-py: a ban recorded before WR-F005 did not block a mailbox variant (banned clipper re-enters)
+
+- Found by: AEGIS review of the war room fixes (2cedde8..ffd6a82, H2).
+- Department: Verification & Integrity (33), `services/verification-py/src/service.py` `identity_check` (ban lookup).
+- What happens: a ban recorded before the WR-F005 fix stored the old `email_base` HMAC. A new identity check carries
+  that value as `email_base_v0`, and the ban lookup compared `(kind, hmac)` literally, so the banned clipper re-applies
+  as `kidη+2@example.com` and the check is `clear`.
+- Why it is a MUST failure: a ban propagates to every identity HMAC of the banned clipper (spec C.5; ADR 0007), and the
+  WR-F005 fix promises a record made before it keeps every match it had.
+- Status: FIXED (commit `2c688ee`; ADR 0007 "War room fixes"): banned HMACs are kept as their `_lock_key`, and every
+  ban lookup compares lock keys. Tests: `services/verification-py/tests/test_warroom_fixes.py` (a pre-fix ban, a
+  post-fix ban, a restart from the ledger, an unrelated address).
+
 ## SHOULD-level observations for Andre (scored, not gate-blocking)
 
 These are outside what the departments' documents promise today, so the war room scores them and does not block on
@@ -124,6 +155,8 @@ them. Each may deserve a decision.
   `Ｍａｒｙ－Ｊａｎｅ Ｏ＇Ｎｅｉｌ`). Refused 422: the N16-11 character allowlist (`textguard.display_name_problem`)
   admits only `space . ' -` as punctuation and checks the raw text, so the full-width hyphen U+FF0D is refused. Fails
   closed; not changed. A decision for Andre: NFKC the name before the allowlist check (and store the NFKC form).
+  The scenario now has MUST checks (`645e381`): every case is answered (201 or 422, never a server error) and the
+  pinned names are accepted as written; a variant's acceptance stays SHOULD.
 - **sales-py, onboarding-py** (not in this fix wave): sales-py misses some `homoglyph_wide` opt-outs (no suppression)
   and onboarding-py's legal-name key does not join a letter-spaced name (`1099-name-variant`, `letter_spacing`); both scored SHOULD by their
   libraries.
