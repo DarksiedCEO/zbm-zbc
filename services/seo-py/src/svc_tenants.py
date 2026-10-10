@@ -38,6 +38,10 @@ def valid_domain(d) -> bool:
                                                                                 ".arpa", ".invalid"))
 
 
+def _site(d: str) -> str:
+    return d[4:] if d.startswith("www.") else d
+
+
 def parse_switch(name: str) -> tuple[str, Optional[str]]:
     if name in ("global", "write"):
         return name, None
@@ -85,7 +89,10 @@ class TenantsMixin:
         engaged mid-run stops the run at its next step."""
         def check(capability: Optional[str] = None, provider: Optional[str] = None) -> None:
             with self.lock:
-                code = self.kill_code(tenant=tenant, capability=capability, provider=provider)
+                # AEGIS M3: a run also stops for the audit capability and the write switch (its result could not be
+                # recorded), checked between steps and before every socket operation
+                code = self.kill_code(tenant=tenant, capability=capability, provider=provider, write=True) \
+                    or self.kill_code(capability="audit")
                 if code is None and self._closed:
                     code = "SERVICE_CLOSED"
             if code is not None:
@@ -189,6 +196,11 @@ class TenantsMixin:
             rk = self.rk("domains", tid, body)
             if self._idem("andre", rk, body):
                 return self.tenant_view(tid)
+            # AEGIS M2: a domain (or its www. twin) belongs to ONE tenant, so a client's site can never be audited
+            # free through the own-properties tenant (or another client's paid audit)
+            taken = {_site(d) for other, t in self.tenants.items() if other != tid for d in t["domains"]}
+            if any(_site(d) in taken for d in domains):
+                raise Conflict(R("DOMAIN_TAKEN"))
             data = {"tenant_id": tid, "domains": sorted(domains)}
             self._commit("tenant_domains_set", self._req(data, "andre", rk, body, tid), "andre",
                          evidence=("tenant_domains_set", f"tenant:{tid}", data, ("andre", rk)))

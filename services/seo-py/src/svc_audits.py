@@ -153,6 +153,14 @@ class AuditsMixin:
             report = self._run_audit(aid, tid, body, ps)
             with self.lock:
                 self._gate()
+                stop = self.kill_code(tenant=tid, capability="audit", write=True)
+                if stop is not None:
+                    # AEGIS M3: a switch engaged during the run refuses the completion record. The run is closed as
+                    # interrupted (a terminal bookkeeping record, not new work) and the report is discarded.
+                    self._commit("audit_interrupted", {"audit_id": aid, "reason": stop}, "seo",
+                                 evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid, "reason": stop},
+                                           ("interrupted", aid)))
+                    return self.audit_view(tid, aid)
                 rsha = sha(report)
                 self._commit("audit_completed", {"audit_id": aid, "report": report, "report_sha256": rsha},
                              "seo", evidence=("audit_report_recorded", f"audit:{aid}",
@@ -174,7 +182,8 @@ class AuditsMixin:
                                           report_sha256=d["report_sha256"])
 
     def _a_audit_interrupted(self, d, at):
-        self.audits[d["audit_id"]].update(status="interrupted", completed_at=at)
+        self.audits[d["audit_id"]].update(status="interrupted", completed_at=at,
+                                          interrupted_reason=d.get("reason", "PROCESS_LOST"))
 
     def _run_audit(self, aid: str, tid: str, body: dict, ps: Optional[dict]) -> dict:
         """The run, outside the service lock: Selene, Delia, Roman, the entity check, Callum, Naomi."""

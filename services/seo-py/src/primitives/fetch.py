@@ -11,8 +11,12 @@ SSRF-safe by construction:
   - numeric host spellings (``2130706433``, ``0x7f.1``, ``017700000001``) resolve to their address and are refused
     by the same check;
   - redirects are followed by hand, at most ``max_redirects``, every hop checked again;
-  - the body is streamed and capped at ``max_bytes`` DECODED bytes (a compression bomb stops at the cap); an overall
-    deadline as well as httpx's per-phase timeouts (a server dripping a byte at a time is cut off);
+  - only ports 80 and 443 (REFUSED_PORT otherwise);
+  - the body is read RAW and decoded here, incrementally, never more than ``max_bytes`` decoded bytes (zlib
+    ``max_length`` per step): at most one content coding, gzip or deflate; stacked or other codings are refused
+    UNSUPPORTED_ENCODING; a MemoryError becomes RESOURCE_LIMIT, never an exception out of ``fetch``;
+  - one HARD overall deadline over connect + TLS + headers + body for every hop (a socket backend bounds every
+    socket operation by the time left), and the kill-switch guard is checked before every socket operation;
   - robots.txt (RFC 9309) is fetched and honoured for this crawler's own product token before any other path on
     that origin; the crawler always identifies itself (``ZBM-SEO-Audit``).
 Anything fetched is DATA: nothing in a response is ever executed, followed as an instruction, or written anywhere
@@ -25,11 +29,14 @@ import hashlib
 import ipaddress
 import socket
 import ssl
+import threading
 import time
+import zlib
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
+import httpcore
 import httpx
 
 from primitives import Killed
@@ -44,11 +51,19 @@ KEPT_HEADERS = ("content-type", "content-length", "location", "x-robots-tag", "l
 # as such in every report; never used for crawling.
 HUMAN_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36")
 
-STATES = ("OK", "REFUSED_URL", "REFUSED_ADDRESS", "DNS_FAILED", "CONNECT_FAILED", "TLS_FAILED", "TIMEOUT",
-          "TOO_LARGE", "TOO_MANY_REDIRECTS", "BLOCKED_BY_ROBOTS", "PROTOCOL_ERROR", "KILLED")
+STATES = ("OK", "REFUSED_URL", "REFUSED_PORT", "REFUSED_ADDRESS", "DNS_FAILED", "CONNECT_FAILED", "TLS_FAILED",
+          "TIMEOUT", "TOO_LARGE", "UNSUPPORTED_ENCODING", "RESOURCE_LIMIT", "TOO_MANY_REDIRECTS", "BLOCKED_BY_ROBOTS",
+          "PROTOCOL_ERROR", "KILLED")
+# Only the web's standard ports are fetched (AEGIS L2): a URL or redirect naming any other port (an admin console, a
+# database, a service on a non-web port of a public host) is refused REFUSED_PORT.
+DEFAULT_PORTS = (80, 443)
+# At most ONE content coding, and only these (AEGIS H1): each is decoded incrementally against the byte budget.
+ENCODINGS = ("gzip", "x-gzip", "deflate")
 
 _BLOCKED_V6 = (ipaddress.ip_network("64:ff9b::/96"), ipaddress.ip_network("64:ff9b:1::/48"),
-               ipaddress.ip_network("2002::/16"), ipaddress.ip_network("2001::/32"))
+               ipaddress.ip_network("2002::/16"), ipaddress.ip_network("2001::/32"),
+               ipaddress.ip_network("fec0::/10"))                      # deprecated site-local (AEGIS L1)
+_BLOCKED_V4 = (ipaddress.ip_network("192.88.99.0/24"),)                # 6to4 relay anycast (AEGIS L1)
 
 
 def public_address(ip: str) -> bool:
@@ -56,6 +71,8 @@ def public_address(ip: str) -> bool:
     try:
         a = ipaddress.ip_address(ip.split("%", 1)[0])
     except ValueError:
+        return False
+    if isinstance(a, ipaddress.IPv4Address) and any(a in n for n in _BLOCKED_V4):
         return False
     if isinstance(a, ipaddress.IPv6Address):
         if a.ipv4_mapped is not None:
@@ -130,13 +147,137 @@ def _content_type(headers: dict) -> tuple[Optional[str], Optional[str]]:
     return ctype, charset
 
 
+# ---------------------------------------------------------------------------------------------- hard deadline
+# AEGIS M1: httpx's timeouts are per phase and per read, so a server trickling its HEADERS a byte at a time kept a
+# fetch alive far past its budget. Every socket operation of a fetch now goes through this network backend, which
+# bounds each connect / TLS handshake / read / write by the time left until the fetch's overall deadline and checks
+# the kill-switch guard before each one: the whole fetch (connect + headers + body, every hop) ends at the deadline,
+# and an engaged switch stops it at its next socket operation. The deadline and guard are per thread (a fetch runs
+# on its caller's thread), so one backend instance serves every concurrent fetch.
+
+class _Budget(threading.local):
+    deadline: Optional[float] = None
+    guard: Optional[Callable] = None
+
+
+_BUDGET = _Budget()
+
+
+def _left(timeout: Optional[float], exc: type) -> Optional[float]:
+    d = _BUDGET.deadline
+    if d is None:
+        return timeout
+    left = d - time.monotonic()
+    if left <= 0:
+        raise exc("the fetch's overall deadline has passed")
+    return left if timeout is None else min(timeout, left)
+
+
+def _guard_check() -> None:
+    g = _BUDGET.guard
+    if g is not None:
+        g(capability="fetch", provider="web")
+
+
+class _DeadlineStream(httpcore.NetworkStream):
+    def __init__(self, inner):
+        self._s = inner
+
+    def read(self, max_bytes: int, timeout: Optional[float] = None) -> bytes:
+        _guard_check()
+        return self._s.read(max_bytes, _left(timeout, httpcore.ReadTimeout))
+
+    def write(self, buffer: bytes, timeout: Optional[float] = None) -> None:
+        _guard_check()
+        self._s.write(buffer, _left(timeout, httpcore.WriteTimeout))
+
+    def close(self) -> None:
+        self._s.close()
+
+    def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+        return _DeadlineStream(self._s.start_tls(ssl_context, server_hostname, _left(timeout, httpcore.ConnectTimeout)))
+
+    def get_extra_info(self, info: str):
+        return self._s.get_extra_info(info)
+
+
+class _DeadlineBackend(httpcore.NetworkBackend):
+    def __init__(self):
+        self._b = httpcore.SyncBackend()
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        _guard_check()
+        return _DeadlineStream(self._b.connect_tcp(host, port, _left(timeout, httpcore.ConnectTimeout), local_address,
+                                                   socket_options))
+
+    def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        raise httpcore.ConnectError("unix sockets are never used")
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+
+_BACKEND = _DeadlineBackend()
+
+
+def install_deadline_backend(transport: httpx.HTTPTransport) -> httpx.HTTPTransport:
+    """Route ``transport``'s socket I/O through the deadline backend. httpx 0.28 has no public parameter for the
+    network backend, so the pool's attribute is set; if httpx ever moves it, this refuses (the service will not run
+    without a hard deadline) instead of silently fetching without one."""
+    pool = getattr(transport, "_pool", None)
+    if pool is None or not hasattr(pool, "_network_backend"):
+        raise RuntimeError("cannot install the fetch deadline backend on this httpx version; refusing to fetch")
+    pool._network_backend = _BACKEND
+    return transport
+
+
+# ---------------------------------------------------------------------------------------------- bounded decoding
+
+class _Decoder:
+    """Raw body bytes -> decoded bytes, never more than ``limit`` decoded bytes in memory (AEGIS H1). Each step asks
+    zlib for at most the remaining budget + 1 bytes (``max_length``), so a compression bomb costs at most the budget."""
+
+    def __init__(self, encoding: Optional[str], limit: int):
+        self.enc, self.limit, self.n, self.parts, self.d = encoding, limit, 0, [], None
+
+    def _add(self, b: bytes) -> None:
+        self.n += len(b)
+        if self.n > self.limit:
+            raise _Refused("TOO_LARGE", f"body larger than {self.limit} bytes (decoded)")
+        self.parts.append(b)
+
+    def feed(self, data: bytes) -> None:
+        if not data:
+            return
+        if self.enc is None:
+            self._add(data)
+            return
+        if self.d is None:
+            if self.enc in ("gzip", "x-gzip"):
+                wbits = 16 + zlib.MAX_WBITS
+            else:   # "deflate" is zlib-wrapped by the RFC; some servers send raw deflate
+                zlib_header = len(data) >= 2 and (data[0] & 0x0F) == 8 and ((data[0] << 8) | data[1]) % 31 == 0
+                wbits = zlib.MAX_WBITS if zlib_header else -zlib.MAX_WBITS
+            self.d = zlib.decompressobj(wbits)
+        buf = data
+        try:
+            while buf and not self.d.eof:
+                self._add(self.d.decompress(buf, self.limit - self.n + 1))
+                buf = self.d.unconsumed_tail
+        except zlib.error:
+            raise _Refused("PROTOCOL_ERROR", "the body could not be decoded") from None
+
+    def body(self) -> bytes:
+        return b"".join(self.parts)
+
+
 class Fetcher:
     connected = True
 
     def __init__(self, timeout_s: int = 10, max_bytes: int = 2 * 1024 * 1024, max_redirects: int = 5,
                  bot_info_url: Optional[str] = None, resolver: Callable = system_resolver,
                  policy: Callable = default_policy, transport: Optional[httpx.BaseTransport] = None,
-                 verify: object = True):
+                 verify: object = True, ports: tuple = DEFAULT_PORTS):
         self.timeout_s = timeout_s
         self.max_bytes = max_bytes
         self.max_redirects = max_redirects
@@ -144,8 +285,10 @@ class Fetcher:
         self.user_agent = f"Mozilla/5.0 (compatible; {PRODUCT_TOKEN}/{VERSION}{info})"
         self.resolver = resolver
         self.policy = policy
-        self.transport = transport
+        self.transport = install_deadline_backend(transport) if isinstance(transport, httpx.HTTPTransport) \
+            else transport
         self.verify = verify
+        self.ports = tuple(ports)
 
     @classmethod
     def from_settings(cls, settings) -> "Fetcher":
@@ -176,6 +319,8 @@ class Fetcher:
         except UnicodeError:
             raise _Refused("REFUSED_URL", "host is not a valid domain name") from None
         port = port or (443 if scheme == "https" else 80)
+        if port not in self.ports:
+            raise _Refused("REFUSED_PORT", "only the standard web ports are fetched")
         try:
             addrs = list(self.resolver(host, port))
         except (OSError, UnicodeError, ValueError):
@@ -204,8 +349,9 @@ class Fetcher:
         ext = {"sni_hostname": host} if scheme == "https" else {}
         t = httpx.Timeout(self.timeout_s)
         try:
-            with httpx.Client(timeout=t, transport=self.transport, verify=self.verify, follow_redirects=False,
-                              trust_env=False) as client:
+            transport = self.transport or install_deadline_backend(httpx.HTTPTransport(verify=self.verify,
+                                                                                       trust_env=False))
+            with httpx.Client(timeout=t, transport=transport, follow_redirects=False, trust_env=False) as client:
                 with client.stream("GET", target, headers=headers, extensions=ext) as resp:
                     kept = {k: resp.headers.get(k)[:2000] for k in KEPT_HEADERS if resp.headers.get(k) is not None}
                     if 300 <= resp.status_code < 400 and resp.headers.get("location"):
@@ -213,19 +359,26 @@ class Fetcher:
                     declared = resp.headers.get("content-length")
                     if declared and declared.isdigit() and int(declared) > self.max_bytes:
                         raise _Refused("TOO_LARGE", f"declared body larger than {self.max_bytes} bytes")
-                    chunks, size = [], 0
-                    for chunk in resp.iter_bytes():
-                        size += len(chunk)
-                        if size > self.max_bytes:
-                            raise _Refused("TOO_LARGE", f"body larger than {self.max_bytes} bytes (decoded)")
+                    codings = [c.strip().lower() for c in (resp.headers.get("content-encoding") or "").split(",")
+                               if c.strip() and c.strip().lower() != "identity"]
+                    if len(codings) > 1 or (codings and codings[0] not in ENCODINGS):
+                        raise _Refused("UNSUPPORTED_ENCODING", "only one content coding, gzip or deflate, is accepted")
+                    dec = _Decoder(codings[0] if codings else None, self.max_bytes)
+                    raw = 0
+                    for chunk in resp.iter_raw():               # raw bytes: httpx decodes nothing (AEGIS H1)
+                        raw += len(chunk)
+                        if raw > self.max_bytes:
+                            raise _Refused("TOO_LARGE", f"body larger than {self.max_bytes} bytes (on the wire)")
                         if time.monotonic() > deadline:
                             raise _Refused("TIMEOUT", "the response did not complete within the deadline")
-                        chunks.append(chunk)
-                    return resp.status_code, kept, b"".join(chunks), url
+                        dec.feed(chunk)
+                    return resp.status_code, kept, dec.body(), url
         except _Refused:
             raise
         except httpx.TimeoutException:
             raise _Refused("TIMEOUT", "timed out") from None
+        except MemoryError:
+            raise _Refused("RESOURCE_LIMIT", "the response exhausted memory; refused") from None
         except httpx.ConnectError as exc:
             if isinstance(exc.__cause__, ssl.SSLError) or "SSL" in str(exc) or "certificate" in str(exc).lower():
                 raise _Refused("TLS_FAILED", "TLS handshake or certificate check failed") from None
@@ -249,6 +402,10 @@ class Fetcher:
         user_agent = self.user_agent if ua == "bot" else HUMAN_UA
         res = FetchResult(url=url, state="OK", user_agent=ua)
         deadline = time.monotonic() + 2 * self.timeout_s
+        prev = (_BUDGET.deadline, _BUDGET.guard)
+        if prev[0] is not None:                   # a nested fetch (robots.txt) never outlives the outer deadline
+            deadline = min(deadline, prev[0])
+        _BUDGET.deadline, _BUDGET.guard = deadline, guard
         current = url
         try:
             for hop in range(self.max_redirects + 1):
@@ -276,6 +433,11 @@ class Fetcher:
         except Killed as k:                               # a kill switch engaged (or the service closed)
             res.state, res.detail, res.final_url = "KILLED", k.code, current
             return res
+        except MemoryError:
+            res.state, res.detail, res.final_url = "RESOURCE_LIMIT", "memory exhausted; refused", current
+            return res
+        finally:
+            _BUDGET.deadline, _BUDGET.guard = prev
 
     def _robots_allows(self, url: str, cache: dict, guard: Optional[Callable]) -> bool:
         p = urlsplit(url)

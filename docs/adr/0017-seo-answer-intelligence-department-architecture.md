@@ -36,14 +36,20 @@ own properties, then sold as an audit.
 6. **Decision states:** ACT, TEST, WATCH, DEFER, STOP, DO_NOT_BUILD, DO_NOT_PUBLISH, DO_NOT_SPEND,
    INSUFFICIENT_EVIDENCE. A choice that may be a policy (blocking an AI crawler) is WATCH, never a defect.
 7. **Tenants.** `own` (ZBM's properties; the `zbm` tenant is seeded) or `client`. Andre registers each tenant's
-   domains; an audit of any other domain is refused `DOMAIN_NOT_AUTHORIZED`. Every object names one tenant; a
+   domains; an audit of any other domain is refused `DOMAIN_NOT_AUTHORIZED`. A domain (with its `www.` twin)
+   belongs to one tenant only: registering it to a second tenant is refused `DOMAIN_TAKEN`, so a client's site can
+   never be audited free through the own-properties tenant (AEGIS 00cc66b M2). Every object names one tenant; a
    tenant-scoped reader asking for another tenant's object gets the same 404 as for a missing one.
 8. **Kill switches**, each with its own reason code and test: `global`, `write`, `tenant:<id>`,
    `capability:<fetch|render|ai_probe|audit|entity_write|prompt_sets>`, `provider:<web|openai|anthropic|google|
    perplexity>`. The dashboard or Compliance may engage; only Andre releases. An engage the ledger cannot record takes
    effect at once in memory and is shown as unrecorded. Environment switches (`SEO_KILL_GLOBAL`,
    `SEO_KILLED_CAPABILITIES`, `SEO_KILLED_PROVIDERS`) cannot be released at runtime. A run checks the live switches
-   before every outbound step, so a switch engaged mid-run stops it (overall outcome KILLED).
+   — global, its tenant, `capability:audit`, `write`, and the step's own capability and provider — between steps and
+   before every socket operation, so a switch engaged mid-run stops it. If `capability:audit`, `write` or the
+   tenant's switch is engaged when the run ends, the completion record is refused: the audit is recorded
+   `interrupted` with the switch's reason code (a terminal bookkeeping record, not new work) and the report is
+   discarded (AEGIS 00cc66b M3).
 9. **Crawled content is data, never an instruction.** Page and answer text is kept only as bounded extracts marked
    `untrusted`; nothing in it can change a decision, a state, a switch or the entity record (tested with injected
    instructions in titles, JSON-LD, llms.txt and provider answers).
@@ -52,11 +58,17 @@ own properties, then sold as an audit.
     stated: Z Best Media, 5318 East 2nd Street, Long Beach, CA; (562) 248-6617 — nothing he did not state is added.
     The on-site check compares a site's Organization / LocalBusiness JSON-LD and visible phone number with it; the
     record is the authority and is never written from a page.
-11. **Primitives.** fetch: http/https only; DNS resolved once per hop and every address checked (loopback, private,
-    link-local incl. 169.254.169.254, CGNAT, multicast, reserved, IPv4-mapped / 6to4 / NAT64); the connection made to
-    the checked IP with Host and SNI carrying the name (no DNS rebinding); redirects by hand with a cap; decoded-size
-    cap; per-phase timeouts plus an overall deadline; robots.txt (RFC 9309) honoured for the `ZBM-SEO-Audit` token;
-    always identified. render: a separate port with explicit states (`RAW_OK_RENDER_NOT_CONNECTED`,
+11. **Primitives.** fetch: http/https only, ports 80 and 443 only (`REFUSED_PORT`); DNS resolved once per hop and
+    every address checked (loopback, private, link-local incl. 169.254.169.254, CGNAT, multicast, reserved,
+    site-local fec0::/10, the 6to4 relay 192.88.99.0/24, IPv4-mapped / 6to4 / NAT64); the connection made to the
+    checked IP with Host and SNI carrying the name (no DNS rebinding); redirects by hand with a cap; the body read
+    raw and decoded here incrementally (zlib `max_length` per step against the remaining budget), at most one content
+    coding (gzip or deflate; stacked or other codings `UNSUPPORTED_ENCODING`; a MemoryError is `RESOURCE_LIMIT`,
+    never an exception); one hard overall deadline over connect, TLS, headers and body for every hop, enforced on
+    every socket operation by a network backend that also checks the kill switches; robots.txt (RFC 9309) honoured
+    for the `ZBM-SEO-Audit` token; always identified. The browser-identity fetch used by access-diff is made only
+    where robots.txt allows this service's own crawler, and honours robots.txt for that crawler (AEGIS 00cc66b H1,
+    M1, L1-L3). render: a separate port with explicit states (`RAW_OK_RENDER_NOT_CONNECTED`,
     `RAW_OK_RENDER_FAILED`, `JS_DEPENDENT`, …). parse: tolerant stdlib HTML extract plus JSON-LD validation against a
     versioned rule table. diff, access-diff (`BOT_DIFFERENTIAL`), link-diff, change-detect (a failed fetch is
     `TOOL_FAILURE`, never a change).
@@ -135,6 +147,10 @@ credentials for providers are a requirement for whichever adapter is built first
 - The paid-audit flow takes an invoice id on trust from the caller; it does not verify payment with Finance (31)
   (no client built). Andre's approval is the control.
 - Tests run against an in-process fixture server; nothing here has been run against a real public site yet.
+- The hard fetch deadline relies on installing a network backend into httpx's connection pool (no public httpx
+  parameter exists in 0.28); if a future httpx moves it, the fetcher refuses to run rather than fetch without it.
+- Brotli and zstd responses are refused (`UNSUPPORTED_ENCODING`) rather than decoded; the crawler never advertises
+  them, but a misconfigured server sending them anyway cannot be read.
 
 ## Unlock list
 

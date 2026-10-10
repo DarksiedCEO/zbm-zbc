@@ -115,7 +115,7 @@ class FixtureServer:
 
     def fetcher(self, **kw) -> fetch_mod.Fetcher:
         args = {"timeout_s": 1, "max_bytes": 256 * 1024, "max_redirects": 3, "resolver": self.resolver(),
-                "policy": self.policy()}
+                "policy": self.policy(), "ports": (80, 443, self.port)}
         args.update(kw)
         return fetch_mod.Fetcher(**args)
 

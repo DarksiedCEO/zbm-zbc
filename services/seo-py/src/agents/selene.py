@@ -8,7 +8,8 @@ Observes (all ``measured`` from this service's own fetches; nothing estimated):
     a blocked search crawler as a defect;
   - each audited page: status code, redirect chain, X-Robots-Tag and meta robots, canonical (count, host, target
     status), noindex / canonical conflicts, content type;
-  - bot-vs-browser access differential (UA-based only; see primitives/diff.py);
+  - bot-vs-browser access differential (UA-based only; see primitives/diff.py): the browser-identity fetch is made
+    only where robots.txt allows this service's own crawler, and honours it;
   - fetch / render state (render is NOT_CONNECTED in Wave 1: raw HTML only).
 Selene returns the page extracts too, so Delia, Roman and the entity check reuse them (one fetch per page).
 """
@@ -29,8 +30,9 @@ AGENT, TASK = "selene", "crawlability"
 METHODOLOGY = ("Fetched robots.txt (RFC 9309: 4xx = no rules, 5xx/unreachable = everything disallowed) and each "
                "audited page with this service's identified crawler (ZBM-SEO-Audit), honouring robots.txt for its own "
                "token. Each bot family token was evaluated with RFC 9309 longest-match rules against '/' and every "
-               "audited path; bot family list version {v}. Pages were also fetched once with a browser User-Agent to "
-               "compare what is served (user-agent differential only). Raw HTML only; no JavaScript was executed.")
+               "audited path; bot family list version {v}. Where robots.txt allows this service's crawler, pages were "
+               "also fetched once with a browser User-Agent (honouring robots.txt for our crawler) to compare what is "
+               "served (user-agent differential only). Raw HTML only; no JavaScript was executed.")
 LIMITS = ["Observed from one network location at one time; a CDN or firewall may answer other clients differently.",
           "Bot access by VERIFIED IP range (how the major operators identify their crawlers) cannot be observed by "
           "changing the User-Agent; an IP-based block or cloak is not detected.",
@@ -91,7 +93,9 @@ def run(ctx) -> tuple[dict, dict]:
             page_findings, canon_checked = _page_findings(ctx, path, f, extract, canon_checked)
             findings += page_findings
             if f.ok and extract is not None:
-                human = ctx.fetcher.fetch(url, ua="human", honor_robots=False, guard=ctx.guard)
+                # AEGIS L3: the browser-identity comparison honours robots.txt for OUR crawler too (it is only made
+                # where our crawler may fetch, and from the same robots cache)
+                human = ctx.fetcher.fetch(url, ua="human", robots_cache=ctx.robots_cache, guard=ctx.guard)
                 if human.state == "KILLED":
                     raise Killed(human.detail or "KILLED")
                 hx = parse_html(human.text(), human.final_url or url) if human.ok and human.content_type in \

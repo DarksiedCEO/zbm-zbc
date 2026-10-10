@@ -66,18 +66,19 @@ def test_refused_urls(srv, url):
 def test_ssrf_direct_and_after_redirect_is_refused(srv, target):
     t = target.format(port=srv.port)
     direct = srv.fetcher().fetch(t)
-    assert direct.state in ("REFUSED_ADDRESS", "DNS_FAILED", "REFUSED_URL"), (t, direct.state)
+    assert direct.state in ("REFUSED_ADDRESS", "DNS_FAILED", "REFUSED_URL", "REFUSED_PORT"), (t, direct.state)
     assert direct.state != "OK"
     srv.redirect("site.test", "/go", t)
     n = len(srv.seen)
     r = srv.fetcher().fetch(srv.url(path="/go"))
-    assert r.state in ("REFUSED_ADDRESS", "DNS_FAILED", "REFUSED_URL")
+    assert r.state in ("REFUSED_ADDRESS", "DNS_FAILED", "REFUSED_URL", "REFUSED_PORT")
     assert len(srv.seen) == n + 1                 # only the first hop reached the server
 
 
 def test_production_policy_refuses_the_fixture_itself(srv):
     srv.html("site.test", "/", PAGE)
-    f = fetch_mod.Fetcher(timeout_s=1, resolver=srv.resolver(), policy=fetch_mod.default_policy)
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=srv.resolver(), policy=fetch_mod.default_policy,
+                          ports=(80, 443, srv.port))
     assert f.fetch(srv.url()).state == "REFUSED_ADDRESS"
     assert srv.seen == []
 
@@ -98,7 +99,7 @@ def test_dns_rebinding_connects_to_the_checked_address_only():
 
     def handler(request: httpx.Request):
         sent.append((request.url.host, request.headers["host"]))
-        return httpx.Response(200, headers={"Content-Type": "text/html"}, content=b"<title>t</title>")
+        return httpx.Response(200, headers={"Content-Type": "text/html"}, stream=httpx.ByteStream(b"<title>t</title>"))
     f = fetch_mod.Fetcher(timeout_s=1, resolver=resolver, transport=httpx.MockTransport(handler))
     r = f.fetch("http://rebind.test/page")
     assert r.state == "OK" and sent == [("93.184.216.34", "rebind.test")] and calls == ["rebind.test"]
@@ -109,7 +110,7 @@ def test_https_sends_sni_with_the_name_to_the_checked_ip():
 
     def handler(request: httpx.Request):
         seen.append((request.url.host, request.headers["host"], request.extensions.get("sni_hostname")))
-        return httpx.Response(200, headers={"Content-Type": "text/html"}, content=b"ok")
+        return httpx.Response(200, headers={"Content-Type": "text/html"}, stream=httpx.ByteStream(b"ok"))
     f = fetch_mod.Fetcher(timeout_s=1, resolver=lambda h, p: ["93.184.216.34"], transport=httpx.MockTransport(handler))
     assert f.fetch("https://Example.COM/x").state == "OK"
     assert seen == [("93.184.216.34", "example.com", "example.com")]

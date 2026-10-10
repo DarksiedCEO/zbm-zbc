@@ -47,6 +47,9 @@ cd src && python3 -m api                                # SEO_BIND_ADDR (127.0.0
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`src/serve.py`, shared with every Python service) |
 | `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | the evidence ledger; unset = every write refused (fail closed) |
 
+The fetcher only ever connects to ports 80 and 443, accepts at most one content coding (gzip or deflate), decoded
+within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SECONDS`) over the whole fetch.
+
 **Not built — setting any of these refuses start:** `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`,
 `SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`, `SEO_PERPLEXITY_API_KEY_FILE`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE`, `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`,

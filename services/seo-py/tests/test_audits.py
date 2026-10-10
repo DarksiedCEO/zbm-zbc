@@ -151,8 +151,8 @@ def test_kill_engaged_mid_run_stops_the_run(tmp_path, srv):
         h.svc.set_switch("dashboard", {"request_id": rid(), "switch": "tenant:zbm", "engaged": True}, andre=False)
         handler._send(200, {"Content-Type": "text/html"}, home_html().encode())
     srv.routes[("site.test", "/")] = home
-    r = h.ok(audit(h), 201)["report"]
-    assert r["summary"]["agent_outcomes"]["selene"] == "KILLED"
+    a = h.ok(audit(h), 201)
+    assert a["status"] == "interrupted" and a["interrupted_reason"] == "KILLED_TENANT" and a["report"] is None
     assert not any(s["path"] == "/about" for s in srv.seen)
 
 
@@ -226,8 +226,8 @@ def test_audit_with_prompt_set_and_not_connected_engines(tmp_path, srv):
     cal = next(e for e in r["agents"] if e["agent"] == "callum")
     assert cal["outcome"] == "NOT_CONNECTED" and cal["findings"] == []
     assert r["prompt_set"]["version"] == 1
-    h.tenant("acme", domains=("site.test",))
-    h.refused(audit(h, "acme", caller="dashboard", andre=True, invoice_id=invoice_id(),
+    h.tenant("acme", domains=("other.test",))
+    h.refused(audit(h, "acme", caller="dashboard", andre=True, invoice_id=invoice_id(), domain="other.test",
                     prompt_set_id=ps["prompt_set_id"]), 404, "PROMPT_SET_NOT_FOUND")
 
 
