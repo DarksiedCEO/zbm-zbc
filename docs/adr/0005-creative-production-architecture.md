@@ -1768,3 +1768,13 @@ reviewer's signature probes, ported).
 | F-1 (Medium) | `zbm_memory` / `zbc_memory` were carried whole: every change carried the store (2 000 feedback entries: 212.9 MB of deltas, quadratic) | The memories' winners, brand notes, feedback and library are per-key append-only lists (`StateTracker.add_keyed_lists`): a line carries only each touched key's new entries (`extend`); the delta for one entry is the same size at the 10th and the 2 000th entry (asserted in bytes). No natural cap exists in the memories; none is invented. |
 | F-2 (Medium, same rule) | A decision whose line was owed at a crash was lost | The shared journal appends locally first, then anchors (onboarding-py's fix): a decision whose anchor failed survives the crash; the last line's anchor is re-sent at start. Kit signatures were already covered by their intent lines. Not added here: onboarding's quarantine (a creative decision lost between its record and its local line is `attempted` and is redone; no money or identity rides on it). |
 | F-3 (Low) | An open signature intent was closed `not_on_ledger` while its record could still be in flight; signing again after a failed resolution line recorded a second `campaign_kit_signed_by_andre` | An intent not found on the first read is re-checked once after the rest of `LEDGER_INFLIGHT_GRACE_S` (10 s) since its line (`build_app(startup_sleep=...)`, injectable; tests never wait). Andre's signature of a kit has a process-independent event id (`stable_event_id(type, kit, version, campaign)`), so signing again is the ledger's 200: one signature event. |
+
+### Annotated CI (Oct 10 2026): the regex linearity test
+
+`test_lim_every_regex_in_text_module_is_linear_time` failed on ubuntu 3.12 on every reading: the confusables class
+read 11.7x the reference pattern (bound 9) on a short input. A ratio to an unrelated pattern measures the runner's
+constant factors, not linearity, so it is no longer asserted (printed only). Linearity is now asserted structurally
+(sre's parse tree: no nested unbounded repeat and no backreference unless the pattern, by name and content hash, is in
+`STRUCTURE_REVIEWED` with the reason it is linear; self-test `test_lim_the_structure_check_flags_*`) plus the existing
+loose scaling check (same work on 16x longer adversarial inputs within 4x the CPU, best of 5). Constant factors stay
+judged per pattern against its own reviewed form (`PIN_RATIO_MAX`) and by the 50 ms bound.

@@ -640,9 +640,14 @@ def regex_same_work(p: re.Pattern, small: str, large: str, span: int = GROWTH_SP
 # ratio ~1 becomes ~4, under 9) on any platform, and off Linux only the 50 ms bound saw constant factors at all. A
 # changed pattern is now judged against ITS OWN reviewed form, per pattern and per input, on every platform
 # (REVIEWED_PATTERNS, PIN_RATIO_MAX below); this ratio and the 50 ms bound still judge the absolute cost.
+# Annotated CI (Oct 10 2026): on GitHub's ubuntu 3.12 runner the confusables character class read 11.7x the reference
+# on EVERY reading, a linear pattern on a short input: the ratio to an unrelated pattern measures constant factors of
+# the runner, not linearity. It is no longer asserted anywhere (it is printed). Linearity is judged by structure
+# (``_regex_structure``) and by scaling (the same-work growth bound); constant factors by each pattern's own reviewed
+# form (PIN_RATIO_MAX, every platform) and the 50 ms bound.
 LINEAR_REF = re.compile(r"[^\w#@]+")
 REGEX_RATIO_MAX = 9.0
-REGEX_RATIO_CALIBRATED = sys.platform.startswith("linux")
+REGEX_RATIO_CALIBRATED = False
 # Fix wave 26b (AEGIS r25 F-10: the 50 ms CPU bound read 34.5 ms in 1 of 20 loaded runs, margin 1.45x). The bound is
 # unchanged; a reading over it (or over REGEX_RATIO_MAX) is read again, fresh, up to ABS_ATTEMPTS times, and only a
 # pattern over the bound on EVERY reading fails — the form R25B-1 gave onboarding's same-work check. A pattern that
@@ -666,11 +671,82 @@ def _abs_readings(p: re.Pattern, s: str, cpu=None) -> tuple[float, float, list[t
     return dt, ref, readings
 
 
+# The constructs that can make a backtracking engine super-linear: an unbounded repeat inside another unbounded repeat,
+# and a backreference. A pattern with one is linear only for a reason a reviewer checked; it must be listed here with
+# that reason, so a new or changed pattern with such a construct fails until reviewed (the scaling check below still
+# runs on it).
+STRUCTURE_REVIEWED = {   # name in shared.text -> (SHA-256 prefix of the reviewed pattern, why it is linear)
+    "_ORDINARY_WORD": ("70493736c0fcb795", "each outer iteration starts with a punctuation char the inner class excludes"),
+    "_TAG_WORD": ("bd7ea5ed7981871f", "each outer iteration starts with '_', which the inner classes exclude"),
+    "_LETTERLIKE_NAME": ("1b780c91f5070144", "each outer iteration starts with a space, which [A-Z-] excludes"),
+    "_REGIONAL_STREAM": ("6eb04bdcd21ac348", "the inner run (spacing marks) and the regional indicator that ends each "
+                                             "outer iteration are disjoint"),
+    "_RUNS": ("5c8d4a253d0dc165", "one group of one char repeated: one pass, no alternative to retry"),
+    "_DIVIDER": ("abcd023c5cb841aa", "one group of one char repeated: one pass, no alternative to retry"),
+}
+
+
+def _regex_structure(p: re.Pattern) -> list[str]:
+    """The super-linear-capable constructs in ``p`` (sre's own parse tree): nested unbounded repeats (possessive and
+    atomic ones excepted) and backreferences."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            from re import _constants as C, _parser as P
+        except ImportError:  # pragma: no cover - before 3.11
+            import sre_constants as C
+            import sre_parse as P
+    found: list[str] = []
+
+    def walk(items, depth: int) -> None:
+        for op, av in items:
+            name = str(op)
+            if name in ("MAX_REPEAT", "MIN_REPEAT"):
+                lo, hi, sub = av
+                unbounded = hi == C.MAXREPEAT
+                if unbounded and depth:
+                    found.append("nested unbounded repeat")
+                walk(sub, depth + unbounded)
+            elif name == "SUBPATTERN":
+                walk(av[-1], depth)
+            elif name == "BRANCH":
+                for b in av[1]:
+                    walk(b, depth)
+            elif name in ("ASSERT", "ASSERT_NOT"):
+                walk(av[1], depth)
+            elif name in ("GROUPREF", "GROUPREF_EXISTS"):
+                found.append("backreference")
+    walk(P.parse(p.pattern, p.flags), 0)
+    return found
+
+
 def test_lim_every_regex_in_text_module_is_linear_time():
+    """Linearity is asserted two ways, neither against another pattern's speed (annotated CI, Oct 10 2026: a ratio to
+    an unrelated reference regex measured the runner's constant factors and failed a linear pattern every time):
+
+    * structurally: every pattern's sre parse tree is free of nested unbounded repeats and backreferences, or the
+      pattern (by name and content hash) is in STRUCTURE_REVIEWED with the reason it is still linear (deterministic,
+      no timing; a changed pattern must be reviewed again);
+    * by scaling, loosely: the same work on 16x longer inputs (adversarial runs) costs at most GROWTH_RATIO_MAX (4)
+      times the CPU of the short side, best of 5; a quadratic pattern reads ~16 there
+      (``test_lim_the_growth_bound_fails_superlinear_patterns_and_passes_a_costly_linear_one``).
+
+    The 50 ms bound per 100 000 chars stays (absolute cost). The ratio to LINEAR_REF is printed only."""
     import shared.text as text
 
-    patterns = [v for v in vars(text).values() if isinstance(v, re.Pattern)]
+    import hashlib
+
+    named = {k: v for k, v in vars(text).items() if isinstance(v, re.Pattern)}
+    patterns = list(named.values())
     assert len(patterns) >= 2
+    for name, p in named.items():
+        risky = _regex_structure(p)
+        reviewed = STRUCTURE_REVIEWED.get(name)
+        same = reviewed is not None and hashlib.sha256(p.pattern.encode()).hexdigest()[:16] == reviewed[0]
+        assert not risky or same, (name, p.pattern[:80], risky, "a super-linear-capable construct no reviewer has "
+                                   "explained (or the reviewed pattern changed)")
     worst, worst_ratio, at, worst_growth, grew = 0.0, 0.0, None, 0.0, None
     for p in patterns:
         for small, large, s in zip(_adversarial_inputs(GROWTH_SMALL), _adversarial_inputs(GROWTH_LARGE),
@@ -944,3 +1020,12 @@ def test_lost_sweep_job_work_and_kit_replay_once():
     assert api2.post(f"{C}/kit", zbc_kit_request()).status_code == 503
     kit = ok(api2.post(f"{C}/kit", zbc_kit_request()), 201)
     assert len(led2.of_type("campaign_kit_built")) == 1 and kit["kit_id"] == led2.of_type("campaign_kit_built")[0]["subject_id"]
+
+
+def test_lim_the_structure_check_flags_nested_repeats_and_backreferences_only():
+    """The structural half of the linearity check on its own: the textbook catastrophic patterns are flagged, plain
+    character-class runs and bounded repeats are not."""
+    for bad in (r"(a+)+$", r"(?:\w+\s?)*x", r"(.+)\1", r"(\w*)*"):
+        assert _regex_structure(re.compile(bad)), bad
+    for good in (r"[^\w#@]+", r"[\s/]+", r"(?:ab){2,5}c+", r"[#@][\w#@]*", r"(?:x|y)z+"):
+        assert not _regex_structure(re.compile(good)), good
