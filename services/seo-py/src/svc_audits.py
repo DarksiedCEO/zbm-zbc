@@ -22,11 +22,13 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from agents import RunContext, delia, entity_check, osei, probes, roman, selene
+from agents import RunContext, bots, delia, entity_check, osei, probes, roman, selene
 from clock import iso
 from envelope import CAPABILITIES, DATA_CLASSES, DECISIONS, EFFECT_CLASSES, envelope, sha, worst_outcome
 from errors import Conflict, Forbidden, Invalid, NotFound
 from ledger import derived_id
+from primitives import diff as diff_mod
+from primitives.parse import SCHEMA_RULES_VERSION
 from reasons import R
 
 REPORT_VERSION = "seo-audit-report/1"
@@ -222,7 +224,11 @@ class AuditsMixin:
             "agents": envs,
             "summary": {"findings": len(all_findings), **by, "agent_outcomes": {e["agent"]: e["outcome"] for e in envs}},
             "pages": {p: {"fetch": v["fetch"].summary(), "render_state": v["render"]["state"],
-                          "access_diff": (v.get("access_diff") or {}).get("state")} for p, v in pages.items()},
+                          "access_diff": (v.get("access_diff") or {}).get("state"),
+                          "fingerprint": diff_mod.fingerprint(v["extract"]) if v.get("extract") else None}
+                      for p, v in pages.items()},
+            "versions": {"bot_families": bots.VERSION, "schema_rules": SCHEMA_RULES_VERSION,
+                         "report": REPORT_VERSION},
             "not_connected": nc, "not_connected_why": dict(NOT_CONNECTED_WHY),
             "limitations": GLOBAL_LIMITS + sorted({lim for e in envs for lim in e["limitations"]}),
             "legend": LEGEND, "data_hygiene": o.summary(),
@@ -243,6 +249,20 @@ class AuditsMixin:
             if full:
                 out["report"] = a["report"]
             return out
+
+    def drift_view(self, tid: str, aid: str, against: str) -> dict:
+        """Search-truth drift between two completed audits of the same target (agents/drift.py), oldest first."""
+        from agents import drift
+        with self.lock:
+            x, y = self.audit_view(tid, aid), self.audit_view(tid, against)
+            order = {k: i for i, k in enumerate(self.audits)}          # log order: the order they were requested
+        if x["status"] != "completed" or y["status"] != "completed":
+            raise Conflict(R("AUDIT_NOT_COMPLETED"))
+        a, b = sorted((x, y), key=lambda r: order[r["audit_id"]])
+        try:
+            return drift.compare(a["report"], b["report"])
+        except drift.NotComparable:
+            raise Conflict(R("DRIFT_NOT_COMPARABLE")) from None
 
     def audits_view(self, tid: str) -> list:
         with self.lock:

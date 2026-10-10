@@ -68,6 +68,7 @@ def run(ctx) -> tuple[dict, dict]:
         if rb["fetch"]["state"] == "KILLED":
             raise Killed(rb["fetch"]["detail"] or "KILLED")
         facts["robots"] = {"status_class": rb["status_class"], "fetch": rb["fetch"],
+                           "text_sha256": rb.get("text_sha256"),
                            "sitemaps_declared": (rb["parsed"].sitemaps[:50] if rb["parsed"] else [])}
         findings += _robots_findings(ctx, rb, facts)
         fetched = 0

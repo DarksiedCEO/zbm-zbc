@@ -459,6 +459,11 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     def audits(scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31", "compliance_38"))) -> list:
         return svc.audits_view(scope[1])
 
+    @app.get(P + "/tenants/{tid}/audits/{aid}/drift", dependencies=auth)
+    def drift(aid: str, against: str = Query(pattern=r"^seo-aud-[0-9a-f]{40}$"),
+              scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "compliance_38"))) -> dict:
+        return svc.drift_view(scope[1], _id(aid), against)
+
     @app.get(P + "/tenants/{tid}/audits/{aid}", dependencies=auth)
     def audit(aid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31",
                                                       "compliance_38"))) -> dict:
