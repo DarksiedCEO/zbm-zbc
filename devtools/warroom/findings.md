@@ -60,7 +60,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - Status: FIXED (war room fixes, commit `ebb9918` on branch `warroom-redteam-gate`; ADR 0004 "War room fixes"):
   `name_key_text` uses the shared lookalike fold (the final sigma, and a word-final capital sigma, read as `c` before
   casefolding; the confusables skeleton under the unchanged table). Tests:
-  `services/onboarding-py/tests/test_warroom_fixes.py` (pinned pk2- keys: no churn for names without a sigma).
+  `services/onboarding-py/tests/test_warroom_fixes.py` (pinned pk2- keys: no churn for already-normalised Latin / Cyrillic names). Correction (AEGIS round 2, M1): 266 code points key differently than at 2cedde8 (Arabic, Hebrew, Armenian, Coptic and others the skeleton now folds); an existing record keeps its stored key, a later signup by the same person can split the 1099 total, and the W-9 reconciliation is the backstop (ADR 0004 "War room fixes").
 
 ## WR-F004 — service-py: leetspeak digits typed full-width are not read as letters
 
@@ -126,6 +126,21 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   ban lookup compares lock keys. Tests: `services/verification-py/tests/test_warroom_fixes.py` (a pre-fix ban, a
   post-fix ban, a restart from the ledger, an unrelated address).
 
+## AEGIS round 2 (review of the WR-F006 / WR-F007 fixes)
+
+- **N-H1 (High) — service-py: the WR-F006 fold made long non-Latin messages slow under the service lock.** A
+  20,000-character email of U+FDFA took 37.9 s end to end (base 7.6 s); ordinary 20k Arabic or Russian text about 2 s.
+  FIXED (`b8b289b`; ADR 0014 "War room fixes"): each distinct text is cleaned and folded once per message (memoised
+  readings), each distinct word once (regex split, per-word cache), and the per-character loops are regex deletions.
+  Tests count the work instead of timing it.
+- **N-M1 (Medium) — service-py: a multi-word opt-out phrase written wholly in another script was missed**
+  (`ԁоп'т техт ме`, `по моге`, Lisu `ꓠꓳ ꓟꓳꓣꓰ`). FIXED (`b8b289b`): surfaced to Andre (`OPT_OUT_POSSIBLE`), never a
+  consent change; benign `по SMS` texts raise nothing.
+- **N-L1 (Low) — clipper-network-py: full-width `Ｍａｒｙ－Ｊａｎｅ Ｏ＇Ｎｅｉｌ` refused.** FIXED (`89c92bc`; ADR 0008): see the
+  full-width display-name observation below.
+- **M1 (Medium) — ADR 0004 claimed no key churn for names without a sigma.** Corrected (this commit; ADR 0004 and the
+  WR-F003 entry above): 266 code points key differently; W-9 reconciliation is the backstop. Key code unchanged.
+
 ## SHOULD-level observations for Andre (scored, not gate-blocking)
 
 These are outside what the departments' documents promise today, so the war room scores them and does not block on
@@ -156,7 +171,8 @@ them. Each may deserve a decision.
   admits only `space . ' -` as punctuation and checks the raw text, so the full-width hyphen U+FF0D is refused. Fails
   closed; not changed. A decision for Andre: NFKC the name before the allowlist check (and store the NFKC form).
   The scenario now has MUST checks (`645e381`): every case is answered (201 or 422, never a server error) and the
-  pinned names are accepted as written; a variant's acceptance stays SHOULD.
+  pinned names are accepted as written. FIXED (N-L1, `89c92bc`): a full-width `. ' -` counts as that mark and the
+  web-address checks also read the NFKC form; full-width acceptance is MUST, case-flipped or re-accented stays SHOULD.
 - **sales-py, onboarding-py** (not in this fix wave): sales-py misses some `homoglyph_wide` opt-outs (no suppression)
   and onboarding-py's legal-name key does not join a letter-spaced name (`1099-name-variant`, `letter_spacing`); both scored SHOULD by their
   libraries.
