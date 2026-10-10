@@ -262,6 +262,7 @@ def _collapse(t: str) -> str:
 # --- display names (AEGIS N16-11) -------------------------------------------------------------------------------
 DISPLAY_NAME_MAX = 80
 _NAME_PUNCT = " .'-"
+_NAME_MARKS = (".", "'", "-")
 _DOMAINISH = re.compile(r"[^\W_]\.[^\W\d_]{2,}")          # "evil.example", "www.x.com" (not "J.R. Smith")
 
 
@@ -276,12 +277,16 @@ def display_name_problem(value: str) -> str | None:
         return "no leading, trailing or doubled spaces"
     for ch in value:
         cat = unicodedata.category(ch)
-        if cat[0] in "LM" or cat == "Nd" or ch in _NAME_PUNCT:
+        # war room N-L1: a full-width (or other compatibility) form of . ' - counts as that mark ("Ｍａｒｙ－Ｊａｎｅ");
+        # never a compatibility space (U+3000 would step around the doubled-space rule)
+        if cat[0] in "LM" or cat == "Nd" or ch in _NAME_PUNCT or unicodedata.normalize("NFKC", ch) in _NAME_MARKS:
             continue
         return f"character U+{ord(ch):04X} ({cat}) is not a letter, digit, space or . ' -"
     if not any(unicodedata.category(ch)[0] == "L" for ch in value):
         return "a name needs at least one letter"
-    if _DOMAINISH.search(value) or re.search(r"(?i)\b(?:https?|www)\b", value):
+    # the web-address checks read the name as written AND after NFKC ("ｅｖｉｌ．ｅｘａｍｐｌｅ", "ｗｗｗ")
+    if any(_DOMAINISH.search(v) or re.search(r"(?i)\b(?:https?|www)\b", v)
+           for v in (value, unicodedata.normalize("NFKC", value))):
         return "no web addresses in a display name"
     if money_or_earnings(value):
         return "no money or earnings words (CN-26)"

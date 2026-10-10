@@ -142,14 +142,11 @@
     "case_flip": [
      "accepted"
     ],
-    "fullwidth": [
-     "accepted"
-    ],
     "diacritic_toggle": [
      "accepted"
     ]
    },
-   "downgrade_basis": "the pinned names are accepted as written (MUST); a case-flipped, full-width or re-accented variant is outside the pinned set, so its acceptance is SHOULD; every variant is answered, never a server error"
+   "downgrade_basis": "the pinned names are accepted as written and full-width (MUST; N-L1: a full-width . ' - is that mark); a case-flipped or re-accented variant is outside the pinned set, so its acceptance is SHOULD; every variant is answered, never a server error"
   }
  ]
 }

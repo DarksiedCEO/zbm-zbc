@@ -40,3 +40,23 @@ def test_wr_f002_numbers_alone_are_not_read_as_letters():
 def test_shared_fold_removes_every_default_ignorable_and_reads_the_final_sigma():
     assert fold_for_matching("g᠋u️a឴rantee") == "guarantee"
     assert fold_for_matching("сαςh") == "cach"
+
+
+@pytest.mark.parametrize("name", ["Ｍａｒｙ－Ｊａｎｅ Ｏ＇Ｎｅｉｌ", "Ｊ．Ｒ． Ｓｍｉｔｈ", "Bob﹣Smith"])
+def test_n_l1_full_width_name_punctuation_is_that_punctuation(name):
+    # war room observation clipper-network-py/ordinary-display-name#008.1@3 (AEGIS N-L1): refused 422 before
+    assert display_name_problem(name) is None
+
+
+@pytest.mark.parametrize("name", ["ｅｖｉｌ．ｅｘａｍｐｌｅ", "ｃａｓｈ．ｃｏｍ", "ｗｗｗ Bob", "ｈｔｔｐｓ Bob"])
+def test_n_l1_web_addresses_are_read_after_nfkc_too(name):
+    assert display_name_problem(name) == "no web addresses in a display name"
+
+
+@pytest.mark.parametrize("name", ["Mary　Jane", "Mary　 Jane", "　Mary"])
+def test_n_l1_a_compatibility_space_is_still_refused(name):
+    assert display_name_problem(name) is not None
+
+
+def test_n_l1_money_words_with_full_width_punctuation_are_still_refused():
+    assert display_name_problem("Ｅａｒｎ－ｃａｓｈ") == "no money or earnings words (CN-26)"
