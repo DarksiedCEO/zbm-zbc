@@ -17,18 +17,18 @@ the check.
 | Suite | Tests | Counted by | Platform-only tests |
 |---|---|---|---|
 | `go:orchestrator-go` | 112 | go test -v | — |
-| `node:dashboard-ts` | 50 | node --test | — |
+| `node:dashboard-ts` | 53 | node --test | — |
 | `python:bizdev-py` | 287 | pytest collection | — |
 | `python:clipper-network-py` | 403 | pytest collection | — |
 | `python:compliance-py` | 644 | pytest collection | — |
-| `python:creative-py` | 844 | pytest collection | — |
+| `python:creative-py` | 850 | pytest collection | — |
 | `python:delivery-py` | 735 | pytest collection | — |
 | `python:detection-py` | 599 | pytest collection | — |
 | `python:finance-py` | 621 | pytest collection | — |
 | `python:fulfillment-py` | 1116 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |
 | `python:legal-py` | 319 | pytest collection | — |
-| `python:onboarding-py` | 815 | pytest collection | — |
+| `python:onboarding-py` | 828 | pytest collection | — |
 | `python:sales-py` | 564 | pytest collection | — |
 | `python:security-py` | 192 | pytest collection | — |
 | `python:service-py` | 673 | pytest collection | — |
