@@ -48,6 +48,10 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   and `onboarding-py/R0002` (seed 2: `JoᏚé ʛaгϲíα` — the lunate sigma `ϲ` is NFKC'd to `ς`, then casefolded to `σ`)
 - Note: creative-py's `canonical()` applies its table after casefold too; the war room has no creative-py library
   yet, so whether it shows the same split is not checked here.
+- Status: FIXED (war room fixes, commit `WR-F003` on branch `warroom-redteam-gate`; ADR 0004 "War room fixes"):
+  `name_key_text` uses the shared lookalike fold (the final sigma, and a word-final capital sigma, read as `c` before
+  casefolding; the confusables skeleton under the unchanged table). Tests:
+  `services/onboarding-py/tests/test_warroom_fixes.py` (pinned pk2- keys: no churn for names without a sigma).
 
 ## WR-F004 — service-py: leetspeak digits typed full-width are not read as letters
 

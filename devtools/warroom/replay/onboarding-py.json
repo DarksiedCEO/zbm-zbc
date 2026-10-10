@@ -15,10 +15,11 @@
     "base": "José García"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F003",
+   "known_failure": null,
    "failed": [
     "one_person_one_total: variant: HTTP 201; p2.paid_to_date_usd = '600.00', wanted '2100.00'"
-   ]
+   ],
+   "fixed": "WR-F003"
   },
   {
    "replay_id": "onboarding-py/R0002",
@@ -34,10 +35,11 @@
     "base": "José García"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F003",
+   "known_failure": null,
    "failed": [
     "one_person_one_total: variant: HTTP 201; p2.paid_to_date_usd = '600.00', wanted '2100.00'"
-   ]
+   ],
+   "fixed": "WR-F003"
   }
  ]
 }

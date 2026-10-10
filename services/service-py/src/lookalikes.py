@@ -13,7 +13,8 @@ What a caller gets (``fold`` / ``fold_cased``), in this order:
    DerivedCoreProperties.txt, as creative-py's ``shared/text.py``) is deleted;
 2. NFKC (full-width letters AND digits, mathematical letters, ligatures);
 3. the letters a HAND table maps whose casefold is a different letter are folded as written (the final sigma ``ς`` is
-   ``c``; casefolding first made it ``σ``, which is ``o``: WR-F003);
+   ``c``; casefolding first made it ``σ``, which is ``o``: WR-F003). A capital sigma ending a word is the final sigma
+   too (``str.lower``'s Final_Sigma rule), so a name written in capitals keys as it does in lower case;
 4. casefold (``fold_cased``) — or not (``fold``, for a caller whose own table is case-sensitive);
 5. the lookalike table, precedence high to low:
    (a) the calling service's own table (unchanged, so no key or match churn for anything it already folded);
@@ -317,13 +318,16 @@ class Table:
 
     def fold_cased(self, text: str) -> str:
         """Steps 1-5: invisible characters out, NFKC, the early letters, casefold, the table."""
-        t = unicodedata.normalize("NFKC", strip_invisible(text)).translate(self._early)
-        return t.casefold().translate(self._full)
+        t = unicodedata.normalize("NFKC", strip_invisible(text))
+        return self.casefold(t).translate(self._full)
 
     def casefold(self, text: str) -> str:
         """Steps 3-4 only (the early letters, then casefold), for a caller that has already removed invisible
         characters and applied NFKC its own way, and strips diacritics between casefolding and the table."""
-        return text.translate(self._early).casefold()
+        t = text.translate(self._early)
+        # str.lower() applies the Final_Sigma rule (a capital sigma ending a word is the final sigma), casefold()
+        # does not: "ΓΙΩΡΓΟΣ" and "Γιωργος" both end in the final sigma, read before casefolding
+        return t.lower().translate(self._early).casefold()
 
     def map(self, text: str) -> str:
         """Step 5 only: the table."""

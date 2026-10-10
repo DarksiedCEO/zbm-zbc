@@ -786,3 +786,12 @@ allows one person under several creator ids and keeps the 1099 total per person;
 the SAME creator id cannot re-apply with a name variant, and the total is not split (`test_probe_person_total_*`).
 Residual: a client record is re-encoded whole when it changes (facts up to the 2 000 cap), so a fact-heavy client's
 lines are large (bounded by the cap, not quadratic in the log).
+
+## War room fixes (Oct 10 2026; ADR 0018 red-team gate, `devtools/warroom/findings.md`)
+
+Pinned by `services/onboarding-py/tests/test_warroom_fixes.py`; the replay cases stay in
+`devtools/warroom/replay/onboarding-py.json` as regression cases (`fixed`).
+
+| Id | Finding | Fix |
+|---|---|---|
+| WR-F003 | `ᴊօsé ɡαrςía` for `José García` keyed as `jose garoia` (and `JoᏚé ʛaгϲíα`: the lunate sigma is NFKC'd to the final sigma): casefold ran before the lookalike table and turned the final sigma `ς` (the shared table's `c`) into `σ` (`o`), so a second creator id under that spelling started a separate 1099 total | `name_key_text` folds with the shared lookalike fold (`src/lookalikes.py`, byte-identical in four services; ADR 0007 "War room fixes"): the hand-table letters casefold would turn into another letter (the final sigma) are folded as written, a capital sigma ending a word is read as the final sigma (`str.lower`'s Final_Sigma rule, so `ΓΙΏΡΓΟΣ` and `Γιώργος` still key alike), then casefold and this module's own table (`CONFUSABLES` + the generated Latin-letter folds, unchanged, on top) over the Unicode confusables.txt 15.1.0 skeleton. Key churn: none for names without a sigma — pinned pk2- keys of already-normalised names (Latin, Latin-1 / Extended-A, Vietnamese, a Cyrillic name) are unchanged, and an exhaustive test shows that every code point the old key folded to ASCII keys the same way except the final sigma family (`ς`, `ϲ`, a word-final `Σ` and their mathematical forms), which is the fix. A legal name written in Greek script with a final sigma therefore gets a new pk2- key (its old key read the sigma as `o`); only the hash is stored, so such a record cannot be re-keyed at load — the W-9 holder reconciles it, as for any pk- record (bug sweep D). Letter spacing in a legal name ("J o s é") stays a SHOULD in the war room: initials cannot be told from spaced-out letters |
