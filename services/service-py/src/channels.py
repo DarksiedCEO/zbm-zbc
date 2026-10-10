@@ -23,6 +23,7 @@ import re
 import unicodedata
 
 import lookalikes
+import triage
 from triage import CONFUSABLES, _one_edit
 from triage import normalise_opt_out as normalise     # WR-F001: every opt-out rule reads with the shared lookalike fold
 
@@ -632,7 +633,11 @@ def _casefold_reading(text: str) -> str | None:
     text, or nothing to read differently)."""
     if text.isascii():
         return None
-    alt = _CASEFOLD_FIRST.fold_cased(html_as_text(text))
+    # WR-F006: a word written wholly in one non-Latin script keeps its own reading here (Russian "ПО" is not "no")
+    # unless its casefold-first reading is an opt-out word; the opt-out rules then read it as they always do
+    t = unicodedata.normalize("NFKC", lookalikes.strip_invisible(html_as_text(text)))
+    alt = "".join(w if one and not triage._opt_out_disguise(_CASEFOLD_FIRST.fold_cased(w))
+                  else _CASEFOLD_FIRST.fold_cased(w) for w, one in lookalikes.words(t))
     return alt if normalise(alt) != normalise(text) else None
 
 

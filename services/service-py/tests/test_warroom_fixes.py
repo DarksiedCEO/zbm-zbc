@@ -1,6 +1,7 @@
 """
 War room fixes (ADR 0018; devtools/warroom/findings.md): WR-F001 (lookalikes the shared table folds were not folded
-on the opt-out path), WR-F004 (full-width digits read as letters), and the SHOULD observations fixed with them
+on the opt-out path), WR-F004 (full-width digits read as letters), WR-F006 (a word written wholly in another script
+was folded into a Latin opt-out word: Russian "по" read as "no"), and the SHOULD observations fixed with them
 (dotted spelling, sentence-shaped opt-outs below an unmarked quote, a full-width clause end). The inputs are the war
 room's replay cases (devtools/warroom/replay/service-py.json), copied.
 """
@@ -113,3 +114,94 @@ def test_should_leet_alert_wording_in_the_tail_alerts():
     # war room service-py/email-clear-opt-out#004.2@3 (SHOULD; the WR-F004 class)
     assert ch.quoted_tail_opt_out("Thanks" + QUOTE + "Shipped.\n\nD0n7 text or email m3 1f y0u c4n h3lp 1t") == "alert"
     assert ch.quoted_tail_opt_out("Thanks" + QUOTE + "Order A13 ships by 5pm. Text or email us anytime.") is None
+
+
+# WR-F006 (AEGIS H1): ordinary customer messages written in Cyrillic (Russian, Ukrainian, Bulgarian, Serbian), Greek,
+# Hebrew and Arabic. Each is a request to be contacted, a thank-you or a question; none is an opt-out. The war room
+# scenario foreign-script-ordinary-sms / -email reads this list (devtools/warroom/scenarios/service-py.json).
+BENIGN_FOREIGN = [
+    "Пожалуйста, отправьте код по SMS",                        # "please send the code by SMS"
+    "Напишите мне по SMS, когда заказ будет готов",             # "text me when the order is ready"
+    "Можно по телефону или по SMS?",                            # "by phone or by SMS?"
+    "Это по cell номер",
+    "Ответьте по text message",
+    "По",
+    "ПО",
+    "ПОЖАЛУЙСТА, ОТПРАВЬТЕ КОД ПО SMS",
+    "Спасибо, по email тоже можно",
+    "Нет, всё нормально, пишите по SMS",
+    "Надішліть код по SMS",                                     # Ukrainian
+    "Напишіть мені по SMS, будь ласка",
+    "Изпратете кода по SMS",                                    # Bulgarian
+    "Пишете ми по SMS, моля",
+    "Пошаљите код по SMS",                                      # Serbian (Cyrillic)
+    "Пишите ми по SMS, хвала",
+    "Παρακαλώ στείλτε τον κωδικό με SMS",                       # Greek
+    "Ναι, στείλτε μου SMS παρακαλώ",
+    "Πότε θα έρθει η παραγγελία; Στείλτε SMS.",
+    "שלחו לי את הקוד ב-SMS",                                    # Hebrew
+    "תודה, אפשר לשלוח לי הודעת SMS?",
+    "أرسل لي الرمز عبر SMS",                                    # Arabic
+    "شكرا، أرسلوا لي رسالة SMS",
+]
+
+
+@pytest.mark.parametrize("text", BENIGN_FOREIGN)
+def test_wr_f006_a_word_wholly_in_another_script_is_never_an_opt_out(text):
+    assert ch.opt_out_level(text) is None
+    assert ch.email_opt_out_decision(text) is None
+    assert not ch.possible_opt_out(text)
+    assert not ch.typo_opt_out(text)
+    assert ch.opt_out_scope(text) is None
+    assert ch.quoted_tail_opt_out("Thanks" + QUOTE + "Shipped.\n" + text) is None
+
+
+@pytest.mark.parametrize("text", BENIGN_FOREIGN)
+def test_wr_f006_benign_foreign_sms_and_email_keep_consent(h, text):
+    """End to end (AEGIS H1's repro): the SMS and the e-mail consent both stay active."""
+    cid = h.contact("client:acme", email="owner@acme.test", phone="+13105551234", timezone="America/Los_Angeles")
+    h.ok(h.consent(cid, channel="sms"), 201)
+    h.ok(h.consent(cid, channel="email"), 201)
+    h.ok(h.sms(text, frm="+13105551234"), 201)
+    h.ok(h.email(text, frm="owner@acme.test"), 201)
+    cons = {c["channel"]: c["status"] for c in h.ok(h.get(f"/svc/v1/contacts/{cid}"))["consents"]}
+    assert cons == {"sms": "active", "email": "active"}
+
+
+@pytest.mark.parametrize("text", [
+    "ЅТОР", "ѕтор", "stoр", "ЅΤΟΡ", "вуе", "Βуе", "ΝΟ",           # caught before the war room (2cedde8): still caught
+    "ᏚᎢᎾᏢ",                                                       # one script, folds to an opt-out word of 4+ letters
+    "Ꮪ Ꭲ Ꮎ Ꮲ",                                                    # spaced-out single letters fold as before
+    "unѕubѕcribe", "ｓｔｏｐ", "𝐬𝐭𝐨𝐩", "s\u200bt\u200bo\u200bp", "5t0p", "S T O P", "Dο η o t τeχt or emaіl mе pleаѕe",
+])
+def test_wr_f006_disguised_opt_outs_are_still_exact(text):
+    assert ch.opt_out_level(text) == "exact"
+
+
+@pytest.mark.parametrize("text", ["ηο", "ηο sms", "по sms", "По SMS"])
+def test_wr_f006_a_short_word_wholly_in_one_script_is_not_read_as_no(text):
+    # the rule AEGIS H1 asks for: a word wholly in one non-Latin script never becomes a negation or one-word reply
+    assert ch.opt_out_level(text) is None
+
+
+def test_wr_f006_russian_stop_is_unchanged_from_before_the_war_room():
+    # "стоп" (Russian for stop) was not an opt-out at 2cedde8 either: no language's opt-out wording is guessed from
+    # its look; a person reads a message in a script we have no lexicon for (triage.non_ascii_letters)
+    for text in ("стоп", "СТОП"):
+        assert ch.opt_out_level(text) is None
+        assert triage.non_ascii_letters(text)
+
+
+def test_wr_f006_the_disguise_words_are_the_english_single_opt_out_words_of_four_letters_or_more():
+    words = {t for t in ch.OPT_OUT_TERMS + ch.OPT_OUT_STRONG + ch.OPT_OUT_FUZZY if " " not in t and len(t) >= 4}
+    # the Spanish / French / Portuguese words are left out on purpose: a word of another script that folds into
+    # one is a word of its own language (Serbian "Баја" folds to "baja"), not a disguised English opt-out
+    foreign = {"alto", "arrete", "arreter", "baja", "cancelar", "cancele", "desabonner", "descadastrar", "parar",
+               "pare", "parem", "sair"}
+    assert triage.OPT_OUT_DISGUISE_WORDS == words - foreign
+    assert ch.opt_out_level("Баја") is None
+
+
+def test_wr_f006_triage_reading_unchanged():
+    assert triage.normalise("Пожалуйста, отправьте код по SMS") == triage.normalise_opt_out(
+        "Пожалуйста, отправьте код по SMS")

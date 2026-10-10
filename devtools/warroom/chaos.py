@@ -38,7 +38,10 @@ OUTLOOK_BLOCKS = ("-----Original Message-----\nFrom: Acme\nSent: Monday\nSubject
 # Ordinary greetings in the other languages the services read (Spanish / French / Portuguese); the opt-out words in
 # those languages are seeds of their own (taken from the services' term lists, never invented here).
 FOREIGN_LINES = ("Hola, gracias por todo.", "Bonjour, merci beaucoup.", "Olá, obrigado pela ajuda.",
-                 "Buenas tardes.", "Bonne journée.", "Boa tarde.")
+                 "Buenas tardes.", "Bonne journée.", "Boa tarde.",
+                 # WR-F006: other scripts, no channel or opt-out words; "по" (Russian "about, by") once read as "no"
+                 "Спасибо большое, хорошего дня.", "Пишу по поводу заказа.", "Ευχαριστώ πολύ, καλή σας μέρα.",
+                 "תודה רבה, יום טוב.", "شكرا جزيلا، يوم سعيد.")
 # Injection lines carry no opt-out vocabulary (no stop / end / quit / cancel / remove / unsubscribe ...), so a
 # message they are added to keeps the consent outcome its own words decide; they ask for other people's data,
 # privileges and state changes the sender is not entitled to.

@@ -30,6 +30,14 @@ What a caller gets (``fold`` / ``fold_cased``), in this order:
    ``fold_cased`` folds an upper-case SKELETON letter as written (before casefolding) only when no layer maps that
    letter's casefold: a letter some table already folded keeps its fold (no churn).
 
+A word written wholly in one non-Latin script (WR-F006, opt-in: ``fold(text, single_script=...)``). By default every
+letter is folded, whatever the word around it. A caller that must not read a real word of another language as a Latin
+one (service-py's opt-out rules: Russian "по", "by", is not "no") passes a predicate: a word (a run of letters, digits
+and combining marks) of two or more letters, with no Latin letter or ASCII digit in it and every letter in ONE
+non-Latin script, then gets layers (b)-(d) only when the predicate accepts its full fold, and the calling service's
+own table (a) alone otherwise (``words`` cuts text into such words). A word that mixes Latin with lookalikes, or two non-Latin scripts ("ЅΤΟΡ"), and a
+single letter (spaced-out letters: "Ꮪ Ꭲ Ꮎ Ꮲ") are folded in full as before. Without a predicate nothing changes.
+
 Diacritics, leetspeak and letter spacing are the caller's business (each service has its own rules for them); the
 callers apply leetspeak AFTER this fold (a full-width digit is a digit only after NFKC: WR-F004) and join spaced
 letters with leet digits counted as letters (WR-F002).
@@ -39,6 +47,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from typing import Callable, Optional
 
 VERSION = "lookalikes-1"
 
@@ -296,11 +305,14 @@ LATIN_NAMED: dict[str, str] = _latin_named()
 class Table:
     """A service's fold: its own table over the shared layers (see the module docstring, step 5)."""
 
-    __slots__ = ("_early", "_full", "mapping")
+    __slots__ = ("_early", "_full", "_own_early", "_own", "mapping")
 
     def __init__(self, own: dict[str, str] | None = None) -> None:
         own = dict(own or {})
         self.mapping: dict[str, str] = {**SKELETON, **LATIN_NAMED, **SHARED, **own}
+        self._own_early = str.maketrans({k: v for k, v in own.items()
+                                         if len(k) == 1 and k.lower() == k and k.casefold() != k})
+        self._own = str.maketrans(own)
         hand = {**SHARED, **own}
         # step 3: hand-table letters that casefold would turn into ANOTHER letter (the final sigma), and upper-case
         # skeleton letters whose casefold nothing maps (folding them as written cannot change an existing fold)
@@ -310,16 +322,26 @@ class Table:
         self._early = str.maketrans(early)
         self._full = str.maketrans(self.mapping)
 
-    def fold(self, text: str) -> str:
+    def fold(self, text: str, single_script: Optional[Callable[[str], bool]] = None) -> str:
         """Steps 1-5 without casefolding: invisible characters out, NFKC, the table (case-sensitive), lower case,
-        the table again. For a service whose own table lists upper-case letters."""
-        t = unicodedata.normalize("NFKC", strip_invisible(text)).translate(self._early).translate(self._full)
-        return t.lower().translate(self._full)
+        the table again. For a service whose own table lists upper-case letters. ``single_script``: see the module
+        docstring (WR-F006)."""
+        t = unicodedata.normalize("NFKC", strip_invisible(text))
+        if single_script is None or t.isascii():
+            return self._fold_all(t)
+        return "".join(self._fold_all(w) if not one or single_script(self._fold_all(w)) else self._fold_own(w)
+                       for w, one in words(t))
 
     def fold_cased(self, text: str) -> str:
         """Steps 1-5: invisible characters out, NFKC, the early letters, casefold, the table."""
         t = unicodedata.normalize("NFKC", strip_invisible(text))
         return self.casefold(t).translate(self._full)
+
+    def _fold_all(self, t: str) -> str:
+        return t.translate(self._early).translate(self._full).lower().translate(self._full)
+
+    def _fold_own(self, t: str) -> str:
+        return t.translate(self._own_early).translate(self._own).lower().translate(self._own)
 
     def casefold(self, text: str) -> str:
         """Steps 3-4 only (the early letters, then casefold), for a caller that has already removed invisible
@@ -332,6 +354,41 @@ class Table:
     def map(self, text: str) -> str:
         """Step 5 only: the table."""
         return text.translate(self._full)
+
+
+def _is_word_char(ch: str) -> bool:
+    return ch.isalnum() or unicodedata.category(ch)[0] == "M"
+
+
+def _script(ch: str) -> str:
+    """"LATIN" for an ASCII letter or digit and every letter Unicode names LATIN; otherwise the first word of the
+    character's name (CYRILLIC, GREEK, HEBREW, ARABIC, CHEROKEE, ...); "" for a mark or a digit outside ASCII
+    (they belong to no script for this purpose)."""
+    if ch.isascii():
+        return "LATIN"
+    if unicodedata.category(ch)[0] in "MN":
+        return ""
+    return unicodedata.name(ch, "?").split(" ", 1)[0]
+
+
+def words(text: str) -> list[tuple[str, bool]]:
+    """``text`` cut into runs of word characters (letters, digits, marks) and the runs between them, each with
+    whether it is a word of two or more letters written wholly in one non-Latin script (WR-F006)."""
+    out: list[tuple[str, bool]] = []
+    i, n = 0, len(text)
+    while i < n:
+        j = i
+        word = _is_word_char(text[i])
+        while j < n and _is_word_char(text[j]) == word:
+            j += 1
+        piece = text[i:j]
+        one = False
+        if word and not piece.isascii():
+            scripts = {_script(c) for c in piece} - {""}
+            one = len(scripts) == 1 and "LATIN" not in scripts and sum(c.isalpha() for c in piece) >= 2
+        out.append((piece, one))
+        i = j
+    return out
 
 
 def is_invisible(ch: str) -> bool:

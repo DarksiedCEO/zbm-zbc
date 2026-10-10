@@ -146,6 +146,33 @@ def _strip_format(t: str) -> str:
 # reading (categories, non_ascii_letters) keeps CONFUSABLES alone: a message written in another script must still
 # reach a human as one, not be read as Latin gibberish.
 _OPT_OUT_FOLD = lookalikes.Table({chr(k): v for k, v in CONFUSABLES.items()})
+# WR-F006 (AEGIS H1): a word written wholly in one non-Latin script is a word of that language, not a disguise: Russian
+# "по" ("by") folded to "no", and "Пожалуйста, отправьте код по SMS" revoked SMS consent. Such a word gets the shared
+# layers only when they make it one of these opt-out words of four letters or more (an all-Cherokee "ᏚᎢᎾᏢ"; no real
+# word of another script reads as one); otherwise only CONFUSABLES, as before the war room. channels.py's opt-out lists
+# are the source (tests/test_warroom_fixes.py checks this is every English single word of four letters or more in
+# them; the Spanish, French and Portuguese ones are left out: Serbian "Баја" folds to "baja").
+OPT_OUT_DISGUISE_WORDS = frozenset({"stop", "stopall", "unsubscribe", "unsub", "cancel", "cancelled", "canceled",
+                                    "quit", "revoke", "optout", "halt", "desist", "stahp"})
+
+
+def _opt_out_disguise(word: str) -> bool:
+    """A word's full lookalike fold reads as an opt-out word (``OPT_OUT_DISGUISE_WORDS``; accents and repeated
+    letters ignored)."""
+    w = re.sub(r"[^a-z]", "", _fold(word))
+    return w in OPT_OUT_DISGUISE_WORDS or _squeeze(w) in _DISGUISE_SQUEEZED
+
+
+def _squeeze(w: str) -> str:
+    return re.sub(r"(.)\1+", r"\1", w)
+
+
+_DISGUISE_SQUEEZED = frozenset(_squeeze(w) for w in OPT_OUT_DISGUISE_WORDS)
+
+
+def opt_out_fold(text: str) -> str:
+    """The opt-out path's lookalike fold of text that has had NFKC (WR-F001, WR-F006)."""
+    return _OPT_OUT_FOLD.fold(text, single_script=_opt_out_disguise)
 
 
 def clean(text: str, opt_out: bool = False) -> str:
@@ -160,7 +187,7 @@ def clean(text: str, opt_out: bool = False) -> str:
         t = u
     t = _strip_format(_TAG.sub("", t))
     t = _strip_format(unicodedata.normalize("NFKC", t))
-    return _OPT_OUT_FOLD.fold(t) if opt_out else t.translate(CONFUSABLES)
+    return opt_out_fold(t) if opt_out else t.translate(CONFUSABLES)
 
 
 def _fold(t: str) -> str:

@@ -375,6 +375,166 @@
    ]
   },
   {
+   "id": "foreign-script-ordinary-sms",
+   "persona": "a customer writing in Cyrillic (Russian, Ukrainian, Bulgarian, Serbian), Greek, Hebrew or Arabic, asking to be texted or e-mailed",
+   "basis": "WR-F006 (AEGIS H1): a word wholly in one non-Latin script is never read as a Latin opt-out word; Russian \"по\" (\"by\") was read as \"no\" and \"Пожалуйста, отправьте код по SMS\" revoked SMS consent",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_warroom_fixes.py",
+      "module": "BENIGN_FOREIGN"
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_sms",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "leetspeak",
+    "signature",
+    "mixed_language",
+    "long_body"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "consent_unchanged",
+     "severity": "MUST",
+     "check": "consent_unchanged"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "no_false_opt_out_alert",
+     "severity": "SHOULD",
+     "check": "no_opt_out_alert"
+    }
+   ]
+  },
+  {
+   "id": "foreign-script-ordinary-email",
+   "persona": "a customer writing in Cyrillic (Russian, Ukrainian, Bulgarian, Serbian), Greek, Hebrew or Arabic, asking to be texted or e-mailed",
+   "basis": "WR-F006 (AEGIS H1): a word wholly in one non-Latin script is never read as a Latin opt-out word; Russian \"по\" (\"by\") was read as \"no\" and \"Пожалуйста, отправьте код по SMS\" revoked SMS consent",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_warroom_fixes.py",
+      "module": "BENIGN_FOREIGN"
+     }
+    }
+   ],
+   "input_field": "text",
+   "steps": [
+    {
+     "action": "sender_with_consents"
+    },
+    {
+     "action": "other_contact"
+    },
+    {
+     "action": "inbound_email",
+     "as": "message",
+     "args": {
+      "text": "$text"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "soft_hyphen",
+    "fullwidth",
+    "homoglyph",
+    "leetspeak",
+    "html_wrap",
+    "quoted_reply",
+    "quoted_tail",
+    "signature",
+    "mixed_language",
+    "long_body",
+    "long_body_middle"
+   ],
+   "chain_max": 2,
+   "invariants": [
+    {
+     "id": "accepted",
+     "severity": "MUST",
+     "check": "status_in",
+     "args": {
+      "step": "message",
+      "codes": [
+       201
+      ]
+     }
+    },
+    {
+     "id": "consent_unchanged",
+     "severity": "MUST",
+     "check": "consent_unchanged"
+    },
+    {
+     "id": "other_contact_untouched",
+     "severity": "MUST",
+     "check": "state_same",
+     "args": {
+      "a": "other_before",
+      "b": "other_after"
+     }
+    },
+    {
+     "id": "no_echo_of_other_contact",
+     "severity": "MUST",
+     "check": "no_echo"
+    },
+    {
+     "id": "no_false_opt_out_alert",
+     "severity": "SHOULD",
+     "check": "no_opt_out_alert"
+    }
+   ]
+  },
+  {
    "id": "email-complaint",
    "persona": "an angry customer complaining that nobody calls or emails back",
    "basis": "AEGIS H-I: complaints and time limits never revoke email",
