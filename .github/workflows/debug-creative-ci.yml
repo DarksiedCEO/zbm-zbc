@@ -1,0 +1,26 @@
+name: debug-creative-ci
+on:
+  push:
+    branches: [debug-creative-ci]
+permissions:
+  contents: read
+jobs:
+  creative:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r services/creative-py/requirements.txt
+      - name: Test under the hygiene check and surface failures as annotations
+        run: |
+          set +e
+          python devtools/hygiene_check.py run --suite python:creative-py --kind pytest --cwd services/creative-py \
+            --allow-ignored services/ledger-rust/target -- python -m pytest -q -rfE -p no:cacheprovider > out.txt 2>&1
+          code=$?
+          tail -8 out.txt
+          grep -E "^(FAILED|ERROR) |HYGIENE|hygiene_check:" out.txt | head -25 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+          grep -nE "^E  " out.txt | head -25 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+          exit $code
