@@ -442,7 +442,7 @@ async function raw(path, init = {}) {
 function loginForm(password, xff) {
   return raw("/api/login", {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": xff },
+    headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": xff, origin: `http://127.0.0.1:${DASH_PORT}` },
     body: new URLSearchParams({ password }).toString(),
   });
 }
@@ -499,7 +499,7 @@ test("bad password, tampered and expired cookies are refused; a good login works
   assert.equal(bad.headers.get("set-cookie"), null, "a failed login set a cookie");
   const badJson = await raw("/api/login", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-forwarded-for": "10.0.0.1" },
+    headers: { "content-type": "application/json", "x-forwarded-for": "10.0.0.1", origin: `http://127.0.0.1:${DASH_PORT}` },
     body: JSON.stringify({ password: "not-the-password" }),
   });
   assert.equal(badJson.status, 401);
@@ -534,7 +534,8 @@ test("bad password, tampered and expired cookies are refused; a good login works
   const other = authConfig({ ...AUTH, DASHBOARD_SESSION_SECRET: "another-secret-another-secret-0123456789" });
   assert.equal((await raw("/", { headers: { cookie: `${SESSION_COOKIE}=${issueSession(other, nowSeconds())}` } })).status, 303);
 
-  const out = await raw("/api/logout", { method: "POST", headers: { cookie: fresh } });
+  assert.equal((await raw("/api/logout", { method: "POST", headers: { cookie: fresh } })).status, 403, "logout without Origin (L-1)");
+  const out = await raw("/api/logout", { method: "POST", headers: { cookie: fresh, origin: `http://127.0.0.1:${DASH_PORT}` } });
   assert.equal(out.status, 303);
   assert.match(out.headers.get("set-cookie"), /Max-Age=0/);
   await stopDashboard();
@@ -548,5 +549,32 @@ test("login is rate limited: after 5 failures from one client even the right pas
   assert.ok(Number(blocked.headers.get("retry-after")) >= 1);
   assert.equal(blocked.headers.get("set-cookie"), null);
   assert.equal((await loginForm("live-test-password-1", "10.0.0.8")).status, 303, "another client is not blocked");
+  await stopDashboard();
+});
+
+test("AEGIS M-1/M-2/L-2: parallel guesses from one client are capped; a global flood never locks the owner out; Origin required", opts, async () => {
+  dash = await startDashboard({ ORCHESTRATOR_URL: `http://127.0.0.1:${STUB_PORT}`, ORCHESTRATOR_SERVICE_TOKEN: TOKEN });
+  // L-2: no Origin, or another scheme / host -> 403, before any password check
+  const form = (headers) => raw("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "10.0.1.1", ...headers },
+    body: new URLSearchParams({ password: "live-test-password-1" }).toString(),
+  });
+  assert.equal((await form({})).status, 403, "missing Origin");
+  assert.equal((await form({ origin: `https://127.0.0.1:${DASH_PORT}` })).status, 403, "scheme differs");
+  assert.equal((await form({ origin: "http://evil.example" })).status, 403, "host differs");
+  // M-1: 30 bad logins in parallel from ONE client -> at most 5 are checked, the rest 429
+  const burst = await Promise.all(Array.from({ length: 30 }, (_, i) => loginForm(`wrong-${i}`, "10.0.2.2")));
+  const checked = burst.filter((r) => r.status === 303).length;
+  assert.equal(checked, 5, `parallel guesses checked: ${checked}`);
+  assert.equal(burst.filter((r) => r.status === 429).length, 25);
+  // M-2: 60 bad logins from 60 different clients spend the global budget...
+  const flood = await Promise.all(Array.from({ length: 60 }, (_, i) => loginForm(`wrong-${i}`, `10.9.${i >> 8}.${i & 255}`)));
+  assert.ok(flood.every((r) => r.status === 303), "a fresh client was refused by the global budget");
+  // ...and the owner, from a client of its own, still signs in.
+  const owner = await loginForm("live-test-password-1", "10.0.3.3");
+  assert.equal(owner.status, 303);
+  assert.equal(owner.headers.get("location"), "/");
+  assert.match(owner.headers.get("set-cookie") ?? "", new RegExp(`^${SESSION_COOKIE}=`));
   await stopDashboard();
 });

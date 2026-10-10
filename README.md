@@ -297,8 +297,10 @@ ORCHESTRATOR_URL=http://localhost:8080 ORCHESTRATOR_SERVICE_TOKEN=<same as above
 # EVERY route answers 503 — never an open dashboard. The session cookie is
 # HttpOnly, Secure, SameSite=Strict (__Host- prefix), DASHBOARD_SESSION_TTL_SECONDS
 # (default 43200, 300..604800); rotating the secret or the password signs
-# every session out. Failed logins are rate limited per client and globally
-# (per process). Off loopback, serve it only behind HTTPS.
+# every session out. Logins are rate limited per client (5 per 15 min, in-flight
+# attempts included; per process); past 50 failures overall, checks are
+# serialised, never refused, so the owner still gets in. Login and logout need
+# a same-origin Origin header (scheme and host). Off loopback, serve it only behind HTTPS.
 # `npm run build && npm start` for production. Both bind 127.0.0.1 by
 # default; DASHBOARD_BIND_ADDR overrides, PORT sets the port.
 # The page shows findings already recorded in the ledger (read-only);
@@ -307,7 +309,8 @@ ORCHESTRATOR_URL=http://localhost:8080 ORCHESTRATOR_SERVICE_TOKEN=<same as above
 # Monitoring: GET /healthz (JSON) and GET / answer 200 only when findings
 # loaded and the ledger verified; 503/502 otherwise (ORCHESTRATOR_TIMEOUT_MS,
 # default 10000, bounds the orchestrator call). Both need a session (a
-# monitor sends the cookie from POST /api/login with JSON {"password": ...});
+# monitor sends the cookie from POST /api/login with JSON {"password": ...}
+# and an Origin header naming the dashboard);
 # both share one ledger read per DASHBOARD_LEDGER_CACHE_MS (default 5000,
 # 0..60000, 0 = off, per process; failures are never cached).
 ```

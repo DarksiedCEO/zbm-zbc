@@ -457,3 +457,15 @@ Known limits (accepted, on record): the rate limiter and the cache are per proce
 instance has its own budget (the global budget bounds a single instance; scrypt N=2^15 bounds the rate per instance).
 Sessions are stateless: logout clears the cookie, but a copied cookie stays valid until its expiry unless the secret is
 rotated. A monitor must log in to read `/healthz`.
+
+### Dashboard login — AEGIS review of fefd5be..34f4946: findings closed (Oct 9 2026)
+
+Regressions: `apps/dashboard-ts/tests/auth.test.ts` (limiter, same-origin) and the "AEGIS M-1/M-2/L-2" case of
+`apps/dashboard-ts/tests/status.live.test.mjs` (the built server, parallel requests on the wire).
+
+| Id | Finding | Fix |
+|---|---|---|
+| M-1 (Medium) | The per-client check ran before scrypt and the failure was recorded after it, so parallel requests all passed the check (100 parallel bad logins from one address: 31 guesses against a limit of 5) | `FailureLimiter.reserve` takes the attempt synchronously, before any await (body read, scrypt); an in-flight attempt counts against the client's 5 until it is verified, and only a success gives it back. 30 parallel bad logins from one client: exactly 5 checked, 25 answered 429 |
+| M-2 (Medium) | 50 bad attempts from any addresses locked out every login, the right password included | The global budget is a backoff, never a block: once 50 failures are spent in the window, password checks are serialised (one scrypt at a time per process), which bounds the guess rate from rotating or spoofed client keys while the owner still signs in. The per-client hard limit stays |
+| L-1 (Low) | Logout had no Origin check | `POST /api/logout` requires a same-origin `Origin` (403 otherwise) |
+| L-2 (Low) | A login without `Origin` was accepted, and only the host was compared | `Origin` is required on login (403 without it), and scheme AND host must match: the `Host` header with the scheme from `X-Forwarded-Proto` (Vercel) or the request's own |

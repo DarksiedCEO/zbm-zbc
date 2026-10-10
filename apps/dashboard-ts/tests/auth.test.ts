@@ -18,7 +18,7 @@ import {
   verifySession,
   DEFAULT_TTL_S,
 } from "../src/lib/auth.ts";
-import { clientKey, FailureLimiter } from "../src/lib/rate-limit.ts";
+import { clientKey, FailureLimiter, sameOrigin } from "../src/lib/rate-limit.ts";
 import { ledgerCacheMs, loadRecordedFindingsCached, resetLedgerCacheForTests, DEFAULT_LEDGER_CACHE_MS } from "../src/lib/api.ts";
 
 const SECRET = "unit-test-session-secret-0123456789abcdef";
@@ -82,25 +82,64 @@ test("session: valid until its signed expiry; tampered, expired, re-keyed or gar
   assert.ok(cookie.startsWith("__Host-"));
 });
 
-test("login limiter: per client and global budgets, sliding window, injected clock", () => {
+test("login limiter: per-client reservations are atomic (M-1); the global budget only serialises (M-2)", async () => {
   let t = 0;
   const lim = new FailureLimiter({ windowMs: 1000, perKey: 3, global: 5, maxKeys: 100 }, () => t);
-  for (let i = 0; i < 3; i++) {
-    assert.equal(lim.retryAfterS("a"), null);
-    lim.fail("a");
-    t += 10;
-  }
-  assert.ok((lim.retryAfterS("a") ?? 0) >= 1, "client a is blocked");
-  assert.equal(lim.retryAfterS("b"), null, "client b is not");
-  lim.fail("b");
-  lim.fail("c");
-  assert.ok(lim.retryAfterS("d") !== null, "global budget spent: everyone waits");
+  // M-1: reservations are taken synchronously, so in-flight attempts count before any failure is recorded
+  const held = [lim.reserve("a"), lim.reserve("a"), lim.reserve("a")];
+  assert.ok(held.every((r) => !("retryAfterS" in r)));
+  const fourth = lim.reserve("a");
+  assert.ok("retryAfterS" in fourth && fourth.retryAfterS >= 1, "a 4th parallel attempt passed");
+  // a success gives its reservation back; a failure keeps it
+  lim.succeed(held[0] as Exclude<(typeof held)[0], { retryAfterS: number }>);
+  lim.fail();
+  lim.fail();
+  assert.ok(!("retryAfterS" in lim.reserve("a")), "a released reservation still counted");
+  assert.ok("retryAfterS" in lim.reserve("a"));
   t += 1000;
-  assert.equal(lim.retryAfterS("a"), null, "the window slid past");
-  assert.equal(lim.retryAfterS("d"), null);
+  assert.ok(!("retryAfterS" in lim.reserve("a")), "the window slid past");
+  // M-2: past the global budget nobody is refused; checks run one at a time
+  for (let i = 0; i < 5; i++) lim.fail();
+  assert.equal(lim.globalSpent(), true);
+  assert.ok(!("retryAfterS" in lim.reserve("owner")), "the global budget blocked a fresh client");
+  let running = 0;
+  let peak = 0;
+  const check = async () => {
+    running++;
+    peak = Math.max(peak, running);
+    await new Promise((r) => setImmediate(r));
+    running--;
+    return true;
+  };
+  const results = await Promise.all([1, 2, 3, 4].map(() => lim.throttled(check)));
+  assert.deepEqual(results, [true, true, true, true]);
+  assert.equal(peak, 1, "checks were not serialised past the global budget");
+  t += 1000;
+  assert.equal(lim.globalSpent(), false);
   const h = new Headers({ "x-forwarded-for": " 203.0.113.9 , 10.0.0.1" });
   assert.equal(clientKey(h), "203.0.113.9");
   assert.equal(clientKey(new Headers()), "unknown");
+});
+
+test("same-origin check: Origin required, scheme and host must both match (L-1/L-2)", () => {
+  const req = (origin?: string) =>
+    new Request("http://127.0.0.1:3000/api/login", { method: "POST", headers: { host: "127.0.0.1:3000", ...(origin === undefined ? {} : { origin }) } });
+  assert.equal(sameOrigin(req("http://127.0.0.1:3000")), true);
+  assert.equal(sameOrigin(req()), false, "missing Origin");
+  assert.equal(sameOrigin(req("null")), false);
+  assert.equal(sameOrigin(req("https://127.0.0.1:3000")), false, "scheme differs");
+  assert.equal(sameOrigin(req("http://evil.example:3000")), false);
+  assert.equal(sameOrigin(req("http://127.0.0.1:3001")), false);
+  const behindTls = new Request("http://10.0.0.5:3000/api/login", {
+    method: "POST",
+    headers: { host: "dash.example.com", "x-forwarded-proto": "https", origin: "https://dash.example.com" },
+  });
+  assert.equal(sameOrigin(behindTls), true, "behind a TLS proxy");
+  const downgraded = new Request("http://10.0.0.5:3000/api/login", {
+    method: "POST",
+    headers: { host: "dash.example.com", "x-forwarded-proto": "https", origin: "http://dash.example.com" },
+  });
+  assert.equal(sameOrigin(downgraded), false, "http Origin on an https site");
 });
 
 const OK_BODY = {
