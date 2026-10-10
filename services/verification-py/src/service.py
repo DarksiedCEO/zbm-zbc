@@ -389,7 +389,7 @@ class VIService:
         self.findings: dict[str, dict] = {}
         self.strikes: dict[str, dict] = {}
         self.bans: dict[str, dict] = {}
-        self.banned: set[tuple[str, str]] = set()
+        self.banned: set[tuple[str, str]] = set()        # every banned HMAC as its _lock_key (WR-F007)
         self.ages: dict[str, dict] = {}
         self.latest_age: dict[tuple[str, str], str] = {}     # (caller namespace, subject id) -> attestation id
         self.identities: dict[str, dict] = {}
@@ -595,7 +595,10 @@ class VIService:
         elif kind == "ban":
             self.bans[r["clipper_id"]] = r
             for k in r["blocked"]:
-                self.banned.add(tuple(k))
+                # WR-F007: kept as the minor lock compares keys, so an email_base_v0 HMAC and the email_base HMAC
+                # a ban recorded before WR-F005 stored are one key (a banned clipper cannot re-enter with a variant
+                # only the old or only the new fold reads as the same mailbox)
+                self.banned.add(_lock_key(tuple(k)))
         elif kind == "age":
             self.ages[r["attestation_id"]] = r
             self.latest_age[(r.get("namespace") or LEGACY_NAMESPACE, r["subject_id"])] = r["attestation_id"]
@@ -1330,7 +1333,7 @@ class VIService:
                                                           "account with at least 100 followers", (), rules))
                             kind = f"account:{platform}"
                             other = self.hmac_owner.get((kind, acct_hmac))
-                            banned = (kind, acct_hmac) in self.banned
+                            banned = _lock_key((kind, acct_hmac)) in self.banned
                             if banned or (other is not None and other != clipper_id):
                                 finding, held = self._identity_finding(op, "account_shared", "ACCOUNT_SHARED", clipper_id,
                                                                        other, kind, now, (cid,))
@@ -3235,7 +3238,7 @@ class VIService:
                 if f["status"] != "overturned":
                     found.append(f["finding_id"])
             for kind, hv in hm.items():
-                if hv and (kind, hv) in self.banned and not found:
+                if hv and _lock_key((kind, hv)) in self.banned and not found:   # WR-F007
                     f, _ = self._identity_finding(op, "duplicate_identity", "DUPLICATE_IDENTITY", clipper_id, None,
                                                   kind, now, (chk,))
                     if f["status"] != "overturned":
