@@ -116,3 +116,14 @@ them. Each may deserve a decision.
 - **service-py dotted spelling.** `N.e.v.e.r call or email me again` is not read (a dot is a clause end for the scope
   rules); spelling with spaces is. FIXED with WR-F001/WR-F004 (`0969219`): a word spelled out with dots, hyphens or underscores is joined
   before the clause split.
+- **service-py imperative stop, bare STOP after a sign-off, leet wording below an unmarked quote** (seeds 1-3:
+  `service-py/email-clear-opt-out#016.1@1`, `#022.2@2`, `#004.2@3`). Nothing was raised. FIXED (alert, never revoke;
+  ADR 0014 "War room fixes"). Below an unmarked quote the war room still scores `email_revoked` as missed: R2 alerts
+  there by design (the quoted words may be a third party's).
+- **clipper-network-py full-width punctuation in a display name** (`clipper-network-py/ordinary-display-name#008.1@3`:
+  `Ｍａｒｙ－Ｊａｎｅ Ｏ＇Ｎｅｉｌ`). Refused 422: the N16-11 character allowlist (`textguard.display_name_problem`)
+  admits only `space . ' -` as punctuation and checks the raw text, so the full-width hyphen U+FF0D is refused. Fails
+  closed; not changed. A decision for Andre: NFKC the name before the allowlist check (and store the NFKC form).
+- **sales-py, onboarding-py** (not in this fix wave): sales-py misses some `homoglyph_wide` opt-outs (no suppression)
+  and onboarding-py's legal-name key does not join a letter-spaced name (`1099-name-variant`, `letter_spacing`); both scored SHOULD by their
+  libraries.

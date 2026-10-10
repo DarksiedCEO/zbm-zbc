@@ -345,21 +345,46 @@ def quoted_tail_opt_out(text: Optional[str]) -> Optional[str]:
         if lt and len(lt) <= TAIL_LAST_LINE_MAX_WORDS and set(lt) <= (_TAIL_LAST_LINE_WORDS | {"quit"}) \
                 and set(lt) & (_TAIL_LAST_LINE_CORE | {"quit"}):    # AEGIS L-6: "Stop by anytime!" never alerts
             return "alert"
-    norms = {normalise(body)}
+    norms = {normalise(body), normalise(_leet(body))}  # war room seed 3 (the WR-F004 class): "D0n7 text or email m3"
     norms |= {" " + " ".join(_collapse(w) for w in v.split()) + " " for v in list(norms)}
     if any(f" {p} " in n for n in norms for p in _TAIL_ALERT_PHRASES):
         return "alert"
     # ADR 0014 R2 ("any other opt-out wording raises OPT_OUT_IN_QUOTED_TEXT"; war room SHOULD observation): the
     # sentence-shaped opt-outs the own-words rules read — a direct "don't call me or email me anymore", "remove me
     # from your email list", "I don't want your emails", and the possible-opt-out wording — alert too (never revoke)
-    return "alert" if any(_tail_sentence_opt_out(ln) for ln in kept) else None
+    if any(_tail_sentence_opt_out(ln) for ln in kept):
+        return "alert"
+    # War room seed 2 (SHOULD): a bare "STOP" line below a sign-off ("Thanks,\nSTOP") was cut with the signature;
+    # an exact-opt-out-only line there alerts (never revokes: it sits where a name would)
+    lines = [ln for ln in body.splitlines() if normalise(ln).strip()]
+    for ln in lines[len(kept):]:
+        lt = [_collapse(t) for t in normalise(_leet(ln)).split()]
+        if lt and len(lt) <= TAIL_LAST_LINE_MAX_WORDS and set(lt) <= _TAIL_LAST_LINE_WORDS \
+                and set(lt) & _TAIL_LAST_LINE_CORE:
+            return "alert"
+    return None
+
+
+# War room seeds 1-3 (SHOULD, ADR 0014 R2): an imperative "stop" that names what to stop — "Stop the texts and the
+# emails please", "please stop emailing me", "quit sending me messages" — below an unmarked quote alerts (never
+# revokes). The clause must START with the command and name a channel or a contacting verb right after it, so a
+# mailer's own "Stop by anytime!" or "We will stop sending reminders" never alerts.
+_TAIL_STOP_CHANNEL = re.compile(
+    r"^(?:(?:hi|hello|hey)(?: \w+)? )?(?:please )?(?:stop|quit|cease)"
+    r"(?: (?:the|your|these|those|all|of|sending|me|us|any|more|getting|receiving))*"
+    r" (?:texts?|text messages?|txts?|sms|messages?|emails?|e mails?|mails?|calls?|phone calls?|newsletters?"
+    r"|texting|txting|emailing|e mailing|calling|messaging|contacting|mailing)\b")
 
 
 def _tail_sentence_opt_out(line: str) -> bool:
     for clause in _SCOPE_SEGMENT.split(_read(line)):
         n = normalise(clause).strip()
-        if n and (_REMOVE_ME.search(n) or _NEG_WANT.search(n) or _DIRECT_NO_CONTACT.match(n)
-                  or _DIRECT_NO_CONTACT.match(" ".join(_collapse(w) for w in n.split()))):
+        if not n:
+            continue
+        joined = " ".join(_collapse(w) for w in n.split())
+        if (_REMOVE_ME.search(n) or _NEG_WANT.search(n) or _DIRECT_NO_CONTACT.match(n)
+                or _DIRECT_NO_CONTACT.match(joined)
+                or any(_TAIL_STOP_CHANNEL.match(v) for v in (n, joined, normalise(_leet(clause)).strip()))):
             return True
     return possible_opt_out(line) or _direct_no_contact(line)
 

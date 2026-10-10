@@ -88,3 +88,28 @@ def test_should_sentence_opt_outs_below_an_unmarked_quote_alert(words):
                                   "We never share your number. Text or email us anytime."])
 def test_should_our_own_quoted_mail_still_raises_nothing(tail):
     assert ch.quoted_tail_opt_out("Thanks" + QUOTE + tail) is None
+
+
+@pytest.mark.parametrize("words", ["Stop the texts and the emails please. I prefer you call.", "please stop emailing me",
+                                   "Quit sending me messages", "S7OP THE 73X75 please", "Ｓｔｏｐ ｔｈｅ ｅｍａｉｌｓ"])
+def test_should_imperative_stop_naming_a_channel_below_an_unmarked_quote_alerts(words):
+    # war room service-py/email-clear-opt-out#016.1@1 (SHOULD): R2, "any other opt-out wording" alerts
+    assert ch.quoted_tail_opt_out("Thanks" + QUOTE + "Our spring offer is here.\n" + words) in ("alert", "revoke")
+
+
+@pytest.mark.parametrize("tail", ["Stop by anytime!", "Stop the presses: our sale is on.",
+                                  "Stopping by? Text or email us anytime.", "You can stop these emails at any time."])
+def test_should_a_mailers_own_stop_wording_still_raises_nothing(tail):
+    assert ch.quoted_tail_opt_out("Thanks" + QUOTE + tail) is None
+
+
+def test_should_a_bare_stop_below_a_sign_off_in_the_tail_alerts():
+    # war room service-py/email-clear-opt-out#022.2@2 (SHOULD): "Thanks,\nSTOP" was cut with the signature
+    assert ch.quoted_tail_opt_out("Thanks" + QUOTE + "Your order has shipped.\n\nThanks,\nSTOP") == "alert"
+    assert ch.quoted_tail_opt_out("Thanks" + QUOTE + "Your order has shipped.\n\nThanks,\nJane Stopford") is None
+
+
+def test_should_leet_alert_wording_in_the_tail_alerts():
+    # war room service-py/email-clear-opt-out#004.2@3 (SHOULD; the WR-F004 class)
+    assert ch.quoted_tail_opt_out("Thanks" + QUOTE + "Shipped.\n\nD0n7 text or email m3 1f y0u c4n h3lp 1t") == "alert"
+    assert ch.quoted_tail_opt_out("Thanks" + QUOTE + "Order A13 ships by 5pm. Text or email us anytime.") is None
