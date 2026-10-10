@@ -683,6 +683,8 @@ jobs:
           done
       - name: The war room engine's own self-test
         run: python -B -m unittest devtools/test_warroom.py -v
+      - name: The shared lookalike fold is one file, generated from the pinned Unicode data, read alike by every service
+        run: python -B -m unittest devtools/test_lookalikes.py -v
       - name: War room gate (seed 1, every seeded department, under the hygiene check)
         run: |
           mkdir -p "$RUNNER_TEMP/warroom"

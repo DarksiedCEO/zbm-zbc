@@ -32,5 +32,5 @@ the check.
 | `python:sales-py` | 564 | pytest collection | — |
 | `python:security-py` | 192 | pytest collection | — |
 | `python:service-py` | 673 | pytest collection | — |
-| `python:verification-py` | 330 | pytest collection | — |
+| `python:verification-py` | 346 | pytest collection | — |
 | `rust:ledger-rust` | 159 | cargo test | `f5_real_sigxfsz_kill_mid_write_leaves_a_torn_tail_that_recovers` only on linux |

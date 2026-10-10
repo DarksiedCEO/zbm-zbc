@@ -14,10 +14,11 @@
     "base": "kid.name@gmail.com"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F005",
+   "known_failure": null,
    "failed": [
     "still_a_minor: again: HTTP 200; again.status = 'adult', wanted 'minor'"
-   ]
+   ],
+   "fixed": "WR-F005"
   },
   {
    "replay_id": "verification-py/R0002",
@@ -33,10 +34,11 @@
     "base": "kid.name@gmail.com"
    },
    "added": "2026-10-10",
-   "known_failure": "WR-F005",
+   "known_failure": null,
    "failed": [
     "still_a_minor: again: HTTP 200; again.status = 'adult', wanted 'minor'"
-   ]
+   ],
+   "fixed": "WR-F005"
   }
  ]
 }

@@ -105,7 +105,9 @@ client wrote). A scenario may name a transform whose effect lies outside what th
 3. Triage: write the finding in `findings.md` (`## WR-Fnnn`, with the replay ids), then put the finding id in the
    entries' `known_failure`. The self-test fails while any entry is untriaged or names a finding `findings.md` lacks.
 4. When the service is fixed, the case passes and the report says the known failure now passes: set its
-   `known_failure` back to null. The case stays in the library for good as a regression case.
+   `known_failure` back to null and record the finding in `fixed` (`"fixed": "WR-F005"`), and mark the finding
+   `Status: FIXED` in `findings.md` with the fixing commit. The case stays in the library for good as a regression
+   case: it now blocks the gate like any other case if it ever fails again.
 
 ## Adding a department
 

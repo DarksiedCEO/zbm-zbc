@@ -71,6 +71,12 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   bug sweep C L3 promises the minor lock folds homoglyphs.
 - Replay: `verification-py/R0001`, `verification-py/R0002` (seed 2).
 - Severity note: this one is a child-safety control; it is the most urgent of the five.
+- Status: FIXED (war room fixes, commit `WR-F005` on branch `warroom-redteam-gate`; ADR 0007 "War room fixes"):
+  `mailbox_base` folds with the shared lookalike fold (`src/lookalikes.py`), invisible characters included (the
+  SHOULD observation below, treated as MUST); a minor recorded before the fix keeps every match it had through the
+  frozen pre-fix fold (`email_base_v0`). Tests: `services/verification-py/tests/test_warroom_fixes.py`. The replay
+  cases pass and stay as regression cases (`fixed`); the scenario no longer downgrades the wide set or invisible
+  characters.
 
 ## SHOULD-level observations for Andre (scored, not gate-blocking)
 
@@ -81,6 +87,7 @@ them. Each may deserve a decision.
   in it (`k­i­d.name@gmail.com`) is a different identity for the under-18 lock, so the new clipper id is attested
   adult. `mailbox_base` folds plus / dash tags, Gmail dots and lookalikes (bug sweep C) but not invisible characters.
   Example: `verification-py/minor-lookalike-email#000.1@1`.
+  FIXED with WR-F005 (treated as MUST; the scenario's downgrade is removed).
 - **service-py opt-out in the middle of a very long message.** A text over the inbound cap (20,000 characters for
   email) is cut to its head and its tail (`models.py`, `INBOUND_TAIL`); an opt-out in the middle is dropped. The
   documented promise covers an opt-out at the end only.

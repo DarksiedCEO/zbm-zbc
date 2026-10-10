@@ -266,7 +266,7 @@
   {
    "id": "minor-lookalike-email",
    "persona": "a minor re-applying under a look-alike email to dodge the minor lock",
-   "basis": "tests/test_sweep_c.py M (plus tag, gmail dots, googlemail) and L3 (dash tags, homoglyphs, full-width)",
+   "basis": "tests/test_sweep_c.py M (plus tag, gmail dots, googlemail) and L3 (dash tags, homoglyphs, full-width); tests/test_warroom_fixes.py WR-F005 (the shared lookalike fold incl. the wide set, invisible characters)",
    "seeds": [
     {
      "literal": [
@@ -324,19 +324,7 @@
       "value": "minor"
      }
     }
-   ],
-   "downgrade": {
-    "email_homoglyph_wide": [
-     "still_a_minor"
-    ],
-    "zero_width": [
-     "still_a_minor"
-    ],
-    "soft_hyphen": [
-     "still_a_minor"
-    ]
-   },
-   "downgrade_basis": "invisible characters and the wide lookalike set in an email address are not in the pinned minor-lock folds: scored, not gate-blocking"
+   ]
   }
  ]
 }

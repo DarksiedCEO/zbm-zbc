@@ -75,7 +75,9 @@ CN_NAMESPACE = "clipper_network"
 LEGACY_NAMESPACE = "legacy"
 # the identity HMACs a minor lock follows (spec C.5, VI-CQ-03); bug sweep C: "email_base" is the HMAC of the canonical
 # mailbox (plus-tag dropped; Gmail dots folded), so kid+1@ cannot split off from a minor's kid@
-IDENTITY_LOCK_KINDS = ("email", "payout", "email_base")
+# WR-F005: "email_base_v0" is the HMAC (computed as "email_base") of the frozen pre-fix mailbox fold, kept when it
+# differs from the new one, so a minor recorded before the fix keeps every match it had (``_lock_key``)
+IDENTITY_LOCK_KINDS = ("email", "payout", "email_base", "email_base_v0")
 FINAL_OR_WATCHED = ("certified", "revised", "voided", "suspended")    # the certify job leaves these alone
 _SHA64 = re.compile(r"[0-9a-f]{64}")
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -91,6 +93,12 @@ ACCESS_LOST_AFTER_FAILED_CHECKS = 2
 HOLD_CODES_FROM_FINDING = {"bought_engagement": "BOUGHT_ENGAGEMENT", "platform_stripped": "PLATFORM_STRIPPED",
                            "duplicate_identity": "DUPLICATE_IDENTITY", "account_shared": "ACCOUNT_SHARED",
                            "stolen_content": "STOLEN_MATCH"}
+
+
+def _lock_key(k: tuple) -> tuple:
+    """The key a minor-lock HMAC is compared on: an ``email_base_v0`` HMAC is an ``email_base`` HMAC of the pre-fix
+    fold (WR-F005), so it is compared as one."""
+    return ("email_base", k[1]) if k[0] == "email_base_v0" else k
 
 
 def rid(prefix: str, *parts: Any) -> str:
@@ -1102,7 +1110,7 @@ class VIService:
                 # AEGIS L3-R: a minor recorded before email_base existed is matched by everything V&I keeps for it
                 # (exact e-mail and payout HMACs, and its platform account HMACs), never by a global freeze
                 if k[0] in IDENTITY_LOCK_KINDS or (legacy and k[0].startswith("account:")):
-                    out.setdefault(k, aid)
+                    out.setdefault(_lock_key(k), aid)
         return out
 
     def _minors_without_base(self) -> list[str]:
@@ -1145,7 +1153,7 @@ class VIService:
                                              "ledger_event_ids": op.events})
 
     def _identity_minor(self, subject_id: str) -> Optional[str]:
-        mine = {k for k in self.clipper_hmacs.get(subject_id, set()) if k[0] in IDENTITY_LOCK_KINDS}
+        mine = {_lock_key(k) for k in self.clipper_hmacs.get(subject_id, set()) if k[0] in IDENTITY_LOCK_KINDS}
         if not mine:
             return None
         locked = self._minor_identities(exclude=subject_id)
@@ -3212,6 +3220,9 @@ class VIService:
             else:
                 hm["email"] = i07.hmac_hex(key_b, "email", i07.normalize_email(email))
                 hm["email_base"] = i07.hmac_hex(key_b, "email_base", i07.mailbox_base(email))
+                v0 = i07.hmac_hex(key_b, "email_base", i07.mailbox_base_v0(email))
+                if v0 != hm["email_base"]:
+                    hm["email_base_v0"] = v0        # WR-F005: an older minor's email_base still matches
             if pay.available and isinstance(pay.identity_hmac, str) and len(pay.identity_hmac) == 64:
                 hm["payout"] = pay.identity_hmac
             else:

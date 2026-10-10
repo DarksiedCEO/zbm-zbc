@@ -220,9 +220,16 @@ class ReplayLibrary(unittest.TestCase):
             scenarios = {sc["id"] for sc in lib["scenarios"]}
             for c in doc["cases"]:
                 self.assertIn(c["scenario"], scenarios, c["replay_id"])
-                self.assertTrue(c["known_failure"], f"{c['replay_id']}: untriaged (known_failure is null)")
-                self.assertIn(f"## {c['known_failure']}", findings, c["replay_id"])
+                # a fixed case keeps its finding id in "fixed" (README "When a case fails", step 4); a null
+                # known_failure without one is untriaged
+                finding = c["known_failure"] or c.get("fixed")
+                self.assertTrue(finding, f"{c['replay_id']}: untriaged (known_failure is null, no fixed finding)")
+                self.assertFalse(c["known_failure"] and c.get("fixed"), f"{c['replay_id']}: both known and fixed")
+                self.assertIn(f"## {finding}", findings, c["replay_id"])
                 self.assertIn(c["replay_id"], findings)
+                if c.get("fixed"):
+                    section = findings.split(f"## {finding}", 1)[1].split("\n## ", 1)[0]
+                    self.assertIn("Status: FIXED", section, f"{c['replay_id']}: {finding} is not marked FIXED")
 
 
 class Sandbox(unittest.TestCase):
