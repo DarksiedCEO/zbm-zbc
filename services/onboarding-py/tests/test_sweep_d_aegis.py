@@ -70,7 +70,8 @@ def test_o2_a_payment_whose_line_was_owed_at_a_restart_is_counted_from_the_ledge
     svc.close()                                        # restart before the owed line is written
     svc2 = make_service(all_fakes=True, ledger=led, log=RecordLog(d), dir_lock=lock)
     c2 = client_for(svc2)
-    assert c2.post("/zbc/creators/applications", json=_app()).status_code == 201
+    # Wave F (M-1): the creator survived the restart (rebuilt from the log): no re-application, the same one is 409
+    assert c2.post("/zbc/creators/applications", json=_app()).status_code == 409
     r = c2.post("/zbc/creators/clip_1/payments", json={"request_id": "p3", "amount_usd": "1.00"}).json()
     tracked = [e for e in led.events if e["event_type"] == "creator_payment_tracked"]
     assert len(tracked) == 3 and r["paid_to_date_usd"] == "1101.00", r

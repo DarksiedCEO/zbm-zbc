@@ -85,6 +85,50 @@ class LedgerQueryFailed(RuntimeError):
 
 
 LEDGER_ENTRIES_MAX_BYTES = 256 * 1024 * 1024
+# Wave F: one page of ledger-rust's paged, filtered read (``GET /ledger/entries?after_seq=&limit=&department=
+# &event_type=``, fix-ledger sweep F-2; its maximum is 10 000)
+ENTRIES_PAGE_SIZE = 1000
+
+
+class LedgerPagingUnsupported(Exception):
+    """The ledger has no paged read (before fix-ledger: 404; a stricter one: 400)."""
+
+
+def select_paged(get_page, department: str, event_type: Optional[str], page_size: int = ENTRIES_PAGE_SIZE,
+                 want: Optional[set] = None, read_all=None) -> list[dict]:
+    """This department's entries (of one event type), page by page, in ledger order. With ``want`` (event ids) the
+    read stops at the page where every wanted id has been seen, so its cost is bounded by where they are, not by the
+    size of the ledger. ``get_page(params)`` raises ``LedgerPagingUnsupported`` on a ledger without the paged read:
+    then ``read_all()`` (the whole ledger, size-capped) is filtered here. An older ledger that ignores the query
+    answers the whole ledger: recognised (more than a page, or a page that does not move past ``after_seq``)."""
+    def keep(e):
+        return isinstance(e, dict) and e.get("department") == department and (
+            event_type is None or e.get("event_type") == event_type)
+    out: list[dict] = []
+    after = None
+    while True:
+        params = {"limit": str(page_size), "department": department}
+        if event_type is not None:
+            params["event_type"] = event_type
+        if after is not None:
+            params["after_seq"] = str(after)
+        try:
+            page = get_page(params)
+        except LedgerPagingUnsupported:
+            if read_all is None:
+                raise LedgerQueryFailed("the ledger has no paged read") from None
+            return [e for e in read_all() if keep(e)]
+        seqs = [e.get("seq") for e in page]
+        if not all(isinstance(q, int) and not isinstance(q, bool) for q in seqs):
+            raise LedgerQueryFailed("ledger entries carry no integer seq")
+        if len(page) > page_size or (after is not None and page and seqs[0] <= after):
+            return [e for e in page if keep(e)]           # an older ledger ignored the query: the whole ledger
+        out += [e for e in page if keep(e)]
+        if len(page) < page_size:
+            return out
+        if want is not None and want <= {e.get("event_id") for e in out}:
+            return out
+        after = seqs[-1]
 
 
 def payload_sha256(payload: dict) -> str:
@@ -284,9 +328,21 @@ class HttpLedgerClient:
         raise LedgerWriteError(f"ledger answered HTTP {r.status_code}; the event may or may not be recorded", UNKNOWN)
 
     def entries(self) -> list[dict]:
-        """GET /ledger/entries (ledger-rust has no filtered read), size-capped (bug sweep D: /audit/evidence)."""
+        """GET /ledger/entries (the whole ledger), size-capped (bug sweep D: /audit/evidence)."""
+        return self._get_list(None)
+
+    def entries_filtered(self, department: str, event_type: Optional[str] = None, page_size: int = ENTRIES_PAGE_SIZE,
+                         want: Optional[set] = None) -> list[dict]:
+        """Wave F: this department's entries of one type through ledger-rust's paged, filtered read (``select_paged``);
+        a ledger without it is read in full and filtered here (bounded by LEDGER_ENTRIES_MAX_BYTES)."""
+        return select_paged(self._get_list, department, event_type, page_size, want, self.entries)
+
+    def _get_list(self, params: Optional[dict]) -> list[dict]:
         try:
-            with self._client.stream("GET", "/ledger/entries", timeout=max(self._client.timeout.read or 5.0, 30.0)) as r:
+            with self._client.stream("GET", "/ledger/entries", params=params,
+                                     timeout=max(self._client.timeout.read or 5.0, 30.0)) as r:
+                if params and r.status_code in (400, 404, 405):
+                    raise LedgerPagingUnsupported("the ledger has no paged read")
                 if r.status_code != 200:
                     raise LedgerQueryFailed(f"ledger could not be read: HTTP {r.status_code}")
                 chunks, size = [], 0
@@ -296,7 +352,7 @@ class HttpLedgerClient:
                         raise LedgerQueryFailed("ledger entries larger than the read cap")
                     chunks.append(chunk)
             data = json.loads(b"".join(chunks))
-        except LedgerQueryFailed:
+        except (LedgerQueryFailed, LedgerPagingUnsupported):
             raise
         except (httpx.HTTPError, ValueError, RecursionError) as exc:
             raise LedgerQueryFailed(f"ledger could not be read: {type(exc).__name__}") from None
@@ -316,6 +372,9 @@ class UnconfiguredLedgerClient:
         )
 
     def entries(self) -> list[dict]:
+        raise LedgerQueryFailed("ledger not configured")
+
+    def entries_filtered(self, *args, **kwargs) -> list[dict]:
         raise LedgerQueryFailed("ledger not configured")
 
 
@@ -353,3 +412,16 @@ class FakeLedgerClient:
         if self.fail:
             raise LedgerQueryFailed("fake ledger configured to fail")
         return [{**e, "seq": i + 1} for i, e in enumerate(self.events)]
+
+    def entries_filtered(self, department: str, event_type: Optional[str] = None, page_size: int = ENTRIES_PAGE_SIZE,
+                         want: Optional[set] = None) -> list[dict]:
+        """ledger-rust's paged filtered read, with the same paging (``pages_read`` counts the pages served)."""
+        def page(params):
+            if self.fail:
+                raise LedgerQueryFailed("fake ledger configured to fail")
+            self.pages_read = getattr(self, "pages_read", 0) + 1
+            after = int(params.get("after_seq", 0))
+            sel = [e for e in ({**x, "seq": i + 1} for i, x in enumerate(self.events)) if e["seq"] > after and e["department"] == params["department"]
+                   and ("event_type" not in params or e["event_type"] == params["event_type"])]
+            return sel[:int(params["limit"])]
+        return select_paged(page, department, event_type, page_size, want)

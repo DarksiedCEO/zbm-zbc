@@ -88,6 +88,7 @@ from journal import EvidenceJournal
 from ledger import (DEPARTMENT, EvidenceLineOwed, LedgerClient, LedgerQueryFailed, LedgerWriteAfterEffects,
                     LedgerWriteError, build_body, derive_event_id, payload_sha256)
 from name_key import name_key_text
+from statelog import Codec, StateCodecError, StateReplayError, StateTracker
 from store import DataDirBusy, RecordLog, StoreWriteError
 from memory import (
     AndreApprovalError,
@@ -375,6 +376,7 @@ class OnboardingService:
         self._op_name = ""
         self._effects: list[str] = []
         self._deferred: list[Callable[[], None]] = []
+        self._deferred_fx: list[Callable[[], None]] = []
         self._occ: dict[tuple, int] = {}
         self._idc: dict[tuple, int] = {}
         self._touched: set[str] = set()
@@ -411,6 +413,9 @@ class OnboardingService:
             # 1099 totals and payment idempotency survive a restart: they are replayed from the log (bug sweep D, M)
             self._paid: dict[tuple[str, int], Decimal] = {}
             self._payment_rids: dict[str, dict] = {}       # payment id (request_id) -> the payment (AEGIS O-3)
+            # Wave F (M-1): every consequential entity is rebuilt from the log's state deltas, in log order
+            self._state = self._make_state_tracker()
+            self._replay_state()
             self._replay_payments()
         except BaseException:
             self.close()
@@ -432,6 +437,64 @@ class OnboardingService:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    # Wave F (M-1): the line kinds and data keys this build writes; replay refuses anything else (fail closed)
+    _LINE_KINDS = frozenset({"op", "partial", "payment_intent", "payment_intent_resolved"})
+    _LINE_KEYS = frozenset({"op", "effects", "partial", "rk", "evidence", "state", "payment", "payment_intent",
+                            "payment_intents_closed", "outcome"})
+
+    def _make_state_tracker(self) -> StateTracker:
+        """The consequential state, as the log carries it (ADR 0004 "Wave F fixes"): clients, creators, escalations,
+        campaigns, escalation plans (briefing retries), owed result records, the playbook's history and the
+        institutional patterns. Not carried: per-client memory walls (P11/P4 deletion; the log is append-only, see the
+        ADR), the per-process event-id counters (``_seq``, scoped by the boot id) and the 1099 totals / payment ids
+        (replayed from their own payment lines, ``_replay_payments``)."""
+        import importlib
+        import pkgutil
+        import sys
+
+        import intelligences
+        import memory as memory_mod
+        import onboarding_schema
+        mods = [sys.modules[__name__], onboarding_schema, rq, memory_mod]
+        mods += [importlib.import_module(f"intelligences.{m.name}") for m in pkgutil.iter_modules(intelligences.__path__)]
+        st = StateTracker(Codec(mods))
+        st.add_keyed("clients", self, "clients")
+        st.add_keyed("creators", self, "creators")
+        st.add_keyed("escalations", self, "escalations")
+        st.add_keyed("campaigns", self, "campaigns")
+        st.add_keyed("escalation_plans", self, "_esc_plans")
+        st.add_keyed("owed_results", self, "_pending")
+        st.add_append_only("playbook", lambda: self.playbook.history)
+        st.add_append_only("institutional", lambda: self.institutional._patterns)
+        return st
+
+    def _replay_state(self) -> None:
+        """Rebuild every consequential entity from the log, in order (Wave F, M-1). Deterministic and idempotent (the
+        same lines always give the same state), and fail closed: a line of an unknown kind, with a data key this
+        build does not write, or whose state cannot be decoded faithfully refuses start-up with its line number.
+        Lines written before Wave F carry no state: they are evidence only (nothing to rebuild from them)."""
+        for r in self.log.iter_records():
+            where = f"local log line {r.get('seq')} ({r.get('kind')!r})"
+            d = r.get("data")
+            if r.get("kind") not in self._LINE_KINDS or not isinstance(d, dict):
+                raise StateReplayError(f"refusing to start: {where}: not a line kind this build writes; the log "
+                                       "cannot be interpreted (inspect it; nothing was skipped)")
+            unknown = sorted(set(d) - self._LINE_KEYS)
+            if unknown:
+                raise StateReplayError(f"refusing to start: {where}: unknown field(s) {unknown}; the log cannot be "
+                                       "interpreted (inspect it; nothing was skipped)")
+            if "state" in d:
+                self._state.apply(d["state"], where)
+        try:
+            self._state.baseline()
+        except StateCodecError as exc:
+            raise StateReplayError(f"refusing to start: the replayed state cannot be re-encoded ({exc})") from None
+
+    def state_snapshot(self) -> bytes:
+        """Every consequential entity, canonically encoded (a restarted service must match the live one exactly)."""
+        with self._lock:
+            return self._state.snapshot()
 
     def _apply_payment(self, pay: dict) -> None:
         if pay["request_id"] in self._payment_rids:      # one payment id counts once, whatever replays it
@@ -470,8 +533,15 @@ class OnboardingService:
         open_ = {rid: its for rid, its in open_.items() if its}
         if not open_:
             return
+        want = {i["event_id"] for its in open_.values() for i in its}
         try:
-            held = {e.get("event_id") for e in self.ledger.entries()  # type: ignore[attr-defined]
+            # Wave F: only this department's payment events, through the ledger's paged filtered read, stopping once
+            # every open intent's event has been seen (the cost is bounded by where they are, not by the ledger)
+            if hasattr(self.ledger, "entries_filtered"):
+                found = self.ledger.entries_filtered(DEPARTMENT, "creator_payment_tracked", want=want)
+            else:
+                found = self.ledger.entries()  # type: ignore[attr-defined]
+            held = {e.get("event_id") for e in found
                     if isinstance(e, dict) and e.get("event_type") == "creator_payment_tracked"}
         except (LedgerQueryFailed, AttributeError) as exc:
             raise RuntimeError(f"refusing to start: {len(open_)} creator payment(s) may be on the ledger without a "
@@ -531,17 +601,17 @@ class OnboardingService:
                     raise ServiceClosed("this onboarding instance is closed; nothing was done")
                 self._flush_owed_lines()
                 self._op_written = []
-                self._op_name, self._effects, self._deferred = name, [], []
+                self._op_name, self._effects, self._deferred, self._deferred_fx = name, [], [], []
                 self._epoch = self._instance if creates_subject else f"{self._instance}:{self._boot}"
                 self._occ, self._idc, self._touched = {}, {}, set()
                 self._op_pending = []
             self._depth += 1
-            completed = False
+            completed = refused = False
             try:
                 yield
                 completed = True
             except OnboardingError:
-                completed = True
+                completed = refused = True
                 raise
             except LedgerWriteAfterEffects:
                 if outer:
@@ -560,18 +630,24 @@ class OnboardingService:
                 self._depth -= 1
                 owed = None
                 if outer and completed:
-                    owed = self._commit_line(name)
-                    if owed is not None:
-                        # in-process effects (bus, client memory) wait for the owed line: nothing happens after a
-                        # failed record; the flush that writes the line runs them
-                        self._owed_deferred.extend(self._deferred)
-                        self._deferred = []
+                    # Wave F (M-1): the operation's deferred STATE changes are applied first, so its line carries the
+                    # state it really applied (replayed at start); bus publishes still wait for the line
                     for fn in self._deferred:
+                        fn()
+                    self._deferred = []
+                    owed = self._commit_line(name, refused=refused)
+                    if owed is not None:
+                        # in-process effects (bus publishes) wait for the owed line: nothing goes out after a failed
+                        # record; the flush that writes the line runs them
+                        self._owed_deferred.extend(self._deferred_fx)
+                        self._deferred_fx = []
+                    for fn in self._deferred_fx:
                         fn()
                     for sid in self._touched:
                         self._seq[sid] = self._seq.get(sid, 0) + 1
                 if outer:
                     self._deferred = []
+                    self._deferred_fx = []
                     self._op_written = []
                     self._op_extra = None
                 if owed is not None:
@@ -596,26 +672,35 @@ class OnboardingService:
         for fn in pending:
             fn()
 
-    def _commit_line(self, name: str, partial: bool = False) -> Optional[EvidenceLineOwed]:
+    def _commit_line(self, name: str, partial: bool = False, refused: bool = False) -> Optional[EvidenceLineOwed]:
         """Name every event this operation wrote in ONE anchored local line (bug sweep D, D-1). Returns the error to
         raise when it could not be written (the line is then owed), None otherwise."""
-        if not self._op_written:
+        if not self._op_written and refused:
+            # a refusal that recorded nothing changed nothing: what it read stays marked (compared at the next line),
+            # so a flood of cheap refusals never pays for re-encoding the entities it looked at
+            return None
+        state, mark_held = self._state.delta()
+        if not self._op_written and state is None:
             return None
         extra = {"op": name, "effects": list(self._effects)}
         if partial:
             extra["partial"] = True
         if self._op_extra:
             extra.update(self._op_extra)
+        if state is not None:
+            extra["state"] = state
         try:
             self.journal.commit("partial" if partial else "op", self.now().isoformat(), name, self._op_written,
                                 extra, owe_on_failure=True)
         except (LedgerWriteError, StoreWriteError) as exc:
+            mark_held()       # owed: the identical line (with this state) is written before anything else
             outcome = getattr(exc, "outcome", "not_recorded")
             log.error("evidence line owed after %s: %s", name, type(exc).__name__)
             return EvidenceLineOwed(f"the action took effect; its local evidence line could not be written yet "
                                     f"({type(exc).__name__})", list(self._effects), outcome,
                                     "do not repeat this action: it took effect; its evidence line is written before "
                                     "the next action")
+        mark_held()
         return None
 
     def _event_id(self, event_type: str, subject_id: str, payload: dict) -> str:
@@ -755,7 +840,10 @@ class OnboardingService:
 
     def _publish(self, event_type: str, subject_id: str, payload: dict) -> None:
         ev = DomainEvent(event_type=event_type, subject_id=subject_id, payload=payload, at=self.now())
-        self._defer(lambda: self.bus.publish(ev))
+        if self._depth == 0:
+            self.bus.publish(ev)
+        else:
+            self._deferred_fx.append(lambda: self.bus.publish(ev))
 
     def _count_flags(self, rec: ClientRecord, flags: list) -> None:
         """The injection counter changes only when the operation completes
